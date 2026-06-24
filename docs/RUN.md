@@ -43,7 +43,7 @@
 (4) swift run … MomoServer       →  Hummingbird API :8080  # REST + JWT + publish proxy
 (5) swift run … OutboxRelay      →  outbox → Centrifugo    # 쓰기경로 fan-out
     swift run … AgentWorker      →  agent_job → hermes     # 에이전트 턴 (D 데모)
-(6) make build  /  swift run MomoMacSmoke                  # macOS 클라(데모 surface)
+(6) make build  /  swift run MomoMacDevApp                 # macOS 클라(개발용 window)
 ```
 
 의존성: **DB·Centrifugo(2) → 마이그레이션(3) → 서버(4) → relay/worker(5)**.
@@ -242,9 +242,10 @@ python3 scripts/mock_hermes.py --host 127.0.0.1 --port "${HERMES_PORT:-8088}"
 
 ## 6. macOS 클라이언트 (데모 surface: D / B / C)
 
-macOS 패키지(`clients/macOS`)는 v0에서 **SwiftUI 라이브러리 + 빌드검증 smoke 실행파일**로
-구성된다(전체 `.app` 번들 + SwiftCentrifuge/AsyncHTTPClient 트랜스포트는 후속 작업).
-데모 경험 **D(Live Tool-Call) / B(비용 호흡) / C(승인 인박스)**는 이 라이브러리의 뷰가 surface다.
+macOS 패키지(`clients/macOS`)는 v0에서 **SwiftUI 라이브러리 + 빌드검증 smoke 실행파일 +
+SwiftPM 개발용 window 앱**으로 구성된다(배포용 `.app` 번들 + SwiftCentrifuge/AsyncHTTPClient
+트랜스포트는 후속 작업). 데모 경험 **D(Live Tool-Call) / B(비용 호흡) / C(승인 인박스)**는
+`MomoMacDevApp`에서 바로 확인할 수 있다.
 
 ```sh
 # 라이브러리 + smoke 컴파일 검증
@@ -252,12 +253,17 @@ swift build --package-path clients/macOS
 
 # 헤드리스 smoke 실행(모델/인메모리 백엔드 라운드트립 — DB/Centrifugo/hermes 불필요)
 swift run --package-path clients/macOS MomoMacSmoke
+
+# SwiftUI 개발용 macOS window 실행(인메모리 demo seed — DB/Centrifugo/hermes 불필요)
+swift run --package-path clients/macOS MomoMacDevApp
 ```
 
 - `MomoMac`(library): `MomoCore`의 `ChatBackend`/`AgentTransport` 계약 위에 SwiftUI 뷰 + `LiveChatBackend` 스텁.
 - `MomoMacSmoke`(exe): `MomoCore` + `MomoMac` import → 도메인 모델·인메모리 백엔드 구동을 출력해 **링크/컴파일을 증명**.
-- smoke는 인메모리만 쓰므로 **런타임 의존이 없다**(여기 단계는 `runtime-verified` 가능).
-  실제 서버에 붙는 라이브 트랜스포트는 후속 티켓에서 `.app`과 함께 추가.
+- `MomoMacDevApp`(exe): `MomoMacRootView`를 실제 macOS SwiftUI window에 호스트한다. 첫 화면은
+  in-memory demo seed로 channel list, message list, cost UI, Approval Inbox를 표시한다.
+- smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
+  실제 서버에 붙는 라이브 트랜스포트는 후속 티켓에서 배포용 `.app`과 함께 추가.
 
 ---
 
@@ -292,7 +298,7 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 | `make up` | `docker compose -f infra/docker-compose.yml up -d` | runtime-verifiable; MOMO-001/002에서 pass |
 | `make down` | `docker compose -f infra/docker-compose.yml down` | runtime-verifiable |
 
-- 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`/`MomoMacSmoke`)은 Makefile 타깃이 아니라
+- 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`/`MomoMacSmoke`/`MomoMacDevApp`)은 Makefile 타깃이 아니라
   **5·6장의 `swift run … <Executable>`로 직접** 띄운다.
 - `make build`/`make test`는 **`Package.swift`가 실제로 존재하는 패키지만** 순회하므로,
   일부 패키지가 없어도 안전하게 동작한다.
@@ -320,6 +326,9 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 make build
 swift build --package-path clients/macOS && swift run --package-path clients/macOS MomoMacSmoke
 python3 -m py_compile adapters/hermes/momo_adapter.py
+
+# --- 선택적 수동 UI 확인: macOS window를 열고, 창을 닫으면 종료 ---
+swift run --package-path clients/macOS MomoMacDevApp
 
 # --- 전체 런타임 기동 (PG18 + Centrifugo v6 환경) ---
 cp infra/.env.example .env       # 값 채움 (openssl rand -hex 32)

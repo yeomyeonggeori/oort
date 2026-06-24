@@ -19,6 +19,12 @@ public struct MomoMacRootView: View {
         _viewModel = StateObject(wrappedValue: viewModel())
     }
 
+    /// Host an already-created ViewModel, used by async bootstraps such as the
+    /// SwiftPM development app entrypoint.
+    public init(existingViewModel viewModel: ChatViewModel) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+    }
+
     public var body: some View {
         NavigationSplitView {
             ChannelListView(viewModel: viewModel)
