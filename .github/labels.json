@@ -1,0 +1,42 @@
+{
+  "_comment": "momo 라벨 택소노미 (정본). scripts/github_bootstrap.sh 가 jq로 읽어 `gh label create --force`로 멱등 생성/갱신한다. color 는 # 없는 6자리 hex. 축: type / status / priority / area / size / gate / agent. 기존 scripts/github/labels.tsv 와 정합(+ area:legal, agent:codex-ok 통합). Issue Types(GitHub 1급 분류, org+admin:org 필요)는 여기에 없음 — repo 스코프에선 type:* 라벨로 대체(bootstrap.sh 하단 주석 참조).",
+  "labels": [
+    { "name": "type:feature", "color": "1d76db", "description": "신규 기능/경험" },
+    { "name": "type:bug", "color": "d73a4a", "description": "결함" },
+    { "name": "type:chore", "color": "cfd3d7", "description": "빌드/툴링/잡일" },
+    { "name": "type:docs", "color": "0075ca", "description": "문서" },
+    { "name": "type:spec", "color": "5319e7", "description": "스펙/설계 결정" },
+    { "name": "type:infra", "color": "006b75", "description": "인프라/배포/CI" },
+
+    { "name": "status:ready", "color": "0e8a16", "description": "착수 가능(의존 충족). Codex picker 대상." },
+    { "name": "status:in-progress", "color": "fbca04", "description": "작업 중" },
+    { "name": "status:blocked", "color": "b60205", "description": "선행 미충족/외부 대기" },
+    { "name": "status:needs-review", "color": "d4c5f9", "description": "PR 리뷰 대기" },
+    { "name": "status:runtime-unverified", "color": "e99695", "description": "컴파일/정합만 검증, docker/psql 런타임 미검증" },
+
+    { "name": "priority:p0", "color": "b60205", "description": "릴리스 블로커" },
+    { "name": "priority:p1", "color": "d93f0b", "description": "중요" },
+    { "name": "priority:p2", "color": "fbca04", "description": "보통" },
+
+    { "name": "area:server", "color": "1d76db", "description": "MomoServer (Hummingbird 2)" },
+    { "name": "area:relay", "color": "1d76db", "description": "OutboxRelay" },
+    { "name": "area:worker", "color": "1d76db", "description": "AgentWorker (hermes SSE)" },
+    { "name": "area:core", "color": "1d76db", "description": "MomoCore 공유 모델/프로토콜" },
+    { "name": "area:macos", "color": "1d76db", "description": "MomoMac (SwiftUI)" },
+    { "name": "area:ios", "color": "1d76db", "description": "iOS 클라이언트" },
+    { "name": "area:infra", "color": "006b75", "description": "docker/centrifugo/migrations/배포" },
+    { "name": "area:adapter", "color": "0052cc", "description": "hermes 어댑터(python)" },
+    { "name": "area:schema", "color": "5319e7", "description": "schema_v0.sql / DDL" },
+    { "name": "area:tenancy", "color": "5319e7", "description": "멀티팀/워크스페이스 격리/초대코드" },
+    { "name": "area:store", "color": "c2e0c6", "description": "배포(공증/앱스토어)" },
+    { "name": "area:ci", "color": "006b75", "description": "GitHub Actions/CI/fastlane" },
+    { "name": "area:legal", "color": "bfd4f2", "description": "법무 선결(법률 자문 아님) — 정책/약관/프라이버시 문서" },
+
+    { "name": "size:s", "color": "c5def5", "description": "작음(1티켓 1세션)" },
+    { "name": "size:m", "color": "c5def5", "description": "보통" },
+    { "name": "size:l", "color": "c5def5", "description": "큼(분할 권장)" },
+
+    { "name": "gate:qa", "color": "fef2c0", "description": "사용성 검수 게이트(스토어 제출 선행, M7)" },
+    { "name": "agent:codex-ok", "color": "0e8a16", "description": "Codex 자율 실행 적합(명확한 goal+검증)" }
+  ]
+}

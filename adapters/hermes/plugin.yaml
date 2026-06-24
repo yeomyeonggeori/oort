@@ -1,0 +1,71 @@
+# 김인턴 (hermes) gateway plugin manifest — momo platform adapter.
+# Registers momo as a first-class platform so a hermes agent lives in momo as a
+# `member` (kind='agent'), not a webhook bot (L4 spec §6.3).
+#
+# runtime-unverified (hermes 게이트웨이 필요): this manifest is loaded by the
+# 김인턴/hermes gateway. The exact manifest schema is owned by the gateway; the
+# keys below follow the documented plugin shape (name/version/entrypoint/
+# register hook + platform metadata). Without a running gateway it cannot be
+# loaded — only statically reviewed here. No docker/psql/hermes in this env.
+
+apiVersion: hermes.plugin/v1
+kind: PlatformPlugin
+
+metadata:
+  name: momo-adapter
+  version: 0.1.0
+  description: >-
+    momo messenger platform adapter — connects a hermes agent to a momo
+    workspace as a first-class member (connect / send / handle_message).
+  authors:
+    - momo
+  license: Apache-2.0
+
+spec:
+  # The platform this plugin contributes to the gateway registry.
+  platform: momo
+
+  # Python entrypoint. The gateway imports this module and calls register_platform
+  # to obtain the adapter class (L4 §6.3).
+  runtime: python
+  module: momo_adapter
+  # register hook: gateway calls momo_adapter.register_platform(registry).
+  register: register_platform
+  # adapter class implementing BasePlatformAdapter (connect/send/handle_message).
+  adapter_class: MomoAdapter
+
+  requirements: requirements.txt
+
+  # Capabilities this adapter implements (for gateway feature negotiation).
+  capabilities:
+    connect: true            # REST auth → realtime-token → agent:/user: subscribe
+    send: true               # REST POST messages, client_msg_id idempotent (§3.1)
+    handle_message: true     # mention/dm.signal → invoke → stream reply (§6.2)
+    streaming: true          # agent.partial deltas (§5.2)
+    non_stream_fallback: true  # tool_call delta drop fallback (§6.3 / §10.1)
+
+  # Environment variables the adapter reads (see requirements.txt / README).
+  # Values are provided by the operator; secrets never live in this manifest.
+  env:
+    - name: MOMO_API_URL
+      description: momo REST API base (Hummingbird), e.g. http://api:8080
+      required: true
+    - name: MOMO_CENTRIFUGO_WS_URL
+      description: Centrifugo WebSocket endpoint
+      required: true
+    - name: MOMO_AGENT_EMAIL
+      description: service-account email the agent authenticates with
+      required: true
+    - name: MOMO_AGENT_PASSWORD
+      description: service-account password
+      required: true
+      secret: true
+    - name: MOMO_WORKSPACE_ID
+      description: target workspace UUID (tenant)
+      required: false
+    - name: MOMO_AGENT_MEMBER_ID
+      description: the agent's member.id (kind='agent')
+      required: false
+    - name: MOMO_AGENT_HANDLE
+      description: agent display handle for logs/UI hints (default kim-intern)
+      required: false

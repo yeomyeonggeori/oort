@@ -1,0 +1,229 @@
+# CODEX.md — momo (Codex 자율실행 가이드)
+
+> **이 파일 하나만 읽으면 Codex가 momo 리포에서 바로 착수할 수 있다.** (`AGENTS.md`와 핵심 내용 동일 — `AGENTS.md`는 Codex 런타임이 자동 머지하는 정식 진입점, 이 `CODEX.md`는 사람·도구가 직접 읽는 풀 가이드. 둘이 어긋나면 `AGENTS.md`가 우선.)
+>
+> **실행 주체:** 계획(마일스톤/티켓)은 릴리스 PM이 세우고, **실제 구현은 Codex가 goal(= GitHub Issue)로 자율 실행**한다.
+> **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. **런타임 미검증**(이 환경에 docker/psql/hermes 없음).
+> **사실 표기 규칙:** `(검증됨)` = 공식문서/리포 교차확인 · `(추정)` = 설계/일정 판단 · `runtime-unverified (no docker/psql)` = docker 환경 없이는 못 닫는 것. **법무 관련 텍스트는 법률 자문이 아님.**
+
+---
+
+## 0. 제품 1줄
+
+momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. macOS 우선 + iOS, 공유 Swift 코어(`MomoCore`). 백엔드 **Hummingbird 2 + Centrifugo v6 + PostgreSQL 18**. 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 **permissive(Apache/MIT)** 타깃.
+
+**핵심 쓰기경로(절대 깨지 말 것):**
+`REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 트랜잭션 → OutboxRelay가 Centrifugo /api/publish`.
+클라는 **절대 Centrifugo로 직접 publish하지 않는다.** Postgres = Source of Truth, Centrifugo = 전송계층(DB 아님). 순서 SoT = `message.seq`.
+
+---
+
+## 1. 리포 맵 + 책임
+
+```
+schema_v0.sql            정본 스키마(PostgreSQL 18, uuidv7() PK, RLS FORCE) — 읽기 전용. 이동/수정 금지.
+STATUS.md                현재 빌드/검증 상태 — 작업 후 반드시 갱신.
+ROADMAP.md               M0→M8 릴리스 backbone(정본). 마일스톤/의존/게이트/비용.
+BUILD_TICKETS.md         Phase 0 + v0 데모 의존순 빌드 백로그 + 수용기준 등급 정의.
+AGENTS.md                Codex 자동 머지 운영 계약(이 파일의 핵심과 동일).
+CODEX.md                 (이 파일) Codex 자율실행 풀 가이드.
+NOTICE                   Apache 2.0 귀속 — 앱 화면 표기 대상.
+
+clients/Core/            MomoCore: 공유 모델 + ChatBackend/AgentTransport 프로토콜. 외부의존 0(순수 Foundation). 모델 단일 진실원천.
+clients/macOS/           MomoMac: SwiftUI 뷰(D Live Tool-Call / B 비용 호흡 링 / C 승인 인박스) + MomoMacSmoke 실행. ※ 아직 SwiftPM 라이브러리 — .app 아님(M4에서 Xcode 프로젝트화).
+clients/iOS/             (아직 없음) M5에서 MomoiOS.xcodeproj 생성.
+
+server/                  MomoServer(Hummingbird 2). PostgresNIO + JWTKit + AsyncHTTPClient.
+  Sources/MomoServer/    Main/App/Config/AppRequestContext · DB/Database.swift(PostgresClient 풀)
+    Auth/                JWT.swift · AuthMiddleware.swift
+    Realtime/            CentrifugoClient.swift
+    Routes/              Message/Auth/Centrifugo/DTOs — 핵심 쓰기경로(seq+outbox tx)가 여기.
+  Migrations/            001_init.sql(schema_v0 정본 복사) · 002_seed.sql(데모 시드). 신규는 003_*.sql 번호순.
+
+relay/OutboxRelay/       outbox SKIP LOCKED 폴링 → Centrifugo publish. BYPASSRLS 역할.
+workers/AgentWorker/     agent_job 클레임 → hermes OpenAI-compat SSE → message PATCH 스트리밍. LoopGuards · CostAccounting. BYPASSRLS 역할.
+adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml. py3 only.
+
+infra/                   docker-compose.yml(PG18 + Centrifugo v6 + healthcheck/volume) · centrifugo.json · .env.example. (※ infra/prod/* 는 M1에서 신규.)
+scripts/                 migrate.sh · github/{bootstrap.sh, milestones.tsv, labels.tsv, issues.tsv}.
+docs/                    RUN.md(기동 순서) · GITHUB_OPS.md · cicd/00~09 · legal/00~03.
+legal/                   privacy-policy.md · agent-disclosure.md · THIRD_PARTY_NOTICES.md (법률 자문 아님).
+.github/                 ISSUE_TEMPLATE/ · workflows/{ci-build,release-ios,release-macos}.yml.
+fastlane/                Fastfile · Appfile · Matchfile. (Gemfile은 리포 루트.)
+research/07-deepdive/    04=L4 정본 스펙 · 05=에이전트 네이티브 경험 설계.
+research/08-distribution/ 01=macOS 배포 스펙 · 02=배포 티켓.
+```
+
+**역할별 BYPASSRLS:** OutboxRelay·AgentWorker만 전 테넌트 폴링을 위해 BYPASSRLS. **쓰기 경로엔 BYPASSRLS 금지**(읽기 추적 전용). 그 외 모든 경로는 `SET LOCAL app.workspace_id` + RLS FORCE.
+
+---
+
+## 2. 빌드 / 검증 명령 (copy-paste 그대로 실행)
+
+> 로컬 툴체인: **Swift 6.2.x 있음**(`.swift-version` = 6.2). **docker/psql/hermes 없음** → DB·Centrifugo·hermes 런타임은 이 환경에서 **검증 불가**.
+
+```bash
+# Swift 패키지 (의존순: Core → server/relay/worker → macOS). 전부 green이 하드 게이트.
+make build                                        # SWIFT_PKGS 중 Package.swift 있는 것만 swift build
+make test                                         # 동일 패키지 swift test
+# 개별 패키지(필요 시):
+( cd clients/Core && swift build )                # MomoCore
+( cd server && swift build )                      # MomoServer (Hummingbird 2)
+( cd relay/OutboxRelay && swift build )           # OutboxRelay
+( cd workers/AgentWorker && swift build )         # AgentWorker
+( cd clients/macOS && swift build )               # MomoMac (lib + smoke)
+
+# hermes 어댑터 문법 검증
+python3 -m py_compile adapters/hermes/momo_adapter.py
+
+# Xcode 앱(M4/M5에서 프로젝트 생성 후 — 무서명 컴파일 확인):
+xcodebuild build -scheme MomoMac  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+xcodebuild build-for-testing -scheme MomoiOS -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
+
+# CI/워크플로우·fastlane 정적 검증(가용 시):
+actionlint .github/workflows/*.yml                # YAML/액션 lint
+ruby -c fastlane/Fastfile                         # Fastfile syntax
+
+# 런타임(이 환경 밖, docker/psql 가용 시에만):
+cp infra/.env.example .env
+make up                                           # postgres:18 + centrifugo:v6
+make migrate                                      # 001_init → 002_seed (멱등)
+( cd server && swift run )                         # MomoServer → GET /health
+( cd relay/OutboxRelay && swift run )
+( cd workers/AgentWorker && swift run )
+```
+
+**검증 등급(각 이슈/티켓에 명시 — BUILD_TICKETS.md·ROADMAP §7 정의 그대로):**
+- `[swift]` = `swift build` green(에러 0, 경고 허용). 미완성부는 `// TODO(#이슈)` + 컴파일 보장.
+- `[infra]` / `[sql]` = 파일 존재 + `schema_v0.sql`(정본)·L4 스펙과 정합. 적용은 `runtime-unverified (no docker/psql)`.
+- `[python]` = `python3 -m py_compile` 통과.
+- `[xcode]` = `xcodebuild`(무서명) 산출.
+- `[ci]` = 워크플로우 syntax/lint(actionlint) 통과 + (게이트 전) dry-run.
+- `[runtime]` = docker/psql/hermes 가용 시에만. **이 환경에서 닫지 말고** `runtime-unverified`로 표기 + `docs/RUN.md`에 절차.
+- `[manual]` = 사람 1회(발급/계약/심사). Codex는 런북/파일만 준비하고 위임 표시.
+
+---
+
+## 3. 컨벤션 (브랜치 / 커밋 / PR)
+
+**브랜치 (GitHub org `dawnkim`, repo `momo`):**
+- `feat/<issue#>-<slug>` · `fix/<issue#>-<slug>` · `chore/<issue#>-<slug>` · `docs/<issue#>-<slug>`.
+- 티켓 id 형태가 `MOMO-NNN`이면 `feat/MOMO-NNN-<slug>`도 허용(SPINE 티켓 id 규약). **main 직접 push 금지**(브랜치 보호 가정).
+
+**커밋:** Conventional Commits — 예) `feat(server): channel_seq 발급 트랜잭션 (#NN)`. 타입/스코프는 영문, 본문 한국어 OK.
+
+**PR:** 1 PR = 1 이슈. 여러 이슈를 한 PR에 섞지 않는다. 머지 전 `swift build` green 필수. PR 본문은 아래 템플릿 그대로.
+
+```
+Closes #<issue>
+
+## 한 일
+- (변경 요약 bullet)
+
+## 검증 (등급: [swift]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
+- [ ] `swift build` green: <패키지>
+- [ ] 선행 패키지 빌드 안 깨짐
+- [ ] schema_v0.sql 정합 (DDL/모델 컬럼·타입 일치)
+- [ ] runtime 미검증 부분 표기 (no docker/psql)
+
+## STATUS 영향
+- (STATUS.md에 반영한 줄)
+
+## 남은 것 / 후속 이슈 제안
+- (스코프 밖이라 새 이슈로 뺀 것)
+```
+
+**절대 하지 말 것:**
+- 시크릿 커밋(`.env`), `schema_v0.sql` 수정/이동, `.build/`·`*.resolved`·`DerivedData/`·`.swiftpm/` 커밋(`.gitignore` 참조).
+- 무관한 리팩터 끼워넣기, 의존성 메이저 임의 변경, 다른 패키지 깨기.
+- **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7 참조).
+
+**Swift 네이밍/구조:** 타입 `PascalCase`, 함수/프로퍼티/let `camelCase`, enum case `camelCase`. 모델은 `MomoCore`에만 두고 다른 패키지가 import. 프로토콜 `ChatBackend`/`AgentTransport`가 클라↔서버 계약(L4 §5.3/§6.1). SwiftPM 의존은 최신 안정 태그로 resolve, `*.resolved` 비커밋. 서버 쓰기경로는 단일 트랜잭션, async/await(블로킹 금지).
+
+---
+
+## 4. Definition of Done (모든 이슈 공통 — 못 채우면 닫지 마라)
+
+1. **해당 등급 검증 통과**(§2). Swift 이슈는 `swift build` green이 **하드 게이트**.
+2. **선행 티켓을 깨지 않음**: 다른 패키지의 `swift build`가 여전히 green. 의존 그래프는 `BUILD_TICKETS.md` STEPS 표 + `ROADMAP.md` §2가 1차 진실.
+3. **정본 정합**: DDL/모델은 `schema_v0.sql`과 컬럼·타입 일치(`member.kind`, `channel_seq` 행카운터, `uuidv7()` PK, `hlc_ts`/`hlc_count`, `client_msg_id` 멱등 등). 정본은 **이동/수정 금지** — 스키마 확장은 `server/Migrations/00N_*.sql` 신규 파일 + RLS DO-block ARRAY에 신규 테이블 등록.
+4. **runtime 미검증은 정직 표기**: 파일/주석/STATUS에 `runtime-unverified (no docker/psql)`. 검증 못 한 걸 "검증됨"이라 쓰지 마라.
+5. **STATUS.md 갱신**: 무엇을 추가/변경했고 무엇이 여전히 미검증인지 1~3줄.
+6. **PR 본문**이 §3 템플릿.
+7. **미완성 스텁**은 `// TODO(#이슈번호): 설명` 형태로만(컴파일은 항상 보장).
+8. **게이트/배포 불변식 준수**: 사용성 검수 게이트(M7) PASS 기록 없이 스토어/공증 배포(M8)·external TestFlight 진행 금지(§7).
+
+---
+
+## 5. 다음 티켓 선택법 (자율 picker)
+
+사람이 이슈를 지정하지 않았다면 아래 순서로 고른다. 진실 원천: **`ROADMAP.md`(마일스톤 순서·의존) → `BUILD_TICKETS.md`(빌드 STEPS) → SPINE 티켓 deps**.
+
+1. **마일스톤 우선순위 순(M0 → M8)**: 가장 낮은 번호의 **열린/미완** 마일스톤부터. 현재 활성 = **M1**(M0 Foundation은 달성됨).
+2. 그 마일스톤 안에서 **`deps`(blocked-by)가 전부 done**인 티켓만(의존 충족). 의존 미충족이면 건너뛰고 다음.
+3. 그 중 **의존 깊이가 가장 얕은** 것 → 동률이면 **`priority:p0 > p1 > p2`** → 그다음 티켓 id/이슈 번호 오름차순.
+4. `legal`/`manual` 티켓은 Codex가 **파일/런북만** 준비하고 실제 발급·계약·심사는 사람에게 위임(런북에 명시).
+5. `[runtime]` 전용 티켓은 docker/psql 없으면 닫지 말고 파일 정합까지만 + `runtime-unverified` 표기.
+6. 고른 이슈를 자신에게 할당 → `status:in-progress` → 시작. 막히면(의존 미충족/정보 부족) 임의 추측 금지, 이슈에 블로커 코멘트 남기고 다음 티켓으로.
+
+**마일스톤 한눈 backbone(정본 = ROADMAP.md):**
+
+| M | 이름 | 핵심 | 게이트 |
+|---|---|---|---|
+| M0 | Foundation | 5 Swift 패키지 컴파일 + 정본 스키마/인프라/마이그레이션 정합 | **달성됨** |
+| M1 | Backend 런타임 + staging 배포 | docker e2e(seq/outbox/relay/RLS/SSE/비용) + Caddy TLS/SOPS/pgBackRest/모니터링 | G-0 런타임 e2e |
+| M2 | 멀티팀 온보딩 | `003_onboarding.sql`(invite_code + platform_admin) + 자가가입 + 관리자 추적 | 3+팀 격리 e2e |
+| M3 | 데스크탑 v0 UX | D Live Tool-Call · B 비용 호흡 링 · C 승인 인박스 실데이터 바인딩 | staging 실접속 동작 |
+| M4 | 데스크탑 패키징 | MomoMac.xcodeproj + Developer ID 서명 + notarytool 공증 + DMG + Sparkle 2 | spctl/Gatekeeper |
+| M5 | iOS 앱 | MomoiOS.xcodeproj(iOS 26 SDK) + Push/APNs + 계정삭제 + UGC 4종 + PrivacyInfo | 실기기 시나리오 |
+| M6 | CI/CD | fastlane(match/pilot/deliver/notarytool) + ASC API Key + Actions. release 잡 게이트 전 dry-run | actionlint green |
+| **M7** | **QA·사용성 검수 게이트 🔒** | G-0~G-G 전부 PASS + 증거 | **스토어 제출 차단 불변식** |
+| M8 | 스토어 제출 | iOS App Store 업로드/심사/배포 + macOS 공증 DMG 공개 + Sparkle 라이브 | M7 PASS 후에만 |
+
+> **임계 경로:** 모바일 `M0→M1→M2→M5→M7→M8`, 데스크탑 `M0→M1→M3→M4→M7→M8`. M3 이후 M4(🖥)·M5(📱)·M6(CI/CD)는 공유 코어 위에서 병렬.
+> **후속(스토어 출시 후):** v1 프리미티브 P1 `branch_id` · P2 `reversibility_tier` · P3 belief · P4 `autonomy_level` · P5 `decision_ledger` · P6 scheduled trigger (EP-PRIMITIVES, v0 데모엔 불필요).
+
+---
+
+## 6. 설계 맥락 요약 + 읽을 곳
+
+momo는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정합 설계로 통합한 L4 스펙 위에 서 있다. 착수 전 **goal(이슈)과 관련된 곳만** 골라 읽는다.
+
+**불변식(day-1 강제 — 코드로 절대 깨지 말 것):**
+1. Postgres = SoT, Centrifugo = 전송계층(DB 아님).
+2. 쓰기 경로 단일화: 클라는 Centrifugo로 직접 publish 금지. 모든 상태변경 = REST → PG commit → outbox → relay publish.
+3. 순서 SoT = `message.seq`(Centrifugo offset 아님). 클라는 seq로 정렬·갭검출·복구.
+4. 에이전트 = 사람과 동일 `member`(`kind='agent'`). 동일 REST/채널/멱등.
+5. commit↔publish 사이 크래시 무손실 = transactional outbox.
+6. seq 발급 = `channel_seq` 행카운터 `UPDATE...RETURNING`(시퀀스 금지 — 롤백 갭). `client_msg_id` 멱등 `ON CONFLICT`.
+7. 멀티테넌시: `workspace → channel → membership(member)` 3계층, 모든 테넌트 행에 `workspace_id`, RLS FORCE, 트랜잭션마다 `SET LOCAL app.workspace_id`.
+
+**읽을 곳(우선순위):**
+- `STATUS.md` — **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐는지.
+- `ROADMAP.md` — 마일스톤/의존/게이트/비용(정본 backbone).
+- `schema_v0.sql` — 정본 DDL(24 테이블, RLS FORCE). DDL/모델 작업 전 필수.
+- `research/07-deepdive/04-self-build-l4-spec.md` — L4 정본 스펙(아키텍처·스키마·쓰기경로·outbox·비용회계·APNs).
+- `research/07-deepdive/05-agent-native-experiences.md` — D/B/C 등 에이전트 네이티브 경험 설계(macOS UX 작업 시).
+- `BUILD_TICKETS.md` — Phase 0 + v0 데모 빌드 STEPS·수용기준 등급.
+- `docs/cicd/05-qa-release-gate.md` — **게이트(M7) 객관 통과기준 정본**(G-0~G-G).
+- `docs/cicd/03-store-readiness-gate.md` — 게이트 PASS 블록 기록 위치.
+- `docs/cicd/00~04` — Apple CI/CD 파이프라인·setup 런북·시크릿 인벤토리·Codex 티켓.
+- `docs/RUN.md` — 기동/마이그레이션/롤백 절차. `legal/*`·`docs/legal/*` — 법무 선결(법률 자문 아님).
+
+---
+
+## 7. 런타임 미검증 · 게이트 · 라이선스 규칙
+
+**런타임 미검증(이 환경에 docker/psql/hermes 없음):**
+- 서버↔PG18 실제 연결, `channel_seq` 발급 동시성, outbox→relay→Centrifugo publish 왕복, RLS 테넌트 격리, 마이그레이션 멱등, AgentWorker↔hermes SSE, reserve/reconcile 비용 회계, Centrifugo presence/recovery, APNs — **전부 이 환경에서 검증 불가.**
+- 이런 작업은 파일 정합 + 컴파일까지가 최대치. **"검증됨"으로 닫지 말고** `runtime-unverified (no docker/psql)`로 표기하고 `docs/RUN.md`에 검증 절차를 남긴다. 실제 런타임 e2e는 docker(PG18 + Centrifugo v6 + hermes) 환경(= M1 G-0)에서.
+
+**🔒 게이트 불변식(스토어/공증 배포 차단):**
+- 스토어/공증 배포(M8) 및 **external TestFlight**는 **사용성 검수 게이트(M7)가 PASS 된 후에만** 진행한다.
+- 통과 조건: `docs/cicd/05-qa-release-gate.md`의 **G-0~G-G 전부 PASS + 증거 첨부** → `docs/cicd/03-store-readiness-gate.md` 상단에 **PASS 블록(날짜 + 커밋 해시 + 빌드# + 증거 링크)** 기록 → `STATUS.md` 게이트 상태 OPEN→PASS 갱신.
+- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-ios.yml`/`release-macos.yml`을 트리거하지 않는다(태그 미푸시 또는 environment protection). `ci-build.yml`의 release/xcode-apps 잡은 C1/C2(M4/M5 Xcode 프로젝트) 완료 전까지 비활성.
+
+**permissive 라이선스 규칙:**
+- 전 의존성을 **permissive(Apache-2.0 / MIT / PostgreSQL License)** 로 유지. 확정 스택: Hummingbird 2(Apache-2.0), Centrifugo v6(Apache-2.0), PostgreSQL 18(PostgreSQL License), SwiftCentrifuge(MIT), APNSwift(Apache-2.0). **비-permissive(GPL/AGPL/상용 제약) 의존 추가 금지.**
+- 새 의존 추가 시 라이선스 확인 + `legal/THIRD_PARTY_NOTICES.md`(및 `NOTICE`)에 귀속 반영.
+- 외부 배포/상용 전 법무 검토 1회 필수. 법무·스토어 정책 텍스트는 **법률 자문이 아님** — 사실은 1차 출처(Apple/GitHub 공식 문서)로 표기, 추정은 `(추정)`.

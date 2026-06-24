@@ -1,0 +1,46 @@
+# momo — iOS TestFlight / App Store 릴리스.
+# ⚠️ 검수 게이트(docs/cicd/03-store-readiness-gate.md) PASS 후에만 실행.
+# 트리거: v* 태그 푸시 또는 수동 dispatch(lane 선택).
+name: release-ios
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "fastlane lane (beta=TestFlight, release=App Store 제출)"
+        required: true
+        default: "beta"
+        type: choice
+        options: ["beta", "release"]
+
+concurrency:
+  group: release-ios
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      ASC_KEY_ID:        ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID:     ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+      MATCH_GIT_URL:     ${{ secrets.MATCH_GIT_URL }}
+      MATCH_GIT_TOKEN:   ${{ secrets.MATCH_GIT_TOKEN }}
+      MATCH_PASSWORD:    ${{ secrets.MATCH_PASSWORD }}
+      FASTLANE_HIDE_CHANGELOG: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo xcode-select -switch /Applications/Xcode.app
+
+      - name: Ruby + bundler 캐시
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+
+      - name: fastlane (TestFlight or App Store)
+        run: |
+          LANE="${{ github.event.inputs.lane || 'beta' }}"
+          bundle exec fastlane ios "$LANE"

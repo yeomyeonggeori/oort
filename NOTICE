@@ -1,0 +1,23 @@
+momo
+Copyright (c) 2026 dawnkim
+
+This product includes software developed by third parties under permissive
+open-source licenses (Apache-2.0, MIT, PostgreSQL License). Attribution and
+per-dependency license details are listed in legal/THIRD_PARTY_NOTICES.md and
+surfaced in the app's "Open Source Licenses" screen.
+
+Apache License 2.0 components require preservation of this NOTICE per §4(d).
+See https://www.apache.org/licenses/LICENSE-2.0 for the full license text.
+
+Major bundled/linked components:
+- swift-log (Apache-2.0) — https://github.com/apple/swift-log
+- hummingbird (Apache-2.0) — https://github.com/hummingbird-project/hummingbird
+- async-http-client (Apache-2.0) — https://github.com/swift-server/async-http-client
+- swift-service-lifecycle (Apache-2.0) — https://github.com/swift-server/swift-service-lifecycle
+- postgres-nio (Apache-2.0) — https://github.com/vapor/postgres-nio
+- jwt-kit (MIT) — https://github.com/vapor/jwt-kit
+- SwiftNIO and related (Apache-2.0) — https://github.com/apple/swift-nio
+
+TODO(Codex): regenerate from Package.resolved via scripts/gen-notices.sh; verify
+each SPDX identifier against the upstream LICENSE file. Report any non-permissive
+(GPL/AGPL/LGPL/SSPL) dependency immediately per AGENTS.md §9.

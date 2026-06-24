@@ -1,0 +1,97 @@
+# runtime-unverified (no docker/psql) — 이 환경에는 docker/psql 부재.
+# 본 파일은 정적으로만 작성/점검됨. `docker compose up`은 PG18+Centrifugo v6 환경에서 별도 검증 필요.
+#
+# momo v0 인프라 — L4 스펙 §1.1 단일 호스트 토폴로지.
+#   - PostgreSQL 18 : SOURCE OF TRUTH (msg/seq/hlc/outbox/ledger). native uuidv7().
+#   - Centrifugo v6 : transport only (DB 아님). Memory engine(v0). subscribe proxy → api:8080.
+#   - relay/worker  : 추후(후속 티켓 T06/T07에서 Swift 실행 패키지로 추가) → 아래 주석 참고.
+#
+# 환경변수는 infra/.env.example 참고(cp infra/.env.example .env 후 값 채움).
+# `make up` / `make down`이 이 파일(infra/docker-compose.yml)을 사용한다.
+
+name: momo
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 18 — SoT. uuidv7() 네이티브 전제(스펙 §0.5 D1 / schema_v0.sql).
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:18
+    container_name: momo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-momo}
+      POSTGRES_USER: ${POSTGRES_USER:-momo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-momo}
+      # 멀티테넌트 RLS는 세션변수(app.workspace_id)로 강제 — 초기화 불필요.
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # pg_isready: DB가 연결 수락 가능한지 확인 → healthcheck green 게이트(§9.1).
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-momo} -d ${POSTGRES_DB:-momo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Centrifugo v6 — realtime fan-out (transport only). config 파일 마운트.
+  # 8000 포트(WS/HTTP API). subscribe proxy 콜백은 api:8080(후속 T05 server).
+  # ---------------------------------------------------------------------------
+  centrifugo:
+    image: centrifugo/centrifugo:v6
+    container_name: momo-centrifugo
+    restart: unless-stopped
+    # config 파일을 명시(env 인터폴레이션 ${CENT_TOKEN_HMAC}/${CENT_API_KEY}는
+    # Centrifugo가 기동 시 직접 치환 — .env가 컨테이너 환경으로 주입됨).
+    command: centrifugo --config=/centrifugo/centrifugo.json
+    environment:
+      CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC}
+      CENT_API_KEY: ${CENT_API_KEY}
+    ports:
+      - "${CENT_PORT:-8000}:8000"
+    volumes:
+      # config 마운트(읽기전용). centrifugo.json은 §4.2 namespace 스펙 그대로.
+      - ./centrifugo.json:/centrifugo/centrifugo.json:ro
+    healthcheck:
+      # Centrifugo 내장 /health 엔드포인트(200 OK) → healthcheck green.
+      test: ["CMD", "centrifugo", "healthcheck", "--config=/centrifugo/centrifugo.json"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------------------------------------------------------------------------
+  # relay / worker — 추후(후속 티켓에서 Swift 실행 패키지 빌드 후 서비스로 추가).
+  #   relay  (T06 relay/OutboxRelay): outbox SKIP LOCKED 클레임 → Centrifugo /api/publish.
+  #            BYPASSRLS role로 전 테넌트 폴링. depends_on: postgres(healthy), centrifugo.
+  #   worker (T07 workers/AgentWorker): outbox(kind='agent_job') 클레임 → hermes SSE 중계.
+  #            depends_on: postgres(healthy). HERMES_BASE_URL/HERMES_API_KEY 사용.
+  #   api    (T05 server): Hummingbird 2. centrifugo subscribe proxy 대상(api:8080).
+  # 예시(주석, 미활성):
+  # relay:
+  #   build: ../relay/OutboxRelay
+  #   environment:
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     CENT_API_URL: http://centrifugo:8000/api
+  #     CENT_API_KEY: ${CENT_API_KEY}
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+  #     centrifugo: { condition: service_healthy }
+  # worker:
+  #   build: ../workers/AgentWorker
+  #   environment:
+  #     DATABASE_URL: ${DATABASE_URL}
+  #     HERMES_BASE_URL: ${HERMES_BASE_URL}
+  #     HERMES_API_KEY: ${HERMES_API_KEY}
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+
+volumes:
+  pgdata:
+    name: momo-pgdata

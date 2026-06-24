@@ -1,0 +1,111 @@
+# momo — hermes platform adapter (`MomoAdapter`)
+
+A 김인턴 (hermes) gateway plugin that makes a hermes agent a **first-class member**
+of a momo workspace (`member.kind = 'agent'`) instead of a webhook bot. This is the
+`BasePlatformAdapter` implementation from the L4 spec **§6.3**.
+
+> **runtime-unverified (hermes 게이트웨이 필요).** This adapter only runs inside a
+> live 김인턴/hermes gateway connected to a running momo stack (Hummingbird API +
+> Centrifugo v6 + PostgreSQL 18). This build env has **no hermes gateway and no
+> docker/psql**, so it is validated by static check only:
+>
+> ```sh
+> python3 -m py_compile adapters/hermes/momo_adapter.py
+> ```
+>
+> HTTP/WS shapes match L4 §5.1 / §5.2 / §4.1 but are not exercised end-to-end here.
+
+## What it does (the three primitives, §6.3)
+
+| Primitive | Behavior |
+|---|---|
+| `connect()` | momo REST auth (`POST /v1/auth/login`, Bearer) → realtime-token exchange (`POST /v1/auth/realtime-token`) → subscribe the agent's `agent:` Centrifugo channel (work stream) + `user:` channel (mention / dm signals) over WebSocket. |
+| `send(channel, blocks)` | REST `POST .../messages` with a `client_msg_id` for **idempotency** (§3.1 — server dedups on `(channel_id, author_member_id, client_msg_id)` in the single `channel_seq`-bump + message + outbox tx). |
+| `handle_message(evt)` | A `mention` / `dm.signal` arrives on the realtime stream → `invoke` the agent → stream `agent.partial` / `agent.status` deltas and reflect the final 1급 message into the channel via `send()`. |
+
+### Write-path invariant (§1.2 / §8.1)
+
+The adapter **never** publishes to Centrifugo directly. It only *reads* the
+realtime stream and *writes* via REST. Every state change is
+`REST → PG commit → outbox → relay publishes`.
+
+### Loop safety (§3.4)
+
+`handle_message` ignores the agent's own messages, dedups one mention → one run
+(trigger key + `agent_run` idempotency key), and only acts on `mention` /
+`dm.signal` event types — so `message.new` echoes never re-trigger it.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `momo_adapter.py` | `MomoAdapter(BasePlatformAdapter)` + `register_platform()`. |
+| `plugin.yaml` | gateway plugin manifest (`register_platform` hook, platform = `momo`). |
+| `requirements.txt` | runtime deps (`aiohttp`, `websockets`). |
+| `README.md` | this file. |
+
+## Install
+
+The gateway loads this directory as a plugin via `plugin.yaml`. To install deps
+into the gateway's environment:
+
+```sh
+pip install -r adapters/hermes/requirements.txt
+```
+
+`BasePlatformAdapter` and `register_platform` are provided by the hermes plugin
+SDK at load time (not a PyPI package), so they are not pinned in
+`requirements.txt`. Without the SDK present (e.g. running `py_compile` standalone),
+the module imports an internal shim so static checks still pass.
+
+## Connect / configure
+
+The adapter is env-driven (see `plugin.yaml` `spec.env`, mirrors
+`infra/.env.example`):
+
+| Env var | Meaning |
+|---|---|
+| `MOMO_API_URL` | momo REST API base, e.g. `http://api:8080`. |
+| `MOMO_CENTRIFUGO_WS_URL` | Centrifugo WS endpoint, e.g. `ws://centrifugo:8000/connection/websocket`. |
+| `MOMO_AGENT_EMAIL` / `MOMO_AGENT_PASSWORD` | service-account credentials the agent authenticates with. |
+| `MOMO_WORKSPACE_ID` | target workspace UUID (tenant). |
+| `MOMO_AGENT_MEMBER_ID` | the agent's `member.id` (`kind='agent'`). |
+| `MOMO_AGENT_HANDLE` | agent display handle for logs/UI hints (default `kim-intern`). |
+
+Connection sequence (§6.3 / §7.1 / §4.3):
+
+1. `POST /v1/auth/login` → access(15m) / refresh(30d) JWT + member.
+2. `POST /v1/auth/realtime-token` → Centrifugo connection JWT (sub = memberId, 30m).
+3. WS connect to Centrifugo with that JWT.
+4. subscribe `agent:ws<workspaceUUID>.<agentMemberUUID>` + `user:ws<workspaceUUID>.<memberUUID>`.
+5. listen loop feeds inbound pushes to `handle_message()`.
+
+Programmatic use (inside the gateway runtime):
+
+```python
+from momo_adapter import MomoAdapter, MomoConfig
+
+adapter = MomoAdapter(MomoConfig(), hermes_runtime=gateway_runtime)
+await adapter.connect()        # auth + subscribe
+# gateway pumps realtime events → adapter.handle_message(evt)
+# ... on shutdown:
+await adapter.close()
+```
+
+## Channel naming (§4.1)
+
+```
+agent : agent:ws<workspaceUUID>.<agentMemberUUID> # the agent's work stream
+user  : user:ws<workspaceUUID>.<memberUUID>       # personal notifications
+ch    : ch:ws<workspaceUUID>.<channelUUID>        # group channel
+```
+
+The adapter treats channel ids handed to `send()` as opaque and still writes only
+through momo REST; it never publishes directly to Centrifugo.
+
+## Server-contract status
+
+As of build ticket **T05**, the momo API implements `/v1/auth/login` and the
+messages endpoints. `/v1/auth/realtime-token` and the agent `/invoke` endpoint are
+specified (§5.1) but not yet wired server-side. This adapter targets the spec
+contract; those calls work once the server ships them.

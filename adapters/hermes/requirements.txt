@@ -1,0 +1,17 @@
+# momo platform adapter for the 김인턴 (hermes) gateway — runtime deps.
+#
+# runtime-unverified (hermes 게이트웨이 필요): these are the deps the adapter needs
+# when loaded by a live hermes gateway against a running momo stack. In this build
+# env there is no hermes gateway / docker / psql, so they are NOT installed and
+# the adapter falls back to import-safe shims (the static gate is
+# `python3 -m py_compile momo_adapter.py`, which needs none of these).
+#
+# BasePlatformAdapter + register_platform are provided by the 김인턴/hermes plugin
+# SDK at load time (not a PyPI package), so it is intentionally NOT pinned here.
+
+# Async HTTP client for the momo REST surface (login / realtime-token / messages /
+# invoke). aiohttp is the de-facto async client; the gateway may supply its own.
+aiohttp>=3.9,<4
+
+# Centrifugo realtime over WebSocket (subscribe agent:/user:, consume pushes).
+websockets>=12,<14

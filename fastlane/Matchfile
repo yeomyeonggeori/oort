@@ -1,0 +1,15 @@
+# momo — Matchfile
+# 인증서/프로파일은 별도 private git repo(Dawn-kim-official/momo-signing)에 암호화 저장.
+# CI는 readonly. 최초 생성은 개발자 머신에서 1회(docs/cicd/01-setup-runbook.md).
+
+git_url(ENV["MATCH_GIT_URL"] || "https://github.com/Dawn-kim-official/momo-signing.git")
+storage_mode("git")
+
+# type 은 레인별로 Fastfile에서 지정(appstore / developer_id). 기본값:
+type("appstore")
+
+app_identifier(["com.dawnkim.momo"])   # ⚠️ 실제 Bundle ID로 교체
+
+# CI에서 readonly 는 Fastfile에서 readonly:true 로 강제(여기선 기본 false 유지).
+# 암호화 패스프레이즈: ENV["MATCH_PASSWORD"]
+# git 접근 토큰: ENV["MATCH_GIT_TOKEN"] (Fastfile에서 git_basic_authorization 구성)

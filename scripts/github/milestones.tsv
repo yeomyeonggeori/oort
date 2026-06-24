@@ -1,0 +1,12 @@
+# momo 마일스톤 = 릴리스/게이트 (TSV: title<TAB>state<TAB>description)
+# LEGACY: 새 9단계 spine 정본은 ../github_bootstrap.sh 의 MILESTONES heredoc.
+# scripts/github/bootstrap.sh 는 ALLOW_LEGACY_BOOTSTRAP=1 없이 실행되지 않는다.
+# 순서가 곧 로드맵. due_on은 의도적으로 비움(추정 날짜를 강제하지 않음 — Projects iteration으로 일정 관리).
+# state: open | closed
+M0 Phase0 런타임 검증	open	5개 Swift 패키지 컴파일은 통과(STATUS.md). docker/psql 환경에서 make up→migrate→swift run, seq 발급·outbox·relay 왕복, RLS 격리, hermes 멘션 1왕복까지 런타임 검증. 이게 닫혀야 그 위 경험이 의미.
+M1 v0 데모 (D Live Tool-Call · B 비용 호흡 · C 승인 인박스)	open	clients/macOS를 SwiftPM 라이브러리→Xcode .app 번들로. D/B/C 3경험 실데이터 바인딩. 추가 프리미티브 0(스펙 §9.2 위에서 성립).
+M2 멀티팀 / 테넌시 (10명=1팀, 3+팀 격리, 초대코드 자가가입, 플랫폼 관리자 추적)	open	workspace day-1 격리(RLS FORCE) 위에 스핀업별 고유 초대코드→자가가입, 플랫폼 관리자 전체 추적. 스펙 §1.3 위 신규 스코프(초대/관리자 추적은 정본에 없음 — 신규).
+M3 검수 게이트 (사용성 빡센 검수 — "사용 가능" 완전 판명)	open	빌드 산출물의 사용성을 빡세게 검수 통과해야 스토어 제출 선행. gate:qa 라벨. 이 마일스톤이 닫히기 전 M4/M5 제출 금지.
+M4 데스크탑 공증 배포 (Developer ID + notarytool, 정식 다운로드)	open	macOS .app을 Developer ID 서명 + Apple notary(notarytool) 공증 + stapler. Gatekeeper 통과 다운로드. Apple Developer Program 필요($99/yr). 선행: M3.
+M5 iOS 앱스토어 (App Store Connect 업로드/심사/배포)	open	iOS 26 SDK 이상 빌드(2026-04-28 업로드 요건), TestFlight→App Review→배포. 선행: M3.
+M6 v1 경험 + 신규 프리미티브 (P1~P6)	open	BUILD_TICKETS.md 후속 백로그: A/E/F/I/H/J/M/N/O 경험과 P1 branch_id · P2 reversibility_tier · P3 belief · P4 autonomy_level · P5 decision_ledger · P6 scheduled trigger.

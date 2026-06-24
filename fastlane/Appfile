@@ -1,0 +1,10 @@
+# momo — Appfile
+# bundle id / team id 는 실제 Apple Developer 계정 값으로 교체.
+# CI에서는 모든 인증을 App Store Connect API Key로 하므로 apple_id는 비워둠.
+
+app_identifier("com.dawnkim.momo")   # ⚠️ 실제 등록한 Bundle ID로 교체
+# apple_id("")                       # API Key 사용 → 비대화형, 불필요
+
+# team_id / itc_team_id 는 Team Key 사용 시 API Key가 추론. 다중 팀 계정이면 명시:
+# team_id("XXXXXXXXXX")              # Developer Portal Team ID
+# itc_team_id("123456789")          # App Store Connect Team ID (숫자)

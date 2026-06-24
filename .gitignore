@@ -1,0 +1,14 @@
+.DS_Store
+.build/
+build/
+*.xcuserstate
+xcuserdata/
+.env
+.env.local
+node_modules/
+__pycache__/
+*.pyc
+Packages/
+*.resolved
+DerivedData/
+.swiftpm/
