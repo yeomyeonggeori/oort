@@ -5,6 +5,7 @@ build/
 xcuserdata/
 .env
 .env.local
+.env.worktree
 node_modules/
 __pycache__/
 *.pyc

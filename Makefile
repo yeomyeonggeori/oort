@@ -13,6 +13,8 @@ SWIFT_PKGS := clients/Core server relay/OutboxRelay workers/AgentWorker clients/
 COMPOSE        := docker compose
 COMPOSE_FILE   := infra/docker-compose.yml
 MIGRATE_SCRIPT := scripts/migrate.sh
+ENV_FILE       ?= $(firstword $(wildcard .env.worktree .env infra/.env.example))
+COMPOSE_ENV    := $(if $(ENV_FILE),--env-file $(ENV_FILE),)
 
 .DEFAULT_GOAL := help
 .PHONY: help build migrate up down test
@@ -53,6 +55,9 @@ test: ## 모든 Swift 패키지 테스트 (Package.swift 존재하는 것만)
 
 migrate: ## server/Migrations/*.sql 번호순 적용 (psql 필요)
 	@if [ -f "$(MIGRATE_SCRIPT)" ]; then \
+		if [ -n "$(ENV_FILE)" ] && [ -f "$(ENV_FILE)" ]; then \
+			set -a; . "$(ENV_FILE)"; set +a; \
+		fi; \
 		sh "$(MIGRATE_SCRIPT)"; \
 	else \
 		echo "migrate: $(MIGRATE_SCRIPT) 없음 (후속 티켓 T03에서 추가). runtime-unverified (no docker/psql)."; \
@@ -60,14 +65,14 @@ migrate: ## server/Migrations/*.sql 번호순 적용 (psql 필요)
 
 up: ## 인프라 기동 (PostgreSQL 18 + Centrifugo v6)
 	@if [ -f "$(COMPOSE_FILE)" ]; then \
-		$(COMPOSE) -f "$(COMPOSE_FILE)" up -d; \
+		$(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" up -d; \
 	else \
 		echo "up: $(COMPOSE_FILE) 없음 (후속 티켓 T02에서 추가). runtime-unverified (no docker/psql)."; \
 	fi
 
 down: ## 인프라 중지
 	@if [ -f "$(COMPOSE_FILE)" ]; then \
-		$(COMPOSE) -f "$(COMPOSE_FILE)" down; \
+		$(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" down; \
 	else \
 		echo "down: $(COMPOSE_FILE) 없음 (후속 티켓 T02에서 추가). runtime-unverified (no docker/psql)."; \
 	fi
