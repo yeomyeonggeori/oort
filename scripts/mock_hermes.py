@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+"""Tiny OpenAI-compatible SSE gateway for MOMO-004 runtime verification.
+
+It implements the subset AgentWorker needs:
+
+  POST /v1/chat/completions
+    - stream=true  -> text/event-stream chat.completion.chunk deltas + usage
+    - stream=false -> ordinary chat.completion JSON fallback
+
+No third-party dependencies are required; this is intentionally a local test
+fixture, not a production hermes replacement.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
+
+MOCK_TEXT = "김인턴 mock reply: MOMO-004 SSE path verified."
+
+
+class MockHermesHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args: Any) -> None:
+        print("[mock-hermes] " + fmt % args)
+
+    def do_GET(self) -> None:
+        if self.path == "/health":
+            self._send_json({"ok": True})
+            return
+        self.send_error(404)
+
+    def do_POST(self) -> None:
+        if self.path != "/v1/chat/completions":
+            self.send_error(404)
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length) or b"{}")
+        except Exception as exc:
+            self.send_error(400, f"invalid JSON: {exc}")
+            return
+
+        if body.get("stream") is False:
+            self._send_json(self._non_stream_response(body))
+            return
+
+        self._send_sse(body)
+
+    def _send_json(self, payload: dict[str, Any]) -> None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_sse(self, request: dict[str, Any]) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        chunks = [
+            "김인턴 mock reply: ",
+            "MOMO-004 SSE ",
+            "path verified.",
+        ]
+        for chunk in chunks:
+            self._write_event(self._stream_chunk(request, content=chunk))
+            time.sleep(0.05)
+
+        self._write_event(self._usage_chunk(request))
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+    def _write_event(self, payload: dict[str, Any]) -> None:
+        line = "data: " + json.dumps(payload, ensure_ascii=False) + "\n\n"
+        self.wfile.write(line.encode("utf-8"))
+        self.wfile.flush()
+
+    def _stream_chunk(
+        self, request: dict[str, Any], *, content: str | None
+    ) -> dict[str, Any]:
+        return {
+            "id": "chatcmpl-momo-004-mock",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": request.get("model", "hermes-agent"),
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": content} if content is not None else {},
+                    "finish_reason": None,
+                }
+            ],
+        }
+
+    def _usage_chunk(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": "chatcmpl-momo-004-mock",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": request.get("model", "hermes-agent"),
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+                "prompt_tokens_details": {"cached_tokens": 0},
+                "completion_tokens_details": {"reasoning_tokens": 0},
+            },
+        }
+
+    def _non_stream_response(self, request: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": "chatcmpl-momo-004-mock",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": request.get("model", "hermes-agent"),
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": MOCK_TEXT},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 11,
+                "completion_tokens": 7,
+                "total_tokens": 18,
+            },
+        }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8088)
+    args = parser.parse_args()
+
+    server = ThreadingHTTPServer((args.host, args.port), MockHermesHandler)
+    print(f"[mock-hermes] listening on http://{args.host}:{args.port}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

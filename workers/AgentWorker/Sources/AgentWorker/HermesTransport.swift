@@ -20,9 +20,8 @@ import NIOFoundationCompat
 /// transport re-issues the same request with `stream=false` and parses the single
 /// JSON completion, so tool calls are never lost.
 ///
-/// runtime-unverified (no hermes gateway running): request/SSE shapes match the
-/// OpenAI Chat Completions spec but are not exercised against a live gateway in
-/// this build env. `swift build` is the verification gate.
+/// Runtime verification status is tracked in STATUS.md. The MOMO-004 gate
+/// exercises this with `scripts/mock_hermes.py` when real hermes is unavailable.
 struct HermesTransport: Sendable {
     let httpClient: HTTPClient
     let baseURL: String   // e.g. http://hermes:8088/v1
