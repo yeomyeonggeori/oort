@@ -21,7 +21,7 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 ## 0.1 표준 작업 루프
 
 1. 모든 작업은 **Issue + Milestone + Project** 기준으로 시작한다. 필요하면 작업 전 이슈/마일스톤/프로젝트 상태를 정리한다.
-2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. `scripts/goal_claim.sh` 같은 운영 스크립트가 있으면 우선 사용하고, 없으면 수동 branch/worktree로 같은 계약을 지킨다.
+2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. 시작 전 `scripts/goal_status.sh`로 충돌을 확인하고, `scripts/goal_claim.sh <issue>`로 branch/worktree/assignee/status lock을 잡는다. 스크립트가 없는 checkout에서는 수동 branch/worktree로 같은 계약을 지킨다.
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
 5. 구현 후 해당 검증 등급의 테스트를 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh --profile ...`를 우선 사용하고, Swift 변경은 `make build`/`make test`를 하드 게이트로 본다.
@@ -60,7 +60,7 @@ workers/AgentWorker/     agent_job 클레임 → hermes OpenAI-compat SSE → me
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml. py3 only.
 
 infra/                   docker-compose.yml(PG18 + Centrifugo v6 + healthcheck/volume) · centrifugo.json · .env.example. (※ infra/prod/* 는 M1에서 신규.)
-scripts/                 migrate.sh · github/{bootstrap.sh, milestones.tsv, labels.tsv, issues.tsv}.
+scripts/                 local_gate.sh · goal_claim/status/release.sh · migrate.sh · github/{bootstrap.sh, milestones.tsv, labels.tsv, issues.tsv}.
 docs/                    RUN.md(기동 순서) · GITHUB_OPS.md · cicd/00~09 · legal/00~03.
 legal/                   privacy-policy.md · agent-disclosure.md · THIRD_PARTY_NOTICES.md (법률 자문 아님).
 .github/                 ISSUE_TEMPLATE/ · workflows/{ci-build,release-ios,release-macos}.yml.

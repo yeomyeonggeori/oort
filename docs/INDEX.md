@@ -33,6 +33,10 @@
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `make build/test/up/down/migrate` | 빌드 명령 |
 | [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|swift|runtime-*|macos-ui|all`) | 운영 명령 |
+| [`scripts/goal_status.sh`](../scripts/goal_status.sh) | ready/in-progress/needs-review/blocked issue와 branch/PR/worktree/local gate 상태판 | 운영 명령 |
+| [`scripts/goal_claim.sh`](../scripts/goal_claim.sh) | 이슈 claim + canonical branch/worktree 생성 + remote branch lock + status 갱신 | 운영 명령 |
+| [`scripts/goal_release.sh`](../scripts/goal_release.sh) | worker 완료 후 issue를 review/blocked/ready 상태로 전환하고 코멘트 기록 | 운영 명령 |
+| [`.conductor/setup.sh`](../.conductor/setup.sh) | worktree별 `.env.worktree`, compose namespace, runtime port 자동 분리 | 운영 명령 |
 
 ---
 

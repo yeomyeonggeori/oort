@@ -128,12 +128,15 @@ Paste the block printed by `scripts/local_gate.sh`. Shape:
 ## 6. Merge Cycle
 
 1. Claim issue and work in a separate worktree.
+   - `momo-main` checks `scripts/goal_status.sh`.
+   - worker runs `scripts/goal_claim.sh <issue>` when available.
 2. Implement from the issue plan.
 3. Run the relevant `scripts/local_gate.sh --profile ...`.
 4. Commit, push, and open PR.
-5. Review for security, correctness, and scope.
-6. Run the final local gate after review fixes.
-7. Merge if the local gate passes and no blocker remains.
-8. Update `main` locally and rerun the relevant local gate on `main`.
-9. Update issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommend the next goal.
-10. If Actions are intentionally disabled, confirm workflow state remains `disabled_manually` instead of waiting for remote CI.
+5. Move the issue to review with `scripts/goal_release.sh <issue> --review --pr <PR URL>`.
+6. Review for security, correctness, and scope.
+7. Run the final local gate after review fixes.
+8. Merge if the local gate passes and no blocker remains.
+9. Update `main` locally and rerun the relevant local gate on `main`.
+10. Update issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommend the next goal.
+11. If Actions are intentionally disabled, confirm workflow state remains `disabled_manually` instead of waiting for remote CI.
