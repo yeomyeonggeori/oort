@@ -61,7 +61,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile ...` + PR evidence 템플릿 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | branch/worktree/env/status handoff 런북 + 충돌 방지 |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
-| `MOMO-151` | M1.5 | Context Packet v0 심화 | mention/command/message-action/source/memory fixtures |
+| `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | typed memory + source/visibility/expiry/delete/retrieval permission |
 | `MOMO-153` | M1.5 | Capability Cache v0 | agent/plugin/MCP tool cache + invalidation + policy/capability version |
 | `MOMO-120` | M2 | Context Packet v0 | `{goal,constraints,decisions,sources,permissions,budget,redactions}` 스펙/fixture |
@@ -156,7 +156,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리.
 - **멀티팀 온보딩**(M2): `003_onboarding.sql`(invite_code + platform_admin) + 온보딩 REST + 관리자 전역 추적. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장.
 - **Context Broker + Memory Plane**(M2~M3): 서버 agent로 바로 넘기지 않고 messenger layer가 권한, 컨텍스트 범위, source refs, cost budget, redaction, local/server model routing을 결정한다. 정본: `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`.
-- **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. 정본: `research/11-agent-runtime/*`.
+- **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`이며, runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
 - **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`, `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`.
 - **Google Workspace connector**(M2~M3): v0는 per-user OAuth + read-mostly sync(Drive metadata/excerpt, Gmail thread read, Calendar read)로 시작하고, external write는 approval card 뒤에 둔다. Domain-wide delegation은 enterprise 옵션.
 - **Local PR gate / multi-session ops**(M1): GitHub Actions가 비주요 gate인 기간에도 PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.

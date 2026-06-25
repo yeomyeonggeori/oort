@@ -1,0 +1,227 @@
+{
+  "schema": "momo.context_packet.v0",
+  "packet_id": "11111111-1111-4111-8111-111111111153",
+  "packet_version": 1,
+  "created_at": "2026-06-25T09:20:00Z",
+  "expires_at": "2026-06-25T09:35:00Z",
+  "workspace": {
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+    "slug": "acme",
+    "name": "Acme"
+  },
+  "request": {
+    "request_id": "22222222-2222-4222-8222-222222221153",
+    "surface": "message_context_action",
+    "actor_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0003",
+    "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb00a1",
+    "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0003",
+    "trigger_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0307",
+    "thread_root_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0300",
+    "idempotency_key": "33333333-3333-4333-8333-333333331153",
+    "raw_text": "Create ERM risk from this message",
+    "normalized_intent": "create_erm_risk_from_message",
+    "context_action": {
+      "name": "erm.create_risk_from_message",
+      "selected_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0307"
+    },
+    "client_context": {
+      "platform": "macos",
+      "app_version": "0.1-dev"
+    }
+  },
+  "scope": {
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+    "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0003",
+    "thread_root_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0300",
+    "visibility": "thread",
+    "seq_window": {
+      "from": 300,
+      "to": 307,
+      "reason": "selected_message_with_thread_context"
+    },
+    "permission_basis": [
+      "actor_is_workspace_member",
+      "actor_is_channel_member",
+      "agent_is_channel_member",
+      "plugin_policy:erm.create_risk",
+      "withheld_source:actor_lacks_private_finance_channel_membership"
+    ],
+    "rls_context": {
+      "set_local_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001"
+    }
+  },
+  "goal": {
+    "summary": "Draft an ERM risk item from a selected message.",
+    "user_prompt": "Create ERM risk from this message",
+    "constraints": [
+      "Use the selected message as primary evidence.",
+      "Mention that private finance context was withheld.",
+      "Do not create the ERM record without approval."
+    ],
+    "desired_outputs": [
+      "tool_call",
+      "approval_request",
+      "timeline_reply"
+    ],
+    "non_goals": [
+      "Do not infer financial exposure from withheld private sources.",
+      "Do not notify executives automatically."
+    ],
+    "acceptance_hint": "Prepare an approval card with risk title, description, severity, owner, and source citations."
+  },
+  "participants": [
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0003",
+      "kind": "human",
+      "handle": "soyeon",
+      "display_name": "Soyeon",
+      "role": "actor"
+    },
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb00a1",
+      "kind": "agent",
+      "handle": "momo",
+      "display_name": "momo",
+      "role": "target_agent"
+    }
+  ],
+  "recent_messages": [
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0300",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0003",
+      "seq": 300,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0004",
+      "type": "text",
+      "body": "The vendor migration has a dependency on the old billing export.",
+      "source_id": "src_thread_root_erm"
+    },
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0307",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0003",
+      "seq": 307,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0004",
+      "type": "text",
+      "body": "If the export fails after cutover, revenue reconciliation may be delayed by two days.",
+      "source_id": "src_selected_risk_message"
+    }
+  ],
+  "memory_refs": [
+    {
+      "memory_id": "mem_pref_erm_severity",
+      "type": "preference",
+      "visibility": "workspace",
+      "source_ids": [
+        "src_erm_policy"
+      ],
+      "excerpt": "Operational risks that can delay revenue reconciliation should default to severity medium or higher.",
+      "reason_included": "Guides suggested ERM severity.",
+      "expires_at": "2026-12-31T00:00:00Z",
+      "delete_path": "workspace_admin_memory_delete",
+      "permission_snapshot": "actor:read"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "src_thread_root_erm",
+      "kind": "message",
+      "title": "Vendor migration thread root",
+      "uri": "momo://workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001/channels/cccccccc-cccc-4ccc-8ccc-cccccccc0003/messages/dddddddd-dddd-4ddd-8ddd-dddddddd0300",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read",
+      "retrieved_at": "2026-06-25T09:20:00Z",
+      "excerpt": "The vendor migration has a dependency on the old billing export."
+    },
+    {
+      "source_id": "src_selected_risk_message",
+      "kind": "message",
+      "title": "Selected risk message",
+      "uri": "momo://workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001/channels/cccccccc-cccc-4ccc-8ccc-cccccccc0003/messages/dddddddd-dddd-4ddd-8ddd-dddddddd0307",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read",
+      "retrieved_at": "2026-06-25T09:20:00Z",
+      "excerpt": "If the export fails after cutover, revenue reconciliation may be delayed by two days."
+    },
+    {
+      "source_id": "src_erm_policy",
+      "kind": "confluence",
+      "title": "ERM severity rubric",
+      "uri": "https://confluence.example.com/erm/severity-rubric",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read:erm-policy",
+      "retrieved_at": "2026-06-25T09:19:40Z",
+      "excerpt": "Operational risks that can delay revenue reconciliation should default to severity medium or higher.",
+      "checksum": "sha256:fixture-erm-policy"
+    }
+  ],
+  "tool_grants": [
+    {
+      "tool_name": "erm.create_risk",
+      "provider": "momo-erm",
+      "grant": "propose",
+      "risk": "write",
+      "approval_policy": "always",
+      "allowed_operations": [
+        "create_risk"
+      ],
+      "denied_operations": [
+        "close_risk",
+        "change_owner_without_approval"
+      ],
+      "input_schema_ref": "momo://capability-cache/erm.create_risk/v1",
+      "capability_version": "momo-erm@0.1.0",
+      "policy_version": "workspace-policy@2026-06-25"
+    }
+  ],
+  "budget": {
+    "budget_id": "budget_erm_context_action",
+    "model_route": "hybrid",
+    "max_prompt_tokens": 5000,
+    "max_completion_tokens": 1000,
+    "reserved_micro_usd": 18000,
+    "soft_limit_micro_usd": 40000,
+    "hard_limit_micro_usd": 80000,
+    "approval_required_over_micro_usd": 40000,
+    "usage_ledger_mode": "reserve_reconcile"
+  },
+  "redactions": [
+    {
+      "redaction_id": "withheld_private_finance",
+      "kind": "withheld_source",
+      "placeholder": null,
+      "applied_to": [
+        "sources"
+      ],
+      "reason": "actor_lacks_channel_membership",
+      "source_hint": "private-finance-thread"
+    }
+  ],
+  "runtime_envelope": {
+    "transport": "openai_chat_completions_sse",
+    "endpoint": "/v1/chat/completions",
+    "stream": true,
+    "metadata": {
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0003",
+      "run_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee1153",
+      "context_packet_id": "11111111-1111-4111-8111-111111111153",
+      "idempotency_key": "33333333-3333-4333-8333-333333331153"
+    },
+    "messages_strategy": "system_summary_plus_context_json",
+    "forbidden_runtime_inputs": [
+      "database_url",
+      "provider_refresh_token",
+      "raw_cross_channel_history",
+      "unredacted_secret"
+    ]
+  },
+  "audit": {
+    "policy_version": "workspace-policy@2026-06-25",
+    "capability_versions": [
+      "momo-erm@0.1.0"
+    ],
+    "source_grant_versions": [
+      "confluence-grant@2026-06-25"
+    ],
+    "builder": "momo-context-broker-v0"
+  }
+}
