@@ -271,11 +271,13 @@ M0(baseline)
 - **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M
 - **deps:** MOMO-150
 - **수용기준:**
-  - [ ] [spec] mention, slash command, message context action, Google Workspace source ref, memory ref fixtures 작성
+  - [ ] [spec] `research/11-agent-runtime/04-context-packet-v0.md`에 Context Packet top-level shape, request/scope/goal/source/memory/tool/budget/redaction/runtime envelope 정의
+  - [ ] [spec] mention, slash command, message context action fixture 3종 작성. 각 fixture는 source ref, memory ref, tool grant, budget, redaction/withheld context 중 하나 이상 포함
   - [ ] [spec] agent runtime에 주입 가능한 필드와 금지 필드 정의
   - [ ] [spec] Hermes/Kim Intern/OpenAI-compatible SSE 호출의 context envelope 정의
+  - [ ] [spec] openclaw식 approval availability/presentation/transport/interactions/observe 분리를 momo Context Broker/clients/server/Postgres 경계로 매핑
 - **라벨:** `type:spec`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
-- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+- **참조:** `research/11-agent-runtime/04-context-packet-v0.md`, `research/11-agent-runtime/fixtures/context-packet-v0/`
 
 #### MOMO-152 · Memory Plane v0 deep spec and permission model
 - **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M

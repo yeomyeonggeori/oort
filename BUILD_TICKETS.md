@@ -182,6 +182,12 @@
 | `MOMO-152` | Memory Plane v0 deep spec and permission model | spec | MOMO-151 |
 | `MOMO-153` | Capability Cache v0 spec and invalidation model | spec | MOMO-151 |
 
+### MOMO-151 수용기준 `[spec]`
+- [ ] `research/11-agent-runtime/04-context-packet-v0.md`에 Context Packet v0 top-level shape, 필수 필드, 금지 필드, runtime envelope를 정의.
+- [ ] `research/11-agent-runtime/fixtures/context-packet-v0/`에 mention, slash command, message context action JSON fixture 3종 추가.
+- [ ] Hermes/Kim Intern/OpenAI-compatible SSE 경로는 같은 runtime envelope를 쓰고, openclaw식 approval availability/presentation/transport/interactions/observe 분리는 momo 소유 경계로 반영.
+- [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`와 기존 build/test gate를 통과.
+
 핵심 원칙:
 
 - Context Packet은 `{goal,constraints,decisions,sources,permissions,budget,redactions}`를 고정 필드로 시작한다.

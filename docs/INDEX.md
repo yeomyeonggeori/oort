@@ -99,6 +99,8 @@
 | [`research/11-agent-runtime/01-three-agent-runtime-analysis.md`](../research/11-agent-runtime/01-three-agent-runtime-analysis.md) | Hermes agent / internkim / openclaw runtime 분석 |
 | [`research/11-agent-runtime/02-memory-cache-protocol-gaps.md`](../research/11-agent-runtime/02-memory-cache-protocol-gaps.md) | Memory Plane · Capability Cache · MCP/A2A/SSE protocol gap |
 | [`research/11-agent-runtime/03-roadmap-and-methodology.md`](../research/11-agent-runtime/03-roadmap-and-methodology.md) | Agent runtime 4-plane 방법론 + MOMO-151~172 로드맵 |
+| [`research/11-agent-runtime/04-context-packet-v0.md`](../research/11-agent-runtime/04-context-packet-v0.md) | Context Packet v0 정본 스펙(request/scope/source/memory/tool/budget/redaction/runtime envelope) |
+| [`research/11-agent-runtime/fixtures/context-packet-v0/`](../research/11-agent-runtime/fixtures/context-packet-v0/) | Context Packet v0 JSON fixtures(mention, slash command, message context action) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---
