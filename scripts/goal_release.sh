@@ -12,7 +12,7 @@ PR_URL=""
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/goal_release.sh [--dry-run] [--repo ORG/REPO] <issue> --review [--pr URL]
+  scripts/goal_release.sh [--dry-run] [--repo ORG/REPO] <issue> --review --pr URL_OR_NUMBER
   scripts/goal_release.sh [--dry-run] [--repo ORG/REPO] <issue> --blocked "reason"
   scripts/goal_release.sh [--dry-run] [--repo ORG/REPO] <issue> --ready "reason"
 
@@ -47,19 +47,62 @@ if [ -z "$ISSUE" ] || [ -z "$MODE" ]; then
 fi
 
 command -v gh >/dev/null 2>&1 || { echo "missing gh" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "missing jq" >&2; exit 1; }
 
-issue_title="$(gh issue view "$ISSUE" --repo "$ORG_REPO" --json title -q .title)"
+issue_json="$(gh issue view "$ISSUE" --repo "$ORG_REPO" --json title,assignees)"
+issue_title="$(printf '%s' "$issue_json" | jq -r '.title')"
+assignees="$(printf '%s' "$issue_json" | jq -r '[.assignees[].login] | join(",")')"
 echo "issue: #$ISSUE $issue_title"
 echo "mode:  $MODE"
 
+pr_ref_from_url() {
+  printf '%s' "$1" | sed -E 's#^https://github.com/[^/]+/[^/]+/pull/([0-9]+).*$#\1#'
+}
+
+validate_review_pr() {
+  local pr_ref pr_json pr_state pr_url pr_branch closes_issue branch_matches
+
+  if [ -z "$PR_URL" ]; then
+    echo "--review requires --pr URL_OR_NUMBER" >&2
+    exit 2
+  fi
+
+  pr_ref="$(pr_ref_from_url "$PR_URL")"
+  pr_json="$(gh pr view "$pr_ref" --repo "$ORG_REPO" --json number,url,state,headRefName,closingIssuesReferences)"
+  pr_state="$(printf '%s' "$pr_json" | jq -r '.state')"
+  pr_url="$(printf '%s' "$pr_json" | jq -r '.url')"
+  pr_branch="$(printf '%s' "$pr_json" | jq -r '.headRefName')"
+
+  if [ "$pr_state" != "OPEN" ]; then
+    echo "PR is not open: $pr_url ($pr_state)" >&2
+    exit 1
+  fi
+
+  if printf '%s' "$pr_json" | jq -e --argjson issue "$ISSUE" 'any(.closingIssuesReferences[]?; .number == $issue)' >/dev/null; then
+    closes_issue=1
+  else
+    closes_issue=0
+  fi
+
+  case "$pr_branch" in
+    "$ISSUE"-*|*/"$ISSUE"-*) branch_matches=1 ;;
+    *) branch_matches=0 ;;
+  esac
+
+  if [ "$closes_issue" != "1" ] && [ "$branch_matches" != "1" ]; then
+    echo "PR must close issue #$ISSUE or use canonical issue branch '<type>/$ISSUE-<slug>': $pr_url ($pr_branch)" >&2
+    exit 1
+  fi
+
+  PR_URL="$pr_url"
+}
+
 case "$MODE" in
   review)
+    validate_review_pr
     add_label="status:needs-review"
     remove_label="status:ready,status:in-progress,status:blocked"
-    body="Moved to review."
-    if [ -n "$PR_URL" ]; then
-      body="$body\n\nPR: $PR_URL"
-    fi
+    body="Moved to review.\n\nPR: $PR_URL"
     ;;
   blocked)
     if [ -z "$MESSAGE" ]; then
@@ -88,11 +131,18 @@ esac
 if [ "$DRY_RUN" = "1" ]; then
   echo "[dry-run] would add label: $add_label"
   echo "[dry-run] would remove labels: $remove_label"
+  if [ "$MODE" = "ready" ] && [ -n "$assignees" ]; then
+    echo "[dry-run] would remove assignees: $assignees"
+  fi
   printf '[dry-run] would comment:\n%b\n' "$body"
   exit 0
 fi
 
-gh issue edit "$ISSUE" --repo "$ORG_REPO" --add-label "$add_label" --remove-label "$remove_label"
+edit_args=(issue edit "$ISSUE" --repo "$ORG_REPO" --add-label "$add_label" --remove-label "$remove_label")
+if [ "$MODE" = "ready" ] && [ -n "$assignees" ]; then
+  edit_args+=(--remove-assignee "$assignees")
+fi
+gh "${edit_args[@]}"
 comment_file="$(mktemp)"
 printf '%b\n' "$body" > "$comment_file"
 gh issue comment "$ISSUE" --repo "$ORG_REPO" --body-file "$comment_file"

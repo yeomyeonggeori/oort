@@ -57,6 +57,22 @@ need gh
 need git
 need jq
 
+assert_origin_matches_repo() {
+  local origin_url repo_pattern
+  origin_url="$(git remote get-url origin 2>/dev/null || true)"
+  repo_pattern="${ORG_REPO%.git}"
+  case "$origin_url" in
+    *"github.com:$repo_pattern.git"|*"github.com:$repo_pattern"|*"github.com/$repo_pattern.git"|*"github.com/$repo_pattern") ;;
+    *)
+      echo "origin remote does not match --repo $ORG_REPO: ${origin_url:-<missing>}" >&2
+      echo "Branch/PR/worktree matching would be unreliable; run inside the matching checkout or pass the matching --repo." >&2
+      exit 1
+      ;;
+  esac
+}
+
+assert_origin_matches_repo
+
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 if [ -z "$WORKTREE_ROOT" ]; then
   repo_parent="$(cd "$repo_root/.." && pwd)"

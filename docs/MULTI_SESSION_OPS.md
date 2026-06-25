@@ -83,13 +83,13 @@ Do not claim an issue that already has an assignee, an active branch, an open PR
 
 `.conductor/setup.sh` creates per-worktree runtime overrides:
 
-- `.conductor/local.env`: ignored local file with generated ports and compose name.
+- `.conductor/local.env`: ignored local file with generated ports, compose name, and the base runtime env keys needed by Docker Compose.
 - `.env.worktree`: ignored symlink to `.conductor/local.env`.
 - `COMPOSE_PROJECT_NAME`: branch/worktree-specific namespace.
 - `PORT`, `CENT_PORT`, `POSTGRES_PORT`, `HERMES_PORT`: deterministic branch-specific ports.
 - `DATABASE_URL`, `CENT_API_URL`, `HERMES_BASE_URL`: local runtime URLs derived from those ports.
 
-Root `.env` is treated as a secret source and must never be copied into commits. If a worktree needs shared secrets, use ignored symlinks or local-only overrides.
+Root `.env` is treated as a secret source and must never be copied into commits. `.conductor/local.env` may mirror those values locally so `make up` can use a single `--env-file`; it is ignored and must stay uncommitted.
 
 Runtime tickets should pass `ENV_FILE=.env.worktree` when needed and must not reuse another worktree's compose project, volume, or port set.
 
@@ -164,6 +164,8 @@ If ready for review:
 ```bash
 scripts/goal_release.sh <issue-number> --review --pr <PR URL>
 ```
+
+`--review` requires a valid open PR that either closes the issue or uses the canonical issue branch. `--ready` returns an issue to the ready pool and removes the current assignee so another worker can claim it normally.
 
 ## 7. PR Review And Merge Cycle
 
