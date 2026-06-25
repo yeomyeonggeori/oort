@@ -2,7 +2,7 @@
 
 > **이 게이트를 PASS하기 전에는 `release-ios.yml` / `release-macos.yml`를 트리거하지 않는다.**
 > 목적: "빌드 파일이 실제로 사용 가능"함을 빡세게 판명한 뒤에만 스토어/공증 배포로 진행.
-> 현재 상태(STATUS.md): Phase 0 컴파일만 통과, **런타임 미검증**. → 이 게이트는 아직 OPEN(미통과).
+> 현재 상태(STATUS.md): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery, APNs, packaged app/IPA, QA 실측은 후속. → 이 게이트는 아직 OPEN(미통과).
 >
 > 📐 **객관 통과기준(measurable DoD) = `docs/cicd/05-qa-release-gate.md`.** 이 파일(03)은 체크리스트(무엇), 05는 "사용 가능 완전 판명"의 수치/방법(어떻게 증명)·PASS 기록 양식.
 > 관련: `06-beta-testflight-plan.md`(베타) · `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능) · `09-qa-codex-tickets.md`(Codex 티켓).
@@ -44,8 +44,9 @@
 - [ ] **G-D 성능**: 콜드 런치 p90 < 2s, hang ≈ 0, 메모리/스크롤 안정(실기기·Release). (05 §5 / 08 §3)
 - [ ] **G-F 베타 피드백**: 전수 트리아지, P0/P1 잔여 0. (TestFlight + ASC API, 06 §3)
 - [ ] **G-G 릴리스 준비 체크리스트**: 05 §9 (메타/프라이버시/암호화 신고/버전·빌드번호) 100%.
+- [ ] **G-H Enterprise Trust**: threat model + SBOM/license scan + secret scanning + VDP/pentest plan + security whitepaper draft. (05 §8a, MOMO-140)
 
 ## PASS 판정
-위 **G-0~G-5 전부 체크 + 증거 첨부** → 게이트 **PASS**. 이 파일 상단에 05 §10 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록.
+위 **G-0~G-5 및 G-A~G-H 전부 체크 + 증거 첨부** → 게이트 **PASS**. 이 파일 상단에 05 §10 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록.
 → 이후에만 `v*.*.*` 태그로 release 워크플로우 가동. **기록 없는 release 트리거는 규칙 위반.**
 </content>
