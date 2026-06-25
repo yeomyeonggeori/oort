@@ -1,5 +1,6 @@
 import Foundation
 import Hummingbird
+import Logging
 import PostgresNIO
 
 /// Message endpoints — the core write path of momo (L4 §1.2 / §3.1 / §8.1).
@@ -36,7 +37,17 @@ struct MessageRoutes: Sendable {
         // props/run_id are passed as JSON/uuid; v0 stub serializes props to a JSON string.
         let propsJSON = Self.encodeProps(dto.props)
 
-        let message: MessageDTO? = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+        let result: (isMember: Bool, message: MessageDTO?) = try await db.withTenantTransaction(
+            workspaceID: workspaceID
+        ) { conn in
+            let isMember = try await Self.hasActiveMembership(
+                conn: conn,
+                logger: db.logger,
+                channelID: channelID,
+                memberID: principal.memberID
+            )
+            guard isMember else { return (false, nil) }
+
             // ---- L4 §3.1: single-transaction monotonic seq + idempotent insert ----
             // UPDATE channel_seq row-lock serializes writes per-channel (gapless);
             // ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING
@@ -78,7 +89,7 @@ struct MessageRoutes: Sendable {
                     """,
                     logger: db.logger
                 ).collect()
-                guard let existingRow = existing.first else { return nil }
+                guard let existingRow = existing.first else { return (true, nil) }
                 row = existingRow
             }
 
@@ -105,15 +116,18 @@ struct MessageRoutes: Sendable {
                 logger: db.logger
             )
 
-            return MessageDTO(
+            return (true, MessageDTO(
                 id: id.uuidString, channelId: channelID.uuidString, seq: seq,
                 hlcTs: ts, hlcCount: count, authorMemberId: principal.memberID.uuidString,
                 type: type, body: body,
                 createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
-            )
+            ))
         }
 
-        guard let message else {
+        guard result.isMember else {
+            throw HTTPError(.forbidden, message: "not a member of this channel")
+        }
+        guard let message = result.message else {
             // channel_seq row missing → channel not provisioned (or wrong tenant).
             throw HTTPError(.notFound, message: "channel not found or not provisioned")
         }
@@ -135,7 +149,17 @@ struct MessageRoutes: Sendable {
         let before = q["before"].flatMap { Int64($0) }   // older than this seq
         let after = q["after"].flatMap { Int64($0) }     // newer than this seq (backfill)
 
-        let page: MessagePage = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        let result: (isMember: Bool, page: MessagePage?) = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let isMember = try await Self.hasActiveMembership(
+                conn: conn,
+                logger: db.logger,
+                channelID: channelID,
+                memberID: principal.memberID
+            )
+            guard isMember else { return (false, nil) }
+
             // `after` = backfill gap (ascending); otherwise newest-first by seq with
             // an optional `before` cursor. Both read via message_channel_seq_idx.
             let rows: [PostgresRow]
@@ -189,12 +213,37 @@ struct MessageRoutes: Sendable {
             }
             // nextBefore = smallest seq in this page (for the next older page).
             let nextBefore = dtos.map(\.seq).min()
-            return MessagePage(messages: dtos, nextBefore: nextBefore)
+            return (true, MessagePage(messages: dtos, nextBefore: nextBefore))
+        }
+        guard result.isMember, let page = result.page else {
+            throw HTTPError(.forbidden, message: "not a member of this channel")
         }
         return try page.response(from: request, context: context)
     }
 
     // MARK: - Helpers
+
+    /// REST read/write access is channel membership-gated in addition to tenant
+    /// RLS. Centrifugo subscribe proxy performs the same check for realtime.
+    private static func hasActiveMembership(
+        conn: PostgresConnection,
+        logger: Logger,
+        channelID: UUID,
+        memberID: UUID
+    ) async throws -> Bool {
+        let rows = try await conn.query(
+            """
+            SELECT 1
+              FROM membership
+             WHERE channel_id = \(channelID)
+               AND member_id = \(memberID)
+               AND left_at IS NULL
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        return !rows.isEmpty
+    }
 
     /// Resolve workspace/channel UUIDs from the path and verify the path workspace
     /// matches the authenticated token's workspace (tenant isolation, L4 §1.3).
