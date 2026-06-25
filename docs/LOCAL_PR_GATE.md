@@ -26,7 +26,41 @@ Every PR needs local evidence in the PR body:
 
 Do not mark runtime work complete if the runtime script was not run.
 
-## 2. Default Gate
+## 2. Standard Script
+
+Run from repo root:
+
+```bash
+scripts/local_gate.sh --profile docs
+```
+
+The script writes a timestamped log and Markdown evidence file under
+`${TMPDIR:-/tmp}/momo-local-gate` by default, then prints a PR-ready
+`## Local Gate` block to stdout. Use `--output-dir <dir>` or
+`LOCAL_GATE_OUT_DIR=<dir>` when you need a stable local evidence path.
+
+Profiles:
+
+| Profile | Use when | What it runs |
+|---|---|---|
+| `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax |
+| `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
+| `runtime-db` | migrations/server/RLS changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` |
+| `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` when present, otherwise explicit manual MOMO-002 not-covered note |
+| `runtime-agent` | AgentWorker/hermes/cost changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` |
+| `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to launch `MomoMacDevApp` |
+| `all` | merge-critical/runtime-wide changes | all profiles in one run, with shared bootstrap deduped except migration idempotency |
+
+Examples:
+
+```bash
+scripts/local_gate.sh --profile swift
+scripts/local_gate.sh --profile runtime-agent
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
+scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
+```
+
+## 3. Manual Fallback
 
 Run from repo root:
 
@@ -51,40 +85,39 @@ actionlint .github/workflows/*.yml
 
 If `actionlint` is missing and workflows changed, install it or record the exact blocker before merge.
 
-## 3. Runtime Profiles
+## 4. Runtime Profiles
 
 Use the profile that matches the changed surface.
 
 | Profile | Use when | Commands |
 |---|---|---|
-| `docs` | docs/spec only | default gate or at least `git diff --check` plus static parse checks |
-| `swift` | Swift package/model/view changes | default gate |
-| `runtime-db` | migrations/server/RLS changes | default gate + `make up` + `make migrate` twice |
-| `runtime-relay` | outbox/relay/realtime changes | default gate + MOMO-002 verification path |
-| `runtime-agent` | AgentWorker/hermes/cost changes | default gate + `scripts/verify_agent_worker.sh` |
-| `macos-ui` | MomoMac UI/run changes | default gate + `swift run --package-path clients/macOS MomoMacDevApp` or the future `script/build_and_run.sh --verify` |
+| `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
+| `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` |
+| `runtime-db` | migrations/server/RLS changes | `scripts/local_gate.sh --profile runtime-db` |
+| `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
+| `runtime-agent` | AgentWorker/hermes/cost changes | `scripts/local_gate.sh --profile runtime-agent` |
+| `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for real window launch |
 
-## 4. PR Body Evidence
+## 5. PR Body Evidence
 
-Use this block:
+Paste the block printed by `scripts/local_gate.sh`. Shape:
 
 ```md
 ## Local Gate
-- Date:
-- Machine/toolchain:
+- Result:
+- Profile:
+- Started:
+- Finished:
 - Commands:
-  - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build`
-  - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make test`
-  - [x] scope-specific:
 - Runtime coverage:
 - Not covered:
 ```
 
-## 5. Merge Cycle
+## 6. Merge Cycle
 
 1. Claim issue and work in a separate worktree.
 2. Implement from the issue plan.
-3. Run the local gate.
+3. Run the relevant `scripts/local_gate.sh --profile ...`.
 4. Commit, push, and open PR.
 5. Review for security, correctness, and scope.
 6. Run the final local gate after review fixes.
@@ -92,13 +125,3 @@ Use this block:
 8. Update `main` locally and rerun the relevant local gate on `main`.
 9. Update issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommend the next goal.
 10. If Actions are intentionally disabled, confirm workflow state remains `disabled_manually` instead of waiting for remote CI.
-
-## 6. Future Script
-
-`MOMO-111` should add:
-
-```bash
-scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all
-```
-
-The script should write a timestamped evidence file under a non-secret local path and print a PR-ready summary.

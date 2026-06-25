@@ -32,6 +32,7 @@
 | [`README.md`](../README.md) | 제품 1줄 + 스택 + 아키텍처 + 정식 릴리스 로드맵 | 진입점 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `make build/test/up/down/migrate` | 빌드 명령 |
+| [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|swift|runtime-*|macos-ui|all`) | 운영 명령 |
 
 ---
 

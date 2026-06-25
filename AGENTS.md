@@ -24,11 +24,11 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. `scripts/goal_claim.sh` 같은 운영 스크립트가 있으면 우선 사용하고, 없으면 수동으로 별도 branch/worktree를 만든다.
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 한 번 더 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
-5. 구현 후 해당 검증 등급의 테스트를 실행한다. Swift 변경은 `make build`/`make test`를 기본 게이트로 본다.
+5. 구현 후 해당 검증 등급의 테스트를 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh --profile ...`를 우선 사용하고, Swift 변경은 `make build`/`make test`를 하드 게이트로 본다.
 6. 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫는다.
 7. PR 이후 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 발견 사항을 반영한다.
 8. 리뷰 반영 후 최종 테스트를 다시 실행한다. 문제가 없고 현재 gate가 통과하면 merge한다.
-9. GitHub Actions disabled/manual-only 기간에는 `docs/LOCAL_PR_GATE.md`의 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
+9. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh`가 출력한 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
 10. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ## 2. 리포 맵 (디렉터리 → 책임)
@@ -61,6 +61,7 @@ research/08-distribution/ 01=macOS 배포 스펙 · 02=배포 티켓
 > 로컬 툴체인: **Swift 6.2.x 있음**(`.swift-version`=6.2). **Docker Desktop + psql 있음**, hermes 없음. PG18+Centrifugo 런타임은 검증 가능하고, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway를 준비한다.
 
 ```bash
+scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all
 make build          # SWIFT_PKGS 중 Package.swift 있는 것만 swift build (의존순: Core→server/relay/worker→macOS)
 make test           # 동일 패키지 swift test
 ( cd clients/Core && swift build )           # MomoCore (공유 모델 + ChatBackend/AgentTransport)
