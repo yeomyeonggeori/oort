@@ -56,4 +56,34 @@ final class MomoMacTests: XCTestCase {
         let second = try await backend.sendOptimistic(draft, clientMsgId: cid)
         XCTAssertEqual(first.id, second.id, "same clientMsgId must dedupe (L4 §3.1)")
     }
+
+    @MainActor
+    func testDemoRealtimeReplayIsIdempotentAcrossResubscribe() async throws {
+        let viewModel = await MomoMacDemo.makeViewModel()
+        try await Task.sleep(for: .milliseconds(50))
+
+        guard let general = viewModel.selectedChannelId else {
+            return XCTFail("demo should select the first channel")
+        }
+        guard let other = viewModel.channels.dropFirst().first?.id else {
+            return XCTFail("demo should seed at least two channels")
+        }
+        let initialPartialText = viewModel.partials.values.first?.textDelta
+        XCTAssertNotNil(initialPartialText)
+
+        guard let approval = viewModel.pendingApprovals.first else {
+            return XCTFail("demo should seed one pending approval")
+        }
+        await viewModel.decideApproval(approval.approvalId, approve: true)
+        XCTAssertEqual(viewModel.approvals[approval.approvalId]?.status, .approved)
+        XCTAssertTrue(viewModel.pendingApprovals.isEmpty)
+
+        await viewModel.selectChannel(other)
+        await viewModel.selectChannel(general)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.partials.values.first?.textDelta, initialPartialText)
+        XCTAssertEqual(viewModel.approvals[approval.approvalId]?.status, .approved)
+        XCTAssertTrue(viewModel.pendingApprovals.isEmpty)
+    }
 }

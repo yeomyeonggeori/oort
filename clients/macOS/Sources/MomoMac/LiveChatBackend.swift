@@ -31,6 +31,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     // Realtime fan-out continuations, keyed by channel.
     private var channelStreams: [ChannelID: [UUID: AsyncStream<RealtimeEvent>.Continuation]] = [:]
     private var agentStreams: [ChannelID: [UUID: AsyncStream<AgentEvent>.Continuation]] = [:]
+    private var demoRealtimeByChannel: [ChannelID: [RealtimeEvent]] = [:]
+    private var replayedDemoDeltaChannels: Set<ChannelID> = []
 
     public init() {}
 
@@ -41,6 +43,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     public func seedDemo() -> DemoSeed {
         let ws = WorkspaceID()
         workspace = ws
+        demoRealtimeByChannel = [:]
+        replayedDemoDeltaChannels = []
 
         let human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
@@ -76,6 +80,58 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
                 "call_id": .string("call_1"),
             ]),
             runId: toolRun)
+
+        let approvalRun = RunID()
+        _ = appendServerMessage(
+            channel: general.id,
+            author: researcher.id,
+            type: .approvalRequest,
+            body: nil,
+            props: .object([
+                "action_type": .string("github.issue.create"),
+                "title": .string("Create rollout checklist issue"),
+                "summary": .string("Open a tracked GitHub issue before the agent writes to the repo."),
+            ]),
+            runId: approvalRun
+        )
+        demoRealtimeByChannel[general.id] = [
+            .agentStatus(AgentStatus(
+                runId: approvalRun,
+                agentMemberId: researcher.id,
+                channelId: general.id,
+                phase: .streaming,
+                runStatus: .awaitingApproval,
+                reservedMicroUSD: 820_000,
+                spentMicroUSD: 340_000
+            )),
+            .agentPartial(AgentPartial(
+                runId: approvalRun,
+                channelId: general.id,
+                textDelta: "Drafted a GitHub issue create request; waiting for approval before writing.",
+                toolCallName: "github.issue.create",
+                toolCallArgs: .object([
+                    "repo": .string("Dawn-kim-official/momo"),
+                    "labels": .array([.string("status:ready"), .string("area:macos")]),
+                ]),
+                spentMicroUSD: 340_000
+            )),
+            .approval(ApprovalEvent(
+                action: .requested,
+                approvalId: ApprovalID(),
+                runId: approvalRun,
+                channelId: general.id,
+                requestedBy: researcher.id,
+                onBehalfOf: human.id,
+                actionType: "github.issue.create",
+                status: .pending,
+                payload: .object([
+                    "repo": .string("Dawn-kim-official/momo"),
+                    "title": .string("Create rollout checklist issue"),
+                ]),
+                estimatedMicroUSD: 820_000,
+                isReversible: true
+            )),
+        ]
 
         return DemoSeed(workspace: ws, human: human, agents: [researcher, builder],
                         channels: channels)
@@ -187,6 +243,38 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
 
     public func decideApproval(_ id: ApprovalID, approve: Bool, reason: String?) async throws {
         // TODO(T09-followup): REST POST .../approvals/{id}/decide.
+        for channel in demoRealtimeByChannel.keys {
+            guard let events = demoRealtimeByChannel[channel],
+                  let idx = events.firstIndex(where: { event in
+                      if case .approval(let approval) = event {
+                          return approval.approvalId == id
+                      }
+                      return false
+                  }) else { continue }
+
+            var updatedEvents = events
+            guard case .approval(var approval) = updatedEvents[idx] else { return }
+            approval.action = .decided
+            approval.status = approve ? .approved : .rejected
+            approval.decidedBy = members.first(where: { $0.kind == .human })?.id
+            approval.decisionReason = reason
+            updatedEvents[idx] = .approval(approval)
+
+            for eventIndex in updatedEvents.indices {
+                if case .agentStatus(var status) = updatedEvents[eventIndex],
+                   status.runId == approval.runId {
+                    status.phase = .done
+                    status.runStatus = approve ? .succeeded : .cancelled
+                    status.reservedMicroUSD = 0
+                    updatedEvents[eventIndex] = .agentStatus(status)
+                    emit(.agentStatus(status), to: channel)
+                }
+            }
+
+            demoRealtimeByChannel[channel] = updatedEvents
+            emit(.approval(approval), to: channel)
+            return
+        }
     }
 
     public func cancelRun(_ id: RunID) async throws {
@@ -226,6 +314,9 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     private func registerChannel(_ channel: ChannelID, token: UUID,
                                  continuation: AsyncStream<RealtimeEvent>.Continuation) async {
         channelStreams[channel, default: [:]][token] = continuation
+        for event in demoReplayEvents(for: channel) {
+            continuation.yield(event)
+        }
     }
     private func unregisterChannel(_ channel: ChannelID, token: UUID) async {
         channelStreams[channel]?[token] = nil
@@ -236,6 +327,17 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     }
     private func unregisterAgent(_ channel: ChannelID, token: UUID) async {
         agentStreams[channel]?[token] = nil
+    }
+
+    private func demoReplayEvents(for channel: ChannelID) -> [RealtimeEvent] {
+        let events = demoRealtimeByChannel[channel] ?? []
+        guard replayedDemoDeltaChannels.insert(channel).inserted else {
+            return events.filter { event in
+                if case .agentPartial = event { return false }
+                return true
+            }
+        }
+        return events
     }
 }
 
