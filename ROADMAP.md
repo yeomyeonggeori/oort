@@ -26,6 +26,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · 남은 M1 = staging 배포/시크릿/백업/모니터링 + local gate/worktree 운영 정본화
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
+     · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준
      · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — M7 실측/판정은 미진행
 ```
 
@@ -47,7 +48,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | **M3** | 데스크탑 v0 UX (D/B/C 실데이터) | 🖥 | macOS 클라가 D Live Tool-Call · B 비용 호흡 · C 승인 인박스를 **실데이터**로 렌더 | MomoMac 실데이터 바인딩(VM↔LiveBackend) | D/B/C 3경험이 staging 실데이터로 동작(아직 라이브러리/스모크 단계 OK) | M1 (data), M0 (UI 골격) |
 | **M4** | 데스크탑 패키징 | 🖥 | macOS Xcode `.app` + Developer ID 서명 + 공증(notarytool) + DMG + Sparkle 자동업데이트 | `MomoMac.xcodeproj`, 공증 `.dmg`, appcast | 공증 `.dmg`가 타 맥에서 Gatekeeper 통과(`spctl --assess`) + Sparkle 업데이트 1회 | M3, (M8-선결: 게이트) |
 | **M5** | iOS 앱 | 📱 | iOS Xcode App 타깃 + Push capability + 계정 삭제 + UGC 모더레이션 + privacy manifest | `MomoiOS.xcodeproj`, App Privacy, 모더레이션 4종 | 실기기에서 G-1/G-2 시나리오 통과(로그인→채널→메시지→에이전트 응답) | M3 (공유 UX), M2 (멀티팀) |
-| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions 자동화 | `.github/workflows/{ci-build,release-ios,release-macos}.yml`, `fastlane/*` | CI green + (게이트 전) release 워크플로우 dry-run 성공 | M0 (skeleton), C1/C2(M4/M5 프로젝트) |
+| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions 자동화. 단, 2026-06-26부터 과금 방지를 위해 Actions는 disabled/manual-only이고 local gate가 우선 | `.github/workflows/{ci-build,release-ios,release-macos}.yml`, `fastlane/*`, `docs/LOCAL_PR_GATE.md` | local gate evidence 운영 + CI 재활성 시 green + (게이트 전) release 워크플로우 dry-run 성공 | M0 (skeleton), C1/C2(M4/M5 프로젝트), owner approval |
 | **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(크래시-free/e2e/접근성/성능/베타/Enterprise Trust) 측정·PASS | 계측(Sentry/MetricKit), XCUITest, PASS 기록 | **G-0~G-H 전부 PASS + 증거 첨부** (`05-qa-release-gate.md`) | M1,M3,M4,M5,M6 |
 | **M8** | 스토어 제출 (App Store + Developer ID) | 🖥📱 | macOS 공증 DMG 공개 다운로드 + iOS App Store 업로드/심사/배포 | 공개 다운로드 페이지, App Store 출시 | App Store 승인·배포 + 공증 DMG 공개 + Sparkle 라이브 | **M7 (게이트 PASS 필수)**, M4, M5, M6 |
 
@@ -58,6 +59,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | Ticket | Milestone | 역할 | 종료 기준 |
 |---|---|---|---|
 | `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
+| `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
 | `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile ...` + PR evidence 템플릿 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | branch/worktree/env/status handoff 런북 + 충돌 방지 |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
@@ -144,7 +146,7 @@ M0 → M1 → M2 → M5(iOS) → M7(게이트) → M8(App Store)   ← 모바일
 M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데스크탑 임계 경로
 ```
 
-- **데스크탑/모바일 병렬:** M3 이후 M4(🖥)와 M5(📱)는 **공유 코어(MomoCore) 위에서 병렬**. M6(CI/CD)도 병렬로 진행하되 release 잡 활성화는 M4/M5의 Xcode 프로젝트(C1/C2)와 게이트(M7)에 종속.
+- **데스크탑/모바일 병렬:** M3 이후 M4(🖥)와 M5(📱)는 **공유 코어(MomoCore) 위에서 병렬**. M6(CI/CD)도 병렬로 진행하되 release 잡 활성화는 M4/M5의 Xcode 프로젝트(C1/C2), 게이트(M7), owner approval에 종속된다. 현재 Actions는 비용 방지를 위해 disabled/manual-only다.
 - **🔒 게이트 컷:** M4·M5·M6가 기술적으로 "배포 가능" 상태여도, **M7 PASS 전에는 M8(external TestFlight 포함)을 절대 진행하지 않는다.** 이것이 본 로드맵의 단일 차단 불변식.
 
 ---
@@ -159,7 +161,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`이며, runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
 - **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`, `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`.
 - **Google Workspace connector**(M2~M3): v0는 per-user OAuth + read-mostly sync(Drive metadata/excerpt, Gmail thread read, Calendar read)로 시작하고, external write는 approval card 뒤에 둔다. Domain-wide delegation은 enterprise 옵션.
-- **Local PR gate / multi-session ops**(M1): GitHub Actions가 비주요 gate인 기간에도 PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
+- **Local PR gate / multi-session ops**(M1): GitHub Actions는 현재 비용/결제 이슈로 disabled/manual-only이며, PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
 
 ### 3.2 🖥 데스크탑 트랙 (macOS)
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.

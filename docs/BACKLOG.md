@@ -23,7 +23,7 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 ```
 
 - **M0 Foundation 달성됨**: 5개 Swift 패키지(`MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac`) `swift build` green + 정본 스키마/인프라/마이그레이션 파일 정합. (상세: `STATUS.md`)
-- **현재 닫을 차례 = M1 운영/배포 축**: MOMO-001~004로 Docker Desktop 기반 seq/outbox/RLS/AgentWorker 비용 회계는 검증됨. 남은 M1은 staging 배포(MOMO-005~007)와 local gate/worktree 운영 정본화(MOMO-111~112).
+- **현재 닫을 차례 = M1 운영/배포 축**: MOMO-001~004로 Docker Desktop 기반 seq/outbox/RLS/AgentWorker 비용 회계는 검증됨. GitHub Actions는 비용/결제 이슈로 disabled/manual-only이며, 남은 M1은 staging 배포(MOMO-005~007)와 local gate/worktree 운영 정본화(MOMO-111~112).
 - `clients/macOS`는 SwiftPM dev app 가능 단계이며, 릴리스용 Xcode `.app`은 M4에서 진행. `clients/iOS`는 미존재.
 - CI/CD·QA·법무 문서는 선작성됨(`docs/cicd/*`, `docs/legal/*`, `legal/*`) — 실행/측정은 미진행(게이트 OPEN).
 
@@ -41,7 +41,7 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 | **M3** | 데스크탑 v0 UX (D/B/C 실데이터) | 🖥 | macOS 클라가 D Live Tool-Call · B 비용 호흡 링 · C 승인 인박스를 실데이터로 렌더 | M1 | D/B/C 3경험이 staging 실데이터로 동작 |
 | **M4** | 데스크탑 패키징 | 🖥 | Xcode `.app` + Developer ID + notarytool 공증 + DMG + Sparkle 2 | M3 | 공증 `.dmg` 타 맥 Gatekeeper 통과 + Sparkle 업데이트 1회 |
 | **M5** | iOS 앱 | 📱 | iOS Xcode App + Push + APNs .p8 + 계정 삭제 + UGC 모더레이션 + privacy manifest | M3, M2 | 실기기 로그인→채널→메시지→에이전트 응답 + 자가가입 시나리오 |
-| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions | M0, M4, M5 | CI green + release 워크플로우 dry-run(게이트 전 미트리거) |
+| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions. 현재는 비용 방지를 위해 disabled/manual-only | M0, M4, M5, owner approval | local gate 운영 + CI 재활성 시 green + release 워크플로우 dry-run(게이트 전 미트리거) |
 | **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(G-0~G-H) 측정·PASS | M1, M3, M4, M5, M6 | **G-0~G-H 전부 PASS + 증거 첨부 + 03 PASS 블록 기록** |
 | **M8** | 스토어 제출 (App Store + Developer ID) | 🖥📱 | macOS 공증 DMG 공개 다운로드 + iOS App Store 업로드/심사/배포 | **M7**, M4, M5, M6 | App Store 승인·배포 + 공증 DMG 공개 + Sparkle 라이브 |
 | (후속) | v1 신규 프리미티브 P1~P6 | ⚙️ | branch_id·reversibility_tier·belief·autonomy_level·decision_ledger·scheduled trigger | M8 | v0 데모엔 불필요, 스토어 출시 후 후속 |
@@ -63,7 +63,7 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 | **EP-MAC-PKG** | macOS 패키징·공증·배포 | M4 | Xcode `.app` + Developer ID 서명 + notarytool 공증 + DMG + Sparkle 2 자동업데이트. |
 | **EP-IOS** | iOS 앱 타깃·Push·계정삭제 | M5 | `MomoiOS.xcodeproj` + explicit Bundle ID + Push capability + APNs .p8 + 계정 삭제 + privacy manifest. |
 | **EP-UGC** | UGC 모더레이션 (App Store 1.2) | M5 | 게시 전 필터 + 신고 + 차단 + 공개 연락처 + EULA 무관용. 에이전트 생성 콘텐츠 모더레이션 정책 포함. |
-| **EP-CICD** | CI/CD 파이프라인 (fastlane·ASC Key) | M6 | fastlane match/pilot/deliver/notarytool + ASC API Key(Team) + GitHub Actions. release 잡 게이트 전 비활성. |
+| **EP-CICD** | CI/CD 파이프라인 (fastlane·ASC Key) | M6 | fastlane match/pilot/deliver/notarytool + ASC API Key(Team) + GitHub Actions. 현재 Actions는 비용 방지를 위해 disabled/manual-only이며, release 잡은 게이트 전 비활성. |
 | **EP-QA-GATE** | QA · 사용성 검수 게이트 | M7 | 계측(Sentry/MetricKit) + XCUITest e2e/접근성/성능 + 베타 + Enterprise Trust evidence(G-H) PASS 판정. |
 | **EP-STORE** | 스토어 제출 (App Store + Developer ID) | M8 | iOS 업로드/심사/배포 + macOS 공증 DMG 공개 다운로드 + Sparkle 라이브. |
 | **EP-LEGAL** | 법무 선결 (법률 자문 아님) | M2 | 등록주체/D-U-N-S + 개인정보처리방침 + App Privacy + NOTICE + 에이전트 LLM 고지 + EULA. 외부 변호사 1회 검토 필수. |
@@ -84,7 +84,7 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 ```
 M0 → M1 → M2 → M5(iOS)  → M7(게이트 🔒) → M8(App Store)     ← 모바일 임계 경로
 M0 → M1 → M3 → M4(공증) → M7(게이트 🔒) → M8(공증 DMG)      ← 데스크탑 임계 경로
-M6(CI/CD)는 M0 위에서 병렬, release 활성화는 C1/C2(M4/M5 Xcode 프로젝트)+게이트(M7)에 종속.
+M6(CI/CD)는 M0 위에서 병렬, release 활성화는 C1/C2(M4/M5 Xcode 프로젝트)+게이트(M7)+owner approval에 종속. 2026-06-26 현재 Actions는 비용 방지를 위해 disabled/manual-only이며 local gate가 primary merge gate다.
 ```
 
 ### 3.2 티켓 의존 그래프 (deps DAG)
@@ -232,14 +232,24 @@ M0(baseline)
 - **라벨:** `type:docs`, `type:spec`, `priority:p1`, `size:m`, `agent:codex-ok`
 - **참조:** `research/10-local-ai-protocol-trust/*`
 
+#### MOMO-154 · disable GitHub Actions auto-runs and prioritize local gate
+- **마일스톤:** M1 · **에픽:** EP-OPS/EP-CICD · **플랫폼:** ci · **추정:** S
+- **deps:** MOMO-110
+- **수용기준:**
+  - [ ] [ci] 원격 `ci-build`, `release-ios`, `release-macos` workflow를 `disabled_manually` 상태로 확인
+  - [ ] [ci] `.github/workflows/*.yml` 자동 `push`/`pull_request`/tag 트리거 제거, `workflow_dispatch` 전용 유지
+  - [ ] [docs] local gate가 당분간 primary merge gate임을 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, `ROADMAP.md`, `STATUS.md`에 반영
+- **라벨:** `type:infra`, `area:ci`, `type:docs`, `priority:p0`, `size:s`, `agent:codex-ok`
+- **참조:** `docs/LOCAL_PR_GATE.md`, `.github/workflows/*.yml`
+
 #### MOMO-111 · local PR gate script and evidence flow
 - **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** ci · **추정:** M
-- **deps:** MOMO-110
+- **deps:** MOMO-110, MOMO-154
 - **수용기준:**
   - [ ] [ci] `scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 추가
   - [ ] [ci] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공
   - [ ] [docs] GitHub Actions 비주요 기간의 merge 기준을 `docs/LOCAL_PR_GATE.md`와 PR template에 반영
-- **라벨:** `type:infra`, `area:ci`, `type:docs`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **라벨:** `type:infra`, `area:ci`, `type:docs`, `priority:p0`, `size:m`, `agent:codex-ok`
 - **참조:** `docs/LOCAL_PR_GATE.md`
 
 #### MOMO-112 · 5+ Codex session/worktree orchestration

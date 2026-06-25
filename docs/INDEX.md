@@ -46,7 +46,7 @@
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
 | [`docs/RUN.md`](RUN.md) | 로컬 기동/마이그레이션/롤백 절차(환경변수→`make up`→migrate→서버/relay/worker→macOS) | M0/M1 |
 | [`docs/GITHUB_OPS.md`](GITHUB_OPS.md) | GitHub 운영 구조(마일스톤=릴리스, 라벨 택소노미, Projects, Codex goal 흐름) | 전반 |
-| [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions 비주요 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
+| [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
 | [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
@@ -117,7 +117,7 @@
 | [`scripts/github/bootstrap.sh`](../scripts/github/bootstrap.sh) | 기존(레거시) 부트스트랩 — 신규는 `scripts/github_bootstrap.sh` 사용 |
 | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | 이슈 템플릿(codex-goal/feature/bug/chore/config) |
 | [`.github/pull_request_template.md`](../.github/pull_request_template.md) | PR 템플릿(AGENTS.md §5 정본) |
-| [`.github/workflows/`](../.github/workflows/) | `ci-build.yml`(swift build/test) · `release-ios.yml` · `release-macos.yml`(🔒 게이트 전 미트리거) |
+| [`.github/workflows/`](../.github/workflows/) | `ci-build.yml` · `release-ios.yml` · `release-macos.yml`은 비용 방지를 위해 manual-only(`workflow_dispatch`)이며 원격 workflow도 disabled 상태 유지 |
 
 > **마일스톤 매핑:** 본 backbone(M0~M8 9단계)이 상위 정본. 기존 `milestones.tsv`(M0~M6 7단계)는 부분집합 — 매핑은 [`ROADMAP.md §6`](../ROADMAP.md).
 

@@ -3,6 +3,17 @@
 > Purpose: keep PR quality high while GitHub Actions are not the primary merge gate.
 > Scope: local developer/Codex validation before PR, after review, and after merge to `main`.
 
+## 0. Current Status
+
+As of 2026-06-26, GitHub Actions are disabled manually for `Dawn-kim-official/momo`
+because the organization is seeing billing/payment failures and should not spend
+paid macOS runner minutes during active development.
+
+- Remote workflow state must stay `disabled_manually` unless the owner explicitly approves re-enabling it.
+- Repo workflow files are manual-only (`workflow_dispatch`) so a future re-enable cannot start jobs from every push, PR, or tag.
+- The merge gate during this period is local evidence + review pass + no unrelated dirty files.
+- Do not wait for GitHub Actions green during this period; record `Actions disabled by policy` in PR evidence when relevant.
+
 ## 1. Rule
 
 Every PR needs local evidence in the PR body:
@@ -80,6 +91,7 @@ Use this block:
 7. Merge if the local gate passes and no blocker remains.
 8. Update `main` locally and rerun the relevant local gate on `main`.
 9. Update issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommend the next goal.
+10. If Actions are intentionally disabled, confirm workflow state remains `disabled_manually` instead of waiting for remote CI.
 
 ## 6. Future Script
 

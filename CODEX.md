@@ -27,8 +27,8 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 5. 구현 후 해당 검증 등급의 테스트를 실행한다. Swift 변경은 `make build`/`make test`를 기본 게이트로 본다.
 6. 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫는다.
 7. PR 이후 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 발견 사항을 반영한다.
-8. 리뷰 반영 후 최종 테스트를 다시 실행한다. 문제가 없고 CI가 green이면 merge한다.
-9. merge 후 main GitHub Actions를 확인한다. 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 추가 리서치 필요성을 점검하고 이슈/마일스톤/로드맵 상태를 정리한다.
+8. 리뷰 반영 후 최종 테스트를 다시 실행한다. 문제가 없고 현재 gate가 통과하면 merge한다.
+9. GitHub Actions disabled/manual-only 기간에는 `docs/LOCAL_PR_GATE.md`의 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
 10. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ---
@@ -95,7 +95,7 @@ python3 -m py_compile adapters/hermes/momo_adapter.py
 xcodebuild build -scheme MomoMac  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
 xcodebuild build-for-testing -scheme MomoiOS -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
 
-# CI/워크플로우·fastlane 정적 검증(가용 시):
+# CI/워크플로우·fastlane 정적 검증(워크플로우는 현재 manual-only/disabled):
 actionlint .github/workflows/*.yml                # YAML/액션 lint
 ruby -c fastlane/Fastfile                         # Fastfile syntax
 
@@ -191,7 +191,7 @@ Closes #<issue>
 | M3 | 데스크탑 v0 UX | D Live Tool-Call · B 비용 호흡 링 · C 승인 인박스 실데이터 바인딩 | staging 실접속 동작 |
 | M4 | 데스크탑 패키징 | MomoMac.xcodeproj + Developer ID 서명 + notarytool 공증 + DMG + Sparkle 2 | spctl/Gatekeeper |
 | M5 | iOS 앱 | MomoiOS.xcodeproj(iOS 26 SDK) + Push/APNs + 계정삭제 + UGC 4종 + PrivacyInfo | 실기기 시나리오 |
-| M6 | CI/CD | fastlane(match/pilot/deliver/notarytool) + ASC API Key + Actions. release 잡 게이트 전 dry-run | actionlint green |
+| M6 | CI/CD | fastlane(match/pilot/deliver/notarytool) + ASC API Key + Actions. 현재는 비용 방지를 위해 disabled/manual-only, release 잡은 게이트 전 dry-run만 | local gate + actionlint green |
 | **M7** | **QA·사용성 검수 게이트 🔒** | G-0~G-G 전부 PASS + 증거 | **스토어 제출 차단 불변식** |
 | M8 | 스토어 제출 | iOS App Store 업로드/심사/배포 + macOS 공증 DMG 공개 + Sparkle 라이브 | M7 PASS 후에만 |
 
@@ -236,7 +236,7 @@ momo는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정
 **🔒 게이트 불변식(스토어/공증 배포 차단):**
 - 스토어/공증 배포(M8) 및 **external TestFlight**는 **사용성 검수 게이트(M7)가 PASS 된 후에만** 진행한다.
 - 통과 조건: `docs/cicd/05-qa-release-gate.md`의 **G-0~G-G 전부 PASS + 증거 첨부** → `docs/cicd/03-store-readiness-gate.md` 상단에 **PASS 블록(날짜 + 커밋 해시 + 빌드# + 증거 링크)** 기록 → `STATUS.md` 게이트 상태 OPEN→PASS 갱신.
-- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-ios.yml`/`release-macos.yml`을 트리거하지 않는다(태그 미푸시 또는 environment protection). `ci-build.yml`의 release/xcode-apps 잡은 C1/C2(M4/M5 Xcode 프로젝트) 완료 전까지 비활성.
+- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-ios.yml`/`release-macos.yml`을 트리거하지 않는다. 현재 GitHub Actions는 비용 방지를 위해 disabled/manual-only이며, owner approval 전에는 재활성/수동 실행하지 않는다.
 
 **permissive 라이선스 규칙:**
 - 전 의존성을 **permissive(Apache-2.0 / MIT / PostgreSQL License)** 로 유지. 확정 스택: Hummingbird 2(Apache-2.0), Centrifugo v6(Apache-2.0), PostgreSQL 18(PostgreSQL License), SwiftCentrifuge(MIT), APNSwift(Apache-2.0). **비-permissive(GPL/AGPL/상용 제약) 의존 추가 금지.**
