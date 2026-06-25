@@ -71,6 +71,7 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 | **EP-OPS** | Local Gate · Multi-session Worktree | M1 | GitHub Actions 비주요 기간에도 local evidence로 PR 품질을 유지하고, 5개+ Codex 세션이 이슈/branch/worktree 단위로 충돌 없이 작업. |
 | **EP-CONTEXT** | Context Broker · Memory Plane | M2 | messenger layer가 권한, source refs, budget, redaction, local/server model routing을 결정. |
 | **EP-AGENT-PROTOCOL** | Agent Protocol · Plugin Work Surface | M3 | agent/plugin 실행을 `context_packet/tool_call/approval/tool_result/usage/audit`로 프로토콜화하고 macOS 카드와 정합. |
+| **EP-AGENT-RUNTIME** | Agent Runtime · Memory · Capability Cache | M1.5/M2/M3 | Hermes/Kim Intern/openclaw 분석을 바탕으로 context/capability/execution/ledger 4-plane 계약과 A2A/MCP 경계를 정리. |
 | **EP-GWORKSPACE** | Google Workspace Sync | M2/M3 | per-user OAuth read-mostly sync, source citation, approval-gated writes, domain-wide delegation은 enterprise 옵션. |
 | **EP-TRUST** | Enterprise Trust | M7 | NIST SSDF/SBOM/license scan/secret scanning/pentest/VDP/SOC2/ISO readiness를 QA gate 입력으로 승격. |
 
@@ -253,6 +254,51 @@ M0(baseline)
 
 ---
 
+### EP-AGENT-RUNTIME — Agent Runtime · Memory · Capability Cache (M1.5)
+
+#### MOMO-150 · Hermes/Kim Intern/openclaw agent runtime research and roadmap
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-110
+- **수용기준:**
+  - [ ] [docs] `research/11-agent-runtime/*`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가
+  - [ ] [docs] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리
+  - [ ] [docs] ROADMAP.md, BUILD_TICKETS.md, docs/INDEX.md, STATUS.md 갱신
+  - [ ] [docs] 코드/스키마 구현 없이 문서/스펙만 변경
+- **라벨:** `type:docs`, `type:spec`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/*`
+
+#### MOMO-151 · Context Packet v0 deep spec and fixtures
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-150
+- **수용기준:**
+  - [ ] [spec] mention, slash command, message context action, Google Workspace source ref, memory ref fixtures 작성
+  - [ ] [spec] agent runtime에 주입 가능한 필드와 금지 필드 정의
+  - [ ] [spec] Hermes/Kim Intern/OpenAI-compatible SSE 호출의 context envelope 정의
+- **라벨:** `type:spec`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+#### MOMO-152 · Memory Plane v0 deep spec and permission model
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-151
+- **수용기준:**
+  - [ ] [spec] `decision/preference/artifact_ref/task_state/external_source_ref/agent_skill_note` memory type 확정
+  - [ ] [spec] source attribution, visibility, expiry, delete path, retrieval-time permission check 정의
+  - [ ] [spec] raw chat exhaust 자동 장기 저장 금지와 local LLM compaction 기준 문서화
+- **라벨:** `type:spec`, `area:core`, `area:tenancy`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+#### MOMO-153 · Capability Cache v0 spec and invalidation model
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-151
+- **수용기준:**
+  - [ ] [spec] agent capability, plugin tool, MCP tool list, context summary, external source cache 모델 정의
+  - [ ] [spec] workspace/visibility/source/expires_at/policy_version/capability_version 필수화
+  - [ ] [spec] plugin version, provider change token, grant revoke, manual refresh invalidation 경로 정의
+- **라벨:** `type:spec`, `area:core`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+---
+
 ### EP-TENANCY — 멀티테넌시 온보딩 (M2)
 
 #### MOMO-010 · 003_onboarding.sql: invite_code 테이블 + RLS 등록
@@ -431,6 +477,76 @@ M0(baseline)
   - [ ] [manual] `--verify`, `--logs`, `--telemetry`, `--debug` 모드 중 최소 `--verify` 검증
 - **라벨:** `type:infra`, `area:macos`, `priority:p1`, `size:s`, `agent:codex-ok`
 - **참조:** `research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`
+
+#### MOMO-160 · A2A-style agent_run lifecycle alignment
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-151, MOMO-004
+- **수용기준:**
+  - [ ] [spec] A2A Task/Message/Artifact/status를 momo `agent_run/message/artifact_ref/agent.status`에 매핑
+  - [ ] [spec] queued/running/input-required/awaiting-approval/succeeded/failed/cancelled 상태 의미 확정
+  - [ ] [swift] 후속 구현 시 기존 5패키지 build/test green 유지
+- **라벨:** `type:spec`, `area:core`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+#### MOMO-161 · approval pause/resume runtime
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-160
+- **수용기준:**
+  - [ ] [runtime] risky `tool_call`이 `approval(status=pending)`과 `message.type='approval_request'`를 만들고 `agent_run.status='awaiting_approval'`로 멈춤
+  - [ ] [runtime] 승인 시 동일 run이 resume되고, 거절/만료 시 run이 안전 종료
+  - [ ] [runtime] 승인/거절/만료 결정이 `audit_log`에 기록
+- **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+#### MOMO-162 · Hermes adapter contract verification
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-150, MOMO-004
+- **수용기준:**
+  - [ ] [runtime] Hermes platform adapter path와 momo AgentWorker SSE path를 각각 검증하거나 제품 기본 경로를 하나로 확정
+  - [ ] [python] `adapters/hermes/momo_adapter.py`가 현재 Hermes adapter API와 정합하는지 live/static check 기록
+  - [ ] [docs] compatibility path와 canonical execution path를 RUN/STATUS에 구분 기록
+- **라벨:** `type:spec`, `type:docs`, `area:adapter`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/01-three-agent-runtime-analysis.md`
+
+#### MOMO-163 · inbound MCP server v0
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-151, MOMO-153
+- **수용기준:**
+  - [ ] [spec] 외부 에이전트용 search messages, fetch thread, post message, create approval-safe tool call surface 정의
+  - [ ] [runtime] MCP 호출도 RLS/membership/plugin policy를 우회하지 않음
+  - [ ] [runtime] write tool은 approval/audit 경로를 사용
+- **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+#### MOMO-170 · macOS agent protocol cards
+- **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-132, MOMO-161
+- **수용기준:**
+  - [ ] [swift] tool_call, approval, artifact, cost, memory citation, source badge cards 렌더
+  - [ ] [swift] cards use shared protocol semantics, not one-off UI-only props
+  - [ ] [runtime] approval card decisions update server state
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
+
+#### MOMO-171 · agent memory inspector
+- **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-152, MOMO-170
+- **수용기준:**
+  - [ ] [swift] 답변에 사용된 memory/source refs를 사용자가 확인
+  - [ ] [swift] personal/workspace memory view, delete, block 경로 제공
+  - [ ] [runtime] 권한 없는 memory는 표시/주입되지 않음
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
+
+#### MOMO-172 · local LLM context compaction
+- **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-130, MOMO-151
+- **수용기준:**
+  - [ ] [swift] local model로 source-preserving channel/thread summary 생성
+  - [ ] [swift] 미지원 OS에서는 server fallback/stub으로 동작
+  - [ ] [spec] summary가 source IDs를 잃지 않도록 fixture 검증
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
 
 ---
 

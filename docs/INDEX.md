@@ -96,6 +96,9 @@
 | [`research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`](../research/10-local-ai-protocol-trust/01-local-llm-context-broker.md) | Apple Foundation Models 적용 경계 + Context Broker + Memory Plane |
 | [`research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`](../research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md) | Agent Protocol v0 + Google Workspace connector roadmap |
 | [`research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`](../research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md) | Enterprise Trust + local PR gate + multi-session ops + build-macos-apps plugin 활용 |
+| [`research/11-agent-runtime/01-three-agent-runtime-analysis.md`](../research/11-agent-runtime/01-three-agent-runtime-analysis.md) | Hermes agent / internkim / openclaw runtime 분석 |
+| [`research/11-agent-runtime/02-memory-cache-protocol-gaps.md`](../research/11-agent-runtime/02-memory-cache-protocol-gaps.md) | Memory Plane · Capability Cache · MCP/A2A/SSE protocol gap |
+| [`research/11-agent-runtime/03-roadmap-and-methodology.md`](../research/11-agent-runtime/03-roadmap-and-methodology.md) | Agent runtime 4-plane 방법론 + MOMO-151~172 로드맵 |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

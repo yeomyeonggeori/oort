@@ -147,6 +147,7 @@
 | `MOMO-110` | Local LLM/Agent Protocol/Google Workspace/Trust 리서치와 로드맵 문서화 | docs/spec | M0 |
 | `MOMO-111` | GitHub Actions 비주요 기간용 local PR gate 스크립트와 evidence flow | ci/docs | MOMO-110 |
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110 |
+| `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -163,6 +164,12 @@
 - [ ] worktree별 `.env.worktree`, `COMPOSE_PROJECT_NAME`, `PORT`, `POSTGRES_PORT`, `CENT_PORT`, `HERMES_PORT` 충돌 방지 확인.
 - [ ] `momo-main` orchestration thread와 worker thread handoff prompt 문서화.
 
+### MOMO-150 수용기준 `[docs/spec]`
+- [ ] `research/11-agent-runtime/`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가.
+- [ ] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리.
+- [ ] ROADMAP/BACKLOG/INDEX/STATUS에 MOMO-151~153, MOMO-160~163, MOMO-170~172 후속 로드맵 반영.
+- [ ] 코드/스키마 구현 없이 문서/스펙만 변경.
+
 ## M2 Context / Memory / Google Workspace
 
 | id | 한줄 | 수용기준 등급 | 의존 |
@@ -171,6 +178,9 @@
 | `MOMO-121` | Memory Plane v0 spec and permission model | spec | MOMO-120 |
 | `MOMO-122` | Google Workspace connector v0: per-user OAuth read-mostly sync | runtime/spec | MOMO-120, MOMO-121 |
 | `MOMO-123` | Domain-wide delegation/admin install design | spec/manual | MOMO-122 |
+| `MOMO-151` | Context Packet v0 deep spec and fixtures | spec | MOMO-150 |
+| `MOMO-152` | Memory Plane v0 deep spec and permission model | spec | MOMO-151 |
+| `MOMO-153` | Capability Cache v0 spec and invalidation model | spec | MOMO-151 |
 
 핵심 원칙:
 
@@ -187,6 +197,13 @@
 | `MOMO-132` | Agent Protocol v0 DB/wire/Swift/card alignment | spec/swift/runtime | MOMO-120, MOMO-121, MOMO-004 |
 | `MOMO-133` | Google Workspace "ask my work" UX | swift/runtime | MOMO-122, MOMO-132 |
 | `MOMO-134` | build-macos-apps based SwiftPM GUI run loop | swift/xcode/manual | MOMO-110 |
+| `MOMO-160` | A2A-style agent_run lifecycle alignment | spec/sql/swift | MOMO-151, MOMO-004 |
+| `MOMO-161` | approval pause/resume runtime | runtime/swift/sql | MOMO-160 |
+| `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
+| `MOMO-163` | inbound MCP server v0 | spec/swift/runtime | MOMO-151, MOMO-153 |
+| `MOMO-170` | macOS agent protocol cards | swift | MOMO-132, MOMO-161 |
+| `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
+| `MOMO-172` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
 호환성 원칙:
 
