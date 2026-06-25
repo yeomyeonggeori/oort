@@ -81,7 +81,7 @@
 
 - `scripts/local_gate.sh`를 추가해 GitHub Actions disabled/manual-only 기간의 PR gate를 `docs`, `swift`, `runtime-db`, `runtime-relay`, `runtime-agent`, `macos-ui`, `all` profile로 실행하고 PR-ready `## Local Gate` evidence를 출력한다.
 - `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template, AGENTS/CODEX, ROADMAP/BUILD_TICKETS/INDEX가 모두 local gate script 우선 운영으로 정렬됐다.
-- `runtime-relay`는 아직 자동 `scripts/verify_relay.sh`가 없으므로 MOMO-002 수동 relay 검증 경로를 not-covered로 명시한다. 새 relay 자동 검증 스크립트는 후속 티켓으로 분리한다.
+- `runtime-relay`는 아직 자동 `scripts/verify_relay.sh`가 없으므로 local gate에서 PASS를 만들지 않고 MOMO-002 수동 relay 검증 경로를 요구한다. 새 relay 자동 검증 스크립트는 후속 티켓으로 분리한다.
 
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 

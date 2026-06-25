@@ -46,10 +46,10 @@ Profiles:
 | `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
 | `runtime-db` | migrations/server/RLS changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` |
-| `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` when present, otherwise explicit manual MOMO-002 not-covered note |
+| `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh`; until that script exists this profile fails honestly and points to the MOMO-002 manual path |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to launch `MomoMacDevApp` |
-| `all` | merge-critical/runtime-wide changes | all profiles in one run, with shared bootstrap deduped except migration idempotency |
+| `all` | merge-critical/runtime-wide changes | all profiles in one run, with shared bootstrap deduped except migration idempotency; fails if any runtime profile is not automated yet |
 
 Examples:
 
@@ -59,6 +59,15 @@ scripts/local_gate.sh --profile runtime-agent
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
+
+The default script is strict: PR evidence should come from a clean worktree and
+checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus
+staged/unstaged diffs. For exploratory pre-commit runs only, use
+`LOCAL_GATE_ALLOW_DIRTY=1`; do not paste that as final merge evidence.
+
+`runtime-relay` is deliberately not green until `scripts/verify_relay.sh` exists.
+Relay/realtime PRs must use the MOMO-002 manual verification path and describe it
+in the PR body until that automation lands.
 
 ## 3. Manual Fallback
 
@@ -74,7 +83,10 @@ jq empty .github/labels.json infra/centrifugo.json
 If shell scripts changed:
 
 ```bash
-bash -n scripts/*.sh
+for f in scripts/*.sh scripts/github/*.sh; do
+  [ -e "$f" ] || continue
+  bash -n "$f"
+done
 ```
 
 If GitHub workflows changed and `actionlint` is installed:
@@ -83,7 +95,7 @@ If GitHub workflows changed and `actionlint` is installed:
 actionlint .github/workflows/*.yml
 ```
 
-If `actionlint` is missing and workflows changed, install it or record the exact blocker before merge.
+If `actionlint` is missing and workflows changed, install it or record the exact blocker before merge. `scripts/local_gate.sh` fails workflow-changing PRs when `actionlint` is unavailable.
 
 ## 4. Runtime Profiles
 
@@ -94,7 +106,7 @@ Use the profile that matches the changed surface.
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` |
 | `runtime-db` | migrations/server/RLS changes | `scripts/local_gate.sh --profile runtime-db` |
-| `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
+| `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` once `scripts/verify_relay.sh` exists; otherwise use MOMO-002 manual evidence |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for real window launch |
 

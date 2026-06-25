@@ -11,7 +11,7 @@ Closes #<issue>
 - <!-- 변경 요약 bullet. 무엇을 done 상태로 만들었나. -->
 
 ## 검증 (등급: [swift]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
-- [ ] Local gate: `scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all>` PASS
+- [ ] Local gate: `scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-agent|macos-ui>` PASS, or scope-specific manual runtime evidence attached
 - [ ] [swift] `swift build` green: <패키지>
 - [ ] 선행 패키지 빌드 안 깨짐 (`make build`)
 - [ ] [sql] schema_v0.sql 정합 (정본 미수정 — 확장은 server/Migrations/NNN_*.sql 신규 + RLS DO-block ARRAY 등록)

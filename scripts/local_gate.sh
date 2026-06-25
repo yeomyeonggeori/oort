@@ -17,6 +17,8 @@ Options:
 Environment:
   LOCAL_GATE_OUT_DIR      Override evidence output directory.
   LOCAL_GATE_LAUNCH_UI=1  In macos-ui/all, launch MomoMacDevApp instead of smoke only.
+  LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
+  LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks.
   DEVELOPER_DIR           Defaults to /Applications/Xcode.app/Contents/Developer for Swift gates.
   ENV_FILE                Optional runtime env file consumed by Makefile/runtime scripts.
 EOF
@@ -116,11 +118,12 @@ add_note_once() {
 }
 
 add_static_commands() {
-  add_cmd_once "diff whitespace" "git diff --check"
+  add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
+  add_cmd_once "diff whitespace" 'base="${LOCAL_GATE_BASE_REF:-origin/main}"; if git rev-parse --verify "$base" >/dev/null 2>&1; then git diff --check "$base"...HEAD; else echo "base ref $base unavailable; falling back to working tree whitespace checks"; fi; git diff --cached --check; git diff --check'
   add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
-  add_cmd_once "workflow lint" "if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else echo 'actionlint not installed; skipped'; fi"
+  add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
   add_cmd_once "json syntax" "jq empty .github/labels.json infra/centrifugo.json"
-  add_cmd_once "shell syntax" "bash -n scripts/local_gate.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_agent_worker.sh"
+  add_cmd_once "shell syntax" 'for f in scripts/local_gate.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_agent_worker.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py'
 }
 
@@ -151,7 +154,7 @@ add_runtime_relay_commands() {
     add_cmd "OutboxRelay runtime verification" "scripts/verify_relay.sh"
     add_note_once coverage "OutboxRelay runtime verification via scripts/verify_relay.sh."
   else
-    add_cmd "OutboxRelay runtime verification marker" "echo 'scripts/verify_relay.sh is not present; use the MOMO-002 manual relay verification path when this surface changes.'"
+    add_cmd "OutboxRelay runtime verification" "echo 'scripts/verify_relay.sh is not present; runtime-relay cannot produce PASS evidence until relay automation exists.'; exit 1"
     add_note_once not_covered "Full OutboxRelay -> Centrifugo publish/history roundtrip is not automated yet; MOMO-002 manual path remains required when relay/realtime changes."
   fi
 }
@@ -279,6 +282,7 @@ done
 END_STAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 BRANCH="$(git branch --show-current 2>/dev/null || echo detached)"
+DIRTY_COUNT="$(git status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')"
 MACHINE="$(hostname 2>/dev/null || echo unknown)"
 OS_INFO="$(sw_vers -productVersion 2>/dev/null || uname -sr)"
 SWIFT_INFO="$(swift --version 2>/dev/null | head -n 1 || echo 'swift unavailable')"
@@ -309,6 +313,7 @@ write_evidence() {
     echo "- Commit: \`$COMMIT\`"
     echo "- Branch: \`$BRANCH\`"
     echo "- Worktree: \`$REPO_ROOT\`"
+    echo "- Dirty files: \`$DIRTY_COUNT\`"
     echo "- Evidence log: \`$LOG_FILE\`"
     echo "- Machine/toolchain:"
     echo "  - Host: \`$MACHINE\`"

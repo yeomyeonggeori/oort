@@ -61,7 +61,11 @@ research/08-distribution/ 01=macOS 배포 스펙 · 02=배포 티켓
 > 로컬 툴체인: **Swift 6.2.x 있음**(`.swift-version`=6.2). **Docker Desktop + psql 있음**, hermes 없음. PG18+Centrifugo 런타임은 검증 가능하고, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway를 준비한다.
 
 ```bash
-scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all
+scripts/local_gate.sh --profile docs
+scripts/local_gate.sh --profile swift
+scripts/local_gate.sh --profile runtime-db
+scripts/local_gate.sh --profile runtime-agent
+scripts/local_gate.sh --profile macos-ui
 make build          # SWIFT_PKGS 중 Package.swift 있는 것만 swift build (의존순: Core→server/relay/worker→macOS)
 make test           # 동일 패키지 swift test
 ( cd clients/Core && swift build )           # MomoCore (공유 모델 + ChatBackend/AgentTransport)

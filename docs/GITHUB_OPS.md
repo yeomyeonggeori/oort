@@ -96,7 +96,6 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
   scripts/local_gate.sh --profile docs
   scripts/local_gate.sh --profile swift
   scripts/local_gate.sh --profile runtime-db
-  scripts/local_gate.sh --profile runtime-relay
   scripts/local_gate.sh --profile runtime-agent
   scripts/local_gate.sh --profile macos-ui
   ```
@@ -107,7 +106,7 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
   python3 -m py_compile adapters/hermes/momo_adapter.py
   jq empty .github/labels.json infra/centrifugo.json
   ```
-- runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 MOMO-002 수동 relay 검증 경로를 not-covered로 남긴다.
+- runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
 - merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행한다. Actions 확인 단계는 Actions를 다시 주 gate로 켤 때 복원한다.
 - Actions를 다시 켜려면 owner approval, billing 상태 확인, branch protection required-check 정리, 그리고 local gate evidence 운영이 유지되는지 먼저 확인한다.
 
