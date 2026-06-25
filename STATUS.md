@@ -26,7 +26,7 @@
 - Centrifugo history pass: `/api/history` 최신 publication이 `data.seq=4`, `payload.seq=4`를 반환. relay 로그에도 `channel=ch:ws...`, `version=4`, `idempotencyKey=...:4`가 남음.
 - 남은 runtime-unverified: MOMO-003(RLS 교차 테넌트 격리), MOMO-004(AgentWorker↔hermes SSE + 비용 reserve/reconcile), WebSocket live subscribe/presence/recovery 세부 UX.
 
-## 0a. CI Hotfix (2026-06-25)
+## 0c. CI Hotfix (2026-06-25)
 
 - `main`의 `ci-build / swift build + test (5 packages)` 실패 원인은 GitHub Actions macOS runner의 Xcode 16.4 / Swift 6.1.2와 `jwt-kit` 최신 해상도 간 MLDSA API 불일치였다.
 - `server/Package.swift`에서 `jwt-kit`을 `exact: "5.2.0"`으로 고정해 CI runner가 지원하지 않는 `MLDSA65`/`MLDSA87` 참조를 피하도록 했다.
