@@ -21,11 +21,12 @@ M3 ── M5 ───────┘                            │
 M6 (CI/CD) ─────────────── 게이트/배포 자동화 ┘
 
   ▲
-  └─ 현재: M0 진입 직전. Phase 0(골격 컴파일)는 완료(=M0 이전 baseline).
-     · 5개 Swift 패키지 `swift build` green (MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac)
-     · 런타임 미검증(docker/psql 부재) → M0가 첫 닫아야 할 마일스톤
-     · clients/macOS = SwiftPM 라이브러리(아직 .app 아님), clients/iOS = 미존재
-     · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — 실행/측정은 미진행
+  └─ 현재: M1 런타임 G-0의 핵심 4개 게이트(MOMO-001~004)는 Docker Desktop으로 검증됨.
+     · 5개 Swift 패키지 `swift build/test` green (MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac)
+     · 남은 M1 = staging 배포/시크릿/백업/모니터링 + local gate/worktree 운영 정본화
+     · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
+     · clients/iOS = 미존재, M5에서 생성
+     · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — M7 실측/판정은 미진행
 ```
 
 **Phase 0 baseline 상세는 `STATUS.md`. 빌드 백로그는 `BUILD_TICKETS.md`. 정본 스키마는 `schema_v0.sql`(이동·수정 금지, 확장은 `server/Migrations/00N_*.sql` 신규 파일).**
@@ -47,8 +48,28 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | **M4** | 데스크탑 패키징 | 🖥 | macOS Xcode `.app` + Developer ID 서명 + 공증(notarytool) + DMG + Sparkle 자동업데이트 | `MomoMac.xcodeproj`, 공증 `.dmg`, appcast | 공증 `.dmg`가 타 맥에서 Gatekeeper 통과(`spctl --assess`) + Sparkle 업데이트 1회 | M3, (M8-선결: 게이트) |
 | **M5** | iOS 앱 | 📱 | iOS Xcode App 타깃 + Push capability + 계정 삭제 + UGC 모더레이션 + privacy manifest | `MomoiOS.xcodeproj`, App Privacy, 모더레이션 4종 | 실기기에서 G-1/G-2 시나리오 통과(로그인→채널→메시지→에이전트 응답) | M3 (공유 UX), M2 (멀티팀) |
 | **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions 자동화 | `.github/workflows/{ci-build,release-ios,release-macos}.yml`, `fastlane/*` | CI green + (게이트 전) release 워크플로우 dry-run 성공 | M0 (skeleton), C1/C2(M4/M5 프로젝트) |
-| **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(크래시-free/e2e/접근성/성능/베타) 측정·PASS | 계측(Sentry/MetricKit), XCUITest, PASS 기록 | **G-0~G-G 전부 PASS + 증거 첨부** (`05-qa-release-gate.md`) | M1,M3,M4,M5,M6 |
+| **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(크래시-free/e2e/접근성/성능/베타/Enterprise Trust) 측정·PASS | 계측(Sentry/MetricKit), XCUITest, PASS 기록 | **G-0~G-H 전부 PASS + 증거 첨부** (`05-qa-release-gate.md`) | M1,M3,M4,M5,M6 |
 | **M8** | 스토어 제출 (App Store + Developer ID) | 🖥📱 | macOS 공증 DMG 공개 다운로드 + iOS App Store 업로드/심사/배포 | 공개 다운로드 페이지, App Store 출시 | App Store 승인·배포 + 공증 DMG 공개 + Sparkle 라이브 | **M7 (게이트 PASS 필수)**, M4, M5, M6 |
+
+### 1.1 Local AI · Agent Protocol · Trust overlay
+
+이 overlay는 기존 M1~M8 backbone을 깨지 않고, momo의 포지션을 "채팅앱"에서 "context/memory/policy가 있는 agent work OS"로 끌어올리는 제품·운영 축이다.
+
+| Ticket | Milestone | 역할 | 종료 기준 |
+|---|---|---|---|
+| `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
+| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile ...` + PR evidence 템플릿 |
+| `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | branch/worktree/env/status handoff 런북 + 충돌 방지 |
+| `MOMO-120` | M2 | Context Packet v0 | `{goal,constraints,decisions,sources,permissions,budget,redactions}` 스펙/fixture |
+| `MOMO-121` | M2 | Memory Plane v0 | typed memory(decision/preference/artifact/task_state/source_ref) + 권한/삭제 모델 |
+| `MOMO-122` | M2 | Google Workspace connector v0 | per-user OAuth + Drive/Gmail/Calendar read-mostly sync |
+| `MOMO-123` | M2 | Google Workspace enterprise admin | domain-wide delegation/admin install/scope inventory/audit export 설계 |
+| `MOMO-130` | M3 | macOS Foundation Models capability probe | `canImport`/availability/fallback 경로 검증 |
+| `MOMO-131` | M3 | Local Context Copilot | 요약/분류/컨텍스트 압축/PII redaction preview UX |
+| `MOMO-132` | M3 | Agent Protocol v0 | `agent_request/context_packet/tool_call/approval/tool_result/usage/audit` DB/wire/Swift/card 정합 |
+| `MOMO-133` | M3 | Google Workspace "ask my work" UX | source citation + approval-gated external writes |
+| `MOMO-134` | M3 | build-macos-apps 기반 macOS dev run loop | SwiftPM GUI `.app` staging + Codex Run action + `--verify/--logs` |
+| `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 
@@ -94,6 +115,7 @@ M6(CI/CD: fastlane/ASC Key) ────────┴────────�
                                   │  G-0 런타임 e2e · G-A 크래시-free ·        │                  │
                                   │  G-B e2e 8/8 · G-C 접근성 · G-D 성능 ·     │                  │
                                   │  G-E 베타 · G-F 피드백 · G-G 릴리스준비     │                  │
+                                  │  G-H Enterprise Trust evidence              │                  │
                                   └────────────────────┬─────────────────────┘                  │
                                                        │ PASS만 통과                            │
                                                        ▼                                         │
@@ -122,9 +144,15 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
 - **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리.
 - **멀티팀 온보딩**(M2): `003_onboarding.sql`(invite_code + platform_admin) + 온보딩 REST + 관리자 전역 추적. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장.
+- **Context Broker + Memory Plane**(M2~M3): 서버 agent로 바로 넘기지 않고 messenger layer가 권한, 컨텍스트 범위, source refs, cost budget, redaction, local/server model routing을 결정한다. 정본: `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`.
+- **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`.
+- **Google Workspace connector**(M2~M3): v0는 per-user OAuth + read-mostly sync(Drive metadata/excerpt, Gmail thread read, Calendar read)로 시작하고, external write는 approval card 뒤에 둔다. Domain-wide delegation은 enterprise 옵션.
+- **Local PR gate / multi-session ops**(M1): GitHub Actions가 비주요 gate인 기간에도 PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
 
 ### 3.2 🖥 데스크탑 트랙 (macOS)
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.
+- **Local LLM UX**(M3): Foundation Models availability probe 후 local summarization/classification/context compaction/PII redaction preview를 macOS에서 먼저 구현한다. 미지원 OS와 CI/local gate는 server fallback/stub으로 green 유지.
+- **macOS 개발 loop**(M3): `build-macos-apps` 플러그인은 SwiftPM build/test/triage와 GUI 실행 표준화에 사용한다. 후속 `MOMO-134`에서 `script/build_and_run.sh`가 `dist/MomoMacDevApp.app`을 staging하고 Codex Run action을 연결한다.
 - **패키징**(M4): Xcode `.app` → bottom-up codesign(`--options runtime --timestamp`) → Developer ID Application → create-dmg → **notarytool submit --wait** → stapler staple → `spctl` 검증 → Sparkle 2(EdDSA, appcast). **App Store 트랙과 별개**(공증=직접배포, App Store≠공증).
 - **배포 채널 순서:** Developer ID 공증 DMG + Sparkle 먼저, Mac App Store는 추후(샌드박스 강제·심사·Sparkle 불가).
 
@@ -150,6 +178,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 | **G-E 베타** | iOS TestFlight(내부≤100/외부≤10,000) + macOS 공증 DMG 비공개 베타 통과 | TestFlight / spctl |
 | **G-F 베타 피드백** | 전수 트리아지, P0/P1 잔여 0 | TestFlight + ASC API |
 | **G-G 릴리스 준비** | 메타/프라이버시/암호화 신고(ITSAppUsesNonExemptEncryption)/버전·빌드번호 100% | 05 §9 체크리스트 |
+| **G-H Enterprise Trust** | threat model + SBOM/license scan + secret scanning + pentest/VDP 계획 + SOC2/ISO readiness evidence | `MOMO-140`, `research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md` |
 
 ---
 

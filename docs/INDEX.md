@@ -11,7 +11,7 @@
 
 | 순서 | 문서 | 왜 |
 |---|---|---|
-| 1 | [`STATUS.md`](../STATUS.md) | **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐나(현재 = M0 완료, 런타임 미검증). |
+| 1 | [`STATUS.md`](../STATUS.md) | **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐나(현재 = M1 runtime MOMO-001~004 검증, staging/WebSocket/APNs 후속). |
 | 2 | [`AGENTS.md`](../AGENTS.md) | Codex 자율작업 **운영 계약**(빌드·검증 명령, DoD, 다음 티켓 선택법, 브랜치/PR). 충돌 시 최우선. |
 | 3 | [`ROADMAP.md`](../ROADMAP.md) | M0~M8 **마일스톤 backbone 정본**(의존/게이트/비용). |
 | 4 | [`docs/BACKLOG.md`](BACKLOG.md) | **티켓 정본**(MOMO-NNN, 41티켓/14에픽) — GitHub 이슈 변환원. |
@@ -43,9 +43,11 @@
 |---|---|---|
 | [`docs/RELEASE_PLAYBOOK.md`](RELEASE_PLAYBOOK.md) | 데스크탑 공증 + iOS App Store + CI/CD **실행 마스터 체크리스트** + 비용/기간 표 + gotcha 집약 | M1~M8 |
 | [`docs/DEPLOY.md`](DEPLOY.md) | 백엔드 멀티팀 운영 배포(staging→prod: Caddy 자동TLS/Redis/SOPS+age/pgBackRest PITR/모니터링) | M1, M2 |
-| [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-G + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
+| [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
 | [`docs/RUN.md`](RUN.md) | 로컬 기동/마이그레이션/롤백 절차(환경변수→`make up`→migrate→서버/relay/worker→macOS) | M0/M1 |
 | [`docs/GITHUB_OPS.md`](GITHUB_OPS.md) | GitHub 운영 구조(마일스톤=릴리스, 라벨 택소노미, Projects, Codex goal 흐름) | 전반 |
+| [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions 비주요 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
+| [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 
@@ -56,7 +58,7 @@
 | [`docs/cicd/02-secrets-inventory.md`](cicd/02-secrets-inventory.md) | 비밀값 6종 인벤토리 |
 | [`docs/cicd/03-store-readiness-gate.md`](cicd/03-store-readiness-gate.md) | 게이트 체크리스트(무엇) + **PASS 블록 정본 기록처** |
 | [`docs/cicd/04-codex-tickets.md`](cicd/04-codex-tickets.md) | CI/CD Codex 실행 티켓(CI0~CI5, C1/C2, M1/M2) |
-| [`docs/cicd/05-qa-release-gate.md`](cicd/05-qa-release-gate.md) | **게이트 객관 통과기준 정본**(G-0~G-G 수치/정의/1차출처) |
+| [`docs/cicd/05-qa-release-gate.md`](cicd/05-qa-release-gate.md) | **게이트 객관 통과기준 정본**(G-0~G-H 수치/정의/1차출처) |
 | [`docs/cicd/06-beta-testflight-plan.md`](cicd/06-beta-testflight-plan.md) | TestFlight 내부/외부 + macOS 공증 .dmg 비공개 베타 + 피드백 트리아지 |
 | [`docs/cicd/07-crash-analytics-spec.md`](cicd/07-crash-analytics-spec.md) | Sentry Cocoa(self-host) + MetricKit 계측 스펙 |
 | [`docs/cicd/08-e2e-accessibility-performance.md`](cicd/08-e2e-accessibility-performance.md) | XCUITest + performAccessibilityAudit + XCTMetric 테스트 plan |
@@ -91,6 +93,9 @@
 | [`research/07-deepdive/03-distributable-backbone-and-agent-interface.md`](../research/07-deepdive/03-distributable-backbone-and-agent-interface.md) | 배포 가능 backbone + 에이전트 인터페이스 |
 | [`research/08-distribution/01-macos-distribution-spec.md`](../research/08-distribution/01-macos-distribution-spec.md) | macOS 배포 스펙(공증/Sparkle) |
 | [`research/08-distribution/02-distribution-tickets.md`](../research/08-distribution/02-distribution-tickets.md) | 배포 티켓 |
+| [`research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`](../research/10-local-ai-protocol-trust/01-local-llm-context-broker.md) | Apple Foundation Models 적용 경계 + Context Broker + Memory Plane |
+| [`research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`](../research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md) | Agent Protocol v0 + Google Workspace connector roadmap |
+| [`research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`](../research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md) | Enterprise Trust + local PR gate + multi-session ops + build-macos-apps plugin 활용 |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

@@ -136,6 +136,78 @@
 
 ---
 
+# Local AI · Agent Protocol · Enterprise Trust 확장 티켓
+
+> 이 섹션은 기존 T01~T10 빌드 순서를 바꾸지 않는다. M1 런타임이 MOMO-001~004로 닫힌 뒤, 운영·제품 차별화를 강화하기 위한 Codex goal 후보들이다.
+
+## M1 운영 정본
+
+| id | 한줄 | 수용기준 등급 | 의존 |
+|---|---|---|---|
+| `MOMO-110` | Local LLM/Agent Protocol/Google Workspace/Trust 리서치와 로드맵 문서화 | docs/spec | M0 |
+| `MOMO-111` | GitHub Actions 비주요 기간용 local PR gate 스크립트와 evidence flow | ci/docs | MOMO-110 |
+| `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110 |
+
+### MOMO-110 수용기준 `[docs/spec]`
+- [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
+- [ ] `ROADMAP.md`, `docs/BACKLOG.md`, `BUILD_TICKETS.md`, `docs/INDEX.md`, `STATUS.md`에 새 에픽/티켓/진행 상태 반영.
+- [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
+
+### MOMO-111 수용기준 `[ci/docs]`
+- [ ] `scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 설계/구현.
+- [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
+- [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 문서화.
+
+### MOMO-112 수용기준 `[infra/docs]`
+- [ ] issue/branch/worktree/PR/local gate 상태를 `scripts/goal_status.sh` 또는 후속 status board에서 확인.
+- [ ] worktree별 `.env.worktree`, `COMPOSE_PROJECT_NAME`, `PORT`, `POSTGRES_PORT`, `CENT_PORT`, `HERMES_PORT` 충돌 방지 확인.
+- [ ] `momo-main` orchestration thread와 worker thread handoff prompt 문서화.
+
+## M2 Context / Memory / Google Workspace
+
+| id | 한줄 | 수용기준 등급 | 의존 |
+|---|---|---|---|
+| `MOMO-120` | Context Packet v0 spec and fixtures | spec/swift | MOMO-003, MOMO-110 |
+| `MOMO-121` | Memory Plane v0 spec and permission model | spec | MOMO-120 |
+| `MOMO-122` | Google Workspace connector v0: per-user OAuth read-mostly sync | runtime/spec | MOMO-120, MOMO-121 |
+| `MOMO-123` | Domain-wide delegation/admin install design | spec/manual | MOMO-122 |
+
+핵심 원칙:
+
+- Context Packet은 `{goal,constraints,decisions,sources,permissions,budget,redactions}`를 고정 필드로 시작한다.
+- 장기 메모리는 raw chat exhaust가 아니라 `decision/preference/artifact/task_state/external_source_ref`로 제한한다.
+- Google Workspace v0는 per-user OAuth + read-mostly sync다. write는 approval card 뒤로 둔다.
+
+## M3 Local LLM UX / Agent Protocol / macOS Dev Loop
+
+| id | 한줄 | 수용기준 등급 | 의존 |
+|---|---|---|---|
+| `MOMO-130` | macOS Foundation Models capability probe | swift | MOMO-110 |
+| `MOMO-131` | Local Context Copilot | swift/manual | MOMO-120, MOMO-130 |
+| `MOMO-132` | Agent Protocol v0 DB/wire/Swift/card alignment | spec/swift/runtime | MOMO-120, MOMO-121, MOMO-004 |
+| `MOMO-133` | Google Workspace "ask my work" UX | swift/runtime | MOMO-122, MOMO-132 |
+| `MOMO-134` | build-macos-apps based SwiftPM GUI run loop | swift/xcode/manual | MOMO-110 |
+
+호환성 원칙:
+
+- `FoundationModels` import는 platform target에만 둔다. `MomoCore`는 Foundation-only 유지.
+- `#if canImport(FoundationModels)`와 OS availability fallback으로 현재 SwiftPM/local gate를 깨지 않는다.
+- build-macos-apps 플러그인은 `swift build`, `swift test`, test triage, SwiftPM GUI `.app` staging, Codex Run action에 사용한다.
+
+## M7 Enterprise Trust
+
+| id | 한줄 | 수용기준 등급 | 의존 |
+|---|---|---|---|
+| `MOMO-140` | Enterprise Trust Gate evidence package | docs/ci/manual | MOMO-111, MOMO-112, MOMO-132 |
+
+핵심 증거물:
+
+- threat model, data flow, deployment hardening, security whitepaper draft.
+- SBOM, dependency license scan, secret scanning, local gate evidence.
+- external pentest/VDP/SOC2 Type I/II/ISO27001/CSA STAR/ISMS-P roadmap.
+
+---
+
 # 후속 백로그 (v1 / v2 + 신규 프리미티브 P1~P6)
 
 > 출처: 경험 설계 문서(`research/07-deepdive/05-agent-native-experiences.md`) §3·§6·§7.
