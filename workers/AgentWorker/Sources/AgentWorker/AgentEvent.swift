@@ -3,9 +3,9 @@ import Foundation
 /// Worker-side mirror of the client `AgentEvent` contract (L4 §6.1).
 ///
 /// The transport emits these as it parses the hermes SSE stream; the worker loop
-/// turns them into `agent.partial` / `agent.status` Centrifugo publishes and the
-/// final `message` insert. Kept local to this package (no MomoCore dep) so the
-/// worker builds standalone — shape matches `clients/Core` AgentEvent.
+/// turns them into `agent.partial` / `agent.status` Centrifugo publishes. Kept
+/// local to this package (no MomoCore dep) so the worker builds standalone —
+/// shape matches `clients/Core` AgentEvent.
 enum AgentEvent: Sendable {
     case status(RunStatus)
     case textDelta(String)                                   // streaming body

@@ -10,7 +10,7 @@
 //     non-stream fallback (§6.3);
 //   - publishes SSE deltas as `message` PATCH events (streaming mimic) +
 //     `agent.status` (queued/thinking/streaming/done/error) to Centrifugo;
-//   - records reserve/reconcile cost ledger stubs (§8.5).
+//   - records reserve/reconcile cost ledger rows (§8.5).
 // Connects as the BYPASSRLS `momo_relay` role so it polls across all tenants
 // (L4 §2.2 / §10.1) — same role family the relay uses.
 //
@@ -20,9 +20,8 @@
 //   - swift-service-lifecycle 2.6.0      — supervised pool + graceful shutdown
 //   - swift-log 1.x                      — structured logging (run/job ids)
 //
-// Runtime needs PostgreSQL 18 + Centrifugo v6 + hermes gateway (NONE running in
-// this build env) → see `runtime-unverified` notes in source. `swift build` is
-// the verification gate for this package.
+// Runtime needs PostgreSQL 18 + Centrifugo v6 + hermes gateway; MOMO-004 verifies
+// this path with Docker plus scripts/mock_hermes.py when real hermes is absent.
 import PackageDescription
 
 let package = Package(

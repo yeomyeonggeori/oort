@@ -13,8 +13,8 @@ import NIOFoundationCompat
 /// REST/outbox → relay. `agent.status` publish is the authoritative working
 /// indicator (presence is at-most-once fallback, L4 §5.2).
 ///
-/// runtime-unverified (no Centrifugo running): request shape matches Centrifugo
-/// v6 server API but is not exercised against a live broker in this build env.
+/// Runtime verification status is tracked in STATUS.md. MOMO-004 verifies
+/// `agent.partial` delivery through Centrifugo history.
 struct CentrifugoClient: Sendable {
     let httpClient: HTTPClient
     let apiURL: String   // e.g. http://centrifugo:8000/api

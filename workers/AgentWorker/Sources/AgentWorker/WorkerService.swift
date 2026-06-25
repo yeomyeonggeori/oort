@@ -21,16 +21,16 @@ import ServiceLifecycle
 ///      (stream=true). Each text delta → publish agent.partial + PATCH the
 ///      streaming `message.body` (streaming mimic, L4 §6.2). tool_calls → (would)
 ///      open an approval gate (G6 stub).
-///   5. Reconcile budget + write the usage_ledger (§8.5 stub). publish
+///   5. Reconcile budget + write the usage_ledger (§8.5). publish
 ///      agent.status=done.
 ///
 /// Wakeups: a dedicated LISTEN connection on `outbox` (schema `outbox_notify_trg`
 /// fires `pg_notify('outbox', kind)`) → sub-second pickup; a `pollInterval`
 /// (300ms) ticker is the fallback (L4 §8.1).
 ///
-/// runtime-unverified (no docker/psql/hermes): SQL + request shapes match
-/// schema_v0 / Centrifugo v6 / OpenAI Chat Completions but are not exercised
-/// against live services in this env. `swift build` is the verification gate.
+/// Runtime verification status is tracked in STATUS.md. The MOMO-004 gate uses
+/// Docker PostgreSQL/Centrifugo plus `scripts/mock_hermes.py` when real hermes is
+/// unavailable.
 struct WorkerService: Service {
     let pg: PostgresClient
     let hermes: HermesTransport
@@ -424,17 +424,31 @@ struct WorkerService: Service {
                 _ = try await conn.query(
                     "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
                     logger: logger)
-                _ = try await conn.query(
-                    """
-                    UPDATE agent_run
-                       SET status = \(dbStatus)::run_status,
-                           error = \(error.map { "\"\($0)\"" }),
-                           updated_at = now(),
-                           finished_at = CASE WHEN \(dbStatus) IN ('succeeded','failed','cancelled','timed_out')
-                                              THEN now() ELSE finished_at END
-                     WHERE id = \(runID)
-                    """,
-                    logger: logger)
+                if let error {
+                    _ = try await conn.query(
+                        """
+                        UPDATE agent_run
+                           SET status = \(dbStatus)::run_status,
+                               error = to_jsonb(\(error)::text),
+                               updated_at = now(),
+                               finished_at = CASE WHEN \(dbStatus) IN ('succeeded','failed','cancelled','timed_out')
+                                                  THEN now() ELSE finished_at END
+                         WHERE id = \(runID)
+                        """,
+                        logger: logger)
+                } else {
+                    _ = try await conn.query(
+                        """
+                        UPDATE agent_run
+                           SET status = \(dbStatus)::run_status,
+                               error = NULL,
+                               updated_at = now(),
+                               finished_at = CASE WHEN \(dbStatus) IN ('succeeded','failed','cancelled','timed_out')
+                                                  THEN now() ELSE finished_at END
+                         WHERE id = \(runID)
+                        """,
+                        logger: logger)
+                }
             }
         } catch {
             logger.warning("agent_run status update failed (non-fatal)", metadata: [

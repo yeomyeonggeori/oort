@@ -215,7 +215,28 @@ swift run --package-path workers/AgentWorker AgentWorker
 - **hermes 게이트웨이가 떠 있어야** 에이전트 턴이 실제로 동작(D 데모). `HERMES_BASE_URL`/`HERMES_API_KEY`.
 
 > **검증됨/미검증 구분:** MomoServer + OutboxRelay는 MOMO-001/002에서 DB·Centrifugo 실연결 검증됨.
-> AgentWorker↔hermes SSE는 실제 hermes 또는 OpenAI-compatible mock이 필요해 후속 MOMO-004에서 닫는다.
+> AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile은 MOMO-004에서
+> `scripts/mock_hermes.py`와 `scripts/verify_agent_worker.sh`로 검증한다.
+
+#### 5.3.1 MOMO-004 AgentWorker 런타임 게이트
+
+실제 hermes가 없을 때는 repo-local mock gateway를 사용한다. 이 스크립트는
+`make up && make migrate` 이후 실행하며, `momo_worker` BYPASSRLS role 준비,
+멘션 fixture → `agent_job` outbox 생성, mock SSE 수신, Centrifugo history의
+`agent.partial`, `usage_ledger`, `budget_window`, low-limit G5 circuit breaker를
+한 번에 확인한다.
+
+```sh
+make up
+make migrate
+scripts/verify_agent_worker.sh
+```
+
+수동으로 mock만 띄우려면:
+
+```sh
+python3 scripts/mock_hermes.py --host 127.0.0.1 --port "${HERMES_PORT:-8088}"
+```
 
 ---
 
