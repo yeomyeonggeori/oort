@@ -1,0 +1,188 @@
+{
+  "schema": "momo.memory_retrieval.fixture.v0",
+  "fixture": "retrieval_allowed_context_packet_refs",
+  "request": {
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "actor_member_id": "44444444-4444-7444-8444-444444444401",
+    "agent_member_id": "55555555-5555-7555-8555-555555555501",
+    "channel_id": "22222222-2222-7222-8222-222222222222",
+    "surface": "mention",
+    "context_packet_id": "77777777-7777-7777-8777-777777777701",
+    "goal_summary": "Summarize launch next steps and prepare a PR body draft."
+  },
+  "permission_context": {
+    "rls_context": {
+      "set_local_workspace_id": "11111111-1111-7111-8111-111111111111"
+    },
+    "actor_workspace_member": true,
+    "actor_channel_member": true,
+    "agent_channel_member": true,
+    "external_grants": [
+      {
+        "provider": "google_drive",
+        "grant": "drive.readonly",
+        "valid": true
+      },
+      {
+        "provider": "github",
+        "grant": "github.issues.read",
+        "valid": true
+      }
+    ],
+    "policy_version": "memory-policy@2026-06-26"
+  },
+  "retrieval_results": [
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000001",
+      "memory_type": "decision",
+      "decision": "include",
+      "checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": true,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "context_packet_memory_ref": {
+        "memory_id": "20000000-0000-7000-8000-000000000001",
+        "type": "decision",
+        "visibility": "channel",
+        "source_ids": ["src_decision_launch_copy"],
+        "excerpt": "Launch copy must use Korean-first messaging and avoid English-only CTAs.",
+        "reason_included": "Relevant to launch next-step and PR body tone.",
+        "expires_at": "2026-12-23T09:00:00Z",
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000001/delete",
+        "permission_snapshot": "actor:channel_member;agent:channel_member;sources:visible;policy:memory-policy@2026-06-26"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000002",
+      "memory_type": "preference",
+      "decision": "include",
+      "checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": true,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "context_packet_memory_ref": {
+        "memory_id": "20000000-0000-7000-8000-000000000002",
+        "type": "preference",
+        "visibility": "personal",
+        "source_ids": ["src_pref_status_style"],
+        "excerpt": "Prefer concise Korean status updates with explicit blocker and next-action sections.",
+        "reason_included": "Actor preference applies to the requested progress summary.",
+        "expires_at": "2026-12-23T09:00:00Z",
+        "delete_path": "momo://settings/memory/personal/20000000-0000-7000-8000-000000000002/delete",
+        "permission_snapshot": "actor:subject_member;sources:visible;policy:memory-policy@2026-06-26"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000003",
+      "memory_type": "artifact_ref",
+      "decision": "include",
+      "checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": true,
+        "external_grant_valid": true,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "context_packet_memory_ref": {
+        "memory_id": "20000000-0000-7000-8000-000000000003",
+        "type": "artifact_ref",
+        "visibility": "workspace",
+        "source_ids": ["src_artifact_launch_prd_v3"],
+        "excerpt": "Launch PRD v3 is the current product scope reference for agent-native messenger positioning.",
+        "reason_included": "The PR body draft should stay aligned with the current product scope reference.",
+        "expires_at": "2027-06-26T09:00:00Z",
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000003/unlink",
+        "permission_snapshot": "actor:workspace_member;provider:google_drive:drive.readonly;sources:visible;policy:memory-policy@2026-06-26"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000004",
+      "memory_type": "task_state",
+      "decision": "include",
+      "checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": true,
+        "external_grant_valid": true,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "context_packet_memory_ref": {
+        "memory_id": "20000000-0000-7000-8000-000000000004",
+        "type": "task_state",
+        "visibility": "workspace",
+        "source_ids": ["src_task_github_59"],
+        "excerpt": "MOMO-152 is in progress on branch docs/59-memory-plane-v0-spec-and-permission-model.",
+        "reason_included": "The user asked about current work status and next actions.",
+        "expires_at": "2026-06-27T09:00:00Z",
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000004/delete",
+        "permission_snapshot": "actor:workspace_member;provider:github:github.issues.read;sources:visible;policy:memory-policy@2026-06-26"
+      }
+    }
+  ],
+  "context_packet_projection": {
+    "schema": "momo.context_packet.memory_refs_projection.v0",
+    "packet_id": "77777777-7777-7777-8777-777777777701",
+    "memory_refs": [
+      {
+        "memory_id": "20000000-0000-7000-8000-000000000001",
+        "type": "decision",
+        "visibility": "channel",
+        "source_ids": ["src_decision_launch_copy"],
+        "excerpt": "Launch copy must use Korean-first messaging and avoid English-only CTAs.",
+        "reason_included": "Relevant to launch next-step and PR body tone.",
+        "expires_at": "2026-12-23T09:00:00Z",
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000001/delete",
+        "permission_snapshot": "actor:channel_member;agent:channel_member;sources:visible;policy:memory-policy@2026-06-26"
+      },
+      {
+        "memory_id": "20000000-0000-7000-8000-000000000002",
+        "type": "preference",
+        "visibility": "personal",
+        "source_ids": ["src_pref_status_style"],
+        "excerpt": "Prefer concise Korean status updates with explicit blocker and next-action sections.",
+        "reason_included": "Actor preference applies to the requested progress summary.",
+        "expires_at": "2026-12-23T09:00:00Z",
+        "delete_path": "momo://settings/memory/personal/20000000-0000-7000-8000-000000000002/delete",
+        "permission_snapshot": "actor:subject_member;sources:visible;policy:memory-policy@2026-06-26"
+      },
+      {
+        "memory_id": "20000000-0000-7000-8000-000000000003",
+        "type": "artifact_ref",
+        "visibility": "workspace",
+        "source_ids": ["src_artifact_launch_prd_v3"],
+        "excerpt": "Launch PRD v3 is the current product scope reference for agent-native messenger positioning.",
+        "reason_included": "The PR body draft should stay aligned with the current product scope reference.",
+        "expires_at": "2027-06-26T09:00:00Z",
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000003/unlink",
+        "permission_snapshot": "actor:workspace_member;provider:google_drive:drive.readonly;sources:visible;policy:memory-policy@2026-06-26"
+      },
+      {
+        "memory_id": "20000000-0000-7000-8000-000000000004",
+        "type": "task_state",
+        "visibility": "workspace",
+        "source_ids": ["src_task_github_59"],
+        "excerpt": "MOMO-152 is in progress on branch docs/59-memory-plane-v0-spec-and-permission-model.",
+        "reason_included": "The user asked about current work status and next actions.",
+        "expires_at": "2026-06-27T09:00:00Z",
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000004/delete",
+        "permission_snapshot": "actor:workspace_member;provider:github:github.issues.read;sources:visible;policy:memory-policy@2026-06-26"
+      }
+    ]
+  }
+}

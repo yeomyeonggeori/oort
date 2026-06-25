@@ -82,21 +82,22 @@ An integration is not accepted until all four planes are specified. "The agent c
 The next implementation-ready prompt should be:
 
 ```text
-MOMO-151 이슈를 새로 만들어서 goal로 진행해줘.
+MOMO-153 이슈를 새로 만들어서 goal로 진행해줘.
 
 Goal:
-Context Packet v0 스펙과 fixtures를 추가해줘. momo가 agent runtime에 넘길 수 있는 권한 검증된 컨텍스트의 최소 JSON 구조를 확정하고, Hermes/Kim Intern/OpenAI-compatible SSE 호출에 들어갈 필드와 금지 필드를 문서화해줘.
+Capability Cache v0 스펙과 invalidation model을 작성해줘.
+agent/plugin/MCP tool list, context summary cache, external source cache, usage price cache를 workspace/visibility/source/expires_at/policy_version/capability_version 기준으로 고정하고,
+plugin version, provider change token, grant revoke, manual refresh가 cache invalidation으로 이어지는 흐름을 정의해줘.
 
 Acceptance:
 - issue assign + status:in-progress
 - 별도 worktree/branch
-- research/11-agent-runtime와 research/10-local-ai-protocol-trust의 결정을 반영
-- Context Packet v0 JSON schema-like spec 추가
-- 최소 fixtures: mention, slash command, message context action, Google Workspace source ref, memory ref
-- MomoCore 모델 구현은 out of scope로 두되 후속 구현 티켓 정의
-- ROADMAP.md / BUILD_TICKETS.md / docs/BACKLOG.md / STATUS.md 갱신
-- 문서 검증 및 local docs gate 통과
-- PR 생성, 리뷰, 최종 테스트, merge
+- research/docs에 Capability Cache v0 정본 문서 추가
+- cache type fixtures/invalidation examples 추가
+- Context Packet v0 `tool_grants.input_schema_ref`와 Memory Plane source/cache boundaries 연결
+- ROADMAP/BUILD_TICKETS/STATUS 갱신
+- make build/test 및 docs 정적 검증 통과
+- PR 생성, 리뷰, merge, main Actions 확인
 ```
 
 ## 6. Sources

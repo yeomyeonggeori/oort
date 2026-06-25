@@ -1,0 +1,243 @@
+{
+  "schema": "momo.memory_retrieval.fixture.v0",
+  "fixture": "retrieval_denied_permission_examples",
+  "request": {
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "actor_member_id": "44444444-4444-7444-8444-444444444402",
+    "agent_member_id": "55555555-5555-7555-8555-555555555501",
+    "channel_id": "22222222-2222-7222-8222-222222222222",
+    "surface": "mention",
+    "context_packet_id": "77777777-7777-7777-8777-777777777702",
+    "goal_summary": "Answer whether private finance review notes affect launch."
+  },
+  "permission_context": {
+    "rls_context": {
+      "set_local_workspace_id": "11111111-1111-7111-8111-111111111111"
+    },
+    "actor_workspace_member": true,
+    "actor_channel_member": true,
+    "agent_channel_member": true,
+    "policy_version": "memory-policy@2026-06-26"
+  },
+  "denied_results": [
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000101",
+      "memory_type": "decision",
+      "decision": "withhold",
+      "reason": "actor_lacks_source_channel_membership",
+      "failed_checks": {
+        "workspace_match": true,
+        "visibility_allowed": false,
+        "all_sources_visible": false,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "hidden_memory_shape": {
+        "visibility": {
+          "scope": "channel",
+          "channel_id": "99999999-9999-7999-8999-999999999901"
+        },
+        "source_refs": [
+          {
+            "source_id": "src_private_finance_decision",
+            "source_kind": "message",
+            "permission_snapshot": "private-channel:finance-review"
+          }
+        ]
+      },
+      "context_packet_redaction": {
+        "redaction_id": "withheld_memory_001",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "actor_lacks_source_channel_membership",
+        "source_hint": "private-finance-thread"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000102",
+      "memory_type": "external_source_ref",
+      "decision": "withhold",
+      "reason": "external_grant_revoked",
+      "failed_checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": false,
+        "external_grant_valid": false,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "hidden_memory_shape": {
+        "visibility": {
+          "scope": "personal",
+          "subject_member_id": "44444444-4444-7444-8444-444444444402"
+        },
+        "source_refs": [
+          {
+            "source_id": "src_revoked_gmail_thread",
+            "source_kind": "gmail",
+            "permission_snapshot": "provider_grant:gmail.read revoked"
+          }
+        ]
+      },
+      "context_packet_redaction": {
+        "redaction_id": "withheld_memory_002",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "external_grant_revoked",
+        "source_hint": "gmail-thread"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000103",
+      "memory_type": "task_state",
+      "decision": "withhold",
+      "reason": "expired",
+      "failed_checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": true,
+        "not_expired": false,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": false
+      },
+      "hidden_memory_shape": {
+        "validity": {
+          "expires_at": "2026-06-20T00:00:00Z",
+          "refresh_policy": "on_access"
+        },
+        "source_refs": [
+          {
+            "source_id": "src_old_issue_state",
+            "source_kind": "github",
+            "permission_snapshot": "provider_grant:github.issues.read"
+          }
+        ]
+      },
+      "context_packet_redaction": {
+        "redaction_id": "withheld_memory_003",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "expired",
+        "source_hint": "task-state"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000104",
+      "memory_type": "preference",
+      "decision": "withhold",
+      "reason": "personal_memory_for_different_member",
+      "failed_checks": {
+        "workspace_match": true,
+        "visibility_allowed": false,
+        "all_sources_visible": true,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "goal_relevant": true
+      },
+      "hidden_memory_shape": {
+        "visibility": {
+          "scope": "personal",
+          "subject_member_id": "44444444-4444-7444-8444-444444444499"
+        },
+        "source_refs": [
+          {
+            "source_id": "src_other_member_preference",
+            "source_kind": "message",
+            "permission_snapshot": "source_visible_but_subject_not_actor"
+          }
+        ]
+      },
+      "context_packet_redaction": {
+        "redaction_id": "withheld_memory_004",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "personal_memory_for_different_member",
+        "source_hint": "personal-preference"
+      }
+    },
+    {
+      "memory_id": "20000000-0000-7000-8000-000000000105",
+      "memory_type": "agent_skill_note",
+      "decision": "withhold",
+      "reason": "candidate_not_reviewed_for_workspace_visibility",
+      "failed_checks": {
+        "workspace_match": true,
+        "visibility_allowed": true,
+        "all_sources_visible": true,
+        "not_expired": true,
+        "not_deleted": true,
+        "policy_version_compatible": true,
+        "quality_review_passed": false,
+        "goal_relevant": true
+      },
+      "hidden_memory_shape": {
+        "quality": {
+          "review_status": "candidate",
+          "confidence": 0.61
+        },
+        "source_refs": [
+          {
+            "source_id": "src_agent_unreviewed_skill",
+            "source_kind": "agent_run",
+            "permission_snapshot": "agent_run:workspace_visible"
+          }
+        ]
+      },
+      "context_packet_redaction": {
+        "redaction_id": "withheld_memory_005",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "candidate_not_reviewed_for_workspace_visibility",
+        "source_hint": "agent-skill-note"
+      }
+    }
+  ],
+  "context_packet_projection": {
+    "schema": "momo.context_packet.memory_refs_projection.v0",
+    "packet_id": "77777777-7777-7777-8777-777777777702",
+    "memory_refs": [],
+    "redactions": [
+      {
+        "redaction_id": "withheld_memory_001",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "actor_lacks_source_channel_membership",
+        "source_hint": "private-finance-thread"
+      },
+      {
+        "redaction_id": "withheld_memory_002",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "external_grant_revoked",
+        "source_hint": "gmail-thread"
+      },
+      {
+        "redaction_id": "withheld_memory_003",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "expired",
+        "source_hint": "task-state"
+      },
+      {
+        "redaction_id": "withheld_memory_004",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "personal_memory_for_different_member",
+        "source_hint": "personal-preference"
+      },
+      {
+        "redaction_id": "withheld_memory_005",
+        "kind": "withheld_memory",
+        "applied_to": ["memory_refs"],
+        "reason": "candidate_not_reviewed_for_workspace_visibility",
+        "source_hint": "agent-skill-note"
+      }
+    ]
+  }
+}

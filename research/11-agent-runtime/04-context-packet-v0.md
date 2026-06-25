@@ -160,6 +160,8 @@ For external systems, the URI should be a provider URL or stable provider id. mo
 
 ## 8. Memory References
 
+Memory reference backing rules are defined by `research/11-agent-runtime/05-memory-plane-v0.md`. Context Packet only carries bounded, permission-checked projections; it does not inline full memory records, raw transcripts, hidden permission state, or provider credentials.
+
 Memory is typed and permission-aware. `memory_refs` may contain:
 
 - `decision`
@@ -332,7 +334,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/context-packet-v0/`.
 
 ## 16. Follow-Up Implementation Notes
 
-- `MOMO-152` should turn `memory_refs` into the Memory Plane spec.
+- `MOMO-152` turns `memory_refs` into the Memory Plane spec at `research/11-agent-runtime/05-memory-plane-v0.md`.
 - `MOMO-153` should turn `tool_grants.input_schema_ref` and capability versions into the Capability Cache spec.
 - `MOMO-160` should map `context_packet_id` into `agent_run` lifecycle and A2A task semantics.
 - `MOMO-161` should implement pause/resume for `approval_policy != "none"`.
