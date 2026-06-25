@@ -11,9 +11,8 @@ import ServiceLifecycle
 /// The relay connects as the BYPASSRLS `momo_relay` role so it polls the
 /// `outbox` across all tenants (L4 §2.2 / §10.1).
 ///
-/// runtime-unverified (no docker/psql): the build env has no PostgreSQL 18 /
-/// Centrifugo v6, so the relay boots but cannot claim/publish here.
-/// `swift build` is the verification gate for this package.
+/// Runtime verification status is tracked in STATUS.md. The relay has been
+/// exercised against Docker PG18/Centrifugo for claim + publish + done.
 @main
 struct OutboxRelayMain {
     static func main() async throws {

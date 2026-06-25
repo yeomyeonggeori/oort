@@ -42,12 +42,12 @@ services:
   centrifugo:
     image: centrifugo/centrifugo:v6
     restart: unless-stopped
-    # config 파일을 명시(env 인터폴레이션 ${CENT_TOKEN_HMAC}/${CENT_API_KEY}는
-    # Centrifugo가 기동 시 직접 치환 — .env가 컨테이너 환경으로 주입됨).
+    # config 파일을 명시한다. Centrifugo v6는 CENTRIFUGO_* env override를
+    # 공식 설정으로 읽는다.
     command: centrifugo --config=/centrifugo/centrifugo.json
     environment:
-      CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC}
-      CENT_API_KEY: ${CENT_API_KEY}
+      CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC}
+      CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY}
     ports:
       - "${CENT_PORT:-8000}:8000"
     volumes:

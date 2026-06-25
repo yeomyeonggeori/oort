@@ -4,6 +4,7 @@
       { "name": "ch", "presence": true, "join_leave": true, "force_push_join_leave": true,
         "history_size": 300, "history_ttl": "720h", "history_meta_ttl": "744h",
         "force_recovery": true, "force_positioning": true,
+        "subscribe_proxy_enabled": true,
         "channel_regex": "^ws[0-9A-Fa-f-]{36}\\.[0-9A-Fa-f-]{36}$" },
       { "name": "dm", "presence": true, "history_size": 300, "history_ttl": "720h",
         "history_meta_ttl": "744h", "force_recovery": true,
@@ -14,9 +15,9 @@
       { "name": "user", "history_size": 50, "history_ttl": "168h",
         "history_meta_ttl": "192h", "force_recovery": true }
     ],
-    "proxy": { "subscribe_endpoint": "http://api:8080/v1/centrifugo/subscribe" }
+    "proxy": {
+      "subscribe": { "endpoint": "http://api:8080/v1/centrifugo/subscribe" }
+    }
   },
-  "client": { "token": { "hmac_secret_key": "${CENT_TOKEN_HMAC}" },
-              "subscription_token": { "enabled": true } },
-  "http_api": { "key": "${CENT_API_KEY}" }
+  "client": { "subscription_token": { "enabled": true } }
 }

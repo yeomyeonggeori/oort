@@ -1,7 +1,7 @@
 # momo — 백엔드 멀티팀 운영 배포 (DEPLOY.md, 2026)
 
 > **목적:** momo 백엔드(MomoServer + OutboxRelay + AgentWorker + PostgreSQL 18 + Centrifugo v6 + hermes)를 **단일 강력 VPS**에 운영 배포(staging→prod)하고, **멀티팀(10명=1팀, 3개+팀)** 을 워크스페이스로 온보딩·운영하는 절차서.
-> **로컬 기동은 `docs/RUN.md`** (이 환경엔 docker/psql 부재 → `runtime-unverified`). 이 문서는 **운영 환경(실 VPS + 공인 도메인 + TLS + 시크릿 + 백업 + 모니터링)** 을 다룬다.
+> **로컬 기동은 `docs/RUN.md`**. 이 문서는 **운영 환경(실 VPS + 공인 도메인 + TLS + 시크릿 + 백업 + 모니터링)** 을 다룬다.
 > **실행 주체:** 계획은 ROADMAP(M1 EP-DEPLOY / M2 EP-TENANCY·EP-ADMIN), 실제 작업은 **Codex가 goal로 자율 실행.** 산출물은 이 리포에 실제 파일로 생성한다.
 > 정본 참조: `research/07-deepdive/04-self-build-l4-spec.md`(토폴로지 §1.1·확장 §1.4·횡단 §8) · `schema_v0.sql`(정본 스키마, RLS FORCE) · `infra/*`(dev compose/centrifugo) · `STATUS.md`/`ROADMAP.md`.
 > 검증 표기: `(검증됨)` = 1차 출처 교차확인 · `(추정)` = 설계 디폴트. **법무는 법률 자문 아님 — 외부 변호사 1회 검토.**
@@ -10,7 +10,9 @@
 
 ## 0. 현재 상태와 이 문서의 위치 (STATUS.md 정합)
 
-- Phase 0 = **5개 Swift 패키지 `swift build` green**, **런타임 미검증**(docker/psql 부재). dev compose(`infra/docker-compose.yml`)는 정적 점검만 됨.
+- Phase 0 = **5개 Swift 패키지 `swift build` green**.
+- M1 런타임 일부 검증 완료: Docker Desktop 기준 PG18+Centrifugo compose health, migrate 멱등, MomoServer health/seq gapless, OutboxRelay→Centrifugo publish/history.
+- 남은 M1 런타임 검증: RLS 교차 테넌트 격리, AgentWorker↔hermes SSE + 비용 회계, staging URL/TLS/운영 시크릿·백업.
 - 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "런타임 e2e PASS + staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
 - **선결:** M0 런타임 e2e(서버↔PG18↔Centrifugo↔hermes 1왕복). M2 멀티팀 온보딩은 M1 위에서 성립.
 - **이 문서가 만들/갱신할 산출물(Codex):**
@@ -164,12 +166,13 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 {
   "engine": { "type": "redis", "redis": { "address": "redis://redis:6379" } },
   "channel": { "namespaces": [ /* dev와 동일: ch/dm/agent/user */ ],
-               "proxy": { "subscribe_endpoint": "http://api:8080/v1/centrifugo/subscribe" } },
-  "client": { "token": { "hmac_secret_key": "${CENT_TOKEN_HMAC}" },
-              "subscription_token": { "enabled": true } },
-  "http_api": { "key": "${CENT_API_KEY}" }
+               "proxy": { "subscribe": { "endpoint": "http://api:8080/v1/centrifugo/subscribe" } } },
+  "client": { "subscription_token": { "enabled": true } }
 }
 ```
+> 운영 compose는 `CENT_TOKEN_HMAC`/`CENT_API_KEY`를 각각
+> `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY`/`CENTRIFUGO_HTTP_API_KEY`로 주입해야 한다.
+> Centrifugo v6는 일반 JSON 문자열의 `"${...}"` 플레이스홀더를 설정값으로 자동 치환하지 않는다.
 > 제약 유지: `history_meta_ttl` > `history_ttl`, namespace 상속 없음(각 명시). Redis 전환으로 presence/recovery가 재시작·다중 인스턴스에서 안정. 진짜 복구는 여전히 REST `?after=<seq>` backfill(Postgres SoT, L4 §4.3).
 
 ---

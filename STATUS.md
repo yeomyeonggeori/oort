@@ -7,7 +7,7 @@
 
 - Centrifugo/server 계약을 `/v1/centrifugo/subscribe` + `ch:ws<workspaceUUID>.<channelUUID>` / `agent:ws<workspaceUUID>.<agentMemberUUID>`로 정렬하고, legacy GitHub bootstrap은 guard 처리.
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
-- MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless까지 검증됨. RLS, relay publish, hermes SSE는 후속 M1 goal에서 확인 필요.
+- MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless 및 relay→Centrifugo publish 왕복까지 검증됨. RLS, hermes SSE는 후속 M1 goal에서 확인 필요.
 
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
@@ -15,9 +15,18 @@
 - `make migrate` pass: `001_init.sql` + `002_seed.sql` 적용 성공, 재실행 시 `적용 0, 스킵 2`로 멱등 통과. `scripts/migrate.sh`는 keg-only Homebrew `libpq`의 `psql`도 자동 감지한다.
 - MomoServer runtime pass: `PORT=18080 swift run MomoServer` 후 `GET /health` 200. `POST /v1/.../messages`가 실제 DB에 `message` + `outbox`를 쓰고 `seq=1` 반환.
 - seq gapless 검증: 같은 채널에 동시 10건 송신 결과 `seq=2...11`, DB 집계 `message_count=11`, `max_seq=11`, `missing_seq=NULL`, `outbox_count=11`, `version=1...11`.
-- 남은 runtime-unverified: MOMO-002(outbox relay→Centrifugo publish 왕복), MOMO-003(RLS 교차 테넌트 격리), MOMO-004(AgentWorker↔hermes SSE + 비용 reserve/reconcile).
+- 남은 runtime-unverified: MOMO-003(RLS 교차 테넌트 격리), MOMO-004(AgentWorker↔hermes SSE + 비용 reserve/reconcile).
 
-## 0a. CI Hotfix (2026-06-25)
+## 0b. MOMO-002 Runtime Gate (2026-06-25)
+
+- `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo002`, `POSTGRES_PORT=55432`, `CENT_PORT=58000`으로 기동하고 Docker health가 둘 다 green.
+- `make migrate` pass: 재실행 시 `적용 0, 스킵 2`로 멱등 통과. MomoServer는 `GET /health` 200.
+- Centrifugo v6 contract fix: compose에서 `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY` / `CENTRIFUGO_HTTP_API_KEY` env override를 사용하고, subscribe proxy 설정을 `channel.proxy.subscribe.endpoint` + namespace `subscribe_proxy_enabled`로 정렬.
+- OutboxRelay runtime pass: relay 중지 상태에서 메시지 송신 → outbox `id=4`가 `pending`, `version=4`, `idempotency_key=<channel>:4`로 생성됨. relay 재기동 후 SKIP LOCKED claim → Centrifugo `/api/publish` → outbox `status=done`, `attempts=1`, `last_error=NULL`.
+- Centrifugo history pass: `/api/history` 최신 publication이 `data.seq=4`, `payload.seq=4`를 반환. relay 로그에도 `channel=ch:ws...`, `version=4`, `idempotencyKey=...:4`가 남음.
+- 남은 runtime-unverified: MOMO-003(RLS 교차 테넌트 격리), MOMO-004(AgentWorker↔hermes SSE + 비용 reserve/reconcile), WebSocket live subscribe/presence/recovery 세부 UX.
+
+## 0c. CI Hotfix (2026-06-25)
 
 - `main`의 `ci-build / swift build + test (5 packages)` 실패 원인은 GitHub Actions macOS runner의 Xcode 16.4 / Swift 6.1.2와 `jwt-kit` 최신 해상도 간 MLDSA API 불일치였다.
 - `server/Package.swift`에서 `jwt-kit`을 `exact: "5.2.0"`으로 고정해 CI runner가 지원하지 않는 `MLDSA65`/`MLDSA87` 참조를 피하도록 했다.
@@ -34,7 +43,7 @@
 
 > ⚠️ SourceKit(IDE) 진단이 `MomoCore`의 일부 파일에 "Cannot find type …"을 표시했으나, 이는 모듈 그래프 없이 파일 단위로 분석한 **stale 경고**다. 실제 `swift build`는 5개 패키지 모두 **clean(exit 0)**.
 
-## 2. 비-Swift 산출물 (정적 + MOMO-001 런타임 점검)
+## 2. 비-Swift 산출물 (정적 + MOMO-001/002 런타임 점검)
 
 | 산출물 | 점검 | 상태 |
 |---|---|---|
@@ -46,7 +55,8 @@
 | `scripts/migrate.sh` | `sh -n` | ✅ OK |
 
 > **MOMO-001에서 검증됨:** PG18+Centrifugo compose health, SQL 001/002 적용 및 멱등 재실행, MomoServer `/health`, 메시지 송신의 `channel_seq` gapless 발급과 `message`/`outbox` 기록.
-> **남은 runtime-unverified:** RLS 격리, outbox relay→Centrifugo publish 왕복, hermes SSE, 비용 회계, Centrifugo 구독/presence/recovery, APNs.
+> **MOMO-002에서 검증됨:** OutboxRelay SKIP LOCKED claim, Centrifugo `/api/publish`, outbox `pending→done`, Centrifugo history의 `seq=message.seq`.
+> **남은 runtime-unverified:** RLS 격리, hermes SSE, 비용 회계, WebSocket live subscribe/presence/recovery, APNs.
 
 ## 3. 생성 파일 트리 (핵심)
 
@@ -76,16 +86,15 @@ momo/
 
 - ✅ **컴파일 검증됨**: 5개 Swift 패키지 전부 `swift build` 통과 → 타입·API 계약·시그니처 정합.
 - ⛔ **남은 런타임 미검증**:
-  - outbox→relay→Centrifugo publish 왕복.
   - RLS 테넌트 격리.
   - AgentWorker↔hermes 게이트웨이 SSE 실연결, reserve/reconcile 비용 회계.
-  - Centrifugo 구독/presence/recovery, APNs.
+  - WebSocket live subscribe/presence/recovery, APNs.
 
 ## 5. 남은 작업
 
 **M1 런타임 후속:**
 1. ✅ MOMO-001: docker 환경에서 `make up` → `make migrate`(001→002) → `swift run`(server) 로 헬스체크 + 메시지 송신(seq 발급) 통합 테스트 완료.
-2. MOMO-002: OutboxRelay 기동 + outbox→Centrifugo publish 왕복 e2e.
+2. ✅ MOMO-002: OutboxRelay 기동 + outbox→Centrifugo publish 왕복 e2e 완료.
 3. MOMO-003: RLS 테넌트 격리 런타임 검증.
 4. MOMO-004: AgentWorker↔hermes 게이트웨이(또는 OpenAI 호환 목) 연결로 김인턴 멘션→응답 1회 + 비용 reserve/reconcile.
 

@@ -1,17 +1,16 @@
 # momo — 로컬 기동 가이드 (RUN.md)
 
 > **이 환경의 현실 (반드시 먼저 읽기).**
-> 로컬에 **Swift 6.2.3 툴체인은 있지만 docker / psql / hermes 게이트웨이는 없다.**
+> 로컬 검증 기준으로 **Swift 6.2.3, Docker Desktop, PostgreSQL 18 client(psql)는 있다. hermes 게이트웨이는 없다.**
 > 따라서:
 > - **모든 Swift 패키지는 `swift build`로 컴파일이 검증된다 (green).**
-> - **런타임(DB·실시간·에이전트)은 검증할 수 없다 → `runtime-unverified (no docker/psql)`.**
+> - **DB·실시간 런타임은 Docker Desktop으로 검증 가능하다.**
+> - **에이전트 hermes SSE 경로만 실제 hermes 또는 OpenAI-compatible mock이 필요하다.**
 >
 > 즉 **`swift build`가 통과한다고 해서 서버/relay/worker가 "돈다"는 뜻은 아니다.**
 > 실제 기동은 **PostgreSQL 18 + Centrifugo v6**(+ 에이전트 데모는 hermes 게이트웨이)가
 > 떠 있어야 한다. 이 둘은 `infra/docker-compose.yml`로 한 번에 띄운다.
-> docker/psql이 없는 머신에서는 아래 절차 중 **빌드/정적 점검 단계까지만** 수행 가능하고,
-> `make up` / `make migrate` / `swift run …`(서버·relay·worker 기동)는
-> `runtime-unverified`로 남는다.
+> docker/psql이 없는 머신에서는 빌드/정적 점검 단계까지만 수행 가능하다.
 
 이 문서는 momo v0를 **로컬에서 처음부터 끝까지 기동**하는 순서를 정리한다.
 정본 스펙은 [`research/07-deepdive/04-self-build-l4-spec.md`](../research/07-deepdive/04-self-build-l4-spec.md),
@@ -25,8 +24,8 @@
 | 요구 | 확인 | 비고 |
 |---|---|---|
 | **Swift 6.2** | `swift --version` → `6.2.x` | `.swift-version` = `6.2`. 빌드 게이트의 전제. |
-| **Docker + Docker Compose v2** | `docker compose version` | `make up`이 사용. **이 환경엔 없음 → runtime-unverified.** |
-| **psql (PostgreSQL 18 client)** | `psql --version` | `make migrate`(`scripts/migrate.sh`)가 사용. **이 환경엔 없음 → runtime-unverified.** |
+| **Docker + Docker Compose v2** | `docker compose version` | `make up`이 사용. MOMO-001/002에서 Docker Desktop 기준 검증됨. |
+| **psql (PostgreSQL 18 client)** | `psql --version` | `make migrate`(`scripts/migrate.sh`)가 사용. Homebrew `libpq` 경로도 자동 감지. |
 | **hermes 게이트웨이** | (외부) | 에이전트 Live Tool-Call 데모(D)에만 필요. 없어도 D 외 경로는 동작. |
 
 > Postgres / Centrifugo는 별도 설치할 필요 없다 — `make up`이 컨테이너로 띄운다.
@@ -131,8 +130,8 @@ docker compose -f infra/docker-compose.yml logs -f
 중지: `make down`. 데이터까지 지우려면 `docker compose -f infra/docker-compose.yml down -v`
 (볼륨 `momo-pgdata` 삭제).
 
-> **`runtime-unverified (no docker/psql)`** — 이 환경엔 docker가 없어 `make up`은 실행 불가.
-> compose 파일은 정적으로만 점검됨. PG18 + Centrifugo v6 환경에서 별도 검증 필요.
+> **검증됨:** MOMO-001/002에서 Docker Desktop 기준 PG18+Centrifugo v6 health, migrate 멱등,
+> server health, 메시지 송신, OutboxRelay→Centrifugo publish/history를 확인했다.
 
 ---
 
@@ -153,7 +152,7 @@ make migrate                                                   # = sh scripts/mi
 `psql`이 없으면 스크립트는 **실패하지 않고** 안내(적용 대상 목록)만 출력하고 0으로 종료한다
 (CI/로컬 친화). 즉 `make migrate` 자체는 psql 부재 환경에서도 깨지지 않는다.
 
-> **`runtime-unverified (no docker/psql)`** — psql 부재로 실제 적용은 불가. 스크립트/SQL은 정적 점검만.
+> **검증됨:** MOMO-001/002에서 `make migrate` 재실행 시 `적용 0, 스킵 2`로 멱등 통과.
 
 ### 4.1 psql 없이 컨테이너 안에서 적용 (대안)
 
@@ -215,8 +214,8 @@ swift run --package-path workers/AgentWorker AgentWorker
   비스트리밍 폴백 포함(§6.3). 루프가드 G1~G3 + A2A depth(§3.3/§3.4).
 - **hermes 게이트웨이가 떠 있어야** 에이전트 턴이 실제로 동작(D 데모). `HERMES_BASE_URL`/`HERMES_API_KEY`.
 
-> **`runtime-unverified (no docker/psql[/hermes])`** — 위 세 바이너리는 `swift build`로 컴파일은
-> 검증되지만, DB·Centrifugo(·hermes) 없이는 런타임이 검증되지 않는다.
+> **검증됨/미검증 구분:** MomoServer + OutboxRelay는 MOMO-001/002에서 DB·Centrifugo 실연결 검증됨.
+> AgentWorker↔hermes SSE는 실제 hermes 또는 OpenAI-compatible mock이 필요해 후속 MOMO-004에서 닫는다.
 
 ---
 
@@ -268,9 +267,9 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 |---|---|---|
 | `make build` | `SWIFT_PKGS` 중 `Package.swift` 있는 패키지 각각 `swift build` (Core/server/relay/worker/macOS) | **build-verifiable** (Swift 6.2 있음) |
 | `make test` | 동일 패키지 각각 `swift test` | build-verifiable |
-| `make migrate` | `sh scripts/migrate.sh` → `psql`로 `server/Migrations/*.sql` 번호순 적용 | **runtime-unverified (no psql)** |
-| `make up` | `docker compose -f infra/docker-compose.yml up -d` | **runtime-unverified (no docker)** |
-| `make down` | `docker compose -f infra/docker-compose.yml down` | runtime-unverified (no docker) |
+| `make migrate` | `sh scripts/migrate.sh` → `psql`로 `server/Migrations/*.sql` 번호순 적용 | runtime-verifiable; MOMO-001/002에서 pass |
+| `make up` | `docker compose -f infra/docker-compose.yml up -d` | runtime-verifiable; MOMO-001/002에서 pass |
+| `make down` | `docker compose -f infra/docker-compose.yml down` | runtime-verifiable |
 
 - 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`/`MomoMacSmoke`)은 Makefile 타깃이 아니라
   **5·6장의 `swift run … <Executable>`로 직접** 띄운다.
@@ -283,11 +282,12 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 
 | 증상 | 원인/조치 |
 |---|---|
-| `make up` 실패: `docker: command not found` | Docker 미설치. 이 환경의 정상 상태 — `runtime-unverified`. |
+| `make up` 실패: `docker: command not found` | Docker Desktop 설치/기동 필요. docker/psql 없는 머신에서는 해당 runtime goal을 닫지 말고 `runtime-unverified`로 남긴다. |
 | `make migrate`가 "psql 을 찾을 수 없습니다" 출력 후 종료 | psql 미설치. 적용 대상만 나열하고 비-실패 종료. psql 설치 후 재실행하거나 §4.1 컨테이너 경로 사용. |
 | 메시지가 클라에 실시간 전달 안 됨 | `OutboxRelay` 미기동. 서버는 commit만 하고 fan-out은 relay 담당. relay 로그 확인. |
 | 에이전트가 응답 안 함(D 데모) | `AgentWorker` 미기동 또는 hermes 게이트웨이 미연결. `HERMES_BASE_URL`/`HERMES_API_KEY` 확인. |
-| Centrifugo subscribe 거부 | `centrifugo.json`의 proxy URL(`api:8080`)과 서버 `PORT` 불일치, 또는 `CENT_TOKEN_HMAC` 불일치. |
+| Centrifugo HTTP API 401 | compose가 `CENTRIFUGO_HTTP_API_KEY=${CENT_API_KEY}`로 주입되는지 확인. Centrifugo v6는 일반 JSON `"${CENT_API_KEY}"`를 치환하지 않는다. |
+| Centrifugo subscribe 거부 | `centrifugo.json`의 `channel.proxy.subscribe.endpoint`(`api:8080`)과 서버 `PORT` 불일치, 또는 `CENT_TOKEN_HMAC` 불일치. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |
 
 ---
