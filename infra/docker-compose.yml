@@ -1,5 +1,5 @@
-# runtime-unverified (no docker/psql) — 이 환경에는 docker/psql 부재.
-# 본 파일은 정적으로만 작성/점검됨. `docker compose up`은 PG18+Centrifugo v6 환경에서 별도 검증 필요.
+# MOMO-001 runtime-verified: PostgreSQL 18 + Centrifugo v6 compose health passes
+# with worktree-scoped env/ports. Relay/worker runtime services are later M1 gates.
 #
 # momo v0 인프라 — L4 스펙 §1.1 단일 호스트 토폴로지.
 #   - PostgreSQL 18 : SOURCE OF TRUTH (msg/seq/hlc/outbox/ledger). native uuidv7().
@@ -9,15 +9,12 @@
 # 환경변수는 infra/.env.example 참고(cp infra/.env.example .env 후 값 채움).
 # `make up` / `make down`이 이 파일(infra/docker-compose.yml)을 사용한다.
 
-name: momo
-
 services:
   # ---------------------------------------------------------------------------
   # PostgreSQL 18 — SoT. uuidv7() 네이티브 전제(스펙 §0.5 D1 / schema_v0.sql).
   # ---------------------------------------------------------------------------
   postgres:
     image: postgres:18
-    container_name: momo-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-momo}
@@ -27,7 +24,9 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # PostgreSQL 18 images keep versioned data directories under this root.
+      # Mounting /var/lib/postgresql/data makes the container reject startup.
+      - pgdata:/var/lib/postgresql
     healthcheck:
       # pg_isready: DB가 연결 수락 가능한지 확인 → healthcheck green 게이트(§9.1).
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-momo} -d ${POSTGRES_DB:-momo}"]
@@ -42,7 +41,6 @@ services:
   # ---------------------------------------------------------------------------
   centrifugo:
     image: centrifugo/centrifugo:v6
-    container_name: momo-centrifugo
     restart: unless-stopped
     # config 파일을 명시(env 인터폴레이션 ${CENT_TOKEN_HMAC}/${CENT_API_KEY}는
     # Centrifugo가 기동 시 직접 치환 — .env가 컨테이너 환경으로 주입됨).
@@ -94,4 +92,3 @@ services:
 
 volumes:
   pgdata:
-    name: momo-pgdata

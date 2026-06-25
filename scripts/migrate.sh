@@ -15,8 +15,8 @@
 # 사용:  make migrate            (Makefile 이 `sh scripts/migrate.sh` 호출)
 #    또는 DATABASE_URL=... sh scripts/migrate.sh
 #
-# runtime-unverified (no docker/psql) — 이 환경엔 psql/PG 부재. 스크립트는
-# 정적으로만 작성/점검됨. 실제 적용은 PG18 환경에서 별도 검증 필요.
+# MOMO-001 runtime-verified: PG18 Docker + psql 18 apply 001/002 and idempotent
+# re-run pass. Later M1 tickets cover relay/RLS/hermes runtime gates.
 # =============================================================================
 set -eu
 
@@ -25,8 +25,14 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 MIGRATIONS_DIR="$REPO_ROOT/server/Migrations"
 
-# --- psql 부재 시: 안내 출력 후 종료 (CI/로컬에서 친절하게) ---------------------
-if ! command -v psql >/dev/null 2>&1; then
+# --- psql 확인: Homebrew libpq keg-only 설치도 자동 감지 -----------------------
+if command -v psql >/dev/null 2>&1; then
+  PSQL_BIN=$(command -v psql)
+elif [ -x /opt/homebrew/opt/libpq/bin/psql ]; then
+  PSQL_BIN=/opt/homebrew/opt/libpq/bin/psql
+elif [ -x /usr/local/opt/libpq/bin/psql ]; then
+  PSQL_BIN=/usr/local/opt/libpq/bin/psql
+else
   cat <<'EOF'
 [migrate] psql 을 찾을 수 없습니다 → 마이그레이션을 적용할 수 없습니다.
           runtime-unverified (no docker/psql).
@@ -53,10 +59,10 @@ fi
 
 # --- 연결 인자 구성: DATABASE_URL 우선, 없으면 표준 PG* 환경변수 사용 -----------
 if [ "${DATABASE_URL:-}" != "" ]; then
-  PSQL="psql ${DATABASE_URL}"
+  PSQL="$PSQL_BIN ${DATABASE_URL}"
 else
   echo "[migrate] DATABASE_URL 미설정 → 표준 PG* 환경변수(PGHOST/PGUSER/...) 로 연결 시도."
-  PSQL="psql"
+  PSQL="$PSQL_BIN"
 fi
 
 # psql 공통 플래그: 에러 시 즉시 중단, 자동커밋 OFF(파일 단위 tx), 조용히.

@@ -1,13 +1,21 @@
 # momo — Phase 0 빌드 STATUS
 
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
-> 검증 환경: Swift 6.2.3 (arm64-apple-macosx). **docker / psql 부재** → DB·Centrifugo·hermes 런타임은 미검증.
+> 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). **hermes 부재** → 에이전트 e2e는 미검증.
 
 ## 0. Repo Bootstrap Hardening (2026-06-24)
 
 - Centrifugo/server 계약을 `/v1/centrifugo/subscribe` + `ch:ws<workspaceUUID>.<channelUUID>` / `agent:ws<workspaceUUID>.<agentMemberUUID>`로 정렬하고, legacy GitHub bootstrap은 guard 처리.
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
-- 런타임 e2e는 계속 **runtime-unverified (no docker/psql/hermes)**: seq 동시성, RLS, outbox→relay→Centrifugo, hermes SSE는 M1 환경에서 확인 필요.
+- MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless까지 검증됨. RLS, relay publish, hermes SSE는 후속 M1 goal에서 확인 필요.
+
+## 0a. MOMO-001 Runtime Gate (2026-06-25)
+
+- `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
+- `make migrate` pass: `001_init.sql` + `002_seed.sql` 적용 성공, 재실행 시 `적용 0, 스킵 2`로 멱등 통과. `scripts/migrate.sh`는 keg-only Homebrew `libpq`의 `psql`도 자동 감지한다.
+- MomoServer runtime pass: `PORT=18080 swift run MomoServer` 후 `GET /health` 200. `POST /v1/.../messages`가 실제 DB에 `message` + `outbox`를 쓰고 `seq=1` 반환.
+- seq gapless 검증: 같은 채널에 동시 10건 송신 결과 `seq=2...11`, DB 집계 `message_count=11`, `max_seq=11`, `missing_seq=NULL`, `outbox_count=11`, `version=1...11`.
+- 남은 runtime-unverified: MOMO-002(outbox relay→Centrifugo publish 왕복), MOMO-003(RLS 교차 테넌트 격리), MOMO-004(AgentWorker↔hermes SSE + 비용 reserve/reconcile).
 
 ## 0a. CI Hotfix (2026-06-25)
 
@@ -26,7 +34,7 @@
 
 > ⚠️ SourceKit(IDE) 진단이 `MomoCore`의 일부 파일에 "Cannot find type …"을 표시했으나, 이는 모듈 그래프 없이 파일 단위로 분석한 **stale 경고**다. 실제 `swift build`는 5개 패키지 모두 **clean(exit 0)**.
 
-## 2. 비-Swift 산출물 (정적 점검만 — runtime-unverified)
+## 2. 비-Swift 산출물 (정적 + MOMO-001 런타임 점검)
 
 | 산출물 | 점검 | 상태 |
 |---|---|---|
@@ -37,7 +45,8 @@
 | `server/Migrations/002_seed.sql` | INSERT 구조 정상(괄호 불균형은 `--`주석 내 한글 괄호 → 무해) | ✅ OK |
 | `scripts/migrate.sh` | `sh -n` | ✅ OK |
 
-> **runtime-unverified (no docker/psql):** SQL 실제 적용·RLS 격리·멱등 재실행, Centrifugo 기동, hermes 연결, 서버↔DB 통합은 **이 환경에서 검증 불가**. PG18 + Centrifugo v6 docker 환경에서 한 단계 더 필요.
+> **MOMO-001에서 검증됨:** PG18+Centrifugo compose health, SQL 001/002 적용 및 멱등 재실행, MomoServer `/health`, 메시지 송신의 `channel_seq` gapless 발급과 `message`/`outbox` 기록.
+> **남은 runtime-unverified:** RLS 격리, outbox relay→Centrifugo publish 왕복, hermes SSE, 비용 회계, Centrifugo 구독/presence/recovery, APNs.
 
 ## 3. 생성 파일 트리 (핵심)
 
@@ -66,18 +75,19 @@ momo/
 ## 4. 컴파일 검증됨 vs 런타임 미검증
 
 - ✅ **컴파일 검증됨**: 5개 Swift 패키지 전부 `swift build` 통과 → 타입·API 계약·시그니처 정합.
-- ⛔ **런타임 미검증 (docker/psql 필요)**:
-  - 서버↔PG18 실제 연결, `channel_seq` 발급 동시성, outbox→relay→Centrifugo publish 왕복.
-  - RLS 테넌트 격리, 마이그레이션/시드 멱등 적용.
+- ⛔ **남은 런타임 미검증**:
+  - outbox→relay→Centrifugo publish 왕복.
+  - RLS 테넌트 격리.
   - AgentWorker↔hermes 게이트웨이 SSE 실연결, reserve/reconcile 비용 회계.
   - Centrifugo 구독/presence/recovery, APNs.
 
 ## 5. 남은 작업
 
-**Phase 0 마무리(런타임):**
-1. docker 환경에서 `make up` → `make migrate`(001→002) → `swift run`(server) 로 헬스체크 + 메시지 송신(seq 발급) 통합 테스트.
-2. OutboxRelay·AgentWorker 기동, agent.partial 스트리밍 왕복 e2e.
-3. hermes 게이트웨이(또는 OpenAI 호환 목) 연결로 김인턴 멘션→응답 1회.
+**M1 런타임 후속:**
+1. ✅ MOMO-001: docker 환경에서 `make up` → `make migrate`(001→002) → `swift run`(server) 로 헬스체크 + 메시지 송신(seq 발급) 통합 테스트 완료.
+2. MOMO-002: OutboxRelay 기동 + outbox→Centrifugo publish 왕복 e2e.
+3. MOMO-003: RLS 테넌트 격리 런타임 검증.
+4. MOMO-004: AgentWorker↔hermes 게이트웨이(또는 OpenAI 호환 목) 연결로 김인턴 멘션→응답 1회 + 비용 reserve/reconcile.
 
 **v0 데모(D/B/C) UI 완성:**
 4. `clients/macOS`를 SwiftPM 라이브러리 → **Xcode `.app` 번들**로(현재는 라이브러리+스모크 실행만 컴파일). Live Tool-Call 카드 / Cost Breathing 링 / Approval Inbox 실데이터 바인딩.
@@ -104,7 +114,7 @@ momo/
 # 컴파일 검증(로컬, 지금 가능)
 make build                  # 또는 각 패키지에서 swift build
 
-# 런타임(docker 환경 필요)
+# 런타임(MOMO-001 검증 완료; .env.worktree 또는 .env 사용)
 cp infra/.env.example .env
 make up                     # postgres:18 + centrifugo:v6
 make migrate                # 001_init → 002_seed

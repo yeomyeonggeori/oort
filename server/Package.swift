@@ -8,8 +8,8 @@
 //   - jwt-kit 5.2.0 exact  (Apache-2.0)  — HS256 app JWT issue/verify; CI Swift 6.1 compatibility
 //   - async-http-client 1.34.0           — CentrifugoClient (POST /api/publish)
 //
-// Runtime needs PostgreSQL 18 + Centrifugo v6 (NOT running in this build env) →
-// see `runtime-unverified` notes in source. `swift build` must stay green.
+// Runtime needs PostgreSQL 18 + Centrifugo v6. MOMO-001 verifies the local
+// Docker path; later M1 tickets cover relay/RLS/hermes runtime gates.
 import PackageDescription
 
 let package = Package(
@@ -23,6 +23,8 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.25.0"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.33.0"),
+        // Keep JWTKit exact until CI moves past Xcode 16.4 / Swift 6.1.2.
+        // 5.3.0+ includes PostQuantum MLDSA APIs unavailable on that runner.
         .package(url: "https://github.com/vapor/jwt-kit.git", exact: "5.2.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.34.0"),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.6.0"),

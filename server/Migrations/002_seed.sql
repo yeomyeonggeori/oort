@@ -1,7 +1,7 @@
 -- =============================================================================
 -- 002_seed.sql — momo v0 데모 시드 (L4 §9.2 MVP / 경험 D·B·C 타깃)
--- runtime-unverified (no docker/psql) — 이 환경엔 psql 부재. 정적으로만 작성/점검.
--- 실제 적용은 PG18 + scripts/migrate.sh(psql) 로 001_init.sql 이후 검증 필요.
+-- MOMO-001 runtime-verified: PG18 + scripts/migrate.sh(psql) applies this
+-- seed after 001_init.sql and skips it on an idempotent re-run.
 --
 -- 시드 내용 (티켓 T03 수용기준):
 --   workspace 1 · human 1 · agent 1(김인턴, model=hermes-agent, base_url placeholder)
@@ -17,12 +17,10 @@
 --   * 전 테이블 RLS FORCE → 테넌트 행 INSERT 전 app.workspace_id 세팅 필수.
 --   * model_pricing 글로벌 행(workspace_id IS NULL)은 policy WITH CHECK 가 NULL 쓰기를
 --     금지하므로(테넌트 위장 방지), 이 트랜잭션 한정 row_security=off 로 우회한다.
---     (migrate.sh 는 DB owner/superuser 컨텍스트 → SET LOCAL row_security 가능.)
+--     (migrate.sh 는 파일 단위 tx + DB owner/superuser 컨텍스트 → SET LOCAL row_security 가능.)
 --
 -- 멱등성: 고정 UUID + ON CONFLICT DO NOTHING. 재실행해도 중복/오류 없음.
 -- =============================================================================
-
-BEGIN;
 
 -- 데모 워크스페이스 컨텍스트(RLS) — 이 tx 동안 모든 테넌트 INSERT 가 통과하도록.
 SET LOCAL app.workspace_id = '00000000-0000-7000-8000-000000000001';
@@ -148,6 +146,4 @@ VALUES
    NULL)        -- reasoning → output 단가로 폴백
 ON CONFLICT (workspace_id, model, currency, effective_from) DO NOTHING;
 
-COMMIT;
-
--- 끝. 적용 검증은 runtime-unverified (no docker/psql).
+-- 끝. MOMO-001에서 적용/멱등 재실행 검증됨.
