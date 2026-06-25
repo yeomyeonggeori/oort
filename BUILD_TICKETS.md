@@ -4,8 +4,7 @@
 > **D Live Tool-Call** · **B 비용 호흡** · **C 승인 인박스** — 을 굴리기 위한 리포 골격·서버·실시간·에이전트 경로를 세운다.
 > 핵심 쓰기경로 = `REST send → (channel_seq bump + message insert + outbox insert) 단일 tx → relay publish`.
 >
-> **툴체인 현실:** 로컬에 `swift 6.2.3` 있음(→ 모든 Swift 패키지는 `swift build` green 필수). `docker`/`psql` 없음
-> (→ docker-compose·SQL·Centrifugo·hermes는 **파일만 작성**, 런타임은 `runtime-unverified (no docker/psql)`).
+> **툴체인 현실:** 로컬에 `swift 6.2.3`, Docker Desktop, `psql` 있음(→ Swift 패키지는 `swift build` green 필수, Docker/psql 가능한 런타임은 M1 goal에서 실제 검증). hermes는 별도 실제 게이트웨이 또는 mock OpenAI-compatible gateway가 필요하다.
 >
 > **표기:** `swift` = Swift 패키지(빌드 검증 대상) · `infra/sql/python` = 파일 존재+정합 검증 · `runtime` = docker/psql 후 검증.
 
@@ -16,10 +15,10 @@
 각 티켓의 체크박스는 아래 등급 중 하나로 검증한다.
 
 - **[swift]** — `swift build`가 green (경고 허용, 에러 0). 미완성부는 `// TODO` + 컴파일 보장.
-- **[infra]** — 파일 존재 + L4 스펙/`schema_v0.sql`과 정합. 런타임은 `runtime-unverified (no docker/psql)`.
+- **[infra]** — 파일 존재 + L4 스펙/`schema_v0.sql`과 정합. Docker/psql로 가능한 범위는 M1 runtime goal에서 검증.
 - **[sql]** — 파일 존재 + DDL/시드가 `schema_v0.sql`(정본)과 정합. 적용은 `runtime-unverified`.
 - **[python]** — `python3 -m py_compile` 통과(문법). 실행은 `runtime-unverified (hermes 게이트웨이 필요)`.
-- **[runtime]** — docker/psql 가용 시에만 검증(현재 환경 밖). 티켓 내 별도 표시.
+- **[runtime]** — Docker/psql로 가능한 검증은 수행. hermes 등 외부 의존이 필요하면 실제 의존성 또는 mock 준비 후 검증하고, 못 닫는 범위만 `runtime-unverified` 표시.
 
 ---
 
@@ -53,20 +52,20 @@
 - [ ] 디렉터리 placeholder 생성: `server/` · `relay/` · `workers/` · `clients/Core/` · `clients/macOS/` · `infra/` · `adapters/hermes/`.
 - [ ] 최상위 `.swift-version` = `6.2`.
 - [ ] `schema_v0.sql`은 **그대로 둠**(이동·수정 금지).
-- 수용: 파일 존재 + 디렉터리 구조가 L4 §9.3과 정합. `runtime-unverified (no docker/psql)`는 해당 없음(파일만).
+- 수용: 파일 존재 + 디렉터리 구조가 L4 §9.3과 정합. runtime 검증은 해당 없음(파일만).
 
 ### ☐ T02-infra — 인프라 정의 `[infra]` · 의존: T01
 - [ ] `infra/docker-compose.yml` — `postgres:18`(POSTGRES_* env, healthcheck, named volume), `centrifugo/centrifugo:v6`(config 마운트, `8000` 포트, healthcheck). relay/worker는 추후(주석).
 - [ ] `infra/centrifugo.json` — L4 §4.2 namespace config 그대로: `ch`/`dm`/`agent`/`user` namespace, presence/history/recovery, subscribe proxy(`/v1/centrifugo/subscribe`), workspace-qualified `ch:ws<workspaceUUID>.<channelUUID>` regex, client token HMAC + subscription_token, `http_api.key`.
 - [ ] `infra/.env.example`(또는 루트 `.env.example`) — DB(POSTGRES_*) / Centrifugo(CENT_TOKEN_HMAC, CENT_API_KEY) / JWT(JWT_HMAC) / hermes(HERMES_BASE_URL, HERMES_API_KEY) 키.
-- [ ] 파일 상단 `# runtime-unverified (no docker/psql)` 주석 명시.
-- 수용: `history_meta_ttl > history_ttl` 제약 충족, namespace 4종 모두 명시(상속 없음). `runtime-unverified (no docker/psql)`.
+- [ ] 파일 상단 `# runtime-unverified` 주석 명시.
+- 수용: `history_meta_ttl > history_ttl` 제약 충족, namespace 4종 모두 명시(상속 없음). Docker/psql 가능한 검증은 M1 runtime goal에서 수행.
 
 ### ☐ T03-migrations — 마이그레이션 + 시드 `[sql]` · 의존: T01 (env: T02)
 - [ ] `server/Migrations/001_init.sql` = `schema_v0.sql` 내용 복사(정본). 보강 4종 DDL(outbox/비용/APNs §2.2~2.4)이 정본에 이미 있으면 그대로, 없으면 후속 마이그레이션으로 분리 표시.
 - [ ] `server/Migrations/002_seed.sql` — 데모 시드: workspace 1, human 1, agent 1(김인턴, model=`hermes-agent`, base_url placeholder), 채널 `#general` + `#agent-lab`, membership, `channel_seq` 0행(채널당), `model_pricing` 글로벌 1행.
 - [ ] `scripts/migrate.sh` — psql로 번호순 `.sql` 적용 + `schema_migrations` 추적. psql 없으면 안내 출력 후 종료.
-- [ ] 파일/주석에 `runtime-unverified (no docker/psql)` 명시.
+- [ ] 파일/주석에 `runtime-unverified` 명시.
 - 수용: DDL/시드가 `schema_v0.sql` 컬럼·타입과 정합(member kind, channel_seq, uuidv7 PK 등). 적용은 `runtime-unverified`.
 
 ### ☐ T04-core — MomoCore 공유 라이브러리 `[swift]` · 의존: T01
@@ -82,15 +81,15 @@
 - [ ] 라우트: `GET /health` · `POST /v1/auth/login`(스텁 HS256 JWT) · `POST /v1/workspaces/{ws}/channels/{ch}/messages`(**핵심**: §3.1 `channel_seq UPDATE...RETURNING` + message INSERT + outbox INSERT 단일 tx, `client_msg_id` 멱등 ON CONFLICT) · `GET .../messages`(seq cursor 페이지네이션) · `POST /v1/centrifugo/subscribe`(멤버십 인가 콜백 스텁).
 - [ ] `CentrifugoClient`(POST `/api/publish`, `X-API-Key`).
 - [ ] RLS용 트랜잭션마다 `SET LOCAL app.workspace_id`.
-- [ ] **`swift build` green.** DB 미가동 → 런타임 안 됨, 안 되는 부분 `// TODO` + 컴파일 보장.
-- 수용: `cd server && swift build` 통과. 런타임 `runtime-unverified (no docker/psql)`.
+- [ ] **`swift build` green.** DB 런타임은 M1 goal에서 검증, 안 되는 부분 `// TODO` + 컴파일 보장.
+- 수용: `cd server && swift build` 통과. 런타임은 해당 M1 goal에서 별도 검증.
 
 ### ☐ T06-relay — OutboxRelay `[swift]` · 의존: T01 (outbox DDL: T03, publish 규약: T05)
 - [ ] `relay/OutboxRelay/Package.swift` — 실행 패키지. 의존: postgres-nio, async-http-client.
 - [ ] outbox 폴링 루프: `SELECT ... WHERE kind='broadcast' AND status='pending' FOR UPDATE SKIP LOCKED` 클레임 → `CentrifugoClient.publish(version=seq, idempotency_key)` → `status='done'`.
 - [ ] `LISTEN/NOTIFY` 훅(가능하면) + `300ms` 폴 fallback.
 - [ ] **`swift build` green.**
-- 수용: `cd relay/OutboxRelay && swift build` 통과. 런타임 `runtime-unverified (no docker/psql)`.
+- 수용: `cd relay/OutboxRelay && swift build` 통과. 런타임은 해당 M1 goal에서 별도 검증.
 
 ### ☐ T07-worker — AgentWorker `[swift]` · 의존: T01, T04 (쓰기경로: T05, publish: T06)
 - [ ] `workers/AgentWorker/Package.swift` — 실행 패키지. 의존: postgres-nio, async-http-client(+ MomoCore).
@@ -98,7 +97,7 @@
 - [ ] 워커 루프: `outbox(kind='agent_job')` SKIP LOCKED 클레임 → `agent_run` 게이트(step cap/consecutive/depth 스텁) → hermes 호출 → SSE 델타를 message PATCH(스트리밍 흉내)로 게시 → reserve/reconcile 비용 기록 스텁 → `agent.status` publish.
 - [ ] 루프 안전장치(MAX_CONSECUTIVE_AUTO/max_steps/세마포어 §3.3)는 함수 스텁 + 기본값 상수.
 - [ ] **`swift build` green.**
-- 수용: `cd workers/AgentWorker && swift build` 통과. 런타임 `runtime-unverified (no docker/psql + hermes)`.
+- 수용: `cd workers/AgentWorker && swift build` 통과. hermes 경로는 실제 게이트웨이 또는 mock 준비 전까지 `runtime-unverified`.
 
 ### ☐ T08-hermes-adapter — MomoAdapter (Python) `[python]` · 의존: T01 (REST 계약: T05)
 - [ ] `adapters/hermes/momo_adapter.py` — `class MomoAdapter(BasePlatformAdapter)`: `connect`(momo REST 인증 → realtime-token → `agent:` 채널 구독), `send`(REST POST messages, `client_msg_id` 멱등), `handle_message`(멘션 수신 → invoke → 스트림 응답).
@@ -117,10 +116,10 @@
 - 수용: `cd clients/macOS && swift build` 통과.
 
 ### ☐ T10-wiring — 배선 + 문서 `[infra]` · 의존: T01~T09
-- [ ] `docs/RUN.md` — 로컬 기동 순서(`docker compose up` → migrate → server run → worker/relay → macOS 빌드), 환경변수 설명, **"`swift build`는 통과하나 런타임은 docker/psql 필요"** 명확 안내.
+- [ ] `docs/RUN.md` — 로컬 기동 순서(`docker compose up` → migrate → server run → worker/relay → macOS 빌드), 환경변수 설명, Docker/psql 가능 범위와 hermes 필요 범위를 명확 안내.
 - [ ] `Makefile` 타깃이 실제 커맨드와 일치(build = 각 패키지 swift build, migrate = scripts/migrate.sh, up/down = docker compose, test).
 - [ ] `.env.example` 최종 점검(T02 키와 server/relay/worker가 읽는 env 정합).
-- 수용: 문서 존재 + Makefile/.env 정합. `runtime-unverified (no docker/psql)`.
+- 수용: 문서 존재 + Makefile/.env 정합. runtime 미검증 범위는 `runtime-unverified`로 표기.
 
 ---
 
@@ -133,7 +132,7 @@
 - [ ] `swift build` green — `clients/macOS` (lib + smoke) (T09)
 - [ ] `python3 -m py_compile` 통과 — `adapters/hermes/momo_adapter.py` (T08)
 - [ ] 파일 정합 — `infra/*` · `server/Migrations/*` · `scripts/migrate.sh` · `docs/RUN.md` (T02/T03/T10)
-- [ ] **런타임(docker/psql/hermes)은 본 환경 밖** → 모든 `runtime` 항목 `runtime-unverified`로 표기, RUN.md에 기동 절차 명시.
+- [ ] **런타임** → Docker/psql 가능한 항목은 M1 goal에서 실제 검증하고, hermes 등 외부 의존이 필요한 항목만 `runtime-unverified`로 표기한다.
 
 ---
 
