@@ -1,13 +1,13 @@
 # momo — macOS Developer ID 공증(notarize) 직접배포.
 # ⚠️ 검수 게이트(docs/cicd/03-store-readiness-gate.md) PASS 후에만 실행.
+# 2026-06-26: GitHub Actions는 조직 과금/결제 이슈가 해소될 때까지 수동 전용이다.
+# v* 태그 푸시는 release를 자동 실행하지 않는다. M7 PASS + owner approval 뒤 수동 dispatch만 허용한다.
 # 빌드 → match(developer_id) → gym(developer-id) → notarytool submit --wait
 #   → stapler staple → create-dmg → GitHub Release 업로드.
 # notarytool은 직접 호출(fastlane notarize+API Key 버그 #22055 회피, docs/cicd/00 §4).
 name: release-macos
 
 on:
-  push:
-    tags: ["v*.*.*"]
   workflow_dispatch:
 
 concurrency:
@@ -43,7 +43,7 @@ jobs:
 
       # ── 폴백/명시 경로: 직접 notarytool (위 레인의 notarize를 빼고 이 step만 쓸 수도) ──
       - name: (대안) 직접 notarytool 공증
-        if: ${{ false }}        # 기본 비활성. fastlane notarize 불안정 시 true로.
+        if: ${{ vars.ENABLE_DIRECT_NOTARYTOOL == 'true' }}
         run: |
           set -euo pipefail
           echo "$ASC_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"

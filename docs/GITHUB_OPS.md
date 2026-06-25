@@ -87,6 +87,7 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 ### 3.2a GitHub Actions 비주요 기간: Local PR Gate
 
 당분간 GitHub Actions를 merge의 주 gate로 쓰지 않는 기간에도 PR 품질 기준은 유지한다.
+2026-06-26 현재 `ci-build`, `release-ios`, `release-macos`는 조직 과금/결제 이슈 때문에 원격에서 `disabled_manually` 상태이며, workflow 파일도 자동 `push`/`pull_request`/tag 트리거 없이 `workflow_dispatch` 전용으로 둔다.
 
 - 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md).
 - PR body에는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 기록한다.
@@ -99,6 +100,7 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
   ```
 - runtime 변경은 해당 profile을 추가한다: `scripts/verify_rls.sh`, `scripts/verify_agent_worker.sh`, `make up && make migrate` 등.
 - merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행한다. Actions 확인 단계는 Actions를 다시 주 gate로 켤 때 복원한다.
+- Actions를 다시 켜려면 owner approval, billing 상태 확인, branch protection required-check 정리, 그리고 `MOMO-111` local gate script 준비 여부를 먼저 확인한다.
 
 ### 3.2b 5개+ session/worktree 운영
 
