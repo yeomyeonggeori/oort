@@ -254,9 +254,10 @@ M0(baseline)
 
 #### MOMO-112 · 5+ Codex session/worktree orchestration
 - **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** infra · **추정:** M
-- **deps:** MOMO-110
+- **deps:** MOMO-110, MOMO-111
 - **수용기준:**
   - [ ] [infra] `scripts/goal_status.sh`가 issue/branch/worktree/PR/local gate 상태를 한눈에 표시
+  - [ ] [infra] `scripts/goal_claim.sh`, `scripts/goal_release.sh`, `.conductor/setup.sh`가 status board 운영 흐름과 연결
   - [ ] [infra] worktree별 `.env.worktree` 포트/compose project 충돌 방지 확인
   - [ ] [docs] `momo-main` orchestration + worker handoff prompt + merge/review cycle을 문서화
 - **라벨:** `type:infra`, `area:infra`, `type:docs`, `priority:p1`, `size:m`, `agent:codex-ok`

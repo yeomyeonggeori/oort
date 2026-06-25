@@ -147,7 +147,7 @@
 | `MOMO-110` | Local LLM/Agent Protocol/Google Workspace/Trust 리서치와 로드맵 문서화 | docs/spec | M0 |
 | `MOMO-154` | GitHub Actions 자동 실행 차단과 local gate 우선순위 격상 | ci/docs | MOMO-110 |
 | `MOMO-111` | GitHub Actions 비주요 기간용 local PR gate 스크립트와 evidence flow | ci/docs | MOMO-110, MOMO-154 |
-| `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110 |
+| `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
@@ -166,7 +166,8 @@
 - [ ] `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, `ROADMAP.md`, `docs/BACKLOG.md`, `STATUS.md`에 비용 방지와 local gate 우선 정책을 반영한다.
 
 ### MOMO-112 수용기준 `[infra/docs]`
-- [ ] issue/branch/worktree/PR/local gate 상태를 `scripts/goal_status.sh` 또는 후속 status board에서 확인.
+- [ ] issue/branch/worktree/PR/local gate 상태를 `scripts/goal_status.sh` status board에서 확인.
+- [ ] `scripts/goal_claim.sh`, `scripts/goal_release.sh`, `.conductor/setup.sh`가 status board 운영 흐름과 연결된다.
 - [ ] worktree별 `.env.worktree`, `COMPOSE_PROJECT_NAME`, `PORT`, `POSTGRES_PORT`, `CENT_PORT`, `HERMES_PORT` 충돌 방지 확인.
 - [ ] `momo-main` orchestration thread와 worker thread handoff prompt 문서화.
 

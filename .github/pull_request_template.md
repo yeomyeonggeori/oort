@@ -10,6 +10,12 @@ Closes #<issue>
 ## 한 일
 - <!-- 변경 요약 bullet. 무엇을 done 상태로 만들었나. -->
 
+## Goal / Worktree
+- Issue: #<issue>
+- Branch: `<type>/<issue>-<slug>`
+- Worktree: `<local path>`
+- Worker lane: `<runtime/backend|macOS UX|docs/spec/protocol|infra/devtooling>`
+
 ## 검증 (등급: [swift]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
 - [ ] Local gate: `scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-agent|macos-ui>` PASS, or scope-specific manual runtime evidence attached
 - [ ] [swift] `swift build` green: <패키지>

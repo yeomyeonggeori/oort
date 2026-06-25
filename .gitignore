@@ -6,6 +6,9 @@ xcuserdata/
 .env
 .env.local
 .env.worktree
+.conductor/local.env
+.conductor/*.tmp
+.conductor/setup.local.sh
 node_modules/
 __pycache__/
 *.pyc
