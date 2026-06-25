@@ -66,15 +66,23 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 
 ### 3.2 이슈 → 실행 흐름
 ```
-이슈 작성(goal+검증등급) ─▶ status:ready ─▶ Codex가 집음(@codex implement this issue 또는 자동 위임 규칙)
-        │                                          │
-        │                                  sandbox: clone → 작업 → swift build → PR open
-        ▼                                          ▼
-  picker 규칙(AGENTS.md §6)                   PR 본문=AGENTS.md §7, "Closes #N"
+이슈 작성(goal+검증등급) ─▶ status:ready ─▶ claim + worktree ─▶ 계획/리서치 검증
+        │                                                                │
+        ▼                                                                ▼
+  picker 규칙(AGENTS.md §6)                         구현 ─▶ 테스트 ─▶ commit/push ─▶ PR
+                                                                           │
+                                                                           ▼
+                                                   리뷰(보안/품질) ─▶ 최종 테스트 ─▶ merge
+                                                                           │
+                                                                           ▼
+                                                main Actions 확인 ─▶ 로드맵/이슈/마일스톤 정리
 ```
 - **수동 트리거:** 이슈에서 `@codex implement this issue`.
 - **자동 위임(추정/조직 설정 의존):** triage에 들어온 이슈가 규칙에 맞으면 Codex에 자동 할당([upgrades to Codex](https://openai.com/index/introducing-upgrades-to-codex/)). 규칙 기반 자동 위임은 org/플랜 설정에 따라 가용. (추정 — 정확 가용은 org 설정 확인 필요)
 - **품질 레버:** 어려운 이슈는 `codex cloud exec --attempts N`으로 best-of-N 후보 중 선택([upgrades to Codex](https://openai.com/index/introducing-upgrades-to-codex/)). (추정 — 플래그 정확 표기는 CLI reference 확인)
+- **로컬/데스크탑 실행:** `scripts/goal_claim.sh` 같은 운영 스크립트가 있으면 issue assignee/status/branch/worktree를 한 번에 맞춘다. 아직 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만들고 같은 규칙을 따른다.
+- **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → main GitHub Actions green 확인 → 이슈/마일스톤/프로젝트/로드맵 정리까지가 한 사이클이다.
+- **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
 
 ### 3.3 의존성 표현
 - 이슈 본문 `## Depends on:`에 선행 이슈 title/번호. picker(AGENTS.md §6)는 의존이 **모두 닫혀야** 그 이슈를 고른다.
@@ -149,5 +157,8 @@ scripts/github_bootstrap.sh --org Dawn-kim-official --repo momo --skip-issues   
 ## 8. 운영 규칙 요약
 - 한 이슈 = 한 goal = 한 PR. 스코프 늘리지 말 것(필요시 새 이슈).
 - `status:ready` + 의존 충족 + 미할당 = Codex picker 대상.
+- 가능하면 worktree에서 작업한다. 동시에 여러 작업을 받을 수 있도록 root dirty worktree는 건드리지 않는다.
+- 작업 전 계획 문서를 확인하고, 계획이 미흡하면 추가 리서치부터 한다.
+- PR 이후에는 보안/품질 리뷰, 최종 테스트, merge, main Actions 확인까지 완료한다.
 - QA/사용성 게이트(M7) PASS 기록 전에는 M8(스토어/공증 공개 배포) 이슈 착수 금지.
-- 런타임(docker/psql/hermes) 미검증은 `status:runtime-unverified` + STATUS.md에 정직 표기.
+- 런타임 미검증은 `status:runtime-unverified` + STATUS.md에 정직 표기. Docker/psql로 가능한 검증은 수행하고, hermes 등 외부 의존은 실제 의존성 또는 mock 준비를 먼저 검토한다.
