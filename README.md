@@ -102,8 +102,9 @@ momo/
 - **Swift 6.2** (`.swift-version` = `6.2`). 로컬 검증: `swift --version`.
 - **PostgreSQL 18** + **Centrifugo v6** — 런타임 전용. v0 개발은 `docker compose`로 기동(`infra/`).
 
-> **툴체인 현실:** 이 리포는 Swift 패키지는 `swift build`로 컴파일 검증되지만,
-> docker/psql/hermes가 없는 환경에서는 런타임을 검증할 수 없다 → `runtime-unverified (no docker/psql)`.
+> **툴체인 현실:** 이 리포는 Swift 패키지를 `swift build`로 컴파일 검증하고,
+> Docker Desktop + PostgreSQL 18 client가 있으면 DB/실시간 런타임까지 검증한다.
+> hermes SSE 경로는 실제 hermes 또는 OpenAI-compatible mock이 필요하다.
 > 로컬 기동 절차(환경변수 · `make up` → migrate → 서버/relay/worker → macOS)는
 > [`docs/RUN.md`](docs/RUN.md) 참고.
 
@@ -155,7 +156,7 @@ make build                      # Swift 패키지 빌드
 | **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | **G-0~G-G 전부 PASS + 증거 + 03 PASS 블록 기록** (스토어 제출 차단 게이트) |
 | **M8** | 스토어 제출 (App Store + Developer ID) | 🖥📱 | App Store 승인·배포 + 공증 DMG 공개 + Sparkle 라이브 (M7 PASS 후에만) |
 
-> **현재 위치 = M0 완료.** 다음 닫을 차례 = **M1**(이 환경엔 docker/psql 부재 → 런타임 미검증). 임계 경로: 모바일 `M0→M1→M2→M5→M7→M8`, 데스크탑 `M0→M1→M3→M4→M7→M8`. 후속(출시 후): v1 프리미티브 P1~P6.
+> **현재 위치 = M0 완료, M1 일부 완료.** MOMO-001(server health/seq gapless)과 MOMO-002(outbox relay→Centrifugo publish/history)는 Docker Desktop 기준 검증됨. 다음 닫을 차례 = **M1의 RLS/hermes/staging 잔여**. 임계 경로: 모바일 `M0→M1→M2→M5→M7→M8`, 데스크탑 `M0→M1→M3→M4→M7→M8`. 후속(출시 후): v1 프리미티브 P1~P6.
 
 ### 릴리스 문서 지도
 

@@ -8,9 +8,8 @@ import Logging
 /// middleware + supervised PostgresClient pool), and runs it under a ServiceGroup
 /// with graceful shutdown on SIGTERM/SIGINT.
 ///
-/// runtime-unverified (no docker/psql): the build env has no PostgreSQL 18 /
-/// Centrifugo v6, so the server boots but cannot serve DB-backed routes here.
-/// `swift build` is the verification gate for this package.
+/// Runtime verification status is tracked in STATUS.md. The server has been
+/// exercised against Docker PG18/Centrifugo for health + message writes.
 @main
 struct MomoServerMain {
     static func main() async throws {

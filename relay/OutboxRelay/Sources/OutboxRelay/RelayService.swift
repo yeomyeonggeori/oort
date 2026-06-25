@@ -25,9 +25,8 @@ import ServiceLifecycle
 /// gives sub-second latency; a `pollInterval` (300ms, spec) ticker is the
 /// fallback so the relay drains even if a NOTIFY is missed (L4 §8.1).
 ///
-/// runtime-unverified (no docker/psql): SQL + request shapes match schema_v0 /
-/// Centrifugo v6 but are not exercised against a live DB/broker in this env.
-/// `swift build` is the verification gate for this package.
+/// Runtime verification status is tracked in STATUS.md. Keep the hot path
+/// aligned with schema_v0.sql: outbox rows carry the Centrifugo publish contract.
 struct RelayService: Service {
     let pg: PostgresClient
     let centrifugo: CentrifugoClient
@@ -201,7 +200,8 @@ struct RelayService: Service {
                 logger.debug("published", metadata: [
                     "outboxId": .stringConvertible(row.id),
                     "channel": .string(payload.channel),
-                    "seq": .stringConvertible(payload.version ?? -1),
+                    "version": .stringConvertible(payload.version ?? -1),
+                    "idempotencyKey": .string(payload.idempotencyKey ?? ""),
                 ])
             case .permanentFailure(let reason):
                 logger.error("permanent publish failure; marking failed", metadata: [

@@ -13,8 +13,8 @@ import NIOFoundationCompat
 /// cache) so this at-least-once relay can't produce duplicates or reordering
 /// (L4 §4.3, §8.1).
 ///
-/// runtime-unverified (no Centrifugo running): request shape matches Centrifugo
-/// v6 server API but is not exercised against a live broker in this build env.
+/// Runtime verification status is tracked in STATUS.md. The request shape stays
+/// intentionally narrow so relay evidence maps directly to the outbox payload.
 struct CentrifugoClient: Sendable {
     let httpClient: HTTPClient
     let apiURL: String   // e.g. http://centrifugo:8000/api
