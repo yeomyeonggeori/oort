@@ -150,6 +150,8 @@
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
+| `MOMO-006` | SOPS/age secret lifecycle + pgBackRest PITR skeleton | infra/docs | MOMO-005 |
+| `MOMO-007` | VPS 시크릿 없는 local/staging smoke gate + RUN/DEPLOY 런북 고정 | infra/docs | MOMO-005, MOMO-006 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -157,7 +159,7 @@
 - [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
 
 ### MOMO-111 수용기준 `[ci/docs]`
-- [ ] `scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 설계/구현.
+- [ ] `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 설계/구현.
 - [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
 - [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template에 문서화.
 
@@ -183,6 +185,24 @@
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
 
+### MOMO-006 수용기준 `[infra/docs]`
+- [x] `.sops.yaml.example` — SOPS creation rule template. 실제 public recipient/age private key는 미포함.
+- [x] `infra/prod/secrets.env.example` — staging/prod secret shape. 실제 production secret은 미커밋.
+- [x] `infra/prod/pgbackrest.conf.example`, `postgresql.pgbackrest.conf.example`, `pgbackrest-cron.example` — PITR skeleton.
+- [x] `docs/SECRETS_BACKUP_RUNBOOK.md` — SOPS/age setup, encryption/decryption, pgBackRest stanza/check/full backup/PITR rehearsal 절차.
+- [x] 실제 staging host, age private key, object-store credential, pgBackRest stanza/check/full backup/PITR restore rehearsal은 `runtime-unverified`로 남김.
+
+### MOMO-007 수용기준 `[infra/docs]`
+- [x] GitHub #7 claim: `scripts/goal_claim.sh --force 7`로 별도 worktree/branch `docs/7-staging-run` 생성, issue assign + `status:in-progress`.
+- [x] `scripts/verify_staging_smoke.sh` — prod compose config validation, Caddyfile structural validation, Centrifugo prod config validation, secret placeholder/real-secret guard, SOPS/pgBackRest checklist validation.
+- [x] `scripts/local_gate.sh --profile staging-smoke` — PR-ready local gate profile 추가.
+- [x] `docs/RUN.md`, `docs/DEPLOY.md`, `docs/SECRETS_BACKUP_RUNBOOK.md`, `docs/LOCAL_PR_GATE.md`에 local gate와 host-runtime 경계를 기록.
+- [x] pgBackRest stanza/check/full backup/PITR restore rehearsal은 실제 host/secrets 없이는 `runtime-unverified`로 유지.
+- [x] `scripts/local_gate.sh --profile staging-smoke` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
 ### MOMO-150 수용기준 `[docs/spec]`
 - [ ] `research/11-agent-runtime/`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가.
 - [ ] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리.
@@ -194,8 +214,9 @@
 | id | 한줄 | 수용기준 등급 | 의존 | 상태 |
 |---|---|---|---|---|
 | `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
-| `MOMO-011` | 워크스페이스 스핀업 REST + 초대코드 자동 발급 | swift/runtime | MOMO-010 | 후속 |
-| `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010 | local gate PASS |
+| `MOMO-011` | 초대코드 발급/조회/폐기 REST + redeem 최소 slice | swift/runtime | MOMO-010 | local gate PASS |
+| `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
+
 | `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
 | `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | 후속 제안 |
 
@@ -208,6 +229,16 @@
 - [x] `scripts/local_gate.sh --profile runtime-db` PASS.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 
+### MOMO-011 수용기준 `[swift/runtime]`
+- [x] `InviteRoutes` 추가: `POST /v1/workspaces/{ws}/invites` create, `GET /v1/workspaces/{ws}/invites` list, `POST /v1/workspaces/{ws}/invites/{invite}/revoke` revoke.
+- [x] `POST /v1/workspaces/{ws}/invites/redeem`은 authenticated member가 자기 member_id로 invite를 최소 redemption 처리한다. self-signup의 member/human/membership 생성은 MOMO-014 범위로 남긴다.
+- [x] create/list/revoke는 path workspace와 JWT workspace 일치 + owner/admin active membership을 요구하고, redeem은 active workspace member를 요구한다.
+- [x] raw invite code는 create 응답에서만 반환하고, DB에는 MOMO-010의 `momo_invite_code_hash(raw_code)`만 저장한다.
+- [x] 모든 invite DB 접근은 `SET LOCAL app.workspace_id`가 적용되는 tenant transaction에서 실행해 RLS FORCE와 same-workspace FK를 유지한다.
+- [x] 로컬 HTTP smoke PASS: login 200 → invite create 201 → list 200 → redeem 200 → revoke 200.
+- [x] `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-db` PASS(전체 swift build/test 포함).
+- [x] Swift local gate PASS는 `runtime-db` profile의 `make build` + `make test` 단계로 함께 검증.
+
 ### MOMO-012 수용기준 `[swift/macos-ui]`
 - [x] `MomoMacDevApp`에서 invite code 입력 UI와 idle/validating/success/failure 상태를 볼 수 있다.
 - [x] `LiveChatBackend` stub이 `MOMO-012`/`MOMO-DEV` 성공, `EXPIRED`/`USED-UP`/기타 실패 상태를 결정적으로 반환한다.
@@ -216,6 +247,7 @@
 - [x] `scripts/local_gate.sh --profile macos-ui` PASS.
 - [x] `scripts/local_gate.sh --profile swift` PASS.
 - out of scope: production server `/v1/join` 구현과 DB-backed invite redemption e2e. 새 후속 이슈(`MOMO-014` 제안)로 분리한다.
+
 
 ## M2 Context / Memory / Google Workspace
 
@@ -275,12 +307,13 @@
 | `MOMO-134` | build-macos-apps based SwiftPM GUI run loop | swift/xcode/manual | MOMO-110 |
 | `MOMO-160` | A2A-style agent_run lifecycle alignment | spec/sql/swift | MOMO-151, MOMO-004 |
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
+| `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
 | `MOMO-172` | inbound MCP server v0 skeleton/spec-to-code bridge | swift/docs | MOMO-163 |
 | `MOMO-165` | Capability Cache approval metadata gate | swift | MOMO-151, MOMO-153, MOMO-161, MOMO-164 |
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
-| `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
+| `MOMO-171` | macOS approval_request card decisions | swift/spec | MOMO-170 |
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
 ### MOMO-163 수용기준 `[spec/swift]`
@@ -301,6 +334,16 @@
 - [x] server smoke tests로 descriptor/scope/RLS/audit policy를 고정한다.
 - [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #80을 `status:needs-review`로 전환하고 momo-main에 handoff한다.
+
+### MOMO-166 수용기준 `[spec/docs]`
+- [x] GitHub #91을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`에 approve/reject/expire/resume server contract를 정본화한다.
+- [x] `research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/`에 request/response/effect JSON fixtures를 추가한다.
+- [x] AgentWorker pause/resume, server decision endpoint, macOS `ChatBackend.decideApproval` 흐름을 한 sequence diagram으로 연결한다.
+- [x] 실제 endpoint/idempotency migration/expiry sweeper/resume runtime e2e는 후속 runtime ticket으로 분리한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #91을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 호환성 원칙:
 

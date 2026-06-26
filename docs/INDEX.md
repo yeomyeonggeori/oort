@@ -118,6 +118,8 @@
 | [`research/11-agent-runtime/fixtures/approval-pause-resume-v0/`](../research/11-agent-runtime/fixtures/approval-pause-resume-v0/) | Approval Pause/Resume v0 JSON fixture(risky tool_call → approval_request → approve/deny → resume/terminate) |
 | [`research/11-agent-runtime/09-inbound-mcp-server-v0.md`](../research/11-agent-runtime/09-inbound-mcp-server-v0.md) | Inbound MCP Server v0 정본 스펙(search/fetch/post/approval-safe tool call + Context Packet/Memory/Capability 권한 연결) |
 | [`research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`](../research/11-agent-runtime/fixtures/inbound-mcp-server-v0/) | Inbound MCP Server v0 JSON fixtures(tools/resources/prompts discovery, approval-safe tool-call proposal) |
+| [`research/11-agent-runtime/10-approval-decision-server-contract-v0.md`](../research/11-agent-runtime/10-approval-decision-server-contract-v0.md) | Approval Decision Server Contract v0 정본 스펙(approve/reject/expire/resume API·DB·event·worker/macOS 연결) |
+| [`research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/`](../research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/) | Approval Decision Server Contract v0 JSON fixtures(approve/reject request/response, expiry result, resume job payload, decided event) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

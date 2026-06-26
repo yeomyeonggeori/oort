@@ -1,0 +1,22 @@
+{
+  "fixture_id": "approval_decision_server_contract_v0_approve_response",
+  "ticket": "MOMO-166",
+  "status_code": 200,
+  "body": {
+    "approval_id": "00000000-0000-7000-8000-000000000901",
+    "status": "approved",
+    "decided_by": "00000000-0000-7000-8000-000000000201",
+    "decided_at_ms": 1782463200000,
+    "decision_reason": "The issue title/body are safe."
+  },
+  "server_effects": [
+    "update approval.status='approved'",
+    "insert audit_log(action='approval.approved')",
+    "update agent_run.status='queued'",
+    "insert outbox(kind='agent_job') with resume_from_approval_id",
+    "insert outbox(kind='broadcast') for approval.decided/message.edited"
+  ],
+  "maps_to": {
+    "momo_core": "ApprovalDecisionReceipt"
+  }
+}
