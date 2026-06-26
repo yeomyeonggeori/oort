@@ -177,6 +177,24 @@
 - [ ] ROADMAP/BACKLOG/INDEX/STATUS에 MOMO-151~153, MOMO-160~163, MOMO-170~172 후속 로드맵 반영.
 - [ ] 코드/스키마 구현 없이 문서/스펙만 변경.
 
+## M2 멀티팀 온보딩
+
+| id | 한줄 | 수용기준 등급 | 의존 | 상태 |
+|---|---|---|---|---|
+| `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
+| `MOMO-011` | 워크스페이스 스핀업 REST + 초대코드 자동 발급 | swift/runtime | MOMO-010 | 후속 |
+| `MOMO-012` | 초대코드 자가가입 플로우 + audit_log | swift/runtime | MOMO-011 | 후속 |
+| `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
+
+### MOMO-010 수용기준 `[sql/runtime]`
+- [x] `server/Migrations/003_onboarding.sql` 신규 추가(`schema_v0.sql` 미수정).
+- [x] raw invite code는 저장하지 않고 `momo_generate_invite_code()` + `momo_invite_code_hash(raw_code)` 패턴으로 high-entropy bearer secret을 해시 저장한다.
+- [x] `invite_code`에 `workspace_id`, `role`, `max_uses`, `used_count`, `expires_at`, `revoked_at`, `revoked_by`, `created_by`, `last_used_at`을 두고 same-workspace member FK와 active lookup index를 둔다.
+- [x] `invite_code_redemption`으로 성공 redemption audit trail을 남긴다.
+- [x] `invite_code`/`invite_code_redemption`을 신규 RLS DO-block에 등록하고 `FORCE ROW LEVEL SECURITY` + `SET LOCAL app.workspace_id` 원칙을 유지한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+
 ## M2 Context / Memory / Google Workspace
 
 | id | 한줄 | 수용기준 등급 | 의존 |
