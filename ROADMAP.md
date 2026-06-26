@@ -27,7 +27,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest PITR restore rehearsal, 외부 hermes staging 연결은 host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
-     · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준
+     · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준이며 `runtime-relay` profile은 MOMO-115에서 자동화됨
      · M2 진입: MOMO-010에서 schema_v0.sql 정본을 건드리지 않고 003_onboarding.sql 초대코드 DB 확장을 시작
      · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — M7 실측/판정은 미진행
 ```
@@ -64,6 +64,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
 | `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-agent|macos-ui|all` + PR evidence 출력 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | `scripts/goal_status.sh` board + `goal_claim/release` + `.conductor/setup.sh` + handoff/충돌 방지 정본 |
+| `MOMO-115` | M1 | runtime-relay local gate 자동화 | `scripts/verify_relay.sh` + `local_gate --profile runtime-relay`로 server send→outbox pending→relay claim→Centrifugo history→outbox done→`version=message.seq` evidence |
 | `MOMO-005` | M1 | staging/prod compose skeleton | Caddy 자동 TLS, PostgreSQL 18, Redis, Centrifugo v6 Redis engine, api/relay/worker compose skeleton |
 | `MOMO-006` | M1 | SOPS/age + pgBackRest skeleton | secret template, pgBackRest config/cron, PITR rehearsal runbook; 실제 host rehearsal은 `runtime-unverified` |
 | `MOMO-007` | M1 | local/staging smoke 운영 gate | `scripts/verify_staging_smoke.sh` + `local_gate --profile staging-smoke`; 실제 URL/TLS/PITR는 host-runtime |
@@ -169,7 +170,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`, Memory Plane v0 정본은 `research/11-agent-runtime/05-memory-plane-v0.md`, Capability Cache v0 정본은 `research/11-agent-runtime/06-capability-cache-v0.md`, Agent Run Lifecycle v0 정본은 `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`, Approval Pause/Resume v0 정본은 `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, Approval Decision Server Contract v0 정본은 `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`, Hermes Adapter Contract v0 정본은 `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`이며, runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
 - **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. Approval은 client-only card가 아니라 `agent_run.status='awaiting_approval'`로 멈추는 protocol checkpoint다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`, `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`.
 - **Google Workspace connector**(M2~M3): v0는 per-user OAuth + read-mostly sync(Drive metadata/excerpt, Gmail thread read, Calendar read)로 시작하고, external write는 approval card 뒤에 둔다. Domain-wide delegation은 enterprise 옵션.
-- **Local PR gate / multi-session ops**(M1): GitHub Actions는 현재 비용/결제 이슈로 disabled/manual-only이며, PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
+- **Local PR gate / multi-session ops**(M1): GitHub Actions는 현재 비용/결제 이슈로 disabled/manual-only이며, PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. `runtime-relay`는 MOMO-115부터 Docker compose/migrate/server send/outbox/relay/Centrifugo evidence까지 자동화된다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
 
 ### 3.2 🖥 데스크탑 트랙 (macOS)
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.

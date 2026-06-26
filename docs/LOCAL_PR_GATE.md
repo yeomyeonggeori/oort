@@ -48,7 +48,7 @@ Profiles:
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
 | `staging-smoke` | staging/prod config/runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` for prod compose config, Caddyfile structure, Centrifugo Redis config, secret-template guard, and SOPS/pgBackRest checklist |
 | `runtime-db` | migrations/server/RLS changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` |
-| `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh`; until that script exists this profile fails honestly and points to the MOMO-002 manual path |
+| `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to launch `MomoMacDevApp` |
 | `all` | merge-critical/runtime-wide changes | all profiles in one run, with shared bootstrap deduped except migration idempotency; fails if any runtime profile is not automated yet |
@@ -68,9 +68,9 @@ checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus
 staged/unstaged diffs. For exploratory pre-commit runs only, use
 `LOCAL_GATE_ALLOW_DIRTY=1`; do not paste that as final merge evidence.
 
-`runtime-relay` is deliberately not green until `scripts/verify_relay.sh` exists.
-Relay/realtime PRs must use the MOMO-002 manual verification path and describe it
-in the PR body until that automation lands.
+`runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/realtime
+PRs must use this profile unless the machine cannot run Docker/psql; in that
+case record the blocker and keep the affected runtime scope unverified.
 
 ## 3. Manual Fallback
 
@@ -110,7 +110,7 @@ Use the profile that matches the changed surface.
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` |
 | `staging-smoke` | MOMO-005/006/007 deploy config, Caddy/Centrifugo, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `runtime-db` | migrations/server/RLS changes | `scripts/local_gate.sh --profile runtime-db` |
-| `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` once `scripts/verify_relay.sh` exists; otherwise use MOMO-002 manual evidence |
+| `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for real window launch |
 
