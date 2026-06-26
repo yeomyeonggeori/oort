@@ -166,7 +166,7 @@
         "bulk_update",
         "delete_ticket"
       ],
-      "input_schema_ref": "momo://capability-cache/ticket.create/v1",
+      "input_schema_ref": "momo://capability-cache/ticket.create/schemas/input/sha256:ticketcreatev1",
       "capability_version": "momo-ticket@0.1.0",
       "policy_version": "workspace-policy@2026-06-25"
     }

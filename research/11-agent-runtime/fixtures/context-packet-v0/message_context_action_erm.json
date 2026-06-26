@@ -167,7 +167,7 @@
         "close_risk",
         "change_owner_without_approval"
       ],
-      "input_schema_ref": "momo://capability-cache/erm.create_risk/v1",
+      "input_schema_ref": "momo://capability-cache/erm.create_risk/schemas/input/sha256:ermcreateriskv1",
       "capability_version": "momo-erm@0.1.0",
       "policy_version": "workspace-policy@2026-06-25"
     }

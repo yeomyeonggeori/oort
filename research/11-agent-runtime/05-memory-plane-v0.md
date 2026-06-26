@@ -49,6 +49,8 @@ A Context Packet must include only the projected, bounded ref. It must not inlin
 
 Memory Plane fixtures may show a partial projection with `schema = "momo.context_packet.memory_refs_projection.v0"`. That shape is not a full Context Packet; it contains only the `packet_id`, projected `memory_refs`, and optional memory redactions used to prove how Memory Plane feeds Context Packet v0.
 
+Capability Cache v0 is a separate plane, defined by `research/11-agent-runtime/06-capability-cache-v0.md`. Provider grant revocation, workspace policy changes, or plugin/source invalidation may force Memory Plane revalidation, but capability invalidation does not delete memory items. It only prevents future Context Packets from using affected tools or source refs until the relevant permission checks pass again.
+
 ## 4. Memory Item Shape
 
 All fields use snake_case JSON. IDs are UUID strings unless noted.
@@ -373,7 +375,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/memory-plane-v0/`.
 
 ## 17. Follow-Up Implementation Notes
 
-- `MOMO-153` should define capability/tool cache invalidation independently from memory retrieval.
+- `MOMO-153` defines capability/tool cache invalidation independently from memory retrieval in `research/11-agent-runtime/06-capability-cache-v0.md`.
 - `MOMO-160` should attach memory retrieval decisions to `agent_run` lifecycle.
 - `MOMO-161` should ensure approval outcomes can become `decision`, `task_state`, or `artifact_ref` memory only through this spec.
 - `MOMO-171` should render a memory inspector that can show source refs, visibility, expiry, and delete/block actions.

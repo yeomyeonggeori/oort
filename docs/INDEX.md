@@ -108,6 +108,8 @@
 | [`research/11-agent-runtime/fixtures/context-packet-v0/`](../research/11-agent-runtime/fixtures/context-packet-v0/) | Context Packet v0 JSON fixtures(mention, slash command, message context action) |
 | [`research/11-agent-runtime/05-memory-plane-v0.md`](../research/11-agent-runtime/05-memory-plane-v0.md) | Memory Plane v0 정본 스펙(typed memory/source/visibility/expiry/delete/retrieval permission) |
 | [`research/11-agent-runtime/fixtures/memory-plane-v0/`](../research/11-agent-runtime/fixtures/memory-plane-v0/) | Memory Plane v0 JSON fixtures(memory item catalog, retrieval allowed/denied examples) |
+| [`research/11-agent-runtime/06-capability-cache-v0.md`](../research/11-agent-runtime/06-capability-cache-v0.md) | Capability Cache v0 정본 스펙(agent/plugin/MCP capability cache, tool schema refs, TTL, invalidation, audit) |
+| [`research/11-agent-runtime/fixtures/capability-cache-v0/`](../research/11-agent-runtime/fixtures/capability-cache-v0/) | Capability Cache v0 JSON fixtures(capability list, plugin tool schema projection, invalidation/audit examples) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

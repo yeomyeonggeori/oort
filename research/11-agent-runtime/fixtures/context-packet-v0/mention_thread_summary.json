@@ -178,7 +178,7 @@
       "denied_operations": [
         "fetch_full_private_doc"
       ],
-      "input_schema_ref": "momo://capability-cache/docs.search/v1",
+      "input_schema_ref": "momo://capability-cache/docs.search/schemas/input/sha256:docssearchv1",
       "capability_version": "momo-docs@0.1.0",
       "policy_version": "workspace-policy@2026-06-25"
     },
@@ -195,7 +195,9 @@
         "delete_repo",
         "modify_branch_protection"
       ],
-      "input_schema_ref": "momo://capability-cache/github.create_issue/v3",
+      "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+      "resource_scope_ref": "momo://capability-cache/github.create_issue/resource-scopes/sha256:githubrepoallowmomo",
+      "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo",
       "capability_version": "github-plugin@0.3.0",
       "policy_version": "workspace-policy@2026-06-25"
     }

@@ -1,0 +1,336 @@
+{
+  "schema": "momo.capability_cache.snapshot.v0",
+  "fixture": "capability_list_snapshot",
+  "snapshot_id": "61000000-0000-7000-8000-000000000001",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "generated_at": "2026-06-26T09:00:00Z",
+  "policy_version": "capability-policy@2026-06-26",
+  "entries": [
+    {
+      "schema": "momo.capability_cache_entry.v0",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000001",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:agent_capability:kim-intern:agent-555501",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "cache_kind": "agent_capability",
+      "visibility": {
+        "scope": "workspace",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "surface_allowlist": ["mention", "message_context_action"],
+        "required_roles": []
+      },
+      "source": {
+        "kind": "agent_manifest",
+        "provider": "kim_intern",
+        "source_uri": "momo://agents/55555555-5555-7555-8555-555555555501/manifest",
+        "source_version": "kim-intern-agent@0.7.0",
+        "retrieved_at": "2026-06-26T09:00:00Z",
+        "retrieved_by": "momo-server",
+        "checksum": "sha256:agentmanifest0001"
+      },
+      "tool": {
+        "name": "kim_intern.runtime",
+        "display_name": "Kim Intern Runtime",
+        "description": "OpenAI-compatible SSE runtime for channel-visible agent runs.",
+        "provider": "kim_intern",
+        "allowed_operations": ["chat_completion_sse", "tool_call_emit", "usage_report"],
+        "side_effects": "none",
+        "required_grants": ["agent.run"],
+        "idempotency_required": true,
+        "result_kind": "message",
+        "runtime": {
+          "transport": "openai_chat_completions_sse",
+          "supports_streaming": true,
+          "supports_tool_calls": true,
+          "supports_usage": true,
+          "max_context_tokens": 32000,
+          "event_types": ["agent.partial", "tool_call", "tool_result", "usage"]
+        }
+      },
+      "risk": {
+        "level": "read",
+        "side_effects": "none",
+        "writes_external_system": false
+      },
+      "approval": {
+        "approval_policy": "none",
+        "approval_reason": "Runtime availability does not execute external writes."
+      },
+      "schema_ref": {
+        "input_schema_ref": "momo://capability-cache/kim_intern.runtime/schemas/input/sha256:runtimeinput0001",
+        "output_schema_ref": "momo://capability-cache/kim_intern.runtime/schemas/output/sha256:runtimeoutput0001",
+        "schema_hash": "sha256:runtimeinput0001",
+        "schema_format": "openai_tool_schema",
+        "schema_inline_allowed": false
+      },
+      "policy": {
+        "policy_version": "capability-policy@2026-06-26",
+        "plugin_policy_version": null,
+        "provider_grant_version": null,
+        "capability_version": "kim-intern-agent@0.7.0",
+        "schema_version": "runtime-schema@2026-06-26",
+        "pricing_version": "kim-intern-pricing@2026-06-26"
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-06-26T09:10:00Z",
+        "stale_after": "2026-06-26T09:08:00Z",
+        "ttl_seconds": 600,
+        "stale_mode": "refresh_before_use",
+        "refresh_policy": "on_access"
+      },
+      "invalidation": {
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "watched_signals": ["agent_config_changed", "workspace_policy_changed", "manual_refresh"]
+      },
+      "quality": {
+        "validation_status": "valid",
+        "confidence": 1.0
+      },
+      "audit": {
+        "discovered_event_id": "audit_capability_001",
+        "cached_event_id": "audit_capability_002",
+        "last_projection_event_id": null
+      }
+    },
+    {
+      "schema": "momo.capability_cache_entry.v0",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000002",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:plugin_tool_schema:github:create_issue:v3",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "cache_kind": "plugin_tool_schema",
+      "visibility": {
+        "scope": "channel",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "channel_id": "22222222-2222-7222-8222-222222222222",
+        "surface_allowlist": ["slash_command", "message_context_action", "mention"],
+        "required_roles": []
+      },
+      "source": {
+        "kind": "plugin_manifest",
+        "provider": "github",
+        "source_uri": "momo://plugins/github/installations/gh_install_launch/manifest",
+        "source_version": "github-plugin@0.3.0",
+        "retrieved_at": "2026-06-26T09:00:00Z",
+        "retrieved_by": "momo-server",
+        "checksum": "sha256:githubplugin0003"
+      },
+      "tool": {
+        "name": "github.create_issue",
+        "display_name": "Create GitHub Issue",
+        "description": "Create an issue in an allowed repository after human approval.",
+        "provider": "github",
+        "allowed_operations": ["create_issue"],
+        "side_effects": "external_write",
+        "required_grants": ["github.issues.write"],
+        "idempotency_required": true,
+        "result_kind": "task_state"
+      },
+      "risk": {
+        "level": "write",
+        "side_effects": "external_write",
+        "writes_external_system": true
+      },
+      "approval": {
+        "approval_policy": "always",
+        "approval_reason": "Creates external GitHub state."
+      },
+      "schema_ref": {
+        "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+        "output_schema_ref": "momo://capability-cache/github.create_issue/schemas/output/sha256:githubissueoutv1",
+        "schema_hash": "sha256:githubcreateissuev3",
+        "schema_format": "json_schema_2020_12",
+        "schema_inline_allowed": false
+      },
+      "policy": {
+        "policy_version": "capability-policy@2026-06-26",
+        "plugin_policy_version": "github-plugin-policy@2026-06-26",
+        "provider_grant_version": "github-grant@2026-06-26",
+        "capability_version": "github-plugin@0.3.0",
+        "schema_version": "github.create_issue.schema@3",
+        "pricing_version": null
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-06-26T09:30:00Z",
+        "stale_after": "2026-06-26T09:25:00Z",
+        "ttl_seconds": 1800,
+        "stale_mode": "deny",
+        "refresh_policy": "on_access"
+      },
+      "invalidation": {
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "watched_signals": ["plugin_version_changed", "provider_grant_revoked", "workspace_policy_changed", "schema_hash_changed"]
+      },
+      "quality": {
+        "validation_status": "valid",
+        "confidence": 1.0
+      },
+      "audit": {
+        "discovered_event_id": "audit_capability_003",
+        "cached_event_id": "audit_capability_004",
+        "last_projection_event_id": "audit_capability_005"
+      }
+    },
+    {
+      "schema": "momo.capability_cache_entry.v0",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000003",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:mcp_tool_list:obsidian:search_notes:v1",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "cache_kind": "mcp_tool_list",
+      "visibility": {
+        "scope": "personal",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "subject_member_id": "44444444-4444-7444-8444-444444444401",
+        "surface_allowlist": ["mention", "slash_command"],
+        "required_roles": []
+      },
+      "source": {
+        "kind": "mcp_server",
+        "provider": "obsidian",
+        "source_uri": "mcp://obsidian-local/tools/list",
+        "source_version": "obsidian-mcp@1.2.0",
+        "retrieved_at": "2026-06-26T09:00:00Z",
+        "retrieved_by": "momo-server",
+        "checksum": "sha256:obsidianmcp0001"
+      },
+      "tool": {
+        "name": "obsidian.search_notes",
+        "display_name": "Search Obsidian Notes",
+        "description": "Search allowed local vault notes and return citeable excerpts.",
+        "provider": "obsidian",
+        "allowed_operations": ["search_notes", "fetch_note_excerpt"],
+        "side_effects": "external_read",
+        "required_grants": ["obsidian.vault.read"],
+        "idempotency_required": false,
+        "result_kind": "external_source_ref"
+      },
+      "risk": {
+        "level": "read",
+        "side_effects": "external_read",
+        "writes_external_system": false
+      },
+      "approval": {
+        "approval_policy": "none",
+        "approval_reason": "Read-only local search with personal visibility."
+      },
+      "schema_ref": {
+        "input_schema_ref": "momo://capability-cache/obsidian.search_notes/schemas/input/sha256:obsidiansearchv1",
+        "output_schema_ref": "momo://capability-cache/obsidian.search_notes/schemas/output/sha256:obsidiansearchoutv1",
+        "schema_hash": "sha256:obsidiansearchv1",
+        "schema_format": "mcp_tool_schema",
+        "schema_inline_allowed": false
+      },
+      "policy": {
+        "policy_version": "capability-policy@2026-06-26",
+        "plugin_policy_version": "obsidian-mcp-policy@2026-06-26",
+        "provider_grant_version": "obsidian-grant@2026-06-26",
+        "capability_version": "obsidian-mcp@1.2.0",
+        "schema_version": "obsidian.search_notes.schema@1",
+        "pricing_version": null
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-06-26T09:05:00Z",
+        "stale_after": "2026-06-26T09:04:00Z",
+        "ttl_seconds": 300,
+        "stale_mode": "refresh_before_use",
+        "refresh_policy": "mcp_list_changed"
+      },
+      "invalidation": {
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "watched_signals": ["mcp_tool_list_changed", "provider_scope_changed", "manual_refresh"]
+      },
+      "quality": {
+        "validation_status": "valid",
+        "confidence": 1.0
+      },
+      "audit": {
+        "discovered_event_id": "audit_capability_006",
+        "cached_event_id": "audit_capability_007",
+        "last_projection_event_id": null
+      }
+    },
+    {
+      "schema": "momo.capability_cache_entry.v0",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000004",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:model_pricing:kim-intern:default:2026-06-26",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "cache_kind": "model_pricing",
+      "visibility": {
+        "scope": "workspace",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "surface_allowlist": ["mention", "slash_command", "message_context_action", "api"],
+        "required_roles": []
+      },
+      "source": {
+        "kind": "model_pricing_table",
+        "provider": "kim_intern",
+        "source_uri": "momo://pricing/kim-intern/default",
+        "source_version": "kim-intern-pricing@2026-06-26",
+        "retrieved_at": "2026-06-26T09:00:00Z",
+        "retrieved_by": "momo-server",
+        "checksum": "sha256:pricing0001"
+      },
+      "tool": {
+        "name": "kim_intern.pricing.default",
+        "display_name": "Kim Intern Default Pricing",
+        "description": "Usage accounting inputs for reserve/reconcile.",
+        "provider": "kim_intern",
+        "allowed_operations": ["estimate_usage", "reserve_budget", "reconcile_usage"],
+        "side_effects": "spend",
+        "required_grants": ["usage_ledger.write"],
+        "idempotency_required": true,
+        "result_kind": "task_state"
+      },
+      "risk": {
+        "level": "spend",
+        "side_effects": "spend",
+        "writes_external_system": false
+      },
+      "approval": {
+        "approval_policy": "budget_threshold",
+        "approval_reason": "Budget reserve may require approval above workspace threshold."
+      },
+      "schema_ref": {
+        "input_schema_ref": "momo://capability-cache/kim_intern.pricing.default/schemas/input/sha256:pricinginput0001",
+        "output_schema_ref": "momo://capability-cache/kim_intern.pricing.default/schemas/output/sha256:pricingout0001",
+        "schema_hash": "sha256:pricinginput0001",
+        "schema_format": "json_schema_2020_12",
+        "schema_inline_allowed": false
+      },
+      "policy": {
+        "policy_version": "capability-policy@2026-06-26",
+        "plugin_policy_version": null,
+        "provider_grant_version": null,
+        "capability_version": "kim-intern-pricing@2026-06-26",
+        "schema_version": "usage-pricing-schema@1",
+        "pricing_version": "kim-intern-pricing@2026-06-26"
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-06-26T10:00:00Z",
+        "stale_after": "2026-06-26T09:50:00Z",
+        "ttl_seconds": 3600,
+        "stale_mode": "refresh_before_use",
+        "refresh_policy": "scheduled"
+      },
+      "invalidation": {
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "watched_signals": ["model_pricing_changed", "workspace_policy_changed", "manual_refresh"]
+      },
+      "quality": {
+        "validation_status": "valid",
+        "confidence": 1.0
+      },
+      "audit": {
+        "discovered_event_id": "audit_capability_008",
+        "cached_event_id": "audit_capability_009",
+        "last_projection_event_id": null
+      }
+    }
+  ]
+}
