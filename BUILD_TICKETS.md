@@ -239,6 +239,14 @@
 - `#if canImport(FoundationModels)`와 OS availability fallback으로 현재 SwiftPM/local gate를 깨지 않는다.
 - build-macos-apps 플러그인은 `swift build`, `swift test`, test triage, SwiftPM GUI `.app` staging, Codex Run action에 사용한다.
 
+### MOMO-160 수용기준 `[spec/sql/swift]`
+- [ ] `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`에 `agent_run` lifecycle 정본을 추가한다.
+- [ ] A2A Task/Message/Artifact/status를 momo `agent_run`/`message`/`artifact_ref`/`agent.status`에 매핑한다.
+- [ ] `queued`/`running`/`input-required`/`awaiting-approval`/`succeeded`/`failed`/`cancelled`의 의미와 전이를 확정한다.
+- [ ] `input-required`는 추가 입력 요청, `awaiting-approval`은 `approval(status='pending')` 기반 side-effect gate로 분리한다.
+- [ ] Swift model, DB migration, AgentWorker/Hermes runtime 영향 범위를 표로 기록하고, 이번 goal에서 runtime behavior를 바꾸지 않는 부분은 `runtime-unverified`로 남긴다.
+- [ ] `scripts/local_gate.sh --profile docs` 및 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`를 통과한다.
+
 ### MOMO-170 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`에 macOS timeline card taxonomy와 shared metadata contract를 정의한다.
 - [ ] `tool_call`, `approval_request`, `tool_result`, `artifact`가 Context Packet, Memory Plane, Capability Cache, source badge, cost 표시 정보를 어떻게 받는지 `message.props` shape로 고정한다.

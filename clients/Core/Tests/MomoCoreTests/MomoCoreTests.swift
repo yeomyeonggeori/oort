@@ -51,6 +51,11 @@ final class MomoCoreTests: XCTestCase {
     func testRunStatusWireValues() {
         XCTAssertEqual(RunStatus.awaitingApproval.rawValue, "awaiting_approval")
         XCTAssertEqual(RunStatus.timedOut.rawValue, "timed_out")
+        XCTAssertEqual(AgentRunLifecycleStatus.inputRequired.rawValue, "input_required")
+        XCTAssertEqual(RunStatus.paused.lifecycleStatus, .inputRequired)
+        XCTAssertEqual(RunStatus.timedOut.lifecycleStatus, .failed)
+        XCTAssertTrue(RunStatus.succeeded.isTerminal)
+        XCTAssertFalse(RunStatus.awaitingApproval.isTerminal)
     }
 
     func testChannelKindWireValues() {

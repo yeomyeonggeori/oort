@@ -503,9 +503,11 @@ M0(baseline)
 - **수용기준:**
   - [ ] [spec] A2A Task/Message/Artifact/status를 momo `agent_run/message/artifact_ref/agent.status`에 매핑
   - [ ] [spec] queued/running/input-required/awaiting-approval/succeeded/failed/cancelled 상태 의미 확정
+  - [ ] [spec] `input-required`(추가 입력)와 `awaiting-approval`(승인 게이트)을 분리
+  - [ ] [swift/sql] Swift model/DB migration/AgentWorker runtime 영향 범위 기록
   - [ ] [swift] 후속 구현 시 기존 5패키지 build/test green 유지
 - **라벨:** `type:spec`, `area:core`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
-- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+- **참조:** `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`
 
 #### MOMO-161 · approval pause/resume runtime
 - **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
