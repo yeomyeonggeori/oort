@@ -1,0 +1,37 @@
+{
+  "fixture_id": "approval_decision_server_contract_v0_resume_agent_job_payload",
+  "ticket": "MOMO-166",
+  "outbox": {
+    "kind": "agent_job",
+    "workspace_id": "00000000-0000-7000-8000-000000000001",
+    "idempotency_key": "approval-resume:00000000-0000-7000-8000-000000000901"
+  },
+  "payload": {
+    "run_id": "00000000-0000-7000-8000-000000000161",
+    "workspace_id": "00000000-0000-7000-8000-000000000001",
+    "channel_id": "00000000-0000-7000-8000-000000000010",
+    "agent_member_id": "00000000-0000-7000-8000-000000000101",
+    "resume_from_approval_id": "00000000-0000-7000-8000-000000000901",
+    "approved_tool_call": {
+      "call_id": "call_create_issue_001",
+      "name": "github.create_issue",
+      "arguments": {
+        "repo": "Dawn-kim-official/momo",
+        "title": "Demo issue from approved tool call",
+        "body": "This external write must not execute before approval."
+      },
+      "payload_sha256": "sha256:fixture-approved-payload"
+    },
+    "policy_evidence": {
+      "approval_policy": "always",
+      "capability_version": "github-plugin@0.3.0",
+      "policy_version": "capability-policy@2026-06-26"
+    }
+  },
+  "worker_requirements": [
+    "verify approval.status='approved'",
+    "verify payload_sha256 or equivalent frozen-payload check",
+    "execute the approved_tool_call without model mutation",
+    "write tool_result and audit_log against the same run_id"
+  ]
+}
