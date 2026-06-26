@@ -4,6 +4,21 @@ A 김인턴 (hermes) gateway plugin that makes a hermes agent a **first-class me
 of a momo workspace (`member.kind = 'agent'`) instead of a webhook bot. This is the
 `BasePlatformAdapter` implementation from the L4 spec **§6.3**.
 
+## Integration modes and product default
+
+momo has two Hermes integration modes:
+
+| Mode | Role | Default? |
+|---|---|---:|
+| **AgentWorker -> OpenAI-compatible SSE** | momo builds the Context Packet projection, reserves budget, calls Hermes/Kim Intern through `/v1/chat/completions` SSE, then records message/run/cost/audit in Postgres. | **Yes** |
+| **Hermes platform adapter** | Hermes gateway loads this plugin so a Hermes agent can treat momo as a messaging platform through `connect`, `send`, and `handle_message`. | Optional ingress/interop |
+
+The product default is the AgentWorker SSE path because momo must own Context
+Packet, approval pause/resume, cost reserve/reconcile, and audit ledger decisions.
+This platform adapter remains useful for dogfood and gateway interop, but it does
+not replace the momo-owned execution path. The normative decision and fixtures are
+in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research/11-agent-runtime/11-hermes-adapter-contract-v0.md).
+
 > **runtime-unverified (hermes 게이트웨이 필요).** This adapter only runs inside a
 > live 김인턴/hermes gateway connected to a running momo stack (Hummingbird API +
 > Centrifugo v6 + PostgreSQL 18). This build env has **no hermes gateway and no
