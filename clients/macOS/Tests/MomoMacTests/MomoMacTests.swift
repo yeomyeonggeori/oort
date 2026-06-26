@@ -246,6 +246,99 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(updatedMessage.props["decision_reason"]?.stringValue, "needs owner")
         XCTAssertNotNil(updatedMessage.props["decided_at_ms"]?.intValue)
     }
+
+    func testLocalContextCopilotRoutesFoundationModelsAndFallbackStates() {
+        let service = LocalContextCopilotService()
+
+        XCTAssertEqual(service.route(for: .available), .foundationModels)
+        XCTAssertEqual(
+            service.route(for: .fallback(.unsupportedOS)),
+            .deterministicFallback(.unsupportedOS)
+        )
+    }
+
+    func testLocalContextCopilotDeterministicFallbackPreservesSourceHints() async throws {
+        let ws = WorkspaceID()
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: ws,
+            kind: .publicChannel,
+            name: "agent-lab"
+        )
+        let author = MemberID()
+        let messages = [
+            Message(
+                id: MessageID(),
+                channelId: channel.id,
+                seq: 1,
+                hlcTs: 1,
+                authorMemberId: author,
+                body: "Please summarize the release notes for owner@example.com"
+            ),
+            Message(
+                id: MessageID(),
+                channelId: channel.id,
+                seq: 2,
+                hlcTs: 2,
+                authorMemberId: author,
+                body: "Create a GitHub issue only after approval."
+            ),
+        ]
+
+        let preview = await LocalContextCopilotService().preview(LocalContextCopilotRequest(
+            channel: channel,
+            messages: messages,
+            capability: .fallback(.frameworkUnavailable)
+        ))
+
+        XCTAssertEqual(preview.route, .deterministicFallback(.frameworkUnavailable))
+        XCTAssertEqual(preview.sourceHints.map(\.id), ["S1", "S2"])
+        XCTAssertTrue(preview.sourceHints.allSatisfy { $0.uri.hasPrefix("momo://channels/") })
+        XCTAssertTrue(preview.summary.contains("[S1]"))
+        XCTAssertTrue(preview.compressedContext.contains("sources=[S1,S2]"))
+        XCTAssertEqual(preview.classification.intent, "approve")
+        XCTAssertEqual(preview.classification.riskHint, "approval-required")
+        XCTAssertEqual(preview.redactionHints.first?.kind, "email")
+        XCTAssertEqual(preview.redactionHints.first?.sourceId, "S1")
+    }
+
+    @MainActor
+    func testViewModelRefreshesLocalContextCopilotPreviewFromVisibleChannel() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: backend,
+            onboarding: backend,
+            foundationModelsCapability: .fallback(.unsupportedOS)
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        viewModel.setChannels(seed.channels)
+
+        await viewModel.selectChannel(seed.channels[0].id)
+
+        let preview = try XCTUnwrap(viewModel.localContextCopilotPreview)
+        XCTAssertEqual(preview.route, .deterministicFallback(.unsupportedOS))
+        XCTAssertFalse(preview.summary.isEmpty)
+        XCTAssertGreaterThan(preview.sourceHints.count, 0)
+        XCTAssertTrue(preview.compressedContext.contains("sources=["))
+    }
+
+    @MainActor
+    func testLocalContextCopilotKeepsEmbeddedSourceBadgeHints() async throws {
+        let viewModel = await MomoMacDemo.makeViewModel()
+        let pg18 = try XCTUnwrap(viewModel.channels.first(where: { $0.name == "feature-pg18" }))
+
+        await viewModel.selectChannel(pg18.id)
+
+        let preview = try XCTUnwrap(viewModel.localContextCopilotPreview)
+        XCTAssertTrue(preview.sourceHints.contains { hint in
+            hint.uri == "https://github.com/Dawn-kim-official/momo/issues/1"
+        })
+        XCTAssertTrue(preview.sourceHints.contains { hint in
+            hint.title.contains("migration thread")
+        })
+    }
 }
 
 private actor RecordingDecisionChatBackend: ChatBackend {

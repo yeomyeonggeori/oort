@@ -21,6 +21,7 @@ public final class ChatViewModel: ObservableObject {
     private let chat: any ChatBackend
     private let agentTransport: any AgentTransport
     private let onboarding: (any OnboardingInviteBackend)?
+    private let localContextCopilot: LocalContextCopilotService
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
@@ -48,6 +49,8 @@ public final class ChatViewModel: ObservableObject {
     // macOS-only local model capability. Apple framework calls stay in this target;
     // MomoCore remains Foundation-only.
     @Published public private(set) var foundationModelsCapability: FoundationModelsCapabilityState
+    @Published public private(set) var localContextCopilotPreview: LocalContextCopilotPreview?
+    @Published public private(set) var isLocalContextCopilotRefreshing = false
 
     @Published public private(set) var connectionError: String?
 
@@ -57,12 +60,14 @@ public final class ChatViewModel: ObservableObject {
         chat: any ChatBackend,
         agentTransport: any AgentTransport,
         onboarding: (any OnboardingInviteBackend)? = nil,
-        foundationModelsCapability: FoundationModelsCapabilityState = FoundationModelsCapabilityProbe().currentState()
+        foundationModelsCapability: FoundationModelsCapabilityState = FoundationModelsCapabilityProbe().currentState(),
+        localContextCopilot: LocalContextCopilotService = LocalContextCopilotService()
     ) {
         self.chat = chat
         self.agentTransport = agentTransport
         self.onboarding = onboarding
         self.foundationModelsCapability = foundationModelsCapability
+        self.localContextCopilot = localContextCopilot
     }
 
     /// Convenience initializer when one object conforms to both contracts.
@@ -97,6 +102,7 @@ public final class ChatViewModel: ObservableObject {
         selectedChannelId = id
         await loadHistory(channel: id)
         subscribe(channel: id)
+        await refreshLocalContextCopilotPreview()
     }
 
     private func loadHistory(channel: ChannelID) async {
@@ -201,6 +207,24 @@ public final class ChatViewModel: ObservableObject {
             msgs.append(message)
         }
         messagesByChannel[channel] = msgs.sorted(by: Self.seqOrder)
+    }
+
+    // MARK: Local Context Copilot
+
+    public func refreshLocalContextCopilotPreview() async {
+        guard !isLocalContextCopilotRefreshing else { return }
+        isLocalContextCopilotRefreshing = true
+        defer { isLocalContextCopilotRefreshing = false }
+
+        let channel = selectedChannelId.flatMap { selected in
+            channels.first(where: { $0.id == selected })
+        }
+        let request = LocalContextCopilotRequest(
+            channel: channel,
+            messages: visibleMessages,
+            capability: foundationModelsCapability
+        )
+        localContextCopilotPreview = await localContextCopilot.preview(request)
     }
 
     /// Coalesce `agent.partial` deltas into one growing buffer per run (L4 §5.2).
