@@ -4,10 +4,11 @@ import MomoCore
 // MARK: - MessageBubble
 //
 // Renders a single message. Agent messages get FIRST-CLASS rendering of the
-// structured message types (L4 §5.2, schema message_type): tool_call / tool_result /
-// diff / approval_request are rendered as their own cards rather than plain text.
-// These are v0 PLACEHOLDER cards per ticket T09 — correct shape + data wiring,
-// minimal chrome.
+// structured message types (L4 §5.2, schema message_type): tool_call /
+// tool_result / diff / approval_request / artifact are rendered as their own
+// cards rather than plain text. MOMO-170 keeps these cards lightweight but gives
+// them a stable metadata strip for Context Packet, Memory Plane, Capability Cache,
+// source, and cost display.
 //
 // Cost breathing (experience B) attaches a CostBreathingRing to agent bubbles when
 // a CostSnapshot is available for the message's run.
@@ -105,8 +106,13 @@ public struct MessageBubble: View {
 
     private var toolCallCard: some View {
         cardFrame(icon: "wrench.and.screwdriver", tint: MomoTheme.agentAccent, title: "tool_call") {
-            let name = message.props["name"]?.stringValue ?? "tool"
+            let name = message.props["name"]?.stringValue
+                ?? message.props["capability"]?["tool_name"]?.stringValue
+                ?? "tool"
             Text(name).font(.callout.monospaced())
+            if let callId = message.props["call_id"]?.stringValue {
+                Text(callId).font(.caption2.monospaced()).foregroundStyle(.tertiary)
+            }
             if let args = message.props["arguments"] {
                 Text(prettyJSON(args)).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
@@ -120,8 +126,14 @@ public struct MessageBubble: View {
         return cardFrame(icon: "arrow.uturn.backward",
                          tint: isError ? MomoTheme.irreversibleRed : MomoTheme.reversibleGreen,
                          title: isError ? "tool_result (error)" : "tool_result") {
+            if let toolName = message.props["tool_name"]?.stringValue {
+                Text(toolName).font(.callout.monospaced())
+            }
             if let output = message.props["output"] {
                 Text(prettyJSON(output)).font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+            if let artifact = message.props["artifact_ref"] {
+                Text(prettyJSON(artifact)).font(.caption2.monospaced()).foregroundStyle(.tertiary)
             }
         }
     }
@@ -142,6 +154,12 @@ public struct MessageBubble: View {
         cardFrame(icon: "exclamationmark.shield", tint: MomoTheme.costAmber, title: "approval_request") {
             let action = message.props["action_type"]?.stringValue ?? "action"
             Text("Needs approval: \(action)").font(.callout)
+            if let title = message.props["title"]?.stringValue {
+                Text(title).font(.caption)
+            }
+            if let summary = message.props["summary"]?.stringValue {
+                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
             // TODO(T09-followup, experience C): inline [승인]/[거부] wired to decideApproval.
         }
     }
@@ -149,6 +167,12 @@ public struct MessageBubble: View {
     private var artifactCard: some View {
         cardFrame(icon: "paperclip", tint: .secondary, title: "artifact") {
             Text(message.props["title"]?.stringValue ?? "artifact").font(.callout)
+            if let kind = message.props["kind"]?.stringValue {
+                Text(kind).font(.caption).foregroundStyle(.secondary)
+            }
+            if let uri = message.props["uri"]?.stringValue {
+                Text(uri).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+            }
         }
     }
 
@@ -165,6 +189,7 @@ public struct MessageBubble: View {
                 Text(title).font(.caption.bold()).foregroundStyle(tint)
             }
             content()
+            AgentProtocolMetadataStrip(props: message.props)
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
