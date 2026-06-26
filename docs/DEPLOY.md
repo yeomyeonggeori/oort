@@ -12,13 +12,15 @@
 
 - Phase 0 = **5개 Swift 패키지 `swift build` green**.
 - M1 런타임 일부 검증 완료: Docker Desktop 기준 PG18+Centrifugo compose health, migrate 멱등, MomoServer health/seq gapless, OutboxRelay→Centrifugo publish/history.
-- 남은 M1 런타임 검증: RLS 교차 테넌트 격리, AgentWorker↔hermes SSE + 비용 회계, staging URL/TLS/운영 시크릿·백업.
-- 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "런타임 e2e PASS + staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
+- M1 런타임 핵심 검증은 Docker Desktop 기준 MOMO-001~004에서 완료: compose/migrate/server health/seq gapless, OutboxRelay publish/history, RLS 격리, AgentWorker↔OpenAI-compatible SSE mock + 비용 회계.
+- 남은 M1 배포 검증: staging URL/TLS/운영 시크릿·백업·모니터링, 외부 hermes 재확인, WebSocket live subscribe/presence/recovery.
+- 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
 - **선결:** M0 런타임 e2e(서버↔PG18↔Centrifugo↔hermes 1왕복). M2 멀티팀 온보딩은 M1 위에서 성립.
 - **이 문서가 만들/갱신할 산출물(Codex):**
-  - `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 (MOMO-005)
-  - `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
-  - `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
+  - ✅ `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 skeleton (MOMO-005)
+  - ✅ `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
+  - ✅ `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
+  - ✅ `infra/prod/.env.example` — production env 예시, 실제 시크릿 미포함 (MOMO-005)
   - `infra/prod/.env.sops.yaml`(SOPS/age 암호화) + `.sops.yaml` 규칙 (MOMO-006)
   - `infra/prod/pgbackrest.conf` + 백업/복원 스크립트 (MOMO-006)
   - `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
