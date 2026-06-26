@@ -169,7 +169,7 @@ export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo   # .env와 동일 
 make migrate                                                   # = sh scripts/migrate.sh
 ```
 
-- 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(데모 시드).
+- 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(데모 시드), `003_onboarding.sql`(M2 invite_code + redemption audit, schema_v0.sql 미수정).
 - `scripts/migrate.sh`는 `schema_migrations` 테이블로 적용 이력을 추적 → **멱등 재실행 안전**
   (이미 적용된 버전은 SKIP). 각 파일은 `--single-transaction`으로 원자 적용.
 - 연결: `DATABASE_URL` 우선, 없으면 표준 `PG*` 환경변수(`PGHOST`/`PGUSER`/…) 폴백.
@@ -188,6 +188,8 @@ docker compose -f infra/docker-compose.yml exec -T postgres \
   psql -U momo -d momo -v ON_ERROR_STOP=1 < server/Migrations/001_init.sql
 docker compose -f infra/docker-compose.yml exec -T postgres \
   psql -U momo -d momo -v ON_ERROR_STOP=1 < server/Migrations/002_seed.sql
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  psql -U momo -d momo -v ON_ERROR_STOP=1 < server/Migrations/003_onboarding.sql
 ```
 
 (이 경로는 `schema_migrations` 추적을 우회하므로 1회성 부트스트랩 용도. 평상시엔 `make migrate` 권장.)
@@ -331,7 +333,52 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 
 ---
 
-## 8. Makefile 타깃 ↔ 실제 커맨드 정합
+## 8. staging/prod 운영 skeleton (MOMO-005)
+
+`infra/prod/`는 단일 VPS에서 staging/prod 스택을 올리기 위한 **운영 skeleton**이다. 현재 goal은
+파일과 런북 준비까지만 수행하며, 실제 도메인 DNS 변경, TLS 발급, 이미지 배포, prod 기동은 하지 않는다.
+
+| 파일 | 역할 |
+|---|---|
+| `infra/prod/docker-compose.prod.yml` | Caddy 자동 TLS, PostgreSQL 18, Redis, Centrifugo v6 Redis engine, api/relay/worker 서비스 정의. |
+| `infra/prod/Caddyfile` | `API_DOMAIN` → `api:8080`, `REALTIME_DOMAIN` → `centrifugo:8000` reverse proxy + 보안 헤더. |
+| `infra/prod/centrifugo.prod.json` | dev namespace 계약(ch/dm/agent/user)을 유지하면서 engine만 Redis로 전환. subscribe proxy는 compose 내부 `api:8080`. |
+| `infra/prod/.env.example` | staging/prod env 예시. 실제 시크릿은 커밋하지 않고 host-local env 또는 MOMO-006 SOPS/age로 주입. |
+
+### 8.1 정적 점검 (배포 없음)
+
+```sh
+jq empty infra/prod/centrifugo.prod.json
+docker compose --env-file infra/prod/.env.example -f infra/prod/docker-compose.prod.yml config >/tmp/momo-prod-compose.yml
+```
+
+이 점검은 compose/env/config가 파싱되는지만 확인한다. `MOMO_API_IMAGE`/`MOMO_RELAY_IMAGE`/
+`MOMO_WORKER_IMAGE`는 placeholder 태그이며, 실제 image build/push는 후속 배포 파이프라인 범위다.
+
+### 8.2 staging 최초 기동 절차 (후속 MOMO-006/007)
+
+```sh
+# 1) DNS: API_DOMAIN / REALTIME_DOMAIN A/AAAA 레코드를 VPS IP로 지정
+# 2) host-local env 또는 SOPS/age로 실제 값을 주입 (.env.example의 change-me 금지)
+# 3) runtime image tag를 staging tag로 교체
+docker compose --env-file /secure/momo/staging.env -f infra/prod/docker-compose.prod.yml pull
+docker compose --env-file /secure/momo/staging.env -f infra/prod/docker-compose.prod.yml up -d
+
+# 4) 검증
+curl -fsS "https://${API_DOMAIN}/health"
+docker compose --env-file /secure/momo/staging.env -f infra/prod/docker-compose.prod.yml ps
+```
+
+운영 DB 마이그레이션, BYPASSRLS role bootstrap, SOPS/age, pgBackRest 백업/복원, 경량 모니터링은
+MOMO-006/007 범위다. staging URL health green과 TLS 정상 확인 전에는 M1 staging 완료로 표시하지 않는다.
+
+> **보안/불변식:** Caddy만 80/443(ACME/HTTPS)을 노출한다. Postgres, Redis, Centrifugo, api,
+> relay, worker는 compose 네트워크 내부에 둔다. 클라이언트 직접 publish 금지와
+> `REST → message/outbox tx → relay publish` 경로는 prod에서도 동일하다.
+
+---
+
+## 9. Makefile 타깃 ↔ 실제 커맨드 정합
 
 | 타깃 | 실제 커맨드 | 검증 가능성 |
 |---|---|---|
@@ -348,7 +395,7 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 
 ---
 
-## 9. 트러블슈팅
+## 10. 트러블슈팅
 
 | 증상 | 원인/조치 |
 |---|---|
@@ -358,17 +405,19 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 | 에이전트가 응답 안 함(D 데모) | `AgentWorker` 미기동 또는 hermes 게이트웨이 미연결. `HERMES_BASE_URL`/`HERMES_API_KEY` 확인. |
 | Centrifugo HTTP API 401 | compose가 `CENTRIFUGO_HTTP_API_KEY=${CENT_API_KEY}`로 주입되는지 확인. Centrifugo v6는 일반 JSON `"${CENT_API_KEY}"`를 치환하지 않는다. |
 | Centrifugo subscribe 거부 | `centrifugo.json`의 `channel.proxy.subscribe.endpoint`(`api:8080`)과 서버 `PORT` 불일치, 또는 `CENT_TOKEN_HMAC` 불일치. |
+| prod compose가 시크릿을 요구하며 실패 | `infra/prod/.env.example`은 예시다. 실제 staging/prod는 host-local env 또는 SOPS/age로 `change-me-*`를 모두 교체한다. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |
 
 ---
 
-## 10. 빠른 참조
+## 11. 빠른 참조
 
 ```sh
 # --- 빌드/정적 점검만 (docker/psql 없는 환경에서 가능한 전부) ---
 make build
 swift build --package-path clients/macOS && swift run --package-path clients/macOS MomoMacSmoke
 python3 -m py_compile adapters/hermes/momo_adapter.py
+jq empty infra/prod/centrifugo.prod.json
 
 # --- 선택적 수동 UI 확인: macOS window를 열고, 창을 닫으면 종료 ---
 swift run --package-path clients/macOS MomoMacDevApp
@@ -381,4 +430,7 @@ make migrate                     # 스키마 + 데모 시드
 swift run --package-path server MomoServer                 # 터미널 1
 swift run --package-path relay/OutboxRelay OutboxRelay     # 터미널 2
 swift run --package-path workers/AgentWorker AgentWorker   # 터미널 3 (D 데모, hermes 필요)
+
+# --- 운영 skeleton 정적 점검 (배포 없음) ---
+docker compose --env-file infra/prod/.env.example -f infra/prod/docker-compose.prod.yml config >/tmp/momo-prod-compose.yml
 ```

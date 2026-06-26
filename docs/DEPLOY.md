@@ -12,16 +12,18 @@
 
 - Phase 0 = **5개 Swift 패키지 `swift build` green**.
 - M1 런타임 일부 검증 완료: Docker Desktop 기준 PG18+Centrifugo compose health, migrate 멱등, MomoServer health/seq gapless, OutboxRelay→Centrifugo publish/history.
-- 남은 M1 런타임 검증: RLS 교차 테넌트 격리, AgentWorker↔hermes SSE + 비용 회계, staging URL/TLS/운영 시크릿·백업.
-- 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "런타임 e2e PASS + staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
+- M1 런타임 핵심 검증은 Docker Desktop 기준 MOMO-001~004에서 완료: compose/migrate/server health/seq gapless, OutboxRelay publish/history, RLS 격리, AgentWorker↔OpenAI-compatible SSE mock + 비용 회계.
+- 남은 M1 배포 검증: staging URL/TLS/운영 시크릿·백업·모니터링, 외부 hermes 재확인, WebSocket live subscribe/presence/recovery.
+- 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
 - **선결:** M0 런타임 e2e(서버↔PG18↔Centrifugo↔hermes 1왕복). M2 멀티팀 온보딩은 M1 위에서 성립.
 - **이 문서가 만들/갱신할 산출물(Codex):**
-  - `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 (MOMO-005)
-  - `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
-  - `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
-  - `.sops.yaml.example` + `infra/prod/secrets.env.example` + `infra/prod/secrets.sops.env` 운영 계약 (MOMO-006)
-  - `infra/prod/pgbackrest*.example` + 백업/복원 런북 (MOMO-006)
-  - `server/Migrations/003_onboarding.sql` — invite_code + platform_admin (MOMO-010)
+  - ✅ `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 skeleton (MOMO-005)
+  - ✅ `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
+  - ✅ `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
+  - ✅ `infra/prod/.env.example` — production env 예시, 실제 시크릿 미포함 (MOMO-005)
+  - ✅ `.sops.yaml.example` + `infra/prod/secrets.env.example` — SOPS/age 운영 계약, 실제 시크릿 미포함 (MOMO-006)
+  - ✅ `infra/prod/pgbackrest*.example` + `docs/SECRETS_BACKUP_RUNBOOK.md` — 백업/복원 skeleton과 리허설 절차 (MOMO-006)
+  - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - `docs/RUN.md`에 staging 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
 ---
@@ -190,7 +192,7 @@ export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo   # 운영은 SOPS�
 make migrate                                                   # 001_init → 002_seed → 003_onboarding
 ```
 - 현재: `001_init.sql`(정본 스키마 + outbox/cost/APNs 보강), `002_seed.sql`(데모 시드).
-- 신규: `003_onboarding.sql`(§6 invite_code + platform_admin). **`schema_v0.sql` 정본은 수정/이동 금지** — 확장은 신규 마이그레이션 + RLS DO-block ARRAY에 신규 테이블 등록(아래).
+- 신규: `003_onboarding.sql`(§6 invite_code + redemption audit). **`schema_v0.sql` 정본은 수정/이동 금지** — 확장은 신규 마이그레이션 + RLS DO-block ARRAY에 신규 테이블 등록(아래). `platform_admin`은 MOMO-013 후속 범위다.
 
 ### 5.2 DB 역할 분리 (RLS 격리의 운영 기반)
 | 역할 | 권한 | 용도 |
@@ -216,9 +218,9 @@ CREATE ROLE momo_admin LOGIN BYPASSRLS PASSWORD '...';   -- 읽기 전용 권한
 > 워크스페이스 스핀업 + **스핀업별 고유 초대코드 → 자가가입** + **플랫폼 관리자 전체 추적.** schema_v0.sql 위에 `003_onboarding.sql`로 확장(정본 미수정).
 
 ### 6.1 `003_onboarding.sql` (MOMO-010 — 신규 마이그레이션)
-- `invite_code{ id uuidv7, workspace_id FK, code(고엔트로피 랜덤), role, max_uses, used_count, expires_at, revoked_at, created_by }` — 만료 + 사용횟수 한정 + revoke.
-- `platform_admin{ id, member_id/email, created_at }` — 전역 추적 주체.
-- **RLS 등록:** `invite_code`를 schema_v0.sql의 RLS DO-block ARRAY 패턴(line 388~399)과 동일하게 `ENABLE`/`FORCE ROW LEVEL SECURITY` + `ws_isolation` 정책에 등록(신규 마이그레이션 내 별도 DO-block). `platform_admin`은 전역 테이블(workspace_id 없음) → BYPASSRLS 읽기 경로로만 접근.
+- `invite_code{ id uuidv7, workspace_id FK, code_hash, code_preview, role, max_uses, used_count, expires_at, revoked_at, revoked_by, created_by }` — raw code는 저장하지 않고 hash 저장, 만료 + 사용횟수 한정 + revoke.
+- `invite_code_redemption{ id, workspace_id, invite_code_id, member_id, email, ip_addr, user_agent, redeemed_at }` — 성공 redemption audit trail.
+- **RLS 등록:** `invite_code`/`invite_code_redemption`을 schema_v0.sql의 RLS DO-block ARRAY 패턴(line 388~399)과 동일하게 `ENABLE`/`FORCE ROW LEVEL SECURITY` + `ws_isolation` 정책에 등록(신규 마이그레이션 내 별도 DO-block). `platform_admin`은 MOMO-013에서 BYPASSRLS 읽기 전용 경로로 분리한다.
 
 ### 6.2 온보딩 운영 플로우 (REST — MOMO-011/012)
 ```

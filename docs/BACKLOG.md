@@ -325,9 +325,10 @@ M0(baseline)
 - **마일스톤:** M2 · **에픽:** EP-TENANCY · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-003
 - **수용기준:**
-  - [ ] [sql] `server/Migrations/003_onboarding.sql` 신규(schema_v0.sql **미수정**): `invite_code{id uuidv7, workspace_id FK, code, role, max_uses, used_count, expires_at, revoked_at, created_by}`
-  - [ ] [sql] 고엔트로피 랜덤 code + 만료 + 사용횟수 한정 + revoke 컬럼
-  - [ ] [sql] RLS DO-block ARRAY에 `invite_code` 등록(FORCE), `schema_v0.sql` 정본은 그대로 둠
+  - [x] [sql] `server/Migrations/003_onboarding.sql` 신규(schema_v0.sql **미수정**): `invite_code{id uuidv7, workspace_id FK, code_hash, role, max_uses, used_count, expires_at, revoked_at, created_by}`
+  - [x] [sql] 고엔트로피 랜덤 code helper + hash 저장 + 만료 + 사용횟수 한정 + revoke 컬럼
+  - [x] [sql] RLS DO-block ARRAY에 `invite_code`/`invite_code_redemption` 등록(FORCE), `schema_v0.sql` 정본은 그대로 둠
+  - [x] [runtime] `scripts/local_gate.sh --profile runtime-db` + `scripts/local_gate.sh --profile swift` PASS
 - **라벨:** `type:spec`, `area:schema`, `area:tenancy`, `status:runtime-unverified`
 - **참조:** L4 §1.3 · `schema_v0.sql`(workspace/membership/RLS DO-block 컨벤션) · ROADMAP §3.1
 

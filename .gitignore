@@ -6,6 +6,9 @@ xcuserdata/
 .env
 .env.local
 .env.worktree
+infra/prod/.env
+infra/prod/.env.*
+!infra/prod/.env.example
 infra/prod/secrets.env
 infra/prod/*.plain.env
 infra/prod/*.decrypted
