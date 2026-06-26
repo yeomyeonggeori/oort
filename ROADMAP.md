@@ -27,6 +27,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
      · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준
+     · M2 진입: MOMO-010에서 schema_v0.sql 정본을 건드리지 않고 003_onboarding.sql 초대코드 DB 확장을 시작
      · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — M7 실측/판정은 미진행
 ```
 
@@ -157,7 +158,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 ### 3.1 ⚙️ 공유 / 백엔드 트랙
 - **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
 - **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리.
-- **멀티팀 온보딩**(M2): `003_onboarding.sql`(invite_code + platform_admin) + 온보딩 REST + 관리자 전역 추적. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장.
+- **멀티팀 온보딩**(M2): `003_onboarding.sql` 첫 slice는 `invite_code` + redemption audit로 시작한다(MOMO-010). 온보딩 REST/자가가입은 MOMO-011~012, `platform_admin` 전역 추적은 MOMO-013로 분리한다. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장.
 - **Context Broker + Memory Plane**(M2~M3): 서버 agent로 바로 넘기지 않고 messenger layer가 권한, 컨텍스트 범위, source refs, cost budget, redaction, local/server model routing을 결정한다. 정본: `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`.
 - **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`, Memory Plane v0 정본은 `research/11-agent-runtime/05-memory-plane-v0.md`, Capability Cache v0 정본은 `research/11-agent-runtime/06-capability-cache-v0.md`, Agent Run Lifecycle v0 정본은 `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`, Approval Pause/Resume v0 정본은 `research/11-agent-runtime/08-approval-pause-resume-runtime.md`이며, runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
 - **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. Approval은 client-only card가 아니라 `agent_run.status='awaiting_approval'`로 멈추는 protocol checkpoint다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`, `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/08-approval-pause-resume-runtime.md`.

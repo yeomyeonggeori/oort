@@ -144,7 +144,7 @@ export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo   # .env와 동일 
 make migrate                                                   # = sh scripts/migrate.sh
 ```
 
-- 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(데모 시드).
+- 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(데모 시드), `003_onboarding.sql`(M2 invite_code + redemption audit, schema_v0.sql 미수정).
 - `scripts/migrate.sh`는 `schema_migrations` 테이블로 적용 이력을 추적 → **멱등 재실행 안전**
   (이미 적용된 버전은 SKIP). 각 파일은 `--single-transaction`으로 원자 적용.
 - 연결: `DATABASE_URL` 우선, 없으면 표준 `PG*` 환경변수(`PGHOST`/`PGUSER`/…) 폴백.
@@ -163,6 +163,8 @@ docker compose -f infra/docker-compose.yml exec -T postgres \
   psql -U momo -d momo -v ON_ERROR_STOP=1 < server/Migrations/001_init.sql
 docker compose -f infra/docker-compose.yml exec -T postgres \
   psql -U momo -d momo -v ON_ERROR_STOP=1 < server/Migrations/002_seed.sql
+docker compose -f infra/docker-compose.yml exec -T postgres \
+  psql -U momo -d momo -v ON_ERROR_STOP=1 < server/Migrations/003_onboarding.sql
 ```
 
 (이 경로는 `schema_migrations` 추적을 우회하므로 1회성 부트스트랩 용도. 평상시엔 `make migrate` 권장.)

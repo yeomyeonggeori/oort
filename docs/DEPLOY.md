@@ -23,7 +23,7 @@
   - ✅ `infra/prod/.env.example` — production env 예시, 실제 시크릿 미포함 (MOMO-005)
   - `infra/prod/.env.sops.yaml`(SOPS/age 암호화) + `.sops.yaml` 규칙 (MOMO-006)
   - `infra/prod/pgbackrest.conf` + 백업/복원 스크립트 (MOMO-006)
-  - `server/Migrations/003_onboarding.sql` — invite_code + platform_admin (MOMO-010)
+  - `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - `docs/RUN.md`에 staging 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
 ---
@@ -188,7 +188,7 @@ export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo   # 운영은 SOPS�
 make migrate                                                   # 001_init → 002_seed → 003_onboarding
 ```
 - 현재: `001_init.sql`(정본 스키마 + outbox/cost/APNs 보강), `002_seed.sql`(데모 시드).
-- 신규: `003_onboarding.sql`(§6 invite_code + platform_admin). **`schema_v0.sql` 정본은 수정/이동 금지** — 확장은 신규 마이그레이션 + RLS DO-block ARRAY에 신규 테이블 등록(아래).
+- 신규: `003_onboarding.sql`(§6 invite_code + redemption audit). **`schema_v0.sql` 정본은 수정/이동 금지** — 확장은 신규 마이그레이션 + RLS DO-block ARRAY에 신규 테이블 등록(아래). `platform_admin`은 MOMO-013 후속 범위다.
 
 ### 5.2 DB 역할 분리 (RLS 격리의 운영 기반)
 | 역할 | 권한 | 용도 |
@@ -214,9 +214,9 @@ CREATE ROLE momo_admin LOGIN BYPASSRLS PASSWORD '...';   -- 읽기 전용 권한
 > 워크스페이스 스핀업 + **스핀업별 고유 초대코드 → 자가가입** + **플랫폼 관리자 전체 추적.** schema_v0.sql 위에 `003_onboarding.sql`로 확장(정본 미수정).
 
 ### 6.1 `003_onboarding.sql` (MOMO-010 — 신규 마이그레이션)
-- `invite_code{ id uuidv7, workspace_id FK, code(고엔트로피 랜덤), role, max_uses, used_count, expires_at, revoked_at, created_by }` — 만료 + 사용횟수 한정 + revoke.
-- `platform_admin{ id, member_id/email, created_at }` — 전역 추적 주체.
-- **RLS 등록:** `invite_code`를 schema_v0.sql의 RLS DO-block ARRAY 패턴(line 388~399)과 동일하게 `ENABLE`/`FORCE ROW LEVEL SECURITY` + `ws_isolation` 정책에 등록(신규 마이그레이션 내 별도 DO-block). `platform_admin`은 전역 테이블(workspace_id 없음) → BYPASSRLS 읽기 경로로만 접근.
+- `invite_code{ id uuidv7, workspace_id FK, code_hash, code_preview, role, max_uses, used_count, expires_at, revoked_at, revoked_by, created_by }` — raw code는 저장하지 않고 hash 저장, 만료 + 사용횟수 한정 + revoke.
+- `invite_code_redemption{ id, workspace_id, invite_code_id, member_id, email, ip_addr, user_agent, redeemed_at }` — 성공 redemption audit trail.
+- **RLS 등록:** `invite_code`/`invite_code_redemption`을 schema_v0.sql의 RLS DO-block ARRAY 패턴(line 388~399)과 동일하게 `ENABLE`/`FORCE ROW LEVEL SECURITY` + `ws_isolation` 정책에 등록(신규 마이그레이션 내 별도 DO-block). `platform_admin`은 MOMO-013에서 BYPASSRLS 읽기 전용 경로로 분리한다.
 
 ### 6.2 온보딩 운영 플로우 (REST — MOMO-011/012)
 ```
