@@ -108,6 +108,53 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(failure.code, "nope")
     }
 
+    func testFoundationModelsCapabilityStateMapping() {
+        let available = FoundationModelsCapabilityProbe.state(from: .available)
+        XCTAssertTrue(available.isAvailable)
+        XCTAssertEqual(available.badgeText, "Available")
+        XCTAssertNil(available.fallbackReason)
+
+        let frameworkFallback = FoundationModelsCapabilityProbe.state(
+            from: .unavailable(.frameworkUnavailable)
+        )
+        XCTAssertFalse(frameworkFallback.isAvailable)
+        XCTAssertEqual(frameworkFallback.badgeText, "Fallback")
+        XCTAssertEqual(frameworkFallback.titleText, "Server fallback")
+        XCTAssertEqual(frameworkFallback.fallbackReason, .frameworkUnavailable)
+
+        let osFallback = FoundationModelsCapabilityProbe.state(from: .unavailable(.unsupportedOS))
+        XCTAssertEqual(osFallback.fallbackReason, .unsupportedOS)
+        XCTAssertTrue(osFallback.detailText.contains("macOS 26"))
+
+        let intelligenceFallback = FoundationModelsCapabilityProbe.state(
+            from: .unavailable(.appleIntelligenceNotEnabled)
+        )
+        XCTAssertEqual(intelligenceFallback.fallbackReason, .appleIntelligenceNotEnabled)
+        XCTAssertTrue(intelligenceFallback.detailText.contains("Apple Intelligence"))
+
+        let modelFallback = FoundationModelsCapabilityProbe.state(from: .unavailable(.modelNotReady))
+        XCTAssertEqual(modelFallback.fallbackReason, .modelNotReady)
+        XCTAssertTrue(modelFallback.detailText.contains("assets"))
+
+        let deviceFallback = FoundationModelsCapabilityProbe.state(
+            from: .unavailable(.deviceNotEligible)
+        )
+        XCTAssertEqual(deviceFallback.fallbackReason, .deviceNotEligible)
+        XCTAssertTrue(deviceFallback.detailText.contains("eligible"))
+    }
+
+    func testFoundationModelsCapabilityProbeReturnsStableState() {
+        let state = FoundationModelsCapabilityProbe().currentState()
+        switch state {
+        case .available:
+            XCTAssertTrue(state.detailText.contains("Foundation Models"))
+        case .fallback(let reason):
+            XCTAssertFalse(state.isAvailable)
+            XCTAssertEqual(state.fallbackReason, reason)
+            XCTAssertFalse(state.detailText.isEmpty)
+        }
+    }
+
     @MainActor
     func testViewModelSubmitsInviteCodeThroughOnboardingBackend() async throws {
         let backend = LiveChatBackend()

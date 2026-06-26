@@ -316,6 +316,17 @@
 | `MOMO-171` | macOS approval_request card decisions | swift/spec | MOMO-170 |
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
+### MOMO-130 수용기준 `[swift]`
+- [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `clients/macOS` target에만 `#if canImport(FoundationModels)` import와 `#available(macOS 26.0, *)` guard를 둔다. `MomoCore`는 Foundation-only 유지한다.
+- [x] `SystemLanguageModel.default.availability`를 momo 내부 `available`/`fallback` state로 매핑한다.
+- [x] 미지원 OS/toolchain, device ineligible, Apple Intelligence off, model-not-ready fallback mapping 테스트를 추가한다.
+- [x] `MomoMacDevApp` sidebar에 작고 명확한 Local LLM capability state surface를 추가한다.
+- [x] `swift run --package-path clients/macOS MomoMacDevApp` launch 후 window 1개를 확인한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #98을 `status:needs-review`로 전환하고 merge하지 않는다.
+
 ### MOMO-163 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.
 - [ ] 최소 MCP tool surface를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 고정한다.

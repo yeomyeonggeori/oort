@@ -45,6 +45,10 @@ public final class ChatViewModel: ObservableObject {
     // until the production REST join API lands.
     @Published public private(set) var inviteJoinState: InviteJoinState = .idle
 
+    // macOS-only local model capability. Apple framework calls stay in this target;
+    // MomoCore remains Foundation-only.
+    @Published public private(set) var foundationModelsCapability: FoundationModelsCapabilityState
+
     @Published public private(set) var connectionError: String?
 
     private var channelSubscription: Task<Void, Never>?
@@ -52,11 +56,13 @@ public final class ChatViewModel: ObservableObject {
     public init(
         chat: any ChatBackend,
         agentTransport: any AgentTransport,
-        onboarding: (any OnboardingInviteBackend)? = nil
+        onboarding: (any OnboardingInviteBackend)? = nil,
+        foundationModelsCapability: FoundationModelsCapabilityState = FoundationModelsCapabilityProbe().currentState()
     ) {
         self.chat = chat
         self.agentTransport = agentTransport
         self.onboarding = onboarding
+        self.foundationModelsCapability = foundationModelsCapability
     }
 
     /// Convenience initializer when one object conforms to both contracts.
