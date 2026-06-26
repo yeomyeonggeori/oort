@@ -1,0 +1,41 @@
+# pgBackRest skeleton for momo staging/prod.
+# Copy or render to /etc/pgbackrest/pgbackrest.conf on the database host.
+# Keep this file non-secret. Inject repo cipher and object-store credentials
+# from SOPS via PGBACKREST_* environment variables or render them on the host.
+#
+# Before enabling, verify the exact path with:
+#   psql "$DATABASE_URL" -c "SHOW data_directory;"
+
+[momo]
+# PostgreSQL 18 Docker images in this repo mount /var/lib/postgresql and keep a
+# versioned data directory under it. Replace this with SHOW data_directory output.
+pg1-path=/var/lib/postgresql/18/docker
+
+[global]
+log-level-console=info
+log-level-file=info
+process-max=4
+start-fast=y
+
+# Local repository default for first rehearsal. Production should prefer an
+# off-host S3-compatible repo; see commented options below.
+repo1-path=/var/lib/pgbackrest
+repo1-retention-full=4
+repo1-retention-full-type=count
+repo1-retention-diff=7
+repo1-cipher-type=aes-256-cbc
+# repo1-cipher-pass is intentionally omitted. Set
+# PGBACKREST_REPO1_CIPHER_PASS from infra/prod/secrets.sops.env.
+
+# Optional S3-compatible repository. Uncomment only after adding the matching
+# credentials to SOPS and confirming the bucket lifecycle policy.
+# repo1-type=s3
+# repo1-path=/momo
+# repo1-s3-bucket=<bucket>
+# repo1-s3-endpoint=<endpoint>
+# repo1-s3-region=<region>
+# repo1-s3-key=<from-sops>
+# repo1-s3-key-secret=<from-sops>
+
+[global:archive-push]
+compress-level=3

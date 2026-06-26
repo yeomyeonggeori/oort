@@ -1,0 +1,26 @@
+{
+    email {$ACME_EMAIL}
+}
+
+(security_headers) {
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+}
+
+{$API_DOMAIN} {
+    import security_headers
+    encode zstd gzip
+    reverse_proxy api:8080
+}
+
+{$REALTIME_DOMAIN} {
+    import security_headers
+    encode zstd gzip
+    reverse_proxy centrifugo:8000
+}

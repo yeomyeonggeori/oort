@@ -149,6 +149,7 @@
 | `MOMO-111` | GitHub Actions 비주요 기간용 local PR gate 스크립트와 evidence flow | ci/docs | MOMO-110, MOMO-154 |
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
+| `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -171,11 +172,40 @@
 - [ ] worktree별 `.env.worktree`, `COMPOSE_PROJECT_NAME`, `PORT`, `POSTGRES_PORT`, `CENT_PORT`, `HERMES_PORT` 충돌 방지 확인.
 - [ ] `momo-main` orchestration thread와 worker thread handoff prompt 문서화.
 
+### MOMO-005 수용기준 `[infra/docs]`
+- [x] `scripts/goal_claim.sh 5` 시도. 이슈가 `status:ready`가 아니어서 fallback으로 별도 worktree/branch를 수동 생성하고 issue `status:in-progress`를 적용.
+- [x] `infra/prod/docker-compose.prod.yml`: Caddy 자동 TLS, PostgreSQL 18, Redis, Centrifugo v6 Redis engine, api/relay/worker 서비스 skeleton.
+- [x] `infra/prod/Caddyfile`: api/rt 도메인 라우팅 + 보안 헤더. Centrifugo subscribe proxy는 compose 내부 `api:8080` 유지.
+- [x] `infra/prod/centrifugo.prod.json`: dev namespace 계약 유지 + Redis engine 전환.
+- [x] `infra/prod/.env.example`: production env 예시만 제공, 실제 시크릿 미커밋.
+- [x] `docs/RUN.md`, `docs/DEPLOY.md`, `STATUS.md`, `ROADMAP.md` 갱신.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
+
 ### MOMO-150 수용기준 `[docs/spec]`
 - [ ] `research/11-agent-runtime/`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가.
 - [ ] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리.
 - [ ] ROADMAP/BACKLOG/INDEX/STATUS에 MOMO-151~153, MOMO-160~163, MOMO-170~172 후속 로드맵 반영.
 - [ ] 코드/스키마 구현 없이 문서/스펙만 변경.
+
+## M2 멀티팀 온보딩
+
+| id | 한줄 | 수용기준 등급 | 의존 | 상태 |
+|---|---|---|---|---|
+| `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
+| `MOMO-011` | 워크스페이스 스핀업 REST + 초대코드 자동 발급 | swift/runtime | MOMO-010 | 후속 |
+| `MOMO-012` | 초대코드 자가가입 플로우 + audit_log | swift/runtime | MOMO-011 | 후속 |
+| `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
+
+### MOMO-010 수용기준 `[sql/runtime]`
+- [x] `server/Migrations/003_onboarding.sql` 신규 추가(`schema_v0.sql` 미수정).
+- [x] raw invite code는 저장하지 않고 `momo_generate_invite_code()` + `momo_invite_code_hash(raw_code)` 패턴으로 high-entropy bearer secret을 해시 저장한다.
+- [x] `invite_code`에 `workspace_id`, `role`, `max_uses`, `used_count`, `expires_at`, `revoked_at`, `revoked_by`, `created_by`, `last_used_at`을 두고 same-workspace member FK와 active lookup index를 둔다.
+- [x] `invite_code_redemption`으로 성공 redemption audit trail을 남긴다.
+- [x] `invite_code`/`invite_code_redemption`을 신규 RLS DO-block에 등록하고 `FORCE ROW LEVEL SECURITY` + `SET LOCAL app.workspace_id` 원칙을 유지한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 
 ## M2 Context / Memory / Google Workspace
 
