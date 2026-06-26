@@ -4,7 +4,7 @@
 > org=`dawnkim`, repo=`momo`. 검증 표기는 docs/cicd/00 참조.
 
 ## 사전 요건
-- Apple Developer Program 멤버십(유료, 연 $99 — 법률/계약 변동 가능, 본인 확인).
+- Apple Developer Program 멤버십(유료, 연 $99 — 법률/계약 변동 가능, 본인 확인). 등록주체 결정, D-U-N-S(조직 선택 시), 사람 handoff 절차는 `docs/legal/01-entity-apple-runbook.md`를 먼저 따른다.
 - App Store Connect에 **App 레코드 생성** + Bundle ID `com.dawnkim.momo`(또는 실제 값) 등록.
 - macOS 직접배포면 **Developer ID Application 인증서** 권한(Account Holder/Admin).
 
