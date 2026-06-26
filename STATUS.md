@@ -212,6 +212,13 @@
 - 검증: `swift test --package-path clients/macOS` pass(10 tests), `scripts/local_gate.sh --profile macos-ui` PASS, `scripts/local_gate.sh --profile swift` PASS. Production invite REST/e2e는 후속 MOMO-014 범위다.
 
 
+## 0ac. MOMO-162 Hermes Adapter Contract Verification (2026-06-26)
+
+- Hermes integration mode를 두 경로로 고정했다: product default는 momo AgentWorker가 Context Packet / approval / cost / audit를 소유하고 Hermes/Kim Intern을 OpenAI-compatible SSE로 호출하는 경로이며, `adapters/hermes/momo_adapter.py` platform adapter는 optional ingress/interop 경로다.
+- 새 정본: `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`. JSON fixture 2종: `agentworker_openai_sse_input.json`, `platform_adapter_event_mapping.json`. Hermes SDK 없이 도는 `adapters/hermes/tests/test_momo_adapter_contract.py` lightweight contract test를 추가했다.
+- Swift-facing contract는 변경하지 않았다. 실제 Hermes gateway plugin load/live adapter e2e는 여전히 `runtime-unverified`; MOMO-004의 repo-local OpenAI-compatible mock 기반 AgentWorker SSE 검증은 유지된다.
+
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
