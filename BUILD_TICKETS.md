@@ -224,9 +224,8 @@
 | `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
 | `MOMO-011` | 초대코드 발급/조회/폐기 REST + redeem 최소 slice | swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
-
 | `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
-| `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | 후속 제안 |
+| `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | local gate 대상 |
 
 ### MOMO-010 수용기준 `[sql/runtime]`
 - [x] `server/Migrations/003_onboarding.sql` 신규 추가(`schema_v0.sql` 미수정).
@@ -254,7 +253,16 @@
 - [x] `swift test --package-path clients/macOS` PASS(10 tests).
 - [x] `scripts/local_gate.sh --profile macos-ui` PASS.
 - [x] `scripts/local_gate.sh --profile swift` PASS.
-- out of scope: production server `/v1/join` 구현과 DB-backed invite redemption e2e. 새 후속 이슈(`MOMO-014` 제안)로 분리한다.
+- out of scope였던 production server `/v1/join` 구현과 DB-backed invite redemption e2e는 MOMO-014에서 서버 runtime slice로 진행한다.
+
+### MOMO-014 수용기준 `[swift/runtime]`
+- [x] Public `POST /v1/join` route를 authenticated workspace-member middleware 밖에 추가.
+- [x] invite code + email/display name/handle request로 human/member를 생성 또는 재사용하고, workspace public channel membership, invite redemption, `audit_log(action='invite.join')`, access/refresh token receipt를 생성.
+- [x] invite lookup은 workspace별 `SET LOCAL app.workspace_id` tenant read로 수행하고, 실제 write path는 `withTenantTransaction` 아래에서 처리한다. `schema_v0.sql` 변경 없음.
+- [x] expired/revoked/exhausted/invalid/duplicate/role-escalation 실패를 결정적 HTTP status로 처리한다. owner/platform admin 생성은 public join에서 금지.
+- [x] `scripts/verify_join.sh` 추가: invite create → public join → joined human login/bootstrap/read, 실패 모드 6종 검증.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS(`scripts/verify_rls.sh` + `scripts/verify_join.sh`).
 
 
 ## M2 Context / Memory / Google Workspace
