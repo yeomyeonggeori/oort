@@ -1,0 +1,462 @@
+{
+  "schema": "momo.memory_plane.fixture.v0",
+  "fixture": "typed_memory_items",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "created_at": "2026-06-26T09:00:00Z",
+  "memory_items": [
+    {
+      "schema": "momo.memory_item.v0",
+      "memory_id": "20000000-0000-7000-8000-000000000001",
+      "memory_type": "decision",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject": {
+        "kind": "project",
+        "project_key": "launch-2026",
+        "display_name": "Launch 2026"
+      },
+      "statement": {
+        "summary": "Launch copy must use Korean-first messaging and avoid English-only CTAs.",
+        "body": "The launch team decided that Korean-first messaging is the default for launch surfaces. English-only CTAs are allowed only for developer-facing docs.",
+        "structured": {
+          "decision_key": "launch-copy-language",
+          "status": "active"
+        },
+        "language": "en",
+        "source_quote_policy": "excerpt_only"
+      },
+      "visibility": {
+        "scope": "channel",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "channel_id": "22222222-2222-7222-8222-222222222222",
+        "required_roles": [],
+        "source_visibility_policy": "all_sources_visible"
+      },
+      "source_refs": [
+        {
+          "source_id": "src_decision_launch_copy",
+          "source_kind": "message",
+          "uri": "momo://workspaces/11111111-1111-7111-8111-111111111111/channels/22222222-2222-7222-8222-222222222222/messages/33333333-3333-7333-8333-333333333301",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "channel_id": "22222222-2222-7222-8222-222222222222",
+          "message_id": "33333333-3333-7333-8333-333333333301",
+          "seq": 188,
+          "permission_snapshot": "actor:read channel:member",
+          "retrieved_at": "2026-06-26T09:00:00Z",
+          "excerpt": "Decision: launch copy is Korean-first; English-only CTA is limited to developer docs.",
+          "checksum": "sha256:placeholder"
+        }
+      ],
+      "permissions": {
+        "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "created_by_kind": "human",
+        "write_policy_version": "memory-policy@2026-06-26",
+        "retrieval_policy_version": "memory-policy@2026-06-26",
+        "allowed_request_surfaces": ["mention", "message_context_action", "slash_command"]
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-12-23T09:00:00Z",
+        "stale_after": "2026-09-24T09:00:00Z",
+        "refresh_policy": "manual_review"
+      },
+      "lifecycle": {
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000001/delete",
+        "deleted_at": null,
+        "revoked_at": null,
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "tombstone_policy": "keep_citation_only"
+      },
+      "quality": {
+        "confidence": 0.96,
+        "review_status": "accepted",
+        "reviewed_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "compaction_model": null,
+        "compaction_prompt_version": null
+      },
+      "audit": {
+        "created_event_id": "evt_memory_created_decision",
+        "policy_versions": ["memory-policy@2026-06-26"],
+        "source_policy_versions": ["channel-policy@2026-06-26"]
+      }
+    },
+    {
+      "schema": "momo.memory_item.v0",
+      "memory_id": "20000000-0000-7000-8000-000000000002",
+      "memory_type": "preference",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject": {
+        "kind": "member",
+        "member_id": "44444444-4444-7444-8444-444444444401",
+        "member_kind": "human"
+      },
+      "statement": {
+        "summary": "Prefer concise Korean status updates with explicit blocker and next-action sections.",
+        "body": "The member prefers short Korean status reports that separate blocker, decision, and next action.",
+        "structured": {
+          "format": "status_update",
+          "language": "ko",
+          "sections": ["blocker", "decision", "next_action"]
+        },
+        "language": "en",
+        "source_quote_policy": "excerpt_only"
+      },
+      "visibility": {
+        "scope": "personal",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "subject_member_id": "44444444-4444-7444-8444-444444444401",
+        "required_roles": [],
+        "source_visibility_policy": "all_sources_visible"
+      },
+      "source_refs": [
+        {
+          "source_id": "src_pref_status_style",
+          "source_kind": "message",
+          "uri": "momo://workspaces/11111111-1111-7111-8111-111111111111/channels/22222222-2222-7222-8222-222222222222/messages/33333333-3333-7333-8333-333333333302",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "channel_id": "22222222-2222-7222-8222-222222222222",
+          "message_id": "33333333-3333-7333-8333-333333333302",
+          "seq": 201,
+          "permission_snapshot": "actor:read channel:member",
+          "retrieved_at": "2026-06-26T09:00:00Z",
+          "excerpt": "앞으로 상태 보고는 짧게, blocker/decision/next action만 나눠줘.",
+          "checksum": "sha256:placeholder"
+        }
+      ],
+      "permissions": {
+        "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "created_by_kind": "human",
+        "write_policy_version": "memory-policy@2026-06-26",
+        "retrieval_policy_version": "memory-policy@2026-06-26",
+        "allowed_request_surfaces": ["mention", "slash_command"]
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-12-23T09:00:00Z",
+        "stale_after": "2026-09-24T09:00:00Z",
+        "refresh_policy": "on_access"
+      },
+      "lifecycle": {
+        "delete_path": "momo://settings/memory/personal/20000000-0000-7000-8000-000000000002/delete",
+        "deleted_at": null,
+        "revoked_at": null,
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "tombstone_policy": "hide"
+      },
+      "quality": {
+        "confidence": 0.91,
+        "review_status": "accepted",
+        "reviewed_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "compaction_model": "apple-foundation-models-device-scale",
+        "compaction_prompt_version": "memory-candidate@v0"
+      },
+      "audit": {
+        "created_event_id": "evt_memory_created_preference",
+        "policy_versions": ["memory-policy@2026-06-26"],
+        "source_policy_versions": ["channel-policy@2026-06-26"]
+      }
+    },
+    {
+      "schema": "momo.memory_item.v0",
+      "memory_id": "20000000-0000-7000-8000-000000000003",
+      "memory_type": "artifact_ref",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject": {
+        "kind": "artifact",
+        "artifact_id": "artifact-launch-prd-v3",
+        "display_name": "Launch PRD v3"
+      },
+      "statement": {
+        "summary": "Launch PRD v3 is the current product scope reference for agent-native messenger positioning.",
+        "body": "Use the artifact link as the current product scope reference. Do not copy the full PRD into memory.",
+        "structured": {
+          "provider": "google_drive",
+          "version": "v3",
+          "artifact_kind": "prd"
+        },
+        "language": "en",
+        "source_quote_policy": "provider_link_only"
+      },
+      "visibility": {
+        "scope": "workspace",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "required_roles": [],
+        "source_visibility_policy": "source_grants_required"
+      },
+      "source_refs": [
+        {
+          "source_id": "src_artifact_launch_prd_v3",
+          "source_kind": "google_drive",
+          "uri": "https://drive.google.com/file/d/launch-prd-v3",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "provider_id": "google_drive",
+          "provider_resource_id": "launch-prd-v3",
+          "permission_snapshot": "actor:read provider_grant:drive.readonly",
+          "retrieved_at": "2026-06-26T09:00:00Z",
+          "excerpt": "PRD scope: agent-native messenger, Context Broker, approval ledger.",
+          "checksum": "sha256:placeholder"
+        }
+      ],
+      "permissions": {
+        "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "created_by_kind": "human",
+        "write_policy_version": "memory-policy@2026-06-26",
+        "retrieval_policy_version": "memory-policy@2026-06-26",
+        "allowed_request_surfaces": ["mention", "slash_command", "message_context_action"]
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2027-06-26T09:00:00Z",
+        "stale_after": "2026-07-26T09:00:00Z",
+        "refresh_policy": "provider_change_token"
+      },
+      "lifecycle": {
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000003/unlink",
+        "deleted_at": null,
+        "revoked_at": null,
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "tombstone_policy": "keep_citation_only"
+      },
+      "quality": {
+        "confidence": 0.94,
+        "review_status": "accepted",
+        "reviewed_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "compaction_model": null,
+        "compaction_prompt_version": null
+      },
+      "audit": {
+        "created_event_id": "evt_memory_created_artifact",
+        "policy_versions": ["memory-policy@2026-06-26"],
+        "source_policy_versions": ["google-drive-grant@2026-06-26"]
+      }
+    },
+    {
+      "schema": "momo.memory_item.v0",
+      "memory_id": "20000000-0000-7000-8000-000000000004",
+      "memory_type": "task_state",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject": {
+        "kind": "task",
+        "provider": "github",
+        "external_id": "Dawn-kim-official/momo#59",
+        "display_name": "MOMO-152 Memory Plane"
+      },
+      "statement": {
+        "summary": "MOMO-152 is in progress on branch docs/59-memory-plane-v0-spec-and-permission-model.",
+        "body": "The issue is claimed by Codex and should not be claimed by another active worktree.",
+        "structured": {
+          "status": "in_progress",
+          "branch": "docs/59-memory-plane-v0-spec-and-permission-model",
+          "issue": 59
+        },
+        "language": "en",
+        "source_quote_policy": "excerpt_only"
+      },
+      "visibility": {
+        "scope": "workspace",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "required_roles": [],
+        "source_visibility_policy": "source_grants_required"
+      },
+      "source_refs": [
+        {
+          "source_id": "src_task_github_59",
+          "source_kind": "github",
+          "uri": "https://github.com/Dawn-kim-official/momo/issues/59",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "provider_id": "github",
+          "provider_resource_id": "Dawn-kim-official/momo#59",
+          "permission_snapshot": "actor:read provider_grant:github.issues.read",
+          "retrieved_at": "2026-06-26T09:00:00Z",
+          "excerpt": "Issue #59 is assigned and status:in-progress.",
+          "checksum": "sha256:placeholder"
+        }
+      ],
+      "permissions": {
+        "created_by_member_id": "55555555-5555-7555-8555-555555555501",
+        "created_by_kind": "agent",
+        "write_policy_version": "memory-policy@2026-06-26",
+        "retrieval_policy_version": "memory-policy@2026-06-26",
+        "allowed_request_surfaces": ["mention", "slash_command"]
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-06-27T09:00:00Z",
+        "stale_after": "2026-06-26T10:00:00Z",
+        "refresh_policy": "on_access"
+      },
+      "lifecycle": {
+        "delete_path": "momo://memory/20000000-0000-7000-8000-000000000004/delete",
+        "deleted_at": null,
+        "revoked_at": null,
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "tombstone_policy": "hide"
+      },
+      "quality": {
+        "confidence": 0.98,
+        "review_status": "accepted",
+        "reviewed_by_member_id": null,
+        "compaction_model": null,
+        "compaction_prompt_version": null
+      },
+      "audit": {
+        "created_event_id": "evt_memory_created_task_state",
+        "policy_versions": ["memory-policy@2026-06-26"],
+        "source_policy_versions": ["github-grant@2026-06-26"]
+      }
+    },
+    {
+      "schema": "momo.memory_item.v0",
+      "memory_id": "20000000-0000-7000-8000-000000000005",
+      "memory_type": "external_source_ref",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject": {
+        "kind": "external_source",
+        "provider": "calendar",
+        "provider_resource_id": "launch-calendar",
+        "display_name": "Launch Calendar"
+      },
+      "statement": {
+        "summary": "Launch review happens every Friday at 10:00 KST on the Launch Calendar.",
+        "body": "Use the Calendar source when scheduling launch review follow-ups. Do not copy attendee emails into memory.",
+        "structured": {
+          "provider": "calendar",
+          "recurrence": "weekly",
+          "day": "friday",
+          "time_zone": "Asia/Seoul"
+        },
+        "language": "en",
+        "source_quote_policy": "provider_link_only"
+      },
+      "visibility": {
+        "scope": "workspace",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "required_roles": [],
+        "source_visibility_policy": "source_grants_required"
+      },
+      "source_refs": [
+        {
+          "source_id": "src_calendar_launch_review",
+          "source_kind": "calendar",
+          "uri": "https://calendar.google.com/calendar/u/0/r/eventedit/launch-review",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "provider_id": "google_calendar",
+          "provider_resource_id": "launch-review",
+          "permission_snapshot": "actor:read provider_grant:calendar.readonly",
+          "retrieved_at": "2026-06-26T09:00:00Z",
+          "excerpt": "Launch Review, weekly Friday 10:00 Asia/Seoul.",
+          "checksum": "sha256:placeholder"
+        }
+      ],
+      "permissions": {
+        "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "created_by_kind": "human",
+        "write_policy_version": "memory-policy@2026-06-26",
+        "retrieval_policy_version": "memory-policy@2026-06-26",
+        "allowed_request_surfaces": ["mention", "slash_command", "scheduled_trigger"]
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-07-26T09:00:00Z",
+        "stale_after": "2026-07-03T09:00:00Z",
+        "refresh_policy": "provider_change_token"
+      },
+      "lifecycle": {
+        "delete_path": "momo://settings/connectors/google-calendar/sources/launch-review/unlink",
+        "deleted_at": null,
+        "revoked_at": null,
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "tombstone_policy": "hide"
+      },
+      "quality": {
+        "confidence": 0.92,
+        "review_status": "accepted",
+        "reviewed_by_member_id": "44444444-4444-7444-8444-444444444401",
+        "compaction_model": null,
+        "compaction_prompt_version": null
+      },
+      "audit": {
+        "created_event_id": "evt_memory_created_external_source",
+        "policy_versions": ["memory-policy@2026-06-26"],
+        "source_policy_versions": ["google-calendar-grant@2026-06-26"]
+      }
+    },
+    {
+      "schema": "momo.memory_item.v0",
+      "memory_id": "20000000-0000-7000-8000-000000000006",
+      "memory_type": "agent_skill_note",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject": {
+        "kind": "agent_skill",
+        "agent_member_id": "55555555-5555-7555-8555-555555555501",
+        "skill_key": "draft-pr-body-from-local-gate"
+      },
+      "statement": {
+        "summary": "When drafting PR bodies, include local gate commands, machine/toolchain, and runtime coverage evidence.",
+        "body": "The agent should propose PR bodies that include Local Gate evidence before merge during the GitHub Actions non-primary gate period.",
+        "structured": {
+          "skill_key": "draft-pr-body-from-local-gate",
+          "applies_to": ["pull_request", "local_gate"]
+        },
+        "language": "en",
+        "source_quote_policy": "excerpt_only"
+      },
+      "visibility": {
+        "scope": "workspace",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "required_roles": [],
+        "source_visibility_policy": "all_sources_visible"
+      },
+      "source_refs": [
+        {
+          "source_id": "src_agent_skill_pr_body",
+          "source_kind": "agent_run",
+          "uri": "momo://workspaces/11111111-1111-7111-8111-111111111111/agent-runs/66666666-6666-7666-8666-666666666601",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "agent_run_id": "66666666-6666-7666-8666-666666666601",
+          "permission_snapshot": "actor:read agent_run:workspace_visible",
+          "retrieved_at": "2026-06-26T09:00:00Z",
+          "excerpt": "PR body should contain local gate evidence and runtime coverage.",
+          "checksum": "sha256:placeholder"
+        }
+      ],
+      "permissions": {
+        "created_by_member_id": "55555555-5555-7555-8555-555555555501",
+        "created_by_kind": "agent",
+        "write_policy_version": "memory-policy@2026-06-26",
+        "retrieval_policy_version": "memory-policy@2026-06-26",
+        "allowed_request_surfaces": ["mention", "message_context_action"]
+      },
+      "validity": {
+        "created_at": "2026-06-26T09:00:00Z",
+        "expires_at": "2026-09-24T09:00:00Z",
+        "stale_after": "2026-07-26T09:00:00Z",
+        "refresh_policy": "manual_review"
+      },
+      "lifecycle": {
+        "delete_path": "momo://agents/55555555-5555-7555-8555-555555555501/skills/draft-pr-body-from-local-gate/delete",
+        "deleted_at": null,
+        "revoked_at": null,
+        "invalidated_at": null,
+        "invalidated_reason": null,
+        "tombstone_policy": "hide"
+      },
+      "quality": {
+        "confidence": 0.84,
+        "review_status": "candidate",
+        "reviewed_by_member_id": null,
+        "compaction_model": "kim-intern-runtime-memory-proposal",
+        "compaction_prompt_version": "skill-note-import@v0"
+      },
+      "audit": {
+        "created_event_id": "evt_memory_created_agent_skill_note",
+        "policy_versions": ["memory-policy@2026-06-26"],
+        "source_policy_versions": ["agent-run-policy@2026-06-26"]
+      }
+    }
+  ]
+}

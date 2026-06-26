@@ -24,6 +24,8 @@ The missing layer is the durable contract between the user's request and the age
 
 Memory must be typed and permission-aware. Raw chat history should not become long-term memory automatically.
 
+Normative spec: `research/11-agent-runtime/05-memory-plane-v0.md`.
+
 | Type | Meaning | Required provenance |
 |---|---|---|
 | `decision` | Team/project decision | source message/doc, deciding members, workspace visibility |

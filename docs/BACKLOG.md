@@ -294,11 +294,14 @@ M0(baseline)
 - **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M
 - **deps:** MOMO-151
 - **수용기준:**
+  - [ ] [spec] `research/11-agent-runtime/05-memory-plane-v0.md`에 Memory Plane v0 정본 추가
   - [ ] [spec] `decision/preference/artifact_ref/task_state/external_source_ref/agent_skill_note` memory type 확정
-  - [ ] [spec] source attribution, visibility, expiry, delete path, retrieval-time permission check 정의
+  - [ ] [spec] source attribution, visibility, expiry, delete path, revocation, retrieval-time permission check 정의
   - [ ] [spec] raw chat exhaust 자동 장기 저장 금지와 local LLM compaction 기준 문서화
+  - [ ] [spec] `research/11-agent-runtime/fixtures/memory-plane-v0/`에 memory type fixtures와 permission examples 추가
+  - [ ] [spec] Context Packet v0의 `memory_refs` projection 규칙과 연결
 - **라벨:** `type:spec`, `area:core`, `area:tenancy`, `priority:p1`, `size:m`, `agent:codex-ok`
-- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/05-memory-plane-v0.md`
 
 #### MOMO-153 · Capability Cache v0 spec and invalidation model
 - **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
