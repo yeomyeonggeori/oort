@@ -61,6 +61,7 @@ public struct ApprovalInboxView: View {
 
     @ViewBuilder
     private func row(_ approval: ApprovalEvent) -> some View {
+        let isInFlight = viewModel.approvalDecisionsInFlight.contains(approval.approvalId)
         HStack(alignment: .top, spacing: 10) {
             // Reversibility risk badge.
             riskBadge(approval.isReversible)
@@ -84,7 +85,11 @@ public struct ApprovalInboxView: View {
                     .buttonStyle(.borderedProminent).controlSize(.small)
                 Button("거부") { Task { await viewModel.decideApproval(approval.approvalId, approve: false) } }
                     .buttonStyle(.bordered).controlSize(.small)
+                if isInFlight {
+                    ProgressView().controlSize(.small)
+                }
             }
+            .disabled(isInFlight)
         }
         .padding(.vertical, 4)
     }
@@ -100,7 +105,9 @@ public struct ApprovalInboxView: View {
     }
 
     private func approveAllReversible() async {
-        for approval in pending where approval.isReversible == true {
+        for approval in pending
+            where approval.isReversible == true
+                && !viewModel.approvalDecisionsInFlight.contains(approval.approvalId) {
             await viewModel.decideApproval(approval.approvalId, approve: true)
         }
     }
