@@ -21,6 +21,22 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try InviteRoutes.validatedMaxUses(10_001))
     }
 
+    func testJoinIdentityValidationNormalizesInputs() throws {
+        XCTAssertEqual(try JoinRoutes.normalizedEmail("  USER@Example.COM  "), "user@example.com")
+        XCTAssertEqual(try JoinRoutes.normalizedDisplayName("  New Human  "), "New Human")
+        XCTAssertEqual(try JoinRoutes.normalizedRequestedHandle(" New_Human-1 "), "new_human-1")
+        XCTAssertEqual(try JoinRoutes.fallbackHandle(email: "new.human@example.com"), "new-human")
+        XCTAssertEqual(try JoinRoutes.normalizedTimeZone(nil), "UTC")
+        XCTAssertEqual(try JoinRoutes.normalizedTimeZone("Asia/Seoul"), "Asia/Seoul")
+    }
+
+    func testJoinIdentityValidationRejectsBadInputs() throws {
+        XCTAssertThrowsError(try JoinRoutes.normalizedEmail("missing-at"))
+        XCTAssertThrowsError(try JoinRoutes.normalizedDisplayName("   "))
+        XCTAssertThrowsError(try JoinRoutes.normalizedRequestedHandle("Owner!"))
+        XCTAssertThrowsError(try JoinRoutes.normalizedTimeZone(String(repeating: "a", count: 65)))
+    }
+
     func testInboundMCPToolSurfaceMatchesMOMO163() {
         let names = InboundMCPToolRegistry.tools.map(\.name)
         XCTAssertEqual(

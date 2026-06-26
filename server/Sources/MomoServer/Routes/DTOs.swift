@@ -137,6 +137,65 @@ struct RedeemInviteResponse: ResponseEncodable {
     let redemptionId: String
 }
 
+// ---- Public join ----
+
+/// POST /v1/join request body.
+///
+/// Password auth is intentionally still a stub in v0: the join path records the
+/// human identity and returns app tokens, while AuthRoutes continues to ignore
+/// password_hash until the real auth ticket lands.
+struct JoinRequest: Decodable {
+    let code: String
+    let email: String
+    let displayName: String
+    let handle: String?
+    let password: String?
+    let timeZone: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case email
+        case displayName
+        case displayNameSnake = "display_name"
+        case handle
+        case password
+        case timeZone
+        case timeZoneSnake = "time_zone"
+        case tz
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.code = try c.decode(String.self, forKey: .code)
+        self.email = try c.decode(String.self, forKey: .email)
+        self.displayName = try c.decodeIfPresent(String.self, forKey: .displayName)
+            ?? c.decodeIfPresent(String.self, forKey: .displayNameSnake)
+            ?? ""
+        self.handle = try c.decodeIfPresent(String.self, forKey: .handle)
+        self.password = try c.decodeIfPresent(String.self, forKey: .password)
+        self.timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
+            ?? c.decodeIfPresent(String.self, forKey: .timeZoneSnake)
+            ?? c.decodeIfPresent(String.self, forKey: .tz)
+    }
+}
+
+struct JoinMembershipDTO: ResponseEncodable, Decodable {
+    let id: String
+    let channelId: String
+    let role: String
+}
+
+struct JoinResponse: ResponseEncodable {
+    let accessToken: String
+    let refreshToken: String
+    let workspaceId: String
+    let member: MemberDTO
+    let memberships: [JoinMembershipDTO]
+    let invite: InviteCodeDTO
+    let redemptionId: String
+    let createdMember: Bool
+}
+
 // ---- Centrifugo subscribe proxy ----
 
 /// Request body Centrifugo sends to the subscribe proxy endpoint (L4 §4.3).

@@ -213,12 +213,40 @@ set -a; . ./.env; set +a
 swift run --package-path server MomoServer
 ```
 
-- REST(`/v1/auth/login`, 메시지 송수신) + JWT 발급 + Centrifugo publish/subscribe-proxy.
+- REST(`/v1/auth/login`, `/v1/join`, 메시지 송수신) + JWT 발급 + Centrifugo publish/subscribe-proxy.
 - **핵심 쓰기경로(§1.2 / v0):** `REST send → (channel_seq bump + message insert + outbox insert) 단일 tx`.
   실제 fan-out은 relay가 담당(아래).
 - 기본 바인드 `0.0.0.0:8080`. **`PORT` 변경 시 `infra/centrifugo.json`의 subscribe proxy URL(`api:8080`)도 함께 변경.**
 
-#### 5.1.1 Inbound MCP v0 skeleton
+#### 5.1.1 Public invite join — `POST /v1/join`
+
+MOMO-014 adds the production self-signup path for a user who only has an invite
+code. Request body accepts `code`, `email`, `displayName`/`display_name`,
+optional `handle`, and optional `timeZone`/`tz`. Password auth remains the v0
+stub until the real auth ticket lands.
+
+- Preflight does not install a cross-tenant SECURITY DEFINER helper. It enumerates
+  workspace ids and checks `invite_code` inside `SET LOCAL app.workspace_id` tenant
+  reads until the bearer code matches.
+- The write path then uses one tenant transaction to create/reuse `human` +
+  `member`, create public-channel `membership` rows for the invite role,
+  increment `invite_code.used_count`, insert `invite_code_redemption`, and record
+  `audit_log(action='invite.join')`.
+- `owner`/platform-admin creation is forbidden. Existing members cannot use a
+  public join invite to escalate their role.
+
+Runtime verifier:
+
+```sh
+make up
+make migrate
+scripts/verify_join.sh
+```
+
+`scripts/local_gate.sh --profile runtime-db` runs this verifier after the RLS
+runtime verifier.
+
+#### 5.1.2 Inbound MCP v0 skeleton
 
 MOMO-172 adds a compile-safe inbound MCP skeleton to the same `MomoServer` process:
 

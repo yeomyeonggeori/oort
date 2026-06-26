@@ -33,11 +33,12 @@ enum AppBuilder {
         let router = Router(context: AppRequestContext.self)
         router.add(middleware: LogRequestsMiddleware(.info))
 
-        // Public routes (no auth): health, login, centrifugo subscribe proxy.
+        // Public routes (no auth): health, login, join, centrifugo subscribe proxy.
         router.get("/health") { _, _ -> HealthResponse in
             HealthResponse(status: "ok", service: "MomoServer")
         }
         AuthRoutes(db: db, jwt: jwt).add(to: router)
+        JoinRoutes(db: db, jwt: jwt).add(to: router)
         CentrifugoRoutes(db: db).add(to: router)
 
         // Protected routes (require valid access token) — mounted in a group that
