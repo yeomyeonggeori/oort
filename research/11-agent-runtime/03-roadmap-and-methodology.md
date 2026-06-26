@@ -59,6 +59,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 | `MOMO-161` | Approval pause/resume runtime | canonical spec + worker pause slice; server decision/resume runtime follows |
 | `MOMO-162` | Hermes adapter contract verification | platform adapter path and AgentWorker SSE path both tested or one declared canonical |
 | `MOMO-163` | Inbound MCP server v0 | governed search/fetch/post/approval-safe tool call spec with tools/resources/prompts fixtures |
+| `MOMO-172` | Inbound MCP server v0 skeleton/spec-to-code bridge | server registry/routes/stub, endpoint docs, auth/RLS preflight |
 
 ### M3 UX
 
@@ -66,7 +67,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 |---|---|---|
 | `MOMO-170` | Agent protocol cards | tool_call, approval, artifact, cost, memory citation, source badge |
 | `MOMO-171` | Agent memory inspector | users can view/delete/block memory entries used in context |
-| `MOMO-172` | Local LLM context compaction | Foundation Models probe + server fallback, source-preserving summaries |
+| `MOMO-173` | Local LLM context compaction | Foundation Models probe + server fallback, source-preserving summaries |
 
 ## 4. Architectural Defaults
 

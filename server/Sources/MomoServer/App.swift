@@ -45,6 +45,7 @@ enum AppBuilder {
         let authed = router.group()
             .add(middleware: AuthMiddleware(jwt: jwt))
         MessageRoutes(db: db).add(to: authed)
+        InboundMCPRoutes(db: db).add(to: authed)
 
         // ---- Application ----
         // The PostgresClient is a ServiceLifecycle.Service; hand it to the app's

@@ -191,6 +191,24 @@ swift run --package-path server MomoServer
   실제 fan-out은 relay가 담당(아래).
 - 기본 바인드 `0.0.0.0:8080`. **`PORT` 변경 시 `infra/centrifugo.json`의 subscribe proxy URL(`api:8080`)도 함께 변경.**
 
+#### 5.1.1 Inbound MCP v0 skeleton
+
+MOMO-172 adds a compile-safe inbound MCP skeleton to the same `MomoServer` process:
+
+```sh
+# requires a bearer token whose scopes include mcp.read / mcp.post / mcp.tool.propose
+curl -H "Authorization: Bearer $ACCESS_TOKEN" http://127.0.0.1:8080/v1/mcp
+curl -H "Authorization: Bearer $ACCESS_TOKEN" http://127.0.0.1:8080/v1/mcp/tools
+```
+
+- Endpoints: `GET /v1/mcp`, `GET /v1/mcp/tools`, `POST /v1/mcp/tools/call`.
+- Tools: `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`.
+- Security preflight: app JWT, exact `mcp.*` scope, workspace claim match, `SET LOCAL app.workspace_id`, active member, channel membership.
+- Current status: `POST /v1/mcp/tools/call` returns a stub tool-result envelope (`runtime-unverified`) rather than executing MCP JSON-RPC/tool logic.
+
+Operational details are in [`docs/INBOUND_MCP.md`](INBOUND_MCP.md); the normative spec remains
+[`research/11-agent-runtime/09-inbound-mcp-server-v0.md`](../research/11-agent-runtime/09-inbound-mcp-server-v0.md).
+
 ### 5.2 Outbox Relay — `OutboxRelay`
 
 ```sh

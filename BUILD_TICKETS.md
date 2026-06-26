@@ -237,9 +237,10 @@
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
+| `MOMO-172` | inbound MCP server v0 skeleton/spec-to-code bridge | swift/docs | MOMO-163 |
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
 | `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
-| `MOMO-172` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
+| `MOMO-173` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
 ### MOMO-163 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.
@@ -249,6 +250,16 @@
 - [ ] Memory Plane retrieval과 Capability Cache projection이 inbound MCP read/propose 경로를 어떻게 제한하는지 연결한다.
 - [ ] `research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`에 discovery snapshot과 approval-safe tool-call JSON fixture를 추가한다.
 - [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`, docs local gate, swift local gate를 통과한다.
+
+### MOMO-172 수용기준 `[swift/docs]`
+- [x] GitHub #80을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `server` package에 inbound MCP registry/model/route skeleton을 추가한다.
+- [x] 최소 tool descriptor를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 코드화한다.
+- [x] 외부 MCP JSON-RPC transport/tool execution은 compile-safe stub으로 두고 `TODO(#80)`를 남긴다.
+- [x] `docs/INBOUND_MCP.md`와 `docs/RUN.md`에 endpoint/security/permission model을 기록한다.
+- [x] server smoke tests로 descriptor/scope/RLS/audit policy를 고정한다.
+- [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #80을 `status:needs-review`로 전환하고 momo-main에 handoff한다.
 
 호환성 원칙:
 
