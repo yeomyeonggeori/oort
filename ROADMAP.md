@@ -23,7 +23,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
   ▲
   └─ 현재: M1 런타임 G-0의 핵심 4개 게이트(MOMO-001~004)는 Docker Desktop으로 검증됨.
      · 5개 Swift 패키지 `swift build/test` green (MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac)
-     · 남은 M1 = staging 배포/시크릿/백업/모니터링 + local gate/worktree 운영 정본화
+     · 남은 M1 = MOMO-005 staging/prod compose skeleton은 준비됨, 실제 staging 기동/TLS/시크릿/백업/모니터링은 MOMO-006/007
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
      · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준

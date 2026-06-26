@@ -6,6 +6,10 @@ xcuserdata/
 .env
 .env.local
 .env.worktree
+infra/prod/.env
+infra/prod/.env.*
+!infra/prod/.env.example
+infra/prod/secrets.env
 .conductor/local.env
 .conductor/*.tmp
 .conductor/setup.local.sh
