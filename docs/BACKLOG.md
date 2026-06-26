@@ -540,6 +540,20 @@ M0(baseline)
 - **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
 - **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
 
+#### MOMO-172 · inbound MCP server v0 skeleton/spec-to-code bridge
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-163
+- **GitHub:** #80
+- **수용기준:**
+  - [x] [swift] `server` package에 MCP registry/model/route skeleton 추가
+  - [x] [swift] `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call` descriptor 구조 추가
+  - [x] [swift] MCP JSON-RPC transport/tool execution은 compile-safe stub + `TODO(#80)`
+  - [x] [docs] MCP endpoint/security/permission model 갱신
+  - [x] [swift] descriptor/security smoke test 추가
+  - [ ] [swift] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부
+- **라벨:** `type:feature`, `area:server`, `priority:p1`, `size:m`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/09-inbound-mcp-server-v0.md`, `docs/INBOUND_MCP.md`
+
 #### MOMO-170 · macOS agent protocol cards
 - **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
 - **deps:** MOMO-132, MOMO-161
@@ -560,7 +574,7 @@ M0(baseline)
 - **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
 - **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
 
-#### MOMO-172 · local LLM context compaction
+#### MOMO-174 · local LLM context compaction
 - **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
 - **deps:** MOMO-130, MOMO-151
 - **수용기준:**

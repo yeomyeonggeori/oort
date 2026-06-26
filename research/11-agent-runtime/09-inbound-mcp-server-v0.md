@@ -136,7 +136,8 @@ Input:
 Rules:
 
 - Requires `mcp.read`.
-- Requires workspace membership and channel membership for every searched channel.
+- Requires `channel_ids` with 1-10 channel UUIDs in v0.
+- Requires workspace membership and channel membership for every searched channel before any DB search execution.
 - `include_deleted` is always false in v0 unless a future admin-only surface is added.
 - Results must be bounded excerpts with `message_id`, `channel_id`, `seq`, `root_id`, `source_id`, and `permission_snapshot`.
 - If `include_memory_refs` is true, Memory Plane retrieval gates run separately and return only `memory_refs` projections. Search results themselves are not memory.
