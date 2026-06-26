@@ -58,7 +58,11 @@ struct AgentJobPayload: Decodable, Sendable {
             ToolGrantProjection.self, forKey: .contextPacket)
         let contextProjection = try c.decodeIfPresent(
             ToolGrantProjection.self, forKey: .contextPacketProjection)
-        toolGrants = directToolGrants ?? contextPacket?.toolGrants ?? contextProjection?.toolGrants
+        toolGrants = Self.trustedToolGrants(
+            directToolGrants,
+            contextPacket?.toolGrants,
+            contextProjection?.toolGrants
+        )
 
         maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
         stepCount = try c.decodeIfPresent(Int.self, forKey: .stepCount)
@@ -69,6 +73,15 @@ struct AgentJobPayload: Decodable, Sendable {
     func toolGrant(for toolName: String) -> ToolGrantMetadata? {
         guard let toolGrants else { return nil }
         return ToolGrantMetadata.singleMatch(in: toolGrants, toolName: toolName)
+    }
+
+    private static func trustedToolGrants(
+        _ candidates: [ToolGrantMetadata]?...
+    ) -> [ToolGrantMetadata]? {
+        let present = candidates.compactMap { $0 }
+        guard let first = present.first else { return nil }
+        guard present.allSatisfy({ $0 == first }) else { return nil }
+        return first
     }
 }
 
@@ -141,8 +154,14 @@ struct ToolGrantMetadata: Codable, Equatable, Sendable {
         case projectionAuditEventID = "projection_audit_event_id"
     }
 
+    var riskAliasesConflict: Bool {
+        guard let risk, let riskLevel else { return false }
+        return Self.normalize(risk) != Self.normalize(riskLevel)
+    }
+
     var effectiveRiskLevel: String? {
-        riskLevel ?? risk
+        guard !riskAliasesConflict else { return nil }
+        return riskLevel ?? risk
     }
 
     var normalizedToolName: String {
@@ -162,7 +181,7 @@ struct ToolGrantMetadata: Codable, Equatable, Sendable {
     }
 
     var isReadOnlyGrant: Bool {
-        normalizedGrant == "read" && normalizedRiskLevel == "read"
+        !riskAliasesConflict && normalizedGrant == "read" && normalizedRiskLevel == "read"
     }
 
     func jsonObject() -> [String: Any] {

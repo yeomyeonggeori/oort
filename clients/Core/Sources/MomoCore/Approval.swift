@@ -84,6 +84,72 @@ public struct Approval: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+/// Client intent for deciding an `approval_request` checkpoint through the
+/// ChatBackend REST contract. The server owns the final audit/resume semantics;
+/// clients send only the human decision intent.
+public struct ApprovalDecisionRequest: Codable, Sendable, Hashable {
+    public var approvalId: ApprovalID
+    public var approve: Bool
+    public var reason: String?
+    public var clientDecisionId: UUID
+
+    public init(
+        approvalId: ApprovalID,
+        approve: Bool,
+        reason: String? = nil,
+        clientDecisionId: UUID = UUID()
+    ) {
+        self.approvalId = approvalId
+        self.approve = approve
+        self.reason = reason
+        self.clientDecisionId = clientDecisionId
+    }
+
+    public var status: ApprovalStatus {
+        approve ? .approved : .rejected
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case approve
+        case reason
+        case clientDecisionId = "client_decision_id"
+    }
+}
+
+/// Minimal acknowledgement returned after the backend records an approval
+/// decision. Live transports may enrich this later with audit ids or resume job
+/// ids without changing the client's decision intent.
+public struct ApprovalDecisionReceipt: Codable, Sendable, Hashable {
+    public var approvalId: ApprovalID
+    public var status: ApprovalStatus
+    public var decidedBy: MemberID?
+    public var decidedAtMs: Int64?
+    public var decisionReason: String?
+
+    public init(
+        approvalId: ApprovalID,
+        status: ApprovalStatus,
+        decidedBy: MemberID? = nil,
+        decidedAtMs: Int64? = nil,
+        decisionReason: String? = nil
+    ) {
+        self.approvalId = approvalId
+        self.status = status
+        self.decidedBy = decidedBy
+        self.decidedAtMs = decidedAtMs
+        self.decisionReason = decisionReason
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case status
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+    }
+}
+
 /// An agent invocation/turn — the run state machine (L4 §3, §6).
 /// Mirrors the `agent_run` table (schema_v0.sql:267) at the fields a client needs.
 public struct AgentRun: Identifiable, Codable, Sendable, Hashable {

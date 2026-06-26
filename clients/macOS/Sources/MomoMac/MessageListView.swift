@@ -61,7 +61,12 @@ public struct MessageListView: View {
                         MessageBubble(
                             message: message,
                             author: viewModel.member(message.authorMemberId),
-                            cost: costSnapshot(for: message)
+                            cost: costSnapshot(for: message),
+                            approvalStatus: viewModel.approvalStatus(for: message),
+                            isApprovalDecisionInFlight: viewModel.isApprovalDecisionInFlight(for: message),
+                            onApprovalDecision: { approvalId, approve in
+                                Task { await viewModel.decideApproval(approvalId, approve: approve) }
+                            }
                         )
                         .id(message.id)
                     }

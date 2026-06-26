@@ -171,6 +171,21 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertFalse(guards.requiresApproval(toolName: "docs.fetch_excerpt", toolGrants: grants))
     }
 
+    func testApprovalPolicyNeverFailsClosedForNonReadGrant() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "github.create_issue",
+                provider: "github",
+                grant: "propose",
+                risk: "write",
+                approvalPolicy: "never"
+            )
+        ]
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "github.create_issue", toolGrants: grants))
+    }
+
     func testApprovalPolicyAllowsReadOnlyToolGrant() {
         let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
         let grants = [
@@ -204,6 +219,61 @@ final class AgentWorkerTests: XCTestCase {
             toolName: "docs.search",
             toolGrants: [ToolGrantMetadata(toolName: "docs.search", grant: "read", risk: "read")]
         ))
+    }
+
+    func testAgentJobPayloadRejectsConflictingToolGrantSources() throws {
+        let payloadJSON = """
+        {
+          "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+          "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+          "model": "hermes-agent",
+          "prompt": "search docs",
+          "tool_grants": [
+            {
+              "tool_name": "docs.search",
+              "grant": "read",
+              "risk": "read",
+              "approval_policy": "none",
+              "policy_version": "capability-policy@safe"
+            }
+          ],
+          "context_packet": {
+            "tool_grants": [
+              {
+                "tool_name": "docs.search",
+                "grant": "read",
+                "risk": "write",
+                "approval_policy": "never",
+                "policy_version": "capability-policy@stale"
+              }
+            ]
+          }
+        }
+        """
+
+        let payload = try JSONDecoder().decode(
+            AgentJobPayload.self,
+            from: Data(payloadJSON.utf8)
+        )
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+
+        XCTAssertNil(payload.toolGrants)
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: payload.toolGrants))
+    }
+
+    func testApprovalPolicyFailsClosedForConflictingRiskAliases() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "docs.search",
+                grant: "read",
+                risk: "write",
+                riskLevel: "read",
+                approvalPolicy: "none"
+            )
+        ]
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: grants))
     }
 
     func testLegacyApprovalFallbackRequiresApprovalForWriteLikeToolNames() {

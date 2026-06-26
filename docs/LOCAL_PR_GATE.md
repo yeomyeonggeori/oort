@@ -12,6 +12,7 @@ paid macOS runner minutes during active development.
 - Remote workflow state must stay `disabled_manually` unless the owner explicitly approves re-enabling it.
 - Repo workflow files are manual-only (`workflow_dispatch`) so a future re-enable cannot start jobs from every push, PR, or tag.
 - The merge gate during this period is local evidence + review pass + no unrelated dirty files.
+- Workers use local evidence to open a PR and hand it off; workers do not merge. `momo-main` owns review, final local gate, merge, issue close, and post-merge `main` verification.
 - Do not wait for GitHub Actions green during this period; record `Actions disabled by policy` in PR evidence when relevant.
 
 ## 1. Rule
@@ -125,18 +126,19 @@ Paste the block printed by `scripts/local_gate.sh`. Shape:
 - Not covered:
 ```
 
-## 6. Merge Cycle
+## 6. Worker Handoff And Merge Cycle
 
 1. Claim issue and work in a separate worktree.
    - `momo-main` checks `scripts/goal_status.sh`.
    - worker runs `scripts/goal_claim.sh <issue>` when available.
 2. Implement from the issue plan.
-3. Run the relevant `scripts/local_gate.sh --profile ...`.
+3. Worker runs the relevant `scripts/local_gate.sh --profile ...` in a clean worktree.
 4. Commit, push, and open PR.
-5. Move the issue to review with `scripts/goal_release.sh <issue> --review --pr <PR URL>`.
-6. Review for security, correctness, and scope.
-7. Run the final local gate after review fixes.
-8. Merge if the local gate passes and no blocker remains.
-9. Update `main` locally and rerun the relevant local gate on `main`.
-10. Update issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommend the next goal.
-11. If Actions are intentionally disabled, confirm workflow state remains `disabled_manually` instead of waiting for remote CI.
+5. Worker moves the issue to review with `scripts/goal_release.sh <issue> --review --pr <PR URL>`, hands off to `momo-main`, and stops.
+6. Worker must not merge, close the issue, run the post-merge `main` gate, or adjust roadmap/backlog state.
+7. `momo-main` reviews for security, correctness, and scope.
+8. `momo-main` runs the final local gate after review fixes.
+9. `momo-main` merges only if the local gate passes and no blocker remains.
+10. `momo-main` updates `main` locally and reruns the relevant local gate on `main`.
+11. `momo-main` updates issue status, `STATUS.md`, roadmap/backlog if decisions changed, and recommends the next goal.
+12. If Actions are intentionally disabled, `momo-main` confirms workflow state remains `disabled_manually` instead of waiting for remote CI.

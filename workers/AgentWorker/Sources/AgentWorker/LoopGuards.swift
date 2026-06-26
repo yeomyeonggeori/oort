@@ -120,9 +120,7 @@ struct LoopGuards: Sendable {
         switch policy {
         case "require_approval", "requires_approval", "approval_required", "always", "required":
             return true
-        case "never":
-            return false
-        case "none", "read_only", "readonly":
+        case "never", "none", "read_only", "readonly":
             return !toolGrant.isReadOnlyGrant
         default:
             // v0 has no runtime implementation for conditional policies such as
