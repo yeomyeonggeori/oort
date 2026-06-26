@@ -215,8 +215,10 @@
 |---|---|---|---|---|
 | `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
 | `MOMO-011` | 초대코드 발급/조회/폐기 REST + redeem 최소 slice | swift/runtime | MOMO-010 | local gate PASS |
-| `MOMO-012` | 초대코드 자가가입 플로우 + audit_log | swift/runtime | MOMO-011 | 후속 |
+| `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
+
 | `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
+| `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | 후속 제안 |
 
 ### MOMO-010 수용기준 `[sql/runtime]`
 - [x] `server/Migrations/003_onboarding.sql` 신규 추가(`schema_v0.sql` 미수정).
@@ -229,13 +231,23 @@
 
 ### MOMO-011 수용기준 `[swift/runtime]`
 - [x] `InviteRoutes` 추가: `POST /v1/workspaces/{ws}/invites` create, `GET /v1/workspaces/{ws}/invites` list, `POST /v1/workspaces/{ws}/invites/{invite}/revoke` revoke.
-- [x] `POST /v1/workspaces/{ws}/invites/redeem`은 authenticated member가 자기 member_id로 invite를 최소 redemption 처리한다. self-signup의 member/human/membership 생성은 MOMO-012 범위로 남긴다.
+- [x] `POST /v1/workspaces/{ws}/invites/redeem`은 authenticated member가 자기 member_id로 invite를 최소 redemption 처리한다. self-signup의 member/human/membership 생성은 MOMO-014 범위로 남긴다.
 - [x] create/list/revoke는 path workspace와 JWT workspace 일치 + owner/admin active membership을 요구하고, redeem은 active workspace member를 요구한다.
 - [x] raw invite code는 create 응답에서만 반환하고, DB에는 MOMO-010의 `momo_invite_code_hash(raw_code)`만 저장한다.
 - [x] 모든 invite DB 접근은 `SET LOCAL app.workspace_id`가 적용되는 tenant transaction에서 실행해 RLS FORCE와 same-workspace FK를 유지한다.
 - [x] 로컬 HTTP smoke PASS: login 200 → invite create 201 → list 200 → redeem 200 → revoke 200.
 - [x] `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-db` PASS(전체 swift build/test 포함).
 - [x] Swift local gate PASS는 `runtime-db` profile의 `make build` + `make test` 단계로 함께 검증.
+
+### MOMO-012 수용기준 `[swift/macos-ui]`
+- [x] `MomoMacDevApp`에서 invite code 입력 UI와 idle/validating/success/failure 상태를 볼 수 있다.
+- [x] `LiveChatBackend` stub이 `MOMO-012`/`MOMO-DEV` 성공, `EXPIRED`/`USED-UP`/기타 실패 상태를 결정적으로 반환한다.
+- [x] 기존 channel/message/approval/cost UI와 `MomoMacRootView` API를 유지한다.
+- [x] `swift test --package-path clients/macOS` PASS(10 tests).
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS.
+- [x] `scripts/local_gate.sh --profile swift` PASS.
+- out of scope: production server `/v1/join` 구현과 DB-backed invite redemption e2e. 새 후속 이슈(`MOMO-014` 제안)로 분리한다.
+
 
 ## M2 Context / Memory / Google Workspace
 

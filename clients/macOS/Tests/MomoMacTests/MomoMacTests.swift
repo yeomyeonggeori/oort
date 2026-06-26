@@ -88,6 +88,47 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(first.id, second.id, "same clientMsgId must dedupe (L4 §3.1)")
     }
 
+    func testInviteJoinStubAcceptsDemoCodeAndRejectsUnknownCode() async throws {
+        let backend = LiveChatBackend()
+        _ = await backend.seedDemo()
+
+        let joined = await backend.joinWorkspace(inviteCode: "MOMO-012")
+        guard case .joined(let workspace) = joined else {
+            return XCTFail("MOMO-012 should join the dev workspace")
+        }
+        XCTAssertEqual(workspace.workspace.name, "Dawn Lab")
+        XCTAssertEqual(workspace.role, "member")
+        XCTAssertTrue(workspace.defaultChannelNames.contains("general"))
+
+        let failed = await backend.joinWorkspace(inviteCode: "nope")
+        guard case .failed(let failure) = failed else {
+            return XCTFail("unknown code should expose a failure state")
+        }
+        XCTAssertEqual(failure.reason, "Invite not found")
+        XCTAssertEqual(failure.code, "nope")
+    }
+
+    @MainActor
+    func testViewModelSubmitsInviteCodeThroughOnboardingBackend() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        viewModel.setChannels(seed.channels)
+
+        await viewModel.submitInviteCode("EXPIRED")
+        guard case .failed(let failure) = viewModel.inviteJoinState else {
+            return XCTFail("EXPIRED should expose a failure state")
+        }
+        XCTAssertEqual(failure.reason, "Invite expired")
+
+        await viewModel.submitInviteCode("MOMO-DEV")
+        guard case .joined(let workspace) = viewModel.inviteJoinState else {
+            return XCTFail("MOMO-DEV should expose a success state")
+        }
+        XCTAssertEqual(workspace.workspace.slug, "dawn-lab")
+    }
+
     @MainActor
     func testDemoRealtimeReplayIsIdempotentAcrossResubscribe() async throws {
         let viewModel = await MomoMacDemo.makeViewModel()

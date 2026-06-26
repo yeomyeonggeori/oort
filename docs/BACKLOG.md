@@ -103,8 +103,9 @@ M0(baseline)
  │            │                                     ├─ MOMO-040 ─┬─ MOMO-041 │        │
  │            └─(MOMO-063 입력 G-0)                 │            ├─ MOMO-042  │        │
  │                                                  │            ├─ MOMO-043  │        │
- MOMO-010 ─┬─ MOMO-011 ── MOMO-012                  │            ├─ MOMO-044  │        │
- │         └─ MOMO-013                              │            └─ MOMO-050 ─┘        │
+ MOMO-010 ─┬─ MOMO-011 ── MOMO-014(proposed)        │            ├─ MOMO-044  │        │
+ │         ├─ MOMO-012                              │            └─ MOMO-050 ─┘        │
+ │         └─ MOMO-013                              │                                      │
  │                                                  │                  │              │
  │                                          MOMO-050 ── MOMO-051 ── MOMO-052          │
  │                                                                       │            │
@@ -342,16 +343,18 @@ M0(baseline)
 - **라벨:** `type:feature`, `area:server`, `area:tenancy`, `status:runtime-unverified`
 - **참조:** L4 §5.1(REST), §7.1/§7.2(권한)
 
-#### MOMO-012 · 초대코드 자가가입 플로우 + audit_log
-- **마일스톤:** M2 · **에픽:** EP-TENANCY · **플랫폼:** backend · **추정:** L
-- **deps:** MOMO-011
+#### MOMO-012 · macOS dev app onboarding/invite flow v0 UI
+- **마일스톤:** M2/M3 bridge · **에픽:** EP-TENANCY/EP-UX-DBC · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-010
 - **수용기준:**
-  - [ ] [swift] `POST /v1/join`: 초대코드 검증(만료/사용횟수/revoke) → member/membership 생성 → used_count 증가
-  - [ ] [runtime] 초대코드의 workspace_id로 `app.workspace_id` 컨텍스트 설정 후 가입 행 생성
-  - [ ] [runtime] 가입 사건 `audit_log` 기록(actor/subject/via_token)
-  - [ ] [runtime] 3개+ 팀(10인=1팀) 자가가입 e2e + 워크스페이스 격리 재확인
-- **라벨:** `type:feature`, `area:server`, `area:tenancy`, `status:runtime-unverified`, `gate:qa`
-- **참조:** L4 §7.3(actor/subject 델리게이션) · `schema_v0.sql`(member/membership/audit_log)
+  - [x] [swift] `MomoMacDevApp`에서 invite code 입력/상태 UI 확인 가능
+  - [x] [swift] `LiveChatBackend` stub으로 성공/실패/workspace join 상태 전이 확인
+  - [x] [swift] 기존 channel/message/approval/cost UI 유지
+  - [x] [macos-ui] `scripts/local_gate.sh --profile macos-ui` PASS
+  - [x] [swift] `scripts/local_gate.sh --profile swift` PASS
+- **라벨:** `type:feature`, `area:macos`, `area:tenancy`, `size:m`
+- **참조:** ROADMAP §3.1/§3.2 · `clients/macOS/Sources/MomoMac/LiveChatBackend.swift`
+- **후속 제안:** production server `/v1/join` 검증→member/membership→used_count→audit_log runtime e2e는 별도 이슈(`MOMO-014` 제안)로 분리.
 
 ---
 
