@@ -51,4 +51,39 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(decoded.server.capabilities.tools.listChanged)
         XCTAssertTrue(decoded.runtimeStatus.contains("runtime-unverified"))
     }
+
+    func testSearchMessagesRequiresBoundedChannelIDsInDescriptor() throws {
+        let descriptor = InboundMCPToolRegistry.descriptor(named: .searchMessages)
+        let schema = try XCTUnwrap(descriptor.inputSchema.objectValue)
+        let required = try XCTUnwrap(schema["required"]?.arrayValue)
+            .compactMap(\.stringValue)
+        let properties = try XCTUnwrap(schema["properties"]?.objectValue)
+        let channelIDs = try XCTUnwrap(properties["channel_ids"]?.objectValue)
+
+        XCTAssertTrue(required.contains("channel_ids"))
+        XCTAssertEqual(channelIDs["maxItems"], .int(InboundMCPToolRegistry.searchMessagesMaxChannelIDs))
+    }
+
+    func testSearchMessagesChannelIDsFailClosedBeforeDBPreflight() throws {
+        XCTAssertThrowsError(try InboundMCPRoutes.channelIDs(
+            for: .searchMessages,
+            arguments: ["workspace_id": .string("00000000-0000-7000-8000-000000000001")]
+        ))
+
+        XCTAssertThrowsError(try InboundMCPRoutes.channelIDs(
+            for: .searchMessages,
+            arguments: [
+                "channel_ids": .array([])
+            ]
+        ))
+
+        let tooMany = (0...InboundMCPToolRegistry.searchMessagesMaxChannelIDs)
+            .map { JSONValue.string(String(format: "00000000-0000-7000-8000-%012d", $0)) }
+        XCTAssertThrowsError(try InboundMCPRoutes.channelIDs(
+            for: .searchMessages,
+            arguments: [
+                "channel_ids": .array(tooMany)
+            ]
+        ))
+    }
 }

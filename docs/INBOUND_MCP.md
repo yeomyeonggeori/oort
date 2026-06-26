@@ -49,7 +49,9 @@ MOMO-172 fixes the same four tools from MOMO-163 in compiled Swift descriptors:
 | `momo.create_tool_call` | `mcp.tool.propose` | proposal only | preflight + stub; must later create approval-safe rows |
 
 The server also exposes the resource template and prompt descriptors from the MOMO-163 discovery
-fixture. Provider/plugin tools are not mirrored directly as inbound MCP tools.
+fixture. Provider/plugin tools are not mirrored directly as inbound MCP tools. In v0,
+`momo.search_messages` requires an explicit `channel_ids` array with 1-10 channel UUIDs; the server
+checks active membership for every listed channel before any search execution.
 
 ## Security Model
 

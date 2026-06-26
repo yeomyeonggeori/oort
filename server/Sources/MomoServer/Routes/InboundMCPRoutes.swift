@@ -188,13 +188,24 @@ struct InboundMCPRoutes: Sendable {
         return uuid
     }
 
-    private static func channelIDs(
+    static func channelIDs(
         for toolName: InboundMCPToolName,
         arguments: [String: JSONValue]
     ) throws -> [UUID] {
         switch toolName {
         case .searchMessages:
-            let values = arguments["channel_ids"]?.arrayValue ?? []
+            guard let values = arguments["channel_ids"]?.arrayValue else {
+                throw HTTPError(.badRequest, message: "channel_ids is required for search_messages")
+            }
+            guard !values.isEmpty else {
+                throw HTTPError(.badRequest, message: "channel_ids must contain at least one channel")
+            }
+            guard values.count <= InboundMCPToolRegistry.searchMessagesMaxChannelIDs else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "channel_ids must contain at most \(InboundMCPToolRegistry.searchMessagesMaxChannelIDs) channels"
+                )
+            }
             return try values.map { value in
                 guard let raw = value.stringValue, let uuid = UUID(uuidString: raw) else {
                     throw HTTPError(.badRequest, message: "channel_ids must contain UUID strings")

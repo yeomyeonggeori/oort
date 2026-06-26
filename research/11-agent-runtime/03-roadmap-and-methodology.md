@@ -67,7 +67,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 |---|---|---|
 | `MOMO-170` | Agent protocol cards | tool_call, approval, artifact, cost, memory citation, source badge |
 | `MOMO-171` | Agent memory inspector | users can view/delete/block memory entries used in context |
-| `MOMO-173` | Local LLM context compaction | Foundation Models probe + server fallback, source-preserving summaries |
+| `MOMO-174` | Local LLM context compaction | Foundation Models probe + server fallback, source-preserving summaries |
 
 ## 4. Architectural Defaults
 

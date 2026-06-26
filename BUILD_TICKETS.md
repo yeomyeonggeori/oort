@@ -240,7 +240,7 @@
 | `MOMO-172` | inbound MCP server v0 skeleton/spec-to-code bridge | swift/docs | MOMO-163 |
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
 | `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
-| `MOMO-173` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
+| `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
 ### MOMO-163 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.

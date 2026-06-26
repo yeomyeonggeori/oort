@@ -574,7 +574,7 @@ M0(baseline)
 - **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
 - **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
 
-#### MOMO-173 · local LLM context compaction
+#### MOMO-174 · local LLM context compaction
 - **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
 - **deps:** MOMO-130, MOMO-151
 - **수용기준:**

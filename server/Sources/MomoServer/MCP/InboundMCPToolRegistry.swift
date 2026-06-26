@@ -1,6 +1,8 @@
 import Foundation
 
 enum InboundMCPToolRegistry {
+    static let searchMessagesMaxChannelIDs = 10
+
     static let server = InboundMCPServerInfo(
         name: "momo-inbound",
         version: "0.1.0",
@@ -19,11 +21,11 @@ enum InboundMCPToolRegistry {
             title: "Search Momo Messages",
             description: "Search visible momo messages and return bounded source refs. Does not create memory.",
             inputSchema: schema(
-                required: ["workspace_id", "query", "limit"],
+                required: ["workspace_id", "query", "channel_ids", "limit"],
                 properties: [
                     "workspace_id": uuidString(),
                     "query": string(minLength: 1, maxLength: 300),
-                    "channel_ids": array(items: uuidString(), maxItems: 10),
+                    "channel_ids": array(items: uuidString(), maxItems: searchMessagesMaxChannelIDs),
                     "thread_root_message_id": nullableUUIDString(),
                     "seq_from": nullableInteger(minimum: 1),
                     "seq_to": nullableInteger(minimum: 1),

@@ -82,7 +82,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-172` | M2 | inbound MCP server v0 skeleton/spec-to-code bridge | server registry/routes/stub + endpoint/security docs |
 | `MOMO-170` | M3 | macOS agent protocol cards | `tool_call`/approval/result/artifact cards + Context Packet/Memory/Capability/source/cost badges + SwiftUI fixture contract |
 | `MOMO-171` | M3 | agent memory inspector | memory entries used in context view/delete/block |
-| `MOMO-173` | M3 | local LLM context compaction | source-preserving summaries + server fallback |
+| `MOMO-174` | M3 | local LLM context compaction | source-preserving summaries + server fallback |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
