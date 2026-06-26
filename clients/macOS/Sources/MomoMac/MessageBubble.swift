@@ -18,11 +18,24 @@ public struct MessageBubble: View {
     public let author: Member?
     /// Optional cost snapshot for the message's run (experience B).
     public let cost: CostSnapshot?
+    public let approvalStatus: ApprovalStatus?
+    public let isApprovalDecisionInFlight: Bool
+    public let onApprovalDecision: ((ApprovalID, Bool) -> Void)?
 
-    public init(message: Message, author: Member?, cost: CostSnapshot? = nil) {
+    public init(
+        message: Message,
+        author: Member?,
+        cost: CostSnapshot? = nil,
+        approvalStatus: ApprovalStatus? = nil,
+        isApprovalDecisionInFlight: Bool = false,
+        onApprovalDecision: ((ApprovalID, Bool) -> Void)? = nil
+    ) {
         self.message = message
         self.author = author
         self.cost = cost
+        self.approvalStatus = approvalStatus
+        self.isApprovalDecisionInFlight = isApprovalDecisionInFlight
+        self.onApprovalDecision = onApprovalDecision
     }
 
     private var isAgent: Bool { author?.isAgent ?? false }
@@ -162,7 +175,43 @@ public struct MessageBubble: View {
             if let summary = message.props["summary"]?.stringValue {
                 Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
-            // TODO(T09-followup, experience C): inline [승인]/[거부] wired to decideApproval.
+            approvalActions
+        }
+    }
+
+    @ViewBuilder
+    private var approvalActions: some View {
+        let status = approvalStatus ?? approvalStatusFromProps ?? .pending
+        if status == .pending, let approvalId, let onApprovalDecision {
+            HStack(spacing: 6) {
+                Button {
+                    onApprovalDecision(approvalId, true)
+                } label: {
+                    Label("Approve", systemImage: "checkmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    onApprovalDecision(approvalId, false)
+                } label: {
+                    Label("Reject", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+
+                if isApprovalDecisionInFlight {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("Decision is being recorded")
+                }
+            }
+            .controlSize(.small)
+            .disabled(isApprovalDecisionInFlight)
+            .padding(.top, 2)
+        } else if status != .pending {
+            Label(decidedLabel(for: status), systemImage: decidedIcon(for: status))
+                .font(.caption.bold())
+                .foregroundStyle(status == .approved ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
+                .padding(.top, 2)
         }
     }
 
@@ -208,5 +257,49 @@ public struct MessageBubble: View {
             return "{}"
         }
         return str
+    }
+
+    private var approvalId: ApprovalID? {
+        guard let raw = message.props["approval_id"]?.stringValue else {
+            return nil
+        }
+        return ApprovalID(raw)
+    }
+
+    private var approvalStatusFromProps: ApprovalStatus? {
+        guard let raw = message.props["approval_status"]?.stringValue else {
+            return nil
+        }
+        return ApprovalStatus(rawValue: raw)
+    }
+
+    private func decidedLabel(for status: ApprovalStatus) -> String {
+        switch status {
+        case .approved:
+            return "Approved"
+        case .rejected:
+            return "Rejected"
+        case .expired:
+            return "Expired"
+        case .cancelled:
+            return "Cancelled"
+        case .pending:
+            return "Pending"
+        }
+    }
+
+    private func decidedIcon(for status: ApprovalStatus) -> String {
+        switch status {
+        case .approved:
+            return "checkmark.circle.fill"
+        case .rejected:
+            return "xmark.circle.fill"
+        case .expired:
+            return "clock.badge.exclamationmark"
+        case .cancelled:
+            return "minus.circle.fill"
+        case .pending:
+            return "hourglass"
+        }
     }
 }

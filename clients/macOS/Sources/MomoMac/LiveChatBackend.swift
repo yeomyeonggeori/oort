@@ -204,12 +204,15 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
         )
 
         let approvalRun = RunID()
+        let approvalId = ApprovalID()
         _ = appendServerMessage(
             channel: general.id,
             author: researcher.id,
             type: .approvalRequest,
             body: nil,
             props: .object([
+                "approval_id": .string(approvalId.description),
+                "approval_status": .string(ApprovalStatus.pending.rawValue),
                 "action_type": .string("github.issue.create"),
                 "title": .string("Create rollout checklist issue"),
                 "summary": .string("Open a tracked GitHub issue before the agent writes to the repo."),
@@ -275,7 +278,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
             )),
             .approval(ApprovalEvent(
                 action: .requested,
-                approvalId: ApprovalID(),
+                approvalId: approvalId,
                 runId: approvalRun,
                 channelId: general.id,
                 requestedBy: researcher.id,
@@ -379,6 +382,62 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
         }
     }
 
+    public func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        // TODO(T09-followup): REST POST .../approvals/{id}/decide.
+        for channel in demoRealtimeByChannel.keys {
+            guard let events = demoRealtimeByChannel[channel],
+                  let idx = events.firstIndex(where: { event in
+                      if case .approval(let approval) = event {
+                          return approval.approvalId == request.approvalId
+                      }
+                      return false
+                  }) else { continue }
+
+            var updatedEvents = events
+            guard case .approval(var approval) = updatedEvents[idx] else {
+                continue
+            }
+
+            if approval.status == .pending {
+                approval.action = .decided
+                approval.status = request.status
+                approval.decidedBy = members.first(where: { $0.kind == .human })?.id
+                approval.decisionReason = request.reason
+                updatedEvents[idx] = .approval(approval)
+
+                for eventIndex in updatedEvents.indices {
+                    if case .agentStatus(var status) = updatedEvents[eventIndex],
+                       status.runId == approval.runId {
+                        status.phase = .done
+                        status.runStatus = request.approve ? .succeeded : .cancelled
+                        status.reservedMicroUSD = 0
+                        updatedEvents[eventIndex] = .agentStatus(status)
+                        emit(.agentStatus(status), to: channel)
+                    }
+                }
+
+                demoRealtimeByChannel[channel] = updatedEvents
+                emit(.approval(approval), to: channel)
+            }
+
+            let receipt = ApprovalDecisionReceipt(
+                approvalId: approval.approvalId,
+                status: approval.status,
+                decidedBy: approval.decidedBy,
+                decidedAtMs: nowMs(),
+                decisionReason: approval.decisionReason
+            )
+            markApprovalRequestMessage(with: receipt, in: channel)
+            return receipt
+        }
+
+        throw BackendError.problem(
+            status: 404,
+            title: "approval not found",
+            detail: "approval \(request.approvalId)"
+        )
+    }
+
     // MARK: AgentTransport
 
     public func observe(agent: MemberID, channel: ChannelID) async throws -> AsyncStream<AgentEvent> {
@@ -400,39 +459,9 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     }
 
     public func decideApproval(_ id: ApprovalID, approve: Bool, reason: String?) async throws {
-        // TODO(T09-followup): REST POST .../approvals/{id}/decide.
-        for channel in demoRealtimeByChannel.keys {
-            guard let events = demoRealtimeByChannel[channel],
-                  let idx = events.firstIndex(where: { event in
-                      if case .approval(let approval) = event {
-                          return approval.approvalId == id
-                      }
-                      return false
-                  }) else { continue }
-
-            var updatedEvents = events
-            guard case .approval(var approval) = updatedEvents[idx] else { return }
-            approval.action = .decided
-            approval.status = approve ? .approved : .rejected
-            approval.decidedBy = members.first(where: { $0.kind == .human })?.id
-            approval.decisionReason = reason
-            updatedEvents[idx] = .approval(approval)
-
-            for eventIndex in updatedEvents.indices {
-                if case .agentStatus(var status) = updatedEvents[eventIndex],
-                   status.runId == approval.runId {
-                    status.phase = .done
-                    status.runStatus = approve ? .succeeded : .cancelled
-                    status.reservedMicroUSD = 0
-                    updatedEvents[eventIndex] = .agentStatus(status)
-                    emit(.agentStatus(status), to: channel)
-                }
-            }
-
-            demoRealtimeByChannel[channel] = updatedEvents
-            emit(.approval(approval), to: channel)
-            return
-        }
+        _ = try await decideApproval(
+            ApprovalDecisionRequest(approvalId: id, approve: approve, reason: reason)
+        )
     }
 
     public func cancelRun(_ id: RunID) async throws {
@@ -465,6 +494,41 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
 
     private func emitAgent(_ event: AgentEvent, to channel: ChannelID) {
         for cont in (agentStreams[channel] ?? [:]).values { cont.yield(event) }
+    }
+
+    private func markApprovalRequestMessage(with receipt: ApprovalDecisionReceipt, in channel: ChannelID) {
+        guard var messages = messagesByChannel[channel] else {
+            return
+        }
+        for index in messages.indices {
+            guard messages[index].type == .approvalRequest,
+                  messages[index].props["approval_id"]?.stringValue == receipt.approvalId.description else {
+                continue
+            }
+
+            var message = messages[index]
+            var props = message.props.objectValue ?? [:]
+            props["approval_status"] = .string(receipt.status.rawValue)
+            if let decidedBy = receipt.decidedBy {
+                props["decided_by"] = .string(decidedBy.description)
+            }
+            if let decidedAtMs = receipt.decidedAtMs {
+                props["decided_at_ms"] = .int(decidedAtMs)
+            }
+            if let decisionReason = receipt.decisionReason {
+                props["decision_reason"] = .string(decisionReason)
+            }
+            message.props = .object(props)
+            message.editedAtMs = receipt.decidedAtMs
+            messages[index] = message
+            messagesByChannel[channel] = messages
+            emit(.messageEdited(message), to: channel)
+            return
+        }
+    }
+
+    private func nowMs() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
     }
 
     // `async` so the cross-actor hop from the nonisolated AsyncStream closure is a

@@ -117,4 +117,124 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(viewModel.approvals[approval.approvalId]?.status, .approved)
         XCTAssertTrue(viewModel.pendingApprovals.isEmpty)
     }
+
+    @MainActor
+    func testApprovalDecisionUsesChatBackendContract() async throws {
+        let chat = RecordingDecisionChatBackend()
+        let agentTransport = FailingDecisionAgentTransport()
+        let viewModel = ChatViewModel(chat: chat, agentTransport: agentTransport)
+        let approvalId = ApprovalID()
+
+        await viewModel.decideApproval(approvalId, approve: false, reason: "needs owner")
+
+        let requests = await chat.recordedDecisionRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.first?.approvalId, approvalId)
+        XCTAssertEqual(requests.first?.approve, false)
+        XCTAssertEqual(requests.first?.reason, "needs owner")
+        let agentDecisionCalls = await agentTransport.decisionCallCount()
+        XCTAssertEqual(agentDecisionCalls, 0)
+        XCTAssertFalse(viewModel.approvalDecisionsInFlight.contains(approvalId))
+    }
+
+    func testApprovalDecisionUpdatesTimelineApprovalRequestProps() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        try await backend.connect(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        let initialHistory = try await backend.history(channel: channel, after: nil, limit: 50)
+        let approvalMessage = try XCTUnwrap(initialHistory.first(where: { $0.type == .approvalRequest }))
+        let rawApprovalId = try XCTUnwrap(approvalMessage.props["approval_id"]?.stringValue)
+        let approvalId = try XCTUnwrap(ApprovalID(rawApprovalId))
+
+        let receipt = try await backend.decideApproval(
+            ApprovalDecisionRequest(approvalId: approvalId, approve: false, reason: "needs owner")
+        )
+
+        XCTAssertEqual(receipt.status, .rejected)
+        let updatedHistory = try await backend.history(channel: channel, after: nil, limit: 50)
+        let updatedMessage = try XCTUnwrap(updatedHistory.first(where: { $0.id == approvalMessage.id }))
+        XCTAssertEqual(updatedMessage.props["approval_status"]?.stringValue, "rejected")
+        XCTAssertEqual(updatedMessage.props["decision_reason"]?.stringValue, "needs owner")
+        XCTAssertNotNil(updatedMessage.props["decided_at_ms"]?.intValue)
+    }
+}
+
+private actor RecordingDecisionChatBackend: ChatBackend {
+    private var decisions: [ApprovalDecisionRequest] = []
+
+    func recordedDecisionRequests() -> [ApprovalDecisionRequest] {
+        decisions
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {}
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        throw BackendError.notConnected
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        []
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        []
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        []
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        []
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {}
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        throw BackendError.notConnected
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {}
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        decisions.append(request)
+        return ApprovalDecisionReceipt(
+            approvalId: request.approvalId,
+            status: request.status,
+            decisionReason: request.reason
+        )
+    }
+}
+
+private actor FailingDecisionAgentTransport: AgentTransport {
+    private var decisionCalls = 0
+
+    func decisionCallCount() -> Int {
+        decisionCalls
+    }
+
+    func observe(agent: MemberID, channel: ChannelID) async throws -> AsyncStream<AgentEvent> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+
+    func invoke(
+        agent: MemberID,
+        channel: ChannelID,
+        prompt: String,
+        idempotencyKey: UUID
+    ) async throws -> RunID {
+        throw BackendError.notConnected
+    }
+
+    func decideApproval(_ id: ApprovalID, approve: Bool, reason: String?) async throws {
+        decisionCalls += 1
+        throw BackendError.problem(status: 500, title: "unexpected agent decision path", detail: nil)
+    }
+
+    func cancelRun(_ id: RunID) async throws {}
 }
