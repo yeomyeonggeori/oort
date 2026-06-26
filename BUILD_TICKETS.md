@@ -237,6 +237,7 @@
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
+| `MOMO-165` | Capability Cache approval metadata gate | swift | MOMO-151, MOMO-153, MOMO-161, MOMO-164 |
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
 | `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
 | `MOMO-172` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
@@ -255,6 +256,15 @@
 - `FoundationModels` import는 platform target에만 둔다. `MomoCore`는 Foundation-only 유지.
 - `#if canImport(FoundationModels)`와 OS availability fallback으로 현재 SwiftPM/local gate를 깨지 않는다.
 - build-macos-apps 플러그인은 `swift build`, `swift test`, test triage, SwiftPM GUI `.app` staging, Codex Run action에 사용한다.
+
+### MOMO-165 수용기준 `[swift]`
+- [x] AgentWorker `agent_job.payload`가 Context Packet / Capability Cache projection의 `tool_grants` metadata를 받을 수 있다.
+- [x] G6 approval gate가 `approval_policy=require_approval`/`always`를 approval pause로 처리한다.
+- [x] `approval_policy=never` 또는 read-only grant(`grant=read`, `risk=read`, `approval_policy=none/read_only`)는 approval 없이 진행한다.
+- [x] metadata 없음/불일치/중복/unknown policy는 approval-required로 fail-closed 처리한다.
+- [x] 기존 MOMO-164 tool-name heuristic은 legacy fallback으로 격리하고, AgentWorker runtime path는 tool grant metadata 우선으로 판단한다.
+- [x] AgentWorker unit test를 추가하고 `scripts/local_gate.sh --profile swift`로 검증한다.
+- [ ] 실제 Hermes runtime e2e, DB migration, macOS 승인/거절 버튼 구현은 out of scope로 남긴다.
 
 ### MOMO-160 수용기준 `[spec/sql/swift]`
 - [ ] `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`에 `agent_run` lifecycle 정본을 추가한다.

@@ -265,18 +265,25 @@ struct WorkerService: Service {
                         existing: streamMessageID, job: job, body: accumulatedText)
 
                 case .toolCall(let id, let name, let args):
-                    // G6 approval gate (stub): side-effecting calls require a human.
-                    let needsApproval = guards.requiresApproval(toolName: name)
+                    // G6 approval gate: prefer Context Packet / Capability Cache
+                    // tool grant metadata; missing or ambiguous metadata fails closed.
+                    let toolGrant = p.toolGrant(for: name)
+                    let needsApproval = guards.requiresApproval(
+                        toolName: name,
+                        toolGrants: p.toolGrants
+                    )
                     logger.info("tool_call from hermes", metadata: [
                         "name": .string(name),
                         "callId": .string(id),
                         "needsApproval": .stringConvertible(needsApproval),
+                        "approvalPolicy": .string(toolGrant?.approvalPolicy ?? "missing_or_ambiguous"),
+                        "riskLevel": .string(toolGrant?.effectiveRiskLevel ?? "missing_or_ambiguous"),
                     ])
                     await publishToolCall(agentChannel, runID: p.runID, callID: id,
                                           name: name, arguments: args)
                     if needsApproval {
                         let toolCall = ApprovalRuntime.ToolCall(
-                            callID: id, name: name, arguments: args)
+                            callID: id, name: name, arguments: args, toolGrant: toolGrant)
                         let pause = await recordApprovalPause(job: job, toolCall: toolCall)
                         switch pause {
                         case .paused(let approvalID, let requestMessageID):
@@ -498,14 +505,19 @@ struct WorkerService: Service {
         plan: ApprovalRuntime.PausePlan,
         runID: UUID
     ) -> String {
-        jsonString([
+        var toolCall: [String: Any] = [
+            "call_id": plan.toolCall.callID,
+            "name": plan.toolCall.name,
+            "arguments": plan.toolCall.arguments,
+        ]
+        if let toolGrant = plan.toolCall.toolGrant {
+            toolCall["tool_grant"] = toolGrant.jsonObject()
+        }
+
+        return jsonString([
             "run_id": runID.uuidString,
             "action_type": plan.actionType,
-            "tool_call": [
-                "call_id": plan.toolCall.callID,
-                "name": plan.toolCall.name,
-                "arguments": plan.toolCall.arguments,
-            ],
+            "tool_call": toolCall,
             "resume_model": "same_run_new_agent_job",
         ])
     }
@@ -517,7 +529,7 @@ struct WorkerService: Service {
         actionType: String,
         toolCall: ApprovalRuntime.ToolCall
     ) -> String {
-        jsonString([
+        var props: [String: Any] = [
             "approval_id": approvalID.uuidString,
             "run_id": runID.uuidString,
             "channel_id": channelID.uuidString,
@@ -528,7 +540,11 @@ struct WorkerService: Service {
             "summary": "Review the proposed tool call before momo executes it.",
             "arguments": toolCall.arguments,
             "status": "pending",
-        ])
+        ]
+        if let toolGrant = toolCall.toolGrant {
+            props["tool_grant"] = toolGrant.jsonObject()
+        }
+        return jsonString(props)
     }
 
     private static func approvalRequestBroadcastPayload(
