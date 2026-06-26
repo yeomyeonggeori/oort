@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport {
+public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var connected = false
@@ -27,6 +27,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     private var messagesByChannel: [ChannelID: [Message]] = [:]
     private var seqByChannel: [ChannelID: Int64] = [:]
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
+    private var inviteJoinState: InviteJoinState = .idle
 
     // Realtime fan-out continuations, keyed by channel.
     private var channelStreams: [ChannelID: [UUID: AsyncStream<RealtimeEvent>.Continuation]] = [:]
@@ -43,6 +44,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
     public func seedDemo() -> DemoSeed {
         let ws = WorkspaceID()
         workspace = ws
+        inviteJoinState = .idle
         demoRealtimeByChannel = [:]
         replayedDemoDeltaChannels = []
 
@@ -296,6 +298,59 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
 
         return DemoSeed(workspace: ws, human: human, agents: [researcher, builder],
                         channels: channels)
+    }
+
+    // MARK: OnboardingInviteBackend
+
+    public func currentInviteJoinState() async -> InviteJoinState {
+        inviteJoinState
+    }
+
+    public func joinWorkspace(inviteCode: String) async -> InviteJoinState {
+        let trimmed = inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            inviteJoinState = .failed(InviteJoinFailure(
+                code: "",
+                reason: "Invite code required",
+                recoveryHint: "Enter MOMO-012 for the dev fixture."
+            ))
+            return inviteJoinState
+        }
+
+        inviteJoinState = .validating(code: trimmed)
+        try? await Task.sleep(for: .milliseconds(250))
+
+        switch trimmed.uppercased() {
+        case "MOMO-012", "MOMO-DEV", "DAWN-LAB":
+            let ws = workspace ?? WorkspaceID()
+            let joined = JoinedWorkspace(
+                workspace: Workspace(id: ws, slug: "dawn-lab", name: "Dawn Lab"),
+                role: "member",
+                defaultChannelNames: channels.compactMap(\.name),
+                joinedMemberCount: members.filter { $0.kind == .human }.count + 1
+            )
+            inviteJoinState = .joined(joined)
+        case "EXPIRED":
+            inviteJoinState = .failed(InviteJoinFailure(
+                code: trimmed,
+                reason: "Invite expired",
+                recoveryHint: "Ask an owner for a fresh code."
+            ))
+        case "USED-UP":
+            inviteJoinState = .failed(InviteJoinFailure(
+                code: trimmed,
+                reason: "Invite already used",
+                recoveryHint: "Use MOMO-012 to see the success path."
+            ))
+        default:
+            inviteJoinState = .failed(InviteJoinFailure(
+                code: trimmed,
+                reason: "Invite not found",
+                recoveryHint: "Try MOMO-012, EXPIRED, or USED-UP in the dev app."
+            ))
+        }
+
+        return inviteJoinState
     }
 
     // MARK: ChatBackend

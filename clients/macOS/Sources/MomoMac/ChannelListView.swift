@@ -22,6 +22,10 @@ public struct ChannelListView: View {
                 }
             }
         )) {
+            Section("Workspace") {
+                OnboardingInviteView(viewModel: viewModel)
+            }
+
             Section("Channels") {
                 ForEach(viewModel.channels) { channel in
                     channelRow(channel).tag(channel.id)

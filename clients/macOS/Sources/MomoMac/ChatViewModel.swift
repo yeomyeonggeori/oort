@@ -20,6 +20,7 @@ public final class ChatViewModel: ObservableObject {
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
     private let agentTransport: any AgentTransport
+    private let onboarding: (any OnboardingInviteBackend)?
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
@@ -40,18 +41,27 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
 
+    // Onboarding / invite flow v0. The dev app drives this through LiveChatBackend
+    // until the production REST join API lands.
+    @Published public private(set) var inviteJoinState: InviteJoinState = .idle
+
     @Published public private(set) var connectionError: String?
 
     private var channelSubscription: Task<Void, Never>?
 
-    public init(chat: any ChatBackend, agentTransport: any AgentTransport) {
+    public init(
+        chat: any ChatBackend,
+        agentTransport: any AgentTransport,
+        onboarding: (any OnboardingInviteBackend)? = nil
+    ) {
         self.chat = chat
         self.agentTransport = agentTransport
+        self.onboarding = onboarding
     }
 
     /// Convenience initializer when one object conforms to both contracts.
     public convenience init(backend: LiveChatBackend) {
-        self.init(chat: backend, agentTransport: backend)
+        self.init(chat: backend, agentTransport: backend, onboarding: backend)
     }
 
     // MARK: Lifecycle
@@ -123,6 +133,33 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             connectionError = String(describing: error)
         }
+    }
+
+    // MARK: Onboarding invite flow
+
+    public func submitInviteCode(_ code: String) async {
+        guard !inviteJoinState.isWorking else { return }
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            inviteJoinState = .failed(InviteJoinFailure(
+                code: "",
+                reason: "Invite code required",
+                recoveryHint: "Enter MOMO-012 for the dev fixture."
+            ))
+            return
+        }
+
+        guard let onboarding else {
+            inviteJoinState = .failed(InviteJoinFailure(
+                code: trimmed,
+                reason: "Invite service unavailable",
+                recoveryHint: "Use LiveChatBackend in the dev app."
+            ))
+            return
+        }
+
+        inviteJoinState = .validating(code: trimmed)
+        inviteJoinState = await onboarding.joinWorkspace(inviteCode: trimmed)
     }
 
     // MARK: Realtime application (ordering authority = seq, L4 §1.2 #3)
