@@ -63,6 +63,80 @@ struct MessagePage: ResponseEncodable {
     let nextBefore: Int64?
 }
 
+// ---- Invites ----
+
+/// POST /v1/workspaces/{ws}/invites request body.
+struct CreateInviteRequest: Decodable {
+    let role: String?
+    let maxUses: Int?
+    /// Epoch milliseconds. Defaults server-side to seven days from creation.
+    let expiresAtMs: Int64?
+    let metadata: [String: String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case maxUses
+        case maxUsesSnake = "max_uses"
+        case expiresAtMs
+        case expiresAtMsSnake = "expires_at_ms"
+        case metadata
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.role = try c.decodeIfPresent(String.self, forKey: .role)
+        self.maxUses = try c.decodeIfPresent(Int.self, forKey: .maxUses)
+            ?? c.decodeIfPresent(Int.self, forKey: .maxUsesSnake)
+        self.expiresAtMs = try c.decodeIfPresent(Int64.self, forKey: .expiresAtMs)
+            ?? c.decodeIfPresent(Int64.self, forKey: .expiresAtMsSnake)
+        self.metadata = try c.decodeIfPresent([String: String].self, forKey: .metadata)
+    }
+}
+
+/// POST /v1/workspaces/{ws}/invites/{invite}/revoke request body.
+struct RevokeInviteRequest: Decodable {
+    let reason: String?
+}
+
+/// POST /v1/workspaces/{ws}/invites/redeem request body.
+struct RedeemInviteRequest: Decodable {
+    let code: String
+    let email: String?
+}
+
+/// Invite metadata returned by list/revoke/redeem. The raw code is intentionally
+/// absent; it is only returned once in CreateInviteResponse.
+struct InviteCodeDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let codePreview: String
+    let role: String
+    let maxUses: Int
+    let usedCount: Int
+    let expiresAtMs: Int64
+    let revokedAtMs: Int64?
+    let revokedBy: String?
+    let revocationReason: String?
+    let createdBy: String
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
+struct CreateInviteResponse: ResponseEncodable {
+    let invite: InviteCodeDTO
+    /// High-entropy bearer secret. Store/display client-side; server stores only hash.
+    let code: String
+}
+
+struct InviteListResponse: ResponseEncodable {
+    let invites: [InviteCodeDTO]
+}
+
+struct RedeemInviteResponse: ResponseEncodable {
+    let invite: InviteCodeDTO
+    let redemptionId: String
+}
+
 // ---- Centrifugo subscribe proxy ----
 
 /// Request body Centrifugo sends to the subscribe proxy endpoint (L4 §4.3).
