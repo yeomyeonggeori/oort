@@ -45,6 +45,7 @@ enum AppBuilder {
         let authed = router.group()
             .add(middleware: AuthMiddleware(jwt: jwt))
         MessageRoutes(db: db).add(to: authed)
+        InviteRoutes(db: db).add(to: authed)
         InboundMCPRoutes(db: db).add(to: authed)
 
         // ---- Application ----

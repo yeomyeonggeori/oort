@@ -6,6 +6,21 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual("MomoServer", "MomoServer")
     }
 
+    func testInviteRoleValidationDefaultsAndRejectsOwner() throws {
+        XCTAssertEqual(try InviteRoutes.normalizedRole(nil), "member")
+        XCTAssertEqual(try InviteRoutes.normalizedRole(" ADMIN "), "admin")
+        XCTAssertEqual(try InviteRoutes.normalizedRole("guest"), "guest")
+        XCTAssertThrowsError(try InviteRoutes.normalizedRole("owner"))
+        XCTAssertThrowsError(try InviteRoutes.normalizedRole("agent"))
+    }
+
+    func testInviteMaxUsesValidationMatchesMigrationConstraint() throws {
+        XCTAssertEqual(try InviteRoutes.validatedMaxUses(nil), 1)
+        XCTAssertEqual(try InviteRoutes.validatedMaxUses(10_000), 10_000)
+        XCTAssertThrowsError(try InviteRoutes.validatedMaxUses(0))
+        XCTAssertThrowsError(try InviteRoutes.validatedMaxUses(10_001))
+    }
+
     func testInboundMCPToolSurfaceMatchesMOMO163() {
         let names = InboundMCPToolRegistry.tools.map(\.name)
         XCTAssertEqual(
