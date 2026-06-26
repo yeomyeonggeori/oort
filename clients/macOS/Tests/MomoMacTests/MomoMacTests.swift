@@ -45,6 +45,37 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(seqs, Array(1...Int64(seqs.count)))
     }
 
+    func testDemoAgentProtocolCardsCarryContextMemoryCapabilityMetadata() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        var messages: [Message] = []
+        for channel in seed.channels {
+            messages += try await backend.history(channel: channel.id, after: nil, limit: 50)
+        }
+
+        for type in [MessageType.toolCall, .toolResult, .artifact, .approvalRequest] {
+            guard let message = messages.first(where: { $0.type == type }) else {
+                return XCTFail("demo should seed \(type.rawValue)")
+            }
+            XCTAssertNotNil(message.props["context_packet"], "\(type.rawValue) should cite Context Packet projection")
+            XCTAssertGreaterThan(message.props["source_badges"]?.arrayValue?.count ?? 0, 0,
+                                 "\(type.rawValue) should show at least one source badge")
+        }
+
+        let toolCall = try XCTUnwrap(messages.first(where: { $0.type == .toolCall }))
+        XCTAssertEqual(toolCall.props["capability"]?["tool_name"]?.stringValue, "github.search_issues")
+        XCTAssertEqual(toolCall.props["memory_citations"]?.arrayValue?.count, 1)
+        XCTAssertNotNil(toolCall.props["estimated_micro_usd"]?.intValue)
+
+        let approval = try XCTUnwrap(messages.first(where: { $0.type == .approvalRequest }))
+        XCTAssertEqual(approval.props["capability"]?["approval_policy"]?.stringValue, "always")
+        XCTAssertEqual(approval.props["memory_citations"]?.arrayValue?.count, 1)
+
+        let result = try XCTUnwrap(messages.first(where: { $0.type == .toolResult }))
+        XCTAssertEqual(result.props["artifact_ref"]?["kind"]?.stringValue, "search_results")
+        XCTAssertNotNil(result.props["spent_micro_usd"]?.intValue)
+    }
+
     func testOptimisticSendIsIdempotent() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()

@@ -65,7 +65,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
             sentClientMsgIds[ch.id] = []
         }
 
-        // A few seed messages incl. a first-class tool_call (demo D placeholder content).
+        // A few seed messages incl. first-class agent protocol cards.
         _ = appendServerMessage(channel: general.id, author: human.id, type: .text,
                                 body: "안녕하세요 팀!")
         _ = appendServerMessage(channel: general.id, author: researcher.id, type: .text,
@@ -75,11 +75,133 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
             channel: pg18.id, author: researcher.id, type: .toolCall,
             body: nil,
             props: .object([
-                "name": .string("search_repo"),
-                "arguments": .object(["query": .string("migration")]),
-                "call_id": .string("call_1"),
+                "name": .string("github.search_issues"),
+                "arguments": .object([
+                    "query": .string("repo:Dawn-kim-official/momo PG18 migration"),
+                    "limit": .int(5),
+                ]),
+                "call_id": .string("call_pg18_search_001"),
+                "requires_approval": .bool(false),
+                "context_packet": .object([
+                    "packet_id": .string("10000000-0000-7000-8000-000000000170"),
+                    "scope": .string("#feature-pg18"),
+                    "source_count": .int(2),
+                    "memory_count": .int(1),
+                ]),
+                "capability": .object([
+                    "provider": .string("github"),
+                    "tool_name": .string("github.search_issues"),
+                    "risk": .string("read"),
+                    "approval_policy": .string("none"),
+                    "input_schema_ref": .string("momo://capability-cache/github.search_issues/schemas/input/sha256:demo"),
+                    "resource_scope_summary": .string("repo:Dawn-kim-official/momo"),
+                    "capability_version": .string("github-plugin@0.3.0"),
+                    "policy_version": .string("capability-policy@2026-06-26"),
+                ]),
+                "source_badges": .array([
+                    .object([
+                        "source_id": .string("src_pg18_thread"),
+                        "kind": .string("thread"),
+                        "title": .string("#feature-pg18 migration thread"),
+                        "uri": .string("momo://channels/feature-pg18/messages/1"),
+                        "permission_snapshot": .string("actor:read channel:member"),
+                    ]),
+                    .object([
+                        "source_id": .string("src_github_migration"),
+                        "kind": .string("github"),
+                        "title": .string("M1 runtime migration issue"),
+                        "uri": .string("https://github.com/Dawn-kim-official/momo/issues/1"),
+                        "permission_snapshot": .string("provider:read repo:momo"),
+                    ]),
+                ]),
+                "memory_citations": .array([
+                    .object([
+                        "memory_id": .string("20000000-0000-7000-8000-000000000170"),
+                        "type": .string("decision"),
+                        "label": .string("PG18 remains the system of record"),
+                        "source_ids": .array([.string("src_pg18_thread")]),
+                        "permission_snapshot": .string("actor:read channel:member"),
+                    ]),
+                ]),
+                "estimated_micro_usd": .int(120_000),
             ]),
             runId: toolRun)
+
+        _ = appendServerMessage(
+            channel: pg18.id,
+            author: researcher.id,
+            type: .toolResult,
+            body: nil,
+            props: .object([
+                "tool_name": .string("github.search_issues"),
+                "call_id": .string("call_pg18_search_001"),
+                "is_error": .bool(false),
+                "output": .object([
+                    "matches": .int(2),
+                    "top_result": .string("MOMO-001 Runtime Gate verified migrate idempotency"),
+                ]),
+                "artifact_ref": .object([
+                    "artifact_id": .string("artifact_pg18_search_results"),
+                    "kind": .string("search_results"),
+                    "uri": .string("momo://artifacts/pg18-search-results"),
+                ]),
+                "context_packet": .object([
+                    "packet_id": .string("10000000-0000-7000-8000-000000000170"),
+                    "scope": .string("#feature-pg18"),
+                    "source_count": .int(2),
+                    "memory_count": .int(1),
+                ]),
+                "source_badges": .array([
+                    .object([
+                        "source_id": .string("src_github_migration"),
+                        "kind": .string("github"),
+                        "title": .string("MOMO-001 Runtime Gate"),
+                        "uri": .string("https://github.com/Dawn-kim-official/momo/issues/1"),
+                        "permission_snapshot": .string("provider:read repo:momo"),
+                    ]),
+                ]),
+                "spent_micro_usd": .int(51_000),
+            ]),
+            runId: toolRun
+        )
+
+        _ = appendServerMessage(
+            channel: pg18.id,
+            author: researcher.id,
+            type: .artifact,
+            body: nil,
+            props: .object([
+                "artifact_id": .string("artifact_pg18_runbook_patch"),
+                "kind": .string("runbook_draft"),
+                "title": .string("PG18 migration runbook patch"),
+                "uri": .string("momo://artifacts/pg18-runbook-patch"),
+                "context_packet": .object([
+                    "packet_id": .string("10000000-0000-7000-8000-000000000170"),
+                    "scope": .string("#feature-pg18"),
+                    "source_count": .int(2),
+                    "memory_count": .int(1),
+                ]),
+                "memory_citations": .array([
+                    .object([
+                        "memory_id": .string("20000000-0000-7000-8000-000000000171"),
+                        "type": .string("artifact_ref"),
+                        "label": .string("Migration runbook should cite verified runtime gates"),
+                        "source_ids": .array([.string("src_github_migration")]),
+                        "permission_snapshot": .string("actor:read channel:member"),
+                    ]),
+                ]),
+                "source_badges": .array([
+                    .object([
+                        "source_id": .string("src_pg18_thread"),
+                        "kind": .string("thread"),
+                        "title": .string("#feature-pg18 migration thread"),
+                        "uri": .string("momo://channels/feature-pg18/messages/1"),
+                        "permission_snapshot": .string("actor:read channel:member"),
+                    ]),
+                ]),
+            ]),
+            runId: toolRun
+        )
 
         let approvalRun = RunID()
         _ = appendServerMessage(
@@ -91,6 +213,42 @@ public actor LiveChatBackend: ChatBackend, AgentTransport {
                 "action_type": .string("github.issue.create"),
                 "title": .string("Create rollout checklist issue"),
                 "summary": .string("Open a tracked GitHub issue before the agent writes to the repo."),
+                "requires_approval": .bool(true),
+                "context_packet": .object([
+                    "packet_id": .string("10000000-0000-7000-8000-000000000171"),
+                    "scope": .string("#general"),
+                    "source_count": .int(1),
+                    "memory_count": .int(1),
+                ]),
+                "capability": .object([
+                    "provider": .string("github"),
+                    "tool_name": .string("github.create_issue"),
+                    "risk": .string("write"),
+                    "approval_policy": .string("always"),
+                    "input_schema_ref": .string("momo://capability-cache/github.create_issue/schemas/input/sha256:demo"),
+                    "resource_scope_summary": .string("repo:Dawn-kim-official/momo"),
+                    "capability_version": .string("github-plugin@0.3.0"),
+                    "policy_version": .string("capability-policy@2026-06-26"),
+                ]),
+                "source_badges": .array([
+                    .object([
+                        "source_id": .string("src_general_rollout"),
+                        "kind": .string("message"),
+                        "title": .string("rollout checklist request"),
+                        "uri": .string("momo://channels/general/messages/3"),
+                        "permission_snapshot": .string("actor:read channel:member"),
+                    ]),
+                ]),
+                "memory_citations": .array([
+                    .object([
+                        "memory_id": .string("20000000-0000-7000-8000-000000000172"),
+                        "type": .string("preference"),
+                        "label": .string("External writes require explicit approval"),
+                        "source_ids": .array([.string("src_general_rollout")]),
+                        "permission_snapshot": .string("actor:read channel:member"),
+                    ]),
+                ]),
+                "estimated_micro_usd": .int(820_000),
             ]),
             runId: approvalRun
         )

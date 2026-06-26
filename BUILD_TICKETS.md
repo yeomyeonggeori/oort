@@ -229,7 +229,7 @@
 | `MOMO-161` | approval pause/resume runtime | runtime/swift/sql | MOMO-160 |
 | `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
 | `MOMO-163` | inbound MCP server v0 | spec/swift/runtime | MOMO-151, MOMO-153 |
-| `MOMO-170` | macOS agent protocol cards | swift | MOMO-132, MOMO-161 |
+| `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
 | `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
 | `MOMO-172` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
@@ -238,6 +238,14 @@
 - `FoundationModels` import는 platform target에만 둔다. `MomoCore`는 Foundation-only 유지.
 - `#if canImport(FoundationModels)`와 OS availability fallback으로 현재 SwiftPM/local gate를 깨지 않는다.
 - build-macos-apps 플러그인은 `swift build`, `swift test`, test triage, SwiftPM GUI `.app` staging, Codex Run action에 사용한다.
+
+### MOMO-170 수용기준 `[spec/swift]`
+- [ ] `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`에 macOS timeline card taxonomy와 shared metadata contract를 정의한다.
+- [ ] `tool_call`, `approval_request`, `tool_result`, `artifact`가 Context Packet, Memory Plane, Capability Cache, source badge, cost 표시 정보를 어떻게 받는지 `message.props` shape로 고정한다.
+- [ ] `MomoMacRootView` API는 유지하고, 영향 범위를 `MessageBubble` + `LiveChatBackend.seedDemo()` fixture + tests로 제한한다.
+- [ ] SwiftUI card skeleton은 shared metadata strip으로 구현하고, offline fixture가 card type 4종을 모두 seed한다.
+- [ ] local gate는 GitHub Actions disabled/manual-only 정책에 따라 `scripts/local_gate.sh --profile macos-ui`로 검증한다.
+- [ ] 런타임 DB/wire alignment, approval pause/resume executor, memory inspector는 MOMO-132/MOMO-161/MOMO-171 범위로 남긴다.
 
 ## M7 Enterprise Trust
 
