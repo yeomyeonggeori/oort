@@ -112,6 +112,8 @@ momo should normalize all transports into:
 
 Current worker behavior can parse tool calls and knows that side-effecting actions need approval, but the durable pause/resume flow still needs a ticket.
 
+Normative spec: `research/11-agent-runtime/08-approval-pause-resume-runtime.md`.
+
 Required behavior:
 
 1. Agent emits risky `tool_call`.
@@ -119,8 +121,8 @@ Required behavior:
 3. Worker writes `message.type='approval_request'`.
 4. Worker sets `agent_run.status='awaiting_approval'`.
 5. Human approves or rejects.
-6. If approved, same run resumes with a `tool_result` or continuation event.
-7. If rejected or expired, run ends or requests alternate action.
+6. If approved, same run resumes from a new `outbox(kind='agent_job')` payload that references the same `run_id` and frozen approved tool payload.
+7. If rejected or expired, the same run terminates without executing the tool.
 8. All decisions write `audit_log`.
 
 This turns approval from a pretty card into a protocol checkpoint.

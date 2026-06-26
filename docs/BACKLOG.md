@@ -513,11 +513,12 @@ M0(baseline)
 - **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
 - **deps:** MOMO-160
 - **수용기준:**
-  - [ ] [runtime] risky `tool_call`이 `approval(status=pending)`과 `message.type='approval_request'`를 만들고 `agent_run.status='awaiting_approval'`로 멈춤
-  - [ ] [runtime] 승인 시 동일 run이 resume되고, 거절/만료 시 run이 안전 종료
-  - [ ] [runtime] 승인/거절/만료 결정이 `audit_log`에 기록
+  - [x] [spec] approval pause/resume 정본 문서와 same-run resume 모델 정의
+  - [x] [swift] risky `tool_call`이 `approval(status=pending)`과 `message.type='approval_request'`를 만들고 `agent_run.status='awaiting_approval'`로 멈추는 AgentWorker pause slice
+  - [x] [swift] 승인/거절/만료 decision outcome smoke test
+  - [ ] [runtime] server approval decision endpoint가 동일 run을 resume하거나 terminate하고 `audit_log`에 기록
 - **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
-- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+- **참조:** `research/11-agent-runtime/08-approval-pause-resume-runtime.md`
 
 #### MOMO-162 · Hermes adapter contract verification
 - **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME · **플랫폼:** backend · **추정:** M

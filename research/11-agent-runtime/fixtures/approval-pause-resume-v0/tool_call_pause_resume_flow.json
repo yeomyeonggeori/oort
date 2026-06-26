@@ -1,0 +1,111 @@
+{
+  "fixture_id": "approval_pause_resume_v0_tool_call",
+  "ticket": "MOMO-161",
+  "status": "canonical_fixture",
+  "ids": {
+    "workspace_id": "00000000-0000-7000-8000-000000000001",
+    "channel_id": "00000000-0000-7000-8000-000000000010",
+    "agent_member_id": "00000000-0000-7000-8000-000000000101",
+    "human_member_id": "00000000-0000-7000-8000-000000000201",
+    "run_id": "00000000-0000-7000-8000-000000000161",
+    "approval_id": "00000000-0000-7000-8000-000000000901",
+    "request_message_id": "00000000-0000-7000-8000-000000000902"
+  },
+  "tool_call": {
+    "event": "tool_call",
+    "call_id": "call_create_issue_001",
+    "name": "github.create_issue",
+    "arguments": {
+      "repo": "Dawn-kim-official/momo",
+      "title": "Demo issue from approved tool call",
+      "body": "This external write must not execute before approval."
+    },
+    "risk": "external_write",
+    "approval_policy": "always"
+  },
+  "pause_checkpoint": {
+    "db_transaction_steps": [
+      "insert approval(status='pending')",
+      "bump channel_seq",
+      "insert message(type='approval_request')",
+      "update approval.request_message_id",
+      "update agent_run.status='awaiting_approval'",
+      "insert outbox(kind='broadcast')",
+      "insert audit_log(action='approval.requested')"
+    ],
+    "agent_run": {
+      "id": "00000000-0000-7000-8000-000000000161",
+      "status": "awaiting_approval"
+    },
+    "approval": {
+      "id": "00000000-0000-7000-8000-000000000901",
+      "run_id": "00000000-0000-7000-8000-000000000161",
+      "status": "pending",
+      "action_type": "tool_call",
+      "request_message_id": "00000000-0000-7000-8000-000000000902"
+    },
+    "timeline_message": {
+      "id": "00000000-0000-7000-8000-000000000902",
+      "type": "approval_request",
+      "props": {
+        "approval_id": "00000000-0000-7000-8000-000000000901",
+        "run_id": "00000000-0000-7000-8000-000000000161",
+        "call_id": "call_create_issue_001",
+        "tool_name": "github.create_issue",
+        "status": "pending"
+      }
+    }
+  },
+  "approved_path": {
+    "approval_decision": {
+      "decision": "approved",
+      "decided_by": "00000000-0000-7000-8000-000000000201",
+      "reason": "The issue title/body are safe."
+    },
+    "server_effects": [
+      "update approval.status='approved'",
+      "insert audit_log(action='approval.approved')",
+      "insert outbox(kind='agent_job') with same run_id and resume_from_approval_id",
+      "publish approval.decided"
+    ],
+    "resume_job_payload": {
+      "run_id": "00000000-0000-7000-8000-000000000161",
+      "resume_from_approval_id": "00000000-0000-7000-8000-000000000901",
+      "approved_tool_call": {
+        "call_id": "call_create_issue_001",
+        "name": "github.create_issue",
+        "arguments": {
+          "repo": "Dawn-kim-official/momo",
+          "title": "Demo issue from approved tool call",
+          "body": "This external write must not execute before approval."
+        }
+      }
+    },
+    "worker_effects": [
+      "set agent_run.status='running'",
+      "execute frozen approved_tool_call",
+      "insert message(type='tool_result')",
+      "insert audit_log(action='tool.executed')",
+      "set terminal run status"
+    ]
+  },
+  "rejected_path": {
+    "approval_decision": {
+      "decision": "rejected",
+      "decided_by": "00000000-0000-7000-8000-000000000201",
+      "reason": "Do not create external GitHub state."
+    },
+    "server_effects": [
+      "update approval.status='rejected'",
+      "set agent_run.status='cancelled'",
+      "insert message(type='tool_result', props.is_error=true)",
+      "insert audit_log(action='approval.rejected')",
+      "publish approval.decided"
+    ],
+    "must_not_happen": [
+      "execute tool",
+      "create second agent_run",
+      "publish client-only approval without DB rows"
+    ]
+  }
+}

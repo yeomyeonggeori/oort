@@ -272,17 +272,31 @@ struct WorkerService: Service {
                         "callId": .string(id),
                         "needsApproval": .stringConvertible(needsApproval),
                     ])
-                    if needsApproval {
-                        // TODO (L4 §6.2): INSERT approval(status=pending),
-                        // run→awaiting_approval, publish approval.requested, wait
-                        // (timeout 30m → abort). v0 surfaces status + records intent.
-                        await updateRunStatus(p.runID, workspaceID: job.workspaceID,
-                                              status: .awaitingApproval, error: nil)
-                        await publishStatus(agentChannel, runID: p.runID,
-                                            status: .awaitingApproval, detail: name)
-                    }
                     await publishToolCall(agentChannel, runID: p.runID, callID: id,
                                           name: name, arguments: args)
+                    if needsApproval {
+                        let toolCall = ApprovalRuntime.ToolCall(
+                            callID: id, name: name, arguments: args)
+                        let pause = await recordApprovalPause(job: job, toolCall: toolCall)
+                        switch pause {
+                        case .paused(let approvalID, let requestMessageID):
+                            logger.info("run paused for approval", metadata: [
+                                "approvalId": .string(approvalID.uuidString),
+                                "requestMessageId": .string(requestMessageID.uuidString),
+                                "runId": .string(p.runID?.uuidString ?? "nil"),
+                            ])
+                            await publishStatus(agentChannel, runID: p.runID,
+                                                status: .awaitingApproval, detail: name)
+                            await markJobDone(job.id)
+                        case .failed(let reason):
+                            await updateRunStatus(p.runID, workspaceID: job.workspaceID,
+                                                  status: .error, error: reason)
+                            await publishStatus(agentChannel, runID: p.runID,
+                                                status: .error, detail: reason)
+                            await markJobFailed(job.id, reason: reason)
+                        }
+                        return
+                    }
 
                 case .usage(let prompt, let completion, let cached, let reasoning):
                     usage = (prompt, completion, cached, reasoning)
@@ -321,6 +335,252 @@ struct WorkerService: Service {
         await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .done, error: nil)
         await publishStatus(agentChannel, runID: p.runID, status: .done)
         await markJobDone(job.id)
+    }
+
+    // MARK: - approval pause checkpoint (MOMO-161)
+
+    private enum ApprovalPauseRecord: Sendable {
+        case paused(approvalID: UUID, requestMessageID: UUID)
+        case failed(reason: String)
+    }
+
+    /// Persist the protocol checkpoint:
+    /// tool_call -> approval(status=pending) -> approval_request message ->
+    /// agent_run(status=awaiting_approval) -> audit_log, all in one DB tx.
+    ///
+    /// The claimed `agent_job` is completed after this commit; the run remains
+    /// awaiting approval. The future decision endpoint resumes the same run by
+    /// enqueueing a new `agent_job` payload with the same run_id.
+    private func recordApprovalPause(
+        job: ClaimedJob,
+        toolCall: ApprovalRuntime.ToolCall
+    ) async -> ApprovalPauseRecord {
+        let p = job.payload
+        guard let runID = p.runID else {
+            return .failed(reason: "approval pause requires agent_job.payload.run_id")
+        }
+
+        let plan = ApprovalRuntime.pausePlan(for: toolCall)
+        let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
+        let hlcCount = 0
+        let body = "Approval required: \(toolCall.name)"
+        let approvalPayload = Self.approvalPayload(plan: plan, runID: runID)
+
+        do {
+            let result: (UUID, UUID) = try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
+                    logger: logger)
+
+                let approvalRows = try await conn.query(
+                    """
+                    INSERT INTO approval
+                      (workspace_id, run_id, channel_id, requested_by,
+                       action_type, payload, status)
+                    VALUES
+                      (\(job.workspaceID), \(runID), \(p.channelID), \(p.agentMemberID),
+                       \(plan.actionType), \(approvalPayload)::jsonb,
+                       \(plan.approvalStatus)::approval_status)
+                    RETURNING id
+                    """,
+                    logger: logger
+                ).collect()
+                guard let approvalRow = approvalRows.first else {
+                    throw ApprovalPauseError.missingInsertedApproval
+                }
+                let approvalID = try approvalRow.decode(UUID.self)
+
+                let props = Self.approvalRequestProps(
+                    approvalID: approvalID,
+                    runID: runID,
+                    channelID: p.channelID,
+                    toolCall: toolCall
+                )
+                let messageRows = try await conn.query(
+                    """
+                    WITH bumped AS (
+                      UPDATE channel_seq
+                         SET last_seq = last_seq + 1
+                       WHERE channel_id = \(p.channelID)
+                      RETURNING last_seq AS seq
+                    )
+                    INSERT INTO message
+                      (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                       author_member_id, type, body, props, run_id)
+                    SELECT \(job.workspaceID), \(p.channelID), b.seq, \(hlcTs), \(hlcCount),
+                           \(p.agentMemberID), \(plan.messageType)::message_type,
+                           \(body), \(props)::jsonb, \(runID)
+                      FROM bumped b
+                    RETURNING id, seq
+                    """,
+                    logger: logger
+                ).collect()
+                guard let messageRow = messageRows.first else {
+                    throw ApprovalPauseError.missingInsertedMessage
+                }
+                let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+
+                _ = try await conn.query(
+                    """
+                    UPDATE approval
+                       SET request_message_id = \(messageID)
+                     WHERE id = \(approvalID)
+                    """,
+                    logger: logger
+                )
+
+                _ = try await conn.query(
+                    """
+                    UPDATE agent_run
+                       SET status = \(plan.runStatus.rawValue)::run_status,
+                           updated_at = now()
+                     WHERE id = \(runID)
+                    """,
+                    logger: logger
+                )
+
+                let outboxPayload = Self.approvalRequestBroadcastPayload(
+                    workspaceID: job.workspaceID,
+                    channelID: p.channelID,
+                    messageID: messageID,
+                    seq: seq,
+                    authorMemberID: p.agentMemberID,
+                    runID: runID,
+                    body: body,
+                    props: props,
+                    hlcTs: hlcTs,
+                    hlcCount: hlcCount
+                )
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(job.workspaceID), 'broadcast', 'publish',
+                       \(outboxPayload)::jsonb, \(p.channelID))
+                    """,
+                    logger: logger
+                )
+
+                _ = try await conn.query(
+                    """
+                    INSERT INTO audit_log
+                      (workspace_id, actor_member_id, action, target_type,
+                       target_id, run_id, detail)
+                    VALUES
+                      (\(job.workspaceID), \(p.agentMemberID),
+                       \(plan.auditAction), 'approval', \(approvalID), \(runID),
+                       \(approvalPayload)::jsonb)
+                    """,
+                    logger: logger
+                )
+
+                return (approvalID, messageID)
+            }
+            return .paused(approvalID: result.0, requestMessageID: result.1)
+        } catch {
+            logger.error("approval pause record failed", metadata: [
+                "runId": .string(runID.uuidString),
+                "toolName": .string(toolCall.name),
+                "error": .string(String(describing: error)),
+            ])
+            return .failed(reason: "approval pause failed: \(error)")
+        }
+    }
+
+    private enum ApprovalPauseError: Error, Sendable {
+        case missingInsertedApproval
+        case missingInsertedMessage
+    }
+
+    private static func approvalPayload(
+        plan: ApprovalRuntime.PausePlan,
+        runID: UUID
+    ) -> String {
+        jsonString([
+            "run_id": runID.uuidString,
+            "action_type": plan.actionType,
+            "tool_call": [
+                "call_id": plan.toolCall.callID,
+                "name": plan.toolCall.name,
+                "arguments": plan.toolCall.arguments,
+            ],
+            "resume_model": "same_run_new_agent_job",
+        ])
+    }
+
+    private static func approvalRequestProps(
+        approvalID: UUID,
+        runID: UUID,
+        channelID: UUID,
+        toolCall: ApprovalRuntime.ToolCall
+    ) -> String {
+        jsonString([
+            "approval_id": approvalID.uuidString,
+            "run_id": runID.uuidString,
+            "channel_id": channelID.uuidString,
+            "call_id": toolCall.callID,
+            "tool_name": toolCall.name,
+            "arguments": toolCall.arguments,
+            "status": "pending",
+        ])
+    }
+
+    private static func approvalRequestBroadcastPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        seq: Int64,
+        authorMemberID: UUID,
+        runID: UUID,
+        body: String,
+        props: String,
+        hlcTs: Int64,
+        hlcCount: Int
+    ) -> String {
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let propsObject = (try? JSONSerialization.jsonObject(with: Data(props.utf8))) ?? [:]
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "message.new",
+                "v": 1,
+                "ts": hlcTs,
+                "seq": seq,
+                "payload": [
+                    "id": messageID.uuidString,
+                    "channel_id": channelID.uuidString,
+                    "channelId": channelID.uuidString,
+                    "seq": seq,
+                    "type": "approval_request",
+                    "body": body,
+                    "props": propsObject,
+                    "author_member_id": authorMemberID.uuidString,
+                    "authorMemberId": authorMemberID.uuidString,
+                    "run_id": runID.uuidString,
+                    "runId": runID.uuidString,
+                    "hlc_ts": hlcTs,
+                    "hlcTs": hlcTs,
+                    "hlc_count": hlcCount,
+                    "hlcCount": hlcCount,
+                ],
+            ],
+            "version": seq,
+            "idempotency_key": "\(centChannel):\(seq)",
+        ])
+    }
+
+    private static func jsonString(_ object: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+              ),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            return "{}"
+        }
+        return string
     }
 
     // MARK: - message PATCH (streaming mimic, L4 §6.2)
@@ -388,7 +648,7 @@ struct WorkerService: Service {
             "arguments": .string(arguments),
         ]
         if let runID { payload["runId"] = .string(runID.uuidString) }
-        await centrifugo.publish(channel: channel, data: envelope(type: "agent.status", payload: payload))
+        await centrifugo.publish(channel: channel, data: envelope(type: "tool_call", payload: payload))
     }
 
     /// L4 §5.2 single envelope: {type, v, ts, payload}.
@@ -418,6 +678,8 @@ struct WorkerService: Service {
         case .awaitingApproval: dbStatus = "awaiting_approval"
         case .done: dbStatus = "succeeded"
         case .error: dbStatus = "failed"
+        case .cancelled: dbStatus = "cancelled"
+        case .timedOut: dbStatus = "timed_out"
         }
         do {
             try await pg.withTransaction(logger: logger) { conn in
