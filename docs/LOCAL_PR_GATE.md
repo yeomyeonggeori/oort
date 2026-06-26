@@ -46,6 +46,7 @@ Profiles:
 |---|---|---|
 | `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
+| `staging-smoke` | staging/prod config/runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` for prod compose config, Caddyfile structure, Centrifugo Redis config, secret-template guard, and SOPS/pgBackRest checklist |
 | `runtime-db` | migrations/server/RLS changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh`; until that script exists this profile fails honestly and points to the MOMO-002 manual path |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` |
@@ -56,6 +57,7 @@ Examples:
 
 ```bash
 scripts/local_gate.sh --profile swift
+scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile runtime-agent
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
@@ -106,6 +108,7 @@ Use the profile that matches the changed surface.
 |---|---|---|
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` |
+| `staging-smoke` | MOMO-005/006/007 deploy config, Caddy/Centrifugo, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `runtime-db` | migrations/server/RLS changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` once `scripts/verify_relay.sh` exists; otherwise use MOMO-002 manual evidence |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `scripts/local_gate.sh --profile runtime-agent` |

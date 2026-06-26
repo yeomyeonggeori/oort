@@ -3,8 +3,9 @@
 > Scope: MOMO-006 locks the safe operating contract and file skeleton for
 > SOPS+age secrets and pgBackRest PITR. It does not include real production
 > secrets, age private keys, object-store credentials, or a live PITR rehearsal.
-> Until MOMO-005 prod compose/staging host exists, backup restore remains
-> `runtime-unverified`.
+> Until a real staging host, SOPS recipients, and backup repository exist,
+> backup restore remains `runtime-unverified`. MOMO-007 adds a local smoke gate
+> that validates this checklist without decrypting or requiring real secrets.
 
 ## 0. Files
 
@@ -188,9 +189,16 @@ Record the evidence in the PR or staging handoff:
 ## 5. Current MOMO-006 Status
 
 This repo now has the SOPS/age and pgBackRest contract plus skeleton files. The
-actual encrypted secret file, prod compose wiring, off-host backup repository,
-and PITR rehearsal are intentionally not included because they require real
-staging/prod infrastructure and secrets.
+MOMO-007 staging smoke gate verifies the file contract with:
+
+```sh
+scripts/verify_staging_smoke.sh
+scripts/local_gate.sh --profile staging-smoke
+```
+
+The actual encrypted secret file, off-host backup repository, and PITR rehearsal
+are intentionally not included because they require real staging/prod
+infrastructure and secrets.
 
 `runtime-unverified`: pgBackRest stanza creation, WAL archive push, full/diff
 schedule, and PITR restore rehearsal.

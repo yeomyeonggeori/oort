@@ -1,0 +1,27 @@
+{
+  "fixture_id": "approval_decision_server_contract_v0_expire_sweeper_result",
+  "ticket": "MOMO-166",
+  "trigger": {
+    "kind": "server_sweeper",
+    "precondition": "approval.status='pending' AND approval.expires_at <= now()"
+  },
+  "receipt_projection": {
+    "approval_id": "00000000-0000-7000-8000-000000000901",
+    "status": "expired",
+    "decided_by": null,
+    "decided_at_ms": 1782466800000,
+    "decision_reason": "Approval expired before a human decision."
+  },
+  "server_effects": [
+    "update approval.status='expired'",
+    "update agent_run.status='timed_out'",
+    "insert message(type='tool_result', props.is_error=true)",
+    "insert audit_log(action='approval.expired')",
+    "insert outbox(kind='broadcast') for approval.decided/message.edited/tool_result"
+  ],
+  "must_not_happen": [
+    "execute provider tool",
+    "insert resume agent_job",
+    "set approval.decided_by"
+  ]
+}
