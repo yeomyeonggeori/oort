@@ -203,8 +203,8 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 
 > 산출물: `legal/*`, `docs/legal/*`, `NOTICE`. 아래는 스토어/공증 배포의 **선결**이며 M2(개인정보처리방침)~M7(App Privacy)~M8(제출)에 걸쳐 게이팅한다.
 
-- **L0 등록 주체 + D-U-N-S**: 개인 vs 법인 결정. 법인은 D-U-N-S 무료·약 7영업일(expedite 불가). [developer.apple.com/help/account/membership/D-U-N-S/]
-- **L1 Apple 등록 + 비용**: $99/년. (M8 선결)
+- **L0 등록 주체 + D-U-N-S**: 개인 vs 법인 결정. 법인은 D-U-N-S 무료·약 7영업일(expedite 불가). 사람 handoff와 Codex 산출물 경계는 `docs/legal/01-entity-apple-runbook.md`. [developer.apple.com/help/account/membership/D-U-N-S/]
+- **L1 Apple 등록 + 비용**: Apple Developer Program $99/년. 실제 계약 동의·결제·Team ID 확보는 사람 `[manual]`. (M8 선결)
 - **L3 개인정보처리방침 URL**: 모든 앱 필수(미수집도). (M2~M7 선결)
 - **L5 App Privacy 라벨**: 제3자/LLM(hermes) 전송 포함 정직 신고. privacy manifest와 일관. (M7 선결)
 - **L6 한국 법규**: 부가통신 신고는 자본금 1억원 이하 면제(전기통신사업법 시행령 30조). 위치 미수집이라 위치기반서비스 비해당 `(추정 — 법인화 시 재확인)`.

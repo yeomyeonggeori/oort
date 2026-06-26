@@ -80,7 +80,7 @@
 | 문서 | 역할 |
 |---|---|
 | [`docs/legal/00-prelaunch-admin-legal-checklist.md`](legal/00-prelaunch-admin-legal-checklist.md) | 출시 전 법무·행정 체크리스트(L0~L8) |
-| [`docs/legal/01-entity-apple-runbook.md`](legal/01-entity-apple-runbook.md) | 등록주체(개인/법인) + D-U-N-S + Apple Developer Program 런북 |
+| [`docs/legal/01-entity-apple-runbook.md`](legal/01-entity-apple-runbook.md) | L0/L1 등록 준비: 등록주체(개인/법인), D-U-N-S, Apple Developer Program, 사람/Codex handoff |
 | [`docs/legal/02-cost-ledger.md`](legal/02-cost-ledger.md) | 비용 원장(일회성/연간/CI 컴퓨트) |
 | [`docs/legal/03-app-privacy-datamap.md`](legal/03-app-privacy-datamap.md) | App Privacy 라벨 ↔ PrivacyInfo.xcprivacy 데이터맵 |
 | [`legal/privacy-policy.md`](../legal/privacy-policy.md) | 개인정보처리방침 초안 |
