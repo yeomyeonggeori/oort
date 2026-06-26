@@ -394,6 +394,7 @@ struct WorkerService: Service {
                     approvalID: approvalID,
                     runID: runID,
                     channelID: p.channelID,
+                    actionType: plan.actionType,
                     toolCall: toolCall
                 )
                 let messageRows = try await conn.query(
@@ -513,14 +514,18 @@ struct WorkerService: Service {
         approvalID: UUID,
         runID: UUID,
         channelID: UUID,
+        actionType: String,
         toolCall: ApprovalRuntime.ToolCall
     ) -> String {
         jsonString([
             "approval_id": approvalID.uuidString,
             "run_id": runID.uuidString,
             "channel_id": channelID.uuidString,
+            "action_type": actionType,
             "call_id": toolCall.callID,
             "tool_name": toolCall.name,
+            "title": "Approve \(toolCall.name)",
+            "summary": "Review the proposed tool call before momo executes it.",
             "arguments": toolCall.arguments,
             "status": "pending",
         ])
