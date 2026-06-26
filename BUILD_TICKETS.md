@@ -285,12 +285,13 @@
 | `MOMO-134` | build-macos-apps based SwiftPM GUI run loop | swift/xcode/manual | MOMO-110 |
 | `MOMO-160` | A2A-style agent_run lifecycle alignment | spec/sql/swift | MOMO-151, MOMO-004 |
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
+| `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
 | `MOMO-172` | inbound MCP server v0 skeleton/spec-to-code bridge | swift/docs | MOMO-163 |
 | `MOMO-165` | Capability Cache approval metadata gate | swift | MOMO-151, MOMO-153, MOMO-161, MOMO-164 |
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
-| `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
+| `MOMO-171` | macOS approval_request card decisions | swift/spec | MOMO-170 |
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 
 ### MOMO-163 수용기준 `[spec/swift]`
@@ -311,6 +312,16 @@
 - [x] server smoke tests로 descriptor/scope/RLS/audit policy를 고정한다.
 - [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #80을 `status:needs-review`로 전환하고 momo-main에 handoff한다.
+
+### MOMO-166 수용기준 `[spec/docs]`
+- [x] GitHub #91을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`에 approve/reject/expire/resume server contract를 정본화한다.
+- [x] `research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/`에 request/response/effect JSON fixtures를 추가한다.
+- [x] AgentWorker pause/resume, server decision endpoint, macOS `ChatBackend.decideApproval` 흐름을 한 sequence diagram으로 연결한다.
+- [x] 실제 endpoint/idempotency migration/expiry sweeper/resume runtime e2e는 후속 runtime ticket으로 분리한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #91을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 호환성 원칙:
 

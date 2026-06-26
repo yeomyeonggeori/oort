@@ -1,0 +1,27 @@
+{
+  "fixture_id": "approval_decision_server_contract_v0_reject_response",
+  "ticket": "MOMO-166",
+  "status_code": 200,
+  "body": {
+    "approval_id": "00000000-0000-7000-8000-000000000901",
+    "status": "rejected",
+    "decided_by": "00000000-0000-7000-8000-000000000201",
+    "decided_at_ms": 1782463260000,
+    "decision_reason": "Do not create external GitHub state."
+  },
+  "server_effects": [
+    "update approval.status='rejected'",
+    "update agent_run.status='cancelled'",
+    "insert message(type='tool_result', props.is_error=true)",
+    "insert audit_log(action='approval.rejected')",
+    "insert outbox(kind='broadcast') for approval.decided/message.edited/tool_result"
+  ],
+  "must_not_happen": [
+    "execute provider tool",
+    "insert resume agent_job",
+    "create a second agent_run"
+  ],
+  "maps_to": {
+    "momo_core": "ApprovalDecisionReceipt"
+  }
+}
