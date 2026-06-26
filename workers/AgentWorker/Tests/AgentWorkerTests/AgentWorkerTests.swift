@@ -96,7 +96,187 @@ final class AgentWorkerTests: XCTestCase {
         )
     }
 
-    func testApprovalPolicyRequiresApprovalForWriteLikeToolNames() {
+    func testAgentJobPayloadDecodesContextPacketToolGrants() throws {
+        let payloadJSON = """
+        {
+          "run_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+          "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+          "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+          "workspace_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0001",
+          "model": "hermes-agent",
+          "prompt": "create an issue",
+          "context_packet_projection": {
+            "schema": "momo.context_packet.tool_grants_projection.v0",
+            "packet_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee0001",
+            "tool_grants": [
+              {
+                "tool_name": "github.create_issue",
+                "provider": "github",
+                "grant": "propose",
+                "risk": "write",
+                "approval_policy": "always",
+                "allowed_operations": ["create_issue"],
+                "denied_operations": ["delete_repo"],
+                "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+                "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo",
+                "capability_version": "github-plugin@0.3.0",
+                "policy_version": "capability-policy@2026-06-26",
+                "cache_entry_id": "60000000-0000-7000-8000-000000000010",
+                "projection_audit_event_id": "audit_capability_022"
+              }
+            ]
+          }
+        }
+        """
+
+        let payload = try JSONDecoder().decode(
+            AgentJobPayload.self,
+            from: Data(payloadJSON.utf8)
+        )
+
+        let grant = try XCTUnwrap(payload.toolGrant(for: "github.create_issue"))
+        XCTAssertEqual(grant.toolName, "github.create_issue")
+        XCTAssertEqual(grant.effectiveRiskLevel, "write")
+        XCTAssertEqual(grant.approvalPolicy, "always")
+        XCTAssertEqual(grant.resourceScopeSummary, "repository_allowlist:Dawn-kim-official/momo")
+    }
+
+    func testApprovalPolicyRequiresApprovalFromToolGrantMetadata() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "github.create_issue",
+                provider: "github",
+                grant: "propose",
+                risk: "write",
+                approvalPolicy: "require_approval"
+            )
+        ]
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "github.create_issue", toolGrants: grants))
+    }
+
+    func testApprovalPolicyAllowsExplicitNeverPolicy() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "docs.fetch_excerpt",
+                provider: "docs",
+                grant: "read",
+                riskLevel: "read",
+                approvalPolicy: "never"
+            )
+        ]
+
+        XCTAssertFalse(guards.requiresApproval(toolName: "docs.fetch_excerpt", toolGrants: grants))
+    }
+
+    func testApprovalPolicyNeverFailsClosedForNonReadGrant() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "github.create_issue",
+                provider: "github",
+                grant: "propose",
+                risk: "write",
+                approvalPolicy: "never"
+            )
+        ]
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "github.create_issue", toolGrants: grants))
+    }
+
+    func testApprovalPolicyAllowsReadOnlyToolGrant() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "obsidian.search_notes",
+                provider: "obsidian",
+                grant: "read",
+                risk: "read",
+                approvalPolicy: "none"
+            )
+        ]
+
+        XCTAssertFalse(guards.requiresApproval(toolName: "obsidian.search_notes", toolGrants: grants))
+    }
+
+    func testApprovalPolicyFailsClosedForMissingOrAmbiguousMetadata() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let readOnlyGrant = ToolGrantMetadata(
+            toolName: "docs.search",
+            grant: "read",
+            risk: "read",
+            approvalPolicy: "none"
+        )
+        let duplicateGrants = [readOnlyGrant, readOnlyGrant]
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: nil))
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: []))
+        XCTAssertTrue(guards.requiresApproval(toolName: "github.create_issue", toolGrants: [readOnlyGrant]))
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: duplicateGrants))
+        XCTAssertTrue(guards.requiresApproval(
+            toolName: "docs.search",
+            toolGrants: [ToolGrantMetadata(toolName: "docs.search", grant: "read", risk: "read")]
+        ))
+    }
+
+    func testAgentJobPayloadRejectsConflictingToolGrantSources() throws {
+        let payloadJSON = """
+        {
+          "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+          "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+          "model": "hermes-agent",
+          "prompt": "search docs",
+          "tool_grants": [
+            {
+              "tool_name": "docs.search",
+              "grant": "read",
+              "risk": "read",
+              "approval_policy": "none",
+              "policy_version": "capability-policy@safe"
+            }
+          ],
+          "context_packet": {
+            "tool_grants": [
+              {
+                "tool_name": "docs.search",
+                "grant": "read",
+                "risk": "write",
+                "approval_policy": "never",
+                "policy_version": "capability-policy@stale"
+              }
+            ]
+          }
+        }
+        """
+
+        let payload = try JSONDecoder().decode(
+            AgentJobPayload.self,
+            from: Data(payloadJSON.utf8)
+        )
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+
+        XCTAssertNil(payload.toolGrants)
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: payload.toolGrants))
+    }
+
+    func testApprovalPolicyFailsClosedForConflictingRiskAliases() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+        let grants = [
+            ToolGrantMetadata(
+                toolName: "docs.search",
+                grant: "read",
+                risk: "write",
+                riskLevel: "read",
+                approvalPolicy: "none"
+            )
+        ]
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "docs.search", toolGrants: grants))
+    }
+
+    func testLegacyApprovalFallbackRequiresApprovalForWriteLikeToolNames() {
         let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
 
         XCTAssertTrue(guards.requiresApproval(toolName: "github.create_issue"))
@@ -106,7 +286,7 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertTrue(guards.requiresApproval(toolName: ""))
     }
 
-    func testApprovalPolicyAllowsKnownReadOnlyToolNames() {
+    func testLegacyApprovalFallbackAllowsKnownReadOnlyToolNames() {
         let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
 
         XCTAssertFalse(guards.requiresApproval(toolName: "github.search_issues"))

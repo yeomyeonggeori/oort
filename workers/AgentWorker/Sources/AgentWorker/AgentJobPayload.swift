@@ -18,6 +18,7 @@ struct AgentJobPayload: Decodable, Sendable {
     let model: String           // OpenAI-compatible model id (agent.model)
     let prompt: String          // user/trigger text
     let tools: JSONValue?       // OpenAI tool/function defs (agent.tool_schema), optional
+    let toolGrants: [ToolGrantMetadata]? // Context Packet / Capability Cache projection
     let maxOutputTokens: Int?   // reserve estimate basis (§8.5)
     // gate seeds (§3.3 / §3.4)
     let stepCount: Int?
@@ -32,9 +33,196 @@ struct AgentJobPayload: Decodable, Sendable {
         case model
         case prompt
         case tools
+        case toolGrants = "tool_grants"
+        case contextPacket = "context_packet"
+        case contextPacketProjection = "context_packet_projection"
         case maxOutputTokens = "max_output_tokens"
         case stepCount = "step_count"
         case depth
         case consecutiveAuto = "consecutive_auto"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        runID = try c.decodeIfPresent(UUID.self, forKey: .runID)
+        agentMemberID = try c.decode(UUID.self, forKey: .agentMemberID)
+        channelID = try c.decode(UUID.self, forKey: .channelID)
+        workspaceID = try c.decodeIfPresent(UUID.self, forKey: .workspaceID)
+        model = try c.decode(String.self, forKey: .model)
+        prompt = try c.decode(String.self, forKey: .prompt)
+        tools = try c.decodeIfPresent(JSONValue.self, forKey: .tools)
+
+        let directToolGrants = try c.decodeIfPresent(
+            [ToolGrantMetadata].self, forKey: .toolGrants)
+        let contextPacket = try c.decodeIfPresent(
+            ToolGrantProjection.self, forKey: .contextPacket)
+        let contextProjection = try c.decodeIfPresent(
+            ToolGrantProjection.self, forKey: .contextPacketProjection)
+        toolGrants = Self.trustedToolGrants(
+            directToolGrants,
+            contextPacket?.toolGrants,
+            contextProjection?.toolGrants
+        )
+
+        maxOutputTokens = try c.decodeIfPresent(Int.self, forKey: .maxOutputTokens)
+        stepCount = try c.decodeIfPresent(Int.self, forKey: .stepCount)
+        depth = try c.decodeIfPresent(Int.self, forKey: .depth)
+        consecutiveAuto = try c.decodeIfPresent(Int.self, forKey: .consecutiveAuto)
+    }
+
+    func toolGrant(for toolName: String) -> ToolGrantMetadata? {
+        guard let toolGrants else { return nil }
+        return ToolGrantMetadata.singleMatch(in: toolGrants, toolName: toolName)
+    }
+
+    private static func trustedToolGrants(
+        _ candidates: [ToolGrantMetadata]?...
+    ) -> [ToolGrantMetadata]? {
+        let present = candidates.compactMap { $0 }
+        guard let first = present.first else { return nil }
+        guard present.allSatisfy({ $0 == first }) else { return nil }
+        return first
+    }
+}
+
+struct ToolGrantMetadata: Codable, Equatable, Sendable {
+    let toolName: String
+    let provider: String?
+    let grant: String?
+    let risk: String?
+    let riskLevel: String?
+    let approvalPolicy: String?
+    let allowedOperations: [String]?
+    let deniedOperations: [String]?
+    let inputSchemaRef: String?
+    let resourceScopeRef: String?
+    let resourceScopeSummary: String?
+    let capabilityVersion: String?
+    let policyVersion: String?
+    let cacheEntryID: String?
+    let projectionAuditEventID: String?
+
+    init(
+        toolName: String,
+        provider: String? = nil,
+        grant: String? = nil,
+        risk: String? = nil,
+        riskLevel: String? = nil,
+        approvalPolicy: String? = nil,
+        allowedOperations: [String]? = nil,
+        deniedOperations: [String]? = nil,
+        inputSchemaRef: String? = nil,
+        resourceScopeRef: String? = nil,
+        resourceScopeSummary: String? = nil,
+        capabilityVersion: String? = nil,
+        policyVersion: String? = nil,
+        cacheEntryID: String? = nil,
+        projectionAuditEventID: String? = nil
+    ) {
+        self.toolName = toolName
+        self.provider = provider
+        self.grant = grant
+        self.risk = risk
+        self.riskLevel = riskLevel
+        self.approvalPolicy = approvalPolicy
+        self.allowedOperations = allowedOperations
+        self.deniedOperations = deniedOperations
+        self.inputSchemaRef = inputSchemaRef
+        self.resourceScopeRef = resourceScopeRef
+        self.resourceScopeSummary = resourceScopeSummary
+        self.capabilityVersion = capabilityVersion
+        self.policyVersion = policyVersion
+        self.cacheEntryID = cacheEntryID
+        self.projectionAuditEventID = projectionAuditEventID
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case toolName = "tool_name"
+        case provider
+        case grant
+        case risk
+        case riskLevel = "risk_level"
+        case approvalPolicy = "approval_policy"
+        case allowedOperations = "allowed_operations"
+        case deniedOperations = "denied_operations"
+        case inputSchemaRef = "input_schema_ref"
+        case resourceScopeRef = "resource_scope_ref"
+        case resourceScopeSummary = "resource_scope_summary"
+        case capabilityVersion = "capability_version"
+        case policyVersion = "policy_version"
+        case cacheEntryID = "cache_entry_id"
+        case projectionAuditEventID = "projection_audit_event_id"
+    }
+
+    var riskAliasesConflict: Bool {
+        guard let risk, let riskLevel else { return false }
+        return Self.normalize(risk) != Self.normalize(riskLevel)
+    }
+
+    var effectiveRiskLevel: String? {
+        guard !riskAliasesConflict else { return nil }
+        return riskLevel ?? risk
+    }
+
+    var normalizedToolName: String {
+        Self.normalize(toolName)
+    }
+
+    var normalizedGrant: String? {
+        grant.map(Self.normalize)
+    }
+
+    var normalizedRiskLevel: String? {
+        effectiveRiskLevel.map(Self.normalize)
+    }
+
+    var normalizedApprovalPolicy: String? {
+        approvalPolicy.map(Self.normalize)
+    }
+
+    var isReadOnlyGrant: Bool {
+        !riskAliasesConflict && normalizedGrant == "read" && normalizedRiskLevel == "read"
+    }
+
+    func jsonObject() -> [String: Any] {
+        var object: [String: Any] = ["tool_name": toolName]
+        if let provider { object["provider"] = provider }
+        if let grant { object["grant"] = grant }
+        if let effectiveRiskLevel { object["risk_level"] = effectiveRiskLevel }
+        if let approvalPolicy { object["approval_policy"] = approvalPolicy }
+        if let allowedOperations { object["allowed_operations"] = allowedOperations }
+        if let deniedOperations { object["denied_operations"] = deniedOperations }
+        if let inputSchemaRef { object["input_schema_ref"] = inputSchemaRef }
+        if let resourceScopeRef { object["resource_scope_ref"] = resourceScopeRef }
+        if let resourceScopeSummary { object["resource_scope_summary"] = resourceScopeSummary }
+        if let capabilityVersion { object["capability_version"] = capabilityVersion }
+        if let policyVersion { object["policy_version"] = policyVersion }
+        if let cacheEntryID { object["cache_entry_id"] = cacheEntryID }
+        if let projectionAuditEventID { object["projection_audit_event_id"] = projectionAuditEventID }
+        return object
+    }
+
+    static func singleMatch(
+        in toolGrants: [ToolGrantMetadata],
+        toolName: String
+    ) -> ToolGrantMetadata? {
+        let normalized = normalize(toolName)
+        guard !normalized.isEmpty else { return nil }
+        let matches = toolGrants.filter { $0.normalizedToolName == normalized }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    static func normalize(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "-", with: "_")
+    }
+}
+
+private struct ToolGrantProjection: Decodable {
+    let toolGrants: [ToolGrantMetadata]
+
+    enum CodingKeys: String, CodingKey {
+        case toolGrants = "tool_grants"
     }
 }
