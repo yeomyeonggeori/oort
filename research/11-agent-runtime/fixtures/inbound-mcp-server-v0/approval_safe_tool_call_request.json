@@ -1,0 +1,284 @@
+{
+  "schema": "momo.inbound_mcp.approval_safe_tool_call.fixture.v0",
+  "fixture": "approval_safe_tool_call_request",
+  "request_id": "72000000-0000-7000-8000-000000000001",
+  "received_at": "2026-06-26T10:05:00Z",
+  "mcp_tool_call": {
+    "method": "tools/call",
+    "params": {
+      "name": "momo.create_tool_call",
+      "arguments": {
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "channel_id": "22222222-2222-7222-8222-222222222222",
+        "root_id": "33333333-3333-7333-8333-333333333301",
+        "context_packet_id": "77777777-7777-7777-8777-777777777701",
+        "tool_name": "github.create_issue",
+        "tool_arguments": {
+          "repo": "Dawn-kim-official/momo",
+          "title": "Refund FAQ missing",
+          "body": "Track missing refund FAQ work from the launch thread.",
+          "labels": ["type:docs", "priority:p1"]
+        },
+        "reason": "The visible launch thread asks for a tracked follow-up for the missing refund FAQ.",
+        "client_msg_id": "72000000-0000-7000-8000-000000000099"
+      }
+    }
+  },
+  "identity_context": {
+    "host_id": "codex",
+    "mcp_client_id": "codex-localhost-dev",
+    "actor_member_id": "55555555-5555-7555-8555-555555555502",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "token_id": "44444444-4444-7444-8444-444444444499",
+    "token_kind": "delegation",
+    "scopes": ["mcp.read", "mcp.post", "mcp.tool.propose"],
+    "transport": "http"
+  },
+  "permission_context": {
+    "rls_context": {
+      "set_local_workspace_id": "11111111-1111-7111-8111-111111111111"
+    },
+    "checks": {
+      "token_active": true,
+      "workspace_match": true,
+      "actor_workspace_member": true,
+      "actor_channel_member": true,
+      "subject_workspace_member": true,
+      "scope_mcp_tool_propose": true,
+      "context_packet_unexpired": true,
+      "context_packet_workspace_match": true,
+      "context_packet_channel_match": true,
+      "idempotency_key_unused": true
+    }
+  },
+  "context_packet_projection": {
+    "schema": "momo.context_packet.tool_grants_projection.v0",
+    "packet_id": "77777777-7777-7777-8777-777777777701",
+    "request_surface": "api",
+    "request_actor_member_id": "55555555-5555-7555-8555-555555555502",
+    "scope": {
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "thread_root_message_id": "33333333-3333-7333-8333-333333333301",
+      "visibility": "thread",
+      "permission_basis": [
+        "actor_is_workspace_member",
+        "actor_is_channel_member",
+        "mcp_scope:mcp.tool.propose",
+        "capability_policy:capability-policy@2026-06-26"
+      ]
+    },
+    "sources": [
+      {
+        "source_id": "src_launch_thread_root",
+        "kind": "message",
+        "uri": "momo://workspaces/11111111-1111-7111-8111-111111111111/channels/22222222-2222-7222-8222-222222222222/messages/33333333-3333-7333-8333-333333333301",
+        "permission_snapshot": "actor:channel_member;rls:workspace",
+        "excerpt": "We still need the refund FAQ tracked before launch."
+      }
+    ],
+    "tool_grants": [
+      {
+        "tool_name": "github.create_issue",
+        "provider": "github",
+        "grant": "propose",
+        "risk": "write",
+        "approval_policy": "always",
+        "allowed_operations": ["create_issue"],
+        "denied_operations": ["delete_repo", "edit_repository_settings"],
+        "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+        "resource_scope_ref": "momo://capability-cache/github.create_issue/resource-scopes/sha256:githubrepoallowmomo",
+        "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo",
+        "capability_version": "github-plugin@0.3.0",
+        "policy_version": "capability-policy@2026-06-26"
+      }
+    ],
+    "audit": {
+      "builder": "momo-context-broker-v0",
+      "policy_version": "workspace-policy@2026-06-26",
+      "capability_projection_event_id": "audit_capability_005"
+    }
+  },
+  "capability_cache_recheck": {
+    "cache_entry_id": "60000000-0000-7000-8000-000000000002",
+    "cache_kind": "plugin_tool_schema",
+    "tool_name": "github.create_issue",
+    "source": {
+      "kind": "plugin_manifest",
+      "provider": "github",
+      "source_version": "github-plugin@0.3.0"
+    },
+    "checks": {
+      "entry_not_expired": true,
+      "entry_not_invalidated": true,
+      "surface_allowed_api": true,
+      "channel_visibility_allowed": true,
+      "provider_grant_valid": true,
+      "schema_hash_matches": true,
+      "resource_scope_admits_repo": true,
+      "approval_policy_requires_pending_approval": true
+    },
+    "schema_ref": {
+      "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+      "schema_hash": "sha256:githubcreateissuev3"
+    }
+  },
+  "planned_transaction": {
+    "writes_external_provider": false,
+    "uses_bypassrls": false,
+    "steps": [
+      {
+        "order": 1,
+        "action": "set_local_workspace_id",
+        "value": "11111111-1111-7111-8111-111111111111"
+      },
+      {
+        "order": 2,
+        "action": "allocate_channel_seq",
+        "channel_id": "22222222-2222-7222-8222-222222222222",
+        "count": 2,
+        "result_seq": [411, 412]
+      },
+      {
+        "order": 3,
+        "action": "insert_message",
+        "message": {
+          "message_id": "72000000-0000-7000-8000-000000000101",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "channel_id": "22222222-2222-7222-8222-222222222222",
+          "seq": 411,
+          "author_member_id": "55555555-5555-7555-8555-555555555502",
+          "type": "tool_call",
+          "state": "sent",
+          "root_id": "33333333-3333-7333-8333-333333333301",
+          "client_msg_id": "72000000-0000-7000-8000-000000000099",
+          "props": {
+            "call_id": "call_72000001",
+            "name": "github.create_issue",
+            "arguments_redacted": {
+              "repo": "Dawn-kim-official/momo",
+              "title": "Refund FAQ missing",
+              "labels": ["type:docs", "priority:p1"]
+            },
+            "context_packet_id": "77777777-7777-7777-8777-777777777701",
+            "capability_cache_entry_id": "60000000-0000-7000-8000-000000000002",
+            "approval_policy": "always"
+          }
+        }
+      },
+      {
+        "order": 4,
+        "action": "insert_approval",
+        "approval": {
+          "approval_id": "72000000-0000-7000-8000-000000000201",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "run_id": "72000000-0000-7000-8000-000000000301",
+          "channel_id": "22222222-2222-7222-8222-222222222222",
+          "requested_by": "55555555-5555-7555-8555-555555555502",
+          "action_type": "tool_call",
+          "payload": {
+            "call_id": "call_72000001",
+            "tool_name": "github.create_issue",
+            "provider": "github",
+            "risk": "write",
+            "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo"
+          },
+          "status": "pending"
+        }
+      },
+      {
+        "order": 5,
+        "action": "insert_message",
+        "message": {
+          "message_id": "72000000-0000-7000-8000-000000000102",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "channel_id": "22222222-2222-7222-8222-222222222222",
+          "seq": 412,
+          "author_member_id": "55555555-5555-7555-8555-555555555502",
+          "type": "approval_request",
+          "state": "sent",
+          "root_id": "33333333-3333-7333-8333-333333333301",
+          "props": {
+            "approval_id": "72000000-0000-7000-8000-000000000201",
+            "request_message_id": "72000000-0000-7000-8000-000000000101",
+            "title": "Approve GitHub issue creation",
+            "summary": "Create a GitHub issue in Dawn-kim-official/momo for the missing refund FAQ.",
+            "risk": "write",
+            "approval_policy": "always"
+          }
+        }
+      },
+      {
+        "order": 6,
+        "action": "insert_outbox",
+        "events": [
+          {
+            "kind": "broadcast",
+            "channel": "ch:ws11111111-1111-7111-8111-111111111111.22222222-2222-7222-8222-222222222222",
+            "message_id": "72000000-0000-7000-8000-000000000101",
+            "version": 411
+          },
+          {
+            "kind": "broadcast",
+            "channel": "ch:ws11111111-1111-7111-8111-111111111111.22222222-2222-7222-8222-222222222222",
+            "message_id": "72000000-0000-7000-8000-000000000102",
+            "version": 412
+          }
+        ]
+      },
+      {
+        "order": 7,
+        "action": "insert_audit_log",
+        "audit": {
+          "audit_id": "72000000-0000-7000-8000-000000000401",
+          "workspace_id": "11111111-1111-7111-8111-111111111111",
+          "actor_member_id": "55555555-5555-7555-8555-555555555502",
+          "subject_member_id": "44444444-4444-7444-8444-444444444401",
+          "action": "mcp.tool_call.proposed",
+          "target_type": "approval",
+          "target_id": "72000000-0000-7000-8000-000000000201",
+          "via_token_id": "44444444-4444-7444-8444-444444444499",
+          "run_id": "72000000-0000-7000-8000-000000000301",
+          "detail": {
+            "host_id": "codex",
+            "mcp_tool": "momo.create_tool_call",
+            "provider_tool": "github.create_issue",
+            "context_packet_id": "77777777-7777-7777-8777-777777777701",
+            "capability_cache_entry_id": "60000000-0000-7000-8000-000000000002",
+            "schema_hash": "sha256:githubcreateissuev3",
+            "policy_version": "capability-policy@2026-06-26",
+            "client_msg_id": "72000000-0000-7000-8000-000000000099",
+            "provider_call_executed": false
+          }
+        }
+      }
+    ]
+  },
+  "mcp_tool_result": {
+    "isError": false,
+    "structuredContent": {
+      "tool_call_message_id": "72000000-0000-7000-8000-000000000101",
+      "approval_request_message_id": "72000000-0000-7000-8000-000000000102",
+      "approval_id": "72000000-0000-7000-8000-000000000201",
+      "status": "awaiting_approval",
+      "context_packet_id": "77777777-7777-7777-8777-777777777701",
+      "capability_cache_entry_id": "60000000-0000-7000-8000-000000000002",
+      "audit_event_id": "72000000-0000-7000-8000-000000000401"
+    },
+    "content": [
+      {
+        "type": "text",
+        "text": "Created an approval-safe tool call proposal. No external provider call has executed."
+      }
+    ]
+  },
+  "executor_revalidation_required": [
+    "approval.status == approved",
+    "approval not expired",
+    "token still active",
+    "actor and subject still workspace/channel-valid",
+    "context packet refreshed or still authorizes tool",
+    "capability cache policy/schema/resource scope still matches",
+    "idempotency key has not executed"
+  ]
+}

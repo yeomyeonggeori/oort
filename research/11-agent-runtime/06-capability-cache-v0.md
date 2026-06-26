@@ -343,5 +343,5 @@ Fixtures live in `research/11-agent-runtime/fixtures/capability-cache-v0/`.
 - `MOMO-160` should attach projected capability evidence to `agent_run.context_packet_id`.
 - `MOMO-161` should enforce approval pause/resume for projected tools with `approval_policy != "none"`.
 - `MOMO-162` should verify which Hermes/Kim Intern capabilities are discoverable through manifest vs SSE metadata.
-- `MOMO-163` should implement inbound MCP v0 using this cache as the source of tool discovery.
+- `MOMO-163` should define inbound MCP v0 using this cache as the source of tool proposal validation; runtime implementation remains a follow-up.
 - `MOMO-170` should render tool-call cards from projected tool grant and schema refs, not raw plugin config.

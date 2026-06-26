@@ -236,10 +236,19 @@
 | `MOMO-160` | A2A-style agent_run lifecycle alignment | spec/sql/swift | MOMO-151, MOMO-004 |
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-162` | Hermes adapter contract verification | runtime/python/swift | MOMO-150, MOMO-004 |
-| `MOMO-163` | inbound MCP server v0 | spec/swift/runtime | MOMO-151, MOMO-153 |
+| `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
 | `MOMO-171` | agent memory inspector | swift/spec | MOMO-152, MOMO-170 |
 | `MOMO-172` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
+
+### MOMO-163 수용기준 `[spec/swift]`
+- [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.
+- [ ] 최소 MCP tool surface를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 고정한다.
+- [ ] MCP resources/prompts 후보를 정의하고, Context Packet `request.surface = "api"`와 연결한다.
+- [ ] RLS/workspace/member/token 권한, audit event, approval-safe write 원칙을 명시한다.
+- [ ] Memory Plane retrieval과 Capability Cache projection이 inbound MCP read/propose 경로를 어떻게 제한하는지 연결한다.
+- [ ] `research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`에 discovery snapshot과 approval-safe tool-call JSON fixture를 추가한다.
+- [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`, docs local gate, swift local gate를 통과한다.
 
 호환성 원칙:
 
