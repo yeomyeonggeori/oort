@@ -10,6 +10,10 @@ infra/prod/.env
 infra/prod/.env.*
 !infra/prod/.env.example
 infra/prod/secrets.env
+infra/prod/*.plain.env
+infra/prod/*.decrypted
+infra/prod/age.key
+infra/prod/keys.txt
 .conductor/local.env
 .conductor/*.tmp
 .conductor/setup.local.sh

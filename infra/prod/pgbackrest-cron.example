@@ -1,0 +1,12 @@
+# /etc/cron.d/momo-pgbackrest example.
+# Requires pgBackRest to be configured and SOPS-provided secret environment to
+# be available to the postgres user by systemd EnvironmentFile, wrapper, or a
+# root-owned decrypted-on-boot tmpfs file. Do not place secrets in this file.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# m h  dom mon dow user      command
+30 03 *   *   0   postgres  pgbackrest --stanza=momo --type=full backup
+30 03 *   *   1-6 postgres  pgbackrest --stanza=momo --type=diff backup
+15 *  *   *   *   postgres  pgbackrest --stanza=momo check

@@ -1,0 +1,10 @@
+# PostgreSQL archive settings required for pgBackRest PITR.
+# Append these to the active postgresql.conf or render them through the prod
+# compose/postgres image entrypoint. Restart PostgreSQL after changing them.
+#
+# The stanza name must match infra/prod/pgbackrest.conf.example and the SOPS env.
+
+wal_level = replica
+archive_mode = on
+archive_command = 'pgbackrest --stanza=momo archive-push %p'
+archive_timeout = '60s'
