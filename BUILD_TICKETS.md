@@ -325,6 +325,7 @@
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
+| `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
 | `MOMO-172` | inbound MCP server v0 skeleton/spec-to-code bridge | swift/docs | MOMO-163 |
 | `MOMO-165` | Capability Cache approval metadata gate | swift | MOMO-151, MOMO-153, MOMO-161, MOMO-164 |
@@ -382,6 +383,17 @@
 - [x] `python3 -m py_compile adapters/hermes/momo_adapter.py` PASS.
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #99를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-168 수용기준 `[python/docs]`
+- [x] GitHub #106을 `scripts/goal_claim.sh 106`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `adapters/hermes/tests/smoke_momo_adapter.py` repo-local smoke harness를 추가한다.
+- [x] smoke harness가 `platform_adapter_event_mapping.json` Centrifugo fixture를 adapter event로 unwrap하고 REST invoke/final-message call capture를 검증한다.
+- [x] smoke harness는 Hermes SDK, aiohttp/websockets, Docker, Postgres, 네트워크 없이 실행된다.
+- [x] `scripts/local_gate.sh --profile docs`가 smoke harness를 실행한다.
+- [x] live Hermes gateway plugin load/e2e는 `runtime-unverified` 후속으로 명시한다.
+- [x] `python3 -m py_compile adapters/hermes/momo_adapter.py` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #106을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 호환성 원칙:
 
