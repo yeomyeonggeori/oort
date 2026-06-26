@@ -8,6 +8,8 @@ import MomoCore
 // MessageListView, MessageBubble, AgentPartialView, CostBreathingRing,
 // ApprovalInboxView. Holds a `ChatBackend` + `AgentTransport` (MomoCore §5.3 / §6.1)
 // — here `LiveChatBackend` (in-memory stub), later the real REST + SwiftCentrifuge.
+// Approval decisions are sent through `ChatBackend` because they are timeline
+// writes/audit intents rather than agent-stream transport events.
 //
 // Threading: @MainActor ObservableObject. Realtime events arrive on the backend's
 // AsyncStream and are applied on the main actor. Ordering authority = Message.seq
@@ -36,6 +38,7 @@ public final class ChatViewModel: ObservableObject {
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
+    @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
 
     @Published public private(set) var connectionError: String?
 
@@ -176,11 +179,19 @@ public final class ChatViewModel: ObservableObject {
     // MARK: Approval inbox actions (experience C)
 
     public func decideApproval(_ id: ApprovalID, approve: Bool, reason: String? = nil) async {
+        guard !approvalDecisionsInFlight.contains(id) else { return }
+        approvalDecisionsInFlight.insert(id)
+        defer { approvalDecisionsInFlight.remove(id) }
+
         do {
-            try await agentTransport.decideApproval(id, approve: approve, reason: reason)
+            let receipt = try await chat.decideApproval(
+                ApprovalDecisionRequest(approvalId: id, approve: approve, reason: reason)
+            )
             // Optimistically reflect the decision; real `approval.decided` will confirm.
             if var ev = approvals[id] {
-                ev.status = approve ? .approved : .rejected
+                ev.status = receipt.status
+                ev.decidedBy = receipt.decidedBy
+                ev.decisionReason = receipt.decisionReason
                 approvals[id] = ev
             }
         } catch {
@@ -201,6 +212,34 @@ public final class ChatViewModel: ObservableObject {
         approvals.values
             .filter { $0.status == .pending }
             .sorted { $0.approvalId.description > $1.approvalId.description }
+    }
+
+    public func approvalId(for message: Message) -> ApprovalID? {
+        guard message.type == .approvalRequest,
+              let raw = message.props["approval_id"]?.stringValue else {
+            return nil
+        }
+        return ApprovalID(raw)
+    }
+
+    public func approvalStatus(for message: Message) -> ApprovalStatus? {
+        guard let id = approvalId(for: message) else {
+            return nil
+        }
+        if let eventStatus = approvals[id]?.status {
+            return eventStatus
+        }
+        if let raw = message.props["approval_status"]?.stringValue {
+            return ApprovalStatus(rawValue: raw)
+        }
+        return .pending
+    }
+
+    public func isApprovalDecisionInFlight(for message: Message) -> Bool {
+        guard let id = approvalId(for: message) else {
+            return false
+        }
+        return approvalDecisionsInFlight.contains(id)
     }
 
     public func member(_ id: MemberID) -> Member? {

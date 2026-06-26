@@ -39,4 +39,8 @@ public protocol ChatBackend: Sendable {
 
     /// Add a reaction to a message.
     func addReaction(_ id: MessageID, emoji: String) async throws
+
+    /// Approve or reject a pending approval_request message. Real backends record
+    /// the decision, audit it, and resume or deny the paused run server-side.
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt
 }
