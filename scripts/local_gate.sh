@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Local PR gate runner for the GitHub Actions disabled/manual-only period.
+# shellcheck disable=SC2016
 set -u -o pipefail
 
 PROFILE="docs"
@@ -123,7 +124,7 @@ add_static_commands() {
   add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
   add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
   add_cmd_once "json syntax" "jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json"
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done; if [ -e scripts/verify_relay.sh ]; then bash -n scripts/verify_relay.sh; fi'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_relay.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py'
 }
 
@@ -158,7 +159,7 @@ add_runtime_relay_commands() {
   add_runtime_bootstrap_commands
   if [ -x scripts/verify_relay.sh ]; then
     add_cmd "OutboxRelay runtime verification" "scripts/verify_relay.sh"
-    add_note_once coverage "OutboxRelay runtime verification via scripts/verify_relay.sh."
+    add_note_once coverage "OutboxRelay runtime verification via scripts/verify_relay.sh: Docker compose/migrate, server REST send, outbox pending, relay claim, Centrifugo history, outbox done, and version=message.seq evidence."
   else
     add_cmd "OutboxRelay runtime verification" "echo 'scripts/verify_relay.sh is not present; runtime-relay cannot produce PASS evidence until relay automation exists.'; exit 1"
     add_note_once not_covered "Full OutboxRelay -> Centrifugo publish/history roundtrip is not automated yet; MOMO-002 manual path remains required when relay/realtime changes."
@@ -271,10 +272,10 @@ run_cmd() {
   set +e
 
   if [ "$code" -eq 0 ]; then
-    CMD_STATUS[$index]="pass"
+    CMD_STATUS[index]="pass"
     echo "PASS: $label" | tee -a "$LOG_FILE"
   else
-    CMD_STATUS[$index]="fail"
+    CMD_STATUS[index]="fail"
     FAILED_INDEX="$index"
     FAILED_CODE="$code"
     echo "FAIL: $label (exit $code)" | tee -a "$LOG_FILE"
