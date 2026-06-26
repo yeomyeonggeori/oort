@@ -168,7 +168,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.
 - **Local LLM UX**(M3): Foundation Models availability probe 후 local summarization/classification/context compaction/PII redaction preview를 macOS에서 먼저 구현한다. 미지원 OS와 CI/local gate는 server fallback/stub으로 green 유지.
 - **macOS 개발 loop**(M3): `build-macos-apps` 플러그인은 SwiftPM build/test/triage와 GUI 실행 표준화에 사용한다. 후속 `MOMO-134`에서 `script/build_and_run.sh`가 `dist/MomoMacDevApp.app`을 staging하고 Codex Run action을 연결한다.
-- **Agent protocol cards**(M3): `MOMO-170`은 macOS timeline에서 `tool_call`, `approval_request`, `tool_result`, `artifact`, cost, memory citation, source badge를 Context Packet/Memory Plane/Capability Cache projection으로 렌더하는 v0 contract다. 정본: `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`.
+- **Agent protocol cards**(M3): `MOMO-170`은 macOS timeline에서 `tool_call`, `approval_request`, `tool_result`, `artifact`, cost, memory citation, source badge를 Context Packet/Memory Plane/Capability Cache projection으로 렌더하는 v0 contract다. `MOMO-171`은 `approval_request` 카드의 Approve/Reject 개발 UX를 `ChatBackend` approval decision 계약에 연결한다. 정본: `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`.
 - **패키징**(M4): Xcode `.app` → bottom-up codesign(`--options runtime --timestamp`) → Developer ID Application → create-dmg → **notarytool submit --wait** → stapler staple → `spctl` 검증 → Sparkle 2(EdDSA, appcast). **App Store 트랙과 별개**(공증=직접배포, App Store≠공증).
 - **배포 채널 순서:** Developer ID 공증 DMG + Sparkle 먼저, Mac App Store는 추후(샌드박스 강제·심사·Sparkle 불가).
 

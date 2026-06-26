@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Move a claimed issue to review, blocked, or ready after a worktree session.
+# Review mode is a worker -> momo-main handoff, not merge permission.
 set -euo pipefail
 
 ORG_REPO="${ORG_REPO:-Dawn-kim-official/momo}"
@@ -17,6 +18,10 @@ Usage:
   scripts/goal_release.sh [--dry-run] [--repo ORG/REPO] <issue> --ready "reason"
 
 Updates only GitHub issue labels/comments. It does not delete worktrees or branches.
+
+Review mode is the worker stop line:
+  PR created -> status:needs-review -> handoff to momo-main.
+  Workers must not merge, close issues, run the post-merge main gate, or adjust roadmap/backlog state.
 EOF
 }
 
@@ -102,7 +107,7 @@ case "$MODE" in
     validate_review_pr
     add_label="status:needs-review"
     remove_label="status:ready,status:in-progress,status:blocked"
-    body="Moved to review.\n\nPR: $PR_URL"
+    body="Moved to review for momo-main handoff.\n\nPR: $PR_URL\n\nWorker stop line: do not merge, close the issue, run the post-merge main gate, or adjust roadmap/backlog state from the worker thread."
     ;;
   blocked)
     if [ -z "$MESSAGE" ]; then
@@ -149,3 +154,6 @@ gh issue comment "$ISSUE" --repo "$ORG_REPO" --body-file "$comment_file"
 rm -f "$comment_file"
 
 echo "updated #$ISSUE -> $MODE"
+if [ "$MODE" = "review" ]; then
+  echo "handoff: #$ISSUE is status:needs-review; momo-main owns review, merge, issue close, main gate, and roadmap/backlog updates."
+fi

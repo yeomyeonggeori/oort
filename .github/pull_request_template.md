@@ -26,6 +26,10 @@ Closes #<issue>
 ## Local Gate Evidence
 <!-- `scripts/local_gate.sh`가 출력한 ## Local Gate 블록을 붙인다. GitHub Actions disabled/manual-only 기간에는 이 evidence가 primary merge gate다. -->
 
+## Worker handoff / merge boundary
+- [ ] Worker stops at PR + `status:needs-review`; no worker-side merge, issue close, post-merge `main` gate, or roadmap/backlog adjustment
+- [ ] Merge/close/final local gate on `main` is `momo-main` only
+
 ## STATUS 영향
 - <!-- STATUS.md에 반영한 줄(무엇이 추가/변경, 무엇이 여전히 미검증). -->
 
