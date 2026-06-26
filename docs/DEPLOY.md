@@ -13,7 +13,7 @@
 - Phase 0 = **5개 Swift 패키지 `swift build` green**.
 - M1 런타임 일부 검증 완료: Docker Desktop 기준 PG18+Centrifugo compose health, migrate 멱등, MomoServer health/seq gapless, OutboxRelay→Centrifugo publish/history.
 - M1 런타임 핵심 검증은 Docker Desktop 기준 MOMO-001~004에서 완료: compose/migrate/server health/seq gapless, OutboxRelay publish/history, RLS 격리, AgentWorker↔OpenAI-compatible SSE mock + 비용 회계.
-- 남은 M1 배포 검증: staging URL/TLS/운영 시크릿·백업·모니터링, 외부 hermes 재확인, WebSocket live subscribe/presence/recovery.
+- 남은 M1 배포 검증: 실제 staging URL/TLS/운영 시크릿 복호화·백업 복원·모니터링, 외부 hermes 재확인, WebSocket live subscribe/presence/recovery.
 - 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
 - **선결:** M0 런타임 e2e(서버↔PG18↔Centrifugo↔hermes 1왕복). M2 멀티팀 온보딩은 M1 위에서 성립.
 - **이 문서가 만들/갱신할 산출물(Codex):**
@@ -23,8 +23,9 @@
   - ✅ `infra/prod/.env.example` — production env 예시, 실제 시크릿 미포함 (MOMO-005)
   - ✅ `.sops.yaml.example` + `infra/prod/secrets.env.example` — SOPS/age 운영 계약, 실제 시크릿 미포함 (MOMO-006)
   - ✅ `infra/prod/pgbackrest*.example` + `docs/SECRETS_BACKUP_RUNBOOK.md` — 백업/복원 skeleton과 리허설 절차 (MOMO-006)
+  - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest local gate (MOMO-007)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
-  - `docs/RUN.md`에 staging 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
+  - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
 ---
 
@@ -273,6 +274,26 @@ pgbackrest --stanza=momo --type=time \
 
 > L4 §8.8: 구조화 로그(run_id/workspace_id 상관) + `audit_log` + 핵심 메트릭. v0는 경량(무거운 APM 불필요).
 
+### 8.0 local/staging smoke gate
+
+실제 VPS 시크릿이 없어도 PR에서 아래 gate를 먼저 통과시킨다.
+
+```sh
+scripts/verify_staging_smoke.sh
+scripts/local_gate.sh --profile staging-smoke
+```
+
+이 gate가 자동으로 닫는 범위:
+
+- `infra/prod/docker-compose.prod.yml`이 `.env.example`만으로 `docker compose config --quiet`를 통과한다.
+- Caddyfile이 `API_DOMAIN`/`REALTIME_DOMAIN`을 받아 api와 Centrifugo에 내부 reverse proxy한다.
+- `infra/prod/centrifugo.prod.json`이 Redis engine, namespace 4종, subscribe proxy, history ttl 계약을 만족한다.
+- prod plaintext secret/env/age key 파일이 tracked되지 않고, example 파일은 placeholder만 담는다.
+- SOPS/age와 pgBackRest PITR rehearsal checklist/evidence template이 존재한다.
+
+`runtime-unverified`: 실제 `https://api.<domain>/health`, TLS 인증서 발급/갱신, Caddy parser healthcheck,
+SOPS 복호화, pgBackRest stanza/check/full backup/PITR restore rehearsal, 외부 hermes staging 연결은 host-runtime에서만 닫는다.
+
 ### 8.1 헬스체크 / 로그
 - `GET https://api.<domain>/health` 200 = api green. Caddy/Centrifugo/postgres healthcheck도 green.
 - 구조화 로그(JSON): 모든 로그에 `run_id`/`workspace_id` 상관키. `docker compose logs -f` + 로그 드라이버(json-file rotate 또는 외부 수집).
@@ -294,6 +315,9 @@ pgbackrest --stanza=momo --type=time \
 
 ### 9.1 staging 최초 기동 (M1)
 ```sh
+# 0) 로컬/PR gate: 실제 VPS 시크릿 없이 config와 runbook을 먼저 검증
+scripts/local_gate.sh --profile staging-smoke
+
 # 1) DNS: api.staging.<domain> / rt.staging.<domain> → VPS IP (A/AAAA)
 # 2) age 키 + SOPS 시크릿 준비(§3), 80/443 인바운드 허용
 # 3) 이미지 빌드/푸시(CI) 또는 호스트에서 build
@@ -324,6 +348,7 @@ sops exec-env infra/prod/secrets.sops.env 'make migrate'
 
 - [ ] 인바운드 443(+80 ACME)만 허용, 5432/8000/8080 비노출(compose 내부).
 - [ ] dev-insecure/`change-me-*` 시크릿 **전부 교체**(SOPS 관리), 평문 `.env` 호스트/리포 미존재.
+- [ ] `scripts/local_gate.sh --profile staging-smoke` PASS 후 실제 host 기동.
 - [ ] `momo_relay`/`momo_admin` BYPASSRLS는 **읽기/relay 경로 한정**, app 역할은 `SET LOCAL app.workspace_id` 강제.
 - [ ] 워크스페이스 간 RLS 격리 런타임 검증(A 컨텍스트에서 B 행 조회 불가).
 - [ ] 초대코드 = 시크릿 취급(만료/max_uses/revoke), 로그 평문 금지.
