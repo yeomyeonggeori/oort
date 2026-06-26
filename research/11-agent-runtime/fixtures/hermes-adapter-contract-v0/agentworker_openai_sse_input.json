@@ -1,0 +1,123 @@
+{
+  "schema": "momo.hermes_adapter_contract.agentworker_openai_sse_input.v0",
+  "mode": "agentworker_openai_sse_default",
+  "owner": "momo",
+  "transport": "openai_chat_completions_sse",
+  "source": {
+    "outbox_kind": "agent_job",
+    "worker": "workers/AgentWorker/HermesTransport.swift",
+    "verified_by": "MOMO-004 repo-local OpenAI-compatible mock"
+  },
+  "momo_run": {
+    "workspace_id": "10000000-0000-7000-8000-000000000001",
+    "channel_id": "20000000-0000-7000-8000-000000000010",
+    "agent_member_id": "30000000-0000-7000-8000-000000000020",
+    "run_id": "40000000-0000-7000-8000-000000000030",
+    "trigger_message_id": "50000000-0000-7000-8000-000000000040",
+    "context_packet_id": "60000000-0000-7000-8000-000000000050",
+    "idempotency_key": "momo:mention:50000000-0000-7000-8000-000000000040"
+  },
+  "momo_owned_controls": {
+    "context_packet": {
+      "schema": "momo.context_packet.v0",
+      "packet_id": "60000000-0000-7000-8000-000000000050",
+      "projection_strategy": "system_summary_plus_context_json",
+      "built_after": [
+        "workspace_member",
+        "channel_member",
+        "source_grant",
+        "tool_policy",
+        "redaction_policy",
+        "budget_policy"
+      ]
+    },
+    "approval": {
+      "policy_source": "context_packet.tool_grants",
+      "default": "fail_closed",
+      "write_like_tool_result": "tool_call_to_approval_request_pause"
+    },
+    "cost": {
+      "mode": "reserve_reconcile",
+      "reserved_micro_usd": 4200,
+      "usage_source": "final_sse_chunk_usage"
+    },
+    "audit": {
+      "records": [
+        "agent_run",
+        "message",
+        "approval",
+        "usage_ledger",
+        "audit_log"
+      ],
+      "correlation_id": "run:40000000-0000-7000-8000-000000000030"
+    }
+  },
+  "http_request": {
+    "method": "POST",
+    "url_path": "/v1/chat/completions",
+    "headers": {
+      "authorization": "Bearer ${HERMES_API_KEY}",
+      "accept": "text/event-stream",
+      "content-type": "application/json"
+    },
+    "body": {
+      "model": "kim-intern",
+      "stream": true,
+      "stream_options": {
+        "include_usage": true
+      },
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are Kim Intern inside momo. Use only the supplied Context Packet projection. Propose write tools; do not execute external writes directly."
+        },
+        {
+          "role": "user",
+          "content": "Context Packet momo.context_packet.v0 packet_id=60000000-0000-7000-8000-000000000050 goal=Draft a GitHub issue from the launch thread recent_messages=[seq:41 Please file the release checklist gap] memory_refs=[decision:Use local gate evidence while Actions are disabled] tool_grants=[github.create_issue grant=propose risk=write approval_policy=always] budget={reserved_micro_usd:4200}."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "github.create_issue",
+            "description": "Draft a GitHub issue for approval inside momo.",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "repo": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "repo",
+                "title",
+                "body"
+              ]
+            }
+          }
+        }
+      ],
+      "max_tokens": 700
+    }
+  },
+  "expected_worker_mapping": {
+    "text_delta": "AgentEvent.textDelta -> agent.partial and final momo message",
+    "tool_call": "AgentEvent.toolCall -> Capability Cache / approval policy gate before execution",
+    "usage": "AgentEvent.usage -> usage_ledger reconcile and budget_window release",
+    "done": "[DONE] sentinel or stream close -> finish run after DB state is durable"
+  },
+  "forbidden_runtime_inputs": [
+    "database_url",
+    "provider_refresh_token",
+    "raw_cross_channel_history",
+    "unredacted_secret",
+    "bypassrls_credentials"
+  ]
+}
