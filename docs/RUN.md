@@ -157,6 +157,7 @@ docker compose -f infra/docker-compose.yml logs -f
 
 > **검증됨:** MOMO-001/002에서 Docker Desktop 기준 PG18+Centrifugo v6 health, migrate 멱등,
 > server health, 메시지 송신, OutboxRelay→Centrifugo publish/history를 확인했다.
+> MOMO-115부터 같은 relay path는 `scripts/local_gate.sh --profile runtime-relay`로 반복 검증한다.
 
 ---
 
@@ -275,6 +276,20 @@ swift run --package-path relay/OutboxRelay OutboxRelay
 - **BYPASSRLS `momo_relay` 역할**로 전 테넌트 폴링(§2.2/§10.1) → `RELAY_DATABASE_URL` 또는
   `RELAY_POSTGRES_USER/PASSWORD`로 분리 자격증명 권장.
 - 이 프로세스가 떠 있어야 메시지가 클라로 **실시간 전달**된다(commit↔publish 무손실 보장계층).
+
+#### 5.2.1 MOMO-115 Relay 런타임 게이트
+
+`make up && make migrate` 이후 직접 실행하거나, PR gate에서는 아래 profile을 사용한다.
+
+```sh
+scripts/verify_relay.sh
+scripts/local_gate.sh --profile runtime-relay
+```
+
+검증 범위는 seeded demo user login → REST message send → outbox `pending`
+→ OutboxRelay claim → Centrifugo history → outbox `done` → `version=message.seq`
+evidence다. worktree에서는 `.env.worktree`의 `COMPOSE_PROJECT_NAME`, `PORT`,
+`POSTGRES_PORT`, `CENT_PORT`를 사용해 포트를 분리한다.
 
 ### 5.3 Agent Worker — `AgentWorker` (데모 D: Live Tool-Call)
 
@@ -471,6 +486,7 @@ make migrate                     # 스키마 + 데모 시드
 swift run --package-path server MomoServer                 # 터미널 1
 swift run --package-path relay/OutboxRelay OutboxRelay     # 터미널 2
 swift run --package-path workers/AgentWorker AgentWorker   # 터미널 3 (D 데모, hermes 필요)
+scripts/local_gate.sh --profile runtime-relay              # relay path 반복 검증
 
 # --- 운영 skeleton 정적 점검 (배포 없음) ---
 docker compose --env-file infra/prod/.env.example -f infra/prod/docker-compose.prod.yml config >/tmp/momo-prod-compose.yml

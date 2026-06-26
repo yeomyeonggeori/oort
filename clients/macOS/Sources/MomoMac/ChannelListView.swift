@@ -26,6 +26,10 @@ public struct ChannelListView: View {
                 OnboardingInviteView(viewModel: viewModel)
             }
 
+            Section("Local AI") {
+                FoundationModelsCapabilityView(state: viewModel.foundationModelsCapability)
+            }
+
             Section("Channels") {
                 ForEach(viewModel.channels) { channel in
                     channelRow(channel).tag(channel.id)
