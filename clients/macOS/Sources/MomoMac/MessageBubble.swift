@@ -152,7 +152,9 @@ public struct MessageBubble: View {
 
     private var approvalRequestCard: some View {
         cardFrame(icon: "exclamationmark.shield", tint: MomoTheme.costAmber, title: "approval_request") {
-            let action = message.props["action_type"]?.stringValue ?? "action"
+            let action = message.props["action_type"]?.stringValue
+                ?? message.props["tool_name"]?.stringValue
+                ?? "action"
             Text("Needs approval: \(action)").font(.callout)
             if let title = message.props["title"]?.stringValue {
                 Text(title).font(.caption)

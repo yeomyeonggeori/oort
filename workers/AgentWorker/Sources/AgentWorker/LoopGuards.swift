@@ -96,10 +96,33 @@ struct LoopGuards: Sendable {
     }
 
     /// G6: does this tool call require a human approval gate? (L4 §3.3 / §6.2).
-    /// Side-effecting actions (deploy/spend/tool_call) always gate. Stub policy.
+    /// Side-effecting actions always gate. Until Capability Cache risk metadata is
+    /// wired into the job payload, unknown tool names fail closed into approval.
     func requiresApproval(toolName: String) -> Bool {
-        // TODO: drive from agent.tool_schema / policy; v0 gates a known side-effect set.
-        let sideEffects: Set<String> = ["deploy", "spend", "exec", "tool_call"]
-        return sideEffects.contains(toolName.lowercased())
+        // TODO(#77): replace this conservative name heuristic with Capability Cache
+        // risk/approval_policy evidence from the immutable Context Packet.
+        let normalized = toolName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+
+        let tokens = normalized.split { char in
+            char == "." || char == "_" || char == "-" || char == "/" || char == ":"
+        }.map(String.init)
+
+        let sideEffectVerbs: Set<String> = [
+            "approve", "assign", "cancel", "change", "close", "comment", "create",
+            "delete", "deploy", "exec", "execute", "invite", "merge", "move",
+            "post", "publish", "reject", "run", "send", "spend", "transition",
+            "update", "upload", "write",
+        ]
+        if tokens.contains(where: sideEffectVerbs.contains) || normalized == "tool_call" {
+            return true
+        }
+
+        let readOnlyVerbs: Set<String> = ["fetch", "find", "get", "list", "lookup", "query", "read", "search"]
+        if tokens.contains(where: readOnlyVerbs.contains) {
+            return false
+        }
+
+        return true
     }
 }

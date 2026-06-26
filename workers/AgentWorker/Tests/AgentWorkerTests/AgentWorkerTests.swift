@@ -96,6 +96,24 @@ final class AgentWorkerTests: XCTestCase {
         )
     }
 
+    func testApprovalPolicyRequiresApprovalForWriteLikeToolNames() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+
+        XCTAssertTrue(guards.requiresApproval(toolName: "github.create_issue"))
+        XCTAssertTrue(guards.requiresApproval(toolName: "jira.transition_issue"))
+        XCTAssertTrue(guards.requiresApproval(toolName: "deploy"))
+        XCTAssertTrue(guards.requiresApproval(toolName: "unknown.custom_action"))
+        XCTAssertTrue(guards.requiresApproval(toolName: ""))
+    }
+
+    func testApprovalPolicyAllowsKnownReadOnlyToolNames() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.approval-policy"))
+
+        XCTAssertFalse(guards.requiresApproval(toolName: "github.search_issues"))
+        XCTAssertFalse(guards.requiresApproval(toolName: "docs.search"))
+        XCTAssertFalse(guards.requiresApproval(toolName: "fetch_source_excerpt"))
+    }
+
     func testApprovalPausePlanUsesDurableCheckpointRecords() {
         let toolCall = ApprovalRuntime.ToolCall(
             callID: "call_001",
@@ -127,6 +145,26 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(
             ApprovalRuntime.outcome(for: .expired),
             .terminateRun(finalStatus: .timedOut, auditAction: "approval.expired")
+        )
+    }
+
+    private func testConfig() -> Config {
+        Config(
+            pgHost: "localhost",
+            pgPort: 5432,
+            pgUser: "momo_worker",
+            pgPassword: "dev",
+            pgDatabase: "momo",
+            centAPIURL: "http://localhost:8000/api",
+            centAPIKey: "dev",
+            hermesBaseURL: "http://localhost:8088/v1",
+            hermesAPIKey: "dev",
+            pollInterval: .milliseconds(300),
+            maxAttempts: 3,
+            maxConsecutiveAuto: 3,
+            maxSteps: 12,
+            maxDepth: 4,
+            maxConcurrentRuns: 1
         )
     }
 }
