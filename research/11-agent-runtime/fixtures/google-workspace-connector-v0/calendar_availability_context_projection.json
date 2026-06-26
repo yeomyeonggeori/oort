@@ -1,0 +1,266 @@
+{
+  "schema": "momo.google_workspace.fixture.v0",
+  "fixture": "calendar_availability_context_projection",
+  "created_at": "2026-06-27T09:10:00Z",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "grant": {
+    "grant_id": "gw_grant_calendar_user_001",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "google_subject": "google-sub-118000000000000000001",
+    "google_primary_email_hash": "sha256:user-primary-email-redacted-001",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.freebusy",
+      "https://www.googleapis.com/auth/calendar.events.readonly"
+    ],
+    "scope_grant_version": "google-workspace-grant@2026-06-27:calendar-001",
+    "token_storage_ref": "secret://google-workspace/gw_grant_calendar_user_001/refresh-token",
+    "status": "active",
+    "created_at": "2026-06-27T08:30:00Z",
+    "last_verified_at": "2026-06-27T09:09:55Z",
+    "revoked_at": null
+  },
+  "source_ref": {
+    "schema": "momo.google_workspace.source_ref.v0",
+    "source_id": "src_gw_calendar_launch_week_availability",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "provider": "google_workspace",
+    "source_kind": "calendar",
+    "provider_account": {
+      "google_subject": "google-sub-118000000000000000001",
+      "primary_email_redacted": "d***@example.com",
+      "hosted_domain": "example.com"
+    },
+    "provider_resource": {
+      "calendar_id": "primary",
+      "event_id": null,
+      "ical_uid": null,
+      "time_min": "2026-07-01T00:00:00+09:00",
+      "time_max": "2026-07-08T00:00:00+09:00",
+      "busy_windows": [
+        {
+          "start": "2026-07-02T10:00:00+09:00",
+          "end": "2026-07-02T11:30:00+09:00"
+        },
+        {
+          "start": "2026-07-03T15:00:00+09:00",
+          "end": "2026-07-03T16:00:00+09:00"
+        }
+      ],
+      "event_summaries": [
+        {
+          "event_id": "evt-launch-review-redacted",
+          "summary_redacted": "Launch review",
+          "start": "2026-07-02T10:00:00+09:00",
+          "end": "2026-07-02T11:30:00+09:00"
+        }
+      ],
+      "time_zone": "Asia/Seoul"
+    },
+    "permission_snapshot": {
+      "actor": "read",
+      "provider_grant_version": "google-workspace-grant@2026-06-27:calendar-001",
+      "oauth_scopes": [
+        "https://www.googleapis.com/auth/calendar.freebusy",
+        "https://www.googleapis.com/auth/calendar.events.readonly"
+      ],
+      "resource_scope": "calendar:primary time_window:2026-07-01..2026-07-08",
+      "momo_visibility": "personal",
+      "verification_class": "calendar.freebusy-plus-events-readonly"
+    },
+    "sync_state": {
+      "retrieved_at": "2026-06-27T09:10:00Z",
+      "cursor": {
+        "events_sync_token_ref": "cursor://google-workspace/calendar/user-001/sync-token/redacted"
+      },
+      "read_path": "calendar.freebusy.query+events.list:bounded_window",
+      "query_semantics": "availability_first_event_titles_only_with_events_readonly"
+    },
+    "excerpt": {
+      "title": "Calendar availability: 2026-07-01 to 2026-07-08",
+      "body": "Busy windows: Jul 2 10:00-11:30 KST and Jul 3 15:00-16:00 KST. Event titles are redacted unless needed for the task.",
+      "language": "en",
+      "redactions": [
+        "attendee_emails",
+        "event_descriptions"
+      ]
+    },
+    "lifecycle": {
+      "delete_path": "momo://settings/connectors/google-workspace/sources/src_gw_calendar_launch_week_availability/unlink",
+      "revoked_at": null,
+      "deleted_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "hide"
+    },
+    "audit": {
+      "connector_policy_version": "google-workspace-connector@2026-06-27",
+      "source_policy_versions": [
+        "memory-policy@2026-06-26",
+        "capability-policy@2026-06-26"
+      ],
+      "provider_request_id": "calendar-request-redacted-001",
+      "cited_by_context_packet_ids": [
+        "90000000-0000-7000-8000-000000000124"
+      ]
+    }
+  },
+  "context_packet_projection": {
+    "schema": "momo.context_packet.google_workspace_projection.v0",
+    "packet_id": "90000000-0000-7000-8000-000000000124",
+    "request": {
+      "surface": "slash_command",
+      "actor_member_id": "44444444-4444-7444-8444-444444444401",
+      "agent_member_id": "55555555-5555-7555-8555-555555555501",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "normalized_intent": "find_launch_review_times"
+    },
+    "scope": {
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "permission_basis": [
+        "actor_is_workspace_member",
+        "google_workspace_grant:calendar.freebusy",
+        "google_workspace_grant:calendar.events.readonly",
+        "time_window:7d"
+      ],
+      "rls_context": {
+        "set_local_workspace_id": "11111111-1111-7111-8111-111111111111"
+      }
+    },
+    "sources": [
+      {
+        "source_id": "src_gw_calendar_launch_week_availability",
+        "kind": "calendar",
+        "title": "Calendar availability: 2026-07-01 to 2026-07-08",
+        "uri": "momo://sources/google-workspace/calendar/src_gw_calendar_launch_week_availability",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "permission_snapshot": "actor:read provider_grant:calendar.freebusy+calendar.events.readonly resource:primary window:7d visibility:personal",
+        "retrieved_at": "2026-06-27T09:10:00Z",
+        "excerpt": "Busy windows: Jul 2 10:00-11:30 KST and Jul 3 15:00-16:00 KST.",
+        "checksum": "sha256:calendar-availability-week-excerpt"
+      }
+    ],
+    "tool_grants": [
+      {
+        "tool_name": "google_workspace.calendar.availability",
+        "provider": "google_workspace",
+        "grant": "read",
+        "risk": "read",
+        "approval_policy": "none",
+        "allowed_operations": [
+          "query_freebusy",
+          "list_events_window"
+        ],
+        "denied_operations": [
+          "create_event",
+          "update_event",
+          "invite_attendee"
+        ],
+        "input_schema_ref": "momo://capability-cache/google_workspace.calendar.availability/schemas/input/sha256:gmscalendaravailabilityv0",
+        "resource_scope_ref": "momo://capability-cache/google_workspace.calendar.availability/resource-scopes/sha256:primary7d",
+        "resource_scope_summary": "calendar:primary window:7d",
+        "capability_version": "google-workspace-connector@2026-06-27",
+        "policy_version": "capability-policy@2026-06-26"
+      }
+    ],
+    "redactions": [
+      {
+        "redaction_id": "red_calendar_attendees",
+        "kind": "pii_email",
+        "placeholder": "[redacted-attendee-email]",
+        "reason": "Availability answer only needs busy windows, not attendee identities."
+      },
+      {
+        "redaction_id": "red_calendar_write_tools",
+        "kind": "withheld_tool",
+        "placeholder": "[approval-required-calendar-write]",
+        "reason": "Creating or updating events is an external write and is not directly granted in read-mostly v0."
+      }
+    ]
+  },
+  "memory_plane_projection": {
+    "schema": "momo.memory_item.v0",
+    "memory_id": "92000000-0000-7000-8000-000000000124",
+    "memory_type": "external_source_ref",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject": {
+      "kind": "external_source",
+      "provider": "google_workspace",
+      "source_kind": "calendar",
+      "provider_resource_id": "primary:2026-07-01..2026-07-08"
+    },
+    "statement": {
+      "summary": "Short-lived calendar availability source for launch-week scheduling.",
+      "body": "Availability memory expires quickly and must be refreshed before reuse. It must not become permanent availability profiling.",
+      "structured": {
+        "source_id": "src_gw_calendar_launch_week_availability",
+        "ttl_reason": "availability_changes_frequently"
+      },
+      "language": "en",
+      "source_quote_policy": "no_quote"
+    },
+    "visibility": {
+      "scope": "personal",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject_member_id": "44444444-4444-7444-8444-444444444401",
+      "required_roles": [],
+      "source_visibility_policy": "source_grants_required"
+    },
+    "source_refs": [
+      {
+        "source_id": "src_gw_calendar_launch_week_availability",
+        "source_kind": "calendar",
+        "uri": "momo://sources/google-workspace/calendar/src_gw_calendar_launch_week_availability",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "provider_grant_version": "google-workspace-grant@2026-06-27:calendar-001",
+        "provider_resource_id": "primary:2026-07-01..2026-07-08",
+        "permission_snapshot": "actor:read provider_grant:calendar.freebusy resource:primary window:7d visibility:personal",
+        "retrieved_at": "2026-06-27T09:10:00Z",
+        "excerpt": "Busy windows: Jul 2 10:00-11:30 KST and Jul 3 15:00-16:00 KST.",
+        "checksum": "sha256:calendar-availability-week-excerpt"
+      }
+    ],
+    "permissions": {
+      "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+      "created_by_kind": "human",
+      "write_policy_version": "memory-policy@2026-06-26",
+      "retrieval_policy_version": "memory-policy@2026-06-26+google-workspace-connector@2026-06-27",
+      "allowed_request_surfaces": [
+        "mention",
+        "slash_command"
+      ]
+    },
+    "validity": {
+      "created_at": "2026-06-27T09:10:00Z",
+      "expires_at": "2026-06-28T09:10:00Z",
+      "stale_after": "2026-06-27T11:10:00Z",
+      "refresh_policy": "on_access"
+    },
+    "lifecycle": {
+      "delete_path": "momo://settings/memory/personal/92000000-0000-7000-8000-000000000124/delete",
+      "deleted_at": null,
+      "revoked_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "hide"
+    }
+  },
+  "approval_gated_writes": [
+    {
+      "tool_name": "google_workspace.calendar.create_event",
+      "grant": "propose",
+      "risk": "write",
+      "approval_policy": "always",
+      "reason": "Creates external Calendar state and may invite attendees."
+    },
+    {
+      "tool_name": "google_workspace.calendar.update_event",
+      "grant": "propose",
+      "risk": "write",
+      "approval_policy": "always",
+      "reason": "Mutates external Calendar state."
+    }
+  ]
+}

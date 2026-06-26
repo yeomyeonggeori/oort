@@ -298,6 +298,14 @@
 - [ ] Memory Plane v0의 `retrieval_policy_version`과 provider grant revoke/source revalidation 관계를 연결한다.
 - [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`와 기존 build/test gate를 통과.
 
+### MOMO-122 수용기준 `[spec]`
+- [x] `research/11-agent-runtime/12-google-workspace-connector-v0.md`에 Google Workspace connector v0의 per-user OAuth, scope policy, token boundary, revocation/delete model을 정의한다.
+- [x] Drive changes/selected file excerpt, Gmail thread/search, Calendar availability/events read path를 read-mostly sync로 고정한다.
+- [x] Google refs가 Context Packet `sources`/`source_refs`, Memory Plane `external_source_ref`, Capability Cache `tool_grants`로 projection되는 방식을 연결한다.
+- [x] `research/11-agent-runtime/fixtures/google-workspace-connector-v0/`에 Drive, Gmail, Calendar JSON fixture 3종을 추가한다.
+- [x] Gmail send, Calendar create/update, Drive share/upload/permission change 등 external write는 approval-gated 또는 v0 out of scope로 명시한다.
+- [x] 코드/스키마 구현 없이 문서/fixture만 변경하며, `scripts/local_gate.sh --profile docs`를 통과한다.
+
 ### MOMO-161 수용기준 `[spec/swift/runtime]`
 - [x] `research/11-agent-runtime/08-approval-pause-resume-runtime.md`에 approval pause/resume 정본을 추가한다.
 - [x] `tool_call → approval_request → approval_decision → resume/deny → tool_result/audit` 흐름과 same-run resume 모델을 정의한다.
