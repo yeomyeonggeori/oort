@@ -1,0 +1,16 @@
+{
+  "fixture_id": "approval_decision_server_contract_v0_reject_request",
+  "ticket": "MOMO-166",
+  "method": "POST",
+  "path": "/v1/workspaces/00000000-0000-7000-8000-000000000001/approvals/00000000-0000-7000-8000-000000000901/decision",
+  "body": {
+    "approval_id": "00000000-0000-7000-8000-000000000901",
+    "approve": false,
+    "reason": "Do not create external GitHub state.",
+    "client_decision_id": "00000000-0000-7000-8000-000000166002"
+  },
+  "maps_to": {
+    "momo_core": "ApprovalDecisionRequest",
+    "db_status": "rejected"
+  }
+}

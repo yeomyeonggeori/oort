@@ -1,0 +1,32 @@
+{
+  "fixture_id": "approval_decision_server_contract_v0_approval_decided_event",
+  "ticket": "MOMO-166",
+  "channel": "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000010",
+  "envelope": {
+    "type": "approval.decided",
+    "v": 1,
+    "ts": 1782463200000,
+    "seq": 42,
+    "payload": {
+      "action": "decided",
+      "approval_id": "00000000-0000-7000-8000-000000000901",
+      "run_id": "00000000-0000-7000-8000-000000000161",
+      "channel_id": "00000000-0000-7000-8000-000000000010",
+      "requested_by": "00000000-0000-7000-8000-000000000101",
+      "on_behalf_of": "00000000-0000-7000-8000-000000000201",
+      "action_type": "tool_call",
+      "status": "approved",
+      "payload": {
+        "call_id": "call_create_issue_001",
+        "tool_name": "github.create_issue"
+      },
+      "estimated_micro_usd": 820000,
+      "is_reversible": false,
+      "decided_by": "00000000-0000-7000-8000-000000000201",
+      "decision_reason": "The issue title/body are safe."
+    }
+  },
+  "maps_to": {
+    "momo_core": "RealtimeEnvelope.decodeEvent() -> RealtimeEvent.approval(ApprovalEvent)"
+  }
+}

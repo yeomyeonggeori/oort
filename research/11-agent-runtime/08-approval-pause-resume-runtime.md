@@ -52,6 +52,9 @@ This PR implements the minimal worker-side pause slice above. The external tool 
 
 ## 4. Server Decision Contract
 
+MOMO-166 refines this high-level follow-up into the canonical server wire/DB/event contract:
+`research/11-agent-runtime/10-approval-decision-server-contract-v0.md`.
+
 Follow-up server route:
 
 ```text
@@ -131,6 +134,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/approval-pause-resume-v0/`.
 ## 8. Open Follow-Ups
 
 - Implement `POST /v1/workspaces/{ws}/approvals/{approval_id}/decision`.
+- Use the MOMO-166 approval decision server contract for request/response JSON, idempotency, expiry, and resume-job payloads.
 - Add resume-job handling in AgentWorker for `resume_from_approval_id`.
 - Add runtime verification script with mock hermes emitting an approval-required tool call, then server approve/deny calls.
 - Add deadline/expiry sweeper for `approval.expires_at`.
