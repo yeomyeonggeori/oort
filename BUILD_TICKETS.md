@@ -150,6 +150,8 @@
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
+| `MOMO-006` | SOPS/age secret lifecycle + pgBackRest PITR skeleton | infra/docs | MOMO-005 |
+| `MOMO-007` | VPS 시크릿 없는 local/staging smoke gate + RUN/DEPLOY 런북 고정 | infra/docs | MOMO-005, MOMO-006 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -157,7 +159,7 @@
 - [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
 
 ### MOMO-111 수용기준 `[ci/docs]`
-- [ ] `scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 설계/구현.
+- [ ] `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 설계/구현.
 - [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
 - [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template에 문서화.
 
@@ -182,6 +184,24 @@
 - [ ] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
+
+### MOMO-006 수용기준 `[infra/docs]`
+- [x] `.sops.yaml.example` — SOPS creation rule template. 실제 public recipient/age private key는 미포함.
+- [x] `infra/prod/secrets.env.example` — staging/prod secret shape. 실제 production secret은 미커밋.
+- [x] `infra/prod/pgbackrest.conf.example`, `postgresql.pgbackrest.conf.example`, `pgbackrest-cron.example` — PITR skeleton.
+- [x] `docs/SECRETS_BACKUP_RUNBOOK.md` — SOPS/age setup, encryption/decryption, pgBackRest stanza/check/full backup/PITR rehearsal 절차.
+- [x] 실제 staging host, age private key, object-store credential, pgBackRest stanza/check/full backup/PITR restore rehearsal은 `runtime-unverified`로 남김.
+
+### MOMO-007 수용기준 `[infra/docs]`
+- [x] GitHub #7 claim: `scripts/goal_claim.sh --force 7`로 별도 worktree/branch `docs/7-staging-run` 생성, issue assign + `status:in-progress`.
+- [x] `scripts/verify_staging_smoke.sh` — prod compose config validation, Caddyfile structural validation, Centrifugo prod config validation, secret placeholder/real-secret guard, SOPS/pgBackRest checklist validation.
+- [x] `scripts/local_gate.sh --profile staging-smoke` — PR-ready local gate profile 추가.
+- [x] `docs/RUN.md`, `docs/DEPLOY.md`, `docs/SECRETS_BACKUP_RUNBOOK.md`, `docs/LOCAL_PR_GATE.md`에 local gate와 host-runtime 경계를 기록.
+- [x] pgBackRest stanza/check/full backup/PITR restore rehearsal은 실제 host/secrets 없이는 `runtime-unverified`로 유지.
+- [x] `scripts/local_gate.sh --profile staging-smoke` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 
 ### MOMO-150 수용기준 `[docs/spec]`
 - [ ] `research/11-agent-runtime/`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가.

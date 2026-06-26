@@ -345,17 +345,29 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 | `infra/prod/centrifugo.prod.json` | dev namespace 계약(ch/dm/agent/user)을 유지하면서 engine만 Redis로 전환. subscribe proxy는 compose 내부 `api:8080`. |
 | `infra/prod/.env.example` | staging/prod env 예시. 실제 시크릿은 커밋하지 않고 host-local env 또는 MOMO-006 SOPS/age로 주입. |
 
-### 8.1 정적 점검 (배포 없음)
+### 8.1 local/staging smoke gate (배포 없음, MOMO-007)
 
 ```sh
-jq empty infra/prod/centrifugo.prod.json
-docker compose --env-file infra/prod/.env.example -f infra/prod/docker-compose.prod.yml config >/tmp/momo-prod-compose.yml
+scripts/verify_staging_smoke.sh
+scripts/local_gate.sh --profile staging-smoke
 ```
 
-이 점검은 compose/env/config가 파싱되는지만 확인한다. `MOMO_API_IMAGE`/`MOMO_RELAY_IMAGE`/
-`MOMO_WORKER_IMAGE`는 placeholder 태그이며, 실제 image build/push는 후속 배포 파이프라인 범위다.
+이 gate는 실제 VPS 시크릿 없이 다음을 자동 검증한다.
 
-### 8.2 staging 최초 기동 절차 (후속 MOMO-006/007)
+- `docker compose --env-file infra/prod/.env.example -f infra/prod/docker-compose.prod.yml config --quiet`
+- Caddyfile의 `API_DOMAIN`/`REALTIME_DOMAIN` 라우팅, `api:8080`/`centrifugo:8000` reverse proxy, 보안 헤더 구조
+- `infra/prod/centrifugo.prod.json` JSON 파싱, Redis engine, namespace 4종, subscribe proxy, `history_meta_ttl > history_ttl`
+- prod plaintext secret 파일이 tracked되지 않는지, `.env.example`/`secrets.env.example`가 명시 placeholder만 담는지
+- `.sops.yaml.example`, pgBackRest config/cron, PITR rehearsal evidence template 존재
+
+`MOMO_API_IMAGE`/`MOMO_RELAY_IMAGE`/`MOMO_WORKER_IMAGE`는 placeholder 태그이며, 실제 image build/push는
+후속 배포 파이프라인 범위다. `caddy` binary가 로컬에 있으면 parser validation까지 실행하고,
+없으면 structural check만 PASS로 남기며 parser validation은 host-runtime으로 둔다.
+
+`runtime-unverified`: 실제 staging URL health/TLS, Caddy healthcheck, SOPS 복호화, pgBackRest stanza/check/full
+backup/PITR restore rehearsal, 외부 hermes staging 연결은 실제 host+시크릿이 있어야 닫는다.
+
+### 8.2 staging 최초 기동 절차 (host-runtime)
 
 ```sh
 # 1) DNS: API_DOMAIN / REALTIME_DOMAIN A/AAAA 레코드를 VPS IP로 지정
@@ -370,7 +382,8 @@ docker compose --env-file /secure/momo/staging.env -f infra/prod/docker-compose.
 ```
 
 운영 DB 마이그레이션, BYPASSRLS role bootstrap, SOPS/age, pgBackRest 백업/복원, 경량 모니터링은
-MOMO-006/007 범위다. staging URL health green과 TLS 정상 확인 전에는 M1 staging 완료로 표시하지 않는다.
+host-runtime 검증이다. staging URL health green, TLS 정상, pgBackRest PITR 복원 리허설 확인 전에는
+M1 staging 완료로 표시하지 않는다.
 
 > **보안/불변식:** Caddy만 80/443(ACME/HTTPS)을 노출한다. Postgres, Redis, Centrifugo, api,
 > relay, worker는 compose 네트워크 내부에 둔다. 클라이언트 직접 publish 금지와

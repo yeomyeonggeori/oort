@@ -23,7 +23,8 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
   ▲
   └─ 현재: M1 런타임 G-0의 핵심 4개 게이트(MOMO-001~004)는 Docker Desktop으로 검증됨.
      · 5개 Swift 패키지 `swift build/test` green (MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac)
-     · 남은 M1 = MOMO-005 staging/prod compose skeleton은 준비됨, 실제 staging 기동/TLS/시크릿/백업/모니터링은 MOMO-006/007
+     · 남은 M1 = MOMO-005/006/007로 staging/prod compose, SOPS/pgBackRest skeleton, local smoke gate는 준비됨
+     · 실제 staging URL/TLS, SOPS 복호화, pgBackRest PITR restore rehearsal, 외부 hermes staging 연결은 host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
      · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준
@@ -61,8 +62,11 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 |---|---|---|---|
 | `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
 | `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
-| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all` + PR evidence 출력 |
+| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-agent|macos-ui|all` + PR evidence 출력 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | `scripts/goal_status.sh` board + `goal_claim/release` + `.conductor/setup.sh` + handoff/충돌 방지 정본 |
+| `MOMO-005` | M1 | staging/prod compose skeleton | Caddy 자동 TLS, PostgreSQL 18, Redis, Centrifugo v6 Redis engine, api/relay/worker compose skeleton |
+| `MOMO-006` | M1 | SOPS/age + pgBackRest skeleton | secret template, pgBackRest config/cron, PITR rehearsal runbook; 실제 host rehearsal은 `runtime-unverified` |
+| `MOMO-007` | M1 | local/staging smoke 운영 gate | `scripts/verify_staging_smoke.sh` + `local_gate --profile staging-smoke`; 실제 URL/TLS/PITR는 host-runtime |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
 | `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |
@@ -157,7 +161,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 
 ### 3.1 ⚙️ 공유 / 백엔드 트랙
 - **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
-- **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리.
+- **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리. MOMO-007의 `staging-smoke` local gate가 prod compose/Caddy/Centrifugo/secrets/pgBackRest checklist를 실제 VPS 시크릿 없이 먼저 검증하고, 실제 URL/TLS/PITR restore는 host-runtime으로 닫는다.
 - **멀티팀 온보딩**(M2): `003_onboarding.sql` 첫 slice는 `invite_code` + redemption audit로 시작한다(MOMO-010). 온보딩 REST/자가가입은 MOMO-011~012, `platform_admin` 전역 추적은 MOMO-013로 분리한다. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장.
 - **Context Broker + Memory Plane**(M2~M3): 서버 agent로 바로 넘기지 않고 messenger layer가 권한, 컨텍스트 범위, source refs, cost budget, redaction, local/server model routing을 결정한다. 정본: `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`.
 - **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`, Memory Plane v0 정본은 `research/11-agent-runtime/05-memory-plane-v0.md`, Capability Cache v0 정본은 `research/11-agent-runtime/06-capability-cache-v0.md`, Agent Run Lifecycle v0 정본은 `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`, Approval Pause/Resume v0 정본은 `research/11-agent-runtime/08-approval-pause-resume-runtime.md`이며, runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
