@@ -58,7 +58,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 | `MOMO-160` | A2A-style `agent_run` lifecycle alignment | mapping for queued/running/input-required/awaiting-approval/succeeded/failed/cancelled |
 | `MOMO-161` | Approval pause/resume runtime | canonical spec + worker pause slice; server decision/resume runtime follows |
 | `MOMO-162` | Hermes adapter contract verification | platform adapter path and AgentWorker SSE path both tested or one declared canonical |
-| `MOMO-163` | Inbound MCP server v0 | governed search/fetch/post/tool surfaces with consent/approval policy |
+| `MOMO-163` | Inbound MCP server v0 | governed search/fetch/post/approval-safe tool call spec with tools/resources/prompts fixtures |
 
 ### M3 UX
 
@@ -84,7 +84,7 @@ After MOMO-153, the next implementation-ready split should move into parallel wo
 ```text
 Worker 1: MOMO-160 agent_run lifecycle alignment.
 Worker 2: MOMO-170 macOS agent protocol cards.
-Worker 3: MOMO-163 inbound MCP server v0 spec/runtime slice.
+Worker 3: MOMO-163 inbound MCP server v0 spec and fixtures slice.
 Worker 4: infra/local gate or plugin fixture hardening.
 ```
 

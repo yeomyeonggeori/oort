@@ -114,6 +114,8 @@
 | [`research/11-agent-runtime/07-agent-run-lifecycle-v0.md`](../research/11-agent-runtime/07-agent-run-lifecycle-v0.md) | Agent Run Lifecycle v0 정본 스펙(A2A-style Task/Message/Artifact/status mapping, input-required vs awaiting-approval 경계) |
 | [`research/11-agent-runtime/08-approval-pause-resume-runtime.md`](../research/11-agent-runtime/08-approval-pause-resume-runtime.md) | Approval Pause/Resume Runtime v0 정본 스펙(tool_call checkpoint, approval decision, same-run resume/terminate, audit) |
 | [`research/11-agent-runtime/fixtures/approval-pause-resume-v0/`](../research/11-agent-runtime/fixtures/approval-pause-resume-v0/) | Approval Pause/Resume v0 JSON fixture(risky tool_call → approval_request → approve/deny → resume/terminate) |
+| [`research/11-agent-runtime/09-inbound-mcp-server-v0.md`](../research/11-agent-runtime/09-inbound-mcp-server-v0.md) | Inbound MCP Server v0 정본 스펙(search/fetch/post/approval-safe tool call + Context Packet/Memory/Capability 권한 연결) |
+| [`research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`](../research/11-agent-runtime/fixtures/inbound-mcp-server-v0/) | Inbound MCP Server v0 JSON fixtures(tools/resources/prompts discovery, approval-safe tool-call proposal) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---
