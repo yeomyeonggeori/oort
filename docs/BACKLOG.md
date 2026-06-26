@@ -202,11 +202,12 @@ M0(baseline)
 - **마일스톤:** M1 · **에픽:** EP-DEPLOY · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-005
 - **수용기준:**
-  - [ ] [infra] SOPS+age로 암호화한 `.env`를 git 버전관리 + 배포 시 메모리 복호화(평문 디스크 미접촉)
-  - [ ] [infra] `change-me`/`dev-insecure` 기본값을 `openssl rand` 로 교체
-  - [ ] [runtime] pgBackRest 주간 풀 + 연속 WAL 아카이빙 구성 + 복원(PITR) 1회 검증
+  - [ ] [infra] SOPS+age secret lifecycle runbook + `.sops.yaml.example`/`secrets.env.example` skeleton(실제 secret 없음)
+  - [ ] [infra] prod secret template은 `change-me`/`dev-insecure` 값을 쓰지 않고 `openssl rand` 생성 지침으로만 채움
+  - [ ] [infra] pgBackRest 주간 full + 일간 diff + 연속 WAL/PITR config skeleton + 복원 리허설 절차
+  - [ ] [runtime] 실제 staging/prod에서 pgBackRest stanza/check/full backup/PITR 복원 1회 검증(MOMO-005 이후, `runtime-unverified` until then)
 - **라벨:** `type:infra`, `area:infra`, `status:runtime-unverified`
-- **참조:** L4 §8.7 · `infra/.env.example` · `docs/RUN.md`
+- **참조:** L4 §8.7 · `infra/.env.example` · `infra/prod/*` · `docs/SECRETS_BACKUP_RUNBOOK.md` · `docs/RUN.md`
 
 #### MOMO-007 · staging 배포 + 경량 모니터링 + RUN 런북 갱신
 - **마일스톤:** M1 · **에픽:** EP-DEPLOY · **플랫폼:** backend · **추정:** M

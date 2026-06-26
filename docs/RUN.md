@@ -108,6 +108,31 @@ cp infra/.env.example .env
 > **보안:** `.env.example`의 `change-me-*` / 코드의 `dev-insecure-*` 기본값은 **개발용**이다.
 > 실배포에선 반드시 교체(`openssl rand -hex 32`). 기본값으로도 부팅은 되지만 안전하지 않다.
 
+### 2.3 staging/prod 시크릿과 백업 skeleton
+
+로컬 `.env`는 개발 편의용이다. staging/prod는 평문 `.env`를 커밋하거나 호스트에 남기지 않고
+SOPS+age로 암호화한 `infra/prod/secrets.sops.env`를 사용한다.
+
+```sh
+# 운영자는 실제 age public recipient를 넣어 .sops.yaml을 만든 뒤:
+cp infra/prod/secrets.env.example infra/prod/secrets.env
+$EDITOR infra/prod/secrets.env
+sops --encrypt --input-type dotenv --output-type dotenv \
+  infra/prod/secrets.env > infra/prod/secrets.sops.env
+rm -f infra/prod/secrets.env
+
+# 배포/마이그레이션은 복호화 값을 프로세스 환경으로만 주입:
+sops exec-env infra/prod/secrets.sops.env \
+  'docker compose -f infra/prod/docker-compose.prod.yml up -d'
+sops exec-env infra/prod/secrets.sops.env 'make migrate'
+```
+
+pgBackRest PITR skeleton은 `infra/prod/pgbackrest.conf.example`,
+`infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`에 있다.
+실제 stanza 생성, WAL archive check, full backup, PITR restore rehearsal은 staging/prod 호스트에서만
+가능하므로 현재는 `runtime-unverified`다. 상세 절차는
+[`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)를 본다.
+
 ---
 
 ## 3. 인프라 기동 — `make up` (PostgreSQL 18 + Centrifugo v6)

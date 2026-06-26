@@ -19,8 +19,8 @@
   - `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 (MOMO-005)
   - `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
   - `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
-  - `infra/prod/.env.sops.yaml`(SOPS/age 암호화) + `.sops.yaml` 규칙 (MOMO-006)
-  - `infra/prod/pgbackrest.conf` + 백업/복원 스크립트 (MOMO-006)
+  - `.sops.yaml.example` + `infra/prod/secrets.env.example` + `infra/prod/secrets.sops.env` 운영 계약 (MOMO-006)
+  - `infra/prod/pgbackrest*.example` + 백업/복원 런북 (MOMO-006)
   - `server/Migrations/003_onboarding.sql` — invite_code + platform_admin (MOMO-010)
   - `docs/RUN.md`에 staging 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
@@ -85,6 +85,7 @@
 ## 3. 시크릿 관리 (SOPS + age) — MOMO-006
 
 > 목표: 암호화한 시크릿을 **git에 버전관리**하면서, 배포 시 **메모리에서만 복호화**(평문이 디스크에 닿지 않음). dev의 `change-me-*`/`dev-insecure-*`를 운영에서 전부 교체.
+> 절차 정본과 skeleton 파일 목록은 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)다.
 
 ### 3.1 키 생성 & 규칙
 ```sh
@@ -92,22 +93,25 @@ age-keygen -o ~/.config/sops/age/keys.txt          # 개인키(호스트 보관,
 # 출력된 public key(age1...)를 .sops.yaml 의 recipient 로 등록
 ```
 
-`.sops.yaml`(리포 루트 또는 `infra/prod/`):
+`.sops.yaml`(리포 루트, `.sops.yaml.example`에서 실제 public recipient로 교체):
 ```yaml
 creation_rules:
-  - path_regex: infra/prod/.*\.sops\.(yaml|env|json)$
+  - path_regex: ^infra/prod/.*\.sops\.(env|yaml|json)$
     age: "age1...<public key>"
 ```
 
 ### 3.2 암호화/복호화
 ```sh
-sops --encrypt infra/prod/secrets.env > infra/prod/.env.sops.yaml   # 커밋 가능(값 암호화됨)
-# 배포 시 메모리로만 복호화 → compose 에 주입(평문 파일 생성 금지):
+sops --encrypt --input-type dotenv --output-type dotenv \
+  infra/prod/secrets.env > infra/prod/secrets.sops.env       # 커밋 가능(값 암호화됨)
+rm -f infra/prod/secrets.env                                 # 평문 삭제(커밋 금지)
+
+# 배포 시 프로세스 환경으로만 복호화 → compose 에 주입(평문 파일 생성 금지):
 SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
-  sops exec-env infra/prod/.env.sops.yaml \
-  'docker compose --env-file /dev/stdin -f infra/prod/docker-compose.prod.yml up -d'
+  sops exec-env infra/prod/secrets.sops.env \
+  'docker compose -f infra/prod/docker-compose.prod.yml up -d'
 ```
-> `sops exec-env`는 복호화 값을 **프로세스 환경**으로만 노출(디스크 미접촉). CI 배포 시 age 개인키는 GitHub Actions secret(또는 OIDC→KMS)로 주입.
+> `sops exec-env`는 복호화 값을 **프로세스 환경**으로만 노출(디스크 미접촉). CI 배포 시 age 개인키는 GitHub Actions secret(또는 OIDC→KMS)로 주입. 환경변수는 동일 사용자/root의 프로세스 관찰 표면에 노출될 수 있으므로 운영 호스트 권한도 함께 제한한다.
 
 ### 3.3 운영 시크릿 인벤토리 (dev `.env.example` + 운영 추가분)
 | 키 | 생성 | 비고 |
@@ -244,10 +248,11 @@ GET /v1/platform/members      → 전 테넌트 멤버 전수
 ## 7. 백업 / 복원 (pgBackRest PITR) — MOMO-006
 
 > L4 §8.7: 일일 `pg_dump` + WAL 아카이빙이 최소선. 운영은 **pgBackRest(주간 풀 + 연속 WAL 아카이빙 → PITR)** 로 승격.
+> skeleton 파일은 `infra/prod/pgbackrest.conf.example`, `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`이며, 상세 절차는 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)다.
 
 ### 7.1 구성(요지)
 - `archive_command = pgbackrest --stanza=momo archive-push %p` (postgresql.conf), `archive_mode = on`, `wal_level = replica`.
-- `pgbackrest.conf`: stanza `momo`, repo(로컬 디스크 또는 S3 호환), **repo cipher(AES-256)** + retention(full=4주, diff/incr).
+- `pgbackrest.conf`: stanza `momo`, `pg1-path`는 `SHOW data_directory`로 확인, repo(로컬 디스크 또는 S3 호환), **repo cipher(AES-256)** + retention(full=4주, diff/incr).
 - 스케줄: **주간 full + 일간 diff + 연속 WAL**(cron). 백업 repo는 호스트와 분리된 오브젝트스토리지 권장(월 $1 미만~수달러 `(추정)`).
 
 ### 7.2 검증(M1 exit — 복원 1회 필수)
@@ -292,10 +297,10 @@ pgbackrest --stanza=momo --type=time \
 # 3) 이미지 빌드/푸시(CI) 또는 호스트에서 build
 # 4) 시크릿 메모리 복호화 + 기동
 SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
-  sops exec-env infra/prod/.env.sops.yaml \
+  sops exec-env infra/prod/secrets.sops.env \
   'docker compose -f infra/prod/docker-compose.prod.yml up -d'
 # 5) 마이그레이션
-sops exec-env infra/prod/.env.sops.yaml 'make migrate'
+sops exec-env infra/prod/secrets.sops.env 'make migrate'
 # 6) 검증: https://api.staging.<domain>/health 200 + TLS 정상 + RLS 격리 + outbox 왕복
 ```
 

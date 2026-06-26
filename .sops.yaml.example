@@ -1,0 +1,11 @@
+# Copy this file to .sops.yaml after replacing the placeholder recipients with
+# real age public keys. .sops.yaml contains public recipients only and is safe to
+# commit; the age private identity must never be committed.
+#
+# SOPS discovers a file named exactly .sops.yaml from the current working
+# directory upward. Keep this example non-operative until real recipients exist.
+creation_rules:
+  - path_regex: ^infra/prod/.*\.sops\.(env|yaml|json)$
+    age: >-
+      <age1-staging-public-recipient>,
+      <age1-prod-public-recipient>
