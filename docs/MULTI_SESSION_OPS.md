@@ -9,11 +9,13 @@
 
 Worker threads are implementation threads. Each worker claims exactly one GitHub Issue and works only in the worktree created for that issue.
 
+Workers stop at PR handoff: claim issue -> worktree work -> local gate -> PR -> `status:needs-review` -> handoff to `momo-main`. Workers must not merge PRs, close issues, run the post-merge `main` gate, or reorder roadmap/backlog state. Those actions are `momo-main` only.
+
 Recommended five-session split:
 
 | Session | Default lane | Responsibility |
 |---|---|---|
-| `momo-main` | orchestration | Issue picker, branch collision checks, review/merge, roadmap/status updates, next-goal recommendation |
+| `momo-main` | orchestration | Issue picker, branch collision checks, review/merge, issue close, main gate, roadmap/status updates, next-goal recommendation |
 | worker 1 | runtime/backend | Small server, DB, relay, worker, runtime verification tickets |
 | worker 2 | macOS UX | MomoMac SwiftUI, app launch, desktop interaction tickets |
 | worker 3 | docs/spec/protocol | Context, memory, agent protocol, research-to-roadmap tickets |
@@ -110,7 +112,7 @@ Coordinate before opening parallel work in:
 - `scripts/local_gate.sh` and goal orchestration scripts,
 - `ROADMAP.md`, `BUILD_TICKETS.md`, `STATUS.md` sections for the same milestone.
 
-Large shared changes should merge in dependency order. Workers should rebase/refresh from `main` after upstream PRs merge, rerun the relevant local gate, and update their PR evidence.
+Large shared changes should be merged by `momo-main` in dependency order. Workers should rebase/refresh from `main` after upstream PRs merge, rerun the relevant local gate, and update their PR evidence.
 
 ## 5. Worker Prompt Template
 
@@ -133,8 +135,8 @@ Operational:
 - Branch/worktree lock required before editing.
 - Use .env.worktree for runtime work and avoid shared ports/compose projects.
 - Run scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui>.
-- Open one PR, paste Local Gate evidence, and hand off the PR URL back to momo-main.
-- Do not merge from the worker thread unless momo-main explicitly delegates merge authority.
+- Open one PR, paste Local Gate evidence, run scripts/goal_release.sh <number> --review --pr <PR URL>, and hand off the PR URL back to momo-main.
+- Stop after the handoff. Do not merge, close the issue, run the post-merge main gate, or adjust roadmap/backlog state from the worker thread.
 ```
 
 ## 6. Worker Handoff Report
@@ -150,6 +152,7 @@ Local Gate:
 Files changed:
 Runtime coverage:
 Remaining risks:
+Handoff target: momo-main
 Next recommended issue:
 ```
 
@@ -165,7 +168,7 @@ If ready for review:
 scripts/goal_release.sh <issue-number> --review --pr <PR URL>
 ```
 
-`--review` requires a valid open PR that either closes the issue or uses the canonical issue branch. `--ready` returns an issue to the ready pool and removes the current assignee so another worker can claim it normally.
+`--review` requires a valid open PR that either closes the issue or uses the canonical issue branch. It is the worker stop line: after this command, `momo-main` owns review, merge, issue close, main gate, and roadmap/backlog adjustments. `--ready` returns an issue to the ready pool and removes the current assignee so another worker can claim it normally.
 
 ## 7. PR Review And Merge Cycle
 

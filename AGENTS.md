@@ -25,11 +25,12 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 한 번 더 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
 5. 구현 후 해당 검증 등급의 테스트를 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh --profile ...`를 우선 사용하고, Swift 변경은 `make build`/`make test`를 하드 게이트로 본다.
-6. 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫는다.
-7. PR 이후 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 발견 사항을 반영한다.
-8. 리뷰 반영 후 최종 테스트를 다시 실행한다. 문제가 없고 현재 gate가 통과하면 merge한다.
-9. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh`가 출력한 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
-10. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
+6. worker는 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫고, PR 본문에 local gate evidence를 붙인다.
+7. worker는 `scripts/goal_release.sh <issue> --review --pr <PR URL>`로 이슈를 `status:needs-review`로 전환하고 `momo-main`에 handoff한 뒤 멈춘다.
+8. **merge/close/main gate/로드맵 조정은 `momo-main`만 수행한다.** worker는 PR 생성 후 임의 merge, 이슈 close, main 재검증, 로드맵/백로그 재배열을 하지 않는다.
+9. `momo-main`은 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 필요한 수정만 worker 또는 같은 이슈 worktree에 위임한다.
+10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh`가 출력한 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
+11. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ## 2. 리포 맵 (디렉터리 → 책임)
 ```
@@ -122,6 +123,10 @@ Closes #<issue>
 
 ## 남은 것 / 후속 이슈 제안
 - (스코프 밖이라 새 이슈로 뺀 것)
+
+## Worker handoff
+- [ ] worker는 PR 생성 후 `status:needs-review`로 넘기고 merge하지 않음
+- [ ] merge/close/main gate/로드맵 조정은 `momo-main`만 수행
 ```
 - **절대 하지 말 것:** 시크릿 커밋(`.env`, `.env.worktree`), `schema_v0.sql` 수정/이동, `.build/`·`*.resolved`·`DerivedData/`·`.swiftpm/` 커밋, 무관한 리팩터, 의존성 메이저 임의 변경, 다른 패키지 깨기, **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7).
 - **Swift:** 타입 `PascalCase`, 함수/프로퍼티/let `camelCase`, enum case `camelCase`. 모델은 `MomoCore`에만 두고 import. SwiftPM 의존은 최신 안정 태그, `*.resolved` 비커밋. 서버 쓰기경로 단일 tx, async/await(블로킹 금지).

@@ -14,9 +14,10 @@ Prints a status board for Codex goal orchestration:
   - ready / in-progress / needs-review / blocked issues
   - issue number, title, assignee, labels
   - matching branch, PR, and local worktree path
-  - the local gate profile/evidence expected before merge
+  - the local gate profile/evidence expected before worker handoff and momo-main merge
 
-The board is read-only. It does not claim, release, merge, or delete anything.
+The board is read-only. It does not claim, release, merge, close, or delete anything.
+Workers stop after PR + status:needs-review. momo-main owns merge, close, post-merge main gate, and roadmap/backlog updates.
 EOF
 }
 
@@ -244,7 +245,7 @@ evidence_for_status() {
       ;;
     needs-review)
       if [ -n "$pr" ] && [ "$pr" != "-" ]; then
-        echo "PR-Local-Gate"
+        echo "momo-main-review"
       else
         echo "PR-missing"
       fi
@@ -311,6 +312,7 @@ fi
 
 echo
 echo "Legend:"
-echo "- gate: local gate profile expected before PR/merge; docs+swift-before-merge means docs profile is enough for early draft evidence, but swift profile is rerun before merge."
-echo "- evidence: claim-first=not started, run:<profile>=worker should run that local gate, PR-Local-Gate=PR body must contain ## Local Gate, blocker-comment=issue comment must explain the blocker."
+echo "- gate: local gate profile expected before PR handoff or momo-main merge; docs+swift-before-merge means docs profile is enough for worker PR evidence, but swift profile is rerun by momo-main before merge."
+echo "- evidence: claim-first=not started, run:<profile>=worker should run that local gate then open PR, momo-main-review=needs-review PR is in momo-main's review/merge queue, PR-missing=handoff label without an open PR, blocker-comment=issue comment must explain the blocker."
 echo "- branch/PR/worktree are matched by the canonical '<type>/<issue>-<slug>' convention. If a field is '-', check for non-canonical names before starting duplicate work."
+echo "- worker stop line: after PR + scripts/goal_release.sh --review, workers do not merge, close issues, run the post-merge main gate, or adjust roadmap/backlog state."
