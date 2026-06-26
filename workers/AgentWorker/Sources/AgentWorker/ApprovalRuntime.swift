@@ -9,6 +9,7 @@ struct ApprovalRuntime: Sendable {
         var callID: String
         var name: String
         var arguments: String
+        var toolGrant: ToolGrantMetadata? = nil
     }
 
     struct PausePlan: Equatable, Sendable {
