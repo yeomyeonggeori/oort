@@ -13,6 +13,7 @@ import PostgresNIO
 struct AuthRoutes: Sendable {
     let db: Database
     let jwt: JWTService
+    let platformAdminEmails: [String]
 
     /// The demo workspace seeded by `server/Migrations/002_seed.sql`. Used when a
     /// login request omits an explicit workspace (single-tenant v0).
@@ -57,7 +58,10 @@ struct AuthRoutes: Sendable {
         }
 
         // Coarse v0 scopes; a real impl derives these from membership/role (L4 §7.2).
-        let scopes = ["messages:write", "messages:read"]
+        var scopes = ["messages:write", "messages:read"]
+        if platformAdminEmails.contains(dto.email.lowercased()) {
+            scopes.append("platform:read")
+        }
         let access = try await jwt.signAccess(
             memberID: memberID, workspaceID: workspaceID, scopes: scopes)
         let refresh = try await jwt.signRefresh(

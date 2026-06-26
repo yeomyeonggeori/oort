@@ -224,7 +224,7 @@
 | `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
 | `MOMO-011` | 초대코드 발급/조회/폐기 REST + redeem 최소 slice | swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
-| `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
+| `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | local gate 대상 |
 
 ### MOMO-010 수용기준 `[sql/runtime]`
@@ -254,6 +254,17 @@
 - [x] `scripts/local_gate.sh --profile macos-ui` PASS.
 - [x] `scripts/local_gate.sh --profile swift` PASS.
 - out of scope였던 production server `/v1/join` 구현과 DB-backed invite redemption e2e는 MOMO-014에서 서버 runtime slice로 진행한다.
+
+### MOMO-013 수용기준 `[sql/swift/runtime]`
+- [x] v0 platform admin token/scope gate: `PLATFORM_ADMIN_EMAILS` 로그인에만 `platform:read` scope를 부여한다.
+- [x] `GET /v1/platform/workspaces`, `/v1/platform/members`, `/v1/platform/invites` read-only endpoint 추가.
+- [x] 일반 tenant token은 platform endpoint 접근 403.
+- [x] platform read path는 `PLATFORM_ADMIN_DATABASE_URL` 별도 BYPASSRLS + SELECT-only role과 read-only transaction으로 전 tenant 조회.
+- [x] tenant write/read path는 기존 `DATABASE_URL` + `withTenantTransaction`/`SET LOCAL app.workspace_id` 경로를 유지하고 BYPASSRLS를 쓰지 않는다.
+- [x] `scripts/verify_platform_admin.sh` 추가: 두 개 이상 workspace fixture에서 workspace/member/invite usage 전역 조회, agent metadata, invite raw/hash secret 미노출 검증.
+- [x] `scripts/local_gate.sh --profile runtime-db`에 platform verifier 연결.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS.
 
 ### MOMO-014 수용기준 `[swift/runtime]`
 - [x] Public `POST /v1/join` route를 authenticated workspace-member middleware 밖에 추가.

@@ -69,11 +69,26 @@ mkdir -p "$TMP_DIR"
 
 cleanup() {
   if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
-    kill "$SERVER_PID" >/dev/null 2>&1 || true
+    terminate_tree "$SERVER_PID"
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
+  for _ in $(seq 1 10); do
+    if ! curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
 }
 trap cleanup EXIT INT TERM
+
+terminate_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    terminate_tree "$child"
+  done
+  kill "$pid" >/dev/null 2>&1 || true
+}
 
 api() {
   local method="$1"
