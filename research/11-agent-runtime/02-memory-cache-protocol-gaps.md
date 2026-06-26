@@ -85,7 +85,10 @@ A2A is a better semantic reference for agent-to-agent tasks. It defines Agent Ca
 | Message | `message` with type-specific props |
 | Artifact | `artifact_ref` memory + `message.type='artifact'` |
 | Task status update | `agent.status` / `agent.partial` realtime event |
-| Input required | `approval.status='pending'`, `agent_run.status='awaiting_approval'` |
+| Input required | `agent_run.status='input_required'` + agent question message |
+| Approval required | `approval.status='pending'`, `agent_run.status='awaiting_approval'`, `message.type='approval_request'` |
+
+`input_required` and `awaiting_approval` are deliberately separate. The first asks for more information; the second pauses on a policy-controlled side effect. The lifecycle contract is now `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`.
 
 ### OpenAI-Compatible SSE
 
