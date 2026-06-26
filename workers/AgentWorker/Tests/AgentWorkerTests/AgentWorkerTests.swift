@@ -95,4 +95,38 @@ final class AgentWorkerTests: XCTestCase {
             .halt(reason: "G3 step cap (max_steps=12)")
         )
     }
+
+    func testApprovalPausePlanUsesDurableCheckpointRecords() {
+        let toolCall = ApprovalRuntime.ToolCall(
+            callID: "call_001",
+            name: "github.create_issue",
+            arguments: #"{"repo":"Dawn-kim-official/momo","title":"demo"}"#
+        )
+
+        let plan = ApprovalRuntime.pausePlan(for: toolCall)
+
+        XCTAssertEqual(plan.runStatus, .awaitingApproval)
+        XCTAssertEqual(plan.approvalStatus, "pending")
+        XCTAssertEqual(plan.messageType, "approval_request")
+        XCTAssertEqual(plan.auditAction, "approval.requested")
+        XCTAssertEqual(plan.actionType, "tool_call")
+        XCTAssertEqual(plan.toolCall, toolCall)
+    }
+
+    func testApprovalDecisionOutcomesResumeOrTerminateSameRun() {
+        XCTAssertEqual(
+            ApprovalRuntime.outcome(for: .approved),
+            .resumeSameRun(nextStatus: .queued)
+        )
+
+        XCTAssertEqual(
+            ApprovalRuntime.outcome(for: .rejected),
+            .terminateRun(finalStatus: .cancelled, auditAction: "approval.rejected")
+        )
+
+        XCTAssertEqual(
+            ApprovalRuntime.outcome(for: .expired),
+            .terminateRun(finalStatus: .timedOut, auditAction: "approval.expired")
+        )
+    }
 }

@@ -56,7 +56,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 | Ticket | Goal | Acceptance |
 |---|---|---|
 | `MOMO-160` | A2A-style `agent_run` lifecycle alignment | mapping for queued/running/input-required/awaiting-approval/succeeded/failed/cancelled |
-| `MOMO-161` | Approval pause/resume runtime | tool_call pauses run, approval resumes/rejects, audit written |
+| `MOMO-161` | Approval pause/resume runtime | canonical spec + worker pause slice; server decision/resume runtime follows |
 | `MOMO-162` | Hermes adapter contract verification | platform adapter path and AgentWorker SSE path both tested or one declared canonical |
 | `MOMO-163` | Inbound MCP server v0 | governed search/fetch/post/tool surfaces with consent/approval policy |
 
@@ -75,7 +75,7 @@ An integration is not accepted until all four planes are specified. "The agent c
 - `Context Packet` is the only way broad context enters an agent runtime.
 - `Memory Plane` stores typed, sourced memory only.
 - `Capability Cache` is required before broad plugin/MCP tool discovery. Its normative spec is `research/11-agent-runtime/06-capability-cache-v0.md`.
-- Approval changes run state; it does not merely display a button.
+- Approval changes run state; it does not merely display a button. Normative spec: `research/11-agent-runtime/08-approval-pause-resume-runtime.md`.
 
 ## 5. Next Goal Recommendation
 
