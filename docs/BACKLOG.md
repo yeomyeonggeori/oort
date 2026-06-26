@@ -305,13 +305,16 @@ M0(baseline)
 
 #### MOMO-153 · Capability Cache v0 spec and invalidation model
 - **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
-- **deps:** MOMO-151
+- **deps:** MOMO-151, MOMO-152
 - **수용기준:**
-  - [ ] [spec] agent capability, plugin tool, MCP tool list, context summary, external source cache 모델 정의
-  - [ ] [spec] workspace/visibility/source/expires_at/policy_version/capability_version 필수화
-  - [ ] [spec] plugin version, provider change token, grant revoke, manual refresh invalidation 경로 정의
+  - [ ] [spec] `research/11-agent-runtime/06-capability-cache-v0.md`에 Capability Cache v0 정본 추가
+  - [ ] [spec] `agent_capability/plugin_tool_schema/mcp_tool_list/model_pricing` cache kind 확정
+  - [ ] [spec] workspace/visibility/source/expires_at/policy_version/capability_version/schema_hash 필수화
+  - [ ] [spec] plugin version, MCP list-changed, provider grant revoke, workspace policy change, manual refresh invalidation 경로 정의
+  - [ ] [spec] Context Packet v0 `tool_grants.input_schema_ref` projection과 Memory Plane provider grant revalidation 관계 연결
+  - [ ] [spec] `research/11-agent-runtime/fixtures/capability-cache-v0/`에 capability list, plugin schema, invalidation/audit fixture 추가
 - **라벨:** `type:spec`, `area:core`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
-- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/06-capability-cache-v0.md`
 
 ---
 

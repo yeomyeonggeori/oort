@@ -1,0 +1,154 @@
+{
+  "schema": "momo.capability_cache.invalidation_fixture.v0",
+  "fixture": "invalidation_audit_examples",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "generated_at": "2026-06-26T09:00:00Z",
+  "invalidation_events": [
+    {
+      "event_id": "audit_capability_invalidation_001",
+      "event_kind": "capability.invalidated",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000002",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:plugin_tool_schema:github:create_issue:v3",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "reason": "plugin_version_changed",
+      "observed_at": "2026-06-26T09:12:00Z",
+      "source": {
+        "kind": "plugin_manifest",
+        "provider": "github",
+        "old_capability_version": "github-plugin@0.3.0",
+        "new_capability_version": "github-plugin@0.4.0",
+        "old_schema_hash": "sha256:githubcreateissuev3",
+        "new_schema_hash": "sha256:githubcreateissuev4"
+      },
+      "effects": ["hide_from_projection", "refresh_required"],
+      "audit": {
+        "triggered_by": "momo-server",
+        "policy_version": "capability-policy@2026-06-26"
+      }
+    },
+    {
+      "event_id": "audit_capability_invalidation_002",
+      "event_kind": "capability.grant_revoked",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000003",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:mcp_tool_list:obsidian:search_notes:v1",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "reason": "provider_grant_revoked",
+      "observed_at": "2026-06-26T09:13:00Z",
+      "source": {
+        "kind": "provider_connector",
+        "provider": "obsidian",
+        "old_provider_grant_version": "obsidian-grant@2026-06-26",
+        "new_provider_grant_version": "obsidian-grant@revoked:2026-06-26T09:13:00Z"
+      },
+      "effects": ["hide_from_projection", "memory_revalidation_required"],
+      "affected_memory_refs": [
+        {
+          "memory_id": "20000000-0000-7000-8000-000000000003",
+          "memory_type": "external_source_ref",
+          "source_ids": ["src_artifact_launch_prd_v3"],
+          "required_memory_action": "withhold_until_source_grant_restored"
+        }
+      ],
+      "audit": {
+        "triggered_by": "provider_webhook",
+        "policy_version": "capability-policy@2026-06-26",
+        "memory_retrieval_policy_version": "memory-policy@2026-06-26"
+      }
+    },
+    {
+      "event_id": "audit_capability_invalidation_003",
+      "event_kind": "capability.invalidated",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000003",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:mcp_tool_list:obsidian:search_notes:v1",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "reason": "mcp_tool_list_changed",
+      "observed_at": "2026-06-26T09:14:00Z",
+      "source": {
+        "kind": "mcp_server",
+        "provider": "obsidian",
+        "notification": "tools/list_changed",
+        "old_capability_version": "obsidian-mcp@1.2.0",
+        "new_capability_version": "obsidian-mcp@1.2.1"
+      },
+      "effects": ["hide_from_projection", "refresh_required"],
+      "audit": {
+        "triggered_by": "mcp_notification",
+        "policy_version": "capability-policy@2026-06-26"
+      }
+    },
+    {
+      "event_id": "audit_capability_invalidation_004",
+      "event_kind": "capability.security_hold",
+      "cache_entry_id": "60000000-0000-7000-8000-000000000004",
+      "cache_key": "cap:11111111-1111-7111-8111-111111111111:model_pricing:kim-intern:default:2026-06-26",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "reason": "workspace_policy_changed",
+      "observed_at": "2026-06-26T09:15:00Z",
+      "source": {
+        "kind": "workspace_policy",
+        "provider": "momo",
+        "old_policy_version": "capability-policy@2026-06-26",
+        "new_policy_version": "capability-policy@2026-06-26.1",
+        "changed_rule": "budget approval threshold lowered"
+      },
+      "effects": ["hide_from_projection", "refresh_required", "deny_until_admin_review", "pricing_recalculation_required"],
+      "audit": {
+        "triggered_by": "workspace_admin",
+        "policy_version": "capability-policy@2026-06-26.1"
+      }
+    }
+  ],
+  "post_invalidation_projection": {
+    "schema": "momo.context_packet.tool_grants_projection.v0",
+    "packet_id": "77777777-7777-7777-8777-777777777704",
+    "tool_grants": [],
+    "redactions": [
+      {
+        "redaction_id": "withheld_tool_001",
+        "kind": "withheld_tool",
+        "applied_to": ["tool_grants"],
+        "reason": "plugin_version_changed",
+        "tool_hint": "github.create_issue",
+        "cache_entry_id": "60000000-0000-7000-8000-000000000002",
+        "audit_event_id": "audit_capability_invalidation_001"
+      },
+      {
+        "redaction_id": "withheld_tool_002",
+        "kind": "withheld_tool",
+        "applied_to": ["tool_grants"],
+        "reason": "provider_grant_revoked",
+        "tool_hint": "obsidian.search_notes",
+        "cache_entry_id": "60000000-0000-7000-8000-000000000003",
+        "audit_event_id": "audit_capability_invalidation_002"
+      }
+    ]
+  },
+  "refresh_result": {
+    "schema": "momo.capability_cache.refresh_result.v0",
+    "refresh_id": "62000000-0000-7000-8000-000000000001",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "requested_by": "momo-server",
+    "started_at": "2026-06-26T09:16:00Z",
+    "finished_at": "2026-06-26T09:16:03Z",
+    "refreshed_entries": [
+      {
+        "old_cache_entry_id": "60000000-0000-7000-8000-000000000002",
+        "new_cache_entry_id": "60000000-0000-7000-8000-000000000012",
+        "tool_name": "github.create_issue",
+        "old_capability_version": "github-plugin@0.3.0",
+        "new_capability_version": "github-plugin@0.4.0",
+        "old_schema_hash": "sha256:githubcreateissuev3",
+        "new_schema_hash": "sha256:githubcreateissuev4",
+        "status": "refreshed_valid"
+      }
+    ],
+    "withheld_entries": [
+      {
+        "cache_entry_id": "60000000-0000-7000-8000-000000000003",
+        "tool_name": "obsidian.search_notes",
+        "status": "withheld",
+        "reason": "provider_grant_revoked"
+      }
+    ]
+  }
+}

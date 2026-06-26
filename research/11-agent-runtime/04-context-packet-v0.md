@@ -194,6 +194,8 @@ Forbidden:
 
 `tool_grants` are per-run capabilities. They do not grant permanent plugin access.
 
+Capability discovery, schema refs, TTL, invalidation, and policy/capability versioning are defined by `research/11-agent-runtime/06-capability-cache-v0.md`. Context Packet only carries bounded projections from that cache after workspace, channel, provider grant, plugin policy, risk, and approval checks pass.
+
 ```json
 {
   "tool_name": "github.create_issue",
@@ -203,11 +205,15 @@ Forbidden:
   "approval_policy": "always",
   "allowed_operations": ["create_issue"],
   "denied_operations": ["delete_repo"],
-  "input_schema_ref": "momo://capability-cache/github.create_issue/v3",
+  "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+  "resource_scope_ref": "momo://capability-cache/github.create_issue/resource-scopes/sha256:githubrepoallowmomo",
+  "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo",
   "capability_version": "github-plugin@0.3.0",
-  "policy_version": "workspace-policy@2026-06-25"
+  "policy_version": "capability-policy@2026-06-26"
 }
 ```
+
+`resource_scope_ref` is required when the tool input schema is broader than the resource scope admitted by workspace/provider policy. The agent may cite the summary in a proposal, but execution must recheck the referenced scope before approval or tool execution.
 
 `grant` values:
 
@@ -223,6 +229,8 @@ Forbidden:
 - `deploy`
 - `identity`
 - `admin`
+
+If a cached capability is expired, invalidated, or policy-incompatible, the packet must omit the tool grant and may include a `withheld_tool` redaction without exposing hidden schemas, provider grants, or credentials.
 
 ## 10. Budget
 
@@ -335,7 +343,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/context-packet-v0/`.
 ## 16. Follow-Up Implementation Notes
 
 - `MOMO-152` turns `memory_refs` into the Memory Plane spec at `research/11-agent-runtime/05-memory-plane-v0.md`.
-- `MOMO-153` should turn `tool_grants.input_schema_ref` and capability versions into the Capability Cache spec.
+- `MOMO-153` turns `tool_grants.input_schema_ref`, policy/capability versions, TTL, and invalidation into the Capability Cache spec at `research/11-agent-runtime/06-capability-cache-v0.md`.
 - `MOMO-160` should map `context_packet_id` into `agent_run` lifecycle and A2A task semantics.
 - `MOMO-161` should implement pause/resume for `approval_policy != "none"`.
 - `MOMO-172` should require local LLM summaries to retain `source_ids`.

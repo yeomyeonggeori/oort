@@ -187,7 +187,7 @@
 | `MOMO-123` | Domain-wide delegation/admin install design | spec/manual | MOMO-122 |
 | `MOMO-151` | Context Packet v0 deep spec and fixtures | spec | MOMO-150 |
 | `MOMO-152` | Memory Plane v0 deep spec and permission model | spec | MOMO-151 |
-| `MOMO-153` | Capability Cache v0 spec and invalidation model | spec | MOMO-151 |
+| `MOMO-153` | Capability Cache v0 spec and invalidation model | spec | MOMO-151, MOMO-152 |
 
 ### MOMO-151 수용기준 `[spec]`
 - [ ] `research/11-agent-runtime/04-context-packet-v0.md`에 Context Packet v0 top-level shape, 필수 필드, 금지 필드, runtime envelope를 정의.
@@ -200,6 +200,14 @@
 - [ ] `decision/preference/artifact_ref/task_state/external_source_ref/agent_skill_note` 6개 memory type을 고정하고, raw chat exhaust/credential/unbounded summary류는 v0 금지 타입으로 명시.
 - [ ] `research/11-agent-runtime/fixtures/memory-plane-v0/`에 typed memory item, retrieval 허용 projection, retrieval 거부 permission examples를 추가.
 - [ ] Context Packet v0의 `memory_refs`가 Memory Plane item에서 projection되는 방식과 retrieval-time permission check를 연결.
+- [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`와 기존 build/test gate를 통과.
+
+### MOMO-153 수용기준 `[spec]`
+- [ ] `research/11-agent-runtime/06-capability-cache-v0.md`에 Capability Cache v0의 cache entry shape, cache kind, source, tool schema, visibility, TTL, invalidation, audit 모델을 정의.
+- [ ] `agent_capability`, `plugin_tool_schema`, `mcp_tool_list`, `model_pricing` 4개 cache kind를 고정하고, context summary/source body 저장은 v0 Capability Cache 밖으로 분리한다.
+- [ ] `research/11-agent-runtime/fixtures/capability-cache-v0/`에 capability list snapshot, plugin tool schema projection, invalidation/audit examples를 추가한다.
+- [ ] Context Packet v0의 `tool_grants.input_schema_ref`가 Capability Cache entry에서 projection되는 방식과 approval/risk policy check를 연결한다.
+- [ ] Memory Plane v0의 `retrieval_policy_version`과 provider grant revoke/source revalidation 관계를 연결한다.
 - [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`와 기존 build/test gate를 통과.
 
 핵심 원칙:

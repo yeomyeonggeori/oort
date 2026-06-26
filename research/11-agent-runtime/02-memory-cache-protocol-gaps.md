@@ -48,15 +48,18 @@ Every memory entry needs a deletion path:
 
 Agents and plugins expose capability lists that can be expensive to fetch. OpenAI Agents SDK notes that MCP tool lists may be cached when definitions do not change frequently, with explicit invalidation available. Source: [OpenAI Agents SDK MCP caching](https://openai.github.io/openai-agents-python/mcp/).
 
+Normative spec: `research/11-agent-runtime/06-capability-cache-v0.md`.
+
 | Cache | Contents | Invalidation |
 |---|---|---|
-| `agent_capability_cache` | model, surfaces, supported event types, max context, tool-call support | agent config version, TTL, manual refresh |
-| `plugin_tool_cache` | tool/command names, input schemas, risk tags, approval policy | plugin version, connection config version, policy version |
-| `context_summary_cache` | bounded summaries of thread/channel windows | message seq range changes, visibility changes, TTL |
-| `external_source_cache` | Drive/Gmail/Calendar excerpts and metadata | provider change token, grant revoke, TTL |
-| `usage_price_cache` | pricing and cache-read/write token prices | model_pricing version |
+| `agent_capability` | model, surfaces, supported event types, max context, tool-call support | agent config version, TTL, manual refresh |
+| `plugin_tool_schema` | tool/command names, input schemas, risk tags, approval policy | plugin version, connection config version, policy version |
+| `mcp_tool_list` | MCP tool names, input schemas, server capability metadata | MCP list-changed notification, TTL, manual refresh |
+| `model_pricing` | pricing and cache-read/write token prices | model pricing version |
 
-Cache entries must include `workspace_id`, `visibility`, `source`, `expires_at`, `policy_version`, `capability_version`, and source seq/range or provider revision when applicable.
+Cache entries must include `workspace_id`, `visibility`, `source`, `expires_at`, `policy_version`, `capability_version`, and schema/provider revision when applicable.
+
+`context_summary_cache` and `external_source_cache` remain adjacent Context Broker/connector concerns. Capability Cache v0 may reference provider grants and source revisions, but it does not store source bodies or summaries.
 
 ## 4. Protocol Baseline
 
