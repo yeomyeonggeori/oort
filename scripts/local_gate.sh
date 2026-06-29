@@ -124,7 +124,7 @@ add_static_commands() {
   add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
   add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_relay.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_relay.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
 }
 
@@ -176,12 +176,12 @@ add_runtime_agent_commands() {
 
 add_macos_ui_commands() {
   if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
-    add_cmd "macOS dev app launch" "swift run --package-path clients/macOS MomoMacDevApp"
-    add_note_once coverage "MomoMacDevApp launched by LOCAL_GATE_LAUNCH_UI=1. Close the app window to let the gate finish."
+    add_cmd "macOS dev app launch verification" "scripts/macos_dev_run.sh --verify --logs --terminate"
+    add_note_once coverage "MomoMacDevApp launched from a staged dev-only .app bundle by LOCAL_GATE_LAUNCH_UI=1; process/window smoke, log capture, and termination are automated."
   else
     add_cmd "macOS smoke executable" "swift run --package-path clients/macOS MomoMacSmoke"
     add_note_once coverage "MomoMac SwiftPM smoke executable."
-    add_note_once not_covered "MomoMacDevApp window launch skipped by default; rerun with LOCAL_GATE_LAUNCH_UI=1 for manual GUI launch evidence."
+    add_note_once not_covered "MomoMacDevApp window launch skipped by default; rerun with LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui for GUI launch/process/window/log evidence."
   fi
 }
 

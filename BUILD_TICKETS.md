@@ -376,6 +376,17 @@
 - [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #105를 `status:needs-review`로 전환하고 merge하지 않는다.
 
+### MOMO-134 수용기준 `[swift/macos-ui]`
+- [x] GitHub #112를 `scripts/goal_claim.sh 112`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] build-macos-apps SwiftPM GUI workflow를 참고하되 Xcode `.app` 패키징/공증/DMG/Sparkle은 out of scope로 유지한다.
+- [x] `scripts/macos_dev_run.sh`가 `clients/macOS` SwiftPM `MomoMacDevApp`을 빌드하고 `dist/MomoMacDevApp.app` dev bundle로 staging한다.
+- [x] launch, process smoke, System Events window smoke, unified log capture, telemetry capture, debug, terminate 옵션을 제공한다.
+- [x] `.codex/environments/environment.toml` Run action이 `./scripts/macos_dev_run.sh`를 호출한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` 기본값은 `MomoMacSmoke`만 실행하고 GUI launch는 opt-in으로 유지한다.
+- [ ] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #112를 `status:needs-review`로 전환하고 merge하지 않는다.
+
 ### MOMO-163 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.
 - [ ] 최소 MCP tool surface를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 고정한다.

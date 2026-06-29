@@ -50,7 +50,7 @@ Profiles:
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` |
-| `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to launch `MomoMacDevApp` |
+| `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `all` | merge-critical/runtime-wide changes | all profiles in one run, with shared bootstrap deduped except migration idempotency; fails if any runtime profile is not automated yet |
 
 Examples:
@@ -71,6 +71,12 @@ staged/unstaged diffs. For exploratory pre-commit runs only, use
 `runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/realtime
 PRs must use this profile unless the machine cannot run Docker/psql; in that
 case record the blocker and keep the affected runtime scope unverified.
+
+For macOS UI PRs, the default `macos-ui` profile stays GUI-safe for headless or
+background Codex runs: it executes `MomoMacSmoke` only. Opt-in GUI evidence uses
+`LOCAL_GATE_LAUNCH_UI=1`, which stages `dist/MomoMacDevApp.app`, launches it with
+`open -n`, verifies the process and System Events window count, captures unified
+logs under `${TMPDIR:-/tmp}/momo-macos-dev-run`, then terminates the app.
 
 ## 3. Manual Fallback
 
@@ -113,7 +119,7 @@ Use the profile that matches the changed surface.
 | `runtime-db` | migrations/server/RLS/join changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `scripts/local_gate.sh --profile runtime-agent` |
-| `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for real window launch |
+| `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
 
 ## 5. PR Body Evidence
 

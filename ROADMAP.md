@@ -80,7 +80,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-131` | M3 | Local Context Copilot | 진행 중: macOS sidebar preview shell + Foundation Models/fallback route + source-preserving deterministic preview |
 | `MOMO-132` | M3 | Agent Protocol v0 | `agent_request/context_packet/tool_call/approval/tool_result/usage/audit` DB/wire/Swift/card 정합 |
 | `MOMO-133` | M3 | Google Workspace "ask my work" UX | source citation + approval-gated external writes |
-| `MOMO-134` | M3 | build-macos-apps 기반 macOS dev run loop | SwiftPM GUI `.app` staging + Codex Run action + `--verify/--logs` |
+| `MOMO-134` | M3 | build-macos-apps 기반 macOS dev run loop | 진행 중: `scripts/macos_dev_run.sh` dev `.app` staging + Codex Run action + `--verify/--logs` + local gate opt-in |
 | `MOMO-160` | M2 | A2A-style agent_run lifecycle alignment | `research/11-agent-runtime/07-agent-run-lifecycle-v0.md` + Task/Message/Artifact/status mapping |
 | `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision/resume endpoint remains follow-up runtime |
 | `MOMO-166` | M2 | approval decision server contract v0 | `research/11-agent-runtime/10-approval-decision-server-contract-v0.md` + request/response fixtures; connects MOMO-161 runtime checkpoint to MOMO-171 macOS decision intent |
@@ -176,7 +176,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 ### 3.2 🖥 데스크탑 트랙 (macOS)
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.
 - **Local LLM UX**(M3): Foundation Models availability probe는 `MomoMac` target 안에서 완료했다(MOMO-130). MOMO-131은 macOS sidebar에서 local summarization/classification/context compaction/PII redaction preview shell을 추가하고, 미지원 OS와 CI/local gate는 deterministic fallback/stub으로 green 유지한다. 실제 Foundation Models generation/session 기반 context compaction은 MOMO-174에서 source-preserving server fallback과 함께 확장한다.
-- **macOS 개발 loop**(M3): `build-macos-apps` 플러그인은 SwiftPM build/test/triage와 GUI 실행 표준화에 사용한다. 후속 `MOMO-134`에서 `script/build_and_run.sh`가 `dist/MomoMacDevApp.app`을 staging하고 Codex Run action을 연결한다.
+- **macOS 개발 loop**(M3): `build-macos-apps` 플러그인은 SwiftPM build/test/triage와 GUI 실행 표준화에 사용한다. `MOMO-134`에서 repo convention에 맞춘 `scripts/macos_dev_run.sh`가 `dist/MomoMacDevApp.app`을 staging하고 Codex Run action 및 `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`와 연결된다.
 - **Onboarding dev UX**(M2/M3 bridge): MOMO-012는 실제 서버 join API 전에도 `MomoMacDevApp`에서 invite code 입력, join 성공/실패, workspace join 상태를 `LiveChatBackend` stub으로 확인할 수 있게 한다.
 - **Agent protocol cards**(M3): `MOMO-170`은 macOS timeline에서 `tool_call`, `approval_request`, `tool_result`, `artifact`, cost, memory citation, source badge를 Context Packet/Memory Plane/Capability Cache projection으로 렌더하는 v0 contract다. `MOMO-171`은 `approval_request` 카드의 Approve/Reject 개발 UX를 `ChatBackend` approval decision 계약에 연결한다. 정본: `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`.
 - **패키징**(M4): Xcode `.app` → bottom-up codesign(`--options runtime --timestamp`) → Developer ID Application → create-dmg → **notarytool submit --wait** → stapler staple → `spctl` 검증 → Sparkle 2(EdDSA, appcast). **App Store 트랙과 별개**(공증=직접배포, App Store≠공증).
