@@ -9,6 +9,12 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
+## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
+
+- `infra/docker-compose.e2e.yml`을 추가해 local gate 전용 api/relay/worker/mock-Hermes/PostgreSQL 18/Centrifugo v6 경계를 dev compose 및 prod compose와 분리했다. e2e는 source checkout + local Swift build를 허용하고, prod는 계속 image-based/source-checkout-free 계약을 유지한다.
+- `infra/e2e/bootstrap_roles.sql`은 api=`momo_app`(NOBYPASSRLS), relay=`momo_relay`/worker=`momo_worker`(BYPASSRLS) test role boundary를 deterministic하게 준비한다. 실제 e2e stack boot/full runtime path는 후속 verifier에서 닫고, 이번 goal은 compose config/static validation 범위다.
+- 검증: `docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config` PASS. `scripts/local_gate.sh --profile docs`에 e2e compose config validation을 연결했다.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.

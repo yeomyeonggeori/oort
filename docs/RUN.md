@@ -159,6 +159,22 @@ docker compose -f infra/docker-compose.yml logs -f
 > server health, 메시지 송신, OutboxRelay→Centrifugo publish/history를 확인했다.
 > MOMO-115부터 같은 relay path는 `scripts/local_gate.sh --profile runtime-relay`로 반복 검증한다.
 
+> **compose layer 분리:** `infra/docker-compose.yml`은 dev/local runtime iteration용 PG18+Centrifugo layer다. `infra/docker-compose.e2e.yml`은 MOMO-186 local gate 전용으로 API/relay/worker/mock-Hermes까지 같은 compose project에 넣는다. `infra/prod/docker-compose.prod.yml`은 source checkout 없는 image-based staging/prod skeleton이다.
+
+### 3.1 E2E compose static validation
+
+MOMO-186 e2e layer는 local gate가 전체 service boundary를 재현하기 위한 초안이다. dev compose를 대체하지 않고, prod compose의 image-based/source-checkout-free 원칙도 건드리지 않는다.
+
+```sh
+# worktree라면 .conductor/setup.sh가 .env.worktree를 만든다.
+docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config
+
+# 같은 검증은 docs local gate에도 포함된다.
+scripts/local_gate.sh --profile docs
+```
+
+서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
+
 ---
 
 ## 4. 마이그레이션 — `make migrate`

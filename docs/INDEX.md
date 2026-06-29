@@ -168,7 +168,7 @@
 | `relay/OutboxRelay/` | SKIP LOCKED 폴링 → Centrifugo publish (BYPASSRLS) |
 | `workers/AgentWorker/` | agent_job 클레임 → hermes OpenAI-compat SSE → message PATCH (BYPASSRLS) |
 | `adapters/hermes/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) |
-| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · `centrifugo.json` · `.env.example`; prod skeleton은 `infra/prod/*`(SOPS/age + pgBackRest 예시, 실제 secret 없음). Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
+| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(api/relay/worker/mock-Hermes/Postgres/Centrifugo local gate boundary) · `centrifugo.json` · `.env.example`; prod skeleton은 `infra/prod/*`(SOPS/age + pgBackRest 예시, 실제 secret 없음). Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
 | `fastlane/` | `Fastfile`·`Appfile`·`Matchfile` (Gemfile은 루트) |
 
 ---

@@ -28,7 +28,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
      · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준이며 `runtime-relay` profile은 MOMO-115에서 자동화됨
-     · Docker compose/deploy layer 정본은 MOMO-182 ADR로 고정: dev(`infra/docker-compose.yml`), future e2e, image-based prod, install/upgrade, backup/PITR
+     · Docker compose/deploy layer 정본은 MOMO-182 ADR로 고정: dev(`infra/docker-compose.yml`), e2e(`infra/docker-compose.e2e.yml`), image-based prod, install/upgrade, backup/PITR
      · M2 진입: MOMO-010에서 schema_v0.sql 정본을 건드리지 않고 003_onboarding.sql 초대코드 DB 확장을 시작
      · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — M7 실측/판정은 미진행
 ```
@@ -76,6 +76,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-180` | M1.5 | Agentic Work OS 시장/레포 topology 정렬 | `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md` + `docs/adr/0001-agentic-work-os-repo-topology.md`; core monorepo 유지, plugin/catalog/SDK/MCP/landing repo split 기준, dev/e2e/prod deploy layering |
 | `MOMO-181` | M1.5 | Plugin manifest v0 + catalog split criteria | `research/12-agentic-work-os/02-plugin-manifest-v0.md` + JSON fixtures; manifest/capability grants/approval/audit/source/signature policy와 `momo-plugins`/first-party plugin/SDK repo split 기준 |
 | `MOMO-182` | M1.5 | Docker compose layer ADR/dev-e2e-prod plan | `docs/adr/0002-docker-compose-layering.md`; dev/e2e/prod/install/upgrade/backup 경계, image-based prod deploy, optional external DB/TLS/agent runtime 방향 |
+| `MOMO-186` | M1.5 | Deterministic e2e compose stack for local gates | `infra/docker-compose.e2e.yml` + `infra/e2e/bootstrap_roles.sql`; api/relay/worker/mock-Hermes/Postgres/Centrifugo boundary와 `local_gate --profile docs` config validation |
 | `MOMO-183` | M1.5 | First-party plugin repo strategy | `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`; GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector 우선순위, repo split 순서, plugin surface/audit/source/approval contract |
 | `MOMO-184` | M1.5 | Agent host positioning/product messaging | `research/12-agentic-work-os/03-agent-host-positioning.md` + README reusable copy; channel timeline execution ledger 중심 제품 문장 |
 | `MOMO-120` | M2 | Context Packet v0 | `{goal,constraints,decisions,sources,permissions,budget,redactions}` 스펙/fixture |
@@ -120,6 +121,7 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 
 - `MOMO-181`: Plugin manifest/catalog split criteria.
 - `MOMO-182`: Docker compose layer ADR/dev-e2e-prod plan. 완료 후 정본은 `docs/adr/0002-docker-compose-layering.md`.
+- `MOMO-186`: Deterministic e2e compose stack. 완료 후 정본은 `infra/docker-compose.e2e.yml` + docs/static local gate config validation.
 - `MOMO-183`: First-party plugin repo strategy. 완료 후 정본은 `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`.
 - `MOMO-184`: Agent host positioning/product messaging. 완료 후 정본은 `research/12-agentic-work-os/03-agent-host-positioning.md`.
 
@@ -202,7 +204,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`, Memory Plane v0 정본은 `research/11-agent-runtime/05-memory-plane-v0.md`, Capability Cache v0 정본은 `research/11-agent-runtime/06-capability-cache-v0.md`, Agent Run Lifecycle v0 정본은 `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`, Approval Pause/Resume v0 정본은 `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, Approval Decision Server Contract v0 정본은 `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`, MOMO-167은 이 contract의 server runtime endpoint/ledger/resume job slice이며, Hermes Adapter Contract v0 정본은 `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`이다. runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
 - **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. Approval은 client-only card가 아니라 `agent_run.status='awaiting_approval'`로 멈추는 protocol checkpoint다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`, `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`.
 - **Google Workspace connector**(M2~M3): v0는 per-user OAuth + read-mostly sync(Drive changes/selected excerpts, Gmail thread/search, Calendar availability/events)로 시작하고, Context Packet `sources`, Memory Plane `external_source_ref`, Capability Cache `tool_grants`로만 투영한다. external write는 approval card 뒤에 둔다. Domain-wide delegation은 기본값이 아니라 enterprise-only 옵션이며 admin consent, service account boundary, scope inventory, delegated user, audit export, revoke/delete는 `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`가 정본이다. per-user OAuth 정본: `research/11-agent-runtime/12-google-workspace-connector-v0.md`.
-- **Local PR gate / multi-session ops**(M1): GitHub Actions는 현재 비용/결제 이슈로 disabled/manual-only이며, PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. `runtime-relay`는 MOMO-115부터 Docker compose/migrate/server send/outbox/relay/Centrifugo evidence까지 자동화된다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
+- **Local PR gate / multi-session ops**(M1): GitHub Actions는 현재 비용/결제 이슈로 disabled/manual-only이며, PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. `runtime-relay`는 MOMO-115부터 Docker compose/migrate/server send/outbox/relay/Centrifugo evidence까지 자동화된다. MOMO-186부터 docs/static local gate는 `infra/docker-compose.e2e.yml` config validation으로 e2e stack boundary drift도 잡는다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
 
 ### 3.2 🖥 데스크탑 트랙 (macOS)
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.

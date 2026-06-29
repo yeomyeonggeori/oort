@@ -235,6 +235,7 @@
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
 | `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 완료 |
+| `MOMO-186` | Deterministic e2e compose stack for local gates | infra/docs | MOMO-182, MOMO-115 | local gate 대상 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 완료 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 완료 |
 
@@ -263,6 +264,16 @@
 - [x] 실제 prod deploy, image publish pipeline, pgBackRest restore rehearsal, GitHub Actions 재활성화, staging/prod secret 입력은 out of scope로 명시.
 - [ ] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
+### MOMO-186 수용기준 `[infra/docs]`
+- [x] `infra/docker-compose.e2e.yml` 추가: Postgres, Centrifugo, migrate, e2e role bootstrap, API, OutboxRelay, AgentWorker, mock-Hermes service boundary를 한 compose project 안에 둔다.
+- [x] dev compose(`infra/docker-compose.yml`)는 PG18+Centrifugo local iteration, e2e compose는 deterministic local gate, prod compose(`infra/prod/docker-compose.prod.yml`)는 source checkout 없는 image-based deploy로 책임을 분리했다.
+- [x] `.env.worktree`/`COMPOSE_PROJECT_NAME`/host port env를 사용해 worktree별 project-name과 host ports가 분리된다.
+- [x] `docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config` PASS.
+- [x] `scripts/local_gate.sh --profile docs`에 e2e compose config validation 연결.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+- out of scope: 실제 prod deploy, image publish, GitHub Actions 재활성화, real staging VPS/TLS/PITR, full e2e stack runtime verifier.
 
 ### MOMO-183 수용기준 `[docs/spec]`
 - [x] first-party plugin 우선순위를 GitHub/GitHub Issues, Google Workspace, Jira-like work item, Docs connector로 정의.
