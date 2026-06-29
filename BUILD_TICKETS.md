@@ -434,6 +434,7 @@
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 | `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
 | `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
+| `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -492,6 +493,18 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #124를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-192 수용기준 `[swift/docs]`
+- [x] GitHub #141을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `POST /v1/auth/realtime-token`을 protected auth group에 추가한다.
+- [x] App access token 검증 후 active member/workspace를 tenant RLS read path로 재확인한다.
+- [x] `sub=member_id`, `ws=workspace_id`, JSON `info`, 짧은 TTL을 담은 Centrifugo connection JWT를 발급한다.
+- [x] 일반 `ch:`/`dm:` 구독 권한은 `/v1/centrifugo/subscribe` membership guard에 남기고, client direct publish 금지를 유지한다.
+- [x] TTL clamp, token claims, expired app token, response shape focused server tests를 추가한다.
+- [x] `docs/RUN.md`, `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] Docker 기반 login → realtime-token smoke evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #141을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

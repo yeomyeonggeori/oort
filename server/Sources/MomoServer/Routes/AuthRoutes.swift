@@ -5,6 +5,7 @@ import PostgresNIO
 /// Auth endpoints (L4 §5.1 / §7.1).
 ///
 ///   POST /v1/auth/login   → access(15m) + refresh(30d) HS256 JWT + member.
+///   POST /v1/auth/realtime-token → short-lived Centrifugo connection JWT.
 ///
 /// v0 is a STUB: it resolves the member by email (looking up `human`/`member`)
 /// and issues tokens WITHOUT verifying the password. The password-hash check is
@@ -23,6 +24,11 @@ struct AuthRoutes: Sendable {
     func add(to router: Router<AppRequestContext>) {
         // Public route — NOT behind AuthMiddleware.
         router.post("/v1/auth/login", use: login)
+    }
+
+    func addProtected(to router: RouterGroup<AppRequestContext>) {
+        // Protected route — requires a valid app access token via AuthMiddleware.
+        router.post("/v1/auth/realtime-token", use: realtimeToken)
     }
 
     @Sendable
@@ -77,6 +83,37 @@ struct AuthRoutes: Sendable {
         return try body.response(from: request, context: context)
     }
 
+    @Sendable
+    func realtimeToken(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        guard principal.scopes.contains("messages:read") else {
+            throw HTTPError(.forbidden, message: "messages:read scope required")
+        }
+
+        let active = try await Self.isActiveMember(
+            db: db,
+            workspaceID: principal.workspaceID,
+            memberID: principal.memberID
+        )
+        guard active else {
+            throw HTTPError(.forbidden, message: "member is not active in this workspace")
+        }
+
+        let issued = try await jwt.signCentrifugoConnection(
+            memberID: principal.memberID,
+            workspaceID: principal.workspaceID
+        )
+        let body = RealtimeTokenResponse(
+            token: issued.token,
+            tokenType: "centrifugo.connection.jwt",
+            expiresAtMs: Int64(issued.expiresAt.timeIntervalSince1970 * 1000),
+            ttlSeconds: issued.ttlSeconds,
+            workspaceId: principal.workspaceID.uuidString,
+            memberId: principal.memberID.uuidString
+        )
+        return try body.response(from: request, context: context)
+    }
+
     static func shouldGrantPlatformRead(
         email: String,
         password: String,
@@ -88,5 +125,22 @@ struct AuthRoutes: Sendable {
         }
         return platformAdminEmails.contains(email.lowercased())
             && password == platformAdminLoginSecret
+    }
+
+    static func isActiveMember(db: Database, workspaceID: UUID, memberID: UUID) async throws -> Bool {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT 1
+                  FROM member
+                 WHERE id = \(memberID)
+                   AND workspace_id = \(workspaceID)
+                   AND status = 'active'
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            return !rows.isEmpty
+        }
     }
 }
