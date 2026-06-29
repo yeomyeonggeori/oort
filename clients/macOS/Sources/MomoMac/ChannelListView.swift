@@ -28,6 +28,7 @@ public struct ChannelListView: View {
 
             Section("Local AI") {
                 FoundationModelsCapabilityView(state: viewModel.foundationModelsCapability)
+                LocalContextCopilotView(viewModel: viewModel)
             }
 
             Section("Channels") {
