@@ -37,6 +37,35 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try JoinRoutes.normalizedTimeZone(String(repeating: "a", count: 65)))
     }
 
+    func testPlatformReadScopeRequiresAllowlistAndSecret() {
+        let admins = ["ops@momo.local"]
+
+        XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
+            email: "ops@momo.local",
+            password: "anything",
+            platformAdminEmails: admins,
+            platformAdminLoginSecret: nil
+        ))
+        XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
+            email: "ops@momo.local",
+            password: "wrong",
+            platformAdminEmails: admins,
+            platformAdminLoginSecret: "secret"
+        ))
+        XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
+            email: "other@momo.local",
+            password: "secret",
+            platformAdminEmails: admins,
+            platformAdminLoginSecret: "secret"
+        ))
+        XCTAssertTrue(AuthRoutes.shouldGrantPlatformRead(
+            email: "OPS@MOMO.LOCAL",
+            password: "secret",
+            platformAdminEmails: admins,
+            platformAdminLoginSecret: "secret"
+        ))
+    }
+
     func testInboundMCPToolSurfaceMatchesMOMO163() {
         let names = InboundMCPToolRegistry.tools.map(\.name)
         XCTAssertEqual(

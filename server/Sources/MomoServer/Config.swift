@@ -28,6 +28,11 @@ struct Config: Sendable {
     var centAPIKey: String   // X-API-Key for POST /api/publish
     var centTokenHMAC: String // connection/subscription JWT signing (HMAC)
 
+    // ---- Platform admin read-only inspection (MOMO-013) ----
+    var platformAdminDatabaseURL: String?
+    var platformAdminEmails: [String]
+    var platformAdminLoginSecret: String?
+
     /// Read an env var, falling back to `default`.
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -56,7 +61,14 @@ struct Config: Sendable {
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: env("CENT_API_URL", "http://localhost:8000/api"),
             centAPIKey: env("CENT_API_KEY", "dev-insecure-cent-api-key"),
-            centTokenHMAC: env("CENT_TOKEN_HMAC", "dev-insecure-cent-token-hmac")
+            centTokenHMAC: env("CENT_TOKEN_HMAC", "dev-insecure-cent-token-hmac"),
+            platformAdminDatabaseURL: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_DATABASE_URL"],
+            platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty },
+            platformAdminLoginSecret: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_LOGIN_SECRET"]
+                .flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 

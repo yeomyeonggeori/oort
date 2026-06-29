@@ -1,4 +1,5 @@
 import Foundation
+import Hummingbird
 import Logging
 import PostgresNIO
 
@@ -13,21 +14,68 @@ import PostgresNIO
 /// and must be supervised by the application's ServiceGroup (see `App.swift`).
 struct Database: Sendable {
     let client: PostgresClient
+    let platformReadClient: PostgresClient?
     let logger: Logger
 
     init(config: Config, logger: Logger) {
-        // TLS disabled for v0 single-host docker-compose (PG on a private network).
-        // TODO: enable TLS (`.require(...)`) for any non-loopback / multi-host deploy.
-        let pgConfig = PostgresClient.Configuration(
+        self.client = Self.makeClient(
             host: config.pgHost,
             port: config.pgPort,
             username: config.pgUser,
             password: config.pgPassword,
             database: config.pgDatabase,
+            logger: logger
+        )
+        if let platformAdminDatabaseURL = config.platformAdminDatabaseURL,
+           let pg = Self.parseDatabaseURL(platformAdminDatabaseURL)
+        {
+            self.platformReadClient = Self.makeClient(
+                host: pg.host,
+                port: pg.port,
+                username: pg.user,
+                password: pg.password,
+                database: pg.database,
+                logger: logger
+            )
+        } else {
+            self.platformReadClient = nil
+        }
+        self.logger = logger
+    }
+
+    private static func makeClient(
+        host: String,
+        port: Int,
+        username: String,
+        password: String,
+        database: String,
+        logger: Logger
+    ) -> PostgresClient {
+        // TLS disabled for v0 single-host docker-compose (PG on a private network).
+        // TODO: enable TLS (`.require(...)`) for any non-loopback / multi-host deploy.
+        let pgConfig = PostgresClient.Configuration(
+            host: host,
+            port: port,
+            username: username,
+            password: password,
+            database: database,
             tls: .disable
         )
-        self.client = PostgresClient(configuration: pgConfig, backgroundLogger: logger)
-        self.logger = logger
+        return PostgresClient(configuration: pgConfig, backgroundLogger: logger)
+    }
+
+    private static func parseDatabaseURL(
+        _ raw: String
+    ) -> (host: String, port: Int, user: String, password: String, database: String)? {
+        guard let comps = URLComponents(string: raw), let host = comps.host else { return nil }
+        let db = comps.path.hasPrefix("/") ? String(comps.path.dropFirst()) : comps.path
+        return (
+            host: host,
+            port: comps.port ?? 5432,
+            user: comps.user ?? "momo_platform_admin",
+            password: comps.password ?? "",
+            database: db.isEmpty ? "momo" : db
+        )
     }
 
     /// Run `body` inside a transaction with the tenant's RLS scope set.
@@ -55,5 +103,20 @@ struct Database: Sendable {
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
         try await withTenantTransaction(workspaceID: workspaceID, body)
+    }
+
+    /// Run an explicit platform-admin inspection read using a separate BYPASSRLS
+    /// role. The transaction is read-only, so this helper must never back tenant
+    /// write paths.
+    func withPlatformReadConnection<Result: Sendable>(
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        guard let platformReadClient else {
+            throw HTTPError(.serviceUnavailable, message: "platform admin read database is not configured")
+        }
+        return try await platformReadClient.withTransaction(logger: logger) { conn in
+            _ = try await conn.query("SET TRANSACTION READ ONLY", logger: logger)
+            return try await body(conn)
+        }
     }
 }
