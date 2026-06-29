@@ -309,13 +309,19 @@
 - JSON fixture 3종을 `research/11-agent-runtime/fixtures/plugin-manifest-v0/`에 추가했다: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
 - Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane permission/policy_version 연결을 문서화했다. 검증: `scripts/local_gate.sh --profile docs` PASS. 실제 plugin runtime, repo split, WASM runtime, marketplace UI, external OAuth implementation은 out of scope이며 런타임/스키마 변경 없음.
 
-## 0ao. MOMO-177 macOS MomoServer REST ChatBackend v0 (2026-06-29)
+## 0ao. MOMO-182 Docker Compose Layer ADR (2026-06-29)
+
+- Docker compose/deploy layer 정본을 `docs/adr/0002-docker-compose-layering.md`에 추가했다. dev(`infra/docker-compose.yml`), future e2e(`infra/docker-compose.e2e.yml`), prod(`infra/prod/docker-compose.prod.yml`), install/upgrade, backup/PITR 책임 경계를 고정했다.
+- Prod는 source checkout 없는 image-based deploy를 원칙으로 두고, Caddy 기본 TLS, optional external DB/TLS, optional agent runtime 경계를 문서화했다. 실제 prod deploy, image publish pipeline, install/upgrade 구현, pgBackRest restore rehearsal, staging/prod secret 입력은 out of scope이며 필요한 부분은 `runtime-unverified`로 유지한다.
+- 코드/스키마/런타임 변경 없음. 검증: `scripts/local_gate.sh --profile docs` PASS.
+
+## 0ap. MOMO-177 macOS MomoServer REST ChatBackend v0 (2026-06-29)
 
 - `clients/macOS`에 `MomoServerRESTChatBackend`를 추가해 `MomoMacDevApp`이 `MOMO_SERVER_BASE_URL` 설정 시 MomoServer REST `/v1/auth/login` + message history/send 경로를 사용한다. 설정이 없으면 기존 `LiveChatBackend.seedDemo()` fallback을 유지한다.
 - REST mode는 `server/Migrations/002_seed.sql` demo workspace/channel/member fixture를 dev-safe 기본값으로 쓰고, unauthorized/offline/decoding 실패는 `ChatViewModel.connectionError` banner로 표시한다.
 - 검증: `swift test --package-path clients/macOS` pass(19 tests). WebSocket/Centrifugo live subscription, full auth/session UI, server approval endpoint 변경은 out of scope이며 `runtime-unverified`.
 
-## 0ap. MOMO-185 AgentWorker All-Profile Gate Isolation Hotfix (2026-06-29)
+## 0aq. MOMO-185 AgentWorker All-Profile Gate Isolation Hotfix (2026-06-29)
 
 - post-merge `scripts/local_gate.sh --profile all`에서 `verify_approval_decision.sh`가 남긴 `resume_approval` agent_job을 `verify_agent_worker.sh`가 먼저 claim하는 verifier 간섭을 확인했다.
 - 제품 회귀는 아니었다. MOMO-178 v0 executor는 `github.create_issue` 같은 외부 write tool을 deterministic mock allowlist 밖으로 보고 fail-closed 처리했으며, 실패 지점은 all-profile fixture isolation이었다.
@@ -369,7 +375,7 @@ momo/
 ├─ schema_v0.sql                 # 정본 스키마(24 테이블, RLS FORCE)
 ├─ BUILD_TICKETS.md              # 의존순 빌드 백로그 (Phase0 + v1 P1~P6)
 ├─ Makefile / README.md / docs/RUN.md
-├─ infra/  docker-compose.yml · centrifugo.json · .env.example
+├─ infra/  docker-compose.yml · centrifugo.json · .env.example · prod/docker-compose.prod.yml
 ├─ server/ (MomoServer, Hummingbird 2)
 │   ├─ Migrations/{001_init,002_seed}.sql
 │   └─ Sources/MomoServer/{Main,App,Config,AppRequestContext}.swift
@@ -402,8 +408,9 @@ momo/
 3. ✅ MOMO-003: RLS 테넌트 격리 + REST message membership guard 런타임 검증 완료.
 4. ✅ MOMO-004: AgentWorker↔OpenAI-compatible SSE mock 연결로 김인턴 멘션→`agent.partial` 1회 + 비용 reserve/reconcile + G5 trip 검증 완료.
 5. ✅ MOMO-005/006/007: prod compose skeleton, SOPS/age+pgBackRest skeleton, local/staging smoke gate 준비 완료.
-6. 남은 M1 host-runtime 배포 축: 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/PITR restore rehearsal, 외부 hermes staging 연결.
-7. ✅ MOMO-111/112/115: local gate script, 5세션 worktree 운영 자동화, runtime-relay local gate 자동화 완료.
+6. ✅ MOMO-182: dev/e2e/prod/install/backup compose/deploy layer ADR 완료. 실제 prod deploy/image publish/install script/upgrade script/pgBackRest restore rehearsal은 후속으로 유지.
+7. 남은 M1 host-runtime 배포 축: 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/PITR restore rehearsal, 외부 hermes staging 연결.
+8. ✅ MOMO-111/112/115: local gate script, 5세션 worktree 운영 자동화, runtime-relay local gate 자동화 완료.
 
 **v0 데모(D/B/C) UI 완성:**
 4. `clients/macOS`의 SwiftPM dev app을 기반으로 **Xcode `.app` 번들**로 확장(Developer ID signing/notarytool/DMG/Sparkle은 M4 범위). Live Tool-Call 카드 / Cost Breathing 링 / Approval Inbox 실데이터 바인딩 고도화.
