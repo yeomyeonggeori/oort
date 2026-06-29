@@ -188,9 +188,19 @@ struct WorkerService: Service {
 
     // MARK: - Process one job
 
+    private struct AgentRealtimeContext: Sendable {
+        let channel: String
+        let channelID: UUID
+        let agentMemberID: UUID
+    }
+
     private func process(_ job: ClaimedJob) async {
         let p = job.payload
-        let agentChannel = "agent:ws\(job.workspaceID.uuidString).\(p.agentMemberID.uuidString)"   // L4 §4.1
+        let agentRealtime = AgentRealtimeContext(
+            channel: "agent:ws\(job.workspaceID.uuidString).\(p.agentMemberID.uuidString)",
+            channelID: p.channelID,
+            agentMemberID: p.agentMemberID
+        )
         logger.info("processing agent_job", metadata: [
             "outboxId": .stringConvertible(job.id),
             "runId": .string(p.runID?.uuidString ?? "nil"),
@@ -199,10 +209,10 @@ struct WorkerService: Service {
             "method": .string(job.method),
         ])
 
-        await publishStatus(agentChannel, runID: p.runID, status: .queued)
+        await publishStatus(agentRealtime, runID: p.runID, status: .queued)
 
         if job.method == "resume_approval" || p.resumeFromApprovalID != nil {
-            await processResumeApproval(job, agentChannel: agentChannel)
+            await processResumeApproval(job, agentRealtime: agentRealtime)
             return
         }
 
@@ -218,7 +228,7 @@ struct WorkerService: Service {
                 "outboxId": .stringConvertible(job.id), "reason": .string(reason),
             ])
             await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .error, error: reason)
-            await publishStatus(agentChannel, runID: p.runID, status: .error, detail: reason)
+            await publishStatus(agentRealtime, runID: p.runID, status: .error, detail: reason)
             await markJobDone(job.id)
             return
         }
@@ -238,7 +248,7 @@ struct WorkerService: Service {
                 "outboxId": .stringConvertible(job.id), "grain": .string(grain),
             ])
             await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .error, error: reason)
-            await publishStatus(agentChannel, runID: p.runID, status: .error, detail: reason)
+            await publishStatus(agentRealtime, runID: p.runID, status: .error, detail: reason)
             await markJobDone(job.id)
             return
         }
@@ -246,7 +256,7 @@ struct WorkerService: Service {
         // ---- run → running; publish thinking ----
         // .thinking maps to the schema run_status 'running' in updateRunStatus.
         await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .thinking, error: nil)
-        await publishStatus(agentChannel, runID: p.runID, status: .thinking)
+        await publishStatus(agentRealtime, runID: p.runID, status: .thinking)
 
         // ---- hermes call + SSE stream → agent.partial + message PATCH ----
         var accumulatedText = ""
@@ -266,12 +276,12 @@ struct WorkerService: Service {
                 if Task.isCancelled { break }
                 switch event {
                 case .status(let s):
-                    await publishStatus(agentChannel, runID: p.runID, status: s)
+                    await publishStatus(agentRealtime, runID: p.runID, status: s)
 
                 case .textDelta(let delta):
                     accumulatedText += delta
                     // agent.partial: 1st-class streaming render (L4 §5.2).
-                    await publishPartial(agentChannel, runID: p.runID, delta: delta,
+                    await publishPartial(agentRealtime, runID: p.runID, delta: delta,
                                          fullText: accumulatedText)
                     // message PATCH: streaming mimic — upsert/patch the in-progress
                     // message body so reconnecting clients see partial state.
@@ -293,7 +303,7 @@ struct WorkerService: Service {
                         "approvalPolicy": .string(toolGrant?.approvalPolicy ?? "missing_or_ambiguous"),
                         "riskLevel": .string(toolGrant?.effectiveRiskLevel ?? "missing_or_ambiguous"),
                     ])
-                    await publishToolCall(agentChannel, runID: p.runID, callID: id,
+                    await publishToolCall(agentRealtime, runID: p.runID, callID: id,
                                           name: name, arguments: args)
                     if needsApproval {
                         let toolCall = ApprovalRuntime.ToolCall(
@@ -306,13 +316,13 @@ struct WorkerService: Service {
                                 "requestMessageId": .string(requestMessageID.uuidString),
                                 "runId": .string(p.runID?.uuidString ?? "nil"),
                             ])
-                            await publishStatus(agentChannel, runID: p.runID,
+                            await publishStatus(agentRealtime, runID: p.runID,
                                                 status: .awaitingApproval, detail: name)
                             await markJobDone(job.id)
                         case .failed(let reason):
                             await updateRunStatus(p.runID, workspaceID: job.workspaceID,
                                                   status: .error, error: reason)
-                            await publishStatus(agentChannel, runID: p.runID,
+                            await publishStatus(agentRealtime, runID: p.runID,
                                                 status: .error, detail: reason)
                             await markJobFailed(job.id, reason: reason)
                         }
@@ -346,7 +356,7 @@ struct WorkerService: Service {
         // ---- terminal: finalize message + status ----
         if let err = sawError {
             await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .error, error: err)
-            await publishStatus(agentChannel, runID: p.runID, status: .error, detail: err)
+            await publishStatus(agentRealtime, runID: p.runID, status: .error, detail: err)
             // Streaming failures are transient at the transport level → requeue.
             await requeueJob(job, reason: err)
             return
@@ -354,7 +364,7 @@ struct WorkerService: Service {
 
         await finalizeStreamingMessage(streamMessageID, job: job, body: accumulatedText)
         await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .done, error: nil)
-        await publishStatus(agentChannel, runID: p.runID, status: .done)
+        await publishStatus(agentRealtime, runID: p.runID, status: .done)
         await markJobDone(job.id)
     }
 
@@ -368,7 +378,7 @@ struct WorkerService: Service {
         let payload: JSONValue
     }
 
-    private func processResumeApproval(_ job: ClaimedJob, agentChannel: String) async {
+    private func processResumeApproval(_ job: ClaimedJob, agentRealtime: AgentRealtimeContext) async {
         let p = job.payload
         let request: ToolResumeExecutor.ValidatedRequest
         do {
@@ -388,7 +398,7 @@ struct WorkerService: Service {
                 reason: reason,
                 markRunFailed: p.runID != nil
             )
-            await publishStatus(agentChannel, runID: p.runID, status: .error, detail: reason)
+            await publishStatus(agentRealtime, runID: p.runID, status: .error, detail: reason)
             return
         }
 
@@ -405,11 +415,11 @@ struct WorkerService: Service {
                 status: .thinking,
                 error: nil
             )
-            await publishStatus(agentChannel, runID: request.runID, status: .thinking)
+            await publishStatus(agentRealtime, runID: request.runID, status: .thinking)
 
             let result = try resumeExecutor.execute(request)
             try await recordResumeSuccess(job: job, request: request, result: result)
-            await publishStatus(agentChannel, runID: request.runID, status: .done)
+            await publishStatus(agentRealtime, runID: request.runID, status: .done)
         } catch {
             let reason = "resume approval execution failed: \(error)"
             let markRunFailed: Bool
@@ -434,7 +444,7 @@ struct WorkerService: Service {
                 reason: reason,
                 markRunFailed: markRunFailed
             )
-            await publishStatus(agentChannel, runID: request.runID, status: .error, detail: reason)
+            await publishStatus(agentRealtime, runID: request.runID, status: .error, detail: reason)
         }
     }
 
@@ -1175,35 +1185,71 @@ struct WorkerService: Service {
     // MARK: - agent.status / agent.partial publishes (L4 §5.2)
 
     private func publishStatus(
-        _ channel: String, runID: UUID?, status: RunStatus, detail: String? = nil
+        _ context: AgentRealtimeContext, runID: UUID?, status: RunStatus, detail: String? = nil
     ) async {
-        var payload: [String: JSONValue] = ["status": .string(status.rawValue)]
-        if let runID { payload["runId"] = .string(runID.uuidString) }
+        guard let runID else {
+            logger.debug("skipping agent.status without run_id", metadata: [
+                "channel": .string(context.channel),
+                "status": .string(status.rawValue),
+            ])
+            return
+        }
+        var payload: [String: JSONValue] = [
+            "agent_member_id": .string(context.agentMemberID.uuidString),
+            "channel_id": .string(context.channelID.uuidString),
+            "phase": .string(Self.agentPhase(status).rawValue),
+            "run_status": .string(Self.clientRunStatus(status)),
+            "run_id": .string(runID.uuidString),
+        ]
         if let detail { payload["detail"] = .string(detail) }
-        await centrifugo.publish(channel: channel, data: envelope(type: "agent.status", payload: payload))
+        await centrifugo.publish(
+            channel: context.channel,
+            data: envelope(type: "agent.status", payload: payload)
+        )
     }
 
     private func publishPartial(
-        _ channel: String, runID: UUID?, delta: String, fullText: String
+        _ context: AgentRealtimeContext, runID: UUID?, delta: String, fullText: String
     ) async {
-        var payload: [String: JSONValue] = [
-            "delta": .string(delta),
+        guard let runID else {
+            logger.debug("skipping agent.partial without run_id", metadata: [
+                "channel": .string(context.channel),
+            ])
+            return
+        }
+        let payload: [String: JSONValue] = [
+            "channel_id": .string(context.channelID.uuidString),
+            "run_id": .string(runID.uuidString),
+            "text_delta": .string(delta),
             "text": .string(fullText),
         ]
-        if let runID { payload["runId"] = .string(runID.uuidString) }
-        await centrifugo.publish(channel: channel, data: envelope(type: "agent.partial", payload: payload))
+        await centrifugo.publish(
+            channel: context.channel,
+            data: envelope(type: "agent.partial", payload: payload)
+        )
     }
 
     private func publishToolCall(
-        _ channel: String, runID: UUID?, callID: String, name: String, arguments: String
+        _ context: AgentRealtimeContext, runID: UUID?, callID: String, name: String, arguments: String
     ) async {
-        var payload: [String: JSONValue] = [
-            "callId": .string(callID),
-            "name": .string(name),
-            "arguments": .string(arguments),
+        guard let runID else {
+            logger.debug("skipping agent.partial tool call without run_id", metadata: [
+                "channel": .string(context.channel),
+                "tool": .string(name),
+            ])
+            return
+        }
+        let payload: [String: JSONValue] = [
+            "channel_id": .string(context.channelID.uuidString),
+            "run_id": .string(runID.uuidString),
+            "tool_call_args": .string(arguments),
+            "tool_call_id": .string(callID),
+            "tool_call_name": .string(name),
         ]
-        if let runID { payload["runId"] = .string(runID.uuidString) }
-        await centrifugo.publish(channel: channel, data: envelope(type: "tool_call", payload: payload))
+        await centrifugo.publish(
+            channel: context.channel,
+            data: envelope(type: "agent.partial", payload: payload)
+        )
     }
 
     /// L4 §5.2 single envelope: {type, v, ts, payload}.
@@ -1214,6 +1260,36 @@ struct WorkerService: Service {
             "ts": .int(Int64(Date().timeIntervalSince1970 * 1000)),
             "payload": .object(payload),
         ])
+    }
+
+    private enum AgentPhase: String {
+        case queued
+        case thinking
+        case streaming
+        case done
+        case error
+    }
+
+    private static func agentPhase(_ status: RunStatus) -> AgentPhase {
+        switch status {
+        case .queued: return .queued
+        case .thinking, .awaitingApproval: return .thinking
+        case .streaming: return .streaming
+        case .done: return .done
+        case .error, .cancelled, .timedOut: return .error
+        }
+    }
+
+    private static func clientRunStatus(_ status: RunStatus) -> String {
+        switch status {
+        case .queued: return "queued"
+        case .thinking, .streaming: return "running"
+        case .awaitingApproval: return "awaiting_approval"
+        case .done: return "succeeded"
+        case .error: return "failed"
+        case .cancelled: return "cancelled"
+        case .timedOut: return "timed_out"
+        }
     }
 
     // MARK: - agent_run status transitions (stub-aware)
