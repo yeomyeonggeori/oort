@@ -23,6 +23,7 @@ if "slots" not in inspect.signature(dataclasses.dataclass).parameters:
     dataclasses.dataclass = _dataclass_without_slots
 
 import momo_adapter  # noqa: E402
+import smoke_momo_adapter  # noqa: E402
 
 
 class CaptureAdapter(momo_adapter.MomoAdapter):
@@ -106,6 +107,16 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertEqual(adapter.posts[0], expected["invoke"])
         self.assertEqual(adapter.posts[1], expected["final_message_send"])
         self.assertEqual(adapter.assert_run_id, run_id)
+
+    def test_repo_local_smoke_harness_captures_rest_mapping(self):
+        summary = asyncio.run(smoke_momo_adapter.run_smoke())
+
+        self.assertEqual(summary["result"], "PASS")
+        self.assertEqual(summary["network"], "not-used")
+        self.assertEqual(len(summary["captured_rest_calls"]), 2)
+        self.assertEqual(
+            summary["runtime_unverified"], "live Hermes gateway plugin load/e2e"
+        )
 
     def test_register_platform_accepts_gateway_like_registry(self):
         class Registry:

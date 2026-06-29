@@ -236,8 +236,20 @@
 - invite lookup은 별도 RLS 우회 helper 없이 workspace id를 열거한 뒤 각 workspace에서 `SET LOCAL app.workspace_id` tenant read로 code hash를 확인한다. 실제 write path는 계속 `withTenantTransaction` + FORCE RLS 아래에서 수행한다.
 - `scripts/verify_join.sh`와 `runtime-db` local gate coverage를 추가했다. 검증 대상: invite create → public join → login/bootstrap/channel read, invalid/expired/revoked/exhausted/duplicate/role-escalation 실패. `schema_v0.sql` 변경 없음.
 
+## 0af. MOMO-013 Platform Admin Read-Only Inspection (2026-06-27)
 
-## 0af. MOMO-122 Google Workspace Connector v0 Spec + Fixtures (2026-06-27)
+- `GET /v1/platform/workspaces`, `/v1/platform/members`, `/v1/platform/invites`를 추가했다. `platform:read` scope가 있는 v0 platform admin token만 접근 가능하고, 일반 tenant token은 403이다. v0 login stub의 위험을 줄이기 위해 `PLATFORM_ADMIN_EMAILS` allowlist와 `PLATFORM_ADMIN_LOGIN_SECRET`이 모두 맞을 때만 `platform:read`을 발급한다.
+- platform read path는 `PLATFORM_ADMIN_DATABASE_URL`의 별도 BYPASSRLS + SELECT-only role로만 실행되며 `SET TRANSACTION READ ONLY`를 적용한다. 일반 tenant write/read path는 계속 `DATABASE_URL` + `withTenantTransaction`/`SET LOCAL app.workspace_id` 경로를 사용한다.
+- `scripts/verify_platform_admin.sh`를 `runtime-db` local gate에 연결했다. 두 개 이상 workspace fixture에서 일반 token 거부, platform 전역 workspace/member/invite usage 조회, invite raw/hash secret 미노출을 검증한다. `schema_v0.sql` 변경 없음.
+
+## 0ag. MOMO-168 Hermes Adapter Repo-Local Smoke Harness (2026-06-27)
+
+- `adapters/hermes/tests/smoke_momo_adapter.py`를 추가해 Hermes SDK/네트워크 없이 `platform_adapter_event_mapping.json` Centrifugo fixture → adapter event unwrap → REST invoke/final-message capture를 검증한다.
+- `scripts/local_gate.sh --profile docs`가 adapter `py_compile`, contract unittest, repo-local smoke를 모두 실행하도록 연결했다. adapter docs/contract/ROADMAP/BUILD_TICKETS도 live Hermes boundary를 갱신했다.
+- 실제 Hermes gateway plugin load 및 live momo+Centrifugo+Postgres platform-adapter e2e는 여전히 `runtime-unverified` 후속 범위다.
+
+
+## 0ah. MOMO-122 Google Workspace Connector v0 Spec + Fixtures (2026-06-27)
 
 - Google Workspace Connector v0 정본을 `research/11-agent-runtime/12-google-workspace-connector-v0.md`에 추가했다. v0 기본 경로는 per-user OAuth + Drive/Gmail/Calendar read-mostly sync이며, token boundary, scopes, revocation/delete, Context Packet `sources`, Memory Plane `external_source_ref`, Capability Cache `tool_grants` projection을 고정한다.
 - JSON fixture 3종을 `research/11-agent-runtime/fixtures/google-workspace-connector-v0/`에 추가했다: Drive selected-file source ref/context projection, Gmail thread/search source ref, Calendar availability/events projection.
@@ -248,7 +260,7 @@
 | 패키지 | 경로 | 빌드 | 비고 |
 |---|---|---|---|
 | **MomoCore** | `clients/Core` | ✅ **pass** | 공유 모델 + `ChatBackend`/`AgentTransport` 프로토콜. 외부 의존 0(순수 Foundation). |
-| **MomoServer** | `server` | ✅ **pass** | Hummingbird 2 + PostgresNIO + JWTKit + AsyncHTTPClient + public `/v1/join`. |
+| **MomoServer** | `server` | ✅ **pass** | Hummingbird 2 + PostgresNIO + JWTKit + AsyncHTTPClient + public `/v1/join` + platform admin read-only inspection. |
 | **OutboxRelay** | `relay/OutboxRelay` | ✅ **pass** | SKIP LOCKED 폴링 → Centrifugo publish. |
 | **AgentWorker** | `workers/AgentWorker` | ✅ **pass** | OpenAI 호환 `/v1/chat/completions` SSE + 루프가드 + 비용 reserve/reconcile. |
 | **MomoMac** | `clients/macOS` | ✅ **pass** | SwiftUI 라이브러리(뷰+VM) + `MomoMacSmoke` 실행 스모크 + `MomoMacDevApp` window + invite onboarding stub UI + Foundation Models capability fallback surface. |
@@ -260,6 +272,7 @@
 | 산출물 | 점검 | 상태 |
 |---|---|---|
 | `adapters/hermes/momo_adapter.py` | `python3 -m py_compile` | ✅ OK |
+| `adapters/hermes/tests/smoke_momo_adapter.py` | fixture 기반 REST invoke/final-message capture smoke(no network) | ✅ OK |
 | `infra/centrifugo.json` | JSON 파싱 + `history_meta_ttl > history_ttl`(4 ns) | ✅ OK |
 | `infra/docker-compose.yml` | YAML 파싱(postgres:18 + centrifugo:v6 + healthcheck/volume) | ✅ OK |
 | `server/Migrations/001_init.sql` | 괄호 290/290 균형, schema_v0.sql 정본 복사 | ✅ OK |
@@ -267,6 +280,7 @@
 | `scripts/migrate.sh` | `sh -n` | ✅ OK |
 | `scripts/verify_rls.sh` | `sh -n` + Docker PG18 RLS runtime | ✅ OK |
 | `scripts/verify_join.sh` | `bash -n` + Docker PG18 public join runtime | ✅ OK |
+| `scripts/verify_platform_admin.sh` | `bash -n` + Docker PG18 platform admin read-only runtime | ✅ OK |
 | `scripts/verify_relay.sh` | `bash -n` + Docker PG18/Centrifugo/MomoServer/OutboxRelay runtime | ✅ OK |
 | `scripts/mock_hermes.py` | `python3 -m py_compile` + MOMO-004 SSE runtime | ✅ OK |
 | `scripts/verify_agent_worker.sh` | `bash -n` + Docker PG18/Centrifugo/AgentWorker runtime | ✅ OK |
@@ -276,6 +290,8 @@
 > **MOMO-002에서 검증됨:** OutboxRelay SKIP LOCKED claim, Centrifugo `/api/publish`, outbox `pending→done`, Centrifugo history의 `seq=message.seq`.
 > **MOMO-003에서 검증됨:** non-superuser app role 기준 RLS FORCE + `SET LOCAL app.workspace_id` 테넌트 격리, relay/worker BYPASSRLS 역할 분리, REST message send/history active membership guard.
 > **MOMO-004에서 검증됨:** OpenAI-compatible SSE mock 기반 AgentWorker one roundtrip, Centrifugo `agent.partial`, `usage_ledger` reconcile, `budget_window` reserve/release, G5 budget trip.
+> **MOMO-168에서 검증됨:** Hermes optional platform-adapter path의 Centrifugo fixture unwrap과 REST invoke/final-message mapping을 repo-local smoke로 검증(no Hermes/network).
+> **MOMO-013에서 검증됨:** 일반 tenant token의 platform endpoint 403, platform read token의 2개+ workspace/member/invite usage 전역 조회, platform BYPASSRLS role의 SELECT-only/read-only transaction, invite raw/hash secret 미노출.
 > **남은 runtime-unverified:** WebSocket live subscribe/presence/recovery, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
 
 ## 3. 생성 파일 트리 (핵심)
@@ -292,7 +308,7 @@ momo/
 │       ├─ DB/Database.swift              # PostgresClient 풀
 │       ├─ Auth/{JWT,AuthMiddleware}.swift
 │       ├─ Realtime/CentrifugoClient.swift
-│       └─ Routes/{Message,Auth,Join,Invite,Centrifugo,DTOs}.swift
+│       └─ Routes/{Message,Auth,Join,Invite,PlatformAdmin,Centrifugo,DTOs}.swift
 │                                                    # 핵심 쓰기경로: seq+outbox tx + public join
 ├─ relay/OutboxRelay/   (SKIP LOCKED → publish)
 ├─ workers/AgentWorker/ (HermesTransport SSE · LoopGuards · CostAccounting · WorkerService)
@@ -300,7 +316,7 @@ momo/
 ├─ clients/macOS/       (MomoMac: ChannelList/MessageList/MessageBubble/AgentPartial/
 │                         CostBreathingRing/ApprovalInbox + ChatViewModel/LiveChatBackend)
 ├─ adapters/hermes/     (momo_adapter.py: BasePlatformAdapter · plugin.yaml)
-└─ scripts/{migrate,verify_rls,verify_join,verify_relay,verify_agent_worker,mock_hermes}.*
+└─ scripts/{migrate,verify_rls,verify_join,verify_platform_admin,verify_relay,verify_agent_worker,mock_hermes}.*
 ```
 
 ## 4. 컴파일 검증됨 vs 런타임 미검증

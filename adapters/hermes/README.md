@@ -28,7 +28,9 @@ in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research
 > python3 -m py_compile adapters/hermes/momo_adapter.py
 > ```
 >
-> HTTP/WS shapes match L4 §5.1 / §5.2 / §4.1 but are not exercised end-to-end here.
+> HTTP/WS shapes match L4 §5.1 / §5.2 / §4.1. The repo-local smoke below
+> verifies fixture → adapter event → captured REST invoke/final-message mapping
+> without a live gateway, but live plugin load/e2e remains runtime-unverified.
 
 ## What it does (the three primitives, §6.3)
 
@@ -57,6 +59,8 @@ realtime stream and *writes* via REST. Every state change is
 | `momo_adapter.py` | `MomoAdapter(BasePlatformAdapter)` + `register_platform()`. |
 | `plugin.yaml` | gateway plugin manifest (`register_platform` hook, platform = `momo`). |
 | `requirements.txt` | runtime deps (`aiohttp`, `websockets`). |
+| `tests/smoke_momo_adapter.py` | dependency-free local smoke: Centrifugo fixture in, REST calls captured, no network. |
+| `tests/test_momo_adapter_contract.py` | stdlib unittest for contract fixtures and smoke harness. |
 | `README.md` | this file. |
 
 ## Install
@@ -117,6 +121,26 @@ ch    : ch:ws<workspaceUUID>.<channelUUID>        # group channel
 
 The adapter treats channel ids handed to `send()` as opaque and still writes only
 through momo REST; it never publishes directly to Centrifugo.
+
+## Local smoke
+
+Run the adapter smoke without Hermes, Docker, aiohttp, websockets, or network:
+
+```sh
+python3 adapters/hermes/tests/smoke_momo_adapter.py
+```
+
+The harness loads `platform_adapter_event_mapping.json`, unwraps the Centrifugo
+push to the adapter event, calls `MomoAdapter.handle_message()`, and captures the
+REST calls that would be made:
+
+1. `POST .../agents/{agent}/invoke`
+2. `POST .../messages` for the final agent message
+
+`scripts/local_gate.sh --profile docs` runs this smoke in addition to
+`python3 -m py_compile adapters/hermes/momo_adapter.py` and the contract unittest.
+Live Hermes gateway plugin loading and live momo/Centrifugo/Postgres e2e are still
+`runtime-unverified` until a Hermes test instance is available.
 
 ## Server-contract status
 
