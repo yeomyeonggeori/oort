@@ -294,8 +294,13 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(preview.route, .deterministicFallback(.frameworkUnavailable))
         XCTAssertEqual(preview.sourceHints.map(\.id), ["S1", "S2"])
         XCTAssertTrue(preview.sourceHints.allSatisfy { $0.uri.hasPrefix("momo://channels/") })
+        XCTAssertEqual(preview.sourceHints.map(\.citation), ["[S1]", "[S2]"])
         XCTAssertTrue(preview.summary.contains("[S1]"))
-        XCTAssertTrue(preview.compressedContext.contains("sources=[S1,S2]"))
+        XCTAssertEqual(preview.contextPacket.schema, "momo.context_packet.compaction.v1")
+        XCTAssertEqual(preview.contextPacket.sourceReferences.map(\.id), ["S1", "S2"])
+        XCTAssertTrue(preview.contextPacket.sourceReferences.allSatisfy { $0.uri.hasPrefix("momo://channels/") })
+        XCTAssertTrue(preview.compressedContext.contains("S1{citation=[S1],uri=momo://channels/"))
+        XCTAssertTrue(preview.contextPacket.sidebarPreview.contains("sources=[S1:[S1],S2:[S2]]"))
         XCTAssertEqual(preview.classification.intent, "approve")
         XCTAssertEqual(preview.classification.riskHint, "approval-required")
         XCTAssertEqual(preview.redactionHints.first?.kind, "email")
@@ -321,7 +326,8 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(preview.route, .deterministicFallback(.unsupportedOS))
         XCTAssertFalse(preview.summary.isEmpty)
         XCTAssertGreaterThan(preview.sourceHints.count, 0)
-        XCTAssertTrue(preview.compressedContext.contains("sources=["))
+        XCTAssertTrue(preview.compressedContext.contains("schema=momo.context_packet.compaction.v1"))
+        XCTAssertEqual(preview.contextPacket.sourceReferences.count, preview.sourceHints.count)
     }
 
     @MainActor
@@ -332,12 +338,20 @@ final class MomoMacTests: XCTestCase {
         await viewModel.selectChannel(pg18.id)
 
         let preview = try XCTUnwrap(viewModel.localContextCopilotPreview)
-        XCTAssertTrue(preview.sourceHints.contains { hint in
-            hint.uri == "https://github.com/Dawn-kim-official/momo/issues/1"
+        let github = try XCTUnwrap(preview.sourceHints.first { hint in
+            hint.id == "src_github_migration"
         })
-        XCTAssertTrue(preview.sourceHints.contains { hint in
-            hint.title.contains("migration thread")
+        XCTAssertEqual(github.uri, "https://github.com/Dawn-kim-official/momo/issues/1")
+        XCTAssertEqual(github.citation, "[src_github_migration]")
+        XCTAssertTrue(preview.contextPacket.sourceReferences.contains { ref in
+            ref.id == github.id && ref.uri == github.uri && ref.citation == github.citation
         })
+
+        let pg18Thread = try XCTUnwrap(preview.sourceHints.first { hint in
+            hint.id == "src_pg18_thread"
+        })
+        XCTAssertTrue(pg18Thread.title.contains("migration thread"))
+        XCTAssertTrue(preview.compressedContext.contains("src_pg18_thread{citation=[src_pg18_thread]"))
     }
 }
 
