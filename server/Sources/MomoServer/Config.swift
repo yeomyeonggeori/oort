@@ -31,6 +31,7 @@ struct Config: Sendable {
     // ---- Platform admin read-only inspection (MOMO-013) ----
     var platformAdminDatabaseURL: String?
     var platformAdminEmails: [String]
+    var platformAdminLoginSecret: String?
 
     /// Read an env var, falling back to `default`.
     private static func env(_ key: String, _ fallback: String) -> String {
@@ -65,7 +66,9 @@ struct Config: Sendable {
             platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
                 .split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                .filter { !$0.isEmpty }
+                .filter { !$0.isEmpty },
+            platformAdminLoginSecret: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_LOGIN_SECRET"]
+                .flatMap { $0.isEmpty ? nil : $0 }
         )
     }
 

@@ -66,6 +66,7 @@ POSTGRES_DB="${POSTGRES_DB:-momo}"
 APP_DATABASE_URL="postgres://momo_app:momo_app_dev_pw@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 PLATFORM_ADMIN_DATABASE_URL="postgres://momo_platform_admin:momo_platform_admin_dev_pw@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB"
 PLATFORM_ADMIN_EMAILS="${PLATFORM_ADMIN_EMAILS:-demo@momo.local}"
+PLATFORM_ADMIN_LOGIN_SECRET="${PLATFORM_ADMIN_LOGIN_SECRET:-platform-admin-dev-secret}"
 DEMO_WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 WORKSPACE_A="10000000-0000-7000-8000-000000000001"
 WORKSPACE_B="20000000-0000-7000-8000-000000000001"
@@ -326,6 +327,7 @@ start_server() {
     DATABASE_URL="$APP_DATABASE_URL" \
     PLATFORM_ADMIN_DATABASE_URL="$PLATFORM_ADMIN_DATABASE_URL" \
     PLATFORM_ADMIN_EMAILS="$PLATFORM_ADMIN_EMAILS" \
+    PLATFORM_ADMIN_LOGIN_SECRET="$PLATFORM_ADMIN_LOGIN_SECRET" \
     swift run --package-path server MomoServer
   ) >"$SERVER_LOG" 2>&1 &
   SERVER_PID="$!"
@@ -351,12 +353,14 @@ start_server() {
 login_token() {
   local email="$1"
   local workspace="$2"
-  local label="$3"
+  local password="$3"
+  local label="$4"
   local body
   body="$(jq -cn \
     --arg email "$email" \
     --arg workspace "$workspace" \
-    '{email:$email,password:"dev-password",workspace:$workspace}')"
+    --arg password "$password" \
+    '{email:$email,password:$password,workspace:$workspace}')"
   api POST /v1/auth/login "$body"
   expect_status 200 "$label login"
   printf '%s' "$RESPONSE_BODY" | jq -r '.accessToken'
@@ -365,11 +369,15 @@ login_token() {
 prepare_roles_and_fixture
 start_server
 
-PLATFORM_TOKEN="$(login_token demo@momo.local "$DEMO_WORKSPACE_ID" "platform admin")"
-TENANT_TOKEN="$(login_token platform-a@momo.local "$WORKSPACE_A" "ordinary tenant")"
+PLATFORM_EMAIL_NO_SECRET_TOKEN="$(login_token demo@momo.local "$DEMO_WORKSPACE_ID" "dev-password" "platform email without secret")"
+PLATFORM_TOKEN="$(login_token demo@momo.local "$DEMO_WORKSPACE_ID" "$PLATFORM_ADMIN_LOGIN_SECRET" "platform admin")"
+TENANT_TOKEN="$(login_token platform-a@momo.local "$WORKSPACE_A" "dev-password" "ordinary tenant")"
 
 api GET /v1/platform/workspaces "" "$TENANT_TOKEN"
 expect_status 403 "ordinary tenant denied platform workspace list"
+
+api GET /v1/platform/workspaces "" "$PLATFORM_EMAIL_NO_SECRET_TOKEN"
+expect_status 403 "platform allowlisted email without secret denied platform workspace list"
 
 api GET /v1/platform/workspaces "" "$PLATFORM_TOKEN"
 expect_status 200 "platform workspace list"

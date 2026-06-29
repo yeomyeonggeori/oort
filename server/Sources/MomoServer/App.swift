@@ -37,7 +37,12 @@ enum AppBuilder {
         router.get("/health") { _, _ -> HealthResponse in
             HealthResponse(status: "ok", service: "MomoServer")
         }
-        AuthRoutes(db: db, jwt: jwt, platformAdminEmails: config.platformAdminEmails).add(to: router)
+        AuthRoutes(
+            db: db,
+            jwt: jwt,
+            platformAdminEmails: config.platformAdminEmails,
+            platformAdminLoginSecret: config.platformAdminLoginSecret
+        ).add(to: router)
         JoinRoutes(db: db, jwt: jwt).add(to: router)
         CentrifugoRoutes(db: db).add(to: router)
 

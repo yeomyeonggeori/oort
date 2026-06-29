@@ -256,7 +256,7 @@
 - out of scope였던 production server `/v1/join` 구현과 DB-backed invite redemption e2e는 MOMO-014에서 서버 runtime slice로 진행한다.
 
 ### MOMO-013 수용기준 `[sql/swift/runtime]`
-- [x] v0 platform admin token/scope gate: `PLATFORM_ADMIN_EMAILS` 로그인에만 `platform:read` scope를 부여한다.
+- [x] v0 platform admin token/scope gate: `PLATFORM_ADMIN_EMAILS` allowlist와 `PLATFORM_ADMIN_LOGIN_SECRET`이 모두 맞는 login에만 `platform:read` scope를 부여한다.
 - [x] `GET /v1/platform/workspaces`, `/v1/platform/members`, `/v1/platform/invites` read-only endpoint 추가.
 - [x] 일반 tenant token은 platform endpoint 접근 403.
 - [x] platform read path는 `PLATFORM_ADMIN_DATABASE_URL` 별도 BYPASSRLS + SELECT-only role과 read-only transaction으로 전 tenant 조회.

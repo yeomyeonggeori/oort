@@ -14,6 +14,7 @@ struct AuthRoutes: Sendable {
     let db: Database
     let jwt: JWTService
     let platformAdminEmails: [String]
+    let platformAdminLoginSecret: String?
 
     /// The demo workspace seeded by `server/Migrations/002_seed.sql`. Used when a
     /// login request omits an explicit workspace (single-tenant v0).
@@ -59,7 +60,12 @@ struct AuthRoutes: Sendable {
 
         // Coarse v0 scopes; a real impl derives these from membership/role (L4 §7.2).
         var scopes = ["messages:write", "messages:read"]
-        if platformAdminEmails.contains(dto.email.lowercased()) {
+        if Self.shouldGrantPlatformRead(
+            email: dto.email,
+            password: dto.password,
+            platformAdminEmails: platformAdminEmails,
+            platformAdminLoginSecret: platformAdminLoginSecret
+        ) {
             scopes.append("platform:read")
         }
         let access = try await jwt.signAccess(
@@ -69,5 +75,18 @@ struct AuthRoutes: Sendable {
 
         let body = LoginResponse(accessToken: access, refreshToken: refresh, member: member)
         return try body.response(from: request, context: context)
+    }
+
+    static func shouldGrantPlatformRead(
+        email: String,
+        password: String,
+        platformAdminEmails: [String],
+        platformAdminLoginSecret: String?
+    ) -> Bool {
+        guard let platformAdminLoginSecret, !platformAdminLoginSecret.isEmpty else {
+            return false
+        }
+        return platformAdminEmails.contains(email.lowercased())
+            && password == platformAdminLoginSecret
     }
 }
