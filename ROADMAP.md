@@ -73,6 +73,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |
 | `MOMO-153` | M1.5 | Capability Cache v0 | `research/11-agent-runtime/06-capability-cache-v0.md` + agent/plugin/MCP capability cache, tool schema refs, invalidation, policy/capability version |
 | `MOMO-180` | M1.5 | Agentic Work OS 시장/레포 topology 정렬 | `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md` + `docs/adr/0001-agentic-work-os-repo-topology.md`; core monorepo 유지, plugin/catalog/SDK/MCP/landing repo split 기준, dev/e2e/prod deploy layering |
+| `MOMO-181` | M1.5 | Plugin manifest v0 + catalog split criteria | `research/12-agentic-work-os/02-plugin-manifest-v0.md` + JSON fixtures; manifest/capability grants/approval/audit/source/signature policy와 `momo-plugins`/first-party plugin/SDK repo split 기준 |
 | `MOMO-120` | M2 | Context Packet v0 | `{goal,constraints,decisions,sources,permissions,budget,redactions}` 스펙/fixture |
 | `MOMO-121` | M2 | Memory Plane v0 | typed memory(decision/preference/artifact/task_state/source_ref) + 권한/삭제 모델 |
 | `MOMO-122` | M2 | Google Workspace connector v0 | `research/11-agent-runtime/12-google-workspace-connector-v0.md` + Drive/Gmail/Calendar fixtures; per-user OAuth + read-mostly sync + approval-gated writes |
@@ -83,9 +84,10 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-133` | M3 | Google Workspace "ask my work" UX | source citation + approval-gated external writes |
 | `MOMO-134` | M3 | build-macos-apps 기반 macOS dev run loop | 완료: `scripts/macos_dev_run.sh` dev `.app` staging + Codex Run action + `--verify/--logs` + local gate opt-in |
 | `MOMO-160` | M2 | A2A-style agent_run lifecycle alignment | `research/11-agent-runtime/07-agent-run-lifecycle-v0.md` + Task/Message/Artifact/status mapping |
-| `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision endpoint/resume job contract is MOMO-167, actual approved tool execution remains follow-up runtime |
+| `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision endpoint/resume job contract is MOMO-167, approved deterministic resume executor is MOMO-178 |
 | `MOMO-166` | M2 | approval decision server contract v0 | `research/11-agent-runtime/10-approval-decision-server-contract-v0.md` + request/response fixtures; connects MOMO-161 runtime checkpoint to MOMO-171 macOS decision intent |
 | `MOMO-167` | M2 | approval decision endpoint runtime | server REST decision endpoint + `approval_decision` idempotency ledger + audit/outbox resume contract + `runtime-db` verifier |
+| `MOMO-178` | M2 | AgentWorker approved tool resume executor v0 | `method='resume_approval'` worker branch + fail-closed approved metadata/frozen payload checks + deterministic mock tool_result/audit runtime smoke |
 | `MOMO-162` | M2 | Hermes adapter contract verification | `research/11-agent-runtime/11-hermes-adapter-contract-v0.md` + fixtures; AgentWorker SSE product default, platform adapter optional interop |
 | `MOMO-168` | M2 | Hermes adapter repo-local smoke harness | `adapters/hermes/tests/smoke_momo_adapter.py` + `local_gate --profile docs`; live Hermes plugin load/e2e remains runtime-unverified |
 | `MOMO-163` | M2 | inbound MCP server v0 | governed search/fetch/post/approval-safe tool call surface + resources/prompts/fixtures |
@@ -93,7 +95,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-170` | M3 | macOS agent protocol cards | `tool_call`/approval/result/artifact cards + Context Packet/Memory/Capability/source/cost badges + SwiftUI fixture contract |
 | `MOMO-171` | M3 | macOS approval_request card decisions | Approve/Reject buttons call `ChatBackend.decideApproval(ApprovalDecisionRequest)` and reconcile receipt/realtime state |
 | `MOMO-174` | M3 | local LLM context compaction | 완료: source-preserving Context Packet compaction v1 + availability-safe Foundation Models route + deterministic fallback |
-| `MOMO-177` | M3 | macOS MomoServer REST ChatBackend v0 | 진행 중: `MOMO_SERVER_BASE_URL` dev config로 REST login/history/send 사용, LiveChatBackend fallback 유지 |
+| `MOMO-177` | M3 | macOS MomoServer REST ChatBackend v0 | 완료: `MOMO_SERVER_BASE_URL` dev config로 REST login/history/send 사용, LiveChatBackend fallback 유지 |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 1.2 Agentic Work OS ecosystem overlay
@@ -104,7 +106,7 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 
 - `momo` core monorepo는 M3/M4까지 유지한다. server/relay/worker/clients/schema/protocol이 아직 함께 움직이므로 조기 split은 금지한다.
 - repo split은 ecosystem surface부터 시작한다: `momo-plugins`, first-party plugin repos, plugin SDK repos, `momo-mcp`, `momo-landing`, private `momo-signing`.
-- plugin v0는 manifest/capability/approval/audit/catalog 중심으로 먼저 고정한다. WASM runtime은 M5+ 후속 선택지이며, v0 기본값은 governed connector + approval ledger다.
+- plugin v0는 `research/12-agentic-work-os/02-plugin-manifest-v0.md`를 정본으로 manifest/capability grants/approval/audit/source/signature/catalog 중심으로 먼저 고정한다. WASM runtime은 M5+ 후속 선택지이며, v0 기본값은 governed connector + approval/cost/audit ledger다.
 - Docker/deploy는 dev/e2e/prod/install/backup layer로 분리하되, 실제 prod installer와 repo split은 후속 티켓에서만 수행한다.
 
 후속 빌더블 후보:
@@ -187,7 +189,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 - **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
 - **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리. MOMO-007의 `staging-smoke` local gate가 prod compose/Caddy/Centrifugo/secrets/pgBackRest checklist를 실제 VPS 시크릿 없이 먼저 검증하고, 실제 URL/TLS/PITR restore는 host-runtime으로 닫는다.
 - **Agentic Work OS ecosystem**(M1.5~M4): Paca류 task/board OS를 복제하지 않고, momo는 channel timeline을 agent execution ledger로 유지한다. 정본은 `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`와 `docs/adr/0001-agentic-work-os-repo-topology.md`. repo split은 core monorepo 안정화 이후 plugin catalog/SDK/MCP/landing/signing 경계부터 진행한다.
-- **멀티팀 온보딩**(M2): `003_onboarding.sql` 첫 slice는 `invite_code` + redemption audit로 시작한다(MOMO-010). invite code 운영 REST(create/list/revoke + authenticated redeem 최소 slice)는 MOMO-011에서 완료했고, macOS에서 먼저 확인 가능한 invite UI thin slice는 MOMO-012, production `/v1/join` self-signup member/human/membership 생성 + audit_log는 MOMO-014에서 서버 runtime slice로 추가했다. `platform_admin` 전역 추적은 MOMO-013에서 별도 BYPASSRLS + SELECT-only read path로 추가했고 runtime-db local gate에서 2개+ workspace 전역 조회를 검증한다. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장한다.
+- **멀티팀 온보딩**(M2): `003_onboarding.sql` 첫 slice는 `invite_code` + redemption audit로 시작한다(MOMO-010). invite code 운영 REST(create/list/revoke + authenticated redeem 최소 slice)는 MOMO-011에서 완료했고, macOS에서 먼저 확인 가능한 invite UI thin slice는 MOMO-012, production `/v1/join` self-signup member/human/membership 생성 + audit_log는 MOMO-014에서 서버 runtime slice로 추가했다. `platform_admin` 전역 추적은 MOMO-013에서 별도 BYPASSRLS + SELECT-only read path로 추가했고 runtime-db local gate에서 2개+ workspace 전역 조회를 검증한다. MOMO-176은 normal tenant token + active membership guard + RLS 경로로 workspace human/agent roster REST를 추가해 M2/M3 실데이터 surface를 연다. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장한다.
 
 - **Context Broker + Memory Plane**(M2~M3): 서버 agent로 바로 넘기지 않고 messenger layer가 권한, 컨텍스트 범위, source refs, cost budget, redaction, local/server model routing을 결정한다. 정본: `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`.
 - **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`, Memory Plane v0 정본은 `research/11-agent-runtime/05-memory-plane-v0.md`, Capability Cache v0 정본은 `research/11-agent-runtime/06-capability-cache-v0.md`, Agent Run Lifecycle v0 정본은 `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`, Approval Pause/Resume v0 정본은 `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, Approval Decision Server Contract v0 정본은 `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`, MOMO-167은 이 contract의 server runtime endpoint/ledger/resume job slice이며, Hermes Adapter Contract v0 정본은 `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`이다. runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.

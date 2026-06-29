@@ -128,6 +128,8 @@
 | [`research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`](../research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md) | Google Workspace Enterprise Admin v0 정본 스펙(enterprise admin install, domain-wide delegation option, scope inventory, service account boundary, delegated user, audit export, revoke/delete) |
 | [`research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`](../research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/) | Google Workspace Enterprise Admin v0 JSON fixtures(admin install scope inventory, DWD delegated Context/Memory/Capability projection, audit export revoke flow) |
 | [`research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`](../research/12-agentic-work-os/01-agentic-work-os-market-analysis.md) | Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 시장 분석 + momo 제품 포지션(agent execution ledger) |
+| [`research/12-agentic-work-os/02-plugin-manifest-v0.md`](../research/12-agentic-work-os/02-plugin-manifest-v0.md) | Plugin Manifest v0 정본 + capability grants/approval/source/audit/signature policy + `momo-plugins`/first-party plugin/SDK repo split 기준 |
+| [`research/11-agent-runtime/fixtures/plugin-manifest-v0/`](../research/11-agent-runtime/fixtures/plugin-manifest-v0/) | Plugin Manifest v0 JSON fixtures(GitHub Issues, Google Workspace read-mostly, high-risk write approval policy) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

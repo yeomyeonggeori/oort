@@ -39,6 +39,7 @@ struct WorkerService: Service {
     let cost: CostAccounting
     let config: Config
     let logger: Logger
+    let resumeExecutor = ToolResumeExecutor()
 
     private static let decoder = JSONDecoder()
 
@@ -132,13 +133,14 @@ struct WorkerService: Service {
         let id: Int64
         let workspaceID: UUID
         let attempts: Int
+        let method: String
         let payload: AgentJobPayload
     }
 
     /// L4 §3.5: claim ONE pending agent_job and flip it to `processing`.
     /// partition_key = agent_member_id ⇒ per-agent serialization.
     private func claimOne() async throws -> ClaimedJob? {
-        let row: (Int64, UUID, Int, String)? = try await pg.withTransaction(logger: logger) { conn in
+        let row: (Int64, UUID, Int, String, String)? = try await pg.withTransaction(logger: logger) { conn in
             let rows = try await conn.query(
                 """
                 WITH claimed AS (
@@ -154,19 +156,25 @@ struct WorkerService: Service {
                    SET status = 'processing', attempts = o.attempts + 1
                   FROM claimed c
                  WHERE o.id = c.id
-                 RETURNING o.id, o.workspace_id, o.attempts, o.payload::text
+                 RETURNING o.id, o.workspace_id, o.attempts, o.method, o.payload::text
                 """,
                 logger: logger
             ).collect()
             guard let first = rows.first else { return nil }
-            return try first.decode((Int64, UUID, Int, String).self)
+            return try first.decode((Int64, UUID, Int, String, String).self)
         }
-        guard let (id, ws, attempts, payloadText) = row else { return nil }
+        guard let (id, ws, attempts, method, payloadText) = row else { return nil }
 
         do {
             let payload = try Self.decoder.decode(
                 AgentJobPayload.self, from: Data(payloadText.utf8))
-            return ClaimedJob(id: id, workspaceID: ws, attempts: attempts, payload: payload)
+            return ClaimedJob(
+                id: id,
+                workspaceID: ws,
+                attempts: attempts,
+                method: method,
+                payload: payload
+            )
         } catch {
             // Malformed payload can never succeed → fail permanently (no poison loop).
             logger.error("agent_job payload decode failed; marking failed", metadata: [
@@ -188,9 +196,15 @@ struct WorkerService: Service {
             "runId": .string(p.runID?.uuidString ?? "nil"),
             "agentMemberId": .string(p.agentMemberID.uuidString),
             "channelId": .string(p.channelID.uuidString),
+            "method": .string(job.method),
         ])
 
         await publishStatus(agentChannel, runID: p.runID, status: .queued)
+
+        if job.method == "resume_approval" || p.resumeFromApprovalID != nil {
+            await processResumeApproval(job, agentChannel: agentChannel)
+            return
+        }
 
         // ---- §3.3 gates (stubs) ----
         let gateState = LoopGuards.RunGateState(
@@ -342,6 +356,388 @@ struct WorkerService: Service {
         await updateRunStatus(p.runID, workspaceID: job.workspaceID, status: .done, error: nil)
         await publishStatus(agentChannel, runID: p.runID, status: .done)
         await markJobDone(job.id)
+    }
+
+    // MARK: - approval resume executor (MOMO-178)
+
+    private struct ApprovalResumeState: Sendable {
+        let status: String
+        let runID: UUID
+        let channelID: UUID
+        let requestedBy: UUID
+        let payload: JSONValue
+    }
+
+    private func processResumeApproval(_ job: ClaimedJob, agentChannel: String) async {
+        let p = job.payload
+        let request: ToolResumeExecutor.ValidatedRequest
+        do {
+            request = try resumeExecutor.validate(p)
+        } catch {
+            let reason = "resume approval validation failed: \(error)"
+            logger.warning("resume_approval validation failed", metadata: [
+                "outboxId": .stringConvertible(job.id),
+                "runId": .string(p.runID?.uuidString ?? "nil"),
+                "approvalId": .string(p.resumeFromApprovalID?.uuidString ?? "nil"),
+                "error": .string(String(describing: error)),
+            ])
+            await recordResumeFailure(
+                job: job,
+                runID: p.runID,
+                approvalID: p.resumeFromApprovalID,
+                reason: reason,
+                markRunFailed: p.runID != nil
+            )
+            await publishStatus(agentChannel, runID: p.runID, status: .error, detail: reason)
+            return
+        }
+
+        do {
+            let state = try await loadApprovalResumeState(
+                workspaceID: job.workspaceID,
+                approvalID: request.approvalID
+            )
+            try validateResumeState(state, job: job, request: request)
+
+            await updateRunStatus(
+                request.runID,
+                workspaceID: job.workspaceID,
+                status: .thinking,
+                error: nil
+            )
+            await publishStatus(agentChannel, runID: request.runID, status: .thinking)
+
+            let result = try resumeExecutor.execute(request)
+            try await recordResumeSuccess(job: job, request: request, result: result)
+            await publishStatus(agentChannel, runID: request.runID, status: .done)
+        } catch {
+            let reason = "resume approval execution failed: \(error)"
+            let markRunFailed: Bool
+            if let resumeError = error as? ResumeApprovalError,
+               case .approvalNotApproved = resumeError
+            {
+                markRunFailed = false
+            } else {
+                markRunFailed = true
+            }
+            logger.error("resume_approval execution failed", metadata: [
+                "outboxId": .stringConvertible(job.id),
+                "runId": .string(request.runID.uuidString),
+                "approvalId": .string(request.approvalID.uuidString),
+                "toolName": .string(request.toolCall.name),
+                "error": .string(String(describing: error)),
+            ])
+            await recordResumeFailure(
+                job: job,
+                runID: request.runID,
+                approvalID: request.approvalID,
+                reason: reason,
+                markRunFailed: markRunFailed
+            )
+            await publishStatus(agentChannel, runID: request.runID, status: .error, detail: reason)
+        }
+    }
+
+    private func loadApprovalResumeState(
+        workspaceID: UUID,
+        approvalID: UUID
+    ) async throws -> ApprovalResumeState {
+        try await pg.withTransaction(logger: logger) { conn in
+            _ = try await conn.query(
+                "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                logger: logger)
+            let rows = try await conn.query(
+                """
+                SELECT status::text, run_id, channel_id, requested_by, payload::text
+                  FROM approval
+                 WHERE id = \(approvalID)
+                 FOR UPDATE
+                """,
+                logger: logger
+            ).collect()
+            guard let row = rows.first else {
+                throw ResumeApprovalError.approvalNotFound(approvalID)
+            }
+            let (status, runID, channelID, requestedBy, payloadText) =
+                try row.decode((String, UUID, UUID, UUID, String).self)
+            let payload = try Self.decoder.decode(JSONValue.self, from: Data(payloadText.utf8))
+            return ApprovalResumeState(
+                status: status,
+                runID: runID,
+                channelID: channelID,
+                requestedBy: requestedBy,
+                payload: payload
+            )
+        }
+    }
+
+    private func validateResumeState(
+        _ state: ApprovalResumeState,
+        job: ClaimedJob,
+        request: ToolResumeExecutor.ValidatedRequest
+    ) throws {
+        guard state.status == "approved" else {
+            throw ResumeApprovalError.approvalNotApproved(state.status)
+        }
+        guard state.runID == request.runID else {
+            throw ResumeApprovalError.runMismatch(expected: state.runID, actual: request.runID)
+        }
+        guard state.channelID == job.payload.channelID else {
+            throw ResumeApprovalError.channelMismatch(expected: state.channelID, actual: job.payload.channelID)
+        }
+        guard state.requestedBy == job.payload.agentMemberID else {
+            throw ResumeApprovalError.agentMismatch(expected: state.requestedBy, actual: job.payload.agentMemberID)
+        }
+        let frozenTool = state.payload["tool_call"]
+        guard frozenTool?["call_id"]?.stringValue == request.toolCall.callID else {
+            throw ResumeApprovalError.frozenPayloadMismatch("call_id")
+        }
+        guard frozenTool?["name"]?.stringValue == request.toolCall.name else {
+            throw ResumeApprovalError.frozenPayloadMismatch("name")
+        }
+        guard frozenTool?["arguments"] == request.toolCall.arguments else {
+            throw ResumeApprovalError.frozenPayloadMismatch("arguments")
+        }
+    }
+
+    private enum ResumeApprovalError: Error, CustomStringConvertible, Sendable {
+        case approvalNotFound(UUID)
+        case approvalNotApproved(String)
+        case runMismatch(expected: UUID, actual: UUID)
+        case channelMismatch(expected: UUID, actual: UUID)
+        case agentMismatch(expected: UUID, actual: UUID)
+        case frozenPayloadMismatch(String)
+        case missingInsertedToolResult
+
+        var description: String {
+            switch self {
+            case .approvalNotFound(let id):
+                return "approval not found: \(id.uuidString)"
+            case .approvalNotApproved(let status):
+                return "approval is \(status), not approved"
+            case .runMismatch(let expected, let actual):
+                return "resume run mismatch: expected \(expected.uuidString), got \(actual.uuidString)"
+            case .channelMismatch(let expected, let actual):
+                return "resume channel mismatch: expected \(expected.uuidString), got \(actual.uuidString)"
+            case .agentMismatch(let expected, let actual):
+                return "resume agent mismatch: expected \(expected.uuidString), got \(actual.uuidString)"
+            case .frozenPayloadMismatch(let field):
+                return "approved_tool_call does not match frozen approval payload field: \(field)"
+            case .missingInsertedToolResult:
+                return "tool_result insert did not return a row"
+            }
+        }
+    }
+
+    private func recordResumeSuccess(
+        job: ClaimedJob,
+        request: ToolResumeExecutor.ValidatedRequest,
+        result: ToolResumeExecutor.Result
+    ) async throws {
+        let p = job.payload
+        let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
+        let props = Self.toolResultProps(
+            request: request,
+            output: result.output,
+            isError: result.isError
+        )
+
+        try await pg.withTransaction(logger: logger) { conn in
+            _ = try await conn.query(
+                "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
+                logger: logger)
+
+            _ = try await conn.query(
+                """
+                UPDATE agent_run
+                   SET status = 'running',
+                       started_at = COALESCE(started_at, now()),
+                       updated_at = now(),
+                       error = NULL,
+                       finished_at = NULL
+                 WHERE id = \(request.runID)
+                """,
+                logger: logger
+            )
+
+            let rows = try await conn.query(
+                """
+                WITH bumped AS (
+                  UPDATE channel_seq
+                     SET last_seq = last_seq + 1
+                   WHERE channel_id = \(p.channelID)
+                  RETURNING last_seq AS seq
+                )
+                INSERT INTO message
+                  (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                   author_member_id, type, body, props, run_id)
+                SELECT \(job.workspaceID), \(p.channelID), b.seq, \(hlcTs), 0,
+                       \(p.agentMemberID), 'tool_result'::message_type,
+                       \(result.body), \(props)::jsonb, \(request.runID)
+                  FROM bumped b
+                RETURNING id, seq
+                """,
+                logger: logger
+            ).collect()
+            guard let row = rows.first else {
+                throw ResumeApprovalError.missingInsertedToolResult
+            }
+            let (messageID, seq) = try row.decode((UUID, Int64).self)
+
+            let outboxPayload = Self.toolResultBroadcastPayload(
+                workspaceID: job.workspaceID,
+                channelID: p.channelID,
+                messageID: messageID,
+                seq: seq,
+                authorMemberID: p.agentMemberID,
+                runID: request.runID,
+                body: result.body,
+                props: props,
+                hlcTs: hlcTs
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO outbox
+                  (workspace_id, kind, method, payload, partition_key)
+                VALUES
+                  (\(job.workspaceID), 'broadcast', 'publish',
+                   \(outboxPayload)::jsonb, \(p.channelID))
+                """,
+                logger: logger
+            )
+
+            let detail = Self.resumeAuditDetail(
+                request: request,
+                output: result.output,
+                error: nil
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type,
+                   target_id, run_id, detail)
+                VALUES
+                  (\(job.workspaceID), \(p.agentMemberID),
+                   'approval.resume', 'approval', \(request.approvalID),
+                   \(request.runID), \(detail)::jsonb),
+                  (\(job.workspaceID), \(p.agentMemberID),
+                   'tool.executed', 'message', \(messageID),
+                   \(request.runID), \(detail)::jsonb)
+                """,
+                logger: logger
+            )
+
+            _ = try await conn.query(
+                """
+                UPDATE agent_run
+                   SET status = 'succeeded',
+                       output = \(result.output.jsonString())::jsonb,
+                       error = NULL,
+                       updated_at = now(),
+                       finished_at = now()
+                 WHERE id = \(request.runID)
+                """,
+                logger: logger
+            )
+
+            _ = try await conn.query(
+                """
+                UPDATE outbox
+                   SET status = 'done',
+                       processed_at = now(),
+                       last_error = NULL
+                 WHERE id = \(job.id)
+                """,
+                logger: logger
+            )
+        }
+    }
+
+    private func recordResumeFailure(
+        job: ClaimedJob,
+        runID: UUID?,
+        approvalID: UUID?,
+        reason: String,
+        markRunFailed: Bool
+    ) async {
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
+                    logger: logger)
+
+                if markRunFailed, let runID {
+                    _ = try await conn.query(
+                        """
+                        UPDATE agent_run
+                           SET status = 'failed',
+                               error = jsonb_build_object(
+                                 'code', 'approval_resume_failed',
+                                 'reason', \(reason)
+                               ),
+                               updated_at = now(),
+                               finished_at = now()
+                         WHERE id = \(runID)
+                        """,
+                        logger: logger
+                    )
+                }
+
+                let detail = Self.resumeFailureAuditDetail(
+                    job: job,
+                    runID: runID,
+                    approvalID: approvalID,
+                    reason: reason
+                )
+                if let approvalID, let runID {
+                    _ = try await conn.query(
+                        """
+                        INSERT INTO audit_log
+                          (workspace_id, actor_member_id, action, target_type,
+                           target_id, run_id, detail)
+                        VALUES
+                          (\(job.workspaceID), \(job.payload.agentMemberID),
+                           'approval.resume_failed', 'approval', \(approvalID),
+                           \(runID), \(detail)::jsonb),
+                          (\(job.workspaceID), \(job.payload.agentMemberID),
+                           'tool.failed', 'approval', \(approvalID),
+                           \(runID), \(detail)::jsonb)
+                        """,
+                        logger: logger
+                    )
+                } else {
+                    _ = try await conn.query(
+                        """
+                        INSERT INTO audit_log
+                          (workspace_id, actor_member_id, action, target_type,
+                           target_id, run_id, detail)
+                        VALUES
+                          (\(job.workspaceID), \(job.payload.agentMemberID),
+                           'approval.resume_failed', 'outbox', NULL,
+                           NULL, \(detail)::jsonb)
+                        """,
+                        logger: logger
+                    )
+                }
+
+                _ = try await conn.query(
+                    """
+                    UPDATE outbox
+                       SET status = 'failed',
+                           processed_at = now(),
+                           last_error = \(reason)
+                     WHERE id = \(job.id)
+                    """,
+                    logger: logger
+                )
+            }
+        } catch {
+            logger.error("resume failure record failed", metadata: [
+                "outboxId": .stringConvertible(job.id),
+                "error": .string(String(describing: error)),
+            ])
+            await markJobFailed(job.id, reason: reason)
+        }
     }
 
     // MARK: - approval pause checkpoint (MOMO-161)
@@ -589,6 +985,144 @@ struct WorkerService: Service {
             "version": seq,
             "idempotency_key": "\(centChannel):\(seq)",
         ])
+    }
+
+    private static func toolResultProps(
+        request: ToolResumeExecutor.ValidatedRequest,
+        output: JSONValue,
+        isError: Bool
+    ) -> String {
+        jsonString([
+            "call_id": request.toolCall.callID,
+            "tool_name": request.toolCall.name,
+            "approval_id": request.approvalID.uuidString,
+            "run_id": request.runID.uuidString,
+            "payload_sha256": request.toolCall.payloadSHA256.map { $0 as Any } ?? NSNull(),
+            "output": anyValue(output),
+            "is_error": isError,
+            "executor": "agentworker.resume_approval.v0",
+        ])
+    }
+
+    private static func toolResultBroadcastPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        seq: Int64,
+        authorMemberID: UUID,
+        runID: UUID,
+        body: String,
+        props: String,
+        hlcTs: Int64
+    ) -> String {
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "message.new",
+                "v": 1,
+                "ts": hlcTs,
+                "seq": seq,
+                "payload": [
+                    "id": messageID.uuidString,
+                    "channel_id": channelID.uuidString,
+                    "channelId": channelID.uuidString,
+                    "seq": seq,
+                    "type": "tool_result",
+                    "body": body,
+                    "props": jsonObject(props),
+                    "author_member_id": authorMemberID.uuidString,
+                    "authorMemberId": authorMemberID.uuidString,
+                    "run_id": runID.uuidString,
+                    "runId": runID.uuidString,
+                    "hlc_ts": hlcTs,
+                    "hlcTs": hlcTs,
+                    "hlc_count": 0,
+                    "hlcCount": 0,
+                ],
+            ],
+            "version": seq,
+            "idempotency_key": "\(centChannel):\(seq)",
+        ])
+    }
+
+    private static func resumeAuditDetail(
+        request: ToolResumeExecutor.ValidatedRequest,
+        output: JSONValue,
+        error: String?
+    ) -> String {
+        jsonString([
+            "approval_id": request.approvalID.uuidString,
+            "run_id": request.runID.uuidString,
+            "tool_call": [
+                "call_id": request.toolCall.callID,
+                "name": request.toolCall.name,
+                "arguments": anyValue(request.toolCall.arguments),
+                "payload_sha256": request.toolCall.payloadSHA256.map { $0 as Any } ?? NSNull(),
+            ],
+            "policy_evidence": request.policyEvidence.jsonObject(),
+            "output": anyValue(output),
+            "error": error ?? NSNull(),
+            "executor": "agentworker.resume_approval.v0",
+        ])
+    }
+
+    private static func resumeFailureAuditDetail(
+        job: ClaimedJob,
+        runID: UUID?,
+        approvalID: UUID?,
+        reason: String
+    ) -> String {
+        var object: [String: Any] = [
+            "outbox_id": job.id,
+            "outbox_method": job.method,
+            "agent_member_id": job.payload.agentMemberID.uuidString,
+            "channel_id": job.payload.channelID.uuidString,
+            "reason": reason,
+            "executor": "agentworker.resume_approval.v0",
+        ]
+        if let runID {
+            object["run_id"] = runID.uuidString
+        }
+        if let approvalID {
+            object["approval_id"] = approvalID.uuidString
+        }
+        if let toolCall = job.payload.approvedToolCall {
+            object["tool_call"] = [
+                "call_id": toolCall.callID,
+                "name": toolCall.name,
+                "arguments": anyValue(toolCall.arguments),
+                "payload_sha256": toolCall.payloadSHA256.map { $0 as Any } ?? NSNull(),
+            ]
+        }
+        return jsonString(object)
+    }
+
+    private static func jsonObject(_ json: String) -> [String: Any] {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              let dict = object as? [String: Any]
+        else { return [:] }
+        return dict
+    }
+
+    private static func anyValue(_ value: JSONValue) -> Any {
+        switch value {
+        case .string(let string):
+            return string
+        case .int(let int):
+            return int
+        case .double(let double):
+            return double
+        case .bool(let bool):
+            return bool
+        case .null:
+            return NSNull()
+        case .object(let object):
+            return object.mapValues(anyValue)
+        case .array(let array):
+            return array.map(anyValue)
+        }
     }
 
     private static func jsonString(_ object: Any) -> String {

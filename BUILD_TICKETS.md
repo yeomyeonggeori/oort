@@ -190,7 +190,7 @@
 - [x] `infra/prod/centrifugo.prod.json`: dev namespace 계약 유지 + Redis engine 전환.
 - [x] `infra/prod/.env.example`: production env 예시만 제공, 실제 시크릿 미커밋.
 - [x] `docs/RUN.md`, `docs/DEPLOY.md`, `STATUS.md`, `ROADMAP.md` 갱신.
-- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
 
@@ -223,7 +223,7 @@
 | id | 한줄 | 수용기준 등급 | 의존 | 상태 |
 |---|---|---|---|---|
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
-| `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | 후보 |
+| `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 후보 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 후보 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 후보 |
@@ -236,11 +236,16 @@
 - [ ] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 리뷰, 필요 수정, merge, main docs local gate PASS.
 
-### MOMO-181 후보 수용기준 `[docs/spec]`
-- [ ] plugin manifest v0 최소 필드(`id`, `runtime`, `surfaces`, `capabilities`, `approval_policy`, `risk`, `audit_policy`, `compatibility`, `signature`) 정의.
-- [ ] plugin catalog repo(`momo-plugins`) split 기준, artifact metadata, signed artifact policy, compatibility matrix를 문서화.
-- [ ] Capability Cache `plugin_tool_schema`와 Context Packet `tool_grants` 연결을 명시.
-- [ ] 실제 plugin runtime 구현은 out of scope.
+### MOMO-181 수용기준 `[docs/spec]`
+- [x] Plugin Manifest v0 정본: `research/12-agentic-work-os/02-plugin-manifest-v0.md`.
+- [x] 최소 manifest fields 정의: `id`, `name`, `version`, `publisher`, `runtime`, `surfaces`, `capabilities`, `tool_schema_refs`, `approval_policy`, `risk`, `source_policy`, `audit_policy`, `compatibility`, `signature`.
+- [x] plugin catalog repo(`momo-plugins`) split 기준, artifact metadata, signed artifact policy, compatibility matrix를 문서화.
+- [x] first-party plugin repo와 SDK repo 분리 기준을 문서화.
+- [x] Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane `permissions.retrieval_policy_version`/plugin policy version 연결을 명시.
+- [x] JSON fixture 3종: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+- out of scope: 실제 plugin runtime, repo split 생성, WASM runtime, marketplace UI, external OAuth implementation.
 
 ### MOMO-182 후보 수용기준 `[infra/docs]`
 - [ ] `infra/docker-compose.yml`의 현재 dev 역할과 future `docker-compose.dev.yml`/`docker-compose.e2e.yml`/`infra/prod/docker-compose.prod.yml` 경계를 ADR로 고정.
@@ -266,6 +271,7 @@
 | `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
 | `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | local gate 대상 |
+| `MOMO-176` | workspace roster REST endpoints v0 | swift/runtime | MOMO-014 | local gate 대상 |
 
 ### MOMO-010 수용기준 `[sql/runtime]`
 - [x] `server/Migrations/003_onboarding.sql` 신규 추가(`schema_v0.sql` 미수정).
@@ -314,6 +320,16 @@
 - [x] `scripts/verify_join.sh` 추가: invite create → public join → joined human login/bootstrap/read, 실패 모드 6종 검증.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] `scripts/local_gate.sh --profile runtime-db` PASS(`scripts/verify_rls.sh` + `scripts/verify_join.sh`).
+
+### MOMO-176 수용기준 `[swift/runtime]`
+- [x] `GET /v1/workspaces/{ws}/roster`와 호환 alias `GET /v1/workspaces/{ws}/members`를 authenticated tenant route로 추가한다.
+- [x] 일반 tenant token은 path workspace와 JWT workspace가 일치하고, `SET LOCAL app.workspace_id` 아래 active workspace membership guard를 통과해야 roster를 조회할 수 있다.
+- [x] roster 응답은 active, non-deleted `member` 중 active membership이 있는 항목을 반환하고 `kind='human'|'agent'`와 human/agent count를 명시한다. agent row는 model/owner/run-limit metadata만 노출하고 base_url/system_prompt/tool_schema/config/secret은 노출하지 않는다.
+- [x] BYPASSRLS 사용 금지: normal tenant `Database.withTenantConnection` 경로만 사용한다.
+- [x] focused server tests 추가: kind filter/limit validation, human/agent DTO shape decode.
+- [x] `scripts/verify_roster.sh` 추가: demo human+agent roster, `kind=agent` filter, invalid kind 400, same-workspace nonmember 403, workspace A/B 교차 접근 403.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS(`scripts/verify_roster.sh` 포함).
 
 
 ## M2 Context / Memory / Google Workspace
@@ -374,7 +390,7 @@
 - [x] DB/Swift/server/worker 변경 범위를 정리하고, `schema_v0.sql`은 수정하지 않는다.
 - [x] AgentWorker가 approval-required `tool_call`에서 `approval(status='pending')`, `message.type='approval_request'`, `agent_run.status='awaiting_approval'`, `audit_log`를 기록하는 최소 pause slice를 컴파일 가능한 코드로 추가한다.
 - [x] `research/11-agent-runtime/fixtures/approval-pause-resume-v0/` fixture와 AgentWorker smoke test를 추가한다.
-- [ ] Server approval decision endpoint와 AgentWorker resume-job execution은 후속 runtime 구현으로 남긴다(`runtime-unverified`).
+- [x] Server approval decision endpoint는 MOMO-167, AgentWorker deterministic resume-job execution은 MOMO-178에서 후속 runtime slice로 닫는다. Expiry sweeper와 real provider side-effect execution은 별도 후속 `runtime-unverified`.
 
 핵심 원칙:
 
@@ -395,6 +411,7 @@
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-167` | approval decision endpoint runtime | swift/sql/runtime | MOMO-161, MOMO-166, MOMO-171 |
+| `MOMO-178` | AgentWorker approved tool resume executor v0 | swift/runtime | MOMO-161, MOMO-165, MOMO-166, MOMO-167 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
 | `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
@@ -505,6 +522,18 @@
 - [x] server/worker focused tests와 `scripts/verify_approval_decision.sh` runtime verifier를 추가한다.
 - [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #111을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-178 수용기준 `[swift/runtime]`
+- [x] GitHub #123을 `scripts/goal_claim.sh 123`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] AgentWorker가 `outbox.method='resume_approval'` 또는 `payload.resume_from_approval_id` resume job을 decode/dispatch한다.
+- [x] `approval.status='approved'`, same-run/channel/agent, frozen `approved_tool_call`, approval-required `policy_evidence`, approved decision payload를 fail-closed로 검증한다.
+- [x] v0 executor는 deterministic mock tool(`mock.echo`/`momo.mock.echo`/`deterministic.echo`)만 실행하고 arbitrary external tool/provider write는 실패 처리한다.
+- [x] 성공 시 같은 `agent_run.id`에 `message(type='tool_result')`, `audit_log(action='approval.resume'/'tool.executed')`, broadcast outbox를 기록하고 resume job을 `done`으로 닫는다. 실패 시 failed outbox `last_error`와 failure audit을 남긴다.
+- [x] reject/cancelled/expired/non-approved approval은 실행하지 않는다.
+- [x] focused AgentWorker tests와 `scripts/verify_agent_worker.sh` approved resume runtime smoke를 추가한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] 가능하면 `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #123을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.

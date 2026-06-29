@@ -91,6 +91,8 @@ HUMAN_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000102
 CHANNEL_ID=00000000-0000-7000-8000-000000000202
 RUN_ID=00000000-0000-7000-8000-000000000904
+RESUME_RUN_ID=00000000-0000-7000-8000-000000000924
+RESUME_APPROVAL_ID=00000000-0000-7000-8000-000000000925
 TRIP_RUN_ID=00000000-0000-7000-8000-000000000914
 BUDGET_ID=00000000-0000-7000-8000-000000000905
 TRIP_BUDGET_ID=00000000-0000-7000-8000-000000000915
@@ -148,10 +150,15 @@ SET LOCAL row_security = off;
 SET LOCAL app.workspace_id = '$WORKSPACE_ID';
 
 DELETE FROM usage_ledger WHERE run_id IN ('$RUN_ID', '$TRIP_RUN_ID');
-DELETE FROM outbox WHERE payload->>'run_id' IN ('$RUN_ID', '$TRIP_RUN_ID');
+DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
+DELETE FROM outbox WHERE payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
+   OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID'
+   OR payload->'data'->'payload'->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID');
+DELETE FROM approval WHERE id = '$RESUME_APPROVAL_ID';
 DELETE FROM budget_window WHERE budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
 DELETE FROM budget WHERE id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
-DELETE FROM agent_run WHERE id IN ('$RUN_ID', '$TRIP_RUN_ID');
+DELETE FROM message WHERE run_id = '$RESUME_RUN_ID';
+DELETE FROM agent_run WHERE id IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID');
 DELETE FROM message WHERE id IN ('$MESSAGE_ID', '$TRIP_MESSAGE_ID');
 
 WITH bumped AS (
@@ -267,6 +274,107 @@ if [ "$SUCCESS_OK" != "1" ]; then
 fi
 
 echo "[agent-worker] success path verified: agent.partial + usage_ledger + budget_window"
+
+echo "[agent-worker] seeding approved deterministic resume fixture"
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, status, step_count, max_steps, depth, input, idempotency_key)
+VALUES
+  ('$RESUME_RUN_ID', '$WORKSPACE_ID', '$AGENT_ID', '$CHANNEL_ID',
+   'queued', 1, 12, 0,
+   jsonb_build_object('prompt', 'MOMO-178 approved mock resume'),
+   'momo-178-approved-resume');
+
+INSERT INTO approval
+  (id, workspace_id, run_id, channel_id, requested_by,
+   action_type, payload, status, decided_by, decided_at, decision_reason)
+VALUES
+  ('$RESUME_APPROVAL_ID', '$WORKSPACE_ID', '$RESUME_RUN_ID', '$CHANNEL_ID', '$AGENT_ID',
+   'tool_call',
+   jsonb_build_object(
+     'run_id', '$RESUME_RUN_ID',
+     'action_type', 'tool_call',
+     'tool_call', jsonb_build_object(
+       'call_id', 'call_momo_178_echo',
+       'name', 'momo.mock.echo',
+       'arguments', jsonb_build_object('message', 'approved hello'),
+       'tool_grant', jsonb_build_object(
+         'tool_name', 'momo.mock.echo',
+         'approval_policy', 'always',
+         'capability_version', 'mock-tool@0.1.0',
+         'policy_version', 'capability-policy@2026-06-29'
+       )
+     ),
+     'resume_model', 'same_run_new_agent_job'
+   ),
+   'approved', '$HUMAN_ID', now(), 'runtime smoke approval');
+
+INSERT INTO outbox
+  (workspace_id, kind, status, method, payload, partition_key)
+VALUES
+  ('$WORKSPACE_ID', 'agent_job', 'pending', 'resume_approval',
+   jsonb_build_object(
+     'run_id', '$RESUME_RUN_ID',
+     'workspace_id', '$WORKSPACE_ID',
+     'agent_member_id', '$AGENT_ID',
+     'channel_id', '$CHANNEL_ID',
+     'model', 'hermes-agent',
+     'prompt', '',
+     'resume_from_approval_id', '$RESUME_APPROVAL_ID',
+     'approved_tool_call', jsonb_build_object(
+       'call_id', 'call_momo_178_echo',
+       'name', 'momo.mock.echo',
+       'arguments', jsonb_build_object('message', 'approved hello'),
+       'payload_sha256', 'sha256:${RESUME_APPROVAL_ID}'
+     ),
+     'policy_evidence', jsonb_build_object(
+       'tool_name', 'momo.mock.echo',
+       'approval_policy', 'always',
+       'capability_version', 'mock-tool@0.1.0',
+       'policy_version', 'capability-policy@2026-06-29'
+     ),
+     'approval_decision', jsonb_build_object(
+       'approval_id', '$RESUME_APPROVAL_ID',
+       'status', 'approved'
+     ),
+     'step_count', 1,
+     'depth', 0,
+     'consecutive_auto', 0
+   ),
+   '$AGENT_ID');
+
+COMMIT;
+SQL
+
+RESUME_OK=0
+deadline=$(($(date +%s) + 60))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  RUN_DONE=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RESUME_RUN_ID' AND status='succeeded' AND output->>'ok'='true';")
+  JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND method='resume_approval' AND payload->>'resume_from_approval_id'='$RESUME_APPROVAL_ID' AND status='done' AND last_error IS NULL;")
+  RESULT_MSG=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$RESUME_RUN_ID' AND type='tool_result' AND props->>'approval_id'='$RESUME_APPROVAL_ID' AND props->>'call_id'='call_momo_178_echo' AND props->>'is_error'='false';")
+  AUDIT_OK=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$RESUME_RUN_ID' AND action IN ('approval.resume','tool.executed');")
+  BROADCAST_PENDING=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->'payload'->>'run_id'='$RESUME_RUN_ID' AND payload->'data'->'payload'->>'type'='tool_result' AND status='pending';")
+
+  if [ "$RUN_DONE" = "1" ] && [ "$JOB_DONE" = "1" ] \
+    && [ "$RESULT_MSG" = "1" ] && [ "$AUDIT_OK" = "2" ] \
+    && [ "$BROADCAST_PENDING" = "1" ]; then
+    RESUME_OK=1
+    break
+  fi
+  sleep 1
+done
+
+if [ "$RESUME_OK" != "1" ]; then
+  echo "[agent-worker] approved resume path did not verify" >&2
+  tail -160 "$WORKER_LOG" >&2 || true
+  exit 1
+fi
+
+echo "[agent-worker] approved resume path verified: tool_result + audit + resume job done"
 
 echo "[agent-worker] seeding low-limit circuit-breaker fixture"
 psql_run <<SQL
