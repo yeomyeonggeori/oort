@@ -18,7 +18,7 @@
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.
-- `message.new` server broadcast payload와 AgentWorker `agent.status`/`agent.partial` progress payload를 MomoCore snake_case decode 계약에 맞췄다. MOMO-192에서 `/v1/auth/realtime-token` endpoint가 추가됐고, macOS SwiftCentrifuge live implementation은 후속이다.
+- `message.new` server broadcast payload와 AgentWorker `agent.status`/`agent.partial` progress payload를 MomoCore snake_case decode 계약에 맞췄다. MOMO-192에서 `/v1/auth/realtime-token` endpoint가 추가됐고, MOMO-193에서 Core/macOS replay driver seam이 추가됐다. 실제 SwiftCentrifuge adapter/live e2e는 후속이다.
 - 검증: `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 
 ## 0-2. MOMO-192 Server realtime-token endpoint (2026-06-29)
@@ -26,6 +26,12 @@
 - `POST /v1/auth/realtime-token`을 protected auth group에 추가했다. App access JWT 검증 후 RLS tenant read로 `member.status='active'`를 재확인하고, `sub=member_id`/`ws=workspace_id`/JSON `info`가 담긴 short-lived Centrifugo connection JWT를 발급한다.
 - 일반 `ch:`/`dm:` 구독 권한은 계속 `/v1/centrifugo/subscribe` membership guard가 맡는다. 클라이언트 direct publish 금지와 tenant write path NOBYPASSRLS 원칙은 변경 없음.
 - 검증: `cd server && swift build` PASS, `cd server && swift test` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS. Docker smoke: `make up` + `make migrate`, server `:20830`, login → realtime-token 발급 PASS(`ttlSeconds=300`, token_len=506), invalid bearer 401 PASS. Full Centrifugo WebSocket connect/subscribe는 SwiftCentrifuge driver ticket에서 계속 검증.
+
+## 0-3. MOMO-193 RealtimeSubscriptionDriver v0 (2026-06-29)
+
+- `clients/Core`에 `RealtimeSubscriptionDriver`, `RealtimeEnvelopeSubscriptionTransport`, `RealtimeReplayController`를 추가해 `message.seq` duplicate drop, gap buffering, REST backfill, buffered replay drain을 deterministic하게 처리한다.
+- `MomoServerRESTChatBackend.subscribe(channel:)`는 optional realtime driver를 주입받아 마지막 REST history seq 이후부터 live stream을 시작할 수 있다. driver 미주입 시 기존 empty stream/demo fallback은 유지된다.
+- SwiftCentrifuge 실제 dependency는 아직 추가하지 않았다. 따라서 NOTICE/THIRD_PARTY 변경은 없으며, live SwiftCentrifuge adapter/reconnect/recovery e2e는 계속 `runtime-unverified` 후속이다. 검증: `swift test --package-path clients/Core` PASS, `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
