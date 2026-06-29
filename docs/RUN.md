@@ -343,7 +343,10 @@ swift build --package-path clients/macOS
 swift run --package-path clients/macOS MomoMacSmoke
 
 # SwiftUI 개발용 macOS window 실행(인메모리 demo seed — DB/Centrifugo/hermes 불필요)
-swift run --package-path clients/macOS MomoMacDevApp
+scripts/macos_dev_run.sh
+
+# PR evidence용 GUI opt-in: launch → process/window smoke → logs → terminate
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 ```
 
 - `MomoMac`(library): `MomoCore`의 `ChatBackend`/`AgentTransport` 계약 위에 SwiftUI 뷰 + `LiveChatBackend` 스텁.
@@ -352,6 +355,14 @@ swift run --package-path clients/macOS MomoMacDevApp
   in-memory demo seed로 channel list, message list, cost UI, Approval Inbox를 표시한다.
 - smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
   실제 서버에 붙는 라이브 트랜스포트는 후속 티켓에서 배포용 `.app`과 함께 추가.
+- `scripts/macos_dev_run.sh`: build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
+  `swift build --package-path clients/macOS --product MomoMacDevApp` 후 `dist/MomoMacDevApp.app`을
+  생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified
+  log capture, `--telemetry`는 bundle subsystem log capture, `--terminate`는 evidence 수집 후 종료,
+  `--terminate-only`는 실행 중인 dev app 정리에 사용한다. 이 bundle은 개발용 staging 산출물이며
+  Xcode `.app` 패키징, Developer ID signing, 공증, DMG/Sparkle 배포는 M4 범위다.
+- Codex app Run action은 `.codex/environments/environment.toml`에서 `./scripts/macos_dev_run.sh`로
+  연결된다.
 
 ---
 
@@ -444,8 +455,9 @@ M1 staging 완료로 표시하지 않는다.
 | `make up` | `docker compose -f infra/docker-compose.yml up -d` | runtime-verifiable; MOMO-001/002에서 pass |
 | `make down` | `docker compose -f infra/docker-compose.yml down` | runtime-verifiable |
 
-- 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`/`MomoMacSmoke`/`MomoMacDevApp`)은 Makefile 타깃이 아니라
-  **5·6장의 `swift run … <Executable>`로 직접** 띄운다.
+- 서비스 실행(`MomoServer`/`OutboxRelay`/`AgentWorker`)은 Makefile 타깃이 아니라
+  **5장의 `swift run … <Executable>`로 직접** 띄운다. macOS GUI 개발 앱은 6장의
+  `scripts/macos_dev_run.sh`를 사용해 dev-only `.app` bundle로 띄운다.
 - `make build`/`make test`는 **`Package.swift`가 실제로 존재하는 패키지만** 순회하므로,
   일부 패키지가 없어도 안전하게 동작한다.
 
@@ -476,7 +488,8 @@ python3 -m py_compile adapters/hermes/momo_adapter.py
 jq empty infra/prod/centrifugo.prod.json
 
 # --- 선택적 수동 UI 확인: macOS window를 열고, 창을 닫으면 종료 ---
-swift run --package-path clients/macOS MomoMacDevApp
+scripts/macos_dev_run.sh --verify --logs
+scripts/macos_dev_run.sh --terminate-only
 
 # --- 전체 런타임 기동 (PG18 + Centrifugo v6 환경) ---
 cp infra/.env.example .env       # 값 채움 (openssl rand -hex 32)
