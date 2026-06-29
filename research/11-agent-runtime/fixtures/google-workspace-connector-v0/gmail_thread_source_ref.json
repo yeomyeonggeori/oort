@@ -1,0 +1,242 @@
+{
+  "schema": "momo.google_workspace.fixture.v0",
+  "fixture": "gmail_thread_source_ref",
+  "created_at": "2026-06-27T09:05:00Z",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "grant": {
+    "grant_id": "gw_grant_gmail_user_001",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "google_subject": "google-sub-118000000000000000001",
+    "google_primary_email_hash": "sha256:user-primary-email-redacted-001",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly"
+    ],
+    "scope_grant_version": "google-workspace-grant@2026-06-27:gmail-001",
+    "token_storage_ref": "secret://google-workspace/gw_grant_gmail_user_001/refresh-token",
+    "status": "active",
+    "created_at": "2026-06-27T08:25:00Z",
+    "last_verified_at": "2026-06-27T09:04:55Z",
+    "revoked_at": null
+  },
+  "source_ref": {
+    "schema": "momo.google_workspace.source_ref.v0",
+    "source_id": "src_gw_gmail_launch_customer_thread",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "provider": "google_workspace",
+    "source_kind": "gmail",
+    "provider_account": {
+      "google_subject": "google-sub-118000000000000000001",
+      "primary_email_redacted": "d***@example.com",
+      "hosted_domain": "example.com"
+    },
+    "provider_resource": {
+      "gmail_thread_id": "thread-17cafe122fixture",
+      "gmail_message_ids": [
+        "msg-17cafe122a",
+        "msg-17cafe122b"
+      ],
+      "history_id": "97751",
+      "label_ids": [
+        "INBOX",
+        "IMPORTANT"
+      ],
+      "subject_redacted": "Customer launch wording question",
+      "participants_redacted": [
+        "customer@example-customer.com",
+        "d***@example.com"
+      ],
+      "internal_date_range": {
+        "from": "2026-06-25T22:10:00Z",
+        "to": "2026-06-26T01:20:00Z"
+      },
+      "query": "from:customer@example-customer.com newer_than:14d subject:launch"
+    },
+    "permission_snapshot": {
+      "actor": "read",
+      "provider_grant_version": "google-workspace-grant@2026-06-27:gmail-001",
+      "oauth_scopes": [
+        "https://www.googleapis.com/auth/gmail.readonly"
+      ],
+      "resource_scope": "mailbox_query:from-customer-newer-than-14d-subject-launch:max_threads_3",
+      "momo_visibility": "personal",
+      "verification_class": "gmail.readonly-restricted"
+    },
+    "sync_state": {
+      "retrieved_at": "2026-06-27T09:05:00Z",
+      "cursor": {
+        "history_id": "97751"
+      },
+      "read_path": "gmail.users.threads.get:bounded_excerpt",
+      "query_semantics": "gmail_api_search_no_thread_wide_ui_expansion"
+    },
+    "excerpt": {
+      "title": "Customer launch wording question",
+      "body": "Customer asks whether beta limits should be described as capacity windows instead of throttling. Internal recipient addresses redacted.",
+      "language": "en",
+      "redactions": [
+        "pii_email:internal_recipients",
+        "quoted_reply_trimmed"
+      ]
+    },
+    "lifecycle": {
+      "delete_path": "momo://settings/connectors/google-workspace/sources/src_gw_gmail_launch_customer_thread/unlink",
+      "revoked_at": null,
+      "deleted_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "hide"
+    },
+    "audit": {
+      "connector_policy_version": "google-workspace-connector@2026-06-27",
+      "source_policy_versions": [
+        "memory-policy@2026-06-26",
+        "capability-policy@2026-06-26"
+      ],
+      "provider_request_id": "gmail-request-redacted-001",
+      "cited_by_context_packet_ids": [
+        "90000000-0000-7000-8000-000000000123"
+      ]
+    }
+  },
+  "context_packet_projection": {
+    "schema": "momo.context_packet.google_workspace_projection.v0",
+    "packet_id": "90000000-0000-7000-8000-000000000123",
+    "sources": [
+      {
+        "source_id": "src_gw_gmail_launch_customer_thread",
+        "kind": "gmail",
+        "title": "Gmail thread: Customer launch wording question",
+        "uri": "momo://sources/google-workspace/gmail/src_gw_gmail_launch_customer_thread",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "permission_snapshot": "actor:read provider_grant:gmail.readonly query_window:14d max_threads:3 visibility:personal",
+        "retrieved_at": "2026-06-27T09:05:00Z",
+        "excerpt": "Customer asks whether beta limits should be described as capacity windows instead of throttling. Internal recipient addresses redacted.",
+        "checksum": "sha256:gmail-thread-launch-customer-excerpt"
+      }
+    ],
+    "redactions": [
+      {
+        "redaction_id": "red_gmail_internal_recipients",
+        "kind": "pii_email",
+        "placeholder": "[redacted-internal-email]",
+        "reason": "Gmail thread participants include internal recipients not needed for task."
+      }
+    ]
+  },
+  "memory_plane_projection": {
+    "schema": "momo.memory_item.v0",
+    "memory_id": "92000000-0000-7000-8000-000000000123",
+    "memory_type": "external_source_ref",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject": {
+      "kind": "external_source",
+      "provider": "google_workspace",
+      "source_kind": "gmail",
+      "provider_resource_id": "thread-17cafe122fixture"
+    },
+    "statement": {
+      "summary": "A user-selected Gmail thread can answer customer launch wording questions for this member only.",
+      "body": "Keep the thread personal unless the user explicitly shares it into a momo channel. Store bounded excerpt and provider ref only.",
+      "structured": {
+        "source_id": "src_gw_gmail_launch_customer_thread",
+        "visibility_reason": "personal_mailbox"
+      },
+      "language": "en",
+      "source_quote_policy": "excerpt_only"
+    },
+    "visibility": {
+      "scope": "personal",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject_member_id": "44444444-4444-7444-8444-444444444401",
+      "required_roles": [],
+      "source_visibility_policy": "source_grants_required"
+    },
+    "source_refs": [
+      {
+        "source_id": "src_gw_gmail_launch_customer_thread",
+        "source_kind": "gmail",
+        "uri": "momo://sources/google-workspace/gmail/src_gw_gmail_launch_customer_thread",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "provider_grant_version": "google-workspace-grant@2026-06-27:gmail-001",
+        "provider_resource_id": "thread-17cafe122fixture",
+        "permission_snapshot": "actor:read provider_grant:gmail.readonly query_window:14d visibility:personal",
+        "retrieved_at": "2026-06-27T09:05:00Z",
+        "excerpt": "Customer asks whether beta limits should be described as capacity windows instead of throttling.",
+        "checksum": "sha256:gmail-thread-launch-customer-excerpt"
+      }
+    ],
+    "permissions": {
+      "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+      "created_by_kind": "human",
+      "write_policy_version": "memory-policy@2026-06-26",
+      "retrieval_policy_version": "memory-policy@2026-06-26+google-workspace-connector@2026-06-27",
+      "allowed_request_surfaces": [
+        "mention",
+        "slash_command"
+      ]
+    },
+    "validity": {
+      "created_at": "2026-06-27T09:05:00Z",
+      "expires_at": "2026-07-27T09:05:00Z",
+      "stale_after": "2026-07-04T09:05:00Z",
+      "refresh_policy": "on_access"
+    },
+    "lifecycle": {
+      "delete_path": "momo://settings/memory/personal/92000000-0000-7000-8000-000000000123/delete",
+      "deleted_at": null,
+      "revoked_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "hide"
+    }
+  },
+  "capability_cache_projection": {
+    "schema": "momo.context_packet.tool_grants_projection.v0",
+    "packet_id": "90000000-0000-7000-8000-000000000123",
+    "tool_grants": [
+      {
+        "tool_name": "google_workspace.gmail.search_threads",
+        "provider": "google_workspace",
+        "grant": "read",
+        "risk": "read",
+        "approval_policy": "none",
+        "allowed_operations": [
+          "search_threads",
+          "fetch_thread_metadata",
+          "fetch_thread_excerpt"
+        ],
+        "denied_operations": [
+          "send_email",
+          "create_draft",
+          "modify_labels"
+        ],
+        "input_schema_ref": "momo://capability-cache/google_workspace.gmail.search_threads/schemas/input/sha256:gmsgmailsearchv0",
+        "resource_scope_ref": "momo://capability-cache/google_workspace.gmail.search_threads/resource-scopes/sha256:mailboxquery14d",
+        "resource_scope_summary": "personal_mailbox_query:newer_than_14d max_threads:3",
+        "capability_version": "google-workspace-connector@2026-06-27",
+        "policy_version": "capability-policy@2026-06-26"
+      },
+      {
+        "tool_name": "google_workspace.gmail.send",
+        "provider": "google_workspace",
+        "grant": "propose",
+        "risk": "write",
+        "approval_policy": "always",
+        "allowed_operations": [
+          "propose_send_email"
+        ],
+        "denied_operations": [
+          "execute_without_approval",
+          "permanent_delete_message"
+        ],
+        "input_schema_ref": "momo://capability-cache/google_workspace.gmail.send/schemas/input/sha256:gmsgmailsendv0",
+        "resource_scope_ref": "momo://capability-cache/google_workspace.gmail.send/resource-scopes/sha256:no-write-scope-installed",
+        "resource_scope_summary": "write_scope_absent:proposal_only",
+        "capability_version": "google-workspace-connector@2026-06-27",
+        "policy_version": "capability-policy@2026-06-26"
+      }
+    ]
+  }
+}
