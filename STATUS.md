@@ -315,6 +315,12 @@
 - REST mode는 `server/Migrations/002_seed.sql` demo workspace/channel/member fixture를 dev-safe 기본값으로 쓰고, unauthorized/offline/decoding 실패는 `ChatViewModel.connectionError` banner로 표시한다.
 - 검증: `swift test --package-path clients/macOS` pass(19 tests). WebSocket/Centrifugo live subscription, full auth/session UI, server approval endpoint 변경은 out of scope이며 `runtime-unverified`.
 
+## 0ap. MOMO-185 AgentWorker All-Profile Gate Isolation Hotfix (2026-06-29)
+
+- post-merge `scripts/local_gate.sh --profile all`에서 `verify_approval_decision.sh`가 남긴 `resume_approval` agent_job을 `verify_agent_worker.sh`가 먼저 claim하는 verifier 간섭을 확인했다.
+- 제품 회귀는 아니었다. MOMO-178 v0 executor는 `github.create_issue` 같은 외부 write tool을 deterministic mock allowlist 밖으로 보고 fail-closed 처리했으며, 실패 지점은 all-profile fixture isolation이었다.
+- `scripts/verify_agent_worker.sh`는 demo workspace의 pending/processing `agent_job` queue를 시작 전에 비워 자기 fixture만 검증하도록 정리했다. 또한 all-profile에서 직전 OutboxRelay가 tool_result broadcast를 즉시 `done`으로 소비할 수 있으므로, broadcast 검증은 `pending|done` non-failed row 존재로 고정했다. MOMO-178의 unsupported tool fail-closed 동작은 유지한다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

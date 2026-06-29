@@ -151,6 +151,14 @@ SET LOCAL app.workspace_id = '$WORKSPACE_ID';
 
 DELETE FROM usage_ledger WHERE run_id IN ('$RUN_ID', '$TRIP_RUN_ID');
 DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
+-- The all-profile local gate runs approval-decision verification before this
+-- script. That verifier intentionally leaves a resume_approval job as durable
+-- evidence, but this AgentWorker verifier owns the demo workspace queue while
+-- it runs and must not claim another verifier's pending agent_job first.
+DELETE FROM outbox
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND kind = 'agent_job'
+   AND status IN ('pending', 'processing');
 DELETE FROM outbox WHERE payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
    OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID'
    OR payload->'data'->'payload'->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID');
@@ -357,11 +365,15 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND method='resume_approval' AND payload->>'resume_from_approval_id'='$RESUME_APPROVAL_ID' AND status='done' AND last_error IS NULL;")
   RESULT_MSG=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$RESUME_RUN_ID' AND type='tool_result' AND props->>'approval_id'='$RESUME_APPROVAL_ID' AND props->>'call_id'='call_momo_178_echo' AND props->>'is_error'='false';")
   AUDIT_OK=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$RESUME_RUN_ID' AND action IN ('approval.resume','tool.executed');")
-  BROADCAST_PENDING=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->'payload'->>'run_id'='$RESUME_RUN_ID' AND payload->'data'->'payload'->>'type'='tool_result' AND status='pending';")
+  # In the all-profile gate, a relay process from the previous verifier can
+  # consume this broadcast quickly. The invariant is that AgentWorker created a
+  # non-failed broadcast outbox row for the tool_result, not that it remains
+  # pending at the exact polling instant.
+  BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->'payload'->>'run_id'='$RESUME_RUN_ID' AND payload->'data'->'payload'->>'type'='tool_result' AND status IN ('pending', 'done') AND last_error IS NULL;")
 
   if [ "$RUN_DONE" = "1" ] && [ "$JOB_DONE" = "1" ] \
     && [ "$RESULT_MSG" = "1" ] && [ "$AUDIT_OK" = "2" ] \
-    && [ "$BROADCAST_PENDING" = "1" ]; then
+    && [ "$BROADCAST_OK" = "1" ]; then
     RESUME_OK=1
     break
   fi
