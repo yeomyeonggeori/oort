@@ -376,6 +376,18 @@
 - [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #105를 `status:needs-review`로 전환하고 merge하지 않는다.
 
+### MOMO-174 수용기준 `[swift/macos-ui]`
+- [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] 기존 `LocalContextCopilotService`를 Context Packet 스타일 compact output v1으로 확장한다.
+- [x] summary/classification/redaction/source hints가 `momo.context_packet.compaction.v1` packet에서 안정적으로 파생된다.
+- [x] source id/URI/citation이 compaction 후에도 `sourceReferences`와 compact output에 보존된다.
+- [x] Foundation Models 실제 호출은 `canImport`/availability-safe wrapper 뒤에 두고, 미지원/오류 환경은 deterministic fallback으로 green 유지한다.
+- [x] macOS sidebar compact context preview는 짧은 `sidebarPreview`와 bounded source row로 표시해 과도한 넘침을 피한다.
+- [x] focused macOS tests로 deterministic fallback, Context Packet output, source/citation preservation, ViewModel refresh를 고정한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #113을 `status:needs-review`로 전환하고 merge하지 않는다.
+
 ### MOMO-163 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.
 - [ ] 최소 MCP tool surface를 `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call`로 고정한다.

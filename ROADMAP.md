@@ -90,7 +90,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-172` | M2 | inbound MCP server v0 skeleton/spec-to-code bridge | server registry/routes/stub + endpoint/security docs |
 | `MOMO-170` | M3 | macOS agent protocol cards | `tool_call`/approval/result/artifact cards + Context Packet/Memory/Capability/source/cost badges + SwiftUI fixture contract |
 | `MOMO-171` | M3 | macOS approval_request card decisions | Approve/Reject buttons call `ChatBackend.decideApproval(ApprovalDecisionRequest)` and reconcile receipt/realtime state |
-| `MOMO-174` | M3 | local LLM context compaction | source-preserving summaries + server fallback |
+| `MOMO-174` | M3 | local LLM context compaction | 완료: source-preserving Context Packet compaction v1 + availability-safe Foundation Models route + deterministic fallback |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
@@ -175,7 +175,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 
 ### 3.2 🖥 데스크탑 트랙 (macOS)
 - **v0 UX**(M3): D/B/C 실데이터 바인딩.
-- **Local LLM UX**(M3): Foundation Models availability probe는 `MomoMac` target 안에서 완료했다(MOMO-130). MOMO-131은 macOS sidebar에서 local summarization/classification/context compaction/PII redaction preview shell을 추가하고, 미지원 OS와 CI/local gate는 deterministic fallback/stub으로 green 유지한다. 실제 Foundation Models generation/session 기반 context compaction은 MOMO-174에서 source-preserving server fallback과 함께 확장한다.
+- **Local LLM UX**(M3): Foundation Models availability probe는 `MomoMac` target 안에서 완료했다(MOMO-130). MOMO-131은 macOS sidebar에서 local summarization/classification/context compaction/PII redaction preview shell을 추가하고, 미지원 OS와 CI/local gate는 deterministic fallback/stub으로 green 유지한다. MOMO-174는 source id/URI/citation을 보존하는 Context Packet compaction v1과 availability-safe Foundation Models generation wrapper를 추가했다.
 - **macOS 개발 loop**(M3): `build-macos-apps` 플러그인은 SwiftPM build/test/triage와 GUI 실행 표준화에 사용한다. 후속 `MOMO-134`에서 `script/build_and_run.sh`가 `dist/MomoMacDevApp.app`을 staging하고 Codex Run action을 연결한다.
 - **Onboarding dev UX**(M2/M3 bridge): MOMO-012는 실제 서버 join API 전에도 `MomoMacDevApp`에서 invite code 입력, join 성공/실패, workspace join 상태를 `LiveChatBackend` stub으로 확인할 수 있게 한다.
 - **Agent protocol cards**(M3): `MOMO-170`은 macOS timeline에서 `tool_call`, `approval_request`, `tool_result`, `artifact`, cost, memory citation, source badge를 Context Packet/Memory Plane/Capability Cache projection으로 렌더하는 v0 contract다. `MOMO-171`은 `approval_request` 카드의 Approve/Reject 개발 UX를 `ChatBackend` approval decision 계약에 연결한다. 정본: `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`.
