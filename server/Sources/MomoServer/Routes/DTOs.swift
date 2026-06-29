@@ -63,6 +63,38 @@ struct MessagePage: ResponseEncodable {
     let nextBefore: Int64?
 }
 
+// ---- Workspace roster ----
+
+/// Workspace member roster entry for client/agent surfaces.
+///
+/// Human-only and agent-only fields are intentionally sparse. The tenant roster
+/// exposes identity and routing metadata, not agent secrets or execution config.
+struct RosterMemberDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let kind: String
+    let status: String
+    let displayName: String
+    let handle: String
+    let avatarUrl: String?
+    let role: String?
+    let channelCount: Int
+    let email: String?
+    let timeZone: String?
+    let agentModel: String?
+    let ownerHumanId: String?
+    let maxConcurrentRuns: Int?
+    let maxRunSteps: Int?
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
+struct WorkspaceRosterResponse: ResponseEncodable {
+    let members: [RosterMemberDTO]
+    let humanCount: Int
+    let agentCount: Int
+}
+
 // ---- Approval decisions ----
 
 /// POST /v1/workspaces/{ws}/approvals/{approval}/decision request body.
