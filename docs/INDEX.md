@@ -124,6 +124,8 @@
 | [`research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/`](../research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/) | Hermes Adapter Contract v0 JSON fixtures(OpenAI-compatible SSE input, platform adapter event mapping) |
 | [`research/11-agent-runtime/12-google-workspace-connector-v0.md`](../research/11-agent-runtime/12-google-workspace-connector-v0.md) | Google Workspace Connector v0 정본 스펙(per-user OAuth, Drive/Gmail/Calendar read-mostly sync, Context Packet/Memory/Capability projection, approval-gated writes) |
 | [`research/11-agent-runtime/fixtures/google-workspace-connector-v0/`](../research/11-agent-runtime/fixtures/google-workspace-connector-v0/) | Google Workspace Connector v0 JSON fixtures(Drive source ref, Gmail thread ref, Calendar availability projection) |
+| [`research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`](../research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md) | Google Workspace Enterprise Admin v0 정본 스펙(enterprise admin install, domain-wide delegation option, scope inventory, service account boundary, delegated user, audit export, revoke/delete) |
+| [`research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`](../research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/) | Google Workspace Enterprise Admin v0 JSON fixtures(admin install scope inventory, DWD delegated Context/Memory/Capability projection, audit export revoke flow) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

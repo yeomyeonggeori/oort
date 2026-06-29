@@ -1,0 +1,157 @@
+{
+  "schema": "momo.google_workspace_enterprise_admin.fixture.v0",
+  "fixture": "audit_export_revoke_flow",
+  "created_at": "2026-06-29T09:10:00Z",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "export": {
+    "schema": "momo.google_workspace_enterprise_audit_export.v0",
+    "export_id": "gwe_audit_export_001",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "requested_by_member_id": "44444444-4444-7444-8444-444444444410",
+    "requested_by_role": "workspace_admin",
+    "time_range": {
+      "from": "2026-06-29T08:00:00Z",
+      "to": "2026-06-29T09:10:00Z"
+    },
+    "filters": {
+      "enterprise_install_id": "gwe_install_example_002",
+      "delegated_subject_hash": "sha256:delegated-user-redacted-001",
+      "event_types": [
+        "enterprise_install.created",
+        "scope_inventory.approved",
+        "delegated_token.minted",
+        "source_ref.cited",
+        "capability.projected",
+        "enterprise_install.revoked"
+      ]
+    },
+    "format": "json",
+    "content_policy": "ids_hashes_policy_versions_no_provider_tokens_no_raw_google_bodies"
+  },
+  "events": [
+    {
+      "event_id": "audit_gwe_001",
+      "event_type": "enterprise_install.created",
+      "occurred_at": "2026-06-29T08:10:00Z",
+      "actor_member_id": "44444444-4444-7444-8444-444444444410",
+      "enterprise_install_id": "gwe_install_example_002",
+      "google_customer_id": "C01example",
+      "hosted_domains": [
+        "example.com"
+      ],
+      "policy_version": "google-workspace-enterprise-policy@2026-06-29"
+    },
+    {
+      "event_id": "audit_gwe_002",
+      "event_type": "scope_inventory.approved",
+      "occurred_at": "2026-06-29T08:20:00Z",
+      "actor_member_id": "44444444-4444-7444-8444-444444444410",
+      "scope_inventory_version": "google-workspace-enterprise-scopes@2026-06-29:002",
+      "scopes": [
+        {
+          "scope": "https://www.googleapis.com/auth/calendar.freebusy",
+          "classification": "sensitive",
+          "dwd_allowed": true,
+          "dwd_default": false
+        }
+      ]
+    },
+    {
+      "event_id": "audit_gwe_003",
+      "event_type": "service_account_boundary.activated",
+      "occurred_at": "2026-06-29T08:40:00Z",
+      "actor_member_id": "44444444-4444-7444-8444-444444444410",
+      "service_account_boundary_id": "gwe_sa_boundary_example_active",
+      "service_account_client_id_hash": "sha256:service-account-client-id-redacted-002",
+      "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_002/workload-identity",
+      "key_material_policy": "no_static_key_preferred"
+    },
+    {
+      "event_id": "audit_gwe_004",
+      "event_type": "delegated_token.minted",
+      "occurred_at": "2026-06-29T09:04:58Z",
+      "runtime_actor": "momo-server",
+      "enterprise_install_id": "gwe_install_example_002",
+      "service_account_boundary_id": "gwe_sa_boundary_example_active",
+      "delegated_subject_hash": "sha256:delegated-user-redacted-001",
+      "scopes": [
+        "https://www.googleapis.com/auth/calendar.freebusy"
+      ],
+      "resource_scope": "calendar:primary time_window:2026-07-01..2026-07-08",
+      "purpose": "answer launch-week availability question",
+      "token_ttl_seconds": 3600,
+      "token_material_exported": false
+    },
+    {
+      "event_id": "audit_gwe_005",
+      "event_type": "source_ref.cited",
+      "occurred_at": "2026-06-29T09:05:00Z",
+      "context_packet_id": "90000000-0000-7000-8000-000000000223",
+      "source_id": "src_gwe_calendar_delegated_launch_week",
+      "source_kind": "calendar",
+      "delegated_subject_hash": "sha256:delegated-user-redacted-001",
+      "excerpt_checksum": "sha256:gwe-calendar-delegated-week-excerpt"
+    },
+    {
+      "event_id": "audit_gwe_006",
+      "event_type": "capability.projected",
+      "occurred_at": "2026-06-29T09:05:00Z",
+      "context_packet_id": "90000000-0000-7000-8000-000000000223",
+      "tool_name": "google_workspace.calendar.availability",
+      "grant": "read",
+      "risk": "read",
+      "approval_policy": "none",
+      "resource_scope_ref": "momo://capability-cache/google_workspace.calendar.availability/resource-scopes/sha256:gwedwdprimary7d"
+    },
+    {
+      "event_id": "audit_gwe_007",
+      "event_type": "enterprise_install.revoked",
+      "occurred_at": "2026-06-29T09:08:00Z",
+      "actor_member_id": "44444444-4444-7444-8444-444444444410",
+      "enterprise_install_id": "gwe_install_example_002",
+      "reason": "customer_admin_requested_revoke",
+      "stopped_delegated_token_minting": true,
+      "credential_storage_action": "disabled",
+      "manual_google_admin_cleanup_required": true
+    }
+  ],
+  "revoke_effects": {
+    "enterprise_install": {
+      "enterprise_install_id": "gwe_install_example_002",
+      "previous_dwd_status": "active",
+      "new_dwd_status": "revoked",
+      "revoked_at": "2026-06-29T09:08:00Z"
+    },
+    "capability_cache_invalidations": [
+      {
+        "cache_entry_id": "gwe_cap_calendar_availability_001",
+        "tool_name": "google_workspace.calendar.availability",
+        "invalidated_reason": "enterprise_install_revoked",
+        "invalidated_at": "2026-06-29T09:08:00Z"
+      }
+    ],
+    "source_ref_invalidations": [
+      {
+        "source_id": "src_gwe_calendar_delegated_launch_week",
+        "invalidated_reason": "domain_wide_delegation_revoked",
+        "future_context_packet_visibility": "hidden",
+        "tombstone_policy": "hide"
+      }
+    ],
+    "memory_revalidation_queue": [
+      {
+        "memory_id": "92000000-0000-7000-8000-000000000223",
+        "revalidation_reason": "enterprise_install_revoked",
+        "expected_decision": "hide"
+      }
+    ],
+    "admin_notice": {
+      "message": "momo stopped delegated token minting and disabled local credential use. A Google Workspace super admin must remove or review the API Controls domain-wide delegation client authorization manually.",
+      "manual_steps": [
+        "review_google_admin_console_api_controls",
+        "remove_domain_wide_delegation_client_if_no_longer_needed",
+        "rotate_or_delete_service_account_key_if_static_key_was_used"
+      ]
+    }
+  }
+}

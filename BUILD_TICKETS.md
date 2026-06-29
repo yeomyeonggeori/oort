@@ -283,7 +283,7 @@
 | `MOMO-120` | Context Packet v0 spec and fixtures | spec/swift | MOMO-003, MOMO-110 |
 | `MOMO-121` | Memory Plane v0 spec and permission model | spec | MOMO-120 |
 | `MOMO-122` | Google Workspace connector v0: per-user OAuth read-mostly sync | runtime/spec | MOMO-120, MOMO-121 |
-| `MOMO-123` | Domain-wide delegation/admin install design | spec/manual | MOMO-122 |
+| `MOMO-123` | Google Workspace enterprise admin install + DWD option design | spec/manual | MOMO-122 |
 | `MOMO-151` | Context Packet v0 deep spec and fixtures | spec | MOMO-150 |
 | `MOMO-152` | Memory Plane v0 deep spec and permission model | spec | MOMO-151 |
 | `MOMO-153` | Capability Cache v0 spec and invalidation model | spec | MOMO-151, MOMO-152 |
@@ -317,6 +317,17 @@
 - [x] Gmail send, Calendar create/update, Drive share/upload/permission change 등 external write는 approval-gated 또는 v0 out of scope로 명시한다.
 - [x] 코드/스키마 구현 없이 문서/fixture만 변경하며, `scripts/local_gate.sh --profile docs`를 통과한다.
 
+### MOMO-123 수용기준 `[spec/manual]`
+- [x] GitHub issue #114 claim: `docs/114-google-workspace-enterprise-admin-install-v0-spec-and-fixtures` 별도 worktree/branch + issue assign + `status:in-progress`.
+- [x] `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`에 enterprise admin install / domain-wide delegation v0 정본을 추가한다.
+- [x] Domain-wide delegation을 MOMO-122 per-user OAuth 기본값과 분리하고, enterprise-only admin option으로 고정한다.
+- [x] admin consent, service account boundary, scope inventory, user delegation, audit export, revoke/delete flow를 정의한다.
+- [x] Context Packet, Memory Plane, Capability Cache projection/revalidation/invalidation과 연결한다.
+- [x] `research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`에 JSON fixture 3종을 추가한다.
+- [ ] 실제 Google Workspace admin 승인, API Controls 설정, OAuth verification, service account credential setup은 사람 `[manual]` 범위로 남긴다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
 ### MOMO-161 수용기준 `[spec/swift/runtime]`
 - [x] `research/11-agent-runtime/08-approval-pause-resume-runtime.md`에 approval pause/resume 정본을 추가한다.
 - [x] `tool_call → approval_request → approval_decision → resume/deny → tool_result/audit` 흐름과 same-run resume 모델을 정의한다.
@@ -329,7 +340,7 @@
 
 - Context Packet은 `{goal,constraints,decisions,sources,permissions,budget,redactions}`를 고정 필드로 시작한다.
 - 장기 메모리는 raw chat exhaust가 아니라 `decision/preference/artifact/task_state/external_source_ref`로 제한한다.
-- Google Workspace v0는 per-user OAuth + read-mostly sync다. write는 approval card 뒤로 둔다.
+- Google Workspace v0는 per-user OAuth + read-mostly sync다. Domain-wide delegation은 enterprise-only option이며, write는 approval card 뒤로 둔다.
 
 ## M3 Local LLM UX / Agent Protocol / macOS Dev Loop
 

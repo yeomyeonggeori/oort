@@ -408,11 +408,13 @@ M0(baseline)
 - **마일스톤:** M2 · **에픽:** EP-GWORKSPACE/EP-TRUST · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-122
 - **수용기준:**
-  - [ ] [spec] domain-wide delegation을 enterprise-only 옵션으로 문서화
-  - [ ] [spec] admin approval, scope inventory, audit export, revoke path 정의
+  - [x] [spec] domain-wide delegation을 enterprise-only 옵션으로 문서화
+  - [x] [spec] admin approval, service account boundary, scope inventory, user delegation, audit export, revoke/delete path 정의
+  - [x] [spec] Context Packet / Memory Plane / Capability Cache projection과 invalidation 연결
+  - [x] [spec] enterprise admin fixture 3종 추가
   - [ ] [manual] 실제 Google Workspace admin 승인/검증은 사람 위임 런북으로 분리
-- **라벨:** `type:spec`, `area:server`, `area:legal`, `priority:p2`, `size:m`, `agent:codex-ok`
-- **참조:** `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`
+- **라벨:** `type:spec`, `area:adapter`, `area:tenancy`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`
 
 ---
 
