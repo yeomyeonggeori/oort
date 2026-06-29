@@ -149,6 +149,7 @@
 | `MOMO-111` | GitHub Actions 비주요 기간용 local PR gate 스크립트와 evidence flow | ci/docs | MOMO-110, MOMO-154 |
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
+| `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub agentic work OS 시장 분석 + repo topology ADR | docs/spec | MOMO-150 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
@@ -182,6 +183,15 @@
 - [x] `scripts/local_gate.sh --profile runtime-relay`가 Docker compose/migrate/server/relay/message send/evidence 검증을 자동 실행한다.
 - [x] worktree별 `.env.worktree` 포트/`COMPOSE_PROJECT_NAME` isolation을 사용한다.
 - [x] 실패 시 local gate evidence log와 verifier server/relay/history log path를 남긴다.
+
+### MOMO-194 수용기준 `[tooling/docs]`
+- [x] GitHub #144를 `scripts/goal_claim.sh 144`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/local_gate.sh` evidence/log filename에 pid, nanosecond timestamp, random suffix, worktree hash를 포함한다.
+- [x] 같은 초에 같은 docs gate를 2개 이상 병렬 실행해도 evidence/log 파일 충돌이 나지 않는다.
+- [x] PR body에 붙일 `Evidence markdown` 및 `Evidence log` path가 `## Local Gate` block에 정확히 출력된다.
+- [x] `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #144를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-005 수용기준 `[infra/docs]`
 - [x] `scripts/goal_claim.sh 5` 시도. 이슈가 `status:ready`가 아니어서 fallback으로 별도 worktree/branch를 수동 생성하고 issue `status:in-progress`를 적용.

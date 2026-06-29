@@ -345,6 +345,12 @@
 - `README.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/INDEX.md`에 정본 링크와 상태를 반영했다. agent host, protocol surface, self-hosted trust boundary, local LLM future 방향을 제품 copy에 연결했다.
 - 코드/스키마/runtime 변경은 없으며 runtime 영향 없음. 검증: `scripts/local_gate.sh --profile docs` PASS.
 
+## 0ar. MOMO-194 Parallel-Safe Local Gate Evidence Filenames (2026-06-29)
+
+- `scripts/local_gate.sh` evidence/log 파일명을 `profile + UTC second + pid + nanosecond timestamp + worktree hash + random suffix` 기반 run id로 생성하도록 바꿔, 같은 초에 같은 profile gate를 병렬 실행해도 파일 충돌을 피한다.
+- PR body에 붙이는 `## Local Gate` block에 `Run ID`, 정확한 `Evidence markdown`, `Evidence log` 경로를 함께 출력한다.
+- 런타임/스키마 변경은 없으며 검증 대상은 docs local gate와 병렬 docs smoke다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

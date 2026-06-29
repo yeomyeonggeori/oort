@@ -35,10 +35,14 @@ Run from repo root:
 scripts/local_gate.sh --profile docs
 ```
 
-The script writes a timestamped log and Markdown evidence file under
+The script writes a log and Markdown evidence file under
 `${TMPDIR:-/tmp}/momo-local-gate` by default, then prints a PR-ready
-`## Local Gate` block to stdout. Use `--output-dir <dir>` or
-`LOCAL_GATE_OUT_DIR=<dir>` when you need a stable local evidence path.
+`## Local Gate` block to stdout. Filenames include the profile, UTC second,
+process id, nanosecond timestamp, worktree hash, and random suffix, for example
+`local-gate-docs-20260629T120000Z-pid1234-ns1780000000000000000-wtab12cd34ef56-r98ab76cd54ef.md`.
+This keeps evidence paths collision-safe when the same profile runs in parallel
+from multiple worktrees. Use `--output-dir <dir>` or `LOCAL_GATE_OUT_DIR=<dir>`
+when you need a stable parent directory for local evidence files.
 
 Profiles:
 
@@ -131,6 +135,9 @@ Paste the block printed by `scripts/local_gate.sh`. Shape:
 - Profile:
 - Started:
 - Finished:
+- Run ID:
+- Evidence markdown:
+- Evidence log:
 - Commands:
 - Runtime coverage:
 - Not covered:
