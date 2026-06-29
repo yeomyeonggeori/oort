@@ -146,4 +146,55 @@ final class MomoServerTests: XCTestCase {
             ]
         ))
     }
+
+    func testApprovalDecisionRequestDecodesMomoCoreWireShape() throws {
+        let data = Data("""
+        {
+          "approval_id": "00000000-0000-7000-8000-000000000901",
+          "approve": true,
+          "reason": "  safe to run  ",
+          "client_decision_id": "00000000-0000-7000-8000-000000167001"
+        }
+        """.utf8)
+
+        let dto = try JSONDecoder().decode(ApprovalDecisionRequestDTO.self, from: data)
+
+        XCTAssertEqual(dto.approvalId.uuidString.lowercased(), "00000000-0000-7000-8000-000000000901")
+        XCTAssertTrue(dto.approve)
+        XCTAssertEqual(dto.clientDecisionId.uuidString.lowercased(), "00000000-0000-7000-8000-000000167001")
+        XCTAssertEqual(ApprovalDecisionRoutes.status(approve: dto.approve), "approved")
+        XCTAssertEqual(ApprovalDecisionRoutes.normalizedReason(dto.reason), "safe to run")
+    }
+
+    func testApprovalDecisionReceiptEncodesSnakeCaseContract() throws {
+        let receipt = ApprovalDecisionReceiptDTO(
+            approvalId: "00000000-0000-7000-8000-000000000901",
+            status: "rejected",
+            decidedBy: "00000000-0000-7000-8000-000000000101",
+            decidedAtMs: 1_782_463_260_000,
+            decisionReason: "Do not create external state."
+        )
+
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(receipt)
+        ) as? [String: Any]
+
+        XCTAssertEqual(object?["approval_id"] as? String, receipt.approvalId)
+        XCTAssertEqual(object?["status"] as? String, "rejected")
+        XCTAssertEqual(object?["decided_by"] as? String, receipt.decidedBy)
+        XCTAssertEqual(object?["decided_at_ms"] as? Int, Int(receipt.decidedAtMs!))
+        XCTAssertNil(object?["approvalId"])
+    }
+
+    func testApprovalDecisionRouteRejectsMismatchedBodyApprovalID() throws {
+        let pathID = UUID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let bodyID = UUID(uuidString: "00000000-0000-7000-8000-000000000902")!
+
+        XCTAssertThrowsError(
+            try ApprovalDecisionRoutes.validateBodyApprovalID(bodyID, pathApprovalID: pathID)
+        )
+        XCTAssertNoThrow(
+            try ApprovalDecisionRoutes.validateBodyApprovalID(pathID, pathApprovalID: pathID)
+        )
+    }
 }

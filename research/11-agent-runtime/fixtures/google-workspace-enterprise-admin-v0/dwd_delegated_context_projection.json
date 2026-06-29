@@ -1,0 +1,215 @@
+{
+  "schema": "momo.google_workspace_enterprise_admin.fixture.v0",
+  "fixture": "dwd_delegated_context_projection",
+  "created_at": "2026-06-29T09:05:00Z",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "enterprise_install": {
+    "enterprise_install_id": "gwe_install_example_002",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "google_customer_id": "C01example",
+    "hosted_domains": [
+      "example.com"
+    ],
+    "install_mode": "enterprise_admin_install",
+    "default_authorization_mode": "per_user_oauth",
+    "dwd_status": "active",
+    "dwd_default": false,
+    "scope_inventory_version": "google-workspace-enterprise-scopes@2026-06-29:002",
+    "service_account_boundary_id": "gwe_sa_boundary_example_active",
+    "policy_version": "google-workspace-enterprise-policy@2026-06-29"
+  },
+  "service_account_boundary": {
+    "service_account_boundary_id": "gwe_sa_boundary_example_active",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "google_customer_id": "C01example",
+    "service_account_client_id_hash": "sha256:service-account-client-id-redacted-002",
+    "service_account_email_redacted": "momo-enterprise@project.iam.gserviceaccount.com",
+    "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_002/workload-identity",
+    "key_material_policy": "no_static_key_preferred",
+    "allowed_subject_domains": [
+      "example.com"
+    ],
+    "allowed_scopes_version": "google-workspace-enterprise-scopes@2026-06-29:002",
+    "status": "active",
+    "last_admin_reviewed_at": "2026-06-29T08:55:00Z"
+  },
+  "delegation_decision": {
+    "delegation_id": "gwe_delegation_calendar_001",
+    "delegated_subject_hash": "sha256:delegated-user-redacted-001",
+    "delegated_subject_redacted": "d***@example.com",
+    "delegated_member_id": "44444444-4444-7444-8444-444444444401",
+    "delegation_basis": "admin_policy",
+    "request_actor_member_id": "44444444-4444-7444-8444-444444444401",
+    "agent_member_id": "55555555-5555-7555-8555-555555555501",
+    "purpose": "answer launch-week availability question",
+    "resource_scope": "calendar:primary time_window:2026-07-01..2026-07-08",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.freebusy"
+    ],
+    "expires_at": "2026-06-29T09:20:00Z"
+  },
+  "source_ref": {
+    "schema": "momo.google_workspace.enterprise_source_ref.v0",
+    "source_id": "src_gwe_calendar_delegated_launch_week",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "provider": "google_workspace",
+    "source_kind": "calendar",
+    "authorization_mode": "domain_wide_delegation",
+    "enterprise_install_id": "gwe_install_example_002",
+    "service_account_boundary_id": "gwe_sa_boundary_example_active",
+    "delegated_subject_hash": "sha256:delegated-user-redacted-001",
+    "provider_resource": {
+      "calendar_id": "primary",
+      "time_min": "2026-07-01T00:00:00+09:00",
+      "time_max": "2026-07-08T00:00:00+09:00",
+      "busy_windows": [
+        {
+          "start": "2026-07-02T10:00:00+09:00",
+          "end": "2026-07-02T11:30:00+09:00"
+        }
+      ],
+      "time_zone": "Asia/Seoul"
+    },
+    "permission_snapshot": {
+      "actor": "read",
+      "provider_grant_version": "gwe_install_example_002+google-workspace-enterprise-scopes@2026-06-29:002",
+      "authorization_mode": "domain_wide_delegation",
+      "dwd_status": "active",
+      "delegated_subject_hash": "sha256:delegated-user-redacted-001",
+      "oauth_scopes": [
+        "https://www.googleapis.com/auth/calendar.freebusy"
+      ],
+      "resource_scope": "calendar:primary time_window:7d",
+      "momo_visibility": "personal",
+      "service_account_boundary_status": "active"
+    },
+    "sync_state": {
+      "retrieved_at": "2026-06-29T09:05:00Z",
+      "read_path": "calendar.freebusy.query:delegated_subject_bounded_window",
+      "token_material": "not_stored_in_fixture"
+    },
+    "excerpt": {
+      "title": "Delegated calendar availability: 2026-07-01 to 2026-07-08",
+      "body": "Busy window: Jul 2 10:00-11:30 KST. No event titles, descriptions, attendees, or token material included.",
+      "language": "en",
+      "redactions": [
+        "attendee_emails",
+        "event_titles",
+        "event_descriptions",
+        "service_account_credentials"
+      ]
+    },
+    "lifecycle": {
+      "delete_path": "momo://settings/connectors/google-workspace-enterprise/sources/src_gwe_calendar_delegated_launch_week/delete",
+      "revoked_at": null,
+      "deleted_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "hide"
+    }
+  },
+  "context_packet_projection": {
+    "schema": "momo.context_packet.google_workspace_enterprise_projection.v0",
+    "packet_id": "90000000-0000-7000-8000-000000000223",
+    "scope": {
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "permission_basis": [
+        "actor_is_workspace_member",
+        "google_workspace_enterprise_install:gwe_install_example_002",
+        "domain_wide_delegation:active",
+        "delegated_subject:sha256:delegated-user-redacted-001",
+        "scope_inventory:calendar.freebusy",
+        "resource_scope:calendar_primary_7d"
+      ],
+      "rls_context": {
+        "set_local_workspace_id": "11111111-1111-7111-8111-111111111111"
+      }
+    },
+    "sources": [
+      {
+        "source_id": "src_gwe_calendar_delegated_launch_week",
+        "kind": "calendar",
+        "title": "Delegated calendar availability: 2026-07-01 to 2026-07-08",
+        "uri": "momo://sources/google-workspace-enterprise/calendar/src_gwe_calendar_delegated_launch_week",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "permission_snapshot": "enterprise_install:gwe_install_example_002 dwd:active delegated_subject:sha256:delegated-user-redacted-001 scope:calendar.freebusy resource:primary window:7d",
+        "retrieved_at": "2026-06-29T09:05:00Z",
+        "excerpt": "Busy window: Jul 2 10:00-11:30 KST.",
+        "checksum": "sha256:gwe-calendar-delegated-week-excerpt"
+      }
+    ],
+    "tool_grants": [
+      {
+        "tool_name": "google_workspace.calendar.availability",
+        "provider": "google_workspace",
+        "grant": "read",
+        "risk": "read",
+        "approval_policy": "none",
+        "allowed_operations": [
+          "query_freebusy"
+        ],
+        "denied_operations": [
+          "list_events_window",
+          "create_event",
+          "update_event",
+          "invite_attendee"
+        ],
+        "input_schema_ref": "momo://capability-cache/google_workspace.calendar.availability/schemas/input/sha256:gwecalendaravailabilityv0",
+        "resource_scope_ref": "momo://capability-cache/google_workspace.calendar.availability/resource-scopes/sha256:gwedwdprimary7d",
+        "resource_scope_summary": "dwd delegated calendar:primary freebusy window:7d",
+        "capability_version": "google-workspace-enterprise-admin@2026-06-29",
+        "policy_version": "capability-policy@2026-06-26+google-workspace-enterprise-policy@2026-06-29"
+      }
+    ],
+    "redactions": [
+      {
+        "redaction_id": "red_gwe_service_account_credentials",
+        "kind": "credential",
+        "placeholder": "[service-account-credential-redacted]",
+        "reason": "Service account credentials are runtime secret material and never enter Context Packet."
+      },
+      {
+        "redaction_id": "red_gwe_calendar_event_titles",
+        "kind": "provider_content",
+        "placeholder": "[event-title-redacted]",
+        "reason": "Only freebusy scope was approved for this delegated read."
+      }
+    ]
+  },
+  "memory_plane_projection": {
+    "schema": "momo.memory_item.v0",
+    "memory_id": "92000000-0000-7000-8000-000000000223",
+    "memory_type": "external_source_ref",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject": {
+      "kind": "external_source",
+      "provider": "google_workspace",
+      "source_kind": "calendar",
+      "authorization_mode": "domain_wide_delegation"
+    },
+    "statement": {
+      "summary": "Delegated freebusy source for launch-week scheduling.",
+      "body": "Short TTL. Recheck enterprise install, DWD status, delegated subject, and calendar resource scope before reuse.",
+      "structured": {
+        "source_id": "src_gwe_calendar_delegated_launch_week",
+        "delegated_subject_hash": "sha256:delegated-user-redacted-001"
+      },
+      "language": "en",
+      "source_quote_policy": "no_quote"
+    },
+    "visibility": {
+      "scope": "personal",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "subject_member_id": "44444444-4444-7444-8444-444444444401",
+      "required_roles": [],
+      "source_visibility_policy": "source_grants_required"
+    },
+    "validity": {
+      "created_at": "2026-06-29T09:05:00Z",
+      "expires_at": "2026-06-30T09:05:00Z",
+      "stale_after": "2026-06-29T10:05:00Z",
+      "refresh_policy": "on_access"
+    }
+  }
+}

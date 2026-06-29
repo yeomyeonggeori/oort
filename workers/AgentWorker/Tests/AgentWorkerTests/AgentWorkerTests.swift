@@ -328,6 +328,48 @@ final class AgentWorkerTests: XCTestCase {
         )
     }
 
+    func testResumeApprovalJobPayloadDecodesServerContract() throws {
+        let json = """
+        {
+          "run_id": "00000000-0000-7000-8000-000000000161",
+          "workspace_id": "00000000-0000-7000-8000-000000000001",
+          "channel_id": "00000000-0000-7000-8000-000000000010",
+          "agent_member_id": "00000000-0000-7000-8000-000000000101",
+          "model": "hermes-agent",
+          "prompt": "",
+          "resume_from_approval_id": "00000000-0000-7000-8000-000000000901",
+          "approved_tool_call": {
+            "call_id": "call_create_issue_001",
+            "name": "github.create_issue",
+            "arguments": {
+              "repo": "Dawn-kim-official/momo",
+              "title": "Demo issue"
+            },
+            "payload_sha256": "sha256:fixture-approved-payload"
+          },
+          "policy_evidence": {
+            "tool_name": "github.create_issue",
+            "approval_policy": "always",
+            "capability_version": "github-plugin@0.3.0",
+            "policy_version": "capability-policy@2026-06-26"
+          },
+          "approval_decision": {
+            "approval_id": "00000000-0000-7000-8000-000000000901",
+            "status": "approved"
+          }
+        }
+        """
+
+        let payload = try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
+
+        XCTAssertEqual(payload.resumeFromApprovalID?.uuidString.lowercased(), "00000000-0000-7000-8000-000000000901")
+        XCTAssertEqual(payload.approvedToolCall?.callID, "call_create_issue_001")
+        XCTAssertEqual(payload.approvedToolCall?.name, "github.create_issue")
+        XCTAssertEqual(payload.approvedToolCall?.payloadSHA256, "sha256:fixture-approved-payload")
+        XCTAssertEqual(payload.policyEvidence?.approvalPolicy, "always")
+        XCTAssertNotNil(payload.approvalDecision)
+    }
+
     private func testConfig() -> Config {
         Config(
             pgHost: "localhost",

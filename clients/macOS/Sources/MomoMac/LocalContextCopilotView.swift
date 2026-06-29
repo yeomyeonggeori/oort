@@ -64,11 +64,12 @@ struct LocalContextCopilotView: View {
                 .lineLimit(3)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text(preview.compressedContext)
+            Text(preview.contextPacket.sidebarPreview)
                 .font(.caption2.monospaced())
                 .foregroundStyle(.secondary)
-                .lineLimit(3)
-                .fixedSize(horizontal: false, vertical: true)
+                .lineLimit(4)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if !preview.redactionHints.isEmpty {
                 Label("\(preview.redactionHints.count) redaction hint", systemImage: "eye.slash")
@@ -84,14 +85,15 @@ struct LocalContextCopilotView: View {
     }
 
     private func sourceRow(_ sources: [LocalContextSourceHint]) -> some View {
-        HStack(spacing: 4) {
+        HStack(alignment: .top, spacing: 4) {
             Image(systemName: "quote.bubble")
                 .foregroundStyle(.secondary)
-            ForEach(sources.prefix(4)) { source in
-                Text(source.id)
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(MomoTheme.agentAccent)
-            }
+            Text(sources.prefix(4).map { "\($0.citation) \($0.id)" }.joined(separator: " · "))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(MomoTheme.agentAccent)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 

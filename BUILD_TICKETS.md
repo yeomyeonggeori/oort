@@ -283,7 +283,7 @@
 | `MOMO-120` | Context Packet v0 spec and fixtures | spec/swift | MOMO-003, MOMO-110 |
 | `MOMO-121` | Memory Plane v0 spec and permission model | spec | MOMO-120 |
 | `MOMO-122` | Google Workspace connector v0: per-user OAuth read-mostly sync | runtime/spec | MOMO-120, MOMO-121 |
-| `MOMO-123` | Domain-wide delegation/admin install design | spec/manual | MOMO-122 |
+| `MOMO-123` | Google Workspace enterprise admin install + DWD option design | spec/manual | MOMO-122 |
 | `MOMO-151` | Context Packet v0 deep spec and fixtures | spec | MOMO-150 |
 | `MOMO-152` | Memory Plane v0 deep spec and permission model | spec | MOMO-151 |
 | `MOMO-153` | Capability Cache v0 spec and invalidation model | spec | MOMO-151, MOMO-152 |
@@ -317,6 +317,17 @@
 - [x] Gmail send, Calendar create/update, Drive share/upload/permission change 등 external write는 approval-gated 또는 v0 out of scope로 명시한다.
 - [x] 코드/스키마 구현 없이 문서/fixture만 변경하며, `scripts/local_gate.sh --profile docs`를 통과한다.
 
+### MOMO-123 수용기준 `[spec/manual]`
+- [x] GitHub issue #114 claim: `docs/114-google-workspace-enterprise-admin-install-v0-spec-and-fixtures` 별도 worktree/branch + issue assign + `status:in-progress`.
+- [x] `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`에 enterprise admin install / domain-wide delegation v0 정본을 추가한다.
+- [x] Domain-wide delegation을 MOMO-122 per-user OAuth 기본값과 분리하고, enterprise-only admin option으로 고정한다.
+- [x] admin consent, service account boundary, scope inventory, user delegation, audit export, revoke/delete flow를 정의한다.
+- [x] Context Packet, Memory Plane, Capability Cache projection/revalidation/invalidation과 연결한다.
+- [x] `research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`에 JSON fixture 3종을 추가한다.
+- [ ] 실제 Google Workspace admin 승인, API Controls 설정, OAuth verification, service account credential setup은 사람 `[manual]` 범위로 남긴다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
 ### MOMO-161 수용기준 `[spec/swift/runtime]`
 - [x] `research/11-agent-runtime/08-approval-pause-resume-runtime.md`에 approval pause/resume 정본을 추가한다.
 - [x] `tool_call → approval_request → approval_decision → resume/deny → tool_result/audit` 흐름과 same-run resume 모델을 정의한다.
@@ -329,7 +340,7 @@
 
 - Context Packet은 `{goal,constraints,decisions,sources,permissions,budget,redactions}`를 고정 필드로 시작한다.
 - 장기 메모리는 raw chat exhaust가 아니라 `decision/preference/artifact/task_state/external_source_ref`로 제한한다.
-- Google Workspace v0는 per-user OAuth + read-mostly sync다. write는 approval card 뒤로 둔다.
+- Google Workspace v0는 per-user OAuth + read-mostly sync다. Domain-wide delegation은 enterprise-only option이며, write는 approval card 뒤로 둔다.
 
 ## M3 Local LLM UX / Agent Protocol / macOS Dev Loop
 
@@ -343,6 +354,7 @@
 | `MOMO-160` | A2A-style agent_run lifecycle alignment | spec/sql/swift | MOMO-151, MOMO-004 |
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
+| `MOMO-167` | approval decision endpoint runtime | swift/sql/runtime | MOMO-161, MOMO-166, MOMO-171 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
 | `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
@@ -383,9 +395,21 @@
 - [x] launch, process smoke, System Events window smoke, unified log capture, telemetry capture, debug, terminate 옵션을 제공한다.
 - [x] `.codex/environments/environment.toml` Run action이 `./scripts/macos_dev_run.sh`를 호출한다.
 - [x] `scripts/local_gate.sh --profile macos-ui` 기본값은 `MomoMacSmoke`만 실행하고 GUI launch는 opt-in으로 유지한다.
-- [ ] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
-- [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
-- [ ] PR 생성 후 GitHub #112를 `status:needs-review`로 전환하고 merge하지 않는다.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] PR 생성 후 GitHub #112를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-174 수용기준 `[swift/macos-ui]`
+- [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] 기존 `LocalContextCopilotService`를 Context Packet 스타일 compact output v1으로 확장한다.
+- [x] summary/classification/redaction/source hints가 `momo.context_packet.compaction.v1` packet에서 안정적으로 파생된다.
+- [x] source id/URI/citation이 compaction 후에도 `sourceReferences`와 compact output에 보존된다.
+- [x] Foundation Models 실제 호출은 `canImport`/availability-safe wrapper 뒤에 두고, 미지원/오류 환경은 deterministic fallback으로 green 유지한다.
+- [x] macOS sidebar compact context preview는 짧은 `sidebarPreview`와 bounded source row로 표시해 과도한 넘침을 피한다.
+- [x] focused macOS tests로 deterministic fallback, Context Packet output, source/citation preservation, ViewModel refresh를 고정한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] PR 생성 후 GitHub #113을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-163 수용기준 `[spec/swift]`
 - [ ] `research/11-agent-runtime/09-inbound-mcp-server-v0.md`에 inbound MCP server v0 정본을 추가한다.
@@ -415,6 +439,17 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #91을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-167 수용기준 `[swift/sql/runtime]`
+- [x] GitHub #111을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `approval_decision` migration을 추가해 `client_decision_id` idempotency ledger와 FORCE RLS policy를 둔다. `schema_v0.sql` 정본은 수정하지 않는다.
+- [x] `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 호환 `POST /v1/agent-runs/{run}/approval-decisions`를 추가한다.
+- [x] app-role tenant transaction에서 active human + channel membership + workspace scope를 검증한다.
+- [x] approve/reject/expired/idempotent retry/idempotency conflict를 durable approval/audit/outbox/message effects와 함께 처리한다.
+- [x] approve는 same-run resume `outbox(kind='agent_job', method='resume_approval')` payload contract를 AgentWorker decoder와 연결한다.
+- [x] server/worker focused tests와 `scripts/verify_approval_decision.sh` runtime verifier를 추가한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #111을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.

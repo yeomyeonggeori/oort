@@ -1,6 +1,10 @@
 import Foundation
 import MomoCore
 
+#if canImport(FoundationModels)
+import FoundationModels
+#endif
+
 public enum LocalContextCopilotRoute: Equatable, Sendable {
     case foundationModels
     case deterministicFallback(FoundationModelsCapabilityFallbackReason)
@@ -28,12 +32,14 @@ public struct LocalContextSourceHint: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let uri: String
+    public let citation: String
     public let excerpt: String
 
-    public init(id: String, title: String, uri: String, excerpt: String) {
+    public init(id: String, title: String, uri: String, citation: String? = nil, excerpt: String) {
         self.id = id
         self.title = title
         self.uri = uri
+        self.citation = citation ?? "[\(id)]"
         self.excerpt = excerpt
     }
 }
@@ -66,6 +72,76 @@ public struct LocalContextRedactionHint: Identifiable, Equatable, Sendable {
     }
 }
 
+public struct LocalContextSourceReference: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let uri: String
+    public let citation: String
+
+    public init(id: String, uri: String, citation: String) {
+        self.id = id
+        self.uri = uri
+        self.citation = citation
+    }
+}
+
+public struct LocalContextCompactionPacket: Equatable, Sendable {
+    public let schema: String
+    public let packetVersion: Int
+    public let summary: String
+    public let classification: LocalContextClassification
+    public let sources: [LocalContextSourceHint]
+    public let redactions: [LocalContextRedactionHint]
+
+    public init(
+        schema: String = "momo.context_packet.compaction.v1",
+        packetVersion: Int = 1,
+        summary: String,
+        classification: LocalContextClassification,
+        sources: [LocalContextSourceHint],
+        redactions: [LocalContextRedactionHint]
+    ) {
+        self.schema = schema
+        self.packetVersion = packetVersion
+        self.summary = summary
+        self.classification = classification
+        self.sources = sources
+        self.redactions = redactions
+    }
+
+    public var sourceReferences: [LocalContextSourceReference] {
+        sources.map { source in
+            LocalContextSourceReference(id: source.id, uri: source.uri, citation: source.citation)
+        }
+    }
+
+    public var compactPreview: String {
+        let sourceRefs = sourceReferences
+            .map { "\($0.id){citation=\($0.citation),uri=\($0.uri)}" }
+            .joined(separator: ",")
+        let redactionRefs = redactions
+            .map { "\($0.id){kind=\($0.kind),source=\($0.sourceId)}" }
+            .joined(separator: ",")
+        let tags = classification.tags.joined(separator: ",")
+        let summaryPreview = summary
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+        return "schema=\(schema);v=\(packetVersion);intent=\(classification.intent);risk=\(classification.riskHint);tags=[\(tags)];sources=[\(sourceRefs)];redactions=[\(redactionRefs)];summary=\"\(summaryPreview)\""
+    }
+
+    public var sidebarPreview: String {
+        let sourceRefs = sourceReferences
+            .map { "\($0.id):\($0.citation)" }
+            .joined(separator: ",")
+        let redactionRefs = redactions
+            .map { "\($0.kind)@\($0.sourceId)" }
+            .joined(separator: ",")
+        let summaryPreview = summary
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\"", with: "'")
+        return "schema=\(schema); intent=\(classification.intent); risk=\(classification.riskHint); sources=[\(sourceRefs)]; redactions=[\(redactionRefs)]; summary=\"\(summaryPreview)\""
+    }
+}
+
 public struct LocalContextCopilotPreview: Equatable, Sendable {
     public let route: LocalContextCopilotRoute
     public let summary: String
@@ -73,6 +149,7 @@ public struct LocalContextCopilotPreview: Equatable, Sendable {
     public let compressedContext: String
     public let redactionHints: [LocalContextRedactionHint]
     public let sourceHints: [LocalContextSourceHint]
+    public let contextPacket: LocalContextCompactionPacket
 
     public init(
         route: LocalContextCopilotRoute,
@@ -80,14 +157,21 @@ public struct LocalContextCopilotPreview: Equatable, Sendable {
         classification: LocalContextClassification,
         compressedContext: String,
         redactionHints: [LocalContextRedactionHint],
-        sourceHints: [LocalContextSourceHint]
+        sourceHints: [LocalContextSourceHint],
+        contextPacket: LocalContextCompactionPacket? = nil
     ) {
         self.route = route
         self.summary = summary
         self.classification = classification
-        self.compressedContext = compressedContext
         self.redactionHints = redactionHints
         self.sourceHints = sourceHints
+        self.contextPacket = contextPacket ?? LocalContextCompactionPacket(
+            summary: summary,
+            classification: classification,
+            sources: sourceHints,
+            redactions: redactionHints
+        )
+        self.compressedContext = compressedContext
     }
 }
 
@@ -111,7 +195,14 @@ public struct LocalContextCopilotService: Sendable {
     public init() {}
 
     public func preview(_ request: LocalContextCopilotRequest) async -> LocalContextCopilotPreview {
-        DeterministicLocalContextCopilot().preview(request, route: route(for: request.capability))
+        let selectedRoute = route(for: request.capability)
+        let deterministic = DeterministicLocalContextCopilot().preview(request, route: selectedRoute)
+        guard case .foundationModels = selectedRoute,
+              let local = await FoundationModelsLocalContextCompactor().compact(seed: deterministic)
+        else {
+            return deterministic
+        }
+        return local
     }
 
     public func route(for capability: FoundationModelsCapabilityState) -> LocalContextCopilotRoute {
@@ -132,16 +223,22 @@ struct DeterministicLocalContextCopilot: Sendable {
         let sourceHints = sourceHints(from: request.messages, channel: request.channel)
         let summary = summary(from: sourceHints)
         let classification = classification(from: sourceHints)
-        let compressedContext = compressedContext(from: sourceHints, classification: classification)
         let redactions = redactionHints(from: sourceHints)
+        let packet = LocalContextCompactionPacket(
+            summary: summary,
+            classification: classification,
+            sources: sourceHints,
+            redactions: redactions
+        )
 
         return LocalContextCopilotPreview(
             route: route,
             summary: summary,
             classification: classification,
-            compressedContext: compressedContext,
+            compressedContext: packet.compactPreview,
             redactionHints: redactions,
-            sourceHints: sourceHints
+            sourceHints: sourceHints,
+            contextPacket: packet
         )
     }
 
@@ -164,11 +261,12 @@ struct DeterministicLocalContextCopilot: Sendable {
                 id: sourceId,
                 title: "\(channelName) \(seqText)",
                 uri: "momo://channels/\(item.0.channelId.description)/messages/\(item.0.id.description)",
+                citation: "[\(sourceId)]",
                 excerpt: truncate(clean(item.1), maxCharacters: 160)
             ))
             hints.append(contentsOf: citedSourceHints(from: item.0, parentSourceId: sourceId))
         }
-        return hints
+        return uniqued(hints)
     }
 
     private func extractedText(from message: Message) -> String {
@@ -200,10 +298,12 @@ struct DeterministicLocalContextCopilot: Sendable {
             let title = object["title"]?.stringValue ?? rawId
             let uri = object["uri"]?.stringValue
                 ?? "momo://channels/\(message.channelId.description)/messages/\(message.id.description)"
+            let citation = object["citation"]?.stringValue ?? "[\(rawId)]"
             return LocalContextSourceHint(
-                id: "C\(index + 1)-\(rawId)",
+                id: rawId,
                 title: title,
                 uri: uri,
+                citation: citation,
                 excerpt: "cited by \(parentSourceId)"
             )
         }
@@ -252,19 +352,6 @@ struct DeterministicLocalContextCopilot: Sendable {
         )
     }
 
-    private func compressedContext(
-        from sources: [LocalContextSourceHint],
-        classification: LocalContextClassification
-    ) -> String {
-        guard !sources.isEmpty else {
-            return "intent=none; sources=[]; notes=[]"
-        }
-        let sourceIds = sources.map(\.id).joined(separator: ",")
-        let notes = sources.prefix(4).map { "\($0.id):\(truncate($0.excerpt, maxCharacters: 72))" }
-            .joined(separator: " | ")
-        return "intent=\(classification.intent); risk=\(classification.riskHint); sources=[\(sourceIds)]; notes=\(notes)"
-    }
-
     private func redactionHints(from sources: [LocalContextSourceHint]) -> [LocalContextRedactionHint] {
         var hints: [LocalContextRedactionHint] = []
         for source in sources {
@@ -305,5 +392,164 @@ struct DeterministicLocalContextCopilot: Sendable {
         guard text.count > maxCharacters else { return text }
         let end = text.index(text.startIndex, offsetBy: maxCharacters)
         return String(text[..<end]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
+    }
+
+    private func uniqued(_ sources: [LocalContextSourceHint]) -> [LocalContextSourceHint] {
+        var seen = Set<String>()
+        var output: [LocalContextSourceHint] = []
+        for source in sources where !seen.contains(source.id) {
+            seen.insert(source.id)
+            output.append(source)
+        }
+        return output
+    }
+}
+
+private struct FoundationModelsLocalContextCompactor: Sendable {
+    func compact(seed: LocalContextCopilotPreview) async -> LocalContextCopilotPreview? {
+        #if canImport(FoundationModels)
+        if #available(macOS 26.0, *) {
+            return await FoundationModelsLocalContextCompactorRuntime().compact(seed: seed)
+        }
+        #endif
+        return nil
+    }
+}
+
+#if canImport(FoundationModels)
+@available(macOS 26.0, *)
+private struct FoundationModelsLocalContextCompactorRuntime: Sendable {
+    func compact(seed: LocalContextCopilotPreview) async -> LocalContextCopilotPreview? {
+        do {
+            let session = LanguageModelSession(instructions: instructions)
+            let response = try await session.respond(to: prompt(for: seed))
+            return FoundationModelsCompactionPatch(response.content).applying(to: seed)
+        } catch {
+            return nil
+        }
+    }
+
+    private var instructions: String {
+        """
+        You compact momo channel context for a sidebar preview. Return exactly four lines:
+        summary: <one concise sentence>
+        intent: <one of classify, ask, summarize, create_ticket, approve>
+        risk: <read-only or approval-required>
+        tags: <comma-separated lowercase tags>
+
+        Preserve the supplied source ids by reference. Do not invent new source ids, URIs, or citations.
+        """
+    }
+
+    private func prompt(for seed: LocalContextCopilotPreview) -> String {
+        let sources = seed.contextPacket.sources.map { source in
+            "- \(source.id) citation=\(source.citation) uri=\(source.uri) excerpt=\(source.excerpt)"
+        }
+        .joined(separator: "\n")
+        return """
+        Compact these source-preserving Context Packet inputs.
+
+        Existing deterministic summary:
+        \(seed.summary)
+
+        Existing classification:
+        intent=\(seed.classification.intent)
+        risk=\(seed.classification.riskHint)
+        tags=\(seed.classification.tags.joined(separator: ","))
+
+        Sources:
+        \(sources)
+        """
+    }
+}
+#endif
+
+private struct FoundationModelsCompactionPatch: Sendable {
+    private let summary: String?
+    private let intent: String?
+    private let risk: String?
+    private let tags: [String]?
+
+    init(_ raw: String) {
+        var summary: String?
+        var intent: String?
+        var risk: String?
+        var tags: [String]?
+
+        for line in raw.split(whereSeparator: \.isNewline) {
+            let parts = line.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let value = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { continue }
+            switch key {
+            case "summary":
+                summary = value
+            case "intent":
+                intent = value
+            case "risk":
+                risk = value
+            case "tags":
+                tags = value
+                    .split(separator: ",")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                    .filter { !$0.isEmpty }
+            default:
+                continue
+            }
+        }
+
+        self.summary = summary
+        self.intent = intent
+        self.risk = risk
+        self.tags = tags
+    }
+
+    func applying(to seed: LocalContextCopilotPreview) -> LocalContextCopilotPreview? {
+        guard let summary else { return nil }
+        let classification = LocalContextClassification(
+            intent: stableIntent(intent ?? seed.classification.intent, fallback: seed.classification.intent),
+            confidence: min(0.93, max(seed.classification.confidence, 0.80)),
+            riskHint: stableRisk(risk ?? seed.classification.riskHint, fallback: seed.classification.riskHint),
+            tags: stableTags(tags ?? seed.classification.tags, fallback: seed.classification.tags)
+        )
+        let packet = LocalContextCompactionPacket(
+            summary: summary,
+            classification: classification,
+            sources: seed.contextPacket.sources,
+            redactions: seed.contextPacket.redactions
+        )
+        return LocalContextCopilotPreview(
+            route: seed.route,
+            summary: summary,
+            classification: classification,
+            compressedContext: packet.compactPreview,
+            redactionHints: seed.redactionHints,
+            sourceHints: seed.sourceHints,
+            contextPacket: packet
+        )
+    }
+
+    private func stableIntent(_ proposed: String, fallback: String) -> String {
+        let allowed = ["classify", "ask", "summarize", "create_ticket", "approve"]
+        let normalized = proposed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return allowed.contains(normalized) ? normalized : fallback
+    }
+
+    private func stableRisk(_ proposed: String, fallback: String) -> String {
+        let normalized = proposed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return ["read-only", "approval-required"].contains(normalized) ? normalized : fallback
+    }
+
+    private func stableTags(_ proposed: [String], fallback: [String]) -> [String] {
+        let normalized = proposed
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        let required = ["visible-context", "source-cited"]
+        var output: [String] = []
+        for tag in required + normalized + fallback where !output.contains(tag) {
+            output.append(tag)
+        }
+        return output
     }
 }
