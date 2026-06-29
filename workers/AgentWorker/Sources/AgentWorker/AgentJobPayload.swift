@@ -24,6 +24,10 @@ struct AgentJobPayload: Decodable, Sendable {
     let stepCount: Int?
     let depth: Int?
     let consecutiveAuto: Int?
+    let resumeFromApprovalID: UUID?
+    let approvedToolCall: ApprovedToolCallPayload?
+    let policyEvidence: ToolGrantMetadata?
+    let approvalDecision: JSONValue?
 
     enum CodingKeys: String, CodingKey {
         case runID = "run_id"
@@ -40,6 +44,10 @@ struct AgentJobPayload: Decodable, Sendable {
         case stepCount = "step_count"
         case depth
         case consecutiveAuto = "consecutive_auto"
+        case resumeFromApprovalID = "resume_from_approval_id"
+        case approvedToolCall = "approved_tool_call"
+        case policyEvidence = "policy_evidence"
+        case approvalDecision = "approval_decision"
     }
 
     init(from decoder: Decoder) throws {
@@ -48,8 +56,13 @@ struct AgentJobPayload: Decodable, Sendable {
         agentMemberID = try c.decode(UUID.self, forKey: .agentMemberID)
         channelID = try c.decode(UUID.self, forKey: .channelID)
         workspaceID = try c.decodeIfPresent(UUID.self, forKey: .workspaceID)
-        model = try c.decode(String.self, forKey: .model)
-        prompt = try c.decode(String.self, forKey: .prompt)
+        resumeFromApprovalID = try c.decodeIfPresent(UUID.self, forKey: .resumeFromApprovalID)
+        approvedToolCall = try c.decodeIfPresent(ApprovedToolCallPayload.self, forKey: .approvedToolCall)
+        policyEvidence = try c.decodeIfPresent(ToolGrantMetadata.self, forKey: .policyEvidence)
+        approvalDecision = try c.decodeIfPresent(JSONValue.self, forKey: .approvalDecision)
+
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
         tools = try c.decodeIfPresent(JSONValue.self, forKey: .tools)
 
         let directToolGrants = try c.decodeIfPresent(
@@ -82,6 +95,20 @@ struct AgentJobPayload: Decodable, Sendable {
         guard let first = present.first else { return nil }
         guard present.allSatisfy({ $0 == first }) else { return nil }
         return first
+    }
+}
+
+struct ApprovedToolCallPayload: Decodable, Sendable {
+    let callID: String
+    let name: String
+    let arguments: JSONValue
+    let payloadSHA256: String?
+
+    enum CodingKeys: String, CodingKey {
+        case callID = "call_id"
+        case name
+        case arguments
+        case payloadSHA256 = "payload_sha256"
     }
 }
 
