@@ -150,6 +150,7 @@
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
+| `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub agentic work OS 시장 분석 + repo topology ADR | docs/spec | MOMO-150 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
@@ -192,6 +193,17 @@
 - [x] `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #144를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-199 수용기준 `[tooling/docs]`
+- [x] GitHub #154를 `scripts/goal_claim.sh 154`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/goal_status.sh`가 local worktree branch를 GitHub issue/PR 상태와 매칭한다.
+- [x] closed issue 또는 merged/closed PR에 연결된 worktree를 `done-candidate`/`stale-warning` 섹션으로 분리 표시한다.
+- [x] current/dirty/unpushed/upstream-unknown worktree는 cleanup command를 숨기고 warning reason을 표시한다.
+- [x] 기본 실행은 read-only이며 `git worktree remove`를 자동 실행하지 않는다.
+- [x] clean + pushed/merged candidate에만 copy-paste 가능한 cleanup command를 출력한다.
+- [x] `docs/MULTI_SESSION_OPS.md`, `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `bash -n scripts/goal_status.sh` 및 `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #154를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-005 수용기준 `[infra/docs]`
 - [x] `scripts/goal_claim.sh 5` 시도. 이슈가 `status:ready`가 아니어서 fallback으로 별도 worktree/branch를 수동 생성하고 issue `status:in-progress`를 적용.
