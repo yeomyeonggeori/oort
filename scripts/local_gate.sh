@@ -69,8 +69,29 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT_DIR" || exit 1
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${STAMP}.log"
-EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${STAMP}.md"
+
+RUN_NANOS="$(
+  python3 - <<'PY' 2>/dev/null || date -u +"%s000000000"
+import time
+print(time.time_ns())
+PY
+)"
+WORKTREE_HASH="$(
+  printf '%s' "$REPO_ROOT" | shasum -a 256 2>/dev/null | awk '{ print substr($1, 1, 12) }'
+)"
+if [ "$WORKTREE_HASH" = "" ]; then
+  WORKTREE_HASH="$(printf '%s' "$REPO_ROOT" | cksum | awk '{ print $1 }')"
+fi
+RUN_RANDOM="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-12)"
+if [ "$RUN_RANDOM" = "" ]; then
+  RUN_RANDOM="$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 12)"
+fi
+if [ "$RUN_RANDOM" = "" ]; then
+  RUN_RANDOM="$(date -u +"%s")"
+fi
+RUN_ID="${STAMP}-pid$$-ns${RUN_NANOS}-wt${WORKTREE_HASH}-r${RUN_RANDOM}"
+LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.log"
+EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.md"
 
 declare -a CMD_LABELS=()
 declare -a CMD_STRINGS=()
@@ -242,9 +263,11 @@ fi
 {
   echo "momo local gate"
   echo "profile: $PROFILE"
+  echo "run_id: $RUN_ID"
   echo "repo: $REPO_ROOT"
   echo "started_at_utc: $STAMP"
   echo "log: $LOG_FILE"
+  echo "evidence: $EVIDENCE_FILE"
   echo
   echo "planned commands:"
   local_i=0
@@ -326,10 +349,12 @@ write_evidence() {
     echo "- Profile: \`$PROFILE\`"
     echo "- Started: $START_ISO"
     echo "- Finished: $END_STAMP"
+    echo "- Run ID: \`$RUN_ID\`"
     echo "- Commit: \`$COMMIT\`"
     echo "- Branch: \`$BRANCH\`"
     echo "- Worktree: \`$REPO_ROOT\`"
     echo "- Dirty files: \`$DIRTY_COUNT\`"
+    echo "- Evidence markdown: \`$EVIDENCE_FILE\`"
     echo "- Evidence log: \`$LOG_FILE\`"
     echo "- Machine/toolchain:"
     echo "  - Host: \`$MACHINE\`"
