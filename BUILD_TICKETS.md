@@ -343,6 +343,7 @@
 | `MOMO-160` | A2A-style agent_run lifecycle alignment | spec/sql/swift | MOMO-151, MOMO-004 |
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
+| `MOMO-167` | approval decision endpoint runtime | swift/sql/runtime | MOMO-161, MOMO-166, MOMO-171 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
 | `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
@@ -404,6 +405,17 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #91을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-167 수용기준 `[swift/sql/runtime]`
+- [x] GitHub #111을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `approval_decision` migration을 추가해 `client_decision_id` idempotency ledger와 FORCE RLS policy를 둔다. `schema_v0.sql` 정본은 수정하지 않는다.
+- [x] `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 호환 `POST /v1/agent-runs/{run}/approval-decisions`를 추가한다.
+- [x] app-role tenant transaction에서 active human + channel membership + workspace scope를 검증한다.
+- [x] approve/reject/expired/idempotent retry/idempotency conflict를 durable approval/audit/outbox/message effects와 함께 처리한다.
+- [x] approve는 same-run resume `outbox(kind='agent_job', method='resume_approval')` payload contract를 AgentWorker decoder와 연결한다.
+- [x] server/worker focused tests와 `scripts/verify_approval_decision.sh` runtime verifier를 추가한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #111을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.

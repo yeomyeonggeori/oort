@@ -63,6 +63,40 @@ struct MessagePage: ResponseEncodable {
     let nextBefore: Int64?
 }
 
+// ---- Approval decisions ----
+
+/// POST /v1/workspaces/{ws}/approvals/{approval}/decision request body.
+struct ApprovalDecisionRequestDTO: Decodable {
+    let approvalId: UUID
+    let approve: Bool
+    let reason: String?
+    let clientDecisionId: UUID
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case approve
+        case reason
+        case clientDecisionId = "client_decision_id"
+    }
+}
+
+/// A committed approval decision acknowledgement.
+struct ApprovalDecisionReceiptDTO: ResponseEncodable, Codable, Sendable {
+    let approvalId: String
+    let status: String
+    let decidedBy: String?
+    let decidedAtMs: Int64?
+    let decisionReason: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case status
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+    }
+}
+
 // ---- Invites ----
 
 /// POST /v1/workspaces/{ws}/invites request body.
