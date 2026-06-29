@@ -229,7 +229,12 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   RUN_OK=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RUN_ID' AND status='succeeded';")
   OUTBOX_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$RUN_ID' AND status='done';")
   USAGE_OK=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$RUN_ID' AND prompt_tokens=11 AND completion_tokens=7 AND cost_micro_usd=6 AND was_estimated=false;")
-  WINDOW_OK=$(psql_scalar "SELECT count(*) FROM budget_window WHERE budget_id='$BUDGET_ID' AND reserved_micro_usd=0 AND spent_micro_usd=6;")
+  # In the full local gate, approval-decision verification can leave a valid
+  # same-run resume agent_job that the worker processes before this fixture.
+  # The immutable usage_ledger assertion above proves this run's exact cost;
+  # the shared workspace budget window only needs to show that reservations
+  # were released and at least this run's spend was reconciled.
+  WINDOW_OK=$(psql_scalar "SELECT count(*) FROM budget_window WHERE budget_id='$BUDGET_ID' AND reserved_micro_usd=0 AND spent_micro_usd>=6;")
 
   HISTORY_JSON=$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
     -H "Content-Type: application/json" \
