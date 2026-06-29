@@ -44,7 +44,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax |
+| `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
 | `staging-smoke` | staging/prod config/runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` for prod compose config, Caddyfile structure, Centrifugo Redis config, secret-template guard, and SOPS/pgBackRest checklist |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
@@ -80,6 +80,7 @@ Run from repo root:
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make test
 python3 -m py_compile adapters/hermes/momo_adapter.py
+python3 adapters/hermes/tests/smoke_momo_adapter.py
 jq empty .github/labels.json infra/centrifugo.json
 ```
 

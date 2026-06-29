@@ -37,7 +37,12 @@ enum AppBuilder {
         router.get("/health") { _, _ -> HealthResponse in
             HealthResponse(status: "ok", service: "MomoServer")
         }
-        AuthRoutes(db: db, jwt: jwt).add(to: router)
+        AuthRoutes(
+            db: db,
+            jwt: jwt,
+            platformAdminEmails: config.platformAdminEmails,
+            platformAdminLoginSecret: config.platformAdminLoginSecret
+        ).add(to: router)
         JoinRoutes(db: db, jwt: jwt).add(to: router)
         CentrifugoRoutes(db: db).add(to: router)
 
@@ -48,17 +53,23 @@ enum AppBuilder {
         MessageRoutes(db: db).add(to: authed)
         InviteRoutes(db: db).add(to: authed)
         InboundMCPRoutes(db: db).add(to: authed)
+        PlatformAdminRoutes(db: db).add(to: authed)
 
         // ---- Application ----
         // The PostgresClient is a ServiceLifecycle.Service; hand it to the app's
         // ServiceGroup so its run() drives the pool and shuts down gracefully.
+        var services: [any Service] = [db.client]
+        if let platformReadClient = db.platformReadClient {
+            services.append(platformReadClient)
+        }
+
         var app = Application(
             router: router,
             configuration: .init(
                 address: .hostname(config.host, port: config.port),
                 serverName: "MomoServer"
             ),
-            services: [db.client],
+            services: services,
             logger: logger
         )
 

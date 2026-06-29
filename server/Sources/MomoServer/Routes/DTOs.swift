@@ -196,6 +196,70 @@ struct JoinResponse: ResponseEncodable {
     let createdMember: Bool
 }
 
+// ---- Platform admin read-only inspection ----
+
+struct PlatformWorkspaceDTO: ResponseEncodable, Decodable {
+    let id: String
+    let slug: String
+    let name: String
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+    let memberCount: Int
+    let humanCount: Int
+    let agentCount: Int
+    let activeMemberCount: Int
+    let inviteCodeCount: Int
+    let activeInviteCodeCount: Int
+    let inviteRedemptionCount: Int
+    let lastInviteUsedAtMs: Int64?
+}
+
+struct PlatformWorkspaceListResponse: ResponseEncodable {
+    let workspaces: [PlatformWorkspaceDTO]
+}
+
+struct PlatformMemberDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let workspaceSlug: String
+    let kind: String
+    let status: String
+    let displayName: String
+    let handle: String
+    let email: String?
+    let agentModel: String?
+    let membershipCount: Int
+    let inviteRedemptionCount: Int
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
+struct PlatformMemberListResponse: ResponseEncodable {
+    let members: [PlatformMemberDTO]
+}
+
+struct PlatformInviteDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let workspaceSlug: String
+    let codePreview: String
+    let role: String
+    let maxUses: Int
+    let usedCount: Int
+    let redemptionCount: Int
+    let expiresAtMs: Int64
+    let revokedAtMs: Int64?
+    let revokedBy: String?
+    let createdBy: String
+    let lastUsedAtMs: Int64?
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
+struct PlatformInviteListResponse: ResponseEncodable {
+    let invites: [PlatformInviteDTO]
+}
+
 // ---- Centrifugo subscribe proxy ----
 
 /// Request body Centrifugo sends to the subscribe proxy endpoint (L4 §4.3).

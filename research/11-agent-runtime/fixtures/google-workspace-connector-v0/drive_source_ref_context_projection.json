@@ -1,0 +1,246 @@
+{
+  "schema": "momo.google_workspace.fixture.v0",
+  "fixture": "drive_source_ref_context_projection",
+  "created_at": "2026-06-27T09:00:00Z",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "grant": {
+    "grant_id": "gw_grant_drive_user_001",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "google_subject": "google-sub-118000000000000000001",
+    "google_primary_email_hash": "sha256:user-primary-email-redacted-001",
+    "scopes": [
+      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive.metadata.readonly"
+    ],
+    "scope_grant_version": "google-workspace-grant@2026-06-27:drive-001",
+    "token_storage_ref": "secret://google-workspace/gw_grant_drive_user_001/refresh-token",
+    "status": "active",
+    "created_at": "2026-06-27T08:20:00Z",
+    "last_verified_at": "2026-06-27T08:59:55Z",
+    "revoked_at": null
+  },
+  "source_ref": {
+    "schema": "momo.google_workspace.source_ref.v0",
+    "source_id": "src_gw_drive_prd_v4",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject_member_id": "44444444-4444-7444-8444-444444444401",
+    "provider": "google_workspace",
+    "source_kind": "google_drive",
+    "provider_account": {
+      "google_subject": "google-sub-118000000000000000001",
+      "primary_email_redacted": "d***@example.com",
+      "hosted_domain": "example.com"
+    },
+    "provider_resource": {
+      "drive_file_id": "1DrvSelectedPrdV4Fixture",
+      "drive_id": null,
+      "shared_drive_id": null,
+      "name": "Launch PRD v4",
+      "mime_type": "application/vnd.google-apps.document",
+      "web_url": "https://docs.google.com/document/d/1DrvSelectedPrdV4Fixture/edit",
+      "resource_key": null,
+      "revision_id": "86",
+      "modified_time": "2026-06-27T08:45:00Z",
+      "trashed": false
+    },
+    "permission_snapshot": {
+      "actor": "read",
+      "provider_grant_version": "google-workspace-grant@2026-06-27:drive-001",
+      "oauth_scopes": [
+        "https://www.googleapis.com/auth/drive.file",
+        "https://www.googleapis.com/auth/drive.metadata.readonly"
+      ],
+      "resource_scope": "selected_file:1DrvSelectedPrdV4Fixture",
+      "momo_visibility": "channel",
+      "verification_class": "drive.file-non-sensitive-plus-metadata-readonly-restricted"
+    },
+    "sync_state": {
+      "retrieved_at": "2026-06-27T09:00:00Z",
+      "cursor": {
+        "start_page_token_ref": "cursor://google-workspace/drive/user-001/start-page-token/redacted",
+        "last_change_id": "drive-change-4482"
+      },
+      "read_path": "drive.files.export:selected_excerpt",
+      "query_semantics": "selected_file_picker"
+    },
+    "excerpt": {
+      "title": "Launch PRD v4",
+      "body": "Launch scope: agent-native messenger, Google Workspace source citations, and approval-gated external writes.",
+      "language": "en",
+      "redactions": []
+    },
+    "lifecycle": {
+      "delete_path": "momo://settings/connectors/google-workspace/sources/src_gw_drive_prd_v4/unlink",
+      "revoked_at": null,
+      "deleted_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "keep_citation_only"
+    },
+    "audit": {
+      "connector_policy_version": "google-workspace-connector@2026-06-27",
+      "source_policy_versions": [
+        "memory-policy@2026-06-26",
+        "capability-policy@2026-06-26"
+      ],
+      "provider_request_id": "drive-request-redacted-001",
+      "cited_by_context_packet_ids": [
+        "90000000-0000-7000-8000-000000000122"
+      ]
+    }
+  },
+  "context_packet_projection": {
+    "schema": "momo.context_packet.google_workspace_projection.v0",
+    "packet_id": "90000000-0000-7000-8000-000000000122",
+    "request": {
+      "surface": "mention",
+      "actor_member_id": "44444444-4444-7444-8444-444444444401",
+      "agent_member_id": "55555555-5555-7555-8555-555555555501",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "normalized_intent": "summarize_launch_prd_with_citations"
+    },
+    "scope": {
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "permission_basis": [
+        "actor_is_workspace_member",
+        "actor_is_channel_member",
+        "agent_is_channel_member",
+        "google_workspace_grant:drive.file",
+        "google_workspace_resource_scope:selected_file"
+      ],
+      "rls_context": {
+        "set_local_workspace_id": "11111111-1111-7111-8111-111111111111"
+      }
+    },
+    "sources": [
+      {
+        "source_id": "src_gw_drive_prd_v4",
+        "kind": "google_drive",
+        "title": "Launch PRD v4",
+        "uri": "https://docs.google.com/document/d/1DrvSelectedPrdV4Fixture/edit",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "permission_snapshot": "actor:read provider_grant:drive.file resource:selected_file revision:86",
+        "retrieved_at": "2026-06-27T09:00:00Z",
+        "excerpt": "Launch scope: agent-native messenger, Google Workspace source citations, and approval-gated external writes.",
+        "checksum": "sha256:drive-prd-v4-excerpt"
+      }
+    ],
+    "redactions": []
+  },
+  "memory_plane_projection": {
+    "schema": "momo.memory_item.v0",
+    "memory_id": "92000000-0000-7000-8000-000000000122",
+    "memory_type": "external_source_ref",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "subject": {
+      "kind": "external_source",
+      "provider": "google_workspace",
+      "source_kind": "google_drive",
+      "provider_resource_id": "1DrvSelectedPrdV4Fixture"
+    },
+    "statement": {
+      "summary": "Launch PRD v4 is a selected Drive source for launch-scope answers.",
+      "body": "Use the Drive source ref and bounded excerpt only; do not copy the full document into memory.",
+      "structured": {
+        "source_id": "src_gw_drive_prd_v4",
+        "artifact_kind": "prd"
+      },
+      "language": "en",
+      "source_quote_policy": "excerpt_only"
+    },
+    "visibility": {
+      "scope": "channel",
+      "workspace_id": "11111111-1111-7111-8111-111111111111",
+      "channel_id": "22222222-2222-7222-8222-222222222222",
+      "required_roles": [],
+      "source_visibility_policy": "source_grants_required"
+    },
+    "source_refs": [
+      {
+        "source_id": "src_gw_drive_prd_v4",
+        "source_kind": "google_drive",
+        "uri": "https://docs.google.com/document/d/1DrvSelectedPrdV4Fixture/edit",
+        "workspace_id": "11111111-1111-7111-8111-111111111111",
+        "provider_grant_version": "google-workspace-grant@2026-06-27:drive-001",
+        "provider_resource_id": "1DrvSelectedPrdV4Fixture",
+        "permission_snapshot": "actor:read provider_grant:drive.file resource:selected_file revision:86",
+        "retrieved_at": "2026-06-27T09:00:00Z",
+        "excerpt": "Launch scope: agent-native messenger, Google Workspace source citations, and approval-gated external writes.",
+        "checksum": "sha256:drive-prd-v4-excerpt"
+      }
+    ],
+    "permissions": {
+      "created_by_member_id": "44444444-4444-7444-8444-444444444401",
+      "created_by_kind": "human",
+      "write_policy_version": "memory-policy@2026-06-26",
+      "retrieval_policy_version": "memory-policy@2026-06-26+google-workspace-connector@2026-06-27",
+      "allowed_request_surfaces": [
+        "mention",
+        "message_context_action"
+      ]
+    },
+    "validity": {
+      "created_at": "2026-06-27T09:00:00Z",
+      "expires_at": "2027-06-27T09:00:00Z",
+      "stale_after": "2026-07-27T09:00:00Z",
+      "refresh_policy": "provider_change_token"
+    },
+    "lifecycle": {
+      "delete_path": "momo://memory/92000000-0000-7000-8000-000000000122/unlink",
+      "deleted_at": null,
+      "revoked_at": null,
+      "invalidated_at": null,
+      "invalidated_reason": null,
+      "tombstone_policy": "keep_citation_only"
+    }
+  },
+  "capability_cache_projection": {
+    "schema": "momo.context_packet.tool_grants_projection.v0",
+    "packet_id": "90000000-0000-7000-8000-000000000122",
+    "tool_grants": [
+      {
+        "tool_name": "google_workspace.drive.search",
+        "provider": "google_workspace",
+        "grant": "read",
+        "risk": "read",
+        "approval_policy": "none",
+        "allowed_operations": [
+          "search_files",
+          "fetch_file_metadata",
+          "fetch_file_excerpt"
+        ],
+        "denied_operations": [
+          "share_file",
+          "change_permission",
+          "upload_file"
+        ],
+        "input_schema_ref": "momo://capability-cache/google_workspace.drive.search/schemas/input/sha256:gwsdrivesearchv0",
+        "resource_scope_ref": "momo://capability-cache/google_workspace.drive.search/resource-scopes/sha256:selectedfileprd4",
+        "resource_scope_summary": "selected_file:Launch PRD v4",
+        "capability_version": "google-workspace-connector@2026-06-27",
+        "policy_version": "capability-policy@2026-06-26"
+      },
+      {
+        "tool_name": "google_workspace.drive.share_file",
+        "provider": "google_workspace",
+        "grant": "propose",
+        "risk": "identity",
+        "approval_policy": "always",
+        "allowed_operations": [
+          "propose_share_file"
+        ],
+        "denied_operations": [
+          "execute_without_approval",
+          "change_owner"
+        ],
+        "input_schema_ref": "momo://capability-cache/google_workspace.drive.share_file/schemas/input/sha256:gwsdrivesharev0",
+        "resource_scope_ref": "momo://capability-cache/google_workspace.drive.share_file/resource-scopes/sha256:selectedfileprd4",
+        "resource_scope_summary": "selected_file:Launch PRD v4",
+        "capability_version": "google-workspace-connector@2026-06-27",
+        "policy_version": "capability-policy@2026-06-26"
+      }
+    ]
+  }
+}

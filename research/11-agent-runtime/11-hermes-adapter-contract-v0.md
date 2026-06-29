@@ -83,7 +83,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/
 | `agentworker_openai_sse_input.json` | Canonical AgentWorker request into Hermes/Kim Intern OpenAI-compatible SSE, including Context Packet, approval, cost, and audit controls. |
 | `platform_adapter_event_mapping.json` | Optional platform adapter mention event mapping into momo REST invoke/send concepts. |
 
-## 7. Lightweight Contract Test
+## 7. Lightweight Contract Test And Smoke
 
 `adapters/hermes/tests/test_momo_adapter_contract.py` is a stdlib unittest that does not require the Hermes SDK, aiohttp, websockets, Docker, or Postgres. It verifies:
 
@@ -91,9 +91,10 @@ Fixtures live in `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/
 - forbidden runtime inputs are not present in the request body;
 - a platform adapter Centrifugo push unwraps to the expected adapter event;
 - `MomoAdapter.handle_message()` maps that event to REST invoke and final message send shapes;
+- `adapters/hermes/tests/smoke_momo_adapter.py` can run the same fixture as a repo-local smoke and capture REST calls without network;
 - `register_platform()` can register the adapter with a gateway-like registry.
 
-Runtime-unverified remains: loading `plugin.yaml` inside a live Hermes gateway and running the platform adapter against live momo + Centrifugo + Postgres. MOMO-004 already verified the AgentWorker SSE path with the repo-local OpenAI-compatible mock; external Hermes staging should re-run that path before release.
+`scripts/local_gate.sh --profile docs` runs `py_compile`, the unittest, and the standalone smoke script so fixture drift fails before PR handoff. Runtime-unverified remains: loading `plugin.yaml` inside a live Hermes gateway and running the platform adapter against live momo + Centrifugo + Postgres. MOMO-004 already verified the AgentWorker SSE path with the repo-local OpenAI-compatible mock; external Hermes staging should re-run that path before release.
 
 ## 8. External Code Policy
 
@@ -101,6 +102,6 @@ No Mattermost, Hermes, OpenClaw, or other external implementation code is copied
 
 ## 9. Follow-Ups
 
-- Add live Hermes gateway adapter smoke once a Hermes test instance is available.
+- Add live Hermes gateway adapter smoke once a Hermes test instance is available; current repo-local smoke proves mapping only, not plugin load/e2e.
 - Keep platform adapter manifests versioned against the Hermes SDK when the exact production plugin schema is confirmed.
 - Ensure future inbound MCP or Google Workspace writes enter through the same Context Packet -> approval -> audit path.

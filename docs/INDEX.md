@@ -122,6 +122,8 @@
 | [`research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/`](../research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/) | Approval Decision Server Contract v0 JSON fixtures(approve/reject request/response, expiry result, resume job payload, decided event) |
 | [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../research/11-agent-runtime/11-hermes-adapter-contract-v0.md) | Hermes Adapter Contract v0 정본 스펙(AgentWorker SSE product default, platform adapter optional ingress/interop) |
 | [`research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/`](../research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/) | Hermes Adapter Contract v0 JSON fixtures(OpenAI-compatible SSE input, platform adapter event mapping) |
+| [`research/11-agent-runtime/12-google-workspace-connector-v0.md`](../research/11-agent-runtime/12-google-workspace-connector-v0.md) | Google Workspace Connector v0 정본 스펙(per-user OAuth, Drive/Gmail/Calendar read-mostly sync, Context Packet/Memory/Capability projection, approval-gated writes) |
+| [`research/11-agent-runtime/fixtures/google-workspace-connector-v0/`](../research/11-agent-runtime/fixtures/google-workspace-connector-v0/) | Google Workspace Connector v0 JSON fixtures(Drive source ref, Gmail thread ref, Calendar availability projection) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---

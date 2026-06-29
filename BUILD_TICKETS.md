@@ -224,7 +224,7 @@
 | `MOMO-010` | `003_onboarding.sql` invite_code + redemption audit + RLS FORCE | sql/runtime | MOMO-003 | local gate PASS |
 | `MOMO-011` | 초대코드 발급/조회/폐기 REST + redeem 최소 slice | swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
-| `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | 후속 |
+| `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | local gate 대상 |
 
 ### MOMO-010 수용기준 `[sql/runtime]`
@@ -254,6 +254,17 @@
 - [x] `scripts/local_gate.sh --profile macos-ui` PASS.
 - [x] `scripts/local_gate.sh --profile swift` PASS.
 - out of scope였던 production server `/v1/join` 구현과 DB-backed invite redemption e2e는 MOMO-014에서 서버 runtime slice로 진행한다.
+
+### MOMO-013 수용기준 `[sql/swift/runtime]`
+- [x] v0 platform admin token/scope gate: `PLATFORM_ADMIN_EMAILS` allowlist와 `PLATFORM_ADMIN_LOGIN_SECRET`이 모두 맞는 login에만 `platform:read` scope를 부여한다.
+- [x] `GET /v1/platform/workspaces`, `/v1/platform/members`, `/v1/platform/invites` read-only endpoint 추가.
+- [x] 일반 tenant token은 platform endpoint 접근 403.
+- [x] platform read path는 `PLATFORM_ADMIN_DATABASE_URL` 별도 BYPASSRLS + SELECT-only role과 read-only transaction으로 전 tenant 조회.
+- [x] tenant write/read path는 기존 `DATABASE_URL` + `withTenantTransaction`/`SET LOCAL app.workspace_id` 경로를 유지하고 BYPASSRLS를 쓰지 않는다.
+- [x] `scripts/verify_platform_admin.sh` 추가: 두 개 이상 workspace fixture에서 workspace/member/invite usage 전역 조회, agent metadata, invite raw/hash secret 미노출 검증.
+- [x] `scripts/local_gate.sh --profile runtime-db`에 platform verifier 연결.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS.
 
 ### MOMO-014 수용기준 `[swift/runtime]`
 - [x] Public `POST /v1/join` route를 authenticated workspace-member middleware 밖에 추가.
@@ -298,6 +309,14 @@
 - [ ] Memory Plane v0의 `retrieval_policy_version`과 provider grant revoke/source revalidation 관계를 연결한다.
 - [ ] 코드/스키마 구현 없이 문서/fixture만 변경하며, `jq`와 기존 build/test gate를 통과.
 
+### MOMO-122 수용기준 `[spec]`
+- [x] `research/11-agent-runtime/12-google-workspace-connector-v0.md`에 Google Workspace connector v0의 per-user OAuth, scope policy, token boundary, revocation/delete model을 정의한다.
+- [x] Drive changes/selected file excerpt, Gmail thread/search, Calendar availability/events read path를 read-mostly sync로 고정한다.
+- [x] Google refs가 Context Packet `sources`/`source_refs`, Memory Plane `external_source_ref`, Capability Cache `tool_grants`로 projection되는 방식을 연결한다.
+- [x] `research/11-agent-runtime/fixtures/google-workspace-connector-v0/`에 Drive, Gmail, Calendar JSON fixture 3종을 추가한다.
+- [x] Gmail send, Calendar create/update, Drive share/upload/permission change 등 external write는 approval-gated 또는 v0 out of scope로 명시한다.
+- [x] 코드/스키마 구현 없이 문서/fixture만 변경하며, `scripts/local_gate.sh --profile docs`를 통과한다.
+
 ### MOMO-161 수용기준 `[spec/swift/runtime]`
 - [x] `research/11-agent-runtime/08-approval-pause-resume-runtime.md`에 approval pause/resume 정본을 추가한다.
 - [x] `tool_call → approval_request → approval_decision → resume/deny → tool_result/audit` 흐름과 same-run resume 모델을 정의한다.
@@ -325,6 +344,7 @@
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
+| `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
 | `MOMO-172` | inbound MCP server v0 skeleton/spec-to-code bridge | swift/docs | MOMO-163 |
 | `MOMO-165` | Capability Cache approval metadata gate | swift | MOMO-151, MOMO-153, MOMO-161, MOMO-164 |
@@ -395,6 +415,17 @@
 - [x] `python3 -m py_compile adapters/hermes/momo_adapter.py` PASS.
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #99를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-168 수용기준 `[python/docs]`
+- [x] GitHub #106을 `scripts/goal_claim.sh 106`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `adapters/hermes/tests/smoke_momo_adapter.py` repo-local smoke harness를 추가한다.
+- [x] smoke harness가 `platform_adapter_event_mapping.json` Centrifugo fixture를 adapter event로 unwrap하고 REST invoke/final-message call capture를 검증한다.
+- [x] smoke harness는 Hermes SDK, aiohttp/websockets, Docker, Postgres, 네트워크 없이 실행된다.
+- [x] `scripts/local_gate.sh --profile docs`가 smoke harness를 실행한다.
+- [x] live Hermes gateway plugin load/e2e는 `runtime-unverified` 후속으로 명시한다.
+- [x] `python3 -m py_compile adapters/hermes/momo_adapter.py` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #106을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 호환성 원칙:
 
