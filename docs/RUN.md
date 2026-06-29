@@ -93,6 +93,7 @@ cp infra/.env.example .env
 | `PORT` | 서버 | `8080` | HTTP 바인드 포트. **Centrifugo subscribe proxy가 `api:8080`을 콜백**하므로 변경 시 `centrifugo.json`도 맞춰야 함. |
 | `POSTGRES_HOST` | 서버/relay/worker | `localhost` | `DATABASE_URL` 미설정 시 폴백 호스트. |
 | `LOG_LEVEL` | 서버 | (info) | 로그 레벨. |
+| `CENT_CONNECTION_TOKEN_TTL_SECONDS` | 서버 | `300` | `/v1/auth/realtime-token` Centrifugo connection JWT TTL. dev 값은 60~1800초로 clamp된다. |
 | `RELAY_DATABASE_URL` | relay/worker | (= `DATABASE_URL`) | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§2.2/§10.1). 설정 시 우선. |
 | `RELAY_POSTGRES_USER` / `RELAY_POSTGRES_PASSWORD` | relay/worker | (= `POSTGRES_*`) | 위와 동일 목적의 분리 자격증명. |
 | `RELAY_POLL_INTERVAL_MS` | relay | `300` | outbox 폴링 주기(§8.1 fallback 300ms). |
@@ -263,7 +264,52 @@ scripts/verify_join.sh
 `scripts/local_gate.sh --profile runtime-db` runs this verifier after the RLS
 runtime verifier.
 
-#### 5.1.2 Inbound MCP v0 skeleton
+#### 5.1.2 Realtime connection token — `POST /v1/auth/realtime-token`
+
+MOMO-192 adds the server-side token source required by live Centrifugo clients.
+Call it with an app access token from `/v1/auth/login`:
+
+```sh
+curl -X POST http://127.0.0.1:8080/v1/auth/realtime-token \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Response:
+
+```json
+{
+  "token": "<centrifugo-connection-jwt>",
+  "tokenType": "centrifugo.connection.jwt",
+  "expiresAtMs": 1782463260000,
+  "ttlSeconds": 300,
+  "workspaceId": "00000000-0000-7000-8000-000000000001",
+  "memberId": "00000000-0000-7000-8000-000000000101"
+}
+```
+
+Boundary:
+
+- The endpoint is mounted behind `AuthMiddleware`; refresh tokens, expired access
+  tokens, and malformed JWTs fail before token issue.
+- The server re-checks `member.status='active'` inside `SET LOCAL app.workspace_id`
+  tenant RLS before signing the Centrifugo connection token.
+- The connection JWT carries `sub=member_id`, top-level `ws=workspace_id`, and
+  JSON `info` with the same member/workspace ids. It does not grant channel
+  access by itself.
+- Normal `ch:`/`dm:` subscriptions still go through Centrifugo subscribe proxy
+  `POST /v1/centrifugo/subscribe`, which parses `ch:ws<workspace>.<channel>` and
+  checks active channel `membership` under tenant RLS.
+- Clients never publish to Centrifugo. All durable writes remain REST → Postgres
+  transaction → outbox → OutboxRelay publish.
+- TTL defaults to 300 seconds and is configurable with
+  `CENT_CONNECTION_TOKEN_TTL_SECONDS`, clamped to 60~1800 seconds.
+
+Focused tests live in `server/Tests/MomoServerTests` and cover TTL clamp,
+Centrifugo JWT member/workspace claims, expired app access token rejection, and
+response JSON shape. Docker connect/subscribe end-to-end remains covered by the
+future SwiftCentrifuge driver/runtime pairing.
+
+#### 5.1.3 Inbound MCP v0 skeleton
 
 MOMO-172 adds a compile-safe inbound MCP skeleton to the same `MomoServer` process:
 

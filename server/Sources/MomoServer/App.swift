@@ -37,12 +37,13 @@ enum AppBuilder {
         router.get("/health") { _, _ -> HealthResponse in
             HealthResponse(status: "ok", service: "MomoServer")
         }
-        AuthRoutes(
+        let authRoutes = AuthRoutes(
             db: db,
             jwt: jwt,
             platformAdminEmails: config.platformAdminEmails,
             platformAdminLoginSecret: config.platformAdminLoginSecret
-        ).add(to: router)
+        )
+        authRoutes.add(to: router)
         JoinRoutes(db: db, jwt: jwt).add(to: router)
         CentrifugoRoutes(db: db).add(to: router)
 
@@ -50,6 +51,7 @@ enum AppBuilder {
         // applies AuthMiddleware. The message read/write path lives here.
         let authed = router.group()
             .add(middleware: AuthMiddleware(jwt: jwt))
+        authRoutes.addProtected(to: authed)
         MessageRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ApprovalDecisionRoutes(db: db).add(to: authed)

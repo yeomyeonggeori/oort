@@ -44,7 +44,8 @@ Connection sequence:
 
 Implementation status:
 
-- The L4 spec defines `/v1/auth/realtime-token`, but the current server does not expose it yet. That route is `runtime-unverified` and must be implemented before live macOS subscription.
+- MOMO-192 implements `POST /v1/auth/realtime-token` on MomoServer. The route is protected by app access JWT auth, re-checks active member state inside tenant RLS, and returns a short-lived Centrifugo connection JWT with `sub=member_id`, `ws=workspace_id`, and JSON `info`.
+- Channel authorization remains outside the connection token. Normal `ch:`/`dm:` subscribe attempts still go through `/v1/centrifugo/subscribe`, which checks active channel membership under tenant RLS.
 - The current macOS REST backend must continue to work without a realtime token. Its empty `subscribe(channel:)` stream is a compatibility boundary, not a live implementation.
 
 ## 4. Channel Names

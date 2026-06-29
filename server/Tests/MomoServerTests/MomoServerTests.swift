@@ -66,6 +66,74 @@ final class MomoServerTests: XCTestCase {
         ))
     }
 
+    func testRealtimeTokenTTLIsClampedToShortWindow() {
+        XCTAssertEqual(Config.clampedCentConnectionTokenTTL(-1), 60)
+        XCTAssertEqual(Config.clampedCentConnectionTokenTTL(59), 60)
+        XCTAssertEqual(Config.clampedCentConnectionTokenTTL(300), 300)
+        XCTAssertEqual(Config.clampedCentConnectionTokenTTL(1_800), 1_800)
+        XCTAssertEqual(Config.clampedCentConnectionTokenTTL(7_200), 1_800)
+    }
+
+    func testCentrifugoConnectionTokenCarriesMemberAndWorkspaceClaims() async throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let jwt = await JWTService(config: testServerConfig(centConnectionTokenTTL: 120))
+
+        let issued = try await jwt.signCentrifugoConnection(
+            memberID: memberID,
+            workspaceID: workspaceID
+        )
+        let payload = try await jwt.verifyCentrifugoConnection(issued.token)
+        let info = try JSONDecoder().decode(RealtimeTokenInfo.self, from: Data(payload.info.utf8))
+
+        XCTAssertEqual(issued.ttlSeconds, 120)
+        XCTAssertEqual(payload.sub.value, memberID.uuidString)
+        XCTAssertEqual(payload.ws, workspaceID.uuidString)
+        XCTAssertEqual(info.schema, "momo.realtime.connection.v0")
+        XCTAssertEqual(info.workspaceId, workspaceID.uuidString)
+        XCTAssertEqual(info.memberId, memberID.uuidString)
+    }
+
+    func testExpiredAppAccessTokenCannotBackRealtimeTokenFlow() async throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let jwt = await JWTService(config: testServerConfig(accessTokenTTL: -60))
+        let expired = try await jwt.signAccess(
+            memberID: memberID,
+            workspaceID: workspaceID,
+            scopes: ["messages:read"]
+        )
+
+        do {
+            _ = try await jwt.verify(expired)
+            XCTFail("expired app access token should be rejected before realtime token issue")
+        } catch {
+            // Expected: JWTKit rejects the expired access token.
+        }
+    }
+
+    func testRealtimeTokenResponseEncodesClientContract() throws {
+        let response = RealtimeTokenResponse(
+            token: "jwt",
+            tokenType: "centrifugo.connection.jwt",
+            expiresAtMs: 1_782_463_260_000,
+            ttlSeconds: 300,
+            workspaceId: "00000000-0000-7000-8000-000000000001",
+            memberId: "00000000-0000-7000-8000-000000000101"
+        )
+
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(response)
+        ) as? [String: Any]
+
+        XCTAssertEqual(object?["token"] as? String, "jwt")
+        XCTAssertEqual(object?["tokenType"] as? String, "centrifugo.connection.jwt")
+        XCTAssertEqual(object?["expiresAtMs"] as? Int, 1_782_463_260_000)
+        XCTAssertEqual(object?["ttlSeconds"] as? Int, 300)
+        XCTAssertEqual(object?["workspaceId"] as? String, "00000000-0000-7000-8000-000000000001")
+        XCTAssertEqual(object?["memberId"] as? String, "00000000-0000-7000-8000-000000000101")
+    }
+
     func testRosterKindFilterValidation() throws {
         XCTAssertNil(try RosterRoutes.validatedKindFilter(nil))
         XCTAssertNil(try RosterRoutes.validatedKindFilter("   "))
@@ -307,5 +375,30 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(payload["authorMemberId"])
         XCTAssertNil(payload["hlcTs"])
         XCTAssertNil(payload["hlcCount"])
+    }
+
+    private func testServerConfig(
+        accessTokenTTL: TimeInterval = 15 * 60,
+        centConnectionTokenTTL: TimeInterval = 5 * 60
+    ) -> Config {
+        Config(
+            host: "127.0.0.1",
+            port: 8080,
+            pgHost: "localhost",
+            pgPort: 5432,
+            pgUser: "momo",
+            pgPassword: "momo",
+            pgDatabase: "momo",
+            jwtHMAC: "test-jwt-hmac",
+            accessTokenTTL: accessTokenTTL,
+            refreshTokenTTL: 30 * 24 * 60 * 60,
+            centAPIURL: "http://localhost:8000/api",
+            centAPIKey: "test-cent-api-key",
+            centTokenHMAC: "test-cent-token-hmac",
+            centConnectionTokenTTL: centConnectionTokenTTL,
+            platformAdminDatabaseURL: nil,
+            platformAdminEmails: [],
+            platformAdminLoginSecret: nil
+        )
     }
 }

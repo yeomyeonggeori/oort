@@ -24,6 +24,25 @@ struct LoginResponse: ResponseEncodable {
     let member: MemberDTO
 }
 
+/// POST /v1/auth/realtime-token response.
+struct RealtimeTokenResponse: ResponseEncodable, Codable, Sendable {
+    let token: String
+    let tokenType: String
+    let expiresAtMs: Int64
+    let ttlSeconds: Int
+    let workspaceId: String
+    let memberId: String
+
+    private enum CodingKeys: String, CodingKey {
+        case token
+        case tokenType
+        case expiresAtMs
+        case ttlSeconds
+        case workspaceId
+        case memberId
+    }
+}
+
 struct MemberDTO: ResponseEncodable {
     let id: String
     let workspaceId: String

@@ -102,6 +102,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-174` | M3 | local LLM context compaction | 완료: source-preserving Context Packet compaction v1 + availability-safe Foundation Models route + deterministic fallback |
 | `MOMO-177` | M3 | macOS MomoServer REST ChatBackend v0 | 완료: `MOMO_SERVER_BASE_URL` dev config로 REST login/history/send 사용, LiveChatBackend fallback 유지 |
 | `MOMO-179` | M3 | Realtime client subscription contract v0 | `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md` + fixtures; exact channel/token boundary, MomoCore event mapping, `message.seq` replay/gap-fill/reconnect; live SwiftCentrifuge remains runtime-unverified |
+| `MOMO-192` | M3 | Server realtime-token endpoint v0 | `POST /v1/auth/realtime-token` protected by app access JWT; active member recheck under tenant RLS; short-lived Centrifugo connection JWT with member/workspace claims; subscribe proxy keeps channel membership boundary |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 1.2 Agentic Work OS ecosystem overlay
