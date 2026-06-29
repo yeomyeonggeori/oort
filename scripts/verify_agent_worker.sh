@@ -152,7 +152,8 @@ SET LOCAL app.workspace_id = '$WORKSPACE_ID';
 DELETE FROM usage_ledger WHERE run_id IN ('$RUN_ID', '$TRIP_RUN_ID');
 DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
 DELETE FROM outbox WHERE payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
-   OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID';
+   OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID'
+   OR payload->'data'->'payload'->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID');
 DELETE FROM approval WHERE id = '$RESUME_APPROVAL_ID';
 DELETE FROM budget_window WHERE budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
 DELETE FROM budget WHERE id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');

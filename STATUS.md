@@ -180,7 +180,7 @@
 
 - AgentWorker가 `outbox(kind='agent_job', method='resume_approval')` 또는 `payload.resume_from_approval_id`를 hermes 호출과 분리해 처리한다. Worker는 `approval.status='approved'`, same-run/channel/agent 일치, frozen `approved_tool_call`과 `approval.payload.tool_call` 일치, approval-required `policy_evidence`, approved decision payload를 fail-closed로 검증한다.
 - v0 executor는 외부 write/plugin runtime 없이 `mock.echo`/`momo.mock.echo`/`deterministic.echo`만 실행한다. 성공 시 같은 `agent_run.id`에 `message(type='tool_result')`, `audit_log(action='approval.resume'/'tool.executed')`, broadcast outbox를 기록하고 resume job을 `done`으로 닫는다. 실패/unsupported/rejected-expired-cancelled approval은 실행하지 않고 `approval.resume_failed`/`tool.failed` audit와 failed outbox `last_error`를 남긴다.
-- 검증: `swift test --package-path workers/AgentWorker` pass(22 tests), `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` pass. `scripts/verify_agent_worker.sh`에 approved deterministic resume smoke를 추가해 `tool_result`/audit/job-done/broadcast-outbox를 확인한다. Real GitHub/Jira/Google/provider side-effect execution은 out of scope이며 계속 `runtime-unverified`.
+- 검증: `swift test --package-path workers/AgentWorker` pass(22 tests). `scripts/verify_agent_worker.sh`에 approved deterministic resume smoke를 추가해 `tool_result`/audit/job-done/broadcast-outbox를 확인한다. Real GitHub/Jira/Google/provider side-effect execution은 out of scope이며 계속 `runtime-unverified`.
 
 ## 0u. MOMO-173 Worker PR Handoff Boundary (2026-06-26)
 
