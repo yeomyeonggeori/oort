@@ -114,6 +114,24 @@ struct WorkspaceRosterResponse: ResponseEncodable {
     let agentCount: Int
 }
 
+// ---- Workspace channels ----
+
+/// Workspace channel entry visible to the authenticated member.
+struct ChannelDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let kind: String
+    let name: String?
+    let topic: String?
+    let dmKey: String?
+    let createdBy: String?
+    let archivedAtMs: Int64?
+}
+
+struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
+    let channels: [ChannelDTO]
+}
+
 // ---- Approval decisions ----
 
 /// POST /v1/workspaces/{ws}/approvals/{approval}/decision request body.

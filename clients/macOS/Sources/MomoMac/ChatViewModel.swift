@@ -83,8 +83,10 @@ public final class ChatViewModel: ObservableObject {
             try await chat.connect(workspace: workspace, accessToken: accessToken)
             self.workspaceId = workspace
             self.members = try await chat.members(workspace: workspace)
-            // Channel list is provided by the seed for the stub; real backend would
-            // expose a channels() call (REST GET .../channels) — TODO(T09-followup).
+            self.channels = try await chat.channels(workspace: workspace)
+            if selectedChannelId == nil {
+                self.selectedChannelId = channels.first?.id
+            }
             self.connectionError = nil
         } catch {
             self.connectionError = String(describing: error)

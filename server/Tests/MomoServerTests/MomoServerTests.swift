@@ -204,6 +204,50 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(members[1].email)
     }
 
+    func testChannelLimitIsBoundedForV0() {
+        XCTAssertEqual(ChannelRoutes.validatedLimit(nil), 200)
+        XCTAssertEqual(ChannelRoutes.validatedLimit("0"), 1)
+        XCTAssertEqual(ChannelRoutes.validatedLimit("50"), 50)
+        XCTAssertEqual(ChannelRoutes.validatedLimit("1000"), 500)
+        XCTAssertEqual(ChannelRoutes.validatedLimit("not-a-number"), 200)
+    }
+
+    func testWorkspaceChannelsResponseDecodesMacOSRESTShape() throws {
+        let data = Data("""
+        {
+          "channels": [
+            {
+              "id": "00000000-0000-7000-8000-000000000201",
+              "workspaceId": "00000000-0000-7000-8000-000000000001",
+              "kind": "public",
+              "name": "general",
+              "topic": "팀 일반 채널",
+              "dmKey": null,
+              "createdBy": "00000000-0000-7000-8000-000000000101",
+              "archivedAtMs": null
+            },
+            {
+              "id": "00000000-0000-7000-8000-000000000202",
+              "workspaceId": "00000000-0000-7000-8000-000000000001",
+              "kind": "public",
+              "name": "agent-lab",
+              "topic": "에이전트 실험실",
+              "dmKey": null,
+              "createdBy": "00000000-0000-7000-8000-000000000101",
+              "archivedAtMs": null
+            }
+          ]
+        }
+        """.utf8)
+
+        let response = try JSONDecoder().decode(WorkspaceChannelsResponse.self, from: data)
+
+        XCTAssertEqual(response.channels.map(\.name), ["general", "agent-lab"])
+        XCTAssertEqual(response.channels.map(\.kind), ["public", "public"])
+        XCTAssertEqual(response.channels.first?.createdBy, "00000000-0000-7000-8000-000000000101")
+        XCTAssertNil(response.channels.first?.archivedAtMs)
+    }
+
     func testInboundMCPToolSurfaceMatchesMOMO163() {
         let names = InboundMCPToolRegistry.tools.map(\.name)
         XCTAssertEqual(
