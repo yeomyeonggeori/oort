@@ -315,6 +315,12 @@
 - JSON fixture 3종을 `research/11-agent-runtime/fixtures/plugin-manifest-v0/`에 추가했다: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
 - Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane permission/policy_version 연결을 문서화했다. 검증: `scripts/local_gate.sh --profile docs` PASS. 실제 plugin runtime, repo split, WASM runtime, marketplace UI, external OAuth implementation은 out of scope이며 런타임/스키마 변경 없음.
 
+## 0an2. MOMO-183 First-Party Plugin Repo Strategy (2026-06-29)
+
+- First-party plugin repo strategy 정본을 `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`에 추가했다. 우선순위는 GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector이며, repo split 순서와 public/private visibility 기준을 고정했다.
+- 각 plugin의 slash command, message context action, approval card, source provider, audit event를 표로 정의하고 Plugin Manifest v0, Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane permission/revalidation model과 연결했다.
+- 런타임/스키마 변경 없음. 실제 plugin runtime, repo split 생성, external OAuth/provider API execution, WASM runtime, marketplace UI는 out of scope다. 검증: `scripts/local_gate.sh --profile docs` PASS.
+
 ## 0ao. MOMO-182 Docker Compose Layer ADR (2026-06-29)
 
 - Docker compose/deploy layer 정본을 `docs/adr/0002-docker-compose-layering.md`에 추가했다. dev(`infra/docker-compose.yml`), future e2e(`infra/docker-compose.e2e.yml`), prod(`infra/prod/docker-compose.prod.yml`), install/upgrade, backup/PITR 책임 경계를 고정했다.

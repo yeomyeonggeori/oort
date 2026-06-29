@@ -133,6 +133,7 @@
 | [`research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`](../research/12-agentic-work-os/01-agentic-work-os-market-analysis.md) | Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 시장 분석 + momo 제품 포지션(agent execution ledger) |
 | [`research/12-agentic-work-os/02-plugin-manifest-v0.md`](../research/12-agentic-work-os/02-plugin-manifest-v0.md) | Plugin Manifest v0 정본 + capability grants/approval/source/audit/signature policy + `momo-plugins`/first-party plugin/SDK repo split 기준 |
 | [`research/12-agentic-work-os/03-agent-host-positioning.md`](../research/12-agentic-work-os/03-agent-host-positioning.md) | MOMO-184 agent host 제품 문장 + channel timeline execution ledger 1페이지 비교 + website/README/sales deck reusable copy |
+| [`research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`](../research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md) | First-party plugin repo strategy 정본(GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector, repo split 순서, plugin surface/audit/source/approval contract) |
 | [`research/11-agent-runtime/fixtures/plugin-manifest-v0/`](../research/11-agent-runtime/fixtures/plugin-manifest-v0/) | Plugin Manifest v0 JSON fixtures(GitHub Issues, Google Workspace read-mostly, high-risk write approval policy) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
