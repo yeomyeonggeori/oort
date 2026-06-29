@@ -62,6 +62,10 @@ public enum MomoMacDemo {
     /// Build + connect a demo ViewModel against an in-memory seeded backend.
     @MainActor
     public static func makeViewModel() async -> ChatViewModel {
+        if let config = MomoServerRESTChatBackendConfig.fromEnvironment() {
+            return await makeRESTViewModel(config: config)
+        }
+
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
         let vm = ChatViewModel(backend: backend)
@@ -70,6 +74,17 @@ public enum MomoMacDemo {
         if let first = seed.channels.first {
             await vm.selectChannel(first.id)
         }
+        return vm
+    }
+
+    /// Build + connect a dev ViewModel against local MomoServer REST.
+    @MainActor
+    public static func makeRESTViewModel(config: MomoServerRESTChatBackendConfig) async -> ChatViewModel {
+        let backend = MomoServerRESTChatBackend(config: config)
+        let vm = ChatViewModel(chat: backend, agentTransport: backend)
+        await vm.bootstrap(workspace: config.workspace, accessToken: config.accessToken ?? "")
+        vm.setChannels(config.channels)
+        await vm.selectChannel(config.defaultChannel)
         return vm
     }
 }

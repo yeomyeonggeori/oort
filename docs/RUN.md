@@ -345,16 +345,31 @@ swift run --package-path clients/macOS MomoMacSmoke
 # SwiftUI 개발용 macOS window 실행(인메모리 demo seed — DB/Centrifugo/hermes 불필요)
 scripts/macos_dev_run.sh
 
+# SwiftUI 개발용 macOS window 실행(MomoServer REST history/send 사용)
+make up
+make migrate
+swift run --package-path server MomoServer
+MOMO_SERVER_BASE_URL=http://127.0.0.1:8080 scripts/macos_dev_run.sh
+
 # PR evidence용 GUI opt-in: launch → process/window smoke → logs → terminate
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 ```
 
-- `MomoMac`(library): `MomoCore`의 `ChatBackend`/`AgentTransport` 계약 위에 SwiftUI 뷰 + `LiveChatBackend` 스텁.
+- `MomoMac`(library): `MomoCore`의 `ChatBackend`/`AgentTransport` 계약 위에 SwiftUI 뷰 + `LiveChatBackend` 스텁 + `MomoServerRESTChatBackend` 개발용 REST transport.
 - `MomoMacSmoke`(exe): `MomoCore` + `MomoMac` import → 도메인 모델·인메모리 백엔드 구동을 출력해 **링크/컴파일을 증명**.
 - `MomoMacDevApp`(exe): `MomoMacRootView`를 실제 macOS SwiftUI window에 호스트한다. 첫 화면은
   in-memory demo seed로 channel list, message list, cost UI, Approval Inbox를 표시한다.
-- smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
-  실제 서버에 붙는 라이브 트랜스포트는 후속 티켓에서 배포용 `.app`과 함께 추가.
+- 기본 smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
+  `MOMO_SERVER_BASE_URL`이 있으면 `MomoMacDevApp`은 MomoServer REST 모드로 전환해
+  `/v1/auth/login`, `GET/POST /v1/workspaces/{ws}/channels/{ch}/messages`를 사용한다.
+  기본값은 `server/Migrations/002_seed.sql`의 demo workspace/channel/member fixture다.
+- REST dev mode 환경변수:
+  `MOMO_SERVER_BASE_URL`(필수), `MOMO_ACCESS_TOKEN`(선택, 없으면 `/v1/auth/login`),
+  `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(기본 `demo@momo.local`/`demo`),
+  `MOMO_WORKSPACE_ID`(기본 demo workspace), `MOMO_CHANNEL_ID`(기본 `#general`).
+- REST dev mode 검증 범위: message history fetch와 send는 실제 MomoServer REST/DB 경로를 탄다.
+  WebSocket/Centrifugo live subscription, full auth/session UI, approval server endpoint 변경은 이 티켓 밖이며
+  `runtime-unverified`다.
 - `scripts/macos_dev_run.sh`: build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
   `swift build --package-path clients/macOS --product MomoMacDevApp` 후 `dist/MomoMacDevApp.app`을
   생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified
