@@ -308,7 +308,7 @@
 | 패키지 | 경로 | 빌드 | 비고 |
 |---|---|---|---|
 | **MomoCore** | `clients/Core` | ✅ **pass** | 공유 모델 + `ChatBackend`/`AgentTransport` 프로토콜. 외부 의존 0(순수 Foundation). |
-| **MomoServer** | `server` | ✅ **pass** | Hummingbird 2 + PostgresNIO + JWTKit + AsyncHTTPClient + public `/v1/join` + platform admin read-only inspection. |
+| **MomoServer** | `server` | ✅ **pass** | Hummingbird 2 + PostgresNIO + JWTKit + AsyncHTTPClient + public `/v1/join` + platform admin read-only inspection + workspace roster read. |
 | **OutboxRelay** | `relay/OutboxRelay` | ✅ **pass** | SKIP LOCKED 폴링 → Centrifugo publish. |
 | **AgentWorker** | `workers/AgentWorker` | ✅ **pass** | OpenAI 호환 `/v1/chat/completions` SSE + 루프가드 + 비용 reserve/reconcile. |
 | **MomoMac** | `clients/macOS` | ✅ **pass** | SwiftUI 라이브러리(뷰+VM) + `MomoMacSmoke` 실행 스모크 + `MomoMacDevApp` window + invite onboarding stub UI + Foundation Models capability fallback surface. |
@@ -327,6 +327,7 @@
 | `server/Migrations/002_seed.sql` | INSERT 구조 정상(괄호 불균형은 `--`주석 내 한글 괄호 → 무해) | ✅ OK |
 | `scripts/migrate.sh` | `sh -n` | ✅ OK |
 | `scripts/verify_rls.sh` | `sh -n` + Docker PG18 RLS runtime | ✅ OK |
+| `scripts/verify_roster.sh` | `bash -n` + Docker PG18 workspace roster runtime | ✅ OK |
 | `scripts/verify_join.sh` | `bash -n` + Docker PG18 public join runtime | ✅ OK |
 | `scripts/verify_platform_admin.sh` | `bash -n` + Docker PG18 platform admin read-only runtime | ✅ OK |
 | `scripts/verify_relay.sh` | `bash -n` + Docker PG18/Centrifugo/MomoServer/OutboxRelay runtime | ✅ OK |
@@ -340,6 +341,7 @@
 > **MOMO-004에서 검증됨:** OpenAI-compatible SSE mock 기반 AgentWorker one roundtrip, Centrifugo `agent.partial`, `usage_ledger` reconcile, `budget_window` reserve/release, G5 budget trip.
 > **MOMO-168에서 검증됨:** Hermes optional platform-adapter path의 Centrifugo fixture unwrap과 REST invoke/final-message mapping을 repo-local smoke로 검증(no Hermes/network).
 > **MOMO-013에서 검증됨:** 일반 tenant token의 platform endpoint 403, platform read token의 2개+ workspace/member/invite usage 전역 조회, platform BYPASSRLS role의 SELECT-only/read-only transaction, invite raw/hash secret 미노출.
+> **MOMO-176에서 검증됨:** `GET /v1/workspaces/{ws}/roster`/`members`는 일반 tenant token + `SET LOCAL app.workspace_id` + active membership guard로 human/agent roster를 반환한다. `scripts/verify_roster.sh`가 demo human+agent, active-membership 없는 member 제외, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증했다.
 > **남은 runtime-unverified:** WebSocket live subscribe/presence/recovery, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
 
 ## 3. 생성 파일 트리 (핵심)
@@ -356,15 +358,15 @@ momo/
 │       ├─ DB/Database.swift              # PostgresClient 풀
 │       ├─ Auth/{JWT,AuthMiddleware}.swift
 │       ├─ Realtime/CentrifugoClient.swift
-│       └─ Routes/{Message,Auth,Join,Invite,PlatformAdmin,Centrifugo,DTOs}.swift
-│                                                    # 핵심 쓰기경로: seq+outbox tx + public join
+│       └─ Routes/{Message,Auth,Join,Invite,Roster,PlatformAdmin,Centrifugo,DTOs}.swift
+│                                                    # 핵심 쓰기경로: seq+outbox tx + public join + roster read
 ├─ relay/OutboxRelay/   (SKIP LOCKED → publish)
 ├─ workers/AgentWorker/ (HermesTransport SSE · LoopGuards · CostAccounting · WorkerService)
 ├─ clients/Core/        (MomoCore: 모델 + ChatBackend/AgentTransport)
 ├─ clients/macOS/       (MomoMac: ChannelList/MessageList/MessageBubble/AgentPartial/
 │                         CostBreathingRing/ApprovalInbox + ChatViewModel/LiveChatBackend)
 ├─ adapters/hermes/     (momo_adapter.py: BasePlatformAdapter · plugin.yaml)
-└─ scripts/{migrate,verify_rls,verify_join,verify_platform_admin,verify_relay,verify_agent_worker,mock_hermes}.*
+└─ scripts/{migrate,verify_rls,verify_roster,verify_join,verify_platform_admin,verify_relay,verify_agent_worker,mock_hermes}.*
 ```
 
 ## 4. 컴파일 검증됨 vs 런타임 미검증

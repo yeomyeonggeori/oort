@@ -271,6 +271,7 @@
 | `MOMO-012` | macOS dev app onboarding/invite flow v0 UI (LiveChatBackend stub) | swift/macos-ui | MOMO-010, MOMO-011 | local gate PASS |
 | `MOMO-013` | platform_admin 전역 추적 뷰/엔드포인트 | sql/swift/runtime | MOMO-010 | local gate PASS |
 | `MOMO-014` | production `/v1/join` 자가가입 플로우 + audit_log | swift/runtime | MOMO-011, MOMO-012 | local gate 대상 |
+| `MOMO-176` | workspace roster REST endpoints v0 | swift/runtime | MOMO-014 | local gate 대상 |
 
 ### MOMO-010 수용기준 `[sql/runtime]`
 - [x] `server/Migrations/003_onboarding.sql` 신규 추가(`schema_v0.sql` 미수정).
@@ -319,6 +320,16 @@
 - [x] `scripts/verify_join.sh` 추가: invite create → public join → joined human login/bootstrap/read, 실패 모드 6종 검증.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] `scripts/local_gate.sh --profile runtime-db` PASS(`scripts/verify_rls.sh` + `scripts/verify_join.sh`).
+
+### MOMO-176 수용기준 `[swift/runtime]`
+- [x] `GET /v1/workspaces/{ws}/roster`와 호환 alias `GET /v1/workspaces/{ws}/members`를 authenticated tenant route로 추가한다.
+- [x] 일반 tenant token은 path workspace와 JWT workspace가 일치하고, `SET LOCAL app.workspace_id` 아래 active workspace membership guard를 통과해야 roster를 조회할 수 있다.
+- [x] roster 응답은 active, non-deleted `member` 중 active membership이 있는 항목을 반환하고 `kind='human'|'agent'`와 human/agent count를 명시한다. agent row는 model/owner/run-limit metadata만 노출하고 base_url/system_prompt/tool_schema/config/secret은 노출하지 않는다.
+- [x] BYPASSRLS 사용 금지: normal tenant `Database.withTenantConnection` 경로만 사용한다.
+- [x] focused server tests 추가: kind filter/limit validation, human/agent DTO shape decode.
+- [x] `scripts/verify_roster.sh` 추가: demo human+agent roster, `kind=agent` filter, invalid kind 400, same-workspace nonmember 403, workspace A/B 교차 접근 403.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS(`scripts/verify_roster.sh` 포함).
 
 
 ## M2 Context / Memory / Google Workspace

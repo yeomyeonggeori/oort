@@ -66,6 +66,76 @@ final class MomoServerTests: XCTestCase {
         ))
     }
 
+    func testRosterKindFilterValidation() throws {
+        XCTAssertNil(try RosterRoutes.validatedKindFilter(nil))
+        XCTAssertNil(try RosterRoutes.validatedKindFilter("   "))
+        XCTAssertEqual(try RosterRoutes.validatedKindFilter(" HUMAN "), "human")
+        XCTAssertEqual(try RosterRoutes.validatedKindFilter("agent"), "agent")
+        XCTAssertThrowsError(try RosterRoutes.validatedKindFilter("bot"))
+        XCTAssertThrowsError(try RosterRoutes.validatedKindFilter("platform"))
+    }
+
+    func testRosterLimitIsBoundedForV0() {
+        XCTAssertEqual(RosterRoutes.validatedLimit(nil), 200)
+        XCTAssertEqual(RosterRoutes.validatedLimit("0"), 1)
+        XCTAssertEqual(RosterRoutes.validatedLimit("50"), 50)
+        XCTAssertEqual(RosterRoutes.validatedLimit("1000"), 500)
+        XCTAssertEqual(RosterRoutes.validatedLimit("not-a-number"), 200)
+    }
+
+    func testRosterMemberDTODecodesHumanAndAgentShapes() throws {
+        let data = Data("""
+        [
+          {
+            "id": "00000000-0000-7000-8000-000000000101",
+            "workspaceId": "00000000-0000-7000-8000-000000000001",
+            "kind": "human",
+            "status": "active",
+            "displayName": "Demo Human",
+            "handle": "demo",
+            "avatarUrl": null,
+            "role": "owner",
+            "channelCount": 2,
+            "email": "demo@momo.local",
+            "timeZone": "Asia/Seoul",
+            "agentModel": null,
+            "ownerHumanId": null,
+            "maxConcurrentRuns": null,
+            "maxRunSteps": null,
+            "createdAtMs": 1782463260000,
+            "updatedAtMs": 1782463260000
+          },
+          {
+            "id": "00000000-0000-7000-8000-000000000102",
+            "workspaceId": "00000000-0000-7000-8000-000000000001",
+            "kind": "agent",
+            "status": "active",
+            "displayName": "Kim Intern",
+            "handle": "kim-intern",
+            "avatarUrl": null,
+            "role": "member",
+            "channelCount": 2,
+            "email": null,
+            "timeZone": null,
+            "agentModel": "hermes-agent",
+            "ownerHumanId": "00000000-0000-7000-8000-000000000101",
+            "maxConcurrentRuns": 1,
+            "maxRunSteps": 12,
+            "createdAtMs": 1782463260000,
+            "updatedAtMs": 1782463260000
+          }
+        ]
+        """.utf8)
+
+        let members = try JSONDecoder().decode([RosterMemberDTO].self, from: data)
+
+        XCTAssertEqual(members.map(\.kind), ["human", "agent"])
+        XCTAssertEqual(members[0].email, "demo@momo.local")
+        XCTAssertNil(members[0].agentModel)
+        XCTAssertEqual(members[1].agentModel, "hermes-agent")
+        XCTAssertNil(members[1].email)
+    }
+
     func testInboundMCPToolSurfaceMatchesMOMO163() {
         let names = InboundMCPToolRegistry.tools.map(\.name)
         XCTAssertEqual(
