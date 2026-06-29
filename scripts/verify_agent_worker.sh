@@ -258,7 +258,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   PARTIAL_OK=$(printf '%s' "$HISTORY_JSON" | jq -r --arg run "$RUN_ID" '
     [.result.publications[]?.data
       | select(.type == "agent.partial")
-      | select(.payload.runId == $run)
+      | select((.payload.run_id // .payload.runId) == $run)
       | select((.payload.text // "") | contains("MOMO-004 SSE path verified"))
     ] | length
   ')
