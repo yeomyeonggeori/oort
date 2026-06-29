@@ -1,0 +1,133 @@
+{
+  "schema": "momo.google_workspace_enterprise_admin.fixture.v0",
+  "fixture": "admin_install_scope_inventory",
+  "created_at": "2026-06-29T09:00:00Z",
+  "workspace_id": "11111111-1111-7111-8111-111111111111",
+  "enterprise_install": {
+    "schema": "momo.google_workspace_enterprise_install.v0",
+    "enterprise_install_id": "gwe_install_example_001",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "google_customer_id": "C01example",
+    "hosted_domains": [
+      "example.com"
+    ],
+    "install_mode": "enterprise_admin_install",
+    "default_authorization_mode": "per_user_oauth",
+    "dwd_status": "disabled",
+    "dwd_default": false,
+    "approved_by_member_id": "44444444-4444-7444-8444-444444444410",
+    "google_admin_email_hash": "sha256:google-admin-redacted-001",
+    "scope_inventory_version": "google-workspace-enterprise-scopes@2026-06-29:001",
+    "service_account_boundary_id": null,
+    "policy_version": "google-workspace-enterprise-policy@2026-06-29",
+    "audit_export_enabled": true,
+    "manual_steps_remaining": [
+      "google_workspace_admin_console_api_controls_authorization",
+      "oauth_app_verification",
+      "customer_security_approval"
+    ]
+  },
+  "scope_inventory": [
+    {
+      "scope": "https://www.googleapis.com/auth/drive.metadata.readonly",
+      "surface": "drive",
+      "classification": "restricted",
+      "install_default": "admin_optional",
+      "dwd_allowed": true,
+      "dwd_default": false,
+      "data_classes": [
+        "drive_file_metadata",
+        "drive_change_tokens"
+      ],
+      "context_packet_projection": "source_badge_metadata_only",
+      "memory_plane_projection": "external_source_ref_metadata",
+      "capability_cache_projection": [
+        "google_workspace.drive.search"
+      ],
+      "approval_policy": "none_for_bounded_read",
+      "review_cadence_days": 90
+    },
+    {
+      "scope": "https://www.googleapis.com/auth/gmail.metadata",
+      "surface": "gmail",
+      "classification": "restricted",
+      "install_default": "admin_optional",
+      "dwd_allowed": true,
+      "dwd_default": false,
+      "data_classes": [
+        "gmail_headers",
+        "gmail_labels",
+        "gmail_thread_ids"
+      ],
+      "context_packet_projection": "metadata_only_no_body",
+      "memory_plane_projection": "external_source_ref_personal_or_admin",
+      "capability_cache_projection": [
+        "google_workspace.gmail.search_threads"
+      ],
+      "approval_policy": "none_for_bounded_read",
+      "review_cadence_days": 90
+    },
+    {
+      "scope": "https://www.googleapis.com/auth/calendar.freebusy",
+      "surface": "calendar",
+      "classification": "sensitive",
+      "install_default": "admin_optional",
+      "dwd_allowed": true,
+      "dwd_default": false,
+      "data_classes": [
+        "calendar_busy_windows"
+      ],
+      "context_packet_projection": "availability_summary",
+      "memory_plane_projection": "short_ttl_external_source_ref",
+      "capability_cache_projection": [
+        "google_workspace.calendar.availability"
+      ],
+      "approval_policy": "none_for_bounded_read",
+      "review_cadence_days": 90
+    },
+    {
+      "scope": "https://www.googleapis.com/auth/gmail.send",
+      "surface": "gmail",
+      "classification": "restricted",
+      "install_default": "never",
+      "dwd_allowed": false,
+      "dwd_default": false,
+      "data_classes": [
+        "external_email_send"
+      ],
+      "context_packet_projection": "none",
+      "memory_plane_projection": "none",
+      "capability_cache_projection": [
+        "google_workspace.gmail.send"
+      ],
+      "approval_policy": "deny_in_v0",
+      "review_cadence_days": 30
+    }
+  ],
+  "service_account_boundary_placeholder": {
+    "service_account_boundary_id": "gwe_sa_boundary_example_pending",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "google_customer_id": "C01example",
+    "service_account_client_id_hash": "sha256:pending-client-id-redacted",
+    "service_account_email_redacted": "momo-enterprise@project.iam.gserviceaccount.com",
+    "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_001/workload-identity",
+    "key_material_policy": "no_static_key_preferred",
+    "allowed_subject_domains": [
+      "example.com"
+    ],
+    "allowed_scopes_version": "google-workspace-enterprise-scopes@2026-06-29:001",
+    "status": "pending_admin"
+  },
+  "audit": {
+    "created_by": "codex-fixture",
+    "policy_versions": [
+      "google-workspace-enterprise-policy@2026-06-29",
+      "capability-policy@2026-06-26",
+      "memory-policy@2026-06-26"
+    ],
+    "notes": [
+      "Domain-wide delegation is disabled by default.",
+      "Per-user OAuth remains the default authorization mode."
+    ]
+  }
+}
