@@ -78,6 +78,8 @@ Paca uses WASM for backend plugin isolation. momo should not adopt a WASM runtim
 
 ## Docker and deploy layering
 
+Detailed operating contract: `docs/adr/0002-docker-compose-layering.md` (MOMO-182).
+
 Current state:
 
 - `infra/docker-compose.yml` is the dev/runtime verification stack.

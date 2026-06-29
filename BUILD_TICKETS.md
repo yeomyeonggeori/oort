@@ -224,7 +224,7 @@
 |---|---|---|---|---|
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
 | `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
-| `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 후보 |
+| `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | PR/local gate 대상 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 후보 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 후보 |
 
@@ -233,7 +233,7 @@
 - [x] `docs/adr/0001-agentic-work-os-repo-topology.md`에 core monorepo 유지와 향후 `momo-plugins`, first-party plugin repos, plugin SDK repos, `momo-mcp`, `momo-landing`, private `momo-signing` split 기준을 정의한다.
 - [x] Docker/deploy layering을 dev/e2e/prod/install/upgrade/backup으로 분리하는 방향을 ADR에 기록한다.
 - [x] ROADMAP/BUILD_TICKETS/STATUS/docs/INDEX 갱신.
-- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 리뷰, 필요 수정, merge, main docs local gate PASS.
 
 ### MOMO-181 수용기준 `[docs/spec]`
@@ -247,10 +247,12 @@
 - [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 - out of scope: 실제 plugin runtime, repo split 생성, WASM runtime, marketplace UI, external OAuth implementation.
 
-### MOMO-182 후보 수용기준 `[infra/docs]`
-- [ ] `infra/docker-compose.yml`의 현재 dev 역할과 future `docker-compose.dev.yml`/`docker-compose.e2e.yml`/`infra/prod/docker-compose.prod.yml` 경계를 ADR로 고정.
-- [ ] source checkout 없는 image-based prod deploy, install/upgrade script, backup/PITR, optional external DB/TLS/agent runtime 선택지를 정의.
-- [ ] 실제 prod deploy 구현은 out of scope.
+### MOMO-182 수용기준 `[infra/docs]`
+- [x] `docs/adr/0002-docker-compose-layering.md`에 `infra/docker-compose.yml`의 현재 dev 역할과 future `docker-compose.dev.yml`/`docker-compose.e2e.yml`/`infra/prod/docker-compose.prod.yml` 경계를 ADR로 고정.
+- [x] source checkout 없는 image-based prod deploy, install/upgrade script, backup/PITR, optional external DB/TLS/agent runtime 선택지를 정의.
+- [x] 실제 prod deploy, image publish pipeline, pgBackRest restore rehearsal, GitHub Actions 재활성화, staging/prod secret 입력은 out of scope로 명시.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 
 ### MOMO-183 후보 수용기준 `[docs/spec]`
 - [ ] first-party plugin 우선순위를 GitHub/GitHub Issues, Google Workspace, Jira-like work item, Docs connector로 정의.
