@@ -85,6 +85,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision/resume endpoint remains follow-up runtime |
 | `MOMO-166` | M2 | approval decision server contract v0 | `research/11-agent-runtime/10-approval-decision-server-contract-v0.md` + request/response fixtures; connects MOMO-161 runtime checkpoint to MOMO-171 macOS decision intent |
 | `MOMO-162` | M2 | Hermes adapter contract verification | `research/11-agent-runtime/11-hermes-adapter-contract-v0.md` + fixtures; AgentWorker SSE product default, platform adapter optional interop |
+| `MOMO-168` | M2 | Hermes adapter repo-local smoke harness | `adapters/hermes/tests/smoke_momo_adapter.py` + `local_gate --profile docs`; live Hermes plugin load/e2e remains runtime-unverified |
 | `MOMO-163` | M2 | inbound MCP server v0 | governed search/fetch/post/approval-safe tool call surface + resources/prompts/fixtures |
 | `MOMO-172` | M2 | inbound MCP server v0 skeleton/spec-to-code bridge | server registry/routes/stub + endpoint/security docs |
 | `MOMO-170` | M3 | macOS agent protocol cards | `tool_call`/approval/result/artifact cards + Context Packet/Memory/Capability/source/cost badges + SwiftUI fixture contract |
