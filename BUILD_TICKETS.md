@@ -226,7 +226,7 @@
 | `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 후보 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 후보 |
-| `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 후보 |
+| `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | local gate 대상 |
 
 ### MOMO-180 수용기준 `[docs/spec]`
 - [x] `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`에 Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 흐름과 momo 차별점을 정리한다.
@@ -258,9 +258,13 @@
 - [ ] repo split 순서와 private/public visibility 기준을 정의.
 
 ### MOMO-184 후보 수용기준 `[docs/product]`
-- [ ] momo 제품 문장을 "channel timeline execution ledger" 중심으로 정리.
-- [ ] Slack/Discord/Mattermost/Paca/OpenHands와의 차이를 대표/팀원 설명용으로 1페이지로 정리.
-- [ ] website/README/세일즈 deck에 재사용 가능한 copy block을 작성.
+- [x] momo 제품 문장을 "channel timeline execution ledger" 중심으로 정리.
+- [x] Slack/Discord/Mattermost/Paca/OpenHands와의 차이를 대표/팀원 설명용으로 1페이지로 정리.
+- [x] website/README/세일즈 deck에 재사용 가능한 copy block을 작성.
+- [x] agent host / protocol surface / self-hosted trust boundary / local LLM future 방향 반영.
+- [x] `research/12-agentic-work-os/03-agent-host-positioning.md`, `README.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `STATUS.md`, `docs/INDEX.md` 갱신.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 
 ## M2 멀티팀 온보딩
 

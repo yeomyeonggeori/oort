@@ -74,6 +74,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-153` | M1.5 | Capability Cache v0 | `research/11-agent-runtime/06-capability-cache-v0.md` + agent/plugin/MCP capability cache, tool schema refs, invalidation, policy/capability version |
 | `MOMO-180` | M1.5 | Agentic Work OS 시장/레포 topology 정렬 | `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md` + `docs/adr/0001-agentic-work-os-repo-topology.md`; core monorepo 유지, plugin/catalog/SDK/MCP/landing repo split 기준, dev/e2e/prod deploy layering |
 | `MOMO-181` | M1.5 | Plugin manifest v0 + catalog split criteria | `research/12-agentic-work-os/02-plugin-manifest-v0.md` + JSON fixtures; manifest/capability grants/approval/audit/source/signature policy와 `momo-plugins`/first-party plugin/SDK repo split 기준 |
+| `MOMO-184` | M1.5 | Agent host positioning/product messaging | `research/12-agentic-work-os/03-agent-host-positioning.md` + README reusable copy; channel timeline execution ledger 중심 제품 문장 |
 | `MOMO-120` | M2 | Context Packet v0 | `{goal,constraints,decisions,sources,permissions,budget,redactions}` 스펙/fixture |
 | `MOMO-121` | M2 | Memory Plane v0 | typed memory(decision/preference/artifact/task_state/source_ref) + 권한/삭제 모델 |
 | `MOMO-122` | M2 | Google Workspace connector v0 | `research/11-agent-runtime/12-google-workspace-connector-v0.md` + Drive/Gmail/Calendar fixtures; per-user OAuth + read-mostly sync + approval-gated writes |
@@ -100,7 +101,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 
 ### 1.2 Agentic Work OS ecosystem overlay
 
-MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 기준으로 momo의 생태계 방향을 고정한다. 결론은 "Paca를 복제하지 않고, 채널 타임라인을 context/approval/cost/audit execution ledger로 만드는 enterprise agent host"다.
+MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 기준으로 momo의 생태계 방향을 고정한다. MOMO-184는 이를 제품 메시지로 압축해 "Paca를 복제하지 않고, 채널 타임라인을 context/approval/cost/audit execution ledger로 만드는 self-hosted enterprise agent host"를 reusable copy로 고정한다.
 
 로드맵 영향:
 
@@ -108,13 +109,14 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - repo split은 ecosystem surface부터 시작한다: `momo-plugins`, first-party plugin repos, plugin SDK repos, `momo-mcp`, `momo-landing`, private `momo-signing`.
 - plugin v0는 `research/12-agentic-work-os/02-plugin-manifest-v0.md`를 정본으로 manifest/capability grants/approval/audit/source/signature/catalog 중심으로 먼저 고정한다. WASM runtime은 M5+ 후속 선택지이며, v0 기본값은 governed connector + approval/cost/audit ledger다.
 - Docker/deploy는 dev/e2e/prod/install/backup layer로 분리하되, 실제 prod installer와 repo split은 후속 티켓에서만 수행한다.
+- product messaging은 `research/12-agentic-work-os/03-agent-host-positioning.md`를 정본으로 둔다. 핵심 문장: channel timeline execution ledger, first-class agent member, protocol surface, self-hosted trust boundary, local LLM future.
 
 후속 빌더블 후보:
 
 - `MOMO-181`: Plugin manifest/catalog split criteria.
 - `MOMO-182`: Docker compose layer ADR/dev-e2e-prod plan.
 - `MOMO-183`: First-party plugin repo strategy.
-- `MOMO-184`: Agent host positioning/product messaging.
+- `MOMO-184`: Agent host positioning/product messaging. (완료: product copy 정본)
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 

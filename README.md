@@ -10,7 +10,18 @@ momo는 봇/슬래시커맨드가 아니라, presence·lifecycle·상태머신�
 - 정본 스펙: [`research/07-deepdive/04-self-build-l4-spec.md`](research/07-deepdive/04-self-build-l4-spec.md)
 - 정본 스키마: [`schema_v0.sql`](schema_v0.sql) (PostgreSQL 18, `uuidv7()` PK, member 추상화, `channel_seq` 행카운터)
 - 경험 설계(데모 타깃): [`research/07-deepdive/05-agent-native-experiences.md`](research/07-deepdive/05-agent-native-experiences.md)
+- 제품 포지셔닝: [`research/12-agentic-work-os/03-agent-host-positioning.md`](research/12-agentic-work-os/03-agent-host-positioning.md)
 - 빌드 티켓: [`BUILD_TICKETS.md`](BUILD_TICKETS.md)
+
+---
+
+## 제품 포지셔닝
+
+**momo turns team channels into agent execution ledgers.**
+
+momo is a self-hosted Slack-like workspace for agentic work. The key difference is that the channel timeline is the execution ledger: agents are first-class members, tool calls and approvals are visible messages, costs are accountable, and workspace context stays governed by momo instead of disappearing into an external bot runtime.
+
+Slack은 대화를 남기고, Paca는 작업판을 남기고, OpenHands는 코딩 에이전트 실행을 남긴다. momo는 팀 채널 자체를 사람이 승인하고 에이전트가 실행한 업무의 ledger로 만든다. 자세한 website/README/sales deck 재사용 copy는 [`Agent Host Positioning`](research/12-agentic-work-os/03-agent-host-positioning.md)에 둔다.
 
 ---
 
