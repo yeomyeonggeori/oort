@@ -274,7 +274,7 @@ struct MessageRoutes: Sendable {
     }
 
     /// Build the outbox `payload` JSON (the args the relay will POST to Centrifugo).
-    private static func broadcastPayload(
+    static func broadcastPayload(
         centChannel: String, messageID: UUID, channelID: UUID, seq: Int64,
         type: String, body: String?, authorMemberID: UUID, hlcTs: Int64, hlcCount: Int
     ) -> String {
@@ -286,13 +286,13 @@ struct MessageRoutes: Sendable {
             "seq": seq,
             "payload": [
                 "id": messageID.uuidString,
-                "channelId": channelID.uuidString,
+                "channel_id": channelID.uuidString,
                 "seq": seq,
                 "type": type,
                 "body": body as Any,
-                "authorMemberId": authorMemberID.uuidString,
-                "hlcTs": hlcTs,
-                "hlcCount": hlcCount,
+                "author_member_id": authorMemberID.uuidString,
+                "hlc_ts": hlcTs,
+                "hlc_count": hlcCount,
             ],
         ]
         let envelope: [String: Any] = [

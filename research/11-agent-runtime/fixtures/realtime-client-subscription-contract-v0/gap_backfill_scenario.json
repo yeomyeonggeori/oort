@@ -1,0 +1,78 @@
+{
+  "fixture_id": "realtime_client_subscription_contract_v0_gap_backfill_scenario",
+  "ticket": "MOMO-179",
+  "channel_id": "00000000-0000-7000-8000-000000000010",
+  "channel": "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000010",
+  "initial_client_state": {
+    "last_applied_seq": 40,
+    "seen_message_ids": [
+      "00000000-0000-7000-8000-000000000140"
+    ]
+  },
+  "incoming_publications": [
+    {
+      "case": "duplicate_replay",
+      "seq": 40,
+      "expected_action": "ignore for ordering; upsert by message_id only if payload carries newer state"
+    },
+    {
+      "case": "gap_detected",
+      "seq": 43,
+      "expected_action": "buffer event and call REST history(after: 40, limit: 200)"
+    }
+  ],
+  "rest_backfill_request": {
+    "method": "GET",
+    "path": "/v1/workspaces/00000000-0000-7000-8000-000000000001/channels/00000000-0000-7000-8000-000000000010/messages?after=40&limit=200"
+  },
+  "rest_backfill_response": {
+    "messages": [
+      {
+        "id": "00000000-0000-7000-8000-000000000141",
+        "channel_id": "00000000-0000-7000-8000-000000000010",
+        "seq": 41,
+        "hlc_ts": 1782463241000,
+        "hlc_count": 0,
+        "author_member_id": "00000000-0000-7000-8000-000000000101",
+        "type": "text",
+        "state": "sent",
+        "body": "Backfilled seq 41.",
+        "props": {}
+      },
+      {
+        "id": "00000000-0000-7000-8000-000000000142",
+        "channel_id": "00000000-0000-7000-8000-000000000010",
+        "seq": 42,
+        "hlc_ts": 1782463242000,
+        "hlc_count": 0,
+        "author_member_id": "00000000-0000-7000-8000-000000000102",
+        "type": "text",
+        "state": "sent",
+        "body": "Backfilled seq 42.",
+        "props": {}
+      },
+      {
+        "id": "00000000-0000-7000-8000-000000000143",
+        "channel_id": "00000000-0000-7000-8000-000000000010",
+        "seq": 43,
+        "hlc_ts": 1782463243000,
+        "hlc_count": 0,
+        "author_member_id": "00000000-0000-7000-8000-000000000101",
+        "type": "text",
+        "state": "sent",
+        "body": "Backfilled seq 43.",
+        "props": {}
+      }
+    ],
+    "next_before": 41
+  },
+  "expected_client_state": {
+    "last_applied_seq": 43,
+    "pending_events": [],
+    "notes": [
+      "Centrifugo offset/recovered flag never replaces message.seq ordering.",
+      "On reconnect with recovered=false, repeat REST history(after:last_applied_seq).",
+      "If REST cannot close the gap after bounded pages, mark channel degraded and reload newest history."
+    ]
+  }
+}

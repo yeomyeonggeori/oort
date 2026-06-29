@@ -1,0 +1,33 @@
+{
+  "fixture_id": "realtime_client_subscription_contract_v0_message_new_event",
+  "ticket": "MOMO-179",
+  "channel": "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000010",
+  "centrifugo_publish": {
+    "version": 43,
+    "idempotency_key": "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000010:43"
+  },
+  "envelope": {
+    "type": "message.new",
+    "v": 1,
+    "ts": 1782463260000,
+    "seq": 43,
+    "payload": {
+      "id": "00000000-0000-7000-8000-000000000179",
+      "channel_id": "00000000-0000-7000-8000-000000000010",
+      "seq": 43,
+      "hlc_ts": 1782463260000,
+      "hlc_count": 0,
+      "author_member_id": "00000000-0000-7000-8000-000000000101",
+      "type": "text",
+      "state": "sent",
+      "body": "Realtime contract sample.",
+      "props": {},
+      "client_msg_id": "00000000-0000-7000-8000-000000179043",
+      "created_at_ms": 1782463260000
+    }
+  },
+  "maps_to": {
+    "momo_core": "RealtimeEnvelope.decodeEvent() -> RealtimeEvent.message(Message)",
+    "macos": "ChatViewModel.upsert by message.id or client_msg_id, then sort by Message.seq"
+  }
+}

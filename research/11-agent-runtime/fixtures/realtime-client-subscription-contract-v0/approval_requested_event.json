@@ -1,0 +1,37 @@
+{
+  "fixture_id": "realtime_client_subscription_contract_v0_approval_requested_event",
+  "ticket": "MOMO-179",
+  "channel": "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000010",
+  "envelope": {
+    "type": "approval.requested",
+    "v": 1,
+    "ts": 1782463270000,
+    "seq": 44,
+    "payload": {
+      "action": "requested",
+      "approval_id": "00000000-0000-7000-8000-000000000901",
+      "run_id": "00000000-0000-7000-8000-000000000161",
+      "channel_id": "00000000-0000-7000-8000-000000000010",
+      "requested_by": "00000000-0000-7000-8000-000000000102",
+      "on_behalf_of": "00000000-0000-7000-8000-000000000101",
+      "action_type": "tool_call",
+      "status": "pending",
+      "payload": {
+        "tool_call": {
+          "call_id": "call_create_issue_001",
+          "name": "github.create_issue",
+          "arguments": {
+            "repo": "Dawn-kim-official/momo",
+            "title": "Demo issue from approved tool call"
+          }
+        }
+      },
+      "estimated_micro_usd": 820000,
+      "is_reversible": false
+    }
+  },
+  "maps_to": {
+    "momo_core": "RealtimeEnvelope.decodeEvent() -> RealtimeEvent.approval(ApprovalEvent)",
+    "macos": "ApprovalInboxView pending item keyed by approval_id"
+  }
+}
