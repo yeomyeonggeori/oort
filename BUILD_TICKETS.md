@@ -225,7 +225,7 @@
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
 | `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 후보 |
-| `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 후보 |
+| `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | PR/local gate 대상 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 후보 |
 
 ### MOMO-180 수용기준 `[docs/spec]`
@@ -233,7 +233,7 @@
 - [x] `docs/adr/0001-agentic-work-os-repo-topology.md`에 core monorepo 유지와 향후 `momo-plugins`, first-party plugin repos, plugin SDK repos, `momo-mcp`, `momo-landing`, private `momo-signing` split 기준을 정의한다.
 - [x] Docker/deploy layering을 dev/e2e/prod/install/upgrade/backup으로 분리하는 방향을 ADR에 기록한다.
 - [x] ROADMAP/BUILD_TICKETS/STATUS/docs/INDEX 갱신.
-- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 리뷰, 필요 수정, merge, main docs local gate PASS.
 
 ### MOMO-181 수용기준 `[docs/spec]`
@@ -252,10 +252,15 @@
 - [ ] source checkout 없는 image-based prod deploy, install/upgrade script, backup/PITR, optional external DB/TLS/agent runtime 선택지를 정의.
 - [ ] 실제 prod deploy 구현은 out of scope.
 
-### MOMO-183 후보 수용기준 `[docs/spec]`
-- [ ] first-party plugin 우선순위를 GitHub/GitHub Issues, Google Workspace, Jira-like work item, Docs connector로 정의.
-- [ ] 각 plugin이 제공할 slash command, message context action, approval card, source provider, audit event를 표로 고정.
-- [ ] repo split 순서와 private/public visibility 기준을 정의.
+### MOMO-183 수용기준 `[docs/spec]`
+- [x] first-party plugin 우선순위를 GitHub/GitHub Issues, Google Workspace, Jira-like work item, Docs connector로 정의.
+- [x] 각 plugin이 제공할 slash command, message context action, approval card, source provider, audit event를 표로 고정.
+- [x] repo split 순서와 private/public visibility 기준을 정의.
+- [x] Plugin Manifest v0, Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane permission model과 연결.
+- [x] ROADMAP/BUILD_TICKETS/STATUS/docs/INDEX 갱신.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+- out of scope: 실제 plugin runtime, repo split 생성, external OAuth/provider API execution, WASM runtime, marketplace UI.
 
 ### MOMO-184 후보 수용기준 `[docs/product]`
 - [ ] momo 제품 문장을 "channel timeline execution ledger" 중심으로 정리.
