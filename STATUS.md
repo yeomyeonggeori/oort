@@ -38,6 +38,12 @@
 - PR #145/#146/#147/#148 merge 후 main `scripts/local_gate.sh --profile all`이 `scripts/verify_agent_worker.sh`에서 실패했다. DB 상태는 `agent_run=succeeded`, `outbox=done`, `usage_ledger`/`budget_window` PASS였고, 원인은 AgentWorker/MomoCore realtime v0 계약이 `payload.run_id` snake_case로 정렬된 뒤 verifier가 legacy `payload.runId`만 조회한 계약 drift였다.
 - verifier를 v0 정본 `payload.run_id` 우선 + legacy `payload.runId` fallback으로 수정했다. 제품 runtime protocol 변경은 없고, post-merge gate 복구용 hotfix다.
 
+## 0-5. MOMO-198 M3 D/B/C Readiness Cleanup (2026-06-29)
+
+- `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`를 추가해 MOMO-170/171/174/177/179/192/193 이후 현재 코드 기준의 D/B/C 실데이터 readiness와 기존 MOMO-020/021/022 unblock 조건을 재정리했다.
+- 다음 builder-friendly 후보를 ROADMAP/BUILD_TICKETS에 반영했다: MOMO-199 SwiftCentrifuge live adapter, MOMO-200 D fixture/gate, MOMO-201 cost projection, MOMO-202 approval pending projection, MOMO-203 combined M3 D/B/C gate.
+- 이번 PR은 docs/spec 변경만 수행한다. 실제 SwiftCentrifuge adapter, D/B/C runtime gate, external Hermes/provider side-effect evidence는 계속 `runtime-unverified` 후속 범위다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
