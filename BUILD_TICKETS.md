@@ -390,7 +390,7 @@
 - [x] DB/Swift/server/worker 변경 범위를 정리하고, `schema_v0.sql`은 수정하지 않는다.
 - [x] AgentWorker가 approval-required `tool_call`에서 `approval(status='pending')`, `message.type='approval_request'`, `agent_run.status='awaiting_approval'`, `audit_log`를 기록하는 최소 pause slice를 컴파일 가능한 코드로 추가한다.
 - [x] `research/11-agent-runtime/fixtures/approval-pause-resume-v0/` fixture와 AgentWorker smoke test를 추가한다.
-- [ ] Server approval decision endpoint와 AgentWorker resume-job execution은 후속 runtime 구현으로 남긴다(`runtime-unverified`).
+- [x] Server approval decision endpoint는 MOMO-167, AgentWorker deterministic resume-job execution은 MOMO-178에서 후속 runtime slice로 닫는다. Expiry sweeper와 real provider side-effect execution은 별도 후속 `runtime-unverified`.
 
 핵심 원칙:
 
@@ -411,6 +411,7 @@
 | `MOMO-161` | approval pause/resume runtime | spec/swift/runtime | MOMO-160 |
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-167` | approval decision endpoint runtime | swift/sql/runtime | MOMO-161, MOMO-166, MOMO-171 |
+| `MOMO-178` | AgentWorker approved tool resume executor v0 | swift/runtime | MOMO-161, MOMO-165, MOMO-166, MOMO-167 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
 | `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
@@ -506,6 +507,18 @@
 - [x] server/worker focused tests와 `scripts/verify_approval_decision.sh` runtime verifier를 추가한다.
 - [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #111을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-178 수용기준 `[swift/runtime]`
+- [x] GitHub #123을 `scripts/goal_claim.sh 123`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] AgentWorker가 `outbox.method='resume_approval'` 또는 `payload.resume_from_approval_id` resume job을 decode/dispatch한다.
+- [x] `approval.status='approved'`, same-run/channel/agent, frozen `approved_tool_call`, approval-required `policy_evidence`, approved decision payload를 fail-closed로 검증한다.
+- [x] v0 executor는 deterministic mock tool(`mock.echo`/`momo.mock.echo`/`deterministic.echo`)만 실행하고 arbitrary external tool/provider write는 실패 처리한다.
+- [x] 성공 시 같은 `agent_run.id`에 `message(type='tool_result')`, `audit_log(action='approval.resume'/'tool.executed')`, broadcast outbox를 기록하고 resume job을 `done`으로 닫는다. 실패 시 failed outbox `last_error`와 failure audit을 남긴다.
+- [x] reject/cancelled/expired/non-approved approval은 실행하지 않는다.
+- [x] focused AgentWorker tests와 `scripts/verify_agent_worker.sh` approved resume runtime smoke를 추가한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] 가능하면 `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #123을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.
