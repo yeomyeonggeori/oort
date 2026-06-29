@@ -412,6 +412,7 @@
 | `MOMO-166` | approval decision server contract v0 | spec/docs | MOMO-161, MOMO-171 |
 | `MOMO-167` | approval decision endpoint runtime | swift/sql/runtime | MOMO-161, MOMO-166, MOMO-171 |
 | `MOMO-178` | AgentWorker approved tool resume executor v0 | swift/runtime | MOMO-161, MOMO-165, MOMO-166, MOMO-167 |
+| `MOMO-185` | AgentWorker all-profile local gate isolation hotfix | runtime/tooling | MOMO-167, MOMO-178 |
 | `MOMO-162` | Hermes adapter contract verification | spec/python | MOMO-150, MOMO-004 |
 | `MOMO-168` | Hermes adapter repo-local smoke harness | python/docs | MOMO-162 |
 | `MOMO-163` | inbound MCP server v0 spec and fixtures | spec/swift | MOMO-151, MOMO-153 |
@@ -534,6 +535,16 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] 가능하면 `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #123을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-185 수용기준 `[runtime/tooling]`
+- [x] GitHub #132를 hotfix issue로 발급하고 별도 branch/worktree에서 진행한다.
+- [x] all-profile에서 `verify_approval_decision.sh`가 남긴 pending `resume_approval` job이 `verify_agent_worker.sh` 검증을 오염시키는 원인을 기록한다.
+- [x] `scripts/verify_agent_worker.sh` 시작 시 demo workspace의 pending/processing `agent_job` queue를 정리해 자기 fixture만 검증한다.
+- [x] all-profile에서 직전 OutboxRelay가 tool_result broadcast를 `done`으로 소비해도 verifier가 non-failed broadcast row를 인정한다.
+- [x] MOMO-178의 unsupported external tool fail-closed 동작은 유지한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile all` PASS.
+- [ ] PR 생성/리뷰/머지 후 issue #132를 `status:done`으로 전환한다.
 
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.
