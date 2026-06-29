@@ -434,6 +434,7 @@
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 | `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
 | `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
+| `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -492,6 +493,18 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #124를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-193 수용기준 `[swift]`
+- [x] GitHub #142를 `scripts/goal_claim.sh 142` 상당의 기존 claim/worktree에서 진행한다. 사용자 입력의 #143은 MOMO-186으로 확인되어 ready로 복구했다.
+- [x] `MomoCore`에 `RealtimeSubscriptionDriver`/`RealtimeEnvelopeSubscriptionTransport`/`RealtimeReplayController` abstraction을 추가한다.
+- [x] `MomoServerRESTChatBackend.subscribe(channel:)`가 optional realtime driver로 live stream을 연결할 수 있고, driver 미주입 시 fallback/demo empty stream을 유지한다.
+- [x] `message.seq` duplicate replay, seq gap, REST backfill trigger, buffered replay drain 테스트를 추가한다.
+- [x] `agent.partial`/`agent.status`는 seq ordering authority가 아닌 non-durable progress projection으로 controller가 별도 통과 처리한다.
+- [x] SwiftCentrifuge dependency는 이번 slice에서 추가하지 않았다. NOTICE/THIRD_PARTY 변경 없음; 실제 adapter/token endpoint/full runtime e2e는 `runtime-unverified` 후속이다.
+- [x] `swift test --package-path clients/Core` PASS.
+- [x] `swift test --package-path clients/macOS` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #142를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

@@ -5,25 +5,29 @@ import MomoCore
 
 /// REST-backed v0 `ChatBackend` for the SwiftPM macOS development app.
 ///
-/// Scope is intentionally narrow for MOMO-177: auth/login, history, and send use
-/// MomoServer REST. Realtime subscription remains an empty stream until the
-/// Centrifugo client lands, so Postgres REST history is still the source of truth.
+/// Scope is intentionally narrow: auth/login, history, and send use MomoServer
+/// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
+/// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
 public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
     public let config: MomoServerRESTChatBackendConfig
 
     private let session: URLSession
+    private let realtimeDriver: (any RealtimeSubscriptionDriver)?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var workspace: WorkspaceID?
     private var accessToken: String?
     private var authenticatedMember: Member?
+    private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
 
     public init(
         config: MomoServerRESTChatBackendConfig,
-        session: URLSession = .shared
+        session: URLSession = .shared,
+        realtimeDriver: (any RealtimeSubscriptionDriver)? = nil
     ) {
         self.config = config
         self.session = session
+        self.realtimeDriver = realtimeDriver
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
         self.decoder.keyDecodingStrategy = .useDefaultKeys
@@ -78,9 +82,21 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
 
     public func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
         guard accessToken != nil else { throw BackendError.notConnected }
-        return AsyncStream { continuation in
-            continuation.finish()
+        guard let realtimeDriver else {
+            return AsyncStream { continuation in
+                continuation.finish()
+            }
         }
+
+        let startingSeq = lastKnownSeqByChannel[channel] ?? 0
+        return try await realtimeDriver.subscribe(
+            channel: channel,
+            startingAfter: startingSeq,
+            backfill: { [weak self] after, limit in
+                guard let self else { return [] }
+                return try await self.history(channel: channel, after: after, limit: limit)
+            }
+        )
     }
 
     public func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
@@ -97,7 +113,9 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
             queryItems: items,
             response: MessagePage.self
         )
-        return page.messages.map(\.message).sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        let messages = page.messages.map(\.message).sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        rememberLastKnownSeq(messages, channel: channel)
+        return messages
     }
 
     public func presence(channel: ChannelID) async throws -> [PresenceEntry] {
@@ -236,6 +254,13 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
             return .problem(status: status, title: problem.title, detail: problem.detail ?? problem.message)
         }
         return .problem(status: status, title: HTTPURLResponse.localizedString(forStatusCode: status), detail: nil)
+    }
+
+    private func rememberLastKnownSeq(_ messages: [Message], channel: ChannelID) {
+        guard let maxSeq = messages.compactMap(\.seq).max() else {
+            return
+        }
+        lastKnownSeqByChannel[channel] = max(lastKnownSeqByChannel[channel] ?? 0, maxSeq)
     }
 }
 

@@ -171,6 +171,74 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(p.spentMicroUSD, 2100)
     }
 
+    func testRealtimeReplayControllerDropsDuplicateMessageSeq() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let message = Self.message(channel: channel, author: author, seq: 40, body: "duplicate")
+        let controller = RealtimeReplayController(
+            channel: channel,
+            lastAppliedSeq: 40,
+            seenMessageIDs: [message.id]
+        )
+
+        let emitted = try await controller.process(Self.envelope(message)) { _, _ in [] }
+
+        XCTAssertTrue(emitted.isEmpty)
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.lastAppliedSeq, 40)
+        XCTAssertTrue(snapshot.pendingSeqs.isEmpty)
+    }
+
+    func testRealtimeReplayControllerBackfillsGapAndDrainsBufferedLiveEvent() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let live43 = Self.message(channel: channel, author: author, seq: 43, body: "live 43")
+        let backfill41 = Self.message(channel: channel, author: author, seq: 41, body: "backfill 41")
+        let backfill42 = Self.message(channel: channel, author: author, seq: 42, body: "backfill 42")
+        let backfill = BackfillScript(pages: [40: [backfill41, backfill42]])
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 40)
+
+        let emitted = try await controller.process(Self.envelope(live43)) { after, limit in
+            await backfill.backfill(after: after, limit: limit)
+        }
+
+        XCTAssertEqual(emitted.messageSeqs, [41, 42, 43])
+        XCTAssertEqual(emitted.messageBodies, ["backfill 41", "backfill 42", "live 43"])
+        let calls = await backfill.calls()
+        XCTAssertEqual(calls, [BackfillCall(after: 40, limit: 200)])
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.lastAppliedSeq, 43)
+        XCTAssertTrue(snapshot.pendingSeqs.isEmpty)
+    }
+
+    func testRealtimeReplayControllerDedupesBufferedEventAlreadyReturnedByBackfill() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let live43 = Self.message(channel: channel, author: author, seq: 43, body: "live 43")
+        let backfill41 = Self.message(channel: channel, author: author, seq: 41, body: "backfill 41")
+        let backfill42 = Self.message(channel: channel, author: author, seq: 42, body: "backfill 42")
+        let backfill43 = Message(
+            id: live43.id,
+            channelId: channel,
+            seq: 43,
+            hlcTs: 43,
+            authorMemberId: author,
+            body: "backfill 43"
+        )
+        let backfill = BackfillScript(pages: [40: [backfill41, backfill42, backfill43]])
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 40)
+
+        let emitted = try await controller.process(Self.envelope(live43)) { after, limit in
+            await backfill.backfill(after: after, limit: limit)
+        }
+
+        XCTAssertEqual(emitted.messageSeqs, [41, 42, 43])
+        XCTAssertEqual(emitted.messageBodies, ["backfill 41", "backfill 42", "backfill 43"])
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.lastAppliedSeq, 43)
+        XCTAssertTrue(snapshot.pendingSeqs.isEmpty)
+    }
+
     // MARK: - Cost snapshot
 
     func testCostSnapshotUSDConversion() {
@@ -187,5 +255,80 @@ final class MomoCoreTests: XCTestCase {
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         XCTAssertNotNil(obj["channel_id"])
         XCTAssertEqual(obj["body"] as? String, "yo")
+    }
+
+    private static func message(
+        channel: ChannelID,
+        author: MemberID,
+        seq: Int64,
+        body: String
+    ) -> Message {
+        Message(
+            id: MessageID(),
+            channelId: channel,
+            seq: seq,
+            hlcTs: seq,
+            authorMemberId: author,
+            body: body
+        )
+    }
+
+    private static func envelope(_ message: Message) -> RealtimeEnvelope {
+        RealtimeEnvelope(
+            type: "message.new",
+            ts: message.hlcTs,
+            seq: message.seq,
+            payload: [
+                "id": .string(message.id.description),
+                "channel_id": .string(message.channelId.description),
+                "seq": .int(message.seq ?? 0),
+                "hlc_ts": .int(message.hlcTs),
+                "hlc_count": .int(Int64(message.hlcCount)),
+                "author_member_id": .string(message.authorMemberId.description),
+                "type": .string(message.type.rawValue),
+                "state": .string(message.state.rawValue),
+                "body": .string(message.body ?? ""),
+                "props": .object([:]),
+            ]
+        )
+    }
+}
+
+private struct BackfillCall: Equatable, Sendable {
+    var after: Int64
+    var limit: Int
+}
+
+private actor BackfillScript {
+    private var pages: [Int64: [Message]]
+    private var recordedCalls: [BackfillCall] = []
+
+    init(pages: [Int64: [Message]]) {
+        self.pages = pages
+    }
+
+    func backfill(after: Int64, limit: Int) -> [Message] {
+        recordedCalls.append(BackfillCall(after: after, limit: limit))
+        return pages[after] ?? []
+    }
+
+    func calls() -> [BackfillCall] {
+        recordedCalls
+    }
+}
+
+private extension Array where Element == RealtimeEvent {
+    var messageSeqs: [Int64] {
+        compactMap { event in
+            guard case .message(let message) = event else { return nil }
+            return message.seq
+        }
+    }
+
+    var messageBodies: [String] {
+        compactMap { event in
+            guard case .message(let message) = event else { return nil }
+            return message.body
+        }
     }
 }

@@ -475,6 +475,72 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
+    func testRESTBackendSubscribeUsesRealtimeDriverStartingAfterKnownHistorySeq() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let liveMessage = Message(
+            id: MessageID(uuidString: "00000000-0000-7000-8000-000000001008")!,
+            channelId: channel,
+            seq: 8,
+            hlcTs: 1700000001000,
+            authorMemberId: .demoHuman,
+            body: "live via driver"
+        )
+        let driver = RecordingRealtimeSubscriptionDriver(events: [.message(liveMessage)])
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(json: """
+                {
+                  "messages": [
+                    {
+                      "id": "00000000-0000-7000-8000-000000001007",
+                      "channelId": "\(channel.description)",
+                      "seq": 7,
+                      "hlcTs": 1700000000000,
+                      "hlcCount": 0,
+                      "authorMemberId": "\(MemberID.demoHuman.description)",
+                      "type": "text",
+                      "body": "history 7",
+                      "createdAtMs": 1700000000000
+                    }
+                  ],
+                  "nextBefore": 7
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session,
+            realtimeDriver: driver
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let history = try await backend.history(channel: channel, after: nil, limit: 200)
+        XCTAssertEqual(history.map(\.seq), [7])
+
+        let stream = try await backend.subscribe(channel: channel)
+        var received: [RealtimeEvent] = []
+        for await event in stream {
+            received.append(event)
+        }
+
+        let startingSeqs = await driver.startingSeqs()
+        XCTAssertEqual(startingSeqs, [7])
+        XCTAssertEqual(received.messageSeqs, [8])
+    }
+
     func testRESTBackendConfigFromEnvironmentUsesDevSafeSeedDefaults() throws {
         let config = try XCTUnwrap(MomoServerRESTChatBackendConfig.fromEnvironment([
             "MOMO_SERVER_BASE_URL": "http://127.0.0.1:8080",
@@ -566,6 +632,42 @@ private actor FailingDecisionAgentTransport: AgentTransport {
     }
 
     func cancelRun(_ id: RunID) async throws {}
+}
+
+private actor RecordingRealtimeSubscriptionDriver: RealtimeSubscriptionDriver {
+    private let events: [RealtimeEvent]
+    private var starts: [Int64] = []
+
+    init(events: [RealtimeEvent]) {
+        self.events = events
+    }
+
+    func subscribe(
+        channel: ChannelID,
+        startingAfter lastAppliedSeq: Int64,
+        backfill: @escaping RealtimeBackfill
+    ) async throws -> AsyncStream<RealtimeEvent> {
+        starts.append(lastAppliedSeq)
+        return AsyncStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+    }
+
+    func startingSeqs() -> [Int64] {
+        starts
+    }
+}
+
+private extension Array where Element == RealtimeEvent {
+    var messageSeqs: [Int64] {
+        compactMap { event in
+            guard case .message(let message) = event else { return nil }
+            return message.seq
+        }
+    }
 }
 
 private struct MockHTTPResponse {
