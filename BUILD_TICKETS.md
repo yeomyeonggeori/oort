@@ -420,6 +420,7 @@
 | `MOMO-170` | macOS agent protocol cards | spec/swift | MOMO-132, MOMO-161 |
 | `MOMO-171` | macOS approval_request card decisions | swift/spec | MOMO-170 |
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
+| `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -455,6 +456,20 @@
 - [x] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
 - [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] PR 생성 후 GitHub #112를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-177 수용기준 `[swift/macos-ui]`
+- [x] GitHub #122를 `scripts/goal_claim.sh 122`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `clients/macOS`에 REST-backed `ChatBackend` v0를 추가한다.
+- [x] base URL/token/workspace/channel 설정은 `MOMO_SERVER_BASE_URL`, `MOMO_ACCESS_TOKEN`, `MOMO_WORKSPACE_ID`, `MOMO_CHANNEL_ID` 등 dev-safe environment로 주입한다.
+- [x] message history fetch는 MomoServer `GET /v1/workspaces/{ws}/channels/{ch}/messages` 응답을 `MomoCore.Message`로 변환한다.
+- [x] message send는 REST `POST /v1/workspaces/{ws}/channels/{ch}/messages`와 `clientMsgId` idempotency key를 사용한다.
+- [x] unauthorized/offline/decoding 실패는 `ChatViewModel.connectionError`와 timeline banner로 표시한다.
+- [x] `LiveChatBackend.seedDemo()`는 dev fallback으로 유지한다.
+- [x] focused macOS tests를 추가한다.
+- [x] local MomoServer smoke 절차를 `docs/RUN.md`에 문서화한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #122를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

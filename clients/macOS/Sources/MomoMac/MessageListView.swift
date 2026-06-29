@@ -19,6 +19,10 @@ public struct MessageListView: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
+            if let error = viewModel.connectionError {
+                connectionBanner(error)
+                Divider()
+            }
             Divider()
             timeline
             Divider()
@@ -49,6 +53,21 @@ public struct MessageListView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private func connectionBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(.orange)
+            Text(error)
+                .font(.caption)
+                .lineLimit(2)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.orange.opacity(0.08))
     }
 
     // MARK: Timeline (seq order)

@@ -353,6 +353,140 @@ final class MomoMacTests: XCTestCase {
         XCTAssertTrue(pg18Thread.title.contains("migration thread"))
         XCTAssertTrue(preview.compressedContext.contains("src_pg18_thread{citation=[src_pg18_thread]"))
     }
+
+    // MARK: MomoServer REST ChatBackend v0
+
+    func testRESTBackendLoginHistoryAndSendUseMomoServerMessageEndpoints() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let messageID = MessageID(uuidString: "00000000-0000-7000-8000-000000001001")!
+        let clientMsgId = UUID(uuidString: "00000000-0000-7000-8000-000000001777")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/auth/login"):
+                return MockHTTPResponse(json: """
+                {
+                  "accessToken": "token-123",
+                  "refreshToken": "refresh-123",
+                  "member": {
+                    "id": "\(MemberID.demoHuman.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "human",
+                    "displayName": "데모 사용자",
+                    "handle": "demo"
+                  }
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                XCTAssertEqual(request.url?.query, "limit=200")
+                return MockHTTPResponse(json: """
+                {
+                  "messages": [
+                    {
+                      "id": "\(messageID.description)",
+                      "channelId": "\(channel.description)",
+                      "seq": 7,
+                      "hlcTs": 1700000000000,
+                      "hlcCount": 0,
+                      "authorMemberId": "\(MemberID.demoHuman.description)",
+                      "type": "text",
+                      "body": "from server",
+                      "createdAtMs": 1700000000000
+                    }
+                  ],
+                  "nextBefore": 7
+                }
+                """)
+            case ("POST", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["clientMsgId"] as? String, clientMsgId.uuidString)
+                XCTAssertEqual(body?["type"] as? String, "text")
+                XCTAssertEqual(body?["body"] as? String, "hello REST")
+                return MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "id": "00000000-0000-7000-8000-000000001002",
+                  "channelId": "\(channel.description)",
+                  "seq": 8,
+                  "hlcTs": 1700000001000,
+                  "hlcCount": 0,
+                  "authorMemberId": "\(MemberID.demoHuman.description)",
+                  "type": "text",
+                  "body": "hello REST",
+                  "createdAtMs": 1700000001000
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "")
+
+        let history = try await backend.history(channel: channel, after: nil, limit: 200)
+        XCTAssertEqual(history.map(\.id), [messageID])
+        XCTAssertEqual(history.first?.body, "from server")
+        XCTAssertEqual(history.first?.seq, 7)
+
+        let ack = try await backend.sendOptimistic(
+            DraftMessage(channelId: channel, type: .text, body: "hello REST"),
+            clientMsgId: clientMsgId
+        )
+        XCTAssertEqual(ack.seq, 8)
+        XCTAssertEqual(ack.clientMsgId, clientMsgId)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET", "POST"])
+    }
+
+    func testRESTBackendMapsUnauthorizedResponseToProblemError() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(statusCode: 401, json: #"{"title":"unauthorized","detail":"bad token"}"#)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "expired-token"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: .demo, accessToken: "expired-token")
+
+        do {
+            _ = try await backend.history(channel: .demoGeneral, after: nil, limit: 50)
+            XCTFail("history should fail on 401")
+        } catch BackendError.problem(let status, let title, let detail) {
+            XCTAssertEqual(status, 401)
+            XCTAssertEqual(title, "unauthorized")
+            XCTAssertEqual(detail, "bad token")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testRESTBackendConfigFromEnvironmentUsesDevSafeSeedDefaults() throws {
+        let config = try XCTUnwrap(MomoServerRESTChatBackendConfig.fromEnvironment([
+            "MOMO_SERVER_BASE_URL": "http://127.0.0.1:8080",
+        ]))
+
+        XCTAssertEqual(config.baseURL.absoluteString, "http://127.0.0.1:8080")
+        XCTAssertEqual(config.workspace, .demo)
+        XCTAssertEqual(config.defaultChannel, .demoGeneral)
+        XCTAssertEqual(config.channels.map(\.name), ["general", "agent-lab"])
+        XCTAssertEqual(config.members.map(\.handle), ["demo", "kim-intern"])
+        XCTAssertNil(MomoServerRESTChatBackendConfig.fromEnvironment([:]))
+    }
 }
 
 private actor RecordingDecisionChatBackend: ChatBackend {
@@ -432,4 +566,110 @@ private actor FailingDecisionAgentTransport: AgentTransport {
     }
 
     func cancelRun(_ id: RunID) async throws {}
+}
+
+private struct MockHTTPResponse {
+    let statusCode: Int
+    let json: String
+
+    init(statusCode: Int = 200, json: String) {
+        self.statusCode = statusCode
+        self.json = json
+    }
+}
+
+private final class MockHTTPURLProtocol: URLProtocol, @unchecked Sendable {
+    typealias Handler = @Sendable (URLRequest) throws -> MockHTTPResponse
+
+    nonisolated(unsafe) private static var handler: Handler?
+    nonisolated(unsafe) private static var seenRequests: [URLRequest] = []
+    nonisolated(unsafe) private static var lock = NSLock()
+
+    static func reset() async {
+        lock.withLock {
+            handler = nil
+            seenRequests = []
+        }
+    }
+
+    static func setHandler(_ newHandler: @escaping Handler) async {
+        lock.withLock {
+            handler = newHandler
+        }
+    }
+
+    static func requests() async -> [URLRequest] {
+        lock.withLock { seenRequests }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        let currentHandler: Handler? = Self.lock.withLock {
+            Self.seenRequests.append(request)
+            return Self.handler
+        }
+        guard let currentHandler else {
+            client?.urlProtocol(self, didFailWithError: BackendError.notConnected)
+            return
+        }
+
+        do {
+            let mocked = try currentHandler(request)
+            let data = Data(mocked.json.utf8)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: mocked.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private extension URLSessionConfiguration {
+    static var momoMocked: URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockHTTPURLProtocol.self]
+        return configuration
+    }
+}
+
+private extension URLRequest {
+    var momoBodyData: Data? {
+        if let httpBody {
+            return httpBody
+        }
+        guard let httpBodyStream else {
+            return nil
+        }
+        httpBodyStream.open()
+        defer { httpBodyStream.close() }
+
+        var data = Data()
+        let bufferSize = 1024
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+        defer { buffer.deallocate() }
+        while httpBodyStream.hasBytesAvailable {
+            let count = httpBodyStream.read(buffer, maxLength: bufferSize)
+            guard count > 0 else {
+                break
+            }
+            data.append(buffer, count: count)
+        }
+        return data
+    }
 }
