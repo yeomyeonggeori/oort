@@ -339,6 +339,12 @@
 - 제품 회귀는 아니었다. MOMO-178 v0 executor는 `github.create_issue` 같은 외부 write tool을 deterministic mock allowlist 밖으로 보고 fail-closed 처리했으며, 실패 지점은 all-profile fixture isolation이었다.
 - `scripts/verify_agent_worker.sh`는 demo workspace의 pending/processing `agent_job` queue를 시작 전에 비워 자기 fixture만 검증하도록 정리했다. 또한 all-profile에서 직전 OutboxRelay가 tool_result broadcast를 즉시 `done`으로 소비할 수 있으므로, broadcast 검증은 `pending|done` non-failed row 존재로 고정했다. MOMO-178의 unsupported tool fail-closed 동작은 유지한다.
 
+## 0aq. MOMO-184 Agent Host Product Messaging (2026-06-29)
+
+- `research/12-agentic-work-os/03-agent-host-positioning.md`를 추가해 momo 제품 문장을 **channel timeline execution ledger** 중심으로 고정했다. Slack/Discord/Mattermost/Paca/OpenHands 대비 1페이지 비교와 website/README/sales deck reusable copy block을 포함한다.
+- `README.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/INDEX.md`에 정본 링크와 상태를 반영했다. agent host, protocol surface, self-hosted trust boundary, local LLM future 방향을 제품 copy에 연결했다.
+- 코드/스키마/runtime 변경은 없으며 runtime 영향 없음. 검증: `scripts/local_gate.sh --profile docs` PASS.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
