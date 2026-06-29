@@ -353,6 +353,25 @@ scripts/local_gate.sh --profile runtime-relay
 evidence다. worktree에서는 `.env.worktree`의 `COMPOSE_PROJECT_NAME`, `PORT`,
 `POSTGRES_PORT`, `CENT_PORT`를 사용해 포트를 분리한다.
 
+#### 5.2.2 MOMO-196 Realtime WebSocket live 게이트
+
+`runtime-relay`는 Centrifugo history를 확인하고, 아래 profile은 실제 WebSocket
+subscriber가 live publication을 받는지 확인한다.
+
+```sh
+scripts/verify_realtime_live.sh
+scripts/local_gate.sh --profile runtime-live
+```
+
+검증 범위는 Docker dev compose PG/Centrifugo bootstrap → host MomoServer/OutboxRelay
+기동 → compose network의 `api:8080` proxy 연결 → demo login →
+`POST /v1/auth/realtime-token` → `ch:ws<workspace>.<channel>` subscribe →
+REST message send → live `message.new` publication 수신이다. evidence에는
+`payload.message.seq`, REST `message.seq`, Centrifugo publication offset, invalid
+connection token reject 경로가 남는다. proxy는 dev Centrifugo config의
+subscribe callback(`http://api:8080/v1/centrifugo/subscribe`)을 host MomoServer로
+전달하기 위한 local gate 전용 컨테이너다.
+
 ### 5.3 Agent Worker — `AgentWorker` (데모 D: Live Tool-Call)
 
 ```sh
