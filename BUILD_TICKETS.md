@@ -224,7 +224,7 @@
 |---|---|---|---|---|
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
 | `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
-| `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 후보 |
+| `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 완료 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | PR/local gate 대상 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 후보 |
 
@@ -247,10 +247,12 @@
 - [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 - out of scope: 실제 plugin runtime, repo split 생성, WASM runtime, marketplace UI, external OAuth implementation.
 
-### MOMO-182 후보 수용기준 `[infra/docs]`
-- [ ] `infra/docker-compose.yml`의 현재 dev 역할과 future `docker-compose.dev.yml`/`docker-compose.e2e.yml`/`infra/prod/docker-compose.prod.yml` 경계를 ADR로 고정.
-- [ ] source checkout 없는 image-based prod deploy, install/upgrade script, backup/PITR, optional external DB/TLS/agent runtime 선택지를 정의.
-- [ ] 실제 prod deploy 구현은 out of scope.
+### MOMO-182 수용기준 `[infra/docs]`
+- [x] `docs/adr/0002-docker-compose-layering.md`에 `infra/docker-compose.yml`의 현재 dev 역할과 future `docker-compose.dev.yml`/`docker-compose.e2e.yml`/`infra/prod/docker-compose.prod.yml` 경계를 ADR로 고정.
+- [x] source checkout 없는 image-based prod deploy, install/upgrade script, backup/PITR, optional external DB/TLS/agent runtime 선택지를 정의.
+- [x] 실제 prod deploy, image publish pipeline, pgBackRest restore rehearsal, GitHub Actions 재활성화, staging/prod secret 입력은 out of scope로 명시.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 
 ### MOMO-183 수용기준 `[docs/spec]`
 - [x] first-party plugin 우선순위를 GitHub/GitHub Issues, Google Workspace, Jira-like work item, Docs connector로 정의.
@@ -427,6 +429,7 @@
 | `MOMO-171` | macOS approval_request card decisions | swift/spec | MOMO-170 |
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 | `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
+| `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -476,6 +479,15 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #122를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-179 수용기준 `[spec/swift]`
+- [x] GitHub #124를 `scripts/goal_claim.sh 124`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`에 REST auth → realtime token, channel naming, subscribe authorization, event envelope, `message.seq` replay/idempotency/gap-fill, reconnect/resubscribe, macOS apply boundary를 고정한다.
+- [x] `research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/*.json`에 `message.new`, `approval.requested`, `approval.decided`, `agent.partial`, `agent.status`, gap/backfill scenario fixtures를 추가한다.
+- [x] Server/worker publish payloads를 MomoCore realtime decode keys와 정렬한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #124를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

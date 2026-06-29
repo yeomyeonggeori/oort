@@ -1,0 +1,23 @@
+{
+  "fixture_id": "realtime_client_subscription_contract_v0_agent_status_event",
+  "ticket": "MOMO-179",
+  "channel": "agent:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000102",
+  "envelope": {
+    "type": "agent.status",
+    "v": 1,
+    "ts": 1782463295000,
+    "payload": {
+      "run_id": "00000000-0000-7000-8000-000000000161",
+      "agent_member_id": "00000000-0000-7000-8000-000000000102",
+      "channel_id": "00000000-0000-7000-8000-000000000010",
+      "phase": "streaming",
+      "run_status": "running",
+      "reserved_micro_usd": 820000,
+      "spent_micro_usd": 2100
+    }
+  },
+  "maps_to": {
+    "momo_core": "RealtimeEnvelope.decodeEvent() -> RealtimeEvent.agentStatus(AgentStatus)",
+    "macos": "ChatViewModel.agentStatuses[run_id] drives CostBreathingRing"
+  }
+}

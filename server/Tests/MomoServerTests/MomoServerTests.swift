@@ -267,4 +267,45 @@ final class MomoServerTests: XCTestCase {
             try ApprovalDecisionRoutes.validateBodyApprovalID(pathID, pathApprovalID: pathID)
         )
     }
+
+    func testMessageBroadcastPayloadUsesRealtimeSnakeCaseContract() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let messageID = UUID(uuidString: "00000000-0000-7000-8000-000000000179")!
+        let authorID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+
+        let raw = MessageRoutes.broadcastPayload(
+            centChannel: centChannel,
+            messageID: messageID,
+            channelID: channelID,
+            seq: 43,
+            type: "text",
+            body: "Realtime contract sample.",
+            authorMemberID: authorID,
+            hlcTs: 1_782_463_260_000,
+            hlcCount: 0
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(object["channel"] as? String, centChannel)
+        XCTAssertEqual(object["version"] as? Int, 43)
+        XCTAssertEqual(object["idempotency_key"] as? String, "\(centChannel):43")
+
+        let data = try XCTUnwrap(object["data"] as? [String: Any])
+        XCTAssertEqual(data["type"] as? String, "message.new")
+        XCTAssertEqual(data["seq"] as? Int, 43)
+
+        let payload = try XCTUnwrap(data["payload"] as? [String: Any])
+        XCTAssertEqual(payload["channel_id"] as? String, channelID.uuidString)
+        XCTAssertEqual(payload["author_member_id"] as? String, authorID.uuidString)
+        XCTAssertEqual(payload["hlc_ts"] as? Int, 1_782_463_260_000)
+        XCTAssertEqual(payload["hlc_count"] as? Int, 0)
+        XCTAssertNil(payload["channelId"])
+        XCTAssertNil(payload["authorMemberId"])
+        XCTAssertNil(payload["hlcTs"])
+        XCTAssertNil(payload["hlcCount"])
+    }
 }

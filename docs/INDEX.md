@@ -56,6 +56,7 @@
 | [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
 | [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
+| [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 
@@ -127,6 +128,8 @@
 | [`research/11-agent-runtime/fixtures/google-workspace-connector-v0/`](../research/11-agent-runtime/fixtures/google-workspace-connector-v0/) | Google Workspace Connector v0 JSON fixtures(Drive source ref, Gmail thread ref, Calendar availability projection) |
 | [`research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`](../research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md) | Google Workspace Enterprise Admin v0 정본 스펙(enterprise admin install, domain-wide delegation option, scope inventory, service account boundary, delegated user, audit export, revoke/delete) |
 | [`research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`](../research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/) | Google Workspace Enterprise Admin v0 JSON fixtures(admin install scope inventory, DWD delegated Context/Memory/Capability projection, audit export revoke flow) |
+| [`research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`](../research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md) | Realtime Client Subscription Contract v0 정본 스펙(connection token, channel naming, subscribe auth, event envelope, `message.seq` replay/gap-fill, reconnect, macOS apply boundary) |
+| [`research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/`](../research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/) | Realtime client subscription JSON fixtures(`message.new`, approval request/decision, `agent.partial`, `agent.status`, gap/backfill scenario) |
 | [`research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`](../research/12-agentic-work-os/01-agentic-work-os-market-analysis.md) | Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 시장 분석 + momo 제품 포지션(agent execution ledger) |
 | [`research/12-agentic-work-os/02-plugin-manifest-v0.md`](../research/12-agentic-work-os/02-plugin-manifest-v0.md) | Plugin Manifest v0 정본 + capability grants/approval/source/audit/signature policy + `momo-plugins`/first-party plugin/SDK repo split 기준 |
 | [`research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`](../research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md) | First-party plugin repo strategy 정본(GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector, repo split 순서, plugin surface/audit/source/approval contract) |
@@ -164,7 +167,7 @@
 | `relay/OutboxRelay/` | SKIP LOCKED 폴링 → Centrifugo publish (BYPASSRLS) |
 | `workers/AgentWorker/` | agent_job 클레임 → hermes OpenAI-compat SSE → message PATCH (BYPASSRLS) |
 | `adapters/hermes/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) |
-| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · `centrifugo.json` · `.env.example`; prod skeleton은 `infra/prod/*`(SOPS/age + pgBackRest 예시, 실제 secret 없음) |
+| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · `centrifugo.json` · `.env.example`; prod skeleton은 `infra/prod/*`(SOPS/age + pgBackRest 예시, 실제 secret 없음). Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
 | `fastlane/` | `Fastfile`·`Appfile`·`Matchfile` (Gemfile은 루트) |
 
 ---
