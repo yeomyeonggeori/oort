@@ -2,7 +2,7 @@
 
 > Status: Accepted for roadmap guidance.
 > Date: 2026-06-29.
-> Related: MOMO-005, MOMO-006, MOMO-007, MOMO-111, MOMO-112, MOMO-115, MOMO-180, MOMO-182.
+> Related: MOMO-005, MOMO-006, MOMO-007, MOMO-111, MOMO-112, MOMO-115, MOMO-180, MOMO-182, MOMO-186.
 
 ## Context
 
@@ -23,7 +23,7 @@ momo will use five explicit layers:
 | Layer | Canonical path | Responsibility | Must not do |
 |---|---|---|---|
 | dev | `infra/docker-compose.yml` now; future alias `infra/docker-compose.dev.yml` only if useful | Human/Codex local development with worktree-scoped env, host ports, PostgreSQL 18, Centrifugo memory engine, optional mock Hermes. | Do not become the prod deploy file. Do not require image registry access. Do not hide local ports needed by runtime gates. |
-| e2e | future `infra/docker-compose.e2e.yml` | Deterministic local gate stack for api/relay/worker plus PG/Centrifugo/mock external services, fixed test credentials, ephemeral data. | Do not contain production domains, ACME, host secrets, long-lived volumes, or external billing services by default. |
+| e2e | `infra/docker-compose.e2e.yml` | Deterministic local gate stack for api/relay/worker plus PG/Centrifugo/mock external services, test-only roles, worktree-scoped project/ports, and disposable data. | Do not contain production domains, ACME, host secrets, long-lived volumes, or external billing services by default. |
 | prod | `infra/prod/docker-compose.prod.yml` | Image-based self-host staging/prod stack without source checkout on the host. Caddy default TLS, Redis-backed Centrifugo, api/relay/worker images, optional bundled PostgreSQL. | Do not `build:` from repo source on host. Do not expose Postgres/Centrifugo/api ports directly except through Caddy. Do not use dev-insecure secrets. |
 | install/upgrade | future `infra/prod/install.sh` and `infra/prod/upgrade.sh` | Host bootstrap, preflight, secret generation/import, compose env creation, image tag pinning, migration, restart, rollback handoff. | Do not commit secrets. Do not perform destructive DB changes without preflight backup and explicit operator confirmation. |
 | backup/PITR | `infra/prod/pgbackrest*.example`, `docs/SECRETS_BACKUP_RUNBOOK.md`; future wrapper scripts only around pgBackRest | Scheduled backup, WAL archive, restore rehearsal, PITR evidence. | Do not treat `docker volume` snapshots as sufficient production backup. Do not call backup verified until restore rehearsal passes on a real host. |
@@ -51,17 +51,23 @@ Validation:
 
 ### E2E Compose
 
-`infra/docker-compose.e2e.yml` is future work. Its purpose is reproducible CI/local-gate runtime evidence, not day-to-day development and not production.
+`infra/docker-compose.e2e.yml` is the MOMO-186 local gate layer. Its purpose is reproducible local-gate runtime evidence, not day-to-day development and not production. It keeps the source-checkout-based Swift build path legal for local verification while preserving the production rule that hosts pull images instead of building from repo source.
 
-Required properties when implemented:
+Implemented properties:
 
-- Runs the full product path locally: api, relay, worker, PostgreSQL, Centrifugo, and deterministic mock OpenAI-compatible/Hermes gateway.
-- Uses fixed test credentials and ephemeral volumes or project names.
-- Produces machine-readable evidence paths compatible with `scripts/local_gate.sh`.
-- Can build images locally or use locally tagged images, but must not depend on public registry availability for ordinary PR validation.
-- Keeps external network calls disabled unless a profile explicitly opts in.
+- Runs the intended full product boundary locally: api, relay, worker, PostgreSQL, Centrifugo, deterministic mock OpenAI-compatible/Hermes gateway, migration job, and e2e DB role bootstrap.
+- Uses `.env.worktree`/`COMPOSE_PROJECT_NAME` for worktree-scoped project names and host ports.
+- Uses deterministic test-only roles: `momo_app` for tenant API traffic and `momo_relay`/`momo_worker` as BYPASSRLS background pollers.
+- Allows source checkout + local Swift build caches in named volumes for e2e only; prod remains image-based.
+- Keeps external network calls disabled by default. The mock Hermes service is repo-local `scripts/mock_hermes.py`.
 
-Expected validation profiles:
+Static validation:
+
+```sh
+docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config
+```
+
+Expected runtime validation profiles:
 
 - `runtime-db`: migrate, RLS, roster, join, platform admin, approval decision.
 - `runtime-relay`: REST send, outbox pending, relay claim, Centrifugo history, outbox done.
@@ -199,7 +205,6 @@ Tradeoffs:
 
 - Implement production deployment.
 - Publish container images.
-- Create `docker-compose.e2e.yml`.
 - Implement `install.sh` or `upgrade.sh`.
 - Run pgBackRest full restore rehearsal.
 - Enter staging/prod secrets.

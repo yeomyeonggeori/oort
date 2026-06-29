@@ -93,6 +93,7 @@ cp infra/.env.example .env
 | `PORT` | 서버 | `8080` | HTTP 바인드 포트. **Centrifugo subscribe proxy가 `api:8080`을 콜백**하므로 변경 시 `centrifugo.json`도 맞춰야 함. |
 | `POSTGRES_HOST` | 서버/relay/worker | `localhost` | `DATABASE_URL` 미설정 시 폴백 호스트. |
 | `LOG_LEVEL` | 서버 | (info) | 로그 레벨. |
+| `CENT_CONNECTION_TOKEN_TTL_SECONDS` | 서버 | `300` | `/v1/auth/realtime-token` Centrifugo connection JWT TTL. dev 값은 60~1800초로 clamp된다. |
 | `RELAY_DATABASE_URL` | relay/worker | (= `DATABASE_URL`) | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§2.2/§10.1). 설정 시 우선. |
 | `RELAY_POSTGRES_USER` / `RELAY_POSTGRES_PASSWORD` | relay/worker | (= `POSTGRES_*`) | 위와 동일 목적의 분리 자격증명. |
 | `RELAY_POLL_INTERVAL_MS` | relay | `300` | outbox 폴링 주기(§8.1 fallback 300ms). |
@@ -158,6 +159,22 @@ docker compose -f infra/docker-compose.yml logs -f
 > **검증됨:** MOMO-001/002에서 Docker Desktop 기준 PG18+Centrifugo v6 health, migrate 멱등,
 > server health, 메시지 송신, OutboxRelay→Centrifugo publish/history를 확인했다.
 > MOMO-115부터 같은 relay path는 `scripts/local_gate.sh --profile runtime-relay`로 반복 검증한다.
+
+> **compose layer 분리:** `infra/docker-compose.yml`은 dev/local runtime iteration용 PG18+Centrifugo layer다. `infra/docker-compose.e2e.yml`은 MOMO-186 local gate 전용으로 API/relay/worker/mock-Hermes까지 같은 compose project에 넣는다. `infra/prod/docker-compose.prod.yml`은 source checkout 없는 image-based staging/prod skeleton이다.
+
+### 3.1 E2E compose static validation
+
+MOMO-186 e2e layer는 local gate가 전체 service boundary를 재현하기 위한 초안이다. dev compose를 대체하지 않고, prod compose의 image-based/source-checkout-free 원칙도 건드리지 않는다.
+
+```sh
+# worktree라면 .conductor/setup.sh가 .env.worktree를 만든다.
+docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config
+
+# 같은 검증은 docs local gate에도 포함된다.
+scripts/local_gate.sh --profile docs
+```
+
+서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
 
 ---
 
@@ -247,7 +264,52 @@ scripts/verify_join.sh
 `scripts/local_gate.sh --profile runtime-db` runs this verifier after the RLS
 runtime verifier.
 
-#### 5.1.2 Inbound MCP v0 skeleton
+#### 5.1.2 Realtime connection token — `POST /v1/auth/realtime-token`
+
+MOMO-192 adds the server-side token source required by live Centrifugo clients.
+Call it with an app access token from `/v1/auth/login`:
+
+```sh
+curl -X POST http://127.0.0.1:8080/v1/auth/realtime-token \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+Response:
+
+```json
+{
+  "token": "<centrifugo-connection-jwt>",
+  "tokenType": "centrifugo.connection.jwt",
+  "expiresAtMs": 1782463260000,
+  "ttlSeconds": 300,
+  "workspaceId": "00000000-0000-7000-8000-000000000001",
+  "memberId": "00000000-0000-7000-8000-000000000101"
+}
+```
+
+Boundary:
+
+- The endpoint is mounted behind `AuthMiddleware`; refresh tokens, expired access
+  tokens, and malformed JWTs fail before token issue.
+- The server re-checks `member.status='active'` inside `SET LOCAL app.workspace_id`
+  tenant RLS before signing the Centrifugo connection token.
+- The connection JWT carries `sub=member_id`, top-level `ws=workspace_id`, and
+  JSON `info` with the same member/workspace ids. It does not grant channel
+  access by itself.
+- Normal `ch:`/`dm:` subscriptions still go through Centrifugo subscribe proxy
+  `POST /v1/centrifugo/subscribe`, which parses `ch:ws<workspace>.<channel>` and
+  checks active channel `membership` under tenant RLS.
+- Clients never publish to Centrifugo. All durable writes remain REST → Postgres
+  transaction → outbox → OutboxRelay publish.
+- TTL defaults to 300 seconds and is configurable with
+  `CENT_CONNECTION_TOKEN_TTL_SECONDS`, clamped to 60~1800 seconds.
+
+Focused tests live in `server/Tests/MomoServerTests` and cover TTL clamp,
+Centrifugo JWT member/workspace claims, expired app access token rejection, and
+response JSON shape. Docker connect/subscribe end-to-end remains covered by the
+future SwiftCentrifuge driver/runtime pairing.
+
+#### 5.1.3 Inbound MCP v0 skeleton
 
 MOMO-172 adds a compile-safe inbound MCP skeleton to the same `MomoServer` process:
 

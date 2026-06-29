@@ -149,6 +149,7 @@
 | `MOMO-111` | GitHub Actions 비주요 기간용 local PR gate 스크립트와 evidence flow | ci/docs | MOMO-110, MOMO-154 |
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
+| `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub agentic work OS 시장 분석 + repo topology ADR | docs/spec | MOMO-150 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
@@ -182,6 +183,15 @@
 - [x] `scripts/local_gate.sh --profile runtime-relay`가 Docker compose/migrate/server/relay/message send/evidence 검증을 자동 실행한다.
 - [x] worktree별 `.env.worktree` 포트/`COMPOSE_PROJECT_NAME` isolation을 사용한다.
 - [x] 실패 시 local gate evidence log와 verifier server/relay/history log path를 남긴다.
+
+### MOMO-194 수용기준 `[tooling/docs]`
+- [x] GitHub #144를 `scripts/goal_claim.sh 144`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/local_gate.sh` evidence/log filename에 pid, nanosecond timestamp, random suffix, worktree hash를 포함한다.
+- [x] 같은 초에 같은 docs gate를 2개 이상 병렬 실행해도 evidence/log 파일 충돌이 나지 않는다.
+- [x] PR body에 붙일 `Evidence markdown` 및 `Evidence log` path가 `## Local Gate` block에 정확히 출력된다.
+- [x] `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #144를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-005 수용기준 `[infra/docs]`
 - [x] `scripts/goal_claim.sh 5` 시도. 이슈가 `status:ready`가 아니어서 fallback으로 별도 worktree/branch를 수동 생성하고 issue `status:in-progress`를 적용.
@@ -225,6 +235,7 @@
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
 | `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 완료 |
+| `MOMO-186` | Deterministic e2e compose stack for local gates | infra/docs | MOMO-182, MOMO-115 | local gate 대상 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 완료 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 완료 |
 
@@ -253,6 +264,16 @@
 - [x] 실제 prod deploy, image publish pipeline, pgBackRest restore rehearsal, GitHub Actions 재활성화, staging/prod secret 입력은 out of scope로 명시.
 - [ ] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
+### MOMO-186 수용기준 `[infra/docs]`
+- [x] `infra/docker-compose.e2e.yml` 추가: Postgres, Centrifugo, migrate, e2e role bootstrap, API, OutboxRelay, AgentWorker, mock-Hermes service boundary를 한 compose project 안에 둔다.
+- [x] dev compose(`infra/docker-compose.yml`)는 PG18+Centrifugo local iteration, e2e compose는 deterministic local gate, prod compose(`infra/prod/docker-compose.prod.yml`)는 source checkout 없는 image-based deploy로 책임을 분리했다.
+- [x] `.env.worktree`/`COMPOSE_PROJECT_NAME`/host port env를 사용해 worktree별 project-name과 host ports가 분리된다.
+- [x] `docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config` PASS.
+- [x] `scripts/local_gate.sh --profile docs`에 e2e compose config validation 연결.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+- out of scope: 실제 prod deploy, image publish, GitHub Actions 재활성화, real staging VPS/TLS/PITR, full e2e stack runtime verifier.
 
 ### MOMO-183 수용기준 `[docs/spec]`
 - [x] first-party plugin 우선순위를 GitHub/GitHub Issues, Google Workspace, Jira-like work item, Docs connector로 정의.
@@ -434,6 +455,7 @@
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 | `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
 | `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
+| `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 | `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
 
 ### MOMO-130 수용기준 `[swift]`
@@ -493,6 +515,18 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #124를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-192 수용기준 `[swift/docs]`
+- [x] GitHub #141을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `POST /v1/auth/realtime-token`을 protected auth group에 추가한다.
+- [x] App access token 검증 후 active member/workspace를 tenant RLS read path로 재확인한다.
+- [x] `sub=member_id`, `ws=workspace_id`, JSON `info`, 짧은 TTL을 담은 Centrifugo connection JWT를 발급한다.
+- [x] 일반 `ch:`/`dm:` 구독 권한은 `/v1/centrifugo/subscribe` membership guard에 남기고, client direct publish 금지를 유지한다.
+- [x] TTL clamp, token claims, expired app token, response shape focused server tests를 추가한다.
+- [x] `docs/RUN.md`, `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] Docker 기반 login → realtime-token smoke evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #141을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-193 수용기준 `[swift]`
 - [x] GitHub #142를 `scripts/goal_claim.sh 142` 상당의 기존 claim/worktree에서 진행한다. 사용자 입력의 #143은 MOMO-186으로 확인되어 ready로 복구했다.

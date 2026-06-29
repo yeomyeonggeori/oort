@@ -69,8 +69,29 @@ cd "$REPO_ROOT" || exit 1
 mkdir -p "$OUT_DIR" || exit 1
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${STAMP}.log"
-EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${STAMP}.md"
+
+RUN_NANOS="$(
+  python3 - <<'PY' 2>/dev/null || date -u +"%s000000000"
+import time
+print(time.time_ns())
+PY
+)"
+WORKTREE_HASH="$(
+  printf '%s' "$REPO_ROOT" | shasum -a 256 2>/dev/null | awk '{ print substr($1, 1, 12) }'
+)"
+if [ "$WORKTREE_HASH" = "" ]; then
+  WORKTREE_HASH="$(printf '%s' "$REPO_ROOT" | cksum | awk '{ print $1 }')"
+fi
+RUN_RANDOM="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-12)"
+if [ "$RUN_RANDOM" = "" ]; then
+  RUN_RANDOM="$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 12)"
+fi
+if [ "$RUN_RANDOM" = "" ]; then
+  RUN_RANDOM="$(date -u +"%s")"
+fi
+RUN_ID="${STAMP}-pid$$-ns${RUN_NANOS}-wt${WORKTREE_HASH}-r${RUN_RANDOM}"
+LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.log"
+EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.md"
 
 declare -a CMD_LABELS=()
 declare -a CMD_STRINGS=()
@@ -123,6 +144,7 @@ add_static_commands() {
   add_cmd_once "diff whitespace" 'base="${LOCAL_GATE_BASE_REF:-origin/main}"; if git rev-parse --verify "$base" >/dev/null 2>&1; then git diff --check "$base"...HEAD; else echo "base ref $base unavailable; falling back to working tree whitespace checks"; fi; git diff --cached --check; git diff --check'
   add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
   add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
+  add_cmd_once "e2e compose config" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; test -n "$env_file" || { echo "no env file found for e2e compose config"; exit 1; }; docker compose --env-file "$env_file" -f infra/docker-compose.e2e.yml config >/tmp/momo-compose-e2e-config.yml; echo "wrote /tmp/momo-compose-e2e-config.yml using $env_file"'
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
   add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_relay.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
@@ -242,9 +264,11 @@ fi
 {
   echo "momo local gate"
   echo "profile: $PROFILE"
+  echo "run_id: $RUN_ID"
   echo "repo: $REPO_ROOT"
   echo "started_at_utc: $STAMP"
   echo "log: $LOG_FILE"
+  echo "evidence: $EVIDENCE_FILE"
   echo
   echo "planned commands:"
   local_i=0
@@ -326,10 +350,12 @@ write_evidence() {
     echo "- Profile: \`$PROFILE\`"
     echo "- Started: $START_ISO"
     echo "- Finished: $END_STAMP"
+    echo "- Run ID: \`$RUN_ID\`"
     echo "- Commit: \`$COMMIT\`"
     echo "- Branch: \`$BRANCH\`"
     echo "- Worktree: \`$REPO_ROOT\`"
     echo "- Dirty files: \`$DIRTY_COUNT\`"
+    echo "- Evidence markdown: \`$EVIDENCE_FILE\`"
     echo "- Evidence log: \`$LOG_FILE\`"
     echo "- Machine/toolchain:"
     echo "  - Host: \`$MACHINE\`"

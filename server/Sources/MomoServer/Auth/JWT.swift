@@ -25,6 +25,46 @@ struct AppJWTPayload: JWTPayload {
     }
 }
 
+/// Extra JSON attached to Centrifugo's connection token `info` claim.
+///
+/// Centrifugo uses `sub` as the client user id. momo also carries the workspace
+/// boundary in `ws` and in `info` so server/client logs can correlate the
+/// connection without allowing channel access by token alone.
+struct RealtimeTokenInfo: Codable, Equatable, Sendable {
+    let schema: String
+    let workspaceId: String
+    let memberId: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case workspaceId = "workspace_id"
+        case memberId = "member_id"
+    }
+}
+
+/// Centrifugo connection JWT payload.
+///
+/// Required Centrifugo claims: `sub` and `exp`. momo-specific workspace claim:
+/// `ws`. The `info` string is JSON so Centrifugo can pass it through as client
+/// info without giving it authorization power.
+struct CentrifugoConnectionJWTPayload: JWTPayload {
+    var sub: SubjectClaim
+    var exp: ExpirationClaim
+    var iat: IssuedAtClaim
+    var ws: String
+    var info: String
+
+    func verify(using _: some JWTAlgorithm) async throws {
+        try exp.verifyNotExpired()
+    }
+}
+
+struct RealtimeTokenIssueResult: Sendable {
+    let token: String
+    let expiresAt: Date
+    let ttlSeconds: Int
+}
+
 /// Issues and verifies App JWTs (HS256) and Centrifugo connection JWTs (HMAC).
 ///
 /// Wraps a single `JWTKeyCollection`. The app secret and the Centrifugo token
@@ -76,5 +116,46 @@ struct JWTService: Sendable {
     /// Verify an App JWT and return its payload (signature + exp checked).
     func verify(_ token: String) async throws -> AppJWTPayload {
         try await keys.verify(token, as: AppJWTPayload.self)
+    }
+
+    /// Sign a short-lived Centrifugo connection token for the authenticated member.
+    ///
+    /// Channel authorization is deliberately not embedded here. Normal `ch:`/`dm:`
+    /// subscriptions still pass through `/v1/centrifugo/subscribe`, which checks
+    /// membership under tenant RLS.
+    func signCentrifugoConnection(
+        memberID: UUID,
+        workspaceID: UUID,
+        ttl: TimeInterval? = nil
+    ) async throws -> RealtimeTokenIssueResult {
+        let ttlSeconds = Int(ttl ?? config.centConnectionTokenTTL)
+        let now = Date()
+        let expiresAt = now.addingTimeInterval(TimeInterval(ttlSeconds))
+        let info = try Self.realtimeInfoString(memberID: memberID, workspaceID: workspaceID)
+        let payload = CentrifugoConnectionJWTPayload(
+            sub: SubjectClaim(value: memberID.uuidString),
+            exp: ExpirationClaim(value: expiresAt),
+            iat: IssuedAtClaim(value: now),
+            ws: workspaceID.uuidString,
+            info: info
+        )
+        let token = try await keys.sign(payload, kid: Self.centKID)
+        return RealtimeTokenIssueResult(token: token, expiresAt: expiresAt, ttlSeconds: ttlSeconds)
+    }
+
+    /// Test/debug verifier for tokens signed with the Centrifugo HMAC key.
+    func verifyCentrifugoConnection(_ token: String) async throws -> CentrifugoConnectionJWTPayload {
+        try await keys.verify(token, as: CentrifugoConnectionJWTPayload.self)
+    }
+
+    static func realtimeInfoString(memberID: UUID, workspaceID: UUID) throws -> String {
+        let info = RealtimeTokenInfo(
+            schema: "momo.realtime.connection.v0",
+            workspaceId: workspaceID.uuidString,
+            memberId: memberID.uuidString
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(info), as: UTF8.self)
     }
 }

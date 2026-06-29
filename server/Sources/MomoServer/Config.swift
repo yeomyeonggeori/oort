@@ -27,6 +27,7 @@ struct Config: Sendable {
     var centAPIURL: String   // e.g. http://centrifugo:8000/api
     var centAPIKey: String   // X-API-Key for POST /api/publish
     var centTokenHMAC: String // connection/subscription JWT signing (HMAC)
+    var centConnectionTokenTTL: TimeInterval // short-lived client connection token
 
     // ---- Platform admin read-only inspection (MOMO-013) ----
     var platformAdminDatabaseURL: String?
@@ -62,6 +63,11 @@ struct Config: Sendable {
             centAPIURL: env("CENT_API_URL", "http://localhost:8000/api"),
             centAPIKey: env("CENT_API_KEY", "dev-insecure-cent-api-key"),
             centTokenHMAC: env("CENT_TOKEN_HMAC", "dev-insecure-cent-token-hmac"),
+            centConnectionTokenTTL: TimeInterval(
+                clampedCentConnectionTokenTTL(
+                    envInt("CENT_CONNECTION_TOKEN_TTL_SECONDS", 5 * 60)
+                )
+            ),
             platformAdminDatabaseURL: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_DATABASE_URL"],
             platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
                 .split(separator: ",")
@@ -70,6 +76,13 @@ struct Config: Sendable {
             platformAdminLoginSecret: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_LOGIN_SECRET"]
                 .flatMap { $0.isEmpty ? nil : $0 }
         )
+    }
+
+    /// Keep realtime connection JWTs short-lived. The upper bound is the
+    /// MOMO-179 contract (`exp <= 30m`), while the lower bound avoids accidental
+    /// zero/negative dev env values that would make every connect fail.
+    static func clampedCentConnectionTokenTTL(_ seconds: Int) -> Int {
+        min(max(seconds, 60), 30 * 60)
     }
 
     /// Minimal `postgres://` URL parser (no extra deps). Returns nil if unparseable.
