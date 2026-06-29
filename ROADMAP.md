@@ -83,9 +83,10 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-133` | M3 | Google Workspace "ask my work" UX | source citation + approval-gated external writes |
 | `MOMO-134` | M3 | build-macos-apps 기반 macOS dev run loop | 진행 중: `scripts/macos_dev_run.sh` dev `.app` staging + Codex Run action + `--verify/--logs` + local gate opt-in |
 | `MOMO-160` | M2 | A2A-style agent_run lifecycle alignment | `research/11-agent-runtime/07-agent-run-lifecycle-v0.md` + Task/Message/Artifact/status mapping |
-| `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision endpoint/resume job contract is MOMO-167, actual approved tool execution remains follow-up runtime |
+| `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision endpoint/resume job contract is MOMO-167, approved deterministic resume executor is MOMO-178 |
 | `MOMO-166` | M2 | approval decision server contract v0 | `research/11-agent-runtime/10-approval-decision-server-contract-v0.md` + request/response fixtures; connects MOMO-161 runtime checkpoint to MOMO-171 macOS decision intent |
 | `MOMO-167` | M2 | approval decision endpoint runtime | server REST decision endpoint + `approval_decision` idempotency ledger + audit/outbox resume contract + `runtime-db` verifier |
+| `MOMO-178` | M2 | AgentWorker approved tool resume executor v0 | `method='resume_approval'` worker branch + fail-closed approved metadata/frozen payload checks + deterministic mock tool_result/audit runtime smoke |
 | `MOMO-162` | M2 | Hermes adapter contract verification | `research/11-agent-runtime/11-hermes-adapter-contract-v0.md` + fixtures; AgentWorker SSE product default, platform adapter optional interop |
 | `MOMO-168` | M2 | Hermes adapter repo-local smoke harness | `adapters/hermes/tests/smoke_momo_adapter.py` + `local_gate --profile docs`; live Hermes plugin load/e2e remains runtime-unverified |
 | `MOMO-163` | M2 | inbound MCP server v0 | governed search/fetch/post/approval-safe tool call surface + resources/prompts/fixtures |

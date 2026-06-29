@@ -370,6 +370,99 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertNotNil(payload.approvalDecision)
     }
 
+    func testResumeApprovalExecutorRunsOnlyDeterministicMockTool() throws {
+        let payload = try resumePayload(
+            toolName: "momo.mock.echo",
+            policyToolName: "momo.mock.echo",
+            approvalStatus: "approved"
+        )
+        let executor = ToolResumeExecutor()
+
+        let request = try executor.validate(payload)
+        let result = try executor.execute(request)
+
+        XCTAssertFalse(result.isError)
+        XCTAssertEqual(result.body, "Deterministic tool executed: momo.mock.echo")
+        XCTAssertEqual(result.output["ok"]?.boolValue, true)
+        XCTAssertEqual(result.output["tool_name"]?.stringValue, "momo.mock.echo")
+    }
+
+    func testResumeApprovalExecutorFailsClosedWithoutPolicyEvidence() throws {
+        let json = """
+        {
+          "run_id": "00000000-0000-7000-8000-000000000161",
+          "workspace_id": "00000000-0000-7000-8000-000000000001",
+          "channel_id": "00000000-0000-7000-8000-000000000010",
+          "agent_member_id": "00000000-0000-7000-8000-000000000101",
+          "model": "hermes-agent",
+          "prompt": "",
+          "resume_from_approval_id": "00000000-0000-7000-8000-000000000901",
+          "approved_tool_call": {
+            "call_id": "call_echo_001",
+            "name": "momo.mock.echo",
+            "arguments": {"message": "hello"},
+            "payload_sha256": "sha256:00000000-0000-7000-8000-000000000901"
+          },
+          "approval_decision": {
+            "approval_id": "00000000-0000-7000-8000-000000000901",
+            "status": "approved"
+          }
+        }
+        """
+        let payload = try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
+
+        XCTAssertThrowsError(try ToolResumeExecutor().validate(payload)) { error in
+            XCTAssertEqual(error as? ToolResumeExecutor.Failure, .missingPolicyEvidence)
+        }
+    }
+
+    func testResumeApprovalExecutorRejectsNonApprovedDecision() throws {
+        let payload = try resumePayload(
+            toolName: "momo.mock.echo",
+            policyToolName: "momo.mock.echo",
+            approvalStatus: "rejected"
+        )
+
+        XCTAssertThrowsError(try ToolResumeExecutor().validate(payload)) { error in
+            XCTAssertEqual(
+                error as? ToolResumeExecutor.Failure,
+                .decisionNotApproved("rejected")
+            )
+        }
+    }
+
+    func testResumeApprovalExecutorRejectsPolicyToolMismatch() throws {
+        let payload = try resumePayload(
+            toolName: "momo.mock.echo",
+            policyToolName: "github.create_issue",
+            approvalStatus: "approved"
+        )
+
+        XCTAssertThrowsError(try ToolResumeExecutor().validate(payload)) { error in
+            XCTAssertEqual(
+                error as? ToolResumeExecutor.Failure,
+                .policyToolMismatch(expected: "momo.mock.echo", actual: "github.create_issue")
+            )
+        }
+    }
+
+    func testResumeApprovalExecutorRejectsExternalToolInV0() throws {
+        let payload = try resumePayload(
+            toolName: "github.create_issue",
+            policyToolName: "github.create_issue",
+            approvalStatus: "approved"
+        )
+        let executor = ToolResumeExecutor()
+        let request = try executor.validate(payload)
+
+        XCTAssertThrowsError(try executor.execute(request)) { error in
+            XCTAssertEqual(
+                error as? ToolResumeExecutor.Failure,
+                .unsupportedTool("github.create_issue")
+            )
+        }
+    }
+
     private func testConfig() -> Config {
         Config(
             pgHost: "localhost",
@@ -388,5 +481,40 @@ final class AgentWorkerTests: XCTestCase {
             maxDepth: 4,
             maxConcurrentRuns: 1
         )
+    }
+
+    private func resumePayload(
+        toolName: String,
+        policyToolName: String,
+        approvalStatus: String
+    ) throws -> AgentJobPayload {
+        let json = """
+        {
+          "run_id": "00000000-0000-7000-8000-000000000161",
+          "workspace_id": "00000000-0000-7000-8000-000000000001",
+          "channel_id": "00000000-0000-7000-8000-000000000010",
+          "agent_member_id": "00000000-0000-7000-8000-000000000101",
+          "model": "hermes-agent",
+          "prompt": "",
+          "resume_from_approval_id": "00000000-0000-7000-8000-000000000901",
+          "approved_tool_call": {
+            "call_id": "call_echo_001",
+            "name": "\(toolName)",
+            "arguments": {"message": "hello"},
+            "payload_sha256": "sha256:00000000-0000-7000-8000-000000000901"
+          },
+          "policy_evidence": {
+            "tool_name": "\(policyToolName)",
+            "approval_policy": "always",
+            "capability_version": "mock-tool@0.1.0",
+            "policy_version": "capability-policy@2026-06-29"
+          },
+          "approval_decision": {
+            "approval_id": "00000000-0000-7000-8000-000000000901",
+            "status": "\(approvalStatus)"
+          }
+        }
+        """
+        return try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
     }
 }

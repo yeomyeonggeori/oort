@@ -172,7 +172,7 @@ add_runtime_relay_commands() {
 add_runtime_agent_commands() {
   add_runtime_bootstrap_commands
   add_cmd "AgentWorker runtime verification" "scripts/verify_agent_worker.sh"
-  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, Centrifugo agent.partial, and cost reserve/reconcile via scripts/verify_agent_worker.sh."
+  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, Centrifugo agent.partial, cost reserve/reconcile, and approved deterministic resume_approval -> tool_result/audit/job-done via scripts/verify_agent_worker.sh."
 }
 
 add_macos_ui_commands() {
