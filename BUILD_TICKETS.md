@@ -190,7 +190,7 @@
 - [x] `infra/prod/centrifugo.prod.json`: dev namespace 계약 유지 + Redis engine 전환.
 - [x] `infra/prod/.env.example`: production env 예시만 제공, 실제 시크릿 미커밋.
 - [x] `docs/RUN.md`, `docs/DEPLOY.md`, `STATUS.md`, `ROADMAP.md` 갱신.
-- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
 
@@ -223,7 +223,7 @@
 | id | 한줄 | 수용기준 등급 | 의존 | 상태 |
 |---|---|---|---|---|
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
-| `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | 후보 |
+| `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 후보 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 후보 |
 | `MOMO-184` | Agent host positioning/product messaging: channel timeline execution ledger | docs/product | MOMO-180 | 후보 |
@@ -236,11 +236,16 @@
 - [ ] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 리뷰, 필요 수정, merge, main docs local gate PASS.
 
-### MOMO-181 후보 수용기준 `[docs/spec]`
-- [ ] plugin manifest v0 최소 필드(`id`, `runtime`, `surfaces`, `capabilities`, `approval_policy`, `risk`, `audit_policy`, `compatibility`, `signature`) 정의.
-- [ ] plugin catalog repo(`momo-plugins`) split 기준, artifact metadata, signed artifact policy, compatibility matrix를 문서화.
-- [ ] Capability Cache `plugin_tool_schema`와 Context Packet `tool_grants` 연결을 명시.
-- [ ] 실제 plugin runtime 구현은 out of scope.
+### MOMO-181 수용기준 `[docs/spec]`
+- [x] Plugin Manifest v0 정본: `research/12-agentic-work-os/02-plugin-manifest-v0.md`.
+- [x] 최소 manifest fields 정의: `id`, `name`, `version`, `publisher`, `runtime`, `surfaces`, `capabilities`, `tool_schema_refs`, `approval_policy`, `risk`, `source_policy`, `audit_policy`, `compatibility`, `signature`.
+- [x] plugin catalog repo(`momo-plugins`) split 기준, artifact metadata, signed artifact policy, compatibility matrix를 문서화.
+- [x] first-party plugin repo와 SDK repo 분리 기준을 문서화.
+- [x] Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane `permissions.retrieval_policy_version`/plugin policy version 연결을 명시.
+- [x] JSON fixture 3종: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
+- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+- out of scope: 실제 plugin runtime, repo split 생성, WASM runtime, marketplace UI, external OAuth implementation.
 
 ### MOMO-182 후보 수용기준 `[infra/docs]`
 - [ ] `infra/docker-compose.yml`의 현재 dev 역할과 future `docker-compose.dev.yml`/`docker-compose.e2e.yml`/`infra/prod/docker-compose.prod.yml` 경계를 ADR로 고정.
