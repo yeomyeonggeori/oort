@@ -212,7 +212,8 @@ add_runtime_agent_commands() {
   add_runtime_bootstrap_commands
   add_cmd "AgentWorker runtime verification" "scripts/verify_agent_worker.sh"
   add_cmd "Agent live channel verification" "scripts/verify_agent_live_channel.sh"
-  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, Centrifugo agent.partial text + D live tool_call progress with bounded args, cost reserve/reconcile, MomoServer cost-snapshots projection endpoint, and approved deterministic resume_approval -> final tool_result/message.new/audit/job-done via scripts/verify_agent_worker.sh."
+  add_note_once coverage "REST @agent mention routing via scripts/verify_agent_worker.sh: same-channel @김인턴 POST /messages creates agent_run/agent_job, duplicate client_msg_id dedupes the job, non-channel agent mention records audit no-op, mock SSE returns agent.partial/tool_call progress on agent:, and OutboxRelay publishes final channel message.new."
+  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, D live tool_call progress with bounded args, cost reserve/reconcile, MomoServer cost-snapshots projection endpoint, and approved deterministic resume_approval -> final tool_result/message.new/audit/job-done via scripts/verify_agent_worker.sh."
   add_note_once coverage "Agent live channel boundary via scripts/verify_agent_live_channel.sh: authorized member receives live agent.status/agent.partial on agent:ws<workspace>.<agent>, invalid token/same-workspace no-shared-channel member/other-workspace token are denied, and client direct publish is rejected."
 }
 

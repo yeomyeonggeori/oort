@@ -15,10 +15,14 @@ struct AgentJobPayload: Decodable, Sendable {
     let agentMemberID: UUID     // the agent (member.id) — also the partition key
     let channelID: UUID         // target channel
     let workspaceID: UUID?      // tenant (also on the outbox row)
+    let authorMemberID: UUID?   // human/service member that triggered the run
+    let triggerMessageID: UUID? // source message for mention/context action runs
+    let triggerMessageSeq: Int64?
     let model: String           // OpenAI-compatible model id (agent.model)
     let prompt: String          // user/trigger text
     let tools: JSONValue?       // OpenAI tool/function defs (agent.tool_schema), optional
     let toolGrants: [ToolGrantMetadata]? // Context Packet / Capability Cache projection
+    let sourceAttribution: JSONValue?
     let maxOutputTokens: Int?   // reserve estimate basis (§8.5)
     // gate seeds (§3.3 / §3.4)
     let stepCount: Int?
@@ -34,12 +38,16 @@ struct AgentJobPayload: Decodable, Sendable {
         case agentMemberID = "agent_member_id"
         case channelID = "channel_id"
         case workspaceID = "workspace_id"
+        case authorMemberID = "author_member_id"
+        case triggerMessageID = "trigger_message_id"
+        case triggerMessageSeq = "trigger_message_seq"
         case model
         case prompt
         case tools
         case toolGrants = "tool_grants"
         case contextPacket = "context_packet"
         case contextPacketProjection = "context_packet_projection"
+        case sourceAttribution = "source_attribution"
         case maxOutputTokens = "max_output_tokens"
         case stepCount = "step_count"
         case depth
@@ -56,10 +64,14 @@ struct AgentJobPayload: Decodable, Sendable {
         agentMemberID = try c.decode(UUID.self, forKey: .agentMemberID)
         channelID = try c.decode(UUID.self, forKey: .channelID)
         workspaceID = try c.decodeIfPresent(UUID.self, forKey: .workspaceID)
+        authorMemberID = try c.decodeIfPresent(UUID.self, forKey: .authorMemberID)
+        triggerMessageID = try c.decodeIfPresent(UUID.self, forKey: .triggerMessageID)
+        triggerMessageSeq = try c.decodeIfPresent(Int64.self, forKey: .triggerMessageSeq)
         resumeFromApprovalID = try c.decodeIfPresent(UUID.self, forKey: .resumeFromApprovalID)
         approvedToolCall = try c.decodeIfPresent(ApprovedToolCallPayload.self, forKey: .approvedToolCall)
         policyEvidence = try c.decodeIfPresent(ToolGrantMetadata.self, forKey: .policyEvidence)
         approvalDecision = try c.decodeIfPresent(JSONValue.self, forKey: .approvalDecision)
+        sourceAttribution = try c.decodeIfPresent(JSONValue.self, forKey: .sourceAttribution)
 
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""

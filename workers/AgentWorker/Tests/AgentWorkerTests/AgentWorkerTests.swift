@@ -103,8 +103,17 @@ final class AgentWorkerTests: XCTestCase {
           "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
           "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
           "workspace_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0001",
+          "author_member_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee0002",
+          "trigger_message_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee0003",
+          "trigger_message_seq": 42,
           "model": "hermes-agent",
           "prompt": "create an issue",
+          "source_attribution": {
+            "kind": "message",
+            "message_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee0003",
+            "message_seq": 42,
+            "permission_snapshot": "actor:channel_member agent:channel_member"
+          },
           "context_packet_projection": {
             "schema": "momo.context_packet.tool_grants_projection.v0",
             "packet_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee0001",
@@ -139,6 +148,11 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(grant.effectiveRiskLevel, "write")
         XCTAssertEqual(grant.approvalPolicy, "always")
         XCTAssertEqual(grant.resourceScopeSummary, "repository_allowlist:Dawn-kim-official/momo")
+        XCTAssertEqual(payload.authorMemberID?.uuidString, "EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEE0002")
+        XCTAssertEqual(payload.triggerMessageID?.uuidString, "EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEE0003")
+        XCTAssertEqual(payload.triggerMessageSeq, 42)
+        XCTAssertEqual(payload.sourceAttribution?["kind"]?.stringValue, "message")
+        XCTAssertEqual(payload.sourceAttribution?["permission_snapshot"]?.stringValue, "actor:channel_member agent:channel_member")
     }
 
     func testApprovalPolicyRequiresApprovalFromToolGrantMetadata() {
