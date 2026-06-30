@@ -27,6 +27,13 @@
 - `scripts/verify_internal_host_runtime.sh`와 `scripts/local_gate.sh --profile host-runtime`을 추가했다. 이 gate는 local api/relay/worker/migrate/mock-Hermes image build, prod+internal-smoke boot, migration one-shot+idempotency, `/health`, REST login/message send, relay publish, mock Hermes `@김인턴` 왕복을 실제 compose stack에서 검증한다.
 - Public DNS/TLS, real registry pull, SOPS production secret injection, pgBackRest PITR restore rehearsal은 계속 `runtime-unverified(public host)`로 남는다. 검증: `scripts/local_gate.sh --profile host-runtime` 및 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` 대상.
 
+## 0-3a. MOMO-221 Production Secret/Bootstrap Hardening v0 (2026-06-30)
+
+- `scripts/prod_env_preflight.sh`를 추가해 `staging`/`prod`/`internal-host` env에서 `change-me-*`, `dev-insecure-*`, `example.com`, `localhost`, `mock-hermes`, local DB password, `internal-smoke`/`latest` image tag를 fail-fast로 거부한다.
+- `internal-smoke`/`local` 모드는 `infra/prod/internal-smoke.env.example`와 verifier-generated temp env에서만 허용되는 placeholder 경계로 고정했다. `verify_staging_smoke`, `verify_internal_hosting_smoke`, `verify_internal_host_runtime`이 같은 preflight를 호출한다.
+- `docs/RUN.md`, `docs/DEPLOY.md`, `docs/SECRETS_BACKUP_RUNBOOK.md`에 required env, secret generation/import path, SOPS `exec-env` preflight, operator checklist를 반영했다. Public DNS/TLS, real registry pull, real SOPS secret injection, pgBackRest PITR restore rehearsal은 계속 `runtime-unverified(public host)`다.
+- 검증: `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile staging-smoke` PASS. Sandbox 제한으로 최초 Swift gate는 `.build`/clang cache 쓰기에서 실패했고, 동일 명령을 승인된 환경에서 재실행해 PASS했다.
+
 ## 0-4. MOMO-222 Backup/PITR Restore Rehearsal Gate v0 (2026-06-30)
 
 - `scripts/verify_backup_restore_rehearsal.sh`와 `scripts/local_gate.sh --profile backup`을 추가했다. Repo-local gate는 임시 PostgreSQL 18 source container에서 marker write → `pg_dump -Fc` → 별도 restore container `pg_restore` → marker fingerprint equality를 검증하고 markdown/json evidence를 생성한다.

@@ -128,6 +128,32 @@ sops exec-env infra/prod/secrets.sops.env \
 sops exec-env infra/prod/secrets.sops.env 'make migrate'
 ```
 
+### 2.4 staging/prod bootstrap preflight
+
+운영/내부호스트 부트 전에 env를 먼저 fail-fast로 검사한다. `staging`/`prod`/`internal-host`
+모드에서는 `change-me-*`, `dev-insecure-*`, `example.com`, `localhost`, `mock-hermes`,
+`momo_*_dev_pw`, `:internal-smoke`, `:latest` 이미지 태그를 거부한다.
+
+```sh
+# SOPS 복호화 값을 프로세스 환경으로만 주입해 검사한다.
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode staging'
+
+# 평문 임시 env 파일을 tmpfs에 렌더링한 운영자도 배포 전에 같은 검사를 실행한다.
+scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod
+```
+
+필수 env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `API_DOMAIN`, `REALTIME_DOMAIN`,
+`ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
+`MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `HERMES_BASE_URL`, `HERMES_API_KEY`.
+
+`internal-smoke`/`local` 모드는 예외다. 이 모드는 `infra/prod/internal-smoke.env.example`
+또는 verifier가 생성한 run-specific env에서만 사용하며, `localhost` 도메인, `mock-hermes`,
+`momo-*:internal-smoke*` 이미지, `change-me-*`와 `momo_*_dev_pw` placeholder를
+의도된 로컬 경계로 허용한다. 이 env는 운영 호스트 배포 입력으로 쓰지 않는다.
+
 pgBackRest PITR skeleton은 `infra/prod/pgbackrest.conf.example`,
 `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`에 있다.
 운영 계약은 **복원 리허설 증거 없는 백업을 검증된 백업으로 보지 않는다**는 것이다. Repo-local로는

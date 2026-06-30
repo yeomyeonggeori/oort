@@ -68,6 +68,7 @@ MOCK_DOCKERFILE="infra/prod/docker/mock-hermes.Dockerfile"
 for path in "$PROD_COMPOSE" "$SMOKE_COMPOSE" "$ENV_TEMPLATE" "$SWIFT_DOCKERFILE" "$MIGRATE_DOCKERFILE" "$MOCK_DOCKERFILE"; do
   [ -f "$path" ] || fail "missing required file: $path"
 done
+[ -f "scripts/prod_env_preflight.sh" ] || fail "missing required file: scripts/prod_env_preflight.sh"
 
 RUN_SUFFIX="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 RUN_SLUG="$(printf '%s' "$RUN_SUFFIX" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '-')"
@@ -149,6 +150,9 @@ MAX_STEPS=12
 MAX_DEPTH=4
 MAX_CONCURRENT_RUNS=1
 EOF
+
+echo "[host-runtime] preflighting generated internal-smoke env"
+scripts/prod_env_preflight.sh --env-file "$ENV_FILE" --mode internal-smoke
 
 compose() {
   docker compose --env-file "$ENV_FILE" -f "$PROD_COMPOSE" -f "$SMOKE_COMPOSE" "$@"
