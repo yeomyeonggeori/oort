@@ -27,12 +27,14 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     private var messagesByChannel: [ChannelID: [Message]] = [:]
     private var seqByChannel: [ChannelID: Int64] = [:]
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
+    private var approvalsById: [ApprovalID: Approval] = [:]
     private var inviteJoinState: InviteJoinState = .idle
 
     // Realtime fan-out continuations, keyed by channel.
     private var channelStreams: [ChannelID: [UUID: AsyncStream<RealtimeEvent>.Continuation]] = [:]
     private var agentStreams: [ChannelID: [UUID: AsyncStream<AgentEvent>.Continuation]] = [:]
     private var demoRealtimeByChannel: [ChannelID: [RealtimeEvent]] = [:]
+    private var demoCostSnapshotsByChannel: [ChannelID: [CostSnapshot]] = [:]
     private var replayedDemoDeltaChannels: Set<ChannelID> = []
 
     public init() {}
@@ -46,7 +48,9 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         workspace = ws
         inviteJoinState = .idle
         demoRealtimeByChannel = [:]
+        demoCostSnapshotsByChannel = [:]
         replayedDemoDeltaChannels = []
+        approvalsById = [:]
 
         let human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
@@ -166,6 +170,18 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
             ]),
             runId: toolRun
         )
+        demoCostSnapshotsByChannel[pg18.id] = [
+            CostSnapshot(
+                runId: toolRun,
+                reservedMicroUSD: 0,
+                spentMicroUSD: 51_000,
+                softLimitMicroUSD: 750_000,
+                hardLimitMicroUSD: 1_000_000,
+                isReconciled: true,
+                wasEstimated: false,
+                limitState: .normal
+            )
+        ]
 
         _ = appendServerMessage(
             channel: pg18.id,
@@ -207,7 +223,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
         let approvalRun = RunID()
         let approvalId = ApprovalID()
-        _ = appendServerMessage(
+        let approvalMessage = appendServerMessage(
             channel: general.id,
             author: researcher.id,
             type: .approvalRequest,
@@ -257,6 +273,25 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
             ]),
             runId: approvalRun
         )
+        approvalsById[approvalId] = Approval(
+            id: approvalId,
+            workspaceId: ws,
+            runId: approvalRun,
+            channelId: general.id,
+            requestMessageId: approvalMessage.id,
+            requestedBy: researcher.id,
+            onBehalfOf: human.id,
+            actionType: "github.issue.create",
+            payload: .object([
+                "repo": .string("Dawn-kim-official/momo"),
+                "title": .string("Create rollout checklist issue"),
+                "estimated_micro_usd": .int(820_000),
+                "is_reversible": .bool(true),
+            ]),
+            status: .pending,
+            estimatedMicroUSD: 820_000,
+            isReversible: true
+        )
         demoRealtimeByChannel[general.id] = [
             .agentStatus(AgentStatus(
                 runId: approvalRun,
@@ -294,6 +329,18 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
                 estimatedMicroUSD: 820_000,
                 isReversible: true
             )),
+        ]
+        demoCostSnapshotsByChannel[general.id] = [
+            CostSnapshot(
+                runId: approvalRun,
+                reservedMicroUSD: 820_000,
+                spentMicroUSD: 340_000,
+                softLimitMicroUSD: 900_000,
+                hardLimitMicroUSD: 1_000_000,
+                isReconciled: false,
+                wasEstimated: true,
+                limitState: .softLimit
+            )
         ]
 
         return DemoSeed(workspace: ws, human: human, agents: [researcher, builder],
@@ -409,6 +456,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         channels.filter { $0.workspaceId == workspace }
     }
 
+    public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        demoCostSnapshotsByChannel[channel] ?? []
+    }
+
     public func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
         messagesByChannel.values.flatMap { $0 }.filter {
             ($0.body ?? "").localizedCaseInsensitiveContains(query)
@@ -441,6 +492,12 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         }
     }
 
+    public func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        approvalsById.values
+            .filter { $0.workspaceId == workspace && $0.status == status }
+            .sorted { ($0.expiresAtMs ?? Int64.max, $0.id.description) < ($1.expiresAtMs ?? Int64.max, $1.id.description) }
+    }
+
     public func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         // TODO(T09-followup): REST POST .../approvals/{id}/decide.
         for channel in demoRealtimeByChannel.keys {
@@ -463,6 +520,13 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
                 approval.decidedBy = members.first(where: { $0.kind == .human })?.id
                 approval.decisionReason = request.reason
                 updatedEvents[idx] = .approval(approval)
+                if var stored = approvalsById[approval.approvalId] {
+                    stored.status = request.status
+                    stored.decidedBy = approval.decidedBy
+                    stored.decidedAtMs = nowMs()
+                    stored.decisionReason = request.reason
+                    approvalsById[approval.approvalId] = stored
+                }
 
                 for eventIndex in updatedEvents.indices {
                     if case .agentStatus(var status) = updatedEvents[eventIndex],

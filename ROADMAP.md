@@ -111,8 +111,8 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-205` | M3 | macOS real-backend dev app smoke gate | `scripts/verify_macos_real_backend_ui.sh` + `local_gate --profile macos-ui`; Docker+migrate+host MomoServer REST login/channel list/history/send plus approval/cost fixture evidence, with `LOCAL_GATE_LAUNCH_UI=1` process/window launch still opt-in |
 | `MOMO-200` | M3 | macOS SwiftCentrifuge live adapter | candidate: realtime-token fetch/refresh + `ch:`/`agent:` subscribe + `RealtimeEnvelopeSubscriptionTransport` injection |
 | `MOMO-201` | M3 | D Live Tool-Call fixture/local gate | candidate: mock SSE/runtime fixture emits `agent.partial` tool-call progress + final `tool_result` evidence for MOMO-020 |
-| `MOMO-202` | M3 | Cost projection + CostSnapshot binding | candidate: server-owned reserve/spent/reconciled/limit projection consumed by macOS B surface |
-| `MOMO-203` | M3 | Approval pending projection + inbox gate | candidate: pending approval read/projection + `approval.decided` reconciliation for MOMO-022 |
+| `MOMO-202` | M3 | Cost projection + CostSnapshot binding | 완료: `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots` server-owned projection + macOS `CostSnapshot` binding; runtime-agent endpoint evidence |
+| `MOMO-203` | M3 | Approval pending projection + inbox gate | `GET /v1/workspaces/{ws}/approvals?status=pending` server-owned read model + macOS C inbox initial load + receipt/`approval.decided` reconciliation; two-workspace/member guard covered by `runtime-db` |
 | `MOMO-204` | M3 | Combined M3 D/B/C local gate profile | candidate: one PR gate that captures D/B/C fixture/runtime evidence for M3 exit |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 

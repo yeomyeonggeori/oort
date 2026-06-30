@@ -380,6 +380,55 @@ final class MomoServerTests: XCTestCase {
         )
     }
 
+    func testApprovalProjectionDTOEncodesPendingInboxContract() throws {
+        let projection = ApprovalProjectionPageDTO(approvals: [
+            ApprovalProjectionDTO(
+                id: "00000000-0000-7000-8000-000000000901",
+                workspaceId: "00000000-0000-7000-8000-000000000001",
+                runId: "00000000-0000-7000-8000-000000000801",
+                channelId: "00000000-0000-7000-8000-000000000201",
+                requestMessageId: "00000000-0000-7000-8000-000000000701",
+                requestedBy: "00000000-0000-7000-8000-000000000102",
+                onBehalfOf: "00000000-0000-7000-8000-000000000101",
+                actionType: "github.issue.create",
+                payload: .object(["title": .string("Ship gated write")]),
+                status: "pending",
+                estimatedMicroUSD: 820_000,
+                isReversible: true,
+                decidedBy: nil,
+                decidedAtMs: nil,
+                decisionReason: nil,
+                expiresAtMs: 1_782_463_260_000
+            )
+        ])
+
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(projection)
+        ) as? [String: Any]
+        let approvals = try XCTUnwrap(object?["approvals"] as? [[String: Any]])
+        let first = try XCTUnwrap(approvals.first)
+
+        XCTAssertEqual(first["approval_id"] as? String, nil)
+        XCTAssertEqual(first["id"] as? String, "00000000-0000-7000-8000-000000000901")
+        XCTAssertEqual(first["workspace_id"] as? String, "00000000-0000-7000-8000-000000000001")
+        XCTAssertEqual(first["action_type"] as? String, "github.issue.create")
+        XCTAssertEqual(first["status"] as? String, "pending")
+        XCTAssertEqual(first["estimated_micro_usd"] as? Int, 820_000)
+        XCTAssertEqual(first["is_reversible"] as? Bool, true)
+        XCTAssertNil(first["workspaceId"])
+    }
+
+    func testApprovalProjectionStatusAndLimitValidation() throws {
+        XCTAssertEqual(try ApprovalDecisionRoutes.validatedStatus(nil), "pending")
+        XCTAssertEqual(try ApprovalDecisionRoutes.validatedStatus(" pending "), "pending")
+        XCTAssertEqual(try ApprovalDecisionRoutes.validatedStatus("rejected"), "rejected")
+        XCTAssertThrowsError(try ApprovalDecisionRoutes.validatedStatus("all"))
+
+        XCTAssertEqual(ApprovalDecisionRoutes.validatedLimit(nil), 100)
+        XCTAssertEqual(ApprovalDecisionRoutes.validatedLimit("0"), 1)
+        XCTAssertEqual(ApprovalDecisionRoutes.validatedLimit("501"), 500)
+    }
+
     func testMessageBroadcastPayloadUsesRealtimeSnakeCaseContract() throws {
         let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
@@ -419,6 +468,69 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(payload["authorMemberId"])
         XCTAssertNil(payload["hlcTs"])
         XCTAssertNil(payload["hlcCount"])
+    }
+
+    func testCostSnapshotDTOEncodesSnakeCaseProjectionContract() throws {
+        let snapshot = CostSnapshotDTO(
+            runId: "00000000-0000-7000-8000-000000000904",
+            reservedMicroUSD: 0,
+            spentMicroUSD: 6,
+            softLimitMicroUSD: 900_000,
+            hardLimitMicroUSD: 1_000_000,
+            isReconciled: true,
+            wasEstimated: false,
+            limitState: "normal"
+        )
+        let page = CostSnapshotPageDTO(
+            schema: "momo.cost_snapshot.channel.v0",
+            channelId: "00000000-0000-7000-8000-000000000202",
+            snapshots: [snapshot],
+            asOfMs: 1_782_463_260_000
+        )
+
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(page)
+        ) as? [String: Any]
+        let snapshots = object?["snapshots"] as? [[String: Any]]
+        let item = snapshots?.first
+
+        XCTAssertEqual(object?["channel_id"] as? String, page.channelId)
+        XCTAssertEqual(item?["run_id"] as? String, snapshot.runId)
+        XCTAssertEqual(item?["reserved_micro_usd"] as? Int, 0)
+        XCTAssertEqual(item?["spent_micro_usd"] as? Int, 6)
+        XCTAssertEqual(item?["soft_limit_micro_usd"] as? Int, 900_000)
+        XCTAssertEqual(item?["hard_limit_micro_usd"] as? Int, 1_000_000)
+        XCTAssertEqual(item?["is_reconciled"] as? Bool, true)
+        XCTAssertEqual(item?["was_estimated"] as? Bool, false)
+        XCTAssertEqual(item?["limit_state"] as? String, "normal")
+        XCTAssertNil(item?["reservedMicroUSD"])
+    }
+
+    func testCostProjectionLimitStateHelper() {
+        XCTAssertEqual(
+            CostProjectionRoutes.limitState(
+                observedMicroUSD: 10,
+                softLimitMicroUSD: 20,
+                hardLimitMicroUSD: 30
+            ),
+            "normal"
+        )
+        XCTAssertEqual(
+            CostProjectionRoutes.limitState(
+                observedMicroUSD: 25,
+                softLimitMicroUSD: 20,
+                hardLimitMicroUSD: 30
+            ),
+            "soft_limit"
+        )
+        XCTAssertEqual(
+            CostProjectionRoutes.limitState(
+                observedMicroUSD: 30,
+                softLimitMicroUSD: 20,
+                hardLimitMicroUSD: 30
+            ),
+            "hard_limit"
+        )
     }
 
     private func testServerConfig(

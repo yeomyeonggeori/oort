@@ -135,6 +135,46 @@ struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
     let channels: [ChannelDTO]
 }
 
+// ---- Cost projection ----
+
+/// Server-owned B surface projection. Clients render this and do not calculate
+/// budget state directly from ledger/window tables.
+struct CostSnapshotDTO: ResponseEncodable, Codable, Sendable {
+    let runId: String
+    let reservedMicroUSD: Int64
+    let spentMicroUSD: Int64
+    let softLimitMicroUSD: Int64?
+    let hardLimitMicroUSD: Int64?
+    let isReconciled: Bool
+    let wasEstimated: Bool
+    let limitState: String
+
+    private enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case reservedMicroUSD = "reserved_micro_usd"
+        case spentMicroUSD = "spent_micro_usd"
+        case softLimitMicroUSD = "soft_limit_micro_usd"
+        case hardLimitMicroUSD = "hard_limit_micro_usd"
+        case isReconciled = "is_reconciled"
+        case wasEstimated = "was_estimated"
+        case limitState = "limit_state"
+    }
+}
+
+struct CostSnapshotPageDTO: ResponseEncodable, Codable, Sendable {
+    let schema: String
+    let channelId: String
+    let snapshots: [CostSnapshotDTO]
+    let asOfMs: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case schema
+        case channelId = "channel_id"
+        case snapshots
+        case asOfMs = "as_of_ms"
+    }
+}
+
 // ---- Approval decisions ----
 
 /// POST /v1/workspaces/{ws}/approvals/{approval}/decision request body.
@@ -167,6 +207,49 @@ struct ApprovalDecisionReceiptDTO: ResponseEncodable, Codable, Sendable {
         case decidedAtMs = "decided_at_ms"
         case decisionReason = "decision_reason"
     }
+}
+
+/// GET /v1/workspaces/{ws}/approvals?status=pending item.
+struct ApprovalProjectionDTO: ResponseEncodable, Codable, Sendable {
+    let id: String
+    let workspaceId: String
+    let runId: String
+    let channelId: String
+    let requestMessageId: String?
+    let requestedBy: String
+    let onBehalfOf: String?
+    let actionType: String
+    let payload: JSONValue
+    let status: String
+    let estimatedMicroUSD: Int64?
+    let isReversible: Bool?
+    let decidedBy: String?
+    let decidedAtMs: Int64?
+    let decisionReason: String?
+    let expiresAtMs: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceId = "workspace_id"
+        case runId = "run_id"
+        case channelId = "channel_id"
+        case requestMessageId = "request_message_id"
+        case requestedBy = "requested_by"
+        case onBehalfOf = "on_behalf_of"
+        case actionType = "action_type"
+        case payload
+        case status
+        case estimatedMicroUSD = "estimated_micro_usd"
+        case isReversible = "is_reversible"
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+        case expiresAtMs = "expires_at_ms"
+    }
+}
+
+struct ApprovalProjectionPageDTO: ResponseEncodable, Codable, Sendable {
+    let approvals: [ApprovalProjectionDTO]
 }
 
 // ---- Invites ----

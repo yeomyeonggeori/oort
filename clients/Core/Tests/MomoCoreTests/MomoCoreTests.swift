@@ -247,6 +247,40 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(c.spentUSD, 0.0021, accuracy: 1e-9)
     }
 
+    func testCostSnapshotEncodesServerOwnedSnakeCaseContract() throws {
+        let run = RunID(uuidString: "00000000-0000-7000-8000-000000000904")!
+        let snapshot = CostSnapshot(
+            runId: run,
+            reservedMicroUSD: 0,
+            spentMicroUSD: 6,
+            softLimitMicroUSD: 900_000,
+            hardLimitMicroUSD: 1_000_000,
+            isReconciled: true,
+            wasEstimated: false,
+            limitState: .normal
+        )
+        let page = CostSnapshotPage(
+            channelId: ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!,
+            snapshots: [snapshot],
+            asOfMs: 1_782_463_260_000
+        )
+
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder.momo.encode(page)
+        ) as? [String: Any]
+        let snapshots = object?["snapshots"] as? [[String: Any]]
+        let item = snapshots?.first
+
+        XCTAssertEqual(object?["schema"] as? String, "momo.cost_snapshot.channel.v0")
+        XCTAssertEqual(item?["run_id"] as? String, run.description)
+        XCTAssertEqual(item?["reserved_micro_usd"] as? Int, 0)
+        XCTAssertEqual(item?["spent_micro_usd"] as? Int, 6)
+        XCTAssertEqual(item?["is_reconciled"] as? Bool, true)
+        XCTAssertEqual(item?["was_estimated"] as? Bool, false)
+        XCTAssertEqual(item?["limit_state"] as? String, "normal")
+        XCTAssertNil(item?["reservedMicroUSD"])
+    }
+
     // MARK: - DraftMessage
 
     func testDraftMessageEncodesSnakeCase() throws {
