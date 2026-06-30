@@ -135,6 +135,58 @@ struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
     let channels: [ChannelDTO]
 }
 
+/// POST /v1/workspaces/{ws}/channels request body.
+struct CreateChannelRequest: Decodable {
+    let kind: String
+    let name: String
+    let topic: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case name
+        case topic
+    }
+}
+
+struct CreateChannelResponse: ResponseEncodable, Decodable {
+    let channel: ChannelDTO
+    let creatorMembership: ChannelMembershipDTO
+}
+
+/// POST /v1/workspaces/{ws}/channels/{ch}/members request body.
+struct AddChannelMemberRequest: Decodable {
+    let memberId: UUID
+    let role: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case memberId
+        case memberIdSnake = "member_id"
+        case role
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.memberId = try c.decodeIfPresent(UUID.self, forKey: .memberId)
+            ?? c.decode(UUID.self, forKey: .memberIdSnake)
+        self.role = try c.decodeIfPresent(String.self, forKey: .role)
+    }
+}
+
+/// Channel membership management result.
+struct ChannelMembershipDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let channelId: String
+    let memberId: String
+    let role: String
+    let joinedAtMs: Int64
+    let leftAtMs: Int64?
+}
+
+struct ChannelMembershipResponse: ResponseEncodable, Decodable {
+    let membership: ChannelMembershipDTO
+}
+
 // ---- Cost projection ----
 
 /// Server-owned B surface projection. Clients render this and do not calculate
