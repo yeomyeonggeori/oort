@@ -258,7 +258,7 @@ SET status = EXCLUDED.status,
     updated_at = now();
 
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
-VALUES ('${NONMEMBER_ID}', '${WORKSPACE_ID}', '${NONMEMBER_EMAIL}', true, 'dev-password-stub', 'UTC')
+VALUES ('${NONMEMBER_ID}', '${WORKSPACE_ID}', '${NONMEMBER_EMAIL}', true, momo_password_hash('dev-password'), 'UTC')
 ON CONFLICT (member_id) DO UPDATE
 SET email = EXCLUDED.email,
     email_verified = EXCLUDED.email_verified,
@@ -274,7 +274,7 @@ VALUES
   ('${WORKSPACE_B_AGENT_ID}', '${WORKSPACE_B_ID}', 'agent', 'active', 'Approval Agent B', 'approval-b-agent');
 
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
-VALUES ('${WORKSPACE_B_HUMAN_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_EMAIL}', true, 'dev-password-stub', 'UTC');
+VALUES ('${WORKSPACE_B_HUMAN_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_EMAIL}', true, momo_password_hash('dev-password'), 'UTC');
 
 INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt, owner_human_id, max_concurrent_runs, max_run_steps)
 VALUES (
@@ -401,7 +401,7 @@ echo "[approval-decision] logging in seeded demo user"
 LOGIN_JSON="$(
   curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+    -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_ID}\"}" \
     "http://127.0.0.1:${PORT}/v1/auth/login"
 )"
 ACCESS_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken // empty')"
@@ -426,7 +426,7 @@ echo "[approval-decision] pending projection channel membership guard"
 NONMEMBER_LOGIN_JSON="$(
   curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"${NONMEMBER_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+    -d "{\"email\":\"${NONMEMBER_EMAIL}\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_ID}\"}" \
     "http://127.0.0.1:${PORT}/v1/auth/login"
 )"
 NONMEMBER_TOKEN="$(printf '%s' "$NONMEMBER_LOGIN_JSON" | jq -r '.accessToken // empty')"
@@ -440,7 +440,7 @@ echo "[approval-decision] pending projection two-workspace guard"
 WORKSPACE_B_LOGIN_JSON="$(
   curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"${WORKSPACE_B_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_B_ID}\"}" \
+    -d "{\"email\":\"${WORKSPACE_B_EMAIL}\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_B_ID}\"}" \
     "http://127.0.0.1:${PORT}/v1/auth/login"
 )"
 WORKSPACE_B_TOKEN="$(printf '%s' "$WORKSPACE_B_LOGIN_JSON" | jq -r '.accessToken // empty')"

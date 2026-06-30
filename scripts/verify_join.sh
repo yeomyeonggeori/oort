@@ -237,8 +237,14 @@ JOIN_MEMBER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.member.id')"
 JOIN_CHANNEL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.memberships[0].channelId')"
 JOIN_REDEMPTION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.redemptionId')"
 
-api POST /v1/auth/login "$(jq -cn --arg email "$VALID_EMAIL" --arg workspace "$WORKSPACE_ID" '{email:$email,password:"anything",workspace:$workspace}')"
-expect_status 200 "joined human can authenticate"
+api POST /v1/auth/login "$(jq -cn --arg email "$VALID_EMAIL" --arg workspace "$WORKSPACE_ID" '{email:$email,password:"wrong-password",workspace:$workspace}')"
+expect_status 401 "joined human rejects wrong password"
+
+api POST /v1/auth/login "$(jq -cn --arg email "$VALID_EMAIL" --arg workspace "$WORKSPACE_ID" '{email:$email,password:"",workspace:$workspace}')"
+expect_status 401 "joined human rejects empty password"
+
+api POST /v1/auth/login "$(jq -cn --arg email "$VALID_EMAIL" --arg workspace "$WORKSPACE_ID" '{email:$email,password:"dev-password",workspace:$workspace}')"
+expect_status 200 "joined human can authenticate with stored password hash"
 
 api GET "/v1/workspaces/$WORKSPACE_ID/channels/$JOIN_CHANNEL_ID/messages" "" "$JOIN_TOKEN"
 expect_status 200 "joined human can read joined channel"

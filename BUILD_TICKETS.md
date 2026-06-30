@@ -152,6 +152,7 @@
 | `MOMO-196` | Realtime WebSocket live subscribe verifier v0(token→subscribe→REST send→live publication) | runtime/infra | MOMO-115, MOMO-186, MOMO-192, MOMO-193 |
 | `MOMO-212` | Agent channel live subscription verifier v0(agent status/partial live boundary) | runtime/infra | MOMO-196, MOMO-200, MOMO-201 |
 | `MOMO-215` | Agent mention routing e2e v0(REST @agent mention→agent_job→agent/live+timeline) | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
+| `MOMO-217` | Auth password verification runtime hardening v0 | swift/runtime-db | MOMO-014, MOMO-213 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-209` | stale worktree Docker Compose project/container/network janitor | tooling/docs | MOMO-112, MOMO-194, MOMO-199 |
@@ -532,6 +533,7 @@
 | `MOMO-215` | Agent mention routing e2e v0 | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 | `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
+| `MOMO-217` | Auth password verification runtime hardening v0 | swift/runtime-db | MOMO-014, MOMO-213 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -751,7 +753,18 @@
 - [x] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #185를 `status:needs-review`로 전환하고 merge하지 않는다.
-- Out of scope: production password hashing/SSO/OAuth, App Store/Developer ID signing, multi-account switching.
+- Out of scope: SSO/OAuth, App Store/Developer ID signing, multi-account switching. Production password hash verification은 MOMO-217에서 runtime hardening으로 분리 완료.
+
+### MOMO-217 수용기준 `[swift/runtime-db]`
+- [x] `POST /v1/auth/login`은 `human.password_hash`가 있는 계정에서 올바른 password만 허용한다.
+- [x] wrong password, empty password, unknown email은 401을 반환한다.
+- [x] demo seed user는 deterministic dev password(`dev-password`)로 로그인 가능하고 잘못된 password는 거부된다.
+- [x] `/v1/join`으로 생성된 human은 `momo_password_hash(password)`를 저장하고 이후 login 가능하다.
+- [x] platform admin scope는 일반 password 검증 후 allowlisted email + 별도 `platformAdminSecret` 조건에서만 부여된다.
+- [x] password hash/raw password는 API 응답, logs, audit payload, STATUS에 노출하지 않는다.
+- [ ] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #193을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
