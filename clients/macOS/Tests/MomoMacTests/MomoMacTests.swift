@@ -207,6 +207,95 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testLiveToolCallPartialReconcilesToFinalToolResultBySeq() async throws {
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000201001")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000201002")!
+        let human = MemberID(uuidString: "00000000-0000-7000-8000-000000201003")!
+        let agent = MemberID(uuidString: "00000000-0000-7000-8000-000000201004")!
+        let run = RunID(uuidString: "00000000-0000-7000-8000-000000201005")!
+        let finalMessageId = MessageID(uuidString: "00000000-0000-7000-8000-000000201006")!
+
+        let initial = Message(
+            id: MessageID(uuidString: "00000000-0000-7000-8000-000000201007")!,
+            channelId: channel,
+            seq: 40,
+            hlcTs: 1_782_864_000_040,
+            authorMemberId: human,
+            body: "run the search"
+        )
+        let final = Message(
+            id: finalMessageId,
+            channelId: channel,
+            seq: 41,
+            hlcTs: 1_782_864_000_041,
+            authorMemberId: agent,
+            type: .toolResult,
+            body: "Found 2 issues.",
+            props: [
+                "tool_name": .string("github.search_issues"),
+                "call_id": .string("call_momo_201_search"),
+                "is_error": .bool(false),
+                "output": .object([
+                    "matches": .int(2),
+                    "query": .string("MOMO-201 live tool-call fixture"),
+                ]),
+            ],
+            runId: run
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human"),
+                Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "Kim Intern", handle: "kim"),
+            ],
+            channels: [
+                Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "agent-lab", createdBy: human),
+            ],
+            history: [channel: [initial]],
+            events: [
+                .agentPartial(AgentPartial(
+                    runId: run,
+                    channelId: channel,
+                    messageId: finalMessageId,
+                    textDelta: "Searching ",
+                    spentMicroUSD: 2_100
+                )),
+                .agentPartial(AgentPartial(
+                    runId: run,
+                    channelId: channel,
+                    messageId: finalMessageId,
+                    textDelta: "issues...",
+                    toolCallName: "github.search_issues",
+                    toolCallArgs: [
+                        "query": .string("MOMO-201 live tool-call fixture"),
+                        "limit": .int(2),
+                    ],
+                    spentMicroUSD: 2_400
+                )),
+                .message(final),
+                .message(final),
+                .agentPartial(AgentPartial(
+                    runId: run,
+                    channelId: channel,
+                    messageId: finalMessageId,
+                    textDelta: "late duplicate partial"
+                )),
+            ]
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertNil(viewModel.partials[run], "final tool_result message.new should remove the progress card")
+        XCTAssertEqual(viewModel.visibleMessages.map(\.seq), [40, 41])
+        XCTAssertEqual(viewModel.visibleMessages.filter { $0.id == finalMessageId }.count, 1)
+        XCTAssertEqual(viewModel.visibleMessages.last?.type, .toolResult)
+        XCTAssertEqual(viewModel.visibleMessages.last?.props["output"]?["matches"]?.intValue, 2)
+    }
+
+    @MainActor
     func testApprovalDecisionUsesChatBackendContract() async throws {
         let chat = RecordingDecisionChatBackend()
         let agentTransport = FailingDecisionAgentTransport()
@@ -1156,6 +1245,85 @@ private actor FailingDecisionAgentTransport: AgentTransport {
     }
 
     func cancelRun(_ id: RunID) async throws {}
+}
+
+private actor FixtureRealtimeChatBackend: ChatBackend {
+    private let workspace: WorkspaceID
+    private let storedMembers: [Member]
+    private let storedChannels: [Channel]
+    private let storedHistory: [ChannelID: [Message]]
+    private let storedEvents: [RealtimeEvent]
+
+    init(
+        workspace: WorkspaceID,
+        members: [Member],
+        channels: [Channel],
+        history: [ChannelID: [Message]],
+        events: [RealtimeEvent]
+    ) {
+        self.workspace = workspace
+        self.storedMembers = members
+        self.storedChannels = channels
+        self.storedHistory = history
+        self.storedEvents = events
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {}
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        throw BackendError.notConnected
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        let events = storedEvents
+        return AsyncStream { continuation in
+            Task {
+                for event in events {
+                    continuation.yield(event)
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+                continuation.finish()
+            }
+        }
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        let messages = (storedHistory[channel] ?? []).filter { message in
+            guard let seq else { return true }
+            return (message.seq ?? 0) > seq
+        }
+        return Array(messages.prefix(limit))
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] { [] }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        storedMembers.filter { $0.workspaceId == workspace }
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        storedChannels.filter { $0.workspaceId == workspace }
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] { [] }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        storedHistory.values.flatMap { $0 }.filter { $0.body?.contains(query) == true }
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {}
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        throw BackendError.notConnected
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {}
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] { [] }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        throw BackendError.notConnected
+    }
 }
 
 private actor RecordingRealtimeSubscriptionDriver: RealtimeSubscriptionDriver, RealtimeStatusProvidingDriver {

@@ -266,6 +266,7 @@ public final class ChatViewModel: ObservableObject {
         }
         messagesByChannel[channel] = msgs.sorted(by: Self.seqOrder)
         hydrateSidecars(from: message)
+        reconcileFinalMessage(message)
     }
 
     private func hydrateSidecars(from message: Message) {
@@ -325,6 +326,10 @@ public final class ChatViewModel: ObservableObject {
 
     /// Coalesce `agent.partial` deltas into one growing buffer per run (L4 §5.2).
     private func coalesce(_ partial: AgentPartial) {
+        guard !hasFinalMessage(for: partial) else {
+            partials[partial.runId] = nil
+            return
+        }
         if var existing = partials[partial.runId] {
             if let delta = partial.textDelta {
                 existing.textDelta = (existing.textDelta ?? "") + delta
@@ -336,6 +341,23 @@ public final class ChatViewModel: ObservableObject {
             partials[partial.runId] = existing
         } else {
             partials[partial.runId] = partial
+        }
+    }
+
+    private func reconcileFinalMessage(_ message: Message) {
+        guard let runId = message.runId else { return }
+        guard let partial = partials[runId] else { return }
+        if partial.messageId == message.id || message.type == .toolResult {
+            partials[runId] = nil
+        }
+    }
+
+    private func hasFinalMessage(for partial: AgentPartial) -> Bool {
+        let messages = messagesByChannel[partial.channelId] ?? []
+        return messages.contains { message in
+            guard message.runId == partial.runId else { return false }
+            if partial.messageId == message.id { return true }
+            return message.type == .toolResult && message.seq != nil
         }
     }
 
