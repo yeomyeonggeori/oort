@@ -49,7 +49,7 @@ public actor MomoServerRealtimeTokenProvider: RealtimeConnectionTokenProvider {
 
 // MARK: - SwiftCentrifuge transport
 
-public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelopeSubscriptionTransport {
+public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelopeSubscriptionTransport, RealtimeStatusReportingEnvelopeSubscriptionTransport {
     public let endpoint: URL
     public let workspace: WorkspaceID
 
@@ -69,6 +69,13 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
     }
 
     public func envelopes(channel: ChannelID) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
+        try await envelopes(channel: channel) { _ in }
+    }
+
+    public func envelopes(
+        channel: ChannelID,
+        statusHandler: @escaping RealtimeStatusHandler
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
         let channelName = Self.channelName(workspace: workspace, channel: channel)
         let tokenProvider = self.tokenProvider
         let endpoint = endpoint.absoluteString
@@ -76,8 +83,10 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
 
         return AsyncThrowingStream { continuation in
             let delegate = CentrifugoEnvelopeDelegate(
+                channelId: channel,
                 channel: channelName,
-                continuation: continuation
+                continuation: continuation,
+                statusHandler: statusHandler
             )
             let config = CentrifugeClientConfig(
                 name: "momo-macos",
@@ -102,9 +111,24 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
                 continuation.onTermination = { _ in
                     lifetime.close()
                 }
+                statusHandler(RealtimeConnectionStatus(
+                    channelId: channel,
+                    connection: .connecting,
+                    subscription: .subscribing,
+                    canRetry: false,
+                    message: "Connecting to realtime."
+                ))
                 client.connect()
                 subscription.subscribe()
             } catch {
+                statusHandler(RealtimeConnectionStatus(
+                    channelId: channel,
+                    connection: .error,
+                    subscription: .error,
+                    fallback: .restHistory,
+                    canRetry: true,
+                    message: String(describing: error)
+                ))
                 continuation.finish(throwing: error)
             }
         }
@@ -165,17 +189,76 @@ private struct RealtimeTokenCompletion: @unchecked Sendable {
 }
 
 private final class CentrifugoEnvelopeDelegate: CentrifugeClientDelegate, CentrifugeSubscriptionDelegate, @unchecked Sendable {
+    let channelId: ChannelID
     let channel: String
     weak var lifetime: CentrifugoSubscriptionLifetime?
 
     private let continuation: AsyncThrowingStream<RealtimeEnvelope, Error>.Continuation
+    private let statusHandler: RealtimeStatusHandler
 
     init(
+        channelId: ChannelID,
         channel: String,
-        continuation: AsyncThrowingStream<RealtimeEnvelope, Error>.Continuation
+        continuation: AsyncThrowingStream<RealtimeEnvelope, Error>.Continuation,
+        statusHandler: @escaping RealtimeStatusHandler
     ) {
+        self.channelId = channelId
         self.channel = channel
         self.continuation = continuation
+        self.statusHandler = statusHandler
+    }
+
+    func onConnecting(_ client: CentrifugeClient, _ event: CentrifugeConnectingEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .reconnecting,
+            subscription: .recovering,
+            fallback: .restHistory,
+            canRetry: false,
+            message: event.reason
+        ))
+    }
+
+    func onConnected(_ client: CentrifugeClient, _ event: CentrifugeConnectedEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .connected,
+            subscription: .subscribing,
+            canRetry: false,
+            message: "Realtime connection established."
+        ))
+    }
+
+    func onDisconnected(_ client: CentrifugeClient, _ event: CentrifugeDisconnectedEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .offline,
+            subscription: .unsubscribed,
+            fallback: .restHistory,
+            canRetry: true,
+            message: event.reason
+        ))
+    }
+
+    func onSubscribing(_ sub: CentrifugeSubscription, _ event: CentrifugeSubscribingEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .connected,
+            subscription: .recovering,
+            fallback: .restHistory,
+            canRetry: false,
+            message: event.reason
+        ))
+    }
+
+    func onSubscribed(_ sub: CentrifugeSubscription, _ event: CentrifugeSubscribedEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .connected,
+            subscription: .subscribed,
+            canRetry: false,
+            message: event.recovered ? "Realtime recovered missed publications." : "Realtime subscribed."
+        ))
     }
 
     func onPublication(_ sub: CentrifugeSubscription, _ event: CentrifugePublicationEvent) {
@@ -188,16 +271,40 @@ private final class CentrifugoEnvelopeDelegate: CentrifugeClientDelegate, Centri
     }
 
     func onError(_ sub: CentrifugeSubscription, _ event: CentrifugeSubscriptionErrorEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .error,
+            subscription: .error,
+            fallback: .restHistory,
+            canRetry: true,
+            message: String(describing: event.error)
+        ))
         continuation.finish(throwing: event.error)
         lifetime?.close()
     }
 
     func onUnsubscribed(_ sub: CentrifugeSubscription, _ event: CentrifugeUnsubscribedEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .offline,
+            subscription: .unsubscribed,
+            fallback: .restHistory,
+            canRetry: true,
+            message: event.reason
+        ))
         continuation.finish()
         lifetime?.close()
     }
 
     func onError(_ client: CentrifugeClient, _ event: CentrifugeErrorEvent) {
+        statusHandler(RealtimeConnectionStatus(
+            channelId: channelId,
+            connection: .error,
+            subscription: .error,
+            fallback: .restHistory,
+            canRetry: true,
+            message: String(describing: event.error)
+        ))
         continuation.finish(throwing: event.error)
         lifetime?.close()
     }

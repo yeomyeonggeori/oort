@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend {
+public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend, RealtimeStatusProvidingBackend {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var connected = false
@@ -36,6 +36,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     private var demoRealtimeByChannel: [ChannelID: [RealtimeEvent]] = [:]
     private var demoCostSnapshotsByChannel: [ChannelID: [CostSnapshot]] = [:]
     private var replayedDemoDeltaChannels: Set<ChannelID> = []
+    private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
+    private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
 
     public init() {}
 
@@ -429,6 +431,12 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     public func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
         guard connected else { throw BackendError.notConnected }
+        emitRealtimeStatus(RealtimeConnectionStatus(
+            channelId: channel,
+            connection: .connected,
+            subscription: .subscribed,
+            message: "Demo realtime connected."
+        ))
         let token = UUID()
         return AsyncStream { continuation in
             Task { await self.registerChannel(channel, token: token, continuation: continuation) }
@@ -468,6 +476,28 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     public func setTyping(channel: ChannelID, isTyping: Bool) async {
         // TODO(T09-followup): publish typing.start/stop via REST → relay.
+    }
+
+    public func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { continuation in
+            let token = UUID()
+            continuation.yield(realtimeStatusByChannel[channel] ?? .idle(channel: channel))
+            realtimeStatusStreams[channel, default: [:]][token] = continuation
+            continuation.onTermination = { _ in
+                Task { await self.unregisterRealtimeStatus(channel: channel, token: token) }
+            }
+        }
+    }
+
+    public func retryRealtime(channel: ChannelID) async {
+        emitRealtimeStatus(RealtimeConnectionStatus(
+            channelId: channel,
+            connection: connected ? .connected : .offline,
+            subscription: connected ? .subscribed : .unsubscribed,
+            fallback: connected ? .none : .restHistory,
+            canRetry: !connected,
+            message: connected ? "Demo realtime connected." : "Demo backend is offline."
+        ))
     }
 
     public func editMessage(_ id: MessageID, body: String) async throws -> Message {
@@ -665,6 +695,18 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     }
     private func unregisterChannel(_ channel: ChannelID, token: UUID) async {
         channelStreams[channel]?[token] = nil
+    }
+    private func unregisterRealtimeStatus(channel: ChannelID, token: UUID) async {
+        realtimeStatusStreams[channel]?[token] = nil
+    }
+    private func emitRealtimeStatus(_ status: RealtimeConnectionStatus) {
+        realtimeStatusByChannel[status.channelId] = status
+        guard let continuations = realtimeStatusStreams[status.channelId]?.values else {
+            return
+        }
+        for continuation in continuations {
+            continuation.yield(status)
+        }
     }
     private func registerAgent(_ channel: ChannelID, token: UUID,
                                continuation: AsyncStream<AgentEvent>.Continuation) async {

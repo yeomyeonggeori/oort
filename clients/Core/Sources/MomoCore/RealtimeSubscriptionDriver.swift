@@ -18,10 +18,12 @@ public protocol RealtimeSubscriptionDriver: Sendable {
     ) async throws -> AsyncStream<RealtimeEvent>
 }
 
-public actor DefaultRealtimeSubscriptionDriver: RealtimeSubscriptionDriver {
+public actor DefaultRealtimeSubscriptionDriver: RealtimeSubscriptionDriver, RealtimeStatusProvidingDriver {
     private let transport: any RealtimeEnvelopeSubscriptionTransport
     private let backfillLimit: Int
     private let maxBackfillPages: Int
+    private var statusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
+    private var statusContinuations: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
 
     public init(
         transport: any RealtimeEnvelopeSubscriptionTransport,
@@ -38,7 +40,27 @@ public actor DefaultRealtimeSubscriptionDriver: RealtimeSubscriptionDriver {
         startingAfter lastAppliedSeq: Int64,
         backfill: @escaping RealtimeBackfill
     ) async throws -> AsyncStream<RealtimeEvent> {
-        let envelopes = try await transport.envelopes(channel: channel)
+        emit(RealtimeConnectionStatus(
+            channelId: channel,
+            connection: .connecting,
+            subscription: .subscribing,
+            canRetry: false,
+            message: "Opening realtime connection."
+        ))
+        let envelopes: AsyncThrowingStream<RealtimeEnvelope, Error>
+        if let statusTransport = transport as? any RealtimeStatusReportingEnvelopeSubscriptionTransport {
+            envelopes = try await statusTransport.envelopes(channel: channel) { [weak self] status in
+                Task { await self?.emit(status) }
+            }
+        } else {
+            envelopes = try await transport.envelopes(channel: channel)
+            emit(RealtimeConnectionStatus(
+                channelId: channel,
+                connection: .connected,
+                subscription: .subscribed,
+                message: "Realtime connected."
+            ))
+        }
         let controller = RealtimeReplayController(
             channel: channel,
             lastAppliedSeq: lastAppliedSeq,
@@ -55,13 +77,58 @@ public actor DefaultRealtimeSubscriptionDriver: RealtimeSubscriptionDriver {
                             continuation.yield(event)
                         }
                     }
+                    self.emit(RealtimeConnectionStatus(
+                        channelId: channel,
+                        connection: .offline,
+                        subscription: .unsubscribed,
+                        fallback: .restHistory,
+                        canRetry: true,
+                        message: "Realtime stream ended; REST history remains available."
+                    ))
                     continuation.finish()
                 } catch {
+                    self.emit(RealtimeConnectionStatus(
+                        channelId: channel,
+                        connection: .error,
+                        subscription: .error,
+                        fallback: .restHistory,
+                        canRetry: true,
+                        message: String(describing: error)
+                    ))
                     continuation.finish()
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    public func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { continuation in
+            let token = UUID()
+            if let current = statusByChannel[channel] {
+                continuation.yield(current)
+            } else {
+                continuation.yield(.idle(channel: channel))
+            }
+            statusContinuations[channel, default: [:]][token] = continuation
+            continuation.onTermination = { _ in
+                Task { await self.unregisterStatus(channel: channel, token: token) }
+            }
+        }
+    }
+
+    private func emit(_ status: RealtimeConnectionStatus) {
+        statusByChannel[status.channelId] = status
+        guard let continuations = statusContinuations[status.channelId]?.values else {
+            return
+        }
+        for continuation in continuations {
+            continuation.yield(status)
+        }
+    }
+
+    private func unregisterStatus(channel: ChannelID, token: UUID) {
+        statusContinuations[channel]?[token] = nil
     }
 }
 

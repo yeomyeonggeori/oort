@@ -40,6 +40,7 @@ public final class ChatViewModel: ObservableObject {
     /// Server-owned cost projection per run. Experience B consumes this instead
     /// of deriving ledger/budget math in the client.
     @Published public private(set) var costSnapshots: [RunID: CostSnapshot] = [:]
+    @Published public private(set) var realtimeStatuses: [ChannelID: RealtimeConnectionStatus] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -58,6 +59,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var connectionError: String?
 
     private var channelSubscription: Task<Void, Never>?
+    private var realtimeStatusSubscription: Task<Void, Never>?
 
     public init(
         chat: any ChatBackend,
@@ -137,6 +139,8 @@ public final class ChatViewModel: ObservableObject {
 
     private func subscribe(channel: ChannelID) {
         channelSubscription?.cancel()
+        realtimeStatusSubscription?.cancel()
+        subscribeRealtimeStatus(channel: channel)
         channelSubscription = Task { [weak self] in
             guard let self else { return }
             do {
@@ -148,6 +152,38 @@ public final class ChatViewModel: ObservableObject {
                 self.connectionError = String(describing: error)
             }
         }
+    }
+
+    private func subscribeRealtimeStatus(channel: ChannelID) {
+        guard let statusProvider = chat as? any RealtimeStatusProvidingBackend else {
+            realtimeStatuses[channel] = .restFallback(channel: channel)
+            return
+        }
+
+        realtimeStatusSubscription = Task { [weak self] in
+            guard let self else { return }
+            let statuses = await statusProvider.realtimeStatus(channel: channel)
+            for await status in statuses {
+                self.realtimeStatuses[status.channelId] = status
+            }
+        }
+    }
+
+    public func retryRealtime() async {
+        guard let channel = selectedChannelId else { return }
+        realtimeStatuses[channel] = RealtimeConnectionStatus(
+            channelId: channel,
+            connection: .reconnecting,
+            subscription: .recovering,
+            fallback: .restHistory,
+            canRetry: false,
+            message: "Retrying realtime; REST history remains available."
+        )
+        await loadHistory(channel: channel)
+        if let statusProvider = chat as? any RealtimeStatusProvidingBackend {
+            await statusProvider.retryRealtime(channel: channel)
+        }
+        subscribe(channel: channel)
     }
 
     // MARK: Sending
@@ -333,6 +369,11 @@ public final class ChatViewModel: ObservableObject {
     public var visibleMessages: [Message] {
         guard let id = selectedChannelId else { return [] }
         return messagesByChannel[id] ?? []
+    }
+
+    public var selectedRealtimeStatus: RealtimeConnectionStatus? {
+        guard let id = selectedChannelId else { return nil }
+        return realtimeStatuses[id]
     }
 
     /// Pending approvals, newest-first (ApprovalInboxView).

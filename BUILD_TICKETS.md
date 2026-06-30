@@ -483,10 +483,11 @@
 | `MOMO-198` | M3 D/B/C real-data readiness spec and blocker cleanup | docs/spec | MOMO-170, MOMO-171, MOMO-174, MOMO-177, MOMO-179, MOMO-192, MOMO-193 |
 | `MOMO-205` | macOS real-backend dev app smoke gate | runtime/macos-ui | MOMO-134, MOMO-177, MOMO-197, MOMO-167 |
 | `MOMO-200` | macOS SwiftCentrifuge live adapter | swift/macos-ui/runtime-relay | MOMO-192, MOMO-193 |
+| `MOMO-207` | macOS realtime reconnect/status UX | swift/macos-ui | MOMO-200, MOMO-205 |
 | `MOMO-201` | D Live Tool-Call fixture/local gate | runtime-agent/macos-ui | MOMO-200, MOMO-178 |
 | `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
 | `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
-| `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203 |
+| `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -607,6 +608,19 @@
 - [x] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
 - [x] `scripts/local_gate.sh --profile swift` 또는 focused package tests PASS evidence를 첨부한다.
 - [x] Docker/Centrifugo live subscribe smoke를 수행하거나, 수행 불가 범위를 좁게 `runtime-unverified`로 표시한다.
+
+### MOMO-207 수용기준 `[swift/macos-ui]`
+- [x] GitHub #170을 `scripts/goal_claim.sh 170`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] connection/subscription/reconnect/error/fallback state model을 `MomoCore`에 추가한다.
+- [x] SwiftCentrifuge channel live adapter lifecycle delegate state를 status stream으로 노출한다.
+- [x] `ChatViewModel`이 selected channel realtime status를 구독하고 manual retry action을 제공한다.
+- [x] macOS timeline UI에 Live/Connecting/Reconnecting/REST fallback/Error 상태와 retry affordance를 표시한다.
+- [x] live driver 미주입/REST fallback 흐름을 유지한다.
+- [x] transient reconnect/fallback focused macOS tests를 추가한다.
+- [x] `swift test --package-path clients/macOS` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #170을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-201 수용기준 `[runtime-agent/macos-ui]`
 - [ ] repo-local mock SSE/runtime fixture가 `agent.partial` tool-call progress(`tool_call_name`, bounded `tool_call_args`)와 final `tool_result`/`message.new`를 생성한다.

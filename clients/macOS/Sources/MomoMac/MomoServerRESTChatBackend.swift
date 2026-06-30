@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeStatusProvidingBackend {
     public let config: MomoServerRESTChatBackendConfig
 
     private let session: URLSession
@@ -20,6 +20,8 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
     private var authenticatedMember: Member?
     private var cachedChannels: [Channel]?
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
+    private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
+    private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
 
     public init(
         config: MomoServerRESTChatBackendConfig,
@@ -93,11 +95,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
     public func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
         guard accessToken != nil else { throw BackendError.notConnected }
         guard let realtimeDriver else {
+            emitRealtimeStatus(.restFallback(channel: channel))
             return AsyncStream { continuation in
                 continuation.finish()
             }
         }
 
+        emitRealtimeStatus(RealtimeConnectionStatus(
+            channelId: channel,
+            connection: .connecting,
+            subscription: .subscribing,
+            canRetry: false,
+            message: "Subscribing to channel realtime."
+        ))
         let startingSeq = lastKnownSeqByChannel[channel] ?? 0
         return try await realtimeDriver.subscribe(
             channel: channel,
@@ -107,6 +117,34 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
                 return try await self.history(channel: channel, after: after, limit: limit)
             }
         )
+    }
+
+    public func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        if let statusDriver = realtimeDriver as? any RealtimeStatusProvidingDriver {
+            return await statusDriver.realtimeStatus(channel: channel)
+        }
+
+        return AsyncStream { continuation in
+            let token = UUID()
+            continuation.yield(realtimeStatusByChannel[channel] ?? .restFallback(channel: channel))
+            realtimeStatusStreams[channel, default: [:]][token] = continuation
+            continuation.onTermination = { _ in
+                Task { await self.unregisterRealtimeStatus(channel: channel, token: token) }
+            }
+        }
+    }
+
+    public func retryRealtime(channel: ChannelID) async {
+        emitRealtimeStatus(RealtimeConnectionStatus(
+            channelId: channel,
+            connection: realtimeDriver == nil ? .disabled : .reconnecting,
+            subscription: realtimeDriver == nil ? .disabled : .recovering,
+            fallback: .restHistory,
+            canRetry: realtimeDriver == nil,
+            message: realtimeDriver == nil
+                ? "Realtime is not configured; REST history is active."
+                : "Retry requested."
+        ))
     }
 
     public func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
@@ -309,6 +347,20 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
             return
         }
         lastKnownSeqByChannel[channel] = max(lastKnownSeqByChannel[channel] ?? 0, maxSeq)
+    }
+
+    private func emitRealtimeStatus(_ status: RealtimeConnectionStatus) {
+        realtimeStatusByChannel[status.channelId] = status
+        guard let continuations = realtimeStatusStreams[status.channelId]?.values else {
+            return
+        }
+        for continuation in continuations {
+            continuation.yield(status)
+        }
+    }
+
+    private func unregisterRealtimeStatus(channel: ChannelID, token: UUID) {
+        realtimeStatusStreams[channel]?[token] = nil
     }
 }
 
