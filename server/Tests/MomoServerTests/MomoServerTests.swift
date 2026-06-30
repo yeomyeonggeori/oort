@@ -487,6 +487,41 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(payload["hlcCount"])
     }
 
+    func testAgentMentionDetectionSupportsDisplayNameHandleAndMemberID() {
+        let agentID = UUID(uuidString: "00000000-0000-7000-8000-000000000102")!
+
+        XCTAssertTrue(MessageRoutes.containsAgentMention(
+            "@김인턴 런타임 확인해줘",
+            handle: "kim-intern",
+            displayName: "김인턴",
+            memberID: agentID
+        ))
+        XCTAssertTrue(MessageRoutes.containsAgentMention(
+            "Can @KIM-INTERN check this?",
+            handle: "kim-intern",
+            displayName: "김인턴",
+            memberID: agentID
+        ))
+        XCTAssertTrue(MessageRoutes.containsAgentMention(
+            "<@00000000-0000-7000-8000-000000000102> please respond",
+            handle: "kim-intern",
+            displayName: "김인턴",
+            memberID: agentID
+        ))
+        XCTAssertFalse(MessageRoutes.containsAgentMention(
+            "@kim-internship is a different token",
+            handle: "kim-intern",
+            displayName: "김인턴",
+            memberID: agentID
+        ))
+        XCTAssertFalse(MessageRoutes.containsAgentMention(
+            "No agent mention here",
+            handle: "kim-intern",
+            displayName: "김인턴",
+            memberID: agentID
+        ))
+    }
+
     func testCostSnapshotDTOEncodesSnakeCaseProjectionContract() throws {
         let snapshot = CostSnapshotDTO(
             runId: "00000000-0000-7000-8000-000000000904",

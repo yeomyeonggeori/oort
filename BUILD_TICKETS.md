@@ -151,6 +151,7 @@
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
 | `MOMO-196` | Realtime WebSocket live subscribe verifier v0(token→subscribe→REST send→live publication) | runtime/infra | MOMO-115, MOMO-186, MOMO-192, MOMO-193 |
 | `MOMO-212` | Agent channel live subscription verifier v0(agent status/partial live boundary) | runtime/infra | MOMO-196, MOMO-200, MOMO-201 |
+| `MOMO-215` | Agent mention routing e2e v0(REST @agent mention→agent_job→agent/live+timeline) | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-209` | stale worktree Docker Compose project/container/network janitor | tooling/docs | MOMO-112, MOMO-194, MOMO-199 |
@@ -516,6 +517,7 @@
 | `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
 | `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
 | `MOMO-212` | Agent channel live subscription verifier v0 | runtime-agent/swift | MOMO-200, MOMO-201 |
+| `MOMO-215` | Agent mention routing e2e v0 | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 
 ### MOMO-130 수용기준 `[swift]`
@@ -685,6 +687,17 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
 - [x] `scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
 - [x] `scripts/local_gate.sh --profile m3-dbc` PASS evidence를 첨부한다.
+
+### MOMO-215 수용기준 `[runtime-agent/swift]`
+- [x] GitHub #187을 `scripts/goal_claim.sh 187`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] 채널 `POST /messages`의 `@김인턴`/agent mention이 same-channel active agent membership을 확인한 뒤 같은 transaction에서 `agent_run` + `outbox(kind='agent_job')`로 이어진다.
+- [x] `agent_job.payload`는 trigger message/source attribution/context projection/tool grants를 포함해 D/B/C timeline card와 audit/source badge가 소비할 수 있다.
+- [x] 동일 `client_msg_id` 재전송은 기존 message/seq를 반환하고 duplicate `agent_job`을 만들지 않는다.
+- [x] 채널 멤버가 아닌 agent mention은 job 없이 `agent.mention.skipped` audit로 남긴다. 다른 workspace agent는 tenant RLS 범위에서 resolve하지 않아 cross-workspace job을 만들지 않는다.
+- [x] AgentWorker/mock SSE 응답은 `agent.partial`/tool-call progress를 `agent:` live channel에 남기고, final text는 durable channel `message.new`로 reconcile한다.
+- [x] `scripts/verify_agent_worker.sh`가 REST send → agent_job → AgentWorker/mock SSE → agent live progress → OutboxRelay channel final `message.new` evidence를 검증한다.
+- [x] `swift test --package-path server`, `swift test --package-path workers/AgentWorker`, `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [x] 가능하면 `scripts/local_gate.sh --profile m3-dbc` PASS evidence를 PR에 첨부한다.
 
 ### MOMO-205 수용기준 `[runtime/macos-ui]`
 - [x] GitHub #162를 `scripts/goal_claim.sh 162`로 claim하고 별도 branch/worktree에서 진행한다.

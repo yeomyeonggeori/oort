@@ -1182,13 +1182,162 @@ struct WorkerService: Service {
         return id
     }
 
-    /// Mark the streaming message final (state stays 'sent'; edited_at cleared in
-    /// the real path). v0 stub logs only — the durable insert is the REST path's job.
+    /// Commit the final agent text to the durable channel timeline. Live
+    /// `agent.partial` remains an ephemeral progress projection on `agent:`;
+    /// this write is the authoritative `message.seq` recovery path.
     private func finalizeStreamingMessage(_ id: UUID?, job: ClaimedJob, body: String) async {
-        guard let id else { return }
-        logger.debug("message finalize (stub)", metadata: [
-            "messageId": .string(id.uuidString),
-            "finalBodyLen": .stringConvertible(body.count),
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let runID = job.payload.runID, !trimmed.isEmpty else { return }
+
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
+                    logger: logger)
+
+                let existing = try await conn.query(
+                    """
+                    SELECT id
+                      FROM message
+                     WHERE workspace_id = \(job.workspaceID)
+                       AND run_id = \(runID)
+                       AND author_member_id = \(job.payload.agentMemberID)
+                       AND type = 'text'
+                       AND deleted_at IS NULL
+                     LIMIT 1
+                    """,
+                    logger: logger
+                ).collect()
+                if let row = existing.first {
+                    let messageID = try row.decode(UUID.self)
+                    logger.debug("final agent message already exists; skipping duplicate", metadata: [
+                        "messageId": .string(messageID.uuidString),
+                        "runId": .string(runID.uuidString),
+                    ])
+                    return
+                }
+
+                let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
+                let props = Self.finalMessageProps(job: job, runID: runID)
+                let rows = try await conn.query(
+                    """
+                    WITH bumped AS (
+                      UPDATE channel_seq
+                         SET last_seq = last_seq + 1
+                       WHERE channel_id = \(job.payload.channelID)
+                      RETURNING last_seq AS seq
+                    )
+                    INSERT INTO message
+                      (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                       author_member_id, type, body, props, run_id)
+                    SELECT \(job.workspaceID), \(job.payload.channelID), b.seq,
+                           \(hlcTs), 0, \(job.payload.agentMemberID),
+                           'text'::message_type, \(body), \(props)::jsonb,
+                           \(runID)
+                      FROM bumped b
+                    RETURNING id, seq
+                    """,
+                    logger: logger
+                ).collect()
+                guard let row = rows.first else { return }
+                let (messageID, seq) = try row.decode((UUID, Int64).self)
+
+                let outboxPayload = Self.finalTextBroadcastPayload(
+                    workspaceID: job.workspaceID,
+                    channelID: job.payload.channelID,
+                    messageID: messageID,
+                    seq: seq,
+                    authorMemberID: job.payload.agentMemberID,
+                    runID: runID,
+                    body: body,
+                    props: props,
+                    hlcTs: hlcTs
+                )
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(job.workspaceID), 'broadcast', 'publish',
+                       \(outboxPayload)::jsonb, \(job.payload.channelID))
+                    """,
+                    logger: logger
+                )
+
+                logger.debug("final agent message committed", metadata: [
+                    "messageId": .string(messageID.uuidString),
+                    "runId": .string(runID.uuidString),
+                    "seq": .stringConvertible(seq),
+                    "streamMessageId": .string(id?.uuidString ?? "nil"),
+                ])
+            }
+        } catch {
+            logger.error("final agent message commit failed", metadata: [
+                "runId": .string(runID.uuidString),
+                "error": .string(String(describing: error)),
+            ])
+        }
+    }
+
+    private static func finalMessageProps(job: ClaimedJob, runID: UUID) -> String {
+        var object: [String: Any] = [
+            "run_id": runID.uuidString,
+            "source": "agent_worker.final_text.v0",
+        ]
+        if let triggerMessageID = job.payload.triggerMessageID {
+            object["trigger_message_id"] = triggerMessageID.uuidString
+        }
+        if let triggerMessageSeq = job.payload.triggerMessageSeq {
+            object["trigger_message_seq"] = triggerMessageSeq
+        }
+        if let authorMemberID = job.payload.authorMemberID {
+            object["author_member_id"] = authorMemberID.uuidString
+        }
+        if let sourceAttribution = job.payload.sourceAttribution {
+            object["source_attribution"] = anyValue(sourceAttribution)
+        }
+        return jsonString(object)
+    }
+
+    private static func finalTextBroadcastPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        seq: Int64,
+        authorMemberID: UUID,
+        runID: UUID,
+        body: String,
+        props: String,
+        hlcTs: Int64
+    ) -> String {
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "message.new",
+                "v": 1,
+                "ts": hlcTs,
+                "seq": seq,
+                "payload": [
+                    "id": messageID.uuidString,
+                    "channel_id": channelID.uuidString,
+                    "channelId": channelID.uuidString,
+                    "seq": seq,
+                    "type": "text",
+                    "body": body,
+                    "props": jsonObject(props),
+                    "author_member_id": authorMemberID.uuidString,
+                    "authorMemberId": authorMemberID.uuidString,
+                    "run_id": runID.uuidString,
+                    "runId": runID.uuidString,
+                    "hlc_ts": hlcTs,
+                    "hlcTs": hlcTs,
+                    "hlc_count": 0,
+                    "hlcCount": 0,
+                ],
+            ],
+            "version": seq,
+            "idempotency_key": "\(centChannel):\(seq)",
         ])
     }
 

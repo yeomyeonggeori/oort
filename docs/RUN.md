@@ -396,9 +396,11 @@ swift run --package-path workers/AgentWorker AgentWorker
 
 실제 hermes가 없을 때는 repo-local mock gateway를 사용한다. 이 스크립트는
 `make up && make migrate` 이후 실행하며, `momo_worker` BYPASSRLS role 준비,
-멘션 fixture → `agent_job` outbox 생성, mock SSE 수신, Centrifugo history의
-`agent.partial`, `usage_ledger`, `budget_window`, low-limit G5 circuit breaker를
-한 번에 확인한다.
+REST `POST /messages`의 `@김인턴` mention → same-channel `agent_run`/`agent_job`,
+duplicate `client_msg_id` job dedupe, non-channel agent mention no-op/audit,
+mock SSE 수신, Centrifugo history의 `agent.partial`/tool-call progress,
+OutboxRelay final channel `message.new`, `usage_ledger`, `budget_window`,
+low-limit G5 circuit breaker를 한 번에 확인한다.
 
 ```sh
 make up
@@ -459,6 +461,12 @@ authorized demo member의 `agent:ws<workspace>.<agentMember>` subscribe →
 `agent.status` 또는 `agent.partial` live publication 수신이다. 같은 run에서
 invalid Centrifugo connection token, same-workspace member without shared channel,
 other-workspace member/token, client direct publish deny를 함께 확인한다.
+
+MOMO-215부터 `runtime-agent` profile은 `scripts/verify_agent_worker.sh`를 통해
+채널 REST send의 자연어 agent mention routing도 함께 닫는다. 최종 assistant text는
+Postgres timeline의 `message.seq` authority를 따르는 channel `message.new`이고,
+`agent:` namespace는 ephemeral progress/status surface로 유지한다. 실제 external
+Hermes/provider side effect는 여전히 repo-local mock 범위 밖이며 `runtime-unverified`다.
 
 `agent.status`/`agent.partial`은 non-durable progress projection이다. 이 이벤트는
 `message.seq`를 갖는 channel timeline의 순서 권위가 아니며, 최종 durable 결과는
