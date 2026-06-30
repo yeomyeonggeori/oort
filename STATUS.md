@@ -38,7 +38,14 @@
 - PR #145/#146/#147/#148 merge 후 main `scripts/local_gate.sh --profile all`이 `scripts/verify_agent_worker.sh`에서 실패했다. DB 상태는 `agent_run=succeeded`, `outbox=done`, `usage_ledger`/`budget_window` PASS였고, 원인은 AgentWorker/MomoCore realtime v0 계약이 `payload.run_id` snake_case로 정렬된 뒤 verifier가 legacy `payload.runId`만 조회한 계약 drift였다.
 - verifier를 v0 정본 `payload.run_id` 우선 + legacy `payload.runId` fallback으로 수정했다. 제품 runtime protocol 변경은 없고, post-merge gate 복구용 hotfix다.
 
-## 0-5. MOMO-198 M3 D/B/C Readiness Cleanup (2026-06-29)
+## 0-5. MOMO-196 Realtime WebSocket Live Subscribe Gate (2026-06-29)
+
+- `scripts/verify_realtime_live.sh`를 추가해 Docker dev compose PG/Centrifugo + host MomoServer/OutboxRelay + compose-network `api:8080` proxy에서 demo login → `/v1/auth/realtime-token` → `ch:ws<workspace>.<channel>` WebSocket subscribe → REST message send → live `message.new` publication 수신까지 검증한다.
+- `scripts/local_gate.sh --profile runtime-live`가 static/Swift gate와 repo-local live verifier를 연결한다. evidence는 REST `message.seq`, `payload.message.seq`, Centrifugo publication offset, invalid connection token reject를 남긴다.
+- `infra/docker-compose.e2e.yml`의 `db-roles` command는 container env `DATABASE_URL`을 쓰도록 `$$DATABASE_URL`로 escape했고, Swift e2e services는 read-only source mount를 보존하면서 `/tmp/momo-src` package copy에서 빌드하도록 정리했다.
+- SwiftCentrifuge macOS adapter UX, reconnect/recovery UX, presence, APNs는 계속 후속 `runtime-unverified`다.
+
+## 0-6. MOMO-198 M3 D/B/C Readiness Cleanup (2026-06-29)
 
 - `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`를 추가해 MOMO-170/171/174/177/179/192/193 이후 현재 코드 기준의 D/B/C 실데이터 readiness와 기존 MOMO-020/021/022 unblock 조건을 재정리했다.
 - 다음 builder-friendly 후보를 ROADMAP/BUILD_TICKETS에 반영했다: MOMO-200 SwiftCentrifuge live adapter, MOMO-201 D fixture/gate, MOMO-202 cost projection, MOMO-203 approval pending projection, MOMO-204 combined M3 D/B/C gate.
@@ -433,7 +440,8 @@
 > **MOMO-013에서 검증됨:** 일반 tenant token의 platform endpoint 403, platform read token의 2개+ workspace/member/invite usage 전역 조회, platform BYPASSRLS role의 SELECT-only/read-only transaction, invite raw/hash secret 미노출.
 > **MOMO-176에서 검증됨:** `GET /v1/workspaces/{ws}/roster`/`members`는 일반 tenant token + `SET LOCAL app.workspace_id` + active membership guard로 human/agent roster를 반환한다. `scripts/verify_roster.sh`가 demo human+agent, active-membership 없는 member 제외, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증했다.
 > **MOMO-197에서 검증됨:** `GET /v1/workspaces/{ws}/channels`는 일반 tenant token + `SET LOCAL app.workspace_id` + active workspace/channel membership guard로 visible channel list를 반환한다. `scripts/verify_channel_list.sh`가 demo active channels, left/archived filtering, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증한다.
-> **남은 runtime-unverified:** WebSocket live subscribe/presence/recovery, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
+> **MOMO-196에서 검증됨:** repo-local live WebSocket verifier가 demo login → realtime-token → Centrifugo subscribe → REST send → live `message.new` publication 수신과 invalid connection token reject를 검증한다.
+> **남은 runtime-unverified:** SwiftCentrifuge macOS adapter/reconnect/recovery UX, presence, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
 
 ## 3. 생성 파일 트리 (핵심)
 
@@ -464,7 +472,7 @@ momo/
 
 - ✅ **컴파일 검증됨**: 5개 Swift 패키지 전부 `swift build` 통과 → 타입·API 계약·시그니처 정합.
 - ⛔ **남은 런타임 미검증**:
-  - WebSocket live subscribe/presence/recovery, APNs.
+  - SwiftCentrifuge macOS adapter/reconnect/recovery UX, presence, APNs.
   - Inbound MCP JSON-RPC transport/tool execution, canonical `post_message` write path, approval-safe `create_tool_call` transaction/audit, RLS/idempotency e2e.
 
 ## 5. 남은 작업

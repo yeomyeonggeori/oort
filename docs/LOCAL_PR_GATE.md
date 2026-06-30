@@ -53,15 +53,17 @@ Profiles:
 | `staging-smoke` | staging/prod config/runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` for prod compose config, Caddyfile structure, Centrifugo Redis config, secret-template guard, and SOPS/pgBackRest checklist |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
+| `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
-| `all` | merge-critical/runtime-wide changes | all profiles in one run, with shared bootstrap deduped except migration idempotency; fails if any runtime profile is not automated yet |
+| `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
 
 ```bash
 scripts/local_gate.sh --profile swift
 scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
@@ -72,9 +74,13 @@ checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus
 staged/unstaged diffs. For exploratory pre-commit runs only, use
 `LOCAL_GATE_ALLOW_DIRTY=1`; do not paste that as final merge evidence.
 
-`runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/realtime
-PRs must use this profile unless the machine cannot run Docker/psql; in that
-case record the blocker and keep the affected runtime scope unverified.
+`runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/history
+PRs must use this profile unless the machine cannot run Docker/psql. WebSocket
+live subscribe PRs must use `runtime-live`, which starts host MomoServer and
+OutboxRelay plus a small `api:8080` proxy container because Centrifugo's
+subscribe proxy must reach the API service on the Docker network. If Docker/psql
+is unavailable, record the blocker and keep the affected runtime scope
+unverified.
 
 For macOS UI PRs, the default `macos-ui` profile stays GUI-safe for headless or
 background Codex runs: it executes `MomoMacSmoke` only. Opt-in GUI evidence uses
@@ -122,6 +128,7 @@ Use the profile that matches the changed surface.
 | `staging-smoke` | MOMO-005/006/007 deploy config, Caddy/Centrifugo, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `runtime-db` | migrations/server/RLS/join changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
+| `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
 
