@@ -8,7 +8,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all
+Usage: scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all
 
 Options:
   --profile PROFILE   Gate profile to run. Default: docs
@@ -18,6 +18,7 @@ Options:
 Environment:
   LOCAL_GATE_OUT_DIR      Override evidence output directory.
   LOCAL_GATE_LAUNCH_UI=1  In macos-ui/all, launch MomoMacDevApp instead of smoke only.
+                          Required by internal-alpha.
   LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
   LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks.
   DEVELOPER_DIR           Defaults to /Applications/Xcode.app/Contents/Developer for Swift gates.
@@ -39,7 +40,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all)
       PROFILE="$1"
       shift
       ;;
@@ -52,7 +53,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -92,6 +93,9 @@ fi
 RUN_ID="${STAMP}-pid$$-ns${RUN_NANOS}-wt${WORKTREE_HASH}-r${RUN_RANDOM}"
 LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.log"
 EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.md"
+export LOCAL_GATE_OUTPUT_DIR="$OUT_DIR"
+export LOCAL_GATE_RUN_ID="$RUN_ID"
+export LOCAL_GATE_INTERNAL_ALPHA_DIR="$OUT_DIR/internal-alpha-${RUN_ID}"
 
 declare -a CMD_LABELS=()
 declare -a CMD_STRINGS=()
@@ -247,6 +251,19 @@ add_macos_ui_commands() {
   fi
 }
 
+add_internal_alpha_commands() {
+  add_static_commands
+  add_cmd "internal alpha UI launch guard" 'test "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" || { echo "internal-alpha requires LOCAL_GATE_LAUNCH_UI=1 for MomoMacDevApp process/window evidence"; exit 1; }'
+  add_cmd "internal alpha packet directory" 'mkdir -p "${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"'
+  add_cmd "internal alpha host-runtime evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/host-runtime"; mkdir -p "$out"; LOCAL_GATE_OUT_DIR="$out" scripts/verify_internal_host_runtime.sh'
+  add_cmd "internal alpha backup restore evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/backup-restore"; mkdir -p "$out"; BACKUP_REHEARSAL_OUT_DIR="$out" scripts/verify_backup_restore_rehearsal.sh'
+  add_cmd "internal alpha macOS real-backend UI evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/macos-real-backend"; mkdir -p "$out"; MACOS_REAL_BACKEND_OUT_DIR="$out" scripts/verify_macos_real_backend_ui.sh'
+  add_cmd "internal alpha diagnostics bundle" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/diagnostics"; mkdir -p "$out"; scripts/collect_diagnostics.sh --output-dir "$out" --since 30m'
+  add_note_once coverage "MOMO-225 internal alpha combined local gate: creates one PR-ready packet with host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal evidence, MomoMacDevApp real-backend process/window evidence, and a redacted diagnostics bundle path."
+  add_note_once coverage "internal-alpha writes verifier artifacts under a run-specific packet directory below the local gate output directory: internal-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/, plus the top-level local-gate markdown/log."
+  add_note_once not_covered "Public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging connectivity, production pgBackRest stanza/check/full backup, WAL archive push, and time-target PITR remain runtime-unverified(public host)."
+}
+
 add_m3_dbc_commands() {
   add_static_commands
   add_swift_commands
@@ -291,6 +308,9 @@ case "$PROFILE" in
   backup)
     add_static_commands
     add_backup_commands
+    ;;
+  internal-alpha)
+    add_internal_alpha_commands
     ;;
   runtime-db)
     add_static_commands
@@ -474,6 +494,23 @@ write_evidence() {
     if [ "$FAILED_INDEX" -ne -1 ]; then
       echo "- Failed command: \`${CMD_STRINGS[$FAILED_INDEX]}\`"
       echo "- Failed exit code: \`$FAILED_CODE\`"
+    fi
+    if [ "$PROFILE" = "internal-alpha" ]; then
+      echo "- Internal alpha artifact packet:"
+      echo "  - packet: \`$LOCAL_GATE_INTERNAL_ALPHA_DIR\`"
+      for artifact_dir in host-runtime backup-restore macos-real-backend diagnostics; do
+        path="$LOCAL_GATE_INTERNAL_ALPHA_DIR/$artifact_dir"
+        if [ -d "$path" ]; then
+          echo "  - ${artifact_dir}: \`$path\`"
+          find "$path" -maxdepth 2 -type f \( -name '*.md' -o -name '*.json' -o -name '*.log' -o -name '*.tar.gz' \) 2>/dev/null \
+            | sort \
+            | tail -n 20 \
+            | sed 's/^/    - `/' \
+            | sed 's/$/`/'
+        else
+          echo "  - ${artifact_dir}: not created"
+        fi
+      done
     fi
   } > "$out"
 }

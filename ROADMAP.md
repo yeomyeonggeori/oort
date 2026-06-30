@@ -27,6 +27,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-220에서 local image 기반 internal host-runtime smoke를 추가해 prod+internal-smoke boot/health/migrate/message/relay/mock-agent 왕복을 검증한다
      · MOMO-221에서 prod/internal-host env preflight를 추가해 placeholder/dev-insecure/default secret bootstrap을 fail-fast로 막는다
      · MOMO-222에서 repo-local backup restore rehearsal gate를 추가해 temporary PG18 dump→separate restore→evidence markdown/json을 검증한다
+     · MOMO-225에서 host-runtime + backup + macOS real-backend UI + diagnostics를 `internal-alpha` combined local gate evidence packet으로 묶는다
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
@@ -79,6 +80,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-221` | M1 | production secret/bootstrap hardening v0 | `scripts/prod_env_preflight.sh` + staging/internal-smoke/host-runtime verifier 연결; prod/internal-host placeholder/dev-insecure/default secret fail-fast, internal-smoke local placeholder 허용 경계와 SOPS operator checklist 문서화 |
 | `MOMO-222` | M1 | Backup/PITR restore rehearsal gate v0 | `scripts/verify_backup_restore_rehearsal.sh` + `local_gate --profile backup`; repo-local PG18 dump→separate restore→marker checksum→markdown/json evidence. `host-runtime`에도 포함, real pgBackRest PITR는 `runtime-unverified(public host)` |
 | `MOMO-224` | M1 | internal alpha diagnostics/observability bundle v0 | `scripts/collect_diagnostics.sh` + `local_gate --profile diagnostics`; server/relay/worker/Centrifugo/macOS/local-gate evidence와 redacted env shape/commit을 directory + tar.gz + summary.md로 수집 |
+| `MOMO-225` | M1 | Internal alpha combined local gate v0 | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha`; host-runtime boot/health/migrate/message/relay/mock Kim Intern, backup restore rehearsal, MomoMacDevApp real-backend process/window, diagnostics bundle path를 한 evidence packet으로 수집 |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
 | `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |
