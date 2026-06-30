@@ -127,6 +127,12 @@
 - 검증: `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc` PASS.
 - #12(MOMO-020) 판정: `m3-dbc` profile PASS를 PR에 첨부하면 오래된 staging/Hermes 문구는 MOMO-204 local-gate 기준으로 대체 가능하므로 **merge 후 momo-main이 #12를 닫아도 됨**. 이 worker branch는 PR 생성 + `status:needs-review`에서 멈추고 #12를 직접 닫지 않는다.
 
+## 0-17. MOMO-213 macOS Real-Server Session Onboarding UI v0 (2026-06-30)
+
+- `MomoMacDevApp`과 Xcode host가 `MomoMacSessionRootView`를 통해 server URL/email/password/optional invite code를 입력받고, `/v1/auth/login` 또는 `/v1/join` 성공 토큰으로 기존 `MomoServerRESTChatBackend` + D/B/C UI에 진입한다.
+- Demo/stub backend는 `Open Demo`로 명시 분리했고, empty channel list/인증 실패/서버 연결 실패를 UI에 표시한다. 저장 전략은 UserDefaults(server URL/email/invite code) + optional Keychain(password)으로 제한한다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

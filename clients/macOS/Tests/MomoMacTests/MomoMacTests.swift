@@ -1149,6 +1149,141 @@ final class MomoMacTests: XCTestCase {
         let token = try await provider.realtimeConnectionToken()
         XCTAssertEqual(token, "cent-token")
     }
+
+    // MARK: Real-server session onboarding
+
+    func testSessionClientLoginReturnsWorkspaceSession() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/auth/login")
+            let data = try XCTUnwrap(request.momoBodyData)
+            let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            XCTAssertEqual(body?["email"] as? String, "demo@momo.local")
+            XCTAssertEqual(body?["password"] as? String, "secret")
+            return MockHTTPResponse(json: """
+            {
+              "accessToken": "access-session",
+              "refreshToken": "refresh-session",
+              "member": {
+                "id": "\(MemberID.demoHuman.description)",
+                "workspaceId": "\(workspace.description)",
+                "kind": "human",
+                "displayName": "Demo User",
+                "handle": "demo"
+              }
+            }
+            """)
+        }
+
+        let client = MomoServerSessionClient(session: URLSession(configuration: .momoMocked))
+        let session = try await client.login(form: MomoServerSessionForm(
+            baseURLString: "https://momo.test",
+            email: "demo@momo.local",
+            password: "secret"
+        ))
+
+        XCTAssertEqual(session.baseURL.absoluteString, "https://momo.test")
+        XCTAssertEqual(session.workspace, workspace)
+        XCTAssertEqual(session.member.id, .demoHuman)
+        XCTAssertEqual(session.accessToken, "access-session")
+        XCTAssertFalse(session.joinedWithInvite)
+    }
+
+    func testSessionClientJoinUsesInviteEndpointAndTokenSession() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/join")
+            let data = try XCTUnwrap(request.momoBodyData)
+            let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            XCTAssertEqual(body?["code"] as? String, "MOMO-213")
+            XCTAssertEqual(body?["email"] as? String, "new.user@momo.local")
+            XCTAssertEqual(body?["password"] as? String, "join-secret")
+            XCTAssertEqual(body?["displayName"] as? String, "New User")
+            return MockHTTPResponse(statusCode: 201, json: """
+            {
+              "accessToken": "join-access",
+              "refreshToken": "join-refresh",
+              "workspaceId": "\(workspace.description)",
+              "member": {
+                "id": "\(MemberID.demoHuman.description)",
+                "workspaceId": "\(workspace.description)",
+                "kind": "human",
+                "displayName": "New User",
+                "handle": "new-user"
+              },
+              "memberships": [],
+              "invite": {},
+              "redemptionId": "00000000-0000-7000-8000-000000213001",
+              "createdMember": true
+            }
+            """)
+        }
+
+        let client = MomoServerSessionClient(session: URLSession(configuration: .momoMocked))
+        let session = try await client.join(form: MomoServerSessionForm(
+            baseURLString: "https://momo.test",
+            email: "new.user@momo.local",
+            password: "join-secret",
+            inviteCode: "MOMO-213"
+        ))
+
+        XCTAssertEqual(session.workspace, workspace)
+        XCTAssertEqual(session.accessToken, "join-access")
+        XCTAssertTrue(session.joinedWithInvite)
+        XCTAssertEqual(session.member.displayName, "New User")
+    }
+
+    func testSessionClientSurfacesAuthProblemForBadCredentials() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(statusCode: 401, json: #"{"title":"invalid credentials","detail":"check email"}"#)
+        }
+
+        let client = MomoServerSessionClient(session: URLSession(configuration: .momoMocked))
+        do {
+            _ = try await client.login(form: MomoServerSessionForm(
+                baseURLString: "https://momo.test",
+                email: "bad@momo.local",
+                password: "wrong"
+            ))
+            XCTFail("login should fail")
+        } catch MomoServerSessionError.problem(let status, let title, let detail) {
+            XCTAssertEqual(status, 401)
+            XCTAssertEqual(title, "invalid credentials")
+            XCTAssertEqual(detail, "check email")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testSessionStorePersistsNonSecretFieldsWithoutPasswordByDefault() {
+        let suite = "momo-session-store-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MomoServerSessionStore(
+            defaults: defaults,
+            keychain: MomoKeychainPasswordStore(service: "momo.test.\(suite)")
+        )
+
+        store.save(MomoServerSessionForm(
+            baseURLString: "https://momo.test",
+            email: "demo@momo.local",
+            password: "do-not-store",
+            inviteCode: "MOMO-213",
+            savePassword: false
+        ))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.baseURLString, "https://momo.test")
+        XCTAssertEqual(loaded.email, "demo@momo.local")
+        XCTAssertEqual(loaded.inviteCode, "MOMO-213")
+        XCTAssertEqual(loaded.password, "")
+        XCTAssertFalse(loaded.savePassword)
+    }
 }
 
 private actor RecordingDecisionChatBackend: ChatBackend {
