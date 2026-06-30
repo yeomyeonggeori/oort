@@ -28,6 +28,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(try JoinRoutes.fallbackHandle(email: "new.human@example.com"), "new-human")
         XCTAssertEqual(try JoinRoutes.normalizedTimeZone(nil), "UTC")
         XCTAssertEqual(try JoinRoutes.normalizedTimeZone("Asia/Seoul"), "Asia/Seoul")
+        XCTAssertEqual(try JoinRoutes.normalizedPassword("dev-password"), "dev-password")
     }
 
     func testJoinIdentityValidationRejectsBadInputs() throws {
@@ -35,6 +36,9 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try JoinRoutes.normalizedDisplayName("   "))
         XCTAssertThrowsError(try JoinRoutes.normalizedRequestedHandle("Owner!"))
         XCTAssertThrowsError(try JoinRoutes.normalizedTimeZone(String(repeating: "a", count: 65)))
+        XCTAssertThrowsError(try JoinRoutes.normalizedPassword(nil))
+        XCTAssertThrowsError(try JoinRoutes.normalizedPassword(""))
+        XCTAssertThrowsError(try JoinRoutes.normalizedPassword(String(repeating: "a", count: 1025)))
     }
 
     func testPlatformReadScopeRequiresAllowlistAndSecret() {
@@ -42,25 +46,31 @@ final class MomoServerTests: XCTestCase {
 
         XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
             email: "ops@momo.local",
-            password: "anything",
+            platformAdminSecret: "anything",
             platformAdminEmails: admins,
             platformAdminLoginSecret: nil
         ))
         XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
             email: "ops@momo.local",
-            password: "wrong",
+            platformAdminSecret: nil,
+            platformAdminEmails: admins,
+            platformAdminLoginSecret: "secret"
+        ))
+        XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
+            email: "ops@momo.local",
+            platformAdminSecret: "wrong",
             platformAdminEmails: admins,
             platformAdminLoginSecret: "secret"
         ))
         XCTAssertFalse(AuthRoutes.shouldGrantPlatformRead(
             email: "other@momo.local",
-            password: "secret",
+            platformAdminSecret: "secret",
             platformAdminEmails: admins,
             platformAdminLoginSecret: "secret"
         ))
         XCTAssertTrue(AuthRoutes.shouldGrantPlatformRead(
             email: "OPS@MOMO.LOCAL",
-            password: "secret",
+            platformAdminSecret: "secret",
             platformAdminEmails: admins,
             platformAdminLoginSecret: "secret"
         ))

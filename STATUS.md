@@ -151,6 +151,12 @@
 - write path는 `momo_app` NOBYPASSRLS + `SET LOCAL app.workspace_id` tenant transaction으로 검증했다. `scripts/verify_channel_management.sh`가 channel create, creator membership, `channel_seq`, member/admin 권한, cross-workspace 차단, remove 후 write 차단, re-add 후 message send까지 확인한다.
 - 검증: `swift build --package-path server` PASS, `scripts/verify_channel_management.sh` PASS. Rich channel settings UI, archival/search, external directory sync, enterprise fine-grained RBAC는 out of scope.
 
+## 0-19. MOMO-217 Auth Password Verification Runtime Hardening v0 (2026-06-30)
+
+- `POST /v1/auth/login` password stub을 제거하고 PostgreSQL `pgcrypto` 기반 `momo_password_hash`/`momo_password_verify` 함수로 DB-backed password verification을 수행한다. Demo seed 및 runtime fixture의 deterministic dev password는 `dev-password`다.
+- `/v1/join` 신규 human 생성은 raw password를 저장하지 않고 `momo_password_hash(password)`만 저장한다. 잘못된 password, 빈 password, unknown email은 401이며, platform admin scope는 일반 password 검증 후 별도 `platformAdminSecret` + allowlisted email 조건에서만 부여된다.
+- `scripts/verify_join.sh`와 `scripts/verify_platform_admin.sh`가 wrong/empty/platform-secret-only rejection 및 joined-account login을 검증한다. Raw password/hash는 API 응답, audit payload, STATUS에 기록하지 않는다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

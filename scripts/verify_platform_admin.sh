@@ -218,9 +218,9 @@ SET status = EXCLUDED.status,
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
   ('10000000-0000-7000-8000-000000000101', '10000000-0000-7000-8000-000000000001',
-   'platform-a@momo.local', true, 'dev-password-stub', 'Asia/Seoul'),
+   'platform-a@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul'),
   ('20000000-0000-7000-8000-000000000101', '20000000-0000-7000-8000-000000000001',
-   'platform-b@momo.local', true, 'dev-password-stub', 'Asia/Seoul')
+   'platform-b@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul')
 ON CONFLICT (member_id) DO UPDATE
 SET email = EXCLUDED.email,
     email_verified = EXCLUDED.email_verified,
@@ -355,12 +355,15 @@ login_token() {
   local workspace="$2"
   local password="$3"
   local label="$4"
+  local platform_secret="${5:-}"
   local body
   body="$(jq -cn \
     --arg email "$email" \
     --arg workspace "$workspace" \
     --arg password "$password" \
-    '{email:$email,password:$password,workspace:$workspace}')"
+    --arg platformAdminSecret "$platform_secret" \
+    '{email:$email,password:$password,workspace:$workspace}
+     + (if $platformAdminSecret == "" then {} else {platformAdminSecret:$platformAdminSecret} end)')"
   api POST /v1/auth/login "$body"
   expect_status 200 "$label login"
   printf '%s' "$RESPONSE_BODY" | jq -r '.accessToken'
@@ -370,7 +373,13 @@ prepare_roles_and_fixture
 start_server
 
 PLATFORM_EMAIL_NO_SECRET_TOKEN="$(login_token demo@momo.local "$DEMO_WORKSPACE_ID" "dev-password" "platform email without secret")"
-PLATFORM_TOKEN="$(login_token demo@momo.local "$DEMO_WORKSPACE_ID" "$PLATFORM_ADMIN_LOGIN_SECRET" "platform admin")"
+api POST /v1/auth/login "$(jq -cn \
+  --arg email demo@momo.local \
+  --arg workspace "$DEMO_WORKSPACE_ID" \
+  --arg password "$PLATFORM_ADMIN_LOGIN_SECRET" \
+  '{email:$email,password:$password,workspace:$workspace}')"
+expect_status 401 "platform secret alone is not an account password"
+PLATFORM_TOKEN="$(login_token demo@momo.local "$DEMO_WORKSPACE_ID" "dev-password" "platform admin" "$PLATFORM_ADMIN_LOGIN_SECRET")"
 TENANT_TOKEN="$(login_token platform-a@momo.local "$WORKSPACE_A" "dev-password" "ordinary tenant")"
 
 api GET /v1/platform/workspaces "" "$TENANT_TOKEN"

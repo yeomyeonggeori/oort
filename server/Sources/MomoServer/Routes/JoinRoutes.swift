@@ -26,6 +26,7 @@ struct JoinRoutes: Sendable {
         let displayName = try Self.normalizedDisplayName(dto.displayName)
         let requestedHandle = try Self.normalizedRequestedHandle(dto.handle)
         let fallbackHandle = try Self.fallbackHandle(email: email)
+        let password = try Self.normalizedPassword(dto.password)
         let timeZone = try Self.normalizedTimeZone(dto.timeZone)
         let userAgent = request.headers[.userAgent]
 
@@ -71,6 +72,7 @@ struct JoinRoutes: Sendable {
                     displayName: displayName,
                     requestedHandle: requestedHandle,
                     fallbackHandle: fallbackHandle,
+                    password: password,
                     timeZone: timeZone
                 ))
             }
@@ -338,6 +340,7 @@ struct JoinRoutes: Sendable {
         displayName: String,
         requestedHandle: String?,
         fallbackHandle: String,
+        password: String,
         timeZone: String
     ) async throws -> JoinMember {
         let handle = requestedHandle ?? fallbackHandle
@@ -356,7 +359,7 @@ struct JoinRoutes: Sendable {
             ),
             inserted_human AS (
               INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
-              SELECT id, workspace_id, \(email), false, NULL, \(timeZone)
+              SELECT id, workspace_id, \(email), false, momo_password_hash(\(password)), \(timeZone)
                 FROM inserted_member
               RETURNING member_id
             )
@@ -664,6 +667,16 @@ struct JoinRoutes: Sendable {
         guard let value, !value.isEmpty else { return "UTC" }
         guard value.count <= 64 else {
             throw HTTPError(.badRequest, message: "timeZone is too long")
+        }
+        return value
+    }
+
+    static func normalizedPassword(_ raw: String?) throws -> String {
+        guard let value = raw, !value.isEmpty else {
+            throw HTTPError(.badRequest, message: "password is required")
+        }
+        guard value.count <= 1024 else {
+            throw HTTPError(.badRequest, message: "password is too long")
         }
         return value
     }

@@ -276,7 +276,7 @@ echo "[realtime-live] logging in seeded demo user"
 LOGIN_JSON="$(
   curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+    -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_ID}\"}" \
     "http://127.0.0.1:${PORT}/v1/auth/login"
 )"
 ACCESS_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken // empty')"

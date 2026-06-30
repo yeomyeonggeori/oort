@@ -185,9 +185,9 @@ SET status = EXCLUDED.status,
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
   ('00000000-0000-7000-8000-000000000198', '00000000-0000-7000-8000-000000000001',
-   'channel-nonmember@momo.local', true, 'dev-password-stub', 'Asia/Seoul'),
+   'channel-nonmember@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul'),
   ('22000000-0000-7000-8000-000000000101', '22000000-0000-7000-8000-000000000001',
-   'channels-b@momo.local', true, 'dev-password-stub', 'Asia/Seoul')
+   'channels-b@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul')
 ON CONFLICT (member_id) DO UPDATE
 SET email = EXCLUDED.email,
     email_verified = EXCLUDED.email_verified,
