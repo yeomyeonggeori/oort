@@ -72,6 +72,9 @@ struct MessageDTO: ResponseEncodable {
     let authorMemberId: String
     let type: String
     let body: String?
+    let props: [String: JSONValue]?
+    let runId: String?
+    let clientMsgId: String?
     let createdAtMs: Int64
 }
 

@@ -111,6 +111,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let history = try await chat.history(channel: channel, after: nil, limit: 200)
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
+            for message in history {
+                hydrateSidecars(from: message)
+            }
         } catch {
             connectionError = String(describing: error)
         }
@@ -209,6 +212,44 @@ public final class ChatViewModel: ObservableObject {
             msgs.append(message)
         }
         messagesByChannel[channel] = msgs.sorted(by: Self.seqOrder)
+        hydrateSidecars(from: message)
+    }
+
+    private func hydrateSidecars(from message: Message) {
+        guard let runId = message.runId else { return }
+        let reserved = Self.microUSD(from: message.props["reserved_micro_usd"])
+            ?? Self.microUSD(from: message.props["estimated_micro_usd"])
+        let spent = Self.microUSD(from: message.props["spent_micro_usd"])
+        if reserved != nil || spent != nil {
+            agentStatuses[runId] = AgentStatus(
+                runId: runId,
+                agentMemberId: message.authorMemberId,
+                channelId: message.channelId,
+                phase: spent == nil ? .thinking : .streaming,
+                runStatus: message.type == .approvalRequest ? .awaitingApproval : .running,
+                reservedMicroUSD: reserved,
+                spentMicroUSD: spent
+            )
+        }
+
+        guard message.type == .approvalRequest,
+              let approvalId = approvalId(for: message) else {
+            return
+        }
+        approvals[approvalId] = ApprovalEvent(
+            action: .requested,
+            approvalId: approvalId,
+            runId: runId,
+            channelId: message.channelId,
+            requestedBy: message.authorMemberId,
+            actionType: message.props["action_type"]?.stringValue
+                ?? message.props["tool_name"]?.stringValue
+                ?? "tool_call",
+            status: approvalStatus(for: message) ?? .pending,
+            payload: message.props,
+            estimatedMicroUSD: Self.microUSD(from: message.props["estimated_micro_usd"]),
+            isReversible: Self.bool(from: message.props["is_reversible"])
+        )
     }
 
     // MARK: Local Context Copilot
@@ -331,5 +372,22 @@ public final class ChatViewModel: ObservableObject {
         if a.hlcTs != b.hlcTs { return a.hlcTs < b.hlcTs }
         if a.hlcCount != b.hlcCount { return a.hlcCount < b.hlcCount }
         return a.id.description < b.id.description
+    }
+
+    nonisolated private static func microUSD(from value: JSON?) -> Int64? {
+        guard let value else { return nil }
+        if let int = value.intValue { return int }
+        if let string = value.stringValue { return Int64(string) }
+        return nil
+    }
+
+    nonisolated private static func bool(from value: JSON?) -> Bool? {
+        guard let value else { return nil }
+        if let bool = value.boolValue { return bool }
+        switch value.stringValue?.lowercased() {
+        case "true", "yes", "1": return true
+        case "false", "no", "0": return false
+        default: return nil
+        }
     }
 }
