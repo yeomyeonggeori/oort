@@ -2,6 +2,10 @@ import Foundation
 import SwiftUI
 import MomoCore
 
+public protocol MomoSessionSensitiveStateClearing: Sendable {
+    func clearSessionSensitiveState() async
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -103,6 +107,39 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             self.connectionError = String(describing: error)
         }
+    }
+
+    public func clearSessionSensitiveState() async {
+        channelSubscription?.cancel()
+        realtimeStatusSubscription?.cancel()
+        channelSubscription = nil
+        realtimeStatusSubscription = nil
+        if let resettable = chat as? any MomoSessionSensitiveStateClearing {
+            await resettable.clearSessionSensitiveState()
+        }
+        if let resettable = agentTransport as? any MomoSessionSensitiveStateClearing {
+            await resettable.clearSessionSensitiveState()
+        }
+        workspaceId = nil
+        members = []
+        channels = []
+        selectedChannelId = nil
+        messagesByChannel = [:]
+        partials = [:]
+        agentStatuses = [:]
+        costSnapshots = [:]
+        realtimeStatuses = [:]
+        composerDraft = ""
+        mentionNotice = nil
+        approvals = [:]
+        approvalDecisionsInFlight = []
+        channelCreateInFlight = false
+        channelMemberMutationIds = []
+        inviteJoinState = .idle
+        localContextCopilotPreview = nil
+        isLocalContextCopilotRefreshing = false
+        connectionError = nil
+        pendingFallbackMentionRuns = [:]
     }
 
     /// Inject channels (stub seeding path; real backend fetches them over REST).

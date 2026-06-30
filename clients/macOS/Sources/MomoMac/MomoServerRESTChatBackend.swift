@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeStatusProvidingBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     public let config: MomoServerRESTChatBackendConfig
 
     private let session: URLSession
@@ -68,6 +68,21 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
     public func requireAccessToken() throws -> String {
         guard let accessToken, !accessToken.isEmpty else { throw BackendError.notConnected }
         return accessToken
+    }
+
+    public func clearSessionSensitiveState() async {
+        workspace = nil
+        accessToken = nil
+        authenticatedMember = nil
+        cachedChannels = nil
+        lastKnownSeqByChannel = [:]
+        realtimeStatusByChannel = [:]
+        for continuations in realtimeStatusStreams.values {
+            for continuation in continuations.values {
+                continuation.finish()
+            }
+        }
+        realtimeStatusStreams = [:]
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
