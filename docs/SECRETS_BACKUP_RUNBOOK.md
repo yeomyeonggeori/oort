@@ -27,6 +27,11 @@
   real public recipients and decryption is tested by the operator.
 - `infra/.env.example` and code `dev-insecure-*` defaults are development-only.
   Staging/prod must use generated values from `infra/prod/secrets.sops.env`.
+- `scripts/prod_env_preflight.sh --mode staging|prod|internal-host` must pass
+  before compose config/render/up on a real host. It rejects placeholder,
+  dev-insecure, localhost/mock, and internal-smoke image values.
+- `internal-smoke`/`local` placeholder values are allowed only in
+  `infra/prod/internal-smoke.env.example` and verifier-generated temp env files.
 - Prefer process environment injection (`sops exec-env`) over decrypted files.
   If a service manager needs an env file, render it to tmpfs with `0600` mode and
   delete it during rollback/rotation.
@@ -75,6 +80,8 @@ Validate without printing secret values:
 sops --decrypt infra/prod/secrets.sops.env >/dev/null
 sops exec-env infra/prod/secrets.sops.env \
   'test -n "$POSTGRES_PASSWORD" && test -n "$JWT_HMAC" && test -n "$PGBACKREST_REPO1_CIPHER_PASS"'
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode staging'
 ```
 
 Deploy commands consume the decrypted values as process environment. MOMO-005
@@ -86,6 +93,16 @@ sops exec-env infra/prod/secrets.sops.env \
 
 sops exec-env infra/prod/secrets.sops.env 'make migrate'
 ```
+
+Operator checklist before `up -d` on staging/prod/internal-host:
+
+1. Generate each secret with `openssl rand -hex 32` or the upstream provider.
+2. Replace every `__PLACEHOLDER__`, `change-me-*`, `example.com`, local DB
+   password, mock Hermes URL, and `internal-smoke` image tag.
+3. Encrypt to `infra/prod/secrets.sops.env`, delete plaintext, then confirm
+   `git status` does not show `infra/prod/secrets.env` or decrypted files.
+4. Run `sops exec-env infra/prod/secrets.sops.env 'scripts/prod_env_preflight.sh --from-env --mode staging'`.
+5. Only after preflight passes, render compose config and start services.
 
 Rotate a secret by editing through SOPS, redeploying, and invalidating the old
 credential at the source:

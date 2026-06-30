@@ -40,7 +40,8 @@ for path in \
   "$PROD_COMPOSE" "$SMOKE_COMPOSE" "$SMOKE_ENV" "$CADDYFILE" "$CENTRIFUGO_CONFIG" \
   "scripts/migrate.sh" "server/Sources/MomoServer/App.swift" \
   "server/Migrations/001_init.sql" "server/Migrations/002_seed.sql" \
-  "infra/prod/pgbackrest.conf.example" "docs/SECRETS_BACKUP_RUNBOOK.md"; do
+  "infra/prod/pgbackrest.conf.example" "docs/SECRETS_BACKUP_RUNBOOK.md" \
+  "scripts/prod_env_preflight.sh"; do
   [ -f "$path" ] || fail "missing required internal hosting smoke file: $path"
 done
 
@@ -121,6 +122,7 @@ grep -Fq 'mock-hermes:' "$SMOKE_COMPOSE" || fail "internal smoke must provide mo
 pass "relay and worker are enabled as single-node services"
 
 section "env template and secret guard"
+scripts/prod_env_preflight.sh --env-file "$SMOKE_ENV" --mode internal-smoke
 for key in \
   COMPOSE_PROJECT_NAME API_DOMAIN REALTIME_DOMAIN MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
   MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL REDIS_PASSWORD CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC HERMES_BASE_URL HERMES_API_KEY; do
