@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tiny OpenAI-compatible SSE gateway for MOMO-004 runtime verification.
+"""Tiny OpenAI-compatible SSE gateway for MOMO runtime verification.
 
 It implements the subset AgentWorker needs:
 
@@ -21,6 +21,11 @@ from typing import Any
 
 
 MOCK_TEXT = "김인턴 mock reply: MOMO-004 SSE path verified."
+MOCK_TOOL_ARGS = {
+    "repo": "Dawn-kim-official/momo",
+    "query": "MOMO-201 live tool-call fixture",
+    "limit": 2,
+}
 
 
 class MockHermesHandler(BaseHTTPRequestHandler):
@@ -78,6 +83,10 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             self._write_event(self._stream_chunk(request, content=chunk))
             time.sleep(0.05)
 
+        self._write_event(self._tool_call_chunk(request, arguments_prefix=True))
+        time.sleep(0.05)
+        self._write_event(self._tool_call_chunk(request, arguments_prefix=False))
+        time.sleep(0.05)
         self._write_event(self._usage_chunk(request))
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
@@ -100,6 +109,52 @@ class MockHermesHandler(BaseHTTPRequestHandler):
                     "index": 0,
                     "delta": {"content": content} if content is not None else {},
                     "finish_reason": None,
+                }
+            ],
+        }
+
+    def _tool_call_chunk(
+        self, request: dict[str, Any], *, arguments_prefix: bool
+    ) -> dict[str, Any]:
+        args = json.dumps(MOCK_TOOL_ARGS, ensure_ascii=False, separators=(",", ":"))
+        delta: dict[str, Any]
+        if arguments_prefix:
+            delta = {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "call_momo_201_search",
+                        "type": "function",
+                        "function": {
+                            "name": "github.search_issues",
+                            "arguments": args[:32],
+                        },
+                    }
+                ]
+            }
+            finish_reason = None
+        else:
+            delta = {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "function": {
+                            "arguments": args[32:],
+                        },
+                    }
+                ]
+            }
+            finish_reason = "tool_calls"
+        return {
+            "id": "chatcmpl-momo-004-mock",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": request.get("model", "hermes-agent"),
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
                 }
             ],
         }
@@ -135,8 +190,25 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": MOCK_TEXT},
-                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": MOCK_TEXT,
+                        "tool_calls": [
+                            {
+                                "id": "call_momo_201_search",
+                                "type": "function",
+                                "function": {
+                                    "name": "github.search_issues",
+                                    "arguments": json.dumps(
+                                        MOCK_TOOL_ARGS,
+                                        ensure_ascii=False,
+                                        separators=(",", ":"),
+                                    ),
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
                 }
             ],
             "usage": {

@@ -609,8 +609,8 @@
 - [x] Docker/Centrifugo live subscribe smoke를 수행하거나, 수행 불가 범위를 좁게 `runtime-unverified`로 표시한다.
 
 ### MOMO-201 수용기준 `[runtime-agent/macos-ui]`
-- [ ] repo-local mock SSE/runtime fixture가 `agent.partial` tool-call progress(`tool_call_name`, bounded `tool_call_args`)와 final `tool_result`/`message.new`를 생성한다.
-- [ ] MomoMac `ChatViewModel`이 live or fixture event stream에서 progress card를 coalesce하고 final message by `message.seq`로 reconcile한다.
+- [x] repo-local mock SSE/runtime fixture가 `agent.partial` tool-call progress(`tool_call_name`, bounded `tool_call_args`)와 final `tool_result`/`message.new`를 생성한다.
+- [x] MomoMac `ChatViewModel`이 live or fixture event stream에서 progress card를 coalesce하고 final message by `message.seq`로 reconcile한다.
 - [ ] MOMO-020 issue update proposal을 실제 티켓 본문/label 업데이트로 적용할지 PR 본문에 handoff한다.
 - [ ] `scripts/local_gate.sh --profile runtime-agent` PASS 또는 D-specific gate PASS evidence를 첨부한다.
 - [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
