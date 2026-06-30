@@ -57,6 +57,13 @@
 - MomoMac REST backend와 `ChatViewModel` bootstrap이 pending approval projection을 읽어 C Approval Inbox initial load를 seed-only가 아닌 server data로 채운다. Approve/reject는 기존 decision endpoint + caller-provided `client_decision_id`를 유지하고, receipt/`approval.decided` event는 `approval_id` keyed state로 reconcile한다.
 - `scripts/verify_approval_decision.sh`가 projection read path, same-workspace nonmember channel guard, two-workspace token isolation, approve/reject/idempotency/expired paths를 함께 검증한다. Real external provider write는 계속 out of scope이며 deterministic resume/tool_result/audit path만 local gate에서 검증한다.
 
+## 0-8. MOMO-202 B Cost Projection + CostSnapshot Binding (2026-06-30)
+
+- `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots`를 추가해 `agent_run`/`usage_ledger`/`budget_window` 기반 server-owned `CostSnapshot` projection을 제공한다. 계약 필드: `reserved_micro_usd`, `spent_micro_usd`, `is_reconciled`, `was_estimated`, `soft_limit_micro_usd`, `hard_limit_micro_usd`, `limit_state`.
+- macOS `ChatBackend`/`MomoServerRESTChatBackend`/`ChatViewModel`/`CostBreathingRing`이 demo seed 계산 대신 `CostSnapshot` projection을 우선 소비한다. `MOMO_SERVER_BASE_URL`이 없으면 `LiveChatBackend` projection fixture fallback은 유지한다.
+- `scripts/verify_agent_worker.sh`가 AgentWorker reserve/reconcile DB evidence와 MomoServer cost projection endpoint evidence를 같은 runtime-agent gate에서 검증하도록 확장됐다. 외부 hermes/staging provider 연결은 계속 `runtime-unverified`.
+- 검증: `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-agent` PASS, `scripts/local_gate.sh --profile macos-ui` PASS.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

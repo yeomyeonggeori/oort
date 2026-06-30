@@ -144,6 +144,16 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
         return channels
     }
 
+    public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        guard let workspace else { throw BackendError.notConnected }
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/cost-snapshots",
+            queryItems: [],
+            response: CostSnapshotPage.self
+        )
+        return page.snapshots
+    }
+
     public func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
         var results: [Message] = []
         let searchableChannels: [Channel]

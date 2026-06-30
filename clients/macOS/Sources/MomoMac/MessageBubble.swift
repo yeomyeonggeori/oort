@@ -52,8 +52,9 @@ public struct MessageBubble: View {
                 CostBreathingRing(
                     reservedMicroUSD: cost.reservedMicroUSD,
                     spentMicroUSD: cost.spentMicroUSD,
-                    isReconciled: cost.spentMicroUSD > 0,
-                    wasEstimated: cost.wasEstimated
+                    isReconciled: cost.isReconciled,
+                    wasEstimated: cost.wasEstimated,
+                    limitState: cost.limitState
                 )
             }
         }

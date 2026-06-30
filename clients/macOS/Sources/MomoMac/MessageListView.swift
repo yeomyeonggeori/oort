@@ -144,13 +144,9 @@ public struct MessageListView: View {
             .sorted { $0.runId.description < $1.runId.description }
     }
 
-    /// Build a CostSnapshot from the run's latest agent.status (experience B).
+    /// Read the server-owned CostSnapshot projection for the message's run.
     private func costSnapshot(for message: Message) -> CostSnapshot? {
-        guard let runId = message.runId, let status = viewModel.agentStatuses[runId] else { return nil }
-        return CostSnapshot(
-            runId: runId,
-            reservedMicroUSD: status.reservedMicroUSD ?? 0,
-            spentMicroUSD: status.spentMicroUSD ?? 0
-        )
+        guard let runId = message.runId else { return nil }
+        return viewModel.costSnapshot(for: runId)
     }
 }

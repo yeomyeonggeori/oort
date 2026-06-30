@@ -31,6 +31,10 @@ public protocol ChatBackend: Sendable {
     /// Channels visible to the authenticated workspace member.
     func channels(workspace: WorkspaceID) async throws -> [Channel]
 
+    /// Server-owned cost projection for a channel. Clients consume this snapshot;
+    /// they do not derive budget state directly from usage_ledger/budget_window.
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot]
+
     /// trgm-backed message search within a workspace.
     func search(workspace: WorkspaceID, query: String) async throws -> [Message]
 

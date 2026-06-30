@@ -25,17 +25,21 @@ public struct CostBreathingRing: View {
     public let isReconciled: Bool
     /// True if usage was estimated (SSE usage missing) → keep dashed + "추정치".
     public let wasEstimated: Bool
+    /// Server-projected budget state for this run/channel.
+    public let limitState: CostLimitState
 
     public init(
         reservedMicroUSD: Int64?,
         spentMicroUSD: Int64?,
         isReconciled: Bool = false,
-        wasEstimated: Bool = false
+        wasEstimated: Bool = false,
+        limitState: CostLimitState = .normal
     ) {
         self.reservedMicroUSD = reservedMicroUSD
         self.spentMicroUSD = spentMicroUSD
         self.isReconciled = isReconciled
         self.wasEstimated = wasEstimated
+        self.limitState = limitState
     }
 
     private var fraction: Double {
@@ -54,7 +58,7 @@ public struct CostBreathingRing: View {
                 Circle()
                     .trim(from: 0, to: fraction)
                     .stroke(
-                        MomoTheme.costAmber,
+                        tint,
                         style: StrokeStyle(
                             lineWidth: 4,
                             lineCap: .round,
@@ -74,6 +78,14 @@ public struct CostBreathingRing: View {
     }
 
     private var label: String {
+        switch limitState {
+        case .hardLimit:
+            return "한도"
+        case .softLimit:
+            return "주의"
+        case .normal:
+            break
+        }
         if isReconciled, let spent = spentMicroUSD {
             return CostFormat.usd(spent)
         }
@@ -84,5 +96,16 @@ public struct CostBreathingRing: View {
             return "예약 \(CostFormat.usd(reserved))"
         }
         return "—"
+    }
+
+    private var tint: Color {
+        switch limitState {
+        case .normal:
+            return MomoTheme.costAmber
+        case .softLimit:
+            return .orange
+        case .hardLimit:
+            return .red
+        }
     }
 }

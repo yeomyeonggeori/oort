@@ -616,12 +616,12 @@
 - [ ] 실제 Hermes/provider side effect가 없으면 해당 범위만 `runtime-unverified`로 남긴다.
 
 ### MOMO-202 수용기준 `[swift/runtime-agent/macos-ui]`
-- [ ] server-owned cost projection contract를 정의한다: `reserved_micro_usd`, `spent_micro_usd`, reconciled/estimated flag, soft/hard limit state.
-- [ ] macOS는 ledger 계산을 하지 않고 `agent.status`/`agent.partial` 또는 REST projection을 `CostSnapshot`으로만 소비한다.
-- [ ] `CostBreathingRing`이 reserve -> running -> reconciled -> limit warning states를 fixture/runtime data로 표시한다.
-- [ ] AgentWorker reserve/reconcile evidence(`usage_ledger`, `budget_window`)와 client-visible projection evidence를 같은 PR에 첨부한다.
-- [ ] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 첨부한다.
-- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [x] server-owned cost projection contract를 정의한다: `reserved_micro_usd`, `spent_micro_usd`, reconciled/estimated flag, soft/hard limit state.
+- [x] macOS는 ledger 계산을 하지 않고 `agent.status`/`agent.partial` 또는 REST projection을 `CostSnapshot`으로만 소비한다.
+- [x] `CostBreathingRing`이 reserve -> running -> reconciled -> limit warning states를 fixture/runtime data로 표시한다.
+- [x] AgentWorker reserve/reconcile evidence(`usage_ledger`, `budget_window`)와 client-visible projection evidence를 같은 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 
 ### MOMO-203 수용기준 `[swift/runtime-db/macos-ui]`
 - [x] pending approval read/projection path를 추가한다(`GET /v1/workspaces/{ws}/approvals?status=pending` 또는 equivalent channel-history projection).
