@@ -792,6 +792,19 @@
 - [ ] local gate는 GitHub Actions disabled/manual-only 정책에 따라 `scripts/local_gate.sh --profile macos-ui`로 검증한다.
 - [ ] 런타임 DB/wire alignment, approval pause/resume executor, memory inspector는 MOMO-132/MOMO-161/MOMO-171 범위로 남긴다.
 
+## M4 macOS 패키징 정본
+
+| id | 한줄 | 수용기준 등급 | 의존 |
+|---|---|---|---|
+| `MOMO-208` | M4 macOS packaging architecture ADR: SwiftPM dev app과 Xcode release app 경계, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle 순서와 #15/#16/#17 split | docs/spec | M4 구현 전 |
+
+### MOMO-208 수용기준 `[docs/spec]`
+- [x] `docs/adr/0003-macos-packaging-architecture.md` — SwiftPM `MomoMacDevApp`은 개발/로컬 게이트용, Xcode `MomoMac.app`은 릴리스 번들/서명/공증용으로 분리한다.
+- [x] build-macos-apps plugin은 SwiftPM GUI 실행/진단, Xcode 설정 점검, signing/Gatekeeper/notary 실패 분류에 사용하고 Apple account/secret material은 사람/운영자 boundary로 분리한다.
+- [x] #15(MOMO-030 Xcode host) → #16(MOMO-031 codesign/notary/DMG) → #17(MOMO-032 Sparkle) 후속 issue split을 문서화한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #171을 `status:needs-review`로 전환하고 merge하지 않는다.
+
 ## M7 Enterprise Trust
 
 | id | 한줄 | 수용기준 등급 | 의존 |
