@@ -282,6 +282,13 @@ DELETE FROM usage_ledger
 DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
 DELETE FROM audit_log
  WHERE workspace_id = '$WORKSPACE_ID'
+   AND run_id IN (
+      SELECT id FROM agent_run
+       WHERE workspace_id = '$WORKSPACE_ID'
+         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
+   );
+DELETE FROM audit_log
+ WHERE workspace_id = '$WORKSPACE_ID'
    AND target_id IN (
      SELECT id FROM message
       WHERE workspace_id = '$WORKSPACE_ID'

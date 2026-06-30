@@ -10,7 +10,6 @@ import MomoCore
 
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
-    @State private var draft: String = ""
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -24,6 +23,10 @@ public struct MessageListView: View {
                 Divider()
             } else if let error = viewModel.connectionError {
                 connectionBanner(error)
+                Divider()
+            }
+            if let notice = viewModel.mentionNotice {
+                mentionNoticeBanner(notice)
                 Divider()
             }
             Divider()
@@ -103,6 +106,21 @@ public struct MessageListView: View {
         .background(.orange.opacity(0.08))
     }
 
+    private func mentionNoticeBanner(_ notice: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "at")
+                .foregroundStyle(MomoTheme.agentAccent)
+            Text(notice)
+                .font(.caption)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(MomoTheme.agentAccent.opacity(0.08))
+    }
+
     private func statusTitle(_ status: RealtimeConnectionStatus) -> String {
         if status.isLive {
             return "Live"
@@ -175,7 +193,7 @@ public struct MessageListView: View {
                     ForEach(livePartials, id: \.runId) { partial in
                         AgentPartialView(
                             partial: partial,
-                            author: nil,
+                            author: partialAuthor(for: partial),
                             status: viewModel.agentStatuses[partial.runId]
                         )
                     }
@@ -195,14 +213,14 @@ public struct MessageListView: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField("Message…", text: $draft, axis: .vertical)
+            TextField("Message @김인턴 or @kim-intern...", text: $viewModel.composerDraft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
                 .onSubmit(submit)
             Button(action: submit) {
                 Image(systemName: "paperplane.fill")
             }
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            .disabled(viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       || viewModel.selectedChannelId == nil)
         }
         .padding(12)
@@ -210,8 +228,8 @@ public struct MessageListView: View {
 
     private func submit() {
         guard let channel = viewModel.selectedChannelId else { return }
-        let body = draft
-        draft = ""
+        let body = viewModel.composerDraft
+        viewModel.composerDraft = ""
         Task { await viewModel.send(body: body, to: channel) }
     }
 
@@ -229,5 +247,12 @@ public struct MessageListView: View {
     private func costSnapshot(for message: Message) -> CostSnapshot? {
         guard let runId = message.runId else { return nil }
         return viewModel.costSnapshot(for: runId)
+    }
+
+    private func partialAuthor(for partial: AgentPartial) -> Member? {
+        guard let agent = viewModel.agentStatuses[partial.runId]?.agentMemberId else {
+            return nil
+        }
+        return viewModel.member(agent)
     }
 }

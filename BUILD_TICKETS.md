@@ -152,6 +152,7 @@
 | `MOMO-196` | Realtime WebSocket live subscribe verifier v0(token→subscribe→REST send→live publication) | runtime/infra | MOMO-115, MOMO-186, MOMO-192, MOMO-193 |
 | `MOMO-212` | Agent channel live subscription verifier v0(agent status/partial live boundary) | runtime/infra | MOMO-196, MOMO-200, MOMO-201 |
 | `MOMO-215` | Agent mention routing e2e v0(REST @agent mention→agent_job→agent/live+timeline) | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
+| `MOMO-219` | macOS agent mention UX v0(roster mention insert→optimistic/progress/final UX) | swift/macos-ui/runtime-agent | MOMO-177, MOMO-205, MOMO-212, MOMO-215 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-209` | stale worktree Docker Compose project/container/network janitor | tooling/docs | MOMO-112, MOMO-194, MOMO-199 |
@@ -530,6 +531,7 @@
 | `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
 | `MOMO-212` | Agent channel live subscription verifier v0 | runtime-agent/swift | MOMO-200, MOMO-201 |
 | `MOMO-215` | Agent mention routing e2e v0 | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
+| `MOMO-219` | macOS agent mention UX v0 | swift/macos-ui/runtime-agent | MOMO-177, MOMO-205, MOMO-212, MOMO-215 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 | `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
 
@@ -724,6 +726,19 @@
 - [x] `scripts/verify_agent_worker.sh`가 REST send → agent_job → AgentWorker/mock SSE → agent live progress → OutboxRelay channel final `message.new` evidence를 검증한다.
 - [x] `swift test --package-path server`, `swift test --package-path workers/AgentWorker`, `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
 - [x] 가능하면 `scripts/local_gate.sh --profile m3-dbc` PASS evidence를 PR에 첨부한다.
+
+### MOMO-219 수용기준 `[swift/macos-ui/runtime-agent]`
+- [x] GitHub #195를 `scripts/goal_claim.sh 195`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] macOS member/agent roster에서 agent row click 또는 context action으로 composer에 `@김인턴` 또는 `@kim-intern` mention을 삽입할 수 있다.
+- [x] 선택된 channel이 없거나 agent가 active가 아니면 mention action은 disabled 또는 clear notice를 표시한다. Channel membership final guard는 server same-channel mention routing이 유지한다.
+- [x] message send는 optimistic local echo를 먼저 표시하고, realtime/progress status와 final durable agent message를 `message.seq` timeline으로 reconcile한다.
+- [x] REST fallback 모드에서도 mention send 후 delayed history refresh로 final durable message를 다시 읽어 결과를 보여준다.
+- [x] LiveChatBackend demo fallback은 `@김인턴`/`@kim-intern` 모두 deterministic Kim Intern progress/final response를 제공한다.
+- [x] macOS unit test가 roster mention insert, alias mention response, REST fallback final refresh를 검증한다.
+- [x] `scripts/verify_macos_real_backend_ui.sh`가 real-backend agent mention source send/read + agent_job 생성 smoke를 포함한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #195를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-205 수용기준 `[runtime/macos-ui]`
 - [x] GitHub #162를 `scripts/goal_claim.sh 162`로 claim하고 별도 branch/worktree에서 진행한다.

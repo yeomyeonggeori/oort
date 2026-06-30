@@ -57,7 +57,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         let human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
         let researcher = Member(id: MemberID(), workspaceId: ws, kind: .agent,
-                                displayName: "리서처", handle: "researcher", presence: .working)
+                                displayName: "김인턴", handle: "kim-intern", presence: .working)
         let builder = Member(id: MemberID(), workspaceId: ws, kind: .agent,
                              displayName: "빌드봇", handle: "buildbot", presence: .online)
         members = [human, researcher, builder]
@@ -77,7 +77,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         _ = appendServerMessage(channel: general.id, author: human.id, type: .text,
                                 body: "안녕하세요 팀!")
         _ = appendServerMessage(channel: general.id, author: researcher.id, type: .text,
-                                body: "리서처 합류했습니다.", runId: RunID())
+                                body: "김인턴 합류했습니다.", runId: RunID())
         let toolRun = RunID()
         _ = appendServerMessage(
             channel: pg18.id, author: researcher.id, type: .toolCall,
@@ -426,6 +426,11 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
             props: draft.props, clientMsgId: clientMsgId,
             rootId: draft.rootId, replyToId: draft.replyToId)
         sentClientMsgIds[ch, default: []].insert(clientMsgId)
+        if draft.type == .text,
+           let body = draft.body,
+           let agent = mentionedAgent(in: body) {
+            appendDemoMentionResponse(agent: agent, channel: ch, trigger: msg, prompt: body)
+        }
         return msg
     }
 
@@ -682,6 +687,71 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     private func nowMs() -> Int64 {
         Int64(Date().timeIntervalSince1970 * 1000)
+    }
+
+    private func mentionedAgent(in body: String) -> Member? {
+        members.first { member in
+            guard member.isAgent else { return false }
+            return body.range(of: "@\(member.handle)", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+                || body.range(of: "@\(member.displayName)", options: [.caseInsensitive, .diacriticInsensitive]) != nil
+        }
+    }
+
+    private func appendDemoMentionResponse(agent: Member, channel: ChannelID, trigger: Message, prompt: String) {
+        let run = RunID()
+        emit(.agentStatus(AgentStatus(
+            runId: run,
+            agentMemberId: agent.id,
+            channelId: channel,
+            phase: .thinking,
+            runStatus: .running,
+            reservedMicroUSD: 90_000,
+            spentMicroUSD: 12_000
+        )), to: channel)
+        emit(.agentPartial(AgentPartial(
+            runId: run,
+            channelId: channel,
+            textDelta: "\(agent.displayName)이 mention을 확인하고 답변을 준비하고 있습니다.",
+            toolCallName: "momo.context.read",
+            toolCallArgs: .object([
+                "trigger_message_id": .string(trigger.id.description),
+                "mention": .string("@\(agent.handle)"),
+            ]),
+            spentMicroUSD: 12_000
+        )), to: channel)
+
+        _ = appendServerMessage(
+            channel: channel,
+            author: agent.id,
+            type: .text,
+            body: "\(agent.displayName) 결과: mention 호출을 확인했습니다. `@김인턴`과 `@kim-intern` 모두 같은 agent로 처리됩니다. 요청: \(prompt)",
+            props: .object([
+                "trigger_message_id": .string(trigger.id.description),
+                "mention_handle": .string(agent.handle),
+                "mention_display_name": .string(agent.displayName),
+                "spent_micro_usd": .int(32_000),
+            ]),
+            runId: run
+        )
+        demoCostSnapshotsByChannel[channel, default: []].append(CostSnapshot(
+            runId: run,
+            reservedMicroUSD: 0,
+            spentMicroUSD: 32_000,
+            softLimitMicroUSD: 900_000,
+            hardLimitMicroUSD: 1_000_000,
+            isReconciled: true,
+            wasEstimated: false,
+            limitState: .normal
+        ))
+        emit(.agentStatus(AgentStatus(
+            runId: run,
+            agentMemberId: agent.id,
+            channelId: channel,
+            phase: .done,
+            runStatus: .succeeded,
+            reservedMicroUSD: 0,
+            spentMicroUSD: 32_000
+        )), to: channel)
     }
 
     // `async` so the cross-actor hop from the nonisolated AsyncStream closure is a
