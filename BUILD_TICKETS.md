@@ -269,6 +269,17 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 
+### MOMO-216 수용기준 `[infra/docs]`
+- [x] GitHub #188 claim: `scripts/goal_claim.sh 188`로 별도 worktree/branch `chore/188-internal-single-node-hosting-smoke-gate-v0` 생성, issue assign + `status:in-progress`.
+- [x] `infra/prod/docker-compose.internal-smoke.yml` — prod compose 위에서 internal single-node smoke override를 제공하고 api/relay/worker는 image-based 계약을 유지한다.
+- [x] `infra/prod/internal-smoke.env.example` — local-only domain/port, local image fallback tag, placeholder secret template을 제공한다.
+- [x] `scripts/verify_internal_hosting_smoke.sh` — compose config, env template guard, Caddy/TLS static wiring, Centrifugo Redis engine, API health route, explicit migration path, relay/worker enablement, backup/restore placeholder boundary를 검증한다.
+- [x] `scripts/local_gate.sh --profile staging-smoke`에 internal hosting smoke evidence를 포함한다.
+- [x] 실제 public DNS/TLS, registry image pull/run, SOPS production secret injection, pgBackRest backup/PITR restore rehearsal은 `runtime-unverified(public TLS/DNS)`/host-runtime으로 좁게 표기한다.
+- [x] `scripts/local_gate.sh --profile staging-smoke` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
 ### MOMO-150 수용기준 `[docs/spec]`
 - [ ] `research/11-agent-runtime/`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가.
 - [ ] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리.
