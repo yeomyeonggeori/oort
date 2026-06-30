@@ -57,6 +57,7 @@
 | [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
 | [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
+| [`docs/adr/0003-macos-packaging-architecture.md`](adr/0003-macos-packaging-architecture.md) | M4 macOS packaging ADR: SwiftPM dev app vs Xcode release app, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle issue split | M4 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 

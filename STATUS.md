@@ -82,7 +82,19 @@
 - `scripts/local_gate.sh --profile all`은 runtime verifier 사이에 worktree env의 `PORT`를 읽고 해당 포트의 `MomoServer` listener만 정리하는 cleanup command를 삽입한다. standalone profile의 포트 점유 fail-fast 동작과 제품 runtime 코드는 변경하지 않았다.
 - 검증: `scripts/local_gate.sh --profile docs` PASS. main post-merge `scripts/local_gate.sh --profile all`은 이 hotfix merge 후 재실행한다.
 
-## 0-12. MOMO-201 D Live Tool-Call fixture/local gate (2026-06-30)
+## 0-12. MOMO-209 Worktree Docker Compose Janitor (2026-06-30)
+
+- `scripts/compose_janitor.sh`를 추가해 병렬 local gate 후 남은 stale `momo_` worktree Docker Compose project/container/network를 dry-run 기본값으로 목록화한다.
+- cleanup은 `--cleanup` 명시 시에만 수행하며, root `momo` project, `momo_default`, `supabase`, active git worktree project, non-momo Docker resource는 보호한다. Volume 삭제는 의도적으로 범위 밖이다.
+- 검증: `bash -n scripts/compose_janitor.sh` PASS, `scripts/compose_janitor.sh` dry-run PASS, `scripts/local_gate.sh --profile docs` PASS.
+
+## 0-13. MOMO-208 M4 macOS Packaging Architecture ADR (2026-06-30)
+
+- `docs/adr/0003-macos-packaging-architecture.md`를 추가해 SwiftPM `MomoMacDevApp`은 개발/로컬 게이트용, M4 Xcode `MomoMac.app`은 릴리스 번들/서명/공증용으로 분리했다.
+- build-macos-apps plugin 사용 범위는 SwiftPM GUI 실행/진단, Xcode 설정 점검, signing/Gatekeeper/notary 실패 분류로 제한하고, Apple 계정·인증서·API key·Sparkle private key는 사람/운영자 소유 secret boundary로 고정했다.
+- M4 후속은 #15(MOMO-030 Xcode host), #16(MOMO-031 codesign/notary/DMG), #17(MOMO-032 Sparkle) 순서로 진행한다. 실제 Xcode project 생성, signing/notary/DMG/Sparkle 구현은 이번 goal out of scope다.
+
+## 0-14. MOMO-201 D Live Tool-Call fixture/local gate (2026-06-30)
 
 - `scripts/mock_hermes.py`가 OpenAI-compatible SSE `tool_calls` delta를 내보내고, `scripts/verify_agent_worker.sh` runtime-agent gate가 `agent.partial`의 `tool_call_name` + bounded JSON `tool_call_args`와 final `tool_result`/`message.new` broadcast evidence를 검증한다.
 - MomoMac `ChatViewModel`은 final `tool_result` 또는 같은 `message_id`의 committed message가 들어오면 in-flight progress card를 제거하고 `message.seq` 기준 timeline으로 reconcile한다. Fixture stream 테스트가 duplicate final/late partial을 중복 없이 처리함을 검증한다.
