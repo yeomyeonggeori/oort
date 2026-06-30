@@ -17,6 +17,8 @@ Major bundled/linked components:
 - postgres-nio (Apache-2.0) — https://github.com/vapor/postgres-nio
 - jwt-kit (MIT) — https://github.com/vapor/jwt-kit
 - SwiftNIO and related (Apache-2.0) — https://github.com/apple/swift-nio
+- SwiftCentrifuge / centrifuge-swift (MIT) — https://github.com/centrifugal/centrifuge-swift
+- SwiftProtobuf (Apache-2.0) — https://github.com/apple/swift-protobuf
 
 TODO(Codex): regenerate from Package.resolved via scripts/gen-notices.sh; verify
 each SPDX identifier against the upstream LICENSE file. Report any non-permissive

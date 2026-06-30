@@ -844,14 +844,91 @@ final class MomoMacTests: XCTestCase {
     func testRESTBackendConfigFromEnvironmentUsesDevSafeSeedDefaults() throws {
         let config = try XCTUnwrap(MomoServerRESTChatBackendConfig.fromEnvironment([
             "MOMO_SERVER_BASE_URL": "http://127.0.0.1:8080",
+            "MOMO_CENTRIFUGO_WS_URL": "ws://127.0.0.1:8000/connection/websocket",
         ]))
 
         XCTAssertEqual(config.baseURL.absoluteString, "http://127.0.0.1:8080")
+        XCTAssertEqual(config.centrifugoWebSocketURL?.absoluteString, "ws://127.0.0.1:8000/connection/websocket")
         XCTAssertEqual(config.workspace, .demo)
         XCTAssertEqual(config.defaultChannel, .demoGeneral)
         XCTAssertEqual(config.channels.map(\.name), ["general", "agent-lab"])
         XCTAssertEqual(config.members.map(\.handle), ["demo", "kim-intern"])
         XCTAssertNil(MomoServerRESTChatBackendConfig.fromEnvironment([:]))
+    }
+
+    func testRESTBackendConfigCanDeriveCentrifugoWebSocketURLFromCentPort() throws {
+        let config = try XCTUnwrap(MomoServerRESTChatBackendConfig.fromEnvironment([
+            "MOMO_SERVER_BASE_URL": "http://127.0.0.1:26670",
+            "CENT_PORT": "26671",
+        ]))
+
+        XCTAssertEqual(config.centrifugoWebSocketURL?.absoluteString, "ws://127.0.0.1:26671/connection/websocket")
+    }
+
+    func testSwiftCentrifugeTransportBuildsWorkspaceQualifiedChannelName() {
+        XCTAssertEqual(
+            SwiftCentrifugeRealtimeSubscriptionTransport.channelName(workspace: .demo, channel: .demoGeneral),
+            "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000201"
+        )
+    }
+
+    func testSwiftCentrifugeTransportDecodesPublicationDataAsRealtimeEnvelope() throws {
+        let data = """
+        {
+          "type": "message.new",
+          "v": 1,
+          "ts": 1700000000000,
+          "seq": 9,
+          "payload": {
+            "id": "00000000-0000-7000-8000-000000001009",
+            "channel_id": "00000000-0000-7000-8000-000000000201",
+            "seq": 9,
+            "hlc_ts": 1700000000000,
+            "hlc_count": 0,
+            "author_member_id": "00000000-0000-7000-8000-000000000101",
+            "type": "text",
+            "body": "live via SwiftCentrifuge",
+            "created_at_ms": 1700000000000
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try SwiftCentrifugeRealtimeSubscriptionTransport.decodePublicationData(data)
+        XCTAssertEqual(envelope.type, "message.new")
+        XCTAssertEqual(envelope.seq, 9)
+        guard case .message(let message) = try envelope.decodeEvent() else {
+            return XCTFail("publication should decode to message event")
+        }
+        XCTAssertEqual(message.seq, 9)
+        XCTAssertEqual(message.body, "live via SwiftCentrifuge")
+    }
+
+    func testRealtimeTokenProviderPostsBearerTokenToServerEndpoint() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/auth/realtime-token")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer app-token")
+            return MockHTTPResponse(json: """
+            {
+              "token": "cent-token",
+              "tokenType": "Bearer",
+              "expiresAtMs": 1700000300000,
+              "ttlSeconds": 300,
+              "workspaceId": "\(WorkspaceID.demo.description)",
+              "memberId": "\(MemberID.demoHuman.description)"
+            }
+            """)
+        }
+
+        let provider = MomoServerRealtimeTokenProvider(
+            baseURL: URL(string: "https://momo.test")!,
+            session: URLSession(configuration: .momoMocked),
+            accessTokenProvider: { "app-token" }
+        )
+
+        let token = try await provider.realtimeConnectionToken()
+        XCTAssertEqual(token, "cent-token")
     }
 }
 

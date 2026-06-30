@@ -12,7 +12,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
     public let config: MomoServerRESTChatBackendConfig
 
     private let session: URLSession
-    private let realtimeDriver: (any RealtimeSubscriptionDriver)?
+    private var realtimeDriver: (any RealtimeSubscriptionDriver)?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var workspace: WorkspaceID?
@@ -57,6 +57,15 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
         )
         self.accessToken = login.accessToken
         self.authenticatedMember = login.member.member
+    }
+
+    public func setRealtimeDriver(_ realtimeDriver: (any RealtimeSubscriptionDriver)?) {
+        self.realtimeDriver = realtimeDriver
+    }
+
+    public func requireAccessToken() throws -> String {
+        guard let accessToken, !accessToken.isEmpty else { throw BackendError.notConnected }
+        return accessToken
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
@@ -307,6 +316,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
 
 public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
     public var baseURL: URL
+    public var centrifugoWebSocketURL: URL?
     public var accessToken: String?
     public var login: Login
     public var workspace: WorkspaceID
@@ -316,6 +326,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
 
     public init(
         baseURL: URL,
+        centrifugoWebSocketURL: URL? = nil,
         accessToken: String? = nil,
         login: Login = .demo,
         workspace: WorkspaceID = .demo,
@@ -324,6 +335,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
         defaultChannel: ChannelID = .demoGeneral
     ) {
         self.baseURL = baseURL
+        self.centrifugoWebSocketURL = centrifugoWebSocketURL
         self.accessToken = accessToken
         self.login = login
         self.workspace = workspace
@@ -356,6 +368,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
         let workspace = environment["MOMO_WORKSPACE_ID"].flatMap { WorkspaceID(uuidString: $0) } ?? .demo
         let defaultChannel = environment["MOMO_CHANNEL_ID"].flatMap { ChannelID(uuidString: $0) } ?? .demoGeneral
         let token = environment["MOMO_ACCESS_TOKEN"].flatMap { $0.isEmpty ? nil : $0 }
+        let centrifugoWebSocketURL = Self.centrifugoWebSocketURL(from: environment)
         let login = Login(
             email: environment["MOMO_LOGIN_EMAIL"] ?? Login.demo.email,
             password: environment["MOMO_LOGIN_PASSWORD"] ?? Login.demo.password
@@ -363,6 +376,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
         let channels = Self.demoChannels(workspace: workspace)
         return Self(
             baseURL: baseURL,
+            centrifugoWebSocketURL: centrifugoWebSocketURL,
             accessToken: token,
             login: login,
             workspace: workspace,
@@ -370,6 +384,16 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
             members: Self.demoMembers(workspace: workspace),
             defaultChannel: channels.contains(where: { $0.id == defaultChannel }) ? defaultChannel : channels[0].id
         )
+    }
+
+    private static func centrifugoWebSocketURL(from environment: [String: String]) -> URL? {
+        if let raw = environment["MOMO_CENTRIFUGO_WS_URL"], !raw.isEmpty {
+            return URL(string: raw)
+        }
+        if let rawPort = environment["CENT_PORT"], let port = Int(rawPort), port > 0 {
+            return URL(string: "ws://127.0.0.1:\(port)/connection/websocket")
+        }
+        return nil
     }
 
     public static func demoChannels(workspace: WorkspaceID = .demo) -> [Channel] {

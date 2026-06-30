@@ -81,6 +81,20 @@ public enum MomoMacDemo {
     @MainActor
     public static func makeRESTViewModel(config: MomoServerRESTChatBackendConfig) async -> ChatViewModel {
         let backend = MomoServerRESTChatBackend(config: config)
+        if let endpoint = config.centrifugoWebSocketURL {
+            let tokenProvider = MomoServerRealtimeTokenProvider(
+                baseURL: config.baseURL,
+                accessTokenProvider: {
+                    try await backend.requireAccessToken()
+                }
+            )
+            let transport = SwiftCentrifugeRealtimeSubscriptionTransport(
+                endpoint: endpoint,
+                workspace: config.workspace,
+                tokenProvider: tokenProvider
+            )
+            await backend.setRealtimeDriver(DefaultRealtimeSubscriptionDriver(transport: transport))
+        }
         let vm = ChatViewModel(chat: backend, agentTransport: backend)
         await vm.bootstrap(workspace: config.workspace, accessToken: config.accessToken ?? "")
         let selected = vm.channels.contains(where: { $0.id == config.defaultChannel })
