@@ -54,19 +54,22 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         replayedDemoDeltaChannels = []
         approvalsById = [:]
 
-        let human = Member(id: MemberID(), workspaceId: ws, kind: .human,
+        var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
-        let researcher = Member(id: MemberID(), workspaceId: ws, kind: .agent,
+        var researcher = Member(id: MemberID(), workspaceId: ws, kind: .agent,
                                 displayName: "리서처", handle: "researcher", presence: .working)
-        let builder = Member(id: MemberID(), workspaceId: ws, kind: .agent,
+        var builder = Member(id: MemberID(), workspaceId: ws, kind: .agent,
                              displayName: "빌드봇", handle: "buildbot", presence: .online)
-        members = [human, researcher, builder]
 
         let general = Channel(id: ChannelID(), workspaceId: ws, kind: .publicChannel,
                               name: "general", topic: "팀 일반 채널", createdBy: human.id)
         let pg18 = Channel(id: ChannelID(), workspaceId: ws, kind: .publicChannel,
                            name: "feature-pg18", topic: "PG18 마이그레이션", createdBy: human.id)
         channels = [general, pg18]
+        human.channelIds = channels.map(\.id)
+        researcher.channelIds = channels.map(\.id)
+        builder.channelIds = [pg18.id]
+        members = [human, researcher, builder]
         for ch in channels {
             messagesByChannel[ch.id] = []
             seqByChannel[ch.id] = 0
@@ -464,6 +467,90 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         channels.filter { $0.workspaceId == workspace }
     }
 
+    public func createChannel(
+        workspace: WorkspaceID,
+        kind: ChannelKind,
+        name: String,
+        topic: String?
+    ) async throws -> ChannelCreateResult {
+        guard connected else { throw BackendError.notConnected }
+        guard kind == .publicChannel || kind == .privateChannel else {
+            throw BackendError.problem(status: 400, title: "bad request", detail: "demo can only create public/private channels")
+        }
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else {
+            throw BackendError.problem(status: 400, title: "bad request", detail: "channel name is required")
+        }
+        guard !channels.contains(where: { $0.workspaceId == workspace && $0.name?.lowercased() == normalized }) else {
+            throw BackendError.problem(status: 409, title: "channel name already exists", detail: normalized)
+        }
+
+        let creator = members.first(where: { $0.kind == .human })?.id ?? MemberID()
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: kind,
+            name: normalized,
+            topic: topic,
+            createdBy: creator
+        )
+        channels.append(channel)
+        messagesByChannel[channel.id] = []
+        seqByChannel[channel.id] = 0
+        sentClientMsgIds[channel.id] = []
+
+        let membership = ChannelMembership(
+            workspaceId: workspace,
+            channelId: channel.id,
+            memberId: creator,
+            role: .owner,
+            joinedAtMs: nowMs()
+        )
+        apply(membership)
+        return ChannelCreateResult(channel: channel, creatorMembership: membership)
+    }
+
+    public func addMember(
+        _ member: MemberID,
+        to channel: ChannelID,
+        role: MembershipRole = .member
+    ) async throws -> ChannelMembership {
+        guard connected else { throw BackendError.notConnected }
+        guard let workspace = channels.first(where: { $0.id == channel })?.workspaceId else {
+            throw BackendError.problem(status: 404, title: "channel or member not found", detail: "channel \(channel)")
+        }
+        guard members.contains(where: { $0.id == member && $0.workspaceId == workspace && $0.status == .active }) else {
+            throw BackendError.problem(status: 404, title: "channel or member not found", detail: "member \(member)")
+        }
+        let membership = ChannelMembership(
+            workspaceId: workspace,
+            channelId: channel,
+            memberId: member,
+            role: role,
+            joinedAtMs: nowMs()
+        )
+        apply(membership)
+        return membership
+    }
+
+    public func removeMember(_ member: MemberID, from channel: ChannelID) async throws -> ChannelMembership {
+        guard connected else { throw BackendError.notConnected }
+        guard let workspace = channels.first(where: { $0.id == channel })?.workspaceId,
+              let stored = members.first(where: { $0.id == member && $0.channelIds.contains(channel) }) else {
+            throw BackendError.problem(status: 404, title: "active channel membership not found", detail: nil)
+        }
+        let membership = ChannelMembership(
+            workspaceId: workspace,
+            channelId: channel,
+            memberId: stored.id,
+            role: .member,
+            joinedAtMs: nowMs(),
+            leftAtMs: nowMs()
+        )
+        apply(membership)
+        return membership
+    }
+
     public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
         demoCostSnapshotsByChannel[channel] ?? []
     }
@@ -677,6 +764,19 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
             messagesByChannel[channel] = messages
             emit(.messageEdited(message), to: channel)
             return
+        }
+    }
+
+    private func apply(_ membership: ChannelMembership) {
+        guard let index = members.firstIndex(where: { $0.id == membership.memberId }) else {
+            return
+        }
+        if membership.isActive {
+            if !members[index].channelIds.contains(membership.channelId) {
+                members[index].channelIds.append(membership.channelId)
+            }
+        } else {
+            members[index].channelIds.removeAll { $0 == membership.channelId }
         }
     }
 

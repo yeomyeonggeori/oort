@@ -101,6 +101,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
     let avatarUrl: String?
     let role: String?
     let channelCount: Int
+    let channelIds: [String]
     let email: String?
     let timeZone: String?
     let agentModel: String?
@@ -109,6 +110,49 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
     let maxRunSteps: Int?
     let createdAtMs: Int64
     let updatedAtMs: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceId
+        case kind
+        case status
+        case displayName
+        case handle
+        case avatarUrl
+        case role
+        case channelCount
+        case channelIds
+        case email
+        case timeZone
+        case agentModel
+        case ownerHumanId
+        case maxConcurrentRuns
+        case maxRunSteps
+        case createdAtMs
+        case updatedAtMs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.workspaceId = try c.decode(String.self, forKey: .workspaceId)
+        self.kind = try c.decode(String.self, forKey: .kind)
+        self.status = try c.decode(String.self, forKey: .status)
+        self.displayName = try c.decode(String.self, forKey: .displayName)
+        self.handle = try c.decode(String.self, forKey: .handle)
+        self.avatarUrl = try c.decodeIfPresent(String.self, forKey: .avatarUrl)
+        self.role = try c.decodeIfPresent(String.self, forKey: .role)
+        self.channelCount = try c.decode(Int.self, forKey: .channelCount)
+        self.channelIds = try c.decodeIfPresent([String].self, forKey: .channelIds) ?? []
+        self.email = try c.decodeIfPresent(String.self, forKey: .email)
+        self.timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
+        self.agentModel = try c.decodeIfPresent(String.self, forKey: .agentModel)
+        self.ownerHumanId = try c.decodeIfPresent(String.self, forKey: .ownerHumanId)
+        self.maxConcurrentRuns = try c.decodeIfPresent(Int.self, forKey: .maxConcurrentRuns)
+        self.maxRunSteps = try c.decodeIfPresent(Int.self, forKey: .maxRunSteps)
+        self.createdAtMs = try c.decode(Int64.self, forKey: .createdAtMs)
+        self.updatedAtMs = try c.decode(Int64.self, forKey: .updatedAtMs)
+    }
 }
 
 struct WorkspaceRosterResponse: ResponseEncodable {

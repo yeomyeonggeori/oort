@@ -532,6 +532,7 @@
 | `MOMO-215` | Agent mention routing e2e v0 | runtime-agent/swift | MOMO-004, MOMO-196, MOMO-212 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 | `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
+| `MOMO-218` | macOS channel management UI v0 | swift/macos-ui | MOMO-213, MOMO-214 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -752,6 +753,22 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #185를 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: production password hashing/SSO/OAuth, App Store/Developer ID signing, multi-account switching.
+
+### MOMO-218 수용기준 `[swift/macos-ui]`
+- [x] GitHub #194를 `scripts/goal_claim.sh 194`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `MomoCore.ChatBackend`와 macOS REST backend에 channel create/member add/remove 계약을 최소 추가한다.
+- [x] macOS sidebar에서 public/private channel 생성 UI를 제공한다.
+- [x] roster에서 human/agent를 selected channel에 add/remove할 수 있고, agent badge/member state가 반영된다.
+- [x] 권한 실패/중복/없는 멤버/서버 오류는 `BackendError.problem`/sidebar error banner로 표시하고 앱이 죽지 않는다.
+- [x] 생성된 channel은 sidebar에 반영되고 즉시 선택된다.
+- [x] `LiveChatBackend` demo fallback은 deterministic create/add/remove/error behavior를 제공한다.
+- [x] focused macOS unit tests를 추가한다.
+- [x] `scripts/verify_macos_real_backend_ui.sh` / `macos-ui` profile에 channel create + agent add/remove REST smoke를 추가한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] PR 생성 후 GitHub #194를 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: full channel settings/preferences, archive/search, enterprise fine-grained RBAC, directory sync, mobile/iOS UI.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

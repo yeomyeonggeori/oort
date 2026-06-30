@@ -639,6 +639,112 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
     }
 
+    func testRESTBackendCreatesChannelAndMutatesMembership() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000218201")!
+        let membership = UUID(uuidString: "00000000-0000-7000-8000-000000218301")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/workspaces/\(workspace.description)/channels"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["kind"] as? String, "private")
+                XCTAssertEqual(body?["name"] as? String, "ops-lab")
+                XCTAssertEqual(body?["topic"] as? String, "internal test")
+                return MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "channel": {
+                    "id": "\(channel.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "private",
+                    "name": "ops-lab",
+                    "topic": "internal test",
+                    "dmKey": null,
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "archivedAtMs": null
+                  },
+                  "creatorMembership": {
+                    "id": "\(membership.uuidString)",
+                    "workspaceId": "\(workspace.description)",
+                    "channelId": "\(channel.description)",
+                    "memberId": "\(MemberID.demoHuman.description)",
+                    "role": "owner",
+                    "joinedAtMs": 1782864000000,
+                    "leftAtMs": null
+                  }
+                }
+                """)
+            case ("POST", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/members"):
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["memberId"] as? String, MemberID.demoAgent.rawValue.uuidString)
+                XCTAssertEqual(body?["role"] as? String, "member")
+                return MockHTTPResponse(json: """
+                {
+                  "membership": {
+                    "id": "\(membership.uuidString)",
+                    "workspaceId": "\(workspace.description)",
+                    "channelId": "\(channel.description)",
+                    "memberId": "\(MemberID.demoAgent.description)",
+                    "role": "member",
+                    "joinedAtMs": 1782864000100,
+                    "leftAtMs": null
+                  }
+                }
+                """)
+            case ("DELETE", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/members/\(MemberID.demoAgent.description)"):
+                return MockHTTPResponse(json: """
+                {
+                  "membership": {
+                    "id": "\(membership.uuidString)",
+                    "workspaceId": "\(workspace.description)",
+                    "channelId": "\(channel.description)",
+                    "memberId": "\(MemberID.demoAgent.description)",
+                    "role": "member",
+                    "joinedAtMs": 1782864000100,
+                    "leftAtMs": 1782864000200
+                  }
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let created = try await backend.createChannel(
+            workspace: workspace,
+            kind: .privateChannel,
+            name: "ops-lab",
+            topic: "internal test"
+        )
+        XCTAssertEqual(created.channel.id, channel)
+        XCTAssertEqual(created.creatorMembership.role, .owner)
+
+        let added = try await backend.addMember(.demoAgent, to: channel, role: .member)
+        XCTAssertEqual(added.memberId, .demoAgent)
+        XCTAssertNil(added.leftAtMs)
+
+        let removed = try await backend.removeMember(.demoAgent, from: channel)
+        XCTAssertEqual(removed.memberId, .demoAgent)
+        XCTAssertNotNil(removed.leftAtMs)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "POST", "DELETE"])
+    }
+
     func testRESTBackendLoadsServerOwnedCostSnapshots() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -711,6 +817,31 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(snapshot.spentMicroUSD, 51_000)
         XCTAssertEqual(snapshot.isReconciled, true)
         XCTAssertEqual(viewModel.liveSpentMicroUSD, 51_000)
+    }
+
+    @MainActor
+    func testViewModelChannelManagementUpdatesDemoMembershipState() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        viewModel.setChannels(seed.channels)
+
+        let agent = try XCTUnwrap(seed.agents.first)
+        await viewModel.createChannel(kind: .privateChannel, name: "ops-lab", topic: "internal test")
+
+        let created = try XCTUnwrap(viewModel.channels.first(where: { $0.name == "ops-lab" }))
+        XCTAssertEqual(viewModel.selectedChannelId, created.id)
+        XCTAssertFalse(viewModel.isMember(agent.id, in: created.id))
+
+        await viewModel.addMember(agent.id, to: created.id)
+        XCTAssertTrue(viewModel.isMember(agent.id, in: created.id))
+
+        await viewModel.removeMember(agent.id, from: created.id)
+        XCTAssertFalse(viewModel.isMember(agent.id, in: created.id))
+
+        await viewModel.createChannel(kind: .publicChannel, name: "ops-lab")
+        XCTAssertTrue(viewModel.connectionError?.contains("channel name already exists") == true)
     }
 
     @MainActor
