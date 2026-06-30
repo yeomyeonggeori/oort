@@ -118,12 +118,15 @@ SERVER_PID=
 cleanup() {
   if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
   fi
   if [ "${WORKER_PID:-}" != "" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
     kill "$WORKER_PID" 2>/dev/null || true
+    wait "$WORKER_PID" 2>/dev/null || true
   fi
   if [ "${MOCK_PID:-}" != "" ] && kill -0 "$MOCK_PID" 2>/dev/null; then
     kill "$MOCK_PID" 2>/dev/null || true
+    wait "$MOCK_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -313,13 +316,16 @@ SQL
 echo "[agent-worker] starting AgentWorker"
 (
   cd "$REPO_ROOT"
-  RELAY_DATABASE_URL="postgres://momo_worker:momo_worker_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
-  CENT_API_URL="$CENT_API_URL" \
-  CENT_API_KEY="$CENT_API_KEY" \
-  HERMES_BASE_URL="$HERMES_BASE_URL" \
-  HERMES_API_KEY="$HERMES_API_KEY" \
-  WORKER_POLL_INTERVAL_MS="$WORKER_POLL_INTERVAL_MS" \
-  swift run --package-path workers/AgentWorker AgentWorker
+  swift build --package-path workers/AgentWorker --product AgentWorker >/dev/null
+  WORKER_BIN="$(swift build --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
+  exec env \
+    RELAY_DATABASE_URL="postgres://momo_worker:momo_worker_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    CENT_API_URL="$CENT_API_URL" \
+    CENT_API_KEY="$CENT_API_KEY" \
+    HERMES_BASE_URL="$HERMES_BASE_URL" \
+    HERMES_API_KEY="$HERMES_API_KEY" \
+    WORKER_POLL_INTERVAL_MS="$WORKER_POLL_INTERVAL_MS" \
+    "$WORKER_BIN"
 ) >"$WORKER_LOG" 2>&1 &
 WORKER_PID=$!
 

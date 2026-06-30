@@ -166,7 +166,7 @@
 - [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
 
 ### MOMO-111 수용기준 `[ci/docs]`
-- [ ] `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all` 설계/구현.
+- [ ] `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
 - [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
 - [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template에 문서화.
 
@@ -677,12 +677,14 @@
 - [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 
 ### MOMO-204 수용기준 `[docs/swift/runtime-agent/macos-ui]`
-- [ ] `scripts/local_gate.sh`에 M3 D/B/C profile 또는 documented composite command를 추가한다.
-- [ ] Gate evidence가 REST login/history, realtime or mock event stream, D tool-call progress/final result, B cost reserve/reconcile projection, C pending approval decision roundtrip을 한 markdown block에 기록한다.
-- [ ] External Hermes/provider side effects are explicitly skipped or marked `runtime-unverified`; repo-local mock path remains deterministic.
-- [ ] `docs/LOCAL_PR_GATE.md`, `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 새 gate 기준으로 갱신한다.
-- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
-- [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh`에 M3 D/B/C profile 또는 documented composite command를 추가한다.
+- [x] Gate evidence가 REST login/history, realtime or mock event stream, D tool-call progress/final result, B cost reserve/reconcile projection, C pending approval decision roundtrip을 한 markdown block에 기록한다.
+- [x] External Hermes/provider side effects are explicitly skipped or marked `runtime-unverified`; repo-local mock path remains deterministic.
+- [x] `docs/LOCAL_PR_GATE.md`, `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 새 gate 기준으로 갱신한다.
+- [x] #12(MOMO-020)는 `m3-dbc` profile PASS evidence가 PR에 첨부되고 merge된 뒤 `momo-main`이 close 가능하다고 판정한다(worker는 직접 close하지 않음).
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh --profile m3-dbc` PASS evidence를 첨부한다.
 
 ### MOMO-205 수용기준 `[runtime/macos-ui]`
 - [x] GitHub #162를 `scripts/goal_claim.sh 162`로 claim하고 별도 branch/worktree에서 진행한다.

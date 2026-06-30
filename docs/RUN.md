@@ -412,7 +412,34 @@ MOMO-202부터 같은 verifier가 MomoServer도 잠깐 띄워
 `budget_window`의 soft/hard limit state를 `CostSnapshot` 계약으로 반환하며,
 macOS B 비용 호흡 링은 이 projection을 소비한다.
 
-#### 5.3.2 MOMO-212 Agent live-channel 게이트
+#### 5.3.2 MOMO-204 M3 D/B/C combined local gate
+
+M3 D/B/C exit evidence는 개별 runtime profile을 따로 붙이지 않고 아래 profile 한 번으로
+수집한다.
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
+```
+
+검증 범위:
+
+- D Live Tool-Call: `scripts/mock_hermes.py` OpenAI-compatible SSE가 `tool_call`
+  delta/progress를 내보내고, AgentWorker가 final `tool_result`/`message.new`를
+  `version=message.seq`로 reconcile한다.
+- B Cost Projection: `usage_ledger`/`budget_window` reserve→reconcile DB evidence와
+  MomoServer `/cost-snapshots` 응답, macOS `CostSnapshot` binding test를 함께 확인한다.
+- C Approval Inbox/Decision: pending projection, approve/reject, `client_decision_id`
+  idempotency/conflict, expired click, membership guard, `audit_log`, resume `agent_job`
+  evidence를 확인한다.
+- macOS REST/UI data path: Docker+migrate+host MomoServer로 REST login/channel
+  list/history/send와 approval/cost structured props를 검증한다.
+
+`LOCAL_GATE_LAUNCH_UI=1`을 붙이면 `MomoMacDevApp` foreground process/window/log smoke까지
+요구한다. 기본값은 headless Codex 환경을 위해 GUI launch를 opt-in으로 유지한다.
+실제 external Hermes/staging provider side effect, M4 packaging/signing/notary, iOS/APNs는
+MOMO-204 범위 밖이다.
+
+#### 5.3.3 MOMO-212 Agent live-channel 게이트
 
 `agent:ws<workspace>.<agentMember>` namespace의 live subscribe 경계는 아래
 verifier가 닫는다. 메시지 채널 `ch:` live gate는 MOMO-196의
@@ -473,6 +500,9 @@ scripts/macos_dev_run.sh
 
 # PR evidence용 GUI opt-in: launch → process/window smoke → logs → terminate
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
+
+# M3 D/B/C combined exit evidence: D tool-call + B cost + C approval + REST/UI data path
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
 
 # M4 릴리스용 Xcode thin host app 무서명 build
 ( cd clients/macOS && \

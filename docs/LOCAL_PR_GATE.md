@@ -56,6 +56,7 @@ Profiles:
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
+| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
@@ -66,6 +67,7 @@ scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
+scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
 
@@ -103,6 +105,22 @@ background Codex runs: it executes `MomoMacSmoke` only. Opt-in GUI evidence uses
 `LOCAL_GATE_LAUNCH_UI=1`, which stages `dist/MomoMacDevApp.app`, launches it with
 `open -n`, verifies the process and System Events window count, captures unified
 logs under `${TMPDIR:-/tmp}/momo-macos-dev-run`, then terminates the app.
+
+For M3 D/B/C exit PRs, use:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
+```
+
+This composed profile records one PR-ready evidence block for:
+D Live Tool-Call (`agent.partial` mock OpenAI-compatible SSE tool_call progress
+and final `tool_result`/`message.new` with `version=message.seq`), B Cost
+Projection (`usage_ledger`/`budget_window` reserve/reconcile plus
+`/cost-snapshots` and MomoMac `CostSnapshot` binding), and C Approval Inbox
+(`/approvals` pending projection plus approve/reject/idempotency/audit/resume
+effects). Add `LOCAL_GATE_LAUNCH_UI=1` when a foreground macOS dev app
+process/window smoke is wanted; by default the profile keeps GUI launch opt-in
+and still verifies the real-backend REST/UI data path.
 
 ## 3. Manual Fallback
 
@@ -147,6 +165,7 @@ Use the profile that matches the changed surface.
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
+| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
 
 ## 5. PR Body Evidence
 

@@ -8,7 +8,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all
+Usage: scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all
 
 Options:
   --profile PROFILE   Gate profile to run. Default: docs
@@ -39,7 +39,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all)
+    docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all)
       PROFILE="$1"
       shift
       ;;
@@ -52,7 +52,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$PROFILE" in
-  docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all) ;;
+  docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -223,6 +223,23 @@ add_macos_ui_commands() {
   fi
 }
 
+add_m3_dbc_commands() {
+  add_static_commands
+  add_swift_commands
+  add_runtime_bootstrap_commands
+  add_cmd "M3 D/B cost projection and tool-call runtime evidence" "scripts/verify_agent_worker.sh"
+  add_runtime_host_api_cleanup_command "Cleanup host MomoServer after D/B verifier"
+  add_cmd "M3 C approval decision runtime evidence" "scripts/verify_approval_decision.sh"
+  add_runtime_host_api_cleanup_command "Cleanup host MomoServer after C verifier"
+  add_macos_ui_commands
+  add_note_once coverage "M3 D evidence: repo-local OpenAI-compatible SSE mock emits agent.partial text plus tool_call_name/tool_call_args progress; AgentWorker reconciles to final tool_result/message.new with outbox version equal to message.seq."
+  add_note_once coverage "M3 B evidence: AgentWorker reserve/reconcile writes usage_ledger and budget_window, then MomoServer /cost-snapshots exposes the server-owned CostSnapshot projection consumed by MomoMac."
+  add_note_once coverage "M3 C evidence: /approvals pending projection, approve/reject, client_decision_id idempotency, conflict, expired click, channel membership guard, audit_log, and resume agent_job durable effects are verified."
+  add_note_once coverage "M3 macOS evidence: real-backend smoke verifies REST login/channel list/history/send plus approval/cost structured props; LOCAL_GATE_LAUNCH_UI=1 upgrades this profile to require MomoMacDevApp process/window/log evidence."
+  add_note_once coverage "MOMO-020 close-readiness: when this profile passes in the PR evidence, the old staging/Hermes wording can be closed under the MOMO-204 local-gate reinterpretation after review/merge; worker does not close #12."
+  add_note_once not_covered "External Hermes/staging provider side effects, M4 Xcode packaging/signing/notary, iOS/APNs, and agent: namespace production presence remain out of scope for MOMO-204."
+}
+
 case "$PROFILE" in
   docs)
     add_static_commands
@@ -263,6 +280,9 @@ case "$PROFILE" in
     add_static_commands
     add_swift_commands
     add_macos_ui_commands
+    ;;
+  m3-dbc)
+    add_m3_dbc_commands
     ;;
   all)
     add_static_commands
