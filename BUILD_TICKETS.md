@@ -150,6 +150,7 @@
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
 | `MOMO-196` | Realtime WebSocket live subscribe verifier v0(token→subscribe→REST send→live publication) | runtime/infra | MOMO-115, MOMO-186, MOMO-192, MOMO-193 |
+| `MOMO-212` | Agent channel live subscription verifier v0(agent status/partial live boundary) | runtime/infra | MOMO-196, MOMO-200, MOMO-201 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-209` | stale worktree Docker Compose project/container/network janitor | tooling/docs | MOMO-112, MOMO-194, MOMO-199 |
@@ -195,6 +196,19 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] `scripts/local_gate.sh --profile runtime-live` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
+
+### MOMO-212 수용기준 `[runtime-agent/swift]`
+- [x] GitHub #180을 `scripts/goal_claim.sh 180`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] Centrifugo `agent` namespace가 `agent:ws<workspaceUUID>.<agentMemberUUID>` channel shape에 대해 subscribe proxy를 타도록 설정한다.
+- [x] `/v1/centrifugo/subscribe`가 `agent:` namespace를 fail-closed로 파싱하고, observer와 target agent가 같은 workspace의 active member이며 하나 이상의 active channel membership을 공유할 때만 허용한다.
+- [x] 기존 `ch:`/`dm:` channel membership guard와 client direct publish 금지, server/worker publish path를 유지한다.
+- [x] `scripts/verify_agent_live_channel.sh`가 Docker dev compose + host API/worker + mock Hermes + Centrifugo subscribe proxy 경로를 검증한다.
+- [x] authorized member가 `agent.status` 또는 `agent.partial` live publication을 수신한다.
+- [x] invalid connection token, same-workspace no-shared-channel member, other-workspace member/token, client direct publish가 차단된다.
+- [x] `agent.status`/`agent.partial`은 ephemeral progress projection이며 `message.seq` ordering authority가 아님을 `docs/RUN.md`/STATUS에 기록한다.
+- [x] focused server tests를 추가하고 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #180을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-194 수용기준 `[tooling/docs]`
 - [x] GitHub #144를 `scripts/goal_claim.sh 144`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -266,7 +280,7 @@
 | id | 한줄 | 수용기준 등급 | 의존 | 상태 |
 |---|---|---|---|---|
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
-| `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
+| `MOMO-181` | Plugin manifest v0 + catalog split criteria + approval metadata gate linkage | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 완료 |
 | `MOMO-186` | Deterministic e2e compose stack for local gates | infra/docs | MOMO-182, MOMO-115 | local gate 대상 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 완료 |
@@ -283,11 +297,14 @@
 ### MOMO-181 수용기준 `[docs/spec]`
 - [x] Plugin Manifest v0 정본: `research/12-agentic-work-os/02-plugin-manifest-v0.md`.
 - [x] 최소 manifest fields 정의: `id`, `name`, `version`, `publisher`, `runtime`, `surfaces`, `capabilities`, `tool_schema_refs`, `approval_policy`, `risk`, `source_policy`, `audit_policy`, `compatibility`, `signature`.
+- [x] GitHub issue #178 field vocabulary 정의: `plugin_id`, `tools`, `scopes`, `audit_surface`, `ui_surfaces`, `runtime_boundary`, `license`, `provenance`.
 - [x] plugin catalog repo(`momo-plugins`) split 기준, artifact metadata, signed artifact policy, compatibility matrix를 문서화.
+- [x] catalog class 기준 정의: core bundled plugin, first-party repo plugin, third-party/custom plugin, private enterprise plugin.
 - [x] first-party plugin repo와 SDK repo 분리 기준을 문서화.
-- [x] Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane `permissions.retrieval_policy_version`/plugin policy version 연결을 명시.
+- [x] Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane `permissions.retrieval_policy_version`/plugin policy version, approval metadata gate 연결을 명시.
+- [x] Paca식 plugin catalog/SDK 구조는 repo topology 참고로만 두고, momo의 channel timeline execution ledger / approval / audit / capability cache 차별점을 명확화.
 - [x] JSON fixture 3종: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
-- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 - out of scope: 실제 plugin runtime, repo split 생성, WASM runtime, marketplace UI, external OAuth implementation.
 
@@ -498,6 +515,7 @@
 | `MOMO-201` | D Live Tool-Call fixture/local gate | runtime-agent/macos-ui | MOMO-200, MOMO-178 |
 | `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
 | `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
+| `MOMO-212` | Agent channel live subscription verifier v0 | runtime-agent/swift | MOMO-200, MOMO-201 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 
 ### MOMO-130 수용기준 `[swift]`
@@ -613,7 +631,7 @@
 ### MOMO-200 수용기준 `[swift/macos-ui/runtime-relay]`
 - [x] macOS SwiftCentrifuge adapter를 추가하기 전 라이선스(MIT/permissive) 확인과 NOTICE/THIRD_PARTY 반영 여부를 결정한다.
 - [x] adapter가 `POST /v1/auth/realtime-token`으로 connection JWT를 가져오고 SwiftCentrifuge token getter/refresh path에 연결한다.
-- [ ] `ch:ws<workspace>.<channel>` 및 `agent:ws<workspace>.<agentMember>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. (이번 slice는 `ch:` channel live subscription)
+- [x] `ch:ws<workspace>.<channel>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. `agent:ws<workspace>.<agentMember>` live boundary는 MOMO-212에서 verifier로 닫는다.
 - [x] SwiftCentrifuge publication data를 `RealtimeEnvelope`로 decode하는 `RealtimeEnvelopeSubscriptionTransport` 구현을 추가한다.
 - [x] `MomoServerRESTChatBackend` dev config에서 live driver를 주입할 수 있고, driver 미주입 fallback은 유지한다.
 - [x] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
@@ -813,6 +831,7 @@
 | id | 한줄 | 수용기준 등급 | 의존 |
 |---|---|---|---|
 | `MOMO-208` | M4 macOS packaging architecture ADR: SwiftPM dev app과 Xcode release app 경계, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle 순서와 #15/#16/#17 split | docs/spec | M4 구현 전 |
+| `MOMO-211` | MomoMac Xcode thin host app v0: SwiftPM dev app과 별개로 `MomoMac.xcodeproj`가 `MomoMac`/`MomoCore` local package를 import해 무서명 build되는 첫 release host slice | xcode/swift/docs | MOMO-208 |
 
 ### MOMO-208 수용기준 `[docs/spec]`
 - [x] `docs/adr/0003-macos-packaging-architecture.md` — SwiftPM `MomoMacDevApp`은 개발/로컬 게이트용, Xcode `MomoMac.app`은 릴리스 번들/서명/공증용으로 분리한다.
@@ -820,6 +839,17 @@
 - [x] #15(MOMO-030 Xcode host) → #16(MOMO-031 codesign/notary/DMG) → #17(MOMO-032 Sparkle) 후속 issue split을 문서화한다.
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #171을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-211 수용기준 `[xcode/swift/docs]`
+- [x] `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가한다.
+- [x] Bundle ID는 `com.dawnkim.momo`를 유지한다.
+- [x] Xcode host app은 `MomoMac`/`MomoCore`를 local SwiftPM package dependency로 사용한다.
+- [x] SwiftUI entrypoint는 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 재사용한다.
+- [x] Debug/Release build settings에 hardened runtime 및 entitlements file이 반영되어 있고, Developer ID signing/notary/DMG/Sparkle은 후속 M4 TODO로 남긴다.
+- [x] `xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] 가능한 범위에서 app launch/window smoke evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #179를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ## M7 Enterprise Trust
 

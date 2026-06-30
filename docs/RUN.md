@@ -299,15 +299,20 @@ Boundary:
 - Normal `ch:`/`dm:` subscriptions still go through Centrifugo subscribe proxy
   `POST /v1/centrifugo/subscribe`, which parses `ch:ws<workspace>.<channel>` and
   checks active channel `membership` under tenant RLS.
+- Agent progress subscriptions use `agent:ws<workspace>.<agentMember>`. The
+  subscribe proxy checks that the observer and target agent are active members
+  in the same workspace and share at least one active channel membership. This
+  boundary is for live `agent.status`/`agent.partial` progress only; durable
+  final output still reconciles through channel `message.new` and `message.seq`.
 - Clients never publish to Centrifugo. All durable writes remain REST → Postgres
-  transaction → outbox → OutboxRelay publish.
+  transaction → outbox → OutboxRelay/AgentWorker server-side publish.
 - TTL defaults to 300 seconds and is configurable with
   `CENT_CONNECTION_TOKEN_TTL_SECONDS`, clamped to 60~1800 seconds.
 
 Focused tests live in `server/Tests/MomoServerTests` and cover TTL clamp,
-Centrifugo JWT member/workspace claims, expired app access token rejection, and
-response JSON shape. Docker connect/subscribe end-to-end remains covered by the
-future SwiftCentrifuge driver/runtime pairing.
+Centrifugo JWT member/workspace claims, expired app access token rejection,
+response JSON shape, and channel/agent namespace parsing. Docker WebSocket live
+evidence is covered by `runtime-live` for `ch:` and `runtime-agent` for `agent:`.
 
 #### 5.1.3 Inbound MCP v0 skeleton
 
@@ -434,6 +439,31 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 실제 external Hermes/staging provider side effect, M4 packaging/signing/notary, iOS/APNs는
 MOMO-204 범위 밖이다.
 
+#### 5.3.3 MOMO-212 Agent live-channel 게이트
+
+`agent:ws<workspace>.<agentMember>` namespace의 live subscribe 경계는 아래
+verifier가 닫는다. 메시지 채널 `ch:` live gate는 MOMO-196의
+`scripts/verify_realtime_live.sh`가 담당하고, 이 gate는 agent status/partial
+progress가 agent channel boundary에서만 전달되는지 확인한다.
+
+```sh
+make up
+make migrate
+scripts/verify_agent_live_channel.sh
+scripts/local_gate.sh --profile runtime-agent
+```
+
+검증 범위는 Docker dev compose PG/Centrifugo bootstrap → host MomoServer →
+mock Hermes → host AgentWorker → compose network의 `api:8080` proxy 연결 →
+authorized demo member의 `agent:ws<workspace>.<agentMember>` subscribe →
+`agent.status` 또는 `agent.partial` live publication 수신이다. 같은 run에서
+invalid Centrifugo connection token, same-workspace member without shared channel,
+other-workspace member/token, client direct publish deny를 함께 확인한다.
+
+`agent.status`/`agent.partial`은 non-durable progress projection이다. 이 이벤트는
+`message.seq`를 갖는 channel timeline의 순서 권위가 아니며, 최종 durable 결과는
+기존 `message.new`/`message.seq` 경로로 reconcile한다.
+
 수동으로 mock만 띄우려면:
 
 ```sh
@@ -445,9 +475,9 @@ python3 scripts/mock_hermes.py --host 127.0.0.1 --port "${HERMES_PORT:-8088}"
 ## 6. macOS 클라이언트 (데모 surface: D / B / C)
 
 macOS 패키지(`clients/macOS`)는 v0에서 **SwiftUI 라이브러리 + 빌드검증 smoke 실행파일 +
-SwiftPM 개발용 window 앱**으로 구성된다(배포용 `.app` 번들 + SwiftCentrifuge/AsyncHTTPClient
-트랜스포트는 후속 작업). 데모 경험 **D(Live Tool-Call) / B(비용 호흡) / C(승인 인박스)**는
-`MomoMacDevApp`에서 바로 확인할 수 있다.
+SwiftPM 개발용 window 앱 + 릴리스용 Xcode thin host app**으로 구성된다. 데모 경험
+**D(Live Tool-Call) / B(비용 호흡) / C(승인 인박스)**는 `MomoMacDevApp`과 Xcode host
+`MomoMac.app` 모두에서 같은 `MomoMacRootView`로 확인할 수 있다.
 
 ```sh
 # 라이브러리 + smoke 컴파일 검증
@@ -473,6 +503,10 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 
 # M3 D/B/C combined exit evidence: D tool-call + B cost + C approval + REST/UI data path
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc
+
+# M4 릴리스용 Xcode thin host app 무서명 build
+( cd clients/macOS && \
+  xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO )
 ```
 
 - `MomoMac`(library): `MomoCore`의 `ChatBackend`/`AgentTransport` 계약 위에 SwiftUI 뷰 + `LiveChatBackend` 스텁 + `MomoServerRESTChatBackend` 개발용 REST transport.
@@ -498,7 +532,13 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
   생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified
   log capture, `--telemetry`는 bundle subsystem log capture, `--terminate`는 evidence 수집 후 종료,
   `--terminate-only`는 실행 중인 dev app 정리에 사용한다. 이 bundle은 개발용 staging 산출물이며
-  Xcode `.app` 패키징, Developer ID signing, 공증, DMG/Sparkle 배포는 M4 범위다.
+  Xcode release host와 별개다.
+- `clients/macOS/MomoMac.xcodeproj`: M4 릴리스 패키징 진입용 thin host app이다. shared scheme
+  `MomoMac`은 `MomoMac.app`을 만들며 Bundle ID는 `com.dawnkim.momo`다. 이 target은 local SwiftPM
+  package products `MomoMac`/`MomoCore`를 링크하고, 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을
+  사용한다. Debug/Release에는 hardened runtime build setting과 `XcodeHost/MomoMac.entitlements`
+  file이 반영되어 있다. `CODE_SIGNING_ALLOWED=NO` local build에서는 Xcode가 hardened runtime signing
+  step을 수행하지 않으므로, Developer ID signing, notarytool/stapler, DMG, Sparkle은 후속 M4 범위다.
 - Codex app Run action은 `.codex/environments/environment.toml`에서 `./scripts/macos_dev_run.sh`로
   연결된다.
 
@@ -611,6 +651,7 @@ M1 staging 완료로 표시하지 않는다.
 | 에이전트가 응답 안 함(D 데모) | `AgentWorker` 미기동 또는 hermes 게이트웨이 미연결. `HERMES_BASE_URL`/`HERMES_API_KEY` 확인. |
 | Centrifugo HTTP API 401 | compose가 `CENTRIFUGO_HTTP_API_KEY=${CENT_API_KEY}`로 주입되는지 확인. Centrifugo v6는 일반 JSON `"${CENT_API_KEY}"`를 치환하지 않는다. |
 | Centrifugo subscribe 거부 | `centrifugo.json`의 `channel.proxy.subscribe.endpoint`(`api:8080`)과 서버 `PORT` 불일치, 또는 `CENT_TOKEN_HMAC` 불일치. |
+| `agent:` subscribe 거부 | target agent가 같은 workspace active member인지, observer와 target agent가 하나 이상의 active channel membership을 공유하는지 확인. 공유 채널이 없거나 다른 workspace token이면 정상적으로 deny된다. |
 | prod compose가 시크릿을 요구하며 실패 | `infra/prod/.env.example`은 예시다. 실제 staging/prod는 host-local env 또는 SOPS/age로 `change-me-*`를 모두 교체한다. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |
 

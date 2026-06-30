@@ -63,18 +63,20 @@ momo plugin v0 should be manifest-first.
 
 Minimum plugin manifest fields:
 
-- `id`, `name`, `version`, `publisher`.
-- `runtime`: `external_webhook`, `hosted_connector`, `mcp_tool_proxy`, later `wasm`.
-- `surfaces`: slash command, message context action, approval card, source provider, sidebar/admin settings.
-- `capabilities`: tool names, input schema refs, output schema refs, read/write grants.
-- `approval_policy`: never/read-only/require-approval/always.
-- `risk`: read/low/medium/high.
-- `source_policy`: what source refs can enter Context Packet.
-- `audit_policy`: events emitted on tool call/result/failure/revoke.
-- `compatibility`: momo protocol version, server API version, client card version.
-- `signature`: optional in dev, required before marketplace/trust gate.
+- `plugin_id`, `id` compatibility alias, `name`, `version`, `publisher`.
+- `runtime` and `runtime_boundary`: `hosted_connector`, `external_webhook`, `mcp_tool_proxy`, `internal`, later `wasm`; plus executor/process/secret/network/state/failure boundary.
+- `surfaces` and `ui_surfaces`: slash command, message context action, approval card, source provider, sidebar/admin settings, and timeline card affordances.
+- `capabilities`, `tools`, and `tool_schema_refs`: tool names, schema hashes, read/propose/deny grants, risk, operations, result kind, and resource scope summaries.
+- `approval_policy`: `none`, `require_approval`, `always`, or `deny`; write/spend/deploy/identity/admin risk must not bypass approval metadata gates.
+- `risk` and `scopes`: risk class plus workspace/channel/member/provider/resource scope vocabulary.
+- `source_policy`: what source refs can enter Context Packet and Memory Plane.
+- `audit_surface` and `audit_policy`: timeline/admin/source/cost events emitted on proposal, approval, tool result, failure, revoke, and memory revalidation.
+- `license` and `provenance`: SPDX license, notice requirements, source repo, release ref, build digest, publisher verification.
+- `compatibility` and `signature`: momo protocol versions, client card versions, artifact digest, signature ref.
 
 Paca uses WASM for backend plugin isolation. momo should not adopt a WASM runtime immediately. The first practical step is governed external connectors plus capability metadata because momo already has approval/cost/audit primitives. WASM or other sandboxed in-process plugins become M5+ only after manifest, catalog, signed artifacts, and permission model are stable.
+
+Catalog classes are fixed by the Plugin Manifest v0 spec: core bundled plugin, first-party repo plugin, third-party/custom plugin, and private enterprise plugin. All classes share the same path: manifest/catalog evidence -> Capability Cache `plugin_tool_schema` -> Context Packet `tool_grants` -> approval metadata gate -> channel timeline/audit result. The catalog is therefore an execution-ledger trust index, not a generic backend app directory.
 
 ## Docker and deploy layering
 

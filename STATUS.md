@@ -73,7 +73,7 @@
 ## 0-10. MOMO-200 macOS SwiftCentrifuge live adapter (2026-06-30)
 
 - `clients/macOS`에 SwiftCentrifuge 0.9.0(MIT) dependency와 `SwiftCentrifugeRealtimeSubscriptionTransport`를 추가해 `/v1/auth/realtime-token` connection token getter → `ch:ws<workspace>.<channel>` subscribe → publication `RealtimeEnvelope` decode → `DefaultRealtimeSubscriptionDriver` 경로를 연결했다.
-- `MomoMacDevApp` REST mode는 `MOMO_CENTRIFUGO_WS_URL` 또는 worktree `CENT_PORT`가 있으면 optional live driver를 주입한다. 검증: `swift test --package-path clients/macOS` PASS, `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-live` PASS. `agent:` subscription과 production reconnect UX polish는 후속이다.
+- `MomoMacDevApp` REST mode는 `MOMO_CENTRIFUGO_WS_URL` 또는 worktree `CENT_PORT`가 있으면 optional live driver를 주입한다. 검증: `swift test --package-path clients/macOS` PASS, `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-live` PASS. `agent:` live boundary는 MOMO-212에서 닫고, production reconnect UX polish는 후속이다.
 
 ## 0-11. MOMO-206 Local Gate All-Profile Runtime Cleanup Hotfix (2026-06-30)
 
@@ -104,7 +104,21 @@
 
 - `MomoCore`에 `RealtimeConnectionStatus` 모델을 추가하고, connection/subscription/reconnect/error/REST fallback 상태를 `RealtimeSubscriptionDriver`와 backend status stream으로 노출했다.
 - SwiftCentrifuge channel live adapter가 connect/subscribe/reconnect/disconnect/error lifecycle을 status stream으로 보고하고, `ChatViewModel`은 selected channel status와 `retryRealtime()`을 제공한다. `MessageListView`는 Live/Connecting/Reconnecting/REST fallback/Error banner와 수동 retry affordance를 표시한다.
-- 검증: `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. `agent:` subscription/presence/APNs는 후속 범위다.
+- 검증: `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. `agent:` live boundary는 MOMO-212에서 닫고, presence/APNs는 후속 범위다.
+
+## 0-16. MOMO-212 Agent Channel Live Subscription Verifier v0 (2026-06-30)
+
+- Centrifugo `agent` namespace에 subscribe proxy와 `agent:ws<workspaceUUID>.<agentMemberUUID>` regex를 적용하고, `/v1/centrifugo/subscribe`가 agent namespace를 fail-closed로 파싱/인가한다.
+- v0 agent live boundary는 observer와 target agent가 같은 workspace의 active member이고, 하나 이상의 active channel membership을 공유할 때만 구독을 허용한다. 일반 channel `ch:`/`dm:` membership guard와 client direct publish 금지, REST→Postgres→outbox publish 경로는 유지한다.
+- `scripts/verify_agent_live_channel.sh`를 추가해 Docker dev compose + host MomoServer/AgentWorker + mock Hermes + Centrifugo subscribe proxy에서 authorized member의 live `agent.status`/`agent.partial` 수신, invalid token, same-workspace no-shared-channel member, other-workspace token/member, client direct publish deny를 검증한다.
+- `agent.status`/`agent.partial`은 ephemeral progress projection이며 `message.seq` ordering authority가 아니다. 최종 durable 결과는 기존 channel timeline의 `message.new`/`message.seq`로 reconcile한다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path server` PASS, `scripts/verify_agent_live_channel.sh` PASS. 전체 `swift`/`runtime-agent` local gate evidence는 PR에 첨부한다. Presence/APNs, external Hermes staging connection, production reconnect UX polish는 계속 후속 범위다.
+
+## 0-16. MOMO-211 M4 MomoMac Xcode thin host app v0 (2026-06-30)
+
+- `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가했다. Xcode host target은 SwiftPM `MomoMacDevApp`과 분리되어 있고, `MomoMac`/`MomoCore`를 local SwiftPM dependency로 소비해 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 호스트한다.
+- Bundle ID는 `com.dawnkim.momo`이며 Debug/Release 모두 hardened runtime build setting과 sandbox/network-client entitlements file을 갖는다. `CODE_SIGNING_ALLOWED=NO` local build에서는 Xcode가 hardened runtime signing step을 비활성화한다. Developer ID signing/notarytool/DMG/Sparkle은 계속 후속 M4 범위다.
+- 검증: `xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO` PASS(in `clients/macOS`), `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS. GUI smoke는 Xcode build 산출 `MomoMac.app` launch 후 `MomoMac` process와 `window_count=1`을 확인했다.
 
 ## 0-16. MOMO-204 Combined M3 D/B/C Local Gate Profile (2026-06-30)
 
@@ -413,6 +427,12 @@
 - JSON fixture 3종을 `research/11-agent-runtime/fixtures/plugin-manifest-v0/`에 추가했다: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
 - Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane permission/policy_version 연결을 문서화했다. 검증: `scripts/local_gate.sh --profile docs` PASS. 실제 plugin runtime, repo split, WASM runtime, marketplace UI, external OAuth implementation은 out of scope이며 런타임/스키마 변경 없음.
 
+## 0an-1. MOMO-181/#178 Plugin Manifest/Catalog v0 Clarification (2026-06-30)
+
+- Plugin Manifest v0를 GitHub issue #178 수용기준에 맞춰 재정본화했다. `plugin_id`, `tools`, `scopes`, `audit_surface`, `ui_surfaces`, `runtime_boundary`, `license`, `provenance`를 명시하고, 기존 compact fixture fields에서 catalog admission이 도출해야 할 항목으로 고정했다.
+- `momo-plugins`를 Paca식 app catalog가 아니라 core bundled / first-party repo / third-party custom / private enterprise plugin의 signed capability evidence catalog로 정의했다. 모든 class는 Manifest/Catalog evidence → Capability Cache `plugin_tool_schema` → Context Packet `tool_grants` → approval metadata gate → channel timeline/audit result 경로를 공유한다.
+- 런타임/스키마/repo split 구현은 out of scope다. 검증: `scripts/local_gate.sh --profile docs` PASS(clean worktree, dirty files 0). 실제 plugin runtime/external signing/marketplace UI/OAuth execution은 계속 후속 `runtime-unverified` 범위다.
+
 ## 0an2. MOMO-183 First-Party Plugin Repo Strategy (2026-06-29)
 
 - First-party plugin repo strategy 정본을 `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`에 추가했다. 우선순위는 GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector이며, repo split 순서와 public/private visibility 기준을 고정했다.
@@ -492,6 +512,7 @@
 | `scripts/verify_relay.sh` | `bash -n` + Docker PG18/Centrifugo/MomoServer/OutboxRelay runtime | ✅ OK |
 | `scripts/mock_hermes.py` | `python3 -m py_compile` + MOMO-004 SSE runtime | ✅ OK |
 | `scripts/verify_agent_worker.sh` | `bash -n` + Docker PG18/Centrifugo/AgentWorker runtime | ✅ OK |
+| `scripts/verify_agent_live_channel.sh` | `bash -n` + Docker PG18/Centrifugo/MomoServer/AgentWorker/mock-Hermes live agent channel runtime | ✅ OK |
 | `infra/prod/*` + `scripts/verify_staging_smoke.sh` | prod compose/Caddy/Centrifugo/secrets/pgBackRest local smoke | ✅ OK (runtime-unverified: staging deploy/TLS/PITR host rehearsal 미실행) |
 
 > **MOMO-001에서 검증됨:** PG18+Centrifugo compose health, SQL 001/002 적용 및 멱등 재실행, MomoServer `/health`, 메시지 송신의 `channel_seq` gapless 발급과 `message`/`outbox` 기록.
@@ -503,7 +524,8 @@
 > **MOMO-176에서 검증됨:** `GET /v1/workspaces/{ws}/roster`/`members`는 일반 tenant token + `SET LOCAL app.workspace_id` + active membership guard로 human/agent roster를 반환한다. `scripts/verify_roster.sh`가 demo human+agent, active-membership 없는 member 제외, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증했다.
 > **MOMO-197에서 검증됨:** `GET /v1/workspaces/{ws}/channels`는 일반 tenant token + `SET LOCAL app.workspace_id` + active workspace/channel membership guard로 visible channel list를 반환한다. `scripts/verify_channel_list.sh`가 demo active channels, left/archived filtering, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증한다.
 > **MOMO-196에서 검증됨:** repo-local live WebSocket verifier가 demo login → realtime-token → Centrifugo subscribe → REST send → live `message.new` publication 수신과 invalid connection token reject를 검증한다.
-> **남은 runtime-unverified:** `agent:` realtime subscription, presence, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
+> **MOMO-212에서 검증됨:** `agent:ws<workspace>.<agentMember>` live subscription boundary가 authorized shared-channel member에게 `agent.status`/`agent.partial`을 전달하고, invalid token/no-shared-channel/other-workspace/direct publish 경로를 차단한다.
+> **남은 runtime-unverified:** presence, APNs, external Hermes staging connection, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
 
 ## 3. 생성 파일 트리 (핵심)
 
@@ -527,14 +549,14 @@ momo/
 ├─ clients/macOS/       (MomoMac: ChannelList/MessageList/MessageBubble/AgentPartial/
 │                         CostBreathingRing/ApprovalInbox + ChatViewModel/LiveChatBackend)
 ├─ adapters/hermes/     (momo_adapter.py: BasePlatformAdapter · plugin.yaml)
-└─ scripts/{migrate,verify_rls,verify_roster,verify_join,verify_platform_admin,verify_relay,verify_agent_worker,mock_hermes}.*
+└─ scripts/{migrate,verify_rls,verify_roster,verify_join,verify_platform_admin,verify_relay,verify_agent_worker,verify_agent_live_channel,mock_hermes}.*
 ```
 
 ## 4. 컴파일 검증됨 vs 런타임 미검증
 
 - ✅ **컴파일 검증됨**: 5개 Swift 패키지 전부 `swift build` 통과 → 타입·API 계약·시그니처 정합.
 - ⛔ **남은 런타임 미검증**:
-  - `agent:` realtime subscription, presence, APNs.
+  - presence, APNs, external Hermes staging connection.
   - Inbound MCP JSON-RPC transport/tool execution, canonical `post_message` write path, approval-safe `create_tool_call` transaction/audit, RLS/idempotency e2e.
 
 ## 5. 남은 작업
