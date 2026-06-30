@@ -100,6 +100,12 @@
 - MomoMac `ChatViewModel`은 final `tool_result` 또는 같은 `message_id`의 committed message가 들어오면 in-flight progress card를 제거하고 `message.seq` 기준 timeline으로 reconcile한다. Fixture stream 테스트가 duplicate final/late partial을 중복 없이 처리함을 검증한다.
 - 검증: `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-agent` PASS, `scripts/local_gate.sh --profile macos-ui` PASS. 실제 external Hermes/provider side effect는 out of scope이며 mock OpenAI-compatible gateway local evidence로 닫는다.
 
+## 0-15. MOMO-207 macOS Realtime Reconnect Status UX (2026-06-30)
+
+- `MomoCore`에 `RealtimeConnectionStatus` 모델을 추가하고, connection/subscription/reconnect/error/REST fallback 상태를 `RealtimeSubscriptionDriver`와 backend status stream으로 노출했다.
+- SwiftCentrifuge channel live adapter가 connect/subscribe/reconnect/disconnect/error lifecycle을 status stream으로 보고하고, `ChatViewModel`은 selected channel status와 `retryRealtime()`을 제공한다. `MessageListView`는 Live/Connecting/Reconnecting/REST fallback/Error banner와 수동 retry affordance를 표시한다.
+- 검증: `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. `agent:` subscription/presence/APNs는 후속 범위다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
@@ -490,7 +496,7 @@
 > **MOMO-176에서 검증됨:** `GET /v1/workspaces/{ws}/roster`/`members`는 일반 tenant token + `SET LOCAL app.workspace_id` + active membership guard로 human/agent roster를 반환한다. `scripts/verify_roster.sh`가 demo human+agent, active-membership 없는 member 제외, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증했다.
 > **MOMO-197에서 검증됨:** `GET /v1/workspaces/{ws}/channels`는 일반 tenant token + `SET LOCAL app.workspace_id` + active workspace/channel membership guard로 visible channel list를 반환한다. `scripts/verify_channel_list.sh`가 demo active channels, left/archived filtering, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증한다.
 > **MOMO-196에서 검증됨:** repo-local live WebSocket verifier가 demo login → realtime-token → Centrifugo subscribe → REST send → live `message.new` publication 수신과 invalid connection token reject를 검증한다.
-> **남은 runtime-unverified:** SwiftCentrifuge macOS adapter/reconnect/recovery UX, presence, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
+> **남은 runtime-unverified:** `agent:` realtime subscription, presence, APNs, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
 
 ## 3. 생성 파일 트리 (핵심)
 
@@ -521,7 +527,7 @@ momo/
 
 - ✅ **컴파일 검증됨**: 5개 Swift 패키지 전부 `swift build` 통과 → 타입·API 계약·시그니처 정합.
 - ⛔ **남은 런타임 미검증**:
-  - SwiftCentrifuge macOS adapter/reconnect/recovery UX, presence, APNs.
+  - `agent:` realtime subscription, presence, APNs.
   - Inbound MCP JSON-RPC transport/tool execution, canonical `post_message` write path, approval-safe `create_tool_call` transaction/audit, RLS/idempotency e2e.
 
 ## 5. 남은 작업

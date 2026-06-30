@@ -847,6 +847,136 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(received.messageSeqs, [8])
     }
 
+    @MainActor
+    func testViewModelSurfacesRealtimeReconnectStatusFromDriver() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let driver = RecordingRealtimeSubscriptionDriver(
+            events: [],
+            statuses: [
+                RealtimeConnectionStatus(
+                    channelId: channel,
+                    connection: .reconnecting,
+                    subscription: .recovering,
+                    fallback: .restHistory,
+                    canRetry: false,
+                    message: "temporary network loss"
+                ),
+                RealtimeConnectionStatus(
+                    channelId: channel,
+                    connection: .connected,
+                    subscription: .subscribed,
+                    message: "recovered"
+                ),
+            ]
+        )
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/approvals"):
+                return MockHTTPResponse(json: #"{"approvals":[]}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                return MockHTTPResponse(json: """
+                {
+                  "channels": [
+                    {
+                      "id": "\(channel.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "public",
+                      "name": "general",
+                      "topic": "팀 일반 채널",
+                      "createdBy": "\(MemberID.demoHuman.description)"
+                    }
+                  ]
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"):
+                return MockHTTPResponse(json: #"{"messages":[],"nextBefore":null}"#)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session,
+            realtimeDriver: driver
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token-123")
+        await viewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.connection, .connected)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.subscription, .subscribed)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.message, "recovered")
+        let statusSubscriptionCount = await driver.statusSubscriptionCount()
+        XCTAssertEqual(statusSubscriptionCount, 1)
+    }
+
+    @MainActor
+    func testViewModelKeepsRESTFallbackWhenRealtimeDriverIsUnavailableAndRetryIsManual() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/approvals"):
+                return MockHTTPResponse(json: #"{"approvals":[]}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                return MockHTTPResponse(json: """
+                {
+                  "channels": [
+                    {
+                      "id": "\(channel.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "public",
+                      "name": "general"
+                    }
+                  ]
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"):
+                return MockHTTPResponse(json: #"{"messages":[],"nextBefore":null}"#)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token-123")
+        await viewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.fallback, .restHistory)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.connection, .disabled)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.subscription, .disabled)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.canRetry, true)
+
+        await viewModel.retryRealtime()
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.fallback, .restHistory)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.connection, .disabled)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.subscription, .disabled)
+    }
+
     func testRESTBackendLoadsPendingApprovalsAndPreservesDecisionIdempotencyKey() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -1196,12 +1326,15 @@ private actor FixtureRealtimeChatBackend: ChatBackend {
     }
 }
 
-private actor RecordingRealtimeSubscriptionDriver: RealtimeSubscriptionDriver {
+private actor RecordingRealtimeSubscriptionDriver: RealtimeSubscriptionDriver, RealtimeStatusProvidingDriver {
     private let events: [RealtimeEvent]
+    private let statuses: [RealtimeConnectionStatus]
     private var starts: [Int64] = []
+    private var statusSubscriptions = 0
 
-    init(events: [RealtimeEvent]) {
+    init(events: [RealtimeEvent], statuses: [RealtimeConnectionStatus] = []) {
         self.events = events
+        self.statuses = statuses
     }
 
     func subscribe(
@@ -1220,6 +1353,21 @@ private actor RecordingRealtimeSubscriptionDriver: RealtimeSubscriptionDriver {
 
     func startingSeqs() -> [Int64] {
         starts
+    }
+
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        statusSubscriptions += 1
+        let selectedStatuses = statuses.filter { $0.channelId == channel }
+        return AsyncStream { continuation in
+            for status in selectedStatuses {
+                continuation.yield(status)
+            }
+            continuation.finish()
+        }
+    }
+
+    func statusSubscriptionCount() -> Int {
+        statusSubscriptions
     }
 }
 
