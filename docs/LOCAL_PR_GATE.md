@@ -50,7 +50,7 @@ Profiles:
 |---|---|---|
 | `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
-| `staging-smoke` | staging/prod config/runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` for prod compose config, Caddyfile structure, Centrifugo Redis config, secret-template guard, and SOPS/pgBackRest checklist |
+| `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, and SOPS/pgBackRest checklist |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |

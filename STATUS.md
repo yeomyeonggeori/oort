@@ -15,6 +15,12 @@
 - `infra/e2e/bootstrap_roles.sql`은 api=`momo_app`(NOBYPASSRLS), relay=`momo_relay`/worker=`momo_worker`(BYPASSRLS) test role boundary를 deterministic하게 준비한다. 실제 e2e stack boot/full runtime path는 후속 verifier에서 닫고, 이번 goal은 compose config/static validation 범위다.
 - 검증: `docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config` PASS. `scripts/local_gate.sh --profile docs`에 e2e compose config validation을 연결했다.
 
+## 0-3. MOMO-216 Internal Single-Node Hosting Smoke Gate (2026-06-30)
+
+- `infra/prod/docker-compose.internal-smoke.yml`과 `infra/prod/internal-smoke.env.example`을 추가해 prod compose의 image-based api/relay/worker 계약을 유지하면서 내부 테스트용 single-node smoke override를 제공한다.
+- `scripts/verify_internal_hosting_smoke.sh`를 추가하고 `scripts/local_gate.sh --profile staging-smoke`에 연결했다. 이 verifier는 compose config, env template guard, Caddy/TLS static wiring, Centrifugo Redis engine, explicit migration path, MomoServer `/health` route, relay/worker enablement, pgBackRest placeholder boundary를 검증한다.
+- 실제 public DNS/TLS, registry image pull/run, SOPS production secret injection, pgBackRest backup/PITR restore rehearsal은 `runtime-unverified(public TLS/DNS)` host-runtime으로 남는다. 검증: `scripts/local_gate.sh --profile staging-smoke` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.
@@ -132,6 +138,18 @@
 - `LOCAL_GATE_LAUNCH_UI=1`이면 기존 MomoMacDevApp process/window/log smoke까지 요구하고, 기본값은 headless local gate를 위해 GUI launch opt-in을 유지한다. External Hermes/staging provider side effects, M4 packaging/signing/notary, iOS/APNs는 계속 out of scope다.
 - 검증: `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc` PASS.
 - #12(MOMO-020) 판정: `m3-dbc` profile PASS를 PR에 첨부하면 오래된 staging/Hermes 문구는 MOMO-204 local-gate 기준으로 대체 가능하므로 **merge 후 momo-main이 #12를 닫아도 됨**. 이 worker branch는 PR 생성 + `status:needs-review`에서 멈추고 #12를 직접 닫지 않는다.
+
+## 0-17. MOMO-213 macOS Real-Server Session Onboarding UI v0 (2026-06-30)
+
+- `MomoMacDevApp`과 Xcode host가 `MomoMacSessionRootView`를 통해 server URL/email/password/optional invite code를 입력받고, `/v1/auth/login` 또는 `/v1/join` 성공 토큰으로 기존 `MomoServerRESTChatBackend` + D/B/C UI에 진입한다.
+- Demo/stub backend는 `Open Demo`로 명시 분리했고, empty channel list/인증 실패/서버 연결 실패를 UI에 표시한다. 저장 전략은 UserDefaults(server URL/email/invite code) + optional Keychain(password)으로 제한한다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS.
+
+## 0-18. MOMO-214 Channel Create + Membership Management Runtime v0 (2026-06-30)
+
+- `POST /v1/workspaces/{ws}/channels`, `POST /v1/workspaces/{ws}/channels/{ch}/members`, `DELETE /v1/workspaces/{ws}/channels/{ch}/members/{member}`를 추가해 owner/admin이 public/private channel을 만들고 human/agent member를 추가/제거할 수 있게 했다. 생성 write는 기존 `channel`/`membership`/`channel_seq`만 사용하며 신규 migration은 없다.
+- write path는 `momo_app` NOBYPASSRLS + `SET LOCAL app.workspace_id` tenant transaction으로 검증했다. `scripts/verify_channel_management.sh`가 channel create, creator membership, `channel_seq`, member/admin 권한, cross-workspace 차단, remove 후 write 차단, re-add 후 message send까지 확인한다.
+- 검증: `swift build --package-path server` PASS, `scripts/verify_channel_management.sh` PASS. Rich channel settings UI, archival/search, external directory sync, enterprise fine-grained RBAC는 out of scope.
 
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 

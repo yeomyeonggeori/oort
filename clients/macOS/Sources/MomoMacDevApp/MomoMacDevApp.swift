@@ -16,25 +16,7 @@ struct MomoMacDevApp: App {
 }
 
 private struct DevAppRoot: View {
-    @State private var viewModel: ChatViewModel?
-
     var body: some View {
-        Group {
-            if let viewModel {
-                MomoMacRootView(existingViewModel: viewModel)
-            } else {
-                ProgressView("Opening momo...")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .task {
-                        await loadDemo()
-                    }
-            }
-        }
-    }
-
-    @MainActor
-    private func loadDemo() async {
-        guard viewModel == nil else { return }
-        viewModel = await MomoMacDemo.makeViewModel()
+        MomoMacSessionRootView()
     }
 }
