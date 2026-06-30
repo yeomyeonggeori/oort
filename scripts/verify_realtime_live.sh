@@ -471,12 +471,29 @@ def verify_invalid_token(ws_url):
     ws = WS(ws_url)
     try:
         ws.send_json({"id": 1, "connect": {"token": "invalid.jwt.for.momo.live.gate"}})
-        msg = wait_for(ws, lambda m: command_error(m, 1), timeout=8)
-        return {"ok": True, "error": msg.get("error")}
+        msg = wait_for(ws, lambda m: msg_for_invalid_connect(m), timeout=8)
+        if command_error(msg, 1):
+            return {"ok": True, "error": msg.get("error")}
+        return {
+            "ok": False,
+            "error": {
+                "message": "invalid token was accepted or did not return an error",
+                "message_seen": msg,
+            },
+        }
+    except TimeoutError as exc:
+        return {"ok": False, "error": {"message": f"timed out waiting for invalid token rejection: {exc}"}}
     except Exception as exc:
-        return {"ok": True, "error": {"message": str(exc)}}
+        message = str(exc)
+        if "websocket close" in message or "websocket closed" in message or "handshake failed" in message:
+            return {"ok": True, "error": {"message": message}}
+        return {"ok": False, "error": {"message": message}}
     finally:
         ws.close()
+
+
+def msg_for_invalid_connect(msg):
+    return msg.get("id") == 1 and (msg.get("error") or msg.get("connect"))
 
 
 def post_json(url, token, body):
