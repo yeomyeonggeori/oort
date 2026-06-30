@@ -84,6 +84,7 @@ public final class ChatViewModel: ObservableObject {
             self.workspaceId = workspace
             self.members = try await chat.members(workspace: workspace)
             self.channels = try await chat.channels(workspace: workspace)
+            await loadPendingApprovals(workspace: workspace)
             if selectedChannelId == nil {
                 self.selectedChannelId = channels.first?.id
             }
@@ -111,6 +112,17 @@ public final class ChatViewModel: ObservableObject {
         do {
             let history = try await chat.history(channel: channel, after: nil, limit: 200)
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
+        } catch {
+            connectionError = String(describing: error)
+        }
+    }
+
+    private func loadPendingApprovals(workspace: WorkspaceID) async {
+        do {
+            let pending = try await chat.pendingApprovals(workspace: workspace, status: .pending)
+            approvals = Dictionary(
+                uniqueKeysWithValues: pending.map { ($0.id, $0.eventProjection) }
+            )
         } catch {
             connectionError = String(describing: error)
         }
@@ -259,6 +271,7 @@ public final class ChatViewModel: ObservableObject {
             // Optimistically reflect the decision; real `approval.decided` will confirm.
             if var ev = approvals[id] {
                 ev.status = receipt.status
+                ev.action = .decided
                 ev.decidedBy = receipt.decidedBy
                 ev.decisionReason = receipt.decisionReason
                 approvals[id] = ev

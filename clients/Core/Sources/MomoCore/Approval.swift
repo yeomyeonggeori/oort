@@ -150,6 +150,37 @@ public struct ApprovalDecisionReceipt: Codable, Sendable, Hashable {
     }
 }
 
+/// Server-owned approval inbox projection. Clients use this read model for the
+/// initial C inbox load, then reconcile by `approval_id` from receipts and
+/// `approval.decided` realtime events.
+public struct ApprovalPage: Codable, Sendable, Hashable {
+    public var approvals: [Approval]
+
+    public init(approvals: [Approval]) {
+        self.approvals = approvals
+    }
+}
+
+public extension Approval {
+    var eventProjection: ApprovalEvent {
+        ApprovalEvent(
+            action: status == .pending ? .requested : .decided,
+            approvalId: id,
+            runId: runId,
+            channelId: channelId,
+            requestedBy: requestedBy,
+            onBehalfOf: onBehalfOf,
+            actionType: actionType,
+            status: status,
+            payload: payload,
+            estimatedMicroUSD: estimatedMicroUSD,
+            isReversible: isReversible,
+            decidedBy: decidedBy,
+            decisionReason: decisionReason
+        )
+    }
+}
+
 /// An agent invocation/turn — the run state machine (L4 §3, §6).
 /// Mirrors the `agent_run` table (schema_v0.sql:267) at the fields a client needs.
 public struct AgentRun: Identifiable, Codable, Sendable, Hashable {

@@ -80,12 +80,19 @@ ADMIN_DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSW
 APP_DATABASE_URL="postgres://momo_app:momo_app_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
 
 WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
+WORKSPACE_B_ID="00000000-0000-7000-8000-000000203901"
 HUMAN_EMAIL="demo@momo.local"
 NONMEMBER_EMAIL="approval-nonmember@momo.local"
+WORKSPACE_B_EMAIL="approval-b@momo.local"
 HUMAN_ID="00000000-0000-7000-8000-000000000101"
 AGENT_ID="00000000-0000-7000-8000-000000000102"
 CHANNEL_ID="00000000-0000-7000-8000-000000000202"
 NONMEMBER_ID="00000000-0000-7000-8000-000000167501"
+WORKSPACE_B_HUMAN_ID="00000000-0000-7000-8000-000000203911"
+WORKSPACE_B_AGENT_ID="00000000-0000-7000-8000-000000203912"
+WORKSPACE_B_CHANNEL_ID="00000000-0000-7000-8000-000000203921"
+WORKSPACE_B_MEMBERSHIP_ID="00000000-0000-7000-8000-000000203931"
+WORKSPACE_B_AGENT_MEMBERSHIP_ID="00000000-0000-7000-8000-000000203932"
 
 APPROVE_RUN_ID="00000000-0000-7000-8000-000000167101"
 APPROVE_MSG_ID="00000000-0000-7000-8000-000000167201"
@@ -106,6 +113,10 @@ NONMEMBER_RUN_ID="00000000-0000-7000-8000-000000167104"
 NONMEMBER_MSG_ID="00000000-0000-7000-8000-000000167204"
 NONMEMBER_APPROVAL_ID="00000000-0000-7000-8000-000000167304"
 NONMEMBER_DECISION_ID="00000000-0000-7000-8000-000000167404"
+
+WORKSPACE_B_RUN_ID="00000000-0000-7000-8000-000000203941"
+WORKSPACE_B_MSG_ID="00000000-0000-7000-8000-000000203951"
+WORKSPACE_B_APPROVAL_ID="00000000-0000-7000-8000-000000203961"
 
 RUN_SUFFIX="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 TMP_ROOT="${TMPDIR:-/tmp}"
@@ -154,6 +165,17 @@ post_decision() {
     "http://127.0.0.1:${PORT}/v1/workspaces/${WORKSPACE_ID}/approvals/${approval_id}/decision"
 }
 
+get_approvals() {
+  local token="$1"
+  local workspace_id="$2"
+  local status="${3:-pending}"
+  curl -sS \
+    -o "$RESP_FILE" \
+    -w "%{http_code}" \
+    -H "Authorization: Bearer ${token}" \
+    "http://127.0.0.1:${PORT}/v1/workspaces/${workspace_id}/approvals?status=${status}"
+}
+
 assert_db_equals() {
   local label="$1"
   local expected="$2"
@@ -176,40 +198,56 @@ BEGIN;
 SET LOCAL row_security = off;
 
 DELETE FROM approval_decision WHERE approval_id IN (
-  '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}'
+  '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}',
+  '${WORKSPACE_B_APPROVAL_ID}'
 );
 DELETE FROM audit_log WHERE target_id IN (
-  '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}'
+  '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}',
+  '${WORKSPACE_B_APPROVAL_ID}'
 ) OR run_id IN (
-  '${APPROVE_RUN_ID}', '${REJECT_RUN_ID}', '${EXPIRED_RUN_ID}', '${NONMEMBER_RUN_ID}'
+  '${APPROVE_RUN_ID}', '${REJECT_RUN_ID}', '${EXPIRED_RUN_ID}', '${NONMEMBER_RUN_ID}',
+  '${WORKSPACE_B_RUN_ID}'
 );
 DELETE FROM outbox
  WHERE payload @> jsonb_build_object('approval_id', '${APPROVE_ID}')
     OR payload @> jsonb_build_object('approval_id', '${REJECT_ID}')
     OR payload @> jsonb_build_object('approval_id', '${EXPIRED_ID}')
     OR payload @> jsonb_build_object('approval_id', '${NONMEMBER_APPROVAL_ID}')
+    OR payload @> jsonb_build_object('approval_id', '${WORKSPACE_B_APPROVAL_ID}')
     OR payload @> jsonb_build_object('run_id', '${APPROVE_RUN_ID}')
     OR payload @> jsonb_build_object('run_id', '${REJECT_RUN_ID}')
     OR payload @> jsonb_build_object('run_id', '${EXPIRED_RUN_ID}')
-    OR payload @> jsonb_build_object('run_id', '${NONMEMBER_RUN_ID}');
+    OR payload @> jsonb_build_object('run_id', '${NONMEMBER_RUN_ID}')
+    OR payload @> jsonb_build_object('run_id', '${WORKSPACE_B_RUN_ID}');
 DELETE FROM approval WHERE id IN (
-  '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}'
+  '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}',
+  '${WORKSPACE_B_APPROVAL_ID}'
 );
 DELETE FROM message
  WHERE run_id IN (
-   '${APPROVE_RUN_ID}', '${REJECT_RUN_ID}', '${EXPIRED_RUN_ID}', '${NONMEMBER_RUN_ID}'
+   '${APPROVE_RUN_ID}', '${REJECT_RUN_ID}', '${EXPIRED_RUN_ID}', '${NONMEMBER_RUN_ID}',
+   '${WORKSPACE_B_RUN_ID}'
  )
     OR props->>'approval_id' IN (
-      '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}'
+      '${APPROVE_ID}', '${REJECT_ID}', '${EXPIRED_ID}', '${NONMEMBER_APPROVAL_ID}',
+      '${WORKSPACE_B_APPROVAL_ID}'
     );
 DELETE FROM message WHERE id IN (
-  '${APPROVE_MSG_ID}', '${REJECT_MSG_ID}', '${EXPIRED_MSG_ID}', '${NONMEMBER_MSG_ID}'
+  '${APPROVE_MSG_ID}', '${REJECT_MSG_ID}', '${EXPIRED_MSG_ID}', '${NONMEMBER_MSG_ID}',
+  '${WORKSPACE_B_MSG_ID}'
 );
 DELETE FROM agent_run WHERE id IN (
-  '${APPROVE_RUN_ID}', '${REJECT_RUN_ID}', '${EXPIRED_RUN_ID}', '${NONMEMBER_RUN_ID}'
+  '${APPROVE_RUN_ID}', '${REJECT_RUN_ID}', '${EXPIRED_RUN_ID}', '${NONMEMBER_RUN_ID}',
+  '${WORKSPACE_B_RUN_ID}'
 );
+DELETE FROM membership WHERE id IN ('${WORKSPACE_B_MEMBERSHIP_ID}', '${WORKSPACE_B_AGENT_MEMBERSHIP_ID}');
+DELETE FROM agent WHERE member_id = '${WORKSPACE_B_AGENT_ID}';
+DELETE FROM human WHERE member_id = '${WORKSPACE_B_HUMAN_ID}';
+DELETE FROM channel_seq WHERE channel_id = '${WORKSPACE_B_CHANNEL_ID}';
+DELETE FROM channel WHERE id = '${WORKSPACE_B_CHANNEL_ID}';
 DELETE FROM human WHERE member_id = '${NONMEMBER_ID}';
-DELETE FROM member WHERE id = '${NONMEMBER_ID}';
+DELETE FROM member WHERE id IN ('${NONMEMBER_ID}', '${WORKSPACE_B_HUMAN_ID}', '${WORKSPACE_B_AGENT_ID}');
+DELETE FROM workspace WHERE id = '${WORKSPACE_B_ID}';
 
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('${NONMEMBER_ID}', '${WORKSPACE_ID}', 'human', 'active', 'Approval Nonmember', 'approval-nonmember')
@@ -226,6 +264,35 @@ SET email = EXCLUDED.email,
     email_verified = EXCLUDED.email_verified,
     password_hash = EXCLUDED.password_hash,
     tz = EXCLUDED.tz;
+
+INSERT INTO workspace (id, slug, name)
+VALUES ('${WORKSPACE_B_ID}', 'approval-b', 'MOMO Approval Projection B');
+
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES
+  ('${WORKSPACE_B_HUMAN_ID}', '${WORKSPACE_B_ID}', 'human', 'active', 'Approval Human B', 'approval-b-human'),
+  ('${WORKSPACE_B_AGENT_ID}', '${WORKSPACE_B_ID}', 'agent', 'active', 'Approval Agent B', 'approval-b-agent');
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('${WORKSPACE_B_HUMAN_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_EMAIL}', true, 'dev-password-stub', 'UTC');
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt, owner_human_id, max_concurrent_runs, max_run_steps)
+VALUES (
+  '${WORKSPACE_B_AGENT_ID}', '${WORKSPACE_B_ID}', 'hermes-agent',
+  'http://localhost:8088/v1', 'Approval projection B fixture.',
+  '${WORKSPACE_B_HUMAN_ID}', 1, 12
+);
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by)
+VALUES ('${WORKSPACE_B_CHANNEL_ID}', '${WORKSPACE_B_ID}', 'public', 'approval-b', 'Approval projection B', '${WORKSPACE_B_HUMAN_ID}');
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES ('${WORKSPACE_B_CHANNEL_ID}', '${WORKSPACE_B_ID}', 203900);
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
+VALUES
+  ('${WORKSPACE_B_MEMBERSHIP_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_CHANNEL_ID}', '${WORKSPACE_B_HUMAN_ID}', 'owner'),
+  ('${WORKSPACE_B_AGENT_MEMBERSHIP_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_CHANNEL_ID}', '${WORKSPACE_B_AGENT_ID}', 'member');
 
 UPDATE channel_seq
    SET last_seq = GREATEST(
@@ -247,6 +314,12 @@ VALUES
   ('${NONMEMBER_RUN_ID}', '${WORKSPACE_ID}', '${AGENT_ID}', '${CHANNEL_ID}', 'awaiting_approval', 1, 12, 0,
    '{"prompt":"MOMO-167 nonmember fixture"}'::jsonb, now());
 
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, status, step_count, max_steps, depth, input, started_at)
+VALUES
+  ('${WORKSPACE_B_RUN_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_AGENT_ID}', '${WORKSPACE_B_CHANNEL_ID}', 'awaiting_approval', 1, 12, 0,
+   '{"prompt":"MOMO-203 workspace B fixture"}'::jsonb, now());
+
 INSERT INTO message
   (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props, run_id)
 VALUES
@@ -258,6 +331,14 @@ VALUES
    'approval_request', 'Expired fixture', '{"approval_id":"${EXPIRED_ID}","status":"pending"}'::jsonb, '${EXPIRED_RUN_ID}'),
   ('${NONMEMBER_MSG_ID}', '${WORKSPACE_ID}', '${CHANNEL_ID}', 167904, 1782463200000, 0, '${AGENT_ID}',
    'approval_request', 'Nonmember fixture', '{"approval_id":"${NONMEMBER_APPROVAL_ID}","status":"pending"}'::jsonb, '${NONMEMBER_RUN_ID}');
+
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props, run_id)
+VALUES
+  ('${WORKSPACE_B_MSG_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_CHANNEL_ID}', 203901, 1782463200000, 0, '${WORKSPACE_B_AGENT_ID}',
+   'approval_request', 'Workspace B approval fixture',
+   '{"approval_id":"${WORKSPACE_B_APPROVAL_ID}","status":"pending","approval_status":"pending"}'::jsonb,
+   '${WORKSPACE_B_RUN_ID}');
 
 INSERT INTO approval
   (id, workspace_id, run_id, channel_id, request_message_id, requested_by,
@@ -278,6 +359,16 @@ VALUES
   ('${NONMEMBER_APPROVAL_ID}', '${WORKSPACE_ID}', '${NONMEMBER_RUN_ID}', '${CHANNEL_ID}', '${NONMEMBER_MSG_ID}', '${AGENT_ID}',
    'tool_call',
    '{"run_id":"${NONMEMBER_RUN_ID}","action_type":"tool_call","tool_call":{"call_id":"call_momo_167_nonmember","name":"github.create_issue","arguments":{"title":"MOMO-167 nonmember"}},"resume_model":"same_run_new_agent_job"}'::jsonb,
+   'pending', now() + interval '1 hour');
+
+INSERT INTO approval
+  (id, workspace_id, run_id, channel_id, request_message_id, requested_by,
+   action_type, payload, status, expires_at)
+VALUES
+  ('${WORKSPACE_B_APPROVAL_ID}', '${WORKSPACE_B_ID}', '${WORKSPACE_B_RUN_ID}', '${WORKSPACE_B_CHANNEL_ID}',
+   '${WORKSPACE_B_MSG_ID}', '${WORKSPACE_B_AGENT_ID}',
+   'tool_call',
+   '{"run_id":"${WORKSPACE_B_RUN_ID}","on_behalf_of":"${WORKSPACE_B_HUMAN_ID}","action_type":"tool_call","estimated_micro_usd":203000,"is_reversible":true,"tool_call":{"call_id":"call_momo_203_b","name":"github.create_issue","arguments":{"title":"MOMO-203 workspace B"},"tool_grant":{"tool_name":"github.create_issue","approval_policy":"always"}},"resume_model":"same_run_new_agent_job"}'::jsonb,
    'pending', now() + interval '1 hour');
 
 UPDATE channel_seq
@@ -315,6 +406,60 @@ LOGIN_JSON="$(
 )"
 ACCESS_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken // empty')"
 [ "$ACCESS_TOKEN" != "" ] || fail "demo login did not return accessToken"
+
+echo "[approval-decision] pending approval projection read path"
+HTTP_CODE="$(get_approvals "$ACCESS_TOKEN" "$WORKSPACE_ID" "pending")"
+[ "$HTTP_CODE" = "200" ] || fail "pending projection returned HTTP ${HTTP_CODE}: $(cat "$RESP_FILE")"
+jq -e \
+  --arg approve "$APPROVE_ID" \
+  --arg reject "$REJECT_ID" \
+  --arg expired "$EXPIRED_ID" \
+  --arg nonmember "$NONMEMBER_APPROVAL_ID" \
+  --arg workspace "$WORKSPACE_ID" \
+  --arg channel "$CHANNEL_ID" \
+  '([.approvals[].id] | index($approve) and index($reject) and index($expired) and index($nonmember))
+   and all(.approvals[]; .workspace_id == $workspace and .channel_id == $channel and .status == "pending")
+   and any(.approvals[]; .id == $approve and .estimated_micro_usd == null and .is_reversible == null)' "$RESP_FILE" >/dev/null \
+  || fail "pending projection invalid for demo member: $(cat "$RESP_FILE")"
+
+echo "[approval-decision] pending projection channel membership guard"
+NONMEMBER_LOGIN_JSON="$(
+  curl -fsS \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"${NONMEMBER_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+    "http://127.0.0.1:${PORT}/v1/auth/login"
+)"
+NONMEMBER_TOKEN="$(printf '%s' "$NONMEMBER_LOGIN_JSON" | jq -r '.accessToken // empty')"
+[ "$NONMEMBER_TOKEN" != "" ] || fail "nonmember login did not return accessToken"
+HTTP_CODE="$(get_approvals "$NONMEMBER_TOKEN" "$WORKSPACE_ID" "pending")"
+[ "$HTTP_CODE" = "200" ] || fail "nonmember pending projection returned HTTP ${HTTP_CODE}: $(cat "$RESP_FILE")"
+jq -e '.approvals == []' "$RESP_FILE" >/dev/null \
+  || fail "nonmember saw approval rows despite no channel membership: $(cat "$RESP_FILE")"
+
+echo "[approval-decision] pending projection two-workspace guard"
+WORKSPACE_B_LOGIN_JSON="$(
+  curl -fsS \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"${WORKSPACE_B_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_B_ID}\"}" \
+    "http://127.0.0.1:${PORT}/v1/auth/login"
+)"
+WORKSPACE_B_TOKEN="$(printf '%s' "$WORKSPACE_B_LOGIN_JSON" | jq -r '.accessToken // empty')"
+[ "$WORKSPACE_B_TOKEN" != "" ] || fail "workspace B login did not return accessToken"
+HTTP_CODE="$(get_approvals "$ACCESS_TOKEN" "$WORKSPACE_B_ID" "pending")"
+[ "$HTTP_CODE" = "403" ] || fail "demo token cross-workspace pending projection returned HTTP ${HTTP_CODE}: $(cat "$RESP_FILE")"
+HTTP_CODE="$(get_approvals "$WORKSPACE_B_TOKEN" "$WORKSPACE_B_ID" "pending")"
+[ "$HTTP_CODE" = "200" ] || fail "workspace B pending projection returned HTTP ${HTTP_CODE}: $(cat "$RESP_FILE")"
+jq -e \
+  --arg id "$WORKSPACE_B_APPROVAL_ID" \
+  --arg workspace "$WORKSPACE_B_ID" \
+  --arg channel "$WORKSPACE_B_CHANNEL_ID" \
+  '.approvals | length == 1
+   and .[0].id == $id
+   and .[0].workspace_id == $workspace
+   and .[0].channel_id == $channel
+   and .[0].estimated_micro_usd == 203000
+   and .[0].is_reversible == true' "$RESP_FILE" >/dev/null \
+  || fail "workspace B projection invalid: $(cat "$RESP_FILE")"
 
 echo "[approval-decision] approve path"
 HTTP_CODE="$(post_decision "$ACCESS_TOKEN" "$APPROVE_ID" "true" "safe to run" "$APPROVE_DECISION_ID")"
@@ -376,14 +521,6 @@ assert_db_equals "expired durable effects" "expired|timed_out|1|1|0" "
 "
 
 echo "[approval-decision] channel membership enforcement"
-NONMEMBER_LOGIN_JSON="$(
-  curl -fsS \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"${NONMEMBER_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
-    "http://127.0.0.1:${PORT}/v1/auth/login"
-)"
-NONMEMBER_TOKEN="$(printf '%s' "$NONMEMBER_LOGIN_JSON" | jq -r '.accessToken // empty')"
-[ "$NONMEMBER_TOKEN" != "" ] || fail "nonmember login did not return accessToken"
 HTTP_CODE="$(post_decision "$NONMEMBER_TOKEN" "$NONMEMBER_APPROVAL_ID" "true" "not a channel member" "$NONMEMBER_DECISION_ID")"
 [ "$HTTP_CODE" = "403" ] || fail "nonmember decision returned HTTP ${HTTP_CODE}: $(cat "$RESP_FILE")"
 assert_db_equals "nonmember did not mutate approval" "pending|0" "

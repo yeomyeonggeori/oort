@@ -14,8 +14,43 @@ struct ApprovalDecisionRoutes: Sendable {
     let db: Database
 
     func add(to group: RouterGroup<AppRequestContext>) {
+        group.get("/v1/workspaces/:ws/approvals", use: list)
         group.post("/v1/workspaces/:ws/approvals/:approval/decision", use: decideByApproval)
         group.post("/v1/agent-runs/:run/approval-decisions", use: decideByRun)
+    }
+
+    @Sendable
+    func list(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let workspaceID = try Self.workspaceID(context, principal: principal)
+        let status = try Self.validatedStatus(request.uri.queryParameters["status"].map(String.init))
+        let limit = Self.validatedLimit(request.uri.queryParameters["limit"].map(String.init))
+
+        let result: (isMember: Bool, approvals: [ApprovalProjectionDTO]) =
+            try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+                guard try await Self.isActiveHumanMember(
+                    conn: conn,
+                    logger: db.logger,
+                    memberID: principal.memberID
+                ) else {
+                    return (false, [])
+                }
+                let approvals = try await Self.fetchApprovals(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    memberID: principal.memberID,
+                    status: status,
+                    limit: limit
+                )
+                return (true, approvals)
+            }
+
+        guard result.isMember else {
+            throw HTTPError(.forbidden, message: "not an active human workspace member")
+        }
+        return try ApprovalProjectionPageDTO(approvals: result.approvals)
+            .response(from: request, context: context)
     }
 
     @Sendable
@@ -389,6 +424,99 @@ struct ApprovalDecisionRoutes: Sendable {
         ).collect()
         guard let json = try rows.first?.decode(String.self) else { return nil }
         return try JSONDecoder().decode(LockedApproval.self, from: Data(json.utf8))
+    }
+
+    static func validatedStatus(_ raw: String?) throws -> String {
+        let status = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch status {
+        case nil, "", "pending":
+            return "pending"
+        case "approved", "rejected", "expired", "cancelled":
+            return status!
+        default:
+            throw HTTPError(.badRequest, message: "status must be pending, approved, rejected, expired, or cancelled")
+        }
+    }
+
+    static func validatedLimit(_ raw: String?) -> Int {
+        min(max(raw.flatMap { Int($0) } ?? 100, 1), 500)
+    }
+
+    private static func fetchApprovals(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        memberID: UUID,
+        status: String,
+        limit: Int
+    ) async throws -> [ApprovalProjectionDTO] {
+        let rows = try await conn.query(
+            """
+            SELECT COALESCE(json_agg(row_json ORDER BY sort_expires_at NULLS LAST, sort_created_at DESC)::text, '[]') AS payload
+              FROM (
+                SELECT jsonb_build_object(
+                         'id', a.id,
+                         'workspace_id', a.workspace_id,
+                         'run_id', a.run_id,
+                         'channel_id', a.channel_id,
+                         'request_message_id', a.request_message_id,
+                         'requested_by', a.requested_by,
+                         'on_behalf_of', a.payload->>'on_behalf_of',
+                         'action_type', a.action_type,
+                         'payload', a.payload,
+                         'status', a.status::text,
+                         'estimated_micro_usd',
+                           COALESCE(
+                             NULLIF(a.payload->>'estimated_micro_usd', '')::bigint,
+                             NULLIF(a.payload #>> '{tool_call,estimated_micro_usd}', '')::bigint
+                           ),
+                         'is_reversible',
+                           COALESCE(
+                             NULLIF(a.payload->>'is_reversible', '')::boolean,
+                             NULLIF(a.payload #>> '{risk,is_reversible}', '')::boolean
+                           ),
+                         'decided_by', a.decided_by,
+                         'decided_at_ms',
+                           CASE WHEN a.decided_at IS NULL
+                                THEN NULL
+                                ELSE floor(extract(epoch from a.decided_at) * 1000)::bigint
+                           END,
+                         'decision_reason', a.decision_reason,
+                         'expires_at_ms',
+                           CASE WHEN a.expires_at IS NULL
+                                THEN NULL
+                                ELSE floor(extract(epoch from a.expires_at) * 1000)::bigint
+                           END
+                       ) AS row_json,
+                       a.expires_at AS sort_expires_at,
+                       a.created_at AS sort_created_at
+                  FROM approval a
+                  JOIN membership ms
+                    ON ms.channel_id = a.channel_id
+                   AND ms.member_id = \(memberID)
+                   AND ms.left_at IS NULL
+                 WHERE a.workspace_id = \(workspaceID)
+                   AND a.status = \(status)::approval_status
+                 ORDER BY a.expires_at NULLS LAST, a.created_at DESC
+                 LIMIT \(limit)
+              ) rows
+            """,
+            logger: logger
+        ).collect()
+        return try decodeApprovalList(from: rows.first)
+    }
+
+    static func decodeApprovalList(from row: PostgresRow?) throws -> [ApprovalProjectionDTO] {
+        guard let row else { return [] }
+        let json = try row.decode(String.self)
+        guard let data = json.data(using: .utf8) else {
+            throw HTTPError(.internalServerError, message: "approval JSON encoding failed")
+        }
+        do {
+            return try JSONDecoder().decode([ApprovalProjectionDTO].self, from: data)
+        } catch {
+            throw HTTPError(.internalServerError, message: "approval JSON decoding failed")
+        }
     }
 
     private static func isActiveHumanMember(
