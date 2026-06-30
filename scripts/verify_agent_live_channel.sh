@@ -218,7 +218,7 @@ login() {
   local workspace="$2"
   curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"${email}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${workspace}\"}" \
+    -d "{\"email\":\"${email}\",\"password\":\"dev-password\",\"workspace\":\"${workspace}\"}" \
     "http://127.0.0.1:${PORT}/v1/auth/login"
 }
 
@@ -261,13 +261,14 @@ ON CONFLICT (id) DO UPDATE
       display_name = EXCLUDED.display_name,
       handle = EXCLUDED.handle;
 
-INSERT INTO human (member_id, workspace_id, email, email_verified, tz)
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
-  ('$NO_SHARED_MEMBER_ID', '$WORKSPACE_ID', '$NO_SHARED_EMAIL', true, 'UTC'),
-  ('$OTHER_MEMBER_ID', '$OTHER_WORKSPACE_ID', '$OTHER_EMAIL', true, 'UTC')
+  ('$NO_SHARED_MEMBER_ID', '$WORKSPACE_ID', '$NO_SHARED_EMAIL', true, momo_password_hash('dev-password'), 'UTC'),
+  ('$OTHER_MEMBER_ID', '$OTHER_WORKSPACE_ID', '$OTHER_EMAIL', true, momo_password_hash('dev-password'), 'UTC')
 ON CONFLICT (member_id) DO UPDATE
   SET email = EXCLUDED.email,
       email_verified = EXCLUDED.email_verified,
+      password_hash = EXCLUDED.password_hash,
       tz = EXCLUDED.tz;
 
 COMMIT;

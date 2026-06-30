@@ -7,10 +7,8 @@ import PostgresNIO
 ///   POST /v1/auth/login   → access(15m) + refresh(30d) HS256 JWT + member.
 ///   POST /v1/auth/realtime-token → short-lived Centrifugo connection JWT.
 ///
-/// v0 is a STUB: it resolves the member by email (looking up `human`/`member`)
-/// and issues tokens WITHOUT verifying the password. The password-hash check is
-/// a // TODO below; everything else (token shape, claims, member resolution) is
-/// real so the client flow works end-to-end against a seeded DB.
+/// Login resolves a human member by email and verifies the submitted password
+/// through PostgreSQL pgcrypto (`momo_password_verify`).
 struct AuthRoutes: Sendable {
     let db: Database
     let jwt: JWTService
@@ -35,13 +33,17 @@ struct AuthRoutes: Sendable {
     func login(_ request: Request, context: AppRequestContext) async throws -> Response {
         let dto = try await request.decode(as: LoginRequest.self, context: context)
         let workspaceID = dto.workspace.flatMap { UUID(uuidString: $0) } ?? Self.demoWorkspaceID
+        guard !dto.password.isEmpty else {
+            throw HTTPError(.unauthorized, message: "invalid credentials")
+        }
 
-        // Resolve the human member by email within the tenant (RLS-scoped).
+        // Resolve the human member by email within the tenant (RLS-scoped) and
+        // verify the password inside Postgres so v0 does not add Swift crypto deps.
         let member: MemberDTO? = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
             let rows = try await conn.query(
                 """
                 SELECT m.id, m.workspace_id, m.kind::text, m.display_name, m.handle,
-                       h.password_hash
+                       momo_password_verify(\(dto.password), h.password_hash) AS password_ok
                   FROM human h
                   JOIN member m ON m.id = h.member_id
                  WHERE h.email = \(dto.email)
@@ -49,11 +51,9 @@ struct AuthRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard let row = rows.first else { return nil }
-            let (id, ws, kind, displayName, handle, _passwordHash) =
-                try row.decode((UUID, UUID, String, String, String, String?).self)
-            // TODO: verify password against `_passwordHash` (e.g. bcrypt/argon2).
-            //       v0 stub trusts the email — DO NOT ship to production.
-            _ = _passwordHash
+            let (id, ws, kind, displayName, handle, passwordOK) =
+                try row.decode((UUID, UUID, String, String, String, Bool).self)
+            guard passwordOK else { return nil }
             return MemberDTO(
                 id: id.uuidString, workspaceId: ws.uuidString, kind: kind,
                 displayName: displayName, handle: handle
@@ -68,7 +68,7 @@ struct AuthRoutes: Sendable {
         var scopes = ["messages:write", "messages:read"]
         if Self.shouldGrantPlatformRead(
             email: dto.email,
-            password: dto.password,
+            platformAdminSecret: dto.platformAdminSecret,
             platformAdminEmails: platformAdminEmails,
             platformAdminLoginSecret: platformAdminLoginSecret
         ) {
@@ -116,15 +116,18 @@ struct AuthRoutes: Sendable {
 
     static func shouldGrantPlatformRead(
         email: String,
-        password: String,
+        platformAdminSecret: String?,
         platformAdminEmails: [String],
         platformAdminLoginSecret: String?
     ) -> Bool {
         guard let platformAdminLoginSecret, !platformAdminLoginSecret.isEmpty else {
             return false
         }
+        guard let platformAdminSecret, !platformAdminSecret.isEmpty else {
+            return false
+        }
         return platformAdminEmails.contains(email.lowercased())
-            && password == platformAdminLoginSecret
+            && platformAdminSecret == platformAdminLoginSecret
     }
 
     static func isActiveMember(db: Database, workspaceID: UUID, memberID: UUID) async throws -> Bool {
