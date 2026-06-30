@@ -75,6 +75,12 @@
 - `clients/macOS`에 SwiftCentrifuge 0.9.0(MIT) dependency와 `SwiftCentrifugeRealtimeSubscriptionTransport`를 추가해 `/v1/auth/realtime-token` connection token getter → `ch:ws<workspace>.<channel>` subscribe → publication `RealtimeEnvelope` decode → `DefaultRealtimeSubscriptionDriver` 경로를 연결했다.
 - `MomoMacDevApp` REST mode는 `MOMO_CENTRIFUGO_WS_URL` 또는 worktree `CENT_PORT`가 있으면 optional live driver를 주입한다. 검증: `swift test --package-path clients/macOS` PASS, `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-live` PASS. `agent:` subscription과 production reconnect UX polish는 후속이다.
 
+## 0-11. MOMO-206 Local Gate All-Profile Runtime Cleanup Hotfix (2026-06-30)
+
+- PR #163/#166/#164/#165 merge 후 main `scripts/local_gate.sh --profile all`에서 개별 runtime profile은 통과했지만, `verify_relay.sh`가 남긴 host `MomoServer` listener 때문에 다음 `verify_agent_worker.sh`가 같은 worktree `PORT`를 보고 fail-fast하는 all-profile 조합 버그를 확인했다.
+- `scripts/local_gate.sh --profile all`은 runtime verifier 사이에 worktree env의 `PORT`를 읽고 해당 포트의 `MomoServer` listener만 정리하는 cleanup command를 삽입한다. standalone profile의 포트 점유 fail-fast 동작과 제품 runtime 코드는 변경하지 않았다.
+- 검증: `scripts/local_gate.sh --profile docs` PASS. main post-merge `scripts/local_gate.sh --profile all`은 이 hotfix merge 후 재실행한다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
