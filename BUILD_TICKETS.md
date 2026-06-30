@@ -516,6 +516,7 @@
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 | `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
 | `MOMO-197` | Server channel list endpoint + macOS dynamic channel loading v0 | swift/runtime | MOMO-176, MOMO-177 |
+| `MOMO-214` | Channel create + member/invite management runtime v0 | swift/runtime-db | MOMO-176, MOMO-197 |
 | `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
 | `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 | `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
@@ -595,6 +596,19 @@
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] 관련 runtime/docs local gate PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #152를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-214 수용기준 `[swift/runtime-db]`
+- [x] GitHub #186을 `scripts/goal_claim.sh 186`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `POST /v1/workspaces/{ws}/channels`로 public/private channel을 생성한다.
+- [x] 생성자는 해당 channel membership을 얻고 `channel_seq` 초기 행이 생성된다.
+- [x] owner/admin만 channel create 및 member add/remove를 수행하고 일반 member는 403으로 차단된다.
+- [x] human member와 agent member 모두 channel membership에 추가 가능하다.
+- [x] 두 workspace fixture에서 tenant A token이 tenant B channel/member를 조작하지 못한다.
+- [x] 정상 membership read/write는 통과하고 tenant write path는 BYPASSRLS 없이 `momo_app` + RLS로 검증한다.
+- [x] `scripts/verify_channel_management.sh`가 channel create + membership + message send를 검증한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] PR 생성 후 GitHub #186을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-179 수용기준 `[spec/swift]`
 - [x] GitHub #124를 `scripts/goal_claim.sh 124`로 claim하고 별도 branch/worktree에서 진행한다.

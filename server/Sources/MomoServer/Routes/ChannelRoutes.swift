@@ -6,15 +6,20 @@ import PostgresNIO
 /// Workspace channel read endpoints.
 ///
 ///   GET /v1/workspaces/{ws}/channels
+///   POST /v1/workspaces/{ws}/channels
+///   POST /v1/workspaces/{ws}/channels/{ch}/members
+///   DELETE /v1/workspaces/{ws}/channels/{ch}/members/{member}
 ///
 /// The handler uses the normal tenant read path (`SET LOCAL app.workspace_id`)
-/// and an active workspace membership guard. It returns only channels where the
-/// authenticated member has active channel membership.
+/// and active workspace admin guards. Write endpoints must never use BYPASSRLS.
 struct ChannelRoutes: Sendable {
     let db: Database
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/channels", use: list)
+        group.post("/v1/workspaces/:ws/channels", use: create)
+        group.post("/v1/workspaces/:ws/channels/:ch/members", use: addMember)
+        group.delete("/v1/workspaces/:ws/channels/:ch/members/:member", use: removeMember)
     }
 
     @Sendable
@@ -53,8 +58,303 @@ struct ChannelRoutes: Sendable {
             .response(from: request, context: context)
     }
 
+    @Sendable
+    func create(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let dto = try await request.decode(as: CreateChannelRequest.self, context: context)
+        let kind = try Self.normalizedChannelKind(dto.kind)
+        let name = try Self.normalizedChannelName(dto.name)
+        let topic = try Self.normalizedTopic(dto.topic)
+        try await Self.requireWorkspaceAdmin(db: db, workspaceID: workspaceID, principal: principal)
+
+        let created: CreateChannelResponse? = try await db.withTenantTransaction(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                WITH inserted_channel AS (
+                  INSERT INTO channel (id, workspace_id, kind, name, topic, created_by)
+                  SELECT uuidv7(), \(workspaceID), \(kind)::channel_kind,
+                         \(name), \(topic), \(principal.memberID)
+                   WHERE NOT EXISTS (
+                         SELECT 1
+                           FROM channel existing
+                          WHERE existing.workspace_id = \(workspaceID)
+                            AND existing.kind <> 'dm'
+                            AND existing.archived_at IS NULL
+                            AND lower(existing.name) = lower(\(name))
+                       )
+                  RETURNING *
+                ),
+                inserted_seq AS (
+                  INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+                  SELECT id, workspace_id, 0
+                    FROM inserted_channel
+                  RETURNING channel_id
+                ),
+                inserted_membership AS (
+                  INSERT INTO membership (workspace_id, channel_id, member_id, role)
+                  SELECT workspace_id, id, \(principal.memberID), 'owner'::membership_role
+                    FROM inserted_channel
+                  RETURNING *
+                )
+                SELECT jsonb_build_object(
+                         'id', c.id,
+                         'workspaceId', c.workspace_id,
+                         'kind', c.kind::text,
+                         'name', c.name,
+                         'topic', c.topic,
+                         'dmKey', c.dm_key,
+                         'createdBy', c.created_by,
+                         'archivedAtMs',
+                           CASE WHEN c.archived_at IS NULL
+                                THEN NULL
+                                ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint
+                           END
+                       )::text AS channel_json,
+                       jsonb_build_object(
+                         'id', ms.id,
+                         'workspaceId', ms.workspace_id,
+                         'channelId', ms.channel_id,
+                         'memberId', ms.member_id,
+                         'role', ms.role::text,
+                         'joinedAtMs', floor(extract(epoch from ms.joined_at) * 1000)::bigint,
+                         'leftAtMs',
+                           CASE WHEN ms.left_at IS NULL
+                                THEN NULL
+                                ELSE floor(extract(epoch from ms.left_at) * 1000)::bigint
+                           END
+                       )::text AS membership_json
+                  FROM inserted_channel c
+                  JOIN inserted_membership ms ON ms.channel_id = c.id
+                  JOIN inserted_seq seq ON seq.channel_id = c.id
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            let (channelJSON, membershipJSON) = try row.decode((String, String).self)
+            return CreateChannelResponse(
+                channel: try Self.decodeChannel(channelJSON),
+                creatorMembership: try Self.decodeMembership(membershipJSON)
+            )
+        }
+        guard let created else {
+            throw HTTPError(.conflict, message: "channel name already exists")
+        }
+
+        var response = try created.response(from: request, context: context)
+        response.status = .created
+        return response
+    }
+
+    @Sendable
+    func addMember(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let channelID = try Self.channelID(context)
+        let dto = try await request.decode(as: AddChannelMemberRequest.self, context: context)
+        let role = try Self.normalizedMembershipRole(dto.role)
+        try await Self.requireWorkspaceAdmin(db: db, workspaceID: workspaceID, principal: principal)
+
+        let membership: ChannelMembershipDTO? = try await db.withTenantTransaction(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                WITH target AS (
+                  SELECT c.id AS channel_id,
+                         c.workspace_id,
+                         m.id AS member_id
+                    FROM channel c
+                    JOIN member m
+                      ON m.workspace_id = c.workspace_id
+                     AND m.id = \(dto.memberId)
+                     AND m.status = 'active'
+                     AND m.deleted_at IS NULL
+                   WHERE c.id = \(channelID)
+                     AND c.workspace_id = \(workspaceID)
+                     AND c.kind IN ('public', 'private')
+                     AND c.archived_at IS NULL
+                ),
+                upserted AS (
+                  INSERT INTO membership (workspace_id, channel_id, member_id, role)
+                  SELECT workspace_id, channel_id, member_id, \(role)::membership_role
+                    FROM target
+                  ON CONFLICT (channel_id, member_id)
+                  DO UPDATE
+                     SET role = EXCLUDED.role,
+                         left_at = NULL
+                  RETURNING *
+                )
+                SELECT jsonb_build_object(
+                         'id', ms.id,
+                         'workspaceId', ms.workspace_id,
+                         'channelId', ms.channel_id,
+                         'memberId', ms.member_id,
+                         'role', ms.role::text,
+                         'joinedAtMs', floor(extract(epoch from ms.joined_at) * 1000)::bigint,
+                         'leftAtMs',
+                           CASE WHEN ms.left_at IS NULL
+                                THEN NULL
+                                ELSE floor(extract(epoch from ms.left_at) * 1000)::bigint
+                           END
+                       )::text AS membership_json
+                  FROM upserted ms
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            return try Self.decodeMembership(row.decode(String.self))
+        }
+        guard let membership else {
+            throw HTTPError(.notFound, message: "channel or member not found")
+        }
+
+        return try ChannelMembershipResponse(membership: membership)
+            .response(from: request, context: context)
+    }
+
+    @Sendable
+    func removeMember(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let channelID = try Self.channelID(context)
+        let memberID = try Self.memberID(context)
+        try await Self.requireWorkspaceAdmin(db: db, workspaceID: workspaceID, principal: principal)
+
+        let membership: ChannelMembershipDTO? = try await db.withTenantTransaction(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                WITH updated AS (
+                  UPDATE membership ms
+                     SET left_at = COALESCE(ms.left_at, now())
+                    FROM channel c
+                    JOIN member m
+                      ON m.workspace_id = c.workspace_id
+                     AND m.id = \(memberID)
+                   WHERE c.id = \(channelID)
+                     AND c.workspace_id = \(workspaceID)
+                     AND c.kind IN ('public', 'private')
+                     AND c.archived_at IS NULL
+                     AND ms.channel_id = c.id
+                     AND ms.member_id = m.id
+                     AND ms.left_at IS NULL
+                  RETURNING ms.*
+                )
+                SELECT jsonb_build_object(
+                         'id', ms.id,
+                         'workspaceId', ms.workspace_id,
+                         'channelId', ms.channel_id,
+                         'memberId', ms.member_id,
+                         'role', ms.role::text,
+                         'joinedAtMs', floor(extract(epoch from ms.joined_at) * 1000)::bigint,
+                         'leftAtMs',
+                           CASE WHEN ms.left_at IS NULL
+                                THEN NULL
+                                ELSE floor(extract(epoch from ms.left_at) * 1000)::bigint
+                           END
+                       )::text AS membership_json
+                  FROM updated ms
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            return try Self.decodeMembership(row.decode(String.self))
+        }
+        guard let membership else {
+            throw HTTPError(.notFound, message: "active channel membership not found")
+        }
+
+        return try ChannelMembershipResponse(membership: membership)
+            .response(from: request, context: context)
+    }
+
     static func validatedLimit(_ raw: String?) -> Int {
         min(max(raw.flatMap { Int($0) } ?? 200, 1), 500)
+    }
+
+    static func requireWorkspaceAdmin(
+        db: Database,
+        workspaceID: UUID,
+        principal: AuthPrincipal
+    ) async throws {
+        let role = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            try await InviteRoutes.activeWorkspaceRole(
+                conn: conn,
+                logger: db.logger,
+                memberID: principal.memberID
+            )
+        }
+        guard let role else {
+            throw HTTPError(.forbidden, message: "not a workspace member")
+        }
+        guard role == "owner" || role == "admin" else {
+            throw HTTPError(.forbidden, message: "workspace admin required")
+        }
+    }
+
+    static func normalizedChannelKind(_ raw: String) throws -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard value == "public" || value == "private" else {
+            throw HTTPError(.badRequest, message: "channel kind must be public or private")
+        }
+        return value
+    }
+
+    static func normalizedChannelName(_ raw: String) throws -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard (1...80).contains(value.count) else {
+            throw HTTPError(.badRequest, message: "channel name must be 1-80 characters")
+        }
+        guard value.range(
+            of: #"^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$"#,
+            options: .regularExpression
+        ) != nil else {
+            throw HTTPError(
+                .badRequest,
+                message: "channel name must use lowercase letters, numbers, hyphen, or underscore"
+            )
+        }
+        return value
+    }
+
+    static func normalizedTopic(_ raw: String?) throws -> String? {
+        guard let raw else { return nil }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        guard value.count <= 280 else {
+            throw HTTPError(.badRequest, message: "channel topic must be 280 characters or fewer")
+        }
+        return value
+    }
+
+    static func normalizedMembershipRole(_ raw: String?) throws -> String {
+        let value = (raw ?? "member")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard ["admin", "member", "guest"].contains(value) else {
+            throw HTTPError(.badRequest, message: "membership role must be admin, member, or guest")
+        }
+        return value
+    }
+
+    static func channelID(_ context: AppRequestContext) throws -> UUID {
+        let raw = try context.parameters.require("ch")
+        guard let id = UUID(uuidString: raw) else {
+            throw HTTPError(.badRequest, message: "invalid channel id")
+        }
+        return id
+    }
+
+    static func memberID(_ context: AppRequestContext) throws -> UUID {
+        let raw = try context.parameters.require("member")
+        guard let id = UUID(uuidString: raw) else {
+            throw HTTPError(.badRequest, message: "invalid member id")
+        }
+        return id
     }
 
     static func decodeChannelList(from row: PostgresRow?) throws -> [ChannelDTO] {
@@ -67,6 +367,28 @@ struct ChannelRoutes: Sendable {
             return try JSONDecoder().decode([ChannelDTO].self, from: data)
         } catch {
             throw HTTPError(.internalServerError, message: "channel JSON decoding failed")
+        }
+    }
+
+    static func decodeChannel(_ json: String) throws -> ChannelDTO {
+        guard let data = json.data(using: .utf8) else {
+            throw HTTPError(.internalServerError, message: "channel JSON encoding failed")
+        }
+        do {
+            return try JSONDecoder().decode(ChannelDTO.self, from: data)
+        } catch {
+            throw HTTPError(.internalServerError, message: "channel JSON decoding failed")
+        }
+    }
+
+    static func decodeMembership(_ json: String) throws -> ChannelMembershipDTO {
+        guard let data = json.data(using: .utf8) else {
+            throw HTTPError(.internalServerError, message: "membership JSON encoding failed")
+        }
+        do {
+            return try JSONDecoder().decode(ChannelMembershipDTO.self, from: data)
+        } catch {
+            throw HTTPError(.internalServerError, message: "membership JSON decoding failed")
         }
     }
 
