@@ -624,13 +624,13 @@
 - [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 
 ### MOMO-203 수용기준 `[swift/runtime-db/macos-ui]`
-- [ ] pending approval read/projection path를 추가한다(`GET /v1/workspaces/{ws}/approvals?status=pending` 또는 equivalent channel-history projection).
-- [ ] `ApprovalInboxView` initial load가 seed-only가 아니라 server-owned pending approval data를 표시할 수 있다.
-- [ ] approve/reject는 기존 `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 `client_decision_id` idempotency를 사용한다.
-- [ ] receipt와 `approval.decided` realtime event가 inbox row/card status를 reconcile한다.
-- [ ] approved deterministic resume path는 `tool_result`/audit/job-done evidence를 남기고 real external provider writes는 out of scope로 유지한다.
-- [ ] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 첨부한다.
-- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [x] pending approval read/projection path를 추가한다(`GET /v1/workspaces/{ws}/approvals?status=pending` 또는 equivalent channel-history projection).
+- [x] `ApprovalInboxView` initial load가 seed-only가 아니라 server-owned pending approval data를 표시할 수 있다.
+- [x] approve/reject는 기존 `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 `client_decision_id` idempotency를 사용한다.
+- [x] receipt와 `approval.decided` realtime event가 inbox row/card status를 reconcile한다.
+- [x] approved deterministic resume path는 `tool_result`/audit/job-done evidence를 남기고 real external provider writes는 out of scope로 유지한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 
 ### MOMO-204 수용기준 `[docs/swift/runtime-agent/macos-ui]`
 - [ ] `scripts/local_gate.sh`에 M3 D/B/C profile 또는 documented composite command를 추가한다.

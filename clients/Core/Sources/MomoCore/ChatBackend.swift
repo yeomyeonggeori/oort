@@ -47,6 +47,10 @@ public protocol ChatBackend: Sendable {
     /// Add a reaction to a message.
     func addReaction(_ id: MessageID, emoji: String) async throws
 
+    /// Server-owned C inbox projection. Real clients load this before realtime so
+    /// pending approvals survive app restart and are scoped by tenant/channel membership.
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval]
+
     /// Approve or reject a pending approval_request message. Real backends record
     /// the decision, audit it, and resume or deny the paused run server-side.
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt

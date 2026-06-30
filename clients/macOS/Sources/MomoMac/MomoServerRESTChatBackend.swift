@@ -179,6 +179,15 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
         throw BackendError.problem(status: 501, title: "not implemented", detail: "REST reactions are out of scope for MOMO-177")
     }
 
+    public func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/approvals",
+            queryItems: [URLQueryItem(name: "status", value: status.rawValue)],
+            response: ApprovalPageDTO.self
+        )
+        return page.approvals.map(\.approval)
+    }
+
     public func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         guard let workspace else { throw BackendError.notConnected }
         return try await post(
@@ -187,7 +196,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
                 approvalId: request.approvalId.rawValue,
                 approve: request.approve,
                 reason: request.reason,
-                clientDecisionId: UUID()
+                clientDecisionId: request.clientDecisionId
             ),
             authorized: true,
             response: ApprovalDecisionReceiptDTO.self
@@ -270,7 +279,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
             do {
                 return try decoder.decode(T.self, from: data)
             } catch {
-                throw BackendError.decoding(error.localizedDescription)
+                throw BackendError.decoding(String(describing: error))
             }
         } catch let error as BackendError {
             throw error
@@ -563,6 +572,77 @@ private struct ApprovalDecisionReceiptDTO: Decodable {
             decidedAtMs: decidedAtMs,
             decisionReason: decisionReason
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case status
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+    }
+}
+
+private struct ApprovalPageDTO: Decodable {
+    let approvals: [ApprovalDTO]
+}
+
+private struct ApprovalDTO: Decodable {
+    let id: String
+    let workspaceId: String
+    let runId: String
+    let channelId: String
+    let requestMessageId: String?
+    let requestedBy: String
+    let onBehalfOf: String?
+    let actionType: String
+    let payload: JSON
+    let status: String
+    let estimatedMicroUSD: Int64?
+    let isReversible: Bool?
+    let decidedBy: String?
+    let decidedAtMs: Int64?
+    let decisionReason: String?
+    let expiresAtMs: Int64?
+
+    var approval: Approval {
+        Approval(
+            id: ApprovalID(uuidString: id) ?? ApprovalID(),
+            workspaceId: WorkspaceID(uuidString: workspaceId) ?? .demo,
+            runId: RunID(uuidString: runId) ?? RunID(),
+            channelId: ChannelID(uuidString: channelId) ?? .demoGeneral,
+            requestMessageId: requestMessageId.flatMap { MessageID(uuidString: $0) },
+            requestedBy: MemberID(uuidString: requestedBy) ?? .demoAgent,
+            onBehalfOf: onBehalfOf.flatMap { MemberID(uuidString: $0) },
+            actionType: actionType,
+            payload: payload,
+            status: ApprovalStatus(rawValue: status) ?? .pending,
+            estimatedMicroUSD: estimatedMicroUSD,
+            isReversible: isReversible,
+            decidedBy: decidedBy.flatMap { MemberID(uuidString: $0) },
+            decidedAtMs: decidedAtMs,
+            decisionReason: decisionReason,
+            expiresAtMs: expiresAtMs
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceId = "workspace_id"
+        case runId = "run_id"
+        case channelId = "channel_id"
+        case requestMessageId = "request_message_id"
+        case requestedBy = "requested_by"
+        case onBehalfOf = "on_behalf_of"
+        case actionType = "action_type"
+        case payload
+        case status
+        case estimatedMicroUSD = "estimated_micro_usd"
+        case isReversible = "is_reversible"
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+        case expiresAtMs = "expires_at_ms"
     }
 }
 

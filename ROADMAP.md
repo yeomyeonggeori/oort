@@ -111,7 +111,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-200` | M3 | macOS SwiftCentrifuge live adapter | candidate: realtime-token fetch/refresh + `ch:`/`agent:` subscribe + `RealtimeEnvelopeSubscriptionTransport` injection |
 | `MOMO-201` | M3 | D Live Tool-Call fixture/local gate | candidate: mock SSE/runtime fixture emits `agent.partial` tool-call progress + final `tool_result` evidence for MOMO-020 |
 | `MOMO-202` | M3 | Cost projection + CostSnapshot binding | 완료: `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots` server-owned projection + macOS `CostSnapshot` binding; runtime-agent endpoint evidence |
-| `MOMO-203` | M3 | Approval pending projection + inbox gate | candidate: pending approval read/projection + `approval.decided` reconciliation for MOMO-022 |
+| `MOMO-203` | M3 | Approval pending projection + inbox gate | `GET /v1/workspaces/{ws}/approvals?status=pending` server-owned read model + macOS C inbox initial load + receipt/`approval.decided` reconciliation; two-workspace/member guard covered by `runtime-db` |
 | `MOMO-204` | M3 | Combined M3 D/B/C local gate profile | candidate: one PR gate that captures D/B/C fixture/runtime evidence for M3 exit |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 

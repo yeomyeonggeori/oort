@@ -27,6 +27,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     private var messagesByChannel: [ChannelID: [Message]] = [:]
     private var seqByChannel: [ChannelID: Int64] = [:]
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
+    private var approvalsById: [ApprovalID: Approval] = [:]
     private var inviteJoinState: InviteJoinState = .idle
 
     // Realtime fan-out continuations, keyed by channel.
@@ -49,6 +50,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         demoRealtimeByChannel = [:]
         demoCostSnapshotsByChannel = [:]
         replayedDemoDeltaChannels = []
+        approvalsById = [:]
 
         let human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
@@ -221,7 +223,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
         let approvalRun = RunID()
         let approvalId = ApprovalID()
-        _ = appendServerMessage(
+        let approvalMessage = appendServerMessage(
             channel: general.id,
             author: researcher.id,
             type: .approvalRequest,
@@ -270,6 +272,25 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
                 "estimated_micro_usd": .int(820_000),
             ]),
             runId: approvalRun
+        )
+        approvalsById[approvalId] = Approval(
+            id: approvalId,
+            workspaceId: ws,
+            runId: approvalRun,
+            channelId: general.id,
+            requestMessageId: approvalMessage.id,
+            requestedBy: researcher.id,
+            onBehalfOf: human.id,
+            actionType: "github.issue.create",
+            payload: .object([
+                "repo": .string("Dawn-kim-official/momo"),
+                "title": .string("Create rollout checklist issue"),
+                "estimated_micro_usd": .int(820_000),
+                "is_reversible": .bool(true),
+            ]),
+            status: .pending,
+            estimatedMicroUSD: 820_000,
+            isReversible: true
         )
         demoRealtimeByChannel[general.id] = [
             .agentStatus(AgentStatus(
@@ -471,6 +492,12 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         }
     }
 
+    public func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        approvalsById.values
+            .filter { $0.workspaceId == workspace && $0.status == status }
+            .sorted { ($0.expiresAtMs ?? Int64.max, $0.id.description) < ($1.expiresAtMs ?? Int64.max, $1.id.description) }
+    }
+
     public func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         // TODO(T09-followup): REST POST .../approvals/{id}/decide.
         for channel in demoRealtimeByChannel.keys {
@@ -493,6 +520,13 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
                 approval.decidedBy = members.first(where: { $0.kind == .human })?.id
                 approval.decisionReason = request.reason
                 updatedEvents[idx] = .approval(approval)
+                if var stored = approvalsById[approval.approvalId] {
+                    stored.status = request.status
+                    stored.decidedBy = approval.decidedBy
+                    stored.decidedAtMs = nowMs()
+                    stored.decisionReason = request.reason
+                    approvalsById[approval.approvalId] = stored
+                }
 
                 for eventIndex in updatedEvents.indices {
                     if case .agentStatus(var status) = updatedEvents[eventIndex],
