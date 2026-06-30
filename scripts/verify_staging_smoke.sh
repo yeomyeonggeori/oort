@@ -34,11 +34,12 @@ PGBACKREST_CONF="$PROD_DIR/pgbackrest.conf.example"
 PGBACKREST_POSTGRES="$PROD_DIR/postgresql.pgbackrest.conf.example"
 PGBACKREST_CRON="$PROD_DIR/pgbackrest-cron.example"
 RUNBOOK="docs/SECRETS_BACKUP_RUNBOOK.md"
+PREFLIGHT="scripts/prod_env_preflight.sh"
 
 for path in \
   "$COMPOSE_FILE" "$ENV_EXAMPLE" "$CADDYFILE" "$CENTRIFUGO_CONFIG" \
   "$SECRETS_EXAMPLE" "$PGBACKREST_CONF" "$PGBACKREST_POSTGRES" \
-  "$PGBACKREST_CRON" "$RUNBOOK" ".sops.yaml.example" ".gitignore"; do
+  "$PGBACKREST_CRON" "$RUNBOOK" "$PREFLIGHT" ".sops.yaml.example" ".gitignore"; do
   [ -f "$path" ] || fail "missing required staging smoke file: $path"
 done
 
@@ -112,6 +113,16 @@ if grep -Eq '^[A-Z0-9_]*(PASSWORD|HMAC|API_KEY|TOKEN|SECRET|CIPHER_PASS)=([0-9a-
   fail "example secret template appears to contain a real high-entropy secret"
 fi
 pass "plaintext prod secrets are untracked and templates contain placeholders only"
+
+echo "==> production secret/bootstrap preflight"
+if "$PREFLIGHT" --env-file "$ENV_EXAMPLE" --mode staging >/tmp/momo-prod-preflight-expected-fail.log 2>&1; then
+  cat /tmp/momo-prod-preflight-expected-fail.log >&2
+  fail "prod preflight must reject infra/prod/.env.example placeholders in staging mode"
+fi
+grep -Eq 'placeholder|change-me|example|local value|unsafe' /tmp/momo-prod-preflight-expected-fail.log \
+  || fail "prod preflight expected-fail output did not explain placeholder/default rejection"
+"$PREFLIGHT" --env-file "$PROD_DIR/internal-smoke.env.example" --mode internal-smoke
+pass "prod preflight rejects staging placeholders and allows only documented internal-smoke local placeholders"
 
 echo "==> SOPS and pgBackRest checklist validation"
 grep -Fq 'path_regex: ^infra/prod/.*\.sops\.(env|yaml|json)$' .sops.yaml.example || fail ".sops.yaml.example must target infra/prod/*.sops.*"

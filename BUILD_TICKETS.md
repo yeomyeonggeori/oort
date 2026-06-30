@@ -163,6 +163,9 @@
 | `MOMO-006` | SOPS/age secret lifecycle + pgBackRest PITR skeleton | infra/docs | MOMO-005 |
 | `MOMO-007` | VPS 시크릿 없는 local/staging smoke gate + RUN/DEPLOY 런북 고정 | infra/docs | MOMO-005, MOMO-006 |
 | `MOMO-220` | Internal single-node host-runtime smoke v0(local image prod+internal-smoke boot) | runtime/infra | MOMO-216, MOMO-215 |
+| `MOMO-221` | Production secret/bootstrap hardening v0 | infra/docs | MOMO-005, MOMO-006, MOMO-216, MOMO-220 |
+| `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
+| `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -170,7 +173,7 @@
 - [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
 
 ### MOMO-111 수용기준 `[ci/docs]`
-- [ ] `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
+- [ ] `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
 - [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
 - [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template에 문서화.
 
@@ -226,6 +229,29 @@
 - [ ] `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-221 수용기준 `[infra/docs]`
+- [x] GitHub #202를 `scripts/goal_claim.sh 202`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/prod_env_preflight.sh`가 `staging`/`prod`/`internal-host` env의 placeholder/dev-insecure/default secret, localhost/mock Hermes, local DB password, internal-smoke/latest image tag를 fail-fast로 거부한다.
+- [x] `internal-smoke`/`local` mode에서는 `infra/prod/internal-smoke.env.example`과 verifier-generated temp env의 의도된 local placeholder만 허용한다.
+- [x] `scripts/verify_staging_smoke.sh`, `scripts/verify_internal_hosting_smoke.sh`, `scripts/verify_internal_host_runtime.sh`가 같은 preflight 경계를 호출한다.
+- [x] `docs/RUN.md`, `docs/DEPLOY.md`, `docs/SECRETS_BACKUP_RUNBOOK.md`에 required env, secret generation/import path, SOPS `exec-env` path, operator checklist를 반영한다.
+- [x] public DNS/TLS, real registry pull, real SOPS secret injection, pgBackRest PITR restore rehearsal은 `runtime-unverified(public host)`로 남긴다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] 가능하면 `scripts/local_gate.sh --profile staging-smoke` 또는 `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-222 수용기준 `[runtime/infra]`
+- [x] GitHub #204를 `scripts/goal_claim.sh 204`로 claim하고 별도 branch/worktree `chore/204-backup-pitr-restore-rehearsal-gate-v0`에서 진행한다.
+- [x] `scripts/verify_backup_restore_rehearsal.sh`가 임시 PostgreSQL 18 source container에서 marker write 후 `pg_dump -Fc`를 만들고, 별도 restore container에 `pg_restore`하여 marker count/checksum equality를 검증한다.
+- [x] verifier가 restore evidence markdown/json을 생성하고 PR body에 붙일 수 있는 경로를 출력한다.
+- [x] `scripts/local_gate.sh --profile backup`을 추가하고 `host-runtime` profile에도 restore rehearsal verifier를 포함한다.
+- [x] repo-local로 닫히는 범위와 실제 pgBackRest host rehearsal(`runtime-unverified(public host)`) 범위를 docs/RUN, docs/DEPLOY, docs/SECRETS_BACKUP_RUNBOOK, docs/LOCAL_PR_GATE에 분리 기록한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR #206에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR #206에 첨부한다.
+- [x] 가능하면 `scripts/local_gate.sh --profile backup` 또는 `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR #206에 첨부한다.
+- [x] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-212 수용기준 `[runtime-agent/swift]`
 - [x] GitHub #180을 `scripts/goal_claim.sh 180`으로 claim하고 별도 branch/worktree에서 진행한다.
