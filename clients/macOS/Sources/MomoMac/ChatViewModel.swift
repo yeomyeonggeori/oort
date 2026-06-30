@@ -47,6 +47,8 @@ public final class ChatViewModel: ObservableObject {
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
+    @Published public private(set) var channelCreateInFlight = false
+    @Published public private(set) var channelMemberMutationIds: Set<MemberID> = []
 
     // Onboarding / invite flow v0. The dev app drives this through LiveChatBackend
     // until the production REST join API lands.
@@ -92,6 +94,7 @@ public final class ChatViewModel: ObservableObject {
             self.workspaceId = workspace
             self.members = try await chat.members(workspace: workspace)
             self.channels = try await chat.channels(workspace: workspace)
+            self.members = mergeConfiguredMembershipHints(members)
             await loadPendingApprovals(workspace: workspace)
             if selectedChannelId == nil {
                 self.selectedChannelId = channels.first?.id
@@ -106,6 +109,44 @@ public final class ChatViewModel: ObservableObject {
     public func setChannels(_ channels: [Channel]) {
         self.channels = channels
         if selectedChannelId == nil { selectedChannelId = channels.first?.id }
+    }
+
+    public func createChannel(kind: ChannelKind, name: String, topic: String? = nil) async {
+        guard let workspaceId, !channelCreateInFlight else { return }
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            connectionError = "Channel name is required."
+            return
+        }
+        let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
+        channelCreateInFlight = true
+        defer { channelCreateInFlight = false }
+
+        do {
+            let result = try await chat.createChannel(
+                workspace: workspaceId,
+                kind: kind,
+                name: trimmedName,
+                topic: trimmedTopic?.isEmpty == true ? nil : trimmedTopic
+            )
+            if !channels.contains(where: { $0.id == result.channel.id }) {
+                channels.append(result.channel)
+                channels.sort(by: Self.channelOrder)
+            }
+            apply(result.creatorMembership)
+            connectionError = nil
+            await selectChannel(result.channel.id)
+        } catch {
+            connectionError = String(describing: error)
+        }
+    }
+
+    public func addMember(_ member: MemberID, to channel: ChannelID? = nil) async {
+        await mutateMember(member, channel: channel, adding: true)
+    }
+
+    public func removeMember(_ member: MemberID, from channel: ChannelID? = nil) async {
+        await mutateMember(member, channel: channel, adding: false)
     }
 
     /// Select a channel: load history + (re)subscribe to its realtime stream.
@@ -501,6 +542,16 @@ public final class ChatViewModel: ObservableObject {
         members.first(where: { $0.id == id })
     }
 
+    public var selectedChannel: Channel? {
+        guard let selectedChannelId else { return nil }
+        return channels.first(where: { $0.id == selectedChannelId })
+    }
+
+    public func isMember(_ member: MemberID, in channel: ChannelID? = nil) -> Bool {
+        guard let channel = channel ?? selectedChannelId else { return false }
+        return members.first(where: { $0.id == member })?.channelIds.contains(channel) == true
+    }
+
     /// Total reserved/spent micro_usd across live runs (cost chip in headers).
     public var liveSpentMicroUSD: Int64 {
         costSnapshots.values.map(\.spentMicroUSD).reduce(0, +)
@@ -606,6 +657,66 @@ public final class ChatViewModel: ObservableObject {
         if a.hlcTs != b.hlcTs { return a.hlcTs < b.hlcTs }
         if a.hlcCount != b.hlcCount { return a.hlcCount < b.hlcCount }
         return a.id.description < b.id.description
+    }
+
+    nonisolated private static func channelOrder(_ a: Channel, _ b: Channel) -> Bool {
+        let kindRank: (ChannelKind) -> Int = { kind in
+            switch kind {
+            case .publicChannel: return 0
+            case .privateChannel: return 1
+            case .dm: return 2
+            }
+        }
+        let lhs = kindRank(a.kind)
+        let rhs = kindRank(b.kind)
+        if lhs != rhs { return lhs < rhs }
+        return (a.name ?? "").localizedCaseInsensitiveCompare(b.name ?? "") == .orderedAscending
+    }
+
+    private func mutateMember(_ member: MemberID, channel: ChannelID?, adding: Bool) async {
+        guard let channel = channel ?? selectedChannelId else {
+            connectionError = "Select a channel first."
+            return
+        }
+        guard !channelMemberMutationIds.contains(member) else { return }
+        channelMemberMutationIds.insert(member)
+        defer { channelMemberMutationIds.remove(member) }
+
+        do {
+            let membership = adding
+                ? try await chat.addMember(member, to: channel, role: .member)
+                : try await chat.removeMember(member, from: channel)
+            apply(membership)
+            connectionError = nil
+        } catch {
+            connectionError = String(describing: error)
+        }
+    }
+
+    private func apply(_ membership: ChannelMembership) {
+        guard let index = members.firstIndex(where: { $0.id == membership.memberId }) else {
+            return
+        }
+        if membership.isActive {
+            if !members[index].channelIds.contains(membership.channelId) {
+                members[index].channelIds.append(membership.channelId)
+            }
+        } else {
+            members[index].channelIds.removeAll { $0 == membership.channelId }
+        }
+    }
+
+    private func mergeConfiguredMembershipHints(_ loaded: [Member]) -> [Member] {
+        loaded.map { member in
+            guard member.channelIds.isEmpty,
+                  let configured = members.first(where: { $0.id == member.id }),
+                  !configured.channelIds.isEmpty else {
+                return member
+            }
+            var copy = member
+            copy.channelIds = configured.channelIds
+            return copy
+        }
     }
 
     nonisolated private static func microUSD(from value: JSON?) -> Int64? {

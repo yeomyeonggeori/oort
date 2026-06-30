@@ -13,11 +13,31 @@ import Hummingbird
 struct LoginRequest: Decodable {
     let email: String
     let password: String
+    /// Optional, separate platform-admin elevation secret. The account password
+    /// still has to pass password_hash verification before this can add scope.
+    let platformAdminSecret: String?
     /// Optional explicit workspace; the stub resolves a default if omitted.
     let workspace: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case email
+        case password
+        case platformAdminSecret
+        case platformAdminSecretSnake = "platform_admin_secret"
+        case workspace
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.email = try c.decode(String.self, forKey: .email)
+        self.password = try c.decode(String.self, forKey: .password)
+        self.platformAdminSecret = try c.decodeIfPresent(String.self, forKey: .platformAdminSecret)
+            ?? c.decodeIfPresent(String.self, forKey: .platformAdminSecretSnake)
+        self.workspace = try c.decodeIfPresent(String.self, forKey: .workspace)
+    }
 }
 
-/// POST /v1/auth/login response (stub-issued HS256 tokens).
+/// POST /v1/auth/login response.
 struct LoginResponse: ResponseEncodable {
     let accessToken: String
     let refreshToken: String
@@ -101,6 +121,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
     let avatarUrl: String?
     let role: String?
     let channelCount: Int
+    let channelIds: [String]
     let email: String?
     let timeZone: String?
     let agentModel: String?
@@ -109,6 +130,49 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
     let maxRunSteps: Int?
     let createdAtMs: Int64
     let updatedAtMs: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceId
+        case kind
+        case status
+        case displayName
+        case handle
+        case avatarUrl
+        case role
+        case channelCount
+        case channelIds
+        case email
+        case timeZone
+        case agentModel
+        case ownerHumanId
+        case maxConcurrentRuns
+        case maxRunSteps
+        case createdAtMs
+        case updatedAtMs
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.workspaceId = try c.decode(String.self, forKey: .workspaceId)
+        self.kind = try c.decode(String.self, forKey: .kind)
+        self.status = try c.decode(String.self, forKey: .status)
+        self.displayName = try c.decode(String.self, forKey: .displayName)
+        self.handle = try c.decode(String.self, forKey: .handle)
+        self.avatarUrl = try c.decodeIfPresent(String.self, forKey: .avatarUrl)
+        self.role = try c.decodeIfPresent(String.self, forKey: .role)
+        self.channelCount = try c.decode(Int.self, forKey: .channelCount)
+        self.channelIds = try c.decodeIfPresent([String].self, forKey: .channelIds) ?? []
+        self.email = try c.decodeIfPresent(String.self, forKey: .email)
+        self.timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
+        self.agentModel = try c.decodeIfPresent(String.self, forKey: .agentModel)
+        self.ownerHumanId = try c.decodeIfPresent(String.self, forKey: .ownerHumanId)
+        self.maxConcurrentRuns = try c.decodeIfPresent(Int.self, forKey: .maxConcurrentRuns)
+        self.maxRunSteps = try c.decodeIfPresent(Int.self, forKey: .maxRunSteps)
+        self.createdAtMs = try c.decode(Int64.self, forKey: .createdAtMs)
+        self.updatedAtMs = try c.decode(Int64.self, forKey: .updatedAtMs)
+    }
 }
 
 struct WorkspaceRosterResponse: ResponseEncodable {
@@ -382,9 +446,6 @@ struct RedeemInviteResponse: ResponseEncodable {
 
 /// POST /v1/join request body.
 ///
-/// Password auth is intentionally still a stub in v0: the join path records the
-/// human identity and returns app tokens, while AuthRoutes continues to ignore
-/// password_hash until the real auth ticket lands.
 struct JoinRequest: Decodable {
     let code: String
     let email: String

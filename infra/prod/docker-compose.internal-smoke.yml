@@ -5,17 +5,11 @@
 #     -f infra/prod/docker-compose.prod.yml \
 #     -f infra/prod/docker-compose.internal-smoke.yml config
 #
-# This override keeps api/relay/worker image-based. Local smoke may point those
-# images at locally built tags, but production hosts must pull pinned registry
-# images and must not build from a source checkout.
+# This override keeps api/relay/worker/migrate/mock-hermes image-based. Local
+# smoke points those images at locally built tags, but production hosts must pull
+# pinned registry images and must not build from a source checkout.
 
 name: ${COMPOSE_PROJECT_NAME:-momo-internal-smoke}
-
-x-repo-root-mount: &repo-root-mount
-  type: bind
-  source: ../..
-  target: /workspace
-  read_only: true
 
 services:
   caddy:
@@ -27,6 +21,8 @@ services:
   api:
     image: ${MOMO_API_IMAGE:-momo-api:internal-smoke}
     pull_policy: never
+    environment:
+      DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,6 +46,7 @@ services:
     image: ${MOMO_WORKER_IMAGE:-momo-agent-worker:internal-smoke}
     pull_policy: never
     environment:
+      RELAY_DATABASE_URL: ${WORKER_DATABASE_URL:?set WORKER_DATABASE_URL}
       HERMES_BASE_URL: ${HERMES_BASE_URL:-http://mock-hermes:8088/v1}
     depends_on:
       postgres:
@@ -62,14 +59,12 @@ services:
         condition: service_healthy
 
   migrate:
-    image: postgres:18
+    image: ${MOMO_MIGRATE_IMAGE:-momo-migrate:internal-smoke}
+    pull_policy: never
     restart: "no"
-    working_dir: /workspace
     environment:
-      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
-    command: ["sh", "-lc", "sh scripts/migrate.sh"]
-    volumes:
-      - *repo-root-mount
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
+      MOMO_BOOTSTRAP_RUNTIME_ROLES: ${MOMO_BOOTSTRAP_RUNTIME_ROLES:-1}
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,14 +72,11 @@ services:
       - private
 
   mock-hermes:
-    image: python:3.12-slim
+    image: ${MOMO_MOCK_HERMES_IMAGE:-momo-mock-hermes:internal-smoke}
+    pull_policy: never
     restart: "no"
-    working_dir: /workspace
-    command: ["python3", "scripts/mock_hermes.py", "--host", "0.0.0.0", "--port", "8088"]
     environment:
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
-    volumes:
-      - *repo-root-mount
     networks:
       - private
     healthcheck:

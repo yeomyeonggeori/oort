@@ -96,6 +96,9 @@ SERVER_LOG="$OUT_DIR/momo-server-${RUN_SUFFIX}.log"
 UI_LOG="$OUT_DIR/macos-dev-app-${RUN_SUFFIX}.log"
 REST_LOGIN_FILE="$OUT_DIR/login-${RUN_SUFFIX}.json"
 REST_CHANNELS_FILE="$OUT_DIR/channels-${RUN_SUFFIX}.json"
+REST_CHANNEL_CREATE_FILE="$OUT_DIR/channel-create-${RUN_SUFFIX}.json"
+REST_MEMBER_ADD_FILE="$OUT_DIR/member-add-${RUN_SUFFIX}.json"
+REST_MEMBER_REMOVE_FILE="$OUT_DIR/member-remove-${RUN_SUFFIX}.json"
 REST_SEND_FILE="$OUT_DIR/send-${RUN_SUFFIX}.json"
 REST_MENTION_SEND_FILE="$OUT_DIR/mention-send-${RUN_SUFFIX}.json"
 REST_HISTORY_FILE="$OUT_DIR/history-${RUN_SUFFIX}.json"
@@ -256,6 +259,48 @@ curl -fsS \
 jq -e --arg channel "$CHANNEL_ID" '.channels[] | select(.id == $channel and .name == "agent-lab")' "$REST_CHANNELS_FILE" >/dev/null \
   || fail "channel list did not include agent-lab"
 
+CHANNEL_MANAGEMENT_NAME="momo218-$(date +%s)-$$"
+echo "[macos-real-backend] REST channel create/member add/remove"
+curl -fsS \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"kind\":\"private\",\"name\":\"${CHANNEL_MANAGEMENT_NAME}\",\"topic\":\"MOMO-218 macOS channel management smoke\"}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels" >"$REST_CHANNEL_CREATE_FILE"
+CHANNEL_MANAGEMENT_ID="$(jq -r '.channel.id // empty' "$REST_CHANNEL_CREATE_FILE")"
+[ "$CHANNEL_MANAGEMENT_ID" != "" ] || fail "channel create response missing channel id"
+jq -e --arg name "$CHANNEL_MANAGEMENT_NAME" '
+  .channel.kind == "private"
+  and .channel.name == $name
+  and .creatorMembership.memberId == "'"${HUMAN_ID}"'"
+  and .creatorMembership.role == "owner"
+  and .creatorMembership.leftAtMs == null
+' "$REST_CHANNEL_CREATE_FILE" >/dev/null \
+  || fail "channel create response missing private channel/owner membership"
+
+curl -fsS \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"memberId\":\"${AGENT_ID}\",\"role\":\"member\"}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_MANAGEMENT_ID}/members" >"$REST_MEMBER_ADD_FILE"
+jq -e --arg agent "$AGENT_ID" --arg channel "$CHANNEL_MANAGEMENT_ID" '
+  .membership.memberId == $agent
+  and .membership.channelId == $channel
+  and .membership.role == "member"
+  and .membership.leftAtMs == null
+' "$REST_MEMBER_ADD_FILE" >/dev/null \
+  || fail "agent add response missing active membership"
+
+curl -fsS \
+  -X DELETE \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_MANAGEMENT_ID}/members/${AGENT_ID}" >"$REST_MEMBER_REMOVE_FILE"
+jq -e --arg agent "$AGENT_ID" --arg channel "$CHANNEL_MANAGEMENT_ID" '
+  .membership.memberId == $agent
+  and .membership.channelId == $channel
+  and .membership.leftAtMs != null
+' "$REST_MEMBER_REMOVE_FILE" >/dev/null \
+  || fail "agent remove response missing leftAtMs"
+
 echo "[macos-real-backend] REST send"
 curl -fsS \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
@@ -327,6 +372,7 @@ fi
   echo "- Channel: \`agent-lab\` / \`${CHANNEL_ID}\`"
   echo "- REST login: member=\`${HUMAN_ID}\`, access_token_len=\`$(jq -r '.accessToken | length' "$REST_LOGIN_FILE")\`"
   echo "- REST channel list: count=\`$(jq -r '.channels | length' "$REST_CHANNELS_FILE")\`, includes \`agent-lab\`"
+  echo "- REST channel management: created private channel \`${CHANNEL_MANAGEMENT_NAME}\` / \`${CHANNEL_MANAGEMENT_ID}\`, agent add/remove membership PASS"
   echo "- REST send: message_id=\`${MESSAGE_ID}\`, seq=\`${MESSAGE_SEQ}\`, client_msg_id=\`${CLIENT_MSG_ID}\`"
   echo "- REST agent mention: body=\`${MENTION_BODY}\`, message_id=\`${MENTION_MESSAGE_ID}\`, seq=\`${MENTION_MESSAGE_SEQ}\`, agent_job_count=\`${MENTION_JOB_COUNT}\`"
   echo "- REST history: includes sent text, agent mention source message, plus approval_request \`${APPROVAL_MSG_ID}\` with approval_id \`${APPROVAL_ID}\`"
@@ -338,7 +384,7 @@ fi
   else
     echo "- UI process/window evidence: \`${UI_LOG}\`"
   fi
-  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, send=\`${REST_SEND_FILE}\`, mention_send=\`${REST_MENTION_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
+  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, channel_create=\`${REST_CHANNEL_CREATE_FILE}\`, member_add=\`${REST_MEMBER_ADD_FILE}\`, member_remove=\`${REST_MEMBER_REMOVE_FILE}\`, send=\`${REST_SEND_FILE}\`, mention_send=\`${REST_MENTION_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
 } >"$EVIDENCE_FILE"
 
 cat "$EVIDENCE_FILE"

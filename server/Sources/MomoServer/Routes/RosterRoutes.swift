@@ -103,6 +103,7 @@ struct RosterRoutes: Sendable {
                              'avatarUrl', m.avatar_url,
                              'role', r.role,
                              'channelCount', COALESCE(cc.channel_count, 0),
+                             'channelIds', COALESCE(ch.channel_ids, ARRAY[]::uuid[]),
                              'email', h.email,
                              'timeZone', h.tz,
                              'agentModel', a.model,
@@ -134,6 +135,12 @@ struct RosterRoutes: Sendable {
                          WHERE ms.member_id = m.id
                            AND ms.left_at IS NULL
                       ) cc ON true
+                      LEFT JOIN LATERAL (
+                        SELECT COALESCE(array_agg(ms.channel_id ORDER BY ms.joined_at, ms.channel_id), ARRAY[]::uuid[]) AS channel_ids
+                          FROM membership ms
+                         WHERE ms.member_id = m.id
+                           AND ms.left_at IS NULL
+                      ) ch ON true
                      WHERE m.deleted_at IS NULL
                        AND m.status = 'active'
                        AND m.kind = \(kindFilter)::member_kind
@@ -163,6 +170,7 @@ struct RosterRoutes: Sendable {
                              'avatarUrl', m.avatar_url,
                              'role', r.role,
                              'channelCount', COALESCE(cc.channel_count, 0),
+                             'channelIds', COALESCE(ch.channel_ids, ARRAY[]::uuid[]),
                              'email', h.email,
                              'timeZone', h.tz,
                              'agentModel', a.model,
@@ -194,6 +202,12 @@ struct RosterRoutes: Sendable {
                          WHERE ms.member_id = m.id
                            AND ms.left_at IS NULL
                       ) cc ON true
+                      LEFT JOIN LATERAL (
+                        SELECT COALESCE(array_agg(ms.channel_id ORDER BY ms.joined_at, ms.channel_id), ARRAY[]::uuid[]) AS channel_ids
+                          FROM membership ms
+                         WHERE ms.member_id = m.id
+                           AND ms.left_at IS NULL
+                      ) ch ON true
                      WHERE m.deleted_at IS NULL
                        AND m.status = 'active'
                        AND EXISTS (

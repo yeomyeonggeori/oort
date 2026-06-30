@@ -69,8 +69,13 @@ for service in api relay worker; do
   esac
   grep -Fq "$expected_image" "$SMOKE_ENV" || fail "internal smoke env missing local image fallback for $service"
 done
+grep -Fq "momo-migrate:internal-smoke" "$SMOKE_ENV" || fail "internal smoke env missing local migrate image fallback"
+grep -Fq "momo-mock-hermes:internal-smoke" "$SMOKE_ENV" || fail "internal smoke env missing local mock Hermes image fallback"
 grep -Fq "pull_policy: never" "$CONFIG_OUT" || fail "internal smoke override must use local image fallback pull_policy"
-pass "api/relay/worker remain image-based with local image fallback tags for smoke"
+if grep -Fq "target: /workspace" "$CONFIG_OUT" || grep -Fq "source: ../.." "$CONFIG_OUT"; then
+  fail "internal smoke runtime overlay must not bind-mount the source checkout"
+fi
+pass "api/relay/worker/migrate/mock-hermes remain image-based with local image fallback tags for smoke"
 
 section "Caddy and public/private network boundary"
 grep -Fq '{$API_DOMAIN}' "$CADDYFILE" || fail "Caddyfile missing API_DOMAIN"
@@ -103,9 +108,9 @@ pass "health endpoint is wired behind Caddy -> api:8080"
 
 section "migration path"
 grep -Fq 'service_completed_successfully' "$SMOKE_COMPOSE" || fail "internal smoke must gate app services on migrate success"
-grep -Fq 'sh scripts/migrate.sh' "$SMOKE_COMPOSE" || fail "internal smoke migrate service must run scripts/migrate.sh"
+grep -Fq 'MOMO_MIGRATE_IMAGE' "$SMOKE_COMPOSE" || fail "internal smoke migrate service must use the local migrate image"
 grep -Fq 'schema_migrations' scripts/migrate.sh || fail "migration runner must track schema_migrations"
-pass "internal smoke has an explicit one-shot DB migration path"
+pass "internal smoke has an explicit image-based one-shot DB migration path"
 
 section "relay and worker enablement"
 grep -Fq 'RELAY_DATABASE_URL:' "$PROD_COMPOSE" || fail "relay/worker must use RELAY_DATABASE_URL"
@@ -117,8 +122,8 @@ pass "relay and worker are enabled as single-node services"
 
 section "env template and secret guard"
 for key in \
-  COMPOSE_PROJECT_NAME API_DOMAIN REALTIME_DOMAIN MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
-  DATABASE_URL RELAY_DATABASE_URL REDIS_PASSWORD CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC HERMES_BASE_URL HERMES_API_KEY; do
+  COMPOSE_PROJECT_NAME API_DOMAIN REALTIME_DOMAIN MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
+  MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL REDIS_PASSWORD CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC HERMES_BASE_URL HERMES_API_KEY; do
   grep -Eq "^${key}=" "$SMOKE_ENV" || fail "internal smoke env missing key: $key"
 done
 if grep -Eq '^[A-Z0-9_]*(PASSWORD|HMAC|API_KEY|TOKEN|SECRET|CIPHER_PASS)=([0-9a-f]{32,}|[A-Za-z0-9+/]{40,}={0,2})$' "$SMOKE_ENV"; then
@@ -135,5 +140,5 @@ pass "backup/restore responsibility boundary is documented"
 
 echo
 echo "MOMO-216 internal single-node hosting smoke PASS"
-echo "- verified: prod compose + internal smoke override config, env template guard, Caddy/Centrifugo static wiring, migration path, API health route wiring, relay/worker enablement, backup/restore placeholders."
+echo "- verified: prod compose + internal smoke override config, image-only smoke service boundary, env template guard, Caddy/Centrifugo static wiring, migration path, API health route wiring, relay/worker enablement, backup/restore placeholders."
 echo "- runtime-unverified(public TLS/DNS): public DNS, public ACME certificate issuance/renewal, real VPS firewall, registry image pull/run, SOPS production secret injection, pgBackRest backup/PITR restore rehearsal."
