@@ -405,6 +405,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     public func members(workspace: WorkspaceID) async throws -> [Member] { members }
 
+    public func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        channels.filter { $0.workspaceId == workspace }
+    }
+
     public func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
         messagesByChannel.values.flatMap { $0 }.filter {
             ($0.body ?? "").localizedCaseInsensitiveContains(query)

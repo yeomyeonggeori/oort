@@ -28,6 +28,9 @@ public protocol ChatBackend: Sendable {
     /// All members of a workspace (humans + agents).
     func members(workspace: WorkspaceID) async throws -> [Member]
 
+    /// Channels visible to the authenticated workspace member.
+    func channels(workspace: WorkspaceID) async throws -> [Channel]
+
     /// trgm-backed message search within a workspace.
     func search(workspace: WorkspaceID, query: String) async throws -> [Message]
 

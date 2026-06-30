@@ -83,8 +83,9 @@ public enum MomoMacDemo {
         let backend = MomoServerRESTChatBackend(config: config)
         let vm = ChatViewModel(chat: backend, agentTransport: backend)
         await vm.bootstrap(workspace: config.workspace, accessToken: config.accessToken ?? "")
-        vm.setChannels(config.channels)
-        await vm.selectChannel(config.defaultChannel)
+        if let selected = vm.selectedChannelId ?? vm.channels.first?.id {
+            await vm.selectChannel(selected)
+        }
         return vm
     }
 }

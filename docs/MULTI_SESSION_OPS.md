@@ -37,6 +37,7 @@ The board shows:
 - issue number, assignee, title, and status labels,
 - matched branch, open PR, and local worktree path,
 - the local gate profile or evidence state expected next.
+- a read-only stale/done local worktree audit for closed issues or merged/closed PRs.
 
 Column meanings:
 
@@ -52,6 +53,25 @@ Column meanings:
 | `worktree` | Local worktree path for the branch, if present on this machine. |
 
 If a branch/PR/worktree column is `-`, check for a non-canonical branch before starting work. The remote branch is the practical lock.
+
+### 1.1 Stale Worktree Audit And Cleanup
+
+The same command also audits local worktrees whose branch name follows the canonical `<type>/<issue>-<slug>` pattern. It matches each local branch to GitHub issue and PR state and prints a separate `Stale/done local worktree audit (read-only)` section.
+
+Cleanup is never automatic. Rows are intentionally conservative:
+
+| Audit row | Meaning |
+|---|---|
+| `done-candidate` | The issue is closed or the PR is merged/closed, the local worktree is not the current checkout, the worktree is clean, and no unpushed/divergent commits were detected. |
+| `stale-warning` | The worktree appears tied to completed GitHub state, but cleanup needs human review first. The row explains blockers such as `dirty:<n>`, `unpushed:<n>`, `upstream-unknown`, or `current-worktree`. |
+
+For `done-candidate` rows, copy the printed command only after confirming the issue/PR references are the intended completed work:
+
+```bash
+git worktree remove '<printed-path>'
+```
+
+Do not run cleanup commands for `stale-warning` rows until the warning is resolved. Inspect dirty files with `git -C '<path>' status --short`; inspect local-only commits with `git -C '<path>' log --oneline --decorate --max-count 20`. If the current worktree is listed, switch to another checkout before removing it.
 
 ## 2. Claiming Work
 
