@@ -266,7 +266,7 @@
 | id | 한줄 | 수용기준 등급 | 의존 | 상태 |
 |---|---|---|---|---|
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub 흐름 기반 제품 포지션 + repo topology + deploy layering ADR | docs/spec | MOMO-150 | PR/local gate 대상 |
-| `MOMO-181` | Plugin manifest v0 + catalog split criteria | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
+| `MOMO-181` | Plugin manifest v0 + catalog split criteria + approval metadata gate linkage | docs/spec | MOMO-153, MOMO-180 | PR/local gate 대상 |
 | `MOMO-182` | Docker compose layer ADR: dev/e2e/prod/install/backup | infra/docs | MOMO-005, MOMO-007, MOMO-180 | 완료 |
 | `MOMO-186` | Deterministic e2e compose stack for local gates | infra/docs | MOMO-182, MOMO-115 | local gate 대상 |
 | `MOMO-183` | First-party plugin repo strategy: GitHub, Google Workspace, Jira-like, Docs | docs/spec | MOMO-122, MOMO-180, MOMO-181 | 완료 |
@@ -283,11 +283,14 @@
 ### MOMO-181 수용기준 `[docs/spec]`
 - [x] Plugin Manifest v0 정본: `research/12-agentic-work-os/02-plugin-manifest-v0.md`.
 - [x] 최소 manifest fields 정의: `id`, `name`, `version`, `publisher`, `runtime`, `surfaces`, `capabilities`, `tool_schema_refs`, `approval_policy`, `risk`, `source_policy`, `audit_policy`, `compatibility`, `signature`.
+- [x] GitHub issue #178 field vocabulary 정의: `plugin_id`, `tools`, `scopes`, `audit_surface`, `ui_surfaces`, `runtime_boundary`, `license`, `provenance`.
 - [x] plugin catalog repo(`momo-plugins`) split 기준, artifact metadata, signed artifact policy, compatibility matrix를 문서화.
+- [x] catalog class 기준 정의: core bundled plugin, first-party repo plugin, third-party/custom plugin, private enterprise plugin.
 - [x] first-party plugin repo와 SDK repo 분리 기준을 문서화.
-- [x] Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane `permissions.retrieval_policy_version`/plugin policy version 연결을 명시.
+- [x] Context Packet `tool_grants`, Capability Cache `plugin_tool_schema`, Memory Plane `permissions.retrieval_policy_version`/plugin policy version, approval metadata gate 연결을 명시.
+- [x] Paca식 plugin catalog/SDK 구조는 repo topology 참고로만 두고, momo의 channel timeline execution ledger / approval / audit / capability cache 차별점을 명확화.
 - [x] JSON fixture 3종: GitHub Issues plugin manifest, Google Workspace read-mostly source plugin manifest, high-risk write action approval policy example.
-- [ ] `scripts/local_gate.sh --profile docs` PASS.
+- [x] `scripts/local_gate.sh --profile docs` PASS.
 - [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 - out of scope: 실제 plugin runtime, repo split 생성, WASM runtime, marketplace UI, external OAuth implementation.
 

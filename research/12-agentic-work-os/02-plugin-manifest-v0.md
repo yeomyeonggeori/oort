@@ -1,7 +1,7 @@
 # Plugin Manifest v0 and Catalog Split Criteria
 
-> Status: normative spec for MOMO-181.
-> Updated: 2026-06-29.
+> Status: normative spec for MOMO-181; clarified by GitHub issue #178.
+> Updated: 2026-06-30.
 > Related: MOMO-180, MOMO-151, MOMO-152, MOMO-153, MOMO-161, MOMO-167.
 
 ## 1. Purpose
@@ -14,7 +14,9 @@ Plugin Manifest v0 fixes the minimum contract for momo plugins before any repo s
 4. Which source refs and memory refs can survive into Context Packet and Memory Plane?
 5. What approval, audit, source, signature, and compatibility evidence must a catalog carry?
 
-momo v0 is not a WASM marketplace. It is a governed connector ecosystem: every useful action is mediated by workspace policy, Context Packet, Capability Cache, Memory Plane, approval pause/resume, usage ledger, and audit log.
+momo v0 is not a WASM marketplace and not a Paca-style catalog of backend apps. It is a governed connector ecosystem: every useful action is mediated by workspace policy, Context Packet, Capability Cache, Memory Plane, approval pause/resume, usage ledger, and audit log.
+
+The product center remains the channel timeline execution ledger. A plugin is admitted only when its reads, proposals, approvals, tool results, usage/cost evidence, source refs, and audit events can be projected back into that ledger.
 
 ## 2. Non-Negotiable Rules
 
@@ -26,6 +28,8 @@ momo v0 is not a WASM marketplace. It is a governed connector ecosystem: every u
 - Memory Plane retrieval uses `permissions.retrieval_policy_version`; plugin install or provider revocation can force memory revalidation but does not silently delete memory.
 - `signature.required_for_catalog = true` for any artifact in `momo-plugins`. Dev fixtures may be unsigned only when they are explicitly not catalog installable.
 - `schema_v0.sql` is unchanged by this spec. Runtime tables, registry migrations, and executors are out of scope.
+- Catalog metadata never grants execution. It only lets momo discover signed manifests, compare compatibility, and decide whether a workspace may install or project capabilities.
+- A plugin that cannot produce approval metadata and audit evidence for write-like side effects is not a momo plugin v0 catalog candidate.
 
 ## 3. Manifest Shape
 
@@ -34,18 +38,26 @@ All fields use snake_case JSON. A v0 installable manifest has:
 ```json
 {
   "schema": "momo.plugin_manifest.v0",
+  "plugin_id": "com.momo.plugins.github-issues",
   "id": "com.momo.plugins.github-issues",
   "name": "GitHub Issues",
   "version": "0.1.0",
   "publisher": {},
   "runtime": {},
+  "runtime_boundary": {},
   "surfaces": [],
+  "ui_surfaces": [],
   "capabilities": [],
+  "tools": [],
   "tool_schema_refs": [],
   "approval_policy": {},
   "risk": {},
+  "scopes": {},
   "source_policy": {},
+  "audit_surface": {},
   "audit_policy": {},
+  "license": {},
+  "provenance": {},
   "compatibility": {},
   "signature": {}
 }
@@ -55,20 +67,30 @@ Required fields:
 
 | Field | Meaning |
 |---|---|
-| `id` | Reverse-DNS or org-scoped stable id. Immutable across releases. |
+| `plugin_id` | Canonical reverse-DNS or org-scoped stable id. Immutable across releases. |
+| `id` | Backward-compatible alias for `plugin_id` in early fixtures. New catalog entries must index by `plugin_id`. |
 | `name` | Human-readable display name. |
 | `version` | SemVer plugin version. This feeds Capability Cache `capability_version`. |
 | `publisher` | Publisher id/name/homepage/support; no secret contacts or private keys. |
 | `runtime` | How momo reaches the plugin: connector, webhook, MCP proxy, future WASM, or internal host. |
+| `runtime_boundary` | Trust boundary summary: process/host owner, sandbox, egress, secret boundary, and executor owner. |
 | `surfaces` | User and system surfaces exposed by the plugin. |
+| `ui_surfaces` | Client-visible surfaces: slash command, message context action, approval card, source picker, settings, and timeline card affordances. |
 | `capabilities` | Tool/capability declarations, grants, risk, operations, provider grant requirements, result kind. |
+| `tools` | Stable tool inventory derived from capabilities and schema refs; optimized for catalog/search display and SDK generation. |
 | `tool_schema_refs` | Hash-addressed input/output schema refs used by Capability Cache and future executors. |
 | `approval_policy` | Fail-closed policy for risky actions and approval-card behavior. |
 | `risk` | Overall risk classes, external systems, data sensitivity, and side-effect classes. |
+| `scopes` | Workspace/channel/member/provider/resource scope vocabulary used by projection and approval. |
 | `source_policy` | Which source refs may enter Context Packet/Memory Plane and under which policy versions. |
+| `audit_surface` | Timeline and admin audit surfaces the plugin must populate. |
 | `audit_policy` | Required audit event kinds and redaction obligations. |
+| `license` | SPDX license id and notice requirements. Must stay permissive for bundled/first-party distribution. |
+| `provenance` | Source repo, release ref, build/signing evidence, and publisher verification metadata. |
 | `compatibility` | Protocol and card compatibility matrix. |
 | `signature` | Artifact digest/signature status for catalog trust. |
+
+`runtime_boundary`, `ui_surfaces`, `tools`, `scopes`, `audit_surface`, `license`, and `provenance` are explicit v0 review fields. Existing fixtures may keep the older compact `runtime`, `surfaces`, `capabilities`, `source_policy`, `audit_policy`, `publisher`, and `signature` objects, but catalog admission must be able to derive the explicit fields above without guessing.
 
 ## 4. Field Contracts
 
@@ -232,6 +254,76 @@ Required:
 
 v0 accepts `minisign-ed25519` or future Sigstore-style provenance as policy options. `momo-plugins` catalog entries require a digest and signature reference before installation by non-dev workspaces.
 
+### 4.12 `runtime_boundary`
+
+`runtime_boundary` makes repo split and execution ownership reviewable before runtime code exists.
+
+Required:
+
+- `executor_owner`: `core`, `first_party_plugin`, `third_party`, or `enterprise_customer`.
+- `process_boundary`: `in_core_process`, `sidecar_worker`, `remote_https`, `mcp_server`, or `future_wasm`.
+- `secret_boundary`: where provider credentials and signing material live. Must never be the catalog.
+- `network_boundary`: egress allowlist and inbound webhook policy when applicable.
+- `state_boundary`: whether durable state remains in momo Postgres, provider APIs, plugin-owned storage, or none.
+- `failure_boundary`: retry/idempotency owner and how failures return to the channel timeline.
+
+### 4.13 `tools`
+
+`tools` is a catalog-facing inventory. It must be derivable from `capabilities[]` and `tool_schema_refs[]`, but it exists so reviewers and future SDKs can inspect the tool surface without reading every policy rule.
+
+Each tool entry should include:
+
+- `tool_name`
+- `display_name`
+- `schema_hash`
+- `default_grant`
+- `risk`
+- `approval_policy`
+- `result_kind`
+- `resource_scope_summary`
+- `capability_version`
+
+Catalog tooling must reject a tool entry whose `schema_hash`, `risk`, or approval fields disagree with the backing capability/schema records.
+
+### 4.14 `scopes`
+
+`scopes` names the resource vocabulary that policy may admit or deny:
+
+- `workspace_scope`: workspace install and admin visibility.
+- `channel_scope`: channels or channel classes where surfaces may appear.
+- `member_scope`: actor/delegated user/on-behalf-of constraints.
+- `provider_scope`: OAuth/API grants or enterprise admin grants.
+- `resource_scope`: provider resources such as GitHub repos, Jira projects, Drive corpora, calendars, mailboxes, or docs spaces.
+
+Broad provider scopes are not enough. If a tool input can name arbitrary provider resources, Context Packet projection must include a `resource_scope_ref`, and approval/execution must recheck that same ref.
+
+### 4.15 `audit_surface`
+
+`audit_surface` binds plugin activity to momo's channel timeline execution ledger.
+
+Required:
+
+- `timeline_events`: user-visible message/card/event projections such as `tool_call.proposed`, `approval.requested`, `approval.decided`, and `tool_result.recorded`.
+- `admin_events`: install, revoke, capability discovery, signature hold, provider grant changes, and policy changes.
+- `source_events`: source ref creation/refresh and Memory Plane revalidation triggers.
+- `cost_events`: usage/reserve/reconcile references when a tool spends model/provider budget.
+- `redaction_policy`: fields hidden from cards, Context Packet, logs, and exported audit.
+
+Approval cards are not the audit surface by themselves. The server-owned approval row, message props, outbox event, and audit log together make the approved or rejected side effect reviewable later.
+
+### 4.16 `license` and `provenance`
+
+Required:
+
+- `license.spdx_id`
+- `license.notice_required`
+- `provenance.source_repo`
+- `provenance.release_ref`
+- `provenance.build_digest`
+- `provenance.publisher_verification`
+
+Bundled and first-party plugins must remain permissive-license compatible with momo's Apache/MIT target. Third-party and private enterprise plugins may use their own licenses only when the catalog marks them non-bundled and workspace admins accept the separate terms.
+
 ## 5. Plane Connections
 
 ### 5.1 Capability Cache `plugin_tool_schema`
@@ -271,7 +363,37 @@ Context Packet projection turns a valid cache entry into:
 
 No Context Packet may inline provider credentials, full manifests, hidden policy, or broad catalog metadata. The grant is valid for one packet/run only.
 
-### 5.3 Memory Plane Permission and `policy_version`
+### 5.3 Approval Metadata Gate
+
+The approval metadata gate is the runtime check that prevents a catalog entry from becoming an unreviewed side effect.
+
+For every proposed tool call, AgentWorker/server must find exactly one matching Context Packet `tool_grant` derived from Capability Cache. The grant must include:
+
+- `tool_name`
+- `grant`
+- `risk` or `risk_level`
+- `approval_policy`
+- `allowed_operations`
+- `denied_operations`
+- `input_schema_ref`
+- `resource_scope_ref` when the schema is broader than the admitted resource set
+- `resource_scope_summary`
+- `capability_version`
+- `policy_version`
+
+Gate rules:
+
+| Metadata state | Result |
+|---|---|
+| Missing, duplicate, malformed, expired, or policy-incompatible grant | Fail closed: pause for approval or deny according to workspace policy. |
+| `grant = "read"`, `risk = "read"`, `approval_policy = "none"` | Direct read may proceed after provider/resource recheck. |
+| `grant = "propose"` with `approval_policy = "require_approval"` or `always` | Create approval request and pause the run. |
+| Write/spend/deploy/identity/admin risk with `approval_policy = "none"` | Invalid metadata; fail closed. |
+| Schema hash or resource scope mismatch at decision/resume time | Reject/expire the approval or fail the resume job without provider side effect. |
+
+Approval metadata is persisted into the proposed `tool_call`/`approval_request` props as sanitized policy evidence. It must be sufficient for a human to see what is being approved and for the executor to recheck the frozen payload after `approval.decided`.
+
+### 5.4 Memory Plane Permission and `policy_version`
 
 When plugin source refs become memory, the memory item must include:
 
@@ -282,7 +404,22 @@ When plugin source refs become memory, the memory item must include:
 
 Plugin uninstall, provider grant revocation, source scope narrowing, signature trust hold, or workspace policy change triggers Memory Plane revalidation. Revalidation can hide or tombstone future retrieval without deleting the audit history.
 
-## 6. Catalog Split Criteria
+## 6. Catalog and Repo Split Criteria
+
+### 6.1 Catalog Classes
+
+The catalog is not a task-board app store. It is an install/discovery ledger for governed capabilities that can appear in channel timelines.
+
+| Class | Home | Admission rule | Typical examples |
+|---|---|---|---|
+| Core bundled plugin | `momo` monorepo | Allowed only when the capability is protocol/bootstrap infrastructure and releases with core. Still needs manifest-derived metadata and audit events. | internal docs search fixture, built-in approval-safe demo tools |
+| First-party repo plugin | `momo-plugin-*` | Split when provider runtime/tests/security boundary release independently and Manifest v0 is stable. Must use catalog metadata and local plugin gates. | GitHub Issues, Google Workspace, work items, docs |
+| Third-party/custom plugin | external repo or customer repo | Catalog entry can be public or workspace-local. Must include signature/provenance, compatibility, scopes, risk, approval, audit, and license terms. | customer Jira workflow, internal CRM connector |
+| Private enterprise plugin | customer/private org repo | May be absent from public `momo-plugins`; install through private catalog index. Must preserve same Context Packet, Capability Cache, approval, and audit gates. | enterprise DWD connector, internal admin automation |
+
+All four classes share one projection path: Manifest/Catalog evidence -> Capability Cache `plugin_tool_schema` -> Context Packet `tool_grants` -> approval metadata gate -> timeline/audit result.
+
+### 6.2 `momo-plugins` Catalog Split
 
 Do not create `momo-plugins` until this spec is accepted and at least the following are true:
 
@@ -301,7 +438,26 @@ Create `momo-plugins` when at least one of these triggers becomes true:
 
 Do not split `momo-plugins` when the only goal is to move unfinished runtime code or hide unstable protocol churn.
 
-## 7. First-Party Plugin Repo Split Criteria
+The catalog index shape is:
+
+| Field | Meaning |
+|---|---|
+| `plugin_id` | Stable manifest id. |
+| `version` | SemVer artifact version. |
+| `manifest_ref` | URL or `momo://` ref to the manifest. |
+| `artifact_digest` | Hash of the installable artifact or manifest-only package. |
+| `signature_ref` | Verification material; required for installable non-dev catalog entries. |
+| `publisher_id` | Verified publisher. |
+| `catalog_class` | `core_bundled`, `first_party_repo`, `third_party_custom`, or `private_enterprise`. |
+| `compatibility` | Manifest/Context Packet/Capability Cache/Memory Plane/client card compatibility. |
+| `risk_summary` | Human-reviewable risk classes and side-effect profile. |
+| `approval_summary` | Whether risky tools require approval, always pause, or are denied. |
+| `scope_summary` | Safe summary of provider/resource scopes. |
+| `audit_surface_summary` | Events/cards/logs the plugin must produce. |
+| `license_summary` | SPDX id and notice/terms pointer. |
+| `deprecation_status` | `active`, `deprecated`, `security_hold`, or `revoked`. |
+
+### 6.3 First-Party Plugin Repo Split Criteria
 
 First-party plugin repos such as `momo-plugin-github` and `momo-plugin-google-workspace` split only after:
 
@@ -313,7 +469,7 @@ First-party plugin repos such as `momo-plugin-github` and `momo-plugin-google-wo
 
 Google Workspace starts private-first because OAuth, restricted scopes, admin install, and domain-wide delegation have higher trust review burden. GitHub Issues can be public earlier if its provider grants, repository allowlist, and approval writes are stable.
 
-## 8. SDK Repo Split Criteria
+### 6.4 SDK Repo Split Criteria
 
 Do not create SDK repos before duplication exists. Split `momo-plugin-sdk-ts`, `momo-plugin-sdk-swift`, or `momo-plugin-sdk-mcp` only when:
 
@@ -324,7 +480,20 @@ Do not create SDK repos before duplication exists. Split `momo-plugin-sdk-ts`, `
 
 `momo-plugin-sdk-ts` is the likely first SDK because manifest/schema/catalog tooling is web/CLI-friendly. Swift SDK is only justified if native client extensions become real. MCP SDK is justified when external MCP servers need a stable bridge without cloning core.
 
-## 9. Fixtures
+## 7. Paca Comparison and momo Difference
+
+Paca is useful as a repo-topology reference: core, catalog, plugins, SDKs, and MCP-adjacent packages can be separated. momo must not copy Paca's plugin catalog semantics directly.
+
+| Paca-like concern | momo v0 decision |
+|---|---|
+| Plugin as backend extension | Plugin as governed work surface visible in the channel timeline. |
+| Catalog as installable app list | Catalog as signed capability evidence feeding Capability Cache and approval/audit gates. |
+| Runtime isolation first | Manifest, policy, Context Packet, Capability Cache, approval metadata, and audit first; runtime isolation later. |
+| Board/task object as center | Channel timeline execution ledger as center; external tickets/docs are source refs or tool results. |
+| Plugin permission at install time | Install creates candidate capabilities; each run still projects bounded `tool_grants`. |
+| Tool execution hidden in plugin runtime | Writes pause into approval cards and return `tool_result`/audit evidence to the timeline. |
+
+## 8. Fixtures
 
 Fixture directory:
 
@@ -334,7 +503,7 @@ Fixture directory:
 
 These are normative examples for field names and policy shape, not runtime implementation.
 
-## 10. Non-Goals
+## 9. Non-Goals
 
 - Implement plugin runtime.
 - Create `momo-plugins` or any first-party plugin repo.

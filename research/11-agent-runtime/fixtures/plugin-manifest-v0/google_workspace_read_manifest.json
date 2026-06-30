@@ -1,5 +1,6 @@
 {
   "schema": "momo.plugin_manifest.v0",
+  "plugin_id": "com.momo.plugins.google-workspace-read",
   "id": "com.momo.plugins.google-workspace-read",
   "name": "Google Workspace Read Sources",
   "version": "0.1.0",
@@ -20,6 +21,14 @@
         "oauth2.googleapis.com"
       ]
     }
+  },
+  "runtime_boundary": {
+    "executor_owner": "first_party_plugin",
+    "process_boundary": "sidecar_worker",
+    "secret_boundary": "momo_secret_store_or_enterprise_oauth_store",
+    "network_boundary": "egress_allowlist:www.googleapis.com,oauth2.googleapis.com",
+    "state_boundary": "momo_postgres_source_refs_and_google_api",
+    "failure_boundary": "read_errors_return_bounded_tool_result_and_audit"
   },
   "surfaces": [
     {
@@ -43,6 +52,7 @@
       "display_name": "Connect Google Workspace"
     }
   ],
+  "ui_surfaces": ["source_provider", "sidebar_settings", "source_badge"],
   "capabilities": [
     {
       "tool_name": "google_workspace.drive.search",
@@ -88,6 +98,41 @@
       "result_kind": "external_source_ref",
       "idempotency_required": false,
       "resource_scope_summary": "freebusy_or_bounded_event_window"
+    }
+  ],
+  "tools": [
+    {
+      "tool_name": "google_workspace.drive.search",
+      "display_name": "Search selected Drive files",
+      "schema_hash": "sha256:gwsdrivesearchv0",
+      "default_grant": "read",
+      "risk": "read",
+      "approval_policy": "none",
+      "result_kind": "external_source_ref",
+      "resource_scope_summary": "selected_file_or_metadata_readonly_scope",
+      "capability_version": "google-workspace-read@0.1.0"
+    },
+    {
+      "tool_name": "google_workspace.gmail.search_threads",
+      "display_name": "Search Gmail threads",
+      "schema_hash": "sha256:gwsgmailsearchv0",
+      "default_grant": "read",
+      "risk": "read",
+      "approval_policy": "none",
+      "result_kind": "external_source_ref",
+      "resource_scope_summary": "bounded_query_window",
+      "capability_version": "google-workspace-read@0.1.0"
+    },
+    {
+      "tool_name": "google_workspace.calendar.availability",
+      "display_name": "Query calendar availability",
+      "schema_hash": "sha256:gwscalendaravailabilityv0",
+      "default_grant": "read",
+      "risk": "read",
+      "approval_policy": "none",
+      "result_kind": "external_source_ref",
+      "resource_scope_summary": "freebusy_or_bounded_event_window",
+      "capability_version": "google-workspace-read@0.1.0"
     }
   ],
   "tool_schema_refs": [
@@ -141,6 +186,20 @@
     "data_sensitivity": "restricted_workspace_sources",
     "side_effects": ["external_read"]
   },
+  "scopes": {
+    "workspace_scope": "installed_workspace",
+    "channel_scope": "enabled_channels",
+    "member_scope": "actor_or_delegated_user_visible_sources",
+    "provider_scope": [
+      "drive.file",
+      "drive.metadata.readonly",
+      "gmail.metadata",
+      "gmail.readonly",
+      "calendar.freebusy",
+      "calendar.events.readonly"
+    ],
+    "resource_scope": "selected_files_mailboxes_and_bounded_calendar_windows"
+  },
   "source_policy": {
     "source_kinds": ["google_drive", "gmail", "calendar"],
     "context_packet_projection": {
@@ -159,6 +218,13 @@
       "retrieval_policy_version": "memory-policy@2026-06-26+google-workspace-connector@2026-06-27+plugin:google-workspace-read@0.1.0"
     }
   },
+  "audit_surface": {
+    "timeline_events": ["source_ref.created", "tool_result.recorded"],
+    "admin_events": ["plugin.installed", "plugin.revoked", "google_workspace.scope_inventory.recorded"],
+    "source_events": ["source_ref.created", "source_ref.refreshed", "memory.revalidation_required"],
+    "cost_events": [],
+    "redaction_policy": ["provider_access_token", "provider_refresh_token", "google_primary_email", "resource_key"]
+  },
   "audit_policy": {
     "event_prefix": "plugin.google_workspace_read",
     "required_events": [
@@ -175,6 +241,17 @@
       "google_primary_email",
       "resource_key"
     ]
+  },
+  "license": {
+    "spdx_id": "Apache-2.0",
+    "notice_required": true,
+    "terms_ref": "NOTICE"
+  },
+  "provenance": {
+    "source_repo": "Dawn-kim-official/momo",
+    "release_ref": "research/11-agent-runtime/fixtures/plugin-manifest-v0/google_workspace_read_manifest.json",
+    "build_digest": "sha256:fixture-google-workspace-read-manifest-v0",
+    "publisher_verification": "momo.first_party"
   },
   "compatibility": {
     "manifest_version": "0",
