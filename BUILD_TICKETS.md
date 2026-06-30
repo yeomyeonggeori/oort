@@ -220,10 +220,10 @@
 - [x] verifier가 restore evidence markdown/json을 생성하고 PR body에 붙일 수 있는 경로를 출력한다.
 - [x] `scripts/local_gate.sh --profile backup`을 추가하고 `host-runtime` profile에도 restore rehearsal verifier를 포함한다.
 - [x] repo-local로 닫히는 범위와 실제 pgBackRest host rehearsal(`runtime-unverified(public host)`) 범위를 docs/RUN, docs/DEPLOY, docs/SECRETS_BACKUP_RUNBOOK, docs/LOCAL_PR_GATE에 분리 기록한다.
-- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
-- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
-- [ ] 가능하면 `scripts/local_gate.sh --profile backup` 또는 `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
-- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR #206에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR #206에 첨부한다.
+- [x] 가능하면 `scripts/local_gate.sh --profile backup` 또는 `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR #206에 첨부한다.
+- [x] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-212 수용기준 `[runtime-agent/swift]`
 - [x] GitHub #180을 `scripts/goal_claim.sh 180`으로 claim하고 별도 branch/worktree에서 진행한다.
