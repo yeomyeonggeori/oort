@@ -525,6 +525,9 @@ private struct MessageDTO: Decodable {
     let authorMemberId: String
     let type: String
     let body: String?
+    let props: JSON?
+    let runId: String?
+    let clientMsgId: UUID?
     let createdAtMs: Int64
 
     var message: Message {
@@ -538,6 +541,9 @@ private struct MessageDTO: Decodable {
             type: MessageType(rawValue: type) ?? .text,
             state: .sent,
             body: body,
+            props: props ?? .object([:]),
+            runId: runId.flatMap { RunID(uuidString: $0) },
+            clientMsgId: clientMsgId,
             createdAtMs: createdAtMs
         )
     }

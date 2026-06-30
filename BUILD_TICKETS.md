@@ -481,6 +481,7 @@
 | `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 | `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
 | `MOMO-198` | M3 D/B/C real-data readiness spec and blocker cleanup | docs/spec | MOMO-170, MOMO-171, MOMO-174, MOMO-177, MOMO-179, MOMO-192, MOMO-193 |
+| `MOMO-205` | macOS real-backend dev app smoke gate | runtime/macos-ui | MOMO-134, MOMO-177, MOMO-197, MOMO-167 |
 | `MOMO-200` | macOS SwiftCentrifuge live adapter | swift/macos-ui/runtime-relay | MOMO-192, MOMO-193 |
 | `MOMO-201` | D Live Tool-Call fixture/local gate | runtime-agent/macos-ui | MOMO-200, MOMO-178 |
 | `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
@@ -639,6 +640,19 @@
 - [ ] `docs/LOCAL_PR_GATE.md`, `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 새 gate 기준으로 갱신한다.
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
 - [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
+
+### MOMO-205 수용기준 `[runtime/macos-ui]`
+- [x] GitHub #162를 `scripts/goal_claim.sh 162`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/verify_macos_real_backend_ui.sh`가 local Docker compose + migrate + host MomoServer를 준비한다.
+- [x] verifier가 REST login, channel list, history, send path를 실제 MomoServer와 PostgreSQL seed/fixture 대상으로 검증하고 markdown evidence를 남긴다.
+- [x] approval/cost surface용 `approval_request` + `agent_run` + `usage_ledger` fixture를 tenant data로 준비하고, REST history response에서 structured `props`/`runId` evidence를 확인한다.
+- [x] MomoServer message DTO는 REST history/send에 `props`, `runId`, `clientMsgId`를 포함해 macOS structured cards가 real backend data를 소비할 수 있다.
+- [x] MomoMac REST bootstrap은 `MOMO_CHANNEL_ID` dev env를 dynamic channel list 후 선택하고, REST history의 approval/cost props로 `ApprovalInboxView`/cost sidecar state를 hydrate한다.
+- [x] `scripts/local_gate.sh --profile macos-ui`는 기본적으로 GUI launch를 skip하고 REST/backend smoke를 PASS한다.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`는 direct executable launch로 `MOMO_SERVER_BASE_URL` 등 env를 전달하고 process/window/log evidence를 요구한다.
+- [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #162를 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: SwiftCentrifuge live adapter, notarization/signing/DMG, full M3 combined D/B/C exit gate.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

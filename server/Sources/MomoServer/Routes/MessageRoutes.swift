@@ -95,6 +95,7 @@ struct MessageRoutes: Sendable {
 
             let (id, seq, ts, count, createdAt) =
                 try row.decode((UUID, Int64, Int64, Int, Date).self)
+            let responseProps = Self.decodeProps(propsJSON)
 
             // ---- outbox INSERT in the SAME tx (L4 §8.1: transactional outbox) ----
             // partition_key = channel_id → per-channel ordering for the relay.
@@ -119,7 +120,8 @@ struct MessageRoutes: Sendable {
             return (true, MessageDTO(
                 id: id.uuidString, channelId: channelID.uuidString, seq: seq,
                 hlcTs: ts, hlcCount: count, authorMemberId: principal.memberID.uuidString,
-                type: type, body: body,
+                type: type, body: body, props: responseProps,
+                runId: dto.runId?.uuidString, clientMsgId: dto.clientMsgId.uuidString,
                 createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
             ))
         }
@@ -166,7 +168,8 @@ struct MessageRoutes: Sendable {
             if let after {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
+                           props::text, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID) AND seq > \(after)
                        AND deleted_at IS NULL
@@ -178,7 +181,8 @@ struct MessageRoutes: Sendable {
             } else if let before {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
+                           props::text, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID) AND seq < \(before)
                        AND deleted_at IS NULL
@@ -190,7 +194,8 @@ struct MessageRoutes: Sendable {
             } else {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
+                           props::text, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID)
                        AND deleted_at IS NULL
@@ -202,12 +207,13 @@ struct MessageRoutes: Sendable {
             }
 
             let dtos = try rows.map { row -> MessageDTO in
-                let (id, seq, ts, count, author, type, body, createdAt) =
-                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, Date).self)
+                let (id, seq, ts, count, author, type, body, propsJSON, runID, clientMsgID, createdAt) =
+                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, String, UUID?, UUID?, Date).self)
                 return MessageDTO(
                     id: id.uuidString, channelId: channelID.uuidString, seq: seq,
                     hlcTs: ts, hlcCount: count, authorMemberId: author.uuidString,
-                    type: type, body: body,
+                    type: type, body: body, props: Self.decodeProps(propsJSON),
+                    runId: runID?.uuidString, clientMsgId: clientMsgID?.uuidString,
                     createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
                 )
             }
@@ -271,6 +277,17 @@ struct MessageRoutes: Sendable {
               let str = String(data: data, encoding: .utf8)
         else { return "{}" }
         return str
+    }
+
+    private static func decodeProps(_ propsJSON: String) -> [String: JSONValue]? {
+        guard let data = propsJSON.data(using: .utf8),
+              let value = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case .object(let props) = value,
+              !props.isEmpty
+        else {
+            return nil
+        }
+        return props
     }
 
     /// Build the outbox `payload` JSON (the args the relay will POST to Centrifugo).
