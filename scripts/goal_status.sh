@@ -15,6 +15,7 @@ Prints a status board for Codex goal orchestration:
   - issue number, title, assignee, labels
   - matching branch, PR, and local worktree path
   - the local gate profile/evidence expected before worker handoff and momo-main merge
+  - read-only stale/done worktree audit with copy-paste cleanup commands
 
 The board is read-only. It does not claim, release, merge, close, or delete anything.
 Workers stop after PR + status:needs-review. momo-main owns merge, close, post-merge main gate, and roadmap/backlog updates.
@@ -99,16 +100,16 @@ branches_txt="$tmp_dir/branches.txt"
 
 gh issue list \
   --repo "$ORG_REPO" \
-  --state open \
+  --state all \
   --limit "$LIMIT" \
-  --json number,title,assignees,labels,url \
+  --json number,title,state,assignees,labels,url,closedAt \
   > "$issues_json"
 
 gh pr list \
   --repo "$ORG_REPO" \
-  --state open \
+  --state all \
   --limit "$LIMIT" \
-  --json number,title,headRefName,url,isDraft,reviewDecision \
+  --json number,title,headRefName,url,isDraft,reviewDecision,state,mergedAt,closedAt \
   > "$prs_json"
 
 jq -r '
@@ -116,9 +117,11 @@ jq -r '
   | [
       (.number | tostring),
       (.title | gsub("[\t\r\n]"; " ")),
+      .state,
       (if ([.assignees[].login] | length) == 0 then "-" else ([.assignees[].login] | join(",")) end),
       (if ([.labels[].name] | length) == 0 then "-" else ([.labels[].name] | join(",")) end),
-      .url
+      .url,
+      (.closedAt // "-")
     ]
   | @tsv
 ' "$issues_json" > "$issues_tsv"
@@ -129,8 +132,11 @@ jq -r '
       (.number | tostring),
       .url,
       .headRefName,
+      .state,
       (if .isDraft then "draft" else "ready" end),
       (.reviewDecision // "-"),
+      (.mergedAt // "-"),
+      (.closedAt // "-"),
       (.title | gsub("[\t\r\n]"; " "))
     ]
   | @tsv
@@ -208,8 +214,8 @@ pr_for_branch() {
   fi
 
   awk -F '\t' -v branch="$branch" '
-    $3 == branch {
-      printf("#%s %s %s %s", $1, $4, $5, $2)
+    $3 == branch && $4 == "OPEN" {
+      printf("#%s %s %s %s", $1, $5, $6, $2)
       exit
     }
   ' "$prs_tsv"
@@ -262,9 +268,13 @@ evidence_for_status() {
 print_rows_for_status() {
   local status="$1"
   local emitted=0
-  local number title assignees labels url gate branch pr worktree evidence status_label
+  local number title state assignees labels url closed_at gate branch pr worktree evidence status_label
 
-  while IFS=$'\t' read -r number title assignees labels url; do
+  while IFS=$'\t' read -r number title state assignees labels url closed_at; do
+    if [ "$state" != "OPEN" ]; then
+      continue
+    fi
+
     status_label="status:$status"
     if ! has_label "$labels" "$status_label"; then
       continue
@@ -292,6 +302,175 @@ print_rows_for_status() {
   fi
 }
 
+issue_for_branch() {
+  local branch="$1"
+  local candidate
+
+  case "$branch" in
+    */[0-9]*-*) candidate="${branch#*/}"; candidate="${candidate%%-*}" ;;
+    [0-9]*-*) candidate="${branch%%-*}" ;;
+    *) candidate="" ;;
+  esac
+
+  case "$candidate" in
+    ""|*[!0-9]*) printf -- '-\n' ;;
+    *) printf '%s\n' "$candidate" ;;
+  esac
+}
+
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+remote_state_for_branch() {
+  local branch="$1"
+  if grep -Fxq "$branch" "$branches_txt"; then
+    printf 'yes\n'
+  else
+    printf 'no\n'
+  fi
+}
+
+ahead_count_for_worktree() {
+  local path="$1"
+  local upstream
+
+  upstream="$(git -C "$path" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  if [ -z "$upstream" ]; then
+    if git -C "$path" rev-parse --verify origin/main >/dev/null 2>&1 &&
+      git -C "$path" merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+      printf '0\n'
+      return 0
+    fi
+    printf 'unknown\n'
+    return 0
+  fi
+
+  git -C "$path" rev-list --count "${upstream}..HEAD" 2>/dev/null || {
+    if git -C "$path" rev-parse --verify origin/main >/dev/null 2>&1 &&
+      git -C "$path" merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+      printf '0\n'
+    else
+      printf 'unknown\n'
+    fi
+  }
+}
+
+print_stale_worktree_audit() {
+  local current_worktree emitted branch path issue issue_line issue_title issue_state issue_url issue_closed_at
+  local pr_line pr_number pr_url pr_branch pr_state pr_draft pr_review pr_merged_at pr_closed_at pr_title
+  local dirty_count ahead_count remote_state reason blockers cleanup_command local_state pr_ref audit_status
+
+  current_worktree="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  emitted=0
+
+  echo
+  echo "Stale/done local worktree audit (read-only)"
+  {
+    printf 'audit\tissue\tpr\tbranch\tworktree\tremote\tlocal_state\tcleanup_command\n'
+
+    while IFS=$'\t' read -r branch path; do
+      issue="$(issue_for_branch "$branch")"
+      issue_title="-"
+      issue_state="-"
+      issue_url="-"
+      issue_closed_at="-"
+      if [ "$issue" != "-" ]; then
+        issue_line="$(awk -F '\t' -v issue="$issue" '$1 == issue { print; exit }' "$issues_tsv")"
+        if [ -n "$issue_line" ]; then
+          IFS=$'\t' read -r _ issue_title issue_state _ _ issue_url issue_closed_at <<EOF
+$issue_line
+EOF
+        fi
+      fi
+
+      pr_number="-"
+      pr_url="-"
+      pr_state="-"
+      pr_merged_at="-"
+      pr_closed_at="-"
+      pr_line="$(awk -F '\t' -v branch="$branch" '$3 == branch { print; exit }' "$prs_tsv")"
+      if [ -n "$pr_line" ]; then
+        IFS=$'\t' read -r pr_number pr_url pr_branch pr_state pr_draft pr_review pr_merged_at pr_closed_at pr_title <<EOF
+$pr_line
+EOF
+      fi
+
+      if [ "$issue_state" != "CLOSED" ] && [ "$pr_state" != "MERGED" ] && [ "$pr_state" != "CLOSED" ]; then
+        continue
+      fi
+
+      dirty_count="$(git -C "$path" status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')"
+      if [ -z "$dirty_count" ]; then
+        dirty_count="unknown"
+      fi
+      ahead_count="$(ahead_count_for_worktree "$path")"
+      remote_state="$(remote_state_for_branch "$branch")"
+
+      reason=""
+      if [ "$issue_state" = "CLOSED" ]; then
+        reason="issue:CLOSED"
+        if [ "$issue_closed_at" != "-" ]; then
+          reason="$reason@$issue_closed_at"
+        fi
+      fi
+      if [ "$pr_state" = "MERGED" ] || [ "$pr_state" = "CLOSED" ]; then
+        [ -n "$reason" ] && reason="$reason,"
+        reason="${reason}pr:$pr_state"
+        if [ "$pr_merged_at" != "-" ]; then
+          reason="$reason@$pr_merged_at"
+        elif [ "$pr_closed_at" != "-" ]; then
+          reason="$reason@$pr_closed_at"
+        fi
+      fi
+
+      blockers=""
+      if [ "$path" = "$current_worktree" ]; then
+        blockers="current-worktree"
+      fi
+      if [ "$dirty_count" != "0" ]; then
+        [ -n "$blockers" ] && blockers="$blockers,"
+        blockers="${blockers}dirty:$dirty_count"
+      fi
+      if [ "$ahead_count" = "unknown" ]; then
+        [ -n "$blockers" ] && blockers="$blockers,"
+        blockers="${blockers}upstream-unknown"
+      elif [ "$ahead_count" != "0" ]; then
+        [ -n "$blockers" ] && blockers="$blockers,"
+        blockers="${blockers}unpushed:$ahead_count"
+      fi
+
+      if [ -n "$blockers" ]; then
+        local_state="$reason; warn:$blockers"
+        cleanup_command="-"
+        audit_status="stale-warning"
+      else
+        local_state="$reason; clean;pushed"
+        cleanup_command="git worktree remove $(shell_quote "$path")"
+        audit_status="done-candidate"
+      fi
+
+      if [ "$pr_number" != "-" ]; then
+        pr_ref="#$pr_number $pr_state $pr_url"
+      else
+        pr_ref="-"
+      fi
+
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$audit_status" "#$issue" "$pr_ref" "$branch" "$path" "$remote_state" "$local_state" "$cleanup_command"
+      emitted=1
+    done < "$worktrees_tsv"
+
+    if [ "$emitted" -eq 0 ]; then
+      printf 'clean\t-\t-\t-\t-\t-\t(no stale/done local worktrees detected within --limit %s)\t-\n' "$LIMIT"
+    fi
+  } | if command -v column >/dev/null 2>&1; then
+    column -t -s $'\t'
+  else
+    cat
+  fi
+}
+
 echo "momo goal status"
 echo "repo: $ORG_REPO"
 echo "worktree root: $WORKTREE_ROOT"
@@ -310,9 +489,13 @@ else
   cat
 fi
 
+print_stale_worktree_audit
+
 echo
 echo "Legend:"
 echo "- gate: local gate profile expected before PR handoff or momo-main merge; docs+swift-before-merge means docs profile is enough for worker PR evidence, but swift profile is rerun by momo-main before merge."
 echo "- evidence: claim-first=not started, run:<profile>=worker should run that local gate then open PR, momo-main-review=needs-review PR is in momo-main's review/merge queue, PR-missing=handoff label without an open PR, blocker-comment=issue comment must explain the blocker."
 echo "- branch/PR/worktree are matched by the canonical '<type>/<issue>-<slug>' convention. If a field is '-', check for non-canonical names before starting duplicate work."
+echo "- stale/done audit is read-only. A cleanup command appears only for a closed issue or merged/closed PR whose local worktree is not current, has no dirty files, and has no unpushed/divergent commits."
+echo "- stale-warning rows need human review first; dirty, current-worktree, upstream-unknown, or unpushed warnings intentionally suppress cleanup commands."
 echo "- worker stop line: after PR + scripts/goal_release.sh --review, workers do not merge, close issues, run the post-merge main gate, or adjust roadmap/backlog state."

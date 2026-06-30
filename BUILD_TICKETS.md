@@ -150,6 +150,7 @@
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
+| `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub agentic work OS 시장 분석 + repo topology ADR | docs/spec | MOMO-150 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
@@ -192,6 +193,17 @@
 - [x] `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #144를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-199 수용기준 `[tooling/docs]`
+- [x] GitHub #154를 `scripts/goal_claim.sh 154`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/goal_status.sh`가 local worktree branch를 GitHub issue/PR 상태와 매칭한다.
+- [x] closed issue 또는 merged/closed PR에 연결된 worktree를 `done-candidate`/`stale-warning` 섹션으로 분리 표시한다.
+- [x] current/dirty/unpushed/upstream-unknown worktree는 cleanup command를 숨기고 warning reason을 표시한다.
+- [x] 기본 실행은 read-only이며 `git worktree remove`를 자동 실행하지 않는다.
+- [x] clean + pushed/merged candidate에만 copy-paste 가능한 cleanup command를 출력한다.
+- [x] `docs/MULTI_SESSION_OPS.md`, `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `bash -n scripts/goal_status.sh` 및 `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #154를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-005 수용기준 `[infra/docs]`
 - [x] `scripts/goal_claim.sh 5` 시도. 이슈가 `status:ready`가 아니어서 fallback으로 별도 worktree/branch를 수동 생성하고 issue `status:in-progress`를 적용.
@@ -458,6 +470,12 @@
 | `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
 | `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 | `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
+| `MOMO-198` | M3 D/B/C real-data readiness spec and blocker cleanup | docs/spec | MOMO-170, MOMO-171, MOMO-174, MOMO-177, MOMO-179, MOMO-192, MOMO-193 |
+| `MOMO-200` | macOS SwiftCentrifuge live adapter | swift/macos-ui/runtime-relay | MOMO-192, MOMO-193 |
+| `MOMO-201` | D Live Tool-Call fixture/local gate | runtime-agent/macos-ui | MOMO-200, MOMO-178 |
+| `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
+| `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
+| `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -557,6 +575,60 @@
 - [x] `swift test --package-path clients/macOS` PASS.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #142를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-198 수용기준 `[docs/spec]`
+- [x] GitHub #153을 `scripts/goal_claim.sh 153`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`에 M3 D/B/C real-data readiness 정본을 추가한다.
+- [x] MOMO-170/171/174/177/179/192/193 완료 surface와 남은 gap을 표로 정리한다.
+- [x] 기존 MOMO-020/021/022 각각의 unblock 조건, required endpoints/events, local gate profile, fixture/runtime evidence를 재정의한다.
+- [x] GitHub issue #12/#13/#14 본문 또는 라벨 업데이트 제안 문구를 문서에 포함한다.
+- [x] 다음 라운드 follow-up 후보 MOMO-200~204를 ROADMAP/BUILD_TICKETS에 반영한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [x] 코드 변경 없음이므로 Swift local gate는 생략하고 docs gate 중심 근거를 PR에 명시한다.
+- [ ] PR 생성 후 GitHub #153을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-200 수용기준 `[swift/macos-ui/runtime-relay]`
+- [ ] macOS SwiftCentrifuge adapter를 추가하기 전 라이선스(MIT/permissive) 확인과 NOTICE/THIRD_PARTY 반영 여부를 결정한다.
+- [ ] adapter가 `POST /v1/auth/realtime-token`으로 connection JWT를 가져오고 만료 전 refresh한다.
+- [ ] `ch:ws<workspace>.<channel>` 및 `agent:ws<workspace>.<agentMember>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다.
+- [ ] SwiftCentrifuge publication data를 `RealtimeEnvelope`로 decode하는 `RealtimeEnvelopeSubscriptionTransport` 구현을 추가한다.
+- [ ] `MomoServerRESTChatBackend` dev config에서 live driver를 주입할 수 있고, driver 미주입 fallback은 유지한다.
+- [ ] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
+- [ ] `scripts/local_gate.sh --profile swift` 또는 focused package tests PASS evidence를 첨부한다.
+- [ ] Docker/Centrifugo live subscribe smoke를 수행하거나, 수행 불가 범위를 좁게 `runtime-unverified`로 표시한다.
+
+### MOMO-201 수용기준 `[runtime-agent/macos-ui]`
+- [ ] repo-local mock SSE/runtime fixture가 `agent.partial` tool-call progress(`tool_call_name`, bounded `tool_call_args`)와 final `tool_result`/`message.new`를 생성한다.
+- [ ] MomoMac `ChatViewModel`이 live or fixture event stream에서 progress card를 coalesce하고 final message by `message.seq`로 reconcile한다.
+- [ ] MOMO-020 issue update proposal을 실제 티켓 본문/label 업데이트로 적용할지 PR 본문에 handoff한다.
+- [ ] `scripts/local_gate.sh --profile runtime-agent` PASS 또는 D-specific gate PASS evidence를 첨부한다.
+- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [ ] 실제 Hermes/provider side effect가 없으면 해당 범위만 `runtime-unverified`로 남긴다.
+
+### MOMO-202 수용기준 `[swift/runtime-agent/macos-ui]`
+- [ ] server-owned cost projection contract를 정의한다: `reserved_micro_usd`, `spent_micro_usd`, reconciled/estimated flag, soft/hard limit state.
+- [ ] macOS는 ledger 계산을 하지 않고 `agent.status`/`agent.partial` 또는 REST projection을 `CostSnapshot`으로만 소비한다.
+- [ ] `CostBreathingRing`이 reserve -> running -> reconciled -> limit warning states를 fixture/runtime data로 표시한다.
+- [ ] AgentWorker reserve/reconcile evidence(`usage_ledger`, `budget_window`)와 client-visible projection evidence를 같은 PR에 첨부한다.
+- [ ] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 첨부한다.
+- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+
+### MOMO-203 수용기준 `[swift/runtime-db/macos-ui]`
+- [ ] pending approval read/projection path를 추가한다(`GET /v1/workspaces/{ws}/approvals?status=pending` 또는 equivalent channel-history projection).
+- [ ] `ApprovalInboxView` initial load가 seed-only가 아니라 server-owned pending approval data를 표시할 수 있다.
+- [ ] approve/reject는 기존 `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 `client_decision_id` idempotency를 사용한다.
+- [ ] receipt와 `approval.decided` realtime event가 inbox row/card status를 reconcile한다.
+- [ ] approved deterministic resume path는 `tool_result`/audit/job-done evidence를 남기고 real external provider writes는 out of scope로 유지한다.
+- [ ] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 첨부한다.
+- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+
+### MOMO-204 수용기준 `[docs/swift/runtime-agent/macos-ui]`
+- [ ] `scripts/local_gate.sh`에 M3 D/B/C profile 또는 documented composite command를 추가한다.
+- [ ] Gate evidence가 REST login/history, realtime or mock event stream, D tool-call progress/final result, B cost reserve/reconcile projection, C pending approval decision roundtrip을 한 markdown block에 기록한다.
+- [ ] External Hermes/provider side effects are explicitly skipped or marked `runtime-unverified`; repo-local mock path remains deterministic.
+- [ ] `docs/LOCAL_PR_GATE.md`, `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 새 gate 기준으로 갱신한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
+- [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
