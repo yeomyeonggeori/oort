@@ -814,6 +814,7 @@
 | id | 한줄 | 수용기준 등급 | 의존 |
 |---|---|---|---|
 | `MOMO-208` | M4 macOS packaging architecture ADR: SwiftPM dev app과 Xcode release app 경계, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle 순서와 #15/#16/#17 split | docs/spec | M4 구현 전 |
+| `MOMO-211` | MomoMac Xcode thin host app v0: SwiftPM dev app과 별개로 `MomoMac.xcodeproj`가 `MomoMac`/`MomoCore` local package를 import해 무서명 build되는 첫 release host slice | xcode/swift/docs | MOMO-208 |
 
 ### MOMO-208 수용기준 `[docs/spec]`
 - [x] `docs/adr/0003-macos-packaging-architecture.md` — SwiftPM `MomoMacDevApp`은 개발/로컬 게이트용, Xcode `MomoMac.app`은 릴리스 번들/서명/공증용으로 분리한다.
@@ -821,6 +822,17 @@
 - [x] #15(MOMO-030 Xcode host) → #16(MOMO-031 codesign/notary/DMG) → #17(MOMO-032 Sparkle) 후속 issue split을 문서화한다.
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #171을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-211 수용기준 `[xcode/swift/docs]`
+- [x] `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가한다.
+- [x] Bundle ID는 `com.dawnkim.momo`를 유지한다.
+- [x] Xcode host app은 `MomoMac`/`MomoCore`를 local SwiftPM package dependency로 사용한다.
+- [x] SwiftUI entrypoint는 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 재사용한다.
+- [x] Debug/Release build settings에 hardened runtime 및 entitlements file이 반영되어 있고, Developer ID signing/notary/DMG/Sparkle은 후속 M4 TODO로 남긴다.
+- [x] `xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] 가능한 범위에서 app launch/window smoke evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #179를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ## M7 Enterprise Trust
 

@@ -106,6 +106,12 @@
 - SwiftCentrifuge channel live adapter가 connect/subscribe/reconnect/disconnect/error lifecycle을 status stream으로 보고하고, `ChatViewModel`은 selected channel status와 `retryRealtime()`을 제공한다. `MessageListView`는 Live/Connecting/Reconnecting/REST fallback/Error banner와 수동 retry affordance를 표시한다.
 - 검증: `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. `agent:` subscription/presence/APNs는 후속 범위다.
 
+## 0-16. MOMO-211 M4 MomoMac Xcode thin host app v0 (2026-06-30)
+
+- `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가했다. Xcode host target은 SwiftPM `MomoMacDevApp`과 분리되어 있고, `MomoMac`/`MomoCore`를 local SwiftPM dependency로 소비해 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 호스트한다.
+- Bundle ID는 `com.dawnkim.momo`이며 Debug/Release 모두 hardened runtime build setting과 sandbox/network-client entitlements file을 갖는다. `CODE_SIGNING_ALLOWED=NO` local build에서는 Xcode가 hardened runtime signing step을 비활성화한다. Developer ID signing/notarytool/DMG/Sparkle은 계속 후속 M4 범위다.
+- 검증: `xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO` PASS(in `clients/macOS`), `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS. GUI smoke는 Xcode build 산출 `MomoMac.app` launch 후 `MomoMac` process와 `window_count=1`을 확인했다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

@@ -12,12 +12,10 @@
 //   - MomoMacDevApp (exe)    : a SwiftPM development app that opens a real SwiftUI
 //                              macOS window hosting MomoMacRootView.
 //
-// The distributable .app bundle (Info.plist + Xcode project / AsyncHTTPClient
-// transport implementation) is intentionally a FOLLOW-UP ticket
-// (see STATUS notes in README of this dir / build ticket T09). Here the hard
-// requirement is: the SwiftUI library and development app compile via `swift build`,
-// with a LiveChatBackend stub wiring the MomoCore contracts so the views render
-// against real model types.
+// The release-oriented thin host app lives beside this package at
+// `MomoMac.xcodeproj`. It imports the local SwiftPM products `MomoMac` and
+// `MomoCore`; this package remains the source of the shared SwiftUI surface and
+// the SwiftPM-only development app.
 //
 // Stack reality: built/verified with local Swift 6.2.3 toolchain. SwiftCentrifuge
 // is linked by the library target for live Centrifugo subscription in REST dev mode;
