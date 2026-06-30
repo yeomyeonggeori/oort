@@ -18,6 +18,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
     private var workspace: WorkspaceID?
     private var accessToken: String?
     private var authenticatedMember: Member?
+    private var cachedChannels: [Channel]?
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
 
     public init(
@@ -132,9 +133,26 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
         return all
     }
 
+    public func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        let response = try await get(
+            "/v1/workspaces/\(workspace.description)/channels",
+            queryItems: [],
+            response: WorkspaceChannelsResponse.self
+        )
+        let channels = try response.channels.map { try $0.channel() }
+        cachedChannels = channels
+        return channels
+    }
+
     public func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
         var results: [Message] = []
-        for channel in config.channels where channel.workspaceId == workspace {
+        let searchableChannels: [Channel]
+        if let cachedChannels {
+            searchableChannels = cachedChannels
+        } else {
+            searchableChannels = try await channels(workspace: workspace)
+        }
+        for channel in searchableChannels where channel.workspaceId == workspace {
             let messages = try await history(channel: channel.id, after: nil, limit: 200)
             results += messages.filter { ($0.body ?? "").localizedCaseInsensitiveContains(query) }
         }
@@ -197,7 +215,9 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport {
         response: T.Type
     ) async throws -> T {
         var components = URLComponents(url: config.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
-        components?.queryItems = queryItems
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
         guard let url = components?.url else {
             throw BackendError.problem(status: 400, title: "bad url", detail: path)
         }
@@ -438,6 +458,43 @@ private struct SendMessageRequest: Encodable {
 private struct MessagePage: Decodable {
     let messages: [MessageDTO]
     let nextBefore: Int64?
+}
+
+private struct WorkspaceChannelsResponse: Decodable {
+    let channels: [ChannelDTO]
+}
+
+private struct ChannelDTO: Decodable {
+    let id: String
+    let workspaceId: String
+    let kind: String
+    let name: String?
+    let topic: String?
+    let dmKey: String?
+    let createdBy: String?
+    let archivedAtMs: Int64?
+
+    func channel() throws -> Channel {
+        guard let id = ChannelID(uuidString: id) else {
+            throw BackendError.decoding("invalid channel id")
+        }
+        guard let workspaceId = WorkspaceID(uuidString: workspaceId) else {
+            throw BackendError.decoding("invalid channel workspace id")
+        }
+        guard let kind = ChannelKind(rawValue: kind) else {
+            throw BackendError.decoding("invalid channel kind")
+        }
+        return Channel(
+            id: id,
+            workspaceId: workspaceId,
+            kind: kind,
+            name: name,
+            topic: topic,
+            dmKey: dmKey,
+            createdBy: createdBy.flatMap { MemberID(uuidString: $0) },
+            archivedAtMs: archivedAtMs
+        )
+    }
 }
 
 private struct MessageDTO: Decodable {

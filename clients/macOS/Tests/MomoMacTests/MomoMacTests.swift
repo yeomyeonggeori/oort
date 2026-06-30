@@ -448,6 +448,118 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET", "POST"])
     }
 
+    func testRESTBackendLoadsChannelsFromMomoServer() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let agentLab = ChannelID.demoAgentLab
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/auth/login"):
+                return MockHTTPResponse(json: """
+                {
+                  "accessToken": "token-123",
+                  "refreshToken": "refresh-123",
+                  "member": {
+                    "id": "\(MemberID.demoHuman.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "human",
+                    "displayName": "데모 사용자",
+                    "handle": "demo"
+                  }
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                XCTAssertNil(request.url?.query)
+                return MockHTTPResponse(json: """
+                {
+                  "channels": [
+                    {
+                      "id": "\(ChannelID.demoGeneral.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "public",
+                      "name": "general",
+                      "topic": "팀 일반 채널",
+                      "dmKey": null,
+                      "createdBy": "\(MemberID.demoHuman.description)",
+                      "archivedAtMs": null
+                    },
+                    {
+                      "id": "\(agentLab.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "public",
+                      "name": "agent-lab",
+                      "topic": "에이전트 실험실",
+                      "dmKey": null,
+                      "createdBy": "\(MemberID.demoHuman.description)",
+                      "archivedAtMs": null
+                    }
+                  ]
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "")
+
+        let channels = try await backend.channels(workspace: workspace)
+        XCTAssertEqual(channels.map(\.id), [.demoGeneral, agentLab])
+        XCTAssertEqual(channels.map(\.name), ["general", "agent-lab"])
+        XCTAssertEqual(channels.first?.createdBy, .demoHuman)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
+    }
+
+    @MainActor
+    func testViewModelBootstrapSurfacesRESTChannelListFailure() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/auth/login"):
+                return MockHTTPResponse(json: """
+                {
+                  "accessToken": "token-123",
+                  "refreshToken": "refresh-123",
+                  "member": {
+                    "id": "\(MemberID.demoHuman.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "human",
+                    "displayName": "데모 사용자",
+                    "handle": "demo"
+                  }
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                return MockHTTPResponse(statusCode: 503, json: #"{"title":"channels unavailable","detail":"db offline"}"#)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: session
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "")
+
+        XCTAssertTrue(viewModel.channels.isEmpty)
+        XCTAssertTrue(viewModel.connectionError?.contains("channels unavailable") == true)
+    }
+
     func testRESTBackendMapsUnauthorizedResponseToProblemError() async throws {
         await MockHTTPURLProtocol.reset()
         await MockHTTPURLProtocol.setHandler { _ in
@@ -581,6 +693,10 @@ private actor RecordingDecisionChatBackend: ChatBackend {
     }
 
     func members(workspace: WorkspaceID) async throws -> [Member] {
+        []
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
         []
     }
 

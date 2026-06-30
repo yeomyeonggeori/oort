@@ -466,6 +466,7 @@
 | `MOMO-171` | macOS approval_request card decisions | swift/spec | MOMO-170 |
 | `MOMO-174` | local LLM context compaction | swift/spec | MOMO-130, MOMO-151 |
 | `MOMO-177` | macOS MomoServer REST ChatBackend v0 | swift/macos-ui | MOMO-105, MOMO-134, MOMO-170, MOMO-171 |
+| `MOMO-197` | Server channel list endpoint + macOS dynamic channel loading v0 | swift/runtime | MOMO-176, MOMO-177 |
 | `MOMO-179` | Realtime client subscription contract v0 | spec/swift | MOMO-177, MOMO-115 |
 | `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 | `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
@@ -524,6 +525,23 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #122를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-197 수용기준 `[swift/runtime]`
+- [x] GitHub #152를 `scripts/goal_claim.sh 152`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] MomoServer에 일반 tenant token용 `GET /v1/workspaces/{ws}/channels` endpoint를 추가한다.
+- [x] endpoint는 path workspace와 JWT workspace 일치, active workspace membership, active channel membership을 확인한다.
+- [x] tenant read path는 `Database.withTenantConnection`의 `SET LOCAL app.workspace_id` RLS 경로만 사용하고 BYPASSRLS를 쓰지 않는다.
+- [x] response shape는 macOS REST backend decode 모델을 통해 `MomoCore.Channel`로 변환된다.
+- [x] inactive channel membership(`left_at`)은 제외하고, archived channel은 기본 제외/명시 query에서만 포함한다.
+- [x] nonmember와 workspace-cross access는 403으로 닫는다.
+- [x] `MomoCore.ChatBackend.channels(workspace:)`와 `MomoServerRESTChatBackend.channels(workspace:)`를 추가한다.
+- [x] `MomoMac` REST mode bootstrap은 server channel list를 읽어 `ChatViewModel.channels`를 채우고, 실패 시 `connectionError`를 남긴다.
+- [x] `LiveChatBackend.seedDemo()` fallback은 `MOMO_SERVER_BASE_URL` 미설정 경로로 유지한다.
+- [x] focused server/macOS tests를 추가한다.
+- [x] `scripts/verify_channel_list.sh`를 추가하고 `runtime-db` local gate에 연결한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] 관련 runtime/docs local gate PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #152를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-179 수용기준 `[spec/swift]`
 - [x] GitHub #124를 `scripts/goal_claim.sh 124`로 claim하고 별도 branch/worktree에서 진행한다.
