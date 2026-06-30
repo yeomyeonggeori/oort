@@ -55,6 +55,7 @@ enum AppBuilder {
         MessageRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
+        CostProjectionRoutes(db: db).add(to: authed)
         ApprovalDecisionRoutes(db: db).add(to: authed)
         InviteRoutes(db: db).add(to: authed)
         InboundMCPRoutes(db: db).add(to: authed)

@@ -12,7 +12,8 @@
 #      SSE gateway (scripts/mock_hermes.py by default)
 #   3) Centrifugo history receives agent.partial
 #   4) cost reserve/reconcile writes budget_window + usage_ledger
-#   5) a low-limit budget trips before spending
+#   5) MomoServer cost-snapshots endpoint exposes the server-owned projection
+#   6) a low-limit budget trips before spending
 # =============================================================================
 set -eu
 
@@ -72,7 +73,10 @@ psql_scalar() {
 }
 
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
+POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 POSTGRES_DB=${POSTGRES_DB:-momo}
+PORT=${PORT:-8080}
+BASE_URL=${BASE_URL:-http://127.0.0.1:${PORT}}
 CENT_PORT=${CENT_PORT:-8000}
 CENT_API_KEY=${CENT_API_KEY:-dev-insecure-cent-api-key}
 HERMES_PORT=${HERMES_PORT:-8088}
@@ -105,10 +109,16 @@ AGENT_CHANNEL=agent:ws${WORKSPACE_ID}.${AGENT_ID}
 TMP_ROOT=${TMPDIR:-/tmp}
 MOCK_LOG=${TMP_ROOT}/momo-mock-hermes-$$.log
 WORKER_LOG=${TMP_ROOT}/momo-agent-worker-$$.log
+SERVER_LOG=${TMP_ROOT}/momo-cost-projection-server-$$.log
+COST_PROJECTION_JSON=${TMP_ROOT}/momo-cost-projection-$$.json
 MOCK_PID=
 WORKER_PID=
+SERVER_PID=
 
 cleanup() {
+  if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+    kill "$SERVER_PID" 2>/dev/null || true
+  fi
   if [ "${WORKER_PID:-}" != "" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
     kill "$WORKER_PID" 2>/dev/null || true
   fi
@@ -131,6 +141,78 @@ wait_http() {
   done
   echo "[agent-worker] ${name} did not become ready: ${url}" >&2
   return 1
+}
+
+start_server() {
+  if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+    echo "[agent-worker] $BASE_URL is already serving /health; stop the existing server before running this verifier." >&2
+    exit 1
+  fi
+
+  echo "[agent-worker] starting MomoServer for cost projection endpoint"
+  (
+    cd "$REPO_ROOT"
+    DATABASE_URL="postgres://momo_app:momo_app_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    PORT="$PORT" \
+    swift run --package-path server MomoServer
+  ) >"$SERVER_LOG" 2>&1 &
+  SERVER_PID=$!
+
+  deadline=$(($(date +%s) + 60))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+      echo "[agent-worker] MomoServer exited before health became green" >&2
+      tail -120 "$SERVER_LOG" >&2 || true
+      exit 1
+    fi
+    if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+      echo "[agent-worker] MomoServer health is green"
+      return 0
+    fi
+    sleep 1
+  done
+  echo "[agent-worker] timed out waiting for MomoServer health" >&2
+  tail -120 "$SERVER_LOG" >&2 || true
+  exit 1
+}
+
+verify_cost_projection_endpoint() {
+  start_server
+  LOGIN_JSON=$(curl -fsS \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"demo@momo.local\",\"password\":\"demo\",\"workspace\":\"$WORKSPACE_ID\"}" \
+    "$BASE_URL/v1/auth/login")
+  ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
+  if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
+    echo "[agent-worker] failed to obtain access token for cost projection endpoint" >&2
+    printf '%s\n' "$LOGIN_JSON" >&2
+    exit 1
+  fi
+
+  curl -fsS \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/$CHANNEL_ID/cost-snapshots?limit=10" \
+    > "$COST_PROJECTION_JSON"
+
+  if ! jq -e --arg run "$RUN_ID" '
+      .schema == "momo.cost_snapshot.channel.v0"
+      and .channel_id == "'"$CHANNEL_ID"'"
+      and any(.snapshots[]?;
+        .run_id == $run
+        and .reserved_micro_usd == 0
+        and .spent_micro_usd == 6
+        and .is_reconciled == true
+        and .was_estimated == false
+        and .limit_state == "normal"
+      )
+    ' "$COST_PROJECTION_JSON" >/dev/null; then
+    echo "[agent-worker] cost projection endpoint contract did not verify" >&2
+    cat "$COST_PROJECTION_JSON" >&2
+    echo "[agent-worker] server log: $SERVER_LOG" >&2
+    exit 1
+  fi
+
+  echo "[agent-worker] cost projection endpoint verified: $COST_PROJECTION_JSON"
 }
 
 echo "[agent-worker] using env file: ${ENV_FILE:-<none>}"
@@ -244,6 +326,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   RUN_OK=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RUN_ID' AND status='succeeded';")
   OUTBOX_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$RUN_ID' AND status='done';")
   USAGE_OK=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$RUN_ID' AND prompt_tokens=11 AND completion_tokens=7 AND cost_micro_usd=6 AND was_estimated=false;")
+  PROJECTION_OK=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RUN_ID' AND input #>> '{cost_projection,source}' = 'agent_worker' AND (input #>> '{cost_projection,reserved_micro_usd}')::bigint = 0;")
   # In the full local gate, approval-decision verification can leave a valid
   # same-run resume agent_job that the worker processes before this fixture.
   # The immutable usage_ledger assertion above proves this run's exact cost;
@@ -265,6 +348,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 
   if [ "$RUN_OK" = "1" ] && [ "$OUTBOX_OK" = "1" ] \
     && [ "$USAGE_OK" = "1" ] && [ "$WINDOW_OK" = "1" ] \
+    && [ "$PROJECTION_OK" = "1" ] \
     && [ "$PARTIAL_OK" != "0" ]; then
     SUCCESS_OK=1
     break
@@ -281,7 +365,8 @@ if [ "$SUCCESS_OK" != "1" ]; then
   exit 1
 fi
 
-echo "[agent-worker] success path verified: agent.partial + usage_ledger + budget_window"
+echo "[agent-worker] success path verified: agent.partial + usage_ledger + budget_window + cost_projection"
+verify_cost_projection_endpoint
 
 echo "[agent-worker] seeding approved deterministic resume fixture"
 psql_run <<SQL
@@ -465,4 +550,4 @@ if [ "$TRIP_OK" != "1" ]; then
 fi
 
 echo "[agent-worker] circuit-breaker path verified: low-limit budget trips before spend"
-echo "[agent-worker] logs: worker=$WORKER_LOG mock=$MOCK_LOG"
+echo "[agent-worker] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG cost_projection=$COST_PROJECTION_JSON"

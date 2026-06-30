@@ -33,6 +33,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     private var channelStreams: [ChannelID: [UUID: AsyncStream<RealtimeEvent>.Continuation]] = [:]
     private var agentStreams: [ChannelID: [UUID: AsyncStream<AgentEvent>.Continuation]] = [:]
     private var demoRealtimeByChannel: [ChannelID: [RealtimeEvent]] = [:]
+    private var demoCostSnapshotsByChannel: [ChannelID: [CostSnapshot]] = [:]
     private var replayedDemoDeltaChannels: Set<ChannelID> = []
 
     public init() {}
@@ -46,6 +47,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         workspace = ws
         inviteJoinState = .idle
         demoRealtimeByChannel = [:]
+        demoCostSnapshotsByChannel = [:]
         replayedDemoDeltaChannels = []
 
         let human = Member(id: MemberID(), workspaceId: ws, kind: .human,
@@ -166,6 +168,18 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
             ]),
             runId: toolRun
         )
+        demoCostSnapshotsByChannel[pg18.id] = [
+            CostSnapshot(
+                runId: toolRun,
+                reservedMicroUSD: 0,
+                spentMicroUSD: 51_000,
+                softLimitMicroUSD: 750_000,
+                hardLimitMicroUSD: 1_000_000,
+                isReconciled: true,
+                wasEstimated: false,
+                limitState: .normal
+            )
+        ]
 
         _ = appendServerMessage(
             channel: pg18.id,
@@ -295,6 +309,18 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
                 isReversible: true
             )),
         ]
+        demoCostSnapshotsByChannel[general.id] = [
+            CostSnapshot(
+                runId: approvalRun,
+                reservedMicroUSD: 820_000,
+                spentMicroUSD: 340_000,
+                softLimitMicroUSD: 900_000,
+                hardLimitMicroUSD: 1_000_000,
+                isReconciled: false,
+                wasEstimated: true,
+                limitState: .softLimit
+            )
+        ]
 
         return DemoSeed(workspace: ws, human: human, agents: [researcher, builder],
                         channels: channels)
@@ -407,6 +433,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
         channels.filter { $0.workspaceId == workspace }
+    }
+
+    public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        demoCostSnapshotsByChannel[channel] ?? []
     }
 
     public func search(workspace: WorkspaceID, query: String) async throws -> [Message] {

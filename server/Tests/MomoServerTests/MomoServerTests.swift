@@ -421,6 +421,69 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(payload["hlcCount"])
     }
 
+    func testCostSnapshotDTOEncodesSnakeCaseProjectionContract() throws {
+        let snapshot = CostSnapshotDTO(
+            runId: "00000000-0000-7000-8000-000000000904",
+            reservedMicroUSD: 0,
+            spentMicroUSD: 6,
+            softLimitMicroUSD: 900_000,
+            hardLimitMicroUSD: 1_000_000,
+            isReconciled: true,
+            wasEstimated: false,
+            limitState: "normal"
+        )
+        let page = CostSnapshotPageDTO(
+            schema: "momo.cost_snapshot.channel.v0",
+            channelId: "00000000-0000-7000-8000-000000000202",
+            snapshots: [snapshot],
+            asOfMs: 1_782_463_260_000
+        )
+
+        let object = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(page)
+        ) as? [String: Any]
+        let snapshots = object?["snapshots"] as? [[String: Any]]
+        let item = snapshots?.first
+
+        XCTAssertEqual(object?["channel_id"] as? String, page.channelId)
+        XCTAssertEqual(item?["run_id"] as? String, snapshot.runId)
+        XCTAssertEqual(item?["reserved_micro_usd"] as? Int, 0)
+        XCTAssertEqual(item?["spent_micro_usd"] as? Int, 6)
+        XCTAssertEqual(item?["soft_limit_micro_usd"] as? Int, 900_000)
+        XCTAssertEqual(item?["hard_limit_micro_usd"] as? Int, 1_000_000)
+        XCTAssertEqual(item?["is_reconciled"] as? Bool, true)
+        XCTAssertEqual(item?["was_estimated"] as? Bool, false)
+        XCTAssertEqual(item?["limit_state"] as? String, "normal")
+        XCTAssertNil(item?["reservedMicroUSD"])
+    }
+
+    func testCostProjectionLimitStateHelper() {
+        XCTAssertEqual(
+            CostProjectionRoutes.limitState(
+                observedMicroUSD: 10,
+                softLimitMicroUSD: 20,
+                hardLimitMicroUSD: 30
+            ),
+            "normal"
+        )
+        XCTAssertEqual(
+            CostProjectionRoutes.limitState(
+                observedMicroUSD: 25,
+                softLimitMicroUSD: 20,
+                hardLimitMicroUSD: 30
+            ),
+            "soft_limit"
+        )
+        XCTAssertEqual(
+            CostProjectionRoutes.limitState(
+                observedMicroUSD: 30,
+                softLimitMicroUSD: 20,
+                hardLimitMicroUSD: 30
+            ),
+            "hard_limit"
+        )
+    }
+
     private func testServerConfig(
         accessTokenTTL: TimeInterval = 15 * 60,
         centConnectionTokenTTL: TimeInterval = 5 * 60

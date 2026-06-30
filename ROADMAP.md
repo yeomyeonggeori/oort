@@ -110,7 +110,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-198` | M3 | D/B/C real-data readiness spec | `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`; stale MOMO-020/021/022 blockers remapped to current code and MOMO-200~204 follow-up slices |
 | `MOMO-200` | M3 | macOS SwiftCentrifuge live adapter | candidate: realtime-token fetch/refresh + `ch:`/`agent:` subscribe + `RealtimeEnvelopeSubscriptionTransport` injection |
 | `MOMO-201` | M3 | D Live Tool-Call fixture/local gate | candidate: mock SSE/runtime fixture emits `agent.partial` tool-call progress + final `tool_result` evidence for MOMO-020 |
-| `MOMO-202` | M3 | Cost projection + CostSnapshot binding | candidate: server-owned reserve/spent/reconciled/limit projection consumed by macOS B surface |
+| `MOMO-202` | M3 | Cost projection + CostSnapshot binding | 완료: `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots` server-owned projection + macOS `CostSnapshot` binding; runtime-agent endpoint evidence |
 | `MOMO-203` | M3 | Approval pending projection + inbox gate | candidate: pending approval read/projection + `approval.decided` reconciliation for MOMO-022 |
 | `MOMO-204` | M3 | Combined M3 D/B/C local gate profile | candidate: one PR gate that captures D/B/C fixture/runtime evidence for M3 exit |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |

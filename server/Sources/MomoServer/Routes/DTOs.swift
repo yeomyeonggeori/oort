@@ -132,6 +132,46 @@ struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
     let channels: [ChannelDTO]
 }
 
+// ---- Cost projection ----
+
+/// Server-owned B surface projection. Clients render this and do not calculate
+/// budget state directly from ledger/window tables.
+struct CostSnapshotDTO: ResponseEncodable, Codable, Sendable {
+    let runId: String
+    let reservedMicroUSD: Int64
+    let spentMicroUSD: Int64
+    let softLimitMicroUSD: Int64?
+    let hardLimitMicroUSD: Int64?
+    let isReconciled: Bool
+    let wasEstimated: Bool
+    let limitState: String
+
+    private enum CodingKeys: String, CodingKey {
+        case runId = "run_id"
+        case reservedMicroUSD = "reserved_micro_usd"
+        case spentMicroUSD = "spent_micro_usd"
+        case softLimitMicroUSD = "soft_limit_micro_usd"
+        case hardLimitMicroUSD = "hard_limit_micro_usd"
+        case isReconciled = "is_reconciled"
+        case wasEstimated = "was_estimated"
+        case limitState = "limit_state"
+    }
+}
+
+struct CostSnapshotPageDTO: ResponseEncodable, Codable, Sendable {
+    let schema: String
+    let channelId: String
+    let snapshots: [CostSnapshotDTO]
+    let asOfMs: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case schema
+        case channelId = "channel_id"
+        case snapshots
+        case asOfMs = "as_of_ms"
+    }
+}
+
 // ---- Approval decisions ----
 
 /// POST /v1/workspaces/{ws}/approvals/{approval}/decision request body.

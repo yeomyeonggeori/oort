@@ -519,6 +519,80 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
     }
 
+    func testRESTBackendLoadsServerOwnedCostSnapshots() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoAgentLab
+        let run = RunID(uuidString: "00000000-0000-7000-8000-000000000904")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/cost-snapshots"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(json: """
+                {
+                  "schema": "momo.cost_snapshot.channel.v0",
+                  "channel_id": "\(channel.description)",
+                  "as_of_ms": 1782463260000,
+                  "snapshots": [
+                    {
+                      "run_id": "\(run.description)",
+                      "reserved_micro_usd": 0,
+                      "spent_micro_usd": 6,
+                      "soft_limit_micro_usd": 900000,
+                      "hard_limit_micro_usd": 1000000,
+                      "is_reconciled": true,
+                      "was_estimated": false,
+                      "limit_state": "normal"
+                    }
+                  ]
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let snapshots = try await backend.costSnapshots(channel: channel)
+
+        XCTAssertEqual(snapshots.map(\.runId), [run])
+        XCTAssertEqual(snapshots.first?.spentMicroUSD, 6)
+        XCTAssertEqual(snapshots.first?.isReconciled, true)
+        XCTAssertEqual(snapshots.first?.limitState, .normal)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["GET"])
+    }
+
+    @MainActor
+    func testViewModelLoadsCostSnapshotsWhenSelectingChannel() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        viewModel.setChannels(seed.channels)
+
+        let costChannel = try XCTUnwrap(seed.channels.first { $0.name == "feature-pg18" })
+        await viewModel.selectChannel(costChannel.id)
+
+        let toolMessage = try XCTUnwrap(viewModel.visibleMessages.first { $0.runId != nil })
+        let runId = try XCTUnwrap(toolMessage.runId)
+        let snapshot = try XCTUnwrap(viewModel.costSnapshot(for: runId))
+        XCTAssertEqual(snapshot.spentMicroUSD, 51_000)
+        XCTAssertEqual(snapshot.isReconciled, true)
+        XCTAssertEqual(viewModel.liveSpentMicroUSD, 51_000)
+    }
+
     @MainActor
     func testViewModelBootstrapSurfacesRESTChannelListFailure() async throws {
         await MockHTTPURLProtocol.reset()
@@ -697,6 +771,10 @@ private actor RecordingDecisionChatBackend: ChatBackend {
     }
 
     func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        []
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
         []
     }
 

@@ -37,6 +37,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var partials: [RunID: AgentPartial] = [:]
     /// Latest `agent.status` per run, drives CostBreathingRing + presence (L4 §5.2).
     @Published public private(set) var agentStatuses: [RunID: AgentStatus] = [:]
+    /// Server-owned cost projection per run. Experience B consumes this instead
+    /// of deriving ledger/budget math in the client.
+    @Published public private(set) var costSnapshots: [RunID: CostSnapshot] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -103,6 +106,7 @@ public final class ChatViewModel: ObservableObject {
     public func selectChannel(_ id: ChannelID) async {
         selectedChannelId = id
         await loadHistory(channel: id)
+        await refreshCostSnapshots(channel: id)
         subscribe(channel: id)
         await refreshLocalContextCopilotPreview()
     }
@@ -190,6 +194,7 @@ public final class ChatViewModel: ObservableObject {
             }
         case .agentStatus(let status):
             agentStatuses[status.runId] = status
+            mergeCostSnapshot(from: status)
         case .agentPartial(let partial):
             coalesce(partial)
         case .approval(let ev):
@@ -317,7 +322,40 @@ public final class ChatViewModel: ObservableObject {
 
     /// Total reserved/spent micro_usd across live runs (cost chip in headers).
     public var liveSpentMicroUSD: Int64 {
-        agentStatuses.values.compactMap { $0.spentMicroUSD }.reduce(0, +)
+        costSnapshots.values.map(\.spentMicroUSD).reduce(0, +)
+    }
+
+    public func costSnapshot(for runId: RunID) -> CostSnapshot? {
+        costSnapshots[runId]
+    }
+
+    private func refreshCostSnapshots(channel: ChannelID) async {
+        do {
+            let snapshots = try await chat.costSnapshots(channel: channel)
+            for snapshot in snapshots {
+                costSnapshots[snapshot.runId] = snapshot
+            }
+            connectionError = nil
+        } catch {
+            connectionError = String(describing: error)
+        }
+    }
+
+    private func mergeCostSnapshot(from status: AgentStatus) {
+        guard status.reservedMicroUSD != nil || status.spentMicroUSD != nil else {
+            return
+        }
+        let existing = costSnapshots[status.runId]
+        costSnapshots[status.runId] = CostSnapshot(
+            runId: status.runId,
+            reservedMicroUSD: status.reservedMicroUSD ?? existing?.reservedMicroUSD ?? 0,
+            spentMicroUSD: status.spentMicroUSD ?? existing?.spentMicroUSD ?? 0,
+            softLimitMicroUSD: existing?.softLimitMicroUSD,
+            hardLimitMicroUSD: existing?.hardLimitMicroUSD,
+            isReconciled: existing?.isReconciled ?? status.runStatus.isTerminal,
+            wasEstimated: existing?.wasEstimated ?? false,
+            limitState: existing?.limitState ?? .normal
+        )
     }
 
     // Stable ordering: seq first (nil = optimistic, sort last), then hlc, then id.

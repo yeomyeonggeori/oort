@@ -242,6 +242,11 @@ struct WorkerService: Service {
         switch reserve {
         case .reserved(let est):
             reservedMicroUSD = est
+            await recordCostProjection(
+                p.runID,
+                workspaceID: job.workspaceID,
+                reservedMicroUSD: est
+            )
         case .tripped(let grain):
             let reason = "G5 budget trip (\(grain))"
             logger.warning("budget circuit breaker tripped", metadata: [
@@ -352,6 +357,11 @@ struct WorkerService: Service {
             promptTokens: u.prompt, completionTokens: u.completion,
             cachedTokens: u.cached, reasoningTokens: u.reasoning,
             wasEstimated: wasEstimated, reservedMicroUSD: reservedMicroUSD)
+        await recordCostProjection(
+            p.runID,
+            workspaceID: job.workspaceID,
+            reservedMicroUSD: 0
+        )
 
         // ---- terminal: finalize message + status ----
         if let err = sawError {
@@ -1206,6 +1216,46 @@ struct WorkerService: Service {
             channel: context.channel,
             data: envelope(type: "agent.status", payload: payload)
         )
+    }
+
+    private func recordCostProjection(
+        _ runID: UUID?,
+        workspaceID: UUID,
+        reservedMicroUSD: Int64
+    ) async {
+        guard let runID else { return }
+        do {
+            try await pg.withTransaction(logger: logger) { conn in
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                _ = try await conn.query(
+                    """
+                    UPDATE agent_run
+                       SET input = jsonb_set(
+                             jsonb_set(
+                               jsonb_set(input, '{cost_projection}', '{}'::jsonb, true),
+                               '{cost_projection,reserved_micro_usd}',
+                               to_jsonb(\(reservedMicroUSD)::bigint),
+                               true
+                             ),
+                             '{cost_projection,source}',
+                             to_jsonb('agent_worker'::text),
+                             true
+                           ),
+                           updated_at = now()
+                     WHERE id = \(runID)
+                    """,
+                    logger: logger
+                )
+            }
+        } catch {
+            logger.error("cost projection update failed", metadata: [
+                "runId": .string(runID.uuidString),
+                "error": .string(String(describing: error)),
+            ])
+        }
     }
 
     private func publishPartial(
