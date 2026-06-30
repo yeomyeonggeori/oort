@@ -1292,7 +1292,8 @@ struct WorkerService: Service {
         let payload: [String: JSONValue] = [
             "channel_id": .string(context.channelID.uuidString),
             "run_id": .string(runID.uuidString),
-            "tool_call_args": .string(arguments),
+            "tool_call_args": Self.boundedToolCallArguments(arguments),
+            "tool_call_args_truncated": .bool(arguments.utf8.count > Self.maxToolCallArgsBytes),
             "tool_call_id": .string(callID),
             "tool_call_name": .string(name),
         ]
@@ -1300,6 +1301,22 @@ struct WorkerService: Service {
             channel: context.channel,
             data: envelope(type: "agent.partial", payload: payload)
         )
+    }
+
+    private static let maxToolCallArgsBytes = 2_048
+
+    private static func boundedToolCallArguments(_ arguments: String) -> JSONValue {
+        if arguments.utf8.count <= maxToolCallArgsBytes,
+           let data = arguments.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(JSONValue.self, from: data) {
+            return decoded
+        }
+
+        let prefix = String(arguments.prefix(maxToolCallArgsBytes))
+        return .object([
+            "raw_prefix": .string(prefix),
+            "truncated": .bool(arguments.utf8.count > maxToolCallArgsBytes),
+        ])
     }
 
     /// L4 §5.2 single envelope: {type, v, ts, payload}.

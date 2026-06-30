@@ -291,6 +291,16 @@ VALUES
      'model', 'hermes-agent',
      'prompt', '@김인턴 MOMO-004 런타임 검증해줘',
      'max_output_tokens', 64,
+     'tool_grants', jsonb_build_array(jsonb_build_object(
+       'tool_name', 'github.search_issues',
+       'provider', 'github',
+       'grant', 'read',
+       'risk', 'read',
+       'approval_policy', 'none',
+       'resource_scope_summary', 'repo:Dawn-kim-official/momo',
+       'capability_version', 'mock-github@0.1.0',
+       'policy_version', 'capability-policy@2026-06-30'
+     )),
      'step_count', 0,
      'depth', 0,
      'consecutive_auto', 0
@@ -345,11 +355,22 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
       | select((.payload.text // "") | contains("MOMO-004 SSE path verified"))
     ] | length
   ')
+  TOOL_PARTIAL_OK=$(printf '%s' "$HISTORY_JSON" | jq -r --arg run "$RUN_ID" '
+    [.result.publications[]?.data
+      | select(.type == "agent.partial")
+      | select((.payload.run_id // .payload.runId) == $run)
+      | select(.payload.tool_call_name == "github.search_issues")
+      | select((.payload.tool_call_args | type) == "object")
+      | select(.payload.tool_call_args.query == "MOMO-201 live tool-call fixture")
+      | select(.payload.tool_call_args.limit == 2)
+      | select(.payload.tool_call_args_truncated == false)
+    ] | length
+  ')
 
   if [ "$RUN_OK" = "1" ] && [ "$OUTBOX_OK" = "1" ] \
     && [ "$USAGE_OK" = "1" ] && [ "$WINDOW_OK" = "1" ] \
     && [ "$PROJECTION_OK" = "1" ] \
-    && [ "$PARTIAL_OK" != "0" ]; then
+    && [ "$PARTIAL_OK" != "0" ] && [ "$TOOL_PARTIAL_OK" != "0" ]; then
     SUCCESS_OK=1
     break
   fi
@@ -365,7 +386,7 @@ if [ "$SUCCESS_OK" != "1" ]; then
   exit 1
 fi
 
-echo "[agent-worker] success path verified: agent.partial + usage_ledger + budget_window + cost_projection"
+echo "[agent-worker] success path verified: agent.partial text + MOMO-201 tool_call progress + usage_ledger + budget_window + cost_projection"
 verify_cost_projection_endpoint
 
 echo "[agent-worker] seeding approved deterministic resume fixture"
@@ -454,7 +475,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   # consume this broadcast quickly. The invariant is that AgentWorker created a
   # non-failed broadcast outbox row for the tool_result, not that it remains
   # pending at the exact polling instant.
-  BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->'payload'->>'run_id'='$RESUME_RUN_ID' AND payload->'data'->'payload'->>'type'='tool_result' AND status IN ('pending', 'done') AND last_error IS NULL;")
+  BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND payload->'data'->'payload'->>'run_id'='$RESUME_RUN_ID' AND payload->'data'->'payload'->>'type'='tool_result' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending', 'done') AND last_error IS NULL;")
 
   if [ "$RUN_DONE" = "1" ] && [ "$JOB_DONE" = "1" ] \
     && [ "$RESULT_MSG" = "1" ] && [ "$AUDIT_OK" = "2" ] \
@@ -471,7 +492,7 @@ if [ "$RESUME_OK" != "1" ]; then
   exit 1
 fi
 
-echo "[agent-worker] approved resume path verified: tool_result + audit + resume job done"
+echo "[agent-worker] approved resume path verified: final tool_result/message.new + audit + resume job done"
 
 echo "[agent-worker] seeding low-limit circuit-breaker fixture"
 psql_run <<SQL
