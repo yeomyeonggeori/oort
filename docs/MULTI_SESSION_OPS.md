@@ -73,6 +73,24 @@ git worktree remove '<printed-path>'
 
 Do not run cleanup commands for `stale-warning` rows until the warning is resolved. Inspect dirty files with `git -C '<path>' status --short`; inspect local-only commits with `git -C '<path>' log --oneline --decorate --max-count 20`. If the current worktree is listed, switch to another checkout before removing it.
 
+### 1.2 Worktree Docker Compose Janitor
+
+Parallel runtime gates can leave Docker Compose containers or networks after a worktree has been removed. Audit those resources with:
+
+```bash
+scripts/compose_janitor.sh
+```
+
+The janitor is dry-run by default. It only lists Compose-labeled worktree projects whose name starts with `momo_` and no longer matches an active git worktree. It explicitly protects the root `momo` project, `momo_default`, `supabase`, active worktree projects, and non-momo Docker resources.
+
+Cleanup requires an explicit flag:
+
+```bash
+scripts/compose_janitor.sh --cleanup
+```
+
+The cleanup path removes only the listed stale containers and networks. Volumes are intentionally left untouched; remove them manually only after checking that no useful local database state is needed.
+
 ## 2. Claiming Work
 
 Preferred:

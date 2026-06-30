@@ -82,6 +82,22 @@ subscribe proxy must reach the API service on the Docker network. If Docker/psql
 is unavailable, record the blocker and keep the affected runtime scope
 unverified.
 
+After parallel runtime gates or after removing old worktrees, audit leftover
+worktree Docker Compose resources with:
+
+```bash
+scripts/compose_janitor.sh
+```
+
+This command is dry-run by default. It lists only stale `momo_` worktree Compose
+projects, containers, and networks; it protects `momo_default`, the root `momo`
+project, `supabase`, active worktree projects, and non-momo resources. Removal
+requires an explicit cleanup flag:
+
+```bash
+scripts/compose_janitor.sh --cleanup
+```
+
 For macOS UI PRs, the default `macos-ui` profile stays GUI-safe for headless or
 background Codex runs: it executes `MomoMacSmoke` only. Opt-in GUI evidence uses
 `LOCAL_GATE_LAUNCH_UI=1`, which stages `dist/MomoMacDevApp.app`, launches it with

@@ -152,6 +152,7 @@
 | `MOMO-196` | Realtime WebSocket live subscribe verifier v0(token→subscribe→REST send→live publication) | runtime/infra | MOMO-115, MOMO-186, MOMO-192, MOMO-193 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
+| `MOMO-209` | stale worktree Docker Compose project/container/network janitor | tooling/docs | MOMO-112, MOMO-194, MOMO-199 |
 | `MOMO-150` | Hermes/Kim Intern/openclaw agent runtime 분석과 roadmap | docs/spec | MOMO-110 |
 | `MOMO-180` | Paca/OpenHands/Linear/Rovo/GitHub agentic work OS 시장 분석 + repo topology ADR | docs/spec | MOMO-150 |
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
@@ -214,6 +215,16 @@
 - [x] `docs/MULTI_SESSION_OPS.md`, `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [x] `bash -n scripts/goal_status.sh` 및 `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #154를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-209 수용기준 `[tooling/docs]`
+- [x] GitHub #172를 `scripts/goal_claim.sh 172`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/compose_janitor.sh`가 Docker Compose label 기반으로 stale `momo_` worktree project/container/network를 목록화한다.
+- [x] 기본 실행은 dry-run이며 container/network 제거는 `--cleanup` 명시 시에만 수행한다.
+- [x] root `momo` project, `momo_default`, `supabase`, active git worktree project, non-momo Docker resource를 cleanup 후보에서 보호한다.
+- [x] Volumes는 삭제하지 않는다.
+- [x] `docs/MULTI_SESSION_OPS.md`, `docs/LOCAL_PR_GATE.md`, `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `bash -n scripts/compose_janitor.sh`, `scripts/compose_janitor.sh` dry-run, `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #172를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-005 수용기준 `[infra/docs]`
 - [x] `scripts/goal_claim.sh 5` 시도. 이슈가 `status:ready`가 아니어서 fallback으로 별도 worktree/branch를 수동 생성하고 issue `status:in-progress`를 적용.
