@@ -24,6 +24,7 @@
   - ✅ `.sops.yaml.example` + `infra/prod/secrets.env.example` — SOPS/age 운영 계약, 실제 시크릿 미포함 (MOMO-006)
   - ✅ `infra/prod/pgbackrest*.example` + `docs/SECRETS_BACKUP_RUNBOOK.md` — 백업/복원 skeleton과 리허설 절차 (MOMO-006)
   - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest local gate (MOMO-007)
+  - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
@@ -280,6 +281,7 @@ pgbackrest --stanza=momo --type=time \
 
 ```sh
 scripts/verify_staging_smoke.sh
+scripts/verify_internal_hosting_smoke.sh
 scripts/local_gate.sh --profile staging-smoke
 ```
 
@@ -290,9 +292,27 @@ scripts/local_gate.sh --profile staging-smoke
 - `infra/prod/centrifugo.prod.json`이 Redis engine, namespace 4종, subscribe proxy, history ttl 계약을 만족한다.
 - prod plaintext secret/env/age key 파일이 tracked되지 않고, example 파일은 placeholder만 담는다.
 - SOPS/age와 pgBackRest PITR rehearsal checklist/evidence template이 존재한다.
+- MOMO-216 internal smoke overlay가 prod compose 위에서 렌더링되고, local image fallback tags, explicit `migrate` job, MomoServer `/health` route, relay/worker env/enablement, mock Hermes boundary를 검증한다.
 
-`runtime-unverified`: 실제 `https://api.<domain>/health`, TLS 인증서 발급/갱신, Caddy parser healthcheck,
-SOPS 복호화, pgBackRest stanza/check/full backup/PITR restore rehearsal, 외부 hermes staging 연결은 host-runtime에서만 닫는다.
+`runtime-unverified(public TLS/DNS)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신, Caddy parser healthcheck,
+registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/PITR restore rehearsal, 외부 hermes staging 연결은 host-runtime에서만 닫는다.
+
+### 8.0.1 internal single-node hosting smoke (MOMO-216)
+
+내부 테스트용 single-node smoke는 prod deploy 방향을 바꾸지 않는 override다.
+
+```sh
+docker compose --env-file infra/prod/internal-smoke.env.example \
+  -f infra/prod/docker-compose.prod.yml \
+  -f infra/prod/docker-compose.internal-smoke.yml config
+scripts/verify_internal_hosting_smoke.sh
+```
+
+- Production/staging host: api/relay/worker는 source checkout 없이 pinned registry image를 pull한다.
+- Local internal smoke: 아직 publish pipeline 전이라도 `momo-api:internal-smoke` 같은 local image tag fallback을 사용할 수 있다.
+- Migration: app container boot side effect가 아니라 `scripts/migrate.sh`를 operator step 또는 smoke `migrate` job으로 실행한다.
+- Caddy/TLS: Caddy가 유일한 public edge다. Local smoke는 `localhost`/`rt.localhost`와 `18080/18443` config를 확인하지만 public ACME/DNS는 검증하지 않는다.
+- Backup/restore: pgBackRest placeholder와 PITR evidence template까지만 repo-local로 닫고, 실제 restore rehearsal은 host-runtime이다.
 
 ### 8.1 헬스체크 / 로그
 - `GET https://api.<domain>/health` 200 = api green. Caddy/Centrifugo/postgres healthcheck도 green.
