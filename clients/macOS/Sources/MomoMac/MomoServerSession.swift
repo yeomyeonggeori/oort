@@ -167,6 +167,172 @@ public struct MomoServerSessionSummary: Equatable, Sendable {
     }
 }
 
+public struct MomoInviteAdminContext: Equatable, Sendable {
+    public var baseURL: URL
+    public var workspace: WorkspaceID
+    public var accessToken: String
+
+    public init(baseURL: URL, workspace: WorkspaceID, accessToken: String) {
+        self.baseURL = baseURL
+        self.workspace = workspace
+        self.accessToken = accessToken
+    }
+}
+
+public struct MomoInviteCreateRequest: Equatable, Sendable, Encodable {
+    public var role: MembershipRole
+    public var maxUses: Int
+    public var expiresAtMs: Int64
+    public var metadata: [String: String]?
+
+    public init(
+        role: MembershipRole = .member,
+        maxUses: Int = 1,
+        expiresAtMs: Int64,
+        metadata: [String: String]? = nil
+    ) {
+        self.role = role
+        self.maxUses = maxUses
+        self.expiresAtMs = expiresAtMs
+        self.metadata = metadata
+    }
+}
+
+public struct MomoInviteCode: Identifiable, Equatable, Sendable {
+    public var id: UUID
+    public var workspaceId: WorkspaceID
+    public var codePreview: String
+    public var role: MembershipRole
+    public var maxUses: Int
+    public var usedCount: Int
+    public var expiresAtMs: Int64
+    public var revokedAtMs: Int64?
+    public var revokedBy: MemberID?
+    public var revocationReason: String?
+    public var createdBy: MemberID
+    public var createdAtMs: Int64
+    public var updatedAtMs: Int64
+
+    public var isRevoked: Bool { revokedAtMs != nil }
+    public var isExhausted: Bool { usedCount >= maxUses }
+    public var isExpired: Bool { expiresAtMs <= Int64(Date().timeIntervalSince1970 * 1000) }
+
+    public var statusLabel: String {
+        if isRevoked { return "Revoked" }
+        if isExpired { return "Expired" }
+        if isExhausted { return "Used" }
+        return "Active"
+    }
+}
+
+public struct MomoCreatedInvite: Equatable, Sendable {
+    public var invite: MomoInviteCode
+    public var code: String
+}
+
+public actor MomoInviteAdminClient {
+    private let session: URLSession
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    public func createInvite(
+        context: MomoInviteAdminContext,
+        request body: MomoInviteCreateRequest
+    ) async throws -> MomoCreatedInvite {
+        try await post(
+            "/v1/workspaces/\(context.workspace.description)/invites",
+            context: context,
+            body: body,
+            response: CreateInviteResponse.self
+        ).createdInvite
+    }
+
+    public func listInvites(
+        context: MomoInviteAdminContext,
+        includeRevoked: Bool = true,
+        limit: Int = 50
+    ) async throws -> [MomoInviteCode] {
+        var components = URLComponents(
+            url: context.baseURL.appendingPathComponent("/v1/workspaces/\(context.workspace.description)/invites"),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "include_revoked", value: includeRevoked ? "true" : "false"),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        guard let url = components?.url else {
+            throw MomoServerSessionError.validation("Invalid invite list URL.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        authorize(&request, token: context.accessToken)
+        return try await execute(request, response: InviteListResponse.self).invites.map(\.invite)
+    }
+
+    public func revokeInvite(
+        context: MomoInviteAdminContext,
+        inviteID: UUID,
+        reason: String?
+    ) async throws -> MomoInviteCode {
+        try await post(
+            "/v1/workspaces/\(context.workspace.description)/invites/\(inviteID.uuidString)/revoke",
+            context: context,
+            body: RevokeInviteRequest(reason: reason),
+            response: InviteCodeDTO.self
+        ).invite
+    }
+
+    private func post<RequestBody: Encodable, ResponseBody: Decodable>(
+        _ path: String,
+        context: MomoInviteAdminContext,
+        body: RequestBody,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: context.baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        authorize(&request, token: context.accessToken)
+        return try await execute(request, response: response)
+    }
+
+    private func authorize(_ request: inout URLRequest, token: String) {
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    }
+
+    private func execute<T: Decodable>(_ request: URLRequest, response: T.Type) async throws -> T {
+        do {
+            let (data, urlResponse) = try await session.data(for: request)
+            guard let http = urlResponse as? HTTPURLResponse else {
+                throw MomoServerSessionError.transport("Server did not return an HTTP response.")
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw problemError(status: http.statusCode, data: data)
+            }
+            do {
+                return try decoder.decode(T.self, from: data)
+            } catch {
+                throw MomoServerSessionError.decoding(String(describing: error))
+            }
+        } catch let error as MomoServerSessionError {
+            throw error
+        } catch {
+            throw MomoServerSessionError.transport(error.localizedDescription)
+        }
+    }
+
+    private func problemError(status: Int, data: Data) -> MomoServerSessionError {
+        if let problem = try? decoder.decode(ProblemResponse.self, from: data) {
+            return .problem(status: status, title: problem.title, detail: problem.detail ?? problem.message)
+        }
+        return .problem(status: status, title: HTTPURLResponse.localizedString(forStatusCode: status), detail: nil)
+    }
+}
+
 public actor MomoServerSessionClient {
     private let session: URLSession
     private let encoder = JSONEncoder()
@@ -410,7 +576,7 @@ public final class MomoServerSessionController: ObservableObject {
     public enum Phase {
         case choosing
         case connecting(String)
-        case connected(ChatViewModel, MomoServerSessionSummary)
+        case connected(ChatViewModel, MomoServerSessionSummary, MomoInviteAdminContext?)
         case failed(String)
     }
 
@@ -438,10 +604,18 @@ public final class MomoServerSessionController: ObservableObject {
             return
         }
         phase = .connecting("Connecting to \(config.baseURL.absoluteString)")
+        if config.accessToken == nil {
+            await establishEnvironmentLoginSession(config: config)
+            return
+        }
+
         let viewModel = await MomoMacDemo.makeRESTViewModel(config: config)
         if let error = viewModel.connectionError {
             phase = .failed(error)
             return
+        }
+        let inviteAdmin = config.accessToken.map {
+            MomoInviteAdminContext(baseURL: config.baseURL, workspace: config.workspace, accessToken: $0)
         }
         sessionNotice = nil
         phase = .connected(viewModel, MomoServerSessionSummary(
@@ -452,7 +626,7 @@ public final class MomoServerSessionController: ObservableObject {
             serverURLString: config.baseURL.absoluteString,
             workspaceIDString: config.workspace.description,
             email: config.login.email
-        ))
+        ), inviteAdmin)
     }
 
     public func openDemo() async {
@@ -470,7 +644,7 @@ public final class MomoServerSessionController: ObservableObject {
             memberHandle: viewModel.members.first(where: { $0.kind == .human })?.handle,
             memberKind: .human,
             email: "demo"
-        ))
+        ), nil)
     }
 
     public func connectRealServer() async {
@@ -528,6 +702,44 @@ public final class MomoServerSessionController: ObservableObject {
                 memberHandle: session.member.handle,
                 memberKind: session.member.kind,
                 email: session.email
+            ), MomoInviteAdminContext(
+                baseURL: session.baseURL,
+                workspace: session.workspace,
+                accessToken: session.accessToken
+            ))
+        } catch {
+            phase = .failed(error.localizedDescription)
+        }
+    }
+
+    private func establishEnvironmentLoginSession(config: MomoServerRESTChatBackendConfig) async {
+        do {
+            let session = try await client.login(form: MomoServerSessionForm(
+                baseURLString: config.baseURL.absoluteString,
+                email: config.login.email,
+                password: config.login.password
+            ), workspace: config.workspace)
+            let viewModel = await makeViewModel(session: session, password: config.login.password)
+            if let error = viewModel.connectionError {
+                phase = .failed(error)
+                return
+            }
+            sessionNotice = nil
+            phase = .connected(viewModel, MomoServerSessionSummary(
+                mode: .real,
+                title: session.summaryTitle,
+                detail: "Environment login session",
+                channelCount: viewModel.channels.count,
+                serverURLString: session.baseURL.absoluteString,
+                workspaceIDString: session.workspace.description,
+                memberDisplayName: session.member.displayName,
+                memberHandle: session.member.handle,
+                memberKind: session.member.kind,
+                email: session.email
+            ), MomoInviteAdminContext(
+                baseURL: session.baseURL,
+                workspace: session.workspace,
+                accessToken: session.accessToken
             ))
         } catch {
             phase = .failed(error.localizedDescription)
@@ -548,14 +760,14 @@ public final class MomoServerSessionController: ObservableObject {
     }
 
     private var connectedViewModel: ChatViewModel? {
-        if case .connected(let viewModel, _) = phase {
+        if case .connected(let viewModel, _, _) = phase {
             return viewModel
         }
         return nil
     }
 
     private var connectedEmail: String? {
-        if case .connected(_, let summary) = phase {
+        if case .connected(_, let summary, _) = phase {
             return summary.email
         }
         return nil
@@ -586,12 +798,13 @@ public struct MomoMacSessionRootView: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .connected(let viewModel, let summary):
+            case .connected(let viewModel, let summary, let inviteAdmin):
                 MomoMacRootView(existingViewModel: viewModel)
                     .safeAreaInset(edge: .top, spacing: 0) {
                         SessionStatusBar(
                             summary: summary,
                             viewModel: viewModel,
+                            inviteAdminContext: inviteAdmin,
                             switchSession: {
                                 Task { await controller.switchSession() }
                             },
@@ -704,9 +917,11 @@ private struct MomoServerSessionChooser: View {
 private struct SessionStatusBar: View {
     var summary: MomoServerSessionSummary
     @ObservedObject var viewModel: ChatViewModel
+    var inviteAdminContext: MomoInviteAdminContext?
     var switchSession: () -> Void
     var logout: () -> Void
     @State private var showDetails = false
+    @State private var showInvites = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -735,6 +950,17 @@ private struct SessionStatusBar: View {
                 SessionDetailPopover(summary: summary, realtimeStatus: viewModel.selectedRealtimeStatus)
             }
             .controlSize(.small)
+            if let inviteAdminContext {
+                Button {
+                    showInvites.toggle()
+                } label: {
+                    Label("Invites", systemImage: "person.badge.key")
+                }
+                .popover(isPresented: $showInvites) {
+                    InviteAdminPopover(context: inviteAdminContext)
+                }
+                .controlSize(.small)
+            }
             Button(action: switchSession) {
                 Label("Switch", systemImage: "arrow.left.arrow.right")
             }
@@ -786,6 +1012,247 @@ private struct SessionStatusBar: View {
             .font(.caption)
             .lineLimit(1)
             .foregroundStyle(color)
+    }
+}
+
+@MainActor
+private final class MomoInviteAdminViewModel: ObservableObject {
+    @Published var invites: [MomoInviteCode] = []
+    @Published var createdCode: String?
+    @Published var notice: String?
+    @Published var errorMessage: String?
+    @Published var isWorking = false
+
+    private let context: MomoInviteAdminContext
+    private let client: MomoInviteAdminClient
+
+    init(context: MomoInviteAdminContext, client: MomoInviteAdminClient = MomoInviteAdminClient()) {
+        self.context = context
+        self.client = client
+    }
+
+    func refreshInvites() async {
+        guard !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            invites = try await client.listInvites(context: context, includeRevoked: true, limit: 50)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func createInvite(role: MembershipRole, maxUsesText: String, expiresInDaysText: String) async {
+        guard !isWorking else { return }
+        let maxUses = Int(maxUsesText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1
+        let expiresInDays = Int(expiresInDaysText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 7
+        let clampedMaxUses = min(max(maxUses, 1), 10_000)
+        let clampedDays = min(max(expiresInDays, 1), 90)
+        let expiresAtMs = Int64(Date().addingTimeInterval(TimeInterval(clampedDays * 24 * 60 * 60)).timeIntervalSince1970 * 1000)
+
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let created = try await client.createInvite(
+                context: context,
+                request: MomoInviteCreateRequest(
+                    role: role,
+                    maxUses: clampedMaxUses,
+                    expiresAtMs: expiresAtMs,
+                    metadata: ["source": "macos-internal-alpha"]
+                )
+            )
+            createdCode = created.code
+            notice = "Invite created for \(created.invite.role.rawValue)."
+            errorMessage = nil
+            invites.removeAll { $0.id == created.invite.id }
+            invites.insert(created.invite, at: 0)
+            await refreshInvites()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func revoke(_ invite: MomoInviteCode, reason: String) async {
+        guard !isWorking else { return }
+        isWorking = true
+        defer { isWorking = false }
+        do {
+            let revoked = try await client.revokeInvite(
+                context: context,
+                inviteID: invite.id,
+                reason: reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : reason
+            )
+            notice = "Invite \(revoked.codePreview) revoked."
+            errorMessage = nil
+            if let index = invites.firstIndex(where: { $0.id == revoked.id }) {
+                invites[index] = revoked
+            } else {
+                invites.insert(revoked, at: 0)
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct InviteAdminPopover: View {
+    @StateObject private var model: MomoInviteAdminViewModel
+    @State private var role: MembershipRole = .member
+    @State private var maxUses = "1"
+    @State private var expiresInDays = "7"
+    @State private var revocationReason = "internal alpha cleanup"
+
+    init(context: MomoInviteAdminContext) {
+        _model = StateObject(wrappedValue: MomoInviteAdminViewModel(context: context))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Invites")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    Task { await model.refreshInvites() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(model.isWorking)
+                .help("Refresh")
+            }
+
+            createControls
+
+            if let code = model.createdCode {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("New invite code")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(code)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            }
+
+            if let notice = model.notice {
+                Label(notice, systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.reversibleGreen)
+            }
+            if let error = model.errorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                    .textSelection(.enabled)
+            }
+
+            Divider()
+
+            inviteList
+        }
+        .padding(16)
+        .frame(width: 460, height: 520, alignment: .topLeading)
+        .task {
+            if model.invites.isEmpty {
+                await model.refreshInvites()
+            }
+        }
+    }
+
+    private var createControls: some View {
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
+            GridRow {
+                Text("Role").foregroundStyle(.secondary)
+                Picker("Role", selection: $role) {
+                    Text("Member").tag(MembershipRole.member)
+                    Text("Admin").tag(MembershipRole.admin)
+                    Text("Guest").tag(MembershipRole.guest)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+            }
+            GridRow {
+                Text("Uses").foregroundStyle(.secondary)
+                TextField("1", text: $maxUses)
+                    .textFieldStyle(.roundedBorder)
+            }
+            GridRow {
+                Text("Days").foregroundStyle(.secondary)
+                TextField("7", text: $expiresInDays)
+                    .textFieldStyle(.roundedBorder)
+            }
+            GridRow {
+                Color.clear
+                Button {
+                    Task {
+                        await model.createInvite(
+                            role: role,
+                            maxUsesText: maxUses,
+                            expiresInDaysText: expiresInDays
+                        )
+                    }
+                } label: {
+                    Label("Create Invite", systemImage: "plus.circle")
+                }
+                .disabled(model.isWorking)
+            }
+        }
+        .font(.caption)
+    }
+
+    private var inviteList: some View {
+        List(model.invites) { invite in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("••••\(invite.codePreview)")
+                        .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    Spacer()
+                    Text(invite.statusLabel)
+                        .font(.caption2.bold())
+                        .foregroundStyle(invite.isRevoked ? MomoTheme.irreversibleRed : .secondary)
+                }
+                HStack(spacing: 10) {
+                    Label(invite.role.rawValue, systemImage: "person.crop.circle.badge.checkmark")
+                    Label("\(invite.usedCount)/\(invite.maxUses)", systemImage: "number")
+                    Text(expiryText(invite.expiresAtMs))
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+                if !invite.isRevoked {
+                    HStack {
+                        TextField("Reason", text: $revocationReason)
+                            .textFieldStyle(.roundedBorder)
+                        Button(role: .destructive) {
+                            Task { await model.revoke(invite, reason: revocationReason) }
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(model.isWorking)
+                        .help("Revoke")
+                    }
+                } else if let reason = invite.revocationReason, !reason.isEmpty {
+                    Text(reason)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .overlay {
+            if model.invites.isEmpty && !model.isWorking {
+                ContentUnavailableView("No invites", systemImage: "person.badge.key")
+            }
+        }
+    }
+
+    private func expiryText(_ expiresAtMs: Int64) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(expiresAtMs) / 1000)
+        return date.formatted(date: .abbreviated, time: .omitted)
     }
 }
 
@@ -861,6 +1328,57 @@ private struct JoinResponse: Decodable {
     let refreshToken: String
     let workspaceId: String
     let member: SessionMemberDTO
+}
+
+private struct CreateInviteResponse: Decodable {
+    let invite: InviteCodeDTO
+    let code: String
+
+    var createdInvite: MomoCreatedInvite {
+        MomoCreatedInvite(invite: invite.invite, code: code)
+    }
+}
+
+private struct InviteListResponse: Decodable {
+    let invites: [InviteCodeDTO]
+}
+
+private struct RevokeInviteRequest: Encodable {
+    let reason: String?
+}
+
+private struct InviteCodeDTO: Decodable {
+    let id: String
+    let workspaceId: String
+    let codePreview: String
+    let role: String
+    let maxUses: Int
+    let usedCount: Int
+    let expiresAtMs: Int64
+    let revokedAtMs: Int64?
+    let revokedBy: String?
+    let revocationReason: String?
+    let createdBy: String
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+
+    var invite: MomoInviteCode {
+        MomoInviteCode(
+            id: UUID(uuidString: id) ?? UUID(),
+            workspaceId: WorkspaceID(uuidString: workspaceId) ?? .demo,
+            codePreview: codePreview,
+            role: MembershipRole(rawValue: role) ?? .member,
+            maxUses: maxUses,
+            usedCount: usedCount,
+            expiresAtMs: expiresAtMs,
+            revokedAtMs: revokedAtMs,
+            revokedBy: revokedBy.flatMap { MemberID(uuidString: $0) },
+            revocationReason: revocationReason,
+            createdBy: MemberID(uuidString: createdBy) ?? .demoHuman,
+            createdAtMs: createdAtMs,
+            updatedAtMs: updatedAtMs
+        )
+    }
 }
 
 private struct SessionMemberDTO: Decodable {
