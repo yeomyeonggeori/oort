@@ -380,6 +380,12 @@
 - PR body에 붙이는 `## Local Gate` block에 `Run ID`, 정확한 `Evidence markdown`, `Evidence log` 경로를 함께 출력한다.
 - 런타임/스키마 변경은 없으며 검증 대상은 docs local gate와 병렬 docs smoke다.
 
+## 0as. MOMO-199 Worktree Stale Audit (2026-06-29)
+
+- `scripts/goal_status.sh`가 open goal board 뒤에 closed issue 또는 merged/closed PR에 연결된 local worktree를 read-only로 audit하는 stale/done 섹션을 출력한다.
+- clean + pushed/merged 상태만 `done-candidate`로 copy-paste 가능한 `git worktree remove ...` 안내를 표시하고, dirty/current/unpushed/upstream-unknown worktree는 `stale-warning`으로 cleanup command를 숨긴다.
+- 런타임/스키마 변경 없음. 검증 대상은 shell syntax, real GitHub/local worktree read-only board smoke, docs local gate다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
