@@ -132,6 +132,13 @@
 - AgentWorker final text 응답은 `run_id`/source attribution을 보존한 durable channel `message.new`로 기록되고, mock SSE의 `agent.partial`/tool-call progress는 기존 `agent:` live channel에 남는다. 다른 workspace agent는 tenant RLS 범위에서 resolve하지 않아 cross-workspace job을 만들지 않는다.
 - 검증: `swift test --package-path server` PASS, `swift test --package-path workers/AgentWorker` PASS, `scripts/verify_agent_worker.sh` PASS. External Hermes/provider side effect는 계속 `runtime-unverified`이며 repo-local OpenAI-compatible mock path로 닫는다.
 
+## 0-18. MOMO-219 macOS Agent Mention UX v0 (2026-06-30)
+
+- macOS agent roster row click/context action이 composer draft에 `@김인턴` 또는 `@kim-intern`을 삽입한다. 선택 channel이 없거나 inactive agent면 action은 disabled/notice로 fail-clear하며, 최종 same-channel membership guard는 서버 mention routing이 유지한다.
+- `ChatViewModel.send`가 실제 optimistic local echo를 먼저 표시하고, mention + REST fallback 상태에서는 agent progress placeholder와 delayed durable history refresh로 final agent message를 `message.seq` timeline에 reconcile한다. `AgentPartialView`는 status의 agent member를 author로 표시한다.
+- `LiveChatBackend` demo fallback은 김인턴(`kim-intern`) mention에 deterministic progress/tool-call/final text response를 제공한다. `scripts/verify_macos_real_backend_ui.sh`는 real-backend `@kim-intern` source send/read와 `agent_job` 생성 smoke를 포함한다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS. Required local gates: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS. External Hermes/provider side effect는 계속 out of scope이며 repo-local mock OpenAI-compatible path로 닫는다.
+
 ## 0-16. MOMO-211 M4 MomoMac Xcode thin host app v0 (2026-06-30)
 
 - `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가했다. Xcode host target은 SwiftPM `MomoMacDevApp`과 분리되어 있고, `MomoMac`/`MomoCore`를 local SwiftPM dependency로 소비해 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 호스트한다.

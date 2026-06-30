@@ -218,7 +218,7 @@ verify_cost_projection_endpoint() {
   start_server
   LOGIN_JSON=$(curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"demo@momo.local\",\"password\":\"demo\",\"workspace\":\"$WORKSPACE_ID\"}" \
+    -d "{\"email\":\"demo@momo.local\",\"password\":\"dev-password\",\"workspace\":\"$WORKSPACE_ID\"}" \
     "$BASE_URL/v1/auth/login")
   ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
   if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
@@ -280,6 +280,13 @@ DELETE FROM usage_ledger
          AND idempotency_key LIKE 'mention:%:$AGENT_ID'
     );
 DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
+DELETE FROM audit_log
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND run_id IN (
+      SELECT id FROM agent_run
+       WHERE workspace_id = '$WORKSPACE_ID'
+         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
+   );
 DELETE FROM audit_log
  WHERE workspace_id = '$WORKSPACE_ID'
    AND target_id IN (
@@ -360,7 +367,7 @@ SQL
 
 LOGIN_JSON=$(curl -fsS \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"demo@momo.local\",\"password\":\"demo\",\"workspace\":\"$WORKSPACE_ID\"}" \
+  -d "{\"email\":\"demo@momo.local\",\"password\":\"dev-password\",\"workspace\":\"$WORKSPACE_ID\"}" \
   "$BASE_URL/v1/auth/login")
 ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
 if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then

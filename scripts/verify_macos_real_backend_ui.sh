@@ -85,8 +85,10 @@ APPROVAL_MSG_ID="00000000-0000-7000-8000-000000205201"
 APPROVAL_ID="00000000-0000-7000-8000-000000205301"
 USAGE_ID="00000000-0000-7000-8000-000000205401"
 CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+MENTION_CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 RUN_SUFFIX="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 MESSAGE_BODY="MOMO-205 real-backend GUI smoke ${RUN_SUFFIX}"
+MENTION_BODY="@kim-intern MOMO-219 macOS mention smoke ${RUN_SUFFIX}"
 
 OUT_DIR="${MACOS_REAL_BACKEND_OUT_DIR:-${TMPDIR:-/tmp}/momo-macos-real-backend}"
 mkdir -p "$OUT_DIR"
@@ -98,6 +100,7 @@ REST_CHANNEL_CREATE_FILE="$OUT_DIR/channel-create-${RUN_SUFFIX}.json"
 REST_MEMBER_ADD_FILE="$OUT_DIR/member-add-${RUN_SUFFIX}.json"
 REST_MEMBER_REMOVE_FILE="$OUT_DIR/member-remove-${RUN_SUFFIX}.json"
 REST_SEND_FILE="$OUT_DIR/send-${RUN_SUFFIX}.json"
+REST_MENTION_SEND_FILE="$OUT_DIR/mention-send-${RUN_SUFFIX}.json"
 REST_HISTORY_FILE="$OUT_DIR/history-${RUN_SUFFIX}.json"
 EVIDENCE_FILE="$OUT_DIR/evidence-${RUN_SUFFIX}.md"
 SERVER_PID=""
@@ -309,12 +312,28 @@ MESSAGE_SEQ="$(jq -r '.seq // empty' "$REST_SEND_FILE")"
 [ "$MESSAGE_ID" != "" ] && [ "$MESSAGE_SEQ" != "" ] && [ "$MESSAGE_SEQ" != "null" ] \
   || fail "send response missing id/seq: $(cat "$REST_SEND_FILE")"
 
+echo "[macos-real-backend] REST agent mention send"
+curl -fsS \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"clientMsgId\":\"${MENTION_CLIENT_MSG_ID}\",\"type\":\"text\",\"body\":\"${MENTION_BODY}\",\"props\":{\"gate\":\"MOMO-219\"}}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" >"$REST_MENTION_SEND_FILE"
+MENTION_MESSAGE_ID="$(jq -r '.id // empty' "$REST_MENTION_SEND_FILE")"
+MENTION_MESSAGE_SEQ="$(jq -r '.seq // empty' "$REST_MENTION_SEND_FILE")"
+[ "$MENTION_MESSAGE_ID" != "" ] && [ "$MENTION_MESSAGE_SEQ" != "" ] && [ "$MENTION_MESSAGE_SEQ" != "null" ] \
+  || fail "mention send response missing id/seq: $(cat "$REST_MENTION_SEND_FILE")"
+
+MENTION_JOB_COUNT="$(psql_admin -Atc "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='agent_job' AND payload->>'trigger_message_id'='${MENTION_MESSAGE_ID}' AND payload->>'agent_member_id'='${AGENT_ID}';")"
+[ "$MENTION_JOB_COUNT" = "1" ] || fail "mention send did not create exactly one agent_job for Kim Intern; count=${MENTION_JOB_COUNT}"
+
 echo "[macos-real-backend] REST history"
 curl -fsS \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages?limit=20" >"$REST_HISTORY_FILE"
 jq -e --arg id "$MESSAGE_ID" --arg body "$MESSAGE_BODY" '.messages[] | select(.id == $id and .body == $body and .type == "text")' "$REST_HISTORY_FILE" >/dev/null \
   || fail "history did not include sent text message"
+jq -e --arg id "$MENTION_MESSAGE_ID" --arg body "$MENTION_BODY" '.messages[] | select(.id == $id and .body == $body and .type == "text")' "$REST_HISTORY_FILE" >/dev/null \
+  || fail "history did not include sent agent mention message"
 jq -e --arg id "$APPROVAL_MSG_ID" --arg approval "$APPROVAL_ID" '
   .messages[]
   | select(.id == $id and .type == "approval_request")
@@ -355,7 +374,8 @@ fi
   echo "- REST channel list: count=\`$(jq -r '.channels | length' "$REST_CHANNELS_FILE")\`, includes \`agent-lab\`"
   echo "- REST channel management: created private channel \`${CHANNEL_MANAGEMENT_NAME}\` / \`${CHANNEL_MANAGEMENT_ID}\`, agent add/remove membership PASS"
   echo "- REST send: message_id=\`${MESSAGE_ID}\`, seq=\`${MESSAGE_SEQ}\`, client_msg_id=\`${CLIENT_MSG_ID}\`"
-  echo "- REST history: includes sent text plus approval_request \`${APPROVAL_MSG_ID}\` with approval_id \`${APPROVAL_ID}\`"
+  echo "- REST agent mention: body=\`${MENTION_BODY}\`, message_id=\`${MENTION_MESSAGE_ID}\`, seq=\`${MENTION_MESSAGE_SEQ}\`, agent_job_count=\`${MENTION_JOB_COUNT}\`"
+  echo "- REST history: includes sent text, agent mention source message, plus approval_request \`${APPROVAL_MSG_ID}\` with approval_id \`${APPROVAL_ID}\`"
   echo "- Approval surface data: status=\`pending\`, action=\`github.create_issue\`, estimated_micro_usd=\`820000\`"
   echo "- Cost surface data: reserved_micro_usd=\`820000\`, spent_micro_usd=\`340000\`, usage_ledger_id=\`${USAGE_ID}\`"
   echo "- UI launch: \`${UI_RESULT}\`"
@@ -364,7 +384,7 @@ fi
   else
     echo "- UI process/window evidence: \`${UI_LOG}\`"
   fi
-  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, channel_create=\`${REST_CHANNEL_CREATE_FILE}\`, member_add=\`${REST_MEMBER_ADD_FILE}\`, member_remove=\`${REST_MEMBER_REMOVE_FILE}\`, send=\`${REST_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
+  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, channel_create=\`${REST_CHANNEL_CREATE_FILE}\`, member_add=\`${REST_MEMBER_ADD_FILE}\`, member_remove=\`${REST_MEMBER_REMOVE_FILE}\`, send=\`${REST_SEND_FILE}\`, mention_send=\`${REST_MENTION_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
 } >"$EVIDENCE_FILE"
 
 cat "$EVIDENCE_FILE"

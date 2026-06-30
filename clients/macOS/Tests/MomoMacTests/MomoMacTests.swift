@@ -88,6 +88,80 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(first.id, second.id, "same clientMsgId must dedupe (L4 §3.1)")
     }
 
+    func testLiveChatBackendMentionFallbackRespondsToKimInternAliases() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        try await backend.connect(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "kim-intern" })
+
+        _ = try await backend.sendOptimistic(
+            DraftMessage(channelId: channel, type: .text, body: "@김인턴 오늘 상태 알려줘"),
+            clientMsgId: UUID()
+        )
+        _ = try await backend.sendOptimistic(
+            DraftMessage(channelId: channel, type: .text, body: "@kim-intern summarize the channel"),
+            clientMsgId: UUID()
+        )
+
+        let history = try await backend.history(channel: channel, after: nil, limit: 50)
+        let finals = history.filter { message in
+            message.authorMemberId == agent.id
+                && message.runId != nil
+                && (message.body?.contains("mention 호출을 확인") == true)
+        }
+        XCTAssertEqual(finals.count, 2)
+        XCTAssertTrue(finals.allSatisfy { $0.props["mention_handle"]?.stringValue == "kim-intern" })
+        XCTAssertTrue(finals.contains { $0.body?.contains("@김인턴") == true })
+        XCTAssertTrue(finals.contains { $0.body?.contains("@kim-intern") == true })
+    }
+
+    @MainActor
+    func testViewModelInsertsAgentMentionFromRoster() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        await viewModel.selectChannel(seed.channels[0].id)
+
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "kim-intern" })
+        XCTAssertTrue(viewModel.canInsertMention(for: agent))
+        viewModel.insertMention(for: agent)
+        XCTAssertEqual(viewModel.composerDraft, "@김인턴 ")
+        XCTAssertEqual(viewModel.mentionNotice, "김인턴 mention inserted.")
+
+        viewModel.insertMention(for: agent, preferDisplayName: false)
+        XCTAssertEqual(viewModel.composerDraft, "@김인턴 @kim-intern ")
+    }
+
+    @MainActor
+    func testViewModelRESTFallbackRefreshesFinalDurableMentionMessage() async throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let human = MemberID()
+        let agent = MemberID()
+        let backend = AgentMentionFallbackChatBackend(
+            workspace: workspace,
+            channel: channel,
+            human: human,
+            agent: agent
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel)
+        XCTAssertEqual(viewModel.selectedRealtimeStatus?.fallback, .restHistory)
+
+        await viewModel.send(body: "@kim-intern check this fallback path", to: channel)
+
+        let messages = viewModel.visibleMessages
+        XCTAssertEqual(messages.filter { $0.authorMemberId == human }.count, 1)
+        let final = try XCTUnwrap(messages.first { $0.authorMemberId == agent })
+        XCTAssertEqual(final.body, "김인턴 final durable response for @kim-intern")
+        XCTAssertNotNil(final.runId)
+        XCTAssertTrue(viewModel.partials.isEmpty)
+    }
+
     func testInviteJoinStubAcceptsDemoCodeAndRejectsUnknownCode() async throws {
         let backend = LiveChatBackend()
         _ = await backend.seedDemo()
@@ -1414,6 +1488,103 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(loaded.inviteCode, "MOMO-213")
         XCTAssertEqual(loaded.password, "")
         XCTAssertFalse(loaded.savePassword)
+    }
+}
+
+private actor AgentMentionFallbackChatBackend: ChatBackend {
+    private let workspace: WorkspaceID
+    private let channel: ChannelID
+    private let human: MemberID
+    private let agent: MemberID
+    private var messages: [Message] = []
+    private var seq: Int64 = 0
+
+    init(workspace: WorkspaceID, channel: ChannelID, human: MemberID, agent: MemberID) {
+        self.workspace = workspace
+        self.channel = channel
+        self.human = human
+        self.agent = agent
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {}
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        seq += 1
+        let ack = Message(
+            id: MessageID(),
+            channelId: draft.channelId,
+            seq: seq,
+            hlcTs: seq,
+            authorMemberId: human,
+            type: .text,
+            body: draft.body,
+            clientMsgId: clientMsgId
+        )
+        messages.append(ack)
+
+        if draft.body?.contains("@kim-intern") == true || draft.body?.contains("@김인턴") == true {
+            seq += 1
+            messages.append(Message(
+                id: MessageID(),
+                channelId: draft.channelId,
+                seq: seq,
+                hlcTs: seq,
+                authorMemberId: agent,
+                type: .text,
+                body: "김인턴 final durable response for @kim-intern",
+                props: .object(["mention_handle": .string("kim-intern")]),
+                runId: RunID()
+            ))
+        }
+
+        return ack
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        AsyncStream { continuation in continuation.finish() }
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        let filtered = messages.filter { message in
+            guard let seq else { return true }
+            return (message.seq ?? 0) > seq
+        }
+        return Array(filtered.prefix(limit))
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] { [] }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        [
+            Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human"),
+            Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "김인턴", handle: "kim-intern"),
+        ]
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        [
+            Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "agent-lab", createdBy: human),
+        ]
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] { [] }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        messages.filter { $0.body?.contains(query) == true }
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {}
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        throw BackendError.notConnected
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {}
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] { [] }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        throw BackendError.notConnected
     }
 }
 

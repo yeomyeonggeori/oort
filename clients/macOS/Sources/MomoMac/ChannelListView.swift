@@ -121,12 +121,45 @@ public struct ChannelListView: View {
 
     @ViewBuilder
     private func memberRow(_ member: Member) -> some View {
+        if member.isAgent {
+            Button {
+                viewModel.insertMention(for: member)
+            } label: {
+                memberRowContent(member)
+            }
+            .buttonStyle(.plain)
+            .disabled(!viewModel.canInsertMention(for: member))
+            .contextMenu {
+                Button {
+                    viewModel.insertMention(for: member)
+                } label: {
+                    Label("Mention @\(member.displayName)", systemImage: "at")
+                }
+                .disabled(!viewModel.canInsertMention(for: member))
+
+                Button {
+                    viewModel.insertMention(for: member, preferDisplayName: false)
+                } label: {
+                    Label("Mention @\(member.handle)", systemImage: "number")
+                }
+                .disabled(!viewModel.canInsertMention(for: member))
+            }
+            .help(viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)")
+        } else {
+            memberRowContent(member)
+        }
+    }
+
+    private func memberRowContent(_ member: Member) -> some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(member.presence.dotColor)
                 .frame(width: 8, height: 8)
             Text(member.displayName).lineLimit(1)
             if member.isAgent {
+                Image(systemName: "at")
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.agentAccent)
                 Text("AGENT")
                     .font(.system(size: 8, weight: .bold))
                     .padding(.horizontal, 4).padding(.vertical, 1)

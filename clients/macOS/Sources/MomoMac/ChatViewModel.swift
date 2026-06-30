@@ -41,6 +41,8 @@ public final class ChatViewModel: ObservableObject {
     /// of deriving ledger/budget math in the client.
     @Published public private(set) var costSnapshots: [RunID: CostSnapshot] = [:]
     @Published public private(set) var realtimeStatuses: [ChannelID: RealtimeConnectionStatus] = [:]
+    @Published public var composerDraft: String = ""
+    @Published public private(set) var mentionNotice: String?
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -62,6 +64,7 @@ public final class ChatViewModel: ObservableObject {
 
     private var channelSubscription: Task<Void, Never>?
     private var realtimeStatusSubscription: Task<Void, Never>?
+    private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
 
     public init(
         chat: any ChatBackend,
@@ -235,14 +238,55 @@ public final class ChatViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         let clientMsgId = UUID()
         let draft = DraftMessage(channelId: channel, type: .text, body: trimmed)
+        let mentionedAgent = mentionedAgent(in: trimmed)
+        let optimistic = optimisticMessage(body: trimmed, channel: channel, clientMsgId: clientMsgId)
+        upsert(optimistic, channel: channel)
+        if let mentionedAgent, isRESTFallback(channel: channel) {
+            showFallbackMentionProgress(agent: mentionedAgent, channel: channel)
+        }
         do {
             let acked = try await chat.sendOptimistic(draft, clientMsgId: clientMsgId)
             // Reconcile (the stub already emits the real message via subscribe, but the
             // returned ack is authoritative — upsert by id).
             upsert(acked, channel: channel)
+            if let mentionedAgent {
+                await refreshAfterMentionSend(channel: channel, agent: mentionedAgent, triggerSeq: acked.seq)
+            }
         } catch {
             connectionError = String(describing: error)
         }
+    }
+
+    public func insertMention(for member: Member, preferDisplayName: Bool = true) {
+        guard member.isAgent else { return }
+        guard selectedChannelId != nil else {
+            mentionNotice = "Select a channel before mentioning \(member.displayName)."
+            return
+        }
+        guard member.status == .active else {
+            mentionNotice = "\(member.displayName) is not active in this workspace."
+            return
+        }
+
+        let token = preferDisplayName ? "@\(member.displayName)" : "@\(member.handle)"
+        let needsSeparator = composerDraft.last.map { !$0.isWhitespace && !$0.isNewline } ?? false
+        composerDraft += "\(needsSeparator ? " " : "")\(token) "
+        mentionNotice = "\(member.displayName) mention inserted."
+    }
+
+    public func canInsertMention(for member: Member) -> Bool {
+        member.isAgent && member.status == .active && selectedChannelId != nil
+    }
+
+    public func mentionUnavailableReason(for member: Member) -> String? {
+        guard member.isAgent else { return nil }
+        if selectedChannelId == nil {
+            return "Select a channel first."
+        }
+        if member.status != .active {
+            return "\(member.displayName) is not active."
+        }
+        return nil
     }
 
     // MARK: Onboarding invite flow
@@ -393,6 +437,26 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    private func clearFallbackMentionProgress(channel: ChannelID, agent: Member, after triggerSeq: Int64?) {
+        guard let runs = pendingFallbackMentionRuns[channel], !runs.isEmpty else { return }
+        let messages = messagesByChannel[channel] ?? []
+        let hasFinal = messages.contains { message in
+            guard message.authorMemberId == agent.id else { return false }
+            guard let triggerSeq, let seq = message.seq else { return message.runId != nil }
+            return seq > triggerSeq
+        }
+        guard hasFinal else { return }
+        for run in runs {
+            partials[run] = nil
+            if var status = agentStatuses[run] {
+                status.phase = .done
+                status.runStatus = .succeeded
+                agentStatuses[run] = status
+            }
+        }
+        pendingFallbackMentionRuns[channel] = nil
+    }
+
     private func hasFinalMessage(for partial: AgentPartial) -> Bool {
         let messages = messagesByChannel[partial.channelId] ?? []
         return messages.contains { message in
@@ -526,6 +590,62 @@ public final class ChatViewModel: ObservableObject {
         )
     }
 
+    private func optimisticMessage(body: String, channel: ChannelID, clientMsgId: UUID) -> Message {
+        Message(
+            id: MessageID(),
+            channelId: channel,
+            seq: nil,
+            hlcTs: Int64(Date().timeIntervalSince1970 * 1000),
+            authorMemberId: members.first(where: { $0.kind == .human })?.id ?? MemberID(),
+            type: .text,
+            state: .sent,
+            body: body,
+            clientMsgId: clientMsgId,
+            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+    }
+
+    private func mentionedAgent(in body: String) -> Member? {
+        members.first { member in
+            member.isAgent && Self.body(body, mentions: member)
+        }
+    }
+
+    private func isRESTFallback(channel: ChannelID) -> Bool {
+        guard let status = realtimeStatuses[channel] else { return false }
+        return status.fallback == .restHistory && !status.isLive
+    }
+
+    private func showFallbackMentionProgress(agent: Member, channel: ChannelID) {
+        let run = RunID()
+        pendingFallbackMentionRuns[channel, default: []].insert(run)
+        agentStatuses[run] = AgentStatus(
+            runId: run,
+            agentMemberId: agent.id,
+            channelId: channel,
+            phase: .thinking,
+            runStatus: .running
+        )
+        partials[run] = AgentPartial(
+            runId: run,
+            channelId: channel,
+            textDelta: "\(agent.displayName) is working from the mention. Waiting for the final channel message..."
+        )
+    }
+
+    private func refreshAfterMentionSend(channel: ChannelID, agent: Member, triggerSeq: Int64?) async {
+        guard isRESTFallback(channel: channel) else { return }
+        for delay in [350_000_000, 900_000_000, 1_600_000_000] as [UInt64] {
+            try? await Task.sleep(nanoseconds: delay)
+            await loadHistory(channel: channel)
+            await refreshCostSnapshots(channel: channel)
+            clearFallbackMentionProgress(channel: channel, agent: agent, after: triggerSeq)
+            if pendingFallbackMentionRuns[channel]?.isEmpty != false {
+                return
+            }
+        }
+    }
+
     // Stable ordering: seq first (nil = optimistic, sort last), then hlc, then id.
     nonisolated static func seqOrder(_ a: Message, _ b: Message) -> Bool {
         switch (a.seq, b.seq) {
@@ -613,6 +733,13 @@ public final class ChatViewModel: ObservableObject {
         case "true", "yes", "1": return true
         case "false", "no", "0": return false
         default: return nil
+        }
+    }
+
+    nonisolated private static func body(_ body: String, mentions member: Member) -> Bool {
+        let needles = ["@\(member.handle)", "@\(member.displayName)"]
+        return needles.contains { token in
+            body.range(of: token, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
     }
 }
