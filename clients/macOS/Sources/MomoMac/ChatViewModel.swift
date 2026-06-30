@@ -37,6 +37,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var partials: [RunID: AgentPartial] = [:]
     /// Latest `agent.status` per run, drives CostBreathingRing + presence (L4 §5.2).
     @Published public private(set) var agentStatuses: [RunID: AgentStatus] = [:]
+    /// Server-owned cost projection per run. Experience B consumes this instead
+    /// of deriving ledger/budget math in the client.
+    @Published public private(set) var costSnapshots: [RunID: CostSnapshot] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -84,6 +87,7 @@ public final class ChatViewModel: ObservableObject {
             self.workspaceId = workspace
             self.members = try await chat.members(workspace: workspace)
             self.channels = try await chat.channels(workspace: workspace)
+            await loadPendingApprovals(workspace: workspace)
             if selectedChannelId == nil {
                 self.selectedChannelId = channels.first?.id
             }
@@ -103,6 +107,7 @@ public final class ChatViewModel: ObservableObject {
     public func selectChannel(_ id: ChannelID) async {
         selectedChannelId = id
         await loadHistory(channel: id)
+        await refreshCostSnapshots(channel: id)
         subscribe(channel: id)
         await refreshLocalContextCopilotPreview()
     }
@@ -111,6 +116,20 @@ public final class ChatViewModel: ObservableObject {
         do {
             let history = try await chat.history(channel: channel, after: nil, limit: 200)
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
+            for message in history {
+                hydrateSidecars(from: message)
+            }
+        } catch {
+            connectionError = String(describing: error)
+        }
+    }
+
+    private func loadPendingApprovals(workspace: WorkspaceID) async {
+        do {
+            let pending = try await chat.pendingApprovals(workspace: workspace, status: .pending)
+            approvals = Dictionary(
+                uniqueKeysWithValues: pending.map { ($0.id, $0.eventProjection) }
+            )
         } catch {
             connectionError = String(describing: error)
         }
@@ -190,6 +209,7 @@ public final class ChatViewModel: ObservableObject {
             }
         case .agentStatus(let status):
             agentStatuses[status.runId] = status
+            mergeCostSnapshot(from: status)
         case .agentPartial(let partial):
             coalesce(partial)
         case .approval(let ev):
@@ -209,6 +229,44 @@ public final class ChatViewModel: ObservableObject {
             msgs.append(message)
         }
         messagesByChannel[channel] = msgs.sorted(by: Self.seqOrder)
+        hydrateSidecars(from: message)
+    }
+
+    private func hydrateSidecars(from message: Message) {
+        guard let runId = message.runId else { return }
+        let reserved = Self.microUSD(from: message.props["reserved_micro_usd"])
+            ?? Self.microUSD(from: message.props["estimated_micro_usd"])
+        let spent = Self.microUSD(from: message.props["spent_micro_usd"])
+        if reserved != nil || spent != nil {
+            agentStatuses[runId] = AgentStatus(
+                runId: runId,
+                agentMemberId: message.authorMemberId,
+                channelId: message.channelId,
+                phase: spent == nil ? .thinking : .streaming,
+                runStatus: message.type == .approvalRequest ? .awaitingApproval : .running,
+                reservedMicroUSD: reserved,
+                spentMicroUSD: spent
+            )
+        }
+
+        guard message.type == .approvalRequest,
+              let approvalId = approvalId(for: message) else {
+            return
+        }
+        approvals[approvalId] = ApprovalEvent(
+            action: .requested,
+            approvalId: approvalId,
+            runId: runId,
+            channelId: message.channelId,
+            requestedBy: message.authorMemberId,
+            actionType: message.props["action_type"]?.stringValue
+                ?? message.props["tool_name"]?.stringValue
+                ?? "tool_call",
+            status: approvalStatus(for: message) ?? .pending,
+            payload: message.props,
+            estimatedMicroUSD: Self.microUSD(from: message.props["estimated_micro_usd"]),
+            isReversible: Self.bool(from: message.props["is_reversible"])
+        )
     }
 
     // MARK: Local Context Copilot
@@ -259,6 +317,7 @@ public final class ChatViewModel: ObservableObject {
             // Optimistically reflect the decision; real `approval.decided` will confirm.
             if var ev = approvals[id] {
                 ev.status = receipt.status
+                ev.action = .decided
                 ev.decidedBy = receipt.decidedBy
                 ev.decisionReason = receipt.decisionReason
                 approvals[id] = ev
@@ -317,7 +376,40 @@ public final class ChatViewModel: ObservableObject {
 
     /// Total reserved/spent micro_usd across live runs (cost chip in headers).
     public var liveSpentMicroUSD: Int64 {
-        agentStatuses.values.compactMap { $0.spentMicroUSD }.reduce(0, +)
+        costSnapshots.values.map(\.spentMicroUSD).reduce(0, +)
+    }
+
+    public func costSnapshot(for runId: RunID) -> CostSnapshot? {
+        costSnapshots[runId]
+    }
+
+    private func refreshCostSnapshots(channel: ChannelID) async {
+        do {
+            let snapshots = try await chat.costSnapshots(channel: channel)
+            for snapshot in snapshots {
+                costSnapshots[snapshot.runId] = snapshot
+            }
+            connectionError = nil
+        } catch {
+            connectionError = String(describing: error)
+        }
+    }
+
+    private func mergeCostSnapshot(from status: AgentStatus) {
+        guard status.reservedMicroUSD != nil || status.spentMicroUSD != nil else {
+            return
+        }
+        let existing = costSnapshots[status.runId]
+        costSnapshots[status.runId] = CostSnapshot(
+            runId: status.runId,
+            reservedMicroUSD: status.reservedMicroUSD ?? existing?.reservedMicroUSD ?? 0,
+            spentMicroUSD: status.spentMicroUSD ?? existing?.spentMicroUSD ?? 0,
+            softLimitMicroUSD: existing?.softLimitMicroUSD,
+            hardLimitMicroUSD: existing?.hardLimitMicroUSD,
+            isReconciled: existing?.isReconciled ?? status.runStatus.isTerminal,
+            wasEstimated: existing?.wasEstimated ?? false,
+            limitState: existing?.limitState ?? .normal
+        )
     }
 
     // Stable ordering: seq first (nil = optimistic, sort last), then hlc, then id.
@@ -331,5 +423,22 @@ public final class ChatViewModel: ObservableObject {
         if a.hlcTs != b.hlcTs { return a.hlcTs < b.hlcTs }
         if a.hlcCount != b.hlcCount { return a.hlcCount < b.hlcCount }
         return a.id.description < b.id.description
+    }
+
+    nonisolated private static func microUSD(from value: JSON?) -> Int64? {
+        guard let value else { return nil }
+        if let int = value.intValue { return int }
+        if let string = value.stringValue { return Int64(string) }
+        return nil
+    }
+
+    nonisolated private static func bool(from value: JSON?) -> Bool? {
+        guard let value else { return nil }
+        if let bool = value.boolValue { return bool }
+        switch value.stringValue?.lowercased() {
+        case "true", "yes", "1": return true
+        case "false", "no", "0": return false
+        default: return nil
+        }
     }
 }

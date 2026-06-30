@@ -481,6 +481,7 @@
 | `MOMO-192` | Server realtime-token endpoint v0 | swift/docs | MOMO-179, MOMO-115 |
 | `MOMO-193` | SwiftCentrifuge RealtimeSubscriptionDriver v0 | swift | MOMO-179, MOMO-177 |
 | `MOMO-198` | M3 D/B/C real-data readiness spec and blocker cleanup | docs/spec | MOMO-170, MOMO-171, MOMO-174, MOMO-177, MOMO-179, MOMO-192, MOMO-193 |
+| `MOMO-205` | macOS real-backend dev app smoke gate | runtime/macos-ui | MOMO-134, MOMO-177, MOMO-197, MOMO-167 |
 | `MOMO-200` | macOS SwiftCentrifuge live adapter | swift/macos-ui/runtime-relay | MOMO-192, MOMO-193 |
 | `MOMO-201` | D Live Tool-Call fixture/local gate | runtime-agent/macos-ui | MOMO-200, MOMO-178 |
 | `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
@@ -616,21 +617,21 @@
 - [ ] 실제 Hermes/provider side effect가 없으면 해당 범위만 `runtime-unverified`로 남긴다.
 
 ### MOMO-202 수용기준 `[swift/runtime-agent/macos-ui]`
-- [ ] server-owned cost projection contract를 정의한다: `reserved_micro_usd`, `spent_micro_usd`, reconciled/estimated flag, soft/hard limit state.
-- [ ] macOS는 ledger 계산을 하지 않고 `agent.status`/`agent.partial` 또는 REST projection을 `CostSnapshot`으로만 소비한다.
-- [ ] `CostBreathingRing`이 reserve -> running -> reconciled -> limit warning states를 fixture/runtime data로 표시한다.
-- [ ] AgentWorker reserve/reconcile evidence(`usage_ledger`, `budget_window`)와 client-visible projection evidence를 같은 PR에 첨부한다.
-- [ ] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 첨부한다.
-- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [x] server-owned cost projection contract를 정의한다: `reserved_micro_usd`, `spent_micro_usd`, reconciled/estimated flag, soft/hard limit state.
+- [x] macOS는 ledger 계산을 하지 않고 `agent.status`/`agent.partial` 또는 REST projection을 `CostSnapshot`으로만 소비한다.
+- [x] `CostBreathingRing`이 reserve -> running -> reconciled -> limit warning states를 fixture/runtime data로 표시한다.
+- [x] AgentWorker reserve/reconcile evidence(`usage_ledger`, `budget_window`)와 client-visible projection evidence를 같은 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 
 ### MOMO-203 수용기준 `[swift/runtime-db/macos-ui]`
-- [ ] pending approval read/projection path를 추가한다(`GET /v1/workspaces/{ws}/approvals?status=pending` 또는 equivalent channel-history projection).
-- [ ] `ApprovalInboxView` initial load가 seed-only가 아니라 server-owned pending approval data를 표시할 수 있다.
-- [ ] approve/reject는 기존 `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 `client_decision_id` idempotency를 사용한다.
-- [ ] receipt와 `approval.decided` realtime event가 inbox row/card status를 reconcile한다.
-- [ ] approved deterministic resume path는 `tool_result`/audit/job-done evidence를 남기고 real external provider writes는 out of scope로 유지한다.
-- [ ] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 첨부한다.
-- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [x] pending approval read/projection path를 추가한다(`GET /v1/workspaces/{ws}/approvals?status=pending` 또는 equivalent channel-history projection).
+- [x] `ApprovalInboxView` initial load가 seed-only가 아니라 server-owned pending approval data를 표시할 수 있다.
+- [x] approve/reject는 기존 `POST /v1/workspaces/{ws}/approvals/{approval}/decision`과 `client_decision_id` idempotency를 사용한다.
+- [x] receipt와 `approval.decided` realtime event가 inbox row/card status를 reconcile한다.
+- [x] approved deterministic resume path는 `tool_result`/audit/job-done evidence를 남기고 real external provider writes는 out of scope로 유지한다.
+- [x] `scripts/local_gate.sh --profile runtime-db` PASS evidence를 첨부한다.
+- [x] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 
 ### MOMO-204 수용기준 `[docs/swift/runtime-agent/macos-ui]`
 - [ ] `scripts/local_gate.sh`에 M3 D/B/C profile 또는 documented composite command를 추가한다.
@@ -639,6 +640,19 @@
 - [ ] `docs/LOCAL_PR_GATE.md`, `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 새 gate 기준으로 갱신한다.
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
 - [ ] `scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
+
+### MOMO-205 수용기준 `[runtime/macos-ui]`
+- [x] GitHub #162를 `scripts/goal_claim.sh 162`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `scripts/verify_macos_real_backend_ui.sh`가 local Docker compose + migrate + host MomoServer를 준비한다.
+- [x] verifier가 REST login, channel list, history, send path를 실제 MomoServer와 PostgreSQL seed/fixture 대상으로 검증하고 markdown evidence를 남긴다.
+- [x] approval/cost surface용 `approval_request` + `agent_run` + `usage_ledger` fixture를 tenant data로 준비하고, REST history response에서 structured `props`/`runId` evidence를 확인한다.
+- [x] MomoServer message DTO는 REST history/send에 `props`, `runId`, `clientMsgId`를 포함해 macOS structured cards가 real backend data를 소비할 수 있다.
+- [x] MomoMac REST bootstrap은 `MOMO_CHANNEL_ID` dev env를 dynamic channel list 후 선택하고, REST history의 approval/cost props로 `ApprovalInboxView`/cost sidecar state를 hydrate한다.
+- [x] `scripts/local_gate.sh --profile macos-ui`는 기본적으로 GUI launch를 skip하고 REST/backend smoke를 PASS한다.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`는 direct executable launch로 `MOMO_SERVER_BASE_URL` 등 env를 전달하고 process/window/log evidence를 요구한다.
+- [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #162를 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: SwiftCentrifuge live adapter, notarization/signing/DMG, full M3 combined D/B/C exit gate.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

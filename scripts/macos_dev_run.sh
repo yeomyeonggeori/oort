@@ -37,6 +37,10 @@ Options:
   --terminate-only      Terminate any running MomoMacDevApp and exit.
   -h, --help            Show this help.
 
+Environment:
+  MACOS_DEV_RUN_DIRECT_EXEC=1  Launch Contents/MacOS/MomoMacDevApp directly so
+                               MOMO_* environment variables reach the process.
+
 Examples:
   scripts/macos_dev_run.sh
   scripts/macos_dev_run.sh --verify --logs
@@ -194,8 +198,14 @@ EOF
 }
 
 launch_app() {
-  echo "Launching $APP_BUNDLE"
-  /usr/bin/open -n "$APP_BUNDLE"
+  if [ "${MACOS_DEV_RUN_DIRECT_EXEC:-0}" = "1" ]; then
+    echo "Launching $APP_EXECUTABLE directly with inherited environment"
+    "$APP_EXECUTABLE" >/dev/null 2>&1 &
+    echo "$APP_NAME direct pid=$!"
+  else
+    echo "Launching $APP_BUNDLE"
+    /usr/bin/open -n "$APP_BUNDLE"
+  fi
 }
 
 process_pid() {

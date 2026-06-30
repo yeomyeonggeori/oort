@@ -51,7 +51,26 @@
 - 다음 builder-friendly 후보를 ROADMAP/BUILD_TICKETS에 반영했다: MOMO-200 SwiftCentrifuge live adapter, MOMO-201 D fixture/gate, MOMO-202 cost projection, MOMO-203 approval pending projection, MOMO-204 combined M3 D/B/C gate.
 - 이번 PR은 docs/spec 변경만 수행한다. 실제 SwiftCentrifuge adapter, D/B/C runtime gate, external Hermes/provider side-effect evidence는 계속 `runtime-unverified` 후속 범위다.
 
-## 0-7. MOMO-200 macOS SwiftCentrifuge live adapter (2026-06-30)
+## 0-7. MOMO-203 Approval Pending Projection + Inbox Gate (2026-06-30)
+
+- `GET /v1/workspaces/{ws}/approvals?status=pending` server-owned projection을 추가하고, tenant token + active channel membership으로 pending approval rows를 제한한다. Projection은 `approval` SoT와 payload-derived cost/reversibility/on-behalf metadata를 반환한다.
+- MomoMac REST backend와 `ChatViewModel` bootstrap이 pending approval projection을 읽어 C Approval Inbox initial load를 seed-only가 아닌 server data로 채운다. Approve/reject는 기존 decision endpoint + caller-provided `client_decision_id`를 유지하고, receipt/`approval.decided` event는 `approval_id` keyed state로 reconcile한다.
+- `scripts/verify_approval_decision.sh`가 projection read path, same-workspace nonmember channel guard, two-workspace token isolation, approve/reject/idempotency/expired paths를 함께 검증한다. Real external provider write는 계속 out of scope이며 deterministic resume/tool_result/audit path만 local gate에서 검증한다.
+
+## 0-8. MOMO-202 B Cost Projection + CostSnapshot Binding (2026-06-30)
+
+- `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots`를 추가해 `agent_run`/`usage_ledger`/`budget_window` 기반 server-owned `CostSnapshot` projection을 제공한다. 계약 필드: `reserved_micro_usd`, `spent_micro_usd`, `is_reconciled`, `was_estimated`, `soft_limit_micro_usd`, `hard_limit_micro_usd`, `limit_state`.
+- macOS `ChatBackend`/`MomoServerRESTChatBackend`/`ChatViewModel`/`CostBreathingRing`이 demo seed 계산 대신 `CostSnapshot` projection을 우선 소비한다. `MOMO_SERVER_BASE_URL`이 없으면 `LiveChatBackend` projection fixture fallback은 유지한다.
+- `scripts/verify_agent_worker.sh`가 AgentWorker reserve/reconcile DB evidence와 MomoServer cost projection endpoint evidence를 같은 runtime-agent gate에서 검증하도록 확장됐다. 외부 hermes/staging provider 연결은 계속 `runtime-unverified`.
+- 검증: `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-agent` PASS, `scripts/local_gate.sh --profile macos-ui` PASS.
+
+## 0-9. MOMO-205 macOS Real-Backend Dev App Smoke Gate (2026-06-30)
+
+- `scripts/verify_macos_real_backend_ui.sh`를 추가하고 `scripts/local_gate.sh --profile macos-ui`에 연결했다. 이 gate는 Docker compose+migrate+host MomoServer를 준비한 뒤 REST login/channel list/history/send와 approval/cost structured fixture evidence를 남긴다.
+- MomoServer message history/send DTO가 `props`/`runId`/`clientMsgId`를 반환하고, MomoMac REST backend가 이를 디코드해 approval inbox/cost sidecar state를 REST history만으로 hydrate한다. `MOMO_CHANNEL_ID` dev env도 dynamic channel loading 후 선택된다.
+- UI launch는 계속 opt-in이다. 기본 `macos-ui`는 REST/backend evidence로 PASS하고, `LOCAL_GATE_LAUNCH_UI=1`이면 `MOMO_SERVER_BASE_URL` 등 env를 직접 실행된 `MomoMacDevApp`에 주입해 process/window/log evidence까지 요구한다. SwiftCentrifuge live adapter와 full M3 combined D/B/C exit gate는 후속 `runtime-unverified`.
+
+## 0-10. MOMO-200 macOS SwiftCentrifuge live adapter (2026-06-30)
 
 - `clients/macOS`에 SwiftCentrifuge 0.9.0(MIT) dependency와 `SwiftCentrifugeRealtimeSubscriptionTransport`를 추가해 `/v1/auth/realtime-token` connection token getter → `ch:ws<workspace>.<channel>` subscribe → publication `RealtimeEnvelope` decode → `DefaultRealtimeSubscriptionDriver` 경로를 연결했다.
 - `MomoMacDevApp` REST mode는 `MOMO_CENTRIFUGO_WS_URL` 또는 worktree `CENT_PORT`가 있으면 optional live driver를 주입한다. 검증: `swift test --package-path clients/macOS` PASS, `scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile runtime-live` PASS. `agent:` subscription과 production reconnect UX polish는 후속이다.

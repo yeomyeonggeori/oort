@@ -146,7 +146,7 @@ add_static_commands() {
   add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
   add_cmd_once "e2e compose config" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; test -n "$env_file" || { echo "no env file found for e2e compose config"; exit 1; }; docker compose --env-file "$env_file" -f infra/docker-compose.e2e.yml config >/tmp/momo-compose-e2e-config.yml; echo "wrote /tmp/momo-compose-e2e-config.yml using $env_file"'
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_staging_smoke.sh scripts/verify_macos_real_backend_ui.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
 }
 
@@ -203,17 +203,16 @@ add_runtime_live_commands() {
 add_runtime_agent_commands() {
   add_runtime_bootstrap_commands
   add_cmd "AgentWorker runtime verification" "scripts/verify_agent_worker.sh"
-  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, Centrifugo agent.partial, cost reserve/reconcile, and approved deterministic resume_approval -> tool_result/audit/job-done via scripts/verify_agent_worker.sh."
+  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, Centrifugo agent.partial, cost reserve/reconcile, MomoServer cost-snapshots projection endpoint, and approved deterministic resume_approval -> tool_result/audit/job-done via scripts/verify_agent_worker.sh."
 }
 
 add_macos_ui_commands() {
+  add_cmd "macOS real-backend REST/UI smoke" "scripts/verify_macos_real_backend_ui.sh"
   if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
-    add_cmd "macOS dev app launch verification" "scripts/macos_dev_run.sh --verify --logs --terminate"
-    add_note_once coverage "MomoMacDevApp launched from a staged dev-only .app bundle by LOCAL_GATE_LAUNCH_UI=1; process/window smoke, log capture, and termination are automated."
+    add_note_once coverage "MomoMacDevApp launched against local Docker + host MomoServer with MOMO_SERVER_BASE_URL/MOMO_WORKSPACE_ID/MOMO_CHANNEL_ID env; REST login/channel list/history/send plus approval/cost fixture, process/window smoke, log capture, and termination are automated."
   else
-    add_cmd "macOS smoke executable" "swift run --package-path clients/macOS MomoMacSmoke"
-    add_note_once coverage "MomoMac SwiftPM smoke executable."
-    add_note_once not_covered "MomoMacDevApp window launch skipped by default; rerun with LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui for GUI launch/process/window/log evidence."
+    add_note_once coverage "MomoMac real-backend REST smoke via scripts/verify_macos_real_backend_ui.sh: Docker compose/migrate, MomoServer, REST login/channel list/history/send, and approval/cost structured history evidence."
+    add_note_once not_covered "MomoMacDevApp process/window launch is skipped by default; rerun with LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui for GUI process/window evidence."
   fi
 }
 

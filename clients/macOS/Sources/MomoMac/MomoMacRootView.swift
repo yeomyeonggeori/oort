@@ -97,7 +97,10 @@ public enum MomoMacDemo {
         }
         let vm = ChatViewModel(chat: backend, agentTransport: backend)
         await vm.bootstrap(workspace: config.workspace, accessToken: config.accessToken ?? "")
-        if let selected = vm.selectedChannelId ?? vm.channels.first?.id {
+        let selected = vm.channels.contains(where: { $0.id == config.defaultChannel })
+            ? config.defaultChannel
+            : (vm.selectedChannelId ?? vm.channels.first?.id)
+        if let selected {
             await vm.selectChannel(selected)
         }
         return vm

@@ -31,6 +31,10 @@ public protocol ChatBackend: Sendable {
     /// Channels visible to the authenticated workspace member.
     func channels(workspace: WorkspaceID) async throws -> [Channel]
 
+    /// Server-owned cost projection for a channel. Clients consume this snapshot;
+    /// they do not derive budget state directly from usage_ledger/budget_window.
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot]
+
     /// trgm-backed message search within a workspace.
     func search(workspace: WorkspaceID, query: String) async throws -> [Message]
 
@@ -42,6 +46,10 @@ public protocol ChatBackend: Sendable {
 
     /// Add a reaction to a message.
     func addReaction(_ id: MessageID, emoji: String) async throws
+
+    /// Server-owned C inbox projection. Real clients load this before realtime so
+    /// pending approvals survive app restart and are scoped by tenant/channel membership.
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval]
 
     /// Approve or reject a pending approval_request message. Real backends record
     /// the decision, audit it, and resume or deny the paused run server-side.

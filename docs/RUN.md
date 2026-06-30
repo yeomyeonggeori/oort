@@ -401,6 +401,12 @@ make migrate
 scripts/verify_agent_worker.sh
 ```
 
+MOMO-202부터 같은 verifier가 MomoServer도 잠깐 띄워
+`GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots`를 호출한다. 이 endpoint는
+`agent_run`의 현재 reservation projection, `usage_ledger`의 reconciled spend,
+`budget_window`의 soft/hard limit state를 `CostSnapshot` 계약으로 반환하며,
+macOS B 비용 호흡 링은 이 projection을 소비한다.
+
 수동으로 mock만 띄우려면:
 
 ```sh
