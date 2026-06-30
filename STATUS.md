@@ -106,6 +106,13 @@
 - SwiftCentrifuge channel live adapter가 connect/subscribe/reconnect/disconnect/error lifecycle을 status stream으로 보고하고, `ChatViewModel`은 selected channel status와 `retryRealtime()`을 제공한다. `MessageListView`는 Live/Connecting/Reconnecting/REST fallback/Error banner와 수동 retry affordance를 표시한다.
 - 검증: `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. `agent:` subscription/presence/APNs는 후속 범위다.
 
+## 0-16. MOMO-204 Combined M3 D/B/C Local Gate Profile (2026-06-30)
+
+- `scripts/local_gate.sh --profile m3-dbc`를 추가해 docs/static + Swift build/test + D mock SSE tool-call/final `tool_result` evidence + B cost reserve/reconcile/projection evidence + C pending approval/decision/audit/resume evidence + macOS real-backend REST/UI data smoke를 한 PR evidence block으로 수집한다.
+- `LOCAL_GATE_LAUNCH_UI=1`이면 기존 MomoMacDevApp process/window/log smoke까지 요구하고, 기본값은 headless local gate를 위해 GUI launch opt-in을 유지한다. External Hermes/staging provider side effects, M4 packaging/signing/notary, iOS/APNs는 계속 out of scope다.
+- 검증: `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc` PASS.
+- #12(MOMO-020) 판정: `m3-dbc` profile PASS를 PR에 첨부하면 오래된 staging/Hermes 문구는 MOMO-204 local-gate 기준으로 대체 가능하므로 **merge 후 momo-main이 #12를 닫아도 됨**. 이 worker branch는 PR 생성 + `status:needs-review`에서 멈추고 #12를 직접 닫지 않는다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
