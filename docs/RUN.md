@@ -176,6 +176,23 @@ scripts/local_gate.sh --profile docs
 
 서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
 
+### 3.2 Internal alpha diagnostics bundle
+
+내부 테스트 중 장애 상황을 공유할 때는 raw 로그를 직접 붙이지 말고 redacted bundle을 만든다.
+
+```sh
+scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m
+scripts/local_gate.sh --profile diagnostics
+```
+
+collector는 best-effort로 server/relay/worker verifier logs, Centrifugo Docker logs,
+macOS unified logs, env shape, git commit/status, local gate evidence를 모아
+`summary.md`가 있는 directory와 `.tar.gz`를 만든다. Docker가 꺼져 있거나 macOS app
+로그가 없어도 가능한 evidence를 남긴다.
+
+보안 경계: secrets/password/token/API key/HMAC/database URL credentials는 bundle에 쓰기 전에
+`[REDACTED]`로 치환한다. 그래도 외부 공유 전에는 내부자가 summary와 파일 목록을 한 번 확인한다.
+
 ---
 
 ## 4. 마이그레이션 — `make migrate`

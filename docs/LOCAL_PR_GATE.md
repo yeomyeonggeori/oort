@@ -50,6 +50,7 @@ Profiles:
 |---|---|---|
 | `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
+| `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, and SOPS/pgBackRest checklist |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
@@ -63,6 +64,7 @@ Examples:
 
 ```bash
 scripts/local_gate.sh --profile swift
+scripts/local_gate.sh --profile diagnostics
 scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
@@ -75,6 +77,18 @@ The default script is strict: PR evidence should come from a clean worktree and
 checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus
 staged/unstaged diffs. For exploratory pre-commit runs only, use
 `LOCAL_GATE_ALLOW_DIRTY=1`; do not paste that as final merge evidence.
+
+For internal alpha incident handoff, collect a redacted diagnostics bundle:
+
+```bash
+scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m
+```
+
+The collector writes a directory, `summary.md`, and a `.tar.gz` archive. It is
+best-effort by design: stopped Docker services, missing macOS logs, or absent
+local gate evidence are recorded in the bundle instead of failing collection.
+Secrets, passwords, API keys, bearer/JWT-shaped tokens, and database URL
+credentials are redacted before files are written.
 
 `runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/history
 PRs must use this profile unless the machine cannot run Docker/psql. WebSocket
@@ -159,6 +173,7 @@ Use the profile that matches the changed surface.
 |---|---|---|
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` |
+| `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
 | `staging-smoke` | MOMO-005/006/007 deploy config, Caddy/Centrifugo, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `runtime-db` | migrations/server/RLS/join changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |

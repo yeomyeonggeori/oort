@@ -64,7 +64,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 |---|---|---|---|
 | `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
 | `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
-| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|staging-smoke|host-runtime|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` + PR evidence 출력 |
+| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` + PR evidence 출력 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | `scripts/goal_status.sh` board + `goal_claim/release` + `.conductor/setup.sh` + handoff/충돌 방지 정본 |
 | `MOMO-115` | M1 | runtime-relay local gate 자동화 | `scripts/verify_relay.sh` + `local_gate --profile runtime-relay`로 server send→outbox pending→relay claim→Centrifugo history→outbox done→`version=message.seq` evidence |
 | `MOMO-199` | M1 | stale local worktree read-only audit | `scripts/goal_status.sh`가 closed issue/merged PR 연결 worktree를 `done-candidate`/`stale-warning`으로 분리하고 안전 cleanup command만 안내 |
@@ -74,6 +74,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-007` | M1 | local/staging smoke 운영 gate | `scripts/verify_staging_smoke.sh` + `local_gate --profile staging-smoke`; 실제 URL/TLS/PITR는 host-runtime |
 | `MOMO-216` | M1 | internal single-node hosting smoke gate v0 | `infra/prod/docker-compose.internal-smoke.yml` + `internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh`; `local_gate --profile staging-smoke`에 포함, public TLS/DNS는 `runtime-unverified(public TLS/DNS)` |
 | `MOMO-220` | M1 | internal single-node host-runtime smoke v0 | `scripts/verify_internal_host_runtime.sh` + `local_gate --profile host-runtime`; local images로 prod+internal-smoke boot, migrate idempotency, `/health`, REST send, relay publish, mock Hermes agent roundtrip 검증. public TLS/DNS/registry/SOPS/PITR는 `runtime-unverified(public host)` |
+| `MOMO-224` | M1 | internal alpha diagnostics/observability bundle v0 | `scripts/collect_diagnostics.sh` + `local_gate --profile diagnostics`; server/relay/worker/Centrifugo/macOS/local-gate evidence와 redacted env shape/commit을 directory + tar.gz + summary.md로 수집 |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
 | `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |

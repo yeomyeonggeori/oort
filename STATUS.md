@@ -139,6 +139,12 @@
 - `LiveChatBackend` demo fallback은 김인턴(`kim-intern`) mention에 deterministic progress/tool-call/final text response를 제공한다. `scripts/verify_macos_real_backend_ui.sh`는 real-backend `@kim-intern` source send/read와 `agent_job` 생성 smoke를 포함한다.
 - 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS. Required local gates: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS. External Hermes/provider side effect는 계속 out of scope이며 repo-local mock OpenAI-compatible path로 닫는다.
 
+## 0-18a. MOMO-224 Internal Alpha Diagnostics Bundle v0 (2026-06-30)
+
+- `scripts/collect_diagnostics.sh`를 추가해 server/relay/worker verifier logs, Centrifugo compose logs, macOS unified logs, env shape, git commit/status, local gate evidence를 redacted directory + `.tar.gz` + `summary.md`로 묶는다. 수집은 best-effort라 Docker/log/app 부재나 실패 상황에서도 가능한 evidence를 남긴다.
+- `scripts/local_gate.sh --profile diagnostics`를 추가해 diagnostics redaction smoke를 PR gate로 실행한다. secrets/password/token/API key/HMAC/database URL credentials는 bundle write 전에 `[REDACTED]`로 치환한다.
+- 검증: `scripts/collect_diagnostics.sh --smoke` PASS, 실제 bundle 생성 PASS. Required local gates: `scripts/local_gate.sh --profile docs`, `scripts/local_gate.sh --profile diagnostics`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`.
+
 ## 0-16. MOMO-211 M4 MomoMac Xcode thin host app v0 (2026-06-30)
 
 - `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가했다. Xcode host target은 SwiftPM `MomoMacDevApp`과 분리되어 있고, `MomoMac`/`MomoCore`를 local SwiftPM dependency로 소비해 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 호스트한다.
