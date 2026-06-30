@@ -1,5 +1,6 @@
 {
   "schema": "momo.plugin_manifest.v0",
+  "plugin_id": "com.momo.plugins.deployment-admin-example",
   "id": "com.momo.plugins.deployment-admin-example",
   "name": "Deployment Admin Approval Example",
   "version": "0.0.1-policy-example",
@@ -18,6 +19,14 @@
       "egress_allowlist": ["plugins.example.invalid"]
     }
   },
+  "runtime_boundary": {
+    "executor_owner": "enterprise_customer",
+    "process_boundary": "remote_https",
+    "secret_boundary": "enterprise_secret_store",
+    "network_boundary": "signed_https_to_plugins.example.invalid",
+    "state_boundary": "provider_control_plane_with_momo_audit_ledger",
+    "failure_boundary": "no_retry_without_idempotency_key_and_reapproval"
+  },
   "surfaces": [
     {
       "kind": "slash_command",
@@ -35,6 +44,7 @@
       "display_name": "Deployment Policy"
     }
   ],
+  "ui_surfaces": ["slash_command", "approval_card", "admin_settings", "audit_badge"],
   "capabilities": [
     {
       "tool_name": "deployment.restart_service",
@@ -59,6 +69,30 @@
       "result_kind": "tool_result",
       "idempotency_required": true,
       "resource_scope_summary": "not_enabled_in_v0"
+    }
+  ],
+  "tools": [
+    {
+      "tool_name": "deployment.restart_service",
+      "display_name": "Restart service",
+      "schema_hash": "sha256:deployrestartservicev0",
+      "default_grant": "propose",
+      "risk": "deploy",
+      "approval_policy": "require_approval",
+      "result_kind": "tool_result",
+      "resource_scope_summary": "environment_allowlist:staging; production requires breakglass",
+      "capability_version": "deployment-admin-example@0.0.1"
+    },
+    {
+      "tool_name": "deployment.rotate_secret",
+      "display_name": "Rotate secret",
+      "schema_hash": "sha256:deployrotatesecretv0",
+      "default_grant": "deny",
+      "risk": "admin",
+      "approval_policy": "deny",
+      "result_kind": "tool_result",
+      "resource_scope_summary": "not_enabled_in_v0",
+      "capability_version": "deployment-admin-example@0.0.1"
     }
   ],
   "tool_schema_refs": [
@@ -126,6 +160,13 @@
     "data_sensitivity": "operational_control_plane",
     "side_effects": ["deploy", "external_write", "admin"]
   },
+  "scopes": {
+    "workspace_scope": "installed_workspace_admin_only",
+    "channel_scope": "incident_or_release_channels_only",
+    "member_scope": "workspace_admin_or_owner",
+    "provider_scope": ["deploy.restart"],
+    "resource_scope": "environment_allowlist_with_production_breakglass"
+  },
   "source_policy": {
     "source_kinds": ["deployment_plan", "incident_ticket", "runbook"],
     "context_packet_projection": {
@@ -142,6 +183,19 @@
       "default_visibility": "admin",
       "retrieval_policy_version": "memory-policy@2026-06-26+plugin:deployment-admin-example@0.0.1"
     }
+  },
+  "audit_surface": {
+    "timeline_events": ["tool_call.proposed", "approval.requested", "approval.decided", "tool_result.recorded"],
+    "admin_events": ["plugin.installed", "security_hold.created", "plugin.revoked"],
+    "source_events": ["memory.revalidation_required"],
+    "cost_events": ["usage.reserved", "usage.reconciled"],
+    "redaction_policy": [
+      "provider_access_token",
+      "provider_refresh_token",
+      "webhook_secret",
+      "deployment_secret",
+      "private_key"
+    ]
   },
   "audit_policy": {
     "event_prefix": "plugin.deployment_admin",
@@ -164,6 +218,17 @@
       "deployment_secret",
       "private_key"
     ]
+  },
+  "license": {
+    "spdx_id": "LicenseRef-Enterprise-Private",
+    "notice_required": false,
+    "terms_ref": "enterprise_private_terms"
+  },
+  "provenance": {
+    "source_repo": "enterprise-private/deployment-admin",
+    "release_ref": "0.0.1-policy-example",
+    "build_digest": "sha256:fixture-high-risk-write-policy-example-v0",
+    "publisher_verification": "enterprise_customer_admin"
   },
   "compatibility": {
     "manifest_version": "0",
