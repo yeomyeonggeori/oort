@@ -124,14 +124,31 @@ project_from_env_file() {
 
 git worktree list --porcelain |
   awk '
-    /^worktree / { path = substr($0, 10) }
+    function flush() {
+      if (path != "") {
+        print path "\t" branch
+      }
+      path = ""
+      branch = ""
+    }
+    /^worktree / {
+      flush()
+      path = substr($0, 10)
+      next
+    }
     /^branch / {
       branch = $2
       sub(/^refs\/heads\//, "", branch)
-      print path "\t" branch
+      next
     }
+    /^detached$/ {
+      branch = ""
+      next
+    }
+    END { flush() }
   ' |
   while IFS=$'\t' read -r path branch; do
+    [ -d "$path" ] || continue
     if [ -f "$path/.env.worktree" ]; then
       project="$(project_from_env_file "$path/.env.worktree" || true)"
       if [ -n "$project" ]; then
@@ -139,7 +156,9 @@ git worktree list --porcelain |
         continue
       fi
     fi
-    safe_project_from_branch "$branch"
+    if [ -n "$branch" ]; then
+      safe_project_from_branch "$branch"
+    fi
   done |
   sort -u > "$active_projects_file"
 
