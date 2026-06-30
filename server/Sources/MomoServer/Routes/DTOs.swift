@@ -166,6 +166,49 @@ struct ApprovalDecisionReceiptDTO: ResponseEncodable, Codable, Sendable {
     }
 }
 
+/// GET /v1/workspaces/{ws}/approvals?status=pending item.
+struct ApprovalProjectionDTO: ResponseEncodable, Codable, Sendable {
+    let id: String
+    let workspaceId: String
+    let runId: String
+    let channelId: String
+    let requestMessageId: String?
+    let requestedBy: String
+    let onBehalfOf: String?
+    let actionType: String
+    let payload: JSONValue
+    let status: String
+    let estimatedMicroUSD: Int64?
+    let isReversible: Bool?
+    let decidedBy: String?
+    let decidedAtMs: Int64?
+    let decisionReason: String?
+    let expiresAtMs: Int64?
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case workspaceId = "workspace_id"
+        case runId = "run_id"
+        case channelId = "channel_id"
+        case requestMessageId = "request_message_id"
+        case requestedBy = "requested_by"
+        case onBehalfOf = "on_behalf_of"
+        case actionType = "action_type"
+        case payload
+        case status
+        case estimatedMicroUSD = "estimated_micro_usd"
+        case isReversible = "is_reversible"
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+        case expiresAtMs = "expires_at_ms"
+    }
+}
+
+struct ApprovalProjectionPageDTO: ResponseEncodable, Codable, Sendable {
+    let approvals: [ApprovalProjectionDTO]
+}
+
 // ---- Invites ----
 
 /// POST /v1/workspaces/{ws}/invites request body.

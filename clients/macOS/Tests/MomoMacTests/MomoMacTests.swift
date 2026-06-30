@@ -225,6 +225,37 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(viewModel.approvalDecisionsInFlight.contains(approvalId))
     }
 
+    @MainActor
+    func testBootstrapLoadsServerOwnedPendingApprovalProjection() async throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let agent = MemberID()
+        let approvalId = ApprovalID()
+        let chat = RecordingDecisionChatBackend(
+            pending: [
+                Approval(
+                    id: approvalId,
+                    workspaceId: workspace,
+                    runId: RunID(),
+                    channelId: channel,
+                    requestedBy: agent,
+                    actionType: "github.issue.create",
+                    status: .pending,
+                    estimatedMicroUSD: 123_000,
+                    isReversible: true
+                )
+            ]
+        )
+        let agentTransport = FailingDecisionAgentTransport()
+        let viewModel = ChatViewModel(chat: chat, agentTransport: agentTransport)
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+
+        XCTAssertEqual(viewModel.pendingApprovals.map(\.approvalId), [approvalId])
+        XCTAssertEqual(viewModel.pendingApprovals.first?.actionType, "github.issue.create")
+        XCTAssertEqual(viewModel.pendingApprovals.first?.estimatedMicroUSD, 123_000)
+    }
+
     func testApprovalDecisionUpdatesTimelineApprovalRequestProps() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -653,6 +684,89 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(received.messageSeqs, [8])
     }
 
+    func testRESTBackendLoadsPendingApprovalsAndPreservesDecisionIdempotencyKey() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let approvalId = ApprovalID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let clientDecisionId = UUID(uuidString: "00000000-0000-7000-8000-000000203001")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/approvals"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                XCTAssertEqual(request.url?.query, "status=pending")
+                return MockHTTPResponse(json: """
+                {
+                  "approvals": [
+                    {
+                      "id": "\(approvalId.description)",
+                      "workspace_id": "\(workspace.description)",
+                      "run_id": "00000000-0000-7000-8000-000000000801",
+                      "channel_id": "\(ChannelID.demoGeneral.description)",
+                      "request_message_id": "00000000-0000-7000-8000-000000000701",
+                      "requested_by": "\(MemberID.demoAgent.description)",
+                      "on_behalf_of": "\(MemberID.demoHuman.description)",
+                      "action_type": "github.issue.create",
+                      "payload": {"title": "Create rollout checklist issue"},
+                      "status": "pending",
+                      "estimated_micro_usd": 820000,
+                      "is_reversible": true,
+                      "decided_by": null,
+                      "decided_at_ms": null,
+                      "decision_reason": null,
+                      "expires_at_ms": 1782463260000
+                    }
+                  ]
+                }
+                """)
+            case ("POST", "/v1/workspaces/\(workspace.description)/approvals/\(approvalId.description)/decision"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["approval_id"] as? String, approvalId.description)
+                XCTAssertEqual(body?["approve"] as? Bool, true)
+                XCTAssertEqual(body?["client_decision_id"] as? String, clientDecisionId.uuidString)
+                return MockHTTPResponse(json: """
+                {
+                  "approval_id": "\(approvalId.description)",
+                  "status": "approved",
+                  "decided_by": "\(MemberID.demoHuman.description)",
+                  "decided_at_ms": 1782463260000,
+                  "decision_reason": "safe"
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let pending = try await backend.pendingApprovals(workspace: workspace, status: .pending)
+        XCTAssertEqual(pending.map(\.id), [approvalId])
+        XCTAssertEqual(pending.first?.eventProjection.status, .pending)
+        XCTAssertEqual(pending.first?.estimatedMicroUSD, 820_000)
+        XCTAssertEqual(pending.first?.isReversible, true)
+
+        let receipt = try await backend.decideApproval(
+            ApprovalDecisionRequest(
+                approvalId: approvalId,
+                approve: true,
+                reason: "safe",
+                clientDecisionId: clientDecisionId
+            )
+        )
+        XCTAssertEqual(receipt.status, .approved)
+    }
+
     func testRESTBackendConfigFromEnvironmentUsesDevSafeSeedDefaults() throws {
         let config = try XCTUnwrap(MomoServerRESTChatBackendConfig.fromEnvironment([
             "MOMO_SERVER_BASE_URL": "http://127.0.0.1:8080",
@@ -669,6 +783,11 @@ final class MomoMacTests: XCTestCase {
 
 private actor RecordingDecisionChatBackend: ChatBackend {
     private var decisions: [ApprovalDecisionRequest] = []
+    private var pending: [Approval]
+
+    init(pending: [Approval] = []) {
+        self.pending = pending
+    }
 
     func recordedDecisionRequests() -> [ApprovalDecisionRequest] {
         decisions
@@ -711,6 +830,10 @@ private actor RecordingDecisionChatBackend: ChatBackend {
     }
 
     func addReaction(_ id: MessageID, emoji: String) async throws {}
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        pending.filter { $0.workspaceId == workspace && $0.status == status }
+    }
 
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         decisions.append(request)

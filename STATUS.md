@@ -51,6 +51,12 @@
 - 다음 builder-friendly 후보를 ROADMAP/BUILD_TICKETS에 반영했다: MOMO-200 SwiftCentrifuge live adapter, MOMO-201 D fixture/gate, MOMO-202 cost projection, MOMO-203 approval pending projection, MOMO-204 combined M3 D/B/C gate.
 - 이번 PR은 docs/spec 변경만 수행한다. 실제 SwiftCentrifuge adapter, D/B/C runtime gate, external Hermes/provider side-effect evidence는 계속 `runtime-unverified` 후속 범위다.
 
+## 0-7. MOMO-203 Approval Pending Projection + Inbox Gate (2026-06-30)
+
+- `GET /v1/workspaces/{ws}/approvals?status=pending` server-owned projection을 추가하고, tenant token + active channel membership으로 pending approval rows를 제한한다. Projection은 `approval` SoT와 payload-derived cost/reversibility/on-behalf metadata를 반환한다.
+- MomoMac REST backend와 `ChatViewModel` bootstrap이 pending approval projection을 읽어 C Approval Inbox initial load를 seed-only가 아닌 server data로 채운다. Approve/reject는 기존 decision endpoint + caller-provided `client_decision_id`를 유지하고, receipt/`approval.decided` event는 `approval_id` keyed state로 reconcile한다.
+- `scripts/verify_approval_decision.sh`가 projection read path, same-workspace nonmember channel guard, two-workspace token isolation, approve/reject/idempotency/expired paths를 함께 검증한다. Real external provider write는 계속 out of scope이며 deterministic resume/tool_result/audit path만 local gate에서 검증한다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
