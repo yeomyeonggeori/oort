@@ -193,6 +193,11 @@ add_runtime_relay_commands() {
   fi
 }
 
+add_runtime_host_api_cleanup_command() {
+  local label="${1:-Runtime host MomoServer cleanup}"
+  add_cmd "$label" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi; port="${PORT:-8080}"; if ! command -v lsof >/dev/null 2>&1; then echo "lsof unavailable; skip host MomoServer cleanup"; exit 0; fi; pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"; if [ -z "$pids" ]; then echo "no listener on port $port"; exit 0; fi; killed=""; for pid in $pids; do cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"; case "$cmd" in *MomoServer*) echo "stopping MomoServer listener pid=$pid port=$port"; kill "$pid" 2>/dev/null || true; killed="$killed $pid" ;; *) echo "leaving non-MomoServer listener pid=$pid port=$port command=$cmd" ;; esac; done; sleep 1; for pid in $killed; do if kill -0 "$pid" 2>/dev/null; then cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"; case "$cmd" in *MomoServer*) echo "force stopping MomoServer listener pid=$pid port=$port"; kill -9 "$pid" 2>/dev/null || true ;; esac; fi; done'
+}
+
 add_runtime_live_commands() {
   add_runtime_bootstrap_commands
   add_cmd "Realtime WebSocket live verification" "scripts/verify_realtime_live.sh"
@@ -262,8 +267,11 @@ case "$PROFILE" in
     add_swift_commands
     add_staging_smoke_commands
     add_runtime_db_commands
+    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after runtime DB verifiers"
     add_runtime_relay_commands
+    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after relay verifier"
     add_runtime_agent_commands
+    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after agent verifier"
     add_macos_ui_commands
     add_note_once not_covered "Realtime WebSocket live subscribe is isolated in scripts/local_gate.sh --profile runtime-live because it starts host API/relay processes plus a compose-network api proxy for Centrifugo subscribe callbacks."
     ;;
