@@ -467,13 +467,37 @@ struct ApprovalDecisionRoutes: Sendable {
                          'status', a.status::text,
                          'estimated_micro_usd',
                            COALESCE(
-                             NULLIF(a.payload->>'estimated_micro_usd', '')::bigint,
-                             NULLIF(a.payload #>> '{tool_call,estimated_micro_usd}', '')::bigint
+                             CASE
+                               WHEN jsonb_typeof(a.payload->'estimated_micro_usd') = 'number'
+                                 THEN (a.payload->>'estimated_micro_usd')::bigint
+                               WHEN (a.payload->>'estimated_micro_usd') ~ '^[0-9]+$'
+                                 THEN (a.payload->>'estimated_micro_usd')::bigint
+                               ELSE NULL
+                             END,
+                             CASE
+                               WHEN jsonb_typeof(a.payload #> '{tool_call,estimated_micro_usd}') = 'number'
+                                 THEN (a.payload #>> '{tool_call,estimated_micro_usd}')::bigint
+                               WHEN (a.payload #>> '{tool_call,estimated_micro_usd}') ~ '^[0-9]+$'
+                                 THEN (a.payload #>> '{tool_call,estimated_micro_usd}')::bigint
+                               ELSE NULL
+                             END
                            ),
                          'is_reversible',
                            COALESCE(
-                             NULLIF(a.payload->>'is_reversible', '')::boolean,
-                             NULLIF(a.payload #>> '{risk,is_reversible}', '')::boolean
+                             CASE
+                               WHEN jsonb_typeof(a.payload->'is_reversible') = 'boolean'
+                                 THEN (a.payload->>'is_reversible')::boolean
+                               WHEN lower(a.payload->>'is_reversible') IN ('true', 'false')
+                                 THEN lower(a.payload->>'is_reversible')::boolean
+                               ELSE NULL
+                             END,
+                             CASE
+                               WHEN jsonb_typeof(a.payload #> '{risk,is_reversible}') = 'boolean'
+                                 THEN (a.payload #>> '{risk,is_reversible}')::boolean
+                               WHEN lower(a.payload #>> '{risk,is_reversible}') IN ('true', 'false')
+                                 THEN lower(a.payload #>> '{risk,is_reversible}')::boolean
+                               ELSE NULL
+                             END
                            ),
                          'decided_by', a.decided_by,
                          'decided_at_ms',

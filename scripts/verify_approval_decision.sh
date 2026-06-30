@@ -346,7 +346,7 @@ INSERT INTO approval
 VALUES
   ('${APPROVE_ID}', '${WORKSPACE_ID}', '${APPROVE_RUN_ID}', '${CHANNEL_ID}', '${APPROVE_MSG_ID}', '${AGENT_ID}',
    'tool_call',
-   '{"run_id":"${APPROVE_RUN_ID}","action_type":"tool_call","tool_call":{"call_id":"call_momo_167_approve","name":"github.create_issue","arguments":{"title":"MOMO-167 approve"},"tool_grant":{"tool_name":"github.create_issue","approval_policy":"always","capability_version":"runtime-gate","policy_version":"momo-167"}},"resume_model":"same_run_new_agent_job"}'::jsonb,
+   '{"run_id":"${APPROVE_RUN_ID}","action_type":"tool_call","estimated_micro_usd":"not-a-number","is_reversible":"unknown","tool_call":{"call_id":"call_momo_167_approve","name":"github.create_issue","arguments":{"title":"MOMO-167 approve"},"tool_grant":{"tool_name":"github.create_issue","approval_policy":"always","capability_version":"runtime-gate","policy_version":"momo-167"}},"resume_model":"same_run_new_agent_job"}'::jsonb,
    'pending', now() + interval '1 hour'),
   ('${REJECT_ID}', '${WORKSPACE_ID}', '${REJECT_RUN_ID}', '${CHANNEL_ID}', '${REJECT_MSG_ID}', '${AGENT_ID}',
    'tool_call',
