@@ -12,16 +12,16 @@
 //   - MomoMacDevApp (exe)    : a SwiftPM development app that opens a real SwiftUI
 //                              macOS window hosting MomoMacRootView.
 //
-// The distributable .app bundle (Info.plist + Xcode project / SwiftCentrifuge +
-// AsyncHTTPClient transport implementation) is intentionally a FOLLOW-UP ticket
+// The distributable .app bundle (Info.plist + Xcode project / AsyncHTTPClient
+// transport implementation) is intentionally a FOLLOW-UP ticket
 // (see STATUS notes in README of this dir / build ticket T09). Here the hard
 // requirement is: the SwiftUI library and development app compile via `swift build`,
 // with a LiveChatBackend stub wiring the MomoCore contracts so the views render
 // against real model types.
 //
-// Stack reality: built/verified with local Swift 6.2.3 toolchain. No SwiftCentrifuge
-// dependency yet (that lands with the .app transport in the follow-up) → the views
-// drive off in-memory state + the MomoCore protocols, so nothing here is runtime-bound.
+// Stack reality: built/verified with local Swift 6.2.3 toolchain. SwiftCentrifuge
+// is linked by the library target for live Centrifugo subscription in REST dev mode;
+// the in-memory demo path remains runtime-independent.
 import PackageDescription
 
 let package = Package(
@@ -37,12 +37,14 @@ let package = Package(
     dependencies: [
         // Local path dependency on the shared client core (sibling dir).
         .package(name: "MomoCore", path: "../Core"),
+        .package(url: "https://github.com/centrifugal/centrifuge-swift.git", exact: "0.9.0"),
     ],
     targets: [
         .target(
             name: "MomoMac",
             dependencies: [
                 .product(name: "MomoCore", package: "MomoCore"),
+                .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

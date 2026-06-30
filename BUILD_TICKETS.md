@@ -598,14 +598,14 @@
 - [ ] PR 생성 후 GitHub #153을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-200 수용기준 `[swift/macos-ui/runtime-relay]`
-- [ ] macOS SwiftCentrifuge adapter를 추가하기 전 라이선스(MIT/permissive) 확인과 NOTICE/THIRD_PARTY 반영 여부를 결정한다.
-- [ ] adapter가 `POST /v1/auth/realtime-token`으로 connection JWT를 가져오고 만료 전 refresh한다.
-- [ ] `ch:ws<workspace>.<channel>` 및 `agent:ws<workspace>.<agentMember>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다.
-- [ ] SwiftCentrifuge publication data를 `RealtimeEnvelope`로 decode하는 `RealtimeEnvelopeSubscriptionTransport` 구현을 추가한다.
-- [ ] `MomoServerRESTChatBackend` dev config에서 live driver를 주입할 수 있고, driver 미주입 fallback은 유지한다.
-- [ ] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
-- [ ] `scripts/local_gate.sh --profile swift` 또는 focused package tests PASS evidence를 첨부한다.
-- [ ] Docker/Centrifugo live subscribe smoke를 수행하거나, 수행 불가 범위를 좁게 `runtime-unverified`로 표시한다.
+- [x] macOS SwiftCentrifuge adapter를 추가하기 전 라이선스(MIT/permissive) 확인과 NOTICE/THIRD_PARTY 반영 여부를 결정한다.
+- [x] adapter가 `POST /v1/auth/realtime-token`으로 connection JWT를 가져오고 SwiftCentrifuge token getter/refresh path에 연결한다.
+- [ ] `ch:ws<workspace>.<channel>` 및 `agent:ws<workspace>.<agentMember>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. (이번 slice는 `ch:` channel live subscription)
+- [x] SwiftCentrifuge publication data를 `RealtimeEnvelope`로 decode하는 `RealtimeEnvelopeSubscriptionTransport` 구현을 추가한다.
+- [x] `MomoServerRESTChatBackend` dev config에서 live driver를 주입할 수 있고, driver 미주입 fallback은 유지한다.
+- [x] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
+- [x] `scripts/local_gate.sh --profile swift` 또는 focused package tests PASS evidence를 첨부한다.
+- [x] Docker/Centrifugo live subscribe smoke를 수행하거나, 수행 불가 범위를 좁게 `runtime-unverified`로 표시한다.
 
 ### MOMO-201 수용기준 `[runtime-agent/macos-ui]`
 - [ ] repo-local mock SSE/runtime fixture가 `agent.partial` tool-call progress(`tool_call_name`, bounded `tool_call_args`)와 final `tool_result`/`message.new`를 생성한다.

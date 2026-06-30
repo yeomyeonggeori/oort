@@ -431,6 +431,9 @@ make up
 make migrate
 swift run --package-path server MomoServer
 MOMO_SERVER_BASE_URL=http://127.0.0.1:8080 scripts/macos_dev_run.sh
+MOMO_SERVER_BASE_URL=http://127.0.0.1:8080 \
+MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:8000/connection/websocket \
+scripts/macos_dev_run.sh
 
 # PR evidence용 GUI opt-in: launch → process/window smoke → logs → terminate
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
@@ -447,10 +450,13 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 - REST dev mode 환경변수:
   `MOMO_SERVER_BASE_URL`(필수), `MOMO_ACCESS_TOKEN`(선택, 없으면 `/v1/auth/login`),
   `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(기본 `demo@momo.local`/`demo`),
-  `MOMO_WORKSPACE_ID`(기본 demo workspace), `MOMO_CHANNEL_ID`(기본 `#general`).
+  `MOMO_WORKSPACE_ID`(기본 demo workspace), `MOMO_CHANNEL_ID`(기본 `#general`),
+  `MOMO_CENTRIFUGO_WS_URL`(선택, 설정 시 `/v1/auth/realtime-token`으로 Centrifugo
+  connection JWT를 받아 `ch:ws<workspace>.<channel>` live subscription을 연결).
 - REST dev mode 검증 범위: message history fetch와 send는 실제 MomoServer REST/DB 경로를 탄다.
-  WebSocket/Centrifugo live subscription, full auth/session UI, approval server endpoint 변경은 이 티켓 밖이며
-  `runtime-unverified`다.
+  `MOMO_CENTRIFUGO_WS_URL`을 설정하면 WebSocket/Centrifugo live subscription도 실제
+  SwiftCentrifuge adapter를 탄다. full auth/session UI와 production reconnect UX polish는
+  후속 범위다.
 - `scripts/macos_dev_run.sh`: build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
   `swift build --package-path clients/macOS --product MomoMacDevApp` 후 `dist/MomoMacDevApp.app`을
   생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified
