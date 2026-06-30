@@ -150,6 +150,7 @@
 | `MOMO-112` | 5개+ Codex session/worktree 운영 자동화와 status board | infra/docs | MOMO-110, MOMO-111 |
 | `MOMO-115` | runtime-relay local gate 자동화(server send→outbox→relay→Centrifugo evidence) | runtime/infra | MOMO-111, MOMO-002, MOMO-003 |
 | `MOMO-196` | Realtime WebSocket live subscribe verifier v0(token→subscribe→REST send→live publication) | runtime/infra | MOMO-115, MOMO-186, MOMO-192, MOMO-193 |
+| `MOMO-212` | Agent channel live subscription verifier v0(agent status/partial live boundary) | runtime/infra | MOMO-196, MOMO-200, MOMO-201 |
 | `MOMO-194` | local gate evidence/log 파일명 병렬 실행 충돌 방지 | tooling/docs | MOMO-111, MOMO-112 |
 | `MOMO-199` | closed issue/merged PR 연결 stale local worktree read-only audit | tooling/docs | MOMO-112, MOMO-194 |
 | `MOMO-209` | stale worktree Docker Compose project/container/network janitor | tooling/docs | MOMO-112, MOMO-194, MOMO-199 |
@@ -195,6 +196,19 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] `scripts/local_gate.sh --profile runtime-live` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
+
+### MOMO-212 수용기준 `[runtime-agent/swift]`
+- [x] GitHub #180을 `scripts/goal_claim.sh 180`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] Centrifugo `agent` namespace가 `agent:ws<workspaceUUID>.<agentMemberUUID>` channel shape에 대해 subscribe proxy를 타도록 설정한다.
+- [x] `/v1/centrifugo/subscribe`가 `agent:` namespace를 fail-closed로 파싱하고, observer와 target agent가 같은 workspace의 active member이며 하나 이상의 active channel membership을 공유할 때만 허용한다.
+- [x] 기존 `ch:`/`dm:` channel membership guard와 client direct publish 금지, server/worker publish path를 유지한다.
+- [x] `scripts/verify_agent_live_channel.sh`가 Docker dev compose + host API/worker + mock Hermes + Centrifugo subscribe proxy 경로를 검증한다.
+- [x] authorized member가 `agent.status` 또는 `agent.partial` live publication을 수신한다.
+- [x] invalid connection token, same-workspace no-shared-channel member, other-workspace member/token, client direct publish가 차단된다.
+- [x] `agent.status`/`agent.partial`은 ephemeral progress projection이며 `message.seq` ordering authority가 아님을 `docs/RUN.md`/STATUS에 기록한다.
+- [x] focused server tests를 추가하고 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #180을 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-194 수용기준 `[tooling/docs]`
 - [x] GitHub #144를 `scripts/goal_claim.sh 144`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -498,6 +512,7 @@
 | `MOMO-201` | D Live Tool-Call fixture/local gate | runtime-agent/macos-ui | MOMO-200, MOMO-178 |
 | `MOMO-202` | B Cost projection + CostSnapshot binding | swift/runtime-agent/macos-ui | MOMO-004, MOMO-170 |
 | `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
+| `MOMO-212` | Agent channel live subscription verifier v0 | runtime-agent/swift | MOMO-200, MOMO-201 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 
 ### MOMO-130 수용기준 `[swift]`
@@ -613,7 +628,7 @@
 ### MOMO-200 수용기준 `[swift/macos-ui/runtime-relay]`
 - [x] macOS SwiftCentrifuge adapter를 추가하기 전 라이선스(MIT/permissive) 확인과 NOTICE/THIRD_PARTY 반영 여부를 결정한다.
 - [x] adapter가 `POST /v1/auth/realtime-token`으로 connection JWT를 가져오고 SwiftCentrifuge token getter/refresh path에 연결한다.
-- [ ] `ch:ws<workspace>.<channel>` 및 `agent:ws<workspace>.<agentMember>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. (이번 slice는 `ch:` channel live subscription)
+- [x] `ch:ws<workspace>.<channel>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. `agent:ws<workspace>.<agentMember>` live boundary는 MOMO-212에서 verifier로 닫는다.
 - [x] SwiftCentrifuge publication data를 `RealtimeEnvelope`로 decode하는 `RealtimeEnvelopeSubscriptionTransport` 구현을 추가한다.
 - [x] `MomoServerRESTChatBackend` dev config에서 live driver를 주입할 수 있고, driver 미주입 fallback은 유지한다.
 - [x] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
