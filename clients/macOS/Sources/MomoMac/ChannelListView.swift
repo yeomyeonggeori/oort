@@ -32,8 +32,13 @@ public struct ChannelListView: View {
             }
 
             Section("Channels") {
-                ForEach(viewModel.channels) { channel in
-                    channelRow(channel).tag(channel.id)
+                if viewModel.channels.isEmpty {
+                    Label("No channels available", systemImage: "tray")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(viewModel.channels) { channel in
+                        channelRow(channel).tag(channel.id)
+                    }
                 }
             }
 

@@ -269,6 +269,17 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] PR 생성 후 issue `status:needs-review` 및 merge 금지.
 
+### MOMO-216 수용기준 `[infra/docs]`
+- [x] GitHub #188 claim: `scripts/goal_claim.sh 188`로 별도 worktree/branch `chore/188-internal-single-node-hosting-smoke-gate-v0` 생성, issue assign + `status:in-progress`.
+- [x] `infra/prod/docker-compose.internal-smoke.yml` — prod compose 위에서 internal single-node smoke override를 제공하고 api/relay/worker는 image-based 계약을 유지한다.
+- [x] `infra/prod/internal-smoke.env.example` — local-only domain/port, local image fallback tag, placeholder secret template을 제공한다.
+- [x] `scripts/verify_internal_hosting_smoke.sh` — compose config, env template guard, Caddy/TLS static wiring, Centrifugo Redis engine, API health route, explicit migration path, relay/worker enablement, backup/restore placeholder boundary를 검증한다.
+- [x] `scripts/local_gate.sh --profile staging-smoke`에 internal hosting smoke evidence를 포함한다.
+- [x] 실제 public DNS/TLS, registry image pull/run, SOPS production secret injection, pgBackRest backup/PITR restore rehearsal은 `runtime-unverified(public TLS/DNS)`/host-runtime으로 좁게 표기한다.
+- [x] `scripts/local_gate.sh --profile staging-smoke` PASS.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [ ] PR 생성 후 issue `status:needs-review` 및 merge 금지.
+
 ### MOMO-150 수용기준 `[docs/spec]`
 - [ ] `research/11-agent-runtime/`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가.
 - [ ] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리.
@@ -518,6 +529,7 @@
 | `MOMO-203` | C Approval pending projection + inbox real-data gate | swift/runtime-db/macos-ui | MOMO-167, MOMO-171 |
 | `MOMO-212` | Agent channel live subscription verifier v0 | runtime-agent/swift | MOMO-200, MOMO-201 |
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
+| `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -712,6 +724,21 @@
 - [x] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #162를 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: SwiftCentrifuge live adapter, notarization/signing/DMG, full M3 combined D/B/C exit gate.
+
+### MOMO-213 수용기준 `[swift/macos-ui]`
+- [x] GitHub #185를 `scripts/goal_claim.sh 185`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `MomoMacDevApp` 및 Xcode host의 첫-run/session surface에서 server base URL, email, password, optional invite code를 입력할 수 있다.
+- [x] real-server mode는 `/v1/auth/login` 또는 invite code가 있는 `/v1/join` 성공 응답의 token/workspace/member로 `MomoServerRESTChatBackend`를 bootstrap한다.
+- [x] 로그인 성공 후 서버 channel list/history/send/approval/cost UI로 기존 `MomoMacRootView`에 진입한다.
+- [x] 인증 실패, 서버 연결 실패, empty channel list가 UI에 명확히 표시된다.
+- [x] demo/stub backend fallback은 `Open Demo`로 명시 분리된다.
+- [x] UserDefaults에는 server URL/email/invite code만 저장하고, password는 optional Keychain 저장으로 제한한다.
+- [x] focused macOS tests로 login, join, auth failure, non-secret persistence를 고정한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #185를 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: production password hashing/SSO/OAuth, App Store/Developer ID signing, multi-account switching.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

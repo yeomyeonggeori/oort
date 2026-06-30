@@ -1,0 +1,99 @@
+# MOMO-216 internal single-node hosting smoke override.
+#
+# Use with:
+#   docker compose --env-file infra/prod/internal-smoke.env.example \
+#     -f infra/prod/docker-compose.prod.yml \
+#     -f infra/prod/docker-compose.internal-smoke.yml config
+#
+# This override keeps api/relay/worker image-based. Local smoke may point those
+# images at locally built tags, but production hosts must pull pinned registry
+# images and must not build from a source checkout.
+
+name: ${COMPOSE_PROJECT_NAME:-momo-internal-smoke}
+
+x-repo-root-mount: &repo-root-mount
+  type: bind
+  source: ../..
+  target: /workspace
+  read_only: true
+
+services:
+  caddy:
+    ports:
+      - "${HTTP_PORT:-18080}:80"
+      - "${HTTPS_PORT:-18443}:443"
+      - "${HTTPS_PORT:-18443}:443/udp"
+
+  api:
+    image: ${MOMO_API_IMAGE:-momo-api:internal-smoke}
+    pull_policy: never
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  relay:
+    image: ${MOMO_RELAY_IMAGE:-momo-outbox-relay:internal-smoke}
+    pull_policy: never
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    image: ${MOMO_WORKER_IMAGE:-momo-agent-worker:internal-smoke}
+    pull_policy: never
+    environment:
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-http://mock-hermes:8088/v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mock-hermes:
+        condition: service_healthy
+
+  migrate:
+    image: postgres:18
+    restart: "no"
+    working_dir: /workspace
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+    command: ["sh", "-lc", "sh scripts/migrate.sh"]
+    volumes:
+      - *repo-root-mount
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+
+  mock-hermes:
+    image: python:3.12-slim
+    restart: "no"
+    working_dir: /workspace
+    command: ["python3", "scripts/mock_hermes.py", "--host", "0.0.0.0", "--port", "8088"]
+    environment:
+      HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+    volumes:
+      - *repo-root-mount
+    networks:
+      - private
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8088/health\", timeout=2).read()'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
