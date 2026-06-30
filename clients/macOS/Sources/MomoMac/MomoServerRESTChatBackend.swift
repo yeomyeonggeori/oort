@@ -173,6 +173,21 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
     }
 
     public func members(workspace: WorkspaceID) async throws -> [Member] {
+        do {
+            let response = try await get(
+                "/v1/workspaces/\(workspace.description)/members",
+                queryItems: [],
+                response: WorkspaceRosterResponse.self
+            )
+            var all = response.members.map(\.member)
+            if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
+                all.insert(authenticatedMember, at: 0)
+            }
+            return all
+        } catch BackendError.problem(let status, _, _) where status == 404 && !config.members.isEmpty {
+            // Older mocks and offline demo configs predate the roster endpoint.
+        }
+
         var all = config.members
         if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
             all.insert(authenticatedMember, at: 0)
@@ -189,6 +204,46 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
         let channels = try response.channels.map { try $0.channel() }
         cachedChannels = channels
         return channels
+    }
+
+    public func createChannel(
+        workspace: WorkspaceID,
+        kind: ChannelKind,
+        name: String,
+        topic: String?
+    ) async throws -> ChannelCreateResult {
+        let response = try await post(
+            "/v1/workspaces/\(workspace.description)/channels",
+            body: CreateChannelRequest(kind: kind.rawValue, name: name, topic: topic),
+            authorized: true,
+            response: CreateChannelResponseDTO.self
+        )
+        let result = try response.result()
+        cachedChannels = (cachedChannels ?? []) + [result.channel]
+        return result
+    }
+
+    public func addMember(
+        _ member: MemberID,
+        to channel: ChannelID,
+        role: MembershipRole = .member
+    ) async throws -> ChannelMembership {
+        guard let workspace else { throw BackendError.notConnected }
+        return try await post(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/members",
+            body: AddChannelMemberRequest(memberId: member.rawValue, role: role.rawValue),
+            authorized: true,
+            response: ChannelMembershipResponseDTO.self
+        ).membership.membership()
+    }
+
+    public func removeMember(_ member: MemberID, from channel: ChannelID) async throws -> ChannelMembership {
+        guard let workspace else { throw BackendError.notConnected }
+        return try await delete(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/members/\(member.description)",
+            authorized: true,
+            response: ChannelMembershipResponseDTO.self
+        ).membership.membership()
     }
 
     public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
@@ -303,6 +358,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
+        if authorized {
+            try authorize(&request)
+        }
+        return try await execute(request, response: response)
+    }
+
+    private func delete<ResponseBody: Decodable>(
+        _ path: String,
+        authorized: Bool,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        request.httpMethod = "DELETE"
         if authorized {
             try authorize(&request)
         }
@@ -477,6 +545,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
                 kind: .human,
                 displayName: "데모 사용자",
                 handle: "demo",
+                channelIds: [.demoGeneral, .demoAgentLab],
                 presence: .online
             ),
             Member(
@@ -485,6 +554,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
                 kind: .agent,
                 displayName: "김인턴",
                 handle: "kim-intern",
+                channelIds: [.demoAgentLab],
                 presence: .working
             ),
         ]
@@ -527,19 +597,29 @@ private struct MemberDTO: Decodable {
     let id: String
     let workspaceId: String
     let kind: String
+    let status: String?
     let displayName: String
     let handle: String
+    let avatarUrl: String?
+    let channelIds: [String]?
 
     var member: Member {
         Member(
             id: MemberID(uuidString: id) ?? .demoHuman,
             workspaceId: WorkspaceID(uuidString: workspaceId) ?? .demo,
             kind: MemberKind(rawValue: kind) ?? .human,
+            status: status.flatMap(MemberStatus.init(rawValue:)) ?? .active,
             displayName: displayName,
             handle: handle,
+            avatarURL: avatarUrl.flatMap(URL.init(string:)),
+            channelIds: (channelIds ?? []).compactMap { ChannelID(uuidString: $0) },
             presence: .online
         )
     }
+}
+
+private struct WorkspaceRosterResponse: Decodable {
+    let members: [MemberDTO]
 }
 
 private struct SendMessageRequest: Encodable {
@@ -590,6 +670,67 @@ private struct ChannelDTO: Decodable {
             archivedAtMs: archivedAtMs
         )
     }
+}
+
+private struct CreateChannelRequest: Encodable {
+    let kind: String
+    let name: String
+    let topic: String?
+}
+
+private struct CreateChannelResponseDTO: Decodable {
+    let channel: ChannelDTO
+    let creatorMembership: ChannelMembershipDTO
+
+    func result() throws -> ChannelCreateResult {
+        ChannelCreateResult(
+            channel: try channel.channel(),
+            creatorMembership: try creatorMembership.membership()
+        )
+    }
+}
+
+private struct AddChannelMemberRequest: Encodable {
+    let memberId: UUID
+    let role: String
+}
+
+private struct ChannelMembershipDTO: Decodable {
+    let id: String
+    let workspaceId: String
+    let channelId: String
+    let memberId: String
+    let role: String
+    let joinedAtMs: Int64
+    let leftAtMs: Int64?
+
+    func membership() throws -> ChannelMembership {
+        guard let id = UUID(uuidString: id) else {
+            throw BackendError.decoding("invalid membership id")
+        }
+        guard let workspaceId = WorkspaceID(uuidString: workspaceId) else {
+            throw BackendError.decoding("invalid membership workspace id")
+        }
+        guard let channelId = ChannelID(uuidString: channelId) else {
+            throw BackendError.decoding("invalid membership channel id")
+        }
+        guard let memberId = MemberID(uuidString: memberId) else {
+            throw BackendError.decoding("invalid membership member id")
+        }
+        return ChannelMembership(
+            id: id,
+            workspaceId: workspaceId,
+            channelId: channelId,
+            memberId: memberId,
+            role: MembershipRole(rawValue: role) ?? .member,
+            joinedAtMs: joinedAtMs,
+            leftAtMs: leftAtMs
+        )
+    }
+}
+
+private struct ChannelMembershipResponseDTO: Decodable {
+    let membership: ChannelMembershipDTO
 }
 
 private struct MessageDTO: Decodable {

@@ -94,6 +94,9 @@ SERVER_LOG="$OUT_DIR/momo-server-${RUN_SUFFIX}.log"
 UI_LOG="$OUT_DIR/macos-dev-app-${RUN_SUFFIX}.log"
 REST_LOGIN_FILE="$OUT_DIR/login-${RUN_SUFFIX}.json"
 REST_CHANNELS_FILE="$OUT_DIR/channels-${RUN_SUFFIX}.json"
+REST_CHANNEL_CREATE_FILE="$OUT_DIR/channel-create-${RUN_SUFFIX}.json"
+REST_MEMBER_ADD_FILE="$OUT_DIR/member-add-${RUN_SUFFIX}.json"
+REST_MEMBER_REMOVE_FILE="$OUT_DIR/member-remove-${RUN_SUFFIX}.json"
 REST_SEND_FILE="$OUT_DIR/send-${RUN_SUFFIX}.json"
 REST_HISTORY_FILE="$OUT_DIR/history-${RUN_SUFFIX}.json"
 EVIDENCE_FILE="$OUT_DIR/evidence-${RUN_SUFFIX}.md"
@@ -239,7 +242,7 @@ wait_http "$BASE_URL/health" "MomoServer"
 echo "[macos-real-backend] REST login"
 curl -fsS \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+  -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_ID}\"}" \
   "$BASE_URL/v1/auth/login" >"$REST_LOGIN_FILE"
 ACCESS_TOKEN="$(jq -r '.accessToken // empty' "$REST_LOGIN_FILE")"
 [ "$ACCESS_TOKEN" != "" ] || fail "login did not return accessToken"
@@ -252,6 +255,48 @@ curl -fsS \
   "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels" >"$REST_CHANNELS_FILE"
 jq -e --arg channel "$CHANNEL_ID" '.channels[] | select(.id == $channel and .name == "agent-lab")' "$REST_CHANNELS_FILE" >/dev/null \
   || fail "channel list did not include agent-lab"
+
+CHANNEL_MANAGEMENT_NAME="momo218-$(date +%s)-$$"
+echo "[macos-real-backend] REST channel create/member add/remove"
+curl -fsS \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"kind\":\"private\",\"name\":\"${CHANNEL_MANAGEMENT_NAME}\",\"topic\":\"MOMO-218 macOS channel management smoke\"}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels" >"$REST_CHANNEL_CREATE_FILE"
+CHANNEL_MANAGEMENT_ID="$(jq -r '.channel.id // empty' "$REST_CHANNEL_CREATE_FILE")"
+[ "$CHANNEL_MANAGEMENT_ID" != "" ] || fail "channel create response missing channel id"
+jq -e --arg name "$CHANNEL_MANAGEMENT_NAME" '
+  .channel.kind == "private"
+  and .channel.name == $name
+  and .creatorMembership.memberId == "'"${HUMAN_ID}"'"
+  and .creatorMembership.role == "owner"
+  and .creatorMembership.leftAtMs == null
+' "$REST_CHANNEL_CREATE_FILE" >/dev/null \
+  || fail "channel create response missing private channel/owner membership"
+
+curl -fsS \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d "{\"memberId\":\"${AGENT_ID}\",\"role\":\"member\"}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_MANAGEMENT_ID}/members" >"$REST_MEMBER_ADD_FILE"
+jq -e --arg agent "$AGENT_ID" --arg channel "$CHANNEL_MANAGEMENT_ID" '
+  .membership.memberId == $agent
+  and .membership.channelId == $channel
+  and .membership.role == "member"
+  and .membership.leftAtMs == null
+' "$REST_MEMBER_ADD_FILE" >/dev/null \
+  || fail "agent add response missing active membership"
+
+curl -fsS \
+  -X DELETE \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_MANAGEMENT_ID}/members/${AGENT_ID}" >"$REST_MEMBER_REMOVE_FILE"
+jq -e --arg agent "$AGENT_ID" --arg channel "$CHANNEL_MANAGEMENT_ID" '
+  .membership.memberId == $agent
+  and .membership.channelId == $channel
+  and .membership.leftAtMs != null
+' "$REST_MEMBER_REMOVE_FILE" >/dev/null \
+  || fail "agent remove response missing leftAtMs"
 
 echo "[macos-real-backend] REST send"
 curl -fsS \
@@ -287,7 +332,7 @@ if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
   MOMO_WORKSPACE_ID="$WORKSPACE_ID" \
   MOMO_CHANNEL_ID="$CHANNEL_ID" \
   MOMO_LOGIN_EMAIL="$HUMAN_EMAIL" \
-  MOMO_LOGIN_PASSWORD="momo-runtime-gate" \
+  MOMO_LOGIN_PASSWORD="dev-password" \
   MACOS_DEV_RUN_DIRECT_EXEC=1 \
     "$REPO_ROOT/scripts/macos_dev_run.sh" --verify --logs --terminate 2>&1 | tee "$UI_LOG"
   UI_CODE=${PIPESTATUS[0]}
@@ -308,6 +353,7 @@ fi
   echo "- Channel: \`agent-lab\` / \`${CHANNEL_ID}\`"
   echo "- REST login: member=\`${HUMAN_ID}\`, access_token_len=\`$(jq -r '.accessToken | length' "$REST_LOGIN_FILE")\`"
   echo "- REST channel list: count=\`$(jq -r '.channels | length' "$REST_CHANNELS_FILE")\`, includes \`agent-lab\`"
+  echo "- REST channel management: created private channel \`${CHANNEL_MANAGEMENT_NAME}\` / \`${CHANNEL_MANAGEMENT_ID}\`, agent add/remove membership PASS"
   echo "- REST send: message_id=\`${MESSAGE_ID}\`, seq=\`${MESSAGE_SEQ}\`, client_msg_id=\`${CLIENT_MSG_ID}\`"
   echo "- REST history: includes sent text plus approval_request \`${APPROVAL_MSG_ID}\` with approval_id \`${APPROVAL_ID}\`"
   echo "- Approval surface data: status=\`pending\`, action=\`github.create_issue\`, estimated_micro_usd=\`820000\`"
@@ -318,7 +364,7 @@ fi
   else
     echo "- UI process/window evidence: \`${UI_LOG}\`"
   fi
-  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, send=\`${REST_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
+  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, channel_create=\`${REST_CHANNEL_CREATE_FILE}\`, member_add=\`${REST_MEMBER_ADD_FILE}\`, member_remove=\`${REST_MEMBER_REMOVE_FILE}\`, send=\`${REST_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
 } >"$EVIDENCE_FILE"
 
 cat "$EVIDENCE_FILE"

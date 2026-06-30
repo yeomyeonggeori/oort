@@ -8,6 +8,10 @@ import MomoCore
 
 public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @State private var isCreatingChannel = false
+    @State private var newChannelName = ""
+    @State private var newChannelTopic = ""
+    @State private var newChannelKind: ChannelKind = .publicChannel
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -31,7 +35,19 @@ public struct ChannelListView: View {
                 LocalContextCopilotView(viewModel: viewModel)
             }
 
-            Section("Channels") {
+            if let error = viewModel.connectionError {
+                Section {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(3)
+                }
+            }
+
+            Section {
+                if isCreatingChannel {
+                    channelCreateForm
+                }
                 if viewModel.channels.isEmpty {
                     Label("No channels available", systemImage: "tray")
                         .foregroundStyle(.secondary)
@@ -39,6 +55,18 @@ public struct ChannelListView: View {
                     ForEach(viewModel.channels) { channel in
                         channelRow(channel).tag(channel.id)
                     }
+                }
+            } header: {
+                HStack {
+                    Text("Channels")
+                    Spacer()
+                    Button {
+                        isCreatingChannel.toggle()
+                    } label: {
+                        Image(systemName: isCreatingChannel ? "xmark.circle" : "plus.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help(isCreatingChannel ? "Cancel" : "New Channel")
                 }
             }
 
@@ -61,9 +89,20 @@ public struct ChannelListView: View {
                 }
             }
 
-            Section("Members") {
+            Section {
                 ForEach(viewModel.members) { member in
                     memberRow(member)
+                }
+            } header: {
+                HStack {
+                    Text("Members")
+                    Spacer()
+                    if let selected = viewModel.selectedChannel {
+                        Text(channelTitle(selected))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
         }
@@ -73,7 +112,7 @@ public struct ChannelListView: View {
     @ViewBuilder
     private func channelRow(_ channel: Channel) -> some View {
         HStack(spacing: 6) {
-            Image(systemName: channel.kind == .dm ? "person.2.fill" : "number")
+            Image(systemName: channelIcon(channel.kind))
                 .foregroundStyle(.secondary)
             Text(channel.name ?? "DM")
                 .lineLimit(1)
@@ -95,6 +134,86 @@ public struct ChannelListView: View {
                     .foregroundStyle(MomoTheme.agentAccent)
             }
             Spacer()
+            if viewModel.selectedChannelId != nil {
+                memberMutationButton(member)
+            }
+        }
+    }
+
+    private var channelCreateForm: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Kind", selection: $newChannelKind) {
+                Label("Public", systemImage: "number").tag(ChannelKind.publicChannel)
+                Label("Private", systemImage: "lock").tag(ChannelKind.privateChannel)
+            }
+            .pickerStyle(.segmented)
+
+            TextField("name", text: $newChannelName)
+                .textFieldStyle(.roundedBorder)
+            TextField("topic", text: $newChannelTopic)
+                .textFieldStyle(.roundedBorder)
+
+            HStack {
+                Spacer()
+                Button {
+                    Task {
+                        await viewModel.createChannel(
+                            kind: newChannelKind,
+                            name: newChannelName,
+                            topic: newChannelTopic
+                        )
+                        if viewModel.connectionError == nil {
+                            newChannelName = ""
+                            newChannelTopic = ""
+                            newChannelKind = .publicChannel
+                            isCreatingChannel = false
+                        }
+                    }
+                } label: {
+                    Label("Create", systemImage: "checkmark.circle")
+                }
+                .disabled(viewModel.channelCreateInFlight || newChannelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func memberMutationButton(_ member: Member) -> some View {
+        let inChannel = viewModel.isMember(member.id)
+        let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
+        return Button {
+            Task {
+                if inChannel {
+                    await viewModel.removeMember(member.id)
+                } else {
+                    await viewModel.addMember(member.id)
+                }
+            }
+        } label: {
+            Image(systemName: inChannel ? "minus.circle" : "plus.circle")
+        }
+        .buttonStyle(.plain)
+        .disabled(isWorking)
+        .help(inChannel ? "Remove" : "Add")
+    }
+
+    private func channelIcon(_ kind: ChannelKind) -> String {
+        switch kind {
+        case .publicChannel:
+            return "number"
+        case .privateChannel:
+            return "lock"
+        case .dm:
+            return "person.2.fill"
+        }
+    }
+
+    private func channelTitle(_ channel: Channel) -> String {
+        switch channel.kind {
+        case .dm:
+            return "DM"
+        case .publicChannel, .privateChannel:
+            return channel.name ?? "channel"
         }
     }
 }

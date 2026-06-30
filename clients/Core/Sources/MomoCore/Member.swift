@@ -12,6 +12,9 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
     /// `@handle`, unique per workspace (schema member_handle_uniq).
     public var handle: String
     public var avatarURL: URL?
+    /// Active channel memberships from roster projections. Login payloads may
+    /// omit this and default to an empty list.
+    public var channelIds: [ChannelID]
     /// Realtime presence (not persisted on `member`; merged from Centrifugo).
     public var presence: Presence
 
@@ -23,6 +26,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         displayName: String,
         handle: String,
         avatarURL: URL? = nil,
+        channelIds: [ChannelID] = [],
         presence: Presence = .offline
     ) {
         self.id = id
@@ -32,6 +36,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         self.displayName = displayName
         self.handle = handle
         self.avatarURL = avatarURL
+        self.channelIds = channelIds
         self.presence = presence
     }
 
@@ -45,6 +50,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         case displayName = "display_name"
         case handle
         case avatarURL = "avatar_url"
+        case channelIds = "channel_ids"
         case presence
     }
 
@@ -58,6 +64,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         self.displayName = try c.decode(String.self, forKey: .displayName)
         self.handle = try c.decode(String.self, forKey: .handle)
         self.avatarURL = try c.decodeIfPresent(URL.self, forKey: .avatarURL)
+        self.channelIds = try c.decodeIfPresent([ChannelID].self, forKey: .channelIds) ?? []
         self.presence = try c.decodeIfPresent(Presence.self, forKey: .presence) ?? .offline
     }
 }
