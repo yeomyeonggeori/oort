@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing {
     public let config: MomoServerRESTChatBackendConfig
 
     private let session: URLSession
@@ -303,6 +303,14 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
             response: ApprovalPageDTO.self
         )
         return page.approvals.map(\.approval)
+    }
+
+    public func agentRuntimeStatus() async throws -> AgentRuntimeStatus {
+        try await get(
+            "/v1/agent-runtime/status",
+            queryItems: [],
+            response: AgentRuntimeStatusDTO.self
+        ).status
     }
 
     public func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
@@ -777,6 +785,32 @@ private struct MessageDTO: Decodable {
             runId: runId.flatMap { RunID(uuidString: $0) },
             clientMsgId: clientMsgId,
             createdAtMs: createdAtMs
+        )
+    }
+}
+
+private struct AgentRuntimeStatusDTO: Decodable {
+    let schema: String
+    let agentHandle: String
+    let displayName: String
+    let mode: String
+    let availability: String
+    let model: String
+    let endpointLabel: String
+    let keyConfigured: Bool
+    let diagnostics: [String]
+
+    var status: AgentRuntimeStatus {
+        AgentRuntimeStatus(
+            schema: schema,
+            agentHandle: agentHandle,
+            displayName: displayName,
+            mode: AgentProviderMode(rawValue: mode) ?? .localMock,
+            availability: AgentAvailability(rawValue: availability) ?? .unknown,
+            model: model,
+            endpointLabel: endpointLabel,
+            keyConfigured: keyConfigured,
+            diagnostics: diagnostics
         )
     }
 }

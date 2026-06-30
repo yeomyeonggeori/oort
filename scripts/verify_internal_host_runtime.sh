@@ -83,6 +83,7 @@ COMPOSE_LOG="$TMP_ROOT/internal-host-runtime-compose-${RUN_SLUG}.log"
 EVIDENCE_FILE="$TMP_ROOT/internal-host-runtime-evidence-${RUN_SLUG}.md"
 MESSAGE_HISTORY_FILE="$TMP_ROOT/internal-host-runtime-history-message-${RUN_SLUG}.json"
 AGENT_HISTORY_FILE="$TMP_ROOT/internal-host-runtime-history-agent-${RUN_SLUG}.json"
+AGENT_STATUS_FILE="$TMP_ROOT/internal-host-runtime-agent-status-${RUN_SLUG}.json"
 
 HTTP_PORT="$(
   python3 - <<'PY'
@@ -138,6 +139,10 @@ CENT_API_KEY=change-me-cent-api-key
 CENTRIFUGO_LOG_LEVEL=debug
 JWT_HMAC=change-me-jwt-hmac
 LOG_LEVEL=debug
+AGENT_PROVIDER_MODE=internal-host-mock
+AGENT_MODEL=hermes-agent
+AGENT_HANDLE=kim-intern
+AGENT_DISPLAY_NAME=김인턴
 HERMES_BASE_URL=http://mock-hermes:8088/v1
 HERMES_API_KEY=change-me-hermes-bearer
 RELAY_POLL_INTERVAL_MS=100
@@ -227,6 +232,24 @@ CENT_AGENT_LAB_CHANNEL="ch:ws${WORKSPACE_ID}.${AGENT_CHANNEL_ID}"
 AGENT_PROGRESS_CHANNEL="agent:ws${WORKSPACE_ID}.${AGENT_ID}"
 CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 AGENT_CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+
+echo "[host-runtime] verifying Kim Intern runtime status projection"
+curl -kfsS \
+  -H "Host: localhost" \
+  "${BASE_URL}/v1/agent-runtime/status" > "$AGENT_STATUS_FILE"
+if ! jq -e '
+    .schema == "momo.agent_runtime.status.v0"
+    and .agentHandle == "kim-intern"
+    and .mode == "internal-host-mock"
+    and .availability == "mock"
+    and .endpointLabel == "http://mock-hermes:8088/v1"
+    and .keyConfigured == false
+  ' "$AGENT_STATUS_FILE" >/dev/null; then
+  fail "agent runtime status projection did not report internal-host mock safely: $(cat "$AGENT_STATUS_FILE")"
+fi
+if grep -Fq "change-me-hermes-bearer" "$AGENT_STATUS_FILE"; then
+  fail "agent runtime status projection leaked HERMES_API_KEY"
+fi
 
 echo "[host-runtime] logging in seeded demo user"
 LOGIN_JSON="$(
@@ -358,12 +381,14 @@ compose logs --no-color > "$COMPOSE_LOG" 2>&1 || true
   echo "  - migrate: \`${MIGRATE_IMAGE}\`"
   echo "  - mock Hermes: \`${MOCK_IMAGE}\`"
   echo "- Health: Caddy/internal API \`/health\` returned 200"
+  echo "- Agent runtime status: \`/v1/agent-runtime/status\` reported internal-host-mock/mock without leaking provider secrets"
   echo "- Migration: one-shot compose migrate succeeded during boot; second \`compose run migrate\` showed idempotent skip"
   echo "- REST message: message_id=\`${MESSAGE_ID}\`, seq=\`${MESSAGE_SEQ}\`, client_msg_id=\`${CLIENT_MSG_ID}\`, channel=\`${CENT_GENERAL_CHANNEL}\`"
   echo "- Relay publish: Centrifugo history contains matching \`message.new\` with \`seq=${MESSAGE_SEQ}\`"
   echo "- Agent mock: trigger_message_id=\`${AGENT_TRIGGER_MESSAGE_ID}\`, run_id=\`${AGENT_RUN_ID}\`, channel=\`${CENT_AGENT_LAB_CHANNEL}\`, progress=\`${AGENT_PROGRESS_CHANNEL}\`"
   echo "- Logs/evidence:"
   echo "  - compose log: \`${COMPOSE_LOG}\`"
+  echo "  - agent status: \`${AGENT_STATUS_FILE}\`"
   echo "  - relay history: \`${MESSAGE_HISTORY_FILE}\`"
   echo "  - agent history: \`${AGENT_HISTORY_FILE}\`"
   echo "- Not covered: public TLS/DNS, real registry pull, SOPS prod secret injection, pgBackRest PITR restore remain \`runtime-unverified(public host)\`."

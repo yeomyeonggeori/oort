@@ -126,6 +126,8 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 | `CENT_TOKEN_HMAC` | `openssl rand -hex 32` | client connection/subscription JWT 서명. |
 | `CENT_API_KEY` | `openssl rand -hex 32` | server publish 인증(`X-API-Key`, relay/worker만). |
 | `JWT_HMAC` | `openssl rand -hex 32` | App access/refresh 토큰 HS256. |
+| `AGENT_PROVIDER_MODE` | literal | staging/prod/internal-host는 반드시 `external-hermes`. |
+| `AGENT_MODEL` | literal | 기본 `hermes-agent`; provider/model 라벨. |
 | `HERMES_API_KEY` | (hermes 발급) | 김인턴 게이트웨이 Bearer. |
 | `RELAY_DATABASE_URL` | — | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§5.2). |
 | `REDIS_URL` | (내부) | `redis://redis:6379`(compose 내부, 비밀번호 설정 권장). |
@@ -151,18 +153,21 @@ sops exec-env infra/prod/secrets.sops.env \
 - `momo_app_dev_pw`/`momo_relay_dev_pw`/`momo_worker_dev_pw` 같은 local DB password.
 - `momo-*:internal-smoke*`, `:latest`, source-checkout fallback image tag.
 - 비밀번호 없는 `CENTRIFUGO_REDIS_ADDRESS`, non-HTTPS `HERMES_BASE_URL`.
+- `AGENT_PROVIDER_MODE != external-hermes`.
 
 Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `API_DOMAIN`, `REALTIME_DOMAIN`,
 `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
 `MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
-`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `HERMES_BASE_URL`, `HERMES_API_KEY`.
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
+`HERMES_BASE_URL`, `HERMES_API_KEY`.
 
 `internal-smoke`/`local`은 별도 경계다. `infra/prod/internal-smoke.env.example`
 또는 `scripts/verify_internal_host_runtime.sh`가 생성한 env에서만 허용하며,
 localhost 도메인, mock Hermes, local `momo-*:internal-smoke*` 이미지, `change-me-*`,
 `momo_*_dev_pw` placeholder가 의도된 테스트 값이다. 이 파일은 real host env나
-SOPS production secret의 입력으로 사용하지 않는다.
+SOPS production secret의 입력으로 사용하지 않는다. 이 모드의 provider는
+`AGENT_PROVIDER_MODE=internal-host-mock`으로 고정한다.
 
 ---
 
@@ -177,7 +182,7 @@ SOPS production secret의 입력으로 사용하지 않는다.
 - **centrifugo**: `centrifugo/centrifugo:v6`, `centrifugo.prod.json`(Redis 엔진) 마운트, **포트 비노출**(caddy가 rt 도메인으로 프록시).
 - **api**: MomoServer 이미지, `depends_on: postgres(healthy)`, `PORT=8080`(내부). subscribe proxy 대상.
 - **relay**: OutboxRelay 이미지, `RELAY_DATABASE_URL`(BYPASSRLS), `CENT_API_URL=http://centrifugo:8000/api`.
-- **worker**: AgentWorker 이미지, `HERMES_BASE_URL`/`HERMES_API_KEY`, `depends_on: postgres(healthy)`.
+- **worker**: AgentWorker 이미지, `AGENT_PROVIDER_MODE`/`HERMES_BASE_URL`/`HERMES_API_KEY`, `depends_on: postgres(healthy)`.
 
 모든 서비스 `restart: unless-stopped`. relay/worker는 dev compose 주석(L4 §1.1 / `infra/docker-compose.yml` line 69~93)에 이미 골격 예시가 있음 → 그대로 승격.
 
@@ -342,7 +347,7 @@ scripts/local_gate.sh --profile host-runtime
 - prod plaintext secret/env/age key 파일이 tracked되지 않고, example 파일은 placeholder만 담는다.
 - SOPS/age와 pgBackRest PITR rehearsal checklist/evidence template이 존재한다.
 - MOMO-216 internal smoke overlay가 prod compose 위에서 렌더링되고, local image fallback tags, explicit image-based `migrate` job, MomoServer `/health` route, relay/worker env/enablement, mock Hermes boundary를 static 검증한다.
-- MOMO-220 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
+- MOMO-220/MOMO-227 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, `/v1/agent-runtime/status` mock/redaction projection, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
 - MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
 
 `runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,
@@ -363,12 +368,13 @@ scripts/verify_internal_host_runtime.sh
 - Production/staging host: api/relay/worker는 source checkout 없이 pinned registry image를 pull한다.
 - Local internal smoke: 아직 publish pipeline 전이라도 verifier가 `momo-api:internal-smoke-*` 같은 run-specific local image tag를 빌드해 사용할 수 있다.
 - Migration: app container boot side effect가 아니라 operator step 또는 image-based smoke `migrate` job으로 실행한다.
-- Runtime smoke: `scripts/verify_internal_host_runtime.sh`는 source checkout bind mount 없이 `/health`, REST login/message send, OutboxRelay→Centrifugo publish, mock Hermes `@김인턴` roundtrip evidence/log path를 출력한다.
+- Runtime smoke: `scripts/verify_internal_host_runtime.sh`는 source checkout bind mount 없이 `/health`, `/v1/agent-runtime/status`, REST login/message send, OutboxRelay→Centrifugo publish, mock Hermes `@김인턴` roundtrip evidence/log path를 출력한다.
 - Caddy/TLS: Caddy가 유일한 public edge다. Local smoke는 `localhost`/`rt.localhost`와 `18080/18443` config를 확인하지만 public ACME/DNS는 검증하지 않는다.
 - Backup/restore: repo-local dump/restore 리허설은 `backup` profile evidence로 닫고, 실제 pgBackRest stanza/check/full backup/WAL/time-target PITR restore rehearsal은 `runtime-unverified(public host)`다.
 
 ### 8.1 헬스체크 / 로그
 - `GET https://api.<domain>/health` 200 = api green. Caddy/Centrifugo/postgres healthcheck도 green.
+- `GET https://api.<domain>/v1/agent-runtime/status` = Kim Intern provider mode/availability projection. `endpointLabel`은 redacted URL이고 `HERMES_API_KEY`/tokens는 출력하지 않는다.
 - 구조화 로그(JSON): 모든 로그에 `run_id`/`workspace_id` 상관키. `docker compose logs -f` + 로그 드라이버(json-file rotate 또는 외부 수집).
 
 ### 8.2 핵심 메트릭 (게이트/운영 신호)

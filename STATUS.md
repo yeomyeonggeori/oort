@@ -40,6 +40,13 @@
 - `host-runtime` profile에도 같은 restore rehearsal verifier를 포함해 내부 테스트 호스팅 전 "복원 리허설 evidence 없는 백업은 검증된 백업이 아님"을 local/host-runtime 계약으로 고정했다.
 - 실제 production pgBackRest stanza/check/full backup, WAL archive push, SOPS decrypt, object-store repository, time-target PITR restore rehearsal은 계속 `runtime-unverified(public host)`다. 검증: `scripts/local_gate.sh --profile docs`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`, `scripts/local_gate.sh --profile backup` 대상.
 
+## 0-4a. MOMO-227 Kim Intern Runtime Config + Health Visibility v0 (2026-07-01)
+
+- `AGENT_PROVIDER_MODE`를 `local-mock` / `internal-host-mock` / `external-hermes` 계약으로 문서화하고, MomoServer·AgentWorker가 staging/prod/internal-host에서 unsafe/missing external Hermes config를 fail-fast 처리하도록 정렬했다.
+- `/health`와 read-only `/v1/agent-runtime/status`가 secret-redacted Kim Intern provider mode/availability/status projection을 반환한다. token/key 원문은 logs, diagnostics, status response에 노출하지 않는다.
+- macOS sidebar Local AI section에 compact Kim Intern availability surface를 추가해 사용자가 agent path의 `available`/`degraded`/`mock`/`unknown` 상태를 볼 수 있게 했다. internal host-runtime verifier는 `internal-host-mock`/`mock` status projection과 secret non-leak를 검사한다.
+- Real external Hermes provider side effect evidence는 실제 Hermes/Kim Intern credentialed host에서 닫아야 하므로 계속 `runtime-unverified(external Hermes host)`다. 검증: `scripts/local_gate.sh --profile docs`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`, `scripts/local_gate.sh --profile host-runtime` 대상.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.

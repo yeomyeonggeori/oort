@@ -79,8 +79,11 @@ cp infra/.env.example .env
 | `CENT_API_KEY` | 서버, relay, worker, Centrifugo | 서버측 HTTP API(`POST /api/publish`) 인증 키(`X-API-Key`). relay/worker만 publish(§4.3). |
 | `CENT_API_URL` | 서버, relay, worker | publish 대상 Centrifugo API 엔드포인트(컨테이너 내부 `http://centrifugo:8000/api`). |
 | `JWT_HMAC` | 서버 | App access(15m)/refresh(30d) 토큰 HS256 서명 시크릿(§7.1). |
-| `HERMES_BASE_URL` | worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). |
-| `HERMES_API_KEY` | worker | hermes Bearer 토큰. |
+| `AGENT_PROVIDER_MODE` | 서버, worker | `local-mock` / `internal-host-mock` / `external-hermes`. staging/prod/internal-host는 `external-hermes`만 허용. |
+| `AGENT_MODEL` | 서버, worker | 김인턴 provider model label(기본 `hermes-agent`). |
+| `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
+| `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
+| `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 
 ### 2.2 코드가 추가로 읽는 선택적 키 (모두 안전한 기본값 있음 → `.env`에 없어도 부팅)
 
@@ -108,6 +111,22 @@ cp infra/.env.example .env
 
 > **보안:** `.env.example`의 `change-me-*` / 코드의 `dev-insecure-*` 기본값은 **개발용**이다.
 > 실배포에선 반드시 교체(`openssl rand -hex 32`). 기본값으로도 부팅은 되지만 안전하지 않다.
+
+### 2.1.1 Kim Intern/Hermes provider mode
+
+김인턴 provider boundary는 `AGENT_PROVIDER_MODE`가 정본이다.
+
+| mode | 사용처 | 허용 provider config | 사용자 표시 |
+|---|---|---|---|
+| `local-mock` | 개발자 로컬 | `HERMES_BASE_URL=http://localhost:<port>/v1`, placeholder key 허용 | `mock` |
+| `internal-host-mock` | `infra/prod/internal-smoke.env.example`, `host-runtime` verifier | `http://mock-hermes:8088/v1`, placeholder key 허용 | `mock` |
+| `external-hermes` | staging/prod/internal-host | `https://.../v1` + non-placeholder `HERMES_API_KEY` 필수 | `available` 또는 `degraded` |
+
+`staging`/`prod`/`internal-host`에서 `local-mock`/`internal-host-mock`, localhost/mock URL,
+placeholder key가 보이면 MomoServer/AgentWorker boot와 `scripts/prod_env_preflight.sh`가 fail-fast한다.
+`GET /health`와 `GET /v1/agent-runtime/status`는 `agentRuntime` projection을 제공하지만
+`endpointLabel`은 user/password/query/fragment를 제거한 값이고 provider token은 절대 포함하지 않는다.
+macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded` / `Mock`을 표시한다.
 
 ### 2.3 staging/prod 시크릿과 백업 skeleton
 
@@ -147,12 +166,14 @@ scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod
 `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
 `MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
-`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `HERMES_BASE_URL`, `HERMES_API_KEY`.
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
+`HERMES_BASE_URL`, `HERMES_API_KEY`.
 
 `internal-smoke`/`local` 모드는 예외다. 이 모드는 `infra/prod/internal-smoke.env.example`
 또는 verifier가 생성한 run-specific env에서만 사용하며, `localhost` 도메인, `mock-hermes`,
 `momo-*:internal-smoke*` 이미지, `change-me-*`와 `momo_*_dev_pw` placeholder를
-의도된 로컬 경계로 허용한다. 이 env는 운영 호스트 배포 입력으로 쓰지 않는다.
+의도된 로컬 경계로 허용한다. 이 모드의 `AGENT_PROVIDER_MODE`는 `internal-host-mock`이다.
+이 env는 운영 호스트 배포 입력으로 쓰지 않는다.
 
 pgBackRest PITR skeleton은 `infra/prod/pgbackrest.conf.example`,
 `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`에 있다.
@@ -689,7 +710,7 @@ scripts/local_gate.sh --profile host-runtime
 - `docker-compose.prod.yml`: source checkout 없는 image-based staging/prod 정본. api/relay/worker는 `image:`만 사용한다.
 - `docker-compose.internal-smoke.yml`: local smoke override. local image tag fallback, image-based `migrate` one-shot job, image-based `mock-hermes` boundary를 추가한다.
 - `internal-smoke.env.example`: `localhost`/`rt.localhost`, `18080/18443`, app/relay/worker runtime role URLs, `change-me-*` placeholder만 담는 tracked template.
-- `scripts/verify_internal_host_runtime.sh`: run-specific local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration one-shot+idempotent re-run, `/health`, REST login/message send, OutboxRelay publish, mock Hermes `@김인턴` 왕복을 검증한다. evidence/log path를 출력한다.
+- `scripts/verify_internal_host_runtime.sh`: run-specific local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration one-shot+idempotent re-run, `/health`, `/v1/agent-runtime/status` redaction, REST login/message send, OutboxRelay publish, mock Hermes `@김인턴` 왕복을 검증한다. evidence/log path를 출력한다.
 - DB migration은 app boot side effect가 아니라 `scripts/migrate.sh` 또는 smoke `migrate` job으로 명시 실행한다.
 - Backup/restore는 pgBackRest skeleton과 evidence template까지만 repo-local로 검증한다. 실제 backup/PITR restore rehearsal은 `runtime-unverified(public host)`다.
 

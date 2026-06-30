@@ -62,8 +62,11 @@ final class AgentWorkerTests: XCTestCase {
             pgDatabase: "momo",
             centAPIURL: "http://localhost:8000/api",
             centAPIKey: "dev",
+            momoEnvironment: "local",
+            agentProviderMode: .localMock,
             hermesBaseURL: "http://localhost:8088/v1",
             hermesAPIKey: "dev",
+            agentModel: "hermes-agent",
             pollInterval: .milliseconds(300),
             maxAttempts: 3,
             maxConsecutiveAuto: 3,
@@ -94,6 +97,36 @@ final class AgentWorkerTests: XCTestCase {
             )),
             .halt(reason: "G3 step cap (max_steps=12)")
         )
+    }
+
+    func testStrictProviderConfigRejectsMockOrPlaceholderHermes() {
+        var config = testConfig()
+        config.momoEnvironment = "staging"
+        config.agentProviderMode = .internalHostMock
+        config.hermesBaseURL = "http://mock-hermes:8088/v1"
+        config.hermesAPIKey = "change-me-hermes-bearer"
+
+        XCTAssertThrowsError(try config.validateAgentProviderForBoot()) { error in
+            let text = String(describing: error)
+            XCTAssertTrue(text.contains("external-hermes"))
+            XCTAssertTrue(text.contains("HERMES_BASE_URL"))
+            XCTAssertTrue(text.contains("HERMES_API_KEY"))
+            XCTAssertFalse(text.contains("change-me-hermes-bearer"))
+        }
+    }
+
+    func testExternalProviderConfigAcceptsHTTPSAndRedactsEndpointLabel() throws {
+        var config = testConfig()
+        config.momoEnvironment = "internal-host"
+        config.agentProviderMode = .externalHermes
+        config.hermesBaseURL = "https://operator:secret@kim.example.net/v1?token=hidden"
+        config.hermesAPIKey = "sk-live-valid-runtime-key-123456"
+
+        XCTAssertNoThrow(try config.validateAgentProviderForBoot())
+        XCTAssertEqual(config.agentAvailability, "available")
+        XCTAssertEqual(config.agentProviderEndpointLabel, "https://kim.example.net/v1")
+        XCTAssertFalse(config.agentProviderEndpointLabel.contains("secret"))
+        XCTAssertFalse(config.agentProviderEndpointLabel.contains("hidden"))
     }
 
     func testAgentJobPayloadDecodesContextPacketToolGrants() throws {
@@ -486,8 +519,11 @@ final class AgentWorkerTests: XCTestCase {
             pgDatabase: "momo",
             centAPIURL: "http://localhost:8000/api",
             centAPIKey: "dev",
+            momoEnvironment: "local",
+            agentProviderMode: .localMock,
             hermesBaseURL: "http://localhost:8088/v1",
             hermesAPIKey: "dev",
+            agentModel: "hermes-agent",
             pollInterval: .milliseconds(300),
             maxAttempts: 3,
             maxConsecutiveAuto: 3,

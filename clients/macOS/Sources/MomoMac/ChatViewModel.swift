@@ -45,6 +45,7 @@ public final class ChatViewModel: ObservableObject {
     /// of deriving ledger/budget math in the client.
     @Published public private(set) var costSnapshots: [RunID: CostSnapshot] = [:]
     @Published public private(set) var realtimeStatuses: [ChannelID: RealtimeConnectionStatus] = [:]
+    @Published public private(set) var agentRuntimeStatus: AgentRuntimeStatus = .localMock
     @Published public var composerDraft: String = ""
     @Published public private(set) var mentionNotice: String?
 
@@ -99,6 +100,7 @@ public final class ChatViewModel: ObservableObject {
             self.members = try await chat.members(workspace: workspace)
             self.channels = try await chat.channels(workspace: workspace)
             self.members = mergeConfiguredMembershipHints(members)
+            await refreshAgentRuntimeStatus()
             await loadPendingApprovals(workspace: workspace)
             if selectedChannelId == nil {
                 self.selectedChannelId = channels.first?.id
@@ -129,6 +131,7 @@ public final class ChatViewModel: ObservableObject {
         agentStatuses = [:]
         costSnapshots = [:]
         realtimeStatuses = [:]
+        agentRuntimeStatus = .localMock
         composerDraft = ""
         mentionNotice = nil
         approvals = [:]
@@ -140,6 +143,23 @@ public final class ChatViewModel: ObservableObject {
         isLocalContextCopilotRefreshing = false
         connectionError = nil
         pendingFallbackMentionRuns = [:]
+    }
+
+    public func refreshAgentRuntimeStatus() async {
+        guard let provider = chat as? any AgentRuntimeStatusProviding else {
+            agentRuntimeStatus = .localMock
+            return
+        }
+
+        do {
+            agentRuntimeStatus = try await provider.agentRuntimeStatus()
+        } catch {
+            agentRuntimeStatus = AgentRuntimeStatus(
+                availability: .degraded,
+                endpointLabel: "status unavailable",
+                diagnostics: [String(describing: error)]
+            )
+        }
     }
 
     /// Inject channels (stub seeding path; real backend fetches them over REST).

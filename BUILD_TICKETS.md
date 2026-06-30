@@ -165,6 +165,7 @@
 | `MOMO-220` | Internal single-node host-runtime smoke v0(local image prod+internal-smoke boot) | runtime/infra | MOMO-216, MOMO-215 |
 | `MOMO-221` | Production secret/bootstrap hardening v0 | infra/docs | MOMO-005, MOMO-006, MOMO-216, MOMO-220 |
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
+| `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
@@ -240,6 +241,19 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] 가능하면 `scripts/local_gate.sh --profile staging-smoke` 또는 `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-227 수용기준 `[swift/docs/host-runtime]`
+- [x] GitHub #211을 `scripts/goal_claim.sh 211`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `AGENT_PROVIDER_MODE`를 `local-mock` / `internal-host-mock` / `external-hermes`로 정의하고 local/internal-host/external Hermes env contract를 문서화한다.
+- [x] staging/prod/internal-host에서 mock/localhost/placeholder external provider config를 MomoServer, AgentWorker, `scripts/prod_env_preflight.sh`가 fail-fast로 거부한다.
+- [x] `GET /health`와 `GET /v1/agent-runtime/status`가 Kim Intern provider mode/availability를 secret-redacted projection으로 반환한다.
+- [x] macOS sidebar가 Kim Intern `Available`/`Degraded`/`Mock` compact status chip을 표시하고 REST backend가 status projection을 읽는다.
+- [x] logs/status/verifier evidence는 `HERMES_API_KEY`/token 원문을 출력하지 않는다.
+- [x] `scripts/verify_internal_host_runtime.sh`가 internal-host mock status projection과 secret non-leakage를 host-runtime gate에서 검증한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] `scripts/local_gate.sh --profile host-runtime` 또는 `runtime-agent` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-222 수용기준 `[runtime/infra]`

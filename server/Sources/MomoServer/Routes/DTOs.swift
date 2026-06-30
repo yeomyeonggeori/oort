@@ -594,4 +594,17 @@ struct SubscribeProxyResponse: ResponseEncodable {
 struct HealthResponse: ResponseEncodable {
     let status: String
     let service: String
+    let agentRuntime: AgentRuntimeStatusResponse
+}
+
+struct AgentRuntimeStatusResponse: ResponseEncodable {
+    let schema: String
+    let agentHandle: String
+    let displayName: String
+    let mode: String
+    let availability: String
+    let model: String
+    let endpointLabel: String
+    let keyConfigured: Bool
+    let diagnostics: [String]
 }
