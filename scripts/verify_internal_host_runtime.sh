@@ -229,7 +229,7 @@ LOGIN_JSON="$(
   curl -kfsS \
     -H "Host: localhost" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"demo@momo.local\",\"password\":\"demo\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+    -d "{\"email\":\"demo@momo.local\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_ID}\"}" \
     "${BASE_URL}/v1/auth/login"
 )"
 ACCESS_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken // empty')"
