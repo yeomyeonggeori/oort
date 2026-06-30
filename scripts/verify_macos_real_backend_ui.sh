@@ -242,7 +242,7 @@ wait_http "$BASE_URL/health" "MomoServer"
 echo "[macos-real-backend] REST login"
 curl -fsS \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"momo-runtime-gate\",\"workspace\":\"${WORKSPACE_ID}\"}" \
+  -d "{\"email\":\"${HUMAN_EMAIL}\",\"password\":\"dev-password\",\"workspace\":\"${WORKSPACE_ID}\"}" \
   "$BASE_URL/v1/auth/login" >"$REST_LOGIN_FILE"
 ACCESS_TOKEN="$(jq -r '.accessToken // empty' "$REST_LOGIN_FILE")"
 [ "$ACCESS_TOKEN" != "" ] || fail "login did not return accessToken"
@@ -332,7 +332,7 @@ if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
   MOMO_WORKSPACE_ID="$WORKSPACE_ID" \
   MOMO_CHANNEL_ID="$CHANNEL_ID" \
   MOMO_LOGIN_EMAIL="$HUMAN_EMAIL" \
-  MOMO_LOGIN_PASSWORD="momo-runtime-gate" \
+  MOMO_LOGIN_PASSWORD="dev-password" \
   MACOS_DEV_RUN_DIRECT_EXEC=1 \
     "$REPO_ROOT/scripts/macos_dev_run.sh" --verify --logs --terminate 2>&1 | tee "$UI_LOG"
   UI_CODE=${PIPESTATUS[0]}
