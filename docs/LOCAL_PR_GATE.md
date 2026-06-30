@@ -48,7 +48,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback packet updates | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, and SOPS/pgBackRest checklist |
@@ -100,6 +100,17 @@ best-effort by design: stopped Docker services, missing macOS logs, or absent
 local gate evidence are recorded in the bundle instead of failing collection.
 Secrets, passwords, API keys, bearer/JWT-shaped tokens, and database URL
 credentials are redacted before files are written.
+
+For internal alpha runbook or feedback packet updates, use:
+
+```bash
+scripts/local_gate.sh --profile docs
+```
+
+If the change modifies diagnostics collection or expected bundle shape, use
+`scripts/local_gate.sh --profile diagnostics`. If the change claims macOS app
+launch evidence, add `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`.
+The human-facing alpha path lives in [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md).
 
 `runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/history
 PRs must use this profile unless the machine cannot run Docker/psql. WebSocket
