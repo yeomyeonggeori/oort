@@ -128,11 +128,48 @@ sops exec-env infra/prod/secrets.sops.env \
 sops exec-env infra/prod/secrets.sops.env 'make migrate'
 ```
 
+### 2.4 staging/prod bootstrap preflight
+
+운영/내부호스트 부트 전에 env를 먼저 fail-fast로 검사한다. `staging`/`prod`/`internal-host`
+모드에서는 `change-me-*`, `dev-insecure-*`, `example.com`, `localhost`, `mock-hermes`,
+`momo_*_dev_pw`, `:internal-smoke`, `:latest` 이미지 태그를 거부한다.
+
+```sh
+# SOPS 복호화 값을 프로세스 환경으로만 주입해 검사한다.
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode staging'
+
+# 평문 임시 env 파일을 tmpfs에 렌더링한 운영자도 배포 전에 같은 검사를 실행한다.
+scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod
+```
+
+필수 env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `API_DOMAIN`, `REALTIME_DOMAIN`,
+`ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
+`MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `HERMES_BASE_URL`, `HERMES_API_KEY`.
+
+`internal-smoke`/`local` 모드는 예외다. 이 모드는 `infra/prod/internal-smoke.env.example`
+또는 verifier가 생성한 run-specific env에서만 사용하며, `localhost` 도메인, `mock-hermes`,
+`momo-*:internal-smoke*` 이미지, `change-me-*`와 `momo_*_dev_pw` placeholder를
+의도된 로컬 경계로 허용한다. 이 env는 운영 호스트 배포 입력으로 쓰지 않는다.
+
 pgBackRest PITR skeleton은 `infra/prod/pgbackrest.conf.example`,
 `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`에 있다.
-실제 stanza 생성, WAL archive check, full backup, PITR restore rehearsal은 staging/prod 호스트에서만
-가능하므로 현재는 `runtime-unverified`다. 상세 절차는
+운영 계약은 **복원 리허설 증거 없는 백업을 검증된 백업으로 보지 않는다**는 것이다. Repo-local로는
+`scripts/local_gate.sh --profile backup`이 임시 PostgreSQL 18 source DB에서 `pg_dump`를 만들고 별도
+restore DB에 `pg_restore`한 뒤 marker checksum과 markdown/json evidence를 남긴다. 실제 pgBackRest
+stanza 생성, WAL archive check, full backup, time-target PITR restore rehearsal은 staging/prod 호스트에서만
+가능하므로 계속 `runtime-unverified(public host)`다. 상세 절차는
 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)를 본다.
+
+```sh
+# 내부 테스트 호스팅 전 최소 backup gate
+scripts/local_gate.sh --profile backup
+
+# host-runtime smoke에는 같은 복원 리허설이 포함된다.
+scripts/local_gate.sh --profile host-runtime
+```
 
 ---
 
@@ -175,6 +212,23 @@ scripts/local_gate.sh --profile docs
 ```
 
 서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
+
+### 3.2 Internal alpha diagnostics bundle
+
+내부 테스트 중 장애 상황을 공유할 때는 raw 로그를 직접 붙이지 말고 redacted bundle을 만든다.
+
+```sh
+scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m
+scripts/local_gate.sh --profile diagnostics
+```
+
+collector는 best-effort로 server/relay/worker verifier logs, Centrifugo Docker logs,
+macOS unified logs, env shape, git commit/status, local gate evidence를 모아
+`summary.md`가 있는 directory와 `.tar.gz`를 만든다. Docker가 꺼져 있거나 macOS app
+로그가 없어도 가능한 evidence를 남긴다.
+
+보안 경계: secrets/password/token/API key/HMAC/database URL credentials는 bundle에 쓰기 전에
+`[REDACTED]`로 치환한다. 그래도 외부 공유 전에는 내부자가 summary와 파일 목록을 한 번 확인한다.
 
 ---
 

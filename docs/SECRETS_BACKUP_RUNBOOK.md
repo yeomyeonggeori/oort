@@ -27,9 +27,19 @@
   real public recipients and decryption is tested by the operator.
 - `infra/.env.example` and code `dev-insecure-*` defaults are development-only.
   Staging/prod must use generated values from `infra/prod/secrets.sops.env`.
+- `scripts/prod_env_preflight.sh --mode staging|prod|internal-host` must pass
+  before compose config/render/up on a real host. It rejects placeholder,
+  dev-insecure, localhost/mock, and internal-smoke image values.
+- `internal-smoke`/`local` placeholder values are allowed only in
+  `infra/prod/internal-smoke.env.example` and verifier-generated temp env files.
 - Prefer process environment injection (`sops exec-env`) over decrypted files.
   If a service manager needs an env file, render it to tmpfs with `0600` mode and
   delete it during rollback/rotation.
+- A backup is not considered verified until restore rehearsal evidence exists.
+  Repo-local evidence may prove the local dump/restore path; production
+  pgBackRest/PITR remains `runtime-unverified(public host)` until a separate
+  host/volume restore rehearsal proves stanza, WAL archive, and target-time
+  recovery.
 
 ## 2. SOPS + age Setup
 
@@ -75,6 +85,8 @@ Validate without printing secret values:
 sops --decrypt infra/prod/secrets.sops.env >/dev/null
 sops exec-env infra/prod/secrets.sops.env \
   'test -n "$POSTGRES_PASSWORD" && test -n "$JWT_HMAC" && test -n "$PGBACKREST_REPO1_CIPHER_PASS"'
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode staging'
 ```
 
 Deploy commands consume the decrypted values as process environment. MOMO-005
@@ -86,6 +98,16 @@ sops exec-env infra/prod/secrets.sops.env \
 
 sops exec-env infra/prod/secrets.sops.env 'make migrate'
 ```
+
+Operator checklist before `up -d` on staging/prod/internal-host:
+
+1. Generate each secret with `openssl rand -hex 32` or the upstream provider.
+2. Replace every `__PLACEHOLDER__`, `change-me-*`, `example.com`, local DB
+   password, mock Hermes URL, and `internal-smoke` image tag.
+3. Encrypt to `infra/prod/secrets.sops.env`, delete plaintext, then confirm
+   `git status` does not show `infra/prod/secrets.env` or decrypted files.
+4. Run `sops exec-env infra/prod/secrets.sops.env 'scripts/prod_env_preflight.sh --from-env --mode staging'`.
+5. Only after preflight passes, render compose config and start services.
 
 Rotate a secret by editing through SOPS, redeploying, and invalidating the old
 credential at the source:
@@ -160,6 +182,33 @@ backup and `check` pass.
 Do not test PITR on the primary data directory. Use a separate restore host,
 throwaway volume, or isolated compose project.
 
+### 4.1 Repo-local restore rehearsal gate
+
+Before internal test hosting, run the local backup profile and attach the
+generated markdown/json evidence to the PR or handoff. This is not a substitute
+for production pgBackRest PITR; it proves the repo-local operating contract:
+take a backup from one temporary PostgreSQL 18 database, restore into a separate
+temporary database, compare marker fingerprints, and leave evidence.
+
+```sh
+scripts/verify_backup_restore_rehearsal.sh
+scripts/local_gate.sh --profile backup
+```
+
+Evidence files are written under `$BACKUP_REHEARSAL_OUT_DIR`,
+`$LOCAL_GATE_OUT_DIR`, or `$TMPDIR/momo-backup-rehearsal` and include:
+
+- source/restore container names and data directories;
+- marker timestamp and source/restore fingerprints;
+- dump file path, byte size, and sha256;
+- repo-local coverage and explicit `runtime-unverified(public host)` gaps.
+
+The same verifier is included in `scripts/local_gate.sh --profile host-runtime`
+so internal host-runtime smoke cannot pass while backup restore evidence is
+missing.
+
+### 4.2 Host pgBackRest PITR rehearsal
+
 1. Record a UTC target time after a known marker write.
 2. Stop PostgreSQL in the restore environment and empty only the restore data
    directory.
@@ -189,19 +238,24 @@ Record the evidence in the PR or staging handoff:
 ## 5. Current MOMO-006 Status
 
 This repo now has the SOPS/age and pgBackRest contract plus skeleton files. The
-MOMO-007 staging smoke gate verifies the file contract with:
+MOMO-007 staging smoke gate verifies the file contract, and MOMO-222 adds a
+repo-local restore rehearsal verifier with:
 
 ```sh
 scripts/verify_staging_smoke.sh
 scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile backup
 ```
 
 The actual encrypted secret file, off-host backup repository, and PITR rehearsal
 are intentionally not included because they require real staging/prod
 infrastructure and secrets.
 
-`runtime-unverified`: pgBackRest stanza creation, WAL archive push, full/diff
-schedule, and PITR restore rehearsal.
+Repo-local verified by `backup`: temporary PostgreSQL dump/restore, marker
+fingerprint equality, markdown/json evidence generation. `runtime-unverified`:
+pgBackRest stanza creation, WAL archive push, full/diff schedule, object-store
+repository, SOPS secret decrypt, and time-target PITR restore rehearsal on a
+public host.
 
 ## 6. References
 

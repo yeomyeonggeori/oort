@@ -26,6 +26,7 @@
   - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest local gate (MOMO-007)
   - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
+  - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
@@ -131,6 +132,37 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 | `pgbackrest` repo cipher | `openssl rand -base64 48` | 백업 암호화 키(별도 보관). |
 
 > **규칙:** 평문 `.env`는 prod 호스트/리포에 절대 남기지 않는다. dev-insecure 기본값으로 부팅은 되지만 **운영에선 전부 교체 필수**(L4 §10.1 RLS/시크릿 리스크).
+
+### 3.4 bootstrap preflight (MOMO-221)
+
+운영 compose를 렌더링하거나 부팅하기 전에 반드시 preflight를 먼저 실행한다.
+
+```sh
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode staging'
+
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode prod'
+```
+
+`staging`/`prod`/`internal-host` 모드는 다음 값을 fail-fast로 거부한다.
+
+- `change-me-*`, `dev-insecure-*`, `__PLACEHOLDER__`, `example.com`, `localhost`, `mock-hermes`.
+- `momo_app_dev_pw`/`momo_relay_dev_pw`/`momo_worker_dev_pw` 같은 local DB password.
+- `momo-*:internal-smoke*`, `:latest`, source-checkout fallback image tag.
+- 비밀번호 없는 `CENTRIFUGO_REDIS_ADDRESS`, non-HTTPS `HERMES_BASE_URL`.
+
+Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `API_DOMAIN`, `REALTIME_DOMAIN`,
+`ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
+`MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `HERMES_BASE_URL`, `HERMES_API_KEY`.
+
+`internal-smoke`/`local`은 별도 경계다. `infra/prod/internal-smoke.env.example`
+또는 `scripts/verify_internal_host_runtime.sh`가 생성한 env에서만 허용하며,
+localhost 도메인, mock Hermes, local `momo-*:internal-smoke*` 이미지, `change-me-*`,
+`momo_*_dev_pw` placeholder가 의도된 테스트 값이다. 이 파일은 real host env나
+SOPS production secret의 입력으로 사용하지 않는다.
 
 ---
 
@@ -254,13 +286,26 @@ GET /v1/platform/members      → 전 테넌트 멤버 전수
 
 > L4 §8.7: 일일 `pg_dump` + WAL 아카이빙이 최소선. 운영은 **pgBackRest(주간 풀 + 연속 WAL 아카이빙 → PITR)** 로 승격.
 > skeleton 파일은 `infra/prod/pgbackrest.conf.example`, `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`이며, 상세 절차는 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)다.
+> **운영 계약:** 복원 리허설 evidence가 없으면 백업은 검증된 것으로 보지 않는다. Repo-local `backup` gate는 dump/restore evidence를 만들고, 실제 pgBackRest PITR는 public host에서 별도 evidence가 필요하다.
 
 ### 7.1 구성(요지)
 - `archive_command = pgbackrest --stanza=momo archive-push %p` (postgresql.conf), `archive_mode = on`, `wal_level = replica`.
 - `pgbackrest.conf`: stanza `momo`, `pg1-path`는 `SHOW data_directory`로 확인, repo(로컬 디스크 또는 S3 호환), **repo cipher(AES-256)** + retention(full=4주, diff/incr).
 - 스케줄: **주간 full + 일간 diff + 연속 WAL**(cron). 백업 repo는 호스트와 분리된 오브젝트스토리지 권장(월 $1 미만~수달러 `(추정)`).
 
-### 7.2 검증(M1 exit — 복원 1회 필수)
+### 7.2 검증(M1 exit — 복원 evidence 필수)
+
+내부 테스트 호스팅 전 local gate:
+
+```sh
+scripts/local_gate.sh --profile backup
+scripts/local_gate.sh --profile host-runtime
+```
+
+`backup` profile이 자동으로 닫는 범위: 임시 PostgreSQL 18 source DB marker write, `pg_dump -Fc`, 별도 restore DB `pg_restore`, marker fingerprint equality, dump sha256, markdown/json evidence. 이 범위는 운영 secret이나 primary data directory를 사용하지 않는다.
+
+Host pgBackRest rehearsal:
+
 ```sh
 pgbackrest --stanza=momo --type=full backup        # 풀 백업
 pgbackrest --stanza=momo check                     # 아카이빙/repo 점검
@@ -268,7 +313,7 @@ pgbackrest --stanza=momo check                     # 아카이빙/repo 점검
 pgbackrest --stanza=momo --type=time \
   --target="2026-06-24 12:00:00+00" restore
 ```
-> **M1 종료 기준 = 백업 1회 + PITR 복원 1회 검증.** 복원 리허설 없는 백업은 "검증 안 됨"으로 간주.
+> **M1 종료 기준 = repo-local restore evidence + host pgBackRest 백업 1회 + PITR 복원 1회 검증.** 복원 리허설 없는 백업은 "검증 안 됨"으로 간주. 실제 stanza/check/full backup/WAL/PITR는 `runtime-unverified(public host)`로 남기고, public host에서 별도 evidence를 첨부해야 닫힌다.
 
 ---
 
@@ -283,7 +328,9 @@ pgbackrest --stanza=momo --type=time \
 ```sh
 scripts/verify_staging_smoke.sh
 scripts/verify_internal_hosting_smoke.sh
+scripts/verify_backup_restore_rehearsal.sh
 scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile backup
 scripts/local_gate.sh --profile host-runtime
 ```
 
@@ -296,9 +343,10 @@ scripts/local_gate.sh --profile host-runtime
 - SOPS/age와 pgBackRest PITR rehearsal checklist/evidence template이 존재한다.
 - MOMO-216 internal smoke overlay가 prod compose 위에서 렌더링되고, local image fallback tags, explicit image-based `migrate` job, MomoServer `/health` route, relay/worker env/enablement, mock Hermes boundary를 static 검증한다.
 - MOMO-220 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
+- MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
 
 `runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,
-real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime에서만 닫는다.
+real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/WAL archive/time-target PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime에서만 닫는다.
 
 ### 8.0.1 internal single-node hosting smoke (MOMO-216/MOMO-220)
 
@@ -317,7 +365,7 @@ scripts/verify_internal_host_runtime.sh
 - Migration: app container boot side effect가 아니라 operator step 또는 image-based smoke `migrate` job으로 실행한다.
 - Runtime smoke: `scripts/verify_internal_host_runtime.sh`는 source checkout bind mount 없이 `/health`, REST login/message send, OutboxRelay→Centrifugo publish, mock Hermes `@김인턴` roundtrip evidence/log path를 출력한다.
 - Caddy/TLS: Caddy가 유일한 public edge다. Local smoke는 `localhost`/`rt.localhost`와 `18080/18443` config를 확인하지만 public ACME/DNS는 검증하지 않는다.
-- Backup/restore: pgBackRest placeholder와 PITR evidence template까지만 repo-local로 닫고, 실제 restore rehearsal은 `runtime-unverified(public host)`다.
+- Backup/restore: repo-local dump/restore 리허설은 `backup` profile evidence로 닫고, 실제 pgBackRest stanza/check/full backup/WAL/time-target PITR restore rehearsal은 `runtime-unverified(public host)`다.
 
 ### 8.1 헬스체크 / 로그
 - `GET https://api.<domain>/health` 200 = api green. Caddy/Centrifugo/postgres healthcheck도 green.
@@ -340,8 +388,10 @@ scripts/verify_internal_host_runtime.sh
 
 ### 9.1 staging 최초 기동 (M1)
 ```sh
-# 0) 로컬/PR gate: 실제 VPS 시크릿 없이 config와 runbook을 먼저 검증
+# 0) 로컬/PR gate: 실제 VPS 시크릿 없이 config, runbook, restore evidence를 먼저 검증
 scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile backup
+scripts/local_gate.sh --profile host-runtime
 
 # 1) DNS: api.staging.<domain> / rt.staging.<domain> → VPS IP (A/AAAA)
 # 2) age 키 + SOPS 시크릿 준비(§3), 80/443 인바운드 허용
