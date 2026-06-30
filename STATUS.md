@@ -41,7 +41,7 @@
 ## 0-5. MOMO-198 M3 D/B/C Readiness Cleanup (2026-06-29)
 
 - `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`를 추가해 MOMO-170/171/174/177/179/192/193 이후 현재 코드 기준의 D/B/C 실데이터 readiness와 기존 MOMO-020/021/022 unblock 조건을 재정리했다.
-- 다음 builder-friendly 후보를 ROADMAP/BUILD_TICKETS에 반영했다: MOMO-199 SwiftCentrifuge live adapter, MOMO-200 D fixture/gate, MOMO-201 cost projection, MOMO-202 approval pending projection, MOMO-203 combined M3 D/B/C gate.
+- 다음 builder-friendly 후보를 ROADMAP/BUILD_TICKETS에 반영했다: MOMO-200 SwiftCentrifuge live adapter, MOMO-201 D fixture/gate, MOMO-202 cost projection, MOMO-203 approval pending projection, MOMO-204 combined M3 D/B/C gate.
 - 이번 PR은 docs/spec 변경만 수행한다. 실제 SwiftCentrifuge adapter, D/B/C runtime gate, external Hermes/provider side-effect evidence는 계속 `runtime-unverified` 후속 범위다.
 
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)

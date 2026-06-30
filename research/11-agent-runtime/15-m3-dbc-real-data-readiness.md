@@ -71,7 +71,7 @@ Fixture/runtime evidence:
 
 Unblock condition:
 
-- MOMO-020 can move from `status:blocked` to `status:ready` after MOMO-199 and MOMO-200 land.
+- MOMO-020 can move from `status:blocked` to `status:ready` after MOMO-200 and MOMO-201 land.
 
 ### MOMO-021: B Cost Breathing Ring Real-Data Binding
 
@@ -104,7 +104,7 @@ Fixture/runtime evidence:
 
 Unblock condition:
 
-- MOMO-021 can move from `status:blocked` to `status:ready` after MOMO-201 lands. If MOMO-199 live adapter is not merged yet, MOMO-021 may still proceed as a REST/history + fixture UI slice but must mark live updates `runtime-unverified`.
+- MOMO-021 can move from `status:blocked` to `status:ready` after MOMO-202 lands. If MOMO-200 live adapter is not merged yet, MOMO-021 may still proceed as a REST/history + fixture UI slice but must mark live updates `runtime-unverified`.
 
 ### MOMO-022: C Approval Inbox Real-Data Roundtrip
 
@@ -139,7 +139,7 @@ Fixture/runtime evidence:
 
 Unblock condition:
 
-- MOMO-022 can move from `status:blocked` to `status:ready` after MOMO-202 lands. MOMO-199 improves live confirmation but is not required for a REST-first pending list + decision roundtrip.
+- MOMO-022 can move from `status:blocked` to `status:ready` after MOMO-203 lands. MOMO-200 improves live confirmation but is not required for a REST-first pending list + decision roundtrip.
 
 ## Proposed GitHub Issue Updates
 
@@ -165,15 +165,15 @@ Render D Live Tool-Call from real momo runtime data in MomoMac: live `agent.part
 - [ ] [docs] Local gate evidence attached; any missing real Hermes/provider side-effect remains `runtime-unverified`.
 
 ## Depends on
-- MOMO-199 macOS SwiftCentrifuge live adapter
-- MOMO-200 D Live Tool-Call fixture/local gate
+- MOMO-200 macOS SwiftCentrifuge live adapter
+- MOMO-201 D Live Tool-Call fixture/local gate
 ```
 
 ### Issue #13 / MOMO-021
 
 Proposed labels:
 
-- keep `status:blocked` until MOMO-201 lands
+- keep `status:blocked` until MOMO-202 lands
 - add after prerequisite: `status:ready`
 
 Proposed body replacement:
@@ -189,14 +189,14 @@ Bind CostBreathingRing to server-owned cost projection for reserve -> in-flight 
 - [ ] [runtime/macos-ui] Ring shows reserve, running spend, reconciled actual, and soft/hard-limit state from fixture/runtime evidence.
 
 ## Depends on
-- MOMO-201 Cost projection endpoint/event contract + macOS binding
+- MOMO-202 Cost projection endpoint/event contract + macOS binding
 ```
 
 ### Issue #14 / MOMO-022
 
 Proposed labels:
 
-- keep `status:blocked` until MOMO-202 lands
+- keep `status:blocked` until MOMO-203 lands
 - add after prerequisite: `status:ready`
 
 Proposed body replacement:
@@ -213,18 +213,18 @@ Render Approval Inbox from real pending approval data and complete approve/rejec
 - [ ] [docs] Local gate evidence attached; real external provider writes remain out of scope.
 
 ## Depends on
-- MOMO-202 Approval pending list/projection + inbox real-data gate
+- MOMO-203 Approval pending list/projection + inbox real-data gate
 ```
 
 ## Next Buildable Tickets
 
 | Candidate | Scope | Verification | Unblocks |
 |---|---|---|---|
-| MOMO-199 | macOS SwiftCentrifuge live adapter: token fetch/refresh, `ch:` + `agent:` subscribe, envelope decode, driver injection into `MomoServerRESTChatBackend`. | `[swift/macos-ui/runtime-relay]` with mock transport tests first, then Docker/Centrifugo live smoke. | MOMO-020 live delivery; improves MOMO-021/022 realtime confirmation. |
-| MOMO-200 | D Live Tool-Call fixture/local gate: repo-local mock SSE creates `agent.partial` tool-call progress and final `tool_result`; macOS consumes same event shapes. | `[runtime-agent/macos-ui]` with no real Hermes/provider dependency. | MOMO-020. |
-| MOMO-201 | Cost projection contract: server event/read projection for reserve/spent/reconciled/limit state and macOS `CostSnapshot` binding. | `[swift/runtime-agent/macos-ui]`; DB accounting stays server-owned. | MOMO-021. |
-| MOMO-202 | Approval pending projection: REST pending list or channel-history projection, macOS inbox initial load, decision receipt + `approval.decided` reconciliation. | `[swift/runtime-db/macos-ui]` with approve/reject/idempotency/RLS evidence. | MOMO-022. |
-| MOMO-203 | M3 D/B/C local gate profile: combine REST login/history, live adapter or mock realtime, tool-call/cost/approval fixture, and evidence markdown into one M3 PR gate. | `[docs/swift/runtime-agent/macos-ui]`; may skip external Hermes/provider with explicit `runtime-unverified`. | M3 exit evidence and QA gate input. |
+| MOMO-200 | macOS SwiftCentrifuge live adapter: token fetch/refresh, `ch:` + `agent:` subscribe, envelope decode, driver injection into `MomoServerRESTChatBackend`. | `[swift/macos-ui/runtime-relay]` with mock transport tests first, then Docker/Centrifugo live smoke. | MOMO-020 live delivery; improves MOMO-021/022 realtime confirmation. |
+| MOMO-201 | D Live Tool-Call fixture/local gate: repo-local mock SSE creates `agent.partial` tool-call progress and final `tool_result`; macOS consumes same event shapes. | `[runtime-agent/macos-ui]` with no real Hermes/provider dependency. | MOMO-020. |
+| MOMO-202 | Cost projection contract: server event/read projection for reserve/spent/reconciled/limit state and macOS `CostSnapshot` binding. | `[swift/runtime-agent/macos-ui]`; DB accounting stays server-owned. | MOMO-021. |
+| MOMO-203 | Approval pending projection: REST pending list or channel-history projection, macOS inbox initial load, decision receipt + `approval.decided` reconciliation. | `[swift/runtime-db/macos-ui]` with approve/reject/idempotency/RLS evidence. | MOMO-022. |
+| MOMO-204 | M3 D/B/C local gate profile: combine REST login/history, live adapter or mock realtime, tool-call/cost/approval fixture, and evidence markdown into one M3 PR gate. | `[docs/swift/runtime-agent/macos-ui]`; may skip external Hermes/provider with explicit `runtime-unverified`. | M3 exit evidence and QA gate input. |
 
 ## Decision
 
