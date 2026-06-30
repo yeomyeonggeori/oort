@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend, RealtimeStatusProvidingBackend {
+public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var connected = false
@@ -411,6 +411,30 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         // TODO(T09-followup): REST auth → realtime-token → SwiftCentrifuge connect.
         self.workspace = workspace
         self.connected = true
+    }
+
+    public func clearSessionSensitiveState() async {
+        workspace = nil
+        connected = false
+        for continuations in channelStreams.values {
+            for continuation in continuations.values {
+                continuation.finish()
+            }
+        }
+        for continuations in agentStreams.values {
+            for continuation in continuations.values {
+                continuation.finish()
+            }
+        }
+        for continuations in realtimeStatusStreams.values {
+            for continuation in continuations.values {
+                continuation.finish()
+            }
+        }
+        channelStreams = [:]
+        agentStreams = [:]
+        realtimeStatusStreams = [:]
+        realtimeStatusByChannel = [:]
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {

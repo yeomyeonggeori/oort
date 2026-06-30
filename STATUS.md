@@ -195,6 +195,13 @@
 - `LiveChatBackend` demo fallback은 deterministic create/add/remove 및 duplicate/not-found error behavior를 제공한다. `scripts/verify_macos_real_backend_ui.sh`는 기존 REST login/channel/history/send smoke에 private channel create + 김인턴 add/remove evidence를 추가했다.
 - 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. Full channel settings/preferences, archive/search, enterprise RBAC, directory sync, iOS UI는 out of scope.
 
+## 0-21. MOMO-223 macOS Session Switch + Logout Polish v0 (2026-06-30)
+
+- `MomoMacSessionRootView` 상단 session bar가 현재 server/workspace/member/session mode와 selected channel realtime 상태(Live/Reconnecting/REST fallback)를 표시하고, details popover로 non-secret session context를 확인할 수 있게 했다.
+- `Switch`/`Log Out` 동선을 분리했다. 두 경로 모두 active `ChatViewModel` subscription을 취소하고 REST/demo backend의 token/workspace/channel/realtime cache를 지운다. `Log Out`은 in-memory password와 saved-password preference/Keychain entry까지 지워 chooser로 돌아간다.
+- secret boundary: access/refresh token은 저장하지 않고 status UI/details/STATUS에 노출하지 않는다. UserDefaults 저장은 server URL/email/invite code에 한정되며, password는 optional Keychain 저장만 허용하고 logout에서 삭제한다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS. 전체 `swift` 및 가능하면 `macos-ui` local gate evidence는 PR에 첨부한다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

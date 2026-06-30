@@ -1489,6 +1489,87 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(loaded.password, "")
         XCTAssertFalse(loaded.savePassword)
     }
+
+    func testRESTBackendClearSessionSensitiveStateDropsTokenAndWorkspace() async throws {
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        try await backend.connect(workspace: .demo, accessToken: "token-123")
+        await backend.clearSessionSensitiveState()
+
+        do {
+            _ = try await backend.history(channel: .demoGeneral, after: nil, limit: 50)
+            XCTFail("history should require a fresh session after logout")
+        } catch BackendError.notConnected {
+            // Expected: access token and workspace cache were cleared.
+        } catch {
+            XCTFail("unexpected error after session clear: \(error)")
+        }
+    }
+
+    @MainActor
+    func testViewModelClearSessionSensitiveStateResetsVisibleWorkspaceState() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "token")
+        viewModel.setChannels(seed.channels)
+        await viewModel.selectChannel(seed.channels[0].id)
+
+        XCTAssertNotNil(viewModel.workspaceId)
+        XCTAssertFalse(viewModel.channels.isEmpty)
+        XCTAssertFalse(viewModel.visibleMessages.isEmpty)
+
+        await viewModel.clearSessionSensitiveState()
+
+        XCTAssertNil(viewModel.workspaceId)
+        XCTAssertTrue(viewModel.members.isEmpty)
+        XCTAssertTrue(viewModel.channels.isEmpty)
+        XCTAssertNil(viewModel.selectedChannelId)
+        XCTAssertTrue(viewModel.messagesByChannel.isEmpty)
+        XCTAssertTrue(viewModel.partials.isEmpty)
+        XCTAssertTrue(viewModel.realtimeStatuses.isEmpty)
+        XCTAssertEqual(viewModel.composerDraft, "")
+    }
+
+    @MainActor
+    func testSessionControllerLogoutClearsCurrentSessionAndPasswordFormState() async throws {
+        let suite = "momo-session-controller-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MomoServerSessionStore(
+            defaults: defaults,
+            keychain: MomoKeychainPasswordStore(service: "momo.test.\(suite)")
+        )
+        let controller = MomoServerSessionController(store: store)
+        controller.form = MomoServerSessionForm(
+            baseURLString: "https://momo.test",
+            email: "demo@momo.local",
+            password: "in-memory-secret",
+            savePassword: true
+        )
+
+        await controller.openDemo()
+        guard case .connected(let viewModel, _) = controller.phase else {
+            return XCTFail("demo should connect before logout")
+        }
+
+        await controller.logout()
+
+        guard case .choosing = controller.phase else {
+            return XCTFail("logout should return to chooser")
+        }
+        XCTAssertNil(viewModel.workspaceId)
+        XCTAssertTrue(viewModel.channels.isEmpty)
+        XCTAssertEqual(controller.form.password, "")
+        XCTAssertFalse(controller.form.savePassword)
+        XCTAssertTrue(controller.sessionNotice?.contains("Logged out") == true)
+    }
 }
 
 private actor AgentMentionFallbackChatBackend: ChatBackend {

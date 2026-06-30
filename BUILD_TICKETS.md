@@ -589,6 +589,7 @@
 | `MOMO-204` | M3 D/B/C combined local gate profile | docs/swift/runtime-agent/macos-ui | MOMO-200, MOMO-201, MOMO-202, MOMO-203, MOMO-207 |
 | `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
 | `MOMO-218` | macOS channel management UI v0 | swift/macos-ui | MOMO-213, MOMO-214 |
+| `MOMO-223` | macOS session/account/server switch + logout polish v0 | swift/macos-ui | MOMO-213, MOMO-207, MOMO-218 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -821,7 +822,7 @@
 - [x] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #185를 `status:needs-review`로 전환하고 merge하지 않는다.
-- Out of scope: SSO/OAuth, App Store/Developer ID signing, multi-account switching. Production password hash verification은 MOMO-217에서 runtime hardening으로 분리 완료.
+- Out of scope: SSO/OAuth, App Store/Developer ID signing. Production password hash verification은 MOMO-217에서 runtime hardening으로 분리 완료했고, session/account/server switching은 MOMO-223에서 닫는다.
 
 ### MOMO-217 수용기준 `[swift/runtime-db]`
 - [x] `POST /v1/auth/login`은 `human.password_hash`가 있는 계정에서 올바른 password만 허용한다.
@@ -849,6 +850,19 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] PR 생성 후 GitHub #194를 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: full channel settings/preferences, archive/search, enterprise fine-grained RBAC, directory sync, mobile/iOS UI.
+
+### MOMO-223 수용기준 `[swift/macos-ui]`
+- [x] GitHub #203을 `scripts/goal_claim.sh 203`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] macOS UI에서 현재 server/workspace/member/session mode와 selected channel realtime/fallback 상태를 확인할 수 있다.
+- [x] `Log Out`은 access token, workspace/channel/message/realtime cache, in-memory password, saved-password preference/Keychain entry를 지우고 chooser/demo fallback 화면으로 돌아간다.
+- [x] `Switch`는 이전 token/realtime/session cache를 지운 뒤 server URL/account를 다시 입력해 재로그인할 수 있는 chooser로 돌아간다.
+- [x] realtime disconnected/retry/fallback 상태는 timeline banner와 session bar/details에서 사용자가 이해할 수 있게 표시된다.
+- [x] password/token/refresh token은 UserDefaults, STATUS, UI details, logs에 평문 저장/표시하지 않는다. Password는 optional Keychain 저장으로만 허용하고 logout에서 삭제한다.
+- [x] focused macOS tests가 REST backend session clear, `ChatViewModel` state reset, controller logout form/state reset을 검증한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #203을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: Keychain production storage finalization, signed `.app` packaging, enterprise multi-workspace admin UX, iOS session UX.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

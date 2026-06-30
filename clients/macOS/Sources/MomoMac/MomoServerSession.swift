@@ -123,12 +123,47 @@ public struct MomoServerSessionSummary: Equatable, Sendable {
     public var title: String
     public var detail: String
     public var channelCount: Int
+    public var serverURLString: String?
+    public var workspaceIDString: String?
+    public var memberDisplayName: String?
+    public var memberHandle: String?
+    public var memberKind: MemberKind?
+    public var email: String?
 
-    public init(mode: MomoServerSessionMode, title: String, detail: String, channelCount: Int) {
+    public init(
+        mode: MomoServerSessionMode,
+        title: String,
+        detail: String,
+        channelCount: Int,
+        serverURLString: String? = nil,
+        workspaceIDString: String? = nil,
+        memberDisplayName: String? = nil,
+        memberHandle: String? = nil,
+        memberKind: MemberKind? = nil,
+        email: String? = nil
+    ) {
         self.mode = mode
         self.title = title
         self.detail = detail
         self.channelCount = channelCount
+        self.serverURLString = serverURLString
+        self.workspaceIDString = workspaceIDString
+        self.memberDisplayName = memberDisplayName
+        self.memberHandle = memberHandle
+        self.memberKind = memberKind
+        self.email = email
+    }
+
+    public var workspaceShortID: String? {
+        workspaceIDString.map { String($0.prefix(8)) }
+    }
+
+    public var memberLabel: String? {
+        guard let memberDisplayName else { return nil }
+        if let memberHandle, !memberHandle.isEmpty {
+            return "\(memberDisplayName) (@\(memberHandle))"
+        }
+        return memberDisplayName
     }
 }
 
@@ -310,6 +345,14 @@ public final class MomoServerSessionStore: @unchecked Sendable {
         }
     }
 
+    public func clearSessionSensitiveState(email: String? = nil) {
+        let account = email ?? defaults.string(forKey: key("email"))
+        if let account, !account.isEmpty {
+            keychain.deletePassword(account: account)
+        }
+        defaults.set(false, forKey: key("savePassword"))
+    }
+
     private func key(_ name: String) -> String { prefix + name }
 }
 
@@ -373,6 +416,7 @@ public final class MomoServerSessionController: ObservableObject {
 
     @Published public var form: MomoServerSessionForm
     @Published public private(set) var phase: Phase = .choosing
+    @Published public private(set) var sessionNotice: String?
 
     private let store: MomoServerSessionStore
     private let client: MomoServerSessionClient
@@ -399,22 +443,33 @@ public final class MomoServerSessionController: ObservableObject {
             phase = .failed(error)
             return
         }
+        sessionNotice = nil
         phase = .connected(viewModel, MomoServerSessionSummary(
             mode: .real,
             title: config.baseURL.absoluteString,
             detail: "Environment session",
-            channelCount: viewModel.channels.count
+            channelCount: viewModel.channels.count,
+            serverURLString: config.baseURL.absoluteString,
+            workspaceIDString: config.workspace.description,
+            email: config.login.email
         ))
     }
 
     public func openDemo() async {
         phase = .connecting("Opening demo workspace")
         let viewModel = await MomoMacDemo.makeViewModel()
+        sessionNotice = nil
         phase = .connected(viewModel, MomoServerSessionSummary(
             mode: .demo,
             title: "Offline demo",
             detail: "LiveChatBackend stub",
-            channelCount: viewModel.channels.count
+            channelCount: viewModel.channels.count,
+            serverURLString: "local demo",
+            workspaceIDString: viewModel.workspaceId?.description,
+            memberDisplayName: viewModel.members.first(where: { $0.kind == .human })?.displayName,
+            memberHandle: viewModel.members.first(where: { $0.kind == .human })?.handle,
+            memberKind: .human,
+            email: "demo"
         ))
     }
 
@@ -426,8 +481,28 @@ public final class MomoServerSessionController: ObservableObject {
         await establishRealSession(useInvite: true)
     }
 
-    public func resetToChooser() {
+    public func resetToChooser() async {
+        await clearActiveSessionState()
         phase = .choosing
+        sessionNotice = "Choose a server or account. Previous realtime state was cleared."
+    }
+
+    public func switchSession() async {
+        await clearActiveSessionState()
+        form = store.load()
+        form.password = ""
+        phase = .choosing
+        sessionNotice = "Choose another server or account. Previous token, realtime subscription, and channel cache were cleared."
+    }
+
+    public func logout() async {
+        let email = connectedEmail ?? form.email
+        await clearActiveSessionState()
+        form.password = ""
+        store.clearSessionSensitiveState(email: email)
+        form.savePassword = false
+        phase = .choosing
+        sessionNotice = "Logged out. Access token, saved password, realtime subscription, and session cache were cleared."
     }
 
     private func establishRealSession(useInvite: Bool) async {
@@ -436,15 +511,23 @@ public final class MomoServerSessionController: ObservableObject {
             store.save(form)
             let session = try await (useInvite ? client.join(form: form) : client.login(form: form))
             let viewModel = await makeViewModel(session: session, password: form.password)
+            form.password = ""
             if let error = viewModel.connectionError {
                 phase = .failed(error)
                 return
             }
+            sessionNotice = nil
             phase = .connected(viewModel, MomoServerSessionSummary(
                 mode: .real,
                 title: session.summaryTitle,
                 detail: session.joinedWithInvite ? "Joined with invite code" : "Signed in",
-                channelCount: viewModel.channels.count
+                channelCount: viewModel.channels.count,
+                serverURLString: session.baseURL.absoluteString,
+                workspaceIDString: session.workspace.description,
+                memberDisplayName: session.member.displayName,
+                memberHandle: session.member.handle,
+                memberKind: session.member.kind,
+                email: session.email
             ))
         } catch {
             phase = .failed(error.localizedDescription)
@@ -462,6 +545,25 @@ public final class MomoServerSessionController: ObservableObject {
             members: [session.member]
         )
         return await MomoMacDemo.makeRESTViewModel(config: config)
+    }
+
+    private var connectedViewModel: ChatViewModel? {
+        if case .connected(let viewModel, _) = phase {
+            return viewModel
+        }
+        return nil
+    }
+
+    private var connectedEmail: String? {
+        if case .connected(_, let summary) = phase {
+            return summary.email
+        }
+        return nil
+    }
+
+    private func clearActiveSessionState() async {
+        guard let viewModel = connectedViewModel else { return }
+        await viewModel.clearSessionSensitiveState()
     }
 }
 
@@ -487,9 +589,16 @@ public struct MomoMacSessionRootView: View {
             case .connected(let viewModel, let summary):
                 MomoMacRootView(existingViewModel: viewModel)
                     .safeAreaInset(edge: .top, spacing: 0) {
-                        SessionStatusBar(summary: summary) {
-                            controller.resetToChooser()
-                        }
+                        SessionStatusBar(
+                            summary: summary,
+                            viewModel: viewModel,
+                            switchSession: {
+                                Task { await controller.switchSession() }
+                            },
+                            logout: {
+                                Task { await controller.logout() }
+                            }
+                        )
                     }
             case .failed(let message):
                 MomoServerSessionChooser(controller: controller, errorMessage: message)
@@ -523,6 +632,13 @@ private struct MomoServerSessionChooser: View {
             }
 
             Divider()
+
+            if let notice = controller.sessionNotice {
+                Label(notice, systemImage: "checkmark.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
 
             if let errorMessage {
                 Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -587,32 +703,133 @@ private struct MomoServerSessionChooser: View {
 
 private struct SessionStatusBar: View {
     var summary: MomoServerSessionSummary
-    var changeSession: () -> Void
+    @ObservedObject var viewModel: ChatViewModel
+    var switchSession: () -> Void
+    var logout: () -> Void
+    @State private var showDetails = false
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Label(summary.mode.title, systemImage: summary.mode == .real ? "server.rack" : "shippingbox")
                 .font(.caption.bold())
-            Text(summary.title)
-                .font(.caption)
-                .lineLimit(1)
-            Text(summary.detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            sessionPill(summary.title, systemImage: "network")
+            if let workspace = summary.workspaceShortID {
+                sessionPill("ws \(workspace)", systemImage: "square.grid.2x2")
+            }
+            if let member = summary.memberLabel {
+                sessionPill(member, systemImage: summary.memberKind == .agent ? "cpu" : "person.crop.circle")
+            }
+            realtimePill
             Spacer()
             if summary.channelCount == 0 {
                 Label("No channels", systemImage: "tray")
                     .font(.caption)
                     .foregroundStyle(MomoTheme.costAmber)
             }
-            Button(action: changeSession) {
-                Label("Session", systemImage: "person.crop.circle.badge.gearshape")
+            Button {
+                showDetails.toggle()
+            } label: {
+                Label("Details", systemImage: "info.circle")
+            }
+            .popover(isPresented: $showDetails) {
+                SessionDetailPopover(summary: summary, realtimeStatus: viewModel.selectedRealtimeStatus)
+            }
+            .controlSize(.small)
+            Button(action: switchSession) {
+                Label("Switch", systemImage: "arrow.left.arrow.right")
+            }
+            .controlSize(.small)
+            Button(role: .destructive, action: logout) {
+                Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
             }
             .controlSize(.small)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .background(.bar)
+    }
+
+    private func sessionPill(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(.caption)
+            .lineLimit(1)
+            .foregroundStyle(.secondary)
+    }
+
+    private var realtimePill: some View {
+        let status = viewModel.selectedRealtimeStatus
+        let title: String
+        let icon: String
+        let color: Color
+        if let status, status.isLive {
+            title = "Live"
+            icon = "dot.radiowaves.left.and.right"
+            color = .green
+        } else if let status, status.connection == .reconnecting || status.subscription == .recovering {
+            title = "Reconnecting"
+            icon = "arrow.triangle.2.circlepath"
+            color = .blue
+        } else if let status, status.fallback == .restHistory {
+            title = "REST fallback"
+            icon = "clock.arrow.circlepath"
+            color = .secondary
+        } else if let status {
+            title = status.connection.rawValue
+            icon = "antenna.radiowaves.left.and.right"
+            color = .secondary
+        } else {
+            title = "Realtime pending"
+            icon = "antenna.radiowaves.left.and.right"
+            color = .secondary
+        }
+        return Label(title, systemImage: icon)
+            .font(.caption)
+            .lineLimit(1)
+            .foregroundStyle(color)
+    }
+}
+
+private struct SessionDetailPopover: View {
+    var summary: MomoServerSessionSummary
+    var realtimeStatus: RealtimeConnectionStatus?
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+            row("Mode", summary.mode.title)
+            row("Server", summary.serverURLString ?? summary.title)
+            row("Workspace", summary.workspaceIDString ?? "Not connected")
+            row("Member", summary.memberLabel ?? "Unknown")
+            row("Email", summary.email ?? "Not stored")
+            row("Session", summary.detail)
+            row("Channels", String(summary.channelCount))
+            row("Realtime", realtimeDescription)
+        }
+        .padding(16)
+        .frame(minWidth: 360, alignment: .leading)
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        GridRow {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .textSelection(.enabled)
+        }
+        .font(.caption)
+    }
+
+    private var realtimeDescription: String {
+        guard let realtimeStatus else {
+            return "Waiting for channel selection"
+        }
+        var parts = [realtimeStatus.connection.rawValue, realtimeStatus.subscription.rawValue]
+        if realtimeStatus.fallback == .restHistory {
+            parts.append("REST history fallback")
+        }
+        if let message = realtimeStatus.message, !message.isEmpty {
+            parts.append(message)
+        }
+        return parts.joined(separator: " · ")
     }
 }
 
