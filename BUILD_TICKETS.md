@@ -161,6 +161,7 @@
 | `MOMO-005` | docker-compose.prod 기반 staging/prod skeleton(Caddy 자동TLS + Centrifugo Redis engine) | infra/docs | MOMO-001~004 |
 | `MOMO-006` | SOPS/age secret lifecycle + pgBackRest PITR skeleton | infra/docs | MOMO-005 |
 | `MOMO-007` | VPS 시크릿 없는 local/staging smoke gate + RUN/DEPLOY 런북 고정 | infra/docs | MOMO-005, MOMO-006 |
+| `MOMO-220` | Internal single-node host-runtime smoke v0(local image prod+internal-smoke boot) | runtime/infra | MOMO-216, MOMO-215 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -168,7 +169,7 @@
 - [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
 
 ### MOMO-111 수용기준 `[ci/docs]`
-- [ ] `scripts/local_gate.sh --profile docs|swift|staging-smoke|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
+- [ ] `scripts/local_gate.sh --profile docs|swift|staging-smoke|host-runtime|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
 - [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
 - [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template에 문서화.
 
@@ -198,6 +199,19 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] `scripts/local_gate.sh --profile runtime-live` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 issue `status:needs-review` 및 `momo-main` handoff.
+
+### MOMO-220 수용기준 `[runtime/infra]`
+- [x] GitHub #196을 `scripts/goal_claim.sh 196`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] prod compose의 api/relay/worker `build:` 없는 image-based production boundary를 유지한다.
+- [x] `infra/prod/docker/`에 local api/relay/worker/migrate/mock-Hermes image build path를 추가한다.
+- [x] `infra/prod/docker-compose.internal-smoke.yml`이 source checkout bind mount 없이 local image fallback으로 boot된다.
+- [x] `scripts/verify_internal_host_runtime.sh`가 local images build, prod+internal-smoke compose boot, migration one-shot+idempotent rerun, `/health` 200, REST login/message send, relay publish done을 검증한다.
+- [x] 같은 verifier가 mock Hermes 기반 `@김인턴` agent mention 1왕복(agent progress + final channel `message.new`)을 검증한다.
+- [x] `scripts/local_gate.sh --profile host-runtime`을 추가하고 기존 `staging-smoke` static gate와 역할을 분리한다.
+- [x] public TLS/DNS, real registry pull, SOPS prod secret injection, pgBackRest PITR restore는 `runtime-unverified(public host)`로 남긴다.
+- [ ] `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-212 수용기준 `[runtime-agent/swift]`
 - [x] GitHub #180을 `scripts/goal_claim.sh 180`으로 claim하고 별도 branch/worktree에서 진행한다.
