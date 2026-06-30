@@ -25,7 +25,8 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · 5개 Swift 패키지 `swift build/test` green (MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac)
      · 남은 M1 = MOMO-005/006/007로 staging/prod compose, SOPS/pgBackRest skeleton, local smoke gate는 준비됨
      · MOMO-220에서 local image 기반 internal host-runtime smoke를 추가해 prod+internal-smoke boot/health/migrate/message/relay/mock-agent 왕복을 검증한다
-     · 실제 staging URL/TLS, SOPS 복호화, pgBackRest PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
+     · MOMO-222에서 repo-local backup restore rehearsal gate를 추가해 temporary PG18 dump→separate restore→evidence markdown/json을 검증한다
+     · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
      · GitHub Actions는 비용/결제 이슈로 disabled + manual-only. 당분간 local gate가 PR merge 기준이며 `runtime-relay` profile은 MOMO-115, `runtime-live` profile은 MOMO-196, `runtime-agent` agent live-channel 검증은 MOMO-212에서 자동화됨
@@ -64,7 +65,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 |---|---|---|---|
 | `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
 | `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
-| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|staging-smoke|host-runtime|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` + PR evidence 출력 |
+| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` + PR evidence 출력 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | `scripts/goal_status.sh` board + `goal_claim/release` + `.conductor/setup.sh` + handoff/충돌 방지 정본 |
 | `MOMO-115` | M1 | runtime-relay local gate 자동화 | `scripts/verify_relay.sh` + `local_gate --profile runtime-relay`로 server send→outbox pending→relay claim→Centrifugo history→outbox done→`version=message.seq` evidence |
 | `MOMO-199` | M1 | stale local worktree read-only audit | `scripts/goal_status.sh`가 closed issue/merged PR 연결 worktree를 `done-candidate`/`stale-warning`으로 분리하고 안전 cleanup command만 안내 |
@@ -74,6 +75,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-007` | M1 | local/staging smoke 운영 gate | `scripts/verify_staging_smoke.sh` + `local_gate --profile staging-smoke`; 실제 URL/TLS/PITR는 host-runtime |
 | `MOMO-216` | M1 | internal single-node hosting smoke gate v0 | `infra/prod/docker-compose.internal-smoke.yml` + `internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh`; `local_gate --profile staging-smoke`에 포함, public TLS/DNS는 `runtime-unverified(public TLS/DNS)` |
 | `MOMO-220` | M1 | internal single-node host-runtime smoke v0 | `scripts/verify_internal_host_runtime.sh` + `local_gate --profile host-runtime`; local images로 prod+internal-smoke boot, migrate idempotency, `/health`, REST send, relay publish, mock Hermes agent roundtrip 검증. public TLS/DNS/registry/SOPS/PITR는 `runtime-unverified(public host)` |
+| `MOMO-222` | M1 | Backup/PITR restore rehearsal gate v0 | `scripts/verify_backup_restore_rehearsal.sh` + `local_gate --profile backup`; repo-local PG18 dump→separate restore→marker checksum→markdown/json evidence. `host-runtime`에도 포함, real pgBackRest PITR는 `runtime-unverified(public host)` |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
 | `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |
@@ -220,7 +222,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 
 ### 3.1 ⚙️ 공유 / 백엔드 트랙
 - **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
-- **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리. MOMO-007의 `staging-smoke` local gate가 prod compose/Caddy/Centrifugo/secrets/pgBackRest checklist를 실제 VPS 시크릿 없이 먼저 검증하고, 실제 URL/TLS/PITR restore는 host-runtime으로 닫는다.
+- **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리. MOMO-007의 `staging-smoke` local gate가 prod compose/Caddy/Centrifugo/secrets/pgBackRest checklist를 실제 VPS 시크릿 없이 먼저 검증하고, MOMO-222의 `backup` gate가 repo-local restore evidence를 만든다. 실제 URL/TLS/pgBackRest stanza·WAL·time-target PITR restore는 public host-runtime으로 닫는다.
 - **Agentic Work OS ecosystem**(M1.5~M4): Paca류 task/board OS를 복제하지 않고, momo는 channel timeline을 agent execution ledger로 유지한다. 정본은 `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`와 `docs/adr/0001-agentic-work-os-repo-topology.md`. repo split은 core monorepo 안정화 이후 plugin catalog/SDK/MCP/landing/signing 경계부터 진행한다.
 - **멀티팀 온보딩**(M2): `003_onboarding.sql` 첫 slice는 `invite_code` + redemption audit로 시작한다(MOMO-010). invite code 운영 REST(create/list/revoke + authenticated redeem 최소 slice)는 MOMO-011에서 완료했고, macOS에서 먼저 확인 가능한 invite UI thin slice는 MOMO-012, production `/v1/join` self-signup member/human/membership 생성 + audit_log는 MOMO-014에서 서버 runtime slice로 추가했다. `platform_admin` 전역 추적은 MOMO-013에서 별도 BYPASSRLS + SELECT-only read path로 추가했고 runtime-db local gate에서 2개+ workspace 전역 조회를 검증한다. MOMO-176은 normal tenant token + active membership guard + RLS 경로로 workspace human/agent roster REST를 추가해 M2/M3 실데이터 surface를 열었고, MOMO-214는 owner/admin channel create + human/agent member add/remove runtime path를 같은 tenant/RLS 원칙으로 추가한다. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장한다.
 
@@ -255,7 +257,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 
 | 게이트 | 통과기준 | 방법/도구 |
 |---|---|---|
-| **G-0 런타임 e2e** | docker 기동 → migrate 멱등 → `/health` → seq 갭리스 → outbox→relay→publish 왕복 → RLS 격리 → 김인턴 멘션 SSE 1왕복 + reserve/reconcile | M1 staging |
+| **G-0 런타임 e2e** | docker 기동 → migrate 멱등 → `/health` → seq 갭리스 → outbox→relay→publish 왕복 → RLS 격리 → 김인턴 멘션 SSE 1왕복 + reserve/reconcile + backup restore rehearsal evidence | M1 staging/local gates |
 | **G-A 크래시-free** | 세션 ≥ 99.5% AND 유저 ≥ 99.0% `(추정 임계)` + 신규 P0/P1 crash 0 | Sentry Release Health / MetricKit |
 | **G-B 핵심플로우 e2e** | 8/8 PASS, 치명 결함 0 | XCUITest + 수동 스모크 |
 | **G-C 접근성** | `performAccessibilityAudit` 치명 위반 0 + VoiceOver 핵심플로우 조작 가능 | Xcode 15+ audit |

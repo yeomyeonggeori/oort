@@ -30,6 +30,11 @@
 - Prefer process environment injection (`sops exec-env`) over decrypted files.
   If a service manager needs an env file, render it to tmpfs with `0600` mode and
   delete it during rollback/rotation.
+- A backup is not considered verified until restore rehearsal evidence exists.
+  Repo-local evidence may prove the local dump/restore path; production
+  pgBackRest/PITR remains `runtime-unverified(public host)` until a separate
+  host/volume restore rehearsal proves stanza, WAL archive, and target-time
+  recovery.
 
 ## 2. SOPS + age Setup
 
@@ -160,6 +165,33 @@ backup and `check` pass.
 Do not test PITR on the primary data directory. Use a separate restore host,
 throwaway volume, or isolated compose project.
 
+### 4.1 Repo-local restore rehearsal gate
+
+Before internal test hosting, run the local backup profile and attach the
+generated markdown/json evidence to the PR or handoff. This is not a substitute
+for production pgBackRest PITR; it proves the repo-local operating contract:
+take a backup from one temporary PostgreSQL 18 database, restore into a separate
+temporary database, compare marker fingerprints, and leave evidence.
+
+```sh
+scripts/verify_backup_restore_rehearsal.sh
+scripts/local_gate.sh --profile backup
+```
+
+Evidence files are written under `$BACKUP_REHEARSAL_OUT_DIR`,
+`$LOCAL_GATE_OUT_DIR`, or `$TMPDIR/momo-backup-rehearsal` and include:
+
+- source/restore container names and data directories;
+- marker timestamp and source/restore fingerprints;
+- dump file path, byte size, and sha256;
+- repo-local coverage and explicit `runtime-unverified(public host)` gaps.
+
+The same verifier is included in `scripts/local_gate.sh --profile host-runtime`
+so internal host-runtime smoke cannot pass while backup restore evidence is
+missing.
+
+### 4.2 Host pgBackRest PITR rehearsal
+
 1. Record a UTC target time after a known marker write.
 2. Stop PostgreSQL in the restore environment and empty only the restore data
    directory.
@@ -189,19 +221,24 @@ Record the evidence in the PR or staging handoff:
 ## 5. Current MOMO-006 Status
 
 This repo now has the SOPS/age and pgBackRest contract plus skeleton files. The
-MOMO-007 staging smoke gate verifies the file contract with:
+MOMO-007 staging smoke gate verifies the file contract, and MOMO-222 adds a
+repo-local restore rehearsal verifier with:
 
 ```sh
 scripts/verify_staging_smoke.sh
 scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile backup
 ```
 
 The actual encrypted secret file, off-host backup repository, and PITR rehearsal
 are intentionally not included because they require real staging/prod
 infrastructure and secrets.
 
-`runtime-unverified`: pgBackRest stanza creation, WAL archive push, full/diff
-schedule, and PITR restore rehearsal.
+Repo-local verified by `backup`: temporary PostgreSQL dump/restore, marker
+fingerprint equality, markdown/json evidence generation. `runtime-unverified`:
+pgBackRest stanza creation, WAL archive push, full/diff schedule, object-store
+repository, SOPS secret decrypt, and time-target PITR restore rehearsal on a
+public host.
 
 ## 6. References
 

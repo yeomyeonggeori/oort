@@ -130,9 +130,20 @@ sops exec-env infra/prod/secrets.sops.env 'make migrate'
 
 pgBackRest PITR skeleton은 `infra/prod/pgbackrest.conf.example`,
 `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`에 있다.
-실제 stanza 생성, WAL archive check, full backup, PITR restore rehearsal은 staging/prod 호스트에서만
-가능하므로 현재는 `runtime-unverified`다. 상세 절차는
+운영 계약은 **복원 리허설 증거 없는 백업을 검증된 백업으로 보지 않는다**는 것이다. Repo-local로는
+`scripts/local_gate.sh --profile backup`이 임시 PostgreSQL 18 source DB에서 `pg_dump`를 만들고 별도
+restore DB에 `pg_restore`한 뒤 marker checksum과 markdown/json evidence를 남긴다. 실제 pgBackRest
+stanza 생성, WAL archive check, full backup, time-target PITR restore rehearsal은 staging/prod 호스트에서만
+가능하므로 계속 `runtime-unverified(public host)`다. 상세 절차는
 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)를 본다.
+
+```sh
+# 내부 테스트 호스팅 전 최소 backup gate
+scripts/local_gate.sh --profile backup
+
+# host-runtime smoke에는 같은 복원 리허설이 포함된다.
+scripts/local_gate.sh --profile host-runtime
+```
 
 ---
 
