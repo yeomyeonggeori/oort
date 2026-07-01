@@ -19,6 +19,7 @@ REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
 MODE=plan
 HERMES_MODE=mock
 SECRET_ENV_FILE=
+EXTERNAL_SMOKE=0
 TMP_BASE=${TMPDIR:-/tmp}
 TMP_BASE=${TMP_BASE%/}
 EVIDENCE_ROOT=${LOCAL_ALPHA_EVIDENCE_ROOT:-$TMP_BASE/momo-local-alpha}
@@ -45,7 +46,13 @@ Options:
   --hermes mock|external
       mock starts scripts/mock_hermes.py locally. external only verifies
       HERMES_BASE_URL/HERMES_API_KEY are set in --secret-env and does not probe
-      the provider.
+      the provider unless --external-smoke is also set.
+
+  --external-smoke
+      With --hermes external, delegate to scripts/verify_external_agent_provider.sh
+      for the OpenAI-compatible SSE preflight plus one
+      channel message -> agent run -> external runtime -> agent response
+      roundtrip. Requires --secret-env outside the repo.
 
   --secret-env /absolute/path/outside/repo.env
       Secret env file to source. Must be outside this repository. Required for
@@ -68,6 +75,7 @@ Examples:
   scripts/local_alpha_runner.sh plan
   scripts/local_alpha_runner.sh execute --hermes mock
   scripts/local_alpha_runner.sh execute --hermes external --secret-env "$HOME/.momo/local-alpha.env"
+  scripts/local_alpha_runner.sh execute --hermes external --external-smoke --secret-env "$HOME/.momo/external-agent.env"
 EOF
 }
 
@@ -382,6 +390,7 @@ write_summary() {
     echo "- git head: $(git -C "$REPO_ROOT" rev-parse --short HEAD)"
     echo "- mode: $MODE"
     echo "- hermes mode: $HERMES_MODE"
+    echo "- external runtime smoke: $EXTERNAL_SMOKE"
     echo "- AWS resources: none; this runner does not call aws or create cloud resources."
     echo "- env file: $ENV_FILE"
     echo "- evidence dir: $EVIDENCE_DIR"
@@ -444,6 +453,7 @@ print_plan() {
   echo "[local-alpha] repo: $REPO_ROOT"
   echo "[local-alpha] AWS resources: none"
   echo "[local-alpha] hermes mode: $HERMES_MODE"
+  echo "[local-alpha] external runtime smoke: $EXTERNAL_SMOKE"
   if [ "$SECRET_ENV_FILE" != "" ]; then
     echo "[local-alpha] secret env: $SECRET_ENV_FILE (outside repo enforced)"
   elif [ "$HERMES_MODE" = "external" ]; then
@@ -453,13 +463,27 @@ print_plan() {
   fi
   echo "[local-alpha] evidence root: $EVIDENCE_ROOT"
   echo
+  if [ "$HERMES_MODE" = "external" ] && [ "$EXTERNAL_SMOKE" = "1" ]; then
+    echo "Execute will delegate to scripts/verify_external_agent_provider.sh:"
+    echo "  1. use .env.worktree/.env/infra/.env.example as the local stack base env"
+    echo "  2. load --secret-env as EXTERNAL_AGENT_PROVIDER_ENV_FILE"
+    echo "  3. require credentialed external runtime config"
+    echo "  4. run provider SSE preflight"
+    echo "  5. boot local MomoServer/OutboxRelay/AgentWorker and send one @agent roundtrip"
+    echo "  6. write redacted external-agent-provider evidence"
+    return 0
+  fi
   echo "Execute will run:"
   echo "  1. docker compose up -d (PG18 + Centrifugo v6, local subscribe proxy override)"
   echo "  2. scripts/migrate.sh"
   echo "  3. scripts/verify_rls.sh to prepare momo_app/momo_relay/momo_worker roles"
   echo "  4. MomoServer on http://127.0.0.1:\${PORT:-8080}"
   echo "  5. OutboxRelay and AgentWorker from SwiftPM"
-  echo "  6. mock Hermes locally or verify external Hermes env"
+  if [ "$HERMES_MODE" = "external" ] && [ "$EXTERNAL_SMOKE" = "1" ]; then
+    echo "  6. delegate to scripts/verify_external_agent_provider.sh for provider SSE + momo @agent roundtrip"
+  else
+    echo "  6. mock Hermes locally or verify external Hermes env"
+  fi
   echo "  7. swift run --package-path clients/macOS MomoMacSmoke"
   echo "  8. evidence summary with URLs, redacted env, logs, and stop command"
 }
@@ -486,6 +510,10 @@ while [ "$#" -gt 0 ]; do
       assert_secret_env_outside_repo "$SECRET_ENV_FILE"
       shift 2
       ;;
+    --external-smoke)
+      EXTERNAL_SMOKE=1
+      shift
+      ;;
     --evidence-root)
       [ "$#" -ge 2 ] || fail "--evidence-root requires a path"
       EVIDENCE_ROOT=$(abs_dir_path "$2")
@@ -510,6 +538,9 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+[ "$EXTERNAL_SMOKE" = "0" ] || [ "$HERMES_MODE" = "external" ] || \
+  fail "--external-smoke requires --hermes external"
+
 case "$MODE" in
   plan)
     print_plan
@@ -521,6 +552,32 @@ esac
 
 [ "$HERMES_MODE" = "mock" ] || [ "$SECRET_ENV_FILE" != "" ] || \
   fail "--hermes external requires --secret-env /path/outside/repo.env"
+
+external_smoke_base_env() {
+  if [ "${LOCAL_ALPHA_BASE_ENV_FILE:-}" != "" ]; then
+    abs_existing_file "$LOCAL_ALPHA_BASE_ENV_FILE"
+    return
+  fi
+  for candidate in "$REPO_ROOT/.env.worktree" "$REPO_ROOT/.env" "$REPO_ROOT/infra/.env.example"; do
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+  fail "no base env file found for external smoke"
+}
+
+if [ "$EXTERNAL_SMOKE" = "1" ]; then
+  BASE_ENV_FILE=$(external_smoke_base_env)
+  echo "[local-alpha] delegating external runtime smoke"
+  echo "[local-alpha] base env: $BASE_ENV_FILE"
+  echo "[local-alpha] provider secret env: $SECRET_ENV_FILE"
+  ENV_FILE="$BASE_ENV_FILE" \
+  EXTERNAL_AGENT_PROVIDER_ENV_FILE="$SECRET_ENV_FILE" \
+  EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
+    "$REPO_ROOT/scripts/verify_external_agent_provider.sh"
+  exit $?
+fi
 
 RUN_ID=$(date -u '+%Y%m%dT%H%M%SZ')
 EVIDENCE_DIR=$EVIDENCE_ROOT/$RUN_ID

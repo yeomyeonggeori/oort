@@ -3,6 +3,7 @@
 > Purpose: one teammate should be able to start momo locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
 > Scope: internal alpha on a developer Mac. This is not the M7 release gate and not a public/staging production launch.
 > Cloud host: for a one-week AWS team alpha, use `docs/AWS_INTERNAL_ALPHA.md` first. The local runbook below still applies to app behavior and smoke scenarios.
+> 72-hour local dogfood: use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) as the Day 0~Day 3 decision contract before MOMO-246 starts.
 
 ## 0. Read This First
 
@@ -10,7 +11,7 @@
 - Never commit `.env`, diagnostics archives, app logs, or screenshots with secrets.
 - Raw invite codes are bearer secrets. momo stores only hashes, so an invite code must be copied when it is created.
 - The durable write path is still REST -> Postgres transaction -> outbox -> relay publish. The macOS app must not publish directly to Centrifugo.
-- Internal alpha can use repo-local mock Hermes. External Hermes/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached.
+- Internal alpha can use repo-local mock Hermes. External agent runtime/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached with an out-of-repo provider env file.
 - "Kim Intern invited" and "Kim Intern connected" are separate checks: invited means the agent is an active `member.kind='agent'` with channel membership; connected means the provider status chip or `/v1/agent-runtime/status` reports mock/available instead of degraded.
 
 ## 1. Tooling Checklist
@@ -193,6 +194,7 @@ Internal alpha usability notes:
 - In real-server mode, use the top `Invites` popover to create/list/revoke owner/admin invites. Create/revoke/refresh buttons disable while a request is in flight and failed invite operations show a `Retry` button.
 - When a new invite is created, click `Copy Code` before closing the popover. Existing invite rows only show the masked preview; the raw invite code cannot be recovered later.
 - Use the top `Updates` popover to inspect the alpha Dev Update Channel. With `MOMO_UPDATE_MANIFEST_PATH` or a `file://` `MOMO_UPDATE_MANIFEST_URL`, it compares current vs available version and shows `Open Download` plus relaunch steps when a newer dogfood build exists; the operator runbook is [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md).
+- Use the right detail pane `Alpha` tab as the in-app dogfood guide. It summarizes Server, Realtime, Kim Intern, Invites, Diagnostics, and Updates state, then lists today's smoke checklist and known limitations.
 - `Switch` and `Log Out` return to the chooser and clear the previous channel/member/message/realtime/invite state. `Log Out` also clears the saved-password preference and Keychain password.
 - Login, join, channel load, and message send errors are recoverable: the chooser, sidebar, or timeline keeps the app interactive and offers retry/dismiss instead of leaving a blank session.
 - The sidebar Members list shows Kim Intern as an `AGENT` when he is in the selected channel. The `+`/`-` member action is the admin path for inviting/removing an existing agent from a channel.
@@ -229,8 +231,33 @@ make down
 3. For local mock smoke, ensure mock Hermes and AgentWorker are running, then send `@김인턴 상태 알려줘` or `@kim-intern summarize this channel` in `#agent-lab`.
 4. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
 5. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
-6. For real-provider smoke, put credentials only in an untracked provider env file and run `scripts/local_gate.sh --profile external-agent-provider`. Without credentials, the profile must PASS as an explicit `runtime-unverified(external provider credentials)` skip; with credentials, its evidence includes the Kim Intern invite precondition and one external-provider roundtrip.
-7. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted diagnostic hint.
+6. For real-provider smoke, put only Hermes-facing credentials in an out-of-repo provider env file. Use [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) as the env contract.
+7. Default no-secret gate:
+
+   ```bash
+   scripts/local_gate.sh --profile external-agent-provider
+   ```
+
+   It must PASS as an explicit `runtime-unverified(external provider credentials)` skip.
+8. Credentialed external runtime gate:
+
+   ```bash
+   EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
+   EXTERNAL_AGENT_PROVIDER_ENV_FILE="$HOME/.momo/external-agent.env" \
+   scripts/local_gate.sh --profile external-agent-provider
+   ```
+
+   Equivalent local-alpha runner entry:
+
+   ```bash
+   scripts/local_alpha_runner.sh execute \
+     --hermes external \
+     --external-smoke \
+     --secret-env "$HOME/.momo/external-agent.env"
+   ```
+
+   With credentials, evidence includes the Kim Intern invite precondition, `/v1/agent-runtime/status` readiness, and one `channel message -> agent run -> external runtime call -> durable agent response` roundtrip.
+9. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted `degradedReason`/diagnostic hint.
 
 ### D. Diagnostics
 
@@ -242,7 +269,15 @@ scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m
 
 The collector writes a directory, `summary.md`, and a `.tar.gz`. It redacts secrets, passwords, API keys, bearer/JWT-shaped tokens, and database URL credentials before writing files. Still inspect `summary.md` and file names before sharing outside the team.
 
-### E. Local Gate
+### E. In-App Alpha Command Center
+
+1. Open the right detail pane and select `Alpha`.
+2. Confirm the status list includes Server, Realtime, Agent Runtime, Invites, Diagnostics, and Updates.
+3. If a row is `Degraded` or `Blocked`, capture the detail/recovery text in feedback before restarting processes.
+4. Use the `Today` checklist for the local dogfood pass: open `#agent-lab`, send a message, mention `@kim-intern`, exercise invite/join, check approval/cost, and collect diagnostics after a failure.
+5. Treat `Known Limits` as scope boundaries. Update install, AWS/public host, iOS/APNs, and credentialed external Hermes proof remain separate gates.
+
+### F. Local Gate
 
 For alpha docs/runbook changes:
 
@@ -298,6 +333,11 @@ required row below to be `PASS`, with evidence paths recorded in the handoff
 note. Use `WAIVED` only for non-blocking P2/P3 polish and explain the follow-up
 issue. P0/P1 rows cannot be waived.
 
+For the planned three-day local dogfood, treat this section as the minimum gate
+and use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md)
+for the full Day 0 readiness, Day 1 messenger, Day 2 agent runtime, Day 3 soak,
+daily report, and final decision templates.
+
 Recommended handoff file name:
 
 ```text
@@ -310,7 +350,7 @@ Recommended handoff file name:
 | Channel 조회 | app screenshot or API JSON for `#general` and `#agent-lab` | Seeded channels load, selected channel history loads, Kim Intern appears as an agent member in `#agent-lab`. |
 | 메시지 송수신 | local gate evidence or two-account transcript | Owner sends one message, joined user sends one message, both appear in `message.seq` order after live receipt or refresh. |
 | 초대/가입 | invite create response with redacted code preview and joined-user login proof | Owner/admin creates invite, raw code is copied once, `/v1/join` succeeds, joined user cannot gain owner/platform-admin privileges. |
-| 김인턴 멘션 | `runtime-agent`, `internal-alpha`, or `external-agent-provider` evidence | `@김인턴` in `#agent-lab` creates an agent job and a durable final timeline message. Mock Hermes is enough for local gate; AWS promotion also needs the Hermes GPT smoke below. |
+| 김인턴 멘션 | `runtime-agent`, `internal-alpha`, or `external-agent-provider` evidence | `@김인턴` in `#agent-lab` creates an agent job and a durable final timeline message. Mock Hermes is enough for local gate; AWS promotion also needs the credentialed external agent runtime smoke below. |
 | 재시작/reconnect | transcript of app restart plus server/relay or Centrifugo restart | App returns to usable state, realtime reconnects or clearly falls back to REST, message history remains ordered by `message.seq`. |
 | diagnostics | redacted diagnostics bundle path plus `summary.md` review note | `scripts/collect_diagnostics.sh --output-dir ... --since 15m` produces a bundle, secrets are redacted, and missing sources are listed explicitly. |
 | feedback filing | GitHub feedback issue/comment URL, or local handoff markdown if GitHub is unavailable | At least one feedback packet exists, even if it is a "no blocker found" soak note with environment, steps, evidence, and severity. |
@@ -331,7 +371,7 @@ Interpretation:
 - `external-agent-provider` may PASS as
   `runtime-unverified(external provider credentials)` for local dogfood, but
   that skip is not enough for AWS promotion. AWS promotion requires a
-  credentialed Hermes GPT smoke.
+  credentialed external agent runtime smoke.
 
 ## 8. AWS Promotion Threshold
 
@@ -343,7 +383,7 @@ local gate evidence paths, diagnostics bundle path, and feedback issue links.
 |---|---|
 | Local gate | One-person local alpha gate is `PASS` with no P0/P1 waiver and no missing required evidence. |
 | 1인 soak | One person completes at least 5 local sessions across at least 2 calendar days, totaling at least 120 minutes of active local server + MomoMacDevApp use. Include at least two app restarts and one server/relay/Centrifugo restart. |
-| Hermes GPT smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` GPT-backed roundtrip through local MomoServer, AgentWorker, OutboxRelay, and timeline. A no-credential skip blocks AWS promotion. |
+| External agent runtime smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` or equivalent agent-member roundtrip through local MomoServer, AgentWorker, OutboxRelay, the external runtime, and timeline. A no-credential skip blocks AWS promotion. |
 | No P0/P1 | Feedback triage shows zero open P0 or P1 issues. P2/P3 may remain only if each has owner, follow-up issue, and workaround or explicit non-blocking note. |
 | Diagnostics evidence | Final diagnostics bundle exists, is redacted, references the same commit as the handoff, and includes local gate evidence plus server/relay/worker/Centrifugo/macOS context where available. |
 
@@ -351,9 +391,9 @@ Promotion decision values:
 
 | Decision | Meaning |
 |---|---|
-| `LOCAL_ONLY` | Keep dogfooding on a developer Mac. Any missing required row, open P0/P1, or skipped Hermes GPT smoke forces this state. |
+| `NEEDS_MORE_LOCAL` | Keep dogfooding on a developer Mac. Any missing required row, open P0/P1, or skipped credentialed external agent runtime smoke forces this state. |
 | `AWS_READY` | All rows above are PASS and the operator may follow `docs/AWS_INTERNAL_ALPHA.md` to prepare the one-week host. |
-| `AWS_BLOCKED` | AWS topology may be documented, but provisioning is blocked by a named external dependency such as credentials, DNS, SOPS, or billing. |
+| `BLOCKED` | AWS topology may be documented, but provisioning is blocked by a named external dependency such as credentials, DNS, SOPS, or billing. |
 
 Do not treat `AWS_READY` as M7 release approval. It only authorizes the internal
 AWS alpha host; store/TestFlight/public release gates remain governed by M7.
@@ -390,9 +430,10 @@ rehearsal. Those remain `runtime-unverified(aws-host)` until the host evidence
 packet is attached.
 
 Before running the AWS preflight against a real host env, attach the
-`AWS_READY` handoff from section 8. If the handoff is `LOCAL_ONLY` or
-`AWS_BLOCKED`, keep this document as planning only and do not provision the
-alpha host.
+`AWS_READY` handoff from section 8 or from
+[`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md). If the
+handoff is `NEEDS_MORE_LOCAL` or `BLOCKED`, keep this document as planning only
+and do not provision the alpha host.
 
 Use this shape for quick GitHub issues or alpha feedback notes:
 

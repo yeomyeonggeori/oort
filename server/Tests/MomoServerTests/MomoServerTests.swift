@@ -102,9 +102,35 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(status.endpointLabel, "http://mock-hermes:8088/v1")
         XCTAssertEqual(object?["mode"] as? String, "internal-host-mock")
         XCTAssertEqual(object?["availability"] as? String, "mock")
+        XCTAssertNil(object?["degradedReason"] as? String)
         XCTAssertFalse(status.endpointLabel.contains("password"))
         XCTAssertFalse(status.endpointLabel.contains("secret"))
         XCTAssertFalse(status.keyConfigured)
+    }
+
+    func testExternalProviderStatusIncludesRedactedDegradedReason() throws {
+        let provider = AgentProviderConfig(
+            mode: .externalHermes,
+            hermesBaseURL: "http://user:super-secret@localhost:8088/v1?token=raw",
+            hermesAPIKey: "dev-insecure-hermes-bearer",
+            model: "hermes-agent",
+            agentHandle: "kim-intern",
+            displayName: "김인턴",
+            allowLocalLoopback: false
+        )
+
+        let status = provider.statusResponse()
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(status)) as? [String: Any]
+        let reason = try XCTUnwrap(object?["degradedReason"] as? String)
+
+        XCTAssertEqual(status.availability, "degraded")
+        XCTAssertTrue(reason.contains("HERMES_BASE_URL"))
+        XCTAssertTrue(reason.contains("HERMES_API_KEY"))
+        XCTAssertFalse(reason.contains("super-secret"))
+        XCTAssertFalse(reason.contains("raw"))
+        XCTAssertFalse(reason.contains("dev-insecure-hermes-bearer"))
+        XCTAssertFalse(status.endpointLabel.contains("super-secret"))
+        XCTAssertFalse(status.endpointLabel.contains("raw"))
     }
 
     func testStrictServerProviderConfigFailsFastForUnsafeExternalConfig() {
@@ -141,6 +167,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNoThrow(try provider.validateForBoot(environmentName: "local"))
         XCTAssertEqual(provider.availability, "available")
         XCTAssertEqual(provider.endpointLabel, "http://127.0.0.1:22683/v1")
+        XCTAssertNil(provider.statusResponse().degradedReason)
         XCTAssertThrowsError(try provider.validateForBoot(environmentName: "staging")) { error in
             let text = String(describing: error)
             XCTAssertTrue(text.contains("localhost"))

@@ -12,7 +12,8 @@ import MomoCore
 
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
-    @State private var showApprovals = true
+    @State private var showDetailPane = true
+    @State private var detailPane: MomoMacDetailPane = .alpha
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
     public init(viewModel: @autoclosure @escaping () -> ChatViewModel) {
@@ -33,8 +34,27 @@ public struct MomoMacRootView: View {
             MessageListView(viewModel: viewModel)
                 .frame(minWidth: 360)
         } detail: {
-            if showApprovals {
-                ApprovalInboxView(viewModel: viewModel)
+            if showDetailPane {
+                VStack(spacing: 0) {
+                    Picker("Detail", selection: $detailPane) {
+                        ForEach(MomoMacDetailPane.allCases) { pane in
+                            Label(pane.title, systemImage: pane.systemImage)
+                                .tag(pane)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(10)
+
+                    Divider()
+
+                    switch detailPane {
+                    case .alpha:
+                        AlphaCommandCenterView(viewModel: viewModel)
+                    case .approvals:
+                        ApprovalInboxView(viewModel: viewModel)
+                    }
+                }
                     .frame(minWidth: 280)
             } else {
                 Color.clear
@@ -43,11 +63,57 @@ public struct MomoMacRootView: View {
         .toolbar {
             ToolbarItem {
                 Button {
-                    showApprovals.toggle()
+                    detailPane = .alpha
+                    showDetailPane = true
+                } label: {
+                    Label("Alpha", systemImage: "list.bullet.clipboard")
+                }
+                .help("Show Alpha Command Center")
+            }
+
+            ToolbarItem {
+                Button {
+                    detailPane = .approvals
+                    showDetailPane = true
                 } label: {
                     Label("Approvals", systemImage: "checkmark.seal")
                 }
+                .help("Show approvals")
             }
+
+            ToolbarItem {
+                Button {
+                    showDetailPane.toggle()
+                } label: {
+                    Label("Detail", systemImage: "sidebar.trailing")
+                }
+                .help(showDetailPane ? "Hide detail pane" : "Show detail pane")
+            }
+        }
+    }
+}
+
+private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
+    case alpha
+    case approvals
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .alpha:
+            return "Alpha"
+        case .approvals:
+            return "Approvals"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .alpha:
+            return "list.bullet.clipboard"
+        case .approvals:
+            return "checkmark.seal"
         }
     }
 }

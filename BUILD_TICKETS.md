@@ -170,11 +170,18 @@
 | `MOMO-237` | Local Docker alpha RC gate v0 | tooling/runtime/docs | MOMO-220, MOMO-224, MOMO-225, MOMO-228, MOMO-233, MOMO-236 |
 | `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233 |
 | `MOMO-240` | Local alpha runner | infra/runtime | MOMO-001~004, MOMO-237, MOMO-238, MOMO-239 |
+| `MOMO-241` | Local 3-Day Alpha Test Pack | docs/manual | MOMO-239, MOMO-240 |
+| `MOMO-242` | External Agent Runtime Smoke | runtime/docs | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-241 |
+| `MOMO-243` | In-App Alpha Command Center | swift/macos-ui | MOMO-228, MOMO-232, MOMO-241 |
+| `MOMO-244` | Dev Update Channel v0 | swift/docs | MOMO-235, MOMO-241 |
+| `MOMO-245` | Local Soak/Resource Monitor | tooling/docs | MOMO-224, MOMO-240, MOMO-241 |
+| `MOMO-246` | 72h Local Alpha Dogfood Run | manual/tracking | MOMO-241, MOMO-242, MOMO-243, MOMO-244, MOMO-245 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
 | `MOMO-236` | Hermes internal alpha invite smoke v0 | runtime/docs | MOMO-227, MOMO-230, MOMO-228 |
 | `MOMO-238` | Local Hermes GPT provider loopback contract | docs/tooling/swift | MOMO-230, MOMO-234, MOMO-236 |
+| `MOMO-242` | External agent runtime smoke contract | runtime/docs/swift | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-240 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -182,6 +189,7 @@
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 | `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
 | `MOMO-244` | Dev Update Channel v0(local/file manifest + operator-assisted install CTA) | swift/macos-ui/docs | MOMO-235 |
+| `MOMO-243` | In-App Alpha Command Center | swift/macos-ui/docs | MOMO-232, MOMO-235, MOMO-239 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
@@ -212,7 +220,7 @@
 - [x] 별도 worktree/branch `docs/MOMO-239-local-alpha-aws-threshold`에서 진행한다.
 - [x] `docs/INTERNAL_ALPHA.md`에 local one-person alpha checklist를 추가한다.
 - [x] 체크리스트는 로그인, 채널 조회, 메시지 송수신, 초대/가입, 김인턴 멘션, 재시작/reconnect, diagnostics, feedback filing을 모두 포함한다.
-- [x] AWS 승격 threshold를 local gate, 1인 soak, Hermes GPT smoke, no P0/P1, diagnostics evidence로 정의한다.
+- [x] AWS 승격 threshold를 local gate, 1인 soak, credentialed external agent runtime smoke, no P0/P1, diagnostics evidence로 정의한다.
 - [x] `docs/AWS_INTERNAL_ALPHA.md`에 `AWS_READY` handoff 전에는 AWS provisioning 금지라는 precondition을 추가한다.
 - [x] `docs/LOCAL_PR_GATE.md`에 docs gate PASS와 실제 `AWS_READY` 운영 판정의 경계를 문서화한다.
 - [x] `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
@@ -229,6 +237,26 @@
 - [x] `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [x] local gate: `sh -n scripts/local_alpha_runner.sh`, `scripts/local_alpha_runner.sh plan`, `scripts/local_alpha_runner.sh execute --hermes mock --stop-after-smoke`, `make build`, `make test`, `python3 -m py_compile adapters/hermes/momo_adapter.py` 통과.
 - [ ] PR은 `needs-review` 상태에서 멈춘다.
+
+### MOMO-241 수용기준 `[docs/manual]`
+- [x] GitHub #241을 `scripts/goal_claim.sh 241`로 claim하고 별도 branch/worktree `docs/241-local-3-day-alpha-test-pack`에서 진행한다.
+- [x] `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`를 추가해 72h local dogfood의 Day 0 / Day 1 / Day 2 / Day 3 체크리스트를 정본화한다.
+- [x] `AWS_READY` / `BLOCKED` / `NEEDS_MORE_LOCAL` 판단 기준을 정의한다.
+- [x] P0/P1/P2/P3 버그 분류 기준과 `docs/INTERNAL_ALPHA_FEEDBACK.md` 연결을 문서화한다.
+- [x] local alpha start / stop / restart / recovery 절차를 정리한다.
+- [x] mock agent runtime과 external agent runtime 경로를 구분하고, provider token은 momo 밖에 둔다는 boundary를 유지한다.
+- [x] daily diagnostics/evidence 수집 절차와 evidence directory layout을 정리한다.
+- [x] Day 0~3 daily report template과 MOMO-246 final report template을 추가한다.
+- [x] `docs/INTERNAL_ALPHA.md`, `docs/AWS_INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `docs/INDEX.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #241을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-246 실행 전제 `[manual/tracking]`
+- [ ] MOMO-241~245가 main에 merge되어 있다.
+- [ ] MOMO-246은 momo-main tracking/run issue로 진행하고 worker implementation goal로 claim하지 않는다.
+- [ ] 실제 72h run 중 발견된 결함은 P0/P1/P2/P3 별도 이슈로 분리한다.
+- [ ] 최종 판정은 `AWS_READY` / `BLOCKED` / `NEEDS_MORE_LOCAL` 중 하나로만 남긴다.
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -267,6 +295,18 @@
 - [ ] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [ ] PR 생성 후 GitHub issue를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-242 수용기준 `[runtime/docs/swift]`
+- [x] 기존 GitHub issue #242를 `scripts/goal_claim.sh 242`로 claim하고 별도 branch/worktree `feat/242-external-agent-runtime-smoke`에서 진행한다.
+- [x] `docs/external-agent-provider/README.md`에 external agent runtime secret env 형식, mock/local runtime과 external runtime의 차이, provider token/Codex OAuth/OpenAI key 비저장 boundary를 문서화한다.
+- [x] `scripts/verify_external_agent_provider.sh` credentialed path가 `channel message -> agent run -> external runtime call -> durable agent response` 최소 1왕복 smoke를 유지하고, PASS status에서 `degradedReason`이 비어 있음을 확인한다.
+- [x] `scripts/local_alpha_runner.sh execute --hermes external --external-smoke --secret-env <outside-repo-env>` 옵션을 추가해 local alpha runner에서 같은 external runtime smoke로 위임할 수 있게 한다.
+- [x] `/v1/agent-runtime/status`와 macOS Kim Intern status surface가 redacted `degradedReason`을 표시하되 provider token/API key/OAuth secret은 노출하지 않는다.
+- [x] `docs/INTERNAL_ALPHA.md`, `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `docs/INDEX.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] 검증: `scripts/local_gate.sh --profile docs` PASS.
+- [x] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] Credentialed real provider PASS는 provider secret이 있는 환경에서만 닫고, 없는 환경에서는 `runtime-unverified(external provider credentials)`로 남긴다.
+- [ ] PR 생성 후 GitHub #242를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
@@ -762,6 +802,7 @@
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 | `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
 | `MOMO-244` | Dev Update Channel v0(local/file manifest + operator-assisted install CTA) | swift/macos-ui/docs | MOMO-235 |
+| `MOMO-243` | In-App Alpha Command Center | swift/macos-ui/docs | MOMO-232, MOMO-235, MOMO-239 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -1088,6 +1129,20 @@
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #244를 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: Sparkle 정식 연동, Developer ID signing, notarization, DMG/App Store 배포, 완전 무인 self-replace updater.
+
+### MOMO-243 수용기준 `[swift/macos-ui/docs]`
+- [x] GitHub #243을 `scripts/goal_claim.sh 243`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] macOS 앱 안에 `Alpha Command Center` detail pane을 추가한다.
+- [x] Server / Realtime / Agent Runtime / Invites / Diagnostics / Updates 상태를 기존 `MomoMacRootView` / `ChatViewModel` / `LiveChatBackend` / REST backend projection으로 재사용해 표시한다.
+- [x] 오늘 테스트할 것 체크리스트와 현재 가능한 기능/아직 안 되는 기능/known limitations를 앱 내에서 보여준다.
+- [x] failed/degraded 상태에 사용자가 이해할 수 있는 detail/recovery hint를 표시한다.
+- [x] empty/loading/error/retry state는 기존 recoverable error, realtime fallback, invite failure, update diagnostics 상태를 통해 구분된다.
+- [x] focused macOS tests가 Command Center snapshot의 필수 surface와 degraded 상태 설명을 검증한다.
+- [x] `docs/INTERNAL_ALPHA.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #243을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: 실제 자동 업데이트 설치, Sparkle 정식 연동, AWS 배포, iOS 앱 구현, 대규모 브랜드/디자인 리뉴얼.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

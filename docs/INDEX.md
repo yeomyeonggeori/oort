@@ -52,6 +52,7 @@
 | [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |
 | [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md) | SOPS+age secret lifecycle + pgBackRest PITR backup/restore skeleton(MOMO-006, 실제 secret 없음) | M1 |
 | [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | 내부 alpha quickstart: local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations | M3/M7 준비 |
+| [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) | 72h local dogfood decision contract: Day 0~3 checklist, AWS_READY/BLOCKED/NEEDS_MORE_LOCAL 기준, daily report/final report template | M1/M7 준비 |
 | [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
 | [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | macOS alpha Dev Update Channel runbook: local/file manifest v0, current/available version CTA, operator-assisted install/relaunch, Sparkle/signing boundary | M3/M4 준비 |
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
@@ -59,12 +60,13 @@
 | [`docs/INBOUND_MCP.md`](INBOUND_MCP.md) | Inbound MCP v0 서버 skeleton endpoint/security/permission model | M2 |
 | [`docs/GITHUB_OPS.md`](GITHUB_OPS.md) | GitHub 운영 구조(마일스톤=릴리스, 라벨 택소노미, Projects, Codex goal 흐름) | 전반 |
 | [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
+| [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) | external agent runtime smoke 계약: provider secret env 형식, mock/local/external 차이, credentialed 1왕복 gate, token 비저장 boundary | M1 |
 | [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md) | local-only Hermes + GPT provider 계약: loopback opt-in, non-loopback HTTP fail-fast, OpenAI credential provider-owned boundary | M1 |
 | [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
 | [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
 | [`docs/adr/0003-macos-packaging-architecture.md`](adr/0003-macos-packaging-architecture.md) | M4 macOS packaging ADR: SwiftPM dev app vs Xcode release app, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle issue split | M4 |
-| [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md) | Codex/OpenAI credential boundary: Hermes/Kim Intern provider-owned OAuth/API keys, momo evidence redaction/fail-fast | M1 |
+| [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md) | Codex/OpenAI credential boundary: external runtime provider-owned OAuth/API keys, momo evidence redaction/fail-fast | M1 |
 | [`docs/adr/0005-macos-alpha-update-channel-v0.md`](adr/0005-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)

@@ -798,6 +798,7 @@ private struct AgentRuntimeStatusDTO: Decodable {
     let model: String
     let endpointLabel: String
     let keyConfigured: Bool
+    let degradedReason: String?
     let diagnostics: [String]
 
     var status: AgentRuntimeStatus {
@@ -810,6 +811,7 @@ private struct AgentRuntimeStatusDTO: Decodable {
             model: model,
             endpointLabel: endpointLabel,
             keyConfigured: keyConfigured,
+            degradedReason: degradedReason,
             diagnostics: diagnostics
         )
     }
