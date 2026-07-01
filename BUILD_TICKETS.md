@@ -602,6 +602,7 @@
 | `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
 | `MOMO-218` | macOS channel management UI v0 | swift/macos-ui | MOMO-213, MOMO-214 |
 | `MOMO-223` | macOS session/account/server switch + logout polish v0 | swift/macos-ui | MOMO-213, MOMO-207, MOMO-218 |
+| `MOMO-226` | macOS invite/admin onboarding real-backend polish v0 | swift/macos-ui | MOMO-011, MOMO-014, MOMO-213, MOMO-217, MOMO-218, MOMO-223 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -875,6 +876,18 @@
 - [ ] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 - [ ] PR 생성 후 GitHub #203을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: Keychain production storage finalization, signed `.app` packaging, enterprise multi-workspace admin UX, iOS session UX.
+
+### MOMO-226 수용기준 `[swift/macos-ui]`
+- [x] GitHub #210을 `scripts/goal_claim.sh 210`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] macOS server-configured/real-server mode에서 owner/admin invite create/list/revoke가 실제 MomoServer REST path를 사용한다.
+- [x] session bar의 compact invite management surface에서 role, usage, expiry를 지정해 invite를 만들고 active/revoked/used 상태를 확인할 수 있다.
+- [x] revoke action은 서버 응답의 `revokedAtMs`/reason을 UI state와 tests에 반영한다.
+- [x] second user는 fresh invite code로 `/v1/join` 후 token/workspace/member session을 받고, `macos-ui` smoke가 joined token으로 channels/members state를 로드한다.
+- [x] focused macOS tests가 invite create request mapping, list/revoke state, join token/workspace/member session을 검증한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] PR 생성 후 GitHub #210을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: SSO/OAuth, email delivery for invite links, billing/team plans, App Store packaging/signing/notarization.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
