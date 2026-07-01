@@ -59,6 +59,7 @@ Profiles:
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
+| `external-agent-provider` | real Kim Intern/Hermes credentialed smoke, opt-in only | `docs` profile + `scripts/verify_external_agent_provider.sh`; with credentials it checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction, and one local MomoServer/AgentWorker/OutboxRelay `@김인턴` roundtrip; without credentials it writes `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
@@ -74,10 +75,31 @@ scripts/local_gate.sh --profile host-runtime
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
+scripts/local_gate.sh --profile external-agent-provider
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
+
+For the external provider profile, keep stack ports in `.env.worktree` and pass
+provider credentials through the shell or a separate untracked file:
+
+```bash
+AGENT_PROVIDER_MODE=external-hermes \
+HERMES_BASE_URL=https://hermes.example.com/v1 \
+HERMES_API_KEY=... \
+scripts/local_gate.sh --profile external-agent-provider
+
+EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
+scripts/local_gate.sh --profile external-agent-provider
+```
+
+The verifier never prints the API key. If `AGENT_PROVIDER_MODE` is not
+`external-hermes`, the profile exits successfully with explicit
+`runtime-unverified(external provider credentials)` evidence so default mock
+runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is
+set but the URL/key is missing, placeholder-like, localhost, or mock, the profile
+fails fast because that is a misconfigured credentialed smoke.
 
 The default script is strict: PR evidence should come from a clean worktree and
 checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus
@@ -231,6 +253,7 @@ Use the profile that matches the changed surface.
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
+| `external-agent-provider` | opt-in real Kim Intern/Hermes side-effect smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
 

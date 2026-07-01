@@ -8,7 +8,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all
+Usage: scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all
 
 Options:
   --profile PROFILE   Gate profile to run. Default: docs
@@ -40,7 +40,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
       PROFILE="$1"
       shift
       ;;
@@ -53,7 +53,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -150,7 +150,7 @@ add_static_commands() {
   add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
   add_cmd_once "e2e compose config" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; test -n "$env_file" || { echo "no env file found for e2e compose config"; exit 1; }; docker compose --env-file "$env_file" -f infra/docker-compose.e2e.yml config >/tmp/momo-compose-e2e-config.yml; echo "wrote /tmp/momo-compose-e2e-config.yml using $env_file"'
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_agent_live_channel.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_agent_live_channel.sh scripts/verify_external_agent_provider.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
 }
 
@@ -239,6 +239,13 @@ add_runtime_agent_commands() {
   add_note_once coverage "REST @agent mention routing via scripts/verify_agent_worker.sh: same-channel @김인턴 POST /messages creates agent_run/agent_job, duplicate client_msg_id dedupes the job, non-channel agent mention records audit no-op, mock SSE returns agent.partial/tool_call progress on agent:, and OutboxRelay publishes final channel message.new."
   add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, D live tool_call progress with bounded args, cost reserve/reconcile, MomoServer cost-snapshots projection endpoint, and approved deterministic resume_approval -> final tool_result/message.new/audit/job-done via scripts/verify_agent_worker.sh."
   add_note_once coverage "Agent live channel boundary via scripts/verify_agent_live_channel.sh: authorized member receives live agent.status/agent.partial on agent:ws<workspace>.<agent>, invalid token/same-workspace no-shared-channel member/other-workspace token are denied, and client direct publish is rejected."
+}
+
+add_external_agent_provider_commands() {
+  add_cmd "External Kim Intern/Hermes provider smoke" "scripts/verify_external_agent_provider.sh"
+  add_note_once coverage "MOMO-230 opt-in external provider gate: when AGENT_PROVIDER_MODE=external-hermes plus HERMES_BASE_URL/HERMES_API_KEY are configured, scripts/verify_external_agent_provider.sh checks OpenAI-compatible SSE directly, boots local Postgres/Centrifugo + MomoServer/OutboxRelay/AgentWorker, verifies /v1/agent-runtime/status redacted availability, and sends one @김인턴 roundtrip through the external provider."
+  add_note_once coverage "MOMO-230 no-credential behavior: with default local/mock env, the verifier exits successfully with explicit runtime-unverified(external provider credentials) evidence and does not alter deterministic runtime-agent/internal-alpha gates."
+  add_note_once not_covered "The default runtime-agent profile remains repo-local mock Hermes only; real provider side effects are covered only by the external-agent-provider opt-in profile."
 }
 
 add_macos_ui_commands() {
@@ -331,6 +338,10 @@ case "$PROFILE" in
     add_static_commands
     add_swift_commands
     add_runtime_agent_commands
+    ;;
+  external-agent-provider)
+    add_static_commands
+    add_external_agent_provider_commands
     ;;
   macos-ui)
     add_static_commands

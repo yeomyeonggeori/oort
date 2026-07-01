@@ -27,6 +27,7 @@
   - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
   - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
+  - ✅ `scripts/verify_external_agent_provider.sh` + `scripts/local_gate.sh --profile external-agent-provider` — credentials가 있는 환경에서만 real Hermes/Kim Intern SSE + local momo `@김인턴` 1왕복을 검증하는 opt-in gate (MOMO-230)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
@@ -128,6 +129,7 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 | `JWT_HMAC` | `openssl rand -hex 32` | App access/refresh 토큰 HS256. |
 | `AGENT_PROVIDER_MODE` | literal | staging/prod/internal-host는 반드시 `external-hermes`. |
 | `AGENT_MODEL` | literal | 기본 `hermes-agent`; provider/model 라벨. |
+| `HERMES_BASE_URL` | (hermes 발급) | OpenAI-compatible `/v1` base URL. staging/prod/internal-host는 `https://`만 허용. |
 | `HERMES_API_KEY` | (hermes 발급) | 김인턴 게이트웨이 Bearer. |
 | `RELAY_DATABASE_URL` | — | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§5.2). |
 | `REDIS_URL` | (내부) | `redis://redis:6379`(compose 내부, 비밀번호 설정 권장). |
@@ -168,6 +170,19 @@ localhost 도메인, mock Hermes, local `momo-*:internal-smoke*` 이미지, `cha
 `momo_*_dev_pw` placeholder가 의도된 테스트 값이다. 이 파일은 real host env나
 SOPS production secret의 입력으로 사용하지 않는다. 이 모드의 provider는
 `AGENT_PROVIDER_MODE=internal-host-mock`으로 고정한다.
+
+운영 host를 띄우기 전에도 real provider credential 자체는 repo-local opt-in gate로
+먼저 확인할 수 있다. 이 gate는 provider secret을 출력하지 않고 redacted evidence만 남긴다.
+
+```sh
+EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
+scripts/local_gate.sh --profile external-agent-provider
+```
+
+`external-hermes`가 명시됐는데 `HERMES_BASE_URL`이 localhost/mock/non-HTTPS이거나
+`HERMES_API_KEY`가 placeholder면 fail-fast한다. credentials가 없으면
+`runtime-unverified(external provider credentials)` evidence로 skip되며 staging/prod
+ready 판정으로 쓰지 않는다.
 
 ---
 
@@ -337,6 +352,7 @@ scripts/verify_backup_restore_rehearsal.sh
 scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile backup
 scripts/local_gate.sh --profile host-runtime
+scripts/local_gate.sh --profile external-agent-provider   # real provider credentials가 있을 때만 PASS evidence
 ```
 
 이 gate가 자동으로 닫는 범위:
@@ -349,9 +365,10 @@ scripts/local_gate.sh --profile host-runtime
 - MOMO-216 internal smoke overlay가 prod compose 위에서 렌더링되고, local image fallback tags, explicit image-based `migrate` job, MomoServer `/health` route, relay/worker env/enablement, mock Hermes boundary를 static 검증한다.
 - MOMO-220/MOMO-227 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, `/v1/agent-runtime/status` mock/redaction projection, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
 - MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
+- MOMO-230 external-agent-provider gate는 credentials가 있을 때만 real Hermes/Kim Intern OpenAI-compatible SSE preflight와 local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복을 검증한다.
 
 `runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,
-real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/WAL archive/time-target PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime에서만 닫는다.
+real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/WAL archive/time-target PITR restore rehearsal은 public host-runtime에서만 닫는다. Real provider credentials가 없으면 외부 hermes/Kim Intern side effect는 `runtime-unverified(external provider credentials)`로 남긴다.
 
 ### 8.0.1 internal single-node hosting smoke (MOMO-216/MOMO-220)
 
@@ -369,6 +386,7 @@ scripts/verify_internal_host_runtime.sh
 - Local internal smoke: 아직 publish pipeline 전이라도 verifier가 `momo-api:internal-smoke-*` 같은 run-specific local image tag를 빌드해 사용할 수 있다.
 - Migration: app container boot side effect가 아니라 operator step 또는 image-based smoke `migrate` job으로 실행한다.
 - Runtime smoke: `scripts/verify_internal_host_runtime.sh`는 source checkout bind mount 없이 `/health`, `/v1/agent-runtime/status`, REST login/message send, OutboxRelay→Centrifugo publish, mock Hermes `@김인턴` roundtrip evidence/log path를 출력한다.
+- External provider smoke: `scripts/verify_external_agent_provider.sh`는 source checkout host process로 local stack을 띄운 뒤 real Hermes/Kim Intern provider에 `@김인턴` 1왕복을 보낸다. 이 smoke는 운영 계정/키 발급 자체를 하지 않으며, credentials가 없으면 explicit skip evidence만 남긴다.
 - Caddy/TLS: Caddy가 유일한 public edge다. Local smoke는 `localhost`/`rt.localhost`와 `18080/18443` config를 확인하지만 public ACME/DNS는 검증하지 않는다.
 - Backup/restore: repo-local dump/restore 리허설은 `backup` profile evidence로 닫고, 실제 pgBackRest stanza/check/full backup/WAL/time-target PITR restore rehearsal은 `runtime-unverified(public host)`다.
 
