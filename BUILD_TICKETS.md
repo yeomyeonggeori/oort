@@ -170,6 +170,7 @@
 | `MOMO-237` | Local Docker alpha RC gate v0 | tooling/runtime/docs | MOMO-220, MOMO-224, MOMO-225, MOMO-228, MOMO-233, MOMO-236 |
 | `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233 |
 | `MOMO-240` | Local alpha runner | infra/runtime | MOMO-001~004, MOMO-237, MOMO-238, MOMO-239 |
+| `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-237, MOMO-239, MOMO-240 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -228,6 +229,22 @@
 - [x] `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [x] local gate: `sh -n scripts/local_alpha_runner.sh`, `scripts/local_alpha_runner.sh plan`, `scripts/local_alpha_runner.sh execute --hermes mock --stop-after-smoke`, `make build`, `make test`, `python3 -m py_compile adapters/hermes/momo_adapter.py` 통과.
 - [ ] PR은 `needs-review` 상태에서 멈춘다.
+
+### MOMO-245 수용기준 `[tooling/runtime/docs]`
+- [x] 기존 GitHub issue #245를 `scripts/goal_claim.sh 245`로 claim하고 별도 branch/worktree `chore/245-local-soak-resource-monitor`에서 진행한다.
+- [x] `scripts/local_soak_monitor.sh`를 추가해 72h local dogfood 동안 주기 snapshot evidence를 repo 밖 디렉터리에 저장한다.
+- [x] snapshot은 API `/health`, Centrifugo `/health`, DB connectivity, pending outbox count/oldest age를 확인한다.
+- [x] snapshot은 OutboxRelay/AgentWorker process 또는 container status를 확인한다.
+- [x] snapshot은 Docker container status, `docker stats`, `docker system df`, disk free evidence를 수집한다.
+- [x] macOS foreground smoke 또는 launch evidence를 `--macos-evidence`/`--launch-macos-smoke`로 연결할 수 있다.
+- [x] `summary.md`에 PASS/WARN/FAIL 판정과 P0/P1 threshold를 출력한다.
+- [x] P0/P1 감지 기준과 Docker Desktop CPU/memory/disk 권장값을 `docs/INTERNAL_ALPHA.md`에 문서화한다.
+- [x] `scripts/local_gate.sh --profile docs`의 shell syntax 대상에 새 스크립트를 포함한다.
+- [x] `docs/INTERNAL_ALPHA.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] 실제 72h dogfood 완료, AWS monitoring, Prometheus/Grafana/Kubernetes, 대규모 부하테스트는 out of scope로 남긴다.
+- [ ] PR 생성 후 GitHub #245를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.

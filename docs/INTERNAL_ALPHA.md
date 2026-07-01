@@ -333,6 +333,73 @@ Interpretation:
   that skip is not enough for AWS promotion. AWS promotion requires a
   credentialed Hermes GPT smoke.
 
+### 7.1 Local Soak/Resource Monitor
+
+Use the soak monitor after the stack and app are already running. It is not a
+process supervisor; it is a lightweight evidence recorder for the 72-hour local
+dogfood window.
+
+```bash
+SOAK_DIR="/tmp/momo-one-person-alpha-$(date -u +%Y%m%d)/soak"
+
+scripts/local_soak_monitor.sh \
+  --duration-hours 72 \
+  --interval-seconds 300 \
+  --evidence-dir "$SOAK_DIR" \
+  --macos-evidence /tmp/momo-local-gate/<macos-ui-or-internal-alpha-evidence>.md
+```
+
+For a quick single-snapshot check while the local stack is up:
+
+```bash
+scripts/local_soak_monitor.sh --smoke --evidence-dir /tmp/momo-soak-smoke
+```
+
+The monitor writes a repo-external directory such as
+`/tmp/momo-one-person-alpha-YYYYMMDD/soak/momo-soak-*/` with `summary.md`,
+`events.tsv`, per-snapshot markdown, API/Centrifugo health responses, DB/outbox
+checks, Docker `ps`/`stats`/`system df`, process snapshots, and optional macOS
+launch evidence.
+
+macOS app evidence can be connected in either of two ways:
+
+- Run `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` or `--profile internal-alpha`, then pass the evidence markdown path via `--macos-evidence`.
+- Use `scripts/local_soak_monitor.sh --launch-macos-smoke` to run `scripts/macos_dev_run.sh --verify --logs` once before monitoring.
+
+`summary.md` result values:
+
+| Result | Meaning |
+|---|---|
+| `PASS` | API, Centrifugo, DB, outbox, Docker health/resources, relay/worker, and app evidence had no recorded P0/P1 signals. |
+| `WARN` | No P0 signal, but at least one P1 signal appeared. This is acceptable only with an explicit follow-up or operator note. |
+| `FAIL` | At least one P0 signal appeared. Do not mark the 72-hour soak complete. |
+
+P0/P1 detection 기준:
+
+| Severity | Signal |
+|---|---|
+| P0 | API `/health`, Centrifugo `/health`, or DB connectivity fails in any snapshot. |
+| P0 | Docker is unavailable, no worktree compose containers are found, or any observed compose container is unhealthy. |
+| P0 | pending outbox rows `>=100` or oldest pending outbox age `>=600s` by default. |
+| P0 | evidence disk free space drops below `2GB`, or required macOS evidence is missing when `--require-macos-evidence` is used. |
+| P1 | pending outbox rows `>=10` or oldest pending outbox age `>=60s` by default. |
+| P1 | OutboxRelay, AgentWorker, or MomoMac process/evidence is not observed during the soak. |
+| P1 | evidence disk free space drops below `10GB`. |
+
+Docker Desktop resource recommendation for the 72-hour local dogfood:
+
+| Resource | Minimum | Preferred |
+|---|---:|---:|
+| CPU | 4 vCPU | 6+ vCPU |
+| Memory | 8 GB | 12-16 GB |
+| Disk image | 64 GB | 100+ GB |
+| Free host disk before start | 20 GB | 40+ GB |
+
+Keep the final `summary.md`, local gate evidence, diagnostics bundle, and any
+feedback issue links together in the one-person alpha handoff directory. AWS
+promotion requires a `PASS` soak summary or a named follow-up for every `WARN`;
+any `FAIL` keeps the decision at `LOCAL_ONLY`.
+
 ## 8. AWS Promotion Threshold
 
 AWS promotion is allowed only after the local gate above and the threshold below
