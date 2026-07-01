@@ -49,6 +49,7 @@
 |---|---|---|
 | [`docs/RELEASE_PLAYBOOK.md`](RELEASE_PLAYBOOK.md) | 데스크탑 공증 + iOS App Store + CI/CD **실행 마스터 체크리스트** + 비용/기간 표 + gotcha 집약 | M1~M8 |
 | [`docs/DEPLOY.md`](DEPLOY.md) | 백엔드 멀티팀 운영 배포(staging→prod: Caddy 자동TLS/Redis/SOPS+age/pgBackRest PITR/모니터링) | M1, M2 |
+| [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |
 | [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md) | SOPS+age secret lifecycle + pgBackRest PITR backup/restore skeleton(MOMO-006, 실제 secret 없음) | M1 |
 | [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | 내부 alpha quickstart: local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations | M3/M7 준비 |
 | [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
