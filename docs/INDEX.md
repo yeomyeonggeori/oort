@@ -52,6 +52,7 @@
 | [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |
 | [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md) | SOPS+age secret lifecycle + pgBackRest PITR backup/restore skeleton(MOMO-006, 실제 secret 없음) | M1 |
 | [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | 내부 alpha quickstart: local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations | M3/M7 준비 |
+| [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) | 72h local dogfood decision contract: Day 0~3 checklist, AWS_READY/BLOCKED/NEEDS_MORE_LOCAL 기준, daily report/final report template | M1/M7 준비 |
 | [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
 | [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | macOS alpha update channel runbook: Sparkle 2/manual fallback, appcast/signing/notary/DMG secret boundary, placeholder UI check | M3/M4 준비 |
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |

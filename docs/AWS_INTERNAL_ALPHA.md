@@ -14,19 +14,20 @@ on 80/443, all momo services in image-based Docker Compose, pgBackRest to S3,
 and daily EBS snapshots.
 
 Do not provision this host until the local one-person alpha handoff in
-[`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) is marked `AWS_READY`. The
-promotion threshold is:
+[`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) or the 72-hour contract in
+[`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) is
+marked `AWS_READY`. The promotion threshold is:
 
 | Gate | Required before AWS |
 |---|---|
 | Local gate | One-person local alpha checklist PASS with login, channel load, message send/receive, invite/join, Kim Intern mention, restart/reconnect, diagnostics, and feedback evidence. |
 | 1인 soak | At least 5 local sessions across at least 2 calendar days and at least 120 active minutes, including app and server/relay/Centrifugo restart coverage. |
-| Hermes GPT smoke | Credentialed `AGENT_PROVIDER_MODE=external-hermes` roundtrip through local MomoServer, AgentWorker, OutboxRelay, and durable timeline. A no-credential skip blocks AWS. |
+| External agent runtime smoke | Credentialed `AGENT_PROVIDER_MODE=external-hermes` roundtrip through local MomoServer, AgentWorker, OutboxRelay, and durable timeline. A no-credential skip blocks AWS. |
 | No P0/P1 | Zero open P0/P1 feedback items after triage. |
 | Diagnostics | Final redacted diagnostics bundle references the same commit and local gate evidence. |
 
-If any row is missing, the decision is `LOCAL_ONLY` or `AWS_BLOCKED`; keep this
-document as planning material and do not create AWS resources.
+If any row is missing, the decision is `NEEDS_MORE_LOCAL` or `BLOCKED`; keep
+this document as planning material and do not create AWS resources.
 
 Lightsail is cheaper and faster to click together, but EC2 is the better v0
 default because it matches the controls this repo is already preflighting:
@@ -243,7 +244,8 @@ volume from snapshot/PITR.
 redacted evidence under the local gate output directory. This proves only the
 documented shape. For a real host, attach:
 
-- `AWS_READY` one-person alpha handoff from `docs/INTERNAL_ALPHA.md`
+- `AWS_READY` one-person alpha handoff from `docs/INTERNAL_ALPHA.md` or
+  `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`
 - `aws-internal-alpha-preflight-<topology>.md/json`
 - `prod-env-preflight-internal-host.md/json`
 - image digest list

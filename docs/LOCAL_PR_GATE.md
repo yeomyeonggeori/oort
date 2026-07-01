@@ -231,8 +231,8 @@ Docs gate PASS for the one-person alpha checklist means the runbook and static
 preflight are internally consistent. It does not by itself mark the product
 `AWS_READY`. AWS promotion still requires the operational threshold in
 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md): local one-person gate PASS,
-1-person soak, credentialed external runtime smoke, zero open P0/P1, and redacted
-diagnostics evidence.
+1-person soak, credentialed external agent runtime smoke, zero open P0/P1, and
+redacted diagnostics evidence.
 
 If the change modifies diagnostics collection or expected bundle shape, use
 `scripts/local_gate.sh --profile diagnostics`. If the change claims macOS app
