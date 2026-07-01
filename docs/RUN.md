@@ -190,6 +190,10 @@ scripts/local_gate.sh --profile backup
 
 # host-runtime smoke에는 같은 복원 리허설이 포함된다.
 scripts/local_gate.sh --profile host-runtime
+
+# 내부 알파 reviewer handoff용 combined evidence packet.
+# host-runtime, backup restore, macOS real-backend process/window, diagnostics bundle을 함께 남긴다.
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 ```
 
 ---
@@ -250,6 +254,20 @@ macOS unified logs, env shape, git commit/status, local gate evidence를 모아
 
 보안 경계: secrets/password/token/API key/HMAC/database URL credentials는 bundle에 쓰기 전에
 `[REDACTED]`로 치환한다. 그래도 외부 공유 전에는 내부자가 summary와 파일 목록을 한 번 확인한다.
+
+내부 알파 PR handoff처럼 "돌아가는 로컬 호스트 런타임 + 실제 macOS dev app + 복원 리허설 +
+진단 번들"을 한 번에 묶어야 할 때는 combined local gate를 사용한다.
+
+```sh
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
+```
+
+이 profile은 `LOCAL_GATE_LAUNCH_UI=1`을 필수로 요구한다. PASS 시 top-level local gate evidence가
+run-specific `internal-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/`
+artifact directory를 함께 출력한다. 여기에는 prod+internal-smoke image boot, `/health`, migration
+idempotency, REST message, OutboxRelay publish, mock Hermes 기반 김인턴 roundtrip, repo-local
+`pg_dump`→separate restore evidence, `MomoMacDevApp` real-backend process/window log, redacted
+diagnostics directory/archive path가 포함된다.
 
 ---
 

@@ -167,6 +167,7 @@
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
+| `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -201,6 +202,17 @@
 - [ ] `scripts/local_gate.sh --profile diagnostics` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #201을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-225 수용기준 `[tooling/runtime]`
+- [x] GitHub #209를 `scripts/goal_claim.sh 209`로 claim하고 별도 branch/worktree `chore/209-internal-alpha-combined-local-gate-v0`에서 진행한다.
+- [x] `scripts/local_gate.sh --profile internal-alpha`를 추가한다.
+- [x] `internal-alpha`는 `LOCAL_GATE_LAUNCH_UI=1`을 요구하고, host-runtime, backup restore, macOS real-backend UI, diagnostics bundle을 한 PR-ready evidence packet으로 묶는다.
+- [x] host-runtime evidence에는 prod+internal-smoke local image boot, `/health`, migration idempotency, REST message, OutboxRelay publish, mock Hermes/Kim Intern roundtrip을 포함한다.
+- [x] macOS evidence에는 `MomoMacDevApp` real backend launch/process/window/log path를 포함한다.
+- [x] diagnostics bundle directory/archive path와 backup restore markdown/json evidence path를 local gate artifact packet에 포함한다.
+- [x] `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #209를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-115 수용기준 `[runtime/infra]`
 - [x] `scripts/verify_relay.sh`가 seeded demo user login + REST send로 outbox `pending`을 만들고, relay 시작 후 SKIP LOCKED claim(`attempts>=1`) + Centrifugo history + outbox `done`을 검증한다.
@@ -604,6 +616,7 @@
 | `MOMO-213` | macOS real-server session/onboarding UI v0 | swift/macos-ui | MOMO-205, MOMO-211 |
 | `MOMO-218` | macOS channel management UI v0 | swift/macos-ui | MOMO-213, MOMO-214 |
 | `MOMO-223` | macOS session/account/server switch + logout polish v0 | swift/macos-ui | MOMO-213, MOMO-207, MOMO-218 |
+| `MOMO-226` | macOS invite/admin onboarding real-backend polish v0 | swift/macos-ui | MOMO-011, MOMO-014, MOMO-213, MOMO-217, MOMO-218, MOMO-223 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -877,6 +890,18 @@
 - [ ] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 첨부한다.
 - [ ] PR 생성 후 GitHub #203을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: Keychain production storage finalization, signed `.app` packaging, enterprise multi-workspace admin UX, iOS session UX.
+
+### MOMO-226 수용기준 `[swift/macos-ui]`
+- [x] GitHub #210을 `scripts/goal_claim.sh 210`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] macOS server-configured/real-server mode에서 owner/admin invite create/list/revoke가 실제 MomoServer REST path를 사용한다.
+- [x] session bar의 compact invite management surface에서 role, usage, expiry를 지정해 invite를 만들고 active/revoked/used 상태를 확인할 수 있다.
+- [x] revoke action은 서버 응답의 `revokedAtMs`/reason을 UI state와 tests에 반영한다.
+- [x] second user는 fresh invite code로 `/v1/join` 후 token/workspace/member session을 받고, `macos-ui` smoke가 joined token으로 channels/members state를 로드한다.
+- [x] focused macOS tests가 invite create request mapping, list/revoke state, join token/workspace/member session을 검증한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] PR 생성 후 GitHub #210을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: SSO/OAuth, email delivery for invite links, billing/team plans, App Store packaging/signing/notarization.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
