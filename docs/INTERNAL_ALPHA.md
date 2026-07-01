@@ -276,7 +276,76 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 
 Paste the `## Local Gate` block from the script into the PR or issue comment.
 
-## 7. Feedback Intake
+## 7. One-Person Local Alpha Gate
+
+This gate decides whether momo is ready to leave a single developer Mac and move
+to an AWS internal alpha host. It is intentionally local and evidence-based: do
+not provision AWS because the app "feels close". AWS promotion requires every
+required row below to be `PASS`, with evidence paths recorded in the handoff
+note. Use `WAIVED` only for non-blocking P2/P3 polish and explain the follow-up
+issue. P0/P1 rows cannot be waived.
+
+Recommended handoff file name:
+
+```text
+/tmp/momo-one-person-alpha-<YYYYMMDD>/handoff.md
+```
+
+| Check | Required evidence | PASS threshold |
+|---|---|---|
+| Login | screenshot or log excerpt for seeded owner login and joined-user login | Both accounts authenticate against local MomoServer; failed login shows recoverable UI/API error. |
+| Channel 조회 | app screenshot or API JSON for `#general` and `#agent-lab` | Seeded channels load, selected channel history loads, Kim Intern appears as an agent member in `#agent-lab`. |
+| 메시지 송수신 | local gate evidence or two-account transcript | Owner sends one message, joined user sends one message, both appear in `message.seq` order after live receipt or refresh. |
+| 초대/가입 | invite create response with redacted code preview and joined-user login proof | Owner/admin creates invite, raw code is copied once, `/v1/join` succeeds, joined user cannot gain owner/platform-admin privileges. |
+| 김인턴 멘션 | `runtime-agent`, `internal-alpha`, or `external-agent-provider` evidence | `@김인턴` in `#agent-lab` creates an agent job and a durable final timeline message. Mock Hermes is enough for local gate; AWS promotion also needs the Hermes GPT smoke below. |
+| 재시작/reconnect | transcript of app restart plus server/relay or Centrifugo restart | App returns to usable state, realtime reconnects or clearly falls back to REST, message history remains ordered by `message.seq`. |
+| diagnostics | redacted diagnostics bundle path plus `summary.md` review note | `scripts/collect_diagnostics.sh --output-dir ... --since 15m` produces a bundle, secrets are redacted, and missing sources are listed explicitly. |
+| feedback filing | GitHub feedback issue/comment URL, or local handoff markdown if GitHub is unavailable | At least one feedback packet exists, even if it is a "no blocker found" soak note with environment, steps, evidence, and severity. |
+
+Minimum local command set before marking this gate `PASS`:
+
+```bash
+scripts/local_gate.sh --profile docs
+LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile internal-alpha
+scripts/local_gate.sh --profile external-agent-provider
+```
+
+Interpretation:
+
+- `docs` must PASS for runbook/checklist changes.
+- `internal-alpha` must PASS with foreground UI evidence for the one-person
+  local dogfood handoff.
+- `external-agent-provider` may PASS as
+  `runtime-unverified(external provider credentials)` for local dogfood, but
+  that skip is not enough for AWS promotion. AWS promotion requires a
+  credentialed Hermes GPT smoke.
+
+## 8. AWS Promotion Threshold
+
+AWS promotion is allowed only after the local gate above and the threshold below
+are both satisfied. Record the decision in the handoff note with commit SHA,
+local gate evidence paths, diagnostics bundle path, and feedback issue links.
+
+| Threshold | Required result |
+|---|---|
+| Local gate | One-person local alpha gate is `PASS` with no P0/P1 waiver and no missing required evidence. |
+| 1인 soak | One person completes at least 5 local sessions across at least 2 calendar days, totaling at least 120 minutes of active local server + MomoMacDevApp use. Include at least two app restarts and one server/relay/Centrifugo restart. |
+| Hermes GPT smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` GPT-backed roundtrip through local MomoServer, AgentWorker, OutboxRelay, and timeline. A no-credential skip blocks AWS promotion. |
+| No P0/P1 | Feedback triage shows zero open P0 or P1 issues. P2/P3 may remain only if each has owner, follow-up issue, and workaround or explicit non-blocking note. |
+| Diagnostics evidence | Final diagnostics bundle exists, is redacted, references the same commit as the handoff, and includes local gate evidence plus server/relay/worker/Centrifugo/macOS context where available. |
+
+Promotion decision values:
+
+| Decision | Meaning |
+|---|---|
+| `LOCAL_ONLY` | Keep dogfooding on a developer Mac. Any missing required row, open P0/P1, or skipped Hermes GPT smoke forces this state. |
+| `AWS_READY` | All rows above are PASS and the operator may follow `docs/AWS_INTERNAL_ALPHA.md` to prepare the one-week host. |
+| `AWS_BLOCKED` | AWS topology may be documented, but provisioning is blocked by a named external dependency such as credentials, DNS, SOPS, or billing. |
+
+Do not treat `AWS_READY` as M7 release approval. It only authorizes the internal
+AWS alpha host; store/TestFlight/public release gates remain governed by M7.
+
+## 9. Feedback Intake
 
 Canonical intake and triage rules live in
 [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md). Use GitHub's
@@ -285,7 +354,7 @@ start as `type:feedback`, `area:alpha`, `status:needs-triage` and become
 `status:ready` only after momo-main turns them into a buildable
 `## Goal / ## Context / ## Acceptance / ## Out of scope` contract.
 
-## 8. AWS Team Alpha Host
+## 10. AWS Team Alpha Host
 
 Use [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) when the team needs a
 shared one-week host instead of each tester running Docker locally. The v0
@@ -306,6 +375,11 @@ The preflight is static. It verifies topology and safety intent, not real AWS
 creation, DNS/TLS, registry pull, SOPS decrypt, backup execution, or restore
 rehearsal. Those remain `runtime-unverified(aws-host)` until the host evidence
 packet is attached.
+
+Before running the AWS preflight against a real host env, attach the
+`AWS_READY` handoff from section 8. If the handoff is `LOCAL_ONLY` or
+`AWS_BLOCKED`, keep this document as planning only and do not provision the
+alpha host.
 
 Use this shape for quick GitHub issues or alpha feedback notes:
 
@@ -366,7 +440,7 @@ momo-main triages feedback with `scripts/goal_status.sh --repo Dawn-kim-official
 Rows in `status:needs-triage` are not claimable worker goals until severity,
 evidence, labels, milestone, and acceptance are fixed.
 
-## 8. Known Limitations
+## 11. Known Limitations
 
 - `MomoMacDevApp` is a development app. It is not signed/notarized and is separate from the M4 release `MomoMac.app` packaging path.
 - The `Updates` popover is an alpha-channel placeholder until Sparkle 2 is wired into a signed/notarized release app and a signed appcast exists.

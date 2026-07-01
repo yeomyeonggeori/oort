@@ -167,6 +167,7 @@
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
 | `MOMO-229` | Public host preflight + deploy evidence packet v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228 |
 | `MOMO-233` | AWS internal alpha stack v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228, MOMO-229 |
+| `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -189,6 +190,17 @@
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] 실제 AWS host creation, DNS/TLS, registry pull, SOPS decrypt, pgBackRest backup, EBS snapshot, PITR restore rehearsal은 `runtime-unverified(aws-host)`로 남긴다.
 - [ ] PR 생성 후 GitHub #224를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-239 수용기준 `[docs/manual]`
+- [x] 별도 worktree/branch `docs/MOMO-239-local-alpha-aws-threshold`에서 진행한다.
+- [x] `docs/INTERNAL_ALPHA.md`에 local one-person alpha checklist를 추가한다.
+- [x] 체크리스트는 로그인, 채널 조회, 메시지 송수신, 초대/가입, 김인턴 멘션, 재시작/reconnect, diagnostics, feedback filing을 모두 포함한다.
+- [x] AWS 승격 threshold를 local gate, 1인 soak, Hermes GPT smoke, no P0/P1, diagnostics evidence로 정의한다.
+- [x] `docs/AWS_INTERNAL_ALPHA.md`에 `AWS_READY` handoff 전에는 AWS provisioning 금지라는 precondition을 추가한다.
+- [x] `docs/LOCAL_PR_GATE.md`에 docs gate PASS와 실제 `AWS_READY` 운영 판정의 경계를 문서화한다.
+- [x] `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 MOMO-239를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
