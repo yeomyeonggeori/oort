@@ -171,6 +171,7 @@
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
 | `MOMO-236` | Hermes internal alpha invite smoke v0 | runtime/docs | MOMO-227, MOMO-230, MOMO-228 |
+| `MOMO-238` | Local Hermes GPT provider loopback contract | docs/tooling/swift | MOMO-230, MOMO-234, MOMO-236 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -213,6 +214,20 @@
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [ ] PR 생성 후 GitHub #225를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-238 수용기준 `[docs/tooling/swift]`
+- [x] 별도 worktree/branch `feat/MOMO-238-external-hermes-provider`에서 진행한다.
+- [x] `docs/external-agent-provider/local-hermes-gpt.md`에 `AGENT_PROVIDER_MODE=external-hermes` local loopback opt-in 계약을 문서화한다.
+- [x] `http://127.0.0.1:<port>/v1` 또는 `http://localhost:<port>/v1`은 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`일 때만 허용한다.
+- [x] non-loopback `http://...` provider URL은 서버/워커 설정과 verifier에서 계속 fail-fast한다.
+- [x] Codex/OpenAI OAuth token/API key env가 momo app/API/DB/evidence path로 들어오면 verifier가 fail-fast한다.
+- [x] `scripts/verify_external_agent_provider.sh`와 `scripts/local_gate.sh --profile external-agent-provider` coverage note를 local Hermes GPT contract에 맞춰 보강한다.
+- [x] credential 없는 환경은 `runtime-unverified(external provider credentials)` explicit skip PASS를 유지한다.
+- [ ] 검증: `scripts/local_gate.sh --profile docs` PASS.
+- [ ] 검증: `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip).
+- [ ] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] PR 생성 후 GitHub issue를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.

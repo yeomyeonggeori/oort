@@ -99,14 +99,27 @@ scripts/local_gate.sh --profile external-agent-provider
 
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
+
+# local-only Hermes + GPT provider loopback smoke
+MOMO_ENV=local \
+AGENT_PROVIDER_MODE=external-hermes \
+AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 \
+HERMES_BASE_URL=http://127.0.0.1:${HERMES_PORT:-8088}/v1 \
+HERMES_API_KEY=local-hermes-bearer \
+AGENT_MODEL=gpt-via-local-hermes \
+scripts/local_gate.sh --profile external-agent-provider
 ```
 
 The verifier never prints the API key. If `AGENT_PROVIDER_MODE` is not
 `external-hermes`, the profile exits successfully with explicit
 `runtime-unverified(external provider credentials)` evidence so default mock
 runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is
-set but the URL/key is missing, placeholder-like, localhost, or mock, the profile
-fails fast because that is a misconfigured credentialed smoke. In the credentialed
+set but the URL/key is missing, placeholder-like, mock, or a non-loopback
+`http://...` URL, the profile fails fast because that is a misconfigured
+credentialed smoke. `http://127.0.0.1:<port>/v1` and
+`http://localhost:<port>/v1` are allowed only with
+`MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`; staging/prod/internal-host
+still reject loopback. In the credentialed
 path, the same verifier also proves the internal alpha invite precondition:
 Kim Intern must be an active `member.kind='agent'` with handle `kim-intern` and
 an active membership in seeded `#agent-lab` before the mention is sent.
@@ -115,8 +128,11 @@ Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
 Intern uses Codex OAuth, configure authorization code exchange, access/refresh
 token storage, refresh, unlink, and rotation inside the provider host. The momo
 smoke process accepts only `HERMES_API_KEY` for the provider SSE boundary and
-fails fast if known Codex/OpenAI OAuth token env var names are present. Boundary
-details: [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md).
+fails fast if known Codex/OpenAI OAuth token or API key env var names are
+present. The local Hermes GPT contract is
+[`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md);
+the credential boundary ADR is
+[`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md).
 
 The default script is strict: PR evidence should come from a clean worktree and
 checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus

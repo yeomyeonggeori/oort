@@ -32,6 +32,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-230에서 credentials가 있는 환경 전용 `external-agent-provider` opt-in gate를 추가해 real Hermes/Kim Intern SSE + local momo `@김인턴` 1왕복을 검증한다
      · MOMO-234에서 Codex OAuth token은 provider-owned이고 momo app/API/DB/local gate가 보관하지 않는 boundary를 ADR/verifier evidence/fail-fast guard로 고정한다
      · MOMO-236에서 Kim Intern을 내부 알파 workspace/channel의 실제 agent member로 초대/활성화하는 precondition과 real-provider smoke evidence 경계를 고정한다
+     · MOMO-238에서 local Hermes + GPT provider 개발 루프를 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` opt-in으로만 허용하고, non-loopback HTTP와 Codex/OpenAI credential leakage는 계속 fail-fast한다
      · MOMO-231에서 internal alpha feedback을 `status:needs-triage` intake issue → severity/evidence/labels/milestone → buildable goal → worker PR/review 흐름으로 고정한다
      · MOMO-232에서 macOS real-server 내부 알파 사용성(초대 관리, 복구 가능한 오류, session reset, Kim Intern 상태 chip)을 보강한다
      · MOMO-235에서 macOS alpha update channel v0를 ADR/runbook + SwiftPM dev app `Updates` placeholder surface로 고정한다
@@ -94,6 +95,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-230` | M1 | External Kim Intern/Hermes provider smoke gate v0 | `scripts/verify_external_agent_provider.sh` + `local_gate --profile external-agent-provider`; credentials가 있으면 OpenAI-compatible SSE preflight + local server/worker/relay `@김인턴` 1왕복, 없으면 `runtime-unverified(external provider credentials)` evidence |
 | `MOMO-234` | M1 | Hermes Codex OAuth provider boundary v0 | `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` + external provider verifier evidence/guard; Codex OAuth access/refresh token은 provider-owned이고 momo app/API/DB/local gate에는 저장/전달하지 않음 |
 | `MOMO-236` | M1 | Hermes internal alpha invite smoke v0 | Kim Intern seeded/admin invite contract(active agent member + `#agent-lab` membership) + macOS/API status boundary + `external-agent-provider` invite precondition evidence; credentials 없으면 explicit `runtime-unverified(external provider credentials)` skip |
+| `MOMO-238` | M1 | Local Hermes GPT provider loopback contract | `docs/external-agent-provider/local-hermes-gpt.md` + server/worker/verifier guard; local-only `http://127.0.0.1:<port>/v1`/`localhost` allowed only with `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`, non-loopback HTTP and Codex/OpenAI credential leakage fail fast |
 | `MOMO-224` | M1 | internal alpha diagnostics/observability bundle v0 | `scripts/collect_diagnostics.sh` + `local_gate --profile diagnostics`; server/relay/worker/Centrifugo/macOS/local-gate evidence와 redacted env shape/commit을 directory + tar.gz + summary.md로 수집 |
 | `MOMO-225` | M1 | Internal alpha combined local gate v0 | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha`; host-runtime boot/health/migrate/message/relay/mock Kim Intern, backup restore rehearsal, MomoMacDevApp real-backend process/window, diagnostics bundle path를 한 evidence packet으로 수집 |
 | `MOMO-228` | M3/M7 준비 | internal alpha runbook and feedback packet v0 | `docs/INTERNAL_ALPHA.md` + RUN/INDEX/LOCAL_PR_GATE/STATUS/ROADMAP/BUILD_TICKETS 연결; local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations를 팀원용 절차로 고정 |

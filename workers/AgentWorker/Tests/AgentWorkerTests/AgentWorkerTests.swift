@@ -67,6 +67,7 @@ final class AgentWorkerTests: XCTestCase {
             hermesBaseURL: "http://localhost:8088/v1",
             hermesAPIKey: "dev",
             agentModel: "hermes-agent",
+            allowLocalLoopbackExternalHermes: false,
             pollInterval: .milliseconds(300),
             maxAttempts: 3,
             maxConsecutiveAuto: 3,
@@ -127,6 +128,37 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(config.agentProviderEndpointLabel, "https://kim.example.net/v1")
         XCTAssertFalse(config.agentProviderEndpointLabel.contains("secret"))
         XCTAssertFalse(config.agentProviderEndpointLabel.contains("hidden"))
+    }
+
+    func testLocalExternalProviderConfigAcceptsLoopbackOnlyWithOptIn() throws {
+        var config = testConfig()
+        config.momoEnvironment = "local"
+        config.agentProviderMode = .externalHermes
+        config.hermesBaseURL = "http://localhost:22683/v1"
+        config.hermesAPIKey = "local-hermes-bearer"
+        config.agentModel = "gpt-4.1-mini-through-local-hermes"
+        config.allowLocalLoopbackExternalHermes = true
+
+        XCTAssertNoThrow(try config.validateAgentProviderForBoot())
+        XCTAssertEqual(config.agentAvailability, "available")
+        XCTAssertEqual(config.agentProviderEndpointLabel, "http://localhost:22683/v1")
+
+        config.momoEnvironment = "prod"
+        XCTAssertThrowsError(try config.validateAgentProviderForBoot()) { error in
+            XCTAssertTrue(String(describing: error).contains("localhost"))
+        }
+    }
+
+    func testExternalProviderConfigRejectsNonLoopbackHTTPEvenWithOptIn() {
+        let errors = AgentProviderValidation.validationErrors(
+            mode: .externalHermes,
+            hermesBaseURL: "http://kim.example.net/v1",
+            hermesAPIKey: "local-hermes-bearer",
+            strictEnvironment: false,
+            allowLocalLoopback: true
+        )
+
+        XCTAssertTrue(errors.joined(separator: " ").contains("https://"))
     }
 
     func testAgentJobPayloadDecodesContextPacketToolGrants() throws {
@@ -524,6 +556,7 @@ final class AgentWorkerTests: XCTestCase {
             hermesBaseURL: "http://localhost:8088/v1",
             hermesAPIKey: "dev",
             agentModel: "hermes-agent",
+            allowLocalLoopbackExternalHermes: false,
             pollInterval: .milliseconds(300),
             maxAttempts: 3,
             maxConsecutiveAuto: 3,

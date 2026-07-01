@@ -6,9 +6,10 @@
 # provider. With no external credentials it exits successfully with explicit
 # runtime-unverified evidence so default local/mock gates stay deterministic.
 #
-# MOMO-234 boundary: momo never receives Codex OAuth access/refresh tokens.
-# Codex OAuth belongs inside the Hermes/Kim Intern provider. This verifier only
-# accepts a provider API key for the OpenAI-compatible SSE boundary.
+# MOMO-234/MOMO-238 boundary: momo never receives Codex/OpenAI OAuth tokens or
+# GPT/OpenAI provider API keys. Those credentials belong inside Hermes/Kim
+# Intern. This verifier only accepts a Hermes-facing bearer key for the
+# OpenAI-compatible SSE boundary.
 # =============================================================================
 set -euo pipefail
 
@@ -92,6 +93,29 @@ is_local_or_mock_host() {
   return 1
 }
 
+is_allowed_loopback_host() {
+  local lowered
+  lowered="$(lower "$1")"
+  case "$lowered" in
+    localhost|127.0.0.1|::1) return 0 ;;
+  esac
+  return 1
+}
+
+is_mock_host() {
+  case "$(lower "$1")" in
+    *mock*) return 0 ;;
+  esac
+  return 1
+}
+
+truthy() {
+  case "$(lower "${1:-}")" in
+    1|true|yes|on) return 0 ;;
+  esac
+  return 1
+}
+
 redacted_endpoint_label() {
   python3 - "$1" <<'PY'
 import sys
@@ -135,7 +159,7 @@ if secret:
 text = re.sub(r"Bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED_BEARER]", text)
 text = re.sub(r"(postgres(?:ql)?://[^:\s]+:)[^@\s]+(@)", r"\1[REDACTED]\2", text)
 text = re.sub(r'("(?:accessToken|refreshToken|apiKey|token|password)"\s*:\s*")[^"]+(")', r"\1[REDACTED]\2", text)
-text = re.sub(r"(?i)((?:codex|openai)[A-Z0-9_]*(?:oauth|access|refresh)[A-Z0-9_]*(?:token|secret)?\s*=\s*)[^\s]+", r"\1[REDACTED_PROVIDER_OAUTH]", text)
+text = re.sub(r"(?i)((?:codex|openai)[A-Z0-9_]*(?:oauth|access|refresh|api)[A-Z0-9_]*(?:token|secret|key)?\s*=\s*)[^\s]+", r"\1[REDACTED_PROVIDER_CREDENTIAL]", text)
 with open(dst, "w", encoding="utf-8") as f:
     f.write(text)
 PY
@@ -154,14 +178,16 @@ validate_no_forbidden_codex_oauth_env() {
   local forbidden=()
   local key
   for key in CODEX_OAUTH_TOKEN CODEX_OAUTH_ACCESS_TOKEN CODEX_OAUTH_REFRESH_TOKEN \
-    CODEX_ACCESS_TOKEN CODEX_REFRESH_TOKEN OPENAI_OAUTH_TOKEN \
-    OPENAI_OAUTH_ACCESS_TOKEN OPENAI_OAUTH_REFRESH_TOKEN; do
+    CODEX_ACCESS_TOKEN CODEX_REFRESH_TOKEN CODEX_API_KEY CODEX_PROVIDER_API_KEY \
+    OPENAI_OAUTH_TOKEN OPENAI_OAUTH_ACCESS_TOKEN OPENAI_OAUTH_REFRESH_TOKEN \
+    OPENAI_ACCESS_TOKEN OPENAI_REFRESH_TOKEN OPENAI_API_KEY OPENAI_ADMIN_KEY \
+    OPENAI_PROVIDER_API_KEY; do
     if [ "${!key+x}" ] && [ "${!key:-}" != "" ]; then
       forbidden+=("$key")
     fi
   done
   if [ "${#forbidden[@]}" -gt 0 ]; then
-    fail "credential-boundary" "Codex OAuth token env must not be passed to momo verifier: $(IFS=', '; echo "${forbidden[*]}"). Configure Codex OAuth only inside Hermes/Kim Intern provider."
+    fail "credential-boundary" "Codex/OpenAI OAuth token or API key env must not be passed to momo verifier: $(IFS=', '; echo "${forbidden[*]}"). Configure GPT/OpenAI credentials only inside Hermes/Kim Intern provider."
   fi
 }
 
@@ -237,15 +263,16 @@ write_evidence() {
     echo "- Endpoint label: \`${ENDPOINT_LABEL:-not configured}\`"
     echo "- Stack env file: \`${ENV_FILE:-<none>}\`"
     echo "- Credential boundary ADR: \`docs/adr/0004-codex-oauth-hermes-provider-boundary.md\`"
-    echo "- Codex OAuth boundary: momo app/API/DB/verifier receive no Codex OAuth access or refresh token; provider owns OAuth storage/refresh."
+    echo "- Codex/OpenAI credential boundary: momo app/API/DB/verifier receive no Codex/OpenAI OAuth token or API key; Hermes/Kim Intern owns provider credential storage/refresh."
     echo "- Required credentialed smoke env: \`AGENT_PROVIDER_MODE=external-hermes\`, \`HERMES_BASE_URL=https://.../v1\`, \`HERMES_API_KEY\`, \`AGENT_MODEL\`."
+    echo "- Local loopback opt-in: \`MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 HERMES_BASE_URL=http://127.0.0.1:<port>/v1\` or \`http://localhost:<port>/v1\`; non-loopback HTTP still fails fast."
     if [ "${EXTERNAL_AGENT_PROVIDER_ENV_FILE:-}" != "" ]; then
       echo "- Provider env file: configured (path withheld from summary; contents are not copied)"
     fi
     if [ "${RESULT:-}" = "SKIP" ]; then
       echo "- Skip reason: ${SKIP_REASON:-external provider credentials are not configured}"
       echo "- Internal alpha invite precondition: expected seeded/admin contract is Kim Intern as active agent member \`kim-intern\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
-      echo "- Coverage: default local/internal-alpha mock gates remain deterministic; Codex OAuth remains provider-owned and unobserved by momo."
+      echo "- Coverage: default local/internal-alpha mock gates remain deterministic; Codex/OpenAI credentials remain provider-owned and unobserved by momo."
       echo "- Not covered: real Hermes/Kim Intern side effect remains \`runtime-unverified(external provider credentials)\`."
     elif [ "${RESULT:-}" = "PASS" ]; then
       echo "- Internal alpha invite precondition: \`${INVITE_PRECONDITION_STATUS:-not-run}\` (active agent member + channel membership verified before send)."
@@ -254,7 +281,7 @@ write_evidence() {
       echo "- Momo roundtrip: trigger_message_id=\`${AGENT_TRIGGER_MESSAGE_ID:-unknown}\`, run_id=\`${AGENT_RUN_ID:-unknown}\`, final_message_id=\`${FINAL_MESSAGE_ID:-unknown}\`, final_seq=\`${FINAL_MESSAGE_SEQ:-unknown}\`."
       echo "- Relay publish: Centrifugo history contained final \`message.new\` for the external-provider run."
       echo "- Provider response bytes: \`${PROVIDER_BYTES:-0}\` (content stored only in redacted artifact path below)."
-      echo "- Coverage: local Docker stack + MomoServer + AgentWorker + OutboxRelay + external Hermes/Kim Intern SSE. Codex OAuth, if used by the provider, stayed outside momo."
+      echo "- Coverage: local Docker stack + MomoServer + AgentWorker + OutboxRelay + external Hermes/Kim Intern SSE. Codex/OpenAI provider credentials, if used by Hermes, stayed outside momo."
     else
       echo "- Failure category: \`${FAILURE_CATEGORY:-unknown}\`"
       echo "- Failure reason: ${FAILURE_REASON:-unknown}"
@@ -270,7 +297,7 @@ write_evidence() {
     artifact_line "server log redacted" "$SERVER_LOG_REDACTED"
     artifact_line "worker log redacted" "$WORKER_LOG_REDACTED"
     artifact_line "relay log redacted" "$RELAY_LOG_REDACTED"
-    echo "- Secret handling: \`HERMES_API_KEY\`, bearer tokens, DB passwords, auth tokens, and Codex/OpenAI OAuth token-shaped values are redacted from generated evidence."
+    echo "- Secret handling: \`HERMES_API_KEY\`, bearer tokens, DB passwords, auth tokens, and Codex/OpenAI OAuth/API key-shaped values are redacted from generated evidence."
   } > "$EVIDENCE_FILE"
 
   for file in "$EVIDENCE_FILE" "$PROVIDER_SSE_REDACTED_FILE" "$PROVIDER_ERR_REDACTED_FILE" \
@@ -283,7 +310,7 @@ write_evidence() {
 
 validate_external_provider_env() {
   local errors=()
-  local raw_url authority host
+  local raw_url scheme authority host port local_loopback_allowed
 
   if [ "${AGENT_PROVIDER_MODE:-}" != "external-hermes" ]; then
     if [ "${EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS:-0}" = "1" ]; then
@@ -295,13 +322,24 @@ validate_external_provider_env() {
   raw_url="${HERMES_BASE_URL:-}"
   if [ "$raw_url" = "" ]; then
     errors+=("HERMES_BASE_URL is missing")
-  elif [[ "$raw_url" != https://* ]]; then
-    errors+=("HERMES_BASE_URL must use https:// for external-hermes")
+  elif [[ "$raw_url" != *://* ]]; then
+    errors+=("HERMES_BASE_URL must be an absolute HTTP(S) URL")
   else
-    authority="${raw_url#https://}"
+    scheme="${raw_url%%://*}"
+    authority="${raw_url#*://}"
     authority="${authority%%/*}"
     host="${authority##*@}"
     host="${host%%:*}"
+    port=""
+    if [[ "$authority" == *":"* ]]; then
+      port="${authority##*:}"
+    fi
+    local_loopback_allowed=0
+    if truthy "${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-0}" \
+      && [ "$(lower "$VERIFY_MOMO_ENV")" = "local" ] \
+      && is_allowed_loopback_host "$host"; then
+      local_loopback_allowed=1
+    fi
     if [[ "$authority" == *"@"* ]]; then
       errors+=("HERMES_BASE_URL must not include userinfo")
     fi
@@ -310,9 +348,24 @@ validate_external_provider_env() {
     fi
     if [ "$host" = "" ]; then
       errors+=("HERMES_BASE_URL must include a host")
-    elif is_local_or_mock_host "$host"; then
-      errors+=("HERMES_BASE_URL must not point at localhost or mock-hermes for external-hermes")
+    elif is_mock_host "$host"; then
+      errors+=("HERMES_BASE_URL must not point at mock-hermes for external-hermes")
+    elif is_local_or_mock_host "$host" && [ "$local_loopback_allowed" != "1" ]; then
+      errors+=("HERMES_BASE_URL must not point at localhost for external-hermes unless MOMO_ENV=local and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1")
     fi
+    case "$(lower "$scheme")" in
+      https) ;;
+      http)
+        if [ "$local_loopback_allowed" != "1" ]; then
+          errors+=("HERMES_BASE_URL must use https:// unless it is an explicit local-only loopback opt-in")
+        elif [ "$port" = "" ] || [ "$port" = "$authority" ]; then
+          errors+=("loopback HERMES_BASE_URL must include an explicit port")
+        fi
+        ;;
+      *)
+        errors+=("HERMES_BASE_URL must use http:// or https://")
+        ;;
+    esac
   fi
 
   if [ "${HERMES_API_KEY:-}" = "" ]; then
@@ -385,6 +438,7 @@ start_server() {
       CENT_API_KEY="$CENT_API_KEY" \
       JWT_HMAC="${JWT_HMAC:-change-me-jwt-hmac}" \
       AGENT_PROVIDER_MODE="external-hermes" \
+      AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK="${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-0}" \
       AGENT_MODEL="$AGENT_MODEL" \
       AGENT_HANDLE="${AGENT_HANDLE:-kim-intern}" \
       AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-김인턴}" \
@@ -439,6 +493,7 @@ start_worker() {
       CENT_API_URL="$CENT_API_URL" \
       CENT_API_KEY="$CENT_API_KEY" \
       AGENT_PROVIDER_MODE="external-hermes" \
+      AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK="${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-0}" \
       AGENT_MODEL="$AGENT_MODEL" \
       HERMES_BASE_URL="$HERMES_BASE_URL" \
       HERMES_API_KEY="$HERMES_API_KEY" \
@@ -634,6 +689,7 @@ HERMES_BASE_URL="${HERMES_BASE_URL:-}"
 HERMES_API_KEY="${HERMES_API_KEY:-}"
 AGENT_MODEL="${AGENT_MODEL:-hermes-agent}"
 VERIFY_MOMO_ENV="${MOMO_ENV:-staging}"
+AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK="${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-0}"
 ENDPOINT_LABEL="$(redacted_endpoint_label "$HERMES_BASE_URL")"
 
 TMP_ROOT="${EXTERNAL_AGENT_PROVIDER_OUT_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-external-agent-provider}}"

@@ -29,6 +29,7 @@ struct Config: Sendable {
     var hermesBaseURL: String   // e.g. http://hermes:8088/v1
     var hermesAPIKey: String    // Bearer token
     var agentModel: String
+    var allowLocalLoopbackExternalHermes: Bool
 
     // ---- Worker loop tuning (L4 §3.5) ----
     var pollInterval: Duration   // fallback poll cadence (spec: 300ms)
@@ -71,6 +72,9 @@ struct Config: Sendable {
             hermesBaseURL: env("HERMES_BASE_URL", "http://localhost:8088/v1"),
             hermesAPIKey: env("HERMES_API_KEY", "dev-insecure-hermes-bearer"),
             agentModel: env("AGENT_MODEL", "hermes-agent"),
+            allowLocalLoopbackExternalHermes: AgentProviderValidation.boolFlag(
+                ProcessInfo.processInfo.environment["AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK"]
+            ),
             pollInterval: .milliseconds(pollMs),
             maxAttempts: envInt("WORKER_MAX_ATTEMPTS", 8),
             // L4 §3.3 defaults (G2/G3, §3.4 depth). Schema default max_run_steps=50;
@@ -95,25 +99,28 @@ struct Config: Sendable {
                 mode: agentProviderMode,
                 hermesBaseURL: hermesBaseURL,
                 hermesAPIKey: hermesAPIKey,
-                strictEnvironment: true
+                strictEnvironment: true,
+                allowLocalLoopback: allowLocalLoopbackExternalHermes
             ).isEmpty ? "available" : "degraded"
         }
     }
 
     func validateAgentProviderForBoot() throws {
-        guard AgentProviderValidation.requiresStrictExternalProvider(momoEnvironment) else {
+        let strictEnvironment = AgentProviderValidation.requiresStrictExternalProvider(momoEnvironment)
+        guard strictEnvironment || agentProviderMode == .externalHermes else {
             return
         }
 
         var errors: [String] = []
-        if agentProviderMode != .externalHermes {
+        if strictEnvironment && agentProviderMode != .externalHermes {
             errors.append("AGENT_PROVIDER_MODE must be external-hermes in \(momoEnvironment)")
         }
         errors += AgentProviderValidation.validationErrors(
             mode: agentProviderMode,
             hermesBaseURL: hermesBaseURL,
             hermesAPIKey: hermesAPIKey,
-            strictEnvironment: true
+            strictEnvironment: strictEnvironment,
+            allowLocalLoopback: allowLocalLoopbackExternalHermes && !strictEnvironment
         )
         if !errors.isEmpty {
             throw AgentProviderConfigurationError(errors: errors)
@@ -154,7 +161,8 @@ enum AgentProviderValidation {
         mode: AgentProviderMode,
         hermesBaseURL: String,
         hermesAPIKey: String,
-        strictEnvironment: Bool
+        strictEnvironment: Bool,
+        allowLocalLoopback: Bool = false
     ) -> [String] {
         var errors: [String] = []
         let trimmedURL = hermesBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -162,14 +170,22 @@ enum AgentProviderValidation {
             errors.append("HERMES_BASE_URL is missing")
         } else if mode == .externalHermes || strictEnvironment {
             guard let url = URL(string: trimmedURL), let scheme = url.scheme, let host = url.host else {
-                errors.append("HERMES_BASE_URL must be an absolute HTTPS URL")
+                errors.append("HERMES_BASE_URL must be an absolute HTTP(S) URL")
                 return errors + keyErrors(hermesAPIKey)
             }
-            if scheme.lowercased() != "https" {
-                errors.append("HERMES_BASE_URL must use https:// for external-hermes")
+            let normalizedScheme = scheme.lowercased()
+            let isLoopback = isAllowedLoopbackHost(host)
+            if normalizedScheme == "http" {
+                if !(allowLocalLoopback && isLoopback) {
+                    errors.append("HERMES_BASE_URL must use https:// unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 targets localhost/127.0.0.1 in local mode")
+                }
+            } else if normalizedScheme != "https" {
+                errors.append("HERMES_BASE_URL must use http:// or https://")
             }
-            if isLocalOrMockHost(host) {
-                errors.append("HERMES_BASE_URL must not point at localhost or mock-hermes for external-hermes")
+            if isMockHost(host) {
+                errors.append("HERMES_BASE_URL must not point at mock-hermes for external-hermes")
+            } else if isLocalOrMockHost(host) && !(allowLocalLoopback && isLoopback) {
+                errors.append("HERMES_BASE_URL must not point at localhost for external-hermes unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 in local mode")
             }
         }
         errors += keyErrors(hermesAPIKey)
@@ -215,6 +231,26 @@ enum AgentProviderValidation {
             || lowered == "0.0.0.0"
             || lowered == "::1"
             || lowered.contains("mock")
+    }
+
+    static func isAllowedLoopbackHost(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        return lowered == "localhost"
+            || lowered == "127.0.0.1"
+            || lowered == "::1"
+    }
+
+    static func isMockHost(_ host: String) -> Bool {
+        host.lowercased().contains("mock")
+    }
+
+    static func boolFlag(_ raw: String?) -> Bool {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
+        }
     }
 
     static func redactedEndpointLabel(_ raw: String) -> String {
