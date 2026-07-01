@@ -28,6 +28,7 @@
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
   - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
   - ✅ `scripts/verify_external_agent_provider.sh` + `scripts/local_gate.sh --profile external-agent-provider` — credentials가 있는 환경에서만 real Hermes/Kim Intern SSE + local momo `@김인턴` 1왕복을 검증하는 opt-in gate (MOMO-230)
+  - ✅ `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh` — AWS 1주일 internal alpha topology/cost/security-group/backup/deploy/rollback preflight (MOMO-233)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
@@ -86,6 +87,30 @@
 | Swift 6.2 (빌드 머신) | relay/worker/api 이미지 빌드용. CI에서 빌드 후 레지스트리 푸시 권장. |
 
 **방화벽:** 인바운드 **80(ACME)·443만 허용**. 5432/8000/8080은 호스트에 노출 금지(compose 내부 네트워크). SSH는 키 인증 + 비표준 포트/IP 화이트리스트 `(추정 권장)`.
+
+### 2.1 AWS internal alpha stack v0 (MOMO-233)
+
+1주일 팀 테스트용 AWS host topology는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)가 정본이다.
+결정값은 **EC2 recommended single-node**: `t4g.large`, encrypted `gp3` data volume,
+Caddy 80/443, API/OutboxRelay/AgentWorker/Centrifugo/Redis/Postgres를 image-based
+prod compose로 실행, pgBackRest→S3 + daily EBS snapshot. Lightsail은 가장 빠른
+throwaway 옵션으로만 문서화하고, 기본 추천은 보안그룹/IAM/EBS snapshot/restore fidelity가
+좋은 EC2로 둔다.
+
+정적 preflight:
+
+```sh
+scripts/aws_internal_alpha_preflight.sh \
+  --env-file infra/prod/aws-internal-alpha.env.example \
+  --mode recommended \
+  --evidence-dir /tmp/momo-aws-alpha-preflight
+```
+
+이 preflight는 AWS 리소스를 만들지 않는다. topology/provider, DNS/TLS intent,
+보안그룹 노출 intent, encrypted gp3 volume intent, pinned image/source-checkout-free
+deploy, backup/restore/rollback acknowledgement만 검증한다. 실제 host 생성, DNS 전파,
+Caddy ACME 인증서, registry pull, SOPS decrypt, pgBackRest backup, EBS snapshot,
+PITR restore rehearsal은 `runtime-unverified(aws-host)`다.
 
 ---
 
