@@ -1848,10 +1848,12 @@ final class MomoMacTests: XCTestCase {
             availability: .degraded,
             endpointLabel: "internal mock",
             keyConfigured: false,
+            degradedReason: "provider readiness check failed",
             diagnostics: ["provider timeout"]
         )
-        XCTAssertEqual(degraded.internalAlphaProviderSummary, "Internal host mock · key missing · provider timeout")
+        XCTAssertEqual(degraded.internalAlphaProviderSummary, "Internal host mock · key missing · provider readiness check failed")
         XCTAssertTrue(degraded.internalAlphaHelpText.contains("key not configured"))
+        XCTAssertTrue(degraded.internalAlphaHelpText.contains("degraded=provider readiness check failed"))
         XCTAssertTrue(degraded.internalAlphaHelpText.contains("provider timeout"))
     }
 

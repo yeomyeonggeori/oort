@@ -162,15 +162,19 @@ struct AgentProviderConfig: Sendable {
 
     func statusResponse() -> AgentRuntimeStatusResponse {
         let diagnostics = validationErrors(strictEnvironment: mode == .externalHermes)
+        let currentAvailability = availability
         return AgentRuntimeStatusResponse(
             schema: "momo.agent_runtime.status.v0",
             agentHandle: agentHandle,
             displayName: displayName,
             mode: mode.rawValue,
-            availability: availability,
+            availability: currentAvailability,
             model: model,
             endpointLabel: endpointLabel,
             keyConfigured: keyConfigured,
+            degradedReason: currentAvailability == "degraded" && !diagnostics.isEmpty
+                ? diagnostics.joined(separator: "; ")
+                : nil,
             diagnostics: diagnostics
         )
     }

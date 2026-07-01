@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_external_agent_provider.sh — MOMO-230/MOMO-234 external provider gate
+# scripts/verify_external_agent_provider.sh — external agent provider/runtime gate
 #
-# Opt-in credentialed smoke for a real Kim Intern/Hermes OpenAI-compatible SSE
-# provider. With no external credentials it exits successfully with explicit
+# Opt-in credentialed smoke for an external OpenAI-compatible agent runtime
+# using Kim Intern as the seeded agent member. With no external credentials it
+# exits successfully with explicit
 # runtime-unverified evidence so default local/mock gates stay deterministic.
 #
 # MOMO-234/MOMO-238 boundary: momo never receives Codex/OpenAI OAuth tokens or
@@ -187,7 +188,7 @@ validate_no_forbidden_codex_oauth_env() {
     fi
   done
   if [ "${#forbidden[@]}" -gt 0 ]; then
-    fail "credential-boundary" "Codex/OpenAI OAuth token or API key env must not be passed to momo verifier: $(IFS=', '; echo "${forbidden[*]}"). Configure GPT/OpenAI credentials only inside Hermes/Kim Intern provider."
+    fail "credential-boundary" "Codex/OpenAI OAuth token or API key env must not be passed to momo verifier: $(IFS=', '; echo "${forbidden[*]}"). Configure provider credentials only inside the external runtime host."
   fi
 }
 
@@ -254,7 +255,7 @@ write_evidence() {
   sanitize_file "$RELAY_LOG" "$RELAY_LOG_REDACTED"
 
   {
-    echo "## MOMO-230/MOMO-234 External Agent Provider Smoke"
+    echo "## MOMO-230/MOMO-234/MOMO-242 External Agent Runtime Smoke"
     echo "- Result: \`${RESULT:-UNKNOWN}\`"
     echo "- Runtime note: \`${RUNTIME_NOTE:-credentialed external provider path attempted}\`"
     echo "- Mode: \`${AGENT_PROVIDER_MODE:-<unset>}\`"
@@ -263,7 +264,7 @@ write_evidence() {
     echo "- Endpoint label: \`${ENDPOINT_LABEL:-not configured}\`"
     echo "- Stack env file: \`${ENV_FILE:-<none>}\`"
     echo "- Credential boundary ADR: \`docs/adr/0004-codex-oauth-hermes-provider-boundary.md\`"
-    echo "- Codex/OpenAI credential boundary: momo app/API/DB/verifier receive no Codex/OpenAI OAuth token or API key; Hermes/Kim Intern owns provider credential storage/refresh."
+    echo "- Codex/OpenAI credential boundary: momo app/API/DB/verifier receive no Codex/OpenAI OAuth token or API key; the external runtime host owns provider credential storage/refresh."
     echo "- Required credentialed smoke env: \`AGENT_PROVIDER_MODE=external-hermes\`, \`HERMES_BASE_URL=https://.../v1\`, \`HERMES_API_KEY\`, \`AGENT_MODEL\`."
     echo "- Local loopback opt-in: \`MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 HERMES_BASE_URL=http://127.0.0.1:<port>/v1\` or \`http://localhost:<port>/v1\`; non-loopback HTTP still fails fast."
     if [ "${EXTERNAL_AGENT_PROVIDER_ENV_FILE:-}" != "" ]; then
@@ -273,19 +274,22 @@ write_evidence() {
       echo "- Skip reason: ${SKIP_REASON:-external provider credentials are not configured}"
       echo "- Internal alpha invite precondition: expected seeded/admin contract is Kim Intern as active agent member \`kim-intern\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
       echo "- Coverage: default local/internal-alpha mock gates remain deterministic; Codex/OpenAI credentials remain provider-owned and unobserved by momo."
-      echo "- Not covered: real Hermes/Kim Intern side effect remains \`runtime-unverified(external provider credentials)\`."
+      echo "- Not covered: real external runtime side effect remains \`runtime-unverified(external provider credentials)\`."
     elif [ "${RESULT:-}" = "PASS" ]; then
       echo "- Internal alpha invite precondition: \`${INVITE_PRECONDITION_STATUS:-not-run}\` (active agent member + channel membership verified before send)."
       echo "- Provider preflight: OpenAI-compatible SSE \`/chat/completions\` returned stream data."
-      echo "- Agent runtime status: \`/v1/agent-runtime/status\` reported external mode with redacted endpoint label and no provider key."
+      echo "- Agent runtime status: \`/v1/agent-runtime/status\` reported external mode with redacted endpoint label, no provider key, and no degraded reason."
       echo "- Momo roundtrip: trigger_message_id=\`${AGENT_TRIGGER_MESSAGE_ID:-unknown}\`, run_id=\`${AGENT_RUN_ID:-unknown}\`, final_message_id=\`${FINAL_MESSAGE_ID:-unknown}\`, final_seq=\`${FINAL_MESSAGE_SEQ:-unknown}\`."
       echo "- Relay publish: Centrifugo history contained final \`message.new\` for the external-provider run."
       echo "- Provider response bytes: \`${PROVIDER_BYTES:-0}\` (content stored only in redacted artifact path below)."
-      echo "- Coverage: local Docker stack + MomoServer + AgentWorker + OutboxRelay + external Hermes/Kim Intern SSE. Codex/OpenAI provider credentials, if used by Hermes, stayed outside momo."
+      echo "- Coverage: local Docker stack + MomoServer + AgentWorker + OutboxRelay + external agent runtime SSE. Codex/OpenAI provider credentials, if used by the provider host, stayed outside momo."
     else
       echo "- Failure category: \`${FAILURE_CATEGORY:-unknown}\`"
       echo "- Failure reason: ${FAILURE_REASON:-unknown}"
       echo "- Coverage before failure: provider preflight status=\`${PROVIDER_PREFLIGHT_STATUS:-not-run}\`, runtime status=\`${RUNTIME_STATUS:-not-run}\`, momo roundtrip=\`${ROUNDTRIP_STATUS:-not-run}\`."
+      if [ -f "$AGENT_STATUS_FILE" ]; then
+        echo "- Degraded reason: \`$(jq -r '.degradedReason // "<none>"' "$AGENT_STATUS_FILE" 2>/dev/null || printf '<unavailable>')\`"
+      fi
     fi
     echo "- Evidence artifacts:"
     echo "  - evidence: \`${EVIDENCE_FILE}\`"
@@ -517,6 +521,7 @@ verify_agent_runtime_status() {
       and .model == $model
       and .endpointLabel == $endpoint
       and .keyConfigured == true
+      and ((.degradedReason // "") == "")
       and (.diagnostics | length == 0)
     ' "$AGENT_STATUS_FILE" >/dev/null; then
     RUNTIME_STATUS="fail"

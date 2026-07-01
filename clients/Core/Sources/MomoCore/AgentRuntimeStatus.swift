@@ -26,6 +26,7 @@ public struct AgentRuntimeStatus: Codable, Sendable, Hashable {
     public var model: String
     public var endpointLabel: String
     public var keyConfigured: Bool
+    public var degradedReason: String?
     public var diagnostics: [String]
 
     public init(
@@ -37,6 +38,7 @@ public struct AgentRuntimeStatus: Codable, Sendable, Hashable {
         model: String = "hermes-agent",
         endpointLabel: String = "not configured",
         keyConfigured: Bool = false,
+        degradedReason: String? = nil,
         diagnostics: [String] = []
     ) {
         self.schema = schema
@@ -47,6 +49,7 @@ public struct AgentRuntimeStatus: Codable, Sendable, Hashable {
         self.model = model
         self.endpointLabel = endpointLabel
         self.keyConfigured = keyConfigured
+        self.degradedReason = degradedReason
         self.diagnostics = diagnostics
     }
 
@@ -59,6 +62,7 @@ public struct AgentRuntimeStatus: Codable, Sendable, Hashable {
         case model
         case endpointLabel
         case keyConfigured
+        case degradedReason
         case diagnostics
     }
 
