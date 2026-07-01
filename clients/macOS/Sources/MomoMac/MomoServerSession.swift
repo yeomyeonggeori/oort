@@ -931,6 +931,7 @@ private struct SessionStatusBar: View {
     var logout: () -> Void
     @State private var showDetails = false
     @State private var showInvites = false
+    @State private var showUpdates = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -961,6 +962,15 @@ private struct SessionStatusBar: View {
                     realtimeStatus: viewModel.selectedRealtimeStatus,
                     agentStatus: viewModel.agentRuntimeStatus
                 )
+            }
+            .controlSize(.small)
+            Button {
+                showUpdates.toggle()
+            } label: {
+                Label("Updates", systemImage: "arrow.down.circle")
+            }
+            .popover(isPresented: $showUpdates) {
+                MomoMacUpdateChannelView()
             }
             .controlSize(.small)
             if let inviteAdminContext {

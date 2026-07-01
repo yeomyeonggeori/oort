@@ -249,6 +249,12 @@
 - Kim Intern chip/details가 `Local mock` / `Internal host mock` / `External Hermes`, key 준비 여부, redacted endpoint/degraded diagnostics를 내부 알파 사용자가 구분 가능하게 표시한다.
 - 검증: `swift test --package-path clients/macOS` PASS. Required local gates: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui`, 가능하면 `LOCAL_GATE_LAUNCH_UI=1 ... scripts/local_gate.sh --profile internal-alpha`. Public host deploy, real external Hermes quality evaluation, signing/notarization, iOS UI는 out of scope다.
 
+## 0-24. MOMO-235 macOS Alpha Update Channel v0 (2026-07-01)
+
+- Sparkle 2 우선 + manual fallback alpha update channel 결정을 `docs/adr/0004-macos-alpha-update-channel-v0.md`로 고정하고, operator runbook `docs/MACOS_ALPHA_UPDATE_CHANNEL.md`에 appcast/signing key/Developer ID/notarytool/DMG secret boundary를 정리했다.
+- `MomoMacSessionRootView` session bar에 `Updates` popover를 추가했다. SwiftPM dev app/Xcode host 공용 surface이며 `MOMO_UPDATE_*` non-secret hints만 읽고, real install 전에는 `signing-unverified`/placeholder 상태를 표시한다.
+- 검증: `swift test --package-path clients/macOS` PASS, `scripts/local_gate.sh --profile docs` PASS. Real Sparkle framework install, appcast generation, Developer ID signing, notarization, DMG upload, old-version-to-new-version update proof는 M4 후속으로 남는다(`runtime-unverified(update install)`).
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

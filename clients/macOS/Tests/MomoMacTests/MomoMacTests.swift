@@ -229,6 +229,52 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
+    func testAlphaUpdateChannelDefaultsToPlaceholderUntilFeedAndPublicKeyExist() {
+        let status = MomoMacUpdateChannelStatus.fromEnvironment([:])
+
+        XCTAssertEqual(status.channel, .alpha)
+        XCTAssertEqual(status.engine, .sparkle2)
+        XCTAssertFalse(status.canCheckNow)
+        XCTAssertFalse(status.canInstallAutomatically)
+        XCTAssertEqual(status.missingRequirements, [
+            "SUFeedURL",
+            "SUPublicEDKey",
+            "Developer ID signing",
+            "notarization",
+            "DMG artifact",
+        ])
+        XCTAssertTrue(status.surfaceDetail.contains("placeholder"))
+    }
+
+    func testAlphaUpdateChannelRequiresSignedNotarizedDMGBeforeInstall() {
+        let status = MomoMacUpdateChannelStatus.fromEnvironment([
+            "MOMO_UPDATE_CHANNEL": "alpha",
+            "MOMO_UPDATE_FEED_URL": "https://updates.example.com/momo/alpha/appcast.xml",
+            "MOMO_UPDATE_PUBLIC_ED_KEY": "public-key-placeholder",
+            "MOMO_UPDATE_AUTOMATIC_CHECKS": "true",
+        ])
+
+        XCTAssertTrue(status.canCheckNow)
+        XCTAssertFalse(status.canInstallAutomatically)
+        XCTAssertEqual(status.missingRequirements, [
+            "Developer ID signing",
+            "notarization",
+            "DMG artifact",
+        ])
+        XCTAssertTrue(status.surfaceDetail.contains("signed/notarized artifacts"))
+    }
+
+    func testAlphaUpdateChannelFlagsPrivateKeyLookingConfig() {
+        let status = MomoMacUpdateChannelStatus.fromEnvironment([
+            "MOMO_UPDATE_FEED_URL": "not a url",
+            "MOMO_UPDATE_PUBLIC_ED_KEY": "PRIVATE KEY SHOULD NOT BE HERE",
+        ])
+
+        XCTAssertEqual(status.diagnostics.count, 2)
+        XCTAssertTrue(status.diagnostics.contains("MOMO_UPDATE_FEED_URL is not a valid URL."))
+        XCTAssertTrue(status.diagnostics.contains("Only Sparkle EdDSA public keys belong in app/runtime config."))
+    }
+
     @MainActor
     func testViewModelSubmitsInviteCodeThroughOnboardingBackend() async throws {
         let backend = LiveChatBackend()
