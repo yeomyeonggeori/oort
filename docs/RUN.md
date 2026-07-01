@@ -278,7 +278,14 @@ scripts/local_gate.sh --profile backup
 # host-runtime smoke에는 같은 복원 리허설이 포함된다.
 scripts/local_gate.sh --profile host-runtime
 
-# 내부 알파 reviewer handoff용 combined evidence packet.
+# AWS로 가기 전 1인 local Docker alpha RC gate.
+# host-runtime, backup restore, macOS real-backend smoke, diagnostics bundle을 함께 남긴다.
+scripts/local_gate.sh --profile local-alpha
+
+# foreground 앱 launch까지 evidence에 포함해야 하면 opt-in.
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha
+
+# 내부 알파 reviewer handoff용 stricter combined evidence packet.
 # host-runtime, backup restore, macOS real-backend process/window, diagnostics bundle을 함께 남긴다.
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 ```
@@ -342,8 +349,30 @@ macOS unified logs, env shape, git commit/status, local gate evidence를 모아
 보안 경계: secrets/password/token/API key/HMAC/database URL credentials는 bundle에 쓰기 전에
 `[REDACTED]`로 치환한다. 그래도 외부 공유 전에는 내부자가 summary와 파일 목록을 한 번 확인한다.
 
+AWS 리소스를 만들기 전에 1인 local Docker alpha RC를 먼저 닫아야 할 때는 `local-alpha`
+profile을 사용한다.
+
+```sh
+scripts/local_gate.sh --profile local-alpha
+```
+
+이 profile은 AWS API를 호출하지 않고, local Docker와 repo-local mock Hermes만 사용한다. PASS 시
+top-level local gate evidence가 run-specific
+`local-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/`
+artifact directory를 함께 출력한다. 여기에는 prod+internal-smoke image boot, `/health`,
+migration idempotency, REST message, OutboxRelay publish, mock Hermes 기반 김인턴 roundtrip,
+repo-local `pg_dump`→separate restore evidence, macOS real-backend smoke, redacted diagnostics
+directory/archive path가 포함된다.
+
+기본값은 foreground GUI launch를 요구하지 않는다. 실제 `MomoMacDevApp` process/window/log
+evidence까지 필요하면 아래처럼 opt-in한다.
+
+```sh
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha
+```
+
 내부 알파 PR handoff처럼 "돌아가는 로컬 호스트 런타임 + 실제 macOS dev app + 복원 리허설 +
-진단 번들"을 한 번에 묶어야 할 때는 combined local gate를 사용한다.
+진단 번들"을 reviewer에게 stricter packet으로 넘겨야 할 때는 combined local gate를 사용한다.
 
 ```sh
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha

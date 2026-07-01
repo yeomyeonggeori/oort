@@ -634,6 +634,12 @@
 - evidence packet에는 prod+internal-smoke image boot/health/migrate/message/relay/mock Kim Intern, repo-local `pg_dump`→separate restore, `MomoMacDevApp` real-backend process/window/log, redacted diagnostics directory/archive path를 포함한다.
 - 실제 public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging, production pgBackRest stanza/check/full backup/WAL/PITR restore는 계속 `runtime-unverified(public host)`다. 검증: 구현 중 `LOCAL_GATE_ALLOW_DIRTY=1 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` PASS; PR evidence는 commit 후 clean worktree에서 재실행한다.
 
+## 0au. MOMO-237 Local Docker Alpha RC Gate (2026-07-01)
+
+- AWS 리소스를 만들기 전에 닫는 1인 local Docker RC profile로 `scripts/local_gate.sh --profile local-alpha`를 추가했다. 이 profile은 local image host-runtime boot, migration idempotency, `/health`, REST message, OutboxRelay publish, mock Hermes/Kim Intern roundtrip, backup restore rehearsal, macOS real-backend smoke, redacted diagnostics bundle을 run-specific `local-alpha-<run-id>/` packet에 모은다.
+- `local-alpha`는 AWS API 호출/리소스 생성 없이 local Docker, local Swift packages, repo-local mock Hermes, local diagnostics만 사용한다. foreground `MomoMacDevApp` process/window/log evidence는 `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha`로 opt-in한다.
+- 실제 AWS host creation, public DNS/TLS, registry pull, SOPS decrypt, production pgBackRest WAL/PITR, real external Hermes credentialed side effect, notarized macOS release app, iOS/APNs는 out of scope이며 계속 `runtime-unverified(public host/external provider/release)`. 검증: `scripts/local_gate.sh --profile docs` 및 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` 대상.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
