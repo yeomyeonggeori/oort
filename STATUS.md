@@ -50,6 +50,12 @@
 - 코드 보강: `CostAccounting`이 `model_pricing` numeric 단가를 읽어 integer micro_usd로 reserve/reconcile하고, `budget_window` reserve를 `ON CONFLICT DO UPDATE ... WHERE spent+reserved+estimate<=limit` 원자 경로로 처리한다. `WorkerService`의 `agent_run.error` JSONB 저장도 `to_jsonb(text)`로 정리했다. 실제 hermes 대신 repo-local mock을 사용했으므로 외부 hermes 연동은 staging에서 재확인한다.
 - 남은 runtime-unverified: WebSocket live subscribe/presence/recovery 세부 UX, APNs.
 
+## 0f. MOMO-240 Local Alpha Runner (2026-07-01)
+
+- `scripts/local_alpha_runner.sh`를 추가해 plan/dry-run과 execute를 분리했다. execute는 repo 밖 evidence 디렉터리에 dev env/임시 Centrifugo config/compose override/log/summary/stop script를 만들고, PG18+Centrifugo → migrate → RLS role prep → mock 또는 external Hermes env 확인 → MomoServer/OutboxRelay/AgentWorker → `MomoMacSmoke` 순서로 내부 알파 stack을 띄운다. `execute --hermes mock --stop-after-smoke`는 로컬 Docker/Swift runtime에서 통과했다.
+- secret env는 `--secret-env /absolute/path`만 받으며 repo 내부 경로를 거부한다. AWS 리소스 생성은 없고, 실행 결과는 `summary.md`에 URL(`MomoServer`, `Centrifugo`, Hermes), redacted env, logs/evidence path, macOS dev launch command로 남긴다.
+- 현재 main의 macOS dev app surface는 Xcode `.app`이 아니라 SwiftPM `MomoMacSmoke`이므로 runner는 해당 launch command를 출력한다. external Hermes 실연결과 packaged `.app` 런치는 각각 제공자/ M4 Xcode 프로젝트가 필요하다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
@@ -75,6 +81,7 @@
 | `scripts/verify_rls.sh` | `sh -n` + Docker PG18 RLS runtime | ✅ OK |
 | `scripts/mock_hermes.py` | `python3 -m py_compile` + MOMO-004 SSE runtime | ✅ OK |
 | `scripts/verify_agent_worker.sh` | `bash -n` + Docker PG18/Centrifugo/AgentWorker runtime | ✅ OK |
+| `scripts/local_alpha_runner.sh` | `sh -n` + plan mode + `execute --hermes mock --stop-after-smoke` | ✅ OK |
 
 > **MOMO-001에서 검증됨:** PG18+Centrifugo compose health, SQL 001/002 적용 및 멱등 재실행, MomoServer `/health`, 메시지 송신의 `channel_seq` gapless 발급과 `message`/`outbox` 기록.
 > **MOMO-002에서 검증됨:** OutboxRelay SKIP LOCKED claim, Centrifugo `/api/publish`, outbox `pending→done`, Centrifugo history의 `seq=message.seq`.
@@ -103,7 +110,7 @@ momo/
 ├─ clients/macOS/       (MomoMac: ChannelList/MessageList/MessageBubble/AgentPartial/
 │                         CostBreathingRing/ApprovalInbox + ChatViewModel/LiveChatBackend)
 ├─ adapters/hermes/     (momo_adapter.py: BasePlatformAdapter · plugin.yaml)
-└─ scripts/{migrate,verify_rls,verify_agent_worker,mock_hermes}.*
+└─ scripts/{migrate,verify_rls,verify_agent_worker,mock_hermes,local_alpha_runner}.*
 ```
 
 ## 4. 컴파일 검증됨 vs 런타임 미검증
@@ -156,6 +163,10 @@ make migrate                # 001_init → 002_seed
 
 # MOMO-004 AgentWorker 런타임 재검증(실제 hermes 없을 때 mock 사용)
 scripts/verify_agent_worker.sh
+
+# MOMO-240 내부 알파 runner
+scripts/local_alpha_runner.sh plan
+scripts/local_alpha_runner.sh execute --hermes mock
 ```
 
 > 라이선스: 전 의존성 permissive(Apache/MIT) 타깃. 외부 배포/상용 전 법무 검토 1회 필수(L4 §10).

@@ -41,7 +41,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | ID | 이름 | 트랙 | 목표(goal) | 핵심 산출물 | 종료 기준(exit) | 의존 |
 |---|---|---|---|---|---|---|
 | **M0** | Foundation (완료) | ⚙️ | 리포 골격 + 5개 Swift 패키지 컴파일 + 정본 스키마/인프라/마이그레이션 파일 | `swift build` green ×5, schema_v0.sql, infra/*, Migrations/* | 컴파일 green ×5 + 파일 정합 (=Phase 0 baseline, **달성됨**) | — |
-| **M1** | Backend 런타임 + 배포(staging) | ⚙️ | docker(PG18+Centrifugo v6+hermes)에서 서버 런타임 검증 + staging 배포(TLS/리버스프록시/시크릿/백업/모니터링) | 동작하는 staging 스택, RUN 런북 갱신 | 런타임 e2e PASS(아래 G-0) + staging URL 헬스 green | M0 |
+| **M1** | Backend 런타임 + 배포(staging) | ⚙️ | docker(PG18+Centrifugo v6+hermes)에서 서버 런타임 검증 + staging 배포(TLS/리버스프록시/시크릿/백업/모니터링) | 동작하는 staging 스택, local alpha runner, RUN 런북 갱신 | 런타임 e2e PASS(아래 G-0) + local alpha evidence + staging URL 헬스 green | M0 |
 | **M2** | 멀티팀 온보딩 | ⚙️ | 워크스페이스 스핀업 + 스핀업별 고유 초대코드 → 자가가입 + 플랫폼 관리자 전체 추적 | `003_onboarding.sql`, 온보딩 REST, 관리자 추적 뷰 | 3개+ 팀(10인=1팀) 격리 + 초대코드 자가가입 e2e + 관리자 전역 조회 | M1 |
 | **M3** | 데스크탑 v0 UX (D/B/C 실데이터) | 🖥 | macOS 클라가 D Live Tool-Call · B 비용 호흡 · C 승인 인박스를 **실데이터**로 렌더 | MomoMac 실데이터 바인딩(VM↔LiveBackend) | D/B/C 3경험이 staging 실데이터로 동작(아직 라이브러리/스모크 단계 OK) | M1 (data), M0 (UI 골격) |
 | **M4** | 데스크탑 패키징 | 🖥 | macOS Xcode `.app` + Developer ID 서명 + 공증(notarytool) + DMG + Sparkle 자동업데이트 | `MomoMac.xcodeproj`, 공증 `.dmg`, appcast | 공증 `.dmg`가 타 맥에서 Gatekeeper 통과(`spctl --assess`) + Sparkle 업데이트 1회 | M3, (M8-선결: 게이트) |
@@ -120,7 +120,7 @@ M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데�
 
 ### 3.1 ⚙️ 공유 / 백엔드 트랙
 - **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
-- **백엔드 런타임/배포**(M1): 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리.
+- **백엔드 런타임/배포**(M1): local alpha runner로 `main` 기준 내부 알파 evidence를 먼저 수집한 뒤, 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링. staging/prod 분리.
 - **멀티팀 온보딩**(M2): `003_onboarding.sql`(invite_code + platform_admin) + 온보딩 REST + 관리자 전역 추적. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장.
 
 ### 3.2 🖥 데스크탑 트랙 (macOS)

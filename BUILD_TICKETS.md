@@ -136,6 +136,21 @@
 
 ---
 
+# M1 운영 보강 티켓
+
+### ☐ MOMO-240 — Local Alpha Runner `[infra]/[runtime]` · 의존: MOMO-001~004
+- [ ] 별도 worktree/branch에서 `main` 기준으로 구현한다.
+- [ ] `scripts/local_alpha_runner.sh plan`은 Docker/Swift 프로세스를 띄우지 않고 실행 순서, URL, env/evidence 정책을 출력한다.
+- [ ] `scripts/local_alpha_runner.sh execute --hermes mock`은 AWS 리소스 생성 없이 PG18+Centrifugo compose, migrate, RLS role prep, mock Hermes, MomoServer, OutboxRelay, AgentWorker, macOS smoke를 한 흐름으로 실행한다.
+- [ ] `--hermes external --secret-env /absolute/path`는 repo 밖 secret env만 허용하고, `HERMES_BASE_URL`/`HERMES_API_KEY` placeholder를 거부한다.
+- [ ] 실행 결과로 `summary.md`에 MomoServer/Centrifugo/Hermes URL, redacted env, logs/evidence path, stop command, macOS dev launch command를 남긴다.
+- [ ] `Makefile` 편의 타깃 `local-alpha-plan` / `local-alpha`가 runner와 정합한다.
+- [ ] `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] local gate: `sh -n scripts/local_alpha_runner.sh`, `scripts/local_alpha_runner.sh plan`, `scripts/local_alpha_runner.sh execute --hermes mock --stop-after-smoke`, `make build`, `make test`, `python3 -m py_compile adapters/hermes/momo_adapter.py` 통과.
+- [ ] PR은 `needs-review` 상태에서 멈춘다.
+
+---
+
 # 후속 백로그 (v1 / v2 + 신규 프리미티브 P1~P6)
 
 > 출처: 경험 설계 문서(`research/07-deepdive/05-agent-native-experiences.md`) §3·§6·§7.
