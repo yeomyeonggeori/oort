@@ -298,6 +298,12 @@
 - 새 `AlphaCommandCenterSnapshot` projection은 기존 `ChatViewModel` 상태(`LiveChatBackend`/REST backend, realtime status, Kim Intern status, invite state, update readiness)를 재사용하며, failed/degraded 상태에는 recovery hint를 붙인다.
 - 검증 대상: `swift test --package-path clients/macOS`, `scripts/local_gate.sh --profile macos-ui`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`. Real Sparkle install, AWS/public host, iOS/APNs, credentialed external Hermes side effects는 계속 out of scope/runtime-unverified 경계다.
 
+## 0-26. MOMO-244 Dev Update Channel v0 (2026-07-01)
+
+- `Updates` popover를 local/file manifest 기반 Dev Update Channel v0로 업그레이드했다. `MOMO_UPDATE_MANIFEST_PATH` 또는 `file://` `MOMO_UPDATE_MANIFEST_URL`을 읽어 current/available version, channel, manifest/download target을 표시하고 `Up to date` / `Update available` / `Update check failed` 상태를 구분한다.
+- `clients/macOS/Fixtures/update-manifest-alpha-v0.json` 예시 fixture와 focused macOS tests를 추가했다. 새 빌드가 있으면 `Open Download`/release notes/설치 후 relaunch 안내를 제공하되, Sparkle/Developer ID/notary/DMG/완전 무인 self-replace updater는 out of scope로 유지한다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS. Required PR gates: `scripts/local_gate.sh --profile macos-ui`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

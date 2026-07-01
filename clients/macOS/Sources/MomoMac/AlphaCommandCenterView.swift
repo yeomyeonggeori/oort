@@ -224,7 +224,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                     id: "updates",
                     title: "Alpha update readiness",
                     detail: updateStatus.surfaceDetail,
-                    isAvailable: updateStatus.canCheckNow
+                    isAvailable: updateStatus.state != .failed
                 ),
             ],
             limitations: [
@@ -377,35 +377,44 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
     }
 
     private static func updates(_ status: MomoMacUpdateChannelStatus) -> AlphaCommandCenterStatus {
-        if !status.diagnostics.isEmpty {
+        if !status.diagnostics.isEmpty || status.state == .failed {
             return AlphaCommandCenterStatus(
                 area: .updates,
                 health: .degraded,
                 detail: status.diagnostics.joined(separator: " "),
-                recovery: "Use only the public EdDSA key and a valid appcast URL in runtime config."
+                recovery: "Use a local path or file:// update manifest and keep signing secrets out of runtime config."
             )
         }
-        if status.canInstallAutomatically {
+
+        switch status.state {
+        case .updateAvailable:
+            return AlphaCommandCenterStatus(
+                area: .updates,
+                health: .ready,
+                detail: status.surfaceDetail,
+                recovery: status.canOpenDownload ? "Open the download, install the new build, and relaunch momo." : nil
+            )
+        case .upToDate:
             return AlphaCommandCenterStatus(
                 area: .updates,
                 health: .ready,
                 detail: status.surfaceDetail
             )
-        }
-        if status.canCheckNow {
+        case .notConfigured:
+            return AlphaCommandCenterStatus(
+                area: .updates,
+                health: .planned,
+                detail: status.surfaceDetail,
+                recovery: "Set MOMO_UPDATE_MANIFEST_PATH or a file:// MOMO_UPDATE_MANIFEST_URL for dogfood build checks."
+            )
+        case .failed:
             return AlphaCommandCenterStatus(
                 area: .updates,
                 health: .degraded,
                 detail: status.surfaceDetail,
-                recovery: "Signed/notarized DMG artifacts are still required before install."
+                recovery: "Fix the update manifest configuration and retry."
             )
         }
-        return AlphaCommandCenterStatus(
-            area: .updates,
-            health: .planned,
-            detail: status.surfaceDetail,
-            recovery: status.missingRequirements.joined(separator: ", ")
-        )
     }
 
     private static func inviteDetail(_ state: InviteJoinState) -> String {
