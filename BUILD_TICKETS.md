@@ -176,6 +176,7 @@
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
 | `MOMO-231` | internal alpha feedback intake + triage workflow v0 | docs/tooling | MOMO-112, MOMO-225, MOMO-228 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
+| `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
@@ -705,6 +706,7 @@
 | `MOMO-223` | macOS session/account/server switch + logout polish v0 | swift/macos-ui | MOMO-213, MOMO-207, MOMO-218 |
 | `MOMO-226` | macOS invite/admin onboarding real-backend polish v0 | swift/macos-ui | MOMO-011, MOMO-014, MOMO-213, MOMO-217, MOMO-218, MOMO-223 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
+| `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -1006,6 +1008,18 @@
 - [ ] PR 생성 후 GitHub #220을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: Developer ID signing/notary/DMG/Sparkle, iOS UI, SSO/OAuth/email invite delivery, public host deploy, real external Hermes quality evaluation.
 
+### MOMO-235 수용기준 `[swift/docs]`
+- [x] GitHub #226을 `scripts/goal_claim.sh 226`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] `docs/adr/0005-macos-alpha-update-channel-v0.md`에 Sparkle 2 우선 + manual fallback alpha channel 결정을 기록한다.
+- [x] `docs/MACOS_ALPHA_UPDATE_CHANNEL.md`에 appcast/signing key/Developer ID/notarization/DMG secret boundary와 operator runbook을 정리한다.
+- [x] SwiftPM dev app/Xcode host 공용 session bar에 `Updates` placeholder surface를 추가한다.
+- [x] placeholder surface는 `MOMO_UPDATE_*` non-secret hints만 읽고 Sparkle private key/Apple signing material을 금지 경계로 둔다.
+- [x] focused macOS tests가 feed/public-key/signing/notary/DMG readiness와 private-key-looking config diagnostics를 검증한다.
+- [x] `swift test --package-path clients/macOS` 또는 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #226을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: real Sparkle framework installation, appcast generation script, Developer ID signing, notarization, DMG build/upload, old-version-to-new-version update proof.
+
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
 - [x] 기존 `LocalContextCopilotService`를 Context Packet 스타일 compact output v1으로 확장한다.
@@ -1139,6 +1153,7 @@
 |---|---|---|---|
 | `MOMO-208` | M4 macOS packaging architecture ADR: SwiftPM dev app과 Xcode release app 경계, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle 순서와 #15/#16/#17 split | docs/spec | M4 구현 전 |
 | `MOMO-211` | MomoMac Xcode thin host app v0: SwiftPM dev app과 별개로 `MomoMac.xcodeproj`가 `MomoMac`/`MomoCore` local package를 import해 무서명 build되는 첫 release host slice | xcode/swift/docs | MOMO-208 |
+| `MOMO-235` | macOS alpha update channel v0: Sparkle 2 alpha-channel ADR/runbook + SwiftPM dev app placeholder surface + signing/appcast secret boundary | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
 
 ### MOMO-208 수용기준 `[docs/spec]`
 - [x] `docs/adr/0003-macos-packaging-architecture.md` — SwiftPM `MomoMacDevApp`은 개발/로컬 게이트용, Xcode `MomoMac.app`은 릴리스 번들/서명/공증용으로 분리한다.

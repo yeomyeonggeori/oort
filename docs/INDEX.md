@@ -53,6 +53,7 @@
 | [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md) | SOPS+age secret lifecycle + pgBackRest PITR backup/restore skeleton(MOMO-006, 실제 secret 없음) | M1 |
 | [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | 내부 alpha quickstart: local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations | M3/M7 준비 |
 | [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
+| [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | macOS alpha update channel runbook: Sparkle 2/manual fallback, appcast/signing/notary/DMG secret boundary, placeholder UI check | M3/M4 준비 |
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
 | [`docs/RUN.md`](RUN.md) | 로컬 기동/마이그레이션/롤백 절차(환경변수→`make up`→migrate→서버/relay/worker→macOS) | M0/M1 |
 | [`docs/INBOUND_MCP.md`](INBOUND_MCP.md) | Inbound MCP v0 서버 skeleton endpoint/security/permission model | M2 |
@@ -62,6 +63,7 @@
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
 | [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
 | [`docs/adr/0003-macos-packaging-architecture.md`](adr/0003-macos-packaging-architecture.md) | M4 macOS packaging ADR: SwiftPM dev app vs Xcode release app, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle issue split | M4 |
+| [`docs/adr/0005-macos-alpha-update-channel-v0.md`](adr/0005-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 
