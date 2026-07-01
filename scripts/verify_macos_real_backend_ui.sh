@@ -122,7 +122,11 @@ wait_http() {
   local url="$1"
   local name="$2"
   local deadline
-  deadline=$(($(date +%s) + 60))
+  local wait_seconds="${MACOS_REAL_BACKEND_WAIT_SECONDS:-240}"
+  if ! [[ "$wait_seconds" =~ ^[0-9]+$ ]] || [ "$wait_seconds" -lt 1 ]; then
+    fail "MACOS_REAL_BACKEND_WAIT_SECONDS must be a positive integer"
+  fi
+  deadline=$(($(date +%s) + wait_seconds))
   while [ "$(date +%s)" -lt "$deadline" ]; do
     if curl -fsS "$url" >/dev/null 2>&1; then
       echo "[macos-real-backend] ${name} ready: ${url}"

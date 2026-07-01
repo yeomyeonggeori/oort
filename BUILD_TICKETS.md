@@ -166,6 +166,7 @@
 | `MOMO-221` | Production secret/bootstrap hardening v0 | infra/docs | MOMO-005, MOMO-006, MOMO-216, MOMO-220 |
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
+| `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.
@@ -200,6 +201,17 @@
 - [ ] `scripts/local_gate.sh --profile diagnostics` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #201을 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-225 수용기준 `[tooling/runtime]`
+- [x] GitHub #209를 `scripts/goal_claim.sh 209`로 claim하고 별도 branch/worktree `chore/209-internal-alpha-combined-local-gate-v0`에서 진행한다.
+- [x] `scripts/local_gate.sh --profile internal-alpha`를 추가한다.
+- [x] `internal-alpha`는 `LOCAL_GATE_LAUNCH_UI=1`을 요구하고, host-runtime, backup restore, macOS real-backend UI, diagnostics bundle을 한 PR-ready evidence packet으로 묶는다.
+- [x] host-runtime evidence에는 prod+internal-smoke local image boot, `/health`, migration idempotency, REST message, OutboxRelay publish, mock Hermes/Kim Intern roundtrip을 포함한다.
+- [x] macOS evidence에는 `MomoMacDevApp` real backend launch/process/window/log path를 포함한다.
+- [x] diagnostics bundle directory/archive path와 backup restore markdown/json evidence path를 local gate artifact packet에 포함한다.
+- [x] `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #209를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-115 수용기준 `[runtime/infra]`
 - [x] `scripts/verify_relay.sh`가 seeded demo user login + REST send로 outbox `pending`을 만들고, relay 시작 후 SKIP LOCKED claim(`attempts>=1`) + Centrifugo history + outbox `done`을 검증한다.
