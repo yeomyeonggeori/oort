@@ -170,6 +170,7 @@
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
 | `MOMO-231` | internal alpha feedback intake + triage workflow v0 | docs/tooling | MOMO-112, MOMO-225, MOMO-228 |
+| `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -636,6 +637,7 @@
 | `MOMO-218` | macOS channel management UI v0 | swift/macos-ui | MOMO-213, MOMO-214 |
 | `MOMO-223` | macOS session/account/server switch + logout polish v0 | swift/macos-ui | MOMO-213, MOMO-207, MOMO-218 |
 | `MOMO-226` | macOS invite/admin onboarding real-backend polish v0 | swift/macos-ui | MOMO-011, MOMO-014, MOMO-213, MOMO-217, MOMO-218, MOMO-223 |
+| `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -921,6 +923,21 @@
 - [x] `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
 - [x] PR 생성 후 GitHub #210을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: SSO/OAuth, email delivery for invite links, billing/team plans, App Store packaging/signing/notarization.
+
+### MOMO-232 수용기준 `[swift/macos-ui]`
+- [x] GitHub #220을 `scripts/goal_claim.sh 220`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] invite create/list/revoke UI에서 중복 submit 방지, 진행 상태, 실패/재시도 상태가 명확하다.
+- [x] raw invite code를 생성 직후 `Copy Code`로 복사할 수 있고, raw code가 사라진 뒤 복구 불가임을 UI/문서에서 안내한다.
+- [x] session/server switch/logout 후 stale channel/member/invite/realtime state가 남지 않도록 `ChatViewModel` session-sensitive state reset을 검증한다.
+- [x] Kim Intern provider chip이 `Local mock` / `Internal host mock` / `External Hermes`, key/endpoint/degraded diagnostics를 내부 알파 사용자가 구분 가능하게 표시한다.
+- [x] login/join/channel load/message send 실패가 recoverable error로 표시되고 retry/dismiss 경로가 있다.
+- [x] 기존 D/B/C approval/cost/tool-call UI를 깨지 않는다.
+- [x] focused macOS tests가 invite admin create/copy/retry, state clear, Kim Intern provider summary를 검증한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [ ] 가능하면 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile internal-alpha` PASS evidence를 첨부한다.
+- [ ] PR 생성 후 GitHub #220을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: Developer ID signing/notary/DMG/Sparkle, iOS UI, SSO/OAuth/email invite delivery, public host deploy, real external Hermes quality evaluation.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

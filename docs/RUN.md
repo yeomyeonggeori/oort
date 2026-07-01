@@ -134,7 +134,9 @@ cp infra/.env.example .env
 placeholder key가 보이면 MomoServer/AgentWorker boot와 `scripts/prod_env_preflight.sh`가 fail-fast한다.
 `GET /health`와 `GET /v1/agent-runtime/status`는 `agentRuntime` projection을 제공하지만
 `endpointLabel`은 user/password/query/fragment를 제거한 값이고 provider token은 절대 포함하지 않는다.
-macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded` / `Mock`을 표시한다.
+macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded` / `Mock`을 표시하고,
+internal alpha 사용자에게 `Local mock` / `Internal host mock` / `External Hermes`, key 준비 여부,
+redacted endpoint/diagnostic hint를 구분해 보여준다.
 
 ### 2.3 staging/prod 시크릿과 백업 skeleton
 

@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Security
 import SwiftUI
 import MomoCore
@@ -854,9 +855,17 @@ private struct MomoServerSessionChooser: View {
             }
 
             if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(MomoTheme.irreversibleRed)
-                    .textSelection(.enabled)
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.semibold))
+                    Text("Fix the server, account, password, or invite code and try again. The app stays in the chooser so the failed session can be recovered.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(MomoTheme.irreversibleRed)
+                .textSelection(.enabled)
+                .padding(10)
+                .background(MomoTheme.irreversibleRed.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
             }
 
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 12) {
@@ -947,7 +956,11 @@ private struct SessionStatusBar: View {
                 Label("Details", systemImage: "info.circle")
             }
             .popover(isPresented: $showDetails) {
-                SessionDetailPopover(summary: summary, realtimeStatus: viewModel.selectedRealtimeStatus)
+                SessionDetailPopover(
+                    summary: summary,
+                    realtimeStatus: viewModel.selectedRealtimeStatus,
+                    agentStatus: viewModel.agentRuntimeStatus
+                )
             }
             .controlSize(.small)
             if let inviteAdminContext {
@@ -1015,44 +1028,94 @@ private struct SessionStatusBar: View {
     }
 }
 
+enum MomoInviteAdminOperation: Equatable {
+    case idle
+    case refreshing
+    case creating
+    case revoking(UUID)
+
+    var isWorking: Bool {
+        switch self {
+        case .idle:
+            return false
+        case .refreshing, .creating, .revoking:
+            return true
+        }
+    }
+
+    var statusText: String? {
+        switch self {
+        case .idle:
+            return nil
+        case .refreshing:
+            return "Refreshing invites"
+        case .creating:
+            return "Creating invite"
+        case .revoking:
+            return "Revoking invite"
+        }
+    }
+}
+
+enum MomoInviteAdminRetryAction: Equatable {
+    case refresh
+    case create(role: MembershipRole, maxUsesText: String, expiresInDaysText: String)
+    case revoke(invite: MomoInviteCode, reason: String)
+}
+
 @MainActor
-private final class MomoInviteAdminViewModel: ObservableObject {
+final class MomoInviteAdminViewModel: ObservableObject {
     @Published var invites: [MomoInviteCode] = []
     @Published var createdCode: String?
     @Published var notice: String?
     @Published var errorMessage: String?
-    @Published var isWorking = false
+    @Published var operation: MomoInviteAdminOperation = .idle
+    @Published private(set) var lastFailedAction: MomoInviteAdminRetryAction?
+
+    var isWorking: Bool { operation.isWorking }
+    var canRetry: Bool { lastFailedAction != nil && !operation.isWorking }
 
     private let context: MomoInviteAdminContext
     private let client: MomoInviteAdminClient
+    private let copyInviteCode: @MainActor (String) -> Void
 
-    init(context: MomoInviteAdminContext, client: MomoInviteAdminClient = MomoInviteAdminClient()) {
+    init(
+        context: MomoInviteAdminContext,
+        client: MomoInviteAdminClient = MomoInviteAdminClient(),
+        copyInviteCode: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard
+    ) {
         self.context = context
         self.client = client
+        self.copyInviteCode = copyInviteCode
     }
 
-    func refreshInvites() async {
-        guard !isWorking else { return }
-        isWorking = true
-        defer { isWorking = false }
+    func refreshInvites(showNotice: Bool = false) async {
+        guard operation == .idle else { return }
+        operation = .refreshing
+        defer { operation = .idle }
         do {
-            invites = try await client.listInvites(context: context, includeRevoked: true, limit: 50)
+            invites = try await loadInvites()
             errorMessage = nil
+            lastFailedAction = nil
+            if showNotice {
+                notice = "Invite list refreshed."
+            }
         } catch {
             errorMessage = error.localizedDescription
+            lastFailedAction = .refresh
         }
     }
 
     func createInvite(role: MembershipRole, maxUsesText: String, expiresInDaysText: String) async {
-        guard !isWorking else { return }
+        guard operation == .idle else { return }
         let maxUses = Int(maxUsesText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 1
         let expiresInDays = Int(expiresInDaysText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 7
         let clampedMaxUses = min(max(maxUses, 1), 10_000)
         let clampedDays = min(max(expiresInDays, 1), 90)
         let expiresAtMs = Int64(Date().addingTimeInterval(TimeInterval(clampedDays * 24 * 60 * 60)).timeIntervalSince1970 * 1000)
 
-        isWorking = true
-        defer { isWorking = false }
+        operation = .creating
+        defer { operation = .idle }
         do {
             let created = try await client.createInvite(
                 context: context,
@@ -1064,20 +1127,27 @@ private final class MomoInviteAdminViewModel: ObservableObject {
                 )
             )
             createdCode = created.code
-            notice = "Invite created for \(created.invite.role.rawValue)."
+            notice = "Invite created for \(created.invite.role.rawValue). Copy the raw code now; the saved list only keeps a masked preview."
             errorMessage = nil
+            lastFailedAction = nil
             invites.removeAll { $0.id == created.invite.id }
             invites.insert(created.invite, at: 0)
-            await refreshInvites()
+            do {
+                invites = try await loadInvites()
+            } catch {
+                errorMessage = "Invite created, but refresh failed: \(error.localizedDescription)"
+                lastFailedAction = .refresh
+            }
         } catch {
             errorMessage = error.localizedDescription
+            lastFailedAction = .create(role: role, maxUsesText: maxUsesText, expiresInDaysText: expiresInDaysText)
         }
     }
 
     func revoke(_ invite: MomoInviteCode, reason: String) async {
-        guard !isWorking else { return }
-        isWorking = true
-        defer { isWorking = false }
+        guard operation == .idle else { return }
+        operation = .revoking(invite.id)
+        defer { operation = .idle }
         do {
             let revoked = try await client.revokeInvite(
                 context: context,
@@ -1086,6 +1156,7 @@ private final class MomoInviteAdminViewModel: ObservableObject {
             )
             notice = "Invite \(revoked.codePreview) revoked."
             errorMessage = nil
+            lastFailedAction = nil
             if let index = invites.firstIndex(where: { $0.id == revoked.id }) {
                 invites[index] = revoked
             } else {
@@ -1093,7 +1164,43 @@ private final class MomoInviteAdminViewModel: ObservableObject {
             }
         } catch {
             errorMessage = error.localizedDescription
+            lastFailedAction = .revoke(invite: invite, reason: reason)
         }
+    }
+
+    func copyCreatedCode() {
+        guard let createdCode, !createdCode.isEmpty else {
+            errorMessage = "Create an invite before copying the raw code."
+            return
+        }
+        copyInviteCode(createdCode)
+        notice = "Invite code copied. It cannot be recovered from the masked invite list after this flow."
+        errorMessage = nil
+    }
+
+    func retryLastFailure() async {
+        guard let lastFailedAction, operation == .idle else { return }
+        switch lastFailedAction {
+        case .refresh:
+            await refreshInvites(showNotice: true)
+        case let .create(role, maxUsesText, expiresInDaysText):
+            await createInvite(role: role, maxUsesText: maxUsesText, expiresInDaysText: expiresInDaysText)
+        case let .revoke(invite, reason):
+            await revoke(invite, reason: reason)
+        }
+    }
+
+    func isRevoking(_ invite: MomoInviteCode) -> Bool {
+        operation == .revoking(invite.id)
+    }
+
+    private func loadInvites() async throws -> [MomoInviteCode] {
+        try await client.listInvites(context: context, includeRevoked: true, limit: 50)
+    }
+
+    private static func copyToPasteboard(_ code: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(code, forType: .string)
     }
 }
 
@@ -1102,7 +1209,7 @@ private struct InviteAdminPopover: View {
     @State private var role: MembershipRole = .member
     @State private var maxUses = "1"
     @State private var expiresInDays = "7"
-    @State private var revocationReason = "internal alpha cleanup"
+    @State private var revocationReasons: [UUID: String] = [:]
 
     init(context: MomoInviteAdminContext) {
         _model = StateObject(wrappedValue: MomoInviteAdminViewModel(context: context))
@@ -1114,8 +1221,12 @@ private struct InviteAdminPopover: View {
                 Text("Invites")
                     .font(.headline)
                 Spacer()
+                if model.operation == .refreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
                 Button {
-                    Task { await model.refreshInvites() }
+                    Task { await model.refreshInvites(showNotice: true) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -1125,29 +1236,7 @@ private struct InviteAdminPopover: View {
             }
 
             createControls
-
-            if let code = model.createdCode {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("New invite code")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(code)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-            }
-
-            if let notice = model.notice {
-                Label(notice, systemImage: "checkmark.circle")
-                    .font(.caption)
-                    .foregroundStyle(MomoTheme.reversibleGreen)
-            }
-            if let error = model.errorMessage {
-                Label(error, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(MomoTheme.irreversibleRed)
-                    .textSelection(.enabled)
-            }
+            feedbackRows
 
             Divider()
 
@@ -1173,16 +1262,19 @@ private struct InviteAdminPopover: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
+                .disabled(model.isWorking)
             }
             GridRow {
                 Text("Uses").foregroundStyle(.secondary)
                 TextField("1", text: $maxUses)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(model.isWorking)
             }
             GridRow {
                 Text("Days").foregroundStyle(.secondary)
                 TextField("7", text: $expiresInDays)
                     .textFieldStyle(.roundedBorder)
+                    .disabled(model.isWorking)
             }
             GridRow {
                 Color.clear
@@ -1195,12 +1287,79 @@ private struct InviteAdminPopover: View {
                         )
                     }
                 } label: {
-                    Label("Create Invite", systemImage: "plus.circle")
+                    if model.operation == .creating {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Creating")
+                        }
+                    } else {
+                        Label("Create Invite", systemImage: "plus.circle")
+                    }
                 }
                 .disabled(model.isWorking)
             }
         }
         .font(.caption)
+    }
+
+    @ViewBuilder
+    private var feedbackRows: some View {
+        if let code = model.createdCode {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("New invite code")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text(code)
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button {
+                        model.copyCreatedCode()
+                    } label: {
+                        Label("Copy Code", systemImage: "doc.on.doc")
+                    }
+                    .controlSize(.small)
+                    .disabled(model.isWorking)
+                }
+                Text("Copy it now. Existing invites only expose the masked preview, so the raw code cannot be recovered later.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(10)
+            .background(MomoTheme.reversibleGreen.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        }
+
+        if let status = model.operation.statusText {
+            Label(status, systemImage: "hourglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        if let notice = model.notice {
+            Label(notice, systemImage: "checkmark.circle")
+                .font(.caption)
+                .foregroundStyle(MomoTheme.reversibleGreen)
+                .textSelection(.enabled)
+        }
+        if let error = model.errorMessage {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                    .textSelection(.enabled)
+                Spacer()
+                if model.canRetry {
+                    Button {
+                        Task { await model.retryLastFailure() }
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                    .disabled(model.isWorking)
+                }
+            }
+        }
     }
 
     private var inviteList: some View {
@@ -1224,12 +1383,18 @@ private struct InviteAdminPopover: View {
 
                 if !invite.isRevoked {
                     HStack {
-                        TextField("Reason", text: $revocationReason)
+                        TextField("Reason", text: revocationReasonBinding(for: invite))
                             .textFieldStyle(.roundedBorder)
+                            .disabled(model.isWorking)
                         Button(role: .destructive) {
-                            Task { await model.revoke(invite, reason: revocationReason) }
+                            Task { await model.revoke(invite, reason: revocationReason(for: invite)) }
                         } label: {
-                            Image(systemName: "xmark.circle")
+                            if model.isRevoking(invite) {
+                                ProgressView()
+                                    .controlSize(.small)
+                            } else {
+                                Image(systemName: "xmark.circle")
+                            }
                         }
                         .buttonStyle(.borderless)
                         .disabled(model.isWorking)
@@ -1244,10 +1409,23 @@ private struct InviteAdminPopover: View {
             .padding(.vertical, 4)
         }
         .overlay {
-            if model.invites.isEmpty && !model.isWorking {
+            if model.invites.isEmpty && model.operation == .refreshing {
+                ProgressView()
+            } else if model.invites.isEmpty && !model.isWorking {
                 ContentUnavailableView("No invites", systemImage: "person.badge.key")
             }
         }
+    }
+
+    private func revocationReason(for invite: MomoInviteCode) -> String {
+        revocationReasons[invite.id] ?? "internal alpha cleanup"
+    }
+
+    private func revocationReasonBinding(for invite: MomoInviteCode) -> Binding<String> {
+        Binding(
+            get: { revocationReason(for: invite) },
+            set: { revocationReasons[invite.id] = $0 }
+        )
     }
 
     private func expiryText(_ expiresAtMs: Int64) -> String {
@@ -1259,6 +1437,7 @@ private struct InviteAdminPopover: View {
 private struct SessionDetailPopover: View {
     var summary: MomoServerSessionSummary
     var realtimeStatus: RealtimeConnectionStatus?
+    var agentStatus: AgentRuntimeStatus
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
@@ -1270,6 +1449,7 @@ private struct SessionDetailPopover: View {
             row("Session", summary.detail)
             row("Channels", String(summary.channelCount))
             row("Realtime", realtimeDescription)
+            row("Kim Intern", agentDescription)
         }
         .padding(16)
         .frame(minWidth: 360, alignment: .leading)
@@ -1295,6 +1475,21 @@ private struct SessionDetailPopover: View {
         }
         if let message = realtimeStatus.message, !message.isEmpty {
             parts.append(message)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var agentDescription: String {
+        var parts = [
+            agentStatus.availability.label,
+            agentStatus.mode.internalAlphaLabel,
+            agentStatus.endpointLabel,
+        ]
+        if !agentStatus.keyConfigured {
+            parts.append("key not configured")
+        }
+        if let diagnostic = agentStatus.diagnostics.first, !diagnostic.isEmpty {
+            parts.append(diagnostic)
         }
         return parts.joined(separator: " · ")
     }
