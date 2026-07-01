@@ -37,6 +37,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-235에서 macOS alpha update channel v0를 ADR/runbook + SwiftPM dev app `Updates` placeholder surface로 고정한다
      · MOMO-229에서 public/staging host preflight를 보강해 DNS/TLS, pinned registry images, SOPS/age secret source, DB/Redis volumes, pgBackRest WAL/full-backup/PITR required env를 fail-fast하고 redacted markdown/json evidence packet을 만든다
      · MOMO-233에서 AWS 1주일 internal alpha stack v0를 EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, static preflight로 고정한다
+     · MOMO-237에서 AWS 생성 전에 실행하는 `local-alpha` RC gate를 추가해 local Docker boot/migrate/health/message/relay/mock Kim Intern/macOS real-backend/diagnostics를 한 evidence packet으로 묶는다
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
@@ -76,7 +77,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 |---|---|---|---|
 | `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
 | `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
-| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all` + PR evidence 출력 |
+| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all` + PR evidence 출력 |
 | `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | `scripts/goal_status.sh` board + `goal_claim/release` + `.conductor/setup.sh` + handoff/충돌 방지 정본 |
 | `MOMO-115` | M1 | runtime-relay local gate 자동화 | `scripts/verify_relay.sh` + `local_gate --profile runtime-relay`로 server send→outbox pending→relay claim→Centrifugo history→outbox done→`version=message.seq` evidence |
 | `MOMO-199` | M1 | stale local worktree read-only audit | `scripts/goal_status.sh`가 closed issue/merged PR 연결 worktree를 `done-candidate`/`stale-warning`으로 분리하고 안전 cleanup command만 안내 |
@@ -90,6 +91,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-222` | M1 | Backup/PITR restore rehearsal gate v0 | `scripts/verify_backup_restore_rehearsal.sh` + `local_gate --profile backup`; repo-local PG18 dump→separate restore→marker checksum→markdown/json evidence. `host-runtime`에도 포함, real pgBackRest PITR는 `runtime-unverified(public host)` |
 | `MOMO-229` | M1 | Public host preflight + deploy evidence packet v0 | `scripts/prod_env_preflight.sh --evidence-dir` + `local_gate --profile staging-smoke`; public/staging env shape, pinned registry images, SOPS/age source, named DB/Redis volumes, pgBackRest/WAL/PITR required env를 fail-fast하고 redacted markdown/json evidence 생성 |
 | `MOMO-233` | M1/M7 준비 | AWS internal alpha stack v0 | `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh`; 최소/권장/분리 topology, Lightsail vs EC2 추천/비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback을 static preflight로 고정 |
+| `MOMO-237` | M1/M7 준비 | Local Docker alpha RC gate v0 | `scripts/local_gate.sh --profile local-alpha`; AWS 생성 전 local Docker image boot/migrate/health/message/relay/mock Kim Intern, backup restore, macOS real-backend smoke, diagnostics bundle을 한 packet으로 수집 |
 | `MOMO-227` | M1 | Kim Intern runtime config + health/status visibility v0 | `AGENT_PROVIDER_MODE` local/internal-host/external Hermes contract, staging/prod/internal-host external-provider fail-fast, `/v1/agent-runtime/status` secret-redacted projection, macOS compact Kim Intern availability chip, host-runtime status/redaction evidence |
 | `MOMO-230` | M1 | External Kim Intern/Hermes provider smoke gate v0 | `scripts/verify_external_agent_provider.sh` + `local_gate --profile external-agent-provider`; credentials가 있으면 OpenAI-compatible SSE preflight + local server/worker/relay `@김인턴` 1왕복, 없으면 `runtime-unverified(external provider credentials)` evidence |
 | `MOMO-234` | M1 | Hermes Codex OAuth provider boundary v0 | `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` + external provider verifier evidence/guard; Codex OAuth access/refresh token은 provider-owned이고 momo app/API/DB/local gate에는 저장/전달하지 않음 |

@@ -54,6 +54,7 @@ Profiles:
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
 | `backup` | backup/PITR runbook or internal hosting changes that must prove restore rehearsal evidence before review | `docs` profile + `scripts/verify_backup_restore_rehearsal.sh` for temporary PostgreSQL 18 source DB marker writes, `pg_dump -Fc`, separate restore DB `pg_restore`, marker checksum equality, and markdown/json evidence generation |
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
+| `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + macOS real-backend smoke + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet; add `LOCAL_GATE_LAUNCH_UI=1` for foreground MomoMacDevApp process/window/log evidence |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + `LOCAL_GATE_LAUNCH_UI=1` MomoMacDevApp real-backend process/window evidence + redacted diagnostics bundle |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
@@ -72,6 +73,8 @@ scripts/local_gate.sh --profile diagnostics
 scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile backup
 scripts/local_gate.sh --profile host-runtime
+scripts/local_gate.sh --profile local-alpha
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
@@ -148,7 +151,22 @@ template or normalize the report with
 issues start at `status:needs-triage`; momo-main adds severity, evidence,
 labels, milestone, and a buildable goal before a worker claims them.
 
-For internal alpha release-candidate handoff, use the combined packet instead
+Before creating AWS resources for a one-person alpha RC, use the local Docker
+RC packet:
+
+```bash
+scripts/local_gate.sh --profile local-alpha
+```
+
+This profile does not call AWS APIs or require public DNS/TLS. It writes a
+run-specific `local-alpha-<run-id>/` packet with host-runtime boot/health/
+migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal,
+macOS real-backend smoke, and a redacted diagnostics bundle. The default keeps
+foreground GUI launch optional so it can run from a background Codex session.
+Add `LOCAL_GATE_LAUNCH_UI=1` when the gate must prove `MomoMacDevApp`
+process/window/log launch against the local MomoServer too.
+
+For internal alpha reviewer handoff, use the stricter combined packet instead
 of pasting separate host/runtime/UI/diagnostics snippets:
 
 ```bash
@@ -279,6 +297,7 @@ Use the profile that matches the changed surface.
 | `staging-smoke` | MOMO-005/006/007/229 deploy config, Caddy/Centrifugo, public host preflight, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
+| `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha`; add `LOCAL_GATE_LAUNCH_UI=1` for MomoMacDevApp process/window/log launch evidence |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |
 | `runtime-db` | migrations/server/RLS/join changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
