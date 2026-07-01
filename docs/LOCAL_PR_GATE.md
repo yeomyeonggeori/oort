@@ -48,7 +48,7 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback packet updates | whitespace diff, workflow YAML parse, actionlint if installed, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
+| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
 | `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
@@ -167,6 +167,20 @@ For internal alpha runbook or feedback packet updates, use:
 ```bash
 scripts/local_gate.sh --profile docs
 ```
+
+For AWS internal alpha topology/runbook updates, the same docs profile runs:
+
+```bash
+scripts/aws_internal_alpha_preflight.sh \
+  --env-file infra/prod/aws-internal-alpha.env.example \
+  --mode recommended \
+  --evidence-dir "$LOCAL_GATE_OUTPUT_DIR/aws-internal-alpha-preflight"
+```
+
+This preflight validates provider/topology, public DNS/TLS shape, security-group
+intent, encrypted volume intent, immutable image deploy, backup/restore, and
+rollback acknowledgement. It does not create AWS resources or prove live host
+runtime; attach real AWS evidence separately when the host exists.
 
 If the change modifies diagnostics collection or expected bundle shape, use
 `scripts/local_gate.sh --profile diagnostics`. If the change claims macOS app

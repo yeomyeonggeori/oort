@@ -34,6 +34,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-231에서 internal alpha feedback을 `status:needs-triage` intake issue → severity/evidence/labels/milestone → buildable goal → worker PR/review 흐름으로 고정한다
      · MOMO-232에서 macOS real-server 내부 알파 사용성(초대 관리, 복구 가능한 오류, session reset, Kim Intern 상태 chip)을 보강한다
      · MOMO-229에서 public/staging host preflight를 보강해 DNS/TLS, pinned registry images, SOPS/age secret source, DB/Redis volumes, pgBackRest WAL/full-backup/PITR required env를 fail-fast하고 redacted markdown/json evidence packet을 만든다
+     · MOMO-233에서 AWS 1주일 internal alpha stack v0를 EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, static preflight로 고정한다
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
@@ -86,6 +87,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-221` | M1 | production secret/bootstrap hardening v0 | `scripts/prod_env_preflight.sh` + staging/internal-smoke/host-runtime verifier 연결; prod/internal-host placeholder/dev-insecure/default secret fail-fast, internal-smoke local placeholder 허용 경계와 SOPS operator checklist 문서화 |
 | `MOMO-222` | M1 | Backup/PITR restore rehearsal gate v0 | `scripts/verify_backup_restore_rehearsal.sh` + `local_gate --profile backup`; repo-local PG18 dump→separate restore→marker checksum→markdown/json evidence. `host-runtime`에도 포함, real pgBackRest PITR는 `runtime-unverified(public host)` |
 | `MOMO-229` | M1 | Public host preflight + deploy evidence packet v0 | `scripts/prod_env_preflight.sh --evidence-dir` + `local_gate --profile staging-smoke`; public/staging env shape, pinned registry images, SOPS/age source, named DB/Redis volumes, pgBackRest/WAL/PITR required env를 fail-fast하고 redacted markdown/json evidence 생성 |
+| `MOMO-233` | M1/M7 준비 | AWS internal alpha stack v0 | `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh`; 최소/권장/분리 topology, Lightsail vs EC2 추천/비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback을 static preflight로 고정 |
 | `MOMO-227` | M1 | Kim Intern runtime config + health/status visibility v0 | `AGENT_PROVIDER_MODE` local/internal-host/external Hermes contract, staging/prod/internal-host external-provider fail-fast, `/v1/agent-runtime/status` secret-redacted projection, macOS compact Kim Intern availability chip, host-runtime status/redaction evidence |
 | `MOMO-230` | M1 | External Kim Intern/Hermes provider smoke gate v0 | `scripts/verify_external_agent_provider.sh` + `local_gate --profile external-agent-provider`; credentials가 있으면 OpenAI-compatible SSE preflight + local server/worker/relay `@김인턴` 1왕복, 없으면 `runtime-unverified(external provider credentials)` evidence |
 | `MOMO-234` | M1 | Hermes Codex OAuth provider boundary v0 | `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` + external provider verifier evidence/guard; Codex OAuth access/refresh token은 provider-owned이고 momo app/API/DB/local gate에는 저장/전달하지 않음 |
