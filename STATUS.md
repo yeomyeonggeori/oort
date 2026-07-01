@@ -98,6 +98,12 @@
 - AWS 승격은 `local gate PASS + 1인 soak + credentialed external agent runtime smoke + open P0/P1 0 + diagnostics evidence`가 모두 PASS일 때만 `AWS_READY`로 기록한다. no-credential `external-agent-provider` skip은 로컬 dogfood에는 허용되지만 AWS 승격은 막는다.
 - `docs/AWS_INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `ROADMAP.md`, `BUILD_TICKETS.md`가 이 threshold를 참조하도록 갱신했다. 실제 AWS host creation/DNS/TLS/SOPS/registry/pgBackRest/PITR는 계속 `runtime-unverified(aws-host)`다. 검증: `scripts/local_gate.sh --profile docs` 대상.
 
+## 0-4f. MOMO-245 Local Soak/Resource Monitor (2026-07-01)
+
+- `scripts/local_soak_monitor.sh`를 추가해 72시간 local dogfood 동안 API/Centrifugo health, DB connectivity, outbox pending backlog, relay/worker status, Docker container/resource snapshot, disk free, macOS launch evidence를 repo 밖 evidence directory에 주기적으로 남길 수 있게 했다.
+- `docs/INTERNAL_ALPHA.md`에 monitor 실행법, `summary.md` PASS/WARN/FAIL 판정, P0/P1 감지 기준, Docker Desktop CPU/memory/disk 권장값을 추가했다. AWS 승격은 실제 72h `PASS` summary 또는 모든 `WARN`의 follow-up 없이는 진행하지 않는다.
+- 실제 72h soak 완료와 AWS monitoring/Prometheus/Grafana/Kubernetes는 out of scope다. 검증: `scripts/local_gate.sh --profile docs`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` 대상.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.
