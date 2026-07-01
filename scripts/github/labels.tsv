@@ -8,9 +8,11 @@ type:feature	1d76db	신규 기능/경험
 type:bug	d73a4a	결함
 type:chore	cfd3d7	빌드/툴링/잡일
 type:docs	0075ca	문서
+type:feedback	bfdadc	내부 알파/사용성 피드백 intake
 type:spec	5319e7	스펙/설계 결정
 type:infra	006b75	인프라/배포/CI
 # ── status (지금 어디) ──
+status:needs-triage	ededed	피드백 접수됨. severity/evidence/goal 변환 필요.
 status:ready	0e8a16	착수 가능(의존 충족). Codex picker 대상.
 status:in-progress	fbca04	작업 중
 status:blocked	b60205	선행 미충족/외부 대기
@@ -33,6 +35,7 @@ area:schema	5319e7	schema_v0.sql / DDL
 area:tenancy	5319e7	멀티팀/워크스페이스 격리/초대코드
 area:store	c2e0c6	배포(공증/앱스토어)
 area:ci	006b75	GitHub Actions/CI
+area:alpha	fef2c0	내부 알파 사용성/피드백/triage
 area:legal	bfd4f2	법무 선결(법률 자문 아님) — 정책/약관/프라이버시 문서
 # ── size (대략 공수) ──
 size:s	c5def5	작음(1티켓 1세션)

@@ -169,7 +169,19 @@
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
+| `MOMO-231` | internal alpha feedback intake + triage workflow v0 | docs/tooling | MOMO-112, MOMO-225, MOMO-228 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
+
+### MOMO-231 수용기준 `[docs/tooling]`
+- [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
+- [ ] `.github/ISSUE_TEMPLATE/`에 internal alpha feedback template을 추가하고, raw report는 `type:feedback` + `area:alpha` + `status:needs-triage`로 시작한다.
+- [ ] `docs/INTERNAL_ALPHA_FEEDBACK.md`에 severity(P0 data loss/security, P1 core alpha flow blocked, P2 usability friction, P3 polish), evidence requirements, triage 절차를 정의한다.
+- [ ] evidence requirements는 local gate profile, diagnostics bundle path, repro steps, workspace/channel/member context, expected/actual을 포함한다.
+- [ ] momo-main triage 절차를 feedback -> GitHub issue -> labels/milestone -> buildable goal -> worker prompt -> review/merge로 고정한다.
+- [ ] `scripts/goal_status.sh`와 GitHub 운영 문서가 `status:needs-triage` 확인 방법을 보여준다.
+- [ ] 새 라벨은 `.github/labels.json`과 `scripts/github/labels.tsv`에 반영한다.
+- [ ] `docs/INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] 검증: `scripts/local_gate.sh --profile docs` PASS.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.

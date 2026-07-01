@@ -103,6 +103,12 @@ local gate evidence are recorded in the bundle instead of failing collection.
 Secrets, passwords, API keys, bearer/JWT-shaped tokens, and database URL
 credentials are redacted before files are written.
 
+For raw internal alpha feedback, file GitHub's `Internal alpha feedback`
+template or normalize the report with
+[`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md). Feedback intake
+issues start at `status:needs-triage`; momo-main adds severity, evidence,
+labels, milestone, and a buildable goal before a worker claims them.
+
 For internal alpha release-candidate handoff, use the combined packet instead
 of pasting separate host/runtime/UI/diagnostics snippets:
 
@@ -129,7 +135,9 @@ scripts/local_gate.sh --profile docs
 If the change modifies diagnostics collection or expected bundle shape, use
 `scripts/local_gate.sh --profile diagnostics`. If the change claims macOS app
 launch evidence, add `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`.
-The human-facing alpha path lives in [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md).
+The human-facing alpha path lives in [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md);
+feedback intake and triage live in
+[`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md).
 
 `runtime-relay` is now automated by `scripts/verify_relay.sh`. Relay/history
 PRs must use this profile unless the machine cannot run Docker/psql. WebSocket
