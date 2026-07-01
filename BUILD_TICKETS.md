@@ -283,10 +283,10 @@
 - [x] credentials가 있으면 OpenAI-compatible SSE direct preflight와 local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복, `/v1/agent-runtime/status` redacted availability를 검증한다.
 - [x] `scripts/local_gate.sh --profile external-agent-provider` opt-in profile을 추가하고 기본 `runtime-agent` mock gate는 deterministic하게 유지한다.
 - [x] `docs/RUN.md`, `docs/DEPLOY.md`, `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`에 사용법과 `runtime-unverified(external provider credentials)` 경계를 기록한다.
-- [ ] `scripts/local_gate.sh --profile external-agent-provider` no-credential skip evidence를 PR에 첨부한다.
-- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
-- [ ] credentials가 있으면 external provider PASS evidence를 첨부하고, 없으면 `runtime-unverified(external provider credentials)`로 표기한다.
-- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+- [x] `scripts/local_gate.sh --profile external-agent-provider` no-credential skip evidence를 PR에 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] credentials가 있으면 external provider PASS evidence를 첨부하고, 없으면 `runtime-unverified(external provider credentials)`로 표기한다.
+- [x] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-222 수용기준 `[runtime/infra]`
 - [x] GitHub #204를 `scripts/goal_claim.sh 204`로 claim하고 별도 branch/worktree `chore/204-backup-pitr-restore-rehearsal-gate-v0`에서 진행한다.
