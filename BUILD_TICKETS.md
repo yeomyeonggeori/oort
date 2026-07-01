@@ -167,6 +167,8 @@
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
 | `MOMO-229` | Public host preflight + deploy evidence packet v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
+| `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
+| `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -183,6 +185,19 @@
 - [ ] 새 라벨은 `.github/labels.json`과 `scripts/github/labels.tsv`에 반영한다.
 - [ ] `docs/INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [ ] 검증: `scripts/local_gate.sh --profile docs` PASS.
+
+### MOMO-234 수용기준 `[docs/tooling]`
+- [x] GitHub #225를 `scripts/goal_claim.sh 225`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] Codex OAuth/Hermes provider boundary ADR 또는 runbook을 추가한다.
+- [x] token owner/storage/rotation/redaction/failure mode/audit 원칙을 정리한다.
+- [x] `scripts/verify_external_agent_provider.sh` 또는 관련 docs를 보강한다.
+- [x] secret 없이도 `scripts/local_gate.sh --profile external-agent-provider`가 safe skip/pass evidence를 남긴다.
+- [x] 실제 credentialed smoke에 필요한 env var를 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`, optional `EXTERNAL_AGENT_PROVIDER_ENV_FILE`로 명확히 한다.
+- [x] 알려진 Codex/OpenAI OAuth access/refresh token env var가 momo smoke process에 들어오면 fail-fast한다.
+- [ ] `scripts/local_gate.sh --profile external-agent-provider` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] PR 생성 후 GitHub #225를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
