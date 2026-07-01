@@ -5,9 +5,11 @@
     { "name": "type:bug", "color": "d73a4a", "description": "결함" },
     { "name": "type:chore", "color": "cfd3d7", "description": "빌드/툴링/잡일" },
     { "name": "type:docs", "color": "0075ca", "description": "문서" },
+    { "name": "type:feedback", "color": "bfdadc", "description": "내부 알파/사용성 피드백 intake" },
     { "name": "type:spec", "color": "5319e7", "description": "스펙/설계 결정" },
     { "name": "type:infra", "color": "006b75", "description": "인프라/배포/CI" },
 
+    { "name": "status:needs-triage", "color": "ededed", "description": "피드백 접수됨. severity/evidence/goal 변환 필요." },
     { "name": "status:ready", "color": "0e8a16", "description": "착수 가능(의존 충족). Codex picker 대상." },
     { "name": "status:in-progress", "color": "fbca04", "description": "작업 중" },
     { "name": "status:blocked", "color": "b60205", "description": "선행 미충족/외부 대기" },
@@ -30,6 +32,7 @@
     { "name": "area:tenancy", "color": "5319e7", "description": "멀티팀/워크스페이스 격리/초대코드" },
     { "name": "area:store", "color": "c2e0c6", "description": "배포(공증/앱스토어)" },
     { "name": "area:ci", "color": "006b75", "description": "GitHub Actions/CI/fastlane" },
+    { "name": "area:alpha", "color": "fef2c0", "description": "내부 알파 사용성/피드백/triage" },
     { "name": "area:legal", "color": "bfd4f2", "description": "법무 선결(법률 자문 아님) — 정책/약관/프라이버시 문서" },
 
     { "name": "size:s", "color": "c5def5", "description": "작음(1티켓 1세션)" },

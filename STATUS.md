@@ -178,6 +178,12 @@
 - `docs/INDEX.md`, `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `ROADMAP.md`, `BUILD_TICKETS.md`에 internal alpha packet 위치와 docs gate 기준을 연결했다.
 - 이번 goal은 문서/운영 런북 변경이다. Actual public staging DNS/TLS, external Hermes/provider side effect, notarized macOS release app, iOS/APNs는 계속 별도 milestone 범위이며 `runtime-unverified(public host/external Hermes)`로 남는다.
 
+## 0-18c. MOMO-231 Internal Alpha Feedback Intake + Triage Workflow v0 (2026-07-01)
+
+- GitHub `Internal alpha feedback` issue template과 `docs/INTERNAL_ALPHA_FEEDBACK.md`를 추가해 raw tester feedback을 `status:needs-triage` intake issue로 받고, severity/evidence/labels/milestone을 정리한 뒤 buildable Codex goal로 전환하는 절차를 고정했다.
+- `.github/labels.json`, `scripts/github/labels.tsv`, `scripts/goal_status.sh`, `docs/GITHUB_OPS.md`, `docs/LOCAL_PR_GATE.md`, `docs/INTERNAL_ALPHA.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 `type:feedback`/`area:alpha`/`status:needs-triage` 운영에 맞췄다.
+- 이번 goal은 docs/tooling 변경이다. 제품 기능 수정, GitHub Project 자동화, Slack/Discord 알림 봇, runtime e2e 신규 구현은 out of scope이며 새 runtime 검증은 수행하지 않는다.
+
 ## 0-16. MOMO-211 M4 MomoMac Xcode thin host app v0 (2026-06-30)
 
 - `clients/macOS/MomoMac.xcodeproj`와 shared scheme `MomoMac`을 추가했다. Xcode host target은 SwiftPM `MomoMacDevApp`과 분리되어 있고, `MomoMac`/`MomoCore`를 local SwiftPM dependency로 소비해 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을 호스트한다.
@@ -228,6 +234,13 @@
 - `MOMO_SERVER_BASE_URL` 환경 실행도 email/password login을 거쳐 real access token + invite-admin context를 만들도록 정렬했다. Demo backend의 legacy invite stub은 유지하지만 server-configured mode는 실제 REST path를 우선한다.
 - `scripts/verify_macos_real_backend_ui.sh`가 invite create/list/revoke, fresh invite second-user `/v1/join`, joined token으로 channel/member state load evidence를 추가로 남긴다. Email delivery, SSO/OAuth, billing/team plan, signing/notarization은 out of scope다.
 - 검증: `swift test --package-path clients/macOS` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS. SwiftCentrifuge live adapter/presence/APNs, email delivery, SSO/OAuth, billing/team plan, signing/notarization은 out of scope다.
+
+## 0-23. MOMO-232 macOS Internal Alpha Usability Polish v0 (2026-07-01)
+
+- `Invites` popover가 create/list/revoke 중복 submit을 막고, 진행 상태·실패 후 retry·생성 직후 raw code `Copy Code` 흐름과 복구 불가 안내를 제공한다.
+- session chooser/sidebar/timeline이 login/join/channel/message 실패를 recoverable error로 표시하고 retry/dismiss 경로를 제공한다. `Switch`/`Log Out`의 stale channel/member/invite/realtime state reset은 focused test로 고정했다.
+- Kim Intern chip/details가 `Local mock` / `Internal host mock` / `External Hermes`, key 준비 여부, redacted endpoint/degraded diagnostics를 내부 알파 사용자가 구분 가능하게 표시한다.
+- 검증: `swift test --package-path clients/macOS` PASS. Required local gates: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`, `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui`, 가능하면 `LOCAL_GATE_LAUNCH_UI=1 ... scripts/local_gate.sh --profile internal-alpha`. Public host deploy, real external Hermes quality evaluation, signing/notarization, iOS UI는 out of scope다.
 
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 

@@ -95,11 +95,29 @@ public struct MessageListView: View {
         HStack(spacing: 8) {
             Image(systemName: "wifi.exclamationmark")
                 .foregroundStyle(.orange)
-            Text(error)
-                .font(.caption)
-                .lineLimit(2)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Recoverable error")
+                    .font(.caption.weight(.semibold))
+                Text(error)
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
+            Button {
+                Task { await viewModel.retrySelectedChannelLoad() }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            Button {
+                viewModel.clearConnectionError()
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)

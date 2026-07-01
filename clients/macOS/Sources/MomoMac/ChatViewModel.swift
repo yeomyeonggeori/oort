@@ -287,6 +287,19 @@ public final class ChatViewModel: ObservableObject {
         subscribe(channel: channel)
     }
 
+    public func retrySelectedChannelLoad() async {
+        guard let channel = selectedChannelId else {
+            connectionError = nil
+            return
+        }
+        connectionError = nil
+        await selectChannel(channel)
+    }
+
+    public func clearConnectionError() {
+        connectionError = nil
+    }
+
     // MARK: Sending
 
     /// Optimistic send: local echo with nil seq, reconciled by the returned message.

@@ -12,6 +12,7 @@ Usage: scripts/goal_status.sh [--repo ORG/REPO] [--limit N] [--worktree-root DIR
 
 Prints a status board for Codex goal orchestration:
   - ready / in-progress / needs-review / blocked issues
+  - internal alpha feedback issues waiting in needs-triage
   - issue number, title, assignee, labels
   - matching branch, PR, and local worktree path
   - the local gate profile/evidence expected before worker handoff and momo-main merge
@@ -243,6 +244,9 @@ evidence_for_status() {
   local pr="$3"
 
   case "$status" in
+    needs-triage)
+      echo "triage-feedback"
+      ;;
     ready)
       echo "claim-first"
       ;;
@@ -479,6 +483,7 @@ echo
 
 {
   printf 'status\tissue\tassignee\tgate\tevidence\tbranch\tpr\tworktree\ttitle\n'
+  print_rows_for_status needs-triage
   print_rows_for_status ready
   print_rows_for_status in-progress
   print_rows_for_status needs-review
@@ -494,7 +499,7 @@ print_stale_worktree_audit
 echo
 echo "Legend:"
 echo "- gate: local gate profile expected before PR handoff or momo-main merge; docs+swift-before-merge means docs profile is enough for worker PR evidence, but swift profile is rerun by momo-main before merge."
-echo "- evidence: claim-first=not started, run:<profile>=worker should run that local gate then open PR, momo-main-review=needs-review PR is in momo-main's review/merge queue, PR-missing=handoff label without an open PR, blocker-comment=issue comment must explain the blocker."
+echo "- evidence: triage-feedback=alpha feedback needs severity/evidence/labels/milestone and a buildable goal before claim, claim-first=not started, run:<profile>=worker should run that local gate then open PR, momo-main-review=needs-review PR is in momo-main's review/merge queue, PR-missing=handoff label without an open PR, blocker-comment=issue comment must explain the blocker."
 echo "- branch/PR/worktree are matched by the canonical '<type>/<issue>-<slug>' convention. If a field is '-', check for non-canonical names before starting duplicate work."
 echo "- stale/done audit is read-only. A cleanup command appears only for a closed issue or merged/closed PR whose local worktree is not current, has no dirty files, and has no unpushed/divergent commits."
 echo "- stale-warning rows need human review first; dirty, current-worktree, upstream-unknown, or unpushed warnings intentionally suppress cleanup commands."

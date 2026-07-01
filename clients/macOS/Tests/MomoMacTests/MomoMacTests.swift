@@ -1619,6 +1619,196 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(revoked.revocationReason, "rotated")
     }
 
+    @MainActor
+    func testInviteAdminViewModelCreatesRefreshesAndCopiesRawCode() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let inviteID = UUID(uuidString: "00000000-0000-7000-8000-000000232001")!
+        var copiedCode: String?
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/workspaces/\(workspace.description)/invites"):
+                return MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "invite": {
+                    "id": "\(inviteID.uuidString)",
+                    "workspaceId": "\(workspace.description)",
+                    "codePreview": "RAW232",
+                    "role": "admin",
+                    "maxUses": 2,
+                    "usedCount": 0,
+                    "expiresAtMs": 1790000000000,
+                    "revokedAtMs": null,
+                    "revokedBy": null,
+                    "revocationReason": null,
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "createdAtMs": 1782864000000,
+                    "updatedAtMs": 1782864000000
+                  },
+                  "code": "momo_raw_232"
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/invites"):
+                return MockHTTPResponse(json: """
+                {
+                  "invites": [
+                    {
+                      "id": "\(inviteID.uuidString)",
+                      "workspaceId": "\(workspace.description)",
+                      "codePreview": "RAW232",
+                      "role": "admin",
+                      "maxUses": 2,
+                      "usedCount": 0,
+                      "expiresAtMs": 1790000000000,
+                      "revokedAtMs": null,
+                      "revokedBy": null,
+                      "revocationReason": null,
+                      "createdBy": "\(MemberID.demoHuman.description)",
+                      "createdAtMs": 1782864000000,
+                      "updatedAtMs": 1782864000000
+                    }
+                  ]
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let model = MomoInviteAdminViewModel(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://momo.test")!,
+                workspace: workspace,
+                accessToken: "admin-token"
+            ),
+            client: MomoInviteAdminClient(session: URLSession(configuration: .momoMocked)),
+            copyInviteCode: { copiedCode = $0 }
+        )
+
+        await model.createInvite(role: .admin, maxUsesText: "2", expiresInDaysText: "14")
+        XCTAssertEqual(model.operation, .idle)
+        XCTAssertEqual(model.createdCode, "momo_raw_232")
+        XCTAssertEqual(model.invites.map(\.id), [inviteID])
+        XCTAssertTrue(model.notice?.contains("Copy the raw code now") == true)
+        XCTAssertFalse(model.canRetry)
+
+        model.copyCreatedCode()
+        XCTAssertEqual(copiedCode, "momo_raw_232")
+        XCTAssertTrue(model.notice?.contains("cannot be recovered") == true)
+    }
+
+    @MainActor
+    func testInviteAdminViewModelRefreshFailureCanRetry() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let inviteID = UUID(uuidString: "00000000-0000-7000-8000-000000232002")!
+        let requestCount = SynchronizedCounter()
+
+        await MockHTTPURLProtocol.setHandler { request in
+            let count = requestCount.increment()
+            XCTAssertEqual(request.url?.path, "/v1/workspaces/\(workspace.description)/invites")
+            if count == 1 {
+                return MockHTTPResponse(statusCode: 503, json: #"{"title":"invite list unavailable","detail":"db warming"}"#)
+            }
+            return MockHTTPResponse(json: """
+            {
+              "invites": [
+                {
+                  "id": "\(inviteID.uuidString)",
+                  "workspaceId": "\(workspace.description)",
+                  "codePreview": "RETRY",
+                  "role": "member",
+                  "maxUses": 1,
+                  "usedCount": 0,
+                  "expiresAtMs": 1790000000000,
+                  "revokedAtMs": null,
+                  "revokedBy": null,
+                  "revocationReason": null,
+                  "createdBy": "\(MemberID.demoHuman.description)",
+                  "createdAtMs": 1782864000000,
+                  "updatedAtMs": 1782864000000
+                }
+              ]
+            }
+            """)
+        }
+
+        let model = MomoInviteAdminViewModel(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://momo.test")!,
+                workspace: workspace,
+                accessToken: "admin-token"
+            ),
+            client: MomoInviteAdminClient(session: URLSession(configuration: .momoMocked)),
+            copyInviteCode: { _ in }
+        )
+
+        await model.refreshInvites(showNotice: true)
+        XCTAssertEqual(model.operation, .idle)
+        XCTAssertTrue(model.errorMessage?.contains("invite list unavailable") == true)
+        XCTAssertTrue(model.canRetry)
+
+        await model.retryLastFailure()
+        XCTAssertEqual(model.invites.map(\.id), [inviteID])
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(model.notice, "Invite list refreshed.")
+        XCTAssertFalse(model.canRetry)
+    }
+
+    @MainActor
+    func testViewModelSessionSensitiveStateClearRemovesStaleWorkspaceData() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        viewModel.setChannels(seed.channels)
+        await viewModel.selectChannel(seed.channels[0].id)
+        await viewModel.submitInviteCode("MOMO-DEV")
+
+        XCTAssertFalse(viewModel.channels.isEmpty)
+        XCTAssertFalse(viewModel.members.isEmpty)
+        XCTAssertNotNil(viewModel.selectedChannelId)
+        XCTAssertFalse(viewModel.visibleMessages.isEmpty)
+        guard case .joined = viewModel.inviteJoinState else {
+            return XCTFail("invite should be joined before clearing")
+        }
+
+        await viewModel.clearSessionSensitiveState()
+
+        XCTAssertNil(viewModel.workspaceId)
+        XCTAssertTrue(viewModel.channels.isEmpty)
+        XCTAssertTrue(viewModel.members.isEmpty)
+        XCTAssertNil(viewModel.selectedChannelId)
+        XCTAssertTrue(viewModel.messagesByChannel.isEmpty)
+        XCTAssertTrue(viewModel.partials.isEmpty)
+        XCTAssertTrue(viewModel.realtimeStatuses.isEmpty)
+        XCTAssertEqual(viewModel.agentRuntimeStatus, .localMock)
+        XCTAssertEqual(viewModel.inviteJoinState, .idle)
+    }
+
+    func testKimInternInternalAlphaProviderSummaryDistinguishesModesAndDiagnostics() {
+        let external = AgentRuntimeStatus(
+            mode: .externalHermes,
+            availability: .available,
+            endpointLabel: "https://kim.example.net/v1",
+            keyConfigured: true
+        )
+        XCTAssertEqual(external.internalAlphaProviderSummary, "External Hermes · key ready · https://kim.example.net/v1")
+        XCTAssertTrue(external.internalAlphaHelpText.contains("key configured"))
+
+        let degraded = AgentRuntimeStatus(
+            mode: .internalHostMock,
+            availability: .degraded,
+            endpointLabel: "internal mock",
+            keyConfigured: false,
+            diagnostics: ["provider timeout"]
+        )
+        XCTAssertEqual(degraded.internalAlphaProviderSummary, "Internal host mock · key missing · provider timeout")
+        XCTAssertTrue(degraded.internalAlphaHelpText.contains("key not configured"))
+        XCTAssertTrue(degraded.internalAlphaHelpText.contains("provider timeout"))
+    }
+
     func testSessionClientSurfacesAuthProblemForBadCredentials() async throws {
         await MockHTTPURLProtocol.reset()
         await MockHTTPURLProtocol.setHandler { _ in
@@ -2082,6 +2272,18 @@ private struct MockHTTPResponse {
     init(statusCode: Int = 200, json: String) {
         self.statusCode = statusCode
         self.json = json
+    }
+}
+
+private final class SynchronizedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func increment() -> Int {
+        lock.withLock {
+            value += 1
+            return value
+        }
     }
 }
 
