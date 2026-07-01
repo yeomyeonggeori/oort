@@ -152,6 +152,8 @@ sops exec-env infra/prod/secrets.sops.env \
 `staging`/`prod`/`internal-host` 모드는 다음 값을 fail-fast로 거부한다.
 
 - `change-me-*`, `dev-insecure-*`, `__PLACEHOLDER__`, `example.com`, `localhost`, `mock-hermes`.
+- Reserved/local public-routing domains such as `.test`, `.invalid`, `.local`,
+  `.localhost`, `.example`, and `.internal`.
 - `momo_app_dev_pw`/`momo_relay_dev_pw`/`momo_worker_dev_pw` 같은 local DB password.
 - `momo-*:internal-smoke*`, `:latest`, source-checkout fallback image tag.
 - 비밀번호 없는 `CENTRIFUGO_REDIS_ADDRESS`, non-HTTPS `HERMES_BASE_URL`.

@@ -130,11 +130,11 @@ cat > "$STRICT_ENV" <<'EOF'
 COMPOSE_PROJECT_NAME=momo-staging
 MOMO_ENV=staging
 SECRET_SOURCE=sops://infra/prod/secrets.sops.env
-PUBLIC_BASE_URL=https://api.staging.momo.test
-API_DOMAIN=api.staging.momo.test
-REALTIME_DOMAIN=rt.staging.momo.test
-CADDY_EMAIL=ops@momo.test
-ACME_EMAIL=ops@momo.test
+PUBLIC_BASE_URL=https://api.staging.momo-alpha.dev
+API_DOMAIN=api.staging.momo-alpha.dev
+REALTIME_DOMAIN=rt.staging.momo-alpha.dev
+CADDY_EMAIL=ops@momo-alpha.dev
+ACME_EMAIL=ops@momo-alpha.dev
 HTTP_PORT=80
 HTTPS_PORT=443
 MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:20260701-1f83728
@@ -154,7 +154,7 @@ CENT_API_KEY=cent_api_key_20260701_operator_generated_shape
 JWT_HMAC=jwt_hmac_20260701_operator_generated_shape
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_MODEL=hermes-agent
-HERMES_BASE_URL=https://hermes.staging.momo.test/v1
+HERMES_BASE_URL=https://hermes.staging.momo-alpha.dev/v1
 HERMES_API_KEY=hermes_api_key_20260701_operator_generated_shape
 PGBACKREST_STANZA=momo
 PGBACKREST_REPO1_PATH=/var/lib/pgbackrest
@@ -165,7 +165,21 @@ PGBACKREST_FULL_BACKUP_REQUIRED=1
 PGBACKREST_PITR_REHEARSAL_REQUIRED=1
 EOF
 "$PREFLIGHT" --env-file "$STRICT_ENV" --mode staging --evidence-dir "$PREFLIGHT_EVIDENCE_DIR"
+RESERVED_ENV="$(mktemp "${TMPDIR:-/tmp}/momo-public-preflight-reserved.XXXXXX")"
+cp "$STRICT_ENV" "$RESERVED_ENV"
+cat >> "$RESERVED_ENV" <<'EOF'
+PUBLIC_BASE_URL=https://api.staging.momo.test
+API_DOMAIN=api.staging.momo.test
+REALTIME_DOMAIN=rt.staging.momo.test
+EOF
+if "$PREFLIGHT" --env-file "$RESERVED_ENV" --mode staging >/tmp/momo-prod-preflight-reserved-expected-fail.log 2>&1; then
+  cat /tmp/momo-prod-preflight-reserved-expected-fail.log >&2
+  fail "prod preflight must reject reserved/local public-routing domains in staging mode"
+fi
+grep -Fq 'reserved/local domain' /tmp/momo-prod-preflight-reserved-expected-fail.log \
+  || fail "prod preflight reserved-domain expected-fail output did not explain the rejection"
 rm -f "$STRICT_ENV"
+rm -f "$RESERVED_ENV"
 [ -f "$PREFLIGHT_EVIDENCE_DIR/prod-env-preflight-staging.md" ] || fail "missing preflight markdown evidence"
 [ -f "$PREFLIGHT_EVIDENCE_DIR/prod-env-preflight-staging.json" ] || fail "missing preflight JSON evidence"
 jq -e '.result == "PASS" and (.coverage | index("pgbackrest_wal_pitr_required_env"))' \

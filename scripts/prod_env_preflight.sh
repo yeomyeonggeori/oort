@@ -208,6 +208,19 @@ assert_http_url() {
   esac
 }
 
+assert_public_https_url() {
+  local key="$1"
+  local value
+  local host
+  value="$(get_var "$key")"
+  [ "$value" != "" ] || return 0
+  assert_http_url "$key"
+  host="${value#https://}"
+  host="${host%%/*}"
+  host="${host%%:*}"
+  assert_public_domain_value "$key host" "$host"
+}
+
 assert_email() {
   local key="$1"
   local value
@@ -224,9 +237,23 @@ assert_public_domain() {
   local value
   value="$(get_var "$key")"
   [ "$value" != "" ] || return 0
+  assert_public_domain_value "$key" "$value"
+}
+
+assert_public_domain_value() {
+  local label="$1"
+  local value="$2"
+  local lowered
+  lowered="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+  case "$lowered" in
+    localhost|*.localhost|*.local|*.localdomain|*.test|*.invalid|*.example|example.com|*.example.com|*.internal)
+      fail "$label must use a public DNS name, not a reserved/local domain"
+      return 0
+      ;;
+  esac
   case "$value" in
-    *.*) pass "$key looks like a public DNS name" ;;
-    *) fail "$key must look like a public DNS name" ;;
+    *.*) pass "$label looks like a public DNS name" ;;
+    *) fail "$label must look like a public DNS name" ;;
   esac
 }
 
@@ -407,7 +434,7 @@ if [ "$runtime_mode" = "strict" ]; then
 
   assert_public_domain API_DOMAIN
   assert_public_domain REALTIME_DOMAIN
-  assert_http_url PUBLIC_BASE_URL
+  assert_public_https_url PUBLIC_BASE_URL
   assert_email CADDY_EMAIL
   assert_email ACME_EMAIL
 

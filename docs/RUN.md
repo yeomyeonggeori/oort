@@ -184,7 +184,8 @@ sops exec-env infra/prod/secrets.sops.env 'make migrate'
 ### 2.4 staging/prod bootstrap preflight
 
 운영/내부호스트 부트 전에 env를 먼저 fail-fast로 검사한다. `staging`/`prod`/`internal-host`
-모드에서는 `change-me-*`, `dev-insecure-*`, `example.com`, `localhost`, `mock-hermes`,
+모드에서는 `change-me-*`, `dev-insecure-*`, `example.com`, `localhost`, `.test`/`.invalid`/
+`.local`/`.internal` 같은 reserved/local public-routing domain, `mock-hermes`,
 `momo_*_dev_pw`, `:internal-smoke`, `:latest` 이미지 태그를 거부한다.
 
 ```sh
