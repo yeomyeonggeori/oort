@@ -263,7 +263,7 @@
 - [x] public TLS/DNS, real registry pull, SOPS prod secret injection, pgBackRest PITR restore는 `runtime-unverified(public host)`로 남긴다.
 - [ ] `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
-- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+- [x] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-221 수용기준 `[infra/docs]`
 - [x] GitHub #202를 `scripts/goal_claim.sh 202`로 claim하고 별도 branch/worktree에서 진행한다.
