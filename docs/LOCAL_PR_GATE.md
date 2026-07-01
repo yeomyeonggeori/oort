@@ -199,7 +199,8 @@ gate markdown/log. It is the preferred evidence packet when a PR needs to show
 host-runtime boot/health/migrate/message/relay/mock Kim Intern, backup restore
 rehearsal, macOS real-backend UI, and diagnostics bundle coverage together.
 
-For internal alpha runbook or feedback packet updates, use:
+For internal alpha runbook, feedback packet, one-person dogfood checklist, or
+AWS promotion threshold updates, use:
 
 ```bash
 scripts/local_gate.sh --profile docs
@@ -218,6 +219,13 @@ This preflight validates provider/topology, public DNS/TLS shape, security-group
 intent, encrypted volume intent, immutable image deploy, backup/restore, and
 rollback acknowledgement. It does not create AWS resources or prove live host
 runtime; attach real AWS evidence separately when the host exists.
+
+Docs gate PASS for the one-person alpha checklist means the runbook and static
+preflight are internally consistent. It does not by itself mark the product
+`AWS_READY`. AWS promotion still requires the operational threshold in
+[`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md): local one-person gate PASS,
+1-person soak, credentialed Hermes GPT smoke, zero open P0/P1, and redacted
+diagnostics evidence.
 
 If the change modifies diagnostics collection or expected bundle shape, use
 `scripts/local_gate.sh --profile diagnostics`. If the change claims macOS app

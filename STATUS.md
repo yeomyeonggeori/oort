@@ -86,6 +86,12 @@
 - `infra/prod/aws-internal-alpha.env.example`와 `scripts/aws_internal_alpha_preflight.sh`를 추가하고 `scripts/local_gate.sh --profile docs`에 fixture preflight를 연결했다. 권장안은 EC2 `t4g.large` single-node + encrypted gp3 data volume + pgBackRest/S3 + EBS snapshot이다.
 - 실제 AWS host creation, DNS propagation, Caddy ACME issuance, registry pull, SOPS decrypt, pgBackRest backup, EBS snapshot, PITR restore rehearsal은 계속 `runtime-unverified(aws-host)`다. 검증: `scripts/local_gate.sh --profile docs` 대상.
 
+## 0-4e. MOMO-239 Local One-Person Alpha Gate + AWS Promotion Threshold (2026-07-01)
+
+- `docs/INTERNAL_ALPHA.md`에 로컬 1인 dogfood 체크리스트를 추가해 login, channel load, message send/receive, invite/join, Kim Intern mention, restart/reconnect, diagnostics, feedback filing을 evidence 기반 PASS/FAIL로 판정하게 했다.
+- AWS 승격은 `local gate PASS + 1인 soak + credentialed Hermes GPT smoke + open P0/P1 0 + diagnostics evidence`가 모두 PASS일 때만 `AWS_READY`로 기록한다. no-credential `external-agent-provider` skip은 로컬 dogfood에는 허용되지만 AWS 승격은 막는다.
+- `docs/AWS_INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `ROADMAP.md`, `BUILD_TICKETS.md`가 이 threshold를 참조하도록 갱신했다. 실제 AWS host creation/DNS/TLS/SOPS/registry/pgBackRest/PITR는 계속 `runtime-unverified(aws-host)`다. 검증: `scripts/local_gate.sh --profile docs` 대상.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.
