@@ -188,6 +188,7 @@
 | `MOMO-231` | internal alpha feedback intake + triage workflow v0 | docs/tooling | MOMO-112, MOMO-225, MOMO-228 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 | `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
+| `MOMO-243` | In-App Alpha Command Center | swift/macos-ui/docs | MOMO-232, MOMO-235, MOMO-239 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
@@ -799,6 +800,7 @@
 | `MOMO-226` | macOS invite/admin onboarding real-backend polish v0 | swift/macos-ui | MOMO-011, MOMO-014, MOMO-213, MOMO-217, MOMO-218, MOMO-223 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 | `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
+| `MOMO-243` | In-App Alpha Command Center | swift/macos-ui/docs | MOMO-232, MOMO-235, MOMO-239 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -1111,6 +1113,20 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #226을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: real Sparkle framework installation, appcast generation script, Developer ID signing, notarization, DMG build/upload, old-version-to-new-version update proof.
+
+### MOMO-243 수용기준 `[swift/macos-ui/docs]`
+- [x] GitHub #243을 `scripts/goal_claim.sh 243`으로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] macOS 앱 안에 `Alpha Command Center` detail pane을 추가한다.
+- [x] Server / Realtime / Agent Runtime / Invites / Diagnostics / Updates 상태를 기존 `MomoMacRootView` / `ChatViewModel` / `LiveChatBackend` / REST backend projection으로 재사용해 표시한다.
+- [x] 오늘 테스트할 것 체크리스트와 현재 가능한 기능/아직 안 되는 기능/known limitations를 앱 내에서 보여준다.
+- [x] failed/degraded 상태에 사용자가 이해할 수 있는 detail/recovery hint를 표시한다.
+- [x] empty/loading/error/retry state는 기존 recoverable error, realtime fallback, invite failure, update diagnostics 상태를 통해 구분된다.
+- [x] focused macOS tests가 Command Center snapshot의 필수 surface와 degraded 상태 설명을 검증한다.
+- [x] `docs/INTERNAL_ALPHA.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #243을 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: 실제 자동 업데이트 설치, Sparkle 정식 연동, AWS 배포, iOS 앱 구현, 대규모 브랜드/디자인 리뉴얼.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

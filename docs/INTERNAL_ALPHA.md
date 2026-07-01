@@ -194,6 +194,7 @@ Internal alpha usability notes:
 - In real-server mode, use the top `Invites` popover to create/list/revoke owner/admin invites. Create/revoke/refresh buttons disable while a request is in flight and failed invite operations show a `Retry` button.
 - When a new invite is created, click `Copy Code` before closing the popover. Existing invite rows only show the masked preview; the raw invite code cannot be recovered later.
 - Use the top `Updates` popover to inspect alpha update-channel readiness. During this skeleton phase it is a placeholder/status checklist, not an installer; the operator runbook is [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md).
+- Use the right detail pane `Alpha` tab as the in-app dogfood guide. It summarizes Server, Realtime, Kim Intern, Invites, Diagnostics, and Updates state, then lists today's smoke checklist and known limitations.
 - `Switch` and `Log Out` return to the chooser and clear the previous channel/member/message/realtime/invite state. `Log Out` also clears the saved-password preference and Keychain password.
 - Login, join, channel load, and message send errors are recoverable: the chooser, sidebar, or timeline keeps the app interactive and offers retry/dismiss instead of leaving a blank session.
 - The sidebar Members list shows Kim Intern as an `AGENT` when he is in the selected channel. The `+`/`-` member action is the admin path for inviting/removing an existing agent from a channel.
@@ -268,7 +269,15 @@ scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m
 
 The collector writes a directory, `summary.md`, and a `.tar.gz`. It redacts secrets, passwords, API keys, bearer/JWT-shaped tokens, and database URL credentials before writing files. Still inspect `summary.md` and file names before sharing outside the team.
 
-### E. Local Gate
+### E. In-App Alpha Command Center
+
+1. Open the right detail pane and select `Alpha`.
+2. Confirm the status list includes Server, Realtime, Agent Runtime, Invites, Diagnostics, and Updates.
+3. If a row is `Degraded` or `Blocked`, capture the detail/recovery text in feedback before restarting processes.
+4. Use the `Today` checklist for the local dogfood pass: open `#agent-lab`, send a message, mention `@kim-intern`, exercise invite/join, check approval/cost, and collect diagnostics after a failure.
+5. Treat `Known Limits` as scope boundaries. Update install, AWS/public host, iOS/APNs, and credentialed external Hermes proof remain separate gates.
+
+### F. Local Gate
 
 For alpha docs/runbook changes:
 

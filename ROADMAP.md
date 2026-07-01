@@ -37,6 +37,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-231에서 internal alpha feedback을 `status:needs-triage` intake issue → severity/evidence/labels/milestone → buildable goal → worker PR/review 흐름으로 고정한다
      · MOMO-232에서 macOS real-server 내부 알파 사용성(초대 관리, 복구 가능한 오류, session reset, Kim Intern 상태 chip)을 보강한다
      · MOMO-235에서 macOS alpha update channel v0를 ADR/runbook + SwiftPM dev app `Updates` placeholder surface로 고정한다
+     · MOMO-243에서 앱 내 `Alpha Command Center`로 Server/Realtime/Agent Runtime/Invites/Diagnostics/Updates 상태와 오늘 테스트할 항목을 한 화면에 묶는다
      · MOMO-229에서 public/staging host preflight를 보강해 DNS/TLS, pinned registry images, SOPS/age secret source, DB/Redis volumes, pgBackRest WAL/full-backup/PITR required env를 fail-fast하고 redacted markdown/json evidence packet을 만든다
      · MOMO-233에서 AWS 1주일 internal alpha stack v0를 EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, static preflight로 고정한다
      · MOMO-237에서 AWS 생성 전에 실행하는 `local-alpha` RC gate를 추가해 local Docker boot/migrate/health/message/relay/mock Kim Intern/macOS real-backend/diagnostics를 한 evidence packet으로 묶는다
@@ -114,6 +115,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-228` | M3/M7 준비 | internal alpha runbook and feedback packet v0 | `docs/INTERNAL_ALPHA.md` + RUN/INDEX/LOCAL_PR_GATE/STATUS/ROADMAP/BUILD_TICKETS 연결; local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations를 팀원용 절차로 고정 |
 | `MOMO-231` | M3/M7 준비 | internal alpha feedback intake + triage workflow v0 | GitHub `Internal alpha feedback` template + `docs/INTERNAL_ALPHA_FEEDBACK.md` + `status:needs-triage` board; severity/evidence/labels/milestone을 buildable goal과 worker handoff로 연결 |
 | `MOMO-235` | M3/M4 준비 | macOS alpha update channel v0 | Sparkle 2 alpha channel ADR/runbook + SwiftPM/Xcode-host visible `Updates` placeholder; real appcast/install remains M4 signed/notarized follow-up |
+| `MOMO-243` | M3/M7 준비 | In-App Alpha Command Center | macOS detail pane에서 Server/Realtime/Agent Runtime/Invites/Diagnostics/Updates 상태, 오늘 테스트할 것, 가능한 기능/known limitations를 앱 안에 표시 |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
 | `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |
@@ -170,6 +172,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-226` | M3 | macOS invite/admin onboarding real-backend polish v0 | 완료: real-server session bar에서 invite create/list/revoke compact admin surface를 제공하고, `/v1/join` second-user smoke 후 workspace/channel/member state load를 `macos-ui` evidence에 포함 |
 | `MOMO-232` | M3 | macOS internal alpha usability polish v0 | 진행: invite admin 중복 submit/progress/retry/copy-code, session switch/logout stale-state cleanup, recoverable error retry/dismiss, Kim Intern provider chip mode/diagnostics polish |
 | `MOMO-235` | M3/M4 | macOS alpha update channel v0 | 진행: `Updates` placeholder surface, Sparkle 2 alpha-channel ADR/runbook, appcast/signing/notary/DMG secret boundary를 정리. Real Sparkle install proof는 signed/notarized M4 artifact 후속 |
+| `MOMO-243` | M3/M7 준비 | 진행: `Alpha Command Center` detail pane이 dogfood 중 사용 가능한 기능, degraded/failed 상태, 테스트 체크리스트, known limitations를 앱 안에서 노출 |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 1.2 Agentic Work OS ecosystem overlay
