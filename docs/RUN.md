@@ -145,9 +145,9 @@ cp infra/.env.example .env
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
-| `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 Hermes/Kim Intern credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
+| `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
-Codex OAuth access/refresh token은 momo 환경변수가 아니다. Hermes/Kim Intern
+Codex OAuth access/refresh token은 momo 환경변수가 아니다. External runtime
 provider가 Codex OAuth를 사용하더라도 token exchange, storage, refresh,
 unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/local gate는
 그 토큰을 받지 않는다. 정본 boundary는
@@ -180,7 +180,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 > **보안:** `.env.example`의 `change-me-*` / 코드의 `dev-insecure-*` 기본값은 **개발용**이다.
 > 실배포에선 반드시 교체(`openssl rand -hex 32`). 기본값으로도 부팅은 되지만 안전하지 않다.
 
-### 2.1.1 Kim Intern/Hermes provider mode
+### 2.1.1 Kim Intern agent runtime provider mode
 
 김인턴 provider boundary는 `AGENT_PROVIDER_MODE`가 정본이다.
 
@@ -194,7 +194,8 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 placeholder key가 보이면 MomoServer/AgentWorker boot와 `scripts/prod_env_preflight.sh`가 fail-fast한다.
 `external-hermes`의 non-loopback `http://...` URL도 항상 fail-fast한다. loopback HTTP는 local-only
 opt-in이며, Hermes local process가 GPT/OpenAI credential을 소유하고 momo에는 Hermes-facing bearer만
-전달하는 개발 루프에서만 쓴다. 자세한 계약은
+전달하는 개발 루프에서만 쓴다. provider-neutral smoke 계약은
+[`docs/external-agent-provider/README.md`](external-agent-provider/README.md), local loopback 특화 계약은
 [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md)다.
 `GET /health`와 `GET /v1/agent-runtime/status`는 `agentRuntime` projection을 제공하지만
 `endpointLabel`은 user/password/query/fragment를 제거한 값이고 provider token은 절대 포함하지 않는다.
@@ -211,7 +212,7 @@ path는 `/v1/workspaces/{ws}/members?kind=agent`와
 `POST /v1/workspaces/{ws}/channels/{ch}/members`로 기존 agent member를 채널에 추가한다.
 이 채널 추가는 human `/v1/join` invite code flow가 아니다.
 
-실제 외부 Hermes/Kim Intern side effect는 기본 local gate에 포함하지 않는다. credentials가 있는
+실제 외부 runtime provider side effect는 기본 local gate에 포함하지 않는다. credentials가 있는
 환경에서만 아래 opt-in smoke를 실행한다.
 
 ```sh
@@ -225,7 +226,18 @@ scripts/local_gate.sh --profile external-agent-provider
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
 
-# 로컬 Hermes + GPT provider loopback smoke (OpenAI/Codex credential은 Hermes 프로세스 안에만 둔다)
+# credentialed smoke를 필수로 요구하고 1왕복 실패 시 fail-fast
+EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
+EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
+scripts/local_gate.sh --profile external-agent-provider
+
+# local alpha runner에서 같은 external runtime smoke로 위임
+scripts/local_alpha_runner.sh execute \
+  --hermes external \
+  --external-smoke \
+  --secret-env /secure/momo/external-hermes.env
+
+# 로컬 OpenAI-compatible provider loopback smoke (OpenAI/Codex credential은 provider 프로세스 안에만 둔다)
 MOMO_ENV=local \
 AGENT_PROVIDER_MODE=external-hermes \
 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 \
@@ -238,6 +250,8 @@ scripts/local_gate.sh --profile external-agent-provider
 Credentialed smoke에 필요한 momo-side env는 위 네 가지
 `AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다. local loopback은
 여기에 `MOMO_ENV=local`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`이 추가로 필요하다.
+credentialed PASS에서는 `/v1/agent-runtime/status`가 `available`이고 `degradedReason`이 비어 있어야
+한다. 실패 evidence는 redacted category/reason만 남긴다.
 provider가 Codex OAuth를 내부적으로 쓰는 경우에도 `CODEX_OAUTH_TOKEN`,
 `CODEX_OAUTH_REFRESH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_REFRESH_TOKEN`,
 `OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`, `OPENAI_API_KEY`류 값은 momo verifier에 넘기지
@@ -797,11 +811,12 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - `MomoMacSmoke`(exe): `MomoCore` + `MomoMac` import → 도메인 모델·인메모리 백엔드 구동을 출력해 **링크/컴파일을 증명**.
 - `MomoMacDevApp`(exe): `MomoMacRootView`를 실제 macOS SwiftUI window에 호스트한다. 첫 화면은
   in-memory demo seed로 channel list, message list, cost UI, Approval Inbox를 표시한다.
-- session bar의 `Updates` popover는 internal alpha update-channel placeholder다. `MOMO_UPDATE_CHANNEL`,
-  `MOMO_UPDATE_FEED_URL`, `MOMO_UPDATE_PUBLIC_ED_KEY`, `MOMO_UPDATE_AUTOMATIC_CHECKS`,
-  `MOMO_UPDATE_SIGNING_READY`, `MOMO_UPDATE_NOTARIZATION_READY`, `MOMO_UPDATE_DMG_READY` 같은
-  non-secret hints만 읽고, Sparkle private key/Apple signing material은 절대 앱 환경이나 git에 넣지 않는다.
-  운영 절차는 [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md)를 따른다.
+- session bar의 `Updates` popover는 internal alpha Dev Update Channel v0다.
+  `MOMO_UPDATE_MANIFEST_PATH` 또는 `file://` `MOMO_UPDATE_MANIFEST_URL`로 local manifest를 읽고
+  current/available version, latest/update/failure 상태, `Open Download` + relaunch 안내를 표시한다.
+  `MOMO_CURRENT_VERSION`/`MOMO_CURRENT_BUILD`는 dev build의 현재 버전 override로만 사용한다.
+  Sparkle private key/Apple signing material은 절대 앱 환경이나 git에 넣지 않는다.
+  운영 절차와 fixture는 [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md)를 따른다.
 - 기본 smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
   `MOMO_SERVER_BASE_URL`이 있으면 `MomoMacDevApp`은 MomoServer REST 모드로 전환해
   `/v1/auth/login`, `GET/POST /v1/workspaces/{ws}/channels/{ch}/messages`를 사용한다.
@@ -921,7 +936,7 @@ scripts/local_gate.sh --profile host-runtime
 - `docker-compose.internal-smoke.yml`: local smoke override. local image tag fallback, image-based `migrate` one-shot job, image-based `mock-hermes` boundary를 추가한다.
 - `internal-smoke.env.example`: `localhost`/`rt.localhost`, `18080/18443`, app/relay/worker runtime role URLs, `change-me-*` placeholder만 담는 tracked template.
 - `scripts/verify_internal_host_runtime.sh`: run-specific local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration one-shot+idempotent re-run, `/health`, `/v1/agent-runtime/status` redaction, REST login/message send, OutboxRelay publish, mock Hermes `@김인턴` 왕복을 검증한다. evidence/log path를 출력한다.
-- `scripts/verify_external_agent_provider.sh`: opt-in external Hermes/Kim Intern gate. credentials가 없으면 `runtime-unverified(external provider credentials)` evidence로 skip하고, credentials가 있으면 OpenAI-compatible SSE preflight + local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복 + `/v1/agent-runtime/status` redaction을 검증한다.
+- `scripts/verify_external_agent_provider.sh`: opt-in credentialed external agent runtime gate. credentials가 없으면 `runtime-unverified(external provider credentials)` evidence로 skip하고, credentials가 있으면 OpenAI-compatible SSE preflight + local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복 + `/v1/agent-runtime/status` redaction을 검증한다.
 - DB migration은 app boot side effect가 아니라 `scripts/migrate.sh` 또는 smoke `migrate` job으로 명시 실행한다.
 - Backup/restore는 pgBackRest skeleton과 evidence template까지만 repo-local로 검증한다. 실제 backup/PITR restore rehearsal은 `runtime-unverified(public host)`다.
 

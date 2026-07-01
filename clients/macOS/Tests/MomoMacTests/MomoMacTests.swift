@@ -229,50 +229,141 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
-    func testAlphaUpdateChannelDefaultsToPlaceholderUntilFeedAndPublicKeyExist() {
+    func testAlphaUpdateChannelDefaultsToNotConfiguredUntilManifestExists() {
         let status = MomoMacUpdateChannelStatus.fromEnvironment([:])
 
         XCTAssertEqual(status.channel, .alpha)
-        XCTAssertEqual(status.engine, .sparkle2)
-        XCTAssertFalse(status.canCheckNow)
-        XCTAssertFalse(status.canInstallAutomatically)
-        XCTAssertEqual(status.missingRequirements, [
-            "SUFeedURL",
-            "SUPublicEDKey",
-            "Developer ID signing",
-            "notarization",
-            "DMG artifact",
-        ])
-        XCTAssertTrue(status.surfaceDetail.contains("placeholder"))
+        XCTAssertEqual(status.engine, .localManifest)
+        XCTAssertEqual(status.state, .notConfigured)
+        XCTAssertFalse(status.hasUpdate)
+        XCTAssertTrue(status.surfaceDetail.contains("MOMO_UPDATE_MANIFEST"))
     }
 
-    func testAlphaUpdateChannelRequiresSignedNotarizedDMGBeforeInstall() {
+    func testAlphaUpdateChannelReadsLocalManifestAndShowsAvailableUpdate() throws {
+        let fixture = updateManifestFixturePath()
         let status = MomoMacUpdateChannelStatus.fromEnvironment([
             "MOMO_UPDATE_CHANNEL": "alpha",
-            "MOMO_UPDATE_FEED_URL": "https://updates.example.com/momo/alpha/appcast.xml",
-            "MOMO_UPDATE_PUBLIC_ED_KEY": "public-key-placeholder",
-            "MOMO_UPDATE_AUTOMATIC_CHECKS": "true",
+            "MOMO_CURRENT_VERSION": "0.4.4-alpha.1",
+            "MOMO_CURRENT_BUILD": "230",
+            "MOMO_UPDATE_MANIFEST_PATH": fixture,
         ])
 
-        XCTAssertTrue(status.canCheckNow)
-        XCTAssertFalse(status.canInstallAutomatically)
-        XCTAssertEqual(status.missingRequirements, [
-            "Developer ID signing",
-            "notarization",
-            "DMG artifact",
-        ])
-        XCTAssertTrue(status.surfaceDetail.contains("signed/notarized artifacts"))
+        XCTAssertEqual(status.state, .updateAvailable)
+        XCTAssertTrue(status.hasUpdate)
+        XCTAssertTrue(status.canOpenDownload)
+        XCTAssertEqual(status.availableVersion?.version, "0.4.5-alpha.2")
+        XCTAssertEqual(status.availableVersion?.build, "244")
+        XCTAssertEqual(status.manifest?.installSteps.count, 3)
+        XCTAssertTrue(try XCTUnwrap(status.manifestSource?.displayLabel).hasSuffix("update-manifest-alpha-v0.json"))
     }
 
-    func testAlphaUpdateChannelFlagsPrivateKeyLookingConfig() {
+    func testAlphaUpdateChannelTreatsMatchingFileURLManifestAsUpToDate() throws {
+        let fixtureURL = URL(fileURLWithPath: updateManifestFixturePath())
         let status = MomoMacUpdateChannelStatus.fromEnvironment([
-            "MOMO_UPDATE_FEED_URL": "not a url",
+            "MOMO_CURRENT_VERSION": "0.4.5-alpha.2",
+            "MOMO_CURRENT_BUILD": "244",
+            "MOMO_UPDATE_MANIFEST_URL": fixtureURL.absoluteString,
+        ])
+
+        XCTAssertEqual(status.state, .upToDate)
+        XCTAssertFalse(status.hasUpdate)
+        XCTAssertEqual(status.availableVersion?.displayLabel, "0.4.5-alpha.2 (244)")
+    }
+
+    func testAlphaUpdateChannelFlagsUnsupportedManifestSourceAndPrivateKeyLookingConfig() {
+        let status = MomoMacUpdateChannelStatus.fromEnvironment([
+            "MOMO_UPDATE_MANIFEST_URL": "https://updates.example.com/momo/alpha/update.json",
             "MOMO_UPDATE_PUBLIC_ED_KEY": "PRIVATE KEY SHOULD NOT BE HERE",
         ])
 
+        XCTAssertEqual(status.state, .failed)
         XCTAssertEqual(status.diagnostics.count, 2)
-        XCTAssertTrue(status.diagnostics.contains("MOMO_UPDATE_FEED_URL is not a valid URL."))
         XCTAssertTrue(status.diagnostics.contains("Only Sparkle EdDSA public keys belong in app/runtime config."))
+        XCTAssertTrue(status.diagnostics.contains { $0.contains("Only local paths and file:// update manifests") })
+    }
+
+    private func updateManifestFixturePath() -> String {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/update-manifest-alpha-v0.json")
+            .path
+    }
+
+    @MainActor
+    func testAlphaCommandCenterSnapshotCoversInternalAlphaSurfaces() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        await viewModel.selectChannel(seed.channels[0].id)
+
+        let snapshot = viewModel.alphaCommandCenterSnapshot(updateStatus: .fromEnvironment([:]))
+        let areas = Set(snapshot.statuses.map(\.area))
+
+        XCTAssertEqual(areas, Set(AlphaCommandCenterArea.allCases))
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .server }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .diagnostics }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .planned)
+        XCTAssertTrue(snapshot.checklist.contains { $0.id == "mention-kim-intern" && $0.state == .ready })
+        XCTAssertTrue(snapshot.capabilities.contains { $0.id == "diagnostics" && $0.isAvailable })
+        XCTAssertTrue(snapshot.limitations.contains { $0.contains("Automatic update install") })
+    }
+
+    func testAlphaCommandCenterSnapshotExplainsDegradedStates() {
+        let workspace = WorkspaceID.demo
+        let channel = Channel(
+            id: .demoAgentLab,
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "agent-lab",
+            createdBy: .demoHuman
+        )
+        let snapshot = AlphaCommandCenterSnapshot.make(
+            workspaceId: workspace,
+            channels: [channel],
+            selectedChannel: channel,
+            selectedRealtimeStatus: RealtimeConnectionStatus(
+                channelId: channel.id,
+                connection: .error,
+                subscription: .error,
+                fallback: .restHistory,
+                canRetry: true,
+                message: "websocket refused"
+            ),
+            agentRuntimeStatus: AgentRuntimeStatus(
+                mode: .externalHermes,
+                availability: .degraded,
+                endpointLabel: "https://kim.example.net/v1",
+                keyConfigured: false,
+                diagnostics: ["HERMES_API_KEY missing"]
+            ),
+            inviteJoinState: .failed(InviteJoinFailure(
+                code: "EXPIRED",
+                reason: "Invite expired",
+                recoveryHint: "Ask an owner for a fresh code."
+            )),
+            connectionError: "db offline",
+            visibleMessageCount: 0,
+            pendingApprovalCount: 0,
+            liveSpentMicroUSD: 0,
+            updateStatus: MomoMacUpdateChannelStatus.fromEnvironment([
+                "MOMO_UPDATE_FEED_URL": "not a url",
+                "MOMO_UPDATE_PUBLIC_ED_KEY": "PRIVATE KEY SHOULD NOT BE HERE",
+            ])
+        )
+
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .server }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .realtime }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .invites }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .degraded)
+        XCTAssertGreaterThanOrEqual(snapshot.attentionCount, 5)
+        XCTAssertTrue(snapshot.statuses.first { $0.area == .realtime }?.recovery?.contains("Retry") == true)
+        XCTAssertTrue(snapshot.statuses.first { $0.area == .invites }?.recovery?.contains("fresh code") == true)
+        XCTAssertTrue(snapshot.capabilities.first { $0.id == "agent-runtime" }?.isAvailable == false)
     }
 
     @MainActor
@@ -1848,10 +1939,12 @@ final class MomoMacTests: XCTestCase {
             availability: .degraded,
             endpointLabel: "internal mock",
             keyConfigured: false,
+            degradedReason: "provider readiness check failed",
             diagnostics: ["provider timeout"]
         )
-        XCTAssertEqual(degraded.internalAlphaProviderSummary, "Internal host mock · key missing · provider timeout")
+        XCTAssertEqual(degraded.internalAlphaProviderSummary, "Internal host mock · key missing · provider readiness check failed")
         XCTAssertTrue(degraded.internalAlphaHelpText.contains("key not configured"))
+        XCTAssertTrue(degraded.internalAlphaHelpText.contains("degraded=provider readiness check failed"))
         XCTAssertTrue(degraded.internalAlphaHelpText.contains("provider timeout"))
     }
 

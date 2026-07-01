@@ -3,6 +3,9 @@
 > Status: Accepted for MOMO-238
 > Scope: local-only development and smoke verification.
 
+For the provider-neutral MOMO-242 smoke contract, start with
+[`README.md`](README.md). This document is the local loopback specialization.
+
 ## Decision
 
 `AGENT_PROVIDER_MODE=external-hermes` may point at a local Hermes process only
