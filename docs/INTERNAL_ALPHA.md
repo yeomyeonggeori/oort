@@ -3,6 +3,7 @@
 > Purpose: one teammate should be able to start momo locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
 > Scope: internal alpha on a developer Mac. This is not the M7 release gate and not a public/staging production launch.
 > Cloud host: for a one-week AWS team alpha, use `docs/AWS_INTERNAL_ALPHA.md` first. The local runbook below still applies to app behavior and smoke scenarios.
+> 72-hour local dogfood: use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) as the Day 0~Day 3 decision contract before MOMO-246 starts.
 
 ## 0. Read This First
 
@@ -298,6 +299,11 @@ required row below to be `PASS`, with evidence paths recorded in the handoff
 note. Use `WAIVED` only for non-blocking P2/P3 polish and explain the follow-up
 issue. P0/P1 rows cannot be waived.
 
+For the planned three-day local dogfood, treat this section as the minimum gate
+and use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md)
+for the full Day 0 readiness, Day 1 messenger, Day 2 agent runtime, Day 3 soak,
+daily report, and final decision templates.
+
 Recommended handoff file name:
 
 ```text
@@ -310,7 +316,7 @@ Recommended handoff file name:
 | Channel 조회 | app screenshot or API JSON for `#general` and `#agent-lab` | Seeded channels load, selected channel history loads, Kim Intern appears as an agent member in `#agent-lab`. |
 | 메시지 송수신 | local gate evidence or two-account transcript | Owner sends one message, joined user sends one message, both appear in `message.seq` order after live receipt or refresh. |
 | 초대/가입 | invite create response with redacted code preview and joined-user login proof | Owner/admin creates invite, raw code is copied once, `/v1/join` succeeds, joined user cannot gain owner/platform-admin privileges. |
-| 김인턴 멘션 | `runtime-agent`, `internal-alpha`, or `external-agent-provider` evidence | `@김인턴` in `#agent-lab` creates an agent job and a durable final timeline message. Mock Hermes is enough for local gate; AWS promotion also needs the Hermes GPT smoke below. |
+| 김인턴 멘션 | `runtime-agent`, `internal-alpha`, or `external-agent-provider` evidence | `@김인턴` in `#agent-lab` creates an agent job and a durable final timeline message. Mock Hermes is enough for local gate; AWS promotion also needs the credentialed external agent runtime smoke below. |
 | 재시작/reconnect | transcript of app restart plus server/relay or Centrifugo restart | App returns to usable state, realtime reconnects or clearly falls back to REST, message history remains ordered by `message.seq`. |
 | diagnostics | redacted diagnostics bundle path plus `summary.md` review note | `scripts/collect_diagnostics.sh --output-dir ... --since 15m` produces a bundle, secrets are redacted, and missing sources are listed explicitly. |
 | feedback filing | GitHub feedback issue/comment URL, or local handoff markdown if GitHub is unavailable | At least one feedback packet exists, even if it is a "no blocker found" soak note with environment, steps, evidence, and severity. |
@@ -331,7 +337,7 @@ Interpretation:
 - `external-agent-provider` may PASS as
   `runtime-unverified(external provider credentials)` for local dogfood, but
   that skip is not enough for AWS promotion. AWS promotion requires a
-  credentialed Hermes GPT smoke.
+  credentialed external agent runtime smoke.
 
 ## 8. AWS Promotion Threshold
 
@@ -343,7 +349,7 @@ local gate evidence paths, diagnostics bundle path, and feedback issue links.
 |---|---|
 | Local gate | One-person local alpha gate is `PASS` with no P0/P1 waiver and no missing required evidence. |
 | 1인 soak | One person completes at least 5 local sessions across at least 2 calendar days, totaling at least 120 minutes of active local server + MomoMacDevApp use. Include at least two app restarts and one server/relay/Centrifugo restart. |
-| Hermes GPT smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` GPT-backed roundtrip through local MomoServer, AgentWorker, OutboxRelay, and timeline. A no-credential skip blocks AWS promotion. |
+| External agent runtime smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` or equivalent agent-member roundtrip through local MomoServer, AgentWorker, OutboxRelay, and timeline. A no-credential skip blocks AWS promotion. |
 | No P0/P1 | Feedback triage shows zero open P0 or P1 issues. P2/P3 may remain only if each has owner, follow-up issue, and workaround or explicit non-blocking note. |
 | Diagnostics evidence | Final diagnostics bundle exists, is redacted, references the same commit as the handoff, and includes local gate evidence plus server/relay/worker/Centrifugo/macOS context where available. |
 
@@ -351,9 +357,9 @@ Promotion decision values:
 
 | Decision | Meaning |
 |---|---|
-| `LOCAL_ONLY` | Keep dogfooding on a developer Mac. Any missing required row, open P0/P1, or skipped Hermes GPT smoke forces this state. |
+| `NEEDS_MORE_LOCAL` | Keep dogfooding on a developer Mac. Any missing required row, open P0/P1, or skipped credentialed external agent runtime smoke forces this state. |
 | `AWS_READY` | All rows above are PASS and the operator may follow `docs/AWS_INTERNAL_ALPHA.md` to prepare the one-week host. |
-| `AWS_BLOCKED` | AWS topology may be documented, but provisioning is blocked by a named external dependency such as credentials, DNS, SOPS, or billing. |
+| `BLOCKED` | AWS topology may be documented, but provisioning is blocked by a named external dependency such as credentials, DNS, SOPS, or billing. |
 
 Do not treat `AWS_READY` as M7 release approval. It only authorizes the internal
 AWS alpha host; store/TestFlight/public release gates remain governed by M7.
@@ -390,9 +396,10 @@ rehearsal. Those remain `runtime-unverified(aws-host)` until the host evidence
 packet is attached.
 
 Before running the AWS preflight against a real host env, attach the
-`AWS_READY` handoff from section 8. If the handoff is `LOCAL_ONLY` or
-`AWS_BLOCKED`, keep this document as planning only and do not provision the
-alpha host.
+`AWS_READY` handoff from section 8 or from
+[`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md). If the
+handoff is `NEEDS_MORE_LOCAL` or `BLOCKED`, keep this document as planning only
+and do not provision the alpha host.
 
 Use this shape for quick GitHub issues or alpha feedback notes:
 

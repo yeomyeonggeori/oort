@@ -89,7 +89,7 @@
 ## 0-4e. MOMO-239 Local One-Person Alpha Gate + AWS Promotion Threshold (2026-07-01)
 
 - `docs/INTERNAL_ALPHA.md`에 로컬 1인 dogfood 체크리스트를 추가해 login, channel load, message send/receive, invite/join, Kim Intern mention, restart/reconnect, diagnostics, feedback filing을 evidence 기반 PASS/FAIL로 판정하게 했다.
-- AWS 승격은 `local gate PASS + 1인 soak + credentialed Hermes GPT smoke + open P0/P1 0 + diagnostics evidence`가 모두 PASS일 때만 `AWS_READY`로 기록한다. no-credential `external-agent-provider` skip은 로컬 dogfood에는 허용되지만 AWS 승격은 막는다.
+- AWS 승격은 `local gate PASS + 1인 soak + credentialed external agent runtime smoke + open P0/P1 0 + diagnostics evidence`가 모두 PASS일 때만 `AWS_READY`로 기록한다. no-credential `external-agent-provider` skip은 로컬 dogfood에는 허용되지만 AWS 승격은 막는다.
 - `docs/AWS_INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `ROADMAP.md`, `BUILD_TICKETS.md`가 이 threshold를 참조하도록 갱신했다. 실제 AWS host creation/DNS/TLS/SOPS/registry/pgBackRest/PITR는 계속 `runtime-unverified(aws-host)`다. 검증: `scripts/local_gate.sh --profile docs` 대상.
 
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
@@ -657,6 +657,12 @@
 - `scripts/local_alpha_runner.sh`를 추가해 plan/dry-run과 execute를 분리했다. execute는 repo 밖 evidence 디렉터리에 dev env/임시 Centrifugo config/compose override/log/summary/stop script를 만들고, PG18+Centrifugo → migrate → RLS role prep → mock 또는 external Hermes env 확인 → MomoServer/OutboxRelay/AgentWorker → `MomoMacSmoke` 순서로 내부 알파 stack을 띄운다. `execute --hermes mock --stop-after-smoke`는 로컬 Docker/Swift runtime에서 통과했다.
 - secret env는 `--secret-env /absolute/path`만 받으며 repo 내부 경로를 거부한다. AWS 리소스 생성은 없고, 실행 결과는 `summary.md`에 URL(`MomoServer`, `Centrifugo`, Hermes), redacted env, logs/evidence path, macOS dev launch command로 남긴다.
 - 현재 main의 macOS dev app surface는 Xcode `.app`이 아니라 SwiftPM `MomoMacSmoke`이므로 runner는 해당 launch command를 출력한다. external Hermes 실연결과 packaged `.app` 런치는 각각 제공자/ M4 Xcode 프로젝트가 필요하다.
+
+## 0aw. MOMO-241 Local 3-Day Alpha Test Pack (2026-07-01)
+
+- `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`를 추가해 72시간 로컬 dogfood의 Day 0 readiness, Day 1 messenger, Day 2 agent runtime, Day 3 soak/final decision 체크리스트를 정본화했다.
+- 최종 판정값을 `AWS_READY` / `BLOCKED` / `NEEDS_MORE_LOCAL`로 고정하고, P0/P1/P2/P3 triage, daily report, evidence directory layout, start/stop/restart/recovery, MOMO-246 final report template을 추가했다.
+- `docs/INTERNAL_ALPHA.md`, `docs/AWS_INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `docs/INDEX.md`, `ROADMAP.md`, `BUILD_TICKETS.md`가 새 72h local dogfood contract를 참조한다. 실제 72시간 실행, credentialed external agent runtime side effect, local soak/resource monitor는 MOMO-242~246에서 계속 검증한다.
 
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
