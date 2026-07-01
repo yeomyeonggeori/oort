@@ -91,7 +91,8 @@ final class MomoServerTests: XCTestCase {
             hermesAPIKey: "change-me-hermes-bearer",
             model: "hermes-agent",
             agentHandle: "kim-intern",
-            displayName: "김인턴"
+            displayName: "김인턴",
+            allowLocalLoopback: false
         )
 
         let status = provider.statusResponse()
@@ -113,7 +114,8 @@ final class MomoServerTests: XCTestCase {
             hermesAPIKey: "dev-insecure-hermes-bearer",
             model: "hermes-agent",
             agentHandle: "kim-intern",
-            displayName: "김인턴"
+            displayName: "김인턴",
+            allowLocalLoopback: false
         )
 
         XCTAssertThrowsError(try provider.validateForBoot(environmentName: "prod")) { error in
@@ -122,6 +124,43 @@ final class MomoServerTests: XCTestCase {
             XCTAssertTrue(text.contains("HERMES_BASE_URL"))
             XCTAssertTrue(text.contains("HERMES_API_KEY"))
             XCTAssertFalse(text.contains("dev-insecure-hermes-bearer"))
+        }
+    }
+
+    func testLocalExternalProviderAllowsLoopbackOnlyWithExplicitOptIn() throws {
+        let provider = AgentProviderConfig(
+            mode: .externalHermes,
+            hermesBaseURL: "http://127.0.0.1:22683/v1",
+            hermesAPIKey: "local-hermes-bearer",
+            model: "gpt-4.1-mini-through-local-hermes",
+            agentHandle: "kim-intern",
+            displayName: "김인턴",
+            allowLocalLoopback: true
+        )
+
+        XCTAssertNoThrow(try provider.validateForBoot(environmentName: "local"))
+        XCTAssertEqual(provider.availability, "available")
+        XCTAssertEqual(provider.endpointLabel, "http://127.0.0.1:22683/v1")
+        XCTAssertThrowsError(try provider.validateForBoot(environmentName: "staging")) { error in
+            let text = String(describing: error)
+            XCTAssertTrue(text.contains("localhost"))
+        }
+    }
+
+    func testNonLoopbackHTTPStillFailsFastForExternalProvider() {
+        let provider = AgentProviderConfig(
+            mode: .externalHermes,
+            hermesBaseURL: "http://kim.example.net/v1",
+            hermesAPIKey: "local-hermes-bearer",
+            model: "hermes-agent",
+            agentHandle: "kim-intern",
+            displayName: "김인턴",
+            allowLocalLoopback: true
+        )
+
+        XCTAssertThrowsError(try provider.validateForBoot(environmentName: "local")) { error in
+            let text = String(describing: error)
+            XCTAssertTrue(text.contains("https://"))
         }
     }
 
@@ -665,7 +704,8 @@ final class MomoServerTests: XCTestCase {
                 hermesAPIKey: "dev-insecure-hermes-bearer",
                 model: "hermes-agent",
                 agentHandle: "kim-intern",
-                displayName: "김인턴"
+                displayName: "김인턴",
+                allowLocalLoopback: false
             )
         )
     }

@@ -219,7 +219,9 @@ scripts/local_gate.sh --profile external-agent-provider
 ```
 
 `external-hermes`가 명시됐는데 `HERMES_BASE_URL`이 localhost/mock/non-HTTPS이거나
-`HERMES_API_KEY`가 placeholder면 fail-fast한다. credentials가 없으면
+`HERMES_API_KEY`가 placeholder면 fail-fast한다. MOMO-238의 local loopback 예외는
+`MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` 개발 루프 전용이며, 운영 host
+env로 승격하지 않는다(`docs/external-agent-provider/local-hermes-gpt.md`). credentials가 없으면
 `runtime-unverified(external provider credentials)` evidence로 skip되며 staging/prod
 ready 판정으로 쓰지 않는다.
 
@@ -406,6 +408,7 @@ scripts/local_gate.sh --profile external-agent-provider   # real provider creden
 - MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
 - MOMO-230 external-agent-provider gate는 credentials가 있을 때만 real Hermes/Kim Intern OpenAI-compatible SSE preflight와 local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복을 검증한다.
 - MOMO-234 boundary: Codex OAuth access/refresh token은 provider host 내부 secret이다. momo 운영 env와 smoke에는 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`만 넣고 Codex/OpenAI OAuth token env var를 전달하지 않는다.
+- MOMO-238 local loopback: `http://127.0.0.1:<port>/v1`/`localhost`는 local-only opt-in smoke에만 허용한다. non-loopback HTTP와 운영 loopback은 계속 fail-fast한다.
 
 `runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,
 real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/WAL archive/time-target PITR restore rehearsal은 public host-runtime에서만 닫는다. Real provider credentials가 없으면 외부 hermes/Kim Intern side effect는 `runtime-unverified(external provider credentials)`로 남긴다.
