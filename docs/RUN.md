@@ -797,11 +797,12 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - `MomoMacSmoke`(exe): `MomoCore` + `MomoMac` import → 도메인 모델·인메모리 백엔드 구동을 출력해 **링크/컴파일을 증명**.
 - `MomoMacDevApp`(exe): `MomoMacRootView`를 실제 macOS SwiftUI window에 호스트한다. 첫 화면은
   in-memory demo seed로 channel list, message list, cost UI, Approval Inbox를 표시한다.
-- session bar의 `Updates` popover는 internal alpha update-channel placeholder다. `MOMO_UPDATE_CHANNEL`,
-  `MOMO_UPDATE_FEED_URL`, `MOMO_UPDATE_PUBLIC_ED_KEY`, `MOMO_UPDATE_AUTOMATIC_CHECKS`,
-  `MOMO_UPDATE_SIGNING_READY`, `MOMO_UPDATE_NOTARIZATION_READY`, `MOMO_UPDATE_DMG_READY` 같은
-  non-secret hints만 읽고, Sparkle private key/Apple signing material은 절대 앱 환경이나 git에 넣지 않는다.
-  운영 절차는 [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md)를 따른다.
+- session bar의 `Updates` popover는 internal alpha Dev Update Channel v0다.
+  `MOMO_UPDATE_MANIFEST_PATH` 또는 `file://` `MOMO_UPDATE_MANIFEST_URL`로 local manifest를 읽고
+  current/available version, latest/update/failure 상태, `Open Download` + relaunch 안내를 표시한다.
+  `MOMO_CURRENT_VERSION`/`MOMO_CURRENT_BUILD`는 dev build의 현재 버전 override로만 사용한다.
+  Sparkle private key/Apple signing material은 절대 앱 환경이나 git에 넣지 않는다.
+  운영 절차와 fixture는 [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md)를 따른다.
 - 기본 smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
   `MOMO_SERVER_BASE_URL`이 있으면 `MomoMacDevApp`은 MomoServer REST 모드로 전환해
   `/v1/auth/login`, `GET/POST /v1/workspaces/{ws}/channels/{ch}/messages`를 사용한다.

@@ -229,50 +229,66 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
-    func testAlphaUpdateChannelDefaultsToPlaceholderUntilFeedAndPublicKeyExist() {
+    func testAlphaUpdateChannelDefaultsToNotConfiguredUntilManifestExists() {
         let status = MomoMacUpdateChannelStatus.fromEnvironment([:])
 
         XCTAssertEqual(status.channel, .alpha)
-        XCTAssertEqual(status.engine, .sparkle2)
-        XCTAssertFalse(status.canCheckNow)
-        XCTAssertFalse(status.canInstallAutomatically)
-        XCTAssertEqual(status.missingRequirements, [
-            "SUFeedURL",
-            "SUPublicEDKey",
-            "Developer ID signing",
-            "notarization",
-            "DMG artifact",
-        ])
-        XCTAssertTrue(status.surfaceDetail.contains("placeholder"))
+        XCTAssertEqual(status.engine, .localManifest)
+        XCTAssertEqual(status.state, .notConfigured)
+        XCTAssertFalse(status.hasUpdate)
+        XCTAssertTrue(status.surfaceDetail.contains("MOMO_UPDATE_MANIFEST"))
     }
 
-    func testAlphaUpdateChannelRequiresSignedNotarizedDMGBeforeInstall() {
+    func testAlphaUpdateChannelReadsLocalManifestAndShowsAvailableUpdate() throws {
+        let fixture = updateManifestFixturePath()
         let status = MomoMacUpdateChannelStatus.fromEnvironment([
             "MOMO_UPDATE_CHANNEL": "alpha",
-            "MOMO_UPDATE_FEED_URL": "https://updates.example.com/momo/alpha/appcast.xml",
-            "MOMO_UPDATE_PUBLIC_ED_KEY": "public-key-placeholder",
-            "MOMO_UPDATE_AUTOMATIC_CHECKS": "true",
+            "MOMO_CURRENT_VERSION": "0.4.4-alpha.1",
+            "MOMO_CURRENT_BUILD": "230",
+            "MOMO_UPDATE_MANIFEST_PATH": fixture,
         ])
 
-        XCTAssertTrue(status.canCheckNow)
-        XCTAssertFalse(status.canInstallAutomatically)
-        XCTAssertEqual(status.missingRequirements, [
-            "Developer ID signing",
-            "notarization",
-            "DMG artifact",
-        ])
-        XCTAssertTrue(status.surfaceDetail.contains("signed/notarized artifacts"))
+        XCTAssertEqual(status.state, .updateAvailable)
+        XCTAssertTrue(status.hasUpdate)
+        XCTAssertTrue(status.canOpenDownload)
+        XCTAssertEqual(status.availableVersion?.version, "0.4.5-alpha.2")
+        XCTAssertEqual(status.availableVersion?.build, "244")
+        XCTAssertEqual(status.manifest?.installSteps.count, 3)
+        XCTAssertTrue(try XCTUnwrap(status.manifestSource?.displayLabel).hasSuffix("update-manifest-alpha-v0.json"))
     }
 
-    func testAlphaUpdateChannelFlagsPrivateKeyLookingConfig() {
+    func testAlphaUpdateChannelTreatsMatchingFileURLManifestAsUpToDate() throws {
+        let fixtureURL = URL(fileURLWithPath: updateManifestFixturePath())
         let status = MomoMacUpdateChannelStatus.fromEnvironment([
-            "MOMO_UPDATE_FEED_URL": "not a url",
+            "MOMO_CURRENT_VERSION": "0.4.5-alpha.2",
+            "MOMO_CURRENT_BUILD": "244",
+            "MOMO_UPDATE_MANIFEST_URL": fixtureURL.absoluteString,
+        ])
+
+        XCTAssertEqual(status.state, .upToDate)
+        XCTAssertFalse(status.hasUpdate)
+        XCTAssertEqual(status.availableVersion?.displayLabel, "0.4.5-alpha.2 (244)")
+    }
+
+    func testAlphaUpdateChannelFlagsUnsupportedManifestSourceAndPrivateKeyLookingConfig() {
+        let status = MomoMacUpdateChannelStatus.fromEnvironment([
+            "MOMO_UPDATE_MANIFEST_URL": "https://updates.example.com/momo/alpha/update.json",
             "MOMO_UPDATE_PUBLIC_ED_KEY": "PRIVATE KEY SHOULD NOT BE HERE",
         ])
 
+        XCTAssertEqual(status.state, .failed)
         XCTAssertEqual(status.diagnostics.count, 2)
-        XCTAssertTrue(status.diagnostics.contains("MOMO_UPDATE_FEED_URL is not a valid URL."))
         XCTAssertTrue(status.diagnostics.contains("Only Sparkle EdDSA public keys belong in app/runtime config."))
+        XCTAssertTrue(status.diagnostics.contains { $0.contains("Only local paths and file:// update manifests") })
+    }
+
+    private func updateManifestFixturePath() -> String {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/update-manifest-alpha-v0.json")
+            .path
     }
 
     @MainActor

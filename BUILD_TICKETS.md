@@ -181,6 +181,7 @@
 | `MOMO-231` | internal alpha feedback intake + triage workflow v0 | docs/tooling | MOMO-112, MOMO-225, MOMO-228 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 | `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
+| `MOMO-244` | Dev Update Channel v0(local/file manifest + operator-assisted install CTA) | swift/macos-ui/docs | MOMO-235 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
@@ -760,6 +761,7 @@
 | `MOMO-226` | macOS invite/admin onboarding real-backend polish v0 | swift/macos-ui | MOMO-011, MOMO-014, MOMO-213, MOMO-217, MOMO-218, MOMO-223 |
 | `MOMO-232` | macOS internal alpha usability polish v0 | swift/macos-ui | MOMO-226, MOMO-227, MOMO-225, MOMO-228 |
 | `MOMO-235` | macOS alpha update channel v0 | swift/docs | MOMO-211, MOMO-228, MOMO-232 |
+| `MOMO-244` | Dev Update Channel v0(local/file manifest + operator-assisted install CTA) | swift/macos-ui/docs | MOMO-235 |
 
 ### MOMO-130 수용기준 `[swift]`
 - [x] GitHub #98을 `status:in-progress`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -1072,6 +1074,20 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #226을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: real Sparkle framework installation, appcast generation script, Developer ID signing, notarization, DMG build/upload, old-version-to-new-version update proof.
+
+### MOMO-244 수용기준 `[swift/macos-ui/docs]`
+- [x] GitHub #244를 `scripts/goal_claim.sh 244`로 claim하고 별도 branch/worktree `feat/244-dev-update-channel-v0`에서 진행한다.
+- [x] `Updates` surface가 current version / available version / channel 상태를 표시한다.
+- [x] `MOMO_UPDATE_MANIFEST_PATH` 또는 `file://` `MOMO_UPDATE_MANIFEST_URL` 기반 update metadata를 읽는다.
+- [x] 새 버전이 있으면 `Open Download` CTA와 operator-assisted install/relaunch 안내를 표시한다.
+- [x] 최신 상태 / 업데이트 가능 / 실패 상태를 구분한다.
+- [x] update manifest 예시 fixture `clients/macOS/Fixtures/update-manifest-alpha-v0.json`를 추가한다.
+- [x] `docs/MACOS_ALPHA_UPDATE_CHANNEL.md`, `docs/INTERNAL_ALPHA.md`, `docs/INDEX.md`, `docs/adr/0005-macos-alpha-update-channel-v0.md`를 local/file manifest v0 기준으로 갱신한다.
+- [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #244를 `status:needs-review`로 전환하고 merge하지 않는다.
+- Out of scope: Sparkle 정식 연동, Developer ID signing, notarization, DMG/App Store 배포, 완전 무인 self-replace updater.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.

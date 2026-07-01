@@ -192,7 +192,7 @@ Internal alpha usability notes:
 
 - In real-server mode, use the top `Invites` popover to create/list/revoke owner/admin invites. Create/revoke/refresh buttons disable while a request is in flight and failed invite operations show a `Retry` button.
 - When a new invite is created, click `Copy Code` before closing the popover. Existing invite rows only show the masked preview; the raw invite code cannot be recovered later.
-- Use the top `Updates` popover to inspect alpha update-channel readiness. During this skeleton phase it is a placeholder/status checklist, not an installer; the operator runbook is [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md).
+- Use the top `Updates` popover to inspect the alpha Dev Update Channel. With `MOMO_UPDATE_MANIFEST_PATH` or a `file://` `MOMO_UPDATE_MANIFEST_URL`, it compares current vs available version and shows `Open Download` plus relaunch steps when a newer dogfood build exists; the operator runbook is [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md).
 - `Switch` and `Log Out` return to the chooser and clear the previous channel/member/message/realtime/invite state. `Log Out` also clears the saved-password preference and Keychain password.
 - Login, join, channel load, and message send errors are recoverable: the chooser, sidebar, or timeline keeps the app interactive and offers retry/dismiss instead of leaving a blank session.
 - The sidebar Members list shows Kim Intern as an `AGENT` when he is in the selected channel. The `+`/`-` member action is the admin path for inviting/removing an existing agent from a channel.
@@ -456,7 +456,7 @@ evidence, labels, milestone, and acceptance are fixed.
 ## 11. Known Limitations
 
 - `MomoMacDevApp` is a development app. It is not signed/notarized and is separate from the M4 release `MomoMac.app` packaging path.
-- The `Updates` popover is an alpha-channel placeholder until Sparkle 2 is wired into a signed/notarized release app and a signed appcast exists.
+- The `Updates` popover is operator-assisted in v0: it reads local/file manifest metadata and can open the announced artifact, but Sparkle 2, signing, notarization, DMG distribution, and fully unattended self-replace updates remain M4 follow-up work.
 - iOS is not present yet. iOS/App Store/TestFlight work remains M5/M7/M8.
 - External Hermes/provider side effects are not covered by default alpha. Repo-local mock Hermes is the normal deterministic path.
 - Public staging DNS/TLS, real registry image pull, SOPS production secret injection, and real pgBackRest WAL/PITR rehearsal are still `runtime-unverified(public host)` unless a host-specific evidence packet is attached.
