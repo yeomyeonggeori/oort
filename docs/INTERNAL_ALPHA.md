@@ -268,6 +268,19 @@ For app smoke with foreground process/window/log evidence:
 LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui
 ```
 
+For the AWS-free one-person local alpha RC gate:
+
+```bash
+scripts/local_gate.sh --profile local-alpha
+```
+
+Expected coverage: local image host-runtime boot, migration idempotency, `/health`,
+REST message send, OutboxRelay publish, mock Hermes/Kim Intern roundtrip, backup
+restore rehearsal, macOS real-backend smoke, and a redacted diagnostics bundle.
+This command creates no AWS resources. Add `LOCAL_GATE_LAUNCH_UI=1` when the RC
+must also prove foreground `MomoMacDevApp` process/window/log launch against the
+local server.
+
 For D/B/C combined runtime evidence:
 
 ```bash

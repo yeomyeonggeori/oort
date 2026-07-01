@@ -167,11 +167,13 @@
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
 | `MOMO-229` | Public host preflight + deploy evidence packet v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228 |
 | `MOMO-233` | AWS internal alpha stack v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228, MOMO-229 |
-| `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233 |
+| `MOMO-237` | Local Docker alpha RC gate v0 | tooling/runtime/docs | MOMO-220, MOMO-224, MOMO-225, MOMO-228, MOMO-233, MOMO-236 |
+| `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233, MOMO-237, MOMO-238 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
 | `MOMO-236` | Hermes internal alpha invite smoke v0 | runtime/docs | MOMO-227, MOMO-230, MOMO-228 |
+| `MOMO-238` | Local Hermes GPT provider loopback contract | docs/tooling/swift | MOMO-230, MOMO-234, MOMO-236 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -190,6 +192,19 @@
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] 실제 AWS host creation, DNS/TLS, registry pull, SOPS decrypt, pgBackRest backup, EBS snapshot, PITR restore rehearsal은 `runtime-unverified(aws-host)`로 남긴다.
 - [ ] PR 생성 후 GitHub #224를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-237 수용기준 `[tooling/runtime/docs]`
+- [x] 별도 worktree/branch `feat/MOMO-237-local-alpha-rc-gate`에서 `origin/main` 기준으로 진행한다.
+- [x] `scripts/local_gate.sh --profile local-alpha`를 추가해 AWS 생성 전 local Docker alpha RC evidence packet을 만든다.
+- [x] `local-alpha`는 AWS API/resource 생성을 하지 않고 local Docker, local Swift packages, repo-local mock Hermes, local diagnostics만 사용한다.
+- [x] packet은 host-runtime image boot, migration idempotency, `/health`, REST message send, OutboxRelay publish, mock Hermes/Kim Intern roundtrip을 포함한다.
+- [x] packet은 backup restore rehearsal, macOS real-backend smoke, diagnostics bundle directory/archive path를 함께 포함한다.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha`로 MomoMacDevApp foreground process/window/log evidence를 opt-in할 수 있다.
+- [x] `docs/RUN.md`, `docs/INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `docs/INDEX.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
+- [ ] 실제 AWS host creation, public DNS/TLS, registry pull, SOPS decrypt, production pgBackRest WAL/PITR, real external Hermes credentialed side effect, notarized macOS release app, iOS/APNs는 out of scope로 남긴다.
+- [ ] PR 생성 후 goal issue를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-239 수용기준 `[docs/manual]`
 - [x] 별도 worktree/branch `docs/MOMO-239-local-alpha-aws-threshold`에서 진행한다.
@@ -226,6 +241,20 @@
 - [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [ ] PR 생성 후 GitHub #225를 `status:needs-review`로 전환하고 merge하지 않는다.
 
+### MOMO-238 수용기준 `[docs/tooling/swift]`
+- [x] 별도 worktree/branch `feat/MOMO-238-external-hermes-provider`에서 진행한다.
+- [x] `docs/external-agent-provider/local-hermes-gpt.md`에 `AGENT_PROVIDER_MODE=external-hermes` local loopback opt-in 계약을 문서화한다.
+- [x] `http://127.0.0.1:<port>/v1` 또는 `http://localhost:<port>/v1`은 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`일 때만 허용한다.
+- [x] non-loopback `http://...` provider URL은 서버/워커 설정과 verifier에서 계속 fail-fast한다.
+- [x] Codex/OpenAI OAuth token/API key env가 momo app/API/DB/evidence path로 들어오면 verifier가 fail-fast한다.
+- [x] `scripts/verify_external_agent_provider.sh`와 `scripts/local_gate.sh --profile external-agent-provider` coverage note를 local Hermes GPT contract에 맞춰 보강한다.
+- [x] credential 없는 환경은 `runtime-unverified(external provider credentials)` explicit skip PASS를 유지한다.
+- [ ] 검증: `scripts/local_gate.sh --profile docs` PASS.
+- [ ] 검증: `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip).
+- [ ] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] PR 생성 후 GitHub issue를 `status:needs-review`로 전환하고 merge하지 않는다.
+
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
 - [ ] invite creation + `/v1/join`, 김인턴 mock path, diagnostics collection, bug report template, known limitations를 한 문서에서 따라 할 수 있게 한다.
@@ -238,7 +267,7 @@
 - [ ] build-macos-apps 플러그인은 SwiftPM build/test/triage와 SwiftPM GUI app 실행 표준화에 적극 사용하되, store signing/notarization은 M4에서 분리한다는 원칙 기록.
 
 ### MOMO-111 수용기준 `[ci/docs]`
-- [ ] `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
+- [ ] `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|m3-dbc|all` 설계/구현.
 - [ ] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공.
 - [ ] GitHub Actions 비주요 기간에는 local evidence + review pass + no unrelated dirty files를 merge gate로 사용한다고 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, PR template에 문서화.
 

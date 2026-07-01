@@ -139,10 +139,14 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 |---|---|---|---|
 | `local-mock` | 개발자 로컬 | `HERMES_BASE_URL=http://localhost:<port>/v1`, placeholder key 허용 | `mock` |
 | `internal-host-mock` | `infra/prod/internal-smoke.env.example`, `host-runtime` verifier | `http://mock-hermes:8088/v1`, placeholder key 허용 | `mock` |
-| `external-hermes` | staging/prod/internal-host | `https://.../v1` + non-placeholder `HERMES_API_KEY` 필수 | `available` 또는 `degraded` |
+| `external-hermes` | staging/prod/internal-host, 또는 명시적 local loopback | 운영은 `https://.../v1` + non-placeholder `HERMES_API_KEY` 필수. 로컬만 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 HERMES_BASE_URL=http://127.0.0.1:<port>/v1` 또는 `http://localhost:<port>/v1` 허용 | `available` 또는 `degraded` |
 
 `staging`/`prod`/`internal-host`에서 `local-mock`/`internal-host-mock`, localhost/mock URL,
 placeholder key가 보이면 MomoServer/AgentWorker boot와 `scripts/prod_env_preflight.sh`가 fail-fast한다.
+`external-hermes`의 non-loopback `http://...` URL도 항상 fail-fast한다. loopback HTTP는 local-only
+opt-in이며, Hermes local process가 GPT/OpenAI credential을 소유하고 momo에는 Hermes-facing bearer만
+전달하는 개발 루프에서만 쓴다. 자세한 계약은
+[`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md)다.
 `GET /health`와 `GET /v1/agent-runtime/status`는 `agentRuntime` projection을 제공하지만
 `endpointLabel`은 user/password/query/fragment를 제거한 값이고 provider token은 절대 포함하지 않는다.
 macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded` / `Mock`을 표시하고,
@@ -171,21 +175,31 @@ scripts/local_gate.sh --profile external-agent-provider
 # 또는 provider secret만 별도 untracked 파일로 분리
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
+
+# 로컬 Hermes + GPT provider loopback smoke (OpenAI/Codex credential은 Hermes 프로세스 안에만 둔다)
+MOMO_ENV=local \
+AGENT_PROVIDER_MODE=external-hermes \
+AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 \
+HERMES_BASE_URL=http://127.0.0.1:${HERMES_PORT:-8088}/v1 \
+HERMES_API_KEY=local-hermes-bearer \
+AGENT_MODEL=gpt-via-local-hermes \
+scripts/local_gate.sh --profile external-agent-provider
 ```
 
 Credentialed smoke에 필요한 momo-side env는 위 네 가지
-`AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다.
+`AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다. local loopback은
+여기에 `MOMO_ENV=local`, `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`이 추가로 필요하다.
 provider가 Codex OAuth를 내부적으로 쓰는 경우에도 `CODEX_OAUTH_TOKEN`,
 `CODEX_OAUTH_REFRESH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_REFRESH_TOKEN`,
-`OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`류 값은 momo verifier에 넘기지
+`OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`, `OPENAI_API_KEY`류 값은 momo verifier에 넘기지
 말고 provider host secret으로만 설정한다. verifier는 알려진 Codex/OpenAI OAuth
-token env var가 momo smoke process에 있으면 credential-boundary 오류로 fail-fast한다.
+token/API key env var가 momo smoke process에 있으면 credential-boundary 오류로 fail-fast한다.
 
 `scripts/verify_external_agent_provider.sh`는 먼저 external env contract를 검사한다.
 `AGENT_PROVIDER_MODE`가 없거나 `external-hermes`가 아니면 mock 기본 환경으로 보고
 `runtime-unverified(external provider credentials)` evidence를 남기고 종료한다. 반대로
-`external-hermes`를 명시했는데 URL이 `https://`가 아니거나 localhost/mock/placeholder key면
-fail-fast한다. credentials가 유효하면 OpenAI-compatible SSE preflight, local
+`external-hermes`를 명시했는데 URL이 non-loopback `http://`이거나, local opt-in 없는
+localhost/mock/placeholder key면 fail-fast한다. credentials가 유효하면 OpenAI-compatible SSE preflight, local
 MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, Kim Intern
 active agent member + `#agent-lab` channel membership precondition, `@김인턴` 1왕복까지
 시도한다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
@@ -278,7 +292,14 @@ scripts/local_gate.sh --profile backup
 # host-runtime smoke에는 같은 복원 리허설이 포함된다.
 scripts/local_gate.sh --profile host-runtime
 
-# 내부 알파 reviewer handoff용 combined evidence packet.
+# AWS로 가기 전 1인 local Docker alpha RC gate.
+# host-runtime, backup restore, macOS real-backend smoke, diagnostics bundle을 함께 남긴다.
+scripts/local_gate.sh --profile local-alpha
+
+# foreground 앱 launch까지 evidence에 포함해야 하면 opt-in.
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha
+
+# 내부 알파 reviewer handoff용 stricter combined evidence packet.
 # host-runtime, backup restore, macOS real-backend process/window, diagnostics bundle을 함께 남긴다.
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 ```
@@ -342,8 +363,30 @@ macOS unified logs, env shape, git commit/status, local gate evidence를 모아
 보안 경계: secrets/password/token/API key/HMAC/database URL credentials는 bundle에 쓰기 전에
 `[REDACTED]`로 치환한다. 그래도 외부 공유 전에는 내부자가 summary와 파일 목록을 한 번 확인한다.
 
+AWS 리소스를 만들기 전에 1인 local Docker alpha RC를 먼저 닫아야 할 때는 `local-alpha`
+profile을 사용한다.
+
+```sh
+scripts/local_gate.sh --profile local-alpha
+```
+
+이 profile은 AWS API를 호출하지 않고, local Docker와 repo-local mock Hermes만 사용한다. PASS 시
+top-level local gate evidence가 run-specific
+`local-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/`
+artifact directory를 함께 출력한다. 여기에는 prod+internal-smoke image boot, `/health`,
+migration idempotency, REST message, OutboxRelay publish, mock Hermes 기반 김인턴 roundtrip,
+repo-local `pg_dump`→separate restore evidence, macOS real-backend smoke, redacted diagnostics
+directory/archive path가 포함된다.
+
+기본값은 foreground GUI launch를 요구하지 않는다. 실제 `MomoMacDevApp` process/window/log
+evidence까지 필요하면 아래처럼 opt-in한다.
+
+```sh
+LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile local-alpha
+```
+
 내부 알파 PR handoff처럼 "돌아가는 로컬 호스트 런타임 + 실제 macOS dev app + 복원 리허설 +
-진단 번들"을 한 번에 묶어야 할 때는 combined local gate를 사용한다.
+진단 번들"을 reviewer에게 stricter packet으로 넘겨야 할 때는 combined local gate를 사용한다.
 
 ```sh
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha

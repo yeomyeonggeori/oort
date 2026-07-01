@@ -128,6 +128,7 @@ struct AgentProviderConfig: Sendable {
     var model: String
     var agentHandle: String
     var displayName: String
+    var allowLocalLoopback: Bool
 
     static func load(environment: [String: String]) -> AgentProviderConfig {
         AgentProviderConfig(
@@ -136,7 +137,8 @@ struct AgentProviderConfig: Sendable {
             hermesAPIKey: environment["HERMES_API_KEY"] ?? "dev-insecure-hermes-bearer",
             model: environment["AGENT_MODEL"] ?? "hermes-agent",
             agentHandle: environment["AGENT_HANDLE"] ?? "kim-intern",
-            displayName: environment["AGENT_DISPLAY_NAME"] ?? "김인턴"
+            displayName: environment["AGENT_DISPLAY_NAME"] ?? "김인턴",
+            allowLocalLoopback: Self.boolFlag(environment["AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK"])
         )
     }
 
@@ -174,35 +176,47 @@ struct AgentProviderConfig: Sendable {
     }
 
     func validateForBoot(environmentName: String) throws {
-        guard Self.requiresStrictExternalProvider(environmentName) else {
+        var errors: [String] = []
+        let strictEnvironment = Self.requiresStrictExternalProvider(environmentName)
+        if !strictEnvironment && mode != .externalHermes {
             return
         }
-
-        var errors: [String] = []
-        if mode != .externalHermes {
+        if strictEnvironment && mode != .externalHermes {
             errors.append("AGENT_PROVIDER_MODE must be external-hermes in \(environmentName)")
         }
-        errors += validationErrors(strictEnvironment: true)
+        errors += validationErrors(
+            strictEnvironment: strictEnvironment,
+            allowLocalLoopback: allowLocalLoopback && !strictEnvironment
+        )
         if !errors.isEmpty {
             throw AgentProviderConfigurationError(errors: errors)
         }
     }
 
-    func validationErrors(strictEnvironment: Bool) -> [String] {
+    func validationErrors(strictEnvironment: Bool, allowLocalLoopback: Bool? = nil) -> [String] {
         var errors: [String] = []
+        let localLoopbackAllowed = allowLocalLoopback ?? self.allowLocalLoopback
         let trimmedURL = hermesBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedURL.isEmpty {
             errors.append("HERMES_BASE_URL is missing")
         } else if mode == .externalHermes || strictEnvironment {
             guard let url = URL(string: trimmedURL), let scheme = url.scheme, let host = url.host else {
-                errors.append("HERMES_BASE_URL must be an absolute HTTPS URL")
+                errors.append("HERMES_BASE_URL must be an absolute HTTP(S) URL")
                 return errors + keyErrors()
             }
-            if scheme.lowercased() != "https" {
-                errors.append("HERMES_BASE_URL must use https:// for external-hermes")
+            let normalizedScheme = scheme.lowercased()
+            let isLoopback = Self.isAllowedLoopbackHost(host)
+            if normalizedScheme == "http" {
+                if !(localLoopbackAllowed && isLoopback) {
+                    errors.append("HERMES_BASE_URL must use https:// unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 targets localhost/127.0.0.1 in local mode")
+                }
+            } else if normalizedScheme != "https" {
+                errors.append("HERMES_BASE_URL must use http:// or https://")
             }
-            if Self.isLocalOrMockHost(host) {
-                errors.append("HERMES_BASE_URL must not point at localhost or mock-hermes for external-hermes")
+            if Self.isMockHost(host) {
+                errors.append("HERMES_BASE_URL must not point at mock-hermes for external-hermes")
+            } else if Self.isLocalOrMockHost(host) && !(localLoopbackAllowed && isLoopback) {
+                errors.append("HERMES_BASE_URL must not point at localhost for external-hermes unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 in local mode")
             }
         }
         errors += keyErrors()
@@ -248,6 +262,26 @@ struct AgentProviderConfig: Sendable {
             || lowered == "0.0.0.0"
             || lowered == "::1"
             || lowered.contains("mock")
+    }
+
+    static func isAllowedLoopbackHost(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        return lowered == "localhost"
+            || lowered == "127.0.0.1"
+            || lowered == "::1"
+    }
+
+    static func isMockHost(_ host: String) -> Bool {
+        host.lowercased().contains("mock")
+    }
+
+    static func boolFlag(_ raw: String?) -> Bool {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
+        }
     }
 
     static func redactedEndpointLabel(_ raw: String) -> String {
