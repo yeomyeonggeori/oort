@@ -53,7 +53,7 @@ Repo-owned material:
 
 | Material | Path |
 |---|---|
-| Update-channel ADR | `docs/adr/0004-macos-alpha-update-channel-v0.md` |
+| Update-channel ADR | `docs/adr/0005-macos-alpha-update-channel-v0.md` |
 | Alpha update runbook | `docs/MACOS_ALPHA_UPDATE_CHANNEL.md` |
 | Placeholder UI/status model | `clients/macOS/Sources/MomoMac/MomoMacUpdateChannel.swift` |
 

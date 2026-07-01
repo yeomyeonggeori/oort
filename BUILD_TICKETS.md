@@ -969,7 +969,7 @@
 
 ### MOMO-235 수용기준 `[swift/docs]`
 - [x] GitHub #226을 `scripts/goal_claim.sh 226`으로 claim하고 별도 branch/worktree에서 진행한다.
-- [x] `docs/adr/0004-macos-alpha-update-channel-v0.md`에 Sparkle 2 우선 + manual fallback alpha channel 결정을 기록한다.
+- [x] `docs/adr/0005-macos-alpha-update-channel-v0.md`에 Sparkle 2 우선 + manual fallback alpha channel 결정을 기록한다.
 - [x] `docs/MACOS_ALPHA_UPDATE_CHANNEL.md`에 appcast/signing key/Developer ID/notarization/DMG secret boundary와 operator runbook을 정리한다.
 - [x] SwiftPM dev app/Xcode host 공용 session bar에 `Updates` placeholder surface를 추가한다.
 - [x] placeholder surface는 `MOMO_UPDATE_*` non-secret hints만 읽고 Sparkle private key/Apple signing material을 금지 경계로 둔다.

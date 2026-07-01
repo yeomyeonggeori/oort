@@ -62,7 +62,7 @@
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
 | [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
 | [`docs/adr/0003-macos-packaging-architecture.md`](adr/0003-macos-packaging-architecture.md) | M4 macOS packaging ADR: SwiftPM dev app vs Xcode release app, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle issue split | M4 |
-| [`docs/adr/0004-macos-alpha-update-channel-v0.md`](adr/0004-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
+| [`docs/adr/0005-macos-alpha-update-channel-v0.md`](adr/0005-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 

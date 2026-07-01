@@ -1,4 +1,4 @@
-# ADR 0004: macOS Alpha Update Channel v0
+# ADR 0005: macOS Alpha Update Channel v0
 
 > Status: Accepted for alpha skeleton.
 > Date: 2026-07-01.
