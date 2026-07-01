@@ -52,6 +52,7 @@
 - `scripts/verify_external_agent_provider.sh`와 `scripts/local_gate.sh --profile external-agent-provider`를 추가했다. 기본 local/mock 환경에서는 Docker/provider side effect를 실행하지 않고 `runtime-unverified(external provider credentials)` evidence로 explicit skip한다.
 - `AGENT_PROVIDER_MODE=external-hermes`와 non-placeholder `HERMES_BASE_URL=https://.../v1`, `HERMES_API_KEY`가 있는 환경에서는 OpenAI-compatible SSE preflight, local MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redacted availability, `@김인턴` 1왕복을 검증한다.
 - verifier evidence는 redacted artifact만 참조하며 `HERMES_API_KEY`, bearer token, DB password, app token 원문을 stdout/evidence에 남기지 않는다. 실제 provider credential이 이 환경에 없으면 real provider side effect는 계속 `runtime-unverified(external provider credentials)`다.
+- 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip). Credentialed real provider PASS는 아직 `runtime-unverified(external provider credentials)`.
 
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
