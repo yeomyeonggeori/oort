@@ -60,7 +60,7 @@ Profiles:
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
-| `external-agent-provider` | real Kim Intern/Hermes credentialed smoke, opt-in only | `docs` profile + `scripts/verify_external_agent_provider.sh`; with credentials it checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction, Kim Intern active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@김인턴` roundtrip; without credentials it writes `runtime-unverified(external provider credentials)` evidence |
+| `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_external_agent_provider.sh`; with credentials it checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Kim Intern active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@김인턴` roundtrip; without credentials it writes `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
@@ -103,7 +103,12 @@ scripts/local_gate.sh --profile external-agent-provider
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
 
-# local-only Hermes + GPT provider loopback smoke
+scripts/local_alpha_runner.sh execute \
+  --hermes external \
+  --external-smoke \
+  --secret-env /secure/momo/external-hermes.env
+
+# local-only OpenAI-compatible provider loopback smoke
 MOMO_ENV=local \
 AGENT_PROVIDER_MODE=external-hermes \
 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 \
@@ -122,8 +127,10 @@ set but the URL/key is missing, placeholder-like, mock, or a non-loopback
 credentialed smoke. `http://127.0.0.1:<port>/v1` and
 `http://localhost:<port>/v1` are allowed only with
 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`; staging/prod/internal-host
-still reject loopback. In the credentialed
-path, the same verifier also proves the internal alpha invite precondition:
+still reject loopback. In the credentialed path, `/v1/agent-runtime/status`
+must report `available` with no `degradedReason`; failures keep a redacted
+category/reason in evidence. The same verifier also proves the internal alpha
+invite precondition:
 Kim Intern must be an active `member.kind='agent'` with handle `kim-intern` and
 an active membership in seeded `#agent-lab` before the mention is sent.
 
@@ -132,7 +139,7 @@ Intern uses Codex OAuth, configure authorization code exchange, access/refresh
 token storage, refresh, unlink, and rotation inside the provider host. The momo
 smoke process accepts only `HERMES_API_KEY` for the provider SSE boundary and
 fails fast if known Codex/OpenAI OAuth token or API key env var names are
-present. The local Hermes GPT contract is
+present. The local loopback provider contract is
 [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md);
 the credential boundary ADR is
 [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md).
@@ -327,7 +334,7 @@ Use the profile that matches the changed surface.
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
-| `external-agent-provider` | opt-in real Kim Intern/Hermes side-effect smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
+| `external-agent-provider` | opt-in credentialed external agent runtime smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
 

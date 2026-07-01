@@ -606,5 +606,6 @@ struct AgentRuntimeStatusResponse: ResponseEncodable {
     let model: String
     let endpointLabel: String
     let keyConfigured: Bool
+    let degradedReason: String?
     let diagnostics: [String]
 }

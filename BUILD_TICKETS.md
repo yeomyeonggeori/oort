@@ -181,6 +181,7 @@
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
 | `MOMO-236` | Hermes internal alpha invite smoke v0 | runtime/docs | MOMO-227, MOMO-230, MOMO-228 |
 | `MOMO-238` | Local Hermes GPT provider loopback contract | docs/tooling/swift | MOMO-230, MOMO-234, MOMO-236 |
+| `MOMO-242` | External agent runtime smoke contract | runtime/docs/swift | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-240 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -292,6 +293,18 @@
 - [ ] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [ ] PR 생성 후 GitHub issue를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-242 수용기준 `[runtime/docs/swift]`
+- [x] 기존 GitHub issue #242를 `scripts/goal_claim.sh 242`로 claim하고 별도 branch/worktree `feat/242-external-agent-runtime-smoke`에서 진행한다.
+- [x] `docs/external-agent-provider/README.md`에 external agent runtime secret env 형식, mock/local runtime과 external runtime의 차이, provider token/Codex OAuth/OpenAI key 비저장 boundary를 문서화한다.
+- [x] `scripts/verify_external_agent_provider.sh` credentialed path가 `channel message -> agent run -> external runtime call -> durable agent response` 최소 1왕복 smoke를 유지하고, PASS status에서 `degradedReason`이 비어 있음을 확인한다.
+- [x] `scripts/local_alpha_runner.sh execute --hermes external --external-smoke --secret-env <outside-repo-env>` 옵션을 추가해 local alpha runner에서 같은 external runtime smoke로 위임할 수 있게 한다.
+- [x] `/v1/agent-runtime/status`와 macOS Kim Intern status surface가 redacted `degradedReason`을 표시하되 provider token/API key/OAuth secret은 노출하지 않는다.
+- [x] `docs/INTERNAL_ALPHA.md`, `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `docs/INDEX.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] 검증: `scripts/local_gate.sh --profile docs` PASS.
+- [x] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
+- [x] Credentialed real provider PASS는 provider secret이 있는 환경에서만 닫고, 없는 환경에서는 `runtime-unverified(external provider credentials)`로 남긴다.
+- [ ] PR 생성 후 GitHub #242를 `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.

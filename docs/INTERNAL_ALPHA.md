@@ -11,7 +11,7 @@
 - Never commit `.env`, diagnostics archives, app logs, or screenshots with secrets.
 - Raw invite codes are bearer secrets. momo stores only hashes, so an invite code must be copied when it is created.
 - The durable write path is still REST -> Postgres transaction -> outbox -> relay publish. The macOS app must not publish directly to Centrifugo.
-- Internal alpha can use repo-local mock Hermes. External Hermes/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached.
+- Internal alpha can use repo-local mock Hermes. External agent runtime/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached with an out-of-repo provider env file.
 - "Kim Intern invited" and "Kim Intern connected" are separate checks: invited means the agent is an active `member.kind='agent'` with channel membership; connected means the provider status chip or `/v1/agent-runtime/status` reports mock/available instead of degraded.
 
 ## 1. Tooling Checklist
@@ -230,8 +230,33 @@ make down
 3. For local mock smoke, ensure mock Hermes and AgentWorker are running, then send `@김인턴 상태 알려줘` or `@kim-intern summarize this channel` in `#agent-lab`.
 4. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
 5. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
-6. For real-provider smoke, put credentials only in an untracked provider env file and run `scripts/local_gate.sh --profile external-agent-provider`. Without credentials, the profile must PASS as an explicit `runtime-unverified(external provider credentials)` skip; with credentials, its evidence includes the Kim Intern invite precondition and one external-provider roundtrip.
-7. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted diagnostic hint.
+6. For real-provider smoke, put only Hermes-facing credentials in an out-of-repo provider env file. Use [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) as the env contract.
+7. Default no-secret gate:
+
+   ```bash
+   scripts/local_gate.sh --profile external-agent-provider
+   ```
+
+   It must PASS as an explicit `runtime-unverified(external provider credentials)` skip.
+8. Credentialed external runtime gate:
+
+   ```bash
+   EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
+   EXTERNAL_AGENT_PROVIDER_ENV_FILE="$HOME/.momo/external-agent.env" \
+   scripts/local_gate.sh --profile external-agent-provider
+   ```
+
+   Equivalent local-alpha runner entry:
+
+   ```bash
+   scripts/local_alpha_runner.sh execute \
+     --hermes external \
+     --external-smoke \
+     --secret-env "$HOME/.momo/external-agent.env"
+   ```
+
+   With credentials, evidence includes the Kim Intern invite precondition, `/v1/agent-runtime/status` readiness, and one `channel message -> agent run -> external runtime call -> durable agent response` roundtrip.
+9. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted `degradedReason`/diagnostic hint.
 
 ### D. Diagnostics
 
@@ -349,7 +374,7 @@ local gate evidence paths, diagnostics bundle path, and feedback issue links.
 |---|---|
 | Local gate | One-person local alpha gate is `PASS` with no P0/P1 waiver and no missing required evidence. |
 | 1인 soak | One person completes at least 5 local sessions across at least 2 calendar days, totaling at least 120 minutes of active local server + MomoMacDevApp use. Include at least two app restarts and one server/relay/Centrifugo restart. |
-| External agent runtime smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` or equivalent agent-member roundtrip through local MomoServer, AgentWorker, OutboxRelay, and timeline. A no-credential skip blocks AWS promotion. |
+| External agent runtime smoke | `AGENT_PROVIDER_MODE=external-hermes` with real non-placeholder `HERMES_BASE_URL` and `HERMES_API_KEY` completes one `@김인턴` or equivalent agent-member roundtrip through local MomoServer, AgentWorker, OutboxRelay, the external runtime, and timeline. A no-credential skip blocks AWS promotion. |
 | No P0/P1 | Feedback triage shows zero open P0 or P1 issues. P2/P3 may remain only if each has owner, follow-up issue, and workaround or explicit non-blocking note. |
 | Diagnostics evidence | Final diagnostics bundle exists, is redacted, references the same commit as the handoff, and includes local gate evidence plus server/relay/worker/Centrifugo/macOS context where available. |
 

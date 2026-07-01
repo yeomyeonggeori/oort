@@ -346,8 +346,12 @@ extension AgentRuntimeStatus {
             mode.internalAlphaLabel,
             keyConfigured ? "key ready" : "key missing",
         ]
-        if availability == .degraded, let diagnostic = diagnostics.first, !diagnostic.isEmpty {
-            parts.append(diagnostic)
+        if availability == .degraded {
+            if let degradedReason, !degradedReason.isEmpty {
+                parts.append(degradedReason)
+            } else if let diagnostic = diagnostics.first, !diagnostic.isEmpty {
+                parts.append(diagnostic)
+            }
         } else if !endpointLabel.isEmpty {
             parts.append(endpointLabel)
         }
@@ -361,6 +365,9 @@ extension AgentRuntimeStatus {
             "endpoint=\(endpointLabel)",
             keyConfigured ? "key configured" : "key not configured",
         ]
+        if let degradedReason, !degradedReason.isEmpty {
+            parts.append("degraded=\(degradedReason)")
+        }
         if !diagnostics.isEmpty {
             parts.append(diagnostics.joined(separator: "; "))
         }
