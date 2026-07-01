@@ -46,10 +46,10 @@
 
 | 축 | 라벨 | 용도 |
 |---|---|---|
-| **type** | `type:feature` `type:bug` `type:chore` `type:docs` `type:spec` `type:infra` | 무엇인가 |
-| **status** | `status:ready` `status:in-progress` `status:blocked` `status:needs-review` `status:runtime-unverified` | 지금 어디 (picker가 `status:ready`만 집음) |
+| **type** | `type:feature` `type:bug` `type:chore` `type:docs` `type:feedback` `type:spec` `type:infra` | 무엇인가 |
+| **status** | `status:needs-triage` `status:ready` `status:in-progress` `status:blocked` `status:needs-review` `status:runtime-unverified` | 지금 어디 (picker가 `status:ready`만 집음) |
 | **priority** | `priority:p0` `priority:p1` `priority:p2` | 우선순위 (p0=릴리스 블로커) |
-| **area** | `area:server/relay/worker/core/macos/ios/infra/adapter/schema/tenancy/store/ci` | 어디 코드 |
+| **area** | `area:server/relay/worker/core/macos/ios/infra/adapter/schema/tenancy/store/ci/alpha` | 어디 코드 |
 | **size** | `size:s` `size:m` `size:l` | 공수 추정 |
 | **gate** | `gate:qa` `agent:codex-ok` | 검수 게이트 / Codex 자율 적합 |
 
@@ -125,6 +125,19 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
 - worker는 완료 시 issue, branch, worktree path, PR URL, local gate, remaining risks를 `momo-main`에 보고한다.
 - PR 생성 후에는 `scripts/goal_release.sh <issue-number> --review --pr <PR URL>`로 issue를 review 상태로 넘기고, 블로커가 있으면 `--blocked "<reason>"`로 이유를 남긴다.
 - 같은 package family의 대형 변경, 특히 `server/`, `infra/`, migrations, shared model 변경은 동시에 2개 이상 열지 않는다.
+
+### 3.2c Internal alpha feedback intake
+
+- 정본: [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md).
+- raw tester report는 GitHub `Internal alpha feedback` 템플릿으로 접수하고 `type:feedback`, `area:alpha`, `status:needs-triage`를 붙인다.
+- `status:needs-triage`는 worker claim 대상이 아니다. momo-main이 severity(P0 data loss/security, P1 core alpha flow blocked, P2 usability friction, P3 polish), evidence, labels, milestone을 정리한다.
+- 필수 evidence: local gate profile, diagnostics bundle path, repro steps, workspace/channel/member context, expected/actual.
+- buildable goal로 바꿀 때만 `## Goal / ## Context / ## Acceptance / ## Out of scope`를 채우고 `status:ready`로 전환한다.
+- 상태 확인:
+  ```bash
+  scripts/goal_status.sh --repo Dawn-kim-official/momo
+  gh issue list --repo Dawn-kim-official/momo --label status:needs-triage --state open
+  ```
 
 ### 3.3 의존성 표현
 - 이슈 본문 `## Depends on:`에 선행 이슈 title/번호. picker(AGENTS.md §6)는 의존이 **모두 닫혀야** 그 이슈를 고른다.
