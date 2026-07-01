@@ -177,7 +177,7 @@ add_staging_smoke_commands() {
 add_host_runtime_commands() {
   add_cmd_once "internal host-runtime smoke verification" "scripts/verify_internal_host_runtime.sh"
   add_backup_commands
-  add_note_once coverage "MOMO-220 host-runtime smoke: local api/relay/worker/migrate/mock-Hermes images are built, prod compose + internal-smoke overlay boots from images without source bind mounts, migration one-shot plus idempotent re-run succeeds, Caddy/internal /health returns 200, REST login/message send publishes through OutboxRelay to Centrifugo history, and @김인턴 mock Hermes agent roundtrip publishes agent progress plus final channel message.new."
+  add_note_once coverage "MOMO-220/MOMO-227 host-runtime smoke: local api/relay/worker/migrate/mock-Hermes images are built, prod compose + internal-smoke overlay boots from images without source bind mounts, migration one-shot plus idempotent re-run succeeds, Caddy/internal /health returns 200, /v1/agent-runtime/status reports internal-host-mock/mock without provider secret leakage, REST login/message send publishes through OutboxRelay to Centrifugo history, and @김인턴 mock Hermes agent roundtrip publishes agent progress plus final channel message.new."
   add_note_once not_covered "Public TLS/DNS, real registry pull, SOPS production secret injection, production pgBackRest stanza/check/full backup, WAL archive push, and time-target PITR restore remain runtime-unverified(public host)."
 }
 

@@ -53,7 +53,7 @@ Profiles:
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, and SOPS/pgBackRest checklist |
 | `backup` | backup/PITR runbook or internal hosting changes that must prove restore rehearsal evidence before review | `docs` profile + `scripts/verify_backup_restore_rehearsal.sh` for temporary PostgreSQL 18 source DB marker writes, `pg_dump -Fc`, separate restore DB `pg_restore`, marker checksum equality, and markdown/json evidence generation |
-| `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/migrate/message/relay/mock-agent and repo-local restore evidence |
+| `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + `LOCAL_GATE_LAUNCH_UI=1` MomoMacDevApp real-backend process/window evidence + redacted diagnostics bundle |
 | `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` + `make migrate` twice + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
@@ -206,7 +206,7 @@ Use the profile that matches the changed surface.
 | `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
 | `staging-smoke` | MOMO-005/006/007 deploy config, Caddy/Centrifugo, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
-| `host-runtime` | internal single-node runtime smoke plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
+| `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |
 | `runtime-db` | migrations/server/RLS/join changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |

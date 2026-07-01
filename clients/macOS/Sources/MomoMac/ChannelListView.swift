@@ -31,6 +31,9 @@ public struct ChannelListView: View {
             }
 
             Section("Local AI") {
+                KimInternAvailabilityView(status: viewModel.agentRuntimeStatus) {
+                    Task { await viewModel.refreshAgentRuntimeStatus() }
+                }
                 FoundationModelsCapabilityView(state: viewModel.foundationModelsCapability)
                 LocalContextCopilotView(viewModel: viewModel)
             }
@@ -247,6 +250,96 @@ public struct ChannelListView: View {
             return "DM"
         case .publicChannel, .privateChannel:
             return channel.name ?? "channel"
+        }
+    }
+}
+
+private struct KimInternAvailabilityView: View {
+    let status: AgentRuntimeStatus
+    let refresh: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+                .foregroundStyle(tint)
+                .frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(status.displayName)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Text(status.availability.label)
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(tint.opacity(0.16), in: Capsule())
+                        .foregroundStyle(tint)
+                }
+                Text(status.mode.rawValue)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button(action: refresh) {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.plain)
+            .help("Refresh Kim Intern status")
+        }
+        .help(helpText)
+    }
+
+    private var iconName: String {
+        switch status.availability {
+        case .available:
+            return "checkmark.circle.fill"
+        case .degraded:
+            return "exclamationmark.triangle.fill"
+        case .mock:
+            return "testtube.2"
+        case .unknown:
+            return "questionmark.circle"
+        }
+    }
+
+    private var tint: Color {
+        switch status.availability {
+        case .available:
+            return MomoTheme.reversibleGreen
+        case .degraded:
+            return MomoTheme.irreversibleRed
+        case .mock:
+            return MomoTheme.costAmber
+        case .unknown:
+            return .secondary
+        }
+    }
+
+    private var helpText: String {
+        var parts = [
+            "\(status.displayName): \(status.availability.label)",
+            "mode=\(status.mode.rawValue)",
+            "endpoint=\(status.endpointLabel)",
+        ]
+        if !status.diagnostics.isEmpty {
+            parts.append(status.diagnostics.joined(separator: "; "))
+        }
+        return parts.joined(separator: " | ")
+    }
+}
+
+private extension AgentAvailability {
+    var label: String {
+        switch self {
+        case .available:
+            return "Available"
+        case .degraded:
+            return "Degraded"
+        case .mock:
+            return "Mock"
+        case .unknown:
+            return "Unknown"
         }
     }
 }

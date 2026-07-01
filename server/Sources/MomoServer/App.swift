@@ -35,7 +35,14 @@ enum AppBuilder {
 
         // Public routes (no auth): health, login, join, centrifugo subscribe proxy.
         router.get("/health") { _, _ -> HealthResponse in
-            HealthResponse(status: "ok", service: "MomoServer")
+            HealthResponse(
+                status: "ok",
+                service: "MomoServer",
+                agentRuntime: config.agentProvider.statusResponse()
+            )
+        }
+        router.get("/v1/agent-runtime/status") { _, _ -> AgentRuntimeStatusResponse in
+            config.agentProvider.statusResponse()
         }
         let authRoutes = AuthRoutes(
             db: db,

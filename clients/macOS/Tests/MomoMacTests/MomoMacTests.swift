@@ -713,6 +713,49 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
     }
 
+    func testRESTBackendLoadsKimInternRuntimeStatus() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/agent-runtime/status"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(json: """
+                {
+                  "schema": "momo.agent_runtime.status.v0",
+                  "agentHandle": "kim-intern",
+                  "displayName": "김인턴",
+                  "mode": "external-hermes",
+                  "availability": "available",
+                  "model": "hermes-agent",
+                  "endpointLabel": "https://kim.example.net/v1",
+                  "keyConfigured": true,
+                  "diagnostics": []
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: .demo, accessToken: "")
+
+        let status = try await backend.agentRuntimeStatus()
+        XCTAssertEqual(status.agentHandle, "kim-intern")
+        XCTAssertEqual(status.mode, .externalHermes)
+        XCTAssertEqual(status.availability, .available)
+        XCTAssertEqual(status.endpointLabel, "https://kim.example.net/v1")
+        XCTAssertFalse(status.endpointLabel.contains("token"))
+    }
+
     func testRESTBackendCreatesChannelAndMutatesMembership() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
