@@ -245,9 +245,9 @@ add_runtime_agent_commands() {
 
 add_external_agent_provider_commands() {
   add_cmd "External Kim Intern/Hermes provider smoke" "scripts/verify_external_agent_provider.sh"
-  add_note_once coverage "MOMO-230/MOMO-234 opt-in external provider gate: when AGENT_PROVIDER_MODE=external-hermes plus HERMES_BASE_URL/HERMES_API_KEY are configured, scripts/verify_external_agent_provider.sh checks OpenAI-compatible SSE directly, boots local Postgres/Centrifugo + MomoServer/OutboxRelay/AgentWorker, verifies /v1/agent-runtime/status redacted availability, and sends one @김인턴 roundtrip through the external provider."
+  add_note_once coverage "MOMO-230/MOMO-236 opt-in external provider gate: when AGENT_PROVIDER_MODE=external-hermes plus HERMES_BASE_URL/HERMES_API_KEY are configured, scripts/verify_external_agent_provider.sh checks OpenAI-compatible SSE directly, boots local Postgres/Centrifugo + MomoServer/OutboxRelay/AgentWorker, verifies /v1/agent-runtime/status redacted availability, proves Kim Intern is an active invited agent member of #agent-lab, and sends one @김인턴 roundtrip through the external provider."
   add_note_once coverage "MOMO-234 credential boundary: momo app/API/DB/local-gate evidence never receive Codex OAuth access/refresh tokens; known Codex/OpenAI OAuth token env vars fail fast and Codex OAuth remains provider-owned inside Hermes/Kim Intern."
-  add_note_once coverage "MOMO-230 no-credential behavior: with default local/mock env, the verifier exits successfully with explicit runtime-unverified(external provider credentials) evidence and does not alter deterministic runtime-agent/internal-alpha gates."
+  add_note_once coverage "MOMO-230/MOMO-236 no-credential behavior: with default local/mock env, the verifier exits successfully with explicit runtime-unverified(external provider credentials) evidence, records the invite precondition expectation, and does not alter deterministic runtime-agent/internal-alpha gates."
   add_note_once not_covered "The default runtime-agent profile remains repo-local mock Hermes only; real provider side effects are covered only by the external-agent-provider opt-in profile."
 }
 

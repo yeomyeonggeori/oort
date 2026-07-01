@@ -54,6 +54,13 @@
 - verifier evidence는 redacted artifact만 참조하며 `HERMES_API_KEY`, bearer token, DB password, app token 원문을 stdout/evidence에 남기지 않는다. 실제 provider credential이 이 환경에 없으면 real provider side effect는 계속 `runtime-unverified(external provider credentials)`다.
 - 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip). Credentialed real provider PASS는 아직 `runtime-unverified(external provider credentials)`.
 
+## 0-4b-1. MOMO-236 Hermes Internal Alpha Invite Smoke v0 (2026-07-01)
+
+- 내부 알파에서 "김인턴 초대됨"을 provider 연결과 분리해 고정했다: seeded/admin path는 active `member.kind='agent'` + display name `김인턴` + handle `kim-intern` + `#agent-lab` active channel membership이고, 사람 `/v1/join` invite code가 아니라 channel membership API/admin UI로 기존 agent member를 초대한다.
+- `scripts/verify_external_agent_provider.sh` credentialed path가 real-provider `@김인턴` smoke 전에 Kim Intern active agent + `#agent-lab` membership precondition JSON evidence를 생성한다. no-credential path는 Docker/provider side effect 없이 explicit `runtime-unverified(external provider credentials)` skip PASS를 유지한다.
+- `docs/INTERNAL_ALPHA.md`, `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `ROADMAP.md`, `BUILD_TICKETS.md`에 mock/internal-host와 credentialed real-provider-required 경계, macOS/API status visibility, smoke 절차를 반영했다. 실제 credentialed Hermes/Kim Intern side effect는 credential 없는 환경에서는 계속 `runtime-unverified(external provider credentials)`다.
+- 검증: `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip, evidence `/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-external-agent-provider-20260701T070401Z-pid82381-ns1782889441663040000-wt1f57f61d7b34-rf512aebfd297.md`), `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS(evidence `/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-swift-20260701T070421Z-pid86990-ns1782889461792630000-wt1f57f61d7b34-r0fa3cd968c72.md`).
+
 ## 0-4b-2. MOMO-234 Hermes Codex OAuth Provider Boundary v0 (2026-07-01)
 
 - `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`를 추가해 Codex OAuth access/refresh token은 Hermes/Kim Intern provider 소유이고 momo app/API/DB/Context Packet/Memory/diagnostics/local gate가 직접 보관하지 않는다는 credential boundary를 정본화했다.

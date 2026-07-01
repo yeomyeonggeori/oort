@@ -170,6 +170,7 @@
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
+| `MOMO-236` | Hermes internal alpha invite smoke v0 | runtime/docs | MOMO-227, MOMO-230, MOMO-228 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -290,7 +291,7 @@
 - [x] public TLS/DNS, real registry pull, SOPS prod secret injection, pgBackRest PITR restore는 `runtime-unverified(public host)`로 남긴다.
 - [ ] `scripts/local_gate.sh --profile host-runtime` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
-- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+- [x] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-221 수용기준 `[infra/docs]`
 - [x] GitHub #202를 `scripts/goal_claim.sh 202`로 claim하고 별도 branch/worktree에서 진행한다.
@@ -341,6 +342,18 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] credentials가 있으면 external provider PASS evidence를 첨부하고, 없으면 `runtime-unverified(external provider credentials)`로 표기한다.
 - [x] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-236 수용기준 `[runtime/docs]`
+- [x] GitHub #228을 `scripts/goal_claim.sh 228`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] 내부 알파 기준 Kim Intern 초대/활성화 flow를 고정한다: seeded workspace의 active `member.kind='agent'`, display name `김인턴`, handle `kim-intern`, `#agent-lab` active membership, admin channel-membership API path.
+- [x] `docs/INTERNAL_ALPHA.md`, `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`가 "초대됨"과 provider "연결 가능/불가"를 분리해 설명한다.
+- [x] `scripts/verify_external_agent_provider.sh` credentialed path가 external provider roundtrip 전에 Kim Intern active agent + `#agent-lab` invite precondition evidence를 생성한다.
+- [x] no-credential path는 Docker/provider side effect 없이 explicit `runtime-unverified(external provider credentials)` skip PASS를 유지하고, real-provider-required 경계를 기록한다.
+- [x] stdout/evidence/log artifact에는 `HERMES_API_KEY`, bearer token, DB password, app token 원문을 남기지 않는다.
+- [x] `scripts/local_gate.sh --profile external-agent-provider` PASS 또는 no-credential explicit skip PASS evidence를 첨부한다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 첨부한다.
+- [x] STATUS.md, ROADMAP.md, BUILD_TICKETS.md를 갱신한다.
+- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-222 수용기준 `[runtime/infra]`
 - [x] GitHub #204를 `scripts/goal_claim.sh 204`로 claim하고 별도 branch/worktree `chore/204-backup-pitr-restore-rehearsal-gate-v0`에서 진행한다.

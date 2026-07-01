@@ -59,7 +59,7 @@ Profiles:
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
-| `external-agent-provider` | real Kim Intern/Hermes credentialed smoke, opt-in only | `docs` profile + `scripts/verify_external_agent_provider.sh`; with credentials it checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction, and one local MomoServer/AgentWorker/OutboxRelay `@김인턴` roundtrip; without credentials it writes `runtime-unverified(external provider credentials)` evidence |
+| `external-agent-provider` | real Kim Intern/Hermes credentialed smoke, opt-in only | `docs` profile + `scripts/verify_external_agent_provider.sh`; with credentials it checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction, Kim Intern active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@김인턴` roundtrip; without credentials it writes `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
@@ -106,7 +106,10 @@ The verifier never prints the API key. If `AGENT_PROVIDER_MODE` is not
 `runtime-unverified(external provider credentials)` evidence so default mock
 runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is
 set but the URL/key is missing, placeholder-like, localhost, or mock, the profile
-fails fast because that is a misconfigured credentialed smoke.
+fails fast because that is a misconfigured credentialed smoke. In the credentialed
+path, the same verifier also proves the internal alpha invite precondition:
+Kim Intern must be an active `member.kind='agent'` with handle `kim-intern` and
+an active membership in seeded `#agent-lab` before the mention is sent.
 
 Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
 Intern uses Codex OAuth, configure authorization code exchange, access/refresh
