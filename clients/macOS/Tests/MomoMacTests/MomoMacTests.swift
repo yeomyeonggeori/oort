@@ -276,6 +276,81 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testAlphaCommandCenterSnapshotCoversInternalAlphaSurfaces() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        await viewModel.selectChannel(seed.channels[0].id)
+
+        let snapshot = viewModel.alphaCommandCenterSnapshot(updateStatus: .fromEnvironment([:]))
+        let areas = Set(snapshot.statuses.map(\.area))
+
+        XCTAssertEqual(areas, Set(AlphaCommandCenterArea.allCases))
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .server }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .diagnostics }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .planned)
+        XCTAssertTrue(snapshot.checklist.contains { $0.id == "mention-kim-intern" && $0.state == .ready })
+        XCTAssertTrue(snapshot.capabilities.contains { $0.id == "diagnostics" && $0.isAvailable })
+        XCTAssertTrue(snapshot.limitations.contains { $0.contains("Automatic update install") })
+    }
+
+    func testAlphaCommandCenterSnapshotExplainsDegradedStates() {
+        let workspace = WorkspaceID.demo
+        let channel = Channel(
+            id: .demoAgentLab,
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "agent-lab",
+            createdBy: .demoHuman
+        )
+        let snapshot = AlphaCommandCenterSnapshot.make(
+            workspaceId: workspace,
+            channels: [channel],
+            selectedChannel: channel,
+            selectedRealtimeStatus: RealtimeConnectionStatus(
+                channelId: channel.id,
+                connection: .error,
+                subscription: .error,
+                fallback: .restHistory,
+                canRetry: true,
+                message: "websocket refused"
+            ),
+            agentRuntimeStatus: AgentRuntimeStatus(
+                mode: .externalHermes,
+                availability: .degraded,
+                endpointLabel: "https://kim.example.net/v1",
+                keyConfigured: false,
+                diagnostics: ["HERMES_API_KEY missing"]
+            ),
+            inviteJoinState: .failed(InviteJoinFailure(
+                code: "EXPIRED",
+                reason: "Invite expired",
+                recoveryHint: "Ask an owner for a fresh code."
+            )),
+            connectionError: "db offline",
+            visibleMessageCount: 0,
+            pendingApprovalCount: 0,
+            liveSpentMicroUSD: 0,
+            updateStatus: MomoMacUpdateChannelStatus.fromEnvironment([
+                "MOMO_UPDATE_FEED_URL": "not a url",
+                "MOMO_UPDATE_PUBLIC_ED_KEY": "PRIVATE KEY SHOULD NOT BE HERE",
+            ])
+        )
+
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .server }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .realtime }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .invites }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .degraded)
+        XCTAssertGreaterThanOrEqual(snapshot.attentionCount, 5)
+        XCTAssertTrue(snapshot.statuses.first { $0.area == .realtime }?.recovery?.contains("Retry") == true)
+        XCTAssertTrue(snapshot.statuses.first { $0.area == .invites }?.recovery?.contains("fresh code") == true)
+        XCTAssertTrue(snapshot.capabilities.first { $0.id == "agent-runtime" }?.isAvailable == false)
+    }
+
+    @MainActor
     func testViewModelSubmitsInviteCodeThroughOnboardingBackend() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()

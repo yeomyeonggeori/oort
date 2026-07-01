@@ -286,6 +286,12 @@
 - `MomoMacSessionRootView` session bar에 `Updates` popover를 추가했다. SwiftPM dev app/Xcode host 공용 surface이며 `MOMO_UPDATE_*` non-secret hints만 읽고, real install 전에는 `signing-unverified`/placeholder 상태를 표시한다.
 - 검증: `swift test --package-path clients/macOS` PASS, `scripts/local_gate.sh --profile docs` PASS. Real Sparkle framework install, appcast generation, Developer ID signing, notarization, DMG upload, old-version-to-new-version update proof는 M4 후속으로 남는다(`runtime-unverified(update install)`).
 
+## 0-25. MOMO-243 In-App Alpha Command Center (2026-07-01)
+
+- `MomoMacRootView` detail pane에 `Alpha Command Center`를 추가해 Server / Realtime / Agent Runtime / Invites / Diagnostics / Updates 상태, 오늘 테스트할 항목, 현재 가능한 기능과 known limitations를 앱 안에서 확인할 수 있게 했다.
+- 새 `AlphaCommandCenterSnapshot` projection은 기존 `ChatViewModel` 상태(`LiveChatBackend`/REST backend, realtime status, Kim Intern status, invite state, update readiness)를 재사용하며, failed/degraded 상태에는 recovery hint를 붙인다.
+- 검증 대상: `swift test --package-path clients/macOS`, `scripts/local_gate.sh --profile macos-ui`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`. Real Sparkle install, AWS/public host, iOS/APNs, credentialed external Hermes side effects는 계속 out of scope/runtime-unverified 경계다.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.
