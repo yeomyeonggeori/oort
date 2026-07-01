@@ -23,7 +23,7 @@
   - ✅ `infra/prod/.env.example` — production env 예시, 실제 시크릿 미포함 (MOMO-005)
   - ✅ `.sops.yaml.example` + `infra/prod/secrets.env.example` — SOPS/age 운영 계약, 실제 시크릿 미포함 (MOMO-006)
   - ✅ `infra/prod/pgbackrest*.example` + `docs/SECRETS_BACKUP_RUNBOOK.md` — 백업/복원 skeleton과 리허설 절차 (MOMO-006)
-  - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest local gate (MOMO-007)
+  - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest/public preflight evidence local gate (MOMO-007/MOMO-229)
   - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
   - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
@@ -143,10 +143,10 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 
 ```sh
 sops exec-env infra/prod/secrets.sops.env \
-  'scripts/prod_env_preflight.sh --from-env --mode staging'
+  'scripts/prod_env_preflight.sh --from-env --mode staging --evidence-dir /tmp/momo-public-preflight'
 
 sops exec-env infra/prod/secrets.sops.env \
-  'scripts/prod_env_preflight.sh --from-env --mode prod'
+  'scripts/prod_env_preflight.sh --from-env --mode prod --evidence-dir /tmp/momo-public-preflight'
 ```
 
 `staging`/`prod`/`internal-host` 모드는 다음 값을 fail-fast로 거부한다.
@@ -156,13 +156,24 @@ sops exec-env infra/prod/secrets.sops.env \
 - `momo-*:internal-smoke*`, `:latest`, source-checkout fallback image tag.
 - 비밀번호 없는 `CENTRIFUGO_REDIS_ADDRESS`, non-HTTPS `HERMES_BASE_URL`.
 - `AGENT_PROVIDER_MODE != external-hermes`.
+- 누락된 SOPS/age 또는 host-local secret source, named DB/Redis volume, pgBackRest stanza/check/full backup/WAL/PITR required env.
 
-Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `API_DOMAIN`, `REALTIME_DOMAIN`,
-`ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
+Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
+`API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
 `MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
 `CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
-`HERMES_BASE_URL`, `HERMES_API_KEY`.
+`HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
+`REDIS_VOLUME_NAME`, `PGBACKREST_STANZA`, `PGBACKREST_REPO1_PATH`,
+`PGBACKREST_REPO1_CIPHER_PASS`, `PGBACKREST_WAL_ARCHIVE_REQUIRED`,
+`PGBACKREST_STANZA_CHECK_REQUIRED`, `PGBACKREST_FULL_BACKUP_REQUIRED`,
+`PGBACKREST_PITR_REHEARSAL_REQUIRED`.
+
+`--evidence-dir` writes `prod-env-preflight-<mode>.md` and `.json` with secret
+values redacted. This is the public host preflight evidence packet for PRs and
+operator handoff. It proves env shape only; DNS changes, ACME issuance, real
+registry pull, SOPS decrypt, and pgBackRest backup/PITR execution stay
+`runtime-unverified(public host)` until performed on the actual host.
 
 `internal-smoke`/`local`은 별도 경계다. `infra/prod/internal-smoke.env.example`
 또는 `scripts/verify_internal_host_runtime.sh`가 생성한 env에서만 허용하며,

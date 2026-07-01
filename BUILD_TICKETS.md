@@ -165,6 +165,7 @@
 | `MOMO-220` | Internal single-node host-runtime smoke v0(local image prod+internal-smoke boot) | runtime/infra | MOMO-216, MOMO-215 |
 | `MOMO-221` | Production secret/bootstrap hardening v0 | infra/docs | MOMO-005, MOMO-006, MOMO-216, MOMO-220 |
 | `MOMO-222` | Backup/PITR restore rehearsal gate v0(repo-local dump→separate restore evidence) | runtime/infra | MOMO-006, MOMO-220 |
+| `MOMO-229` | Public host preflight + deploy evidence packet v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
@@ -286,6 +287,18 @@
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] `scripts/local_gate.sh --profile host-runtime` 또는 `runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-229 수용기준 `[infra/docs]`
+- [x] GitHub #217을 `scripts/goal_claim.sh 217`로 claim하고 별도 branch/worktree에서 진행한다.
+- [ ] `scripts/prod_env_preflight.sh` 또는 equivalent preflight가 public/staging mode에서 DNS/TLS env, pinned registry image tags, SOPS/age or host-local secret source, DB/Redis named volumes, pgBackRest stanza/check/full backup/WAL/PITR required env를 검사한다.
+- [ ] placeholder/default/dev-insecure/latest/local-only/mock-only 값은 public/staging mode에서 fail-fast한다.
+- [ ] internal-host/mock mode와 public/staging mode의 허용값을 명확히 분리한다.
+- [ ] preflight가 PR body에 붙일 수 있는 redacted markdown/json evidence를 생성한다.
+- [ ] `docs/DEPLOY.md`, `docs/RUN.md`, `docs/SECRETS_BACKUP_RUNBOOK.md`, `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 첨부한다.
+- [ ] 가능하면 `scripts/local_gate.sh --profile staging-smoke` 또는 `host-runtime` PASS evidence를 첨부한다.
+- [ ] 실제 DNS/TLS/production host deploy/registry pull/pgBackRest PITR/외부 Hermes 연결은 out of scope로 유지한다.
 - [ ] PR 생성 후 issue `status:needs-review`로 전환하고 merge하지 않는다.
 
 ### MOMO-230 수용기준 `[runtime/docs]`

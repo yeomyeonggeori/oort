@@ -54,6 +54,13 @@
 - verifier evidence는 redacted artifact만 참조하며 `HERMES_API_KEY`, bearer token, DB password, app token 원문을 stdout/evidence에 남기지 않는다. 실제 provider credential이 이 환경에 없으면 real provider side effect는 계속 `runtime-unverified(external provider credentials)`다.
 - 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS, `scripts/local_gate.sh --profile external-agent-provider` PASS(no-credential explicit skip). Credentialed real provider PASS는 아직 `runtime-unverified(external provider credentials)`.
 
+## 0-4c. MOMO-229 Public Host Preflight + Deploy Evidence Packet v0 (2026-07-01)
+
+- `scripts/prod_env_preflight.sh`를 보강해 public/staging strict mode에서 DNS/TLS env shape, pinned registry image tags, SOPS/age 또는 host-local secret source, DB/Redis named volume, pgBackRest stanza/check/full backup/WAL/PITR required env를 fail-fast로 검사한다.
+- `--evidence-dir` 옵션이 secret 값을 redacted 처리한 `prod-env-preflight-<mode>.md`와 `.json`을 생성한다. `scripts/verify_staging_smoke.sh`는 tracked placeholder env의 expected fail과 synthetic public/staging env shape PASS evidence를 함께 검증한다.
+- internal-smoke/local mode는 계속 `infra/prod/internal-smoke.env.example`의 localhost/mock/local image placeholder만 허용한다. 실제 public DNS/TLS, registry pull, SOPS decrypt, production pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal은 계속 `runtime-unverified(public host)`다.
+- 검증: `scripts/local_gate.sh --profile docs` 및 가능하면 `scripts/local_gate.sh --profile staging-smoke` 대상.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.

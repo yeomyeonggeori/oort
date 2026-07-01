@@ -35,6 +35,7 @@ PGBACKREST_POSTGRES="$PROD_DIR/postgresql.pgbackrest.conf.example"
 PGBACKREST_CRON="$PROD_DIR/pgbackrest-cron.example"
 RUNBOOK="docs/SECRETS_BACKUP_RUNBOOK.md"
 PREFLIGHT="scripts/prod_env_preflight.sh"
+PREFLIGHT_EVIDENCE_DIR="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-public-host-preflight}"
 
 for path in \
   "$COMPOSE_FILE" "$ENV_EXAMPLE" "$CADDYFILE" "$CENTRIFUGO_CONFIG" \
@@ -115,14 +116,62 @@ fi
 pass "plaintext prod secrets are untracked and templates contain placeholders only"
 
 echo "==> production secret/bootstrap preflight"
-if "$PREFLIGHT" --env-file "$ENV_EXAMPLE" --mode staging >/tmp/momo-prod-preflight-expected-fail.log 2>&1; then
+mkdir -p "$PREFLIGHT_EVIDENCE_DIR"
+if "$PREFLIGHT" --env-file "$ENV_EXAMPLE" --mode staging --evidence-dir "$PREFLIGHT_EVIDENCE_DIR" >/tmp/momo-prod-preflight-expected-fail.log 2>&1; then
   cat /tmp/momo-prod-preflight-expected-fail.log >&2
   fail "prod preflight must reject infra/prod/.env.example placeholders in staging mode"
 fi
-grep -Eq 'placeholder|change-me|example|local value|unsafe' /tmp/momo-prod-preflight-expected-fail.log \
+grep -Eq 'placeholder|change-me|example|local value|unsafe|missing required env' /tmp/momo-prod-preflight-expected-fail.log \
   || fail "prod preflight expected-fail output did not explain placeholder/default rejection"
 "$PREFLIGHT" --env-file "$PROD_DIR/internal-smoke.env.example" --mode internal-smoke
-pass "prod preflight rejects staging placeholders and allows only documented internal-smoke local placeholders"
+
+STRICT_ENV="$(mktemp "${TMPDIR:-/tmp}/momo-public-preflight.XXXXXX")"
+cat > "$STRICT_ENV" <<'EOF'
+COMPOSE_PROJECT_NAME=momo-staging
+MOMO_ENV=staging
+SECRET_SOURCE=sops://infra/prod/secrets.sops.env
+PUBLIC_BASE_URL=https://api.staging.momo.test
+API_DOMAIN=api.staging.momo.test
+REALTIME_DOMAIN=rt.staging.momo.test
+CADDY_EMAIL=ops@momo.test
+ACME_EMAIL=ops@momo.test
+HTTP_PORT=80
+HTTPS_PORT=443
+MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:20260701-1f83728
+MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay:20260701-1f83728
+MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker:20260701-1f83728
+POSTGRES_DB=momo
+POSTGRES_USER=momo
+POSTGRES_PASSWORD=postgres_20260701_operator_generated_shape
+DATABASE_URL=postgres://momo:postgres_20260701_operator_generated_shape@postgres:5432/momo
+RELAY_DATABASE_URL=postgres://momo_relay:relay_20260701_operator_generated_shape@postgres:5432/momo
+DB_VOLUME_NAME=momo-staging-pgdata
+REDIS_PASSWORD=redis_20260701_operator_generated_shape
+CENTRIFUGO_REDIS_ADDRESS=redis://:redis_20260701_operator_generated_shape@redis:6379/0
+REDIS_VOLUME_NAME=momo-staging-redis-data
+CENT_TOKEN_HMAC=cent_token_hmac_20260701_operator_generated_shape
+CENT_API_KEY=cent_api_key_20260701_operator_generated_shape
+JWT_HMAC=jwt_hmac_20260701_operator_generated_shape
+AGENT_PROVIDER_MODE=external-hermes
+AGENT_MODEL=hermes-agent
+HERMES_BASE_URL=https://hermes.staging.momo.test/v1
+HERMES_API_KEY=hermes_api_key_20260701_operator_generated_shape
+PGBACKREST_STANZA=momo
+PGBACKREST_REPO1_PATH=/var/lib/pgbackrest
+PGBACKREST_REPO1_CIPHER_PASS=pgbackrest_cipher_20260701_operator_generated_shape
+PGBACKREST_WAL_ARCHIVE_REQUIRED=1
+PGBACKREST_STANZA_CHECK_REQUIRED=1
+PGBACKREST_FULL_BACKUP_REQUIRED=1
+PGBACKREST_PITR_REHEARSAL_REQUIRED=1
+EOF
+"$PREFLIGHT" --env-file "$STRICT_ENV" --mode staging --evidence-dir "$PREFLIGHT_EVIDENCE_DIR"
+rm -f "$STRICT_ENV"
+[ -f "$PREFLIGHT_EVIDENCE_DIR/prod-env-preflight-staging.md" ] || fail "missing preflight markdown evidence"
+[ -f "$PREFLIGHT_EVIDENCE_DIR/prod-env-preflight-staging.json" ] || fail "missing preflight JSON evidence"
+jq -e '.result == "PASS" and (.coverage | index("pgbackrest_wal_pitr_required_env"))' \
+  "$PREFLIGHT_EVIDENCE_DIR/prod-env-preflight-staging.json" >/dev/null \
+  || fail "preflight JSON evidence missing PASS pgBackRest/WAL/PITR coverage"
+pass "prod preflight rejects staging placeholders, allows documented internal-smoke placeholders, and writes public/staging evidence"
 
 echo "==> SOPS and pgBackRest checklist validation"
 grep -Fq 'path_regex: ^infra/prod/.*\.sops\.(env|yaml|json)$' .sops.yaml.example || fail ".sops.yaml.example must target infra/prod/*.sops.*"

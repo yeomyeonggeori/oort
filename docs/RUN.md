@@ -190,18 +190,28 @@ sops exec-env infra/prod/secrets.sops.env 'make migrate'
 ```sh
 # SOPS 복호화 값을 프로세스 환경으로만 주입해 검사한다.
 sops exec-env infra/prod/secrets.sops.env \
-  'scripts/prod_env_preflight.sh --from-env --mode staging'
+  'scripts/prod_env_preflight.sh --from-env --mode staging --evidence-dir /tmp/momo-public-preflight'
 
 # 평문 임시 env 파일을 tmpfs에 렌더링한 운영자도 배포 전에 같은 검사를 실행한다.
-scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod
+scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod --evidence-dir /tmp/momo-public-preflight
 ```
 
-필수 env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `API_DOMAIN`, `REALTIME_DOMAIN`,
-`ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
+필수 env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
+`API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
 `MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
 `CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
-`HERMES_BASE_URL`, `HERMES_API_KEY`.
+`HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
+`REDIS_VOLUME_NAME`, `PGBACKREST_STANZA`, `PGBACKREST_REPO1_PATH`,
+`PGBACKREST_REPO1_CIPHER_PASS`, `PGBACKREST_WAL_ARCHIVE_REQUIRED`,
+`PGBACKREST_STANZA_CHECK_REQUIRED`, `PGBACKREST_FULL_BACKUP_REQUIRED`,
+`PGBACKREST_PITR_REHEARSAL_REQUIRED`.
+
+`--evidence-dir`는 secret 값을 redacted 처리한 `prod-env-preflight-<mode>.md`
+와 `.json`을 만든다. 이 packet은 PR body나 host handoff에 붙이는 public host
+preflight evidence이며, 실제 DNS 변경/TLS 인증서 발급/registry pull/SOPS 복호화/
+pgBackRest backup/PITR 실행은 여전히 실제 host에서만 닫히는
+`runtime-unverified(public host)` 범위다.
 
 `internal-smoke`/`local` 모드는 예외다. 이 모드는 `infra/prod/internal-smoke.env.example`
 또는 verifier가 생성한 run-specific env에서만 사용하며, `localhost` 도메인, `mock-hermes`,

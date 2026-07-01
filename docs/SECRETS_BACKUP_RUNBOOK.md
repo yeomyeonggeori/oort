@@ -30,6 +30,12 @@
 - `scripts/prod_env_preflight.sh --mode staging|prod|internal-host` must pass
   before compose config/render/up on a real host. It rejects placeholder,
   dev-insecure, localhost/mock, and internal-smoke image values.
+- The same preflight also requires an explicit secret source (`SECRET_SOURCE`),
+  named DB/Redis volume intent, and pgBackRest/WAL/PITR acknowledgement env:
+  `PGBACKREST_STANZA`, `PGBACKREST_REPO1_PATH`,
+  `PGBACKREST_REPO1_CIPHER_PASS`, `PGBACKREST_WAL_ARCHIVE_REQUIRED`,
+  `PGBACKREST_STANZA_CHECK_REQUIRED`, `PGBACKREST_FULL_BACKUP_REQUIRED`, and
+  `PGBACKREST_PITR_REHEARSAL_REQUIRED`.
 - `internal-smoke`/`local` placeholder values are allowed only in
   `infra/prod/internal-smoke.env.example` and verifier-generated temp env files.
 - Prefer process environment injection (`sops exec-env`) over decrypted files.
@@ -86,7 +92,7 @@ sops --decrypt infra/prod/secrets.sops.env >/dev/null
 sops exec-env infra/prod/secrets.sops.env \
   'test -n "$POSTGRES_PASSWORD" && test -n "$JWT_HMAC" && test -n "$PGBACKREST_REPO1_CIPHER_PASS"'
 sops exec-env infra/prod/secrets.sops.env \
-  'scripts/prod_env_preflight.sh --from-env --mode staging'
+  'scripts/prod_env_preflight.sh --from-env --mode staging --evidence-dir /tmp/momo-public-preflight'
 ```
 
 Deploy commands consume the decrypted values as process environment. MOMO-005
@@ -106,8 +112,12 @@ Operator checklist before `up -d` on staging/prod/internal-host:
    password, mock Hermes URL, and `internal-smoke` image tag.
 3. Encrypt to `infra/prod/secrets.sops.env`, delete plaintext, then confirm
    `git status` does not show `infra/prod/secrets.env` or decrypted files.
-4. Run `sops exec-env infra/prod/secrets.sops.env 'scripts/prod_env_preflight.sh --from-env --mode staging'`.
+4. Run `sops exec-env infra/prod/secrets.sops.env 'scripts/prod_env_preflight.sh --from-env --mode staging --evidence-dir /tmp/momo-public-preflight'`.
 5. Only after preflight passes, render compose config and start services.
+
+Preflight evidence files are redacted Markdown/JSON. They prove the public host
+env shape and required backup/PITR acknowledgements, not that DNS/TLS,
+registry pull, SOPS decrypt, or pgBackRest restore actually ran.
 
 Rotate a secret by editing through SOPS, redeploying, and invalidating the old
 credential at the source:
