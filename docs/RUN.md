@@ -20,6 +20,10 @@
 팀원이 내부 alpha를 바로 따라 할 때는 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md)를 먼저 본다.
 그 문서는 local tools/env/gate 순서, `MomoMacDevApp` 실행, seeded 계정/채널/김인턴 assumptions,
 초대/자가가입, diagnostics bundle, bug report template, known limitations를 한 흐름으로 묶은 실행 런북이다.
+AWS에서 1주일짜리 팀 테스트 host를 띄우는 경우에는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)를
+같이 본다. 해당 문서는 EC2/Lightsail topology, 비용 추정, 보안그룹, DNS/TLS,
+backup/restore, image-based deploy/rollback, `scripts/aws_internal_alpha_preflight.sh`
+사용법을 고정한다.
 
 ---
 
@@ -94,6 +98,12 @@ cp infra/.env.example .env
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 Hermes/Kim Intern credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
+Codex OAuth access/refresh token은 momo 환경변수가 아니다. Hermes/Kim Intern
+provider가 Codex OAuth를 사용하더라도 token exchange, storage, refresh,
+unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/local gate는
+그 토큰을 받지 않는다. 정본 boundary는
+[`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md)다.
+
 ### 2.2 코드가 추가로 읽는 선택적 키 (모두 안전한 기본값 있음 → `.env`에 없어도 부팅)
 
 > 아래는 `.env.example`에는 의도적으로 넣지 않은 **튜닝/오버라이드 키**다. 설정하지 않으면
@@ -162,6 +172,14 @@ scripts/local_gate.sh --profile external-agent-provider
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
 ```
+
+Credentialed smoke에 필요한 momo-side env는 위 네 가지
+`AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다.
+provider가 Codex OAuth를 내부적으로 쓰는 경우에도 `CODEX_OAUTH_TOKEN`,
+`CODEX_OAUTH_REFRESH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_REFRESH_TOKEN`,
+`OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`류 값은 momo verifier에 넘기지
+말고 provider host secret으로만 설정한다. verifier는 알려진 Codex/OpenAI OAuth
+token env var가 momo smoke process에 있으면 credential-boundary 오류로 fail-fast한다.
 
 `scripts/verify_external_agent_provider.sh`는 먼저 external env contract를 검사한다.
 `AGENT_PROVIDER_MODE`가 없거나 `external-hermes`가 아니면 mock 기본 환경으로 보고
@@ -238,6 +256,20 @@ restore DB에 `pg_restore`한 뒤 marker checksum과 markdown/json evidence를 �
 stanza 생성, WAL archive check, full backup, time-target PITR restore rehearsal은 staging/prod 호스트에서만
 가능하므로 계속 `runtime-unverified(public host)`다. 상세 절차는
 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)를 본다.
+
+AWS internal alpha topology는 secret env와 별개로 먼저 정적 preflight를 통과해야 한다.
+
+```sh
+scripts/aws_internal_alpha_preflight.sh \
+  --env-file infra/prod/aws-internal-alpha.env.example \
+  --mode recommended \
+  --evidence-dir /tmp/momo-aws-alpha-preflight
+```
+
+실제 AWS host에서는 fixture를 `/run/momo/aws-alpha.env` 같은 untracked 파일로 복사한 뒤
+도메인, tester CIDR, IAM instance profile, S3 bucket, immutable image tag/digest를 바꾸고
+동일 preflight를 다시 실행한다. 이 preflight는 AWS API를 호출하지 않으며 실제 host runtime은
+`runtime-unverified(aws-host)`로 남는다.
 
 ```sh
 # 내부 테스트 호스팅 전 최소 backup gate

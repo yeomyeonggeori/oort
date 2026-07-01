@@ -2,6 +2,7 @@
 
 > Purpose: one teammate should be able to start momo locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
 > Scope: internal alpha on a developer Mac. This is not the M7 release gate and not a public/staging production launch.
+> Cloud host: for a one-week AWS team alpha, use `docs/AWS_INTERNAL_ALPHA.md` first. The local runbook below still applies to app behavior and smoke scenarios.
 
 ## 0. Read This First
 
@@ -282,6 +283,28 @@ Canonical intake and triage rules live in
 start as `type:feedback`, `area:alpha`, `status:needs-triage` and become
 `status:ready` only after momo-main turns them into a buildable
 `## Goal / ## Context / ## Acceptance / ## Out of scope` contract.
+
+## 8. AWS Team Alpha Host
+
+Use [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) when the team needs a
+shared one-week host instead of each tester running Docker locally. The v0
+recommendation is EC2 `t4g.large` single-node with Caddy/API/OutboxRelay/
+AgentWorker/Centrifugo/Redis/Postgres in image-based compose, encrypted `gp3`
+data volume, pgBackRest to S3, and daily EBS snapshots.
+
+Before provisioning or handoff:
+
+```bash
+scripts/aws_internal_alpha_preflight.sh \
+  --env-file infra/prod/aws-internal-alpha.env.example \
+  --mode recommended \
+  --evidence-dir /tmp/momo-aws-alpha-preflight
+```
+
+The preflight is static. It verifies topology and safety intent, not real AWS
+creation, DNS/TLS, registry pull, SOPS decrypt, backup execution, or restore
+rehearsal. Those remain `runtime-unverified(aws-host)` until the host evidence
+packet is attached.
 
 Use this shape for quick GitHub issues or alpha feedback notes:
 

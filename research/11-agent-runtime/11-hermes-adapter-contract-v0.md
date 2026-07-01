@@ -16,6 +16,14 @@ The product default is **AgentWorker OpenAI-compatible SSE**. That path keeps mo
 
 The platform adapter remains useful for dogfood, interoperability, and a future Hermes-native operator experience. It is not the default execution path until it can prove the same Context Packet, approval, cost, audit, RLS, and outbox guarantees without moving ownership into Hermes.
 
+Codex OAuth is outside the momo boundary. If Hermes/Kim Intern uses Codex OAuth,
+the provider owns authorization code exchange, access/refresh token storage,
+refresh, unlink, rotation, and provider account audit. momo accepts only the
+OpenAI-compatible provider endpoint plus `HERMES_API_KEY`; momo app/API/DB,
+Context Packet, Memory Plane, Capability Cache, diagnostics, and local gate
+evidence must not contain Codex OAuth access or refresh tokens. The detailed
+credential boundary is `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`.
+
 ## 2. Non-Negotiable Controls
 
 A Hermes integration is acceptable only if these controls stay under momo ownership.
@@ -28,6 +36,7 @@ A Hermes integration is acceptable only if these controls stay under momo owners
 | Audit | `agent_run`, `message`, `approval`, `usage_ledger`, and `audit_log` are written under the workspace boundary. Realtime delivery is still outbox -> relay -> Centrifugo. |
 | Ordering | User-visible messages enter through the normal REST/DB path and receive `message.seq`; no adapter may publish directly to Centrifugo. |
 | Tenancy | Runtime work is scoped by `workspace_id`; DB access uses RLS or worker BYPASSRLS only for controlled background consumption. |
+| Codex OAuth | Hermes/Kim Intern provider owns Codex OAuth token storage/refresh. momo receives only bounded context and a provider API key; Codex OAuth tokens are never stored in momo. |
 
 ## 3. Mode A: AgentWorker OpenAI-Compatible SSE
 
@@ -45,6 +54,10 @@ This is the canonical path for user-visible agent runs.
 
 The fixture `fixtures/hermes-adapter-contract-v0/agentworker_openai_sse_input.json` fixes the input shape for this path.
 
+Credentialed smoke for a real provider uses `AGENT_PROVIDER_MODE=external-hermes`,
+`HERMES_BASE_URL=https://.../v1`, `HERMES_API_KEY`, and `AGENT_MODEL`. Do not
+pass Codex OAuth token env vars to momo processes or verifier scripts.
+
 ## 4. Mode B: Hermes Platform Adapter
 
 This path lets the Hermes gateway treat momo as one messaging platform.
@@ -61,6 +74,8 @@ Adapter hard boundaries:
 - It must treat channel ids as REST path ids, not as publish channels.
 - It must not take broad plugin/provider credentials from Hermes runtime memory.
 - It must not bypass momo approval/cost/audit decisions for user-visible work.
+- It must not forward Codex OAuth tokens into momo REST requests, message props,
+  audit payloads, diagnostics, or adapter evidence.
 
 The fixture `fixtures/hermes-adapter-contract-v0/platform_adapter_event_mapping.json` fixes the minimum event mapping for this path.
 
@@ -105,3 +120,5 @@ No Mattermost, Hermes, OpenClaw, or other external implementation code is copied
 - Add live Hermes gateway adapter smoke once a Hermes test instance is available; current repo-local smoke proves mapping only, not plugin load/e2e.
 - Keep platform adapter manifests versioned against the Hermes SDK when the exact production plugin schema is confirmed.
 - Ensure future inbound MCP or Google Workspace writes enter through the same Context Packet -> approval -> audit path.
+- Keep Codex OAuth provider links provider-owned unless a future security review
+  explicitly adds an encrypted provider-link table and migration.

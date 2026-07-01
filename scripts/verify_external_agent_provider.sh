@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_external_agent_provider.sh — MOMO-230 external provider gate
+# scripts/verify_external_agent_provider.sh — MOMO-230/MOMO-234 external provider gate
 #
 # Opt-in credentialed smoke for a real Kim Intern/Hermes OpenAI-compatible SSE
 # provider. With no external credentials it exits successfully with explicit
 # runtime-unverified evidence so default local/mock gates stay deterministic.
+#
+# MOMO-234 boundary: momo never receives Codex OAuth access/refresh tokens.
+# Codex OAuth belongs inside the Hermes/Kim Intern provider. This verifier only
+# accepts a provider API key for the OpenAI-compatible SSE boundary.
 # =============================================================================
 set -euo pipefail
 
@@ -131,6 +135,7 @@ if secret:
 text = re.sub(r"Bearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED_BEARER]", text)
 text = re.sub(r"(postgres(?:ql)?://[^:\s]+:)[^@\s]+(@)", r"\1[REDACTED]\2", text)
 text = re.sub(r'("(?:accessToken|refreshToken|apiKey|token|password)"\s*:\s*")[^"]+(")', r"\1[REDACTED]\2", text)
+text = re.sub(r"(?i)((?:codex|openai)[A-Z0-9_]*(?:oauth|access|refresh)[A-Z0-9_]*(?:token|secret)?\s*=\s*)[^\s]+", r"\1[REDACTED_PROVIDER_OAUTH]", text)
 with open(dst, "w", encoding="utf-8") as f:
     f.write(text)
 PY
@@ -142,6 +147,21 @@ assert_file_does_not_contain_secret() {
   if [ "${HERMES_API_KEY:-}" != "" ] && grep -Fq -- "$HERMES_API_KEY" "$file"; then
     echo "[external-agent] refusing to keep evidence with raw HERMES_API_KEY: $file" >&2
     exit 1
+  fi
+}
+
+validate_no_forbidden_codex_oauth_env() {
+  local forbidden=()
+  local key
+  for key in CODEX_OAUTH_TOKEN CODEX_OAUTH_ACCESS_TOKEN CODEX_OAUTH_REFRESH_TOKEN \
+    CODEX_ACCESS_TOKEN CODEX_REFRESH_TOKEN OPENAI_OAUTH_TOKEN \
+    OPENAI_OAUTH_ACCESS_TOKEN OPENAI_OAUTH_REFRESH_TOKEN; do
+    if [ "${!key+x}" ] && [ "${!key:-}" != "" ]; then
+      forbidden+=("$key")
+    fi
+  done
+  if [ "${#forbidden[@]}" -gt 0 ]; then
+    fail "credential-boundary" "Codex OAuth token env must not be passed to momo verifier: $(IFS=', '; echo "${forbidden[*]}"). Configure Codex OAuth only inside Hermes/Kim Intern provider."
   fi
 }
 
@@ -208,7 +228,7 @@ write_evidence() {
   sanitize_file "$RELAY_LOG" "$RELAY_LOG_REDACTED"
 
   {
-    echo "## MOMO-230 External Agent Provider Smoke"
+    echo "## MOMO-230/MOMO-234 External Agent Provider Smoke"
     echo "- Result: \`${RESULT:-UNKNOWN}\`"
     echo "- Runtime note: \`${RUNTIME_NOTE:-credentialed external provider path attempted}\`"
     echo "- Mode: \`${AGENT_PROVIDER_MODE:-<unset>}\`"
@@ -216,13 +236,16 @@ write_evidence() {
     echo "- Model: \`${AGENT_MODEL:-<unset>}\`"
     echo "- Endpoint label: \`${ENDPOINT_LABEL:-not configured}\`"
     echo "- Stack env file: \`${ENV_FILE:-<none>}\`"
+    echo "- Credential boundary ADR: \`docs/adr/0004-codex-oauth-hermes-provider-boundary.md\`"
+    echo "- Codex OAuth boundary: momo app/API/DB/verifier receive no Codex OAuth access or refresh token; provider owns OAuth storage/refresh."
+    echo "- Required credentialed smoke env: \`AGENT_PROVIDER_MODE=external-hermes\`, \`HERMES_BASE_URL=https://.../v1\`, \`HERMES_API_KEY\`, \`AGENT_MODEL\`."
     if [ "${EXTERNAL_AGENT_PROVIDER_ENV_FILE:-}" != "" ]; then
       echo "- Provider env file: configured (path withheld from summary; contents are not copied)"
     fi
     if [ "${RESULT:-}" = "SKIP" ]; then
       echo "- Skip reason: ${SKIP_REASON:-external provider credentials are not configured}"
       echo "- Internal alpha invite precondition: expected seeded/admin contract is Kim Intern as active agent member \`kim-intern\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
-      echo "- Coverage: default local/internal-alpha mock gates remain deterministic."
+      echo "- Coverage: default local/internal-alpha mock gates remain deterministic; Codex OAuth remains provider-owned and unobserved by momo."
       echo "- Not covered: real Hermes/Kim Intern side effect remains \`runtime-unverified(external provider credentials)\`."
     elif [ "${RESULT:-}" = "PASS" ]; then
       echo "- Internal alpha invite precondition: \`${INVITE_PRECONDITION_STATUS:-not-run}\` (active agent member + channel membership verified before send)."
@@ -231,7 +254,7 @@ write_evidence() {
       echo "- Momo roundtrip: trigger_message_id=\`${AGENT_TRIGGER_MESSAGE_ID:-unknown}\`, run_id=\`${AGENT_RUN_ID:-unknown}\`, final_message_id=\`${FINAL_MESSAGE_ID:-unknown}\`, final_seq=\`${FINAL_MESSAGE_SEQ:-unknown}\`."
       echo "- Relay publish: Centrifugo history contained final \`message.new\` for the external-provider run."
       echo "- Provider response bytes: \`${PROVIDER_BYTES:-0}\` (content stored only in redacted artifact path below)."
-      echo "- Coverage: local Docker stack + MomoServer + AgentWorker + OutboxRelay + external Hermes/Kim Intern SSE."
+      echo "- Coverage: local Docker stack + MomoServer + AgentWorker + OutboxRelay + external Hermes/Kim Intern SSE. Codex OAuth, if used by the provider, stayed outside momo."
     else
       echo "- Failure category: \`${FAILURE_CATEGORY:-unknown}\`"
       echo "- Failure reason: ${FAILURE_REASON:-unknown}"
@@ -247,7 +270,7 @@ write_evidence() {
     artifact_line "server log redacted" "$SERVER_LOG_REDACTED"
     artifact_line "worker log redacted" "$WORKER_LOG_REDACTED"
     artifact_line "relay log redacted" "$RELAY_LOG_REDACTED"
-    echo "- Secret handling: \`HERMES_API_KEY\`, bearer tokens, DB passwords, and auth tokens are redacted from generated evidence."
+    echo "- Secret handling: \`HERMES_API_KEY\`, bearer tokens, DB passwords, auth tokens, and Codex/OpenAI OAuth token-shaped values are redacted from generated evidence."
   } > "$EVIDENCE_FILE"
 
   for file in "$EVIDENCE_FILE" "$PROVIDER_SSE_REDACTED_FILE" "$PROVIDER_ERR_REDACTED_FILE" \
@@ -639,6 +662,7 @@ RUNTIME_STATUS="not-run"
 ROUNDTRIP_STATUS="not-run"
 INVITE_PRECONDITION_STATUS="not-run"
 
+validate_no_forbidden_codex_oauth_env
 validate_external_provider_env
 
 need docker

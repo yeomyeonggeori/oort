@@ -28,6 +28,8 @@
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
   - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
   - ✅ `scripts/verify_external_agent_provider.sh` + `scripts/local_gate.sh --profile external-agent-provider` — credentials가 있는 환경에서만 real Hermes/Kim Intern SSE + local momo `@김인턴` 1왕복을 검증하는 opt-in gate (MOMO-230)
+  - ✅ `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` — Codex OAuth token은 Hermes/Kim Intern provider-owned이고 momo app/API/DB/local gate가 직접 저장하지 않는 credential boundary (MOMO-234)
+  - ✅ `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh` — AWS 1주일 internal alpha topology/cost/security-group/backup/deploy/rollback preflight (MOMO-233)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
@@ -86,6 +88,30 @@
 | Swift 6.2 (빌드 머신) | relay/worker/api 이미지 빌드용. CI에서 빌드 후 레지스트리 푸시 권장. |
 
 **방화벽:** 인바운드 **80(ACME)·443만 허용**. 5432/8000/8080은 호스트에 노출 금지(compose 내부 네트워크). SSH는 키 인증 + 비표준 포트/IP 화이트리스트 `(추정 권장)`.
+
+### 2.1 AWS internal alpha stack v0 (MOMO-233)
+
+1주일 팀 테스트용 AWS host topology는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)가 정본이다.
+결정값은 **EC2 recommended single-node**: `t4g.large`, encrypted `gp3` data volume,
+Caddy 80/443, API/OutboxRelay/AgentWorker/Centrifugo/Redis/Postgres를 image-based
+prod compose로 실행, pgBackRest→S3 + daily EBS snapshot. Lightsail은 가장 빠른
+throwaway 옵션으로만 문서화하고, 기본 추천은 보안그룹/IAM/EBS snapshot/restore fidelity가
+좋은 EC2로 둔다.
+
+정적 preflight:
+
+```sh
+scripts/aws_internal_alpha_preflight.sh \
+  --env-file infra/prod/aws-internal-alpha.env.example \
+  --mode recommended \
+  --evidence-dir /tmp/momo-aws-alpha-preflight
+```
+
+이 preflight는 AWS 리소스를 만들지 않는다. topology/provider, DNS/TLS intent,
+보안그룹 노출 intent, encrypted gp3 volume intent, pinned image/source-checkout-free
+deploy, backup/restore/rollback acknowledgement만 검증한다. 실제 host 생성, DNS 전파,
+Caddy ACME 인증서, registry pull, SOPS decrypt, pgBackRest backup, EBS snapshot,
+PITR restore rehearsal은 `runtime-unverified(aws-host)`다.
 
 ---
 
@@ -379,6 +405,7 @@ scripts/local_gate.sh --profile external-agent-provider   # real provider creden
 - MOMO-220/MOMO-227 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, `/v1/agent-runtime/status` mock/redaction projection, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
 - MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
 - MOMO-230 external-agent-provider gate는 credentials가 있을 때만 real Hermes/Kim Intern OpenAI-compatible SSE preflight와 local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복을 검증한다.
+- MOMO-234 boundary: Codex OAuth access/refresh token은 provider host 내부 secret이다. momo 운영 env와 smoke에는 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`만 넣고 Codex/OpenAI OAuth token env var를 전달하지 않는다.
 
 `runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,
 real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/WAL archive/time-target PITR restore rehearsal은 public host-runtime에서만 닫는다. Real provider credentials가 없으면 외부 hermes/Kim Intern side effect는 `runtime-unverified(external provider credentials)`로 남긴다.
