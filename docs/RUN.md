@@ -92,6 +92,7 @@ cp infra/.env.example .env
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
+| `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 Hermes/Kim Intern credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
 ### 2.2 코드가 추가로 읽는 선택적 키 (모두 안전한 기본값 있음 → `.env`에 없어도 부팅)
 
@@ -135,6 +136,29 @@ placeholder key가 보이면 MomoServer/AgentWorker boot와 `scripts/prod_env_pr
 `GET /health`와 `GET /v1/agent-runtime/status`는 `agentRuntime` projection을 제공하지만
 `endpointLabel`은 user/password/query/fragment를 제거한 값이고 provider token은 절대 포함하지 않는다.
 macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded` / `Mock`을 표시한다.
+
+실제 외부 Hermes/Kim Intern side effect는 기본 local gate에 포함하지 않는다. credentials가 있는
+환경에서만 아래 opt-in smoke를 실행한다.
+
+```sh
+# stack ports/DB/Centrifugo는 .env.worktree를 사용하고 provider secret은 shell로 주입
+AGENT_PROVIDER_MODE=external-hermes \
+HERMES_BASE_URL=https://hermes.example.com/v1 \
+HERMES_API_KEY=... \
+scripts/local_gate.sh --profile external-agent-provider
+
+# 또는 provider secret만 별도 untracked 파일로 분리
+EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
+scripts/local_gate.sh --profile external-agent-provider
+```
+
+`scripts/verify_external_agent_provider.sh`는 먼저 external env contract를 검사한다.
+`AGENT_PROVIDER_MODE`가 없거나 `external-hermes`가 아니면 mock 기본 환경으로 보고
+`runtime-unverified(external provider credentials)` evidence를 남기고 종료한다. 반대로
+`external-hermes`를 명시했는데 URL이 `https://`가 아니거나 localhost/mock/placeholder key면
+fail-fast한다. credentials가 유효하면 OpenAI-compatible SSE preflight, local
+MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, `@김인턴`
+1왕복까지 시도한다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
 
 ### 2.3 staging/prod 시크릿과 백업 skeleton
 
@@ -567,7 +591,9 @@ MOMO-215부터 `runtime-agent` profile은 `scripts/verify_agent_worker.sh`를 �
 채널 REST send의 자연어 agent mention routing도 함께 닫는다. 최종 assistant text는
 Postgres timeline의 `message.seq` authority를 따르는 channel `message.new`이고,
 `agent:` namespace는 ephemeral progress/status surface로 유지한다. 실제 external
-Hermes/provider side effect는 여전히 repo-local mock 범위 밖이며 `runtime-unverified`다.
+Hermes/provider side effect는 여전히 repo-local mock 범위 밖이며, MOMO-230의
+`external-agent-provider` opt-in profile에서 credentials가 있을 때만 닫는다. credentials가
+없으면 `runtime-unverified(external provider credentials)`로 남긴다.
 
 `agent.status`/`agent.partial`은 non-durable progress projection이다. 이 이벤트는
 `message.seq`를 갖는 channel timeline의 순서 권위가 아니며, 최종 durable 결과는
@@ -741,6 +767,7 @@ scripts/local_gate.sh --profile host-runtime
 - `docker-compose.internal-smoke.yml`: local smoke override. local image tag fallback, image-based `migrate` one-shot job, image-based `mock-hermes` boundary를 추가한다.
 - `internal-smoke.env.example`: `localhost`/`rt.localhost`, `18080/18443`, app/relay/worker runtime role URLs, `change-me-*` placeholder만 담는 tracked template.
 - `scripts/verify_internal_host_runtime.sh`: run-specific local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration one-shot+idempotent re-run, `/health`, `/v1/agent-runtime/status` redaction, REST login/message send, OutboxRelay publish, mock Hermes `@김인턴` 왕복을 검증한다. evidence/log path를 출력한다.
+- `scripts/verify_external_agent_provider.sh`: opt-in external Hermes/Kim Intern gate. credentials가 없으면 `runtime-unverified(external provider credentials)` evidence로 skip하고, credentials가 있으면 OpenAI-compatible SSE preflight + local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복 + `/v1/agent-runtime/status` redaction을 검증한다.
 - DB migration은 app boot side effect가 아니라 `scripts/migrate.sh` 또는 smoke `migrate` job으로 명시 실행한다.
 - Backup/restore는 pgBackRest skeleton과 evidence template까지만 repo-local로 검증한다. 실제 backup/PITR restore rehearsal은 `runtime-unverified(public host)`다.
 
