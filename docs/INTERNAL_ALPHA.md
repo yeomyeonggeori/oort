@@ -238,9 +238,16 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 
 Paste the `## Local Gate` block from the script into the PR or issue comment.
 
-## 7. Bug Report Template
+## 7. Feedback Intake
 
-Use this shape for GitHub issues or alpha feedback notes:
+Canonical intake and triage rules live in
+[`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md). Use GitHub's
+`Internal alpha feedback` issue template for raw tester reports. Those issues
+start as `type:feedback`, `area:alpha`, `status:needs-triage` and become
+`status:ready` only after momo-main turns them into a buildable
+`## Goal / ## Context / ## Acceptance / ## Out of scope` contract.
+
+Use this shape for quick GitHub issues or alpha feedback notes:
 
 ```md
 ## Summary
@@ -256,8 +263,12 @@ Use this shape for GitHub issues or alpha feedback notes:
 - Docker:
 - App mode: demo / local server / local server + live / Xcode host
 - Server URL:
+
+## Workspace Context
+- Workspace:
 - Channel:
-- User:
+- Member/user:
+- Agent involved: none / Kim Intern / other
 
 ## Steps
 1.
@@ -269,8 +280,9 @@ Use this shape for GitHub issues or alpha feedback notes:
 ## Actual
 
 ## Evidence
+- Local gate profile:
+- Local gate evidence path or PR URL:
 - Diagnostics bundle:
-- Local gate evidence:
 - Screenshots or screen recording:
 - Relevant log excerpt:
 
@@ -285,10 +297,14 @@ Severity guide:
 
 | Severity | Meaning |
 |---|---|
-| P0 | Data loss, cross-tenant leak, secret exposure, crash on launch, or impossible to log in. |
-| P1 | Core alpha flow blocked: send, invite/join, Kim Intern, approval/cost, or diagnostics unusable. |
-| P2 | Flow works with workaround, confusing UI, stale state, missing evidence. |
-| P3 | Copy polish, visual fit, non-blocking papercut. |
+| P0 | Data loss/security: cross-tenant leak, secret exposure, destructive corruption, or launch/login impossible for every tester. |
+| P1 | Core alpha flow blocked: send, invite/join, Kim Intern, approval/cost, realtime, diagnostics, or local gate unusable. |
+| P2 | Usability friction: flow works but is confusing, brittle, stale, missing expected feedback, or requires an undocumented workaround. |
+| P3 | Polish: copy, layout, visual fit, minor papercut, or non-blocking affordance issue. |
+
+momo-main triages feedback with `scripts/goal_status.sh --repo Dawn-kim-official/momo`.
+Rows in `status:needs-triage` are not claimable worker goals until severity,
+evidence, labels, milestone, and acceptance are fixed.
 
 ## 8. Known Limitations
 
