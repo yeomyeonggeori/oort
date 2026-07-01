@@ -28,6 +28,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-221에서 prod/internal-host env preflight를 추가해 placeholder/dev-insecure/default secret bootstrap을 fail-fast로 막는다
      · MOMO-222에서 repo-local backup restore rehearsal gate를 추가해 temporary PG18 dump→separate restore→evidence markdown/json을 검증한다
      · MOMO-225에서 host-runtime + backup + macOS real-backend UI + diagnostics를 `internal-alpha` combined local gate evidence packet으로 묶는다
+     · MOMO-228에서 internal alpha quickstart/feedback/known-limitations packet을 추가해 팀원이 local stack + MomoMacDevApp + invite/join + 김인턴 + diagnostics를 한 흐름으로 테스트할 수 있게 한다
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
@@ -82,6 +83,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-227` | M1 | Kim Intern runtime config + health/status visibility v0 | `AGENT_PROVIDER_MODE` local/internal-host/external Hermes contract, staging/prod/internal-host external-provider fail-fast, `/v1/agent-runtime/status` secret-redacted projection, macOS compact Kim Intern availability chip, host-runtime status/redaction evidence |
 | `MOMO-224` | M1 | internal alpha diagnostics/observability bundle v0 | `scripts/collect_diagnostics.sh` + `local_gate --profile diagnostics`; server/relay/worker/Centrifugo/macOS/local-gate evidence와 redacted env shape/commit을 directory + tar.gz + summary.md로 수집 |
 | `MOMO-225` | M1 | Internal alpha combined local gate v0 | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha`; host-runtime boot/health/migrate/message/relay/mock Kim Intern, backup restore rehearsal, MomoMacDevApp real-backend process/window, diagnostics bundle path를 한 evidence packet으로 수집 |
+| `MOMO-228` | M3/M7 준비 | internal alpha runbook and feedback packet v0 | `docs/INTERNAL_ALPHA.md` + RUN/INDEX/LOCAL_PR_GATE/STATUS/ROADMAP/BUILD_TICKETS 연결; local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations를 팀원용 절차로 고정 |
 | `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
 | `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
 | `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |

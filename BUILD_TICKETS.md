@@ -168,6 +168,13 @@
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
+| `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
+
+### MOMO-228 수용기준 `[docs/manual]`
+- [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
+- [ ] invite creation + `/v1/join`, 김인턴 mock path, diagnostics collection, bug report template, known limitations를 한 문서에서 따라 할 수 있게 한다.
+- [ ] `docs/INDEX.md`, `docs/RUN.md`, `docs/LOCAL_PR_GATE.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`에 문서 위치와 gate/상태 영향을 반영한다.
+- [ ] 검증: `scripts/local_gate.sh --profile docs` PASS. 가능하면 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 
 ### MOMO-110 수용기준 `[docs/spec]`
 - [ ] `research/10-local-ai-protocol-trust/`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 연구 문서 추가.

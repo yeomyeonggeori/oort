@@ -17,6 +17,10 @@
 정본 스키마는 [`schema_v0.sql`](../schema_v0.sql), 데모 타깃은
 [`research/07-deepdive/05-agent-native-experiences.md`](../research/07-deepdive/05-agent-native-experiences.md) 참고.
 
+팀원이 내부 alpha를 바로 따라 할 때는 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md)를 먼저 본다.
+그 문서는 local tools/env/gate 순서, `MomoMacDevApp` 실행, seeded 계정/채널/김인턴 assumptions,
+초대/자가가입, diagnostics bundle, bug report template, known limitations를 한 흐름으로 묶은 실행 런북이다.
+
 ---
 
 ## 0. 사전 요구
@@ -53,6 +57,10 @@ relay/worker는 DB와 Centrifugo에만 의존하므로 서버와 **병렬 기동
 > **빌드만 검증할 때(docker/psql 없음):** (1)에서 멈추지 말고 바로 `make build`로
 > 전 Swift 패키지 컴파일을 확인하고, `python3 -m py_compile adapters/hermes/momo_adapter.py`로
 > hermes 어댑터를 정적 점검하면 된다. (2)~(5)의 런타임은 `runtime-unverified`.
+
+내부 alpha smoke의 권장 순서는 `make up` -> `make migrate` -> `MomoServer`/`OutboxRelay`
+-> mock Hermes + `AgentWorker` -> `MomoMacDevApp` real-server mode다. 세부 명령은
+[`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) §2~§6을 따른다.
 
 ---
 
@@ -620,7 +628,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
   기본값은 `server/Migrations/002_seed.sql`의 demo workspace/channel/member fixture다.
 - REST dev mode 환경변수:
   `MOMO_SERVER_BASE_URL`(필수), `MOMO_ACCESS_TOKEN`(선택, 없으면 `/v1/auth/login`),
-  `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(기본 `demo@momo.local`/`demo`),
+  `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(내부 alpha seed는 `demo@momo.local`/`dev-password`;
+  미설정 시 legacy transport default는 `demo@momo.local`/`demo`라 real-server mode에서는 명시 권장),
   `MOMO_WORKSPACE_ID`(기본 demo workspace), `MOMO_CHANNEL_ID`(기본 `#general`),
   `MOMO_CENTRIFUGO_WS_URL`(선택, 설정 시 `/v1/auth/realtime-token`으로 Centrifugo
   connection JWT를 받아 `ch:ws<workspace>.<channel>` live subscription을 연결).
@@ -634,6 +643,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
   log capture, `--telemetry`는 bundle subsystem log capture, `--terminate`는 evidence 수집 후 종료,
   `--terminate-only`는 실행 중인 dev app 정리에 사용한다. 이 bundle은 개발용 staging 산출물이며
   Xcode release host와 별개다.
+- `MOMO_*` 환경변수를 앱 프로세스에 확실히 전달하려면
+  `MACOS_DEV_RUN_DIRECT_EXEC=1 scripts/macos_dev_run.sh --verify --logs`를 사용한다. 내부 alpha의
+  real-server launch 예시는 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) §5에 있다.
 - `clients/macOS/MomoMac.xcodeproj`: M4 릴리스 패키징 진입용 thin host app이다. shared scheme
   `MomoMac`은 `MomoMac.app`을 만들며 Bundle ID는 `com.dawnkim.momo`다. 이 target은 local SwiftPM
   package products `MomoMac`/`MomoCore`를 링크하고, 기존 `MomoMacRootView` + `MomoMacDemo` bootstrap을
