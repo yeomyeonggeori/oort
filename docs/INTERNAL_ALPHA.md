@@ -165,6 +165,14 @@ scripts/macos_dev_run.sh --verify --logs
 
 Use `#agent-lab` for Kim Intern and D/B/C testing. The app first shows the session chooser. Use server mode with the seeded email/password above, or paste an invite code and join as a new user.
 
+Internal alpha usability notes:
+
+- In real-server mode, use the top `Invites` popover to create/list/revoke owner/admin invites. Create/revoke/refresh buttons disable while a request is in flight and failed invite operations show a `Retry` button.
+- When a new invite is created, click `Copy Code` before closing the popover. Existing invite rows only show the masked preview; the raw invite code cannot be recovered later.
+- `Switch` and `Log Out` return to the chooser and clear the previous channel/member/message/realtime/invite state. `Log Out` also clears the saved-password preference and Keychain password.
+- Login, join, channel load, and message send errors are recoverable: the chooser, sidebar, or timeline keeps the app interactive and offers retry/dismiss instead of leaving a blank session.
+- The sidebar Kim Intern chip distinguishes `Local mock`, `Internal host mock`, and `External Hermes`, plus key/endpoint/degraded diagnostics. The same redacted provider summary appears in session details.
+
 Cleanup:
 
 ```bash
@@ -183,9 +191,11 @@ make down
 
 ### B. Invite/Join
 
-1. Create a member invite through the owner API.
-2. Join from the app session chooser or `POST /v1/join`.
-3. Expected: joined user can log in, sees public channels, and cannot escalate to owner/platform admin through a public invite.
+1. Create a member invite through the owner API or the app's `Invites` popover.
+2. Copy the raw code immediately from the create response or `Copy Code` button.
+3. Join from the app session chooser or `POST /v1/join`.
+4. Expected: joined user can log in, sees public channels, and cannot escalate to owner/platform admin through a public invite.
+5. If the code is lost, revoke that invite and create a new one; only masked previews are durable.
 
 ### C. Kim Intern
 
@@ -193,6 +203,7 @@ make down
 2. In `#agent-lab`, send either `@김인턴 상태 알려줘` or `@kim-intern summarize this channel`.
 3. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
 4. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
+5. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted diagnostic hint.
 
 ### D. Diagnostics
 

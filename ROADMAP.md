@@ -138,6 +138,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-219` | M3 | macOS agent mention UX v0 | 완료: macOS agent roster click/context action inserts `@김인턴`/`@kim-intern`, optimistic/progress/final reconcile is visible, REST fallback refreshes durable final history, LiveChatBackend has deterministic Kim Intern mention response |
 | `MOMO-223` | M3 | macOS session/account/server switch + logout polish v0 | 완료: session bar/details에서 server/workspace/member/realtime fallback 상태를 확인하고, Switch/Log Out이 token/workspace/channel/realtime cache와 password-sensitive state를 지운 뒤 chooser로 돌아간다 |
 | `MOMO-226` | M3 | macOS invite/admin onboarding real-backend polish v0 | 완료: real-server session bar에서 invite create/list/revoke compact admin surface를 제공하고, `/v1/join` second-user smoke 후 workspace/channel/member state load를 `macos-ui` evidence에 포함 |
+| `MOMO-232` | M3 | macOS internal alpha usability polish v0 | 진행: invite admin 중복 submit/progress/retry/copy-code, session switch/logout stale-state cleanup, recoverable error retry/dismiss, Kim Intern provider chip mode/diagnostics polish |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 1.2 Agentic Work OS ecosystem overlay

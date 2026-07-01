@@ -40,10 +40,29 @@ public struct ChannelListView: View {
 
             if let error = viewModel.connectionError {
                 Section {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .lineLimit(3)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Recoverable error", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                        Text(error)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                        HStack(spacing: 8) {
+                            Button {
+                                Task { await viewModel.retrySelectedChannelLoad() }
+                            } label: {
+                                Label("Retry", systemImage: "arrow.clockwise")
+                            }
+                            .controlSize(.small)
+                            Button {
+                                viewModel.clearConnectionError()
+                            } label: {
+                                Label("Dismiss", systemImage: "xmark.circle")
+                            }
+                            .controlSize(.small)
+                        }
+                    }
                 }
             }
 
@@ -275,7 +294,7 @@ private struct KimInternAvailabilityView: View {
                         .background(tint.opacity(0.16), in: Capsule())
                         .foregroundStyle(tint)
                 }
-                Text(status.mode.rawValue)
+                Text(status.internalAlphaProviderSummary)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -317,19 +336,52 @@ private struct KimInternAvailabilityView: View {
     }
 
     private var helpText: String {
+        status.internalAlphaHelpText
+    }
+}
+
+extension AgentRuntimeStatus {
+    var internalAlphaProviderSummary: String {
         var parts = [
-            "\(status.displayName): \(status.availability.label)",
-            "mode=\(status.mode.rawValue)",
-            "endpoint=\(status.endpointLabel)",
+            mode.internalAlphaLabel,
+            keyConfigured ? "key ready" : "key missing",
         ]
-        if !status.diagnostics.isEmpty {
-            parts.append(status.diagnostics.joined(separator: "; "))
+        if availability == .degraded, let diagnostic = diagnostics.first, !diagnostic.isEmpty {
+            parts.append(diagnostic)
+        } else if !endpointLabel.isEmpty {
+            parts.append(endpointLabel)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var internalAlphaHelpText: String {
+        var parts = [
+            "\(displayName): \(availability.label)",
+            "mode=\(mode.internalAlphaLabel)",
+            "endpoint=\(endpointLabel)",
+            keyConfigured ? "key configured" : "key not configured",
+        ]
+        if !diagnostics.isEmpty {
+            parts.append(diagnostics.joined(separator: "; "))
         }
         return parts.joined(separator: " | ")
     }
 }
 
-private extension AgentAvailability {
+extension AgentProviderMode {
+    var internalAlphaLabel: String {
+        switch self {
+        case .localMock:
+            return "Local mock"
+        case .internalHostMock:
+            return "Internal host mock"
+        case .externalHermes:
+            return "External Hermes"
+        }
+    }
+}
+
+extension AgentAvailability {
     var label: String {
         switch self {
         case .available:
