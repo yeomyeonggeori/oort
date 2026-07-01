@@ -10,6 +10,7 @@
 - Raw invite codes are bearer secrets. momo stores only hashes, so an invite code must be copied when it is created.
 - The durable write path is still REST -> Postgres transaction -> outbox -> relay publish. The macOS app must not publish directly to Centrifugo.
 - Internal alpha can use repo-local mock Hermes. External Hermes/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached.
+- "Kim Intern invited" and "Kim Intern connected" are separate checks: invited means the agent is an active `member.kind='agent'` with channel membership; connected means the provider status chip or `/v1/agent-runtime/status` reports mock/available instead of degraded.
 
 ## 1. Tooling Checklist
 
@@ -88,6 +89,27 @@ curl -fsS "http://127.0.0.1:${PORT:-8080}/health"
 | `#agent-lab` id | `00000000-0000-7000-8000-000000000202` |
 
 Both the demo user and Kim Intern are active members of both seeded channels. First message seq in each seeded channel starts at `1` after the first send.
+
+Kim Intern internal alpha contract:
+
+| Check | Expected |
+|---|---|
+| Workspace invitation | `member.kind='agent'`, `member.status='active'`, display name `김인턴`, handle `kim-intern` |
+| Agent profile | `agent.member_id` = Kim Intern member id, model `hermes-agent`, owner = seeded demo user |
+| Channel invitation | active `membership` in `#agent-lab`; `#general` is also seeded for broad smoke |
+| Status visibility | macOS sidebar Local AI chip or `GET /v1/agent-runtime/status` shows `Mock`, `Available`, or `Degraded` with redacted endpoint/key details |
+| Send path | only REST `POST /messages` creates the mention; clients do not publish directly to Centrifugo |
+
+If a later workspace seed omits Kim Intern from `#agent-lab`, an owner/admin must add the existing agent member through the channel membership API before the `@김인턴` smoke:
+
+```bash
+curl -fsS -X POST "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/00000000-0000-7000-8000-000000000202/members" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"memberId":"00000000-0000-7000-8000-000000000102","role":"member"}'
+```
+
+This is a channel invite/activation path for an existing agent member, not a human `/v1/join` invite code. Do not create a new human member for Kim Intern.
 
 There is no fixed raw invite code in seed data. Create a fresh one through the authenticated invite API and copy the returned `code` immediately.
 
@@ -171,7 +193,8 @@ Internal alpha usability notes:
 - When a new invite is created, click `Copy Code` before closing the popover. Existing invite rows only show the masked preview; the raw invite code cannot be recovered later.
 - `Switch` and `Log Out` return to the chooser and clear the previous channel/member/message/realtime/invite state. `Log Out` also clears the saved-password preference and Keychain password.
 - Login, join, channel load, and message send errors are recoverable: the chooser, sidebar, or timeline keeps the app interactive and offers retry/dismiss instead of leaving a blank session.
-- The sidebar Kim Intern chip distinguishes `Local mock`, `Internal host mock`, and `External Hermes`, plus key/endpoint/degraded diagnostics. The same redacted provider summary appears in session details.
+- The sidebar Members list shows Kim Intern as an `AGENT` when he is in the selected channel. The `+`/`-` member action is the admin path for inviting/removing an existing agent from a channel.
+- The sidebar Kim Intern chip distinguishes `Local mock`, `Internal host mock`, and `External Hermes`, plus key/endpoint/degraded diagnostics. The same redacted provider summary appears in session details. `Mock` is connected enough for local alpha; `Available` means credentialed external provider is configured; `Degraded` means invited may still be true but provider connectivity is not usable.
 
 Cleanup:
 
@@ -199,11 +222,13 @@ make down
 
 ### C. Kim Intern
 
-1. Ensure mock Hermes and AgentWorker are running.
-2. In `#agent-lab`, send either `@김인턴 상태 알려줘` or `@kim-intern summarize this channel`.
-3. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
-4. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
-5. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted diagnostic hint.
+1. Confirm Kim Intern is invited: select `#agent-lab`, verify the Members list includes `김인턴` with the `AGENT` badge, or call `/v1/workspaces/$WORKSPACE_ID/members?kind=agent` and check `channelIds` includes `00000000-0000-7000-8000-000000000202`.
+2. Confirm provider connectivity: check the sidebar Kim Intern chip or `curl -fsS "$BASE_URL/v1/agent-runtime/status" | jq .`.
+3. For local mock smoke, ensure mock Hermes and AgentWorker are running, then send `@김인턴 상태 알려줘` or `@kim-intern summarize this channel` in `#agent-lab`.
+4. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
+5. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
+6. For real-provider smoke, put credentials only in an untracked provider env file and run `scripts/local_gate.sh --profile external-agent-provider`. Without credentials, the profile must PASS as an explicit `runtime-unverified(external provider credentials)` skip; with credentials, its evidence includes the Kim Intern invite precondition and one external-provider roundtrip.
+7. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted diagnostic hint.
 
 ### D. Diagnostics
 

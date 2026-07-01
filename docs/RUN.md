@@ -139,6 +139,15 @@ macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded
 internal alpha 사용자에게 `Local mock` / `Internal host mock` / `External Hermes`, key 준비 여부,
 redacted endpoint/diagnostic hint를 구분해 보여준다.
 
+Provider status는 연결 가능성만 뜻한다. 내부 알파에서 "김인턴 초대됨"은 별도 precondition이다:
+demo workspace의 `김인턴`은 `member.kind='agent'`, `member.status='active'`, handle
+`kim-intern`인 기존 agent member이고, `#agent-lab`
+(`00000000-0000-7000-8000-000000000202`) active membership을 가져야 한다. macOS는
+선택 채널 Members 섹션의 `AGENT` badge와 sidebar Kim Intern chip을 함께 보여주고, server/API
+path는 `/v1/workspaces/{ws}/members?kind=agent`와
+`POST /v1/workspaces/{ws}/channels/{ch}/members`로 기존 agent member를 채널에 추가한다.
+이 채널 추가는 human `/v1/join` invite code flow가 아니다.
+
 실제 외부 Hermes/Kim Intern side effect는 기본 local gate에 포함하지 않는다. credentials가 있는
 환경에서만 아래 opt-in smoke를 실행한다.
 
@@ -159,8 +168,9 @@ scripts/local_gate.sh --profile external-agent-provider
 `runtime-unverified(external provider credentials)` evidence를 남기고 종료한다. 반대로
 `external-hermes`를 명시했는데 URL이 `https://`가 아니거나 localhost/mock/placeholder key면
 fail-fast한다. credentials가 유효하면 OpenAI-compatible SSE preflight, local
-MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, `@김인턴`
-1왕복까지 시도한다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
+MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, Kim Intern
+active agent member + `#agent-lab` channel membership precondition, `@김인턴` 1왕복까지
+시도한다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
 
 ### 2.3 staging/prod 시크릿과 백업 skeleton
 
@@ -605,8 +615,10 @@ MOMO-215부터 `runtime-agent` profile은 `scripts/verify_agent_worker.sh`를 �
 Postgres timeline의 `message.seq` authority를 따르는 channel `message.new`이고,
 `agent:` namespace는 ephemeral progress/status surface로 유지한다. 실제 external
 Hermes/provider side effect는 여전히 repo-local mock 범위 밖이며, MOMO-230의
-`external-agent-provider` opt-in profile에서 credentials가 있을 때만 닫는다. credentials가
-없으면 `runtime-unverified(external provider credentials)`로 남긴다.
+`external-agent-provider` opt-in profile에서 credentials가 있을 때만 닫는다. MOMO-236부터
+credentialed profile은 send 전에 Kim Intern이 active agent member로 `#agent-lab`에 초대되어
+있는지도 evidence로 남긴다. credentials가 없으면
+`runtime-unverified(external provider credentials)`로 남긴다.
 
 `agent.status`/`agent.partial`은 non-durable progress projection이다. 이 이벤트는
 `message.seq`를 갖는 channel timeline의 순서 권위가 아니며, 최종 durable 결과는

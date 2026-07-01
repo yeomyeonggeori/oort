@@ -221,9 +221,11 @@ write_evidence() {
     fi
     if [ "${RESULT:-}" = "SKIP" ]; then
       echo "- Skip reason: ${SKIP_REASON:-external provider credentials are not configured}"
+      echo "- Internal alpha invite precondition: expected seeded/admin contract is Kim Intern as active agent member \`kim-intern\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
       echo "- Coverage: default local/internal-alpha mock gates remain deterministic."
       echo "- Not covered: real Hermes/Kim Intern side effect remains \`runtime-unverified(external provider credentials)\`."
     elif [ "${RESULT:-}" = "PASS" ]; then
+      echo "- Internal alpha invite precondition: \`${INVITE_PRECONDITION_STATUS:-not-run}\` (active agent member + channel membership verified before send)."
       echo "- Provider preflight: OpenAI-compatible SSE \`/chat/completions\` returned stream data."
       echo "- Agent runtime status: \`/v1/agent-runtime/status\` reported external mode with redacted endpoint label and no provider key."
       echo "- Momo roundtrip: trigger_message_id=\`${AGENT_TRIGGER_MESSAGE_ID:-unknown}\`, run_id=\`${AGENT_RUN_ID:-unknown}\`, final_message_id=\`${FINAL_MESSAGE_ID:-unknown}\`, final_seq=\`${FINAL_MESSAGE_SEQ:-unknown}\`."
@@ -237,6 +239,7 @@ write_evidence() {
     fi
     echo "- Evidence artifacts:"
     echo "  - evidence: \`${EVIDENCE_FILE}\`"
+    artifact_line "internal alpha invite precondition" "$INVITE_PRECONDITION_FILE"
     artifact_line "provider SSE redacted" "$PROVIDER_SSE_REDACTED_FILE"
     artifact_line "provider stderr redacted" "$PROVIDER_ERR_REDACTED_FILE"
     artifact_line "agent runtime status" "$AGENT_STATUS_FILE"
@@ -248,7 +251,8 @@ write_evidence() {
   } > "$EVIDENCE_FILE"
 
   for file in "$EVIDENCE_FILE" "$PROVIDER_SSE_REDACTED_FILE" "$PROVIDER_ERR_REDACTED_FILE" \
-    "$SERVER_LOG_REDACTED" "$WORKER_LOG_REDACTED" "$RELAY_LOG_REDACTED" "$AGENT_STATUS_FILE" "$CHANNEL_HISTORY_FILE"; do
+    "$SERVER_LOG_REDACTED" "$WORKER_LOG_REDACTED" "$RELAY_LOG_REDACTED" "$AGENT_STATUS_FILE" "$CHANNEL_HISTORY_FILE" \
+    "$INVITE_PRECONDITION_FILE"; do
     assert_file_does_not_contain_secret "$file"
   done
   rm -f "$PROVIDER_SSE_FILE" "$PROVIDER_ERR_FILE" "$SERVER_LOG" "$WORKER_LOG" "$RELAY_LOG"
@@ -444,6 +448,60 @@ verify_agent_runtime_status() {
   RUNTIME_STATUS="pass"
 }
 
+verify_internal_alpha_invite_precondition() {
+  echo "[external-agent] verifying internal alpha Kim Intern invite precondition"
+  psql_run -t -A -c "
+    SELECT jsonb_build_object(
+             'schema', 'momo.internal_alpha.agent_invite_precondition.v0',
+             'workspace_id', w.id,
+             'workspace_slug', w.slug,
+             'agent_member_id', m.id,
+             'member_kind', m.kind::text,
+             'member_status', m.status::text,
+             'display_name', m.display_name,
+             'handle', m.handle,
+             'agent_model', a.model,
+             'channel_id', c.id,
+             'channel_name', c.name,
+             'channel_membership_active', (ms.member_id IS NOT NULL AND ms.left_at IS NULL),
+             'membership_role', ms.role::text
+           )::text
+      FROM workspace w
+      JOIN member m
+        ON m.workspace_id = w.id
+       AND m.id = '${AGENT_ID}'
+      JOIN agent a
+        ON a.workspace_id = w.id
+       AND a.member_id = m.id
+      JOIN channel c
+        ON c.workspace_id = w.id
+       AND c.id = '${CHANNEL_ID}'
+      LEFT JOIN membership ms
+        ON ms.workspace_id = w.id
+       AND ms.channel_id = c.id
+       AND ms.member_id = m.id
+     WHERE w.id = '${WORKSPACE_ID}';
+  " > "$INVITE_PRECONDITION_FILE"
+
+  if ! jq -e '
+      .schema == "momo.internal_alpha.agent_invite_precondition.v0"
+      and .workspace_id == "'"$WORKSPACE_ID"'"
+      and .agent_member_id == "'"$AGENT_ID"'"
+      and .member_kind == "agent"
+      and .member_status == "active"
+      and .display_name == "김인턴"
+      and .handle == "kim-intern"
+      and .agent_model == "'"$AGENT_MODEL"'"
+      and .channel_id == "'"$CHANNEL_ID"'"
+      and .channel_name == "agent-lab"
+      and .channel_membership_active == true
+    ' "$INVITE_PRECONDITION_FILE" >/dev/null; then
+    INVITE_PRECONDITION_STATUS="fail"
+    fail "runtime/invite-precondition" "Kim Intern is not an active invited member of #agent-lab"
+  fi
+  INVITE_PRECONDITION_STATUS="pass"
+}
+
 verify_roundtrip() {
   local login_json access_token send_payload send_json message_id deadline run_status final_ok live_ok
   login_json="$(curl -fsS \
@@ -572,12 +630,14 @@ WORKER_LOG="$TMP_ROOT/external-agent-provider-worker-${RUN_SLUG}.raw.log"
 WORKER_LOG_REDACTED="$TMP_ROOT/external-agent-provider-worker-${RUN_SLUG}.redacted.log"
 RELAY_LOG="$TMP_ROOT/external-agent-provider-relay-${RUN_SLUG}.raw.log"
 RELAY_LOG_REDACTED="$TMP_ROOT/external-agent-provider-relay-${RUN_SLUG}.redacted.log"
+INVITE_PRECONDITION_FILE="$TMP_ROOT/external-agent-provider-invite-precondition-${RUN_SLUG}.json"
 
 RESULT="UNKNOWN"
 RUNTIME_NOTE="credentialed external provider path attempted"
 PROVIDER_PREFLIGHT_STATUS="not-run"
 RUNTIME_STATUS="not-run"
 ROUNDTRIP_STATUS="not-run"
+INVITE_PRECONDITION_STATUS="not-run"
 
 validate_external_provider_env
 
@@ -617,6 +677,7 @@ make ENV_FILE="$ENV_FILE" migrate
 
 echo "[external-agent] ensuring runtime DB roles exist"
 "$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
+verify_internal_alpha_invite_precondition
 
 psql_run <<SQL
 BEGIN;
