@@ -713,6 +713,49 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
     }
 
+    func testRESTBackendLoadsKimInternRuntimeStatus() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/agent-runtime/status"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(json: """
+                {
+                  "schema": "momo.agent_runtime.status.v0",
+                  "agentHandle": "kim-intern",
+                  "displayName": "김인턴",
+                  "mode": "external-hermes",
+                  "availability": "available",
+                  "model": "hermes-agent",
+                  "endpointLabel": "https://kim.example.net/v1",
+                  "keyConfigured": true,
+                  "diagnostics": []
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: .demo, accessToken: "")
+
+        let status = try await backend.agentRuntimeStatus()
+        XCTAssertEqual(status.agentHandle, "kim-intern")
+        XCTAssertEqual(status.mode, .externalHermes)
+        XCTAssertEqual(status.availability, .available)
+        XCTAssertEqual(status.endpointLabel, "https://kim.example.net/v1")
+        XCTAssertFalse(status.endpointLabel.contains("token"))
+    }
+
     func testRESTBackendCreatesChannelAndMutatesMembership() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -1442,6 +1485,140 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(session.member.displayName, "New User")
     }
 
+    func testInviteAdminClientCreateMapsServerContractAndRawCode() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let inviteID = UUID(uuidString: "00000000-0000-7000-8000-000000226001")!
+        let expiresAtMs: Int64 = 1_790_000_000_000
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.path, "/v1/workspaces/\(workspace.description)/invites")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+            let data = try XCTUnwrap(request.momoBodyData)
+            let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            XCTAssertEqual(body?["role"] as? String, "admin")
+            XCTAssertEqual(body?["maxUses"] as? Int, 3)
+            XCTAssertEqual((body?["expiresAtMs"] as? NSNumber)?.int64Value, expiresAtMs)
+            XCTAssertEqual((body?["metadata"] as? [String: String])?["source"], "test")
+            return MockHTTPResponse(statusCode: 201, json: """
+            {
+              "invite": {
+                "id": "\(inviteID.uuidString)",
+                "workspaceId": "\(workspace.description)",
+                "codePreview": "ABC123",
+                "role": "admin",
+                "maxUses": 3,
+                "usedCount": 0,
+                "expiresAtMs": \(expiresAtMs),
+                "revokedAtMs": null,
+                "revokedBy": null,
+                "revocationReason": null,
+                "createdBy": "\(MemberID.demoHuman.description)",
+                "createdAtMs": 1782864000000,
+                "updatedAtMs": 1782864000000
+              },
+              "code": "momo_raw_invite_code"
+            }
+            """)
+        }
+
+        let client = MomoInviteAdminClient(session: URLSession(configuration: .momoMocked))
+        let created = try await client.createInvite(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://momo.test")!,
+                workspace: workspace,
+                accessToken: "admin-token"
+            ),
+            request: MomoInviteCreateRequest(
+                role: .admin,
+                maxUses: 3,
+                expiresAtMs: expiresAtMs,
+                metadata: ["source": "test"]
+            )
+        )
+
+        XCTAssertEqual(created.code, "momo_raw_invite_code")
+        XCTAssertEqual(created.invite.id, inviteID)
+        XCTAssertEqual(created.invite.role, .admin)
+        XCTAssertEqual(created.invite.statusLabel, "Active")
+    }
+
+    func testInviteAdminClientListAndRevokeReflectRevokedState() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let inviteID = UUID(uuidString: "00000000-0000-7000-8000-000000226002")!
+        let revokedAtMs: Int64 = 1_782_864_200_000
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/invites"):
+                XCTAssertEqual(request.url?.query?.contains("include_revoked=true"), true)
+                return MockHTTPResponse(json: """
+                {
+                  "invites": [
+                    {
+                      "id": "\(inviteID.uuidString)",
+                      "workspaceId": "\(workspace.description)",
+                      "codePreview": "XYZ789",
+                      "role": "member",
+                      "maxUses": 2,
+                      "usedCount": 1,
+                      "expiresAtMs": 1790000000000,
+                      "revokedAtMs": null,
+                      "revokedBy": null,
+                      "revocationReason": null,
+                      "createdBy": "\(MemberID.demoHuman.description)",
+                      "createdAtMs": 1782864000000,
+                      "updatedAtMs": 1782864000000
+                    }
+                  ]
+                }
+                """)
+            case ("POST", "/v1/workspaces/\(workspace.description)/invites/\(inviteID.uuidString)/revoke"):
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["reason"] as? String, "rotated")
+                return MockHTTPResponse(json: """
+                {
+                  "id": "\(inviteID.uuidString)",
+                  "workspaceId": "\(workspace.description)",
+                  "codePreview": "XYZ789",
+                  "role": "member",
+                  "maxUses": 2,
+                  "usedCount": 1,
+                  "expiresAtMs": 1790000000000,
+                  "revokedAtMs": \(revokedAtMs),
+                  "revokedBy": "\(MemberID.demoHuman.description)",
+                  "revocationReason": "rotated",
+                  "createdBy": "\(MemberID.demoHuman.description)",
+                  "createdAtMs": 1782864000000,
+                  "updatedAtMs": \(revokedAtMs)
+                }
+                """)
+            default:
+                XCTFail("unexpected request \(request.httpMethod ?? "?") \(request.url?.absoluteString ?? "?")")
+                return MockHTTPResponse(statusCode: 404, json: "{}")
+            }
+        }
+
+        let context = MomoInviteAdminContext(
+            baseURL: URL(string: "https://momo.test")!,
+            workspace: workspace,
+            accessToken: "admin-token"
+        )
+        let client = MomoInviteAdminClient(session: URLSession(configuration: .momoMocked))
+
+        let listed = try await client.listInvites(context: context)
+        XCTAssertEqual(listed.count, 1)
+        XCTAssertEqual(listed[0].usedCount, 1)
+        XCTAssertEqual(listed[0].statusLabel, "Active")
+
+        let revoked = try await client.revokeInvite(context: context, inviteID: inviteID, reason: "rotated")
+        XCTAssertTrue(revoked.isRevoked)
+        XCTAssertEqual(revoked.statusLabel, "Revoked")
+        XCTAssertEqual(revoked.revocationReason, "rotated")
+    }
+
     func testSessionClientSurfacesAuthProblemForBadCredentials() async throws {
         await MockHTTPURLProtocol.reset()
         await MockHTTPURLProtocol.setHandler { _ in
@@ -1555,7 +1732,7 @@ final class MomoMacTests: XCTestCase {
         )
 
         await controller.openDemo()
-        guard case .connected(let viewModel, _) = controller.phase else {
+        guard case .connected(let viewModel, _, _) = controller.phase else {
             return XCTFail("demo should connect before logout")
         }
 

@@ -149,7 +149,7 @@ assert_exact() {
   local expected="$2"
   local value
   value="$(get_var "$key")"
-  [ "$value" = "$expected" ] || fail "$key must be '$expected' in internal-smoke/local mode (got '$value')"
+  [ "$value" = "$expected" ] || fail "$key must be '$expected' for this mode (got '$value')"
 }
 
 assert_contains() {
@@ -189,7 +189,7 @@ if [ "$runtime_mode" = "strict" ]; then
     MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
     POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL RELAY_DATABASE_URL \
     REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC \
-    HERMES_BASE_URL HERMES_API_KEY
+    AGENT_PROVIDER_MODE AGENT_MODEL HERMES_BASE_URL HERMES_API_KEY
 
   for key in \
     API_DOMAIN REALTIME_DOMAIN ACME_EMAIL MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
@@ -201,6 +201,8 @@ if [ "$runtime_mode" = "strict" ]; then
   assert_not_latest_or_smoke_image MOMO_API_IMAGE
   assert_not_latest_or_smoke_image MOMO_RELAY_IMAGE
   assert_not_latest_or_smoke_image MOMO_WORKER_IMAGE
+
+  assert_exact AGENT_PROVIDER_MODE external-hermes
 
   case "$(get_var HERMES_BASE_URL)" in
     https://*) ;;
@@ -219,7 +221,7 @@ elif [ "$runtime_mode" = "internal-smoke" ]; then
     POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL \
     DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL MOMO_BOOTSTRAP_RUNTIME_ROLES \
     REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC \
-    HERMES_BASE_URL HERMES_API_KEY
+    AGENT_PROVIDER_MODE AGENT_MODEL HERMES_BASE_URL HERMES_API_KEY
 
   case "${MOMO_ENV:-}" in
     internal-smoke|local|dev|development) ;;
@@ -233,6 +235,8 @@ elif [ "$runtime_mode" = "internal-smoke" ]; then
   assert_exact CENT_TOKEN_HMAC change-me-cent-token-hmac
   assert_exact CENT_API_KEY change-me-cent-api-key
   assert_exact JWT_HMAC change-me-jwt-hmac
+  assert_exact AGENT_PROVIDER_MODE internal-host-mock
+  assert_exact AGENT_MODEL hermes-agent
   assert_exact HERMES_BASE_URL http://mock-hermes:8088/v1
   assert_exact HERMES_API_KEY change-me-hermes-bearer
   assert_exact MOMO_BOOTSTRAP_RUNTIME_ROLES 1

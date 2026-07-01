@@ -19,11 +19,15 @@ struct MomoServerMain {
                 .flatMap { Logger.Level(rawValue: $0) } ?? .info
 
         let config = Config.load()
+        try config.agentProvider.validateForBoot(environmentName: config.momoEnvironment)
         logger.info("starting MomoServer", metadata: [
             "host": .string(config.host),
             "port": .stringConvertible(config.port),
             "pgHost": .string(config.pgHost),
             "pgDatabase": .string(config.pgDatabase),
+            "momoEnvironment": .string(config.momoEnvironment),
+            "agentProviderMode": .string(config.agentProvider.mode.rawValue),
+            "agentProviderEndpoint": .string(config.agentProvider.endpointLabel),
         ])
 
         let app = await AppBuilder.build(config: config, logger: logger)

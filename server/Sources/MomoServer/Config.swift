@@ -34,6 +34,10 @@ struct Config: Sendable {
     var platformAdminEmails: [String]
     var platformAdminLoginSecret: String?
 
+    // ---- Kim Intern / Hermes provider boundary (MOMO-227) ----
+    var momoEnvironment: String
+    var agentProvider: AgentProviderConfig
+
     /// Read an env var, falling back to `default`.
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -74,7 +78,9 @@ struct Config: Sendable {
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
                 .filter { !$0.isEmpty },
             platformAdminLoginSecret: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_LOGIN_SECRET"]
-                .flatMap { $0.isEmpty ? nil : $0 }
+                .flatMap { $0.isEmpty ? nil : $0 },
+            momoEnvironment: env("MOMO_ENV", "local"),
+            agentProvider: AgentProviderConfig.load(environment: ProcessInfo.processInfo.environment)
         )
     }
 
@@ -100,5 +106,169 @@ struct Config: Sendable {
             password: comps.password ?? "",
             database: db.isEmpty ? "momo" : db
         )
+    }
+}
+
+enum AgentProviderMode: String, Sendable {
+    case localMock = "local-mock"
+    case internalHostMock = "internal-host-mock"
+    case externalHermes = "external-hermes"
+
+    static func parse(_ raw: String?) -> AgentProviderMode {
+        guard let raw else { return .localMock }
+        return AgentProviderMode(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            ?? .localMock
+    }
+}
+
+struct AgentProviderConfig: Sendable {
+    var mode: AgentProviderMode
+    var hermesBaseURL: String
+    var hermesAPIKey: String
+    var model: String
+    var agentHandle: String
+    var displayName: String
+
+    static func load(environment: [String: String]) -> AgentProviderConfig {
+        AgentProviderConfig(
+            mode: AgentProviderMode.parse(environment["AGENT_PROVIDER_MODE"]),
+            hermesBaseURL: environment["HERMES_BASE_URL"] ?? "http://localhost:8088/v1",
+            hermesAPIKey: environment["HERMES_API_KEY"] ?? "dev-insecure-hermes-bearer",
+            model: environment["AGENT_MODEL"] ?? "hermes-agent",
+            agentHandle: environment["AGENT_HANDLE"] ?? "kim-intern",
+            displayName: environment["AGENT_DISPLAY_NAME"] ?? "김인턴"
+        )
+    }
+
+    var endpointLabel: String {
+        Self.redactedEndpointLabel(hermesBaseURL)
+    }
+
+    var keyConfigured: Bool {
+        !hermesAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !Self.isUnsafeSecret(hermesAPIKey)
+    }
+
+    var availability: String {
+        switch mode {
+        case .localMock, .internalHostMock:
+            return "mock"
+        case .externalHermes:
+            return validationErrors(strictEnvironment: true).isEmpty ? "available" : "degraded"
+        }
+    }
+
+    func statusResponse() -> AgentRuntimeStatusResponse {
+        let diagnostics = validationErrors(strictEnvironment: mode == .externalHermes)
+        return AgentRuntimeStatusResponse(
+            schema: "momo.agent_runtime.status.v0",
+            agentHandle: agentHandle,
+            displayName: displayName,
+            mode: mode.rawValue,
+            availability: availability,
+            model: model,
+            endpointLabel: endpointLabel,
+            keyConfigured: keyConfigured,
+            diagnostics: diagnostics
+        )
+    }
+
+    func validateForBoot(environmentName: String) throws {
+        guard Self.requiresStrictExternalProvider(environmentName) else {
+            return
+        }
+
+        var errors: [String] = []
+        if mode != .externalHermes {
+            errors.append("AGENT_PROVIDER_MODE must be external-hermes in \(environmentName)")
+        }
+        errors += validationErrors(strictEnvironment: true)
+        if !errors.isEmpty {
+            throw AgentProviderConfigurationError(errors: errors)
+        }
+    }
+
+    func validationErrors(strictEnvironment: Bool) -> [String] {
+        var errors: [String] = []
+        let trimmedURL = hermesBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedURL.isEmpty {
+            errors.append("HERMES_BASE_URL is missing")
+        } else if mode == .externalHermes || strictEnvironment {
+            guard let url = URL(string: trimmedURL), let scheme = url.scheme, let host = url.host else {
+                errors.append("HERMES_BASE_URL must be an absolute HTTPS URL")
+                return errors + keyErrors()
+            }
+            if scheme.lowercased() != "https" {
+                errors.append("HERMES_BASE_URL must use https:// for external-hermes")
+            }
+            if Self.isLocalOrMockHost(host) {
+                errors.append("HERMES_BASE_URL must not point at localhost or mock-hermes for external-hermes")
+            }
+        }
+        errors += keyErrors()
+        return errors
+    }
+
+    private func keyErrors() -> [String] {
+        if hermesAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ["HERMES_API_KEY is missing"]
+        }
+        if Self.isUnsafeSecret(hermesAPIKey) {
+            return ["HERMES_API_KEY uses a placeholder/dev value"]
+        }
+        return []
+    }
+
+    static func requiresStrictExternalProvider(_ environmentName: String) -> Bool {
+        switch environmentName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "staging", "prod", "production", "internal-host":
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func isUnsafeSecret(_ value: String) -> Bool {
+        let lowered = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered.isEmpty { return true }
+        if ["password", "secret", "token", "default", "dev", "test", "staging", "prod", "production", "admin", "momo"].contains(lowered) {
+            return true
+        }
+        return lowered.contains("change-me")
+            || lowered.contains("changeme")
+            || lowered.contains("dev-insecure")
+            || lowered.contains("placeholder")
+            || lowered.contains("example")
+    }
+
+    static func isLocalOrMockHost(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        return lowered == "localhost"
+            || lowered == "127.0.0.1"
+            || lowered == "0.0.0.0"
+            || lowered == "::1"
+            || lowered.contains("mock")
+    }
+
+    static func redactedEndpointLabel(_ raw: String) -> String {
+        guard var components = URLComponents(string: raw), let host = components.host else {
+            return raw.isEmpty ? "not configured" : "invalid url"
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        let scheme = components.scheme.map { "\($0)://" } ?? ""
+        let port = components.port.map { ":\($0)" } ?? ""
+        let path = components.path.isEmpty ? "" : components.path
+        return "\(scheme)\(host)\(port)\(path)"
+    }
+}
+
+struct AgentProviderConfigurationError: Error, CustomStringConvertible {
+    let errors: [String]
+
+    var description: String {
+        "invalid Kim Intern/Hermes provider config: \(errors.joined(separator: "; "))"
     }
 }

@@ -84,6 +84,47 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(Config.clampedCentConnectionTokenTTL(7_200), 1_800)
     }
 
+    func testAgentProviderStatusIsRedactedAndMockVisible() throws {
+        let provider = AgentProviderConfig(
+            mode: .internalHostMock,
+            hermesBaseURL: "http://user:password@mock-hermes:8088/v1?token=secret",
+            hermesAPIKey: "change-me-hermes-bearer",
+            model: "hermes-agent",
+            agentHandle: "kim-intern",
+            displayName: "김인턴"
+        )
+
+        let status = provider.statusResponse()
+        let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(status)) as? [String: Any]
+
+        XCTAssertEqual(status.availability, "mock")
+        XCTAssertEqual(status.endpointLabel, "http://mock-hermes:8088/v1")
+        XCTAssertEqual(object?["mode"] as? String, "internal-host-mock")
+        XCTAssertEqual(object?["availability"] as? String, "mock")
+        XCTAssertFalse(status.endpointLabel.contains("password"))
+        XCTAssertFalse(status.endpointLabel.contains("secret"))
+        XCTAssertFalse(status.keyConfigured)
+    }
+
+    func testStrictServerProviderConfigFailsFastForUnsafeExternalConfig() {
+        let provider = AgentProviderConfig(
+            mode: .localMock,
+            hermesBaseURL: "http://localhost:8088/v1",
+            hermesAPIKey: "dev-insecure-hermes-bearer",
+            model: "hermes-agent",
+            agentHandle: "kim-intern",
+            displayName: "김인턴"
+        )
+
+        XCTAssertThrowsError(try provider.validateForBoot(environmentName: "prod")) { error in
+            let text = String(describing: error)
+            XCTAssertTrue(text.contains("external-hermes"))
+            XCTAssertTrue(text.contains("HERMES_BASE_URL"))
+            XCTAssertTrue(text.contains("HERMES_API_KEY"))
+            XCTAssertFalse(text.contains("dev-insecure-hermes-bearer"))
+        }
+    }
+
     func testCentrifugoConnectionTokenCarriesMemberAndWorkspaceClaims() async throws {
         let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
@@ -616,7 +657,16 @@ final class MomoServerTests: XCTestCase {
             centConnectionTokenTTL: centConnectionTokenTTL,
             platformAdminDatabaseURL: nil,
             platformAdminEmails: [],
-            platformAdminLoginSecret: nil
+            platformAdminLoginSecret: nil,
+            momoEnvironment: "local",
+            agentProvider: AgentProviderConfig(
+                mode: .localMock,
+                hermesBaseURL: "http://localhost:8088/v1",
+                hermesAPIKey: "dev-insecure-hermes-bearer",
+                model: "hermes-agent",
+                agentHandle: "kim-intern",
+                displayName: "김인턴"
+            )
         )
     }
 }
