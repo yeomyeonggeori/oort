@@ -98,6 +98,12 @@ cp infra/.env.example .env
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 Hermes/Kim Intern credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
+Codex OAuth access/refresh token은 momo 환경변수가 아니다. Hermes/Kim Intern
+provider가 Codex OAuth를 사용하더라도 token exchange, storage, refresh,
+unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/local gate는
+그 토큰을 받지 않는다. 정본 boundary는
+[`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md)다.
+
 ### 2.2 코드가 추가로 읽는 선택적 키 (모두 안전한 기본값 있음 → `.env`에 없어도 부팅)
 
 > 아래는 `.env.example`에는 의도적으로 넣지 않은 **튜닝/오버라이드 키**다. 설정하지 않으면
@@ -157,6 +163,14 @@ scripts/local_gate.sh --profile external-agent-provider
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
 ```
+
+Credentialed smoke에 필요한 momo-side env는 위 네 가지
+`AGENT_PROVIDER_MODE`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`뿐이다.
+provider가 Codex OAuth를 내부적으로 쓰는 경우에도 `CODEX_OAUTH_TOKEN`,
+`CODEX_OAUTH_REFRESH_TOKEN`, `CODEX_ACCESS_TOKEN`, `CODEX_REFRESH_TOKEN`,
+`OPENAI_OAUTH_TOKEN`, `OPENAI_OAUTH_REFRESH_TOKEN`류 값은 momo verifier에 넘기지
+말고 provider host secret으로만 설정한다. verifier는 알려진 Codex/OpenAI OAuth
+token env var가 momo smoke process에 있으면 credential-boundary 오류로 fail-fast한다.
 
 `scripts/verify_external_agent_provider.sh`는 먼저 external env contract를 검사한다.
 `AGENT_PROVIDER_MODE`가 없거나 `external-hermes`가 아니면 mock 기본 환경으로 보고

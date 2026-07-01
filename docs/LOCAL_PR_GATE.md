@@ -108,6 +108,13 @@ runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is
 set but the URL/key is missing, placeholder-like, localhost, or mock, the profile
 fails fast because that is a misconfigured credentialed smoke.
 
+Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
+Intern uses Codex OAuth, configure authorization code exchange, access/refresh
+token storage, refresh, unlink, and rotation inside the provider host. The momo
+smoke process accepts only `HERMES_API_KEY` for the provider SSE boundary and
+fails fast if known Codex/OpenAI OAuth token env var names are present. Boundary
+details: [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md).
+
 The default script is strict: PR evidence should come from a clean worktree and
 checks committed whitespace against `${LOCAL_GATE_BASE_REF:-origin/main}` plus
 staged/unstaged diffs. For exploratory pre-commit runs only, use
