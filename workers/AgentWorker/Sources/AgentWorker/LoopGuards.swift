@@ -96,10 +96,68 @@ struct LoopGuards: Sendable {
     }
 
     /// G6: does this tool call require a human approval gate? (L4 §3.3 / §6.2).
-    /// Side-effecting actions (deploy/spend/tool_call) always gate. Stub policy.
+    ///
+    /// The authoritative input is the Context Packet `tool_grants` projection fed
+    /// by Capability Cache v0. Missing, duplicate, mismatched, or unknown metadata
+    /// fails closed into approval-required.
+    func requiresApproval(
+        toolName: String,
+        toolGrants: [ToolGrantMetadata]?
+    ) -> Bool {
+        guard let toolGrants,
+              let toolGrant = ToolGrantMetadata.singleMatch(in: toolGrants, toolName: toolName)
+        else {
+            return true
+        }
+        return requiresApproval(toolGrant: toolGrant)
+    }
+
+    func requiresApproval(toolGrant: ToolGrantMetadata) -> Bool {
+        guard let policy = toolGrant.normalizedApprovalPolicy else {
+            return true
+        }
+
+        switch policy {
+        case "require_approval", "requires_approval", "approval_required", "always", "required":
+            return true
+        case "never", "none", "read_only", "readonly":
+            return !toolGrant.isReadOnlyGrant
+        default:
+            // v0 has no runtime implementation for conditional policies such as
+            // budget_threshold; pause so a human can decide instead of auto-running.
+            return true
+        }
+    }
+
+    /// Legacy MOMO-164 fallback. WorkerService no longer uses this when
+    /// `tool_grants` metadata is absent, because MOMO-165 requires missing or
+    /// ambiguous metadata to fail closed. Keep this isolated until all old tests
+    /// and payload producers move to Context Packet metadata.
     func requiresApproval(toolName: String) -> Bool {
-        // TODO: drive from agent.tool_schema / policy; v0 gates a known side-effect set.
-        let sideEffects: Set<String> = ["deploy", "spend", "exec", "tool_call"]
-        return sideEffects.contains(toolName.lowercased())
+        // TODO(#79): delete this fallback once all producers send
+        // agent_job.payload.tool_grants from the immutable Context Packet.
+        let normalized = toolName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalized.isEmpty else { return true }
+
+        let tokens = normalized.split { char in
+            char == "." || char == "_" || char == "-" || char == "/" || char == ":"
+        }.map(String.init)
+
+        let sideEffectVerbs: Set<String> = [
+            "approve", "assign", "cancel", "change", "close", "comment", "create",
+            "delete", "deploy", "exec", "execute", "invite", "merge", "move",
+            "post", "publish", "reject", "run", "send", "spend", "transition",
+            "update", "upload", "write",
+        ]
+        if tokens.contains(where: sideEffectVerbs.contains) || normalized == "tool_call" {
+            return true
+        }
+
+        let readOnlyVerbs: Set<String> = ["fetch", "find", "get", "list", "lookup", "query", "read", "search"]
+        if tokens.contains(where: readOnlyVerbs.contains) {
+            return false
+        }
+
+        return true
     }
 }

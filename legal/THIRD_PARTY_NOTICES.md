@@ -14,6 +14,8 @@
 | swift-service-lifecycle | https://github.com/swift-server/swift-service-lifecycle | Apache-2.0 | 서비스 수명주기 |
 | jwt-kit | https://github.com/vapor/jwt-kit | MIT | server 인증 |
 | postgres-nio | https://github.com/vapor/postgres-nio | Apache-2.0 | DB 드라이버 |
+| centrifuge-swift / SwiftCentrifuge | https://github.com/centrifugal/centrifuge-swift | MIT(검증됨, 0.9.0 LICENSE) | macOS Centrifugo live subscription |
+| swift-protobuf | https://github.com/apple/swift-protobuf | Apache-2.0(검증 필요) | SwiftCentrifuge 전이 의존성 |
 
 ## 전이 의존성(주요, 자동 생성 권장)
 - SwiftNIO 계열(apple/swift-nio*) — Apache-2.0 (대부분).

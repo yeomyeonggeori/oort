@@ -27,6 +27,16 @@ struct Config: Sendable {
     var centAPIURL: String   // e.g. http://centrifugo:8000/api
     var centAPIKey: String   // X-API-Key for POST /api/publish
     var centTokenHMAC: String // connection/subscription JWT signing (HMAC)
+    var centConnectionTokenTTL: TimeInterval // short-lived client connection token
+
+    // ---- Platform admin read-only inspection (MOMO-013) ----
+    var platformAdminDatabaseURL: String?
+    var platformAdminEmails: [String]
+    var platformAdminLoginSecret: String?
+
+    // ---- Kim Intern / Hermes provider boundary (MOMO-227) ----
+    var momoEnvironment: String
+    var agentProvider: AgentProviderConfig
 
     /// Read an env var, falling back to `default`.
     private static func env(_ key: String, _ fallback: String) -> String {
@@ -56,8 +66,29 @@ struct Config: Sendable {
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: env("CENT_API_URL", "http://localhost:8000/api"),
             centAPIKey: env("CENT_API_KEY", "dev-insecure-cent-api-key"),
-            centTokenHMAC: env("CENT_TOKEN_HMAC", "dev-insecure-cent-token-hmac")
+            centTokenHMAC: env("CENT_TOKEN_HMAC", "dev-insecure-cent-token-hmac"),
+            centConnectionTokenTTL: TimeInterval(
+                clampedCentConnectionTokenTTL(
+                    envInt("CENT_CONNECTION_TOKEN_TTL_SECONDS", 5 * 60)
+                )
+            ),
+            platformAdminDatabaseURL: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_DATABASE_URL"],
+            platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
+                .split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty },
+            platformAdminLoginSecret: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_LOGIN_SECRET"]
+                .flatMap { $0.isEmpty ? nil : $0 },
+            momoEnvironment: env("MOMO_ENV", "local"),
+            agentProvider: AgentProviderConfig.load(environment: ProcessInfo.processInfo.environment)
         )
+    }
+
+    /// Keep realtime connection JWTs short-lived. The upper bound is the
+    /// MOMO-179 contract (`exp <= 30m`), while the lower bound avoids accidental
+    /// zero/negative dev env values that would make every connect fail.
+    static func clampedCentConnectionTokenTTL(_ seconds: Int) -> Int {
+        min(max(seconds, 60), 30 * 60)
     }
 
     /// Minimal `postgres://` URL parser (no extra deps). Returns nil if unparseable.
@@ -75,5 +106,203 @@ struct Config: Sendable {
             password: comps.password ?? "",
             database: db.isEmpty ? "momo" : db
         )
+    }
+}
+
+enum AgentProviderMode: String, Sendable {
+    case localMock = "local-mock"
+    case internalHostMock = "internal-host-mock"
+    case externalHermes = "external-hermes"
+
+    static func parse(_ raw: String?) -> AgentProviderMode {
+        guard let raw else { return .localMock }
+        return AgentProviderMode(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            ?? .localMock
+    }
+}
+
+struct AgentProviderConfig: Sendable {
+    var mode: AgentProviderMode
+    var hermesBaseURL: String
+    var hermesAPIKey: String
+    var model: String
+    var agentHandle: String
+    var displayName: String
+    var allowLocalLoopback: Bool
+
+    static func load(environment: [String: String]) -> AgentProviderConfig {
+        AgentProviderConfig(
+            mode: AgentProviderMode.parse(environment["AGENT_PROVIDER_MODE"]),
+            hermesBaseURL: environment["HERMES_BASE_URL"] ?? "http://localhost:8088/v1",
+            hermesAPIKey: environment["HERMES_API_KEY"] ?? "dev-insecure-hermes-bearer",
+            model: environment["AGENT_MODEL"] ?? "hermes-agent",
+            agentHandle: environment["AGENT_HANDLE"] ?? "kim-intern",
+            displayName: environment["AGENT_DISPLAY_NAME"] ?? "김인턴",
+            allowLocalLoopback: Self.boolFlag(environment["AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK"])
+        )
+    }
+
+    var endpointLabel: String {
+        Self.redactedEndpointLabel(hermesBaseURL)
+    }
+
+    var keyConfigured: Bool {
+        !hermesAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !Self.isUnsafeSecret(hermesAPIKey)
+    }
+
+    var availability: String {
+        switch mode {
+        case .localMock, .internalHostMock:
+            return "mock"
+        case .externalHermes:
+            return validationErrors(strictEnvironment: true).isEmpty ? "available" : "degraded"
+        }
+    }
+
+    func statusResponse() -> AgentRuntimeStatusResponse {
+        let diagnostics = validationErrors(strictEnvironment: mode == .externalHermes)
+        return AgentRuntimeStatusResponse(
+            schema: "momo.agent_runtime.status.v0",
+            agentHandle: agentHandle,
+            displayName: displayName,
+            mode: mode.rawValue,
+            availability: availability,
+            model: model,
+            endpointLabel: endpointLabel,
+            keyConfigured: keyConfigured,
+            diagnostics: diagnostics
+        )
+    }
+
+    func validateForBoot(environmentName: String) throws {
+        var errors: [String] = []
+        let strictEnvironment = Self.requiresStrictExternalProvider(environmentName)
+        if !strictEnvironment && mode != .externalHermes {
+            return
+        }
+        if strictEnvironment && mode != .externalHermes {
+            errors.append("AGENT_PROVIDER_MODE must be external-hermes in \(environmentName)")
+        }
+        errors += validationErrors(
+            strictEnvironment: strictEnvironment,
+            allowLocalLoopback: allowLocalLoopback && !strictEnvironment
+        )
+        if !errors.isEmpty {
+            throw AgentProviderConfigurationError(errors: errors)
+        }
+    }
+
+    func validationErrors(strictEnvironment: Bool, allowLocalLoopback: Bool? = nil) -> [String] {
+        var errors: [String] = []
+        let localLoopbackAllowed = allowLocalLoopback ?? self.allowLocalLoopback
+        let trimmedURL = hermesBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedURL.isEmpty {
+            errors.append("HERMES_BASE_URL is missing")
+        } else if mode == .externalHermes || strictEnvironment {
+            guard let url = URL(string: trimmedURL), let scheme = url.scheme, let host = url.host else {
+                errors.append("HERMES_BASE_URL must be an absolute HTTP(S) URL")
+                return errors + keyErrors()
+            }
+            let normalizedScheme = scheme.lowercased()
+            let isLoopback = Self.isAllowedLoopbackHost(host)
+            if normalizedScheme == "http" {
+                if !(localLoopbackAllowed && isLoopback) {
+                    errors.append("HERMES_BASE_URL must use https:// unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 targets localhost/127.0.0.1 in local mode")
+                }
+            } else if normalizedScheme != "https" {
+                errors.append("HERMES_BASE_URL must use http:// or https://")
+            }
+            if Self.isMockHost(host) {
+                errors.append("HERMES_BASE_URL must not point at mock-hermes for external-hermes")
+            } else if Self.isLocalOrMockHost(host) && !(localLoopbackAllowed && isLoopback) {
+                errors.append("HERMES_BASE_URL must not point at localhost for external-hermes unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 in local mode")
+            }
+        }
+        errors += keyErrors()
+        return errors
+    }
+
+    private func keyErrors() -> [String] {
+        if hermesAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return ["HERMES_API_KEY is missing"]
+        }
+        if Self.isUnsafeSecret(hermesAPIKey) {
+            return ["HERMES_API_KEY uses a placeholder/dev value"]
+        }
+        return []
+    }
+
+    static func requiresStrictExternalProvider(_ environmentName: String) -> Bool {
+        switch environmentName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "staging", "prod", "production", "internal-host":
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func isUnsafeSecret(_ value: String) -> Bool {
+        let lowered = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered.isEmpty { return true }
+        if ["password", "secret", "token", "default", "dev", "test", "staging", "prod", "production", "admin", "momo"].contains(lowered) {
+            return true
+        }
+        return lowered.contains("change-me")
+            || lowered.contains("changeme")
+            || lowered.contains("dev-insecure")
+            || lowered.contains("placeholder")
+            || lowered.contains("example")
+    }
+
+    static func isLocalOrMockHost(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        return lowered == "localhost"
+            || lowered == "127.0.0.1"
+            || lowered == "0.0.0.0"
+            || lowered == "::1"
+            || lowered.contains("mock")
+    }
+
+    static func isAllowedLoopbackHost(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        return lowered == "localhost"
+            || lowered == "127.0.0.1"
+            || lowered == "::1"
+    }
+
+    static func isMockHost(_ host: String) -> Bool {
+        host.lowercased().contains("mock")
+    }
+
+    static func boolFlag(_ raw: String?) -> Bool {
+        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "1", "true", "yes", "on":
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func redactedEndpointLabel(_ raw: String) -> String {
+        guard var components = URLComponents(string: raw), let host = components.host else {
+            return raw.isEmpty ? "not configured" : "invalid url"
+        }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        let scheme = components.scheme.map { "\($0)://" } ?? ""
+        let port = components.port.map { ":\($0)" } ?? ""
+        let path = components.path.isEmpty ? "" : components.path
+        return "\(scheme)\(host)\(port)\(path)"
+    }
+}
+
+struct AgentProviderConfigurationError: Error, CustomStringConvertible {
+    let errors: [String]
+
+    var description: String {
+        "invalid Kim Intern/Hermes provider config: \(errors.joined(separator: "; "))"
     }
 }

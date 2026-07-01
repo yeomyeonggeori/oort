@@ -1,11 +1,10 @@
 # momo — iOS TestFlight / App Store 릴리스.
 # ⚠️ 검수 게이트(docs/cicd/03-store-readiness-gate.md) PASS 후에만 실행.
-# 트리거: v* 태그 푸시 또는 수동 dispatch(lane 선택).
+# 2026-06-26: GitHub Actions는 조직 과금/결제 이슈가 해소될 때까지 수동 전용이다.
+# v* 태그 푸시는 release를 자동 실행하지 않는다. M7 PASS + owner approval 뒤 수동 dispatch만 허용한다.
 name: release-ios
 
 on:
-  push:
-    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
       lane:

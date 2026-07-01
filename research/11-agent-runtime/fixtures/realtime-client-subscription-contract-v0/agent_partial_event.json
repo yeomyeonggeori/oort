@@ -1,0 +1,26 @@
+{
+  "fixture_id": "realtime_client_subscription_contract_v0_agent_partial_event",
+  "ticket": "MOMO-179",
+  "channel": "agent:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000102",
+  "envelope": {
+    "type": "agent.partial",
+    "v": 1,
+    "ts": 1782463290000,
+    "payload": {
+      "run_id": "00000000-0000-7000-8000-000000000161",
+      "channel_id": "00000000-0000-7000-8000-000000000010",
+      "message_id": "00000000-0000-7000-8000-000000000181",
+      "text_delta": "Searching repository issues...",
+      "tool_call_name": "github.search_issues",
+      "tool_call_args": {
+        "repo": "Dawn-kim-official/momo",
+        "query": "realtime subscription"
+      },
+      "spent_micro_usd": 2100
+    }
+  },
+  "maps_to": {
+    "momo_core": "RealtimeEnvelope.decodeEvent() -> RealtimeEvent.agentPartial(AgentPartial)",
+    "macos": "ChatViewModel.coalesce by run_id; not used for channel seq ordering"
+  }
+}

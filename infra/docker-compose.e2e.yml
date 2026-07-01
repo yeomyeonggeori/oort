@@ -1,0 +1,205 @@
+# MOMO-186 deterministic local e2e stack.
+#
+# This compose file is intentionally separate from:
+#   - infra/docker-compose.yml              dev PG18 + Centrifugo for local iteration
+#   - infra/prod/docker-compose.prod.yml    image-based staging/prod skeleton
+#
+# Purpose:
+#   Local gate boundary for API/relay/worker/mock-Hermes/Postgres/Centrifugo.
+#   It may use the source checkout and local Swift builds; prod compose must not.
+#
+# Static validation:
+#   docker compose --env-file .env.worktree -f infra/docker-compose.e2e.yml config
+
+x-e2e-common-env: &e2e-common-env
+  POSTGRES_DB: ${POSTGRES_DB:-momo}
+  POSTGRES_USER: ${POSTGRES_USER:-momo}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+  CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
+  CENT_API_KEY: ${CENT_API_KEY:-change-me-cent-api-key}
+  JWT_HMAC: ${JWT_HMAC:-change-me-jwt-hmac}
+  HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+
+x-source-mount: &source-mount
+  type: bind
+  source: ..
+  target: /workspace
+  read_only: true
+
+services:
+  postgres:
+    image: postgres:18
+    restart: "no"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-momo}
+      POSTGRES_USER: ${POSTGRES_USER:-momo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - e2e-pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-momo} -d ${POSTGRES_DB:-momo}"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  centrifugo:
+    image: centrifugo/centrifugo:v6
+    restart: "no"
+    command: centrifugo --config=/centrifugo/centrifugo.json
+    environment:
+      CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
+      CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY:-change-me-cent-api-key}
+    ports:
+      - "${CENT_PORT:-8000}:8000"
+    volumes:
+      - ./centrifugo.json:/centrifugo/centrifugo.json:ro
+    healthcheck:
+      test: ["CMD", "centrifugo", "healthcheck", "--config=/centrifugo/centrifugo.json"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  mock-hermes:
+    image: python:3.12-slim
+    restart: "no"
+    working_dir: /workspace
+    command: ["python3", "scripts/mock_hermes.py", "--host", "0.0.0.0", "--port", "8088"]
+    ports:
+      - "${HERMES_PORT:-8088}:8088"
+    volumes:
+      - *source-mount
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8088/health\", timeout=2).read()'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
+  migrate:
+    image: postgres:18
+    restart: "no"
+    working_dir: /workspace
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-momo}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-momo}
+    command: ["sh", "-lc", "sh scripts/migrate.sh"]
+    volumes:
+      - *source-mount
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  db-roles:
+    image: postgres:18
+    restart: "no"
+    working_dir: /workspace
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-momo}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-momo}
+    command: ["sh", "-lc", "psql \"$$DATABASE_URL\" -v ON_ERROR_STOP=1 -f infra/e2e/bootstrap_roles.sql"]
+    volumes:
+      - *source-mount
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  api:
+    image: swift:6.2
+    restart: "no"
+    init: true
+    working_dir: /workspace
+    command:
+      [
+        "bash",
+        "-lc",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src && cp -R /workspace/server /tmp/momo-src/server && cd /tmp/momo-src && swift run --package-path server --scratch-path /tmp/momo-swiftpm/server MomoServer",
+      ]
+    environment:
+      <<: *e2e-common-env
+      HOST: 0.0.0.0
+      PORT: 8080
+      DATABASE_URL: postgres://momo_app:momo_app_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
+      CENT_API_URL: http://centrifugo:8000/api
+      HERMES_BASE_URL: http://mock-hermes:8088/v1
+      HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - *source-mount
+      - api-swiftpm:/tmp/momo-swiftpm/server
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      centrifugo:
+        condition: service_healthy
+      mock-hermes:
+        condition: service_healthy
+
+  relay:
+    image: swift:6.2
+    restart: "no"
+    init: true
+    working_dir: /workspace
+    command:
+      [
+        "bash",
+        "-lc",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/relay && cp -R /workspace/relay/OutboxRelay /tmp/momo-src/relay/OutboxRelay && cd /tmp/momo-src && swift run --package-path relay/OutboxRelay --scratch-path /tmp/momo-swiftpm/relay OutboxRelay",
+      ]
+    environment:
+      <<: *e2e-common-env
+      RELAY_DATABASE_URL: postgres://momo_relay:momo_relay_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
+      CENT_API_URL: http://centrifugo:8000/api
+      RELAY_POLL_INTERVAL_MS: ${RELAY_POLL_INTERVAL_MS:-100}
+    volumes:
+      - *source-mount
+      - relay-swiftpm:/tmp/momo-swiftpm/relay
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      centrifugo:
+        condition: service_healthy
+
+  worker:
+    image: swift:6.2
+    restart: "no"
+    init: true
+    working_dir: /workspace
+    command:
+      [
+        "bash",
+        "-lc",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers /tmp/momo-src/clients && cp -R /workspace/workers/AgentWorker /tmp/momo-src/workers/AgentWorker && cp -R /workspace/clients/Core /tmp/momo-src/clients/Core && cd /tmp/momo-src && swift run --package-path workers/AgentWorker --scratch-path /tmp/momo-swiftpm/worker AgentWorker",
+      ]
+    environment:
+      <<: *e2e-common-env
+      RELAY_DATABASE_URL: postgres://momo_worker:momo_worker_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
+      CENT_API_URL: http://centrifugo:8000/api
+      HERMES_BASE_URL: http://mock-hermes:8088/v1
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-100}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
+    volumes:
+      - *source-mount
+      - worker-swiftpm:/tmp/momo-swiftpm/worker
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      centrifugo:
+        condition: service_healthy
+      mock-hermes:
+        condition: service_healthy
+
+volumes:
+  e2e-pgdata:
+  api-swiftpm:
+  relay-swiftpm:
+  worker-swiftpm:

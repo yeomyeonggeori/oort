@@ -1,0 +1,91 @@
+# MOMO-216 internal single-node hosting smoke override.
+#
+# Use with:
+#   docker compose --env-file infra/prod/internal-smoke.env.example \
+#     -f infra/prod/docker-compose.prod.yml \
+#     -f infra/prod/docker-compose.internal-smoke.yml config
+#
+# This override keeps api/relay/worker/migrate/mock-hermes image-based. Local
+# smoke points those images at locally built tags, but production hosts must pull
+# pinned registry images and must not build from a source checkout.
+
+name: ${COMPOSE_PROJECT_NAME:-momo-internal-smoke}
+
+services:
+  caddy:
+    ports:
+      - "${HTTP_PORT:-18080}:80"
+      - "${HTTPS_PORT:-18443}:443"
+      - "${HTTPS_PORT:-18443}:443/udp"
+
+  api:
+    image: ${MOMO_API_IMAGE:-momo-api:internal-smoke}
+    pull_policy: never
+    environment:
+      DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  relay:
+    image: ${MOMO_RELAY_IMAGE:-momo-outbox-relay:internal-smoke}
+    pull_policy: never
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    image: ${MOMO_WORKER_IMAGE:-momo-agent-worker:internal-smoke}
+    pull_policy: never
+    environment:
+      RELAY_DATABASE_URL: ${WORKER_DATABASE_URL:?set WORKER_DATABASE_URL}
+      HERMES_BASE_URL: ${HERMES_BASE_URL:-http://mock-hermes:8088/v1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      mock-hermes:
+        condition: service_healthy
+
+  migrate:
+    image: ${MOMO_MIGRATE_IMAGE:-momo-migrate:internal-smoke}
+    pull_policy: never
+    restart: "no"
+    environment:
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
+      MOMO_BOOTSTRAP_RUNTIME_ROLES: ${MOMO_BOOTSTRAP_RUNTIME_ROLES:-1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - private
+
+  mock-hermes:
+    image: ${MOMO_MOCK_HERMES_IMAGE:-momo-mock-hermes:internal-smoke}
+    pull_policy: never
+    restart: "no"
+    environment:
+      HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+    networks:
+      - private
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8088/health\", timeout=2).read()'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s

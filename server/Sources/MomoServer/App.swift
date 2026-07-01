@@ -33,29 +33,56 @@ enum AppBuilder {
         let router = Router(context: AppRequestContext.self)
         router.add(middleware: LogRequestsMiddleware(.info))
 
-        // Public routes (no auth): health, login, centrifugo subscribe proxy.
+        // Public routes (no auth): health, login, join, centrifugo subscribe proxy.
         router.get("/health") { _, _ -> HealthResponse in
-            HealthResponse(status: "ok", service: "MomoServer")
+            HealthResponse(
+                status: "ok",
+                service: "MomoServer",
+                agentRuntime: config.agentProvider.statusResponse()
+            )
         }
-        AuthRoutes(db: db, jwt: jwt).add(to: router)
+        router.get("/v1/agent-runtime/status") { _, _ -> AgentRuntimeStatusResponse in
+            config.agentProvider.statusResponse()
+        }
+        let authRoutes = AuthRoutes(
+            db: db,
+            jwt: jwt,
+            platformAdminEmails: config.platformAdminEmails,
+            platformAdminLoginSecret: config.platformAdminLoginSecret
+        )
+        authRoutes.add(to: router)
+        JoinRoutes(db: db, jwt: jwt).add(to: router)
         CentrifugoRoutes(db: db).add(to: router)
 
         // Protected routes (require valid access token) — mounted in a group that
         // applies AuthMiddleware. The message read/write path lives here.
         let authed = router.group()
             .add(middleware: AuthMiddleware(jwt: jwt))
+        authRoutes.addProtected(to: authed)
         MessageRoutes(db: db).add(to: authed)
+        RosterRoutes(db: db).add(to: authed)
+        ChannelRoutes(db: db).add(to: authed)
+        CostProjectionRoutes(db: db).add(to: authed)
+        ApprovalDecisionRoutes(db: db).add(to: authed)
+        InviteRoutes(db: db).add(to: authed)
+        InboundMCPRoutes(db: db).add(to: authed)
+        PlatformAdminRoutes(db: db).add(to: authed)
 
         // ---- Application ----
         // The PostgresClient is a ServiceLifecycle.Service; hand it to the app's
         // ServiceGroup so its run() drives the pool and shuts down gracefully.
+        var services: [any Service] = [db.client]
+        if let platformReadClient = db.platformReadClient {
+            services.append(platformReadClient)
+        }
+
         var app = Application(
             router: router,
             configuration: .init(
                 address: .hostname(config.host, port: config.port),
                 serverName: "MomoServer"
             ),
-            services: [db.client],
+            services: services,
             logger: logger
         )
 

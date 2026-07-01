@@ -238,9 +238,39 @@ compose_cmd() {
 log_command_line() {
   printf '$'
   for arg in "$@"; do
-    printf ' %s' "$arg"
+    printf ' %s' "$(redact_command_arg "$arg")"
   done
   printf '\n'
+}
+
+redact_command_arg() {
+  arg=$1
+  case "$arg" in
+    *=*)
+      key=${arg%%=*}
+      value=${arg#*=}
+      upper_key=$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')
+      case "$upper_key" in
+        *PASSWORD*|*SECRET*|*TOKEN*|*KEY*|*HMAC*|*DATABASE_URL*)
+          if [ "$value" = "" ]; then
+            printf '%s=' "$key"
+          else
+            printf '%s=<set:redacted>' "$key"
+          fi
+          return
+          ;;
+        *URL*)
+          printf '%s=%s' "$key" "$(redact_url "$value")"
+          return
+          ;;
+      esac
+      ;;
+  esac
+
+  case "$arg" in
+    *://*@*) redact_url "$arg" ;;
+    *) printf '%s' "$arg" ;;
+  esac
 }
 
 run_cmd() {

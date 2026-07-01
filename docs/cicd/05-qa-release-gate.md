@@ -43,7 +43,8 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
                     │  G-0 런타임 e2e   G-A 크래시-free율        │
                     │  G-B 핵심플로우 e2e   G-C 접근성           │
                     │  G-D 성능   G-E 베타(TestFlight+공증빌드)  │
-                    │  G-F 베타 피드백 트리아지   G-G 릴리스준비 │
+                    │  G-F 베타 피드백   G-G 릴리스준비          │
+                    │  G-H Enterprise Trust evidence             │
                     └─────────────────────────────────────────┘
                        │ PASS(상단에 날짜+커밋해시 기록) 후에만 ↓
               ┌────────┴────────┐
@@ -52,7 +53,7 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
    (release-macos.yml)    (release-ios.yml)
 ```
 
-**불변식(절대 규칙):** G-A~G-G 전부 PASS(증거 첨부) 전에는 `release-macos.yml`/`release-ios.yml`(notarize 직접배포 / `deliver` App Store 제출)를 **트리거하지 않는다.** CI는 게이트 전까지 `build+test`와 베타(TestFlight/공증빌드) 업로드까지만 돈다.
+**불변식(절대 규칙):** G-A~G-H 전부 PASS(증거 첨부) 전에는 `release-macos.yml`/`release-ios.yml`(notarize 직접배포 / `deliver` App Store 제출)를 **트리거하지 않는다.** CI는 게이트 전까지 `build+test`와 베타(TestFlight/공증빌드) 업로드까지만 돈다.
 
 > ⚠️ TestFlight 업로드(베타) 자체는 게이트의 **수단**이지 스토어 제출이 아니다. 즉 `pilot`(TestFlight) 업로드는 게이트 진행 중 허용, `deliver`(App Store 제출 `submit_for_review:true`)는 게이트 PASS 후. macOS는 공증된 .dmg를 **비공개 채널로** 베타 배포(게이트 중) → PASS 후 공개 다운로드.
 
@@ -70,6 +71,7 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
 | **G-F** 베타 피드백 | 결함 회수 | 베타 피드백 전수 트리아지, **P0/P1 잔여 0** | App Store Connect 피드백 + ASC API 수집 | 수동 + 스크립트 | (검증됨) |
 | **G-G** 릴리스 준비 | 제출 요건 | 스토어 메타/프라이버시/암호화 신고/버전·빌드번호 체크리스트 100% | `precheck`/`deliver --verify` + 수동 | 자동 + 수동 | (검증됨) |
 | **G-0** 런타임 e2e | 백엔드 왕복 | 03 §G-0 (서버↔PG18↔Centrifugo↔hermes 1왕복) | docker e2e | 수동/runtime | (선결, STATUS.md §5) |
+| **G-H** Enterprise Trust | 보안/공급망/감사 신뢰 | threat model + SBOM/license scan + secret scanning + VDP/pentest plan + security whitepaper draft | local gate evidence + 수동 리뷰 | 자동 + 수동 | (설계, MOMO-140) |
 
 > 임계값(99.5%/2s 등)은 **출시 게이트 디폴트(추정)** 다. 표본이 작은 자체구축 내부 도구이므로 **표본 충분성**(아래 §2.4)이 수치만큼 중요하다. 팀이 더 빡세게/느슨하게 조정 시 이 표의 값을 바꾸고 사유를 게이트 PASS 기록에 남긴다.
 
@@ -160,6 +162,12 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
 ## 8. G-G 릴리스 준비 체크리스트 → §9
 - 메타데이터/프라이버시/암호화 신고/버전·빌드번호/스크린샷·아이콘 = `precheck`/`deliver --verify`로 사전검증 + 수동.
 
+## 8a. G-H Enterprise Trust evidence
+- threat model, data flow, deployment hardening guide, agent execution ledger 설명을 security whitepaper 초안으로 묶는다.
+- SBOM, dependency license scan, secret scanning, local gate evidence를 release evidence에 포함한다.
+- external pentest, vulnerability disclosure policy, SOC2 Type I/II, ISO27001, CSA STAR, ISMS-P는 단계별 로드맵과 책임자를 기록한다.
+- 상세 티켓: `MOMO-140`. 연구 정본: `research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`.
+
 ---
 
 ## 9. 릴리스 준비 체크리스트 (G-G, 제출 직전 — 공통/플랫폼별)
@@ -189,7 +197,7 @@ M0 런타임 검증 ── M1 v0 데모(D/B/C) ── M2 멀티팀/테넌시
 ---
 
 ## 10. 게이트 PASS 판정 & 기록 (감사 가능)
-PASS 조건: **G-0, G-A~G-G 전부 체크 + 증거 첨부.** PASS 시 `docs/cicd/03-store-readiness-gate.md` 상단에 아래 블록 기록:
+PASS 조건: **G-0, G-A~G-H 전부 체크 + 증거 첨부.** PASS 시 `docs/cicd/03-store-readiness-gate.md` 상단에 아래 블록 기록:
 
 ```
 GATE PASS: 2026-MM-DD · commit <sha> · 빌드 iOS <build#> / macOS <build#>
@@ -200,6 +208,7 @@ GATE PASS: 2026-MM-DD · commit <sha> · 빌드 iOS <build#> / macOS <build#>
 - G-E 베타: iOS TF 내부+외부 1왕복 / macOS 공증.dmg 타맥 Gatekeeper PASS
 - G-F 피드백: 전수 트리아지 N건, P0/P1 잔여 0
 - G-G 릴리스준비: 9.1~9.3 체크리스트 100%
+- G-H Enterprise Trust: threat model/SBOM/license/secret scan/VDP-pentest plan/security whitepaper evidence
 판정자: <name> · 다음 단계: M4/M5 release 워크플로우 활성 허용
 ```
 

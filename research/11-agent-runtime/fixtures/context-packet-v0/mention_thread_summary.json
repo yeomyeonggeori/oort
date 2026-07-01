@@ -1,0 +1,258 @@
+{
+  "schema": "momo.context_packet.v0",
+  "packet_id": "11111111-1111-4111-8111-111111111151",
+  "packet_version": 1,
+  "created_at": "2026-06-25T09:00:00Z",
+  "expires_at": "2026-06-25T09:15:00Z",
+  "workspace": {
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+    "slug": "acme",
+    "name": "Acme"
+  },
+  "request": {
+    "request_id": "22222222-2222-4222-8222-222222221151",
+    "surface": "mention",
+    "actor_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+    "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb00a1",
+    "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+    "trigger_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0105",
+    "thread_root_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0100",
+    "idempotency_key": "33333333-3333-4333-8333-333333331151",
+    "raw_text": "@momo summarize this launch thread and draft the customer update.",
+    "normalized_intent": "summarize_thread_and_draft_update",
+    "client_context": {
+      "platform": "macos",
+      "app_version": "0.1-dev"
+    }
+  },
+  "scope": {
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+    "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+    "thread_root_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0100",
+    "visibility": "thread",
+    "seq_window": {
+      "from": 97,
+      "to": 105,
+      "reason": "thread_root_plus_recent_replies"
+    },
+    "permission_basis": [
+      "actor_is_workspace_member",
+      "actor_is_channel_member",
+      "agent_is_channel_member",
+      "google_drive_source_grant:read",
+      "workspace_tool_policy:v2026-06-25"
+    ],
+    "rls_context": {
+      "set_local_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001"
+    }
+  },
+  "goal": {
+    "summary": "Summarize a launch thread and draft a customer-facing update.",
+    "user_prompt": "@momo summarize this launch thread and draft the customer update.",
+    "constraints": [
+      "Use only cited thread messages and approved Drive excerpts.",
+      "Do not reveal internal owner email addresses.",
+      "Ask for approval before creating a GitHub issue or external ticket."
+    ],
+    "desired_outputs": [
+      "timeline_reply",
+      "draft_update"
+    ],
+    "non_goals": [
+      "Do not send email.",
+      "Do not create external tickets without approval."
+    ],
+    "acceptance_hint": "Reply with a short summary, risks, and a draft update."
+  },
+  "participants": [
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+      "kind": "human",
+      "handle": "dawn",
+      "display_name": "Dawn",
+      "role": "actor"
+    },
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0002",
+      "kind": "human",
+      "handle": "min",
+      "display_name": "Min",
+      "role": "thread_participant"
+    },
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb00a1",
+      "kind": "agent",
+      "handle": "momo",
+      "display_name": "momo",
+      "role": "target_agent"
+    }
+  ],
+  "recent_messages": [
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0100",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+      "seq": 97,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+      "type": "text",
+      "body": "Launch is ready if we can land the pricing FAQ by Friday.",
+      "source_id": "src_thread_root"
+    },
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0102",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+      "seq": 101,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0002",
+      "type": "text",
+      "body": "Support needs the refund wording and escalation owner [redacted-email-1].",
+      "source_id": "src_support_reply"
+    },
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0105",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+      "seq": 105,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+      "type": "text",
+      "body": "@momo summarize this launch thread and draft the customer update.",
+      "source_id": "src_trigger"
+    }
+  ],
+  "memory_refs": [
+    {
+      "memory_id": "mem_decision_launch_tone",
+      "type": "decision",
+      "visibility": "workspace",
+      "source_ids": [
+        "src_drive_launch_brief"
+      ],
+      "excerpt": "Customer launch updates should be direct, low-hype, and cite known limitations.",
+      "reason_included": "Applies to customer-facing launch copy.",
+      "expires_at": "2026-09-30T00:00:00Z",
+      "delete_path": "workspace_admin_memory_delete",
+      "permission_snapshot": "actor:read"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "src_thread_root",
+      "kind": "message",
+      "title": "Launch thread root",
+      "uri": "momo://workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001/channels/cccccccc-cccc-4ccc-8ccc-cccccccc0001/messages/dddddddd-dddd-4ddd-8ddd-dddddddd0100",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read",
+      "retrieved_at": "2026-06-25T09:00:00Z",
+      "excerpt": "Launch is ready if we can land the pricing FAQ by Friday."
+    },
+    {
+      "source_id": "src_support_reply",
+      "kind": "message",
+      "title": "Support reply",
+      "uri": "momo://workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001/channels/cccccccc-cccc-4ccc-8ccc-cccccccc0001/messages/dddddddd-dddd-4ddd-8ddd-dddddddd0102",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read",
+      "retrieved_at": "2026-06-25T09:00:00Z",
+      "excerpt": "Support needs the refund wording and escalation owner [redacted-email-1]."
+    },
+    {
+      "source_id": "src_drive_launch_brief",
+      "kind": "google_drive",
+      "title": "Launch brief",
+      "uri": "https://docs.google.com/document/d/launch-brief",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read:file:launch-brief",
+      "retrieved_at": "2026-06-25T08:59:45Z",
+      "excerpt": "Customer launch updates should be direct, low-hype, and cite known limitations.",
+      "checksum": "sha256:fixture-launch-brief"
+    }
+  ],
+  "tool_grants": [
+    {
+      "tool_name": "docs.search",
+      "provider": "momo",
+      "grant": "read",
+      "risk": "read",
+      "approval_policy": "none",
+      "allowed_operations": [
+        "search_sources",
+        "fetch_source_excerpt"
+      ],
+      "denied_operations": [
+        "fetch_full_private_doc"
+      ],
+      "input_schema_ref": "momo://capability-cache/docs.search/schemas/input/sha256:docssearchv1",
+      "capability_version": "momo-docs@0.1.0",
+      "policy_version": "workspace-policy@2026-06-25"
+    },
+    {
+      "tool_name": "github.create_issue",
+      "provider": "github",
+      "grant": "propose",
+      "risk": "write",
+      "approval_policy": "always",
+      "allowed_operations": [
+        "create_issue"
+      ],
+      "denied_operations": [
+        "delete_repo",
+        "modify_branch_protection"
+      ],
+      "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+      "resource_scope_ref": "momo://capability-cache/github.create_issue/resource-scopes/sha256:githubrepoallowmomo",
+      "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo",
+      "capability_version": "github-plugin@0.3.0",
+      "policy_version": "workspace-policy@2026-06-25"
+    }
+  ],
+  "budget": {
+    "budget_id": "budget_launch_thread",
+    "model_route": "hybrid",
+    "max_prompt_tokens": 6000,
+    "max_completion_tokens": 1200,
+    "reserved_micro_usd": 22000,
+    "soft_limit_micro_usd": 50000,
+    "hard_limit_micro_usd": 100000,
+    "approval_required_over_micro_usd": 50000,
+    "usage_ledger_mode": "reserve_reconcile"
+  },
+  "redactions": [
+    {
+      "redaction_id": "red_email_001",
+      "kind": "pii_email",
+      "placeholder": "[redacted-email-1]",
+      "applied_to": [
+        "recent_messages[1].body",
+        "sources[src_support_reply].excerpt"
+      ],
+      "reason": "default_pii_policy"
+    }
+  ],
+  "runtime_envelope": {
+    "transport": "openai_chat_completions_sse",
+    "endpoint": "/v1/chat/completions",
+    "stream": true,
+    "metadata": {
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0001",
+      "run_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee1151",
+      "context_packet_id": "11111111-1111-4111-8111-111111111151",
+      "idempotency_key": "33333333-3333-4333-8333-333333331151"
+    },
+    "messages_strategy": "system_summary_plus_context_json",
+    "forbidden_runtime_inputs": [
+      "database_url",
+      "provider_refresh_token",
+      "raw_cross_channel_history",
+      "unredacted_secret"
+    ]
+  },
+  "audit": {
+    "policy_version": "workspace-policy@2026-06-25",
+    "capability_versions": [
+      "momo-docs@0.1.0",
+      "github-plugin@0.3.0"
+    ],
+    "source_grant_versions": [
+      "google-drive-oauth-grant@2026-06-25"
+    ],
+    "builder": "momo-context-broker-v0"
+  }
+}

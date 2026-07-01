@@ -1,0 +1,577 @@
+#!/usr/bin/env bash
+# Local PR gate runner for the GitHub Actions disabled/manual-only period.
+# shellcheck disable=SC2016
+set -u -o pipefail
+
+PROFILE="docs"
+OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all
+
+Options:
+  --profile PROFILE   Gate profile to run. Default: docs
+  --output-dir DIR    Directory for log/evidence files. Default: $TMPDIR/momo-local-gate
+  -h, --help          Show this help.
+
+Environment:
+  LOCAL_GATE_OUT_DIR      Override evidence output directory.
+  LOCAL_GATE_LAUNCH_UI=1  In macos-ui/local-alpha/all, launch MomoMacDevApp instead of smoke only.
+                          Required by internal-alpha.
+  LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
+  LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks.
+  DEVELOPER_DIR           Defaults to /Applications/Xcode.app/Contents/Developer for Swift gates.
+  ENV_FILE                Optional runtime env file consumed by Makefile/runtime scripts.
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --profile)
+      PROFILE="${2:-}"
+      shift 2
+      ;;
+    --output-dir)
+      OUT_DIR="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
+      PROFILE="$1"
+      shift
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+case "$PROFILE" in
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all) ;;
+  *)
+    echo "unknown profile: $PROFILE" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "scripts/local_gate.sh must run inside a git repository" >&2
+  exit 1
+fi
+cd "$REPO_ROOT" || exit 1
+
+mkdir -p "$OUT_DIR" || exit 1
+STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
+START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+RUN_NANOS="$(
+  python3 - <<'PY' 2>/dev/null || date -u +"%s000000000"
+import time
+print(time.time_ns())
+PY
+)"
+WORKTREE_HASH="$(
+  printf '%s' "$REPO_ROOT" | shasum -a 256 2>/dev/null | awk '{ print substr($1, 1, 12) }'
+)"
+if [ "$WORKTREE_HASH" = "" ]; then
+  WORKTREE_HASH="$(printf '%s' "$REPO_ROOT" | cksum | awk '{ print $1 }')"
+fi
+RUN_RANDOM="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -d '-' | cut -c1-12)"
+if [ "$RUN_RANDOM" = "" ]; then
+  RUN_RANDOM="$(LC_ALL=C tr -dc 'a-z0-9' < /dev/urandom 2>/dev/null | head -c 12)"
+fi
+if [ "$RUN_RANDOM" = "" ]; then
+  RUN_RANDOM="$(date -u +"%s")"
+fi
+RUN_ID="${STAMP}-pid$$-ns${RUN_NANOS}-wt${WORKTREE_HASH}-r${RUN_RANDOM}"
+LOG_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.log"
+EVIDENCE_FILE="$OUT_DIR/local-gate-${PROFILE}-${RUN_ID}.md"
+export LOCAL_GATE_OUTPUT_DIR="$OUT_DIR"
+export LOCAL_GATE_RUN_ID="$RUN_ID"
+export LOCAL_GATE_LOCAL_ALPHA_DIR="$OUT_DIR/local-alpha-${RUN_ID}"
+export LOCAL_GATE_INTERNAL_ALPHA_DIR="$OUT_DIR/internal-alpha-${RUN_ID}"
+
+declare -a CMD_LABELS=()
+declare -a CMD_STRINGS=()
+declare -a CMD_STATUS=()
+declare -a RUNTIME_COVERAGE=()
+declare -a NOT_COVERED=()
+BOOTSTRAP_ADDED=0
+
+add_cmd() {
+  local label="$1"
+  local command="$2"
+  CMD_LABELS+=("$label")
+  CMD_STRINGS+=("$command")
+  CMD_STATUS+=("not-run")
+}
+
+add_cmd_once() {
+  local label="$1"
+  local command="$2"
+  local existing
+  for existing in "${CMD_STRINGS[@]:-}"; do
+    if [ "$existing" = "$command" ]; then
+      return 0
+    fi
+  done
+  CMD_LABELS+=("$label")
+  CMD_STRINGS+=("$command")
+  CMD_STATUS+=("not-run")
+}
+
+add_note_once() {
+  local target="$1"
+  local note="$2"
+  local existing
+  if [ "$target" = "coverage" ]; then
+    for existing in "${RUNTIME_COVERAGE[@]:-}"; do
+      [ "$existing" = "$note" ] && return 0
+    done
+    RUNTIME_COVERAGE+=("$note")
+  else
+    for existing in "${NOT_COVERED[@]:-}"; do
+      [ "$existing" = "$note" ] && return 0
+    done
+    NOT_COVERED+=("$note")
+  fi
+}
+
+add_static_commands() {
+  add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
+  add_cmd_once "diff whitespace" 'base="${LOCAL_GATE_BASE_REF:-origin/main}"; if git rev-parse --verify "$base" >/dev/null 2>&1; then git diff --check "$base"...HEAD; else echo "base ref $base unavailable; falling back to working tree whitespace checks"; fi; git diff --cached --check; git diff --check'
+  add_cmd_once "workflow yaml parse" "ruby -e 'require \"yaml\"; Dir[\".github/workflows/*.yml\"].sort.each { |f| YAML.load_file(f); puts f }'"
+  add_cmd_once "workflow lint" 'if command -v actionlint >/dev/null 2>&1; then actionlint .github/workflows/*.yml; else base="${LOCAL_GATE_BASE_REF:-origin/main}"; changed=""; if git rev-parse --verify "$base" >/dev/null 2>&1; then changed="$(git diff --name-only "$base"...HEAD -- .github/workflows/*.yml)"; else changed="$(git diff --name-only -- .github/workflows/*.yml)"; fi; if [ -n "$changed" ]; then echo "actionlint is not installed and workflow files changed:"; printf "%s\n" "$changed"; exit 1; fi; echo "actionlint not installed; workflow files unchanged; skipped"; fi'
+  add_cmd_once "e2e compose config" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; test -n "$env_file" || { echo "no env file found for e2e compose config"; exit 1; }; docker compose --env-file "$env_file" -f infra/docker-compose.e2e.yml config >/tmp/momo-compose-e2e-config.yml; echo "wrote /tmp/momo-compose-e2e-config.yml using $env_file"'
+  add_cmd_once "AWS internal alpha topology preflight" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/aws-internal-alpha-preflight"; scripts/aws_internal_alpha_preflight.sh --env-file infra/prod/aws-internal-alpha.env.example --mode recommended --evidence-dir "$out"'
+  add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/local_gate.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_agent_live_channel.sh scripts/verify_external_agent_provider.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
+}
+
+add_diagnostics_commands() {
+  add_cmd_once "diagnostics redaction smoke" "scripts/collect_diagnostics.sh --smoke"
+  add_note_once coverage "MOMO-224 diagnostics smoke: redaction removes database passwords, API keys, bearer/JWT-shaped tokens, accessToken JSON fields, and password fields before evidence is written."
+  add_note_once coverage "MOMO-224 diagnostics collector is best-effort and can emit a directory/tar bundle with markdown summary for server/relay/worker/Centrifugo/macOS/local-gate evidence when those logs exist."
+  add_note_once not_covered "The diagnostics smoke does not require live Docker services or a running macOS app; it verifies bundle tooling/redaction shape only."
+}
+
+add_swift_commands() {
+  add_cmd_once "swift build" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make build'
+  add_cmd_once "swift test" 'DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" make test'
+}
+
+add_staging_smoke_commands() {
+  add_cmd_once "staging smoke config verification" "scripts/verify_staging_smoke.sh"
+  add_cmd_once "internal single-node hosting smoke verification" "scripts/verify_internal_hosting_smoke.sh"
+  add_note_once coverage "MOMO-007 local/staging smoke: prod compose config, Caddyfile structure, Centrifugo Redis config, secret-template guard, and SOPS/pgBackRest checklist."
+  add_note_once coverage "MOMO-229 public host preflight: tracked staging placeholder env fails fast, synthetic public/staging env shape passes, and redacted prod-env-preflight-staging.md/json evidence covers DNS/TLS env, pinned registry image tags, SOPS/age or host-local secret source, named DB/Redis volumes, and pgBackRest WAL/full-backup/PITR required env."
+  add_note_once coverage "MOMO-216 internal single-node hosting smoke: prod compose + internal smoke override config, env template guard, Caddy/TLS static wiring, Centrifugo Redis engine, explicit migration path, API health route wiring, relay/worker enablement, and backup/restore placeholder boundary."
+  add_note_once not_covered "Real staging VPS URL/TLS, public TLS/DNS, registry image pull/run, SOPS production secret injection, pgBackRest stanza/check/full backup/PITR restore rehearsal, and external hermes staging connectivity remain runtime-unverified without host secrets/infrastructure."
+}
+
+add_host_runtime_commands() {
+  add_cmd_once "internal host-runtime smoke verification" "scripts/verify_internal_host_runtime.sh"
+  add_backup_commands
+  add_note_once coverage "MOMO-220/MOMO-227 host-runtime smoke: local api/relay/worker/migrate/mock-Hermes images are built, prod compose + internal-smoke overlay boots from images without source bind mounts, migration one-shot plus idempotent re-run succeeds, Caddy/internal /health returns 200, /v1/agent-runtime/status reports internal-host-mock/mock without provider secret leakage, REST login/message send publishes through OutboxRelay to Centrifugo history, and @김인턴 mock Hermes agent roundtrip publishes agent progress plus final channel message.new."
+  add_note_once not_covered "Public TLS/DNS, real registry pull, SOPS production secret injection, production pgBackRest stanza/check/full backup, WAL archive push, and time-target PITR restore remain runtime-unverified(public host)."
+}
+
+add_backup_commands() {
+  add_cmd_once "backup restore rehearsal verification" "scripts/verify_backup_restore_rehearsal.sh"
+  add_note_once coverage "MOMO-222 backup gate: repo-local PostgreSQL 18 source/restore containers verify pg_dump -> pg_restore into a separate non-primary target, compare marker count/checksum, and generate restore evidence markdown/json suitable for PR handoff."
+  add_note_once not_covered "Actual production pgBackRest stanza-create/check/full backup, WAL archive push, object-store repository, SOPS secret decrypt, and time-target PITR restore rehearsal remain runtime-unverified(public host)."
+}
+
+add_runtime_bootstrap_commands() {
+  if [ "$BOOTSTRAP_ADDED" -eq 1 ]; then
+    return 0
+  fi
+  add_cmd "docker compose up" "make up"
+  add_cmd "migrate first pass" "make migrate"
+  add_cmd "migrate idempotency pass" "make migrate"
+  BOOTSTRAP_ADDED=1
+}
+
+add_runtime_db_commands() {
+  add_runtime_bootstrap_commands
+  add_cmd "RLS runtime verification" "scripts/verify_rls.sh"
+  add_cmd "Workspace roster runtime verification" "scripts/verify_roster.sh"
+  add_cmd "Workspace channel list runtime verification" "scripts/verify_channel_list.sh"
+  add_cmd "Workspace channel management runtime verification" "scripts/verify_channel_management.sh"
+  add_cmd "Public join runtime verification" "scripts/verify_join.sh"
+  add_cmd "Platform admin read-only runtime verification" "scripts/verify_platform_admin.sh"
+  add_cmd "Approval decision endpoint runtime verification" "scripts/verify_approval_decision.sh"
+  add_note_once coverage "Docker compose, migration idempotency, RLS tenant isolation via scripts/verify_rls.sh, workspace roster tenant/member guard via scripts/verify_roster.sh, workspace channel list active membership/cross-workspace guard via scripts/verify_channel_list.sh, channel create + human/agent member add/remove + message send management path via scripts/verify_channel_management.sh, public /v1/join invite self-signup via scripts/verify_join.sh, platform-admin read-only cross-tenant inspection via scripts/verify_platform_admin.sh, and approval decision endpoint approve/reject/idempotency/expiry/membership via scripts/verify_approval_decision.sh."
+}
+
+add_runtime_relay_commands() {
+  add_runtime_bootstrap_commands
+  if [ -x scripts/verify_relay.sh ]; then
+    add_cmd "OutboxRelay runtime verification" "scripts/verify_relay.sh"
+    add_note_once coverage "OutboxRelay runtime verification via scripts/verify_relay.sh: Docker compose/migrate, server REST send, outbox pending, relay claim, Centrifugo history, outbox done, and version=message.seq evidence."
+  else
+    add_cmd "OutboxRelay runtime verification" "echo 'scripts/verify_relay.sh is not present; runtime-relay cannot produce PASS evidence until relay automation exists.'; exit 1"
+    add_note_once not_covered "Full OutboxRelay -> Centrifugo publish/history roundtrip is not automated yet; MOMO-002 manual path remains required when relay/realtime changes."
+  fi
+}
+
+add_runtime_host_api_cleanup_command() {
+  local label="${1:-Runtime host MomoServer cleanup}"
+  add_cmd "$label" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi; port="${PORT:-8080}"; if ! command -v lsof >/dev/null 2>&1; then echo "lsof unavailable; skip host MomoServer cleanup"; exit 0; fi; pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"; if [ -z "$pids" ]; then echo "no listener on port $port"; exit 0; fi; killed=""; for pid in $pids; do cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"; case "$cmd" in *MomoServer*) echo "stopping MomoServer listener pid=$pid port=$port"; kill "$pid" 2>/dev/null || true; killed="$killed $pid" ;; *) echo "leaving non-MomoServer listener pid=$pid port=$port command=$cmd" ;; esac; done; sleep 1; for pid in $killed; do if kill -0 "$pid" 2>/dev/null; then cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"; case "$cmd" in *MomoServer*) echo "force stopping MomoServer listener pid=$pid port=$port"; kill -9 "$pid" 2>/dev/null || true ;; esac; fi; done'
+}
+
+add_runtime_live_commands() {
+  add_runtime_bootstrap_commands
+  add_cmd "Realtime WebSocket live verification" "scripts/verify_realtime_live.sh"
+  add_note_once coverage "Realtime WebSocket live subscribe verification via scripts/verify_realtime_live.sh: Docker compose PostgreSQL/Centrifugo bootstrap, host MomoServer/OutboxRelay, compose-network api proxy for Centrifugo subscribe callbacks, demo login, /v1/auth/realtime-token, Centrifugo connect/subscribe, REST message send, live message.new publication, payload.message.seq evidence, and invalid connection token rejection."
+  add_note_once not_covered "This profile verifies the repo-local WebSocket protocol helper, not the future SwiftCentrifuge macOS adapter UX or APNs."
+}
+
+add_runtime_agent_commands() {
+  add_runtime_bootstrap_commands
+  add_cmd "AgentWorker runtime verification" "scripts/verify_agent_worker.sh"
+  add_cmd "Agent live channel verification" "scripts/verify_agent_live_channel.sh"
+  add_note_once coverage "REST @agent mention routing via scripts/verify_agent_worker.sh: same-channel @김인턴 POST /messages creates agent_run/agent_job, duplicate client_msg_id dedupes the job, non-channel agent mention records audit no-op, mock SSE returns agent.partial/tool_call progress on agent:, and OutboxRelay publishes final channel message.new."
+  add_note_once coverage "AgentWorker OpenAI-compatible SSE mock, D live tool_call progress with bounded args, cost reserve/reconcile, MomoServer cost-snapshots projection endpoint, and approved deterministic resume_approval -> final tool_result/message.new/audit/job-done via scripts/verify_agent_worker.sh."
+  add_note_once coverage "Agent live channel boundary via scripts/verify_agent_live_channel.sh: authorized member receives live agent.status/agent.partial on agent:ws<workspace>.<agent>, invalid token/same-workspace no-shared-channel member/other-workspace token are denied, and client direct publish is rejected."
+}
+
+add_external_agent_provider_commands() {
+  add_cmd "External Kim Intern/Hermes provider smoke" "scripts/verify_external_agent_provider.sh"
+  add_note_once coverage "MOMO-230/MOMO-236 opt-in external provider gate: when AGENT_PROVIDER_MODE=external-hermes plus HERMES_BASE_URL/HERMES_API_KEY are configured, scripts/verify_external_agent_provider.sh checks OpenAI-compatible SSE directly, boots local Postgres/Centrifugo + MomoServer/OutboxRelay/AgentWorker, verifies /v1/agent-runtime/status redacted availability, proves Kim Intern is an active invited agent member of #agent-lab, and sends one @김인턴 roundtrip through the external provider."
+  add_note_once coverage "MOMO-234/MOMO-238 credential boundary: momo app/API/DB/local-gate evidence never receive Codex/OpenAI OAuth tokens or GPT/OpenAI API keys; known Codex/OpenAI credential env vars fail fast and credentials remain provider-owned inside Hermes/Kim Intern."
+  add_note_once coverage "MOMO-238 local-only loopback contract: AGENT_PROVIDER_MODE=external-hermes may use http://127.0.0.1:<port>/v1 or http://localhost:<port>/v1 only with MOMO_ENV=local and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1; non-loopback HTTP and staging/prod/internal-host loopback fail fast."
+  add_note_once coverage "MOMO-230/MOMO-236 no-credential behavior: with default local/mock env, the verifier exits successfully with explicit runtime-unverified(external provider credentials) evidence, records the invite precondition expectation, and does not alter deterministic runtime-agent/internal-alpha gates."
+  add_note_once not_covered "The default runtime-agent profile remains repo-local mock Hermes only; real provider side effects are covered only by the external-agent-provider opt-in profile."
+}
+
+add_macos_ui_commands() {
+  add_cmd "macOS real-backend REST/UI smoke" "scripts/verify_macos_real_backend_ui.sh"
+  if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
+    add_note_once coverage "MomoMacDevApp launched against local Docker + host MomoServer with MOMO_SERVER_BASE_URL/MOMO_WORKSPACE_ID/MOMO_CHANNEL_ID env; REST login/channel list/history/send plus approval/cost fixture, process/window smoke, log capture, and termination are automated."
+  else
+    add_note_once coverage "MomoMac real-backend REST smoke via scripts/verify_macos_real_backend_ui.sh: Docker compose/migrate, MomoServer, REST login/channel list/history/send, and approval/cost structured history evidence."
+    add_note_once not_covered "MomoMacDevApp process/window launch is skipped by default; rerun with LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui for GUI process/window evidence."
+  fi
+}
+
+add_internal_alpha_commands() {
+  add_static_commands
+  add_cmd "internal alpha UI launch guard" 'test "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" || { echo "internal-alpha requires LOCAL_GATE_LAUNCH_UI=1 for MomoMacDevApp process/window evidence"; exit 1; }'
+  add_cmd "internal alpha packet directory" 'mkdir -p "${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"'
+  add_cmd "internal alpha host-runtime evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/host-runtime"; mkdir -p "$out"; LOCAL_GATE_OUT_DIR="$out" scripts/verify_internal_host_runtime.sh'
+  add_cmd "internal alpha backup restore evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/backup-restore"; mkdir -p "$out"; BACKUP_REHEARSAL_OUT_DIR="$out" scripts/verify_backup_restore_rehearsal.sh'
+  add_cmd "internal alpha macOS real-backend UI evidence" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/macos-real-backend"; mkdir -p "$out"; MACOS_REAL_BACKEND_OUT_DIR="$out" scripts/verify_macos_real_backend_ui.sh'
+  add_cmd "internal alpha diagnostics bundle" 'packet="${LOCAL_GATE_INTERNAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/internal-alpha-manual}"; out="$packet/diagnostics"; mkdir -p "$out"; scripts/collect_diagnostics.sh --output-dir "$out" --since 30m'
+  add_note_once coverage "MOMO-225 internal alpha combined local gate: creates one PR-ready packet with host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence, backup restore rehearsal evidence, MomoMacDevApp real-backend process/window evidence, and a redacted diagnostics bundle path."
+  add_note_once coverage "internal-alpha writes verifier artifacts under a run-specific packet directory below the local gate output directory: internal-alpha-<run-id>/{host-runtime,backup-restore,macos-real-backend,diagnostics}/, plus the top-level local-gate markdown/log."
+  add_note_once not_covered "Public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging connectivity, production pgBackRest stanza/check/full backup, WAL archive push, and time-target PITR remain runtime-unverified(public host)."
+}
+
+add_local_alpha_commands() {
+  add_static_commands
+  add_cmd "local alpha packet directory" 'mkdir -p "${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"'
+  add_cmd "local alpha host-runtime evidence" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/host-runtime"; mkdir -p "$out"; LOCAL_GATE_OUT_DIR="$out" scripts/verify_internal_host_runtime.sh'
+  add_cmd "local alpha backup restore evidence" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/backup-restore"; mkdir -p "$out"; BACKUP_REHEARSAL_OUT_DIR="$out" scripts/verify_backup_restore_rehearsal.sh'
+  add_cmd "local alpha macOS real-backend evidence" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/macos-real-backend"; mkdir -p "$out"; MACOS_REAL_BACKEND_OUT_DIR="$out" scripts/verify_macos_real_backend_ui.sh'
+  add_cmd "local alpha diagnostics bundle" 'packet="${LOCAL_GATE_LOCAL_ALPHA_DIR:-${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/local-alpha-manual}"; out="$packet/diagnostics"; mkdir -p "$out"; scripts/collect_diagnostics.sh --output-dir "$out" --since 30m'
+  add_note_once coverage "MOMO-237 local-alpha RC gate: creates one local Docker evidence packet with host-runtime image boot/health/migration idempotency/REST message/OutboxRelay publish/mock Kim Intern roundtrip, repo-local backup restore rehearsal, macOS real-backend smoke, and a redacted diagnostics bundle."
+  add_note_once coverage "local-alpha is AWS-free: it uses local Docker, local Swift packages, repo-local mock Hermes, and local diagnostics only. It does not call AWS APIs, create cloud resources, trigger release workflows, or require public DNS/TLS."
+  if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
+    add_note_once coverage "LOCAL_GATE_LAUNCH_UI=1 upgrades local-alpha macOS evidence to include MomoMacDevApp process/window/log launch against the local MomoServer."
+  else
+    add_note_once coverage "The default local-alpha profile keeps foreground GUI launch optional; rerun with LOCAL_GATE_LAUNCH_UI=1 for MomoMacDevApp process/window/log evidence."
+  fi
+  add_note_once not_covered "Public AWS/staging resources, public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging connectivity, production pgBackRest stanza/check/full backup, WAL archive push, time-target PITR, notarization, TestFlight, iOS/APNs, and M7 release gate PASS remain out of scope."
+}
+
+add_m3_dbc_commands() {
+  add_static_commands
+  add_swift_commands
+  add_runtime_bootstrap_commands
+  add_cmd "M3 D/B cost projection and tool-call runtime evidence" "scripts/verify_agent_worker.sh"
+  add_runtime_host_api_cleanup_command "Cleanup host MomoServer after D/B verifier"
+  add_cmd "M3 C approval decision runtime evidence" "scripts/verify_approval_decision.sh"
+  add_runtime_host_api_cleanup_command "Cleanup host MomoServer after C verifier"
+  add_macos_ui_commands
+  add_note_once coverage "M3 D evidence: repo-local OpenAI-compatible SSE mock emits agent.partial text plus tool_call_name/tool_call_args progress; AgentWorker reconciles to final tool_result/message.new with outbox version equal to message.seq."
+  add_note_once coverage "M3 B evidence: AgentWorker reserve/reconcile writes usage_ledger and budget_window, then MomoServer /cost-snapshots exposes the server-owned CostSnapshot projection consumed by MomoMac."
+  add_note_once coverage "M3 C evidence: /approvals pending projection, approve/reject, client_decision_id idempotency, conflict, expired click, channel membership guard, audit_log, and resume agent_job durable effects are verified."
+  add_note_once coverage "M3 macOS evidence: real-backend smoke verifies REST login/channel list/history/send plus approval/cost structured props; LOCAL_GATE_LAUNCH_UI=1 upgrades this profile to require MomoMacDevApp process/window/log evidence."
+  add_note_once coverage "MOMO-020 close-readiness: when this profile passes in the PR evidence, the old staging/Hermes wording can be closed under the MOMO-204 local-gate reinterpretation after review/merge; worker does not close #12."
+  add_note_once not_covered "External Hermes/staging provider side effects, M4 Xcode packaging/signing/notary, iOS/APNs, and agent: namespace production presence remain out of scope for MOMO-204."
+}
+
+case "$PROFILE" in
+  docs)
+    add_static_commands
+    add_note_once coverage "Static docs/CI validation only."
+    add_note_once not_covered "Swift build/test and runtime profiles not run for docs profile."
+    ;;
+  swift)
+    add_static_commands
+    add_swift_commands
+    add_note_once coverage "Static checks plus all Swift package build/test."
+    add_note_once not_covered "Docker runtime profiles not run for swift profile."
+    ;;
+  diagnostics)
+    add_static_commands
+    add_diagnostics_commands
+    ;;
+  staging-smoke)
+    add_static_commands
+    add_staging_smoke_commands
+    ;;
+  host-runtime)
+    add_static_commands
+    add_host_runtime_commands
+    ;;
+  backup)
+    add_static_commands
+    add_backup_commands
+    ;;
+  local-alpha)
+    add_local_alpha_commands
+    ;;
+  internal-alpha)
+    add_internal_alpha_commands
+    ;;
+  runtime-db)
+    add_static_commands
+    add_swift_commands
+    add_runtime_db_commands
+    ;;
+  runtime-relay)
+    add_static_commands
+    add_swift_commands
+    add_runtime_relay_commands
+    ;;
+  runtime-live)
+    add_static_commands
+    add_swift_commands
+    add_runtime_live_commands
+    ;;
+  runtime-agent)
+    add_static_commands
+    add_swift_commands
+    add_runtime_agent_commands
+    ;;
+  external-agent-provider)
+    add_static_commands
+    add_external_agent_provider_commands
+    ;;
+  macos-ui)
+    add_static_commands
+    add_swift_commands
+    add_macos_ui_commands
+    ;;
+  m3-dbc)
+    add_m3_dbc_commands
+    ;;
+  all)
+    add_static_commands
+    add_swift_commands
+    add_staging_smoke_commands
+    add_host_runtime_commands
+    add_runtime_db_commands
+    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after runtime DB verifiers"
+    add_runtime_relay_commands
+    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after relay verifier"
+    add_runtime_agent_commands
+    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after agent verifier"
+    add_macos_ui_commands
+    add_note_once not_covered "Realtime WebSocket live subscribe is isolated in scripts/local_gate.sh --profile runtime-live because it starts host API/relay processes plus a compose-network api proxy for Centrifugo subscribe callbacks."
+    ;;
+esac
+
+if [ "${#CMD_STRINGS[@]}" -eq 0 ]; then
+  echo "no commands planned for profile: $PROFILE" >&2
+  exit 1
+fi
+
+{
+  echo "momo local gate"
+  echo "profile: $PROFILE"
+  echo "run_id: $RUN_ID"
+  echo "repo: $REPO_ROOT"
+  echo "started_at_utc: $STAMP"
+  echo "log: $LOG_FILE"
+  echo "evidence: $EVIDENCE_FILE"
+  echo
+  echo "planned commands:"
+  local_i=0
+  while [ "$local_i" -lt "${#CMD_STRINGS[@]}" ]; do
+    printf '  %02d. %s: %s\n' "$((local_i + 1))" "${CMD_LABELS[$local_i]}" "${CMD_STRINGS[$local_i]}"
+    local_i=$((local_i + 1))
+  done
+  echo
+} | tee "$LOG_FILE"
+
+FAILED_INDEX=-1
+FAILED_CODE=0
+
+run_cmd() {
+  local index="$1"
+  local label="${CMD_LABELS[$index]}"
+  local command="${CMD_STRINGS[$index]}"
+  local code
+
+  {
+    echo
+    echo "==> [$((index + 1))/${#CMD_STRINGS[@]}] $label"
+    echo "\$ $command"
+  } | tee -a "$LOG_FILE"
+
+  set +e
+  bash -lc "$command" 2>&1 | tee -a "$LOG_FILE"
+  code=${PIPESTATUS[0]}
+  set +e
+
+  if [ "$code" -eq 0 ]; then
+    CMD_STATUS[index]="pass"
+    echo "PASS: $label" | tee -a "$LOG_FILE"
+  else
+    CMD_STATUS[index]="fail"
+    FAILED_INDEX="$index"
+    FAILED_CODE="$code"
+    echo "FAIL: $label (exit $code)" | tee -a "$LOG_FILE"
+    return "$code"
+  fi
+}
+
+idx=0
+while [ "$idx" -lt "${#CMD_STRINGS[@]}" ]; do
+  if ! run_cmd "$idx"; then
+    break
+  fi
+  idx=$((idx + 1))
+done
+
+END_STAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+BRANCH="$(git branch --show-current 2>/dev/null || echo detached)"
+DIRTY_COUNT="$(git status --porcelain 2>/dev/null | wc -l | tr -d '[:space:]')"
+MACHINE="$(hostname 2>/dev/null || echo unknown)"
+OS_INFO="$(sw_vers -productVersion 2>/dev/null || uname -sr)"
+SWIFT_INFO="$(swift --version 2>/dev/null | head -n 1 || echo 'swift unavailable')"
+XCODE_INFO="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//' || echo 'xcodebuild unavailable')"
+DOCKER_INFO="$(docker --version 2>/dev/null || echo 'docker unavailable')"
+if command -v psql >/dev/null 2>&1; then
+  PSQL_INFO="$(psql --version 2>/dev/null || echo 'psql unavailable')"
+elif [ -x /opt/homebrew/opt/libpq/bin/psql ]; then
+  PSQL_INFO="$(/opt/homebrew/opt/libpq/bin/psql --version 2>/dev/null || echo 'psql unavailable')"
+else
+  PSQL_INFO="psql unavailable"
+fi
+
+if [ "$FAILED_INDEX" -eq -1 ]; then
+  RESULT="PASS"
+else
+  RESULT="FAIL"
+fi
+
+write_evidence() {
+  local out="$1"
+  {
+    echo "## Local Gate"
+    echo "- Result: $RESULT"
+    echo "- Profile: \`$PROFILE\`"
+    echo "- Started: $START_ISO"
+    echo "- Finished: $END_STAMP"
+    echo "- Run ID: \`$RUN_ID\`"
+    echo "- Commit: \`$COMMIT\`"
+    echo "- Branch: \`$BRANCH\`"
+    echo "- Worktree: \`$REPO_ROOT\`"
+    echo "- Dirty files: \`$DIRTY_COUNT\`"
+    echo "- Evidence markdown: \`$EVIDENCE_FILE\`"
+    echo "- Evidence log: \`$LOG_FILE\`"
+    echo "- Machine/toolchain:"
+    echo "  - Host: \`$MACHINE\`"
+    echo "  - OS: \`$OS_INFO\`"
+    echo "  - Swift: \`$SWIFT_INFO\`"
+    echo "  - Xcode: \`$XCODE_INFO\`"
+    echo "  - Docker: \`$DOCKER_INFO\`"
+    echo "  - psql: \`$PSQL_INFO\`"
+    echo "- Commands:"
+    local i=0
+    while [ "$i" -lt "${#CMD_STRINGS[@]}" ]; do
+      case "${CMD_STATUS[$i]}" in
+        pass) marker="[x]" ;;
+        fail) marker="[ ]" ;;
+        *) marker="[ ]" ;;
+      esac
+      echo "  - $marker \`${CMD_STRINGS[$i]}\`"
+      i=$((i + 1))
+    done
+    echo "- Runtime coverage:"
+    if [ "${#RUNTIME_COVERAGE[@]}" -eq 0 ]; then
+      echo "  - None declared."
+    else
+      for note in "${RUNTIME_COVERAGE[@]}"; do
+        echo "  - $note"
+      done
+    fi
+    echo "- Not covered:"
+    if [ "${#NOT_COVERED[@]}" -eq 0 ]; then
+      echo "  - None."
+    else
+      for note in "${NOT_COVERED[@]}"; do
+        echo "  - $note"
+      done
+    fi
+    if [ "$FAILED_INDEX" -ne -1 ]; then
+      echo "- Failed command: \`${CMD_STRINGS[$FAILED_INDEX]}\`"
+      echo "- Failed exit code: \`$FAILED_CODE\`"
+    fi
+    if [ "$PROFILE" = "local-alpha" ] || [ "$PROFILE" = "internal-alpha" ]; then
+      if [ "$PROFILE" = "local-alpha" ]; then
+        packet_label="Local alpha artifact packet"
+        packet_dir="$LOCAL_GATE_LOCAL_ALPHA_DIR"
+      else
+        packet_label="Internal alpha artifact packet"
+        packet_dir="$LOCAL_GATE_INTERNAL_ALPHA_DIR"
+      fi
+      echo "- ${packet_label}:"
+      echo "  - packet: \`${packet_dir}\`"
+      for artifact_dir in host-runtime backup-restore macos-real-backend diagnostics; do
+        path="$packet_dir/$artifact_dir"
+        if [ -d "$path" ]; then
+          echo "  - ${artifact_dir}: \`$path\`"
+          find "$path" -maxdepth 2 -type f \( -name '*.md' -o -name '*.json' -o -name '*.log' -o -name '*.tar.gz' \) 2>/dev/null \
+            | sort \
+            | tail -n 20 \
+            | sed 's/^/    - `/' \
+            | sed 's/$/`/'
+        else
+          echo "  - ${artifact_dir}: not created"
+        fi
+      done
+    fi
+  } > "$out"
+}
+
+write_evidence "$EVIDENCE_FILE"
+
+{
+  echo
+  echo "==> evidence markdown"
+  cat "$EVIDENCE_FILE"
+} | tee -a "$LOG_FILE"
+
+echo
+echo "Evidence file: $EVIDENCE_FILE"
+echo "Log file: $LOG_FILE"
+
+if [ "$FAILED_INDEX" -ne -1 ]; then
+  exit "$FAILED_CODE"
+fi
+
+exit 0

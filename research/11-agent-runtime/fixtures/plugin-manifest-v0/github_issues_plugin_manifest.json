@@ -1,0 +1,213 @@
+{
+  "schema": "momo.plugin_manifest.v0",
+  "plugin_id": "com.momo.plugins.github-issues",
+  "id": "com.momo.plugins.github-issues",
+  "name": "GitHub Issues",
+  "version": "0.1.0",
+  "publisher": {
+    "id": "momo.first_party",
+    "name": "momo",
+    "homepage": "https://github.com/Dawn-kim-official/momo",
+    "support": "momo://support/plugins/github-issues"
+  },
+  "runtime": {
+    "kind": "hosted_connector",
+    "entrypoint": "momo://connectors/github/issues",
+    "transport": "momo_worker",
+    "sandbox": "process_external_api",
+    "network": {
+      "egress_allowlist": ["api.github.com"]
+    }
+  },
+  "runtime_boundary": {
+    "executor_owner": "first_party_plugin",
+    "process_boundary": "sidecar_worker",
+    "secret_boundary": "momo_secret_store",
+    "network_boundary": "egress_allowlist:api.github.com",
+    "state_boundary": "momo_postgres_and_github_api",
+    "failure_boundary": "idempotent_retry_returns_tool_result_to_timeline"
+  },
+  "surfaces": [
+    {
+      "kind": "slash_command",
+      "name": "github.issue.create",
+      "display_name": "Create GitHub Issue"
+    },
+    {
+      "kind": "message_context_action",
+      "name": "github.issue.from_message",
+      "display_name": "Create Issue from Message"
+    },
+    {
+      "kind": "source_provider",
+      "name": "github.issue.search",
+      "display_name": "GitHub Issue Source"
+    },
+    {
+      "kind": "approval_card",
+      "name": "github.issue.write_approval",
+      "display_name": "GitHub Write Approval"
+    }
+  ],
+  "ui_surfaces": ["slash_command", "message_context_action", "approval_card", "source_provider"],
+  "capabilities": [
+    {
+      "tool_name": "github.search_issues",
+      "display_name": "Search Issues",
+      "grant": "read",
+      "risk": "read",
+      "allowed_operations": ["search_issues", "fetch_issue"],
+      "required_provider_grants": ["github.issues.read"],
+      "result_kind": "external_source_ref",
+      "idempotency_required": false
+    },
+    {
+      "tool_name": "github.create_issue",
+      "display_name": "Create Issue",
+      "grant": "propose",
+      "risk": "write",
+      "allowed_operations": ["create_issue"],
+      "denied_operations": ["delete_repo", "change_repo_visibility", "invite_outside_collaborator"],
+      "required_provider_grants": ["github.issues.write"],
+      "result_kind": "task_state",
+      "idempotency_required": true,
+      "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo"
+    }
+  ],
+  "tools": [
+    {
+      "tool_name": "github.search_issues",
+      "display_name": "Search Issues",
+      "schema_hash": "sha256:githubsearchissuesv1",
+      "default_grant": "read",
+      "risk": "read",
+      "approval_policy": "none",
+      "result_kind": "external_source_ref",
+      "resource_scope_summary": "repository_allowlist",
+      "capability_version": "github-issues@0.1.0"
+    },
+    {
+      "tool_name": "github.create_issue",
+      "display_name": "Create Issue",
+      "schema_hash": "sha256:githubcreateissuev3",
+      "default_grant": "propose",
+      "risk": "write",
+      "approval_policy": "always",
+      "result_kind": "task_state",
+      "resource_scope_summary": "repository_allowlist:Dawn-kim-official/momo",
+      "capability_version": "github-issues@0.1.0"
+    }
+  ],
+  "tool_schema_refs": [
+    {
+      "tool_name": "github.search_issues",
+      "input_schema_ref": "momo://capability-cache/github.search_issues/schemas/input/sha256:githubsearchissuesv1",
+      "output_schema_ref": "momo://capability-cache/github.search_issues/schemas/output/sha256:githubissuesearchoutv1",
+      "schema_format": "json_schema_2020_12",
+      "schema_hash": "sha256:githubsearchissuesv1"
+    },
+    {
+      "tool_name": "github.create_issue",
+      "input_schema_ref": "momo://capability-cache/github.create_issue/schemas/input/sha256:githubcreateissuev3",
+      "output_schema_ref": "momo://capability-cache/github.create_issue/schemas/output/sha256:githubissueoutv1",
+      "schema_format": "json_schema_2020_12",
+      "schema_hash": "sha256:githubcreateissuev3"
+    }
+  ],
+  "approval_policy": {
+    "default": "require_approval",
+    "rules": [
+      {
+        "match": {
+          "risk": "read"
+        },
+        "policy": "none",
+        "grant": "read"
+      },
+      {
+        "match": {
+          "tool_name": "github.create_issue"
+        },
+        "policy": "always",
+        "grant": "propose",
+        "approval_card_kind": "external_write_confirmation",
+        "expires_after_seconds": 900,
+        "requires_diff_preview": true
+      }
+    ]
+  },
+  "risk": {
+    "level": "medium",
+    "classes": ["read", "write"],
+    "external_systems": ["github"],
+    "data_sensitivity": "work_item_metadata",
+    "side_effects": ["external_read", "external_write"]
+  },
+  "scopes": {
+    "workspace_scope": "installed_workspace",
+    "channel_scope": "enabled_channels",
+    "member_scope": "actor_and_agent_channel_members",
+    "provider_scope": ["github.issues.read", "github.issues.write"],
+    "resource_scope": "repository_allowlist:Dawn-kim-official/momo"
+  },
+  "source_policy": {
+    "source_kinds": ["github"],
+    "context_packet_projection": {
+      "sources_allowed": true,
+      "max_excerpt_chars": 2000,
+      "required_permission_basis": ["github_provider_grant", "repository_resource_scope"]
+    },
+    "memory_plane_projection": {
+      "allowed_memory_types": ["external_source_ref", "task_state", "artifact_ref"],
+      "default_visibility": "channel",
+      "retrieval_policy_version": "memory-policy@2026-06-26+plugin:github-issues@0.1.0"
+    }
+  },
+  "audit_surface": {
+    "timeline_events": ["tool_call.proposed", "approval.requested", "approval.decided", "tool_result.recorded"],
+    "admin_events": ["plugin.installed", "plugin.revoked"],
+    "source_events": ["source_ref.created", "memory.revalidation_required"],
+    "cost_events": ["usage.reserved", "usage.reconciled"],
+    "redaction_policy": ["provider_access_token", "provider_refresh_token", "webhook_secret"]
+  },
+  "audit_policy": {
+    "event_prefix": "plugin.github_issues",
+    "required_events": [
+      "plugin.installed",
+      "capability.discovered",
+      "capability.projected_to_context_packet",
+      "tool_call.proposed",
+      "approval.requested",
+      "approval.decided",
+      "tool_result.recorded",
+      "plugin.revoked"
+    ],
+    "redact_fields": ["provider_access_token", "provider_refresh_token", "webhook_secret"]
+  },
+  "license": {
+    "spdx_id": "Apache-2.0",
+    "notice_required": true,
+    "terms_ref": "NOTICE"
+  },
+  "provenance": {
+    "source_repo": "Dawn-kim-official/momo",
+    "release_ref": "research/11-agent-runtime/fixtures/plugin-manifest-v0/github_issues_plugin_manifest.json",
+    "build_digest": "sha256:fixture-github-issues-manifest-v0",
+    "publisher_verification": "momo.first_party"
+  },
+  "compatibility": {
+    "manifest_version": "0",
+    "momo_protocol": ">=0.1.0 <0.2.0",
+    "context_packet": "momo.context_packet.v0",
+    "capability_cache": "momo.capability_cache_entry.v0",
+    "memory_plane": "momo.memory_item.v0",
+    "client_cards": ["approval_request.v0", "tool_result.v0"]
+  },
+  "signature": {
+    "required_for_catalog": true,
+    "algorithm": "minisign-ed25519",
+    "artifact_digest": "sha256:fixture-github-issues-manifest-v0",
+    "signature_ref": "momo://catalog/signatures/github-issues/0.1.0/minisign",
+    "signed_at": "2026-06-29T00:00:00Z"
+  }
+}

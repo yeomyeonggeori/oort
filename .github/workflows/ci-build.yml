@@ -1,13 +1,10 @@
-# momo — CI build/test (서명·배포 없음). 모든 푸시·PR에서 빠른 피드백.
-# Swift 패키지 빌드/테스트는 항상 동작. Xcode app 빌드는 프로젝트 추가 후 활성.
+# momo — CI build/test (서명·배포 없음).
+# 2026-06-26: GitHub Actions는 조직 과금/결제 이슈가 해소될 때까지 수동 전용이다.
+# 기본 merge gate는 docs/LOCAL_PR_GATE.md의 local evidence이며, 이 workflow는 명시적 dispatch 때만 실행한다.
 name: ci-build
 
 on:
-  push:
-    branches: ["**"]
-    tags-ignore: ["v*"]        # 릴리스 태그는 release-* 워크플로우가 담당
-  pull_request:
-    branches: ["main"]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}

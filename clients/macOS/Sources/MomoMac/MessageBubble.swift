@@ -4,10 +4,11 @@ import MomoCore
 // MARK: - MessageBubble
 //
 // Renders a single message. Agent messages get FIRST-CLASS rendering of the
-// structured message types (L4 §5.2, schema message_type): tool_call / tool_result /
-// diff / approval_request are rendered as their own cards rather than plain text.
-// These are v0 PLACEHOLDER cards per ticket T09 — correct shape + data wiring,
-// minimal chrome.
+// structured message types (L4 §5.2, schema message_type): tool_call /
+// tool_result / diff / approval_request / artifact are rendered as their own
+// cards rather than plain text. MOMO-170 keeps these cards lightweight but gives
+// them a stable metadata strip for Context Packet, Memory Plane, Capability Cache,
+// source, and cost display.
 //
 // Cost breathing (experience B) attaches a CostBreathingRing to agent bubbles when
 // a CostSnapshot is available for the message's run.
@@ -17,11 +18,24 @@ public struct MessageBubble: View {
     public let author: Member?
     /// Optional cost snapshot for the message's run (experience B).
     public let cost: CostSnapshot?
+    public let approvalStatus: ApprovalStatus?
+    public let isApprovalDecisionInFlight: Bool
+    public let onApprovalDecision: ((ApprovalID, Bool) -> Void)?
 
-    public init(message: Message, author: Member?, cost: CostSnapshot? = nil) {
+    public init(
+        message: Message,
+        author: Member?,
+        cost: CostSnapshot? = nil,
+        approvalStatus: ApprovalStatus? = nil,
+        isApprovalDecisionInFlight: Bool = false,
+        onApprovalDecision: ((ApprovalID, Bool) -> Void)? = nil
+    ) {
         self.message = message
         self.author = author
         self.cost = cost
+        self.approvalStatus = approvalStatus
+        self.isApprovalDecisionInFlight = isApprovalDecisionInFlight
+        self.onApprovalDecision = onApprovalDecision
     }
 
     private var isAgent: Bool { author?.isAgent ?? false }
@@ -38,8 +52,9 @@ public struct MessageBubble: View {
                 CostBreathingRing(
                     reservedMicroUSD: cost.reservedMicroUSD,
                     spentMicroUSD: cost.spentMicroUSD,
-                    isReconciled: cost.spentMicroUSD > 0,
-                    wasEstimated: cost.wasEstimated
+                    isReconciled: cost.isReconciled,
+                    wasEstimated: cost.wasEstimated,
+                    limitState: cost.limitState
                 )
             }
         }
@@ -105,8 +120,13 @@ public struct MessageBubble: View {
 
     private var toolCallCard: some View {
         cardFrame(icon: "wrench.and.screwdriver", tint: MomoTheme.agentAccent, title: "tool_call") {
-            let name = message.props["name"]?.stringValue ?? "tool"
+            let name = message.props["name"]?.stringValue
+                ?? message.props["capability"]?["tool_name"]?.stringValue
+                ?? "tool"
             Text(name).font(.callout.monospaced())
+            if let callId = message.props["call_id"]?.stringValue {
+                Text(callId).font(.caption2.monospaced()).foregroundStyle(.tertiary)
+            }
             if let args = message.props["arguments"] {
                 Text(prettyJSON(args)).font(.caption.monospaced()).foregroundStyle(.secondary)
             }
@@ -120,8 +140,14 @@ public struct MessageBubble: View {
         return cardFrame(icon: "arrow.uturn.backward",
                          tint: isError ? MomoTheme.irreversibleRed : MomoTheme.reversibleGreen,
                          title: isError ? "tool_result (error)" : "tool_result") {
+            if let toolName = message.props["tool_name"]?.stringValue {
+                Text(toolName).font(.callout.monospaced())
+            }
             if let output = message.props["output"] {
                 Text(prettyJSON(output)).font(.caption.monospaced()).foregroundStyle(.secondary)
+            }
+            if let artifact = message.props["artifact_ref"] {
+                Text(prettyJSON(artifact)).font(.caption2.monospaced()).foregroundStyle(.tertiary)
             }
         }
     }
@@ -140,15 +166,65 @@ public struct MessageBubble: View {
 
     private var approvalRequestCard: some View {
         cardFrame(icon: "exclamationmark.shield", tint: MomoTheme.costAmber, title: "approval_request") {
-            let action = message.props["action_type"]?.stringValue ?? "action"
+            let action = message.props["action_type"]?.stringValue
+                ?? message.props["tool_name"]?.stringValue
+                ?? "action"
             Text("Needs approval: \(action)").font(.callout)
-            // TODO(T09-followup, experience C): inline [승인]/[거부] wired to decideApproval.
+            if let title = message.props["title"]?.stringValue {
+                Text(title).font(.caption)
+            }
+            if let summary = message.props["summary"]?.stringValue {
+                Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            approvalActions
+        }
+    }
+
+    @ViewBuilder
+    private var approvalActions: some View {
+        let status = approvalStatus ?? approvalStatusFromProps ?? .pending
+        if status == .pending, let approvalId, let onApprovalDecision {
+            HStack(spacing: 6) {
+                Button {
+                    onApprovalDecision(approvalId, true)
+                } label: {
+                    Label("Approve", systemImage: "checkmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    onApprovalDecision(approvalId, false)
+                } label: {
+                    Label("Reject", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+
+                if isApprovalDecisionInFlight {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help("Decision is being recorded")
+                }
+            }
+            .controlSize(.small)
+            .disabled(isApprovalDecisionInFlight)
+            .padding(.top, 2)
+        } else if status != .pending {
+            Label(decidedLabel(for: status), systemImage: decidedIcon(for: status))
+                .font(.caption.bold())
+                .foregroundStyle(status == .approved ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
+                .padding(.top, 2)
         }
     }
 
     private var artifactCard: some View {
         cardFrame(icon: "paperclip", tint: .secondary, title: "artifact") {
             Text(message.props["title"]?.stringValue ?? "artifact").font(.callout)
+            if let kind = message.props["kind"]?.stringValue {
+                Text(kind).font(.caption).foregroundStyle(.secondary)
+            }
+            if let uri = message.props["uri"]?.stringValue {
+                Text(uri).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+            }
         }
     }
 
@@ -165,6 +241,7 @@ public struct MessageBubble: View {
                 Text(title).font(.caption.bold()).foregroundStyle(tint)
             }
             content()
+            AgentProtocolMetadataStrip(props: message.props)
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -181,5 +258,49 @@ public struct MessageBubble: View {
             return "{}"
         }
         return str
+    }
+
+    private var approvalId: ApprovalID? {
+        guard let raw = message.props["approval_id"]?.stringValue else {
+            return nil
+        }
+        return ApprovalID(raw)
+    }
+
+    private var approvalStatusFromProps: ApprovalStatus? {
+        guard let raw = message.props["approval_status"]?.stringValue else {
+            return nil
+        }
+        return ApprovalStatus(rawValue: raw)
+    }
+
+    private func decidedLabel(for status: ApprovalStatus) -> String {
+        switch status {
+        case .approved:
+            return "Approved"
+        case .rejected:
+            return "Rejected"
+        case .expired:
+            return "Expired"
+        case .cancelled:
+            return "Cancelled"
+        case .pending:
+            return "Pending"
+        }
+    }
+
+    private func decidedIcon(for status: ApprovalStatus) -> String {
+        switch status {
+        case .approved:
+            return "checkmark.circle.fill"
+        case .rejected:
+            return "xmark.circle.fill"
+        case .expired:
+            return "clock.badge.exclamationmark"
+        case .cancelled:
+            return "minus.circle.fill"
+        case .pending:
+            return "hourglass"
+        }
     }
 }

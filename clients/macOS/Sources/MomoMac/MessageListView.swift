@@ -10,7 +10,6 @@ import MomoCore
 
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
-    @State private var draft: String = ""
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -19,6 +18,17 @@ public struct MessageListView: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
+            if let status = viewModel.selectedRealtimeStatus {
+                realtimeStatusBanner(status)
+                Divider()
+            } else if let error = viewModel.connectionError {
+                connectionBanner(error)
+                Divider()
+            }
+            if let notice = viewModel.mentionNotice {
+                mentionNoticeBanner(notice)
+                Divider()
+            }
             Divider()
             timeline
             Divider()
@@ -51,6 +61,132 @@ public struct MessageListView: View {
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
 
+    private func realtimeStatusBanner(_ status: RealtimeConnectionStatus) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: statusIcon(status))
+                .foregroundStyle(statusColor(status))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(statusTitle(status))
+                    .font(.caption.weight(.semibold))
+                if let message = status.message, !message.isEmpty, !status.isLive {
+                    Text(message)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if status.canRetry {
+                Button {
+                    Task { await viewModel.retryRealtime() }
+                } label: {
+                    Label("Retry", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(statusColor(status).opacity(0.08))
+    }
+
+    private func connectionBanner(_ error: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wifi.exclamationmark")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Recoverable error")
+                    .font(.caption.weight(.semibold))
+                Text(error)
+                    .font(.caption2)
+                    .lineLimit(2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                Task { await viewModel.retrySelectedChannelLoad() }
+            } label: {
+                Label("Retry", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            Button {
+                viewModel.clearConnectionError()
+            } label: {
+                Image(systemName: "xmark.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.orange.opacity(0.08))
+    }
+
+    private func mentionNoticeBanner(_ notice: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "at")
+                .foregroundStyle(MomoTheme.agentAccent)
+            Text(notice)
+                .font(.caption)
+                .lineLimit(1)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(MomoTheme.agentAccent.opacity(0.08))
+    }
+
+    private func statusTitle(_ status: RealtimeConnectionStatus) -> String {
+        if status.isLive {
+            return "Live"
+        }
+        switch (status.connection, status.subscription, status.fallback) {
+        case (.disabled, .disabled, .restHistory):
+            return "REST fallback"
+        case (.connecting, _, _), (.connected, .subscribing, _):
+            return "Connecting live"
+        case (.reconnecting, _, _), (_, .recovering, _):
+            return "Reconnecting"
+        case (.offline, _, .restHistory), (_, .unsubscribed, .restHistory):
+            return "Offline - REST fallback"
+        case (.error, _, .restHistory), (_, .error, .restHistory):
+            return "Live error - REST fallback"
+        default:
+            return "Realtime \(status.connection.rawValue)"
+        }
+    }
+
+    private func statusIcon(_ status: RealtimeConnectionStatus) -> String {
+        if status.isLive { return "dot.radiowaves.left.and.right" }
+        switch status.connection {
+        case .connecting, .reconnecting:
+            return "arrow.triangle.2.circlepath"
+        case .offline, .disabled:
+            return "clock.arrow.circlepath"
+        case .error:
+            return "wifi.exclamationmark"
+        case .connected:
+            return status.subscription == .subscribed ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right"
+        }
+    }
+
+    private func statusColor(_ status: RealtimeConnectionStatus) -> Color {
+        if status.isLive { return .green }
+        switch status.connection {
+        case .connecting, .reconnecting:
+            return .blue
+        case .error:
+            return .orange
+        case .offline, .disabled:
+            return .secondary
+        case .connected:
+            return status.subscription == .error ? .orange : .blue
+        }
+    }
+
     // MARK: Timeline (seq order)
 
     private var timeline: some View {
@@ -61,7 +197,12 @@ public struct MessageListView: View {
                         MessageBubble(
                             message: message,
                             author: viewModel.member(message.authorMemberId),
-                            cost: costSnapshot(for: message)
+                            cost: costSnapshot(for: message),
+                            approvalStatus: viewModel.approvalStatus(for: message),
+                            isApprovalDecisionInFlight: viewModel.isApprovalDecisionInFlight(for: message),
+                            onApprovalDecision: { approvalId, approve in
+                                Task { await viewModel.decideApproval(approvalId, approve: approve) }
+                            }
                         )
                         .id(message.id)
                     }
@@ -70,7 +211,7 @@ public struct MessageListView: View {
                     ForEach(livePartials, id: \.runId) { partial in
                         AgentPartialView(
                             partial: partial,
-                            author: nil,
+                            author: partialAuthor(for: partial),
                             status: viewModel.agentStatuses[partial.runId]
                         )
                     }
@@ -90,14 +231,14 @@ public struct MessageListView: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField("Message…", text: $draft, axis: .vertical)
+            TextField("Message @김인턴 or @kim-intern...", text: $viewModel.composerDraft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
                 .onSubmit(submit)
             Button(action: submit) {
                 Image(systemName: "paperplane.fill")
             }
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            .disabled(viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       || viewModel.selectedChannelId == nil)
         }
         .padding(12)
@@ -105,8 +246,8 @@ public struct MessageListView: View {
 
     private func submit() {
         guard let channel = viewModel.selectedChannelId else { return }
-        let body = draft
-        draft = ""
+        let body = viewModel.composerDraft
+        viewModel.composerDraft = ""
         Task { await viewModel.send(body: body, to: channel) }
     }
 
@@ -120,13 +261,16 @@ public struct MessageListView: View {
             .sorted { $0.runId.description < $1.runId.description }
     }
 
-    /// Build a CostSnapshot from the run's latest agent.status (experience B).
+    /// Read the server-owned CostSnapshot projection for the message's run.
     private func costSnapshot(for message: Message) -> CostSnapshot? {
-        guard let runId = message.runId, let status = viewModel.agentStatuses[runId] else { return nil }
-        return CostSnapshot(
-            runId: runId,
-            reservedMicroUSD: status.reservedMicroUSD ?? 0,
-            spentMicroUSD: status.spentMicroUSD ?? 0
-        )
+        guard let runId = message.runId else { return nil }
+        return viewModel.costSnapshot(for: runId)
+    }
+
+    private func partialAuthor(for partial: AgentPartial) -> Member? {
+        guard let agent = viewModel.agentStatuses[partial.runId]?.agentMemberId else {
+            return nil
+        }
+        return viewModel.member(agent)
     }
 }

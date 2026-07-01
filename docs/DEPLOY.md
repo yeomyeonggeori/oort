@@ -12,17 +12,26 @@
 
 - Phase 0 = **5개 Swift 패키지 `swift build` green**.
 - M1 런타임 일부 검증 완료: Docker Desktop 기준 PG18+Centrifugo compose health, migrate 멱등, MomoServer health/seq gapless, OutboxRelay→Centrifugo publish/history.
-- 남은 M1 런타임 검증: RLS 교차 테넌트 격리, AgentWorker↔hermes SSE + 비용 회계, staging URL/TLS/운영 시크릿·백업.
-- 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "런타임 e2e PASS + staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
+- M1 런타임 핵심 검증은 Docker Desktop 기준 MOMO-001~004에서 완료: compose/migrate/server health/seq gapless, OutboxRelay publish/history, RLS 격리, AgentWorker↔OpenAI-compatible SSE mock + 비용 회계.
+- 남은 M1 배포 검증: 실제 staging URL/TLS/운영 시크릿 복호화·백업 복원·모니터링, 외부 hermes 재확인, WebSocket live subscribe/presence/recovery.
+- 운영 배포는 아직 **미진행**(이 문서가 절차 정본). M1 = "staging URL 헬스 green + TLS 정상 + 시크릿 암호화 + 백업 1회 검증".
 - **선결:** M0 런타임 e2e(서버↔PG18↔Centrifugo↔hermes 1왕복). M2 멀티팀 온보딩은 M1 위에서 성립.
 - **이 문서가 만들/갱신할 산출물(Codex):**
-  - `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 (MOMO-005)
-  - `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
-  - `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
-  - `infra/prod/.env.sops.yaml`(SOPS/age 암호화) + `.sops.yaml` 규칙 (MOMO-006)
-  - `infra/prod/pgbackrest.conf` + 백업/복원 스크립트 (MOMO-006)
-  - `server/Migrations/003_onboarding.sql` — invite_code + platform_admin (MOMO-010)
-  - `docs/RUN.md`에 staging 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
+  - ✅ `infra/prod/docker-compose.prod.yml` — Caddy(자동 TLS) + Redis + relay/worker 실서비스 승격 skeleton (MOMO-005)
+  - ✅ `infra/prod/Caddyfile` — api/rt 도메인 라우팅 + 보안 헤더 (MOMO-005)
+  - ✅ `infra/prod/centrifugo.prod.json` — Redis 엔진 전환본 (MOMO-005)
+  - ✅ `infra/prod/.env.example` — production env 예시, 실제 시크릿 미포함 (MOMO-005)
+  - ✅ `.sops.yaml.example` + `infra/prod/secrets.env.example` — SOPS/age 운영 계약, 실제 시크릿 미포함 (MOMO-006)
+  - ✅ `infra/prod/pgbackrest*.example` + `docs/SECRETS_BACKUP_RUNBOOK.md` — 백업/복원 skeleton과 리허설 절차 (MOMO-006)
+  - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest/public preflight evidence local gate (MOMO-007/MOMO-229)
+  - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
+  - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
+  - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
+  - ✅ `scripts/verify_external_agent_provider.sh` + `scripts/local_gate.sh --profile external-agent-provider` — credentials가 있는 환경에서만 real Hermes/Kim Intern SSE + local momo `@김인턴` 1왕복을 검증하는 opt-in gate (MOMO-230)
+  - ✅ `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` — Codex OAuth token은 Hermes/Kim Intern provider-owned이고 momo app/API/DB/local gate가 직접 저장하지 않는 credential boundary (MOMO-234)
+  - ✅ `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh` — AWS 1주일 internal alpha topology/cost/security-group/backup/deploy/rollback preflight (MOMO-233)
+  - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
+  - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
 
 ---
 
@@ -80,11 +89,36 @@
 
 **방화벽:** 인바운드 **80(ACME)·443만 허용**. 5432/8000/8080은 호스트에 노출 금지(compose 내부 네트워크). SSH는 키 인증 + 비표준 포트/IP 화이트리스트 `(추정 권장)`.
 
+### 2.1 AWS internal alpha stack v0 (MOMO-233)
+
+1주일 팀 테스트용 AWS host topology는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)가 정본이다.
+결정값은 **EC2 recommended single-node**: `t4g.large`, encrypted `gp3` data volume,
+Caddy 80/443, API/OutboxRelay/AgentWorker/Centrifugo/Redis/Postgres를 image-based
+prod compose로 실행, pgBackRest→S3 + daily EBS snapshot. Lightsail은 가장 빠른
+throwaway 옵션으로만 문서화하고, 기본 추천은 보안그룹/IAM/EBS snapshot/restore fidelity가
+좋은 EC2로 둔다.
+
+정적 preflight:
+
+```sh
+scripts/aws_internal_alpha_preflight.sh \
+  --env-file infra/prod/aws-internal-alpha.env.example \
+  --mode recommended \
+  --evidence-dir /tmp/momo-aws-alpha-preflight
+```
+
+이 preflight는 AWS 리소스를 만들지 않는다. topology/provider, DNS/TLS intent,
+보안그룹 노출 intent, encrypted gp3 volume intent, pinned image/source-checkout-free
+deploy, backup/restore/rollback acknowledgement만 검증한다. 실제 host 생성, DNS 전파,
+Caddy ACME 인증서, registry pull, SOPS decrypt, pgBackRest backup, EBS snapshot,
+PITR restore rehearsal은 `runtime-unverified(aws-host)`다.
+
 ---
 
 ## 3. 시크릿 관리 (SOPS + age) — MOMO-006
 
 > 목표: 암호화한 시크릿을 **git에 버전관리**하면서, 배포 시 **메모리에서만 복호화**(평문이 디스크에 닿지 않음). dev의 `change-me-*`/`dev-insecure-*`를 운영에서 전부 교체.
+> 절차 정본과 skeleton 파일 목록은 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)다.
 
 ### 3.1 키 생성 & 규칙
 ```sh
@@ -92,22 +126,25 @@ age-keygen -o ~/.config/sops/age/keys.txt          # 개인키(호스트 보관,
 # 출력된 public key(age1...)를 .sops.yaml 의 recipient 로 등록
 ```
 
-`.sops.yaml`(리포 루트 또는 `infra/prod/`):
+`.sops.yaml`(리포 루트, `.sops.yaml.example`에서 실제 public recipient로 교체):
 ```yaml
 creation_rules:
-  - path_regex: infra/prod/.*\.sops\.(yaml|env|json)$
+  - path_regex: ^infra/prod/.*\.sops\.(env|yaml|json)$
     age: "age1...<public key>"
 ```
 
 ### 3.2 암호화/복호화
 ```sh
-sops --encrypt infra/prod/secrets.env > infra/prod/.env.sops.yaml   # 커밋 가능(값 암호화됨)
-# 배포 시 메모리로만 복호화 → compose 에 주입(평문 파일 생성 금지):
+sops --encrypt --input-type dotenv --output-type dotenv \
+  infra/prod/secrets.env > infra/prod/secrets.sops.env       # 커밋 가능(값 암호화됨)
+rm -f infra/prod/secrets.env                                 # 평문 삭제(커밋 금지)
+
+# 배포 시 프로세스 환경으로만 복호화 → compose 에 주입(평문 파일 생성 금지):
 SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
-  sops exec-env infra/prod/.env.sops.yaml \
-  'docker compose --env-file /dev/stdin -f infra/prod/docker-compose.prod.yml up -d'
+  sops exec-env infra/prod/secrets.sops.env \
+  'docker compose -f infra/prod/docker-compose.prod.yml up -d'
 ```
-> `sops exec-env`는 복호화 값을 **프로세스 환경**으로만 노출(디스크 미접촉). CI 배포 시 age 개인키는 GitHub Actions secret(또는 OIDC→KMS)로 주입.
+> `sops exec-env`는 복호화 값을 **프로세스 환경**으로만 노출(디스크 미접촉). CI 배포 시 age 개인키는 GitHub Actions secret(또는 OIDC→KMS)로 주입. 환경변수는 동일 사용자/root의 프로세스 관찰 표면에 노출될 수 있으므로 운영 호스트 권한도 함께 제한한다.
 
 ### 3.3 운영 시크릿 인벤토리 (dev `.env.example` + 운영 추가분)
 | 키 | 생성 | 비고 |
@@ -116,12 +153,77 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 | `CENT_TOKEN_HMAC` | `openssl rand -hex 32` | client connection/subscription JWT 서명. |
 | `CENT_API_KEY` | `openssl rand -hex 32` | server publish 인증(`X-API-Key`, relay/worker만). |
 | `JWT_HMAC` | `openssl rand -hex 32` | App access/refresh 토큰 HS256. |
+| `AGENT_PROVIDER_MODE` | literal | staging/prod/internal-host는 반드시 `external-hermes`. |
+| `AGENT_MODEL` | literal | 기본 `hermes-agent`; provider/model 라벨. |
+| `HERMES_BASE_URL` | (hermes 발급) | OpenAI-compatible `/v1` base URL. staging/prod/internal-host는 `https://`만 허용. |
 | `HERMES_API_KEY` | (hermes 발급) | 김인턴 게이트웨이 Bearer. |
 | `RELAY_DATABASE_URL` | — | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§5.2). |
 | `REDIS_URL` | (내부) | `redis://redis:6379`(compose 내부, 비밀번호 설정 권장). |
 | `pgbackrest` repo cipher | `openssl rand -base64 48` | 백업 암호화 키(별도 보관). |
 
 > **규칙:** 평문 `.env`는 prod 호스트/리포에 절대 남기지 않는다. dev-insecure 기본값으로 부팅은 되지만 **운영에선 전부 교체 필수**(L4 §10.1 RLS/시크릿 리스크).
+
+### 3.4 bootstrap preflight (MOMO-221)
+
+운영 compose를 렌더링하거나 부팅하기 전에 반드시 preflight를 먼저 실행한다.
+
+```sh
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode staging --evidence-dir /tmp/momo-public-preflight'
+
+sops exec-env infra/prod/secrets.sops.env \
+  'scripts/prod_env_preflight.sh --from-env --mode prod --evidence-dir /tmp/momo-public-preflight'
+```
+
+`staging`/`prod`/`internal-host` 모드는 다음 값을 fail-fast로 거부한다.
+
+- `change-me-*`, `dev-insecure-*`, `__PLACEHOLDER__`, `example.com`, `localhost`, `mock-hermes`.
+- Reserved/local public-routing domains such as `.test`, `.invalid`, `.local`,
+  `.localhost`, `.example`, and `.internal`.
+- `momo_app_dev_pw`/`momo_relay_dev_pw`/`momo_worker_dev_pw` 같은 local DB password.
+- `momo-*:internal-smoke*`, `:latest`, source-checkout fallback image tag.
+- 비밀번호 없는 `CENTRIFUGO_REDIS_ADDRESS`, non-HTTPS `HERMES_BASE_URL`.
+- `AGENT_PROVIDER_MODE != external-hermes`.
+- 누락된 SOPS/age 또는 host-local secret source, named DB/Redis volume, pgBackRest stanza/check/full backup/WAL/PITR required env.
+
+Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
+`API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
+`MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
+`HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
+`REDIS_VOLUME_NAME`, `PGBACKREST_STANZA`, `PGBACKREST_REPO1_PATH`,
+`PGBACKREST_REPO1_CIPHER_PASS`, `PGBACKREST_WAL_ARCHIVE_REQUIRED`,
+`PGBACKREST_STANZA_CHECK_REQUIRED`, `PGBACKREST_FULL_BACKUP_REQUIRED`,
+`PGBACKREST_PITR_REHEARSAL_REQUIRED`.
+
+`--evidence-dir` writes `prod-env-preflight-<mode>.md` and `.json` with secret
+values redacted. This is the public host preflight evidence packet for PRs and
+operator handoff. It proves env shape only; DNS changes, ACME issuance, real
+registry pull, SOPS decrypt, and pgBackRest backup/PITR execution stay
+`runtime-unverified(public host)` until performed on the actual host.
+
+`internal-smoke`/`local`은 별도 경계다. `infra/prod/internal-smoke.env.example`
+또는 `scripts/verify_internal_host_runtime.sh`가 생성한 env에서만 허용하며,
+localhost 도메인, mock Hermes, local `momo-*:internal-smoke*` 이미지, `change-me-*`,
+`momo_*_dev_pw` placeholder가 의도된 테스트 값이다. 이 파일은 real host env나
+SOPS production secret의 입력으로 사용하지 않는다. 이 모드의 provider는
+`AGENT_PROVIDER_MODE=internal-host-mock`으로 고정한다.
+
+운영 host를 띄우기 전에도 real provider credential 자체는 repo-local opt-in gate로
+먼저 확인할 수 있다. 이 gate는 provider secret을 출력하지 않고 redacted evidence만 남긴다.
+
+```sh
+EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
+scripts/local_gate.sh --profile external-agent-provider
+```
+
+`external-hermes`가 명시됐는데 `HERMES_BASE_URL`이 localhost/mock/non-HTTPS이거나
+`HERMES_API_KEY`가 placeholder면 fail-fast한다. MOMO-238의 local loopback 예외는
+`MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` 개발 루프 전용이며, 운영 host
+env로 승격하지 않는다(`docs/external-agent-provider/local-hermes-gpt.md`). credentials가 없으면
+`runtime-unverified(external provider credentials)` evidence로 skip되며 staging/prod
+ready 판정으로 쓰지 않는다.
 
 ---
 
@@ -136,7 +238,7 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 - **centrifugo**: `centrifugo/centrifugo:v6`, `centrifugo.prod.json`(Redis 엔진) 마운트, **포트 비노출**(caddy가 rt 도메인으로 프록시).
 - **api**: MomoServer 이미지, `depends_on: postgres(healthy)`, `PORT=8080`(내부). subscribe proxy 대상.
 - **relay**: OutboxRelay 이미지, `RELAY_DATABASE_URL`(BYPASSRLS), `CENT_API_URL=http://centrifugo:8000/api`.
-- **worker**: AgentWorker 이미지, `HERMES_BASE_URL`/`HERMES_API_KEY`, `depends_on: postgres(healthy)`.
+- **worker**: AgentWorker 이미지, `AGENT_PROVIDER_MODE`/`HERMES_BASE_URL`/`HERMES_API_KEY`, `depends_on: postgres(healthy)`.
 
 모든 서비스 `restart: unless-stopped`. relay/worker는 dev compose 주석(L4 §1.1 / `infra/docker-compose.yml` line 69~93)에 이미 골격 예시가 있음 → 그대로 승격.
 
@@ -186,7 +288,7 @@ export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo   # 운영은 SOPS�
 make migrate                                                   # 001_init → 002_seed → 003_onboarding
 ```
 - 현재: `001_init.sql`(정본 스키마 + outbox/cost/APNs 보강), `002_seed.sql`(데모 시드).
-- 신규: `003_onboarding.sql`(§6 invite_code + platform_admin). **`schema_v0.sql` 정본은 수정/이동 금지** — 확장은 신규 마이그레이션 + RLS DO-block ARRAY에 신규 테이블 등록(아래).
+- 신규: `003_onboarding.sql`(§6 invite_code + redemption audit). **`schema_v0.sql` 정본은 수정/이동 금지** — 확장은 신규 마이그레이션 + RLS DO-block ARRAY에 신규 테이블 등록(아래). `platform_admin`은 MOMO-013 후속 범위다.
 
 ### 5.2 DB 역할 분리 (RLS 격리의 운영 기반)
 | 역할 | 권한 | 용도 |
@@ -212,9 +314,9 @@ CREATE ROLE momo_admin LOGIN BYPASSRLS PASSWORD '...';   -- 읽기 전용 권한
 > 워크스페이스 스핀업 + **스핀업별 고유 초대코드 → 자가가입** + **플랫폼 관리자 전체 추적.** schema_v0.sql 위에 `003_onboarding.sql`로 확장(정본 미수정).
 
 ### 6.1 `003_onboarding.sql` (MOMO-010 — 신규 마이그레이션)
-- `invite_code{ id uuidv7, workspace_id FK, code(고엔트로피 랜덤), role, max_uses, used_count, expires_at, revoked_at, created_by }` — 만료 + 사용횟수 한정 + revoke.
-- `platform_admin{ id, member_id/email, created_at }` — 전역 추적 주체.
-- **RLS 등록:** `invite_code`를 schema_v0.sql의 RLS DO-block ARRAY 패턴(line 388~399)과 동일하게 `ENABLE`/`FORCE ROW LEVEL SECURITY` + `ws_isolation` 정책에 등록(신규 마이그레이션 내 별도 DO-block). `platform_admin`은 전역 테이블(workspace_id 없음) → BYPASSRLS 읽기 경로로만 접근.
+- `invite_code{ id uuidv7, workspace_id FK, code_hash, code_preview, role, max_uses, used_count, expires_at, revoked_at, revoked_by, created_by }` — raw code는 저장하지 않고 hash 저장, 만료 + 사용횟수 한정 + revoke.
+- `invite_code_redemption{ id, workspace_id, invite_code_id, member_id, email, ip_addr, user_agent, redeemed_at }` — 성공 redemption audit trail.
+- **RLS 등록:** `invite_code`/`invite_code_redemption`을 schema_v0.sql의 RLS DO-block ARRAY 패턴(line 388~399)과 동일하게 `ENABLE`/`FORCE ROW LEVEL SECURITY` + `ws_isolation` 정책에 등록(신규 마이그레이션 내 별도 DO-block). `platform_admin`은 MOMO-013에서 BYPASSRLS 읽기 전용 경로로 분리한다.
 
 ### 6.2 온보딩 운영 플로우 (REST — MOMO-011/012)
 ```
@@ -244,13 +346,27 @@ GET /v1/platform/members      → 전 테넌트 멤버 전수
 ## 7. 백업 / 복원 (pgBackRest PITR) — MOMO-006
 
 > L4 §8.7: 일일 `pg_dump` + WAL 아카이빙이 최소선. 운영은 **pgBackRest(주간 풀 + 연속 WAL 아카이빙 → PITR)** 로 승격.
+> skeleton 파일은 `infra/prod/pgbackrest.conf.example`, `infra/prod/postgresql.pgbackrest.conf.example`, `infra/prod/pgbackrest-cron.example`이며, 상세 절차는 [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md)다.
+> **운영 계약:** 복원 리허설 evidence가 없으면 백업은 검증된 것으로 보지 않는다. Repo-local `backup` gate는 dump/restore evidence를 만들고, 실제 pgBackRest PITR는 public host에서 별도 evidence가 필요하다.
 
 ### 7.1 구성(요지)
 - `archive_command = pgbackrest --stanza=momo archive-push %p` (postgresql.conf), `archive_mode = on`, `wal_level = replica`.
-- `pgbackrest.conf`: stanza `momo`, repo(로컬 디스크 또는 S3 호환), **repo cipher(AES-256)** + retention(full=4주, diff/incr).
+- `pgbackrest.conf`: stanza `momo`, `pg1-path`는 `SHOW data_directory`로 확인, repo(로컬 디스크 또는 S3 호환), **repo cipher(AES-256)** + retention(full=4주, diff/incr).
 - 스케줄: **주간 full + 일간 diff + 연속 WAL**(cron). 백업 repo는 호스트와 분리된 오브젝트스토리지 권장(월 $1 미만~수달러 `(추정)`).
 
-### 7.2 검증(M1 exit — 복원 1회 필수)
+### 7.2 검증(M1 exit — 복원 evidence 필수)
+
+내부 테스트 호스팅 전 local gate:
+
+```sh
+scripts/local_gate.sh --profile backup
+scripts/local_gate.sh --profile host-runtime
+```
+
+`backup` profile이 자동으로 닫는 범위: 임시 PostgreSQL 18 source DB marker write, `pg_dump -Fc`, 별도 restore DB `pg_restore`, marker fingerprint equality, dump sha256, markdown/json evidence. 이 범위는 운영 secret이나 primary data directory를 사용하지 않는다.
+
+Host pgBackRest rehearsal:
+
 ```sh
 pgbackrest --stanza=momo --type=full backup        # 풀 백업
 pgbackrest --stanza=momo check                     # 아카이빙/repo 점검
@@ -258,7 +374,7 @@ pgbackrest --stanza=momo check                     # 아카이빙/repo 점검
 pgbackrest --stanza=momo --type=time \
   --target="2026-06-24 12:00:00+00" restore
 ```
-> **M1 종료 기준 = 백업 1회 + PITR 복원 1회 검증.** 복원 리허설 없는 백업은 "검증 안 됨"으로 간주.
+> **M1 종료 기준 = repo-local restore evidence + host pgBackRest 백업 1회 + PITR 복원 1회 검증.** 복원 리허설 없는 백업은 "검증 안 됨"으로 간주. 실제 stanza/check/full backup/WAL/PITR는 `runtime-unverified(public host)`로 남기고, public host에서 별도 evidence를 첨부해야 닫힌다.
 
 ---
 
@@ -266,8 +382,60 @@ pgbackrest --stanza=momo --type=time \
 
 > L4 §8.8: 구조화 로그(run_id/workspace_id 상관) + `audit_log` + 핵심 메트릭. v0는 경량(무거운 APM 불필요).
 
+### 8.0 local/staging smoke gate
+
+실제 VPS 시크릿이 없어도 PR에서 아래 gate를 먼저 통과시킨다.
+
+```sh
+scripts/verify_staging_smoke.sh
+scripts/verify_internal_hosting_smoke.sh
+scripts/verify_backup_restore_rehearsal.sh
+scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile backup
+scripts/local_gate.sh --profile host-runtime
+scripts/local_gate.sh --profile external-agent-provider   # real provider credentials가 있을 때만 PASS evidence
+```
+
+이 gate가 자동으로 닫는 범위:
+
+- `infra/prod/docker-compose.prod.yml`이 `.env.example`만으로 `docker compose config --quiet`를 통과한다.
+- Caddyfile이 `API_DOMAIN`/`REALTIME_DOMAIN`을 받아 api와 Centrifugo에 내부 reverse proxy한다.
+- `infra/prod/centrifugo.prod.json`이 Redis engine, namespace 4종, subscribe proxy, history ttl 계약을 만족한다.
+- prod plaintext secret/env/age key 파일이 tracked되지 않고, example 파일은 placeholder만 담는다.
+- SOPS/age와 pgBackRest PITR rehearsal checklist/evidence template이 존재한다.
+- MOMO-216 internal smoke overlay가 prod compose 위에서 렌더링되고, local image fallback tags, explicit image-based `migrate` job, MomoServer `/health` route, relay/worker env/enablement, mock Hermes boundary를 static 검증한다.
+- MOMO-220/MOMO-227 host-runtime gate가 local api/relay/worker/migrate/mock-Hermes images를 빌드하고, prod+internal-smoke stack boot, migration idempotency, `/v1/agent-runtime/status` mock/redaction projection, REST message, relay publish, mock agent roundtrip을 실제 검증한다.
+- MOMO-222 backup gate가 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence를 markdown/json으로 생성한다. `host-runtime` profile도 이 verifier를 포함한다.
+- MOMO-230 external-agent-provider gate는 credentials가 있을 때만 real Hermes/Kim Intern OpenAI-compatible SSE preflight와 local MomoServer/AgentWorker/OutboxRelay `@김인턴` 1왕복을 검증한다.
+- MOMO-234 boundary: Codex OAuth access/refresh token은 provider host 내부 secret이다. momo 운영 env와 smoke에는 `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, `HERMES_API_KEY`, `AGENT_MODEL`만 넣고 Codex/OpenAI OAuth token env var를 전달하지 않는다.
+- MOMO-238 local loopback: `http://127.0.0.1:<port>/v1`/`localhost`는 local-only opt-in smoke에만 허용한다. non-loopback HTTP와 운영 loopback은 계속 fail-fast한다.
+
+`runtime-unverified(public host)`: 실제 `https://api.<domain>/health`, public DNS, TLS 인증서 발급/갱신,
+real registry image pull/run, SOPS 복호화, pgBackRest stanza/check/full backup/WAL archive/time-target PITR restore rehearsal은 public host-runtime에서만 닫는다. Real provider credentials가 없으면 외부 hermes/Kim Intern side effect는 `runtime-unverified(external provider credentials)`로 남긴다.
+
+### 8.0.1 internal single-node hosting smoke (MOMO-216/MOMO-220)
+
+내부 테스트용 single-node smoke는 prod deploy 방향을 바꾸지 않는 override다.
+
+```sh
+docker compose --env-file infra/prod/internal-smoke.env.example \
+  -f infra/prod/docker-compose.prod.yml \
+  -f infra/prod/docker-compose.internal-smoke.yml config
+scripts/verify_internal_hosting_smoke.sh
+scripts/verify_internal_host_runtime.sh
+```
+
+- Production/staging host: api/relay/worker는 source checkout 없이 pinned registry image를 pull한다.
+- Local internal smoke: 아직 publish pipeline 전이라도 verifier가 `momo-api:internal-smoke-*` 같은 run-specific local image tag를 빌드해 사용할 수 있다.
+- Migration: app container boot side effect가 아니라 operator step 또는 image-based smoke `migrate` job으로 실행한다.
+- Runtime smoke: `scripts/verify_internal_host_runtime.sh`는 source checkout bind mount 없이 `/health`, `/v1/agent-runtime/status`, REST login/message send, OutboxRelay→Centrifugo publish, mock Hermes `@김인턴` roundtrip evidence/log path를 출력한다.
+- External provider smoke: `scripts/verify_external_agent_provider.sh`는 source checkout host process로 local stack을 띄운 뒤 real Hermes/Kim Intern provider에 `@김인턴` 1왕복을 보낸다. 이 smoke는 운영 계정/키 발급 자체를 하지 않으며, credentials가 없으면 explicit skip evidence만 남긴다.
+- Caddy/TLS: Caddy가 유일한 public edge다. Local smoke는 `localhost`/`rt.localhost`와 `18080/18443` config를 확인하지만 public ACME/DNS는 검증하지 않는다.
+- Backup/restore: repo-local dump/restore 리허설은 `backup` profile evidence로 닫고, 실제 pgBackRest stanza/check/full backup/WAL/time-target PITR restore rehearsal은 `runtime-unverified(public host)`다.
+
 ### 8.1 헬스체크 / 로그
 - `GET https://api.<domain>/health` 200 = api green. Caddy/Centrifugo/postgres healthcheck도 green.
+- `GET https://api.<domain>/v1/agent-runtime/status` = Kim Intern provider mode/availability projection. `endpointLabel`은 redacted URL이고 `HERMES_API_KEY`/tokens는 출력하지 않는다.
 - 구조화 로그(JSON): 모든 로그에 `run_id`/`workspace_id` 상관키. `docker compose logs -f` + 로그 드라이버(json-file rotate 또는 외부 수집).
 
 ### 8.2 핵심 메트릭 (게이트/운영 신호)
@@ -287,15 +455,20 @@ pgbackrest --stanza=momo --type=time \
 
 ### 9.1 staging 최초 기동 (M1)
 ```sh
+# 0) 로컬/PR gate: 실제 VPS 시크릿 없이 config, runbook, restore evidence를 먼저 검증
+scripts/local_gate.sh --profile staging-smoke
+scripts/local_gate.sh --profile backup
+scripts/local_gate.sh --profile host-runtime
+
 # 1) DNS: api.staging.<domain> / rt.staging.<domain> → VPS IP (A/AAAA)
 # 2) age 키 + SOPS 시크릿 준비(§3), 80/443 인바운드 허용
 # 3) 이미지 빌드/푸시(CI) 또는 호스트에서 build
 # 4) 시크릿 메모리 복호화 + 기동
 SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
-  sops exec-env infra/prod/.env.sops.yaml \
+  sops exec-env infra/prod/secrets.sops.env \
   'docker compose -f infra/prod/docker-compose.prod.yml up -d'
 # 5) 마이그레이션
-sops exec-env infra/prod/.env.sops.yaml 'make migrate'
+sops exec-env infra/prod/secrets.sops.env 'make migrate'
 # 6) 검증: https://api.staging.<domain>/health 200 + TLS 정상 + RLS 격리 + outbox 왕복
 ```
 
@@ -317,6 +490,7 @@ sops exec-env infra/prod/.env.sops.yaml 'make migrate'
 
 - [ ] 인바운드 443(+80 ACME)만 허용, 5432/8000/8080 비노출(compose 내부).
 - [ ] dev-insecure/`change-me-*` 시크릿 **전부 교체**(SOPS 관리), 평문 `.env` 호스트/리포 미존재.
+- [ ] `scripts/local_gate.sh --profile staging-smoke` PASS 후 실제 host 기동.
 - [ ] `momo_relay`/`momo_admin` BYPASSRLS는 **읽기/relay 경로 한정**, app 역할은 `SET LOCAL app.workspace_id` 강제.
 - [ ] 워크스페이스 간 RLS 격리 런타임 검증(A 컨텍스트에서 B 행 조회 불가).
 - [ ] 초대코드 = 시크릿 취급(만료/max_uses/revoke), 로그 평문 금지.

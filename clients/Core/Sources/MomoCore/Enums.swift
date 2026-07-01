@@ -67,6 +67,51 @@ public enum RunStatus: String, Codable, Sendable, Hashable, CaseIterable {
     case timedOut = "timed_out"
 }
 
+/// Product-level A2A-style `agent_run` lifecycle.
+///
+/// This is intentionally separate from `RunStatus`, which mirrors the current
+/// Postgres enum. `paused` and `timed_out` remain DB compatibility states; UI and
+/// protocol surfaces should project them through this seven-state lifecycle.
+public enum AgentRunLifecycleStatus: String, Codable, Sendable, Hashable, CaseIterable {
+    case queued
+    case running
+    case inputRequired = "input_required"
+    case awaitingApproval = "awaiting_approval"
+    case succeeded
+    case failed
+    case cancelled
+}
+
+public extension RunStatus {
+    var lifecycleStatus: AgentRunLifecycleStatus {
+        switch self {
+        case .queued:
+            return .queued
+        case .running:
+            return .running
+        case .awaitingApproval:
+            return .awaitingApproval
+        case .paused:
+            return .inputRequired
+        case .succeeded:
+            return .succeeded
+        case .failed, .timedOut:
+            return .failed
+        case .cancelled:
+            return .cancelled
+        }
+    }
+
+    var isTerminal: Bool {
+        switch lifecycleStatus {
+        case .succeeded, .failed, .cancelled:
+            return true
+        case .queued, .running, .inputRequired, .awaitingApproval:
+            return false
+        }
+    }
+}
+
 /// `approval_status` ENUM (schema_v0.sql:22).
 public enum ApprovalStatus: String, Codable, Sendable, Hashable, CaseIterable {
     case pending

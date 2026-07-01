@@ -12,7 +12,7 @@
 
 ### 0.1 현재 상태(STATUS.md 기준)
 
-- Phase 0: 5개 Swift 패키지 `swift build` green. **런타임 미검증**(docker/psql 부재).
+- Phase 0: 5개 Swift 패키지 `swift build` green. M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. 남은 런타임 후속은 WebSocket live subscribe/presence/recovery, APNs, staging이다.
 - `clients/macOS` = SwiftPM **라이브러리 + smoke 실행 타깃**. 아직 **`.app` 번들 아님**(Xcode 프로젝트 없음).
 - `clients/iOS` = **존재하지 않음**(디렉터리 미생성).
 - 따라서 **이 CI/CD 파이프라인은 "배포 가능한 산출물(.app/.ipa)"이 생기기 전까지는 빌드/검증 단계까지만 실동작**한다. notarize/TestFlight 잡은 산출물 생성 이후 활성화.

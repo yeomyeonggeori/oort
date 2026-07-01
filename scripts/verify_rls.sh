@@ -115,7 +115,7 @@ DECLARE missing text;
 BEGIN
   SELECT string_agg(v.relname, ', ' ORDER BY v.relname)
     INTO missing
-    FROM (VALUES ('member'), ('channel'), ('membership'), ('message')) AS v(relname)
+    FROM (VALUES ('member'), ('channel'), ('membership'), ('message'), ('invite_code')) AS v(relname)
     LEFT JOIN pg_class c ON c.relname = v.relname
    WHERE c.oid IS NULL
       OR NOT c.relrowsecurity
@@ -155,11 +155,11 @@ SET status = EXCLUDED.status,
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
   ('10000000-0000-7000-8000-000000000101', '10000000-0000-7000-8000-000000000001',
-   'rls-a@momo.local', true, 'dev-password-stub', 'Asia/Seoul'),
+   'rls-a@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul'),
   ('10000000-0000-7000-8000-000000000102', '10000000-0000-7000-8000-000000000001',
-   'rls-a-nonmember@momo.local', true, 'dev-password-stub', 'Asia/Seoul'),
+   'rls-a-nonmember@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul'),
   ('20000000-0000-7000-8000-000000000101', '20000000-0000-7000-8000-000000000001',
-   'rls-b@momo.local', true, 'dev-password-stub', 'Asia/Seoul')
+   'rls-b@momo.local', true, momo_password_hash('dev-password'), 'Asia/Seoul')
 ON CONFLICT (member_id) DO UPDATE
 SET email = EXCLUDED.email,
     email_verified = EXCLUDED.email_verified,
@@ -193,6 +193,27 @@ VALUES
 ON CONFLICT (id) DO UPDATE
 SET role = EXCLUDED.role,
     left_at = NULL;
+
+INSERT INTO invite_code
+  (id, workspace_id, code_hash, code_preview, role, max_uses, used_count, expires_at, created_by)
+VALUES
+  ('10000000-0000-7000-8000-000000000601', '10000000-0000-7000-8000-000000000001',
+   momo_invite_code_hash('rls-a-invite-code'), 'odeA', 'member', 5, 0, now() + interval '1 day',
+   '10000000-0000-7000-8000-000000000101'),
+  ('20000000-0000-7000-8000-000000000601', '20000000-0000-7000-8000-000000000001',
+   momo_invite_code_hash('rls-b-invite-code'), 'odeB', 'member', 5, 0, now() + interval '1 day',
+   '20000000-0000-7000-8000-000000000101')
+ON CONFLICT (id) DO UPDATE
+SET code_hash = EXCLUDED.code_hash,
+    code_preview = EXCLUDED.code_preview,
+    role = EXCLUDED.role,
+    max_uses = EXCLUDED.max_uses,
+    used_count = EXCLUDED.used_count,
+    expires_at = EXCLUDED.expires_at,
+    revoked_at = NULL,
+    revoked_by = NULL,
+    revocation_reason = NULL,
+    updated_at = now();
 
 INSERT INTO message
   (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, client_msg_id)
@@ -230,6 +251,11 @@ BEGIN
     '20000000-0000-7000-8000-000000000401'
   );
   IF got <> 0 THEN RAISE EXCEPTION 'message leaked without app.workspace_id: %', got; END IF;
+  SELECT count(*) INTO got FROM invite_code WHERE id IN (
+    '10000000-0000-7000-8000-000000000601',
+    '20000000-0000-7000-8000-000000000601'
+  );
+  IF got <> 0 THEN RAISE EXCEPTION 'invite_code leaked without app.workspace_id: %', got; END IF;
 END $$;
 RESET ROLE;
 
@@ -248,6 +274,8 @@ BEGIN
   IF got <> 0 THEN RAISE EXCEPTION 'workspace B membership leaked into A context: %', got; END IF;
   SELECT count(*) INTO got FROM message WHERE id = '20000000-0000-7000-8000-000000000401';
   IF got <> 0 THEN RAISE EXCEPTION 'workspace B message leaked into A context: %', got; END IF;
+  SELECT count(*) INTO got FROM invite_code WHERE id = '20000000-0000-7000-8000-000000000601';
+  IF got <> 0 THEN RAISE EXCEPTION 'workspace B invite_code leaked into A context: %', got; END IF;
 
   SELECT count(*) INTO got
     FROM message m
@@ -293,6 +321,8 @@ BEGIN
   IF got <> 0 THEN RAISE EXCEPTION 'workspace A membership leaked into B context: %', got; END IF;
   SELECT count(*) INTO got FROM message WHERE id = '10000000-0000-7000-8000-000000000401';
   IF got <> 0 THEN RAISE EXCEPTION 'workspace A message leaked into B context: %', got; END IF;
+  SELECT count(*) INTO got FROM invite_code WHERE id = '10000000-0000-7000-8000-000000000601';
+  IF got <> 0 THEN RAISE EXCEPTION 'workspace A invite_code leaked into B context: %', got; END IF;
 END $$;
 COMMIT;
 RESET ROLE;
@@ -309,6 +339,13 @@ BEGIN
      '20000000-0000-7000-8000-000000000401'
    );
   IF got <> 2 THEN RAISE EXCEPTION 'momo_relay did not see both tenants: %', got; END IF;
+  SELECT count(DISTINCT workspace_id) INTO got
+    FROM invite_code
+   WHERE id IN (
+     '10000000-0000-7000-8000-000000000601',
+     '20000000-0000-7000-8000-000000000601'
+   );
+  IF got <> 2 THEN RAISE EXCEPTION 'momo_relay did not see both tenant invite_codes: %', got; END IF;
 END $$;
 RESET ROLE;
 

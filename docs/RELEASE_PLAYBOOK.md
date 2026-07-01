@@ -24,7 +24,7 @@
 PASS 기록(03 상단 PASS 블록: 날짜+커밋해시+빌드#+증거) 없는 release 트리거 = 규칙 위반.
 ```
 
-현재 상태(`STATUS.md`): Phase 0 = 5개 Swift 패키지 `swift build` green, **런타임 미검증**(docker/psql 부재). `clients/macOS`는 SwiftPM 라이브러리(+smoke), **`.app` 번들 아님**. `clients/iOS`는 **미존재**. → 본 PLAYBOOK의 STAGE A(런타임)·STAGE B(Xcode 프로젝트)가 모든 배포의 선결.
+현재 상태(`STATUS.md`): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨(seq/outbox/RLS/AgentWorker 비용 회계). `clients/macOS`는 SwiftPM dev app 가능 단계이나 릴리스용 Xcode `.app`은 아직 없음. `clients/iOS`는 **미존재**. → 본 PLAYBOOK의 남은 선결은 staging/WebSocket/APNs, STAGE B(Xcode 프로젝트), QA gate 실측이다.
 
 **전체 경로(요약):**
 ```

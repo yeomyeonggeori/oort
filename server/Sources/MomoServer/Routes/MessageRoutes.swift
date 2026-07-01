@@ -74,8 +74,10 @@ struct MessageRoutes: Sendable {
             ).collect()
 
             let row: PostgresRow
+            let didInsert: Bool
             if let first = insertRows.first {
                 row = first
+                didInsert = true
             } else {
                 // 0 rows → idempotency hit: re-select the existing message to return
                 // the prior seq (exactly-once effect, L4 §3.1).
@@ -91,10 +93,12 @@ struct MessageRoutes: Sendable {
                 ).collect()
                 guard let existingRow = existing.first else { return (true, nil) }
                 row = existingRow
+                didInsert = false
             }
 
             let (id, seq, ts, count, createdAt) =
                 try row.decode((UUID, Int64, Int64, Int, Date).self)
+            let responseProps = Self.decodeProps(propsJSON)
 
             // ---- outbox INSERT in the SAME tx (L4 §8.1: transactional outbox) ----
             // partition_key = channel_id → per-channel ordering for the relay.
@@ -116,10 +120,29 @@ struct MessageRoutes: Sendable {
                 logger: db.logger
             )
 
+            // MOMO-215: mention routing is part of the same commit boundary as
+            // the source message. It only runs on the first idempotent insert;
+            // retries that hit message_client_idem_uniq return the existing
+            // message without creating duplicate agent_run/outbox rows.
+            if didInsert, type == "text", let body, !body.isEmpty {
+                try await Self.routeAgentMentions(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    messageID: id,
+                    messageSeq: seq,
+                    authorMemberID: principal.memberID,
+                    body: body,
+                    hlcTs: ts
+                )
+            }
+
             return (true, MessageDTO(
                 id: id.uuidString, channelId: channelID.uuidString, seq: seq,
                 hlcTs: ts, hlcCount: count, authorMemberId: principal.memberID.uuidString,
-                type: type, body: body,
+                type: type, body: body, props: responseProps,
+                runId: dto.runId?.uuidString, clientMsgId: dto.clientMsgId.uuidString,
                 createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
             ))
         }
@@ -166,7 +189,8 @@ struct MessageRoutes: Sendable {
             if let after {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
+                           props::text, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID) AND seq > \(after)
                        AND deleted_at IS NULL
@@ -178,7 +202,8 @@ struct MessageRoutes: Sendable {
             } else if let before {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
+                           props::text, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID) AND seq < \(before)
                        AND deleted_at IS NULL
@@ -190,7 +215,8 @@ struct MessageRoutes: Sendable {
             } else {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
+                           props::text, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID)
                        AND deleted_at IS NULL
@@ -202,12 +228,13 @@ struct MessageRoutes: Sendable {
             }
 
             let dtos = try rows.map { row -> MessageDTO in
-                let (id, seq, ts, count, author, type, body, createdAt) =
-                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, Date).self)
+                let (id, seq, ts, count, author, type, body, propsJSON, runID, clientMsgID, createdAt) =
+                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, String, UUID?, UUID?, Date).self)
                 return MessageDTO(
                     id: id.uuidString, channelId: channelID.uuidString, seq: seq,
                     hlcTs: ts, hlcCount: count, authorMemberId: author.uuidString,
-                    type: type, body: body,
+                    type: type, body: body, props: Self.decodeProps(propsJSON),
+                    runId: runID?.uuidString, clientMsgId: clientMsgID?.uuidString,
                     createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
                 )
             }
@@ -245,6 +272,500 @@ struct MessageRoutes: Sendable {
         return !rows.isEmpty
     }
 
+    private struct AgentMentionCandidate {
+        let id: UUID
+        let handle: String
+        let displayName: String
+        let model: String
+        let toolSchemaJSON: String
+        let configJSON: String
+        let maxRunSteps: Int
+        let isChannelMember: Bool
+    }
+
+    private static func routeAgentMentions(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        body: String,
+        hlcTs: Int64
+    ) async throws {
+        let candidates = try await loadAgentMentionCandidates(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            channelID: channelID
+        )
+        let mentioned = candidates.filter {
+            containsAgentMention(body, handle: $0.handle, displayName: $0.displayName, memberID: $0.id)
+        }
+        guard !mentioned.isEmpty else { return }
+
+        for agent in mentioned {
+            if !agent.isChannelMember {
+                try await insertMentionDiagnostic(
+                    conn: conn,
+                    logger: logger,
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    messageID: messageID,
+                    messageSeq: messageSeq,
+                    authorMemberID: authorMemberID,
+                    agent: agent,
+                    reason: "agent_not_channel_member"
+                )
+                continue
+            }
+
+            try await enqueueMentionJob(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                channelID: channelID,
+                messageID: messageID,
+                messageSeq: messageSeq,
+                authorMemberID: authorMemberID,
+                body: body,
+                hlcTs: hlcTs,
+                agent: agent
+            )
+        }
+    }
+
+    private static func loadAgentMentionCandidates(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID
+    ) async throws -> [AgentMentionCandidate] {
+        let rows = try await conn.query(
+            """
+            SELECT m.id, m.handle, m.display_name, a.model,
+                   a.tool_schema::text, a.config::text, a.max_run_steps,
+                   EXISTS (
+                     SELECT 1
+                       FROM membership ms
+                      WHERE ms.channel_id = \(channelID)
+                        AND ms.member_id = m.id
+                        AND ms.left_at IS NULL
+                   ) AS is_channel_member
+              FROM member m
+              JOIN agent a ON a.member_id = m.id
+             WHERE m.workspace_id = \(workspaceID)
+               AND m.kind = 'agent'
+               AND m.status = 'active'
+               AND m.deleted_at IS NULL
+             ORDER BY m.created_at ASC, m.id ASC
+            """,
+            logger: logger
+        ).collect()
+
+        return try rows.map { row in
+            let (id, handle, displayName, model, toolSchema, config, maxRunSteps, isChannelMember) =
+                try row.decode((UUID, String, String, String, String, String, Int, Bool).self)
+            return AgentMentionCandidate(
+                id: id,
+                handle: handle,
+                displayName: displayName,
+                model: model,
+                toolSchemaJSON: toolSchema,
+                configJSON: config,
+                maxRunSteps: maxRunSteps,
+                isChannelMember: isChannelMember
+            )
+        }
+    }
+
+    static func containsAgentMention(
+        _ text: String,
+        handle: String,
+        displayName: String,
+        memberID: UUID
+    ) -> Bool {
+        let trimmedHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let id = memberID.uuidString.lowercased()
+
+        if !trimmedHandle.isEmpty,
+           containsMentionToken(text, marker: "@\(trimmedHandle)", caseInsensitive: true)
+            || containsMentionToken(text, marker: "<@\(trimmedHandle)>", caseInsensitive: true)
+        {
+            return true
+        }
+        if !trimmedName.isEmpty,
+           containsMentionToken(text, marker: "@\(trimmedName)", caseInsensitive: false)
+            || containsMentionToken(text, marker: "<@\(trimmedName)>", caseInsensitive: false)
+        {
+            return true
+        }
+        return containsMentionToken(text, marker: "<@\(id)>", caseInsensitive: true)
+            || containsMentionToken(text, marker: "@\(id)", caseInsensitive: true)
+    }
+
+    private static func containsMentionToken(
+        _ text: String,
+        marker: String,
+        caseInsensitive: Bool
+    ) -> Bool {
+        let haystack = caseInsensitive ? text.lowercased() : text
+        let needle = caseInsensitive ? marker.lowercased() : marker
+        guard !needle.isEmpty else { return false }
+
+        var searchStart = haystack.startIndex
+        while let range = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
+            if range.upperBound == haystack.endIndex
+                || isMentionBoundary(haystack[range.upperBound])
+            {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
+    }
+
+    private static func isMentionBoundary(_ char: Character) -> Bool {
+        char.unicodeScalars.allSatisfy { scalar in
+            !(CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-")
+        }
+    }
+
+    private static func enqueueMentionJob(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        body: String,
+        hlcTs: Int64,
+        agent: AgentMentionCandidate
+    ) async throws {
+        let idempotencyKey = "mention:\(messageID.uuidString):\(agent.id.uuidString)"
+        let input = mentionRunInput(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            agent: agent,
+            body: body,
+            idempotencyKey: idempotencyKey
+        )
+        let rows = try await conn.query(
+            """
+            INSERT INTO agent_run
+              (workspace_id, agent_member_id, channel_id, trigger_message_id,
+               status, step_count, max_steps, depth, input, idempotency_key)
+            VALUES
+              (\(workspaceID), \(agent.id), \(channelID), \(messageID),
+               'queued', 0, \(agent.maxRunSteps), 0, \(input)::jsonb,
+               \(idempotencyKey))
+            ON CONFLICT (workspace_id, idempotency_key) DO NOTHING
+            RETURNING id
+            """,
+            logger: logger
+        ).collect()
+        guard let first = rows.first else { return }
+        let runID = try first.decode(UUID.self)
+
+        let payload = mentionJobPayload(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            runID: runID,
+            agent: agent,
+            body: body,
+            hlcTs: hlcTs,
+            idempotencyKey: idempotencyKey
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox
+              (workspace_id, kind, status, method, payload, partition_key)
+            VALUES
+              (\(workspaceID), 'agent_job', 'pending', 'publish',
+               \(payload)::jsonb, \(agent.id))
+            """,
+            logger: logger
+        )
+
+        let detail = mentionDiagnosticDetail(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            agent: agent,
+            reason: "queued",
+            runID: runID,
+            idempotencyKey: idempotencyKey
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, run_id, detail)
+            VALUES
+              (\(workspaceID), \(authorMemberID), \(agent.id),
+               'agent.mention.queued', 'message', \(messageID), \(runID),
+               \(detail)::jsonb)
+            """,
+            logger: logger
+        )
+    }
+
+    private static func insertMentionDiagnostic(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        agent: AgentMentionCandidate,
+        reason: String
+    ) async throws {
+        let detail = mentionDiagnosticDetail(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            agent: agent,
+            reason: reason,
+            runID: nil,
+            idempotencyKey: nil
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, detail)
+            VALUES
+              (\(workspaceID), \(authorMemberID), \(agent.id),
+               'agent.mention.skipped', 'message', \(messageID), \(detail)::jsonb)
+            """,
+            logger: logger
+        )
+    }
+
+    private static func mentionRunInput(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        agent: AgentMentionCandidate,
+        body: String,
+        idempotencyKey: String
+    ) -> String {
+        jsonString([
+            "schema": "momo.agent_run.input.v0",
+            "surface": "mention",
+            "prompt": body,
+            "idempotency_key": idempotencyKey,
+            "trigger_message_id": messageID.uuidString,
+            "author_member_id": authorMemberID.uuidString,
+            "agent_member_id": agent.id.uuidString,
+            "channel_id": channelID.uuidString,
+            "workspace_id": workspaceID.uuidString,
+            "source": messageSource(
+                workspaceID: workspaceID,
+                channelID: channelID,
+                messageID: messageID,
+                messageSeq: messageSeq,
+                authorMemberID: authorMemberID,
+                body: body
+            ),
+        ])
+    }
+
+    private static func mentionJobPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        runID: UUID,
+        agent: AgentMentionCandidate,
+        body: String,
+        hlcTs: Int64,
+        idempotencyKey: String
+    ) -> String {
+        let source = messageSource(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            body: body
+        )
+        let contextPacket = contextPacketProjection(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            messageID: messageID,
+            messageSeq: messageSeq,
+            authorMemberID: authorMemberID,
+            runID: runID,
+            agent: agent,
+            body: body,
+            idempotencyKey: idempotencyKey,
+            source: source
+        )
+        return jsonString([
+            "run_id": runID.uuidString,
+            "workspace_id": workspaceID.uuidString,
+            "channel_id": channelID.uuidString,
+            "agent_member_id": agent.id.uuidString,
+            "author_member_id": authorMemberID.uuidString,
+            "trigger_message_id": messageID.uuidString,
+            "trigger_message_seq": messageSeq,
+            "model": agent.model,
+            "prompt": body,
+            "tools": jsonObject(agent.toolSchemaJSON),
+            "tool_grants": readOnlyToolGrants(),
+            "context_packet_projection": contextPacket,
+            "source_attribution": source,
+            "max_output_tokens": maxOutputTokens(from: agent.configJSON),
+            "step_count": 0,
+            "depth": 0,
+            "consecutive_auto": 0,
+            "created_from": "server.message_send.agent_mention.v0",
+            "created_at_ms": hlcTs,
+        ])
+    }
+
+    private static func contextPacketProjection(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        runID: UUID,
+        agent: AgentMentionCandidate,
+        body: String,
+        idempotencyKey: String,
+        source: [String: Any]
+    ) -> [String: Any] {
+        [
+            "schema": "momo.context_packet.mention_projection.v0",
+            "request": [
+                "surface": "mention",
+                "request_id": runID.uuidString,
+                "actor_member_id": authorMemberID.uuidString,
+                "agent_member_id": agent.id.uuidString,
+                "channel_id": channelID.uuidString,
+                "trigger_message_id": messageID.uuidString,
+                "idempotency_key": idempotencyKey,
+                "raw_text": body,
+                "normalized_intent": body,
+            ],
+            "scope": [
+                "workspace_id": workspaceID.uuidString,
+                "channel_id": channelID.uuidString,
+                "visibility": "channel",
+                "permission_basis": [
+                    "actor_channel_member",
+                    "agent_channel_member",
+                    "rls_workspace_scope",
+                ],
+                "rls_context": [
+                    "set_local_workspace_id": workspaceID.uuidString,
+                ],
+            ],
+            "recent_messages": [source],
+            "sources": [source],
+            "tool_grants": readOnlyToolGrants(),
+        ]
+    }
+
+    private static func readOnlyToolGrants() -> [[String: Any]] {
+        [[
+            "tool_name": "github.search_issues",
+            "provider": "github",
+            "grant": "read",
+            "risk": "read",
+            "approval_policy": "none",
+            "resource_scope_summary": "repo:Dawn-kim-official/momo",
+            "capability_version": "mock-github@0.1.0",
+            "policy_version": "capability-policy@2026-06-30",
+        ]]
+    }
+
+    private static func messageSource(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        body: String
+    ) -> [String: Any] {
+        [
+            "source_id": "msg_\(messageID.uuidString)",
+            "kind": "message",
+            "title": "Message #\(messageSeq)",
+            "uri": "momo://workspaces/\(workspaceID.uuidString)/channels/\(channelID.uuidString)/messages/\(messageID.uuidString)",
+            "workspace_id": workspaceID.uuidString,
+            "channel_id": channelID.uuidString,
+            "message_id": messageID.uuidString,
+            "message_seq": messageSeq,
+            "author_member_id": authorMemberID.uuidString,
+            "permission_snapshot": "actor:channel_member agent:channel_member",
+            "excerpt": String(body.prefix(512)),
+        ]
+    }
+
+    private static func mentionDiagnosticDetail(
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        messageSeq: Int64,
+        authorMemberID: UUID,
+        agent: AgentMentionCandidate,
+        reason: String,
+        runID: UUID?,
+        idempotencyKey: String?
+    ) -> String {
+        var detail: [String: Any] = [
+            "schema": "momo.agent_mention.diagnostic.v0",
+            "reason": reason,
+            "workspace_id": workspaceID.uuidString,
+            "channel_id": channelID.uuidString,
+            "message_id": messageID.uuidString,
+            "message_seq": messageSeq,
+            "author_member_id": authorMemberID.uuidString,
+            "agent_member_id": agent.id.uuidString,
+            "agent_handle": agent.handle,
+            "agent_display_name": agent.displayName,
+            "agent_channel_member": agent.isChannelMember,
+            "policy": agent.isChannelMember ? "queued" : "no_op_fail_closed",
+        ]
+        if let runID { detail["run_id"] = runID.uuidString }
+        if let idempotencyKey { detail["idempotency_key"] = idempotencyKey }
+        return jsonString(detail)
+    }
+
+    private static func maxOutputTokens(from configJSON: String) -> Int {
+        guard let object = jsonObject(configJSON) as? [String: Any] else { return 1024 }
+        if let value = object["max_output_tokens"] as? Int {
+            return value
+        }
+        if let value = object["max_output_tokens"] as? Double {
+            return Int(value)
+        }
+        if let value = object["maxOutputTokens"] as? Int {
+            return value
+        }
+        return 1024
+    }
+
     /// Resolve workspace/channel UUIDs from the path and verify the path workspace
     /// matches the authenticated token's workspace (tenant isolation, L4 §1.3).
     private static func scopeIDs(
@@ -273,8 +794,37 @@ struct MessageRoutes: Sendable {
         return str
     }
 
+    private static func jsonObject(_ json: String) -> Any {
+        guard let data = json.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data)
+        else { return [:] }
+        return object
+    }
+
+    private static func jsonString(_ object: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+              ),
+              let str = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return str
+    }
+
+    private static func decodeProps(_ propsJSON: String) -> [String: JSONValue]? {
+        guard let data = propsJSON.data(using: .utf8),
+              let value = try? JSONDecoder().decode(JSONValue.self, from: data),
+              case .object(let props) = value,
+              !props.isEmpty
+        else {
+            return nil
+        }
+        return props
+    }
+
     /// Build the outbox `payload` JSON (the args the relay will POST to Centrifugo).
-    private static func broadcastPayload(
+    static func broadcastPayload(
         centChannel: String, messageID: UUID, channelID: UUID, seq: Int64,
         type: String, body: String?, authorMemberID: UUID, hlcTs: Int64, hlcCount: Int
     ) -> String {
@@ -286,13 +836,13 @@ struct MessageRoutes: Sendable {
             "seq": seq,
             "payload": [
                 "id": messageID.uuidString,
-                "channelId": channelID.uuidString,
+                "channel_id": channelID.uuidString,
                 "seq": seq,
                 "type": type,
                 "body": body as Any,
-                "authorMemberId": authorMemberID.uuidString,
-                "hlcTs": hlcTs,
-                "hlcCount": hlcCount,
+                "author_member_id": authorMemberID.uuidString,
+                "hlc_ts": hlcTs,
+                "hlc_count": hlcCount,
             ],
         ]
         let envelope: [String: Any] = [

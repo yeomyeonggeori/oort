@@ -24,12 +24,16 @@ struct AgentWorkerMain {
                 .flatMap { Logger.Level(rawValue: $0) } ?? .info
 
         let config = Config.load()
+        try config.validateAgentProviderForBoot()
         logger.info("starting AgentWorker", metadata: [
             "pgHost": .string(config.pgHost),
             "pgDatabase": .string(config.pgDatabase),
             "pgUser": .string(config.pgUser),
             "centAPIURL": .string(config.centAPIURL),
-            "hermesBaseURL": .string(config.hermesBaseURL),
+            "momoEnvironment": .string(config.momoEnvironment),
+            "agentProviderMode": .string(config.agentProviderMode.rawValue),
+            "agentProviderEndpoint": .string(config.agentProviderEndpointLabel),
+            "agentAvailability": .string(config.agentAvailability),
         ])
 
         // ---- PostgreSQL pool (SoT access; BYPASSRLS role) ----

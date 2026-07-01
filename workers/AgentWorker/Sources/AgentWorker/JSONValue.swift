@@ -5,7 +5,7 @@ import Foundation
 /// Used to (a) decode the `agent_job` outbox `payload` column, (b) decode hermes
 /// `tool_calls` arguments, and (c) build Centrifugo publish payloads for
 /// `agent.status` / `agent.partial` events (L4 §5.2 single envelope).
-enum JSONValue: Codable, Sendable {
+enum JSONValue: Codable, Equatable, Sendable {
     case string(String)
     case int(Int64)
     case double(Double)
@@ -58,5 +58,30 @@ enum JSONValue: Codable, Sendable {
     var stringValue: String? {
         if case .string(let s) = self { return s }
         return nil
+    }
+
+    var objectValue: [String: JSONValue]? {
+        if case .object(let object) = self { return object }
+        return nil
+    }
+
+    var boolValue: Bool? {
+        if case .bool(let bool) = self { return bool }
+        return nil
+    }
+
+    func jsonString() -> String {
+        guard let data = try? JSONEncoder.sorted.encode(self),
+              let string = String(data: data, encoding: .utf8)
+        else { return "null" }
+        return string
+    }
+}
+
+private extension JSONEncoder {
+    static var sorted: JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return encoder
     }
 }

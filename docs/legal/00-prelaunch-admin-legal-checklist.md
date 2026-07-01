@@ -8,6 +8,12 @@
 
 ---
 
+## 현재 진행상황
+
+- 2026-06-26: `MOMO-080`에서 L0/L1 등록 준비 런북을 `docs/legal/01-entity-apple-runbook.md`에 정리했다. Codex 산출물은 문서/체크리스트까지이며, D-U-N-S 조회·신청, Apple 계약 동의, $99/년 결제, Team ID/API Key/인증서 확보는 사람 `[manual]` handoff다.
+
+---
+
 ## 등급 정의
 - `[doc]` = Codex가 이 리포에 마크다운/텍스트 산출(템플릿 채움). 검증 = 파일 존재 + 플레이스홀더 0.
 - `[file]` = Codex가 리포에 실제 산출물 생성(NOTICE, LICENSE, Info.plist 키 등). 검증 = 파일 존재 + 빌드 정합.
@@ -49,6 +55,7 @@
   ([Apple — D-U-N-S Number](https://developer.apple.com/help/account/membership/D-U-N-S/), [Apple — Enroll](https://developer.apple.com/programs/enroll/))
 - **momo 맥락(추정)**: "플랫폼 관리자 전체 추적 + 멀티팀 워크스페이스 격리"는 조직 운영 색채가 강하나, App Store 등록 주체는 **법인 설립 여부와 별개**다. 초기 검증·TestFlight 단계는 개인 등록으로 충분(추정). 정식 상용·계약(B2B 워크스페이스 판매) 단계에서 법인 전환 검토.
 - **DoD**: 이 문서에 "개인" 또는 "법인" 선택 + 근거 1줄 기록. 법인이면 `L0-duns`로, 개인이면 `L1-apple-enroll`로(D-U-N-S 스킵).
+- **상세 런북**: `docs/legal/01-entity-apple-runbook.md` §2.
 
 ---
 
@@ -63,6 +70,7 @@
   2. 없으면 무료 신청 → 최대 5영업일 대기.
   3. 번호 수령 후 Apple 반영 2영업일 대기 → 그 뒤 §3 등록.
 - **DoD**: D-U-N-S 9자리 확보(시크릿/사내 위키에 보관, **리포에 평문 금지**). 이 문서엔 "확보 완료(YYYY-MM-DD)"만 기록.
+- **상세 런북**: `docs/legal/01-entity-apple-runbook.md` §3.
 
 ---
 
@@ -75,6 +83,7 @@
 - **절차(사람)**: Apple Developer 앱 또는 웹 등록 → (조직)D-U-N-S·법적실체명 입력 → Apple 검증 → $99 결제.
 - **연계**: 등록 완료 후 `docs/cicd/01-setup-runbook.md`의 ASC API Key(M1)·서명(M2)으로 이어짐.
 - **DoD**: Team ID 확보 + App Store Connect 접근. Bundle ID `com.dawnkim.momo` 등록(게이트 03 G-3). 이 문서에 "등록 완료(YYYY-MM-DD), Team ID 보관 위치" 기록.
+- **상세 런북**: `docs/legal/01-entity-apple-runbook.md` §4~§5.
 
 ---
 

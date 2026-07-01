@@ -11,7 +11,7 @@
 
 | 순서 | 문서 | 왜 |
 |---|---|---|
-| 1 | [`STATUS.md`](../STATUS.md) | **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐나(현재 = M0 완료, 런타임 미검증). |
+| 1 | [`STATUS.md`](../STATUS.md) | **항상 먼저.** 지금 무엇이 컴파일/런타임 검증됐나(현재 = M1 runtime MOMO-001~004 검증, staging/WebSocket/APNs 후속). |
 | 2 | [`AGENTS.md`](../AGENTS.md) | Codex 자율작업 **운영 계약**(빌드·검증 명령, DoD, 다음 티켓 선택법, 브랜치/PR). 충돌 시 최우선. |
 | 3 | [`ROADMAP.md`](../ROADMAP.md) | M0~M8 **마일스톤 backbone 정본**(의존/게이트/비용). |
 | 4 | [`docs/BACKLOG.md`](BACKLOG.md) | **티켓 정본**(MOMO-NNN, 41티켓/14에픽) — GitHub 이슈 변환원. |
@@ -32,6 +32,12 @@
 | [`README.md`](../README.md) | 제품 1줄 + 스택 + 아키텍처 + 정식 릴리스 로드맵 | 진입점 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
 | [`Makefile`](../Makefile) | `make build/test/up/down/migrate` | 빌드 명령 |
+| [`scripts/local_gate.sh`](../scripts/local_gate.sh) | GitHub Actions disabled/manual-only 기간 PR evidence 생성용 로컬 게이트(`docs|swift|diagnostics|local-alpha|runtime-*|macos-ui|m3-dbc|all`) | 운영 명령 |
+| [`scripts/collect_diagnostics.sh`](../scripts/collect_diagnostics.sh) | 내부 alpha 장애 공유용 redacted diagnostics bundle(directory + tar.gz + summary.md) 생성 | 운영 명령 |
+| [`scripts/goal_status.sh`](../scripts/goal_status.sh) | ready/in-progress/needs-review/blocked issue와 branch/PR/worktree/local gate 상태판 | 운영 명령 |
+| [`scripts/goal_claim.sh`](../scripts/goal_claim.sh) | 이슈 claim + canonical branch/worktree 생성 + remote branch lock + status 갱신 | 운영 명령 |
+| [`scripts/goal_release.sh`](../scripts/goal_release.sh) | worker 완료 후 issue를 review/blocked/ready 상태로 전환하고 코멘트 기록 | 운영 명령 |
+| [`.conductor/setup.sh`](../.conductor/setup.sh) | worktree별 `.env.worktree`, compose namespace, runtime port 자동 분리 | 운영 명령 |
 
 ---
 
@@ -43,9 +49,23 @@
 |---|---|---|
 | [`docs/RELEASE_PLAYBOOK.md`](RELEASE_PLAYBOOK.md) | 데스크탑 공증 + iOS App Store + CI/CD **실행 마스터 체크리스트** + 비용/기간 표 + gotcha 집약 | M1~M8 |
 | [`docs/DEPLOY.md`](DEPLOY.md) | 백엔드 멀티팀 운영 배포(staging→prod: Caddy 자동TLS/Redis/SOPS+age/pgBackRest PITR/모니터링) | M1, M2 |
-| [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-G + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
+| [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |
+| [`docs/SECRETS_BACKUP_RUNBOOK.md`](SECRETS_BACKUP_RUNBOOK.md) | SOPS+age secret lifecycle + pgBackRest PITR backup/restore skeleton(MOMO-006, 실제 secret 없음) | M1 |
+| [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) | 내부 alpha quickstart: local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations | M3/M7 준비 |
+| [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) | 내부 alpha feedback intake: severity, evidence packet, needs-triage, buildable goal handoff | M3/M7 준비 |
+| [`docs/MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) | macOS alpha update channel runbook: Sparkle 2/manual fallback, appcast/signing/notary/DMG secret boundary, placeholder UI check | M3/M4 준비 |
+| [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
 | [`docs/RUN.md`](RUN.md) | 로컬 기동/마이그레이션/롤백 절차(환경변수→`make up`→migrate→서버/relay/worker→macOS) | M0/M1 |
+| [`docs/INBOUND_MCP.md`](INBOUND_MCP.md) | Inbound MCP v0 서버 skeleton endpoint/security/permission model | M2 |
 | [`docs/GITHUB_OPS.md`](GITHUB_OPS.md) | GitHub 운영 구조(마일스톤=릴리스, 라벨 택소노미, Projects, Codex goal 흐름) | 전반 |
+| [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
+| [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md) | local-only Hermes + GPT provider 계약: loopback opt-in, non-loopback HTTP fail-fast, OpenAI credential provider-owned boundary | M1 |
+| [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
+| [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
+| [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |
+| [`docs/adr/0003-macos-packaging-architecture.md`](adr/0003-macos-packaging-architecture.md) | M4 macOS packaging ADR: SwiftPM dev app vs Xcode release app, build-macos-apps 사용 기준, signing/notary/DMG/Sparkle issue split | M4 |
+| [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md) | Codex/OpenAI credential boundary: Hermes/Kim Intern provider-owned OAuth/API keys, momo evidence redaction/fail-fast | M1 |
+| [`docs/adr/0005-macos-alpha-update-channel-v0.md`](adr/0005-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 
@@ -56,7 +76,7 @@
 | [`docs/cicd/02-secrets-inventory.md`](cicd/02-secrets-inventory.md) | 비밀값 6종 인벤토리 |
 | [`docs/cicd/03-store-readiness-gate.md`](cicd/03-store-readiness-gate.md) | 게이트 체크리스트(무엇) + **PASS 블록 정본 기록처** |
 | [`docs/cicd/04-codex-tickets.md`](cicd/04-codex-tickets.md) | CI/CD Codex 실행 티켓(CI0~CI5, C1/C2, M1/M2) |
-| [`docs/cicd/05-qa-release-gate.md`](cicd/05-qa-release-gate.md) | **게이트 객관 통과기준 정본**(G-0~G-G 수치/정의/1차출처) |
+| [`docs/cicd/05-qa-release-gate.md`](cicd/05-qa-release-gate.md) | **게이트 객관 통과기준 정본**(G-0~G-H 수치/정의/1차출처) |
 | [`docs/cicd/06-beta-testflight-plan.md`](cicd/06-beta-testflight-plan.md) | TestFlight 내부/외부 + macOS 공증 .dmg 비공개 베타 + 피드백 트리아지 |
 | [`docs/cicd/07-crash-analytics-spec.md`](cicd/07-crash-analytics-spec.md) | Sentry Cocoa(self-host) + MetricKit 계측 스펙 |
 | [`docs/cicd/08-e2e-accessibility-performance.md`](cicd/08-e2e-accessibility-performance.md) | XCUITest + performAccessibilityAudit + XCTMetric 테스트 plan |
@@ -71,7 +91,7 @@
 | 문서 | 역할 |
 |---|---|
 | [`docs/legal/00-prelaunch-admin-legal-checklist.md`](legal/00-prelaunch-admin-legal-checklist.md) | 출시 전 법무·행정 체크리스트(L0~L8) |
-| [`docs/legal/01-entity-apple-runbook.md`](legal/01-entity-apple-runbook.md) | 등록주체(개인/법인) + D-U-N-S + Apple Developer Program 런북 |
+| [`docs/legal/01-entity-apple-runbook.md`](legal/01-entity-apple-runbook.md) | L0/L1 등록 준비: 등록주체(개인/법인), D-U-N-S, Apple Developer Program, 사람/Codex handoff |
 | [`docs/legal/02-cost-ledger.md`](legal/02-cost-ledger.md) | 비용 원장(일회성/연간/CI 컴퓨트) |
 | [`docs/legal/03-app-privacy-datamap.md`](legal/03-app-privacy-datamap.md) | App Privacy 라벨 ↔ PrivacyInfo.xcprivacy 데이터맵 |
 | [`legal/privacy-policy.md`](../legal/privacy-policy.md) | 개인정보처리방침 초안 |
@@ -91,6 +111,40 @@
 | [`research/07-deepdive/03-distributable-backbone-and-agent-interface.md`](../research/07-deepdive/03-distributable-backbone-and-agent-interface.md) | 배포 가능 backbone + 에이전트 인터페이스 |
 | [`research/08-distribution/01-macos-distribution-spec.md`](../research/08-distribution/01-macos-distribution-spec.md) | macOS 배포 스펙(공증/Sparkle) |
 | [`research/08-distribution/02-distribution-tickets.md`](../research/08-distribution/02-distribution-tickets.md) | 배포 티켓 |
+| [`research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`](../research/10-local-ai-protocol-trust/01-local-llm-context-broker.md) | Apple Foundation Models 적용 경계 + Context Broker + Memory Plane |
+| [`research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`](../research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md) | Agent Protocol v0 + Google Workspace connector roadmap |
+| [`research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`](../research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md) | Enterprise Trust + local PR gate + multi-session ops + build-macos-apps plugin 활용 |
+| [`research/11-agent-runtime/01-three-agent-runtime-analysis.md`](../research/11-agent-runtime/01-three-agent-runtime-analysis.md) | Hermes agent / internkim / openclaw runtime 분석 |
+| [`research/11-agent-runtime/02-memory-cache-protocol-gaps.md`](../research/11-agent-runtime/02-memory-cache-protocol-gaps.md) | Memory Plane · Capability Cache · MCP/A2A/SSE protocol gap |
+| [`research/11-agent-runtime/03-roadmap-and-methodology.md`](../research/11-agent-runtime/03-roadmap-and-methodology.md) | Agent runtime 4-plane 방법론 + MOMO-151~172 로드맵 |
+| [`research/11-agent-runtime/04-context-packet-v0.md`](../research/11-agent-runtime/04-context-packet-v0.md) | Context Packet v0 정본 스펙(request/scope/source/memory/tool/budget/redaction/runtime envelope) |
+| [`research/11-agent-runtime/fixtures/context-packet-v0/`](../research/11-agent-runtime/fixtures/context-packet-v0/) | Context Packet v0 JSON fixtures(mention, slash command, message context action) |
+| [`research/11-agent-runtime/05-memory-plane-v0.md`](../research/11-agent-runtime/05-memory-plane-v0.md) | Memory Plane v0 정본 스펙(typed memory/source/visibility/expiry/delete/retrieval permission) |
+| [`research/11-agent-runtime/fixtures/memory-plane-v0/`](../research/11-agent-runtime/fixtures/memory-plane-v0/) | Memory Plane v0 JSON fixtures(memory item catalog, retrieval allowed/denied examples) |
+| [`research/11-agent-runtime/06-capability-cache-v0.md`](../research/11-agent-runtime/06-capability-cache-v0.md) | Capability Cache v0 정본 스펙(agent/plugin/MCP capability cache, tool schema refs, TTL, invalidation, audit) |
+| [`research/11-agent-runtime/fixtures/capability-cache-v0/`](../research/11-agent-runtime/fixtures/capability-cache-v0/) | Capability Cache v0 JSON fixtures(capability list, plugin tool schema projection, invalidation/audit examples) |
+| [`research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`](../research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md) | macOS Agent Protocol card UX 정본(tool_call/approval/tool_result/artifact/cost/memory/source badges + SwiftUI fixture contract) |
+| [`research/11-agent-runtime/07-agent-run-lifecycle-v0.md`](../research/11-agent-runtime/07-agent-run-lifecycle-v0.md) | Agent Run Lifecycle v0 정본 스펙(A2A-style Task/Message/Artifact/status mapping, input-required vs awaiting-approval 경계) |
+| [`research/11-agent-runtime/08-approval-pause-resume-runtime.md`](../research/11-agent-runtime/08-approval-pause-resume-runtime.md) | Approval Pause/Resume Runtime v0 정본 스펙(tool_call checkpoint, approval decision, same-run resume/terminate, audit) |
+| [`research/11-agent-runtime/fixtures/approval-pause-resume-v0/`](../research/11-agent-runtime/fixtures/approval-pause-resume-v0/) | Approval Pause/Resume v0 JSON fixture(risky tool_call → approval_request → approve/deny → resume/terminate) |
+| [`research/11-agent-runtime/09-inbound-mcp-server-v0.md`](../research/11-agent-runtime/09-inbound-mcp-server-v0.md) | Inbound MCP Server v0 정본 스펙(search/fetch/post/approval-safe tool call + Context Packet/Memory/Capability 권한 연결) |
+| [`research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`](../research/11-agent-runtime/fixtures/inbound-mcp-server-v0/) | Inbound MCP Server v0 JSON fixtures(tools/resources/prompts discovery, approval-safe tool-call proposal) |
+| [`research/11-agent-runtime/10-approval-decision-server-contract-v0.md`](../research/11-agent-runtime/10-approval-decision-server-contract-v0.md) | Approval Decision Server Contract v0 정본 스펙(approve/reject/expire/resume API·DB·event·worker/macOS 연결) |
+| [`research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/`](../research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/) | Approval Decision Server Contract v0 JSON fixtures(approve/reject request/response, expiry result, resume job payload, decided event) |
+| [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../research/11-agent-runtime/11-hermes-adapter-contract-v0.md) | Hermes Adapter Contract v0 정본 스펙(AgentWorker SSE product default, platform adapter optional ingress/interop) |
+| [`research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/`](../research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/) | Hermes Adapter Contract v0 JSON fixtures(OpenAI-compatible SSE input, platform adapter event mapping) |
+| [`research/11-agent-runtime/12-google-workspace-connector-v0.md`](../research/11-agent-runtime/12-google-workspace-connector-v0.md) | Google Workspace Connector v0 정본 스펙(per-user OAuth, Drive/Gmail/Calendar read-mostly sync, Context Packet/Memory/Capability projection, approval-gated writes) |
+| [`research/11-agent-runtime/fixtures/google-workspace-connector-v0/`](../research/11-agent-runtime/fixtures/google-workspace-connector-v0/) | Google Workspace Connector v0 JSON fixtures(Drive source ref, Gmail thread ref, Calendar availability projection) |
+| [`research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`](../research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md) | Google Workspace Enterprise Admin v0 정본 스펙(enterprise admin install, domain-wide delegation option, scope inventory, service account boundary, delegated user, audit export, revoke/delete) |
+| [`research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`](../research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/) | Google Workspace Enterprise Admin v0 JSON fixtures(admin install scope inventory, DWD delegated Context/Memory/Capability projection, audit export revoke flow) |
+| [`research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`](../research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md) | Realtime Client Subscription Contract v0 정본 스펙(connection token, channel naming, subscribe auth, event envelope, `message.seq` replay/gap-fill, reconnect, macOS apply boundary) |
+| [`research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/`](../research/11-agent-runtime/fixtures/realtime-client-subscription-contract-v0/) | Realtime client subscription JSON fixtures(`message.new`, approval request/decision, `agent.partial`, `agent.status`, gap/backfill scenario) |
+| [`research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`](../research/11-agent-runtime/15-m3-dbc-real-data-readiness.md) | M3 D/B/C real-data readiness 정본(MOMO-020/021/022 unblock 조건, endpoints/events, local gate, follow-up MOMO-200~204 후보) |
+| [`research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`](../research/12-agentic-work-os/01-agentic-work-os-market-analysis.md) | Paca/OpenHands/Linear/Rovo/GitHub/Slack/MCP/A2A 시장 분석 + momo 제품 포지션(agent execution ledger) |
+| [`research/12-agentic-work-os/02-plugin-manifest-v0.md`](../research/12-agentic-work-os/02-plugin-manifest-v0.md) | Plugin Manifest v0 정본 + `plugin_id`/tools/scopes/runtime boundary/license/provenance + Context Packet `tool_grants`/Capability Cache/approval metadata gate + source/audit/signature policy + catalog class/repo split 기준 |
+| [`research/12-agentic-work-os/03-agent-host-positioning.md`](../research/12-agentic-work-os/03-agent-host-positioning.md) | MOMO-184 agent host 제품 문장 + channel timeline execution ledger 1페이지 비교 + website/README/sales deck reusable copy |
+| [`research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`](../research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md) | First-party plugin repo strategy 정본(GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector, repo split 순서, plugin surface/audit/source/approval contract) |
+| [`research/11-agent-runtime/fixtures/plugin-manifest-v0/`](../research/11-agent-runtime/fixtures/plugin-manifest-v0/) | Plugin Manifest v0 JSON fixtures(GitHub Issues, Google Workspace read-mostly, high-risk write approval policy) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
 ---
@@ -107,7 +161,7 @@
 | [`scripts/github/bootstrap.sh`](../scripts/github/bootstrap.sh) | 기존(레거시) 부트스트랩 — 신규는 `scripts/github_bootstrap.sh` 사용 |
 | [`.github/ISSUE_TEMPLATE/`](../.github/ISSUE_TEMPLATE/) | 이슈 템플릿(codex-goal/feature/bug/chore/config) |
 | [`.github/pull_request_template.md`](../.github/pull_request_template.md) | PR 템플릿(AGENTS.md §5 정본) |
-| [`.github/workflows/`](../.github/workflows/) | `ci-build.yml`(swift build/test) · `release-ios.yml` · `release-macos.yml`(🔒 게이트 전 미트리거) |
+| [`.github/workflows/`](../.github/workflows/) | `ci-build.yml` · `release-ios.yml` · `release-macos.yml`은 비용 방지를 위해 manual-only(`workflow_dispatch`)이며 원격 workflow도 disabled 상태 유지 |
 
 > **마일스톤 매핑:** 본 backbone(M0~M8 9단계)이 상위 정본. 기존 `milestones.tsv`(M0~M6 7단계)는 부분집합 — 매핑은 [`ROADMAP.md §6`](../ROADMAP.md).
 
@@ -124,7 +178,7 @@
 | `relay/OutboxRelay/` | SKIP LOCKED 폴링 → Centrifugo publish (BYPASSRLS) |
 | `workers/AgentWorker/` | agent_job 클레임 → hermes OpenAI-compat SSE → message PATCH (BYPASSRLS) |
 | `adapters/hermes/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) |
-| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · `centrifugo.json` · `.env.example` (prod는 M1에서 `infra/prod/*` 신규) |
+| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(api/relay/worker/mock-Hermes/Postgres/Centrifugo local gate boundary) · `centrifugo.json` · `.env.example`; prod skeleton은 `infra/prod/*`(SOPS/age + pgBackRest 예시, 실제 secret 없음). Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
 | `fastlane/` | `Fastfile`·`Appfile`·`Matchfile` (Gemfile은 루트) |
 
 ---

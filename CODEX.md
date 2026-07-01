@@ -21,15 +21,16 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 ## 0.1 표준 작업 루프
 
 1. 모든 작업은 **Issue + Milestone + Project** 기준으로 시작한다. 필요하면 작업 전 이슈/마일스톤/프로젝트 상태를 정리한다.
-2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. `scripts/goal_claim.sh` 같은 운영 스크립트가 있으면 우선 사용하고, 없으면 수동 branch/worktree로 같은 계약을 지킨다.
+2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. 시작 전 `scripts/goal_status.sh`로 충돌을 확인하고, `scripts/goal_claim.sh <issue>`로 branch/worktree/assignee/status lock을 잡는다. 스크립트가 없는 checkout에서는 수동 branch/worktree로 같은 계약을 지킨다.
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
-5. 구현 후 해당 검증 등급의 테스트를 실행한다. Swift 변경은 `make build`/`make test`를 기본 게이트로 본다.
-6. 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫는다.
-7. PR 이후 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 발견 사항을 반영한다.
-8. 리뷰 반영 후 최종 테스트를 다시 실행한다. 문제가 없고 CI가 green이면 merge한다.
-9. merge 후 main GitHub Actions를 확인한다. 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 추가 리서치 필요성을 점검하고 이슈/마일스톤/로드맵 상태를 정리한다.
-10. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
+5. 구현 후 해당 검증 등급의 테스트를 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh --profile ...`를 우선 사용하고, Swift 변경은 `make build`/`make test`를 하드 게이트로 본다.
+6. worker는 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫고, PR 본문에 local gate evidence를 붙인다.
+7. worker는 `scripts/goal_release.sh <issue> --review --pr <PR URL>`로 이슈를 `status:needs-review`로 전환하고 `momo-main`에 handoff한 뒤 멈춘다.
+8. **merge/close/main gate/로드맵 조정은 `momo-main`만 수행한다.** worker는 PR 생성 후 임의 merge, 이슈 close, main 재검증, 로드맵/백로그 재배열을 하지 않는다.
+9. `momo-main`은 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 필요한 수정만 worker 또는 같은 이슈 worktree에 위임한다.
+10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh`가 출력한 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
+11. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ---
 
@@ -60,7 +61,7 @@ workers/AgentWorker/     agent_job 클레임 → hermes OpenAI-compat SSE → me
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml. py3 only.
 
 infra/                   docker-compose.yml(PG18 + Centrifugo v6 + healthcheck/volume) · centrifugo.json · .env.example. (※ infra/prod/* 는 M1에서 신규.)
-scripts/                 migrate.sh · github/{bootstrap.sh, milestones.tsv, labels.tsv, issues.tsv}.
+scripts/                 local_gate.sh · goal_claim/status/release.sh · migrate.sh · github/{bootstrap.sh, milestones.tsv, labels.tsv, issues.tsv}.
 docs/                    RUN.md(기동 순서) · GITHUB_OPS.md · cicd/00~09 · legal/00~03.
 legal/                   privacy-policy.md · agent-disclosure.md · THIRD_PARTY_NOTICES.md (법률 자문 아님).
 .github/                 ISSUE_TEMPLATE/ · workflows/{ci-build,release-ios,release-macos}.yml.
@@ -78,6 +79,11 @@ research/08-distribution/ 01=macOS 배포 스펙 · 02=배포 티켓.
 > 로컬 툴체인: **Swift 6.2.x 있음**(`.swift-version` = 6.2). **Docker Desktop + psql 있음**, hermes 없음. PG18+Centrifugo 런타임은 검증 가능하고, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway를 준비한다.
 
 ```bash
+scripts/local_gate.sh --profile docs
+scripts/local_gate.sh --profile swift
+scripts/local_gate.sh --profile runtime-db
+scripts/local_gate.sh --profile runtime-agent
+scripts/local_gate.sh --profile macos-ui
 # Swift 패키지 (의존순: Core → server/relay/worker → macOS). 전부 green이 하드 게이트.
 make build                                        # SWIFT_PKGS 중 Package.swift 있는 것만 swift build
 make test                                         # 동일 패키지 swift test
@@ -95,7 +101,7 @@ python3 -m py_compile adapters/hermes/momo_adapter.py
 xcodebuild build -scheme MomoMac  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
 xcodebuild build-for-testing -scheme MomoiOS -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
 
-# CI/워크플로우·fastlane 정적 검증(가용 시):
+# CI/워크플로우·fastlane 정적 검증(워크플로우는 현재 manual-only/disabled):
 actionlint .github/workflows/*.yml                # YAML/액션 lint
 ruby -c fastlane/Fastfile                         # Fastfile syntax
 
@@ -146,6 +152,10 @@ Closes #<issue>
 
 ## 남은 것 / 후속 이슈 제안
 - (스코프 밖이라 새 이슈로 뺀 것)
+
+## Worker handoff
+- [ ] worker는 PR 생성 후 `status:needs-review`로 넘기고 merge하지 않음
+- [ ] merge/close/main gate/로드맵 조정은 `momo-main`만 수행
 ```
 
 **절대 하지 말 것:**
@@ -191,7 +201,7 @@ Closes #<issue>
 | M3 | 데스크탑 v0 UX | D Live Tool-Call · B 비용 호흡 링 · C 승인 인박스 실데이터 바인딩 | staging 실접속 동작 |
 | M4 | 데스크탑 패키징 | MomoMac.xcodeproj + Developer ID 서명 + notarytool 공증 + DMG + Sparkle 2 | spctl/Gatekeeper |
 | M5 | iOS 앱 | MomoiOS.xcodeproj(iOS 26 SDK) + Push/APNs + 계정삭제 + UGC 4종 + PrivacyInfo | 실기기 시나리오 |
-| M6 | CI/CD | fastlane(match/pilot/deliver/notarytool) + ASC API Key + Actions. release 잡 게이트 전 dry-run | actionlint green |
+| M6 | CI/CD | fastlane(match/pilot/deliver/notarytool) + ASC API Key + Actions. 현재는 비용 방지를 위해 disabled/manual-only, release 잡은 게이트 전 dry-run만 | local gate + actionlint green |
 | **M7** | **QA·사용성 검수 게이트 🔒** | G-0~G-G 전부 PASS + 증거 | **스토어 제출 차단 불변식** |
 | M8 | 스토어 제출 | iOS App Store 업로드/심사/배포 + macOS 공증 DMG 공개 + Sparkle 라이브 | M7 PASS 후에만 |
 
@@ -236,7 +246,7 @@ momo는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정
 **🔒 게이트 불변식(스토어/공증 배포 차단):**
 - 스토어/공증 배포(M8) 및 **external TestFlight**는 **사용성 검수 게이트(M7)가 PASS 된 후에만** 진행한다.
 - 통과 조건: `docs/cicd/05-qa-release-gate.md`의 **G-0~G-G 전부 PASS + 증거 첨부** → `docs/cicd/03-store-readiness-gate.md` 상단에 **PASS 블록(날짜 + 커밋 해시 + 빌드# + 증거 링크)** 기록 → `STATUS.md` 게이트 상태 OPEN→PASS 갱신.
-- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-ios.yml`/`release-macos.yml`을 트리거하지 않는다(태그 미푸시 또는 environment protection). `ci-build.yml`의 release/xcode-apps 잡은 C1/C2(M4/M5 Xcode 프로젝트) 완료 전까지 비활성.
+- **기록 없는 release = 규칙 위반.** 게이트 PASS 전에는 `release-ios.yml`/`release-macos.yml`을 트리거하지 않는다. 현재 GitHub Actions는 비용 방지를 위해 disabled/manual-only이며, owner approval 전에는 재활성/수동 실행하지 않는다.
 
 **permissive 라이선스 규칙:**
 - 전 의존성을 **permissive(Apache-2.0 / MIT / PostgreSQL License)** 로 유지. 확정 스택: Hummingbird 2(Apache-2.0), Centrifugo v6(Apache-2.0), PostgreSQL 18(PostgreSQL License), SwiftCentrifuge(MIT), APNSwift(Apache-2.0). **비-permissive(GPL/AGPL/상용 제약) 의존 추가 금지.**

@@ -33,7 +33,7 @@
 | M4 | 데스크탑 패키징 | Xcode .app + Developer ID + notarytool + DMG + Sparkle | M3 |
 | M5 | iOS 앱 | iOS 26 SDK + Push + 계정삭제 + UGC + PrivacyInfo | M2, M3 |
 | M6 | CI/CD | fastlane/ASC Key/GitHub Actions, release jobs dry-run | M0, M4, M5 |
-| M7 | **QA · 사용성 검수 게이트** | G-0~G-G 전부 PASS + 증거 기록 — **스토어 선행** | M1, M3, M4, M5, M6 |
+| M7 | **QA · 사용성 검수 게이트** | G-0~G-H 전부 PASS + 증거 기록 — **스토어 선행** | M1, M3, M4, M5, M6 |
 | M8 | 스토어 제출 | App Store + macOS 공개 배포. **M7 PASS 후에만** | M7 |
 
 > ⚠️ **native `gh milestone` 명령은 없다**(2026 현재). 마일스톤은 `gh api repos/{owner}/{repo}/milestones`로 생성한다. 출처: [cli/cli#1200](https://github.com/cli/cli/issues/1200). `scripts/github_bootstrap.sh`가 이 우회를 자동 처리.
@@ -46,10 +46,10 @@
 
 | 축 | 라벨 | 용도 |
 |---|---|---|
-| **type** | `type:feature` `type:bug` `type:chore` `type:docs` `type:spec` `type:infra` | 무엇인가 |
-| **status** | `status:ready` `status:in-progress` `status:blocked` `status:needs-review` `status:runtime-unverified` | 지금 어디 (picker가 `status:ready`만 집음) |
+| **type** | `type:feature` `type:bug` `type:chore` `type:docs` `type:feedback` `type:spec` `type:infra` | 무엇인가 |
+| **status** | `status:needs-triage` `status:ready` `status:in-progress` `status:blocked` `status:needs-review` `status:runtime-unverified` | 지금 어디 (picker가 `status:ready`만 집음) |
 | **priority** | `priority:p0` `priority:p1` `priority:p2` | 우선순위 (p0=릴리스 블로커) |
-| **area** | `area:server/relay/worker/core/macos/ios/infra/adapter/schema/tenancy/store/ci` | 어디 코드 |
+| **area** | `area:server/relay/worker/core/macos/ios/infra/adapter/schema/tenancy/store/ci/alpha` | 어디 코드 |
 | **size** | `size:s` `size:m` `size:l` | 공수 추정 |
 | **gate** | `gate:qa` `agent:codex-ok` | 검수 게이트 / Codex 자율 적합 |
 
@@ -75,14 +75,69 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
                                                    리뷰(보안/품질) ─▶ 최종 테스트 ─▶ merge
                                                                            │
                                                                            ▼
-                                                main Actions 확인 ─▶ 로드맵/이슈/마일스톤 정리
+                                                main local gate ─▶ 로드맵/이슈/마일스톤 정리
 ```
 - **수동 트리거:** 이슈에서 `@codex implement this issue`.
 - **자동 위임(추정/조직 설정 의존):** triage에 들어온 이슈가 규칙에 맞으면 Codex에 자동 할당([upgrades to Codex](https://openai.com/index/introducing-upgrades-to-codex/)). 규칙 기반 자동 위임은 org/플랜 설정에 따라 가용. (추정 — 정확 가용은 org 설정 확인 필요)
 - **품질 레버:** 어려운 이슈는 `codex cloud exec --attempts N`으로 best-of-N 후보 중 선택([upgrades to Codex](https://openai.com/index/introducing-upgrades-to-codex/)). (추정 — 플래그 정확 표기는 CLI reference 확인)
-- **로컬/데스크탑 실행:** `scripts/goal_claim.sh` 같은 운영 스크립트가 있으면 issue assignee/status/branch/worktree를 한 번에 맞춘다. 아직 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만들고 같은 규칙을 따른다.
-- **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → main GitHub Actions green 확인 → 이슈/마일스톤/프로젝트/로드맵 정리까지가 한 사이클이다.
+- **로컬/데스크탑 실행:** `scripts/goal_status.sh`로 ready/in-progress/needs-review/blocked와 branch/PR/worktree 충돌을 확인한 뒤 `scripts/goal_claim.sh <issue>`로 issue assignee/status/branch/worktree를 한 번에 맞춘다. 아직 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만들고 같은 규칙을 따른다.
+- **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → `main` local gate 확인까지가 한 사이클이다. GitHub Actions를 다시 주 gate로 켠 기간에는 Actions green도 함께 확인한다.
 - **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
+
+### 3.2a GitHub Actions 비주요 기간: Local PR Gate
+
+당분간 GitHub Actions를 merge의 주 gate로 쓰지 않는 기간에도 PR 품질 기준은 유지한다.
+2026-06-26 현재 `ci-build`, `release-ios`, `release-macos`는 조직 과금/결제 이슈 때문에 원격에서 `disabled_manually` 상태이며, workflow 파일도 자동 `push`/`pull_request`/tag 트리거 없이 `workflow_dispatch` 전용으로 둔다.
+
+- 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md), 실행 진입점: `scripts/local_gate.sh`.
+- PR body에는 `scripts/local_gate.sh --profile ...`가 출력하는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 붙인다.
+- 기본 실행:
+  ```bash
+  scripts/local_gate.sh --profile docs
+  scripts/local_gate.sh --profile swift
+  scripts/local_gate.sh --profile diagnostics
+  scripts/local_gate.sh --profile runtime-db
+  scripts/local_gate.sh --profile runtime-agent
+  scripts/local_gate.sh --profile macos-ui
+  ```
+- 수동 fallback 명령:
+  ```bash
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make test
+  python3 -m py_compile adapters/hermes/momo_adapter.py
+  jq empty .github/labels.json infra/centrifugo.json
+  ```
+- runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
+- 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
+- merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행한다. Actions 확인 단계는 Actions를 다시 주 gate로 켤 때 복원한다.
+- Actions를 다시 켜려면 owner approval, billing 상태 확인, branch protection required-check 정리, 그리고 local gate evidence 운영이 유지되는지 먼저 확인한다.
+
+### 3.2b 5개+ session/worktree 운영
+
+- 정본: [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md).
+- `momo-main` thread는 issue picker/review/merge/orchestration 전담.
+- worker thread는 한 GitHub Issue만 claim하고, remote branch를 lock으로 사용한다.
+- 시작 명령:
+  ```bash
+  scripts/goal_status.sh --repo Dawn-kim-official/momo
+  scripts/goal_claim.sh <issue-number>
+  ```
+- worker는 완료 시 issue, branch, worktree path, PR URL, local gate, remaining risks를 `momo-main`에 보고한다.
+- PR 생성 후에는 `scripts/goal_release.sh <issue-number> --review --pr <PR URL>`로 issue를 review 상태로 넘기고, 블로커가 있으면 `--blocked "<reason>"`로 이유를 남긴다.
+- 같은 package family의 대형 변경, 특히 `server/`, `infra/`, migrations, shared model 변경은 동시에 2개 이상 열지 않는다.
+
+### 3.2c Internal alpha feedback intake
+
+- 정본: [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md).
+- raw tester report는 GitHub `Internal alpha feedback` 템플릿으로 접수하고 `type:feedback`, `area:alpha`, `status:needs-triage`를 붙인다.
+- `status:needs-triage`는 worker claim 대상이 아니다. momo-main이 severity(P0 data loss/security, P1 core alpha flow blocked, P2 usability friction, P3 polish), evidence, labels, milestone을 정리한다.
+- 필수 evidence: local gate profile, diagnostics bundle path, repro steps, workspace/channel/member context, expected/actual.
+- buildable goal로 바꿀 때만 `## Goal / ## Context / ## Acceptance / ## Out of scope`를 채우고 `status:ready`로 전환한다.
+- 상태 확인:
+  ```bash
+  scripts/goal_status.sh --repo Dawn-kim-official/momo
+  gh issue list --repo Dawn-kim-official/momo --label status:needs-triage --state open
+  ```
 
 ### 3.3 의존성 표현
 - 이슈 본문 `## Depends on:`에 선행 이슈 title/번호. picker(AGENTS.md §6)는 의존이 **모두 닫혀야** 그 이슈를 고른다.
@@ -159,6 +214,7 @@ scripts/github_bootstrap.sh --org Dawn-kim-official --repo momo --skip-issues   
 - `status:ready` + 의존 충족 + 미할당 = Codex picker 대상.
 - 가능하면 worktree에서 작업한다. 동시에 여러 작업을 받을 수 있도록 root dirty worktree는 건드리지 않는다.
 - 작업 전 계획 문서를 확인하고, 계획이 미흡하면 추가 리서치부터 한다.
-- PR 이후에는 보안/품질 리뷰, 최종 테스트, merge, main Actions 확인까지 완료한다.
+- PR 이후에는 보안/품질 리뷰, 최종 테스트, merge, `main` local gate 확인까지 완료한다.
+- Actions를 비주요 gate로 두는 기간에는 `docs/LOCAL_PR_GATE.md`의 local evidence + reviewer pass + merge 후 main local gate를 완료 기준으로 사용한다.
 - QA/사용성 게이트(M7) PASS 기록 전에는 M8(스토어/공증 공개 배포) 이슈 착수 금지.
 - 런타임 미검증은 `status:runtime-unverified` + STATUS.md에 정직 표기. Docker/psql로 가능한 검증은 수행하고, hermes 등 외부 의존은 실제 의존성 또는 mock 준비를 먼저 검토한다.

@@ -10,11 +10,25 @@ Closes #<issue>
 ## 한 일
 - <!-- 변경 요약 bullet. 무엇을 done 상태로 만들었나. -->
 
+## Goal / Worktree
+- Issue: #<issue>
+- Branch: `<type>/<issue>-<slug>`
+- Worktree: `<local path>`
+- Worker lane: `<runtime/backend|macOS UX|docs/spec/protocol|infra/devtooling>`
+
 ## 검증 (등급: [swift]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
+- [ ] Local gate: `scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-agent|macos-ui>` PASS, or scope-specific manual runtime evidence attached
 - [ ] [swift] `swift build` green: <패키지>
 - [ ] 선행 패키지 빌드 안 깨짐 (`make build`)
 - [ ] [sql] schema_v0.sql 정합 (정본 미수정 — 확장은 server/Migrations/NNN_*.sql 신규 + RLS DO-block ARRAY 등록)
 - [ ] runtime 미검증 부분 정직 표기 (no docker/psql) — `runtime-unverified`
+
+## Local Gate Evidence
+<!-- `scripts/local_gate.sh`가 출력한 ## Local Gate 블록을 붙인다. GitHub Actions disabled/manual-only 기간에는 이 evidence가 primary merge gate다. -->
+
+## Worker handoff / merge boundary
+- [ ] Worker stops at PR + `status:needs-review`; no worker-side merge, issue close, post-merge `main` gate, or roadmap/backlog adjustment
+- [ ] Merge/close/final local gate on `main` is `momo-main` only
 
 ## STATUS 영향
 - <!-- STATUS.md에 반영한 줄(무엇이 추가/변경, 무엇이 여전히 미검증). -->

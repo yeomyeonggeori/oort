@@ -1,7 +1,7 @@
 # momo — QA 게이트 (스토어 제출 전 빌드파일 사용성 검수, 2026)
 
 > **이 문서 = M7 검수 게이트의 단일 진입점(top-level).** "빌드 파일이 실제로 **사용 가능**"함을 빡세게 판명한 뒤에만 스토어/공증 배포(M8)로 간다.
-> **불변식(절대 규칙):** 🔒 아래 게이트(G-0 ~ G-G)가 **전부 PASS + 증거 첨부**되기 전에는 `release-ios.yml`/`release-macos.yml`(App Store `deliver` / Developer ID 공개 다운로드)를 **트리거하지 않는다.** external TestFlight·공개 다운로드 개시도 PASS 이후.
+> **불변식(절대 규칙):** 🔒 아래 게이트(G-0 ~ G-H)가 **전부 PASS + 증거 첨부**되기 전에는 `release-ios.yml`/`release-macos.yml`(App Store `deliver` / Developer ID 공개 다운로드)를 **트리거하지 않는다.** external TestFlight·공개 다운로드 개시도 PASS 이후.
 >
 > 작성: 2026-06-24 · 실행 주체: **Codex (goal 자율 실행)** · 산출 위치: 이 리포.
 > 정본 참조: `STATUS.md`(현재 상태) · `ROADMAP.md`(M0~M8 백본·§4 게이트 표) · `schema_v0.sql`(스키마) · `research/07-deepdive/04·05`(L4 스펙·경험).
@@ -17,7 +17,7 @@ momo의 QA 게이트 문서는 **"무엇을 통과(checklist)" → "어떻게 �
 |---|---|---|
 | **최상위(이 문서)** | `docs/QA_GATE.md` | 게이트 전모 + 베타 전략 + 사용성 체크리스트 + GO 판정 단일 진입점 |
 | 체크리스트(무엇) | `docs/cicd/03-store-readiness-gate.md` | G-0~G-5 체크박스 + PASS 블록 기록 위치(정본 기록처) |
-| 측정 정본(어떻게 증명) | `docs/cicd/05-qa-release-gate.md` | 크래시-free/e2e/접근성/성능 객관 수치·정의·1차출처 검증로그 |
+| 측정 정본(어떻게 증명) | `docs/cicd/05-qa-release-gate.md` | 크래시-free/e2e/접근성/성능/Enterprise Trust 객관 수치·정의·1차출처 검증로그 |
 | 베타 | `docs/cicd/06-beta-testflight-plan.md` | TestFlight 내부/외부 + macOS 공증 .dmg 비공개 베타 + 피드백 트리아지 |
 | 크래시/분석 | `docs/cicd/07-crash-analytics-spec.md` | Sentry Cocoa(self-host) + MetricKit 계측 스펙 |
 | e2e/접근성/성능 | `docs/cicd/08-e2e-accessibility-performance.md` | XCUITest + performAccessibilityAudit + XCTMetric 테스트 plan |
@@ -26,10 +26,10 @@ momo의 QA 게이트 문서는 **"무엇을 통과(checklist)" → "어떻게 �
 > **PASS 블록의 정본 기록처는 `03-store-readiness-gate.md` 상단**(05 §10 양식). 이 문서는 그 사본/요약을 §8에 둔다. STATUS.md §5b의 게이트 상태도 OPEN→PASS로 함께 갱신한다.
 
 ### 0.1 현재 상태 (왜 아직 OPEN인가 — STATUS.md 정합)
-- Phase 0 = **5개 Swift 패키지 `swift build` green**이나 **런타임 미검증**(이 머신에 docker/psql 부재). → G-0 미충족.
-- `clients/macOS` = SwiftPM 라이브러리 + smoke 실행파일(**아직 `.app` 번들 아님**). `clients/iOS` = **미존재**. → 사용성 검수 대상 산출물(.app/.ipa)이 아직 없음.
+- Phase 0 = **5개 Swift 패키지 `swift build` green**이고, M1 runtime MOMO-001~004(seq/outbox/RLS/AgentWorker 비용 회계)는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery와 APNs는 후속.
+- `clients/macOS` = SwiftPM dev app 가능 단계이나 릴리스용 Xcode `.app`은 아직 없음. `clients/iOS` = **미존재**. → 사용성 검수 대상 산출물(.app/.ipa)이 아직 없음.
 - 계측(Sentry/MetricKit), XCUITest/접근성/성능, qa-gate.yml, 베타 배포·실측·PASS 기록 **전부 미진행**. → 게이트 **OPEN**.
-- **게이트 선결:** M0(런타임 e2e) + M3 C1(MomoMac.xcodeproj) + M5 C2(MomoiOS.xcodeproj) + M6(CI/fastlane). 이게 없으면 게이트 측정 자체가 불가.
+- **게이트 선결:** M1 runtime e2e 잔여(WebSocket/APNs/staging) + M3 C1(MomoMac.xcodeproj) + M5 C2(MomoiOS.xcodeproj) + M6(CI/fastlane). 이게 없으면 게이트 측정 자체가 불가.
 
 ---
 
@@ -47,6 +47,7 @@ M0 런타임 e2e ─ M1 staging ─ M2 멀티팀 ─ M3 데스크탑 UX ─ M4 �
                 │   G-B 핵심플로우 e2e   G-C 접근성              │
                 │   G-D 성능   G-E 베타(TestFlight+공증 DMG)     │
                 │   G-F 베타 피드백   G-G 릴리스 준비            │
+                │   G-H Enterprise Trust evidence                 │
                 └───────────────────────┬──────────────────────┘
                         전부 PASS + 증거 + 03 상단 PASS 블록 기록 후에만 ↓
               ┌─────────────────────────┴─────────────────────────┐
@@ -73,6 +74,7 @@ M0 런타임 e2e ─ M1 staging ─ M2 멀티팀 ─ M3 데스크탑 UX ─ M4 �
 | **G-E** 베타 사용성 | 실사용 검증 | iOS TestFlight 내부+외부 1왕복 / macOS 공증 .dmg 타 맥 Gatekeeper 통과·1왕복 | TestFlight / `spctl` + 실기기 | 수동(실사용) | (검증됨) |
 | **G-F** 베타 피드백 | 결함 회수 | 베타 피드백 **전수 트리아지, P0/P1 잔여 0** | ASC 피드백 + ASC API 수집 스크립트 | 수동 + 스크립트 | (검증됨) |
 | **G-G** 릴리스 준비 | 제출 요건 | 메타/프라이버시/암호화 신고/버전·빌드번호 체크리스트 **100%** | `precheck`/`deliver --verify` + 수동(§6) | 자동 + 수동 | (검증됨) |
+| **G-H** Enterprise Trust | 보안/공급망/감사 신뢰 | threat model + SBOM/license scan + secret scanning + VDP/pentest plan + security whitepaper draft | local gate evidence + 수동 리뷰 | 자동 + 수동 | (설계, MOMO-140) |
 
 ### 2.1 표본 충분성 (작은 내부 베타의 함정 — 추정)
 - 자체구축 멤버 베타는 표본이 작다(수십~수백 세션). **세션 < 200이면 % 신뢰 낮음** → "절대 crash 수 0~1 + 핵심플로우 e2e 그린 + P0/P1 잔여 0"을 병행 조건으로.
@@ -237,6 +239,7 @@ GATE PASS: 2026-MM-DD · commit <sha> · 빌드 iOS <build#> / macOS <build#>
 - G-E 베타: iOS TF 내부+외부 1왕복 / macOS 공증 .dmg 타맥 Gatekeeper PASS
 - G-F 피드백: 전수 트리아지 N건, P0/P1 잔여 0
 - G-G 릴리스준비: §6.1~6.3 체크리스트 100%
+- G-H Enterprise Trust: threat model/SBOM/license/secret scan/VDP-pentest plan/security whitepaper evidence
 판정자: <name> · 다음 단계: M8 release-ios.yml / release-macos.yml 활성 허용
 ```
 

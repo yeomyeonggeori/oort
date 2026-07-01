@@ -24,4 +24,6 @@ enum RunStatus: String, Sendable {
     case awaitingApproval = "awaiting_approval"
     case done
     case error
+    case cancelled
+    case timedOut = "timed_out"
 }

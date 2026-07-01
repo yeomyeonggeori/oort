@@ -21,15 +21,16 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 
 ### 1.1 표준 작업 루프
 1. 모든 작업은 **Issue + Milestone + Project** 기준으로 시작한다. 필요하면 이슈/마일스톤/프로젝트 상태를 먼저 정리한다.
-2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. `scripts/goal_claim.sh` 같은 운영 스크립트가 있으면 우선 사용하고, 없으면 수동으로 별도 branch/worktree를 만든다.
+2. 이슈를 claim한 뒤 가능하면 worktree에서 진행한다. 시작 전 `scripts/goal_status.sh`로 충돌을 확인하고, `scripts/goal_claim.sh <issue>`로 branch/worktree/assignee/status lock을 잡는다. 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만든다.
 3. 작업 전 `STATUS.md` → `ROADMAP.md` → `BUILD_TICKETS.md` → 이슈 본문 순으로 계획을 확인한다. 계획이 미흡하면 추가 리서치를 하고, 계획이 충분하면 현재 사실을 한 번 더 검증한다.
 4. 구현은 이슈 범위에 맞춘다. 범위가 커지면 새 이슈로 제안한다.
-5. 구현 후 해당 검증 등급의 테스트를 실행한다. Swift 변경은 `make build`/`make test`를 기본 게이트로 본다.
-6. 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫는다.
-7. PR 이후 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 발견 사항을 반영한다.
-8. 리뷰 반영 후 최종 테스트를 다시 실행한다. 문제가 없고 CI가 green이면 merge한다.
-9. merge 후 main GitHub Actions를 확인한다. 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 추가 리서치 필요성을 점검하고 이슈/마일스톤/로드맵 상태를 정리한다.
-10. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
+5. 구현 후 해당 검증 등급의 테스트를 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh --profile ...`를 우선 사용하고, Swift 변경은 `make build`/`make test`를 하드 게이트로 본다.
+6. worker는 커밋하고 push한 뒤 PR을 연다. PR은 해당 이슈 하나만 닫고, PR 본문에 local gate evidence를 붙인다.
+7. worker는 `scripts/goal_release.sh <issue> --review --pr <PR URL>`로 이슈를 `status:needs-review`로 전환하고 `momo-main`에 handoff한 뒤 멈춘다.
+8. **merge/close/main gate/로드맵 조정은 `momo-main`만 수행한다.** worker는 PR 생성 후 임의 merge, 이슈 close, main 재검증, 로드맵/백로그 재배열을 하지 않는다.
+9. `momo-main`은 코드리뷰 에이전트 또는 리뷰 스킬로 보안·코드 품질·회귀 위험을 점검하고, 필요한 수정만 worker 또는 같은 이슈 worktree에 위임한다.
+10. `momo-main`은 리뷰 반영 후 최종 local gate를 다시 실행한다. GitHub Actions disabled/manual-only 기간에는 `scripts/local_gate.sh`가 출력한 local evidence를 primary merge gate로 쓰고, merge 후 workflow가 계속 `disabled_manually`인지 확인한다. Actions를 다시 주 gate로 켠 기간에만 main GitHub Actions green을 확인한다.
+11. 최종 보고에는 이번 작업 결과, 검증, 로드맵 영향, 새로 알게 된 리스크/자료, 다음 goal 추천을 포함한다.
 
 ## 2. 리포 맵 (디렉터리 → 책임)
 ```
@@ -47,7 +48,7 @@ relay/OutboxRelay/       SKIP LOCKED 폴링 → Centrifugo publish (BYPASSRLS)
 workers/AgentWorker/     agent_job 클레임 → hermes OpenAI-compat SSE → message PATCH (BYPASSRLS) · LoopGuards · CostAccounting
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml (py3)
 infra/                   docker-compose(PG18+Centrifugo v6) · centrifugo.json · .env.example (infra/prod/*는 M1 신규)
-scripts/                 migrate.sh · github/(bootstrap.sh · milestones/labels/issues.tsv)
+scripts/                 local_gate.sh · goal_claim/status/release.sh · migrate.sh · github/(bootstrap.sh · milestones/labels/issues.tsv)
 docs/                    RUN.md · GITHUB_OPS.md · cicd/00~09 · legal/00~03
 legal/                   privacy-policy · agent-disclosure · THIRD_PARTY_NOTICES (법률 자문 아님)
 .github/                 ISSUE_TEMPLATE/ · workflows/{ci-build,release-ios,release-macos}.yml
@@ -61,6 +62,11 @@ research/08-distribution/ 01=macOS 배포 스펙 · 02=배포 티켓
 > 로컬 툴체인: **Swift 6.2.x 있음**(`.swift-version`=6.2). **Docker Desktop + psql 있음**, hermes 없음. PG18+Centrifugo 런타임은 검증 가능하고, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway를 준비한다.
 
 ```bash
+scripts/local_gate.sh --profile docs
+scripts/local_gate.sh --profile swift
+scripts/local_gate.sh --profile runtime-db
+scripts/local_gate.sh --profile runtime-agent
+scripts/local_gate.sh --profile macos-ui
 make build          # SWIFT_PKGS 중 Package.swift 있는 것만 swift build (의존순: Core→server/relay/worker→macOS)
 make test           # 동일 패키지 swift test
 ( cd clients/Core && swift build )           # MomoCore (공유 모델 + ChatBackend/AgentTransport)
@@ -72,7 +78,7 @@ python3 -m py_compile adapters/hermes/momo_adapter.py   # hermes 어댑터 문�
 # Xcode 앱(M4/M5 프로젝트 생성 후, 무서명 컴파일):
 xcodebuild build -scheme MomoMac -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
 xcodebuild build-for-testing -scheme MomoiOS -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO
-# CI·fastlane 정적 검증:
+# CI·fastlane 정적 검증(워크플로우는 현재 manual-only/disabled):
 actionlint .github/workflows/*.yml ; ruby -c fastlane/Fastfile
 # 런타임(Docker Desktop/psql 가용):
 cp infra/.env.example .env && make up && make migrate && ( cd server && swift run )
@@ -117,6 +123,10 @@ Closes #<issue>
 
 ## 남은 것 / 후속 이슈 제안
 - (스코프 밖이라 새 이슈로 뺀 것)
+
+## Worker handoff
+- [ ] worker는 PR 생성 후 `status:needs-review`로 넘기고 merge하지 않음
+- [ ] merge/close/main gate/로드맵 조정은 `momo-main`만 수행
 ```
 - **절대 하지 말 것:** 시크릿 커밋(`.env`, `.env.worktree`), `schema_v0.sql` 수정/이동, `.build/`·`*.resolved`·`DerivedData/`·`.swiftpm/` 커밋, 무관한 리팩터, 의존성 메이저 임의 변경, 다른 패키지 깨기, **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7).
 - **Swift:** 타입 `PascalCase`, 함수/프로퍼티/let `camelCase`, enum case `camelCase`. 모델은 `MomoCore`에만 두고 import. SwiftPM 의존은 최신 안정 태그, `*.resolved` 비커밋. 서버 쓰기경로 단일 tx, async/await(블로킹 금지).
@@ -139,7 +149,7 @@ Closes #<issue>
 
 **런타임 미검증:** Docker/psql로 가능한 PG18+Centrifugo 검증은 각 M1 goal에서 실제 수행한다. hermes, APNs, Apple 배포 등 외부 의존이 남으면 실제 의존성 또는 mock 준비를 먼저 검토하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + `docs/RUN.md`에 절차를 남긴다.
 
-**🔒 게이트 불변식:** 스토어/공증 배포(M8)·external TestFlight는 **사용성 검수 게이트(M7) PASS 후에만**. 조건: `docs/cicd/05-qa-release-gate.md` G-0~G-G 전부 PASS + 증거 → `docs/cicd/03-store-readiness-gate.md` 상단 PASS 블록(날짜+커밋해시+빌드#+증거) 기록 → STATUS.md 게이트 OPEN→PASS. **기록 없는 release = 규칙 위반.** PASS 전 `release-*.yml` 미트리거(태그 자제 또는 environment protection). `ci-build.yml`의 xcode-apps/release 잡은 C1/C2(M4/M5 Xcode 프로젝트) 전까지 비활성.
+**🔒 게이트 불변식:** 스토어/공증 배포(M8)·external TestFlight는 **사용성 검수 게이트(M7) PASS 후에만**. 조건: `docs/cicd/05-qa-release-gate.md` G-0~G-G 전부 PASS + 증거 → `docs/cicd/03-store-readiness-gate.md` 상단 PASS 블록(날짜+커밋해시+빌드#+증거) 기록 → STATUS.md 게이트 OPEN→PASS. **기록 없는 release = 규칙 위반.** PASS 전 `release-*.yml` 미트리거. 현재 GitHub Actions는 비용 방지를 위해 disabled/manual-only이며, owner approval 전에는 재활성/수동 실행하지 않는다.
 
 **permissive 라이선스:** 전 의존성 permissive(Apache-2.0/MIT/PostgreSQL License) 유지 — Hummingbird 2·Centrifugo v6·PostgreSQL 18·SwiftCentrifuge(MIT)·APNSwift. **비-permissive(GPL/AGPL/상용 제약) 의존 추가 금지.** 새 의존 추가 시 라이선스 확인 + `legal/THIRD_PARTY_NOTICES.md`/`NOTICE` 귀속 반영. 외부 배포/상용 전 법무 검토 1회 필수 — 법무·스토어 정책 텍스트는 **법률 자문이 아님**(사실은 Apple/GitHub 1차 출처, 추정은 `(추정)`).
 

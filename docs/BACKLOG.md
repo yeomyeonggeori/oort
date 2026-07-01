@@ -23,7 +23,8 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 ```
 
 - **M0 Foundation 달성됨**: 5개 Swift 패키지(`MomoCore/MomoServer/OutboxRelay/AgentWorker/MomoMac`) `swift build` green + 정본 스키마/인프라/마이그레이션 파일 정합. (상세: `STATUS.md`)
-- **현재 닫을 차례 = M1**: docker/psql 부재로 런타임 미검증. `clients/macOS`는 SwiftPM 라이브러리(아직 `.app` 아님), `clients/iOS`는 미존재.
+- **현재 닫을 차례 = M1 운영/배포 축**: MOMO-001~004로 Docker Desktop 기반 seq/outbox/RLS/AgentWorker 비용 회계는 검증됨. GitHub Actions는 비용/결제 이슈로 disabled/manual-only이며, 남은 M1은 staging 배포(MOMO-005~007)와 local gate/worktree 운영 정본화(MOMO-111~112).
+- `clients/macOS`는 SwiftPM dev app 가능 단계이며, 릴리스용 Xcode `.app`은 M4에서 진행. `clients/iOS`는 미존재.
 - CI/CD·QA·법무 문서는 선작성됨(`docs/cicd/*`, `docs/legal/*`, `legal/*`) — 실행/측정은 미진행(게이트 OPEN).
 
 > 정본 참조: `STATUS.md` · `BUILD_TICKETS.md` · `schema_v0.sql`(이동·수정 금지) · `ROADMAP.md`.
@@ -40,8 +41,8 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 | **M3** | 데스크탑 v0 UX (D/B/C 실데이터) | 🖥 | macOS 클라가 D Live Tool-Call · B 비용 호흡 링 · C 승인 인박스를 실데이터로 렌더 | M1 | D/B/C 3경험이 staging 실데이터로 동작 |
 | **M4** | 데스크탑 패키징 | 🖥 | Xcode `.app` + Developer ID + notarytool 공증 + DMG + Sparkle 2 | M3 | 공증 `.dmg` 타 맥 Gatekeeper 통과 + Sparkle 업데이트 1회 |
 | **M5** | iOS 앱 | 📱 | iOS Xcode App + Push + APNs .p8 + 계정 삭제 + UGC 모더레이션 + privacy manifest | M3, M2 | 실기기 로그인→채널→메시지→에이전트 응답 + 자가가입 시나리오 |
-| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions | M0, M4, M5 | CI green + release 워크플로우 dry-run(게이트 전 미트리거) |
-| **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(G-0~G-G) 측정·PASS | M1, M3, M4, M5, M6 | **G-0~G-G 전부 PASS + 증거 첨부 + 03 PASS 블록 기록** |
+| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions. 현재는 비용 방지를 위해 disabled/manual-only | M0, M4, M5, owner approval | local gate 운영 + CI 재활성 시 green + release 워크플로우 dry-run(게이트 전 미트리거) |
+| **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(G-0~G-H) 측정·PASS | M1, M3, M4, M5, M6 | **G-0~G-H 전부 PASS + 증거 첨부 + 03 PASS 블록 기록** |
 | **M8** | 스토어 제출 (App Store + Developer ID) | 🖥📱 | macOS 공증 DMG 공개 다운로드 + iOS App Store 업로드/심사/배포 | **M7**, M4, M5, M6 | App Store 승인·배포 + 공증 DMG 공개 + Sparkle 라이브 |
 | (후속) | v1 신규 프리미티브 P1~P6 | ⚙️ | branch_id·reversibility_tier·belief·autonomy_level·decision_ledger·scheduled trigger | M8 | v0 데모엔 불필요, 스토어 출시 후 후속 |
 
@@ -62,11 +63,17 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 | **EP-MAC-PKG** | macOS 패키징·공증·배포 | M4 | Xcode `.app` + Developer ID 서명 + notarytool 공증 + DMG + Sparkle 2 자동업데이트. |
 | **EP-IOS** | iOS 앱 타깃·Push·계정삭제 | M5 | `MomoiOS.xcodeproj` + explicit Bundle ID + Push capability + APNs .p8 + 계정 삭제 + privacy manifest. |
 | **EP-UGC** | UGC 모더레이션 (App Store 1.2) | M5 | 게시 전 필터 + 신고 + 차단 + 공개 연락처 + EULA 무관용. 에이전트 생성 콘텐츠 모더레이션 정책 포함. |
-| **EP-CICD** | CI/CD 파이프라인 (fastlane·ASC Key) | M6 | fastlane match/pilot/deliver/notarytool + ASC API Key(Team) + GitHub Actions. release 잡 게이트 전 비활성. |
-| **EP-QA-GATE** | QA · 사용성 검수 게이트 | M7 | 계측(Sentry/MetricKit) + XCUITest e2e/접근성/성능 + 베타 + G-0~G-G PASS 판정. |
+| **EP-CICD** | CI/CD 파이프라인 (fastlane·ASC Key) | M6 | fastlane match/pilot/deliver/notarytool + ASC API Key(Team) + GitHub Actions. 현재 Actions는 비용 방지를 위해 disabled/manual-only이며, release 잡은 게이트 전 비활성. |
+| **EP-QA-GATE** | QA · 사용성 검수 게이트 | M7 | 계측(Sentry/MetricKit) + XCUITest e2e/접근성/성능 + 베타 + Enterprise Trust evidence(G-H) PASS 판정. |
 | **EP-STORE** | 스토어 제출 (App Store + Developer ID) | M8 | iOS 업로드/심사/배포 + macOS 공증 DMG 공개 다운로드 + Sparkle 라이브. |
 | **EP-LEGAL** | 법무 선결 (법률 자문 아님) | M2 | 등록주체/D-U-N-S + 개인정보처리방침 + App Privacy + NOTICE + 에이전트 LLM 고지 + EULA. 외부 변호사 1회 검토 필수. |
 | **EP-PRIMITIVES** | v1 신규 프리미티브 P1~P6 (후속) | M8 | branch_id(P1) · reversibility_tier(P2) · belief(P3) · autonomy_level(P4) · decision_ledger(P5) · scheduled trigger(P6). |
+| **EP-OPS** | Local Gate · Multi-session Worktree | M1 | GitHub Actions 비주요 기간에도 local evidence로 PR 품질을 유지하고, 5개+ Codex 세션이 이슈/branch/worktree 단위로 충돌 없이 작업. |
+| **EP-CONTEXT** | Context Broker · Memory Plane | M2 | messenger layer가 권한, source refs, budget, redaction, local/server model routing을 결정. |
+| **EP-AGENT-PROTOCOL** | Agent Protocol · Plugin Work Surface | M3 | agent/plugin 실행을 `context_packet/tool_call/approval/tool_result/usage/audit`로 프로토콜화하고 macOS 카드와 정합. |
+| **EP-AGENT-RUNTIME** | Agent Runtime · Memory · Capability Cache | M1.5/M2/M3 | Hermes/Kim Intern/openclaw 분석을 바탕으로 context/capability/execution/ledger 4-plane 계약과 A2A/MCP 경계를 정리. |
+| **EP-GWORKSPACE** | Google Workspace Sync | M2/M3 | per-user OAuth read-mostly sync, source citation, approval-gated writes, domain-wide delegation은 enterprise 옵션. |
+| **EP-TRUST** | Enterprise Trust | M7 | NIST SSDF/SBOM/license scan/secret scanning/pentest/VDP/SOC2/ISO readiness를 QA gate 입력으로 승격. |
 
 ---
 
@@ -77,7 +84,7 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 ```
 M0 → M1 → M2 → M5(iOS)  → M7(게이트 🔒) → M8(App Store)     ← 모바일 임계 경로
 M0 → M1 → M3 → M4(공증) → M7(게이트 🔒) → M8(공증 DMG)      ← 데스크탑 임계 경로
-M6(CI/CD)는 M0 위에서 병렬, release 활성화는 C1/C2(M4/M5 Xcode 프로젝트)+게이트(M7)에 종속.
+M6(CI/CD)는 M0 위에서 병렬, release 활성화는 C1/C2(M4/M5 Xcode 프로젝트)+게이트(M7)+owner approval에 종속. 2026-06-26 현재 Actions는 비용 방지를 위해 disabled/manual-only이며 local gate가 primary merge gate다.
 ```
 
 ### 3.2 티켓 의존 그래프 (deps DAG)
@@ -96,8 +103,9 @@ M0(baseline)
  │            │                                     ├─ MOMO-040 ─┬─ MOMO-041 │        │
  │            └─(MOMO-063 입력 G-0)                 │            ├─ MOMO-042  │        │
  │                                                  │            ├─ MOMO-043  │        │
- MOMO-010 ─┬─ MOMO-011 ── MOMO-012                  │            ├─ MOMO-044  │        │
- │         └─ MOMO-013                              │            └─ MOMO-050 ─┘        │
+ MOMO-010 ─┬─ MOMO-011 ── MOMO-014(proposed)        │            ├─ MOMO-044  │        │
+ │         ├─ MOMO-012                              │            └─ MOMO-050 ─┘        │
+ │         └─ MOMO-013                              │                                      │
  │                                                  │                  │              │
  │                                          MOMO-050 ── MOMO-051 ── MOMO-052          │
  │                                                                       │            │
@@ -129,7 +137,7 @@ M0(baseline)
 
 ---
 
-## 4. 티켓 (41)
+## 4. 티켓 (41 + Local AI/Trust 확장)
 
 > 표기 규약: `acceptance`는 전부 체크 가능한 동사구. `platform` ∈ {backend, macos, ios, ci, shared, legal}. `labels`는 `scripts/github/labels.tsv` 택소노미. `deps`는 선행 티켓/마일스톤 ID. 수용기준 등급: `[runtime]`=docker/psql 필요(미가용 시 `status:runtime-unverified` 표기) · `[swift]`=`swift build` green · `[xcode]`=`xcodebuild` 산출 · `[sql]`=정본 정합 · `[ci]`=워크플로우 syntax/lint · `[manual]`=사람 1회.
 
@@ -195,11 +203,12 @@ M0(baseline)
 - **마일스톤:** M1 · **에픽:** EP-DEPLOY · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-005
 - **수용기준:**
-  - [ ] [infra] SOPS+age로 암호화한 `.env`를 git 버전관리 + 배포 시 메모리 복호화(평문 디스크 미접촉)
-  - [ ] [infra] `change-me`/`dev-insecure` 기본값을 `openssl rand` 로 교체
-  - [ ] [runtime] pgBackRest 주간 풀 + 연속 WAL 아카이빙 구성 + 복원(PITR) 1회 검증
+  - [ ] [infra] SOPS+age secret lifecycle runbook + `.sops.yaml.example`/`secrets.env.example` skeleton(실제 secret 없음)
+  - [ ] [infra] prod secret template은 `change-me`/`dev-insecure` 값을 쓰지 않고 `openssl rand` 생성 지침으로만 채움
+  - [ ] [infra] pgBackRest 주간 full + 일간 diff + 연속 WAL/PITR config skeleton + 복원 리허설 절차
+  - [ ] [runtime] 실제 staging/prod에서 pgBackRest stanza/check/full backup/PITR 복원 1회 검증(MOMO-005 이후, `runtime-unverified` until then)
 - **라벨:** `type:infra`, `area:infra`, `status:runtime-unverified`
-- **참조:** L4 §8.7 · `infra/.env.example` · `docs/RUN.md`
+- **참조:** L4 §8.7 · `infra/.env.example` · `infra/prod/*` · `docs/SECRETS_BACKUP_RUNBOOK.md` · `docs/RUN.md`
 
 #### MOMO-007 · staging 배포 + 경량 모니터링 + RUN 런북 갱신
 - **마일스톤:** M1 · **에픽:** EP-DEPLOY · **플랫폼:** backend · **추정:** M
@@ -213,15 +222,114 @@ M0(baseline)
 
 ---
 
+### EP-OPS — Local Gate · Multi-session Worktree (M1)
+
+#### MOMO-110 · Local LLM · Agent Protocol · Enterprise Trust roadmap
+- **마일스톤:** M1 · **에픽:** EP-OPS/EP-CONTEXT/EP-AGENT-PROTOCOL/EP-TRUST · **플랫폼:** shared · **추정:** M
+- **deps:** M0
+- **수용기준:**
+  - [ ] [docs] `research/10-local-ai-protocol-trust/*`에 Apple local LLM, Context Broker, Agent Protocol, Google Workspace, Trust, local ops 리서치 문서화
+  - [ ] [docs] `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/BACKLOG.md`, `docs/INDEX.md`, `STATUS.md` 갱신
+  - [ ] [docs] build-macos-apps 플러그인의 SwiftPM/macOS 개발 활용 방침 기록
+- **라벨:** `type:docs`, `type:spec`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/*`
+
+#### MOMO-154 · disable GitHub Actions auto-runs and prioritize local gate
+- **마일스톤:** M1 · **에픽:** EP-OPS/EP-CICD · **플랫폼:** ci · **추정:** S
+- **deps:** MOMO-110
+- **수용기준:**
+  - [ ] [ci] 원격 `ci-build`, `release-ios`, `release-macos` workflow를 `disabled_manually` 상태로 확인
+  - [ ] [ci] `.github/workflows/*.yml` 자동 `push`/`pull_request`/tag 트리거 제거, `workflow_dispatch` 전용 유지
+  - [ ] [docs] local gate가 당분간 primary merge gate임을 `docs/LOCAL_PR_GATE.md`, `docs/GITHUB_OPS.md`, `ROADMAP.md`, `STATUS.md`에 반영
+- **라벨:** `type:infra`, `area:ci`, `type:docs`, `priority:p0`, `size:s`, `agent:codex-ok`
+- **참조:** `docs/LOCAL_PR_GATE.md`, `.github/workflows/*.yml`
+
+#### MOMO-111 · local PR gate script and evidence flow
+- **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** ci · **추정:** M
+- **deps:** MOMO-110, MOMO-154
+- **수용기준:**
+  - [ ] [ci] `scripts/local_gate.sh --profile docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui|all` 추가
+  - [ ] [ci] PR body에 machine/toolchain/commands/runtime coverage evidence를 붙일 수 있는 출력 제공
+  - [ ] [docs] GitHub Actions 비주요 기간의 merge 기준을 `docs/LOCAL_PR_GATE.md`와 PR template에 반영
+- **라벨:** `type:infra`, `area:ci`, `type:docs`, `priority:p0`, `size:m`, `agent:codex-ok`
+- **참조:** `docs/LOCAL_PR_GATE.md`
+
+#### MOMO-112 · 5+ Codex session/worktree orchestration
+- **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** infra · **추정:** M
+- **deps:** MOMO-110, MOMO-111
+- **수용기준:**
+  - [ ] [infra] `scripts/goal_status.sh`가 issue/branch/worktree/PR/local gate 상태를 한눈에 표시
+  - [ ] [infra] `scripts/goal_claim.sh`, `scripts/goal_release.sh`, `.conductor/setup.sh`가 status board 운영 흐름과 연결
+  - [ ] [infra] worktree별 `.env.worktree` 포트/compose project 충돌 방지 확인
+  - [ ] [docs] `momo-main` orchestration + worker handoff prompt + merge/review cycle을 문서화
+- **라벨:** `type:infra`, `area:infra`, `type:docs`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `docs/MULTI_SESSION_OPS.md`
+
+---
+
+### EP-AGENT-RUNTIME — Agent Runtime · Memory · Capability Cache (M1.5)
+
+#### MOMO-150 · Hermes/Kim Intern/openclaw agent runtime research and roadmap
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-110
+- **수용기준:**
+  - [ ] [docs] `research/11-agent-runtime/*`에 Hermes agent, internkim/Kim Intern, openclaw 분석 문서 추가
+  - [ ] [docs] memory/cache/protocol gap을 Context Packet, Memory Plane, Capability Cache, A2A lifecycle, approval pause/resume 관점으로 정리
+  - [ ] [docs] ROADMAP.md, BUILD_TICKETS.md, docs/INDEX.md, STATUS.md 갱신
+  - [ ] [docs] 코드/스키마 구현 없이 문서/스펙만 변경
+- **라벨:** `type:docs`, `type:spec`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/*`
+
+#### MOMO-151 · Context Packet v0 deep spec and fixtures
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-150
+- **수용기준:**
+  - [ ] [spec] `research/11-agent-runtime/04-context-packet-v0.md`에 Context Packet top-level shape, request/scope/goal/source/memory/tool/budget/redaction/runtime envelope 정의
+  - [ ] [spec] mention, slash command, message context action fixture 3종 작성. 각 fixture는 source ref, memory ref, tool grant, budget, redaction/withheld context 중 하나 이상 포함
+  - [ ] [spec] agent runtime에 주입 가능한 필드와 금지 필드 정의
+  - [ ] [spec] Hermes/Kim Intern/OpenAI-compatible SSE 호출의 context envelope 정의
+  - [ ] [spec] openclaw식 approval availability/presentation/transport/interactions/observe 분리를 momo Context Broker/clients/server/Postgres 경계로 매핑
+- **라벨:** `type:spec`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/04-context-packet-v0.md`, `research/11-agent-runtime/fixtures/context-packet-v0/`
+
+#### MOMO-152 · Memory Plane v0 deep spec and permission model
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-151
+- **수용기준:**
+  - [ ] [spec] `research/11-agent-runtime/05-memory-plane-v0.md`에 Memory Plane v0 정본 추가
+  - [ ] [spec] `decision/preference/artifact_ref/task_state/external_source_ref/agent_skill_note` memory type 확정
+  - [ ] [spec] source attribution, visibility, expiry, delete path, revocation, retrieval-time permission check 정의
+  - [ ] [spec] raw chat exhaust 자동 장기 저장 금지와 local LLM compaction 기준 문서화
+  - [ ] [spec] `research/11-agent-runtime/fixtures/memory-plane-v0/`에 memory type fixtures와 permission examples 추가
+  - [ ] [spec] Context Packet v0의 `memory_refs` projection 규칙과 연결
+- **라벨:** `type:spec`, `area:core`, `area:tenancy`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/05-memory-plane-v0.md`
+
+#### MOMO-153 · Capability Cache v0 spec and invalidation model
+- **마일스톤:** M1.5 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-151, MOMO-152
+- **수용기준:**
+  - [ ] [spec] `research/11-agent-runtime/06-capability-cache-v0.md`에 Capability Cache v0 정본 추가
+  - [ ] [spec] `agent_capability/plugin_tool_schema/mcp_tool_list/model_pricing` cache kind 확정
+  - [ ] [spec] workspace/visibility/source/expires_at/policy_version/capability_version/schema_hash 필수화
+  - [ ] [spec] plugin version, MCP list-changed, provider grant revoke, workspace policy change, manual refresh invalidation 경로 정의
+  - [ ] [spec] Context Packet v0 `tool_grants.input_schema_ref` projection과 Memory Plane provider grant revalidation 관계 연결
+  - [ ] [spec] `research/11-agent-runtime/fixtures/capability-cache-v0/`에 capability list, plugin schema, invalidation/audit fixture 추가
+- **라벨:** `type:spec`, `area:core`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/06-capability-cache-v0.md`
+
+---
+
 ### EP-TENANCY — 멀티테넌시 온보딩 (M2)
 
 #### MOMO-010 · 003_onboarding.sql: invite_code 테이블 + RLS 등록
 - **마일스톤:** M2 · **에픽:** EP-TENANCY · **플랫폼:** backend · **추정:** M
 - **deps:** MOMO-003
 - **수용기준:**
-  - [ ] [sql] `server/Migrations/003_onboarding.sql` 신규(schema_v0.sql **미수정**): `invite_code{id uuidv7, workspace_id FK, code, role, max_uses, used_count, expires_at, revoked_at, created_by}`
-  - [ ] [sql] 고엔트로피 랜덤 code + 만료 + 사용횟수 한정 + revoke 컬럼
-  - [ ] [sql] RLS DO-block ARRAY에 `invite_code` 등록(FORCE), `schema_v0.sql` 정본은 그대로 둠
+  - [x] [sql] `server/Migrations/003_onboarding.sql` 신규(schema_v0.sql **미수정**): `invite_code{id uuidv7, workspace_id FK, code_hash, role, max_uses, used_count, expires_at, revoked_at, created_by}`
+  - [x] [sql] 고엔트로피 랜덤 code helper + hash 저장 + 만료 + 사용횟수 한정 + revoke 컬럼
+  - [x] [sql] RLS DO-block ARRAY에 `invite_code`/`invite_code_redemption` 등록(FORCE), `schema_v0.sql` 정본은 그대로 둠
+  - [x] [runtime] `scripts/local_gate.sh --profile runtime-db` + `scripts/local_gate.sh --profile swift` PASS
 - **라벨:** `type:spec`, `area:schema`, `area:tenancy`, `status:runtime-unverified`
 - **참조:** L4 §1.3 · `schema_v0.sql`(workspace/membership/RLS DO-block 컨벤션) · ROADMAP §3.1
 
@@ -235,16 +343,18 @@ M0(baseline)
 - **라벨:** `type:feature`, `area:server`, `area:tenancy`, `status:runtime-unverified`
 - **참조:** L4 §5.1(REST), §7.1/§7.2(권한)
 
-#### MOMO-012 · 초대코드 자가가입 플로우 + audit_log
-- **마일스톤:** M2 · **에픽:** EP-TENANCY · **플랫폼:** backend · **추정:** L
-- **deps:** MOMO-011
+#### MOMO-012 · macOS dev app onboarding/invite flow v0 UI
+- **마일스톤:** M2/M3 bridge · **에픽:** EP-TENANCY/EP-UX-DBC · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-010
 - **수용기준:**
-  - [ ] [swift] `POST /v1/join`: 초대코드 검증(만료/사용횟수/revoke) → member/membership 생성 → used_count 증가
-  - [ ] [runtime] 초대코드의 workspace_id로 `app.workspace_id` 컨텍스트 설정 후 가입 행 생성
-  - [ ] [runtime] 가입 사건 `audit_log` 기록(actor/subject/via_token)
-  - [ ] [runtime] 3개+ 팀(10인=1팀) 자가가입 e2e + 워크스페이스 격리 재확인
-- **라벨:** `type:feature`, `area:server`, `area:tenancy`, `status:runtime-unverified`, `gate:qa`
-- **참조:** L4 §7.3(actor/subject 델리게이션) · `schema_v0.sql`(member/membership/audit_log)
+  - [x] [swift] `MomoMacDevApp`에서 invite code 입력/상태 UI 확인 가능
+  - [x] [swift] `LiveChatBackend` stub으로 성공/실패/workspace join 상태 전이 확인
+  - [x] [swift] 기존 channel/message/approval/cost UI 유지
+  - [x] [macos-ui] `scripts/local_gate.sh --profile macos-ui` PASS
+  - [x] [swift] `scripts/local_gate.sh --profile swift` PASS
+- **라벨:** `type:feature`, `area:macos`, `area:tenancy`, `size:m`
+- **참조:** ROADMAP §3.1/§3.2 · `clients/macOS/Sources/MomoMac/LiveChatBackend.swift`
+- **후속 제안:** production server `/v1/join` 검증→member/membership→used_count→audit_log runtime e2e는 별도 이슈(`MOMO-014` 제안)로 분리.
 
 ---
 
@@ -259,6 +369,52 @@ M0(baseline)
   - [ ] [runtime] 일반 테넌트 토큰으로는 접근 불가(권한 분리 확인)
 - **라벨:** `type:feature`, `area:server`, `area:tenancy`, `status:runtime-unverified`
 - **참조:** L4 §7.2(권한 매트릭스) · `schema_v0.sql`(RLS 역할 분리)
+
+---
+
+### EP-CONTEXT / EP-GWORKSPACE — Context Broker · Memory · Google Workspace (M2)
+
+#### MOMO-120 · Context Packet v0 spec and fixtures
+- **마일스톤:** M2 · **에픽:** EP-CONTEXT · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-003, MOMO-110
+- **수용기준:**
+  - [ ] [spec] `Context Packet v0` 구조를 `{goal,constraints,decisions,sources,permissions,budget,redactions}`로 확정
+  - [ ] [spec] channel/thread/message/plugin/google source refs fixture 작성
+  - [ ] [swift] MomoCore에 protocol/model 초안 추가 시 기존 5패키지 build/test green 유지
+- **라벨:** `type:spec`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`
+
+#### MOMO-121 · Memory Plane v0 spec and permission model
+- **마일스톤:** M2 · **에픽:** EP-CONTEXT · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-120
+- **수용기준:**
+  - [ ] [spec] memory type을 `decision/preference/artifact/task_state/external_source_ref`로 제한
+  - [ ] [spec] source attribution, visibility, expiry, delete path, retrieval-time permission check를 필수 필드로 정의
+  - [ ] [spec] raw chat exhaust를 장기 메모리로 자동 저장하지 않는 정책 문서화
+- **라벨:** `type:spec`, `area:core`, `area:tenancy`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`
+
+#### MOMO-122 · Google Workspace connector v0: per-user OAuth read-mostly sync
+- **마일스톤:** M2 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-120, MOMO-121
+- **수용기준:**
+  - [ ] [spec] per-user OAuth scope inventory와 token storage policy 정의
+  - [ ] [runtime] Drive metadata/excerpt, Gmail search/thread read, Calendar read 최소 동기화 검증
+  - [ ] [spec] external write는 `tool_call -> approval_request -> tool_result -> audit_log` 뒤로 제한
+- **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`
+
+#### MOMO-123 · Google Workspace domain-wide delegation and admin install design
+- **마일스톤:** M2 · **에픽:** EP-GWORKSPACE/EP-TRUST · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-122
+- **수용기준:**
+  - [x] [spec] domain-wide delegation을 enterprise-only 옵션으로 문서화
+  - [x] [spec] admin approval, service account boundary, scope inventory, user delegation, audit export, revoke/delete path 정의
+  - [x] [spec] Context Packet / Memory Plane / Capability Cache projection과 invalidation 연결
+  - [x] [spec] enterprise admin fixture 3종 추가
+  - [ ] [manual] 실제 Google Workspace admin 승인/검증은 사람 위임 런북으로 분리
+- **라벨:** `type:spec`, `area:adapter`, `area:tenancy`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`
 
 ---
 
@@ -293,6 +449,147 @@ M0(baseline)
   - [ ] [runtime] 결정 `audit_log` 기록 확인
 - **라벨:** `type:feature`, `area:macos`
 - **참조:** 경험 C(05) · L4 §5.2, §7.3 · `schema_v0.sql`(approval/agent_run)
+
+---
+
+### EP-AGENT-PROTOCOL — Local LLM UX · Agent Protocol Cards (M3)
+
+#### MOMO-130 · macOS Foundation Models capability probe
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-110
+- **수용기준:**
+  - [ ] [swift] `#if canImport(FoundationModels)`와 OS availability guard로 빌드 호환성 유지
+  - [ ] [swift] 미지원 OS에서는 server AgentWorker fallback 또는 deterministic local stub 사용
+  - [ ] [swift] Core는 Foundation-only 유지, FoundationModels import는 macOS/iOS target에만 둠
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`
+
+#### MOMO-131 · Local Context Copilot
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** L
+- **deps:** MOMO-120, MOMO-130
+- **수용기준:**
+  - [ ] [swift] visible channel/thread context에서 요약, 분류, 컨텍스트 압축, PII redaction preview 제공
+  - [ ] [swift] local model unsupported 시 동일 UI가 server fallback/stub으로 동작
+  - [ ] [manual] 고위험 외부 write/법무/재무 판단은 local-only 자동 처리하지 않음
+- **라벨:** `type:feature`, `area:macos`, `priority:p1`, `size:l`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`
+
+#### MOMO-132 · Agent Protocol v0 DB/wire/Swift/card alignment
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** L
+- **deps:** MOMO-120, MOMO-121, MOMO-004
+- **수용기준:**
+  - [ ] [spec] `agent_request/context_packet/tool_call/approval_request/tool_result/usage_ledger/audit_log`의 DB/wire/Swift 의미 정합
+  - [ ] [swift] macOS card renderer가 같은 protocol object를 사용
+  - [ ] [runtime] external write는 approval card 없이 실행되지 않음
+- **라벨:** `type:spec`, `type:feature`, `area:core`, `area:macos`, `area:worker`, `priority:p1`, `size:l`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`
+
+#### MOMO-133 · Google Workspace "ask my work" UX
+- **마일스톤:** M3 · **에픽:** EP-GWORKSPACE/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** L
+- **deps:** MOMO-122, MOMO-132
+- **수용기준:**
+  - [ ] [swift] Drive/Gmail/Calendar source refs를 답변에 cite
+  - [ ] [swift] external write action은 approval card를 거쳐야 함
+  - [ ] [runtime] source permission이 없는 문서는 Context Packet에서 제외
+- **라벨:** `type:feature`, `area:macos`, `area:server`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`
+
+#### MOMO-134 · build-macos-apps based SwiftPM GUI run loop
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL/EP-OPS · **플랫폼:** macos · **추정:** S
+- **deps:** MOMO-110
+- **수용기준:**
+  - [ ] [swift] `script/build_and_run.sh`가 `clients/macOS` SwiftPM GUI executable을 빌드하고 `dist/MomoMacDevApp.app`으로 staging
+  - [ ] [xcode] Codex app `.codex/environments/environment.toml` Run action이 script를 호출
+  - [ ] [manual] `--verify`, `--logs`, `--telemetry`, `--debug` 모드 중 최소 `--verify` 검증
+- **라벨:** `type:infra`, `area:macos`, `priority:p1`, `size:s`, `agent:codex-ok`
+- **참조:** `research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`
+
+#### MOMO-160 · A2A-style agent_run lifecycle alignment
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** shared · **추정:** M
+- **deps:** MOMO-151, MOMO-004
+- **수용기준:**
+  - [ ] [spec] A2A Task/Message/Artifact/status를 momo `agent_run/message/artifact_ref/agent.status`에 매핑
+  - [ ] [spec] queued/running/input-required/awaiting-approval/succeeded/failed/cancelled 상태 의미 확정
+  - [ ] [spec] `input-required`(추가 입력)와 `awaiting-approval`(승인 게이트)을 분리
+  - [ ] [swift/sql] Swift model/DB migration/AgentWorker runtime 영향 범위 기록
+  - [ ] [swift] 후속 구현 시 기존 5패키지 build/test green 유지
+- **라벨:** `type:spec`, `area:core`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`
+
+#### MOMO-161 · approval pause/resume runtime
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-160
+- **수용기준:**
+  - [x] [spec] approval pause/resume 정본 문서와 same-run resume 모델 정의
+  - [x] [swift] risky `tool_call`이 `approval(status=pending)`과 `message.type='approval_request'`를 만들고 `agent_run.status='awaiting_approval'`로 멈추는 AgentWorker pause slice
+  - [x] [swift] 승인/거절/만료 decision outcome smoke test
+  - [ ] [runtime] server approval decision endpoint가 동일 run을 resume하거나 terminate하고 `audit_log`에 기록
+- **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/08-approval-pause-resume-runtime.md`
+
+#### MOMO-162 · Hermes adapter contract verification
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-150, MOMO-004
+- **수용기준:**
+  - [ ] [runtime] Hermes platform adapter path와 momo AgentWorker SSE path를 각각 검증하거나 제품 기본 경로를 하나로 확정
+  - [ ] [python] `adapters/hermes/momo_adapter.py`가 현재 Hermes adapter API와 정합하는지 live/static check 기록
+  - [ ] [docs] compatibility path와 canonical execution path를 RUN/STATUS에 구분 기록
+- **라벨:** `type:spec`, `type:docs`, `area:adapter`, `area:worker`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/01-three-agent-runtime-analysis.md`
+
+#### MOMO-163 · inbound MCP server v0
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-151, MOMO-153
+- **수용기준:**
+  - [ ] [spec] 외부 에이전트용 search messages, fetch thread, post message, create approval-safe tool call surface 정의
+  - [ ] [runtime] MCP 호출도 RLS/membership/plugin policy를 우회하지 않음
+  - [ ] [runtime] write tool은 approval/audit 경로를 사용
+- **라벨:** `type:feature`, `area:server`, `area:worker`, `priority:p1`, `size:l`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`
+
+#### MOMO-172 · inbound MCP server v0 skeleton/spec-to-code bridge
+- **마일스톤:** M2 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-163
+- **GitHub:** #80
+- **수용기준:**
+  - [x] [swift] `server` package에 MCP registry/model/route skeleton 추가
+  - [x] [swift] `momo.search_messages`, `momo.fetch_thread`, `momo.post_message`, `momo.create_tool_call` descriptor 구조 추가
+  - [x] [swift] MCP JSON-RPC transport/tool execution은 compile-safe stub + `TODO(#80)`
+  - [x] [docs] MCP endpoint/security/permission model 갱신
+  - [x] [swift] descriptor/security smoke test 추가
+  - [ ] [swift] `scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부
+- **라벨:** `type:feature`, `area:server`, `priority:p1`, `size:m`, `status:runtime-unverified`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/09-inbound-mcp-server-v0.md`, `docs/INBOUND_MCP.md`
+
+#### MOMO-170 · macOS agent protocol cards
+- **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-132, MOMO-161
+- **수용기준:**
+  - [ ] [swift] tool_call, approval, artifact, cost, memory citation, source badge cards 렌더
+  - [ ] [swift] cards use shared protocol semantics, not one-off UI-only props
+  - [ ] [runtime] approval card decisions update server state
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
+
+#### MOMO-171 · agent memory inspector
+- **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-CONTEXT · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-152, MOMO-170
+- **수용기준:**
+  - [ ] [swift] 답변에 사용된 memory/source refs를 사용자가 확인
+  - [ ] [swift] personal/workspace memory view, delete, block 경로 제공
+  - [ ] [runtime] 권한 없는 memory는 표시/주입되지 않음
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
+
+#### MOMO-174 · local LLM context compaction
+- **마일스톤:** M3 · **에픽:** EP-AGENT-RUNTIME/EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-130, MOMO-151
+- **수용기준:**
+  - [ ] [swift] local model로 source-preserving channel/thread summary 생성
+  - [ ] [swift] 미지원 OS에서는 server fallback/stub으로 동작
+  - [ ] [spec] summary가 source IDs를 잃지 않도록 fixture 검증
+- **라벨:** `type:feature`, `area:macos`, `area:core`, `priority:p1`, `size:m`, `agent:codex-ok`
+- **참조:** `research/11-agent-runtime/03-roadmap-and-methodology.md`
 
 ---
 
@@ -458,11 +755,26 @@ M0(baseline)
 - **마일스톤:** M7 · **에픽:** EP-QA-GATE · **플랫폼:** shared · **추정:** S
 - **deps:** MOMO-001, MOMO-060, MOMO-061, MOMO-062
 - **수용기준:**
-  - [ ] [manual] G-0~G-G 전부 PASS + 증거(크래시-free 지표/분모/윈도우, e2e 결과, 접근성 감사, 성능 수치, 베타 피드백) 첨부
+  - [ ] [manual] G-0~G-H 전부 PASS + 증거(크래시-free 지표/분모/윈도우, e2e 결과, 접근성 감사, 성능 수치, 베타 피드백, trust evidence) 첨부
   - [ ] [manual] `docs/cicd/03-store-readiness-gate.md` 상단에 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록
   - [ ] [manual] `STATUS.md` 게이트 상태 OPEN→PASS 갱신
 - **라벨:** `type:docs`, `gate:qa`, `priority:p0`
 - **참조:** `docs/cicd/05-qa-release-gate.md` §10 PASS 양식 · 🔒 **이 티켓 closed 전 MOMO-070/071/072 착수 금지**
+
+---
+
+### EP-TRUST — Enterprise Trust Gate (M7)
+
+#### MOMO-140 · Enterprise Trust Gate evidence package
+- **마일스톤:** M7 · **에픽:** EP-TRUST/EP-QA-GATE · **플랫폼:** shared · **추정:** L
+- **deps:** MOMO-111, MOMO-112, MOMO-132
+- **수용기준:**
+  - [ ] [spec] threat model, data flow, deployment hardening, agent execution ledger 설명을 security whitepaper 초안으로 작성
+  - [ ] [ci] SBOM/license scan/secret scanning 결과를 local gate 또는 release evidence에 포함
+  - [ ] [manual] external pentest/VDP/SOC2 Type I/II/ISO27001/CSA STAR/ISMS-P 로드맵과 책임자를 문서화
+  - [ ] [docs] `docs/cicd/05-qa-release-gate.md`에 G-H Enterprise Trust gate 반영
+- **라벨:** `type:spec`, `type:docs`, `area:legal`, `area:ci`, `gate:qa`, `priority:p1`, `size:l`
+- **참조:** `research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md`
 
 ---
 

@@ -84,6 +84,103 @@ public struct Approval: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
+/// Client intent for deciding an `approval_request` checkpoint through the
+/// ChatBackend REST contract. The server owns the final audit/resume semantics;
+/// clients send only the human decision intent.
+public struct ApprovalDecisionRequest: Codable, Sendable, Hashable {
+    public var approvalId: ApprovalID
+    public var approve: Bool
+    public var reason: String?
+    public var clientDecisionId: UUID
+
+    public init(
+        approvalId: ApprovalID,
+        approve: Bool,
+        reason: String? = nil,
+        clientDecisionId: UUID = UUID()
+    ) {
+        self.approvalId = approvalId
+        self.approve = approve
+        self.reason = reason
+        self.clientDecisionId = clientDecisionId
+    }
+
+    public var status: ApprovalStatus {
+        approve ? .approved : .rejected
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case approve
+        case reason
+        case clientDecisionId = "client_decision_id"
+    }
+}
+
+/// Minimal acknowledgement returned after the backend records an approval
+/// decision. Live transports may enrich this later with audit ids or resume job
+/// ids without changing the client's decision intent.
+public struct ApprovalDecisionReceipt: Codable, Sendable, Hashable {
+    public var approvalId: ApprovalID
+    public var status: ApprovalStatus
+    public var decidedBy: MemberID?
+    public var decidedAtMs: Int64?
+    public var decisionReason: String?
+
+    public init(
+        approvalId: ApprovalID,
+        status: ApprovalStatus,
+        decidedBy: MemberID? = nil,
+        decidedAtMs: Int64? = nil,
+        decisionReason: String? = nil
+    ) {
+        self.approvalId = approvalId
+        self.status = status
+        self.decidedBy = decidedBy
+        self.decidedAtMs = decidedAtMs
+        self.decisionReason = decisionReason
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case status
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+    }
+}
+
+/// Server-owned approval inbox projection. Clients use this read model for the
+/// initial C inbox load, then reconcile by `approval_id` from receipts and
+/// `approval.decided` realtime events.
+public struct ApprovalPage: Codable, Sendable, Hashable {
+    public var approvals: [Approval]
+
+    public init(approvals: [Approval]) {
+        self.approvals = approvals
+    }
+}
+
+public extension Approval {
+    var eventProjection: ApprovalEvent {
+        ApprovalEvent(
+            action: status == .pending ? .requested : .decided,
+            approvalId: id,
+            runId: runId,
+            channelId: channelId,
+            requestedBy: requestedBy,
+            onBehalfOf: onBehalfOf,
+            actionType: actionType,
+            status: status,
+            payload: payload,
+            estimatedMicroUSD: estimatedMicroUSD,
+            isReversible: isReversible,
+            decidedBy: decidedBy,
+            decisionReason: decisionReason
+        )
+    }
+}
+
 /// An agent invocation/turn — the run state machine (L4 §3, §6).
 /// Mirrors the `agent_run` table (schema_v0.sql:267) at the fields a client needs.
 public struct AgentRun: Identifiable, Codable, Sendable, Hashable {
@@ -153,7 +250,14 @@ public struct AgentRun: Identifiable, Codable, Sendable, Hashable {
     }
 }
 
-/// A two-phase cost snapshot for "cost breathing" (demo B, L4 §8.5).
+/// Server-owned limit state for "cost breathing" (demo B, L4 §8.5).
+public enum CostLimitState: String, Codable, Sendable, Hashable, CaseIterable {
+    case normal
+    case softLimit = "soft_limit"
+    case hardLimit = "hard_limit"
+}
+
+/// A server-owned two-phase cost snapshot for "cost breathing" (demo B, L4 §8.5).
 /// Integer micro_usd accumulation avoids float drift.
 public struct CostSnapshot: Codable, Sendable, Hashable {
     public var runId: RunID
@@ -163,21 +267,33 @@ public struct CostSnapshot: Codable, Sendable, Hashable {
     public var spentMicroUSD: Int64
     /// Soft-limit warning threshold for the matched budget grain.
     public var softLimitMicroUSD: Int64?
+    /// Hard-limit threshold for the matched budget grain.
+    public var hardLimitMicroUSD: Int64?
+    /// True once the worker has written usage_ledger for this run.
+    public var isReconciled: Bool
     /// True if usage was estimated (SSE usage chunk missing).
     public var wasEstimated: Bool
+    /// Server-projected state after applying reserved + spent against limits.
+    public var limitState: CostLimitState
 
     public init(
         runId: RunID,
         reservedMicroUSD: Int64,
         spentMicroUSD: Int64,
         softLimitMicroUSD: Int64? = nil,
-        wasEstimated: Bool = false
+        hardLimitMicroUSD: Int64? = nil,
+        isReconciled: Bool = false,
+        wasEstimated: Bool = false,
+        limitState: CostLimitState = .normal
     ) {
         self.runId = runId
         self.reservedMicroUSD = reservedMicroUSD
         self.spentMicroUSD = spentMicroUSD
         self.softLimitMicroUSD = softLimitMicroUSD
+        self.hardLimitMicroUSD = hardLimitMicroUSD
+        self.isReconciled = isReconciled
         self.wasEstimated = wasEstimated
+        self.limitState = limitState
     }
 
     /// Convenience: micro_usd → USD (display only; never use for accounting math).
@@ -189,6 +305,36 @@ public struct CostSnapshot: Codable, Sendable, Hashable {
         case reservedMicroUSD = "reserved_micro_usd"
         case spentMicroUSD = "spent_micro_usd"
         case softLimitMicroUSD = "soft_limit_micro_usd"
+        case hardLimitMicroUSD = "hard_limit_micro_usd"
+        case isReconciled = "is_reconciled"
         case wasEstimated = "was_estimated"
+        case limitState = "limit_state"
+    }
+}
+
+/// REST response for a channel's client-visible cost projection.
+public struct CostSnapshotPage: Codable, Sendable, Hashable {
+    public var schema: String
+    public var channelId: ChannelID
+    public var snapshots: [CostSnapshot]
+    public var asOfMs: Int64
+
+    public init(
+        schema: String = "momo.cost_snapshot.channel.v0",
+        channelId: ChannelID,
+        snapshots: [CostSnapshot],
+        asOfMs: Int64
+    ) {
+        self.schema = schema
+        self.channelId = channelId
+        self.snapshots = snapshots
+        self.asOfMs = asOfMs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schema
+        case channelId = "channel_id"
+        case snapshots
+        case asOfMs = "as_of_ms"
     }
 }

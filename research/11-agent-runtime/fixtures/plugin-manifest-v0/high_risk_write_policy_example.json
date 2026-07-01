@@ -1,0 +1,248 @@
+{
+  "schema": "momo.plugin_manifest.v0",
+  "plugin_id": "com.momo.plugins.deployment-admin-example",
+  "id": "com.momo.plugins.deployment-admin-example",
+  "name": "Deployment Admin Approval Example",
+  "version": "0.0.1-policy-example",
+  "publisher": {
+    "id": "momo.examples",
+    "name": "momo examples",
+    "homepage": "https://github.com/Dawn-kim-official/momo",
+    "support": "momo://support/plugins/examples/deployment-admin"
+  },
+  "runtime": {
+    "kind": "external_webhook",
+    "entrypoint": "https://plugins.example.invalid/momo/deployment-admin",
+    "transport": "https_signed_webhook",
+    "sandbox": "external_service",
+    "network": {
+      "egress_allowlist": ["plugins.example.invalid"]
+    }
+  },
+  "runtime_boundary": {
+    "executor_owner": "enterprise_customer",
+    "process_boundary": "remote_https",
+    "secret_boundary": "enterprise_secret_store",
+    "network_boundary": "signed_https_to_plugins.example.invalid",
+    "state_boundary": "provider_control_plane_with_momo_audit_ledger",
+    "failure_boundary": "no_retry_without_idempotency_key_and_reapproval"
+  },
+  "surfaces": [
+    {
+      "kind": "slash_command",
+      "name": "deploy.production.restart",
+      "display_name": "Restart Production Deployment"
+    },
+    {
+      "kind": "approval_card",
+      "name": "deploy.high_risk_approval",
+      "display_name": "High-Risk Deployment Approval"
+    },
+    {
+      "kind": "admin_settings",
+      "name": "deploy.policy",
+      "display_name": "Deployment Policy"
+    }
+  ],
+  "ui_surfaces": ["slash_command", "approval_card", "admin_settings", "audit_badge"],
+  "capabilities": [
+    {
+      "tool_name": "deployment.restart_service",
+      "display_name": "Restart service",
+      "grant": "propose",
+      "risk": "deploy",
+      "allowed_operations": ["restart_service"],
+      "denied_operations": ["delete_cluster", "rotate_database_credentials", "disable_audit_logging"],
+      "required_provider_grants": ["deploy.restart"],
+      "result_kind": "tool_result",
+      "idempotency_required": true,
+      "resource_scope_summary": "environment_allowlist:staging; production requires breakglass"
+    },
+    {
+      "tool_name": "deployment.rotate_secret",
+      "display_name": "Rotate secret",
+      "grant": "deny",
+      "risk": "admin",
+      "allowed_operations": [],
+      "denied_operations": ["rotate_secret"],
+      "required_provider_grants": ["deploy.secrets.admin"],
+      "result_kind": "tool_result",
+      "idempotency_required": true,
+      "resource_scope_summary": "not_enabled_in_v0"
+    }
+  ],
+  "tools": [
+    {
+      "tool_name": "deployment.restart_service",
+      "display_name": "Restart service",
+      "schema_hash": "sha256:deployrestartservicev0",
+      "default_grant": "propose",
+      "risk": "deploy",
+      "approval_policy": "require_approval",
+      "result_kind": "tool_result",
+      "resource_scope_summary": "environment_allowlist:staging; production requires breakglass",
+      "capability_version": "deployment-admin-example@0.0.1"
+    },
+    {
+      "tool_name": "deployment.rotate_secret",
+      "display_name": "Rotate secret",
+      "schema_hash": "sha256:deployrotatesecretv0",
+      "default_grant": "deny",
+      "risk": "admin",
+      "approval_policy": "deny",
+      "result_kind": "tool_result",
+      "resource_scope_summary": "not_enabled_in_v0",
+      "capability_version": "deployment-admin-example@0.0.1"
+    }
+  ],
+  "tool_schema_refs": [
+    {
+      "tool_name": "deployment.restart_service",
+      "input_schema_ref": "momo://capability-cache/deployment.restart_service/schemas/input/sha256:deployrestartservicev0",
+      "output_schema_ref": "momo://capability-cache/deployment.restart_service/schemas/output/sha256:deployrestartserviceoutv0",
+      "schema_format": "json_schema_2020_12",
+      "schema_hash": "sha256:deployrestartservicev0"
+    },
+    {
+      "tool_name": "deployment.rotate_secret",
+      "input_schema_ref": "momo://capability-cache/deployment.rotate_secret/schemas/input/sha256:deployrotatesecretv0",
+      "output_schema_ref": null,
+      "schema_format": "json_schema_2020_12",
+      "schema_hash": "sha256:deployrotatesecretv0"
+    }
+  ],
+  "approval_policy": {
+    "default": "deny",
+    "rules": [
+      {
+        "match": {
+          "risk": "deploy",
+          "environment": "staging"
+        },
+        "policy": "require_approval",
+        "grant": "propose",
+        "approval_card_kind": "deployment_change_confirmation",
+        "expires_after_seconds": 600,
+        "requires_diff_preview": true,
+        "requires_cost_preview": true,
+        "required_approver_roles": ["workspace_admin"]
+      },
+      {
+        "match": {
+          "risk": "deploy",
+          "environment": "production"
+        },
+        "policy": "always",
+        "grant": "propose",
+        "approval_card_kind": "breakglass_deployment_confirmation",
+        "expires_after_seconds": 300,
+        "requires_diff_preview": true,
+        "requires_cost_preview": true,
+        "requires_second_approver": true,
+        "required_approver_roles": ["workspace_owner", "platform_admin"],
+        "requires_reason": true
+      },
+      {
+        "match": {
+          "risk": ["identity", "admin"],
+          "operation": ["rotate_secret", "disable_audit_logging"]
+        },
+        "policy": "deny",
+        "grant": "deny",
+        "reason": "Secret rotation and audit disabling are out of Plugin Manifest v0 scope."
+      }
+    ]
+  },
+  "risk": {
+    "level": "critical",
+    "classes": ["deploy", "admin"],
+    "external_systems": ["customer_infrastructure"],
+    "data_sensitivity": "operational_control_plane",
+    "side_effects": ["deploy", "external_write", "admin"]
+  },
+  "scopes": {
+    "workspace_scope": "installed_workspace_admin_only",
+    "channel_scope": "incident_or_release_channels_only",
+    "member_scope": "workspace_admin_or_owner",
+    "provider_scope": ["deploy.restart"],
+    "resource_scope": "environment_allowlist_with_production_breakglass"
+  },
+  "source_policy": {
+    "source_kinds": ["deployment_plan", "incident_ticket", "runbook"],
+    "context_packet_projection": {
+      "sources_allowed": true,
+      "max_excerpt_chars": 1500,
+      "required_permission_basis": [
+        "actor_is_workspace_admin",
+        "deployment_resource_scope",
+        "breakglass_policy"
+      ]
+    },
+    "memory_plane_projection": {
+      "allowed_memory_types": ["task_state", "artifact_ref", "decision"],
+      "default_visibility": "admin",
+      "retrieval_policy_version": "memory-policy@2026-06-26+plugin:deployment-admin-example@0.0.1"
+    }
+  },
+  "audit_surface": {
+    "timeline_events": ["tool_call.proposed", "approval.requested", "approval.decided", "tool_result.recorded"],
+    "admin_events": ["plugin.installed", "security_hold.created", "plugin.revoked"],
+    "source_events": ["memory.revalidation_required"],
+    "cost_events": ["usage.reserved", "usage.reconciled"],
+    "redaction_policy": [
+      "provider_access_token",
+      "provider_refresh_token",
+      "webhook_secret",
+      "deployment_secret",
+      "private_key"
+    ]
+  },
+  "audit_policy": {
+    "event_prefix": "plugin.deployment_admin",
+    "required_events": [
+      "plugin.installed",
+      "capability.discovered",
+      "capability.projected_to_context_packet",
+      "tool_call.proposed",
+      "approval.requested",
+      "approval.decided",
+      "tool_result.recorded",
+      "memory.revalidation_required",
+      "security_hold.created",
+      "plugin.revoked"
+    ],
+    "redact_fields": [
+      "provider_access_token",
+      "provider_refresh_token",
+      "webhook_secret",
+      "deployment_secret",
+      "private_key"
+    ]
+  },
+  "license": {
+    "spdx_id": "LicenseRef-Enterprise-Private",
+    "notice_required": false,
+    "terms_ref": "enterprise_private_terms"
+  },
+  "provenance": {
+    "source_repo": "enterprise-private/deployment-admin",
+    "release_ref": "0.0.1-policy-example",
+    "build_digest": "sha256:fixture-high-risk-write-policy-example-v0",
+    "publisher_verification": "enterprise_customer_admin"
+  },
+  "compatibility": {
+    "manifest_version": "0",
+    "momo_protocol": ">=0.1.0 <0.2.0",
+    "context_packet": "momo.context_packet.v0",
+    "capability_cache": "momo.capability_cache_entry.v0",
+    "memory_plane": "momo.memory_item.v0",
+    "client_cards": ["approval_request.v0", "tool_result.v0", "audit_badge.v0"]
+  },
+  "signature": {
+    "required_for_catalog": true,
+    "algorithm": "minisign-ed25519",
+    "artifact_digest": "sha256:fixture-high-risk-write-policy-example-v0",
+    "signature_ref": "momo://catalog/signatures/deployment-admin-example/0.0.1/minisign",
+    "signed_at": "2026-06-29T00:00:00Z"
+  }
+}

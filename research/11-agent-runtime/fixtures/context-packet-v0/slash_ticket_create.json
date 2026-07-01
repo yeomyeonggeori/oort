@@ -1,0 +1,213 @@
+{
+  "schema": "momo.context_packet.v0",
+  "packet_id": "11111111-1111-4111-8111-111111111152",
+  "packet_version": 1,
+  "created_at": "2026-06-25T09:10:00Z",
+  "expires_at": "2026-06-25T09:25:00Z",
+  "workspace": {
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+    "slug": "acme",
+    "name": "Acme"
+  },
+  "request": {
+    "request_id": "22222222-2222-4222-8222-222222221152",
+    "surface": "slash_command",
+    "actor_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+    "agent_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb00a1",
+    "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0002",
+    "trigger_message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0203",
+    "thread_root_message_id": null,
+    "idempotency_key": "33333333-3333-4333-8333-333333331152",
+    "raw_text": "/ticket create title:\"Refund FAQ missing\" priority:p1 owner:@min",
+    "normalized_intent": "create_ticket_draft",
+    "command": {
+      "name": "ticket.create",
+      "args": {
+        "title": "Refund FAQ missing",
+        "priority": "p1",
+        "owner_handle": "min"
+      }
+    },
+    "client_context": {
+      "platform": "macos",
+      "app_version": "0.1-dev"
+    }
+  },
+  "scope": {
+    "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+    "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0002",
+    "thread_root_message_id": null,
+    "visibility": "channel",
+    "seq_window": {
+      "from": 201,
+      "to": 203,
+      "reason": "slash_command_nearby_context"
+    },
+    "permission_basis": [
+      "actor_is_workspace_member",
+      "actor_is_channel_member",
+      "agent_is_channel_member",
+      "plugin_policy:ticket.create",
+      "workspace_tool_policy:v2026-06-25"
+    ],
+    "rls_context": {
+      "set_local_workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001"
+    }
+  },
+  "goal": {
+    "summary": "Draft a Jira-like ticket from a slash command.",
+    "user_prompt": "/ticket create title:\"Refund FAQ missing\" priority:p1 owner:@min",
+    "constraints": [
+      "Create a draft first; do not write to the external tracker without approval.",
+      "Use command arguments as the primary source of truth.",
+      "Include nearby channel context only as supporting evidence."
+    ],
+    "desired_outputs": [
+      "tool_call",
+      "approval_request"
+    ],
+    "non_goals": [
+      "Do not assign work to members not visible in this workspace.",
+      "Do not modify existing tickets."
+    ],
+    "acceptance_hint": "Produce an approval-ready ticket draft."
+  },
+  "participants": [
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+      "kind": "human",
+      "handle": "dawn",
+      "display_name": "Dawn",
+      "role": "actor"
+    },
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0002",
+      "kind": "human",
+      "handle": "min",
+      "display_name": "Min",
+      "role": "candidate_owner"
+    },
+    {
+      "member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb00a1",
+      "kind": "agent",
+      "handle": "momo",
+      "display_name": "momo",
+      "role": "target_agent"
+    }
+  ],
+  "recent_messages": [
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0201",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0002",
+      "seq": 201,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0002",
+      "type": "text",
+      "body": "The refund FAQ is still missing from the customer help draft.",
+      "source_id": "src_channel_context_201"
+    },
+    {
+      "message_id": "dddddddd-dddd-4ddd-8ddd-dddddddd0203",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0002",
+      "seq": 203,
+      "author_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbb0001",
+      "type": "text",
+      "body": "/ticket create title:\"Refund FAQ missing\" priority:p1 owner:@min",
+      "source_id": "src_slash_command"
+    }
+  ],
+  "memory_refs": [
+    {
+      "memory_id": "mem_task_state_refund_faq",
+      "type": "task_state",
+      "visibility": "channel",
+      "source_ids": [
+        "src_channel_context_201"
+      ],
+      "excerpt": "Refund FAQ work is not yet represented by an open ticket.",
+      "reason_included": "Avoids duplicate ticket creation and explains priority.",
+      "expires_at": "2026-07-25T00:00:00Z",
+      "delete_path": "source_revoked_or_channel_admin_delete",
+      "permission_snapshot": "actor:read"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "src_channel_context_201",
+      "kind": "message",
+      "title": "Nearby channel context",
+      "uri": "momo://workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001/channels/cccccccc-cccc-4ccc-8ccc-cccccccc0002/messages/dddddddd-dddd-4ddd-8ddd-dddddddd0201",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read",
+      "retrieved_at": "2026-06-25T09:10:00Z",
+      "excerpt": "The refund FAQ is still missing from the customer help draft."
+    },
+    {
+      "source_id": "src_slash_command",
+      "kind": "message",
+      "title": "Slash command trigger",
+      "uri": "momo://workspaces/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001/channels/cccccccc-cccc-4ccc-8ccc-cccccccc0002/messages/dddddddd-dddd-4ddd-8ddd-dddddddd0203",
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "permission_snapshot": "actor:read",
+      "retrieved_at": "2026-06-25T09:10:00Z",
+      "excerpt": "/ticket create title:\"Refund FAQ missing\" priority:p1 owner:@min"
+    }
+  ],
+  "tool_grants": [
+    {
+      "tool_name": "ticket.create",
+      "provider": "momo-ticket",
+      "grant": "propose",
+      "risk": "write",
+      "approval_policy": "always",
+      "allowed_operations": [
+        "create_ticket"
+      ],
+      "denied_operations": [
+        "bulk_update",
+        "delete_ticket"
+      ],
+      "input_schema_ref": "momo://capability-cache/ticket.create/schemas/input/sha256:ticketcreatev1",
+      "capability_version": "momo-ticket@0.1.0",
+      "policy_version": "workspace-policy@2026-06-25"
+    }
+  ],
+  "budget": {
+    "budget_id": "budget_ticket_command",
+    "model_route": "server",
+    "max_prompt_tokens": 3500,
+    "max_completion_tokens": 800,
+    "reserved_micro_usd": 12000,
+    "soft_limit_micro_usd": 25000,
+    "hard_limit_micro_usd": 50000,
+    "approval_required_over_micro_usd": 25000,
+    "usage_ledger_mode": "reserve_reconcile"
+  },
+  "redactions": [],
+  "runtime_envelope": {
+    "transport": "openai_chat_completions_sse",
+    "endpoint": "/v1/chat/completions",
+    "stream": true,
+    "metadata": {
+      "workspace_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaa0001",
+      "channel_id": "cccccccc-cccc-4ccc-8ccc-cccccccc0002",
+      "run_id": "eeeeeeee-eeee-4eee-8eee-eeeeeeee1152",
+      "context_packet_id": "11111111-1111-4111-8111-111111111152",
+      "idempotency_key": "33333333-3333-4333-8333-333333331152"
+    },
+    "messages_strategy": "system_summary_plus_context_json",
+    "forbidden_runtime_inputs": [
+      "database_url",
+      "provider_refresh_token",
+      "raw_cross_channel_history",
+      "unredacted_secret"
+    ]
+  },
+  "audit": {
+    "policy_version": "workspace-policy@2026-06-25",
+    "capability_versions": [
+      "momo-ticket@0.1.0"
+    ],
+    "source_grant_versions": [],
+    "builder": "momo-context-broker-v0"
+  }
+}
