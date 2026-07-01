@@ -17,7 +17,7 @@ ENV_FILE       ?= $(firstword $(wildcard .env.worktree .env infra/.env.example))
 COMPOSE_ENV    := $(if $(ENV_FILE),--env-file $(ENV_FILE),)
 
 .DEFAULT_GOAL := help
-.PHONY: help build migrate up down test
+.PHONY: help build migrate up down test local-alpha-plan local-alpha
 
 help: ## 사용 가능한 타깃 출력
 	@echo "momo — make targets:"
@@ -26,6 +26,8 @@ help: ## 사용 가능한 타깃 출력
 	@echo "  make up       infra/docker-compose.yml 기동 (PG18 + Centrifugo v6)"
 	@echo "  make down     인프라 중지"
 	@echo "  make test     모든 Swift 패키지 테스트"
+	@echo "  make local-alpha-plan  MOMO-240 로컬 알파 runner dry-run"
+	@echo "  make local-alpha       MOMO-240 로컬 알파 runner execute(mock Hermes)"
 
 build: ## 모든 Swift 패키지 빌드 (Package.swift 존재하는 것만)
 	@found=0; \
@@ -76,3 +78,9 @@ down: ## 인프라 중지
 	else \
 		echo "down: $(COMPOSE_FILE) 없음 (후속 티켓 T02에서 추가). runtime-unverified (no docker/psql)."; \
 	fi
+
+local-alpha-plan: ## MOMO-240 local alpha runner dry-run
+	@sh scripts/local_alpha_runner.sh plan
+
+local-alpha: ## MOMO-240 local alpha runner execute (mock Hermes by default)
+	@sh scripts/local_alpha_runner.sh execute --hermes mock

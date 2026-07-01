@@ -66,6 +66,55 @@ relay/worker는 DB와 Centrifugo에만 의존하므로 서버와 **병렬 기동
 -> mock Hermes + `AgentWorker` -> `MomoMacDevApp` real-server mode다. 세부 명령은
 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) §2~§6을 따른다.
 
+### 1.1 MOMO-240 Local Alpha Runner
+
+`scripts/local_alpha_runner.sh`는 위 수동 순서를 내부 알파용 한 흐름으로 묶는다. 기본 evidence는
+repo 밖 `${TMPDIR:-/tmp}/momo-local-alpha/<UTC timestamp>/`에 생성되며, 실행 후 `summary.md`에
+확인할 URL, redacted env, 로그 파일, stop command가 남는다. **AWS 리소스는 만들지 않는다.**
+
+```sh
+# dry-run/plan: 아무 프로세스도 띄우지 않고 실행 계획만 출력
+scripts/local_alpha_runner.sh plan
+make local-alpha-plan
+
+# execute: PG18+Centrifugo → migrate/RLS prep → mock Hermes → server/relay/worker → macOS smoke
+scripts/local_alpha_runner.sh execute --hermes mock
+make local-alpha
+```
+
+실제 외부 Hermes를 쓰려면 secret env 파일을 **절대경로로, repo 밖에** 둔다. runner는 repo 내부
+secret env 경로를 거부한다.
+
+```sh
+scripts/local_alpha_runner.sh execute \
+  --hermes external \
+  --secret-env "$HOME/.momo/local-alpha.env"
+```
+
+필수/권장 키는 `infra/.env.example`와 동일하다. 외부 Hermes 모드에서는 최소
+`HERMES_BASE_URL`/`HERMES_API_KEY`가 필요하며, placeholder 키(`change-me-*`)는 거부한다.
+mock 모드에서 `--secret-env`를 생략하면 runner가 dev-only env를 evidence 디렉터리에 생성한다.
+
+실행 성공 시 대표 출력:
+
+```text
+MomoServer: http://127.0.0.1:<PORT>/health
+Centrifugo: ws://127.0.0.1:<CENT_PORT>/connection/websocket
+mock Hermes: http://127.0.0.1:<HERMES_PORT>/health
+macOS dev launch: swift run --package-path clients/macOS MomoMacSmoke
+evidence summary: /tmp/.../summary.md
+logs: /tmp/.../logs
+stop: /tmp/.../stop-local-alpha.sh
+```
+
+Centrifugo 컨테이너의 subscribe proxy는 local alpha 실행 중 host-run `MomoServer`를 호출해야 하므로
+runner가 evidence 디렉터리에 임시 Centrifugo config/compose override를 생성한다. macOS Docker
+Desktop 기본값은 `host.docker.internal`이며, 필요하면 `--api-proxy-host <host>`로 바꾼다.
+
+현재 `main`의 macOS dev surface는 Xcode `.app`이 아니라 SwiftPM `MomoMacSmoke`다. 따라서 runner는
+실행 가능한 dev launch command로 `swift run --package-path clients/macOS MomoMacSmoke`를 출력한다.
+Xcode `.app` 번들 런치는 M4/C1 이후 같은 runner에 추가한다.
+
 ---
 
 ## 2. 환경변수 (`.env`)

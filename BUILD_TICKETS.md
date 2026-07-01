@@ -168,7 +168,8 @@
 | `MOMO-229` | Public host preflight + deploy evidence packet v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228 |
 | `MOMO-233` | AWS internal alpha stack v0 | infra/docs | MOMO-221, MOMO-222, MOMO-225, MOMO-228, MOMO-229 |
 | `MOMO-237` | Local Docker alpha RC gate v0 | tooling/runtime/docs | MOMO-220, MOMO-224, MOMO-225, MOMO-228, MOMO-233, MOMO-236 |
-| `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233, MOMO-237, MOMO-238 |
+| `MOMO-239` | Local one-person alpha checklist + AWS promotion threshold | docs/manual | MOMO-225, MOMO-228, MOMO-230, MOMO-231, MOMO-233 |
+| `MOMO-240` | Local alpha runner | infra/runtime | MOMO-001~004, MOMO-237, MOMO-238, MOMO-239 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -216,6 +217,17 @@
 - [x] `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`를 갱신한다.
 - [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 MOMO-239를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-240 수용기준 `[infra/runtime]`
+- [x] 별도 worktree/branch `chore/MOMO-240-local-alpha-runner`에서 `main` 기준으로 구현한다.
+- [x] `scripts/local_alpha_runner.sh plan`은 Docker/Swift 프로세스를 띄우지 않고 실행 순서, URL, env/evidence 정책을 출력한다.
+- [x] `scripts/local_alpha_runner.sh execute --hermes mock`은 AWS 리소스 생성 없이 PG18+Centrifugo compose, migrate, RLS role prep, mock Hermes, MomoServer, OutboxRelay, AgentWorker, macOS smoke를 한 흐름으로 실행한다.
+- [x] `--hermes external --secret-env /absolute/path`는 repo 밖 secret env만 허용하고, `HERMES_BASE_URL`/`HERMES_API_KEY` placeholder를 거부한다.
+- [x] 실행 결과로 `summary.md`에 MomoServer/Centrifugo/Hermes URL, redacted env, logs/evidence path, stop command, macOS dev launch command를 남긴다.
+- [x] `Makefile` 편의 타깃 `local-alpha-plan` / `local-alpha`가 runner와 정합한다.
+- [x] `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] local gate: `sh -n scripts/local_alpha_runner.sh`, `scripts/local_alpha_runner.sh plan`, `scripts/local_alpha_runner.sh execute --hermes mock --stop-after-smoke`, `make build`, `make test`, `python3 -m py_compile adapters/hermes/momo_adapter.py` 통과.
+- [ ] PR은 `needs-review` 상태에서 멈춘다.
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
