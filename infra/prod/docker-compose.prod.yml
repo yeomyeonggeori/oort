@@ -171,6 +171,8 @@ networks:
 
 volumes:
   pgdata:
+    name: ${DB_VOLUME_NAME:-momo-pgdata}
   redis-data:
+    name: ${REDIS_VOLUME_NAME:-momo-redis-data}
   caddy-data:
   caddy-config:
