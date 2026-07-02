@@ -171,13 +171,24 @@ DELETE FROM approval WHERE id = '${APPROVAL_ID}';
 DELETE FROM message WHERE id = '${APPROVAL_MSG_ID}' OR run_id = '${RUN_ID_FIXTURE}';
 DELETE FROM agent_run WHERE id = '${RUN_ID_FIXTURE}';
 
-UPDATE channel_seq
-   SET last_seq = GREATEST(
-         last_seq,
-         205900,
-         COALESCE((SELECT max(seq) FROM message WHERE channel_id = '${CHANNEL_ID}'), 0)
-       )
- WHERE channel_id = '${CHANNEL_ID}';
+CREATE TEMP TABLE macos_smoke_fixture_seq(seq bigint) ON COMMIT DROP;
+
+WITH current_seq AS (
+  SELECT GREATEST(
+           205900,
+           COALESCE((SELECT last_seq FROM channel_seq WHERE channel_id = '${CHANNEL_ID}'), 0),
+           COALESCE((SELECT max(seq) FROM message WHERE channel_id = '${CHANNEL_ID}'), 0)
+         ) AS last_seen_seq
+),
+bumped AS (
+  UPDATE channel_seq
+     SET last_seq = current_seq.last_seen_seq + 1
+    FROM current_seq
+   WHERE channel_seq.channel_id = '${CHANNEL_ID}'
+   RETURNING channel_seq.last_seq
+)
+INSERT INTO macos_smoke_fixture_seq(seq)
+SELECT last_seq FROM bumped;
 
 INSERT INTO agent_run
   (id, workspace_id, agent_member_id, channel_id, status, step_count, max_steps, depth, input, started_at)
@@ -188,7 +199,7 @@ VALUES
 INSERT INTO message
   (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, props, run_id)
 VALUES
-  ('${APPROVAL_MSG_ID}', '${WORKSPACE_ID}', '${CHANNEL_ID}', 205901, 1782864000000, 0, '${AGENT_ID}',
+  ('${APPROVAL_MSG_ID}', '${WORKSPACE_ID}', '${CHANNEL_ID}', (SELECT seq FROM macos_smoke_fixture_seq), 1782864000000, 0, '${AGENT_ID}',
    'approval_request', 'MOMO-205 approval/cost fixture',
    jsonb_build_object(
      'approval_id', '${APPROVAL_ID}',
@@ -229,7 +240,7 @@ VALUES
    1200, 480, 340000, false);
 
 UPDATE channel_seq
-   SET last_seq = GREATEST(last_seq, 205901)
+   SET last_seq = GREATEST(last_seq, (SELECT seq FROM macos_smoke_fixture_seq))
  WHERE channel_id = '${CHANNEL_ID}';
 
 COMMIT;
