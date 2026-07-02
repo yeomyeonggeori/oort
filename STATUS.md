@@ -86,6 +86,13 @@
 - `scripts/verify_local_hermes_bridge.sh`를 추가해 repo-local mock Hermes provider fallback으로 `@hermes` mention -> `agent_job` -> AgentWorker SSE -> usage ledger/reserve -> durable channel response -> relay history를 검증한다. 실제 local Hermes/GPT provider는 같은 env contract에 endpoint/token을 꽂아 검증하고, mock fallback과 별도 evidence로 구분한다.
 - AgentWorker provider 실패가 반복되면 같은 channel timeline에 사람이 읽을 수 있는 degraded Hermes error message를 남긴다. macOS 앱은 roster/command center/demo fallback에서 `@hermes` alias를 기본으로 삽입하고 표시한다.
 
+## 0-4b-6. MOMO-257 Local Hermes/Codex OAuth Provider Setup (2026-07-02)
+
+- `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`와 placeholder-only `local-hermes-provider.env.example`를 추가해 사용자가 local Hermes-compatible provider에서 Codex/OpenAI OAuth 또는 provider token 설정을 직접 수행하고, momo는 loopback `HERMES_BASE_URL` + Hermes-facing bearer만 받아 검증하는 경계를 고정했다.
+- `scripts/verify_local_hermes_credentialed_smoke.sh`를 추가해 기본 실행은 `NEEDS_USER_CREDENTIAL` evidence로 안전하게 종료하고, out-of-repo env 파일 또는 inline momo-facing endpoint/key가 있으면 기존 external-provider verifier로 위임해 `@hermes` credentialed roundtrip을 검증한다. 알려진 Codex/OpenAI OAuth/API key env가 momo smoke process에 있으면 fail-fast한다.
+- macOS Alpha Command Center에 `Provider Setup` 상태, `Connect real local Hermes` 체크리스트, provider credential boundary capability를 추가했다. 실제 provider login/token 입력은 사람이 provider에서 수행해야 하며, 이 환경의 real credentialed provider PASS는 사용자가 런타임을 띄운 뒤 별도 evidence로 닫는다.
+- 검증: `scripts/local_gate.sh --profile external-agent-provider` PASS(`NEEDS_USER_CREDENTIAL` no-secret path), `scripts/local_gate.sh --profile runtime-agent` PASS(mock/local Hermes bridge), `scripts/local_gate.sh --profile macos-ui` PASS, `LOCAL_GATE_LAUNCH_UI=1 scripts/verify_macos_real_backend_ui.sh` PASS(window_count=1). 실제 Codex/OAuth credentialed provider PASS는 사용자가 provider 로그인/env를 준비한 뒤 `scripts/verify_local_hermes_credentialed_smoke.sh`로 닫는다.
+
 ## 0-4c. MOMO-229 Public Host Preflight + Deploy Evidence Packet v0 (2026-07-01)
 
 - `scripts/prod_env_preflight.sh`를 보강해 public/staging strict mode에서 DNS/TLS env shape, pinned registry image tags, SOPS/age 또는 host-local secret source, DB/Redis named volume, pgBackRest stanza/check/full backup/WAL/PITR required env를 fail-fast로 검사한다.

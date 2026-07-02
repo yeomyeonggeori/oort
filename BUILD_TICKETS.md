@@ -173,6 +173,7 @@
 | `MOMO-241` | Local 3-Day Alpha Test Pack | docs/manual | MOMO-239, MOMO-240 |
 | `MOMO-242` | External Agent Runtime Smoke | runtime/docs | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-241 |
 | `MOMO-256` | Local Hermes Agent Bridge v0 | runtime-agent/macos-ui/swift | MOMO-215, MOMO-238, MOMO-242, MOMO-253 |
+| `MOMO-257` | Local Hermes/Codex OAuth provider setup | runtime-agent/macos-ui/docs | MOMO-234, MOMO-238, MOMO-242, MOMO-256 |
 | `MOMO-243` | In-App Alpha Command Center | swift/macos-ui | MOMO-228, MOMO-232, MOMO-241 |
 | `MOMO-244` | Dev Update Channel v0 | swift/docs | MOMO-235, MOMO-241 |
 | `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-224, MOMO-237, MOMO-239, MOMO-240, MOMO-241 |
@@ -184,6 +185,7 @@
 | `MOMO-238` | Local Hermes GPT provider loopback contract | docs/tooling/swift | MOMO-230, MOMO-234, MOMO-236 |
 | `MOMO-242` | External agent runtime smoke contract | runtime/docs/swift | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-240 |
 | `MOMO-256` | Local Hermes Agent Bridge v0 | runtime-agent/macos-ui/swift | MOMO-215, MOMO-238, MOMO-242, MOMO-253 |
+| `MOMO-257` | Local Hermes/Codex OAuth provider setup | runtime-agent/macos-ui/docs | MOMO-234, MOMO-238, MOMO-242, MOMO-256 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
