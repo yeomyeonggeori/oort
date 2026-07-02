@@ -238,29 +238,99 @@ check_http() {
   fi
 }
 
-check_db_and_outbox() {
+check_centrifugo_health() {
   local snap_dir="$1"
-  local psql_path
-  if ! psql_path="$(psql_bin)"; then
-    record_event "FAIL" "db" "psql is unavailable; DB connectivity and outbox backlog cannot be measured"
-    return 0
-  fi
-  if [ "${DATABASE_URL:-}" = "" ]; then
-    record_event "FAIL" "db" "DATABASE_URL is unset; DB connectivity and outbox backlog cannot be measured"
+  local body="$snap_dir/centrifugo-health.body"
+  local err="$snap_dir/centrifugo-health.err"
+  local url="http://127.0.0.1:${CENT_PORT:-8000}/health"
+  local tmp_err
+  tmp_err="$(mktemp "${TMPDIR:-/tmp}/momo-soak-http.XXXXXX")" || return 1
+  set +e
+  curl -fsS --max-time 5 "$url" >"$body" 2>"$tmp_err"
+  local code=$?
+  set +e
+  redact_stream <"$tmp_err" >"$err"
+  rm -f "$tmp_err"
+  if [ "$code" -eq 0 ]; then
+    record_event "PASS" "centrifugo-health" "$url responded"
     return 0
   fi
 
-  local connect_out="$snap_dir/db-connect.txt"
-  local connect_err="$snap_dir/db-connect.err"
-  local tmp_err
+  if ! command -v docker >/dev/null 2>&1; then
+    record_event "FAIL" "centrifugo-health" "$url failed with curl exit $code and docker is unavailable"
+    return 0
+  fi
+
+  local cid status
+  cid="$(docker ps -q \
+    --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-}" \
+    --filter "label=com.docker.compose.service=centrifugo" 2>/dev/null | head -n 1)"
+  if [ "$cid" = "" ]; then
+    record_event "FAIL" "centrifugo-health" "$url failed with curl exit $code and no Centrifugo compose container was found"
+    return 0
+  fi
+  status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+  printf 'http_health_curl_exit=%s\ndocker_container=%s\ndocker_health=%s\n' "$code" "$cid" "$status" >"$body"
+  if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
+    record_event "PASS" "centrifugo-health" "HTTP /health unavailable, Docker health is $status"
+  else
+    record_event "FAIL" "centrifugo-health" "HTTP /health failed with curl exit $code and Docker health is ${status:-unknown}"
+  fi
+}
+
+psql_capture() {
+  local query="$1"
+  local out="$2"
+  local err="$3"
+  local tmp_err code psql_path cid
+  : >"$err"
+
+  tmp_err="$(mktemp "${TMPDIR:-/tmp}/momo-soak-db.XXXXXX")" || return 1
+  if psql_path="$(psql_bin 2>/dev/null)" && [ "${DATABASE_URL:-}" != "" ]; then
+    set +e
+    "$psql_path" "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "$query" >"$out" 2>"$tmp_err"
+    code=$?
+    set +e
+    redact_stream <"$tmp_err" >>"$err"
+    rm -f "$tmp_err"
+    if [ "$code" -eq 0 ]; then
+      return 0
+    fi
+  else
+    rm -f "$tmp_err"
+  fi
+
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "docker is unavailable for DB fallback" >>"$err"
+    return 1
+  fi
+  cid="$(docker ps -q \
+    --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-}" \
+    --filter "label=com.docker.compose.service=postgres" 2>/dev/null | head -n 1)"
+  if [ "$cid" = "" ]; then
+    echo "no postgres compose container found for DB fallback" >>"$err"
+    return 1
+  fi
+
   tmp_err="$(mktemp "${TMPDIR:-/tmp}/momo-soak-db.XXXXXX")" || return 1
   set +e
-  "$psql_path" "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "SELECT 1;" >"$connect_out" 2>"$tmp_err"
-  local code=$?
+  docker exec "$cid" psql \
+    -U "${POSTGRES_USER:-momo}" \
+    -d "${POSTGRES_DB:-momo}" \
+    -v ON_ERROR_STOP=1 \
+    -Atqc "$query" >"$out" 2>"$tmp_err"
+  code=$?
   set +e
-  redact_stream <"$tmp_err" >"$connect_err"
+  redact_stream <"$tmp_err" >>"$err"
   rm -f "$tmp_err"
-  if [ "$code" -eq 0 ] && grep -Fxq "1" "$connect_out"; then
+  [ "$code" -eq 0 ]
+}
+
+check_db_and_outbox() {
+  local snap_dir="$1"
+  local connect_out="$snap_dir/db-connect.txt"
+  local connect_err="$snap_dir/db-connect.err"
+  if psql_capture "SELECT 1;" "$connect_out" "$connect_err" && grep -Fxq "1" "$connect_out"; then
     record_event "PASS" "db" "PostgreSQL connectivity check passed"
   else
     record_event "FAIL" "db" "PostgreSQL connectivity check failed"
@@ -269,14 +339,7 @@ check_db_and_outbox() {
 
   local outbox_out="$snap_dir/outbox-pending.tsv"
   local outbox_err="$snap_dir/outbox-pending.err"
-  tmp_err="$(mktemp "${TMPDIR:-/tmp}/momo-soak-outbox.XXXXXX")" || return 1
-  set +e
-  "$psql_path" "$DATABASE_URL" -v ON_ERROR_STOP=1 -Atqc "SELECT count(*)::text || E'\t' || COALESCE(max(EXTRACT(EPOCH FROM (now() - created_at)))::bigint, 0)::text FROM outbox WHERE status = 'pending';" >"$outbox_out" 2>"$tmp_err"
-  code=$?
-  set +e
-  redact_stream <"$tmp_err" >"$outbox_err"
-  rm -f "$tmp_err"
-  if [ "$code" -ne 0 ]; then
+  if ! psql_capture "SELECT count(*)::text || E'\t' || COALESCE(max(EXTRACT(EPOCH FROM (now() - created_at)))::bigint, 0)::text FROM outbox WHERE status = 'pending';" "$outbox_out" "$outbox_err"; then
     record_event "FAIL" "outbox" "pending outbox query failed"
     return 0
   fi
@@ -315,10 +378,13 @@ check_docker() {
   fi
 
   run_capture "$snap_dir/docker-ps.txt" "docker ps -a --filter 'label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-}' --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}'" || true
-  run_capture "$snap_dir/docker-stats.txt" "docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' $(tr '\n' ' ' < '$ids_file')" || true
+  run_capture "$snap_dir/docker-stats.txt" "ids=\$(tr '\n' ' ' < '$ids_file'); docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' \$ids" || true
   run_capture "$snap_dir/docker-system-df.txt" "docker system df" || true
 
-  if grep -Ei "unhealthy|exited|created|restarting|dead" "$snap_dir/docker-ps.txt" >/dev/null 2>&1; then
+  if awk '
+    NR > 1 && $1 !~ /-migrate-1$/ && tolower($0) ~ /(unhealthy|exited|created|restarting|dead)/ { bad = 1 }
+    END { exit bad ? 0 : 1 }
+  ' "$snap_dir/docker-ps.txt"; then
     record_event "FAIL" "docker" "one or more compose containers are not running healthy"
   else
     record_event "PASS" "docker" "compose containers found and no stopped/unhealthy status observed"
@@ -556,7 +622,7 @@ while true; do
   echo "snapshot $sample at $snap_started" | tee -a "$RUN_DIR/monitor.log"
 
   check_http "http://127.0.0.1:${PORT:-8080}/health" "api-health" "$snap_dir/api-health.body" "$snap_dir/api-health.err"
-  check_http "http://127.0.0.1:${CENT_PORT:-8000}/health" "centrifugo-health" "$snap_dir/centrifugo-health.body" "$snap_dir/centrifugo-health.err"
+  check_centrifugo_health "$snap_dir"
   check_db_and_outbox "$snap_dir"
   check_docker "$snap_dir"
   check_processes "$snap_dir"

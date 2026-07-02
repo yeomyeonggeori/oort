@@ -3,93 +3,177 @@ import MomoCore
 
 // MARK: - MomoMacRootView
 //
-// The top-level macOS layout: a 3-pane NavigationSplitView wiring together the
-// channel sidebar, the seq-ordered message timeline, and the approval inbox
-// (experience C) as an inspector pane. This is the composition root the .app
-// follow-up ticket will host inside a `WindowGroup` (Info.plist / Xcode target).
+// The top-level macOS layout: a sidebar + channel timeline, with an optional
+// right inspector that opens only for command center / approval / thread-like
+// detail work. This keeps dogfood messaging roomy by default.
 //
 // All panes drive off a single ChatViewModel bound to the MomoCore contracts.
 
+struct MomoSessionChrome {
+    var summary: MomoServerSessionSummary
+    var inviteAdminContext: MomoInviteAdminContext?
+    var switchSession: () -> Void
+    var logout: () -> Void
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
-    @State private var showDetailPane = true
+    @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
+    @State private var showDetailPane = false
     @State private var detailPane: MomoMacDetailPane = .alpha
+    @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    private let sessionChrome: MomoSessionChrome?
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
     public init(viewModel: @autoclosure @escaping () -> ChatViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel())
+        self.sessionChrome = nil
     }
 
     /// Host an already-created ViewModel, used by async bootstraps such as the
     /// SwiftPM development app entrypoint.
     public init(existingViewModel viewModel: ChatViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.sessionChrome = nil
+    }
+
+    init(existingViewModel viewModel: ChatViewModel, sessionChrome: MomoSessionChrome?) {
+        _viewModel = StateObject(wrappedValue: viewModel)
+        self.sessionChrome = sessionChrome
     }
 
     public var body: some View {
-        NavigationSplitView {
-            ChannelListView(viewModel: viewModel)
-                .frame(minWidth: 200)
-        } content: {
-            MessageListView(viewModel: viewModel)
-                .frame(minWidth: 360)
-        } detail: {
+        let copy = MomoWorkspaceCopy(language: language)
+
+        Group {
             if showDetailPane {
-                VStack(spacing: 0) {
-                    Picker("Detail", selection: $detailPane) {
-                        ForEach(MomoMacDetailPane.allCases) { pane in
-                            Label(pane.title, systemImage: pane.systemImage)
-                                .tag(pane)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .padding(10)
-
-                    Divider()
-
-                    switch detailPane {
-                    case .alpha:
-                        AlphaCommandCenterView(viewModel: viewModel)
-                    case .approvals:
-                        ApprovalInboxView(viewModel: viewModel)
-                    }
-                }
-                    .frame(minWidth: 280)
+                threePaneLayout(copy: copy)
             } else {
-                Color.clear
+                twoPaneLayout(copy: copy)
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: showDetailPane)
         .toolbar {
             ToolbarItem {
                 Button {
-                    detailPane = .alpha
-                    showDetailPane = true
+                    openDetailPane(.alpha)
                 } label: {
-                    Label("Alpha", systemImage: "list.bullet.clipboard")
+                    Label(copy.commandCenter, systemImage: "list.bullet.clipboard")
                 }
-                .help("Show Alpha Command Center")
+                .help(copy.showCommandCenter)
             }
 
             ToolbarItem {
                 Button {
-                    detailPane = .approvals
-                    showDetailPane = true
+                    openDetailPane(.approvals)
                 } label: {
-                    Label("Approvals", systemImage: "checkmark.seal")
+                    Label(copy.approvals, systemImage: "checkmark.seal")
                 }
-                .help("Show approvals")
+                .help(copy.showApprovals)
             }
 
             ToolbarItem {
                 Button {
-                    showDetailPane.toggle()
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showDetailPane.toggle()
+                        columnVisibility = showDetailPane ? .all : .doubleColumn
+                    }
                 } label: {
-                    Label("Detail", systemImage: "sidebar.trailing")
+                    Label(copy.detail, systemImage: "sidebar.trailing")
                 }
-                .help(showDetailPane ? "Hide detail pane" : "Show detail pane")
+                .help(showDetailPane ? copy.hideDetailPane : copy.showDetailPane)
+            }
+
+            ToolbarItem {
+                languageMenu(copy: copy)
             }
         }
+    }
+
+    private func twoPaneLayout(copy: MomoWorkspaceCopy) -> some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar(copy: copy)
+        } detail: {
+            messageTimeline
+        }
+    }
+
+    private func threePaneLayout(copy: MomoWorkspaceCopy) -> some View {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar(copy: copy)
+        } content: {
+            messageTimeline
+        } detail: {
+            detailPaneView(copy: copy)
+        }
+    }
+
+    private func sidebar(copy: MomoWorkspaceCopy) -> some View {
+        ChannelListView(
+            viewModel: viewModel,
+            sessionChrome: sessionChrome,
+            openCommandCenter: {
+                openDetailPane(.alpha)
+            },
+            openApprovals: {
+                openDetailPane(.approvals)
+            }
+        )
+        .frame(minWidth: 292, idealWidth: 320, maxWidth: 380)
+    }
+
+    private var messageTimeline: some View {
+        MessageListView(viewModel: viewModel)
+            .frame(minWidth: 640)
+    }
+
+    private func detailPaneView(copy: MomoWorkspaceCopy) -> some View {
+        VStack(spacing: 0) {
+            Picker("Detail", selection: $detailPane) {
+                ForEach(MomoMacDetailPane.allCases) { pane in
+                    Label(pane.title(copy: copy), systemImage: pane.systemImage)
+                        .tag(pane)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(10)
+
+            Divider()
+
+            switch detailPane {
+            case .alpha:
+                AlphaCommandCenterView(viewModel: viewModel)
+            case .approvals:
+                ApprovalInboxView(viewModel: viewModel)
+            }
+        }
+        .frame(minWidth: 320, idealWidth: 360)
+    }
+
+    private func openDetailPane(_ pane: MomoMacDetailPane) {
+        withAnimation(.easeInOut(duration: 0.18)) {
+            detailPane = pane
+            showDetailPane = true
+            columnVisibility = .all
+        }
+    }
+
+    private var language: MomoUILanguage {
+        MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
+    }
+
+    private func languageMenu(copy: MomoWorkspaceCopy) -> some View {
+        Menu {
+            Picker(copy.languageLabel, selection: $languageRaw) {
+                ForEach(MomoUILanguage.allCases) { option in
+                    Text(option.displayName).tag(option.rawValue)
+                }
+            }
+        } label: {
+            Label(language.displayName, systemImage: "globe")
+        }
+        .help(copy.languageLabel)
     }
 }
 
@@ -99,12 +183,12 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    func title(copy: MomoWorkspaceCopy) -> String {
         switch self {
         case .alpha:
-            return "Alpha"
+            return copy.commandCenter
         case .approvals:
-            return "Approvals"
+            return copy.approvals
         }
     }
 

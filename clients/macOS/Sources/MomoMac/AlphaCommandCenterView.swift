@@ -467,6 +467,7 @@ public extension ChatViewModel {
 public struct AlphaCommandCenterView: View {
     @ObservedObject var viewModel: ChatViewModel
     var updateStatus: MomoMacUpdateChannelStatus
+    @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
 
     public init(
         viewModel: ChatViewModel,
@@ -478,26 +479,31 @@ public struct AlphaCommandCenterView: View {
 
     public var body: some View {
         let snapshot = viewModel.alphaCommandCenterSnapshot(updateStatus: updateStatus)
+        let copy = MomoWorkspaceCopy(language: language)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                header(snapshot)
-                statusSection(snapshot.statuses)
-                checklistSection(snapshot.checklist)
-                capabilitySection(snapshot.capabilities)
-                limitationSection(snapshot.limitations)
+                header(snapshot, copy: copy)
+                statusSection(snapshot.statuses, copy: copy)
+                checklistSection(snapshot.checklist, copy: copy)
+                capabilitySection(snapshot.capabilities, copy: copy)
+                limitationSection(snapshot.limitations, copy: copy)
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
-    private func header(_ snapshot: AlphaCommandCenterSnapshot) -> some View {
+    private var language: MomoUILanguage {
+        MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
+    }
+
+    private func header(_ snapshot: AlphaCommandCenterSnapshot, copy: MomoWorkspaceCopy) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Alpha Command Center")
+                Text(copy.commandCenter)
                     .font(.title3.bold())
-                Text(snapshot.attentionCount == 0 ? "All visible alpha surfaces are usable." : "\(snapshot.attentionCount) surface(s) need attention.")
+                Text(snapshot.attentionCount == 0 ? copy.alphaCenterSubtitleReady : copy.alphaCenterSubtitle(attentionCount: snapshot.attentionCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -508,9 +514,9 @@ public struct AlphaCommandCenterView: View {
         }
     }
 
-    private func statusSection(_ statuses: [AlphaCommandCenterStatus]) -> some View {
+    private func statusSection(_ statuses: [AlphaCommandCenterStatus], copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Status")
+            Text(copy.status)
                 .font(.headline)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(statuses) { status in
@@ -524,9 +530,9 @@ public struct AlphaCommandCenterView: View {
         }
     }
 
-    private func checklistSection(_ checklist: [AlphaChecklistItem]) -> some View {
+    private func checklistSection(_ checklist: [AlphaChecklistItem], copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Today")
+            Text(copy.today)
                 .font(.headline)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(checklist) { item in
@@ -540,9 +546,9 @@ public struct AlphaCommandCenterView: View {
         }
     }
 
-    private func capabilitySection(_ capabilities: [AlphaCapabilityItem]) -> some View {
+    private func capabilitySection(_ capabilities: [AlphaCapabilityItem], copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Available / Not Yet")
+            Text(copy.availableNotYet)
                 .font(.headline)
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(capabilities) { item in
@@ -556,9 +562,9 @@ public struct AlphaCommandCenterView: View {
         }
     }
 
-    private func limitationSection(_ limitations: [String]) -> some View {
+    private func limitationSection(_ limitations: [String], copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Known Limits")
+            Text(copy.knownLimits)
                 .font(.headline)
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(limitations, id: \.self) { limit in

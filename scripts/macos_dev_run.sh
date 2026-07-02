@@ -123,6 +123,7 @@ cd "$REPO_ROOT" || exit 1
 APP_BUNDLE="$REPO_ROOT/dist/$APP_NAME.app"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 INFO_PLIST="$APP_BUNDLE/Contents/Info.plist"
+APP_ICON="$REPO_ROOT/clients/macOS/Resources/MomoMacDevAppIcon.icns"
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 LOG_FILE="$OUT_DIR/$APP_NAME-$STAMP.log"
 
@@ -169,6 +170,9 @@ build_and_stage() {
   mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
   cp "$built_executable" "$APP_EXECUTABLE"
   chmod +x "$APP_EXECUTABLE"
+  if [ -f "$APP_ICON" ]; then
+    cp "$APP_ICON" "$APP_BUNDLE/Contents/Resources/MomoMacDevAppIcon.icns"
+  fi
   cat > "$INFO_PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -180,6 +184,8 @@ build_and_stage() {
   <string>$APP_NAME</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
+  <key>CFBundleIconFile</key>
+  <string>MomoMacDevAppIcon</string>
   <key>CFBundleName</key>
   <string>$APP_NAME</string>
   <key>CFBundlePackageType</key>

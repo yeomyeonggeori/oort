@@ -301,10 +301,8 @@ start_bg() {
   shift
   log="$LOG_DIR/${name}.log"
   echo "[local-alpha] ==> start $name (log: $log)" >&2
-  {
-    log_command_line "$@"
-    (cd "$REPO_ROOT" && "$@")
-  } >"$log" 2>&1 &
+  log_command_line "$@" >"$log" 2>&1
+  nohup sh -c 'repo=$1; shift; cd "$repo" || exit 1; exec "$@"' sh "$REPO_ROOT" "$@" >>"$log" 2>&1 </dev/null &
   pid=$!
   echo "$name=$pid" >>"$PIDS_FILE"
   printf '%s\n' "$pid"

@@ -778,6 +778,13 @@ SwiftPM 개발용 window 앱 + 릴리스용 Xcode thin host app**으로 구성�
 `MomoMac.app` 모두에서 같은 `MomoMacRootView`로 확인할 수 있다.
 
 ```sh
+# 로컬 dogfood 한 줄 실행: 서버가 없으면 mock Hermes 스택을 올리고 앱까지 연다.
+scripts/momo start
+
+# 상태 확인 / 종료
+scripts/momo status
+scripts/momo stop
+
 # 라이브러리 + smoke 컴파일 검증
 swift build --package-path clients/macOS
 
@@ -811,6 +818,10 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - `MomoMacSmoke`(exe): `MomoCore` + `MomoMac` import → 도메인 모델·인메모리 백엔드 구동을 출력해 **링크/컴파일을 증명**.
 - `MomoMacDevApp`(exe): `MomoMacRootView`를 실제 macOS SwiftUI window에 호스트한다. 첫 화면은
   in-memory demo seed로 channel list, message list, cost UI, Approval Inbox를 표시한다.
+- `scripts/momo`: 내부 dogfood용 friendly launcher다. `start`는 `http://127.0.0.1:28180/health`가
+  이미 살아 있으면 앱만 열고, 없으면 `scripts/local_alpha_runner.sh execute --hermes mock`으로
+  local alpha stack을 올린 뒤 `MomoMacDevApp`을 연다. `stop`은 앱을 종료하고, runner가 남긴
+  stop script 또는 `28180`을 publish하는 momo Docker compose project를 찾아 local stack을 내린다.
 - session bar의 `Updates` popover는 internal alpha Dev Update Channel v0다.
   `MOMO_UPDATE_MANIFEST_PATH` 또는 `file://` `MOMO_UPDATE_MANIFEST_URL`로 local manifest를 읽고
   current/available version, latest/update/failure 상태, `Open Download` + relaunch 안내를 표시한다.
