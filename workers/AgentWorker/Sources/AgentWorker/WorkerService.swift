@@ -1589,6 +1589,11 @@ struct WorkerService: Service {
                 "outboxId": .stringConvertible(job.id),
                 "attempts": .stringConvertible(job.attempts),
             ])
+            await finalizeStreamingMessage(
+                nil,
+                job: job,
+                body: Self.degradedProviderMessage(reason: reason)
+            )
             await markJobFailed(job.id, reason: "max attempts: \(reason)")
             return
         }
@@ -1618,5 +1623,11 @@ struct WorkerService: Service {
                 "error": .string(String(describing: error)),
             ])
         }
+    }
+
+    private static func degradedProviderMessage(reason: String) -> String {
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        let detail = trimmed.isEmpty ? "provider did not return a usable response" : trimmed
+        return "Hermes could not complete this request yet. Check the local provider endpoint/token and try again. Details: \(detail)"
     }
 }

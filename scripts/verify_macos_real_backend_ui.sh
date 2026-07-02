@@ -78,7 +78,8 @@ BASE_URL="http://127.0.0.1:${PORT}"
 WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 HUMAN_EMAIL="demo@momo.local"
 HUMAN_ID="00000000-0000-7000-8000-000000000101"
-AGENT_ID="00000000-0000-7000-8000-000000000102"
+AGENT_ID="00000000-0000-7000-8000-000000000103"
+AGENT_HANDLE="hermes"
 CHANNEL_ID="00000000-0000-7000-8000-000000000202"
 RUN_ID_FIXTURE="00000000-0000-7000-8000-000000205101"
 APPROVAL_MSG_ID="00000000-0000-7000-8000-000000205201"
@@ -88,7 +89,7 @@ CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 MENTION_CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 RUN_SUFFIX="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 MESSAGE_BODY="MOMO-205 real-backend GUI smoke ${RUN_SUFFIX}"
-MENTION_BODY="@kim-intern MOMO-219 macOS mention smoke ${RUN_SUFFIX}"
+MENTION_BODY="@${AGENT_HANDLE} MOMO-256 macOS Hermes mention smoke ${RUN_SUFFIX}"
 
 OUT_DIR="${MACOS_REAL_BACKEND_OUT_DIR:-${TMPDIR:-/tmp}/momo-macos-real-backend}"
 mkdir -p "$OUT_DIR"
@@ -399,7 +400,7 @@ echo "[macos-real-backend] REST agent mention send"
 curl -fsS \
   -H "Authorization: Bearer ${ACCESS_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d "{\"clientMsgId\":\"${MENTION_CLIENT_MSG_ID}\",\"type\":\"text\",\"body\":\"${MENTION_BODY}\",\"props\":{\"gate\":\"MOMO-219\"}}" \
+  -d "{\"clientMsgId\":\"${MENTION_CLIENT_MSG_ID}\",\"type\":\"text\",\"body\":\"${MENTION_BODY}\",\"props\":{\"gate\":\"MOMO-256\",\"agent_handle\":\"${AGENT_HANDLE}\"}}" \
   "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" >"$REST_MENTION_SEND_FILE"
 MENTION_MESSAGE_ID="$(jq -r '.id // empty' "$REST_MENTION_SEND_FILE")"
 MENTION_MESSAGE_SEQ="$(jq -r '.seq // empty' "$REST_MENTION_SEND_FILE")"
@@ -407,7 +408,7 @@ MENTION_MESSAGE_SEQ="$(jq -r '.seq // empty' "$REST_MENTION_SEND_FILE")"
   || fail "mention send response missing id/seq: $(cat "$REST_MENTION_SEND_FILE")"
 
 MENTION_JOB_COUNT="$(psql_admin -Atc "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='agent_job' AND payload->>'trigger_message_id'='${MENTION_MESSAGE_ID}' AND payload->>'agent_member_id'='${AGENT_ID}';")"
-[ "$MENTION_JOB_COUNT" = "1" ] || fail "mention send did not create exactly one agent_job for Kim Intern; count=${MENTION_JOB_COUNT}"
+[ "$MENTION_JOB_COUNT" = "1" ] || fail "mention send did not create exactly one agent_job for @${AGENT_HANDLE}; count=${MENTION_JOB_COUNT}"
 
 echo "[macos-real-backend] REST history"
 curl -fsS \

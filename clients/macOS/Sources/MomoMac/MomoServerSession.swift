@@ -1342,8 +1342,8 @@ private struct MomoSessionCopy {
 
     var agentPill: String {
         switch language {
-        case .korean: return "김인턴"
-        case .english: return "Kim Intern"
+        case .korean: return "Hermes"
+        case .english: return "Hermes"
         }
     }
 

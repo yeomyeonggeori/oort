@@ -79,6 +79,13 @@
 - `/v1/agent-runtime/status`와 macOS Kim Intern chip이 degraded 상태에서 redacted `degradedReason`을 노출한다. `scripts/verify_external_agent_provider.sh`는 credentialed PASS에서 `degradedReason`이 비어 있음을 확인한다.
 - `scripts/local_alpha_runner.sh execute --hermes external --external-smoke --secret-env <outside-repo-env>`가 기존 `external-agent-provider` verifier로 위임해 `channel message -> agent run -> external runtime call -> durable agent response` smoke를 실행할 수 있게 했다. Credentialed real provider side effect는 이 환경에 provider secret이 없으면 계속 `runtime-unverified(external provider credentials)`다. 검증: `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 
+## 0-4b-5. MOMO-256 Local Hermes Agent Bridge v0 (2026-07-02)
+
+- `server/Migrations/006_local_hermes_agent_seed.sql`로 내부 알파 기본 agent member를 `member.kind='agent'`, display name `Hermes`, handle `hermes`, membership `#general`/`#agent-lab`로 seed한다. 기존 Kim Intern 시드는 backward-compatible fixture로 남기고, dogfood 기본 호출명은 `@hermes`다.
+- MomoServer/AgentWorker/macOS 기본 agent runtime config를 Hermes 중심으로 정렬했다. `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 AGENT_PROVIDER_MODE=external-hermes`일 때만 loopback OpenAI-compatible endpoint를 허용하며, non-loopback HTTP와 provider/Codex/OpenAI credential leakage fail-closed 경계는 유지한다.
+- `scripts/verify_local_hermes_bridge.sh`를 추가해 repo-local mock Hermes provider fallback으로 `@hermes` mention -> `agent_job` -> AgentWorker SSE -> usage ledger/reserve -> durable channel response -> relay history를 검증한다. 실제 local Hermes/GPT provider는 같은 env contract에 endpoint/token을 꽂아 검증하고, mock fallback과 별도 evidence로 구분한다.
+- AgentWorker provider 실패가 반복되면 같은 channel timeline에 사람이 읽을 수 있는 degraded Hermes error message를 남긴다. macOS 앱은 roster/command center/demo fallback에서 `@hermes` alias를 기본으로 삽입하고 표시한다.
+
 ## 0-4c. MOMO-229 Public Host Preflight + Deploy Evidence Packet v0 (2026-07-01)
 
 - `scripts/prod_env_preflight.sh`를 보강해 public/staging strict mode에서 DNS/TLS env shape, pinned registry image tags, SOPS/age 또는 host-local secret source, DB/Redis named volume, pgBackRest stanza/check/full backup/WAL/PITR required env를 fail-fast로 검사한다.

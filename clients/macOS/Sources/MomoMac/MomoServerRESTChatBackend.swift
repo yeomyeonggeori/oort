@@ -554,7 +554,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
                 workspaceId: workspace,
                 kind: .publicChannel,
                 name: "agent-lab",
-                topic: "에이전트 실험실 - 김인턴 데모(D/B/C)",
+                topic: "에이전트 실험실 - Hermes 로컬 브리지 데모(D/B/C)",
                 createdBy: .demoHuman
             ),
         ]
@@ -575,8 +575,8 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
                 id: .demoAgent,
                 workspaceId: workspace,
                 kind: .agent,
-                displayName: "김인턴",
-                handle: "kim-intern",
+                displayName: "Hermes",
+                handle: "hermes",
                 channelIds: [.demoAgentLab],
                 presence: .working
             ),

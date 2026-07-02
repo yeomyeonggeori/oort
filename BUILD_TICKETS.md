@@ -172,6 +172,7 @@
 | `MOMO-240` | Local alpha runner | infra/runtime | MOMO-001~004, MOMO-237, MOMO-238, MOMO-239 |
 | `MOMO-241` | Local 3-Day Alpha Test Pack | docs/manual | MOMO-239, MOMO-240 |
 | `MOMO-242` | External Agent Runtime Smoke | runtime/docs | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-241 |
+| `MOMO-256` | Local Hermes Agent Bridge v0 | runtime-agent/macos-ui/swift | MOMO-215, MOMO-238, MOMO-242, MOMO-253 |
 | `MOMO-243` | In-App Alpha Command Center | swift/macos-ui | MOMO-228, MOMO-232, MOMO-241 |
 | `MOMO-244` | Dev Update Channel v0 | swift/docs | MOMO-235, MOMO-241 |
 | `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-224, MOMO-237, MOMO-239, MOMO-240, MOMO-241 |
@@ -182,6 +183,7 @@
 | `MOMO-236` | Hermes internal alpha invite smoke v0 | runtime/docs | MOMO-227, MOMO-230, MOMO-228 |
 | `MOMO-238` | Local Hermes GPT provider loopback contract | docs/tooling/swift | MOMO-230, MOMO-234, MOMO-236 |
 | `MOMO-242` | External agent runtime smoke contract | runtime/docs/swift | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-240 |
+| `MOMO-256` | Local Hermes Agent Bridge v0 | runtime-agent/macos-ui/swift | MOMO-215, MOMO-238, MOMO-242, MOMO-253 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -324,6 +326,18 @@
 - [x] 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS.
 - [x] Credentialed real provider PASS는 provider secret이 있는 환경에서만 닫고, 없는 환경에서는 `runtime-unverified(external provider credentials)`로 남긴다.
 - [ ] PR 생성 후 GitHub #242를 `status:needs-review`로 전환하고 merge하지 않는다.
+
+### MOMO-256 수용기준 `[runtime-agent/macos-ui/swift]`
+- [x] GitHub issue #256을 발급하고 별도 branch/worktree `feat/256-local-hermes-agent-bridge-v0`에서 진행한다.
+- [x] Hermes를 seeded workspace의 `member.kind='agent'`, display name `Hermes`, handle `hermes`, `#general`/`#agent-lab` active channel member로 추가한다.
+- [x] MomoServer/AgentWorker/macOS 기본 agent handle/display를 `@hermes`/`Hermes`로 정렬하고, 기존 Kim Intern fixture는 backward-compatible path로 남긴다.
+- [x] local loopback OpenAI-compatible provider endpoint/token env를 지원하고, non-loopback HTTP는 명시 opt-in 없이는 fail-closed 경계를 유지한다.
+- [x] `@hermes` mention -> `agent_job` 생성 -> AgentWorker SSE 호출 -> usage ledger/reserve -> same channel durable response message를 repo-local verifier로 검증한다.
+- [x] provider 실패 반복 시 사람이 읽을 수 있는 degraded/error message를 같은 timeline에 기록한다.
+- [x] `scripts/verify_local_hermes_bridge.sh`가 mock provider fallback과 actual local provider endpoint smoke를 evidence에서 구분한다.
+- [ ] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성/리뷰/머지 후 issue #256을 `status:done`으로 전환한다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
