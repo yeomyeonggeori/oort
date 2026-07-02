@@ -310,6 +310,15 @@
 - `clients/macOS/Fixtures/update-manifest-alpha-v0.json` 예시 fixture와 focused macOS tests를 추가했다. 새 빌드가 있으면 `Open Download`/release notes/설치 후 relaunch 안내를 제공하되, Sparkle/Developer ID/notary/DMG/완전 무인 self-replace updater는 out of scope로 유지한다.
 - 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path clients/macOS` PASS. Required PR gates: `scripts/local_gate.sh --profile macos-ui`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift`.
 
+## 0-27. MOMO-253 macOS Dogfood UX Shell Polish (2026-07-02)
+
+- macOS post-login shell에서 과밀한 상단 session/debug bar를 제거하고, session/profile/language/update/invite/logout controls를 좌측 sidebar 하단 profile menu로 이동했다. 기본 sidebar는 channel, approval, member 중심으로 넓고 읽기 쉽게 유지하며 Local AI/Context/diagnostics는 접힌 diagnostics 영역으로 숨긴다.
+- `MomoMacRootView` detail pane은 기본 숨김으로 시작하고, 숨김 상태에서는 실제 2-column layout으로 전환해 채널 타임라인이 빈 우측 패널에 밀리지 않게 했다. Command Center/Approvals는 필요할 때만 Slack thread/inspector처럼 열리며 로그인 첫 화면의 prefilled local alpha UX, 한국어/영어 앱 chrome localization, `m` 로고 기반 dev app icon은 유지한다.
+- `scripts/momo` friendly launcher를 추가했다. dogfood 사용자는 `scripts/momo start/status/stop`만 기억하면 local alpha stack, macOS dev app launch, 종료 흐름을 처리할 수 있다.
+- 좌측 sidebar를 custom glass panel로 재구성했다. `작업함 → 채널 → 멤버 → 개발 도구` 순서로 정리하고, 에이전트는 별도 섹션이 아니라 현재 채널 membership에 속한 first-class member로만 표시한다. 멤버 `+`는 사람 초대와 에이전트 초대를 분기하고, 에르메스는 `@hermes` 별칭/endpoint/초대코드 네트워크 핸드셰이크를 준비하는 UI 경로로만 노출한다.
+- 하단 profile menu에 서버 설정 로컬 드래프트를 추가했다. 서버명/아이콘 문자/멤버 초대 정책/에이전트 초대 승인 필요 여부를 dogfood 앱 표시값으로 저장할 수 있으며, 실제 server-persisted workspace settings/RBAC API는 후속 goal로 남긴다.
+- 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(58 tests), `bash -n scripts/macos_dev_run.sh` PASS, `scripts/macos_dev_run.sh --launch --verify --wait 20 --terminate` PASS(window_count=1), clean commit 기준 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

@@ -39,6 +39,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-235에서 macOS alpha update channel v0를 ADR/runbook + SwiftPM dev app `Updates` placeholder surface/boundary로 고정한다
      · MOMO-243에서 앱 내 `Alpha Command Center`로 Server/Realtime/Agent Runtime/Invites/Diagnostics/Updates 상태와 오늘 테스트할 항목을 한 화면에 묶는다
      · MOMO-244에서 `Updates` surface가 local/file manifest를 읽어 current/available version, update available/latest/failure 상태, operator-assisted download/relaunch CTA를 표시한다
+     · MOMO-253에서 post-login 기본 shell을 channel/member/approval 중심으로 단순화하고, diagnostics/session/logout/update/invite는 sidebar footer profile menu와 detail pane으로 숨긴다
      · MOMO-229에서 public/staging host preflight를 보강해 DNS/TLS, pinned registry images, SOPS/age secret source, DB/Redis volumes, pgBackRest WAL/full-backup/PITR required env를 fail-fast하고 redacted markdown/json evidence packet을 만든다
      · MOMO-233에서 AWS 1주일 internal alpha stack v0를 EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, static preflight로 고정한다
      · MOMO-237에서 AWS 생성 전에 실행하는 `local-alpha` RC gate를 추가해 local Docker boot/migrate/health/message/relay/mock Kim Intern/macOS real-backend/diagnostics를 한 evidence packet으로 묶는다
@@ -104,6 +105,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-242` | M1/M7 준비 | External Agent Runtime Smoke | momo agent member가 external runtime/provider와 최소 1왕복을 수행하는 credentialed smoke; provider token은 momo 밖에 두고 readiness/degraded evidence만 redacted 처리 |
 | `MOMO-243` | M3/M7 준비 | In-App Alpha Command Center | macOS 앱 안에서 Server/Realtime/Agent Runtime/Invites/Diagnostics/Updates 상태와 오늘 테스트할 항목을 보여주는 내부 alpha surface |
 | `MOMO-244` | M3/M4 준비 | Dev Update Channel v0 | local manifest/file URL 기반 current/available version surface + operator-assisted update/relaunch flow |
+| `MOMO-253` | M3/M7 준비 | macOS dogfood UX shell polish | post-login UI를 channel/member/approval 중심으로 단순화하고 session/profile/language/update/invite/logout controls를 sidebar footer profile menu로 이동 |
 | `MOMO-245` | M1/M7 준비 | Local Soak/Resource Monitor | `scripts/local_soak_monitor.sh`; 72h local dogfood 중 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md`에 PASS/WARN/FAIL + P0/P1 기준 기록 |
 | `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정 |
 | `MOMO-227` | M1 | Kim Intern runtime config + health/status visibility v0 | `AGENT_PROVIDER_MODE` local/internal-host/external Hermes contract, staging/prod/internal-host external-provider fail-fast, `/v1/agent-runtime/status` secret-redacted projection, macOS compact Kim Intern availability chip, host-runtime status/redaction evidence |
@@ -177,6 +179,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-235` | M3/M4 | macOS alpha update channel v0 | 완료: `Updates` placeholder surface, Sparkle 2 alpha-channel ADR/runbook, appcast/signing/notary/DMG secret boundary를 정리. Real Sparkle install proof는 signed/notarized M4 artifact 후속 |
 | `MOMO-243` | M3/M7 준비 | 완료: `Alpha Command Center` detail pane이 dogfood 중 사용 가능한 기능, degraded/failed 상태, 테스트 체크리스트, known limitations를 앱 안에서 노출 |
 | `MOMO-244` | M3/M4 | Dev Update Channel v0 | 진행: local/file manifest 기반 current/available version 표시, update/latest/failure 상태, operator-assisted download/relaunch CTA, manifest fixture/runbook을 추가. Sparkle/Developer ID/notary/DMG/self-replace updater는 후속 |
+| `MOMO-253` | M3/M7 준비 | 완료: macOS post-login shell을 넓은 sidebar + bottom profile menu + hidden diagnostics/detail pane 중심으로 단순화하고 first-run/icon/localization UX는 유지 |
 | `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
 
 ### 1.2 Agentic Work OS ecosystem overlay

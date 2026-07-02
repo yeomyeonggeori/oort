@@ -10,19 +10,28 @@ import MomoCore
 
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
+        let copy = MomoWorkspaceCopy(language: language)
+
         VStack(spacing: 0) {
-            header
+            header(copy: copy)
+            if showQuickStart {
+                quickStartCard(copy: copy)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 12)
+            }
             if let status = viewModel.selectedRealtimeStatus {
-                realtimeStatusBanner(status)
+                realtimeStatusBanner(status, copy: copy)
                 Divider()
             } else if let error = viewModel.connectionError {
-                connectionBanner(error)
+                connectionBanner(error, copy: copy)
                 Divider()
             }
             if let notice = viewModel.mentionNotice {
@@ -32,23 +41,34 @@ public struct MessageListView: View {
             Divider()
             timeline
             Divider()
-            composer
+            composer(copy: copy)
         }
     }
 
     // MARK: Header (cost chip — experience B social signal)
 
-    private var header: some View {
+    private var language: MomoUILanguage {
+        MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
+    }
+
+    private func header(copy: MomoWorkspaceCopy) -> some View {
         HStack {
             if let id = viewModel.selectedChannelId,
                let channel = viewModel.channels.first(where: { $0.id == id }) {
                 Image(systemName: channel.kind == .dm ? "person.2.fill" : "number")
-                Text(channel.name ?? "DM").font(.headline)
+                    .foregroundStyle(.secondary)
+                Text(channel.name ?? "DM")
+                    .font(.system(size: 18, weight: .semibold))
                 if let topic = channel.topic {
-                    Text(topic).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Text(topic)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
             } else {
-                Text("Select a channel").foregroundStyle(.secondary)
+                Text(copy.selectChannel)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
             // Social cost chip (experience B): today's live spend.
@@ -58,15 +78,79 @@ public struct MessageListView: View {
                     .foregroundStyle(MomoTheme.costAmber)
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 15)
     }
 
-    private func realtimeStatusBanner(_ status: RealtimeConnectionStatus) -> some View {
+    private func quickStartCard(copy: MomoWorkspaceCopy) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(MomoTheme.agentAccent.opacity(0.18))
+                Image(systemName: "sparkles")
+                    .foregroundStyle(MomoTheme.agentAccent)
+                    .font(.system(size: 17, weight: .bold))
+            }
+            .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text(copy.quickStartTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(copy.quickStartSubtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    MomoGuideStepPill(index: 1, title: copy.guideStepChannel)
+                    MomoGuideStepPill(index: 2, title: copy.guideStepAgent)
+                    MomoGuideStepPill(index: 3, title: copy.guideStepApproval)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        insertPreferredAgentMention()
+                    } label: {
+                        Label(copy.insertAgentMention, systemImage: "at")
+                    }
+                    .controlSize(.small)
+                    .disabled(preferredAgent == nil)
+
+                    Button {
+                        viewModel.composerDraft = copy.guideSummaryPromptText
+                    } label: {
+                        Label(copy.draftSummaryPrompt, systemImage: "text.badge.plus")
+                    }
+                    .controlSize(.small)
+                    .disabled(viewModel.selectedChannelId == nil)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            Button {
+                showQuickStart = false
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .help(copy.dismissGuide)
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        }
+    }
+
+    private func realtimeStatusBanner(_ status: RealtimeConnectionStatus, copy: MomoWorkspaceCopy) -> some View {
         HStack(spacing: 8) {
             Image(systemName: statusIcon(status))
                 .foregroundStyle(statusColor(status))
             VStack(alignment: .leading, spacing: 1) {
-                Text(statusTitle(status))
+                Text(statusTitle(status, copy: copy))
                     .font(.caption.weight(.semibold))
                 if let message = status.message, !message.isEmpty, !status.isLive {
                     Text(message)
@@ -80,7 +164,7 @@ public struct MessageListView: View {
                 Button {
                     Task { await viewModel.retryRealtime() }
                 } label: {
-                    Label("Retry", systemImage: "arrow.clockwise")
+                    Label(copy.retry, systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
                 .font(.caption)
@@ -91,12 +175,12 @@ public struct MessageListView: View {
         .background(statusColor(status).opacity(0.08))
     }
 
-    private func connectionBanner(_ error: String) -> some View {
+    private func connectionBanner(_ error: String, copy: MomoWorkspaceCopy) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "wifi.exclamationmark")
                 .foregroundStyle(.orange)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Recoverable error")
+                Text(copy.recoverableError)
                     .font(.caption.weight(.semibold))
                 Text(error)
                     .font(.caption2)
@@ -107,7 +191,7 @@ public struct MessageListView: View {
             Button {
                 Task { await viewModel.retrySelectedChannelLoad() }
             } label: {
-                Label("Retry", systemImage: "arrow.clockwise")
+                Label(copy.retry, systemImage: "arrow.clockwise")
             }
             .buttonStyle(.borderless)
             .font(.caption)
@@ -117,7 +201,7 @@ public struct MessageListView: View {
                 Image(systemName: "xmark.circle")
             }
             .buttonStyle(.borderless)
-            .help("Dismiss")
+            .help(copy.dismiss)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -139,21 +223,21 @@ public struct MessageListView: View {
         .background(MomoTheme.agentAccent.opacity(0.08))
     }
 
-    private func statusTitle(_ status: RealtimeConnectionStatus) -> String {
+    private func statusTitle(_ status: RealtimeConnectionStatus, copy: MomoWorkspaceCopy) -> String {
         if status.isLive {
-            return "Live"
+            return copy.live
         }
         switch (status.connection, status.subscription, status.fallback) {
         case (.disabled, .disabled, .restHistory):
-            return "REST fallback"
+            return copy.restFallback
         case (.connecting, _, _), (.connected, .subscribing, _):
-            return "Connecting live"
+            return copy.connectingLive
         case (.reconnecting, _, _), (_, .recovering, _):
-            return "Reconnecting"
+            return copy.reconnecting
         case (.offline, _, .restHistory), (_, .unsubscribed, .restHistory):
-            return "Offline - REST fallback"
+            return copy.offlineRestFallback
         case (.error, _, .restHistory), (_, .error, .restHistory):
-            return "Live error - REST fallback"
+            return copy.liveErrorRestFallback
         default:
             return "Realtime \(status.connection.rawValue)"
         }
@@ -229,11 +313,12 @@ public struct MessageListView: View {
 
     // MARK: Composer (optimistic send)
 
-    private var composer: some View {
+    private func composer(copy: MomoWorkspaceCopy) -> some View {
         HStack(spacing: 8) {
-            TextField("Message @김인턴 or @kim-intern...", text: $viewModel.composerDraft, axis: .vertical)
+            TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)
+                .font(.system(size: 14))
                 .onSubmit(submit)
             Button(action: submit) {
                 Image(systemName: "paperplane.fill")
@@ -241,7 +326,17 @@ public struct MessageListView: View {
             .disabled(viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                       || viewModel.selectedChannelId == nil)
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var preferredAgent: Member? {
+        viewModel.members.first { $0.isAgent && viewModel.canInsertMention(for: $0) }
+    }
+
+    private func insertPreferredAgentMention() {
+        guard let agent = preferredAgent else { return }
+        viewModel.insertMention(for: agent)
     }
 
     private func submit() {
@@ -272,5 +367,26 @@ public struct MessageListView: View {
             return nil
         }
         return viewModel.member(agent)
+    }
+}
+
+private struct MomoGuideStepPill: View {
+    var index: Int
+    var title: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text("\(index)")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 16, height: 16)
+                .background(MomoTheme.humanAccent, in: Circle())
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 4)
+        .background(.thinMaterial, in: Capsule())
     }
 }
