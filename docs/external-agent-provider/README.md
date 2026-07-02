@@ -1,6 +1,7 @@
 # External Agent Runtime Provider Smoke
 
-> Status: Accepted for MOMO-242.
+> Status: Accepted for MOMO-242; updated by MOMO-257 for local
+> Hermes/Codex-OAuth setup evidence.
 > Scope: local/internal-alpha smoke for an external agent runtime. This is not
 > provider account setup, billing setup, long-term memory, or AWS deployment.
 
@@ -8,8 +9,8 @@
 
 momo treats an agent as a first-class `member.kind='agent'`. The external agent
 runtime is the provider process behind that member. In v0 the concrete boundary
-is an OpenAI-compatible `/v1/chat/completions` endpoint, usually Hermes/Kim
-Intern, but the smoke is intentionally provider-layer oriented:
+is an OpenAI-compatible `/v1/chat/completions` endpoint, usually Hermes, but the
+smoke is intentionally provider-layer oriented:
 
 - momo owns workspace, channel, membership, Context Packet projection, approval,
   cost, audit, message order, and the REST -> Postgres -> outbox write path.
@@ -59,23 +60,31 @@ account secrets in this env file. Those belong inside the external runtime.
 |---|---|---|---|
 | repo-local mock | `scripts/mock_hermes.py` | dev-only local bearer | deterministic AgentWorker, tool-call, cost, status, and timeline smoke |
 | internal-host mock | compose `mock-hermes` image | internal smoke placeholder | image-based host-runtime smoke without real provider side effects |
-| external runtime | Hermes/OpenAI-compatible provider | out-of-repo `HERMES_API_KEY` only | provider SSE preflight plus one `@김인턴` channel roundtrip through MomoServer, AgentWorker, OutboxRelay, and timeline |
+| external runtime | Hermes/OpenAI-compatible provider | out-of-repo `HERMES_API_KEY` only | provider SSE preflight plus one `@hermes` channel roundtrip through MomoServer, AgentWorker, OutboxRelay, and timeline |
 
 ## Smoke Commands
 
 Default no-secret local gate stays deterministic and exits successfully with
-explicit `runtime-unverified(external provider credentials)` evidence:
+explicit `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence:
 
 ```sh
 scripts/local_gate.sh --profile external-agent-provider
 ```
 
-Credentialed external runtime smoke:
+Credentialed local Hermes/Codex-OAuth runtime smoke, preferred for dogfood:
+
+```sh
+scripts/verify_local_hermes_credentialed_smoke.sh
+LOCAL_HERMES_PROVIDER_ENV_FILE="$HOME/.momo/local-hermes-provider.env" \
+  scripts/verify_local_hermes_credentialed_smoke.sh
+```
+
+Credentialed external runtime smoke, lower-level equivalent:
 
 ```sh
 EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
 EXTERNAL_AGENT_PROVIDER_ENV_FILE="$HOME/.momo/external-agent.env" \
-scripts/local_gate.sh --profile external-agent-provider
+scripts/verify_external_agent_provider.sh
 ```
 
 Equivalent local-alpha runner option:
@@ -94,9 +103,8 @@ Expected credentialed coverage:
 3. `/v1/agent-runtime/status` reports `mode=external-hermes`,
    `availability=available`, `keyConfigured=true`, a redacted `endpointLabel`,
    and no `degradedReason`.
-4. Seeded Kim Intern is verified as an active `member.kind='agent'` in
-   `#agent-lab`.
-5. A channel message mentioning `@김인턴` creates an `agent_run`, calls the
+4. Seeded Hermes is verified as an active `member.kind='agent'` in `#agent-lab`.
+5. A channel message mentioning `@hermes` creates an `agent_run`, calls the
    external runtime, writes a durable agent response message, and publishes the
    final `message.new` through OutboxRelay.
 
@@ -107,6 +115,7 @@ without provider tokens or raw secrets.
 ## References
 
 - `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`
+- `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`
 - `docs/external-agent-provider/local-hermes-gpt.md`
 - `docs/INTERNAL_ALPHA.md`
 - `docs/LOCAL_PR_GATE.md`

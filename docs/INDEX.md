@@ -62,6 +62,8 @@
 | [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
 | [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) | external agent runtime smoke 계약: provider secret env 형식, mock/local/external 차이, credentialed 1왕복 gate, token 비저장 boundary | M1 |
 | [`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md) | local-only Hermes + GPT provider 계약: loopback opt-in, non-loopback HTTP fail-fast, OpenAI credential provider-owned boundary | M1 |
+| [`docs/external-agent-provider/local-hermes-codex-oauth-setup.md`](external-agent-provider/local-hermes-codex-oauth-setup.md) | MOMO-257 local Hermes/Codex OAuth provider setup runbook: 사용자가 provider에서 인증하고 momo는 loopback endpoint + Hermes-facing bearer만 검증 | M1/M7 준비 |
+| [`docs/external-agent-provider/local-hermes-provider.env.example`](external-agent-provider/local-hermes-provider.env.example) | placeholder-only local Hermes provider env template; `$HOME/.momo/local-hermes-provider.env`로 복사해 사용하며 provider OAuth/API key는 포함 금지 | M1/M7 준비 |
 | [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md) | 5개+ Codex session/worktree 운영 모델(momo-main/worker/handoff/env 충돌 방지) | M1 |
 | [`docs/adr/0001-agentic-work-os-repo-topology.md`](adr/0001-agentic-work-os-repo-topology.md) | Agentic Work OS repo topology + plugin ecosystem + Docker/deploy layering ADR | M1.5 |
 | [`docs/adr/0002-docker-compose-layering.md`](adr/0002-docker-compose-layering.md) | Docker compose/deploy layer ADR: dev/e2e/prod/install/upgrade/backup 경계, image-based prod, optional external DB/TLS/agent runtime | M1.5 |

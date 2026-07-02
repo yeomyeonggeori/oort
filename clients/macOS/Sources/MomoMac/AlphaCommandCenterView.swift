@@ -5,6 +5,7 @@ public enum AlphaCommandCenterArea: String, CaseIterable, Sendable, Hashable {
     case server = "Server"
     case realtime = "Realtime"
     case agentRuntime = "Agent Runtime"
+    case providerSetup = "Provider Setup"
     case invites = "Invites"
     case diagnostics = "Diagnostics"
     case updates = "Updates"
@@ -118,6 +119,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
             status: selectedRealtimeStatus
         )
         let agentStatus = agentRuntime(agentRuntimeStatus)
+        let providerSetupStatus = providerSetup(agentRuntimeStatus)
         let inviteStatus = invites(inviteJoinState, workspaceId: workspaceId)
         let diagnosticsStatus = diagnostics(connectionError: connectionError)
         let updateStatusItem = updates(updateStatus)
@@ -126,6 +128,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
             serverStatus,
             realtimeStatus,
             agentStatus,
+            providerSetupStatus,
             inviteStatus,
             diagnosticsStatus,
             updateStatusItem,
@@ -165,6 +168,12 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                     detail: agentUsable
                         ? "Mock or available provider is enough for local alpha."
                         : "Fix Agent Runtime before treating a missing response as an app bug."
+                ),
+                AlphaChecklistItem(
+                    id: "credentialed-hermes",
+                    title: "Connect real local Hermes",
+                    state: credentialedHermesState(agentRuntimeStatus, hasSelectedChannel: hasSelectedChannel),
+                    detail: credentialedHermesDetail(agentRuntimeStatus)
                 ),
                 AlphaChecklistItem(
                     id: "invite-join",
@@ -209,6 +218,12 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                     isAvailable: agentUsable
                 ),
                 AlphaCapabilityItem(
+                    id: "credential-boundary",
+                    title: "Provider credential boundary",
+                    detail: "Codex/OpenAI OAuth stays in the local provider; momo receives only endpoint, Hermes bearer, context, usage, and audit evidence.",
+                    isAvailable: true
+                ),
+                AlphaCapabilityItem(
                     id: "invites",
                     title: "Invite and join smoke",
                     detail: inviteDetail(inviteJoinState),
@@ -230,7 +245,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
             limitations: [
                 "Automatic update install and Sparkle appcast proof wait for signed/notarized M4 artifacts.",
                 "AWS/public host, DNS/TLS, registry pull, SOPS, and pgBackRest host evidence remain outside this app surface.",
-                "External Hermes side effects need credentialed provider evidence; repo-local mock is the normal dogfood path.",
+                "Real Hermes/Codex OAuth side effects need MOMO-257 credentialed provider evidence; repo-local mock remains the deterministic default.",
                 "iOS, APNs, enterprise SSO, and full channel settings/search/archive are not part of this alpha app.",
             ]
         )
@@ -327,6 +342,65 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 detail: status.internalAlphaProviderSummary,
                 recovery: "Refresh Hermes status after connecting to the server."
             )
+        }
+    }
+
+    private static func providerSetup(_ status: AgentRuntimeStatus) -> AlphaCommandCenterStatus {
+        switch status.availability {
+        case .available:
+            return AlphaCommandCenterStatus(
+                area: .providerSetup,
+                health: .ready,
+                detail: "Credentialed Hermes-compatible provider is connected: \(status.internalAlphaProviderSummary)"
+            )
+        case .mock:
+            return AlphaCommandCenterStatus(
+                area: .providerSetup,
+                health: .working,
+                detail: "Repo-local Hermes mock is active.",
+                recovery: "For real GPT/Codex behavior, run scripts/verify_local_hermes_credentialed_smoke.sh after user-owned provider login."
+            )
+        case .degraded:
+            return AlphaCommandCenterStatus(
+                area: .providerSetup,
+                health: .degraded,
+                detail: status.internalAlphaProviderSummary,
+                recovery: status.diagnostics.first ?? "Open docs/external-agent-provider/local-hermes-codex-oauth-setup.md and verify the local provider endpoint/key."
+            )
+        case .unknown:
+            return AlphaCommandCenterStatus(
+                area: .providerSetup,
+                health: .working,
+                detail: "Credentialed provider has not been checked in this session.",
+                recovery: "Use scripts/verify_local_hermes_credentialed_smoke.sh for MOMO-257 evidence."
+            )
+        }
+    }
+
+    private static func credentialedHermesState(
+        _ status: AgentRuntimeStatus,
+        hasSelectedChannel: Bool
+    ) -> AlphaChecklistState {
+        switch status.availability {
+        case .available:
+            return hasSelectedChannel ? .done : .ready
+        case .mock:
+            return .ready
+        case .degraded, .unknown:
+            return .blocked
+        }
+    }
+
+    private static func credentialedHermesDetail(_ status: AgentRuntimeStatus) -> String {
+        switch status.availability {
+        case .available:
+            return "Real provider path is available; now send @hermes in #agent-lab."
+        case .mock:
+            return "Mock is fine for local dogfood. For AWS_READY, add MOMO-257 credentialed provider evidence."
+        case .degraded:
+            return "Provider setup is degraded: \(short(status.internalAlphaProviderSummary))"
+        case .unknown:
+            return "Run the local Hermes/Codex OAuth setup runbook before treating real-provider behavior as verified."
         }
     }
 

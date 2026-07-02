@@ -60,7 +60,7 @@ Profiles:
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
-| `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_external_agent_provider.sh`; with credentials it checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Kim Intern active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@김인턴` roundtrip; without credentials it writes `runtime-unverified(external provider credentials)` evidence |
+| `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
@@ -79,6 +79,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 scripts/local_gate.sh --profile runtime-live
 scripts/local_gate.sh --profile runtime-agent
 scripts/local_gate.sh --profile external-agent-provider
+scripts/verify_local_hermes_credentialed_smoke.sh
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
@@ -92,7 +93,9 @@ SOPS/volume/pgBackRest required env coverage for PR review without touching a
 real host.
 
 For the external provider profile, keep stack ports in `.env.worktree` and pass
-provider credentials through the shell or a separate untracked file:
+only momo-facing provider endpoint/key values through the shell or, preferably,
+a separate untracked file. Codex/OpenAI OAuth login and provider API keys stay
+inside the provider runtime:
 
 ```bash
 AGENT_PROVIDER_MODE=external-hermes \
@@ -102,6 +105,11 @@ scripts/local_gate.sh --profile external-agent-provider
 
 EXTERNAL_AGENT_PROVIDER_ENV_FILE=/secure/momo/external-hermes.env \
 scripts/local_gate.sh --profile external-agent-provider
+
+# preferred local Hermes/Codex-OAuth dogfood wrapper
+scripts/verify_local_hermes_credentialed_smoke.sh
+LOCAL_HERMES_PROVIDER_ENV_FILE="$HOME/.momo/local-hermes-provider.env" \
+  scripts/verify_local_hermes_credentialed_smoke.sh
 
 scripts/local_alpha_runner.sh execute \
   --hermes external \
@@ -118,8 +126,9 @@ AGENT_MODEL=gpt-via-local-hermes \
 scripts/local_gate.sh --profile external-agent-provider
 ```
 
-The verifier never prints the API key. If `AGENT_PROVIDER_MODE` is not
-`external-hermes`, the profile exits successfully with explicit
+The wrapper/verifier never prints the API key. If no out-of-repo provider env
+file or inline momo-facing endpoint/key is configured, the profile exits
+successfully with explicit `NEEDS_USER_CREDENTIAL` /
 `runtime-unverified(external provider credentials)` evidence so default mock
 runtime gates remain deterministic. If `AGENT_PROVIDER_MODE=external-hermes` is
 set but the URL/key is missing, placeholder-like, mock, or a non-loopback
@@ -131,17 +140,19 @@ still reject loopback. In the credentialed path, `/v1/agent-runtime/status`
 must report `available` with no `degradedReason`; failures keep a redacted
 category/reason in evidence. The same verifier also proves the internal alpha
 invite precondition:
-Kim Intern must be an active `member.kind='agent'` with handle `kim-intern` and
-an active membership in seeded `#agent-lab` before the mention is sent.
+Hermes must be an active `member.kind='agent'` with handle `hermes` and an
+active membership in seeded `#agent-lab` before the mention is sent.
 
 Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
 Intern uses Codex OAuth, configure authorization code exchange, access/refresh
 token storage, refresh, unlink, and rotation inside the provider host. The momo
 smoke process accepts only `HERMES_API_KEY` for the provider SSE boundary and
 fails fast if known Codex/OpenAI OAuth token or API key env var names are
-present. The local loopback provider contract is
-[`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md);
-the credential boundary ADR is
+present. The MOMO-257 local setup runbook is
+[`docs/external-agent-provider/local-hermes-codex-oauth-setup.md`](external-agent-provider/local-hermes-codex-oauth-setup.md),
+the local loopback provider contract is
+[`docs/external-agent-provider/local-hermes-gpt.md`](external-agent-provider/local-hermes-gpt.md),
+and the credential boundary ADR is
 [`docs/adr/0004-codex-oauth-hermes-provider-boundary.md`](adr/0004-codex-oauth-hermes-provider-boundary.md).
 
 The default script is strict: PR evidence should come from a clean worktree and

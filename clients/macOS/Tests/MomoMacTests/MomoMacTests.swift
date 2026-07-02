@@ -305,10 +305,13 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(areas, Set(AlphaCommandCenterArea.allCases))
         XCTAssertEqual(snapshot.statuses.first { $0.area == .server }?.health, .ready)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .ready)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .providerSetup }?.health, .working)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .diagnostics }?.health, .ready)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .planned)
         XCTAssertTrue(snapshot.checklist.contains { $0.id == "mention-hermes" && $0.state == .ready })
+        XCTAssertTrue(snapshot.checklist.contains { $0.id == "credentialed-hermes" && $0.state == .ready })
         XCTAssertTrue(snapshot.capabilities.contains { $0.id == "diagnostics" && $0.isAvailable })
+        XCTAssertTrue(snapshot.capabilities.contains { $0.id == "credential-boundary" && $0.isAvailable })
         XCTAssertTrue(snapshot.limitations.contains { $0.contains("Automatic update install") })
     }
 
@@ -358,12 +361,14 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(snapshot.statuses.first { $0.area == .server }?.health, .degraded)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .realtime }?.health, .degraded)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .degraded)
+        XCTAssertEqual(snapshot.statuses.first { $0.area == .providerSetup }?.health, .degraded)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .invites }?.health, .degraded)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .degraded)
         XCTAssertGreaterThanOrEqual(snapshot.attentionCount, 5)
         XCTAssertTrue(snapshot.statuses.first { $0.area == .realtime }?.recovery?.contains("Retry") == true)
         XCTAssertTrue(snapshot.statuses.first { $0.area == .invites }?.recovery?.contains("fresh code") == true)
         XCTAssertTrue(snapshot.capabilities.first { $0.id == "agent-runtime" }?.isAvailable == false)
+        XCTAssertEqual(snapshot.checklist.first { $0.id == "credentialed-hermes" }?.state, .blocked)
     }
 
     @MainActor

@@ -1,6 +1,7 @@
 # Local Hermes GPT Provider Contract
 
-> Status: Accepted for MOMO-238
+> Status: Accepted for MOMO-238; updated by MOMO-257 for credentialed
+> local-provider setup.
 > Scope: local-only development and smoke verification.
 
 For the provider-neutral MOMO-242 smoke contract, start with
@@ -68,8 +69,8 @@ opaque `HERMES_API_KEY` used to authenticate to Hermes.
   `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` must be present.
 - If credentialed config is valid, it checks the OpenAI-compatible SSE provider,
   boots local MomoServer/OutboxRelay/AgentWorker, verifies redacted
-  `/v1/agent-runtime/status`, proves Kim Intern is an active `#agent-lab` agent
-  member, and sends one `@김인턴` roundtrip.
+  `/v1/agent-runtime/status`, proves Hermes is an active `#agent-lab` agent
+  member, and sends one `@hermes` roundtrip.
 
 ## Boundary
 
@@ -95,25 +96,21 @@ All user-visible writes still enter through momo REST, Postgres, and outbox.
 
 ## Local Example
 
-Run Hermes separately with its provider credential in that process only:
+Run Hermes separately with its provider credential in that process only. The
+specific command depends on the local provider; OAuth login or provider API keys
+must stay in that provider runtime:
 
 ```sh
-# Terminal A: Hermes owns OPENAI_API_KEY or Codex OAuth internally.
-OPENAI_API_KEY=... hermes --host 127.0.0.1 --port 22683
+# Terminal A: Hermes owns Codex/OpenAI OAuth or provider keys internally.
+hermes --host 127.0.0.1 --port 22683
 ```
 
-Run momo smoke without exporting the OpenAI key:
+Run momo smoke without exporting any provider credential:
 
 ```sh
 unset OPENAI_API_KEY OPENAI_OAUTH_TOKEN OPENAI_ACCESS_TOKEN OPENAI_REFRESH_TOKEN
 
-MOMO_ENV=local \
-AGENT_PROVIDER_MODE=external-hermes \
-AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 \
-HERMES_BASE_URL=http://127.0.0.1:22683/v1 \
-HERMES_API_KEY=local-hermes-bearer \
-AGENT_MODEL=gpt-via-local-hermes \
-scripts/local_gate.sh --profile external-agent-provider
+scripts/verify_local_hermes_credentialed_smoke.sh
 ```
 
 The evidence may contain the redacted endpoint label
@@ -123,6 +120,7 @@ GPT/OpenAI credential.
 ## References
 
 - `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`
+- `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`
 - `docs/LOCAL_PR_GATE.md`
 - `docs/RUN.md`
 - `scripts/verify_external_agent_provider.sh`

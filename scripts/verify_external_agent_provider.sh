@@ -255,7 +255,7 @@ write_evidence() {
   sanitize_file "$RELAY_LOG" "$RELAY_LOG_REDACTED"
 
   {
-    echo "## MOMO-230/MOMO-234/MOMO-242/MOMO-256 External Agent Runtime Smoke"
+    echo "## MOMO-230/MOMO-234/MOMO-242/MOMO-256/MOMO-257 External Agent Runtime Smoke"
     echo "- Result: \`${RESULT:-UNKNOWN}\`"
     echo "- Runtime note: \`${RUNTIME_NOTE:-credentialed external provider path attempted}\`"
     echo "- Mode: \`${AGENT_PROVIDER_MODE:-<unset>}\`"
@@ -265,7 +265,7 @@ write_evidence() {
     echo "- Stack env file: \`${ENV_FILE:-<none>}\`"
     echo "- Credential boundary ADR: \`docs/adr/0004-codex-oauth-hermes-provider-boundary.md\`"
     echo "- Codex/OpenAI credential boundary: momo app/API/DB/verifier receive no Codex/OpenAI OAuth token or API key; the external runtime host owns provider credential storage/refresh."
-    echo "- Required credentialed smoke env: \`AGENT_PROVIDER_MODE=external-hermes\`, \`HERMES_BASE_URL=https://.../v1\`, \`HERMES_API_KEY\`, \`AGENT_MODEL\`."
+    echo "- Required credentialed smoke env: \`AGENT_PROVIDER_MODE=external-hermes\`, \`HERMES_BASE_URL=https://.../v1\`, \`HERMES_API_KEY\`, \`AGENT_MODEL\`. For local Codex/OAuth-backed Hermes setup, use \`scripts/verify_local_hermes_credentialed_smoke.sh\` and keep provider credentials in the provider host."
     echo "- Local loopback opt-in: \`MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 HERMES_BASE_URL=http://127.0.0.1:<port>/v1\` or \`http://localhost:<port>/v1\`; non-loopback HTTP still fails fast."
     if [ "${EXTERNAL_AGENT_PROVIDER_ENV_FILE:-}" != "" ]; then
       echo "- Provider env file: configured (path withheld from summary; contents are not copied)"
@@ -393,7 +393,7 @@ provider_preflight() {
 
   jq -cn \
     --arg model "$AGENT_MODEL" \
-    --arg prompt "MOMO-230 external provider smoke. Reply with one short sentence." \
+    --arg prompt "MOMO-257 credentialed external provider smoke. Reply with one short sentence." \
     '{model:$model,messages:[{role:"user",content:$prompt}],stream:true,stream_options:{include_usage:true},max_tokens:64}' \
     > "$PROVIDER_REQUEST_FILE"
 
@@ -602,9 +602,9 @@ verify_roundtrip() {
 
   send_payload="$(jq -cn \
     --arg client "$CLIENT_MSG_ID" \
-    --arg body "@${AGENT_HANDLE} MOMO-256 local Hermes bridge smoke. Please reply briefly." \
+    --arg body "@${AGENT_HANDLE} MOMO-257 credentialed local Hermes provider smoke. Please reply briefly." \
     --arg agent "$AGENT_HANDLE" \
-    '{clientMsgId:$client,type:"text",body:$body,props:{gate:"MOMO-256",provider:"external-hermes",agent_handle:$agent}}')"
+    '{clientMsgId:$client,type:"text",body:$body,props:{gate:"MOMO-257",provider:"external-hermes",agent_handle:$agent}}')"
   send_json="$(curl -fsS \
     -H "Authorization: Bearer ${access_token}" \
     -H "Content-Type: application/json" \
@@ -850,4 +850,4 @@ verify_roundtrip
 RESULT="PASS"
 write_evidence
 cat "$EVIDENCE_FILE"
-echo "[external-agent] MOMO-230 external provider smoke PASS"
+echo "[external-agent] MOMO-257 external provider smoke PASS"
