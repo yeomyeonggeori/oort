@@ -88,19 +88,19 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(first.id, second.id, "same clientMsgId must dedupe (L4 §3.1)")
     }
 
-    func testLiveChatBackendMentionFallbackRespondsToKimInternAliases() async throws {
+    func testLiveChatBackendMentionFallbackRespondsToHermesAlias() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
         try await backend.connect(workspace: seed.workspace, accessToken: "t")
         let channel = seed.channels[0].id
-        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "kim-intern" })
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
 
         _ = try await backend.sendOptimistic(
-            DraftMessage(channelId: channel, type: .text, body: "@김인턴 오늘 상태 알려줘"),
+            DraftMessage(channelId: channel, type: .text, body: "@Hermes 오늘 상태 알려줘"),
             clientMsgId: UUID()
         )
         _ = try await backend.sendOptimistic(
-            DraftMessage(channelId: channel, type: .text, body: "@kim-intern summarize the channel"),
+            DraftMessage(channelId: channel, type: .text, body: "@hermes summarize the channel"),
             clientMsgId: UUID()
         )
 
@@ -108,12 +108,12 @@ final class MomoMacTests: XCTestCase {
         let finals = history.filter { message in
             message.authorMemberId == agent.id
                 && message.runId != nil
-                && (message.body?.contains("mention 호출을 확인") == true)
+                && (message.body?.contains("mention received") == true)
         }
         XCTAssertEqual(finals.count, 2)
-        XCTAssertTrue(finals.allSatisfy { $0.props["mention_handle"]?.stringValue == "kim-intern" })
-        XCTAssertTrue(finals.contains { $0.body?.contains("@김인턴") == true })
-        XCTAssertTrue(finals.contains { $0.body?.contains("@kim-intern") == true })
+        XCTAssertTrue(finals.allSatisfy { $0.props["mention_handle"]?.stringValue == "hermes" })
+        XCTAssertTrue(finals.contains { $0.body?.contains("@Hermes") == true })
+        XCTAssertTrue(finals.contains { $0.body?.contains("@hermes") == true })
     }
 
     @MainActor
@@ -124,14 +124,14 @@ final class MomoMacTests: XCTestCase {
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
         await viewModel.selectChannel(seed.channels[0].id)
 
-        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "kim-intern" })
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
         XCTAssertTrue(viewModel.canInsertMention(for: agent))
         viewModel.insertMention(for: agent)
-        XCTAssertEqual(viewModel.composerDraft, "@김인턴 ")
-        XCTAssertEqual(viewModel.mentionNotice, "김인턴 mention inserted.")
+        XCTAssertEqual(viewModel.composerDraft, "@hermes ")
+        XCTAssertEqual(viewModel.mentionNotice, "Hermes mention inserted.")
 
-        viewModel.insertMention(for: agent, preferDisplayName: false)
-        XCTAssertEqual(viewModel.composerDraft, "@김인턴 @kim-intern ")
+        viewModel.insertMention(for: agent, preferDisplayName: true)
+        XCTAssertEqual(viewModel.composerDraft, "@hermes @Hermes ")
     }
 
     @MainActor
@@ -307,7 +307,7 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(snapshot.statuses.first { $0.area == .agentRuntime }?.health, .ready)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .diagnostics }?.health, .ready)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .planned)
-        XCTAssertTrue(snapshot.checklist.contains { $0.id == "mention-kim-intern" && $0.state == .ready })
+        XCTAssertTrue(snapshot.checklist.contains { $0.id == "mention-hermes" && $0.state == .ready })
         XCTAssertTrue(snapshot.capabilities.contains { $0.id == "diagnostics" && $0.isAvailable })
         XCTAssertTrue(snapshot.limitations.contains { $0.contains("Automatic update install") })
     }
@@ -861,8 +861,8 @@ final class MomoMacTests: XCTestCase {
                 return MockHTTPResponse(json: """
                 {
                   "schema": "momo.agent_runtime.status.v0",
-                  "agentHandle": "kim-intern",
-                  "displayName": "김인턴",
+                  "agentHandle": "hermes",
+                  "displayName": "Hermes",
                   "mode": "external-hermes",
                   "availability": "available",
                   "model": "hermes-agent",
@@ -886,7 +886,7 @@ final class MomoMacTests: XCTestCase {
         try await backend.connect(workspace: .demo, accessToken: "")
 
         let status = try await backend.agentRuntimeStatus()
-        XCTAssertEqual(status.agentHandle, "kim-intern")
+        XCTAssertEqual(status.agentHandle, "hermes")
         XCTAssertEqual(status.mode, .externalHermes)
         XCTAssertEqual(status.availability, .available)
         XCTAssertEqual(status.endpointLabel, "https://kim.example.net/v1")
@@ -1456,7 +1456,7 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(config.workspace, .demo)
         XCTAssertEqual(config.defaultChannel, .demoGeneral)
         XCTAssertEqual(config.channels.map(\.name), ["general", "agent-lab"])
-        XCTAssertEqual(config.members.map(\.handle), ["demo", "kim-intern"])
+        XCTAssertEqual(config.members.map(\.handle), ["demo", "hermes"])
         XCTAssertNil(MomoServerRESTChatBackendConfig.fromEnvironment([:]))
     }
 

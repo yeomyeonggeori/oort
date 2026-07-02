@@ -952,7 +952,7 @@ private struct KimInternAvailabilityView: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.plain)
-            .help("Refresh Kim Intern status")
+            .help("Refresh Hermes status")
         }
         .help(helpText)
     }

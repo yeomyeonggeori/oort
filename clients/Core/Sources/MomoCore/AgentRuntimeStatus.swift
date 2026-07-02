@@ -1,6 +1,6 @@
 import Foundation
 
-/// User-visible availability for the Kim Intern agent path.
+/// User-visible availability for the local Hermes agent path.
 ///
 /// This is deliberately a redacted projection: clients can show whether the
 /// provider path is usable, but never receive provider tokens or raw secret URLs.
@@ -31,8 +31,8 @@ public struct AgentRuntimeStatus: Codable, Sendable, Hashable {
 
     public init(
         schema: String = "momo.agent_runtime.status.v0",
-        agentHandle: String = "kim-intern",
-        displayName: String = "김인턴",
+        agentHandle: String = "hermes",
+        displayName: String = "Hermes",
         mode: AgentProviderMode = .localMock,
         availability: AgentAvailability = .unknown,
         model: String = "hermes-agent",

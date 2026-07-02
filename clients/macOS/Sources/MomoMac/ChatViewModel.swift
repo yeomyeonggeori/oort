@@ -327,7 +327,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func insertMention(for member: Member, preferDisplayName: Bool = true) {
+    public func insertMention(for member: Member, preferDisplayName: Bool = false) {
         guard member.isAgent else { return }
         guard selectedChannelId != nil else {
             mentionNotice = "Select a channel before mentioning \(member.displayName)."

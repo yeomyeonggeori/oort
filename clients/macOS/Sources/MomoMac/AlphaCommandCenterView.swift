@@ -148,7 +148,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                     id: "open-agent-lab",
                     title: "Open #agent-lab",
                     state: hasSelectedChannel ? .done : (hasChannels ? .ready : .blocked),
-                    detail: selectedChannel?.name.map { "Selected #\($0)" } ?? "Load channels, then select the Kim Intern test channel."
+                    detail: selectedChannel?.name.map { "Selected #\($0)" } ?? "Load channels, then select the Hermes test channel."
                 ),
                 AlphaChecklistItem(
                     id: "send-message",
@@ -159,8 +159,8 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                         : "Use the composer and confirm ordered message.seq history."
                 ),
                 AlphaChecklistItem(
-                    id: "mention-kim-intern",
-                    title: "Mention @kim-intern",
+                    id: "mention-hermes",
+                    title: "Mention @hermes",
                     state: agentUsable && hasSelectedChannel ? .ready : .blocked,
                     detail: agentUsable
                         ? "Mock or available provider is enough for local alpha."
@@ -204,7 +204,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 ),
                 AlphaCapabilityItem(
                     id: "agent-runtime",
-                    title: "Kim Intern path",
+                    title: "Hermes bridge",
                     detail: agentRuntimeStatus.internalAlphaProviderSummary,
                     isAvailable: agentUsable
                 ),
@@ -325,7 +325,7 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
                 area: .agentRuntime,
                 health: .working,
                 detail: status.internalAlphaProviderSummary,
-                recovery: "Refresh Kim Intern status after connecting to the server."
+                recovery: "Refresh Hermes status after connecting to the server."
             )
         }
     }

@@ -7,7 +7,7 @@
 #   make migrate
 #
 # Verifies:
-#   1) REST channel send with @김인턴 creates exactly one agent_job outbox row
+#   1) REST channel send with @hermes creates exactly one agent_job outbox row
 #   2) duplicate client_msg_id REST retry does not create a duplicate job
 #   3) AgentWorker claims it with SKIP LOCKED and calls an OpenAI-compatible
 #      SSE gateway (scripts/mock_hermes.py by default)
@@ -94,7 +94,7 @@ HERMES_BASE_URL=${HERMES_BASE_URL:-http://localhost:${HERMES_PORT}/v1}
 
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_ID=00000000-0000-7000-8000-000000000101
-AGENT_ID=00000000-0000-7000-8000-000000000102
+AGENT_ID=00000000-0000-7000-8000-000000000103
 CHANNEL_ID=00000000-0000-7000-8000-000000000202
 RUN_ID=00000000-0000-7000-8000-000000000904
 RESUME_RUN_ID=00000000-0000-7000-8000-000000000924
@@ -330,7 +330,7 @@ DELETE FROM agent_run
 DELETE FROM message
  WHERE id IN ('$MESSAGE_ID', '$TRIP_MESSAGE_ID')
     OR client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
-    OR body IN ('@김인턴 MOMO-215 REST mention routing 검증해줘',
+    OR body IN ('@hermes MOMO-256 Local Hermes bridge 검증해줘',
                 '@no-channel-agent should not be invoked');
 
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
@@ -376,7 +376,7 @@ if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   exit 1
 fi
 
-MENTION_BODY='@김인턴 MOMO-215 REST mention routing 검증해줘'
+MENTION_BODY='@hermes MOMO-256 Local Hermes bridge 검증해줘'
 SEND_PAYLOAD=$(jq -cn --arg client "$CLIENT_MSG_ID" --arg body "$MENTION_BODY" \
   '{clientMsgId:$client,type:"text",body:$body}')
 SEND_JSON=$(curl -fsS \
@@ -427,7 +427,7 @@ if [ "$NON_MEMBER_JOB_COUNT" != "0" ] || [ "$NON_MEMBER_AUDIT" != "1" ]; then
   exit 1
 fi
 
-echo "[agent-worker] REST mention routing verified: message=$MESSAGE_ID seq=$MESSAGE_SEQ run=$RUN_ID duplicate_jobs=$JOB_COUNT non_member_noop=ok"
+echo "[agent-worker] REST @hermes mention routing verified: message=$MESSAGE_ID seq=$MESSAGE_SEQ run=$RUN_ID duplicate_jobs=$JOB_COUNT non_member_noop=ok"
 
 echo "[agent-worker] starting AgentWorker"
 (
@@ -652,7 +652,7 @@ INSERT INTO message
    type, body, client_msg_id)
 SELECT '$TRIP_MESSAGE_ID', '$WORKSPACE_ID', '$CHANNEL_ID', bumped.last_seq,
        (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
-       '$HUMAN_ID', 'text', '@김인턴 예산 초과 테스트', '$TRIP_CLIENT_MSG_ID'
+       '$HUMAN_ID', 'text', '@hermes 예산 초과 테스트', '$TRIP_CLIENT_MSG_ID'
   FROM bumped;
 
 INSERT INTO budget
@@ -667,7 +667,7 @@ INSERT INTO agent_run
 VALUES
   ('$TRIP_RUN_ID', '$WORKSPACE_ID', '$AGENT_ID', '$CHANNEL_ID', '$TRIP_MESSAGE_ID',
    'queued', 0, 12, 0,
-   jsonb_build_object('prompt', '@김인턴 예산 초과 테스트'),
+   jsonb_build_object('prompt', '@hermes 예산 초과 테스트'),
    'momo-004-trip');
 
 INSERT INTO outbox
@@ -680,7 +680,7 @@ VALUES
      'agent_member_id', '$AGENT_ID',
      'channel_id', '$CHANNEL_ID',
      'model', 'hermes-agent',
-     'prompt', '@김인턴 예산 초과 테스트',
+     'prompt', '@hermes 예산 초과 테스트',
      'max_output_tokens', 64,
      'step_count', 0,
      'depth', 0,

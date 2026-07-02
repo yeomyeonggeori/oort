@@ -272,6 +272,6 @@ struct AgentProviderConfigurationError: Error, CustomStringConvertible {
     let errors: [String]
 
     var description: String {
-        "invalid Kim Intern/Hermes provider config: \(errors.joined(separator: "; "))"
+        "invalid Hermes provider config: \(errors.joined(separator: "; "))"
     }
 }

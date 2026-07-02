@@ -3,13 +3,13 @@
 # scripts/verify_external_agent_provider.sh — external agent provider/runtime gate
 #
 # Opt-in credentialed smoke for an external OpenAI-compatible agent runtime
-# using Kim Intern as the seeded agent member. With no external credentials it
+# using Hermes as the seeded agent member. With no external credentials it
 # exits successfully with explicit
 # runtime-unverified evidence so default local/mock gates stay deterministic.
 #
 # MOMO-234/MOMO-238 boundary: momo never receives Codex/OpenAI OAuth tokens or
-# GPT/OpenAI provider API keys. Those credentials belong inside Hermes/Kim
-# Intern. This verifier only accepts a Hermes-facing bearer key for the
+# GPT/OpenAI provider API keys. Those credentials belong inside the local Hermes
+# runtime. This verifier only accepts a Hermes-facing bearer key for the
 # OpenAI-compatible SSE boundary.
 # =============================================================================
 set -euo pipefail
@@ -255,7 +255,7 @@ write_evidence() {
   sanitize_file "$RELAY_LOG" "$RELAY_LOG_REDACTED"
 
   {
-    echo "## MOMO-230/MOMO-234/MOMO-242 External Agent Runtime Smoke"
+    echo "## MOMO-230/MOMO-234/MOMO-242/MOMO-256 External Agent Runtime Smoke"
     echo "- Result: \`${RESULT:-UNKNOWN}\`"
     echo "- Runtime note: \`${RUNTIME_NOTE:-credentialed external provider path attempted}\`"
     echo "- Mode: \`${AGENT_PROVIDER_MODE:-<unset>}\`"
@@ -272,7 +272,7 @@ write_evidence() {
     fi
     if [ "${RESULT:-}" = "SKIP" ]; then
       echo "- Skip reason: ${SKIP_REASON:-external provider credentials are not configured}"
-      echo "- Internal alpha invite precondition: expected seeded/admin contract is Kim Intern as active agent member \`kim-intern\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
+      echo "- Internal alpha invite precondition: expected seeded/admin contract is Hermes as active agent member \`hermes\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
       echo "- Coverage: default local/internal-alpha mock gates remain deterministic; Codex/OpenAI credentials remain provider-owned and unobserved by momo."
       echo "- Not covered: real external runtime side effect remains \`runtime-unverified(external provider credentials)\`."
     elif [ "${RESULT:-}" = "PASS" ]; then
@@ -444,8 +444,8 @@ start_server() {
       AGENT_PROVIDER_MODE="external-hermes" \
       AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK="${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-0}" \
       AGENT_MODEL="$AGENT_MODEL" \
-      AGENT_HANDLE="${AGENT_HANDLE:-kim-intern}" \
-      AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-김인턴}" \
+      AGENT_HANDLE="${AGENT_HANDLE:-hermes}" \
+      AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-Hermes}" \
       HERMES_BASE_URL="$HERMES_BASE_URL" \
       HERMES_API_KEY="$HERMES_API_KEY" \
       "$SERVER_BIN"
@@ -532,7 +532,7 @@ verify_agent_runtime_status() {
 }
 
 verify_internal_alpha_invite_precondition() {
-  echo "[external-agent] verifying internal alpha Kim Intern invite precondition"
+  echo "[external-agent] verifying local Hermes invite precondition"
   psql_run -t -A -c "
     SELECT jsonb_build_object(
              'schema', 'momo.internal_alpha.agent_invite_precondition.v0',
@@ -566,21 +566,27 @@ verify_internal_alpha_invite_precondition() {
      WHERE w.id = '${WORKSPACE_ID}';
   " > "$INVITE_PRECONDITION_FILE"
 
-  if ! jq -e '
+  if ! jq -e \
+    --arg workspace "$WORKSPACE_ID" \
+    --arg agent "$AGENT_ID" \
+    --arg display "$AGENT_DISPLAY_NAME" \
+    --arg handle "$AGENT_HANDLE" \
+    --arg model "$AGENT_MODEL" \
+    --arg channel "$CHANNEL_ID" '
       .schema == "momo.internal_alpha.agent_invite_precondition.v0"
-      and .workspace_id == "'"$WORKSPACE_ID"'"
-      and .agent_member_id == "'"$AGENT_ID"'"
+      and .workspace_id == $workspace
+      and .agent_member_id == $agent
       and .member_kind == "agent"
       and .member_status == "active"
-      and .display_name == "김인턴"
-      and .handle == "kim-intern"
-      and .agent_model == "'"$AGENT_MODEL"'"
-      and .channel_id == "'"$CHANNEL_ID"'"
+      and .display_name == $display
+      and .handle == $handle
+      and .agent_model == $model
+      and .channel_id == $channel
       and .channel_name == "agent-lab"
       and .channel_membership_active == true
     ' "$INVITE_PRECONDITION_FILE" >/dev/null; then
     INVITE_PRECONDITION_STATUS="fail"
-    fail "runtime/invite-precondition" "Kim Intern is not an active invited member of #agent-lab"
+    fail "runtime/invite-precondition" "Hermes is not an active invited member of #agent-lab"
   fi
   INVITE_PRECONDITION_STATUS="pass"
 }
@@ -596,8 +602,9 @@ verify_roundtrip() {
 
   send_payload="$(jq -cn \
     --arg client "$CLIENT_MSG_ID" \
-    --arg body "@김인턴 MOMO-230 external provider smoke. Please reply briefly." \
-    '{clientMsgId:$client,type:"text",body:$body,props:{gate:"MOMO-230",provider:"external-hermes"}}')"
+    --arg body "@${AGENT_HANDLE} MOMO-256 local Hermes bridge smoke. Please reply briefly." \
+    --arg agent "$AGENT_HANDLE" \
+    '{clientMsgId:$client,type:"text",body:$body,props:{gate:"MOMO-256",provider:"external-hermes",agent_handle:$agent}}')"
   send_json="$(curl -fsS \
     -H "Authorization: Bearer ${access_token}" \
     -H "Content-Type: application/json" \
@@ -650,7 +657,7 @@ verify_roundtrip() {
     sleep 2
   done
   ROUNDTRIP_STATUS="fail"
-  fail "runtime/timeout" "timed out waiting for external provider @Kim Intern roundtrip"
+  fail "runtime/timeout" "timed out waiting for external provider @${AGENT_HANDLE} roundtrip"
 }
 
 if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -693,6 +700,8 @@ AGENT_PROVIDER_MODE="${AGENT_PROVIDER_MODE:-}"
 HERMES_BASE_URL="${HERMES_BASE_URL:-}"
 HERMES_API_KEY="${HERMES_API_KEY:-}"
 AGENT_MODEL="${AGENT_MODEL:-hermes-agent}"
+AGENT_HANDLE="${AGENT_HANDLE:-hermes}"
+AGENT_DISPLAY_NAME="${AGENT_DISPLAY_NAME:-Hermes}"
 VERIFY_MOMO_ENV="${MOMO_ENV:-staging}"
 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK="${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-0}"
 ENDPOINT_LABEL="$(redacted_endpoint_label "$HERMES_BASE_URL")"
@@ -745,7 +754,7 @@ esac
 
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_ID=00000000-0000-7000-8000-000000000101
-AGENT_ID=00000000-0000-7000-8000-000000000102
+AGENT_ID=00000000-0000-7000-8000-000000000103
 CHANNEL_ID=00000000-0000-7000-8000-000000000202
 CENT_CHANNEL="ch:ws${WORKSPACE_ID}.${CHANNEL_ID}"
 CLIENT_MSG_ID="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || python3 - <<'PY'
@@ -796,6 +805,18 @@ DELETE FROM audit_log
       WHERE workspace_id = '$WORKSPACE_ID'
         AND client_msg_id = '$CLIENT_MSG_ID'
    );
+DELETE FROM budget_window
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND budget_id IN (
+     SELECT id FROM budget
+      WHERE workspace_id = '$WORKSPACE_ID'
+        AND agent_member_id = '$AGENT_ID'
+        AND (channel_id IS NULL OR channel_id = '$CHANNEL_ID')
+   );
+DELETE FROM budget
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND agent_member_id = '$AGENT_ID'
+   AND (channel_id IS NULL OR channel_id = '$CHANNEL_ID');
 DELETE FROM message
  WHERE workspace_id = '$WORKSPACE_ID'
    AND run_id IN (

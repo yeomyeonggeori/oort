@@ -57,7 +57,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
         var researcher = Member(id: MemberID(), workspaceId: ws, kind: .agent,
-                                displayName: "김인턴", handle: "kim-intern", presence: .working)
+                                displayName: "Hermes", handle: "hermes", presence: .working)
         var builder = Member(id: MemberID(), workspaceId: ws, kind: .agent,
                              displayName: "빌드봇", handle: "buildbot", presence: .online)
 
@@ -80,7 +80,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         _ = appendServerMessage(channel: general.id, author: human.id, type: .text,
                                 body: "안녕하세요 팀!")
         _ = appendServerMessage(channel: general.id, author: researcher.id, type: .text,
-                                body: "김인턴 합류했습니다.", runId: RunID())
+                                body: "Hermes joined the workspace.", runId: RunID())
         let toolRun = RunID()
         _ = appendServerMessage(
             channel: pg18.id, author: researcher.id, type: .toolCall,
@@ -848,7 +848,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
             channel: channel,
             author: agent.id,
             type: .text,
-            body: "\(agent.displayName) 결과: mention 호출을 확인했습니다. `@김인턴`과 `@kim-intern` 모두 같은 agent로 처리됩니다. 요청: \(prompt)",
+            body: "\(agent.displayName) result: mention received through `@\(agent.handle)`. Request: \(prompt)",
             props: .object([
                 "trigger_message_id": .string(trigger.id.description),
                 "mention_handle": .string(agent.handle),

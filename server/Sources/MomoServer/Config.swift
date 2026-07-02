@@ -34,7 +34,7 @@ struct Config: Sendable {
     var platformAdminEmails: [String]
     var platformAdminLoginSecret: String?
 
-    // ---- Kim Intern / Hermes provider boundary (MOMO-227) ----
+    // ---- Local Hermes provider boundary (MOMO-256) ----
     var momoEnvironment: String
     var agentProvider: AgentProviderConfig
 
@@ -136,8 +136,8 @@ struct AgentProviderConfig: Sendable {
             hermesBaseURL: environment["HERMES_BASE_URL"] ?? "http://localhost:8088/v1",
             hermesAPIKey: environment["HERMES_API_KEY"] ?? "dev-insecure-hermes-bearer",
             model: environment["AGENT_MODEL"] ?? "hermes-agent",
-            agentHandle: environment["AGENT_HANDLE"] ?? "kim-intern",
-            displayName: environment["AGENT_DISPLAY_NAME"] ?? "김인턴",
+            agentHandle: environment["AGENT_HANDLE"] ?? "hermes",
+            displayName: environment["AGENT_DISPLAY_NAME"] ?? "Hermes",
             allowLocalLoopback: Self.boolFlag(environment["AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK"])
         )
     }
@@ -307,6 +307,6 @@ struct AgentProviderConfigurationError: Error, CustomStringConvertible {
     let errors: [String]
 
     var description: String {
-        "invalid Kim Intern/Hermes provider config: \(errors.joined(separator: "; "))"
+        "invalid Hermes provider config: \(errors.joined(separator: "; "))"
     }
 }
