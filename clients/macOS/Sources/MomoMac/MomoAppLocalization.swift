@@ -357,6 +357,76 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var profileSettingsSubtitle: String {
+        switch language {
+        case .korean: return "이름과 프로필 이미지를 관리합니다."
+        case .english: return "Manage your name and profile image."
+        }
+    }
+
+    var displayName: String {
+        switch language {
+        case .korean: return "표시 이름"
+        case .english: return "Display name"
+        }
+    }
+
+    var profileImage: String {
+        switch language {
+        case .korean: return "프로필 이미지"
+        case .english: return "Profile image"
+        }
+    }
+
+    var profileLocalDraftNote: String {
+        switch language {
+        case .korean: return "현재 dogfood 앱에서는 로컬 표시값으로 저장됩니다. 서버 프로필 API는 후속 goal에서 연결합니다."
+        case .english: return "For this dogfood app, this is saved as a local display value. Server profile persistence follows in a later goal."
+        }
+    }
+
+    var settings: String {
+        switch language {
+        case .korean: return "설정"
+        case .english: return "Settings"
+        }
+    }
+
+    var settingsSubtitle: String {
+        switch language {
+        case .korean: return "언어, 화면 모드, 워크스페이스 표시를 관리합니다."
+        case .english: return "Manage language, appearance, and workspace display."
+        }
+    }
+
+    var general: String {
+        switch language {
+        case .korean: return "일반"
+        case .english: return "General"
+        }
+    }
+
+    var email: String {
+        switch language {
+        case .korean: return "이메일"
+        case .english: return "Email"
+        }
+    }
+
+    var session: String {
+        switch language {
+        case .korean: return "세션"
+        case .english: return "Session"
+        }
+    }
+
+    var workspaceAppearance: String {
+        switch language {
+        case .korean: return "워크스페이스 표시"
+        case .english: return "Workspace display"
+        }
+    }
+
     var serverSettings: String {
         switch language {
         case .korean: return "서버 설정"
@@ -581,10 +651,205 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var downloadHistory: String {
+        switch language {
+        case .korean: return "다운로드 이력"
+        case .english: return "Download history"
+        }
+    }
+
+    var downloadFolder: String {
+        switch language {
+        case .korean: return "다운로드 폴더"
+        case .english: return "Download folder"
+        }
+    }
+
+    var downloadFolderSubtitle: String {
+        switch language {
+        case .korean: return "다운로드가 저장될 기본 위치입니다."
+        case .english: return "Default location for downloaded alpha builds."
+        }
+    }
+
+    var changeDownloadFolder: String {
+        switch language {
+        case .korean: return "폴더 변경"
+        case .english: return "Change folder"
+        }
+    }
+
     var openDownloadsFolder: String {
         switch language {
         case .korean: return "다운로드 폴더 열기"
         case .english: return "Open Downloads folder"
+        }
+    }
+
+    var noDownloadHistory: String {
+        switch language {
+        case .korean: return "아직 다운로드 기록이 없습니다."
+        case .english: return "No download history yet."
+        }
+    }
+
+    var downloadReady: String {
+        switch language {
+        case .korean: return "다운로드 가능"
+        case .english: return "Ready"
+        }
+    }
+
+    var downloadUnavailable: String {
+        switch language {
+        case .korean: return "다운로드 없음"
+        case .english: return "Unavailable"
+        }
+    }
+
+    var downloadCheckSucceeded: String {
+        switch language {
+        case .korean: return "확인 성공"
+        case .english: return "Check succeeded"
+        }
+    }
+
+    var downloadCheckFailed: String {
+        switch language {
+        case .korean: return "확인 실패"
+        case .english: return "Check failed"
+        }
+    }
+
+    var updatesSubtitle: String {
+        switch language {
+        case .korean: return "현재 버전과 알파 업데이트 상태를 확인합니다."
+        case .english: return "Review the current build and alpha update status."
+        }
+    }
+
+    var currentVersion: String {
+        switch language {
+        case .korean: return "현재 버전"
+        case .english: return "Current version"
+        }
+    }
+
+    var availableVersion: String {
+        switch language {
+        case .korean: return "사용 가능 버전"
+        case .english: return "Available version"
+        }
+    }
+
+    var manifest: String {
+        switch language {
+        case .korean: return "매니페스트"
+        case .english: return "Manifest"
+        }
+    }
+
+    var latestVersion: String {
+        switch language {
+        case .korean: return "최신 버전입니다"
+        case .english: return "Up to date"
+        }
+    }
+
+    var updateAvailable: String {
+        switch language {
+        case .korean: return "업데이트 가능"
+        case .english: return "Update available"
+        }
+    }
+
+    var updatesNotConfigured: String {
+        switch language {
+        case .korean: return "업데이트 설정 필요"
+        case .english: return "Updates not configured"
+        }
+    }
+
+    var updateCheckFailed: String {
+        switch language {
+        case .korean: return "업데이트 확인 실패"
+        case .english: return "Update check failed"
+        }
+    }
+
+    var openDownload: String {
+        switch language {
+        case .korean: return "다운로드 열기"
+        case .english: return "Open download"
+        }
+    }
+
+    var releaseNotes: String {
+        switch language {
+        case .korean: return "릴리스 노트"
+        case .english: return "Release notes"
+        }
+    }
+
+    var noManifest: String {
+        switch language {
+        case .korean: return "매니페스트 없음"
+        case .english: return "No manifest"
+        }
+    }
+
+    var notConfigured: String {
+        switch language {
+        case .korean: return "설정되지 않음"
+        case .english: return "Not configured"
+        }
+    }
+
+    var notAvailable: String {
+        switch language {
+        case .korean: return "사용 불가"
+        case .english: return "Not available"
+        }
+    }
+
+    var updateStatusNotConfiguredDetail: String {
+        switch language {
+        case .korean: return "MOMO_UPDATE_MANIFEST_URL 또는 MOMO_UPDATE_MANIFEST_PATH를 설정하면 알파 업데이트 상태를 확인할 수 있습니다."
+        case .english: return "Set MOMO_UPDATE_MANIFEST_URL or MOMO_UPDATE_MANIFEST_PATH to check alpha updates."
+        }
+    }
+
+    var updateStatusUpToDateDetail: String {
+        switch language {
+        case .korean: return "현재 빌드가 알파 매니페스트의 최신 버전과 일치합니다."
+        case .english: return "This build matches the latest version in the alpha manifest."
+        }
+    }
+
+    var updateStatusAvailableDetail: String {
+        switch language {
+        case .korean: return "새 빌드를 다운로드한 뒤 앱을 다시 실행하면 됩니다."
+        case .english: return "Download the newer build, replace the app, and relaunch."
+        }
+    }
+
+    var updateStatusFailedDetail: String {
+        switch language {
+        case .korean: return "업데이트 매니페스트를 읽을 수 없습니다. 경로나 JSON 형식을 확인하세요."
+        case .english: return "The update manifest could not be read. Check the path or JSON shape."
+        }
+    }
+
+    func updateChannelLabel(_ channel: MomoMacUpdateChannel) -> String {
+        switch (language, channel) {
+        case (.korean, .alpha):
+            return "알파 채널"
+        case (.korean, .stable):
+            return "안정 채널"
+        case (.english, .alpha):
+            return "Alpha channel"
+        case (.english, .stable):
+            return "Stable channel"
         }
     }
 

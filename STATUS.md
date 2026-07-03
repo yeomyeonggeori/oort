@@ -99,6 +99,12 @@
 - smoke fixture가 현재 `channel_seq`와 기존 message max를 기준으로 새 seq를 예약하도록 수정했다. 제품 runtime behavior 변경은 없고, repeated local gate/long-lived dogfood DB에서도 approval/cost structured props 검증이 안정적으로 유지되도록 한 test harness hotfix다.
 - 검증: `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui` PASS, 같은 local DB에서 `scripts/verify_macos_real_backend_ui.sh` 재실행 PASS, `scripts/local_gate.sh --profile docs` PASS.
 
+## 0-4b-8. MOMO-264 macOS Native Profile/Settings/Downloads UX (2026-07-03)
+
+- macOS profile footer를 기술 세부 popover가 아니라 `Profile`, `Settings`, `Downloads`, `Updates` 우측 설정 surface로 이동하는 launcher로 정리했다. 프로필 편집은 표시 이름/프로필 이미지만 다루고, 언어/화면 모드/워크스페이스 표시/초대 정책은 별도 Settings surface로 분리했다.
+- 서버 아이콘은 더 이상 텍스트 입력으로 편집하지 않고 이미지 선택/제거만 제공한다. 다운로드 surface는 다운로드 폴더 열기/변경과 update manifest 기반 이력/성공·실패 상태를 표시한다. Updates surface는 최신/업데이트 가능/설정 필요/실패 상태를 앱 chrome 다국어 문구로 표시한다.
+- 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS. `macos-ui` launch smoke는 PR gate에서 최종 evidence로 닫는다.
+
 ## 0-4c. MOMO-229 Public Host Preflight + Deploy Evidence Packet v0 (2026-07-01)
 
 - `scripts/prod_env_preflight.sh`를 보강해 public/staging strict mode에서 DNS/TLS env shape, pinned registry image tags, SOPS/age 또는 host-local secret source, DB/Redis named volume, pgBackRest stanza/check/full backup/WAL/PITR required env를 fail-fast로 검사한다.
