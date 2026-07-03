@@ -1014,9 +1014,11 @@ private struct MomoServerSessionChooser: View {
 
     private func languageMenu(copy: MomoSessionCopy) -> some View {
         Menu {
-            Picker(copy.languageLabel, selection: $languageRaw) {
-                ForEach(MomoUILanguage.allCases) { option in
-                    Text(option.displayName).tag(option.rawValue)
+            ForEach(MomoUILanguage.allCases) { option in
+                Button {
+                    languageRaw = option.rawValue
+                } label: {
+                    Label(option.displayName, systemImage: language == option ? "checkmark" : "circle")
                 }
             }
         } label: {
@@ -1636,9 +1638,11 @@ private struct SessionStatusBar: View {
 
     private func languageMenu(copy: MomoWorkspaceCopy) -> some View {
         Menu {
-            Picker(copy.languageLabel, selection: $languageRaw) {
-                ForEach(MomoUILanguage.allCases) { option in
-                    Text(option.displayName).tag(option.rawValue)
+            ForEach(MomoUILanguage.allCases) { option in
+                Button {
+                    languageRaw = option.rawValue
+                } label: {
+                    Label(option.displayName, systemImage: language == option ? "checkmark" : "circle")
                 }
             }
         } label: {

@@ -195,6 +195,7 @@
 | `MOMO-244` | Dev Update Channel v0(local/file manifest + operator-assisted install CTA) | swift/macos-ui/docs | MOMO-235 |
 | `MOMO-243` | In-App Alpha Command Center | swift/macos-ui/docs | MOMO-232, MOMO-235, MOMO-239 |
 | `MOMO-253` | macOS dogfood UX shell polish | swift/macos-ui | MOMO-243, MOMO-244 |
+| `MOMO-259` | macOS shell/layout/performance polish | swift/macos-ui | MOMO-253 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
