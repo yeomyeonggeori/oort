@@ -114,8 +114,25 @@ REST_HISTORY_FILE="$OUT_DIR/history-${RUN_SUFFIX}.json"
 EVIDENCE_FILE="$OUT_DIR/evidence-${RUN_SUFFIX}.md"
 SERVER_PID=""
 UI_RESULT="skipped"
+LAUNCHCTL_ENV_KEYS=()
+
+set_launchctl_env() {
+  local key="$1"
+  local value="$2"
+  /bin/launchctl setenv "$key" "$value"
+  LAUNCHCTL_ENV_KEYS+=("$key")
+}
+
+unset_launchctl_env() {
+  local key
+  for key in "${LAUNCHCTL_ENV_KEYS[@]:-}"; do
+    /bin/launchctl unsetenv "$key" >/dev/null 2>&1 || true
+  done
+  LAUNCHCTL_ENV_KEYS=()
+}
 
 cleanup() {
+  unset_launchctl_env
   if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true
@@ -441,16 +458,16 @@ jq -e --arg id "$APPROVAL_MSG_ID" --arg approval "$APPROVAL_ID" '
 
 if [ "${LOCAL_GATE_LAUNCH_UI:-0}" = "1" ]; then
   echo "[macos-real-backend] launching MomoMacDevApp against ${BASE_URL}"
+  set_launchctl_env MOMO_SERVER_BASE_URL "$BASE_URL"
+  set_launchctl_env MOMO_WORKSPACE_ID "$WORKSPACE_ID"
+  set_launchctl_env MOMO_CHANNEL_ID "$CHANNEL_ID"
+  set_launchctl_env MOMO_LOGIN_EMAIL "$HUMAN_EMAIL"
+  set_launchctl_env MOMO_LOGIN_PASSWORD "dev-password"
   set +e
-  MOMO_SERVER_BASE_URL="$BASE_URL" \
-  MOMO_WORKSPACE_ID="$WORKSPACE_ID" \
-  MOMO_CHANNEL_ID="$CHANNEL_ID" \
-  MOMO_LOGIN_EMAIL="$HUMAN_EMAIL" \
-  MOMO_LOGIN_PASSWORD="dev-password" \
-  MACOS_DEV_RUN_DIRECT_EXEC=1 \
-    "$REPO_ROOT/scripts/macos_dev_run.sh" --verify --logs --terminate 2>&1 | tee "$UI_LOG"
+  "$REPO_ROOT/scripts/macos_dev_run.sh" --verify --logs --terminate 2>&1 | tee "$UI_LOG"
   UI_CODE=${PIPESTATUS[0]}
   set -e
+  unset_launchctl_env
   [ "$UI_CODE" -eq 0 ] || fail "MomoMacDevApp launch verifier failed with exit ${UI_CODE}"
   grep -q "process is running" "$UI_LOG" || fail "UI launch log missing process evidence"
   grep -q "window smoke passed" "$UI_LOG" || fail "UI launch log missing window_count evidence"

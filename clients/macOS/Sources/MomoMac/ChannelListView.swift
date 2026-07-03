@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 import MomoCore
 
 // MARK: - ChannelListView
@@ -13,6 +15,8 @@ public struct ChannelListView: View {
     @State private var showSessionDetails = false
     @State private var showInvites = false
     @State private var showUpdates = false
+    @State private var showDownloads = false
+    @State private var showProfilePanel = false
     @State private var showMemberInvite = false
     @State private var showServerSettings = false
     @State private var newChannelName = ""
@@ -22,8 +26,10 @@ public struct ChannelListView: View {
     @State private var agentAlias = "@hermes"
     @State private var agentEndpoint = "http://127.0.0.1:28088/v1"
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
+    @AppStorage("momo.server.iconPath") private var serverIconPath = ""
     @AppStorage("momo.server.agentInviteRequiresApproval") private var agentInviteRequiresApproval = true
     @AppStorage("momo.server.memberInvitePolicy") private var memberInvitePolicy = "admins"
     private let sessionChrome: MomoSessionChrome?
@@ -52,31 +58,55 @@ public struct ChannelListView: View {
     public var body: some View {
         let copy = MomoWorkspaceCopy(language: language)
 
-        VStack(spacing: 0) {
-            sidebarHeader(copy: copy)
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                sidebarHeader(copy: copy)
 
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
-                    if let error = viewModel.connectionError {
-                        connectionErrorRow(error, copy: copy)
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18) {
+                        if let error = viewModel.connectionError {
+                            connectionErrorRow(error, copy: copy)
+                        }
+
+                        workQueueSection(copy: copy)
+                        channelsSection(copy: copy)
+                        membersSection(copy: copy)
+                        developerToolsSection(copy: copy)
                     }
-
-                    workQueueSection(copy: copy)
-                    channelsSection(copy: copy)
-                    membersSection(copy: copy)
-                    developerToolsSection(copy: copy)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 4)
+                    .padding(.bottom, 14)
                 }
-                .padding(.horizontal, 14)
-                .padding(.top, 4)
-                .padding(.bottom, 14)
-            }
-            .scrollIndicators(.hidden)
+                .scrollIndicators(.hidden)
 
-            Divider()
-                .opacity(0.35)
-            profileFooter(copy: copy)
+                Divider()
+                    .opacity(0.35)
+                profileFooter(copy: copy)
+            }
+
+            if showProfilePanel {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(sidebarPanelAnimation) {
+                            showProfilePanel = false
+                        }
+                    }
+                    .zIndex(1)
+
+                profilePanel(copy: copy)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 76)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .opacity
+                    ))
+                    .zIndex(2)
+            }
         }
         .background(MomoSidebarGlassBackground())
+        .animation(sidebarPanelAnimation, value: showProfilePanel)
     }
 
     private var language: MomoUILanguage {
@@ -84,13 +114,15 @@ public struct ChannelListView: View {
     }
 
     private var visibleChannelMembers: [Member] {
-        viewModel.members.filter { viewModel.isMember($0.id) }
+        viewModel.members.filter { member in
+            viewModel.isMember(member.id) && !isHiddenDogfoodAgent(member)
+        }
     }
 
     private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 11) {
-                MomoSidebarLogoMark(text: serverIconText)
+                MomoSidebarLogoMark(text: serverIconText, imagePath: serverIconPath)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(serverDisplayName)
                         .font(.system(size: 16, weight: .semibold))
@@ -191,11 +223,12 @@ public struct ChannelListView: View {
         VStack(alignment: .leading, spacing: 8) {
             sidebarPlainHeader(copy.workQueue)
             sidebarActionRow(
-                title: copy.approvalRequests,
+                title: copy.agentApprovalInbox,
                 subtitle: approvalSummary(copy: copy),
                 systemImage: "checkmark.seal",
                 tint: MomoTheme.costAmber,
-                badge: viewModel.pendingApprovals.isEmpty ? nil : "\(viewModel.pendingApprovals.count)"
+                badge: viewModel.pendingApprovals.isEmpty ? nil : "\(viewModel.pendingApprovals.count)",
+                isQuiet: viewModel.pendingApprovals.isEmpty
             ) {
                 openApprovals?()
             }
@@ -319,13 +352,14 @@ public struct ChannelListView: View {
         systemImage: String,
         tint: Color,
         badge: String? = nil,
+        isQuiet: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack {
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(isQuiet ? .secondary : tint)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
@@ -347,7 +381,7 @@ public struct ChannelListView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(.primary.opacity(isQuiet ? 0.030 : 0.065), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -474,51 +508,13 @@ public struct ChannelListView: View {
     }
 
     private func profileFooter(copy: MomoWorkspaceCopy) -> some View {
-        Menu {
-            Button {
-                showSessionDetails = true
-            } label: {
-                Label(copy.profile, systemImage: "person.crop.circle")
-            }
-
-            Button {
-                showServerSettings = true
-            } label: {
-                Label(copy.serverSettings, systemImage: "server.rack")
-            }
-
-            Divider()
-
-            Button {
-                showUpdates = true
-            } label: {
-                Label(copy.updates, systemImage: "arrow.down.circle")
-            }
-
-            Button {
-                inviteMode = .human
-                showMemberInvite = true
-            } label: {
-                Label(copy.inviteMembers, systemImage: "person.badge.plus")
-            }
-
-            Divider()
-
-            if let chrome = sessionChrome {
-                Button(action: chrome.switchSession) {
-                    Label(copy.switchSession, systemImage: "arrow.left.arrow.right")
-                }
-                Button(role: .destructive, action: chrome.logout) {
-                    Label(copy.logout, systemImage: "rectangle.portrait.and.arrow.right")
-                }
+        Button {
+            withAnimation(sidebarPanelAnimation) {
+                showProfilePanel.toggle()
             }
         } label: {
             HStack(spacing: 10) {
-                Text(profileInitials)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 34, height: 34)
-                    .background(MomoTheme.agentAccent, in: Circle())
+                MomoProfileAvatar(initials: profileInitials, status: .online)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profileDisplayName)
@@ -535,6 +531,7 @@ public struct ChannelListView: View {
                 Image(systemName: "chevron.up")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(showProfilePanel ? 180 : 0))
             }
             .contentShape(Rectangle())
             .padding(.horizontal, 12)
@@ -543,7 +540,6 @@ public struct ChannelListView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
         }
-        .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         .popover(isPresented: $showMemberInvite, arrowEdge: .bottom) {
             memberInvitePopover(copy: copy)
@@ -567,10 +563,162 @@ public struct ChannelListView: View {
         .popover(isPresented: $showUpdates) {
             MomoMacUpdateChannelView()
         }
+        .sheet(isPresented: $showDownloads) {
+            MomoDownloadsSheet(copy: copy)
+        }
         .sheet(isPresented: $showServerSettings) {
             serverSettingsSheet(copy: copy)
         }
         .animation(.timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18), value: showMemberInvite)
+    }
+
+    private func profilePanel(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                MomoProfileAvatar(initials: profileInitials, status: .online, size: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(profileDisplayName)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text(profileDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+
+            Divider()
+
+            profileAction(copy.profile, systemImage: "person.crop.circle") {
+                showProfilePanel = false
+                showSessionDetails = true
+            }
+            profileAction(copy.serverSettings, systemImage: "server.rack") {
+                showProfilePanel = false
+                showServerSettings = true
+            }
+            profileAction(copy.commandCenter, systemImage: "list.bullet.clipboard") {
+                showProfilePanel = false
+                openCommandCenter?()
+            }
+            profileAction(copy.agentApprovalInbox, systemImage: "checkmark.seal") {
+                showProfilePanel = false
+                openApprovals?()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label(copy.languageLabel, systemImage: "globe")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(MomoUILanguage.allCases) { option in
+                        profilePill(
+                            option.displayName,
+                            selected: language == option,
+                            systemImage: language == option ? "checkmark" : nil
+                        ) {
+                            languageRaw = option.rawValue
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Label(copy.appearanceLabel, systemImage: currentAppearance.systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    ForEach(MomoAppearancePreference.allCases) { option in
+                        profilePill(
+                            option.title(copy: copy),
+                            selected: currentAppearance == option,
+                            systemImage: currentAppearance == option ? "checkmark" : option.systemImage
+                        ) {
+                            appearanceRaw = option.rawValue
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            profileAction(copy.downloads, systemImage: "tray.and.arrow.down") {
+                showProfilePanel = false
+                showDownloads = true
+            }
+            profileAction(copy.updates, systemImage: "arrow.down.circle") {
+                showProfilePanel = false
+                showUpdates = true
+            }
+            profileAction(copy.inviteMembers, systemImage: "person.badge.plus") {
+                showProfilePanel = false
+                inviteMode = .human
+                showMemberInvite = true
+            }
+
+            Divider()
+
+            if let chrome = sessionChrome {
+                profileAction(copy.switchSession, systemImage: "arrow.left.arrow.right", action: chrome.switchSession)
+                profileAction(copy.logout, systemImage: "rectangle.portrait.and.arrow.right", role: .destructive, action: chrome.logout)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.26), radius: 22, x: 0, y: 12)
+    }
+
+    private func profileAction(
+        _ title: String,
+        systemImage: String,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 22)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func profilePill(
+        _ title: String,
+        selected: Bool,
+        systemImage: String?,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 10, weight: .bold))
+                }
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 26)
+            .background(selected ? MomoTheme.humanAccent : Color.primary.opacity(0.08), in: Capsule())
+            .foregroundStyle(selected ? .white : .primary)
+        }
+        .buttonStyle(.plain)
     }
 
     private func memberInvitePopover(copy: MomoWorkspaceCopy) -> some View {
@@ -656,6 +804,7 @@ public struct ChannelListView: View {
             copy: copy,
             displayName: $serverDisplayName,
             iconText: $serverIconText,
+            iconPath: $serverIconPath,
             memberInvitePolicy: $memberInvitePolicy,
             agentInviteRequiresApproval: $agentInviteRequiresApproval
         )
@@ -704,7 +853,21 @@ public struct ChannelListView: View {
 
     private func approvalSummary(copy: MomoWorkspaceCopy) -> String {
         let count = viewModel.pendingApprovals.count
-        return count == 0 ? copy.noPendingApprovals : "\(count) \(copy.pendingApprovals)"
+        return count == 0 ? copy.noPendingAgentApprovals : "\(count) \(copy.pendingApprovals)"
+    }
+
+    private var currentAppearance: MomoAppearancePreference {
+        MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
+    }
+
+    private var sidebarPanelAnimation: Animation {
+        .timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18)
+    }
+
+    private func isHiddenDogfoodAgent(_ member: Member) -> Bool {
+        guard member.isAgent else { return false }
+        let identity = "\(member.displayName) \(member.handle)".lowercased()
+        return identity.contains("김인턴") || identity.contains("kim") || identity.contains("intern")
     }
 
     private func sidebarEmptyRow(_ title: String, systemImage: String) -> some View {
@@ -747,10 +910,73 @@ private enum MomoInviteMode: String, CaseIterable, Identifiable {
     }
 }
 
+private struct MomoDownloadsSheet: View {
+    let copy: MomoWorkspaceCopy
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "tray.and.arrow.down")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(MomoTheme.humanAccent)
+                    .frame(width: 34, height: 34)
+                    .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(copy.downloads)
+                        .font(.system(size: 19, weight: .semibold))
+                    Text(copy.downloadsSubtitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help(copy.dismiss)
+            }
+
+            MomoMacUpdateChannelView()
+                .background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            HStack {
+                Button {
+                    openDownloadsFolder()
+                } label: {
+                    Label(copy.openDownloadsFolder, systemImage: "folder")
+                }
+                Spacer()
+                Button(copy.done) {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(22)
+        .frame(width: 560)
+        .background(.regularMaterial)
+    }
+
+    private func openDownloadsFolder() {
+        let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+        NSWorkspace.shared.open(folder)
+    }
+}
+
 private struct MomoServerSettingsDraftSheet: View {
     let copy: MomoWorkspaceCopy
     @Binding var displayName: String
     @Binding var iconText: String
+    @Binding var iconPath: String
     @Binding var memberInvitePolicy: String
     @Binding var agentInviteRequiresApproval: Bool
     @Environment(\.dismiss) private var dismiss
@@ -758,7 +984,7 @@ private struct MomoServerSettingsDraftSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                MomoSidebarLogoMark(text: iconText)
+                MomoSidebarLogoMark(text: iconText, imagePath: iconPath, size: 40)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(copy.serverSettings)
                         .font(.system(size: 19, weight: .semibold))
@@ -779,10 +1005,43 @@ private struct MomoServerSettingsDraftSheet: View {
             }
 
             VStack(alignment: .leading, spacing: 12) {
-                TextField(copy.serverName, text: $displayName)
-                    .textFieldStyle(.roundedBorder)
-                TextField(copy.serverIconText, text: $iconText)
-                    .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(copy.serverName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextField(copy.serverName, text: $displayName)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(copy.serverIconImage)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 10) {
+                        MomoSidebarLogoMark(text: iconText, imagePath: iconPath, size: 44)
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField(copy.serverIconText, text: $iconText)
+                                .textFieldStyle(.roundedBorder)
+                            HStack(spacing: 8) {
+                                Button {
+                                    chooseServerIcon()
+                                } label: {
+                                    Label(copy.chooseImage, systemImage: "photo")
+                                }
+                                .controlSize(.small)
+
+                                Button {
+                                    iconPath = ""
+                                } label: {
+                                    Label(copy.removeImage, systemImage: "arrow.uturn.backward")
+                                }
+                                .controlSize(.small)
+                                .disabled(iconPath.isEmpty)
+                            }
+                        }
+                    }
+                }
+
                 Picker(copy.memberInvitePolicy, selection: $memberInvitePolicy) {
                     Text(copy.invitePolicyAdmins).tag("admins")
                     Text(copy.invitePolicyMembers).tag("members")
@@ -810,10 +1069,46 @@ private struct MomoServerSettingsDraftSheet: View {
         .frame(width: 460)
         .background(.regularMaterial)
     }
+
+    private func chooseServerIcon() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = copy.chooseImage
+
+        guard panel.runModal() == .OK, let source = panel.url else {
+            return
+        }
+
+        do {
+            let directory = try appSupportAvatarDirectory()
+            let ext = source.pathExtension.isEmpty ? "png" : source.pathExtension
+            let destination = directory.appendingPathComponent("server-icon.\(ext)")
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: source, to: destination)
+            iconPath = destination.path
+        } catch {
+            NSSound.beep()
+        }
+    }
+
+    private func appSupportAvatarDirectory() throws -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+        let directory = base.appendingPathComponent("momo/avatars", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
 }
 
 private struct MomoSidebarLogoMark: View {
     var text: String = "m"
+    var imagePath: String = ""
+    var size: CGFloat = 30
 
     private var visibleText: String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -822,18 +1117,82 @@ private struct MomoSidebarLogoMark: View {
     }
 
     var body: some View {
-        Text(visibleText)
-            .font(.system(size: 15, weight: .heavy, design: .rounded))
-            .foregroundStyle(.white)
-            .frame(width: 30, height: 30)
-            .background(
-                LinearGradient(
-                    colors: [MomoTheme.agentAccent, MomoTheme.costAmber],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
+        ZStack {
+            if let image = serverIcon {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
+            } else {
+                Text(visibleText)
+                    .font(.system(size: size * 0.50, weight: .heavy, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: size, height: size)
+                    .background(
+                        LinearGradient(
+                            colors: [MomoTheme.agentAccent, MomoTheme.costAmber],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
+                    )
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
+                .stroke(.white.opacity(0.16), lineWidth: 1)
+        }
+    }
+
+    private var serverIcon: NSImage? {
+        guard !imagePath.isEmpty else { return nil }
+        return NSImage(contentsOfFile: imagePath)
+    }
+}
+
+private enum MomoPresenceBadge {
+    case online
+    case working
+    case away
+    case error
+
+    var color: Color {
+        switch self {
+        case .online:
+            return MomoTheme.reversibleGreen
+        case .working:
+            return MomoTheme.costAmber
+        case .away:
+            return .secondary
+        case .error:
+            return MomoTheme.irreversibleRed
+        }
+    }
+}
+
+private struct MomoProfileAvatar: View {
+    let initials: String
+    let status: MomoPresenceBadge
+    var size: CGFloat = 34
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Text(initials)
+                .font(.system(size: size * 0.36, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: size, height: size)
+                .background(MomoTheme.agentAccent, in: Circle())
+            Circle()
+                .fill(status.color)
+                .frame(width: size * 0.24, height: size * 0.24)
+                .overlay {
+                    Circle()
+                        .stroke(.regularMaterial, lineWidth: 2)
+                }
+                .offset(x: 1, y: 1)
+        }
     }
 }
 

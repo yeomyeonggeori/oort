@@ -18,13 +18,14 @@ struct MomoSessionChrome {
 
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
-    @State private var columnVisibility: NavigationSplitViewVisibility = .doubleColumn
     @State private var showDetailPane = false
     @State private var detailPane: MomoMacDetailPane = .alpha
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     private let sessionChrome: MomoSessionChrome?
     private static let layoutAnimation = Animation.timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.24)
+    private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
+    private static let inspectorWidth: CGFloat = 376
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
     public init(viewModel: @autoclosure @escaping () -> ChatViewModel) {
@@ -47,53 +48,67 @@ public struct MomoMacRootView: View {
     public var body: some View {
         let copy = MomoWorkspaceCopy(language: language)
 
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            sidebar(copy: copy)
-        } detail: {
+        GeometryReader { geometry in
+            let useAttachedInspector = geometry.size.width >= Self.attachedInspectorMinimumWindowWidth
+            let sidebarWidth = sidebarWidth(for: geometry.size.width)
+            let detailWidth = max(0, geometry.size.width - sidebarWidth - 1)
+
+            HStack(spacing: 0) {
+                sidebar(copy: copy)
+                    .frame(width: sidebarWidth)
+                    .layoutPriority(2)
+
+                Divider()
+                    .opacity(0.5)
+
+                detailLayout(
+                    copy: copy,
+                    availableDetailWidth: detailWidth,
+                    useAttachedInspector: useAttachedInspector
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .layoutPriority(1)
+            }
+            .background(Color(nsColor: .windowBackgroundColor))
+            .preferredColorScheme(appearance.colorScheme)
+        }
+    }
+
+    private func detailLayout(
+        copy: MomoWorkspaceCopy,
+        availableDetailWidth: CGFloat,
+        useAttachedInspector: Bool
+    ) -> some View {
+        ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
                 messageTimeline
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if showDetailPane {
+                if showDetailPane && useAttachedInspector {
                     Divider()
-                    detailPaneView(copy: copy)
+                    detailPaneView(copy: copy, presentation: .attached)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(Self.layoutAnimation, value: showDetailPane)
-        }
-        .preferredColorScheme(appearance.colorScheme)
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button {
-                    openDetailPane(.alpha)
-                } label: {
-                    Label(copy.commandCenter, systemImage: "list.bullet.clipboard")
-                }
-                .help(copy.showCommandCenter)
-                .momoQuickTooltip(copy.showCommandCenter)
 
-                Button {
-                    openDetailPane(.approvals)
-                } label: {
-                    Label(copy.approvals, systemImage: "checkmark.seal")
-                }
-                .help(copy.showApprovals)
-                .momoQuickTooltip(copy.showApprovals)
+            if showDetailPane && !useAttachedInspector {
+                Color.black.opacity(0.18)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+                    .onTapGesture {
+                        closeDetailPane()
+                    }
 
-                Button {
-                    toggleDetailPane()
-                } label: {
-                    Label(copy.detail, systemImage: "sidebar.trailing")
-                }
-                .help(showDetailPane ? copy.hideDetailPane : copy.showDetailPane)
-                .momoQuickTooltip(showDetailPane ? copy.hideDetailPane : copy.showDetailPane)
-
-                languageMenu(copy: copy)
-                appearanceMenu(copy: copy)
+                detailPaneView(copy: copy, presentation: .overlay)
+                    .frame(width: overlayInspectorWidth(for: availableDetailWidth))
+                    .padding(.trailing, 12)
+                    .padding(.vertical, 10)
+                    .shadow(color: .black.opacity(0.28), radius: 24, x: -12, y: 0)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .animation(Self.layoutAnimation, value: showDetailPane)
     }
 
     private func sidebar(copy: MomoWorkspaceCopy) -> some View {
@@ -107,15 +122,15 @@ public struct MomoMacRootView: View {
                 openDetailPane(.approvals)
             }
         )
-        .frame(minWidth: 304, idealWidth: 328, maxWidth: 380)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var messageTimeline: some View {
         MessageListView(viewModel: viewModel)
-            .frame(minWidth: 640)
+            .frame(minWidth: 0)
     }
 
-    private func detailPaneView(copy: MomoWorkspaceCopy) -> some View {
+    private func detailPaneView(copy: MomoWorkspaceCopy, presentation: MomoInspectorPresentation) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: detailPane.systemImage)
@@ -138,13 +153,17 @@ public struct MomoMacRootView: View {
                 Button {
                     closeDetailPane()
                 } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .frame(width: 28, height: 28)
+                    Label(copy.closeDetailPane, systemImage: "xmark")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                        .background(.primary.opacity(0.08), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .help(copy.closeDetailPane)
                 .momoQuickTooltip(copy.closeDetailPane)
+                .keyboardShortcut(.cancelAction)
             }
             .padding(.horizontal, 14)
             .padding(.top, 12)
@@ -170,8 +189,12 @@ public struct MomoMacRootView: View {
                 ApprovalInboxView(viewModel: viewModel)
             }
         }
-        .frame(width: 376)
-        .background(.regularMaterial)
+        .frame(width: presentation == .attached ? Self.inspectorWidth : nil)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: presentation.cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: presentation.cornerRadius, style: .continuous)
+                .stroke(.white.opacity(presentation == .overlay ? 0.14 : 0.0), lineWidth: 1)
+        }
     }
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
@@ -193,44 +216,34 @@ public struct MomoMacRootView: View {
         }
     }
 
-    private var language: MomoUILanguage {
-        MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
+    private func sidebarWidth(for windowWidth: CGFloat) -> CGFloat {
+        min(328, max(300, windowWidth * 0.28))
     }
 
-    private func languageMenu(copy: MomoWorkspaceCopy) -> some View {
-        Menu {
-            ForEach(MomoUILanguage.allCases) { option in
-                Button {
-                    languageRaw = option.rawValue
-                } label: {
-                    Label(option.displayName, systemImage: language == option ? "checkmark" : "circle")
-                }
-            }
-        } label: {
-            Label(language.displayName, systemImage: "globe")
-        }
-        .help(copy.languageLabel)
-        .momoQuickTooltip(copy.languageLabel)
+    private func overlayInspectorWidth(for detailWidth: CGFloat) -> CGFloat {
+        min(Self.inspectorWidth, max(312, detailWidth - 28))
+    }
+
+    private var language: MomoUILanguage {
+        MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
     }
 
     private var appearance: MomoAppearancePreference {
         MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
     }
+}
 
-    private func appearanceMenu(copy: MomoWorkspaceCopy) -> some View {
-        Menu {
-            ForEach(MomoAppearancePreference.allCases) { option in
-                Button {
-                    appearanceRaw = option.rawValue
-                } label: {
-                    Label(option.title(copy: copy), systemImage: appearance == option ? "checkmark" : option.systemImage)
-                }
-            }
-        } label: {
-            Label(copy.appearanceLabel, systemImage: appearance.systemImage)
+private enum MomoInspectorPresentation {
+    case attached
+    case overlay
+
+    var cornerRadius: CGFloat {
+        switch self {
+        case .attached:
+            return 0
+        case .overlay:
+            return 18
         }
-        .help(copy.appearanceLabel)
-        .momoQuickTooltip(copy.appearanceLabel)
     }
 }
 
