@@ -339,6 +339,13 @@
 - 하단 profile menu에 서버 설정 로컬 드래프트를 추가했다. 서버명/아이콘 문자/멤버 초대 정책/에이전트 초대 승인 필요 여부를 dogfood 앱 표시값으로 저장할 수 있으며, 실제 server-persisted workspace settings/RBAC API는 후속 goal로 남긴다.
 - 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(58 tests), `bash -n scripts/macos_dev_run.sh` PASS, `scripts/macos_dev_run.sh --launch --verify --wait 20 --terminate` PASS(window_count=1), clean commit 기준 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS.
 
+## 0-28. MOMO-259 macOS Shell/Layout/Performance Polish (2026-07-03)
+
+- `MomoMacRootView`의 2-pane/3-pane `NavigationSplitView` root swap을 제거하고, 항상 안정적인 sidebar + timeline split 안에서 우측 inspector만 slide-in/out 하도록 정렬했다. 우측 inspector에는 명시적인 닫기 버튼과 현재 surface 설명을 추가했다.
+- toolbar는 command center/approvals/detail/language/appearance를 고정된 primary action group으로 유지하고, language menu는 `언어 >` submenu 없이 `한국어`/`English`를 바로 선택한다. Light/Dark/System appearance preference는 `@AppStorage`로 저장된다.
+- 하단 profile footer는 무거운 custom popover 대신 lightweight macOS `Menu`로 바꿔 open/close 체감 지연을 줄였다. 좌측 sidebar 버튼 크기와 quick tooltip을 보강하고 sidebar material을 더 독립적인 glass 영역처럼 조정했다.
+- 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(58 tests), clean commit 기준 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS(window_count=1).
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

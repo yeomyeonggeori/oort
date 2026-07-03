@@ -14,6 +14,34 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var appearanceLabel: String {
+        switch language {
+        case .korean: return "화면 모드"
+        case .english: return "Appearance"
+        }
+    }
+
+    var appearanceSystem: String {
+        switch language {
+        case .korean: return "시스템 설정"
+        case .english: return "System"
+        }
+    }
+
+    var appearanceLight: String {
+        switch language {
+        case .korean: return "라이트 모드"
+        case .english: return "Light"
+        }
+    }
+
+    var appearanceDark: String {
+        switch language {
+        case .korean: return "다크 모드"
+        case .english: return "Dark"
+        }
+    }
+
     var quickStartTitle: String {
         switch language {
         case .korean: return "처음이라면 이렇게 시작하세요"
@@ -476,6 +504,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var commandCenterInspectorSubtitle: String {
+        switch language {
+        case .korean: return "테스트와 진단은 필요할 때만 여는 보조 패널입니다."
+        case .english: return "Open test and diagnostic controls only when you need them."
+        }
+    }
+
+    var approvalsInspectorSubtitle: String {
+        switch language {
+        case .korean: return "에이전트가 외부 작업 전 확인을 요청하면 여기에 모입니다."
+        case .english: return "Agent actions that need human review collect here."
+        }
+    }
+
     var detail: String {
         switch language {
         case .korean: return "상세"
@@ -536,6 +578,13 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "상세 패널 숨기기"
         case .english: return "Hide detail pane"
+        }
+    }
+
+    var closeDetailPane: String {
+        switch language {
+        case .korean: return "상세 패널 닫기"
+        case .english: return "Close detail pane"
         }
     }
 

@@ -13,7 +13,6 @@ public struct ChannelListView: View {
     @State private var showSessionDetails = false
     @State private var showInvites = false
     @State private var showUpdates = false
-    @State private var showProfileMenu = false
     @State private var showMemberInvite = false
     @State private var showServerSettings = false
     @State private var newChannelName = ""
@@ -128,7 +127,7 @@ public struct ChannelListView: View {
         }
         .padding(.top, 22)
         .padding(.horizontal, 18)
-        .padding(.bottom, 14)
+        .padding(.bottom, 16)
     }
 
     private func sidebarSectionHeader(
@@ -145,12 +144,13 @@ public struct ChannelListView: View {
             Spacer()
             Button(action: action) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .bold))
-                    .frame(width: 26, height: 26)
-                    .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 30, height: 30)
+                    .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
             .help(actionTitle)
+            .momoQuickTooltip(actionTitle)
         }
     }
 
@@ -462,20 +462,55 @@ public struct ChannelListView: View {
             }
         } label: {
             Image(systemName: inChannel ? "minus" : "plus")
-                .font(.system(size: 12, weight: .bold))
-                .frame(width: 24, height: 24)
+                .font(.system(size: 13, weight: .bold))
+                .frame(width: 28, height: 28)
                 .foregroundStyle(inChannel ? .secondary : MomoTheme.humanAccent)
-                .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isWorking)
         .help(inChannel ? "Remove" : "Add")
+        .momoQuickTooltip(inChannel ? "Remove" : "Add")
     }
 
     private func profileFooter(copy: MomoWorkspaceCopy) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.16)) {
-                showProfileMenu.toggle()
+        Menu {
+            Button {
+                showSessionDetails = true
+            } label: {
+                Label(copy.profile, systemImage: "person.crop.circle")
+            }
+
+            Button {
+                showServerSettings = true
+            } label: {
+                Label(copy.serverSettings, systemImage: "server.rack")
+            }
+
+            Divider()
+
+            Button {
+                showUpdates = true
+            } label: {
+                Label(copy.updates, systemImage: "arrow.down.circle")
+            }
+
+            Button {
+                inviteMode = .human
+                showMemberInvite = true
+            } label: {
+                Label(copy.inviteMembers, systemImage: "person.badge.plus")
+            }
+
+            Divider()
+
+            if let chrome = sessionChrome {
+                Button(action: chrome.switchSession) {
+                    Label(copy.switchSession, systemImage: "arrow.left.arrow.right")
+                }
+                Button(role: .destructive, action: chrome.logout) {
+                    Label(copy.logout, systemImage: "rectangle.portrait.and.arrow.right")
+                }
             }
         } label: {
             HStack(spacing: 10) {
@@ -508,12 +543,8 @@ public struct ChannelListView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
         }
+        .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
-        .popover(isPresented: $showProfileMenu, arrowEdge: .bottom) {
-            profilePopover(copy: copy)
-                .frame(width: 292)
-                .padding(10)
-        }
         .popover(isPresented: $showMemberInvite, arrowEdge: .bottom) {
             memberInvitePopover(copy: copy)
                 .frame(width: 340)
@@ -539,8 +570,7 @@ public struct ChannelListView: View {
         .sheet(isPresented: $showServerSettings) {
             serverSettingsSheet(copy: copy)
         }
-        .animation(.easeInOut(duration: 0.16), value: showProfileMenu)
-        .animation(.easeInOut(duration: 0.16), value: showMemberInvite)
+        .animation(.timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18), value: showMemberInvite)
     }
 
     private func memberInvitePopover(copy: MomoWorkspaceCopy) -> some View {
@@ -629,99 +659,6 @@ public struct ChannelListView: View {
             memberInvitePolicy: $memberInvitePolicy,
             agentInviteRequiresApproval: $agentInviteRequiresApproval
         )
-    }
-
-    private func profilePopover(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Text(profileInitials)
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 42, height: 42)
-                    .background(MomoTheme.agentAccent, in: Circle())
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(profileDisplayName)
-                        .font(.system(size: 15, weight: .semibold))
-                    Text(profileDetail)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 4)
-
-            Divider()
-
-            profileMenuButton(copy.profile, systemImage: "person.crop.circle") {
-                showProfileMenu = false
-                showSessionDetails = true
-            }
-
-            profileMenuButton(copy.serverSettings, systemImage: "server.rack") {
-                showProfileMenu = false
-                showServerSettings = true
-            }
-
-            VStack(alignment: .leading, spacing: 7) {
-                Label(copy.languageLabel, systemImage: "globe")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Picker(copy.languageLabel, selection: $languageRaw) {
-                    ForEach(MomoUILanguage.allCases) { option in
-                        Text(option.displayName).tag(option.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-
-            profileMenuButton(copy.updates, systemImage: "arrow.down.circle") {
-                showProfileMenu = false
-                showUpdates = true
-            }
-
-            profileMenuButton(copy.inviteMembers, systemImage: "person.badge.plus") {
-                showProfileMenu = false
-                inviteMode = .human
-                showMemberInvite = true
-            }
-
-            Divider()
-
-            if let chrome = sessionChrome {
-                profileMenuButton(copy.switchSession, systemImage: "arrow.left.arrow.right", action: chrome.switchSession)
-                profileMenuButton(copy.logout, systemImage: "rectangle.portrait.and.arrow.right", role: .destructive, action: chrome.logout)
-            }
-        }
-        .padding(6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func profileMenuButton(
-        _ title: String,
-        systemImage: String,
-        role: ButtonRole? = nil,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(role: role, action: action) {
-            HStack(spacing: 10) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 22)
-                Text(title)
-                    .font(.system(size: 14, weight: .medium))
-                Spacer()
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     private var profileDisplayName: String {
@@ -904,18 +841,24 @@ private struct MomoSidebarGlassBackground: View {
     var body: some View {
         ZStack {
             Rectangle()
-                .fill(.ultraThinMaterial)
+                .fill(.thinMaterial)
             LinearGradient(
                 colors: [
-                    MomoTheme.humanAccent.opacity(0.10),
-                    MomoTheme.reversibleGreen.opacity(0.08),
+                    MomoTheme.humanAccent.opacity(0.12),
+                    MomoTheme.reversibleGreen.opacity(0.10),
                     Color.clear,
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             Rectangle()
-                .fill(Color.black.opacity(0.08))
+                .fill(Color.black.opacity(0.025))
+            HStack {
+                Spacer()
+                Rectangle()
+                    .fill(.white.opacity(0.08))
+                    .frame(width: 1)
+            }
         }
         .ignoresSafeArea()
     }
