@@ -346,6 +346,15 @@
 - 하단 profile footer는 무거운 custom popover 대신 lightweight macOS `Menu`로 바꿔 open/close 체감 지연을 줄였다. 좌측 sidebar 버튼 크기와 quick tooltip을 보강하고 sidebar material을 더 독립적인 glass 영역처럼 조정했다.
 - 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(58 tests), clean commit 기준 `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS(window_count=1).
 
+## 0-29. MOMO-263 macOS Responsive Drawer/Profile/Downloads UX (2026-07-03)
+
+- Slack thread UX와 Mattermost right-hand sidebar 패턴을 기준으로 작은 창에서 approval/command center가 sidebar/timeline을 밀어내는 문제를 재정리했다. `MomoMacRootView`는 top-level `NavigationSplitView` 교체 대신 고정 sidebar + timeline + responsive inspector 구조를 사용하고, 창 폭이 좁으면 우측 패널을 center 위 overlay drawer로 열어 좌측 glass sidebar가 찌그러지지 않게 했다.
+- 상단 toolbar의 command/approval/language/theme/download 기능을 줄이고, profile footer의 sidebar-local panel로 숨겼다. 언어와 appearance는 한 번에 바꾸는 segmented action으로 노출하고, 다운로드는 v0에서 update channel 상태와 Finder Downloads 열기를 제공한다.
+- 서버 설정은 explicit `서버 이름`/`서버 아이콘` 입력으로 정리했고, macOS dogfood v0에서는 선택한 이미지를 `Application Support/momo/avatars/`에 복사해 local display draft로 사용한다. 실제 server-persisted workspace icon/profile upload API는 후속이다.
+- dogfood 기본 roster는 legacy Kim Intern fixture를 숨기고, Hermes/`@hermes` 초대 이후 표시되는 first-class agent member 모델을 우선한다. Agent pairing/credentialed Hermes smoke 자체는 MOMO-257/후속 provider setup 범위다.
+- `verify_macos_real_backend_ui.sh`의 GUI smoke는 direct executable launch 대신 `launchctl setenv`로 필요한 `MOMO_*` dev env만 임시 주입하고 정상 `.app` LaunchServices path로 실행하도록 안정화했다. 이전 direct launch는 process는 떴지만 System Events window count가 0으로 잡히는 flake가 있었다.
+- 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(58 tests), `bash -n scripts/momo scripts/macos_dev_run.sh scripts/local_gate.sh scripts/verify_macos_real_backend_ui.sh` PASS, `LOCAL_GATE_LAUNCH_UI=1 scripts/verify_macos_real_backend_ui.sh` PASS(evidence `/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-macos-real-backend/evidence-20260703T051343Z-28686.md`). Visual smoke: `/private/tmp/momo-267-1120.png`, `/private/tmp/momo-267-profile.png`.
+
 ## 0a. MOMO-001 Runtime Gate (2026-06-25)
 
 - `make up` pass: PostgreSQL 18 + Centrifugo v6가 `.env.worktree`의 `COMPOSE_PROJECT_NAME=momo_momo_001`, `POSTGRES_PORT=15432`, `CENT_PORT=18001`로 기동하고 Docker health가 둘 다 green.

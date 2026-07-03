@@ -154,10 +154,24 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var agentApprovalInbox: String {
+        switch language {
+        case .korean: return "에이전트 승인함"
+        case .english: return "Agent approvals"
+        }
+    }
+
     var noPendingApprovals: String {
         switch language {
         case .korean: return "대기 중인 승인 없음"
         case .english: return "No pending approvals"
+        }
+    }
+
+    var noPendingAgentApprovals: String {
+        switch language {
+        case .korean: return "외부 작업 전 확인할 요청 없음"
+        case .english: return "No external actions need review"
         }
     }
 
@@ -371,6 +385,27 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var serverIconImage: String {
+        switch language {
+        case .korean: return "서버 아이콘"
+        case .english: return "Server icon"
+        }
+    }
+
+    var chooseImage: String {
+        switch language {
+        case .korean: return "이미지 선택"
+        case .english: return "Choose image"
+        }
+    }
+
+    var removeImage: String {
+        switch language {
+        case .korean: return "기본으로 되돌리기"
+        case .english: return "Use default"
+        }
+    }
+
     var memberInvitePolicy: String {
         switch language {
         case .korean: return "멤버 초대 권한"
@@ -529,6 +564,27 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "업데이트"
         case .english: return "Updates"
+        }
+    }
+
+    var downloads: String {
+        switch language {
+        case .korean: return "다운로드"
+        case .english: return "Downloads"
+        }
+    }
+
+    var downloadsSubtitle: String {
+        switch language {
+        case .korean: return "알파 빌드 다운로드와 로컬 다운로드 위치를 확인합니다."
+        case .english: return "Review alpha build downloads and local download locations."
+        }
+    }
+
+    var openDownloadsFolder: String {
+        switch language {
+        case .korean: return "다운로드 폴더 열기"
+        case .english: return "Open Downloads folder"
         }
     }
 

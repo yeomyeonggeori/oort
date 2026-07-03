@@ -196,6 +196,7 @@
 | `MOMO-243` | In-App Alpha Command Center | swift/macos-ui/docs | MOMO-232, MOMO-235, MOMO-239 |
 | `MOMO-253` | macOS dogfood UX shell polish | swift/macos-ui | MOMO-243, MOMO-244 |
 | `MOMO-259` | macOS shell/layout/performance polish | swift/macos-ui | MOMO-253 |
+| `MOMO-263` | macOS responsive drawer/profile/downloads UX | swift/macos-ui | MOMO-259, MOMO-244 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
@@ -1177,6 +1178,23 @@
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성 후 GitHub #243을 `status:needs-review`로 전환하고 merge하지 않는다.
 - Out of scope: 실제 자동 업데이트 설치, Sparkle 정식 연동, AWS 배포, iOS 앱 구현, 대규모 브랜드/디자인 리뉴얼.
+
+### MOMO-263 수용기준 `[swift/macos-ui]`
+- [x] GitHub #267을 `scripts/goal_claim.sh 267`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] 작은 창에서 Command Center/Approvals를 열어도 좌측 sidebar가 밀리거나 잘리지 않도록 root layout을 안정화한다.
+- [x] 우측 detail surface는 좁은 창에서는 overlay drawer, 넓은 창에서는 attached inspector로 동작한다.
+- [x] detail surface에는 명확한 닫기 버튼과 현재 surface 설명을 둔다.
+- [x] 언어/appearance/downloads/update/session/logout 같은 운영 기능은 top toolbar가 아니라 profile footer surface로 이동한다.
+- [x] profile footer menu/popover open/close가 버벅이지 않도록 sidebar-local lightweight panel로 정리한다.
+- [x] 서버 설정의 입력 의미를 `서버 이름`/`서버 아이콘`으로 명확히 하고, dogfood v0 local image 선택/제거를 지원한다.
+- [x] 다운로드 surface에서 update channel 상태와 Finder Downloads 열기 action을 제공한다.
+- [x] dogfood 기본 roster에서 legacy Kim Intern fixture를 숨기고, Hermes/`@hermes` 초대 이후 first-class agent member가 보이는 방향을 유지한다.
+- [x] `swift build --package-path clients/macOS --product MomoMacDevApp` PASS.
+- [x] `swift test --package-path clients/macOS` PASS.
+- [x] `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- [x] real-backend UI smoke는 direct executable launch 대신 LaunchServices `.app` launch + temporary `launchctl setenv` injection을 사용해 System Events window count flake를 피한다.
+- [x] Visual smoke screenshot evidence를 남긴다.
+- Out of scope: backend-persisted workspace icon/profile upload API, real Hermes credentialed provider login, Sparkle self-update install, iOS shell.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
