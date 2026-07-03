@@ -25,7 +25,7 @@ public struct MomoMacRootView: View {
     private let sessionChrome: MomoSessionChrome?
     private static let layoutAnimation = Animation.timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.24)
     private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
-    private static let inspectorWidth: CGFloat = 376
+    private static let inspectorWidth: CGFloat = 440
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
     public init(viewModel: @autoclosure @escaping () -> ChatViewModel) {
@@ -120,6 +120,18 @@ public struct MomoMacRootView: View {
             },
             openApprovals: {
                 openDetailPane(.approvals)
+            },
+            openProfile: {
+                openDetailPane(.profile)
+            },
+            openSettings: {
+                openDetailPane(.settings)
+            },
+            openDownloads: {
+                openDetailPane(.downloads)
+            },
+            openUpdates: {
+                openDetailPane(.updates)
             }
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -169,16 +181,18 @@ public struct MomoMacRootView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            Picker("Detail", selection: $detailPane) {
-                ForEach(MomoMacDetailPane.allCases) { pane in
-                    Label(pane.title(copy: copy), systemImage: pane.systemImage)
-                        .tag(pane)
+            if detailPane.showsOperationalSwitcher {
+                Picker("Detail", selection: $detailPane) {
+                    ForEach(MomoMacDetailPane.operationalCases) { pane in
+                        Label(pane.title(copy: copy), systemImage: pane.systemImage)
+                            .tag(pane)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 14)
-            .padding(.bottom, 10)
 
             Divider()
 
@@ -187,6 +201,14 @@ public struct MomoMacRootView: View {
                 AlphaCommandCenterView(viewModel: viewModel)
             case .approvals:
                 ApprovalInboxView(viewModel: viewModel)
+            case .profile:
+                MomoProfileSettingsSurface(copy: copy, summary: sessionChrome?.summary)
+            case .settings:
+                MomoAppSettingsSurface(copy: copy)
+            case .downloads:
+                MomoDownloadsSettingsSurface(copy: copy)
+            case .updates:
+                MomoUpdateStatusSurface(copy: copy)
             }
         }
         .frame(width: presentation == .attached ? Self.inspectorWidth : nil)
@@ -221,7 +243,7 @@ public struct MomoMacRootView: View {
     }
 
     private func overlayInspectorWidth(for detailWidth: CGFloat) -> CGFloat {
-        min(Self.inspectorWidth, max(312, detailWidth - 28))
+        min(Self.inspectorWidth, max(340, detailWidth - 28))
     }
 
     private var language: MomoUILanguage {
@@ -250,8 +272,23 @@ private enum MomoInspectorPresentation {
 private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
     case alpha
     case approvals
+    case profile
+    case settings
+    case downloads
+    case updates
 
     var id: String { rawValue }
+
+    static let operationalCases: [MomoMacDetailPane] = [.alpha, .approvals]
+
+    var showsOperationalSwitcher: Bool {
+        switch self {
+        case .alpha, .approvals:
+            return true
+        case .profile, .settings, .downloads, .updates:
+            return false
+        }
+    }
 
     func title(copy: MomoWorkspaceCopy) -> String {
         switch self {
@@ -259,6 +296,14 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.commandCenter
         case .approvals:
             return copy.approvals
+        case .profile:
+            return copy.profile
+        case .settings:
+            return copy.settings
+        case .downloads:
+            return copy.downloads
+        case .updates:
+            return copy.updates
         }
     }
 
@@ -268,6 +313,14 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.commandCenterInspectorSubtitle
         case .approvals:
             return copy.approvalsInspectorSubtitle
+        case .profile:
+            return copy.profileSettingsSubtitle
+        case .settings:
+            return copy.settingsSubtitle
+        case .downloads:
+            return copy.downloadsSubtitle
+        case .updates:
+            return copy.updatesSubtitle
         }
     }
 
@@ -277,6 +330,14 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return "list.bullet.clipboard"
         case .approvals:
             return "checkmark.seal"
+        case .profile:
+            return "person.crop.circle"
+        case .settings:
+            return "gearshape"
+        case .downloads:
+            return "tray.and.arrow.down"
+        case .updates:
+            return "arrow.down.circle"
         }
     }
 }

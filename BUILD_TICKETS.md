@@ -197,6 +197,7 @@
 | `MOMO-253` | macOS dogfood UX shell polish | swift/macos-ui | MOMO-243, MOMO-244 |
 | `MOMO-259` | macOS shell/layout/performance polish | swift/macos-ui | MOMO-253 |
 | `MOMO-263` | macOS responsive drawer/profile/downloads UX | swift/macos-ui | MOMO-259, MOMO-244 |
+| `MOMO-264` | macOS native profile/settings/downloads UX | swift/macos-ui | MOMO-263 |
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.
@@ -1195,6 +1196,20 @@
 - [x] real-backend UI smoke는 direct executable launch 대신 LaunchServices `.app` launch + temporary `launchctl setenv` injection을 사용해 System Events window count flake를 피한다.
 - [x] Visual smoke screenshot evidence를 남긴다.
 - Out of scope: backend-persisted workspace icon/profile upload API, real Hermes credentialed provider login, Sparkle self-update install, iOS shell.
+
+### MOMO-264 수용기준 `[swift/macos-ui]`
+- [x] GitHub #269를 `scripts/goal_claim.sh 269`로 claim하고 별도 branch/worktree에서 진행한다.
+- [x] profile footer click은 기술 세부 popover 대신 Profile/Settings/Downloads/Updates launcher로 동작한다.
+- [x] Profile surface는 표시 이름과 프로필 이미지만 편집하며 세션 기술 정보는 보조 상태로만 표시한다.
+- [x] Settings surface는 언어, 시스템/라이트/다크 appearance, workspace/server 표시 이름, workspace icon 이미지, 초대 정책을 한 페이지에서 관리한다.
+- [x] 서버 아이콘은 텍스트 입력 없이 이미지 선택/제거와 기본 로고 복귀를 제공한다.
+- [x] Downloads surface는 다운로드 폴더 열기/변경, update manifest 기반 이력, 성공/실패/사용불가 상태를 표시한다.
+- [x] Updates surface는 최신/업데이트 가능/설정 필요/실패 상태와 current/available/manifest/download 정보를 다국어 문구로 표시한다.
+- [x] sidebar/profile/settings 기본 텍스트 크기와 row 높이를 dogfood 가독성 기준으로 키운다.
+- [x] `swift build --package-path clients/macOS --product MomoMacDevApp` PASS.
+- [x] `swift test --package-path clients/macOS` PASS.
+- [ ] `LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
+- Out of scope: backend-persisted profile/workspace image upload API, automatic self-update install, real Hermes pairing wizard runtime, iOS shell.
 
 ### MOMO-174 수용기준 `[swift/macos-ui]`
 - [x] GitHub #113 (`MOMO-174`)을 `scripts/goal_claim.sh 113`으로 claim하고 별도 branch/worktree에서 진행한다.
