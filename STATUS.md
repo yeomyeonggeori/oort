@@ -755,6 +755,14 @@
 - 3-lens 코드리뷰 반영(blocker 1 + high 4): ① `infra/*`(non-prod)·`server/*`(non-Migrations) 매핑을 staging-smoke/runtime-db 단독에서 **all로 확대**(로컬 런타임 compose와 relay/live/agent 표면의 silent coverage loss 차단) ② diff 베이스 부재/merge-base 실패 시 dirty-only로 좁히지 않고 all로 확대(fail-open 차단) ③ 분류 루프 `set -f`로 glob 확장 차단 ④ 게이트 migrate 스텝이 `MIGRATE_IDEMPOTENCY_CHECK=1` 강제 + `IDEMPOTENCY_OK` 마커 직접 grep 단정(env로 verify 패스가 조용히 꺼져도 게이트 FAIL).
 - 알려진 잔여(정직 표기): host-runtime 1-run 전환으로 기존 2번째 `compose run migrate`가 증명하던 컨테이너 entrypoint(internal-smoke-migrate.sh + bootstrap_roles.sql) 전체의 fresh 재실행 멱등성은 게이트가 더 이상 단정하지 않는다(마이그레이션 파일 skip 증명은 동일 경로+강화 유지, bootstrap_roles는 IF NOT EXISTS 가드). prod 정본 compose(docker-compose.prod.yml)에는 api healthcheck 미추가(핀 이미지의 curl 보장 불가 — 필요 시 이미지 계약 확정 후 별도 티켓).
 
+## 0az. MOMO-300 Realtime subscribe proxy 인증 + token revocation + rate limit (2026-07-06)
+
+- **Subscribe proxy 인증(CentrifugoRoutes TODO 해소):** Centrifugo가 subscribe proxy 콜백에 `X-Centrifugo-Proxy-Secret` static header를 붙이고(`infra/centrifugo.json` dev 파일값 + dev/e2e/prod compose의 `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` env override, `infra/prod/centrifugo.prod.json`은 change-me placeholder + prod compose `:?` env 강제), API가 constant-time 비교로 검증한다 — 없거나 틀리면 **401**(fail closed, 네트워크 위치만으로는 더 이상 인증되지 않음). env는 `CENT_PROXY_SECRET`(`.env.example`/`internal-smoke.env.example`/`secrets.env.example`/`prod .env.example` placeholder + `.conductor/setup.sh` passthrough). 비-local(staging/prod/internal-host)에서 missing/placeholder면 **부팅 fail-fast**(`Config.validateSecurityForBoot`) + `scripts/prod_env_preflight.sh` strict/internal-smoke 검사 연계.
+- **Token revocation:** login/join이 발급한 access/refresh JWT를 `token` 테이블(kind='session', `token_hash=sha256` — pgcrypto `digest()`, 원문 비저장)에 기록하고, AuthMiddleware가 요청마다 `revoked_at`/`expires_at`/row 존재를 검사(**unknown/revoked/expired → 401, fail-closed** — 배포 이전 발급 토큰은 재로그인 필요). `POST /v1/auth/logout` 신설(presented access + 선택 refresh revoke, **멱등** — 재호출 200 `alreadyRevoked`, 실제 전환 시에만 `audit_log(auth.logout)`), `POST /v1/auth/refresh` 신설(rotation: 이전 refresh 즉시 revoke, 재사용 401). subscribe proxy 멤버 확인도 "active session token ≥1"을 요구해 로그아웃이 신규 realtime subscribe를 차단한다(**coarse per-member v0** — 기기별 eviction은 `include_connection_meta` 후속, TokenStore에 TODO).
+- **Rate limit:** per-IP(전 라우트) + per-member(인증 라우트) 미들웨어 — **in-memory sliding window(단일 노드 v0, 프로세스 재시작 리셋/레플리카 비공유 문서화, docs/RUN.md §2.2)**. env `RATE_LIMIT_WINDOW_SECONDS`/`RATE_LIMIT_PER_MEMBER`/`RATE_LIMIT_PER_IP`(0=비활성), `/health`·subscribe proxy 제외, 초과 시 **429 + Retry-After + `audit_log(rate_limit.exceeded)`(버스트당 1회, member 축)** — 익명 IP 축은 tenant 부재로 서버 로그만(문서화). 비용 서킷브레이커(budget_window)와 독립.
+- **검증:** `scripts/verify_auth_hardening.sh` 신설(runtime-db 프로파일 + --auto 매핑 + shell syntax 목록 등록): proxy secret 401/allow 경계, login→token rows, revoked-token **401 evidence**, logout 멱등+audit, 로그아웃 후 subscribe deny, refresh rotation replay 401, member **429+Retry-After+audit evidence**, /health 제외. `verify_realtime_live.sh`에 미인증 proxy 401 네거티브 스텝 추가, 두 live verifier에 `CENT_PROXY_SECRET` 전달. 게이트: docs/swift/runtime-db/runtime-live/runtime-agent PASS(각 프로파일 사이 API 포트 누수 가드 실행). 스키마 변경 없음(schema_v0 `token`/`audit_log` 그대로) — 신규 마이그레이션 불필요.
+- 알려진 잔여(정직 표기): ① revocation 검사로 인증 요청마다 tenant-scoped SELECT 1회 추가(v0 허용, 캐시는 후속) ② per-IP 축은 `X-Forwarded-For` 첫 hop을 신뢰(직노출 배포에선 스푸핑 가능 — Caddy 뒤 전제 문서화) ③ 기기별 realtime eviction은 coarse(전 세션 revoke 시에만 subscribe 차단) ④ Centrifugo `dm:` namespace는 dev/prod 모두 subscribe_proxy_enabled 미설정(user-limited 채널 정책 기존 그대로 — 본 티켓 스코프 밖).
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
@@ -783,6 +791,7 @@
 | `scripts/verify_channel_list.sh` | `bash -n` + Docker PG18 workspace channel list runtime | ✅ OK |
 | `scripts/verify_join.sh` | `bash -n` + Docker PG18 public join runtime | ✅ OK |
 | `scripts/verify_platform_admin.sh` | `bash -n` + Docker PG18 platform admin read-only runtime | ✅ OK |
+| `scripts/verify_auth_hardening.sh` | `bash -n` + Docker PG18 MOMO-300 proxy secret/revocation/rate limit runtime | ✅ OK |
 | `scripts/verify_relay.sh` | `bash -n` + Docker PG18/Centrifugo/MomoServer/OutboxRelay runtime | ✅ OK |
 | `scripts/mock_hermes.py` | `python3 -m py_compile` + MOMO-004 SSE runtime | ✅ OK |
 | `scripts/verify_agent_worker.sh` | `bash -n` + Docker PG18/Centrifugo/AgentWorker runtime | ✅ OK |

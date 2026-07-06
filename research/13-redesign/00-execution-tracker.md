@@ -30,7 +30,7 @@
 
 | 티켓 | 내용 | 상태 |
 |---|---|---|
-| MOMO-300 | subscribe proxy 인증 + token revocation + rate limit | `ready` |
+| MOMO-300 | subscribe proxy 인증 + token revocation + rate limit | `review` (2026-07-06 구현+게이트, STATUS §0az) |
 | MOMO-301 | agent_run depth/round 스키마 + 루프가드 G1~G4 실쿼리 | `ready` |
 | MOMO-302 | 컨텍스트 조립 v1 (단일 메시지 → 히스토리/토큰 윈도) | `ready` |
 | MOMO-303 | MomoDS v0: 토큰 4층 + ugly mode + 컴포넌트 7종 추출 | `ready` |

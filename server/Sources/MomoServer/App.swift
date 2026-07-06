@@ -32,6 +32,12 @@ enum AppBuilder {
         // ---- Router ----
         let router = Router(context: AppRequestContext.self)
         router.add(middleware: LogRequestsMiddleware(.info))
+        // MOMO-300 per-IP rate limit — applies to public + protected routes
+        // (excludes /health and the shared-secret-authenticated subscribe proxy).
+        let rateLimiter = SlidingWindowRateLimiter()
+        router.add(middleware: IPRateLimitMiddleware(
+            limiter: rateLimiter, config: config.rateLimit, logger: logger
+        ))
 
         // Public routes (no auth): health, login, join, centrifugo subscribe proxy.
         router.get("/health") { _, _ -> HealthResponse in
@@ -44,20 +50,28 @@ enum AppBuilder {
         router.get("/v1/agent-runtime/status") { _, _ -> AgentRuntimeStatusResponse in
             config.agentProvider.statusResponse()
         }
+        let tokenStore = TokenStore(db: db)
         let authRoutes = AuthRoutes(
             db: db,
             jwt: jwt,
+            tokenStore: tokenStore,
             platformAdminEmails: config.platformAdminEmails,
             platformAdminLoginSecret: config.platformAdminLoginSecret
         )
         authRoutes.add(to: router)
-        JoinRoutes(db: db, jwt: jwt).add(to: router)
-        CentrifugoRoutes(db: db).add(to: router)
+        JoinRoutes(db: db, jwt: jwt, tokenStore: tokenStore).add(to: router)
+        CentrifugoRoutes(
+            db: db, tokenStore: tokenStore, proxySecret: config.centProxySecret
+        ).add(to: router)
 
         // Protected routes (require valid access token) — mounted in a group that
-        // applies AuthMiddleware. The message read/write path lives here.
+        // applies AuthMiddleware (JWT + MOMO-300 revocation check), then the
+        // per-member rate limit (needs the authenticated principal).
         let authed = router.group()
-            .add(middleware: AuthMiddleware(jwt: jwt))
+            .add(middleware: AuthMiddleware(jwt: jwt, tokenStore: tokenStore))
+            .add(middleware: MemberRateLimitMiddleware(
+                limiter: rateLimiter, config: config.rateLimit, db: db, logger: logger
+            ))
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)

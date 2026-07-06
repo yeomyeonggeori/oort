@@ -86,6 +86,8 @@ case "$CENT_API_URL" in
 esac
 JWT_HMAC="${JWT_HMAC:-dev-insecure-jwt-hmac-change-me}"
 CENT_TOKEN_HMAC="${CENT_TOKEN_HMAC:-dev-insecure-cent-token-hmac}"
+# MOMO-300: must match the dev compose Centrifugo static proxy header.
+CENT_PROXY_SECRET="${CENT_PROXY_SECRET:-dev-insecure-cent-proxy-secret}"
 HERMES_PORT="${HERMES_PORT:-8088}"
 HERMES_API_KEY="${HERMES_API_KEY:-dev-insecure-hermes-bearer}"
 HERMES_BASE_URL="${HERMES_BASE_URL:-http://localhost:${HERMES_PORT}/v1}"
@@ -284,6 +286,7 @@ echo "[agent-live] starting MomoServer on host"
   CENT_API_KEY="$CENT_API_KEY" \
   JWT_HMAC="$JWT_HMAC" \
   CENT_TOKEN_HMAC="$CENT_TOKEN_HMAC" \
+  CENT_PROXY_SECRET="$CENT_PROXY_SECRET" \
   LOG_LEVEL="${LOG_LEVEL:-info}" \
   swift run --package-path server MomoServer
 ) >"$SERVER_LOG" 2>&1 &

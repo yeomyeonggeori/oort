@@ -65,6 +65,13 @@ struct RealtimeTokenIssueResult: Sendable {
     let ttlSeconds: Int
 }
 
+/// An issued App JWT plus its expiry, so callers can persist the token row
+/// (`token.expires_at`, MOMO-300 revocation) without re-decoding the JWT.
+struct IssuedAppToken: Sendable {
+    let token: String
+    let expiresAt: Date
+}
+
 /// Issues and verifies App JWTs (HS256) and Centrifugo connection JWTs (HMAC).
 ///
 /// Wraps a single `JWTKeyCollection`. The app secret and the Centrifugo token
@@ -87,30 +94,32 @@ struct JWTService: Sendable {
     }
 
     /// Sign an access token (15m). L4 §7.1.
-    func signAccess(memberID: UUID, workspaceID: UUID, scopes: [String]) async throws -> String {
+    func signAccess(memberID: UUID, workspaceID: UUID, scopes: [String]) async throws -> IssuedAppToken {
         try await sign(memberID: memberID, workspaceID: workspaceID,
                        scopes: scopes, ttl: config.accessTokenTTL, typ: "access")
     }
 
     /// Sign a refresh token (30d, rotated on use). L4 §7.1.
-    func signRefresh(memberID: UUID, workspaceID: UUID, scopes: [String]) async throws -> String {
+    func signRefresh(memberID: UUID, workspaceID: UUID, scopes: [String]) async throws -> IssuedAppToken {
         try await sign(memberID: memberID, workspaceID: workspaceID,
                        scopes: scopes, ttl: config.refreshTokenTTL, typ: "refresh")
     }
 
     private func sign(
         memberID: UUID, workspaceID: UUID, scopes: [String], ttl: TimeInterval, typ: String
-    ) async throws -> String {
+    ) async throws -> IssuedAppToken {
         let now = Date()
+        let expiresAt = now.addingTimeInterval(ttl)
         let payload = AppJWTPayload(
             sub: SubjectClaim(value: memberID.uuidString),
-            exp: ExpirationClaim(value: now.addingTimeInterval(ttl)),
+            exp: ExpirationClaim(value: expiresAt),
             iat: IssuedAtClaim(value: now),
             ws: workspaceID.uuidString,
             scopes: scopes,
             typ: typ
         )
-        return try await keys.sign(payload, kid: Self.appKID)
+        let token = try await keys.sign(payload, kid: Self.appKID)
+        return IssuedAppToken(token: token, expiresAt: expiresAt)
     }
 
     /// Verify an App JWT and return its payload (signature + exp checked).

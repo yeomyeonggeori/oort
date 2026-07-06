@@ -49,7 +49,10 @@
     ],
     "proxy": {
       "subscribe": {
-        "endpoint": "http://api:8080/v1/centrifugo/subscribe"
+        "endpoint": "http://api:8080/v1/centrifugo/subscribe",
+        "http": {
+          "static_headers": { "X-Centrifugo-Proxy-Secret": "change-me-cent-proxy-secret" }
+        }
       }
     }
   },

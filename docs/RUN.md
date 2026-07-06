@@ -139,6 +139,7 @@ cp infra/.env.example .env
 | `CENT_TOKEN_HMAC` | 서버, Centrifugo | 클라 connection/subscription JWT 서명용 HMAC 시크릿(§7.1). |
 | `CENT_API_KEY` | 서버, relay, worker, Centrifugo | 서버측 HTTP API(`POST /api/publish`) 인증 키(`X-API-Key`). relay/worker만 publish(§4.3). |
 | `CENT_API_URL` | 서버, relay, worker | publish 대상 Centrifugo API 엔드포인트(컨테이너 내부 `http://centrifugo:8000/api`). |
+| `CENT_PROXY_SECRET` | 서버, Centrifugo | **MOMO-300** subscribe proxy 콜백 공유 시크릿. Centrifugo가 `X-Centrifugo-Proxy-Secret` static header로 붙이고(`infra/centrifugo*.json` + compose env override) API가 검증 — 없거나 틀리면 401. staging/prod/internal-host에서는 placeholder면 부팅 fail-fast(`prod_env_preflight.sh` 연계). |
 | `JWT_HMAC` | 서버 | App access(15m)/refresh(30d) 토큰 HS256 서명 시크릿(§7.1). |
 | `AGENT_PROVIDER_MODE` | 서버, worker | `local-mock` / `internal-host-mock` / `external-hermes`. staging/prod/internal-host는 `external-hermes`만 허용. |
 | `AGENT_MODEL` | 서버, worker | 김인턴 provider model label(기본 `hermes-agent`). |
@@ -176,6 +177,13 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `MAX_STEPS` | worker | `12` | 루프가드 G3(턴당 tool-call 상한, 스키마 50의 v0 오버라이드). |
 | `MAX_DEPTH` | worker | `4` | A2A 홉 깊이 상한(§3.4). |
 | `MAX_CONCURRENT_RUNS` | worker | `1` | 에이전트별 세마포어 G1. |
+| `RATE_LIMIT_WINDOW_SECONDS` | 서버 | `60` | **MOMO-300** rate limit sliding window 길이. |
+| `RATE_LIMIT_PER_MEMBER` | 서버 | `600` | 윈도당 인증 멤버별 요청 상한. `0`=축 비활성. 초과 시 429 + `Retry-After` + `audit_log(rate_limit.exceeded)`(버스트당 1회). |
+| `RATE_LIMIT_PER_IP` | 서버 | `1200` | 윈도당 클라이언트 IP별 요청 상한(`X-Forwarded-For` 우선). `0`=축 비활성. 익명(비인증) 위반은 tenant가 없어 audit_log 대신 서버 로그에만 남는다. |
+
+> **rate limit v0 경계(문서화):** in-memory sliding window — 단일 노드 전제, 프로세스
+> 재시작 시 리셋, 레플리카 간 비공유. `/health`와 subscribe proxy 경로는 제외.
+> 비용 서킷브레이커(budget_window)와는 독립 축이다.
 
 > **보안:** `.env.example`의 `change-me-*` / 코드의 `dev-insecure-*` 기본값은 **개발용**이다.
 > 실배포에선 반드시 교체(`openssl rand -hex 32`). 기본값으로도 부팅은 되지만 안전하지 않다.
@@ -306,7 +314,7 @@ scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod --eviden
 `API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
 `MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
-`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
+`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `CENT_PROXY_SECRET`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
 `HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
 `REDIS_VOLUME_NAME`, `PGBACKREST_STANZA`, `PGBACKREST_REPO1_PATH`,
 `PGBACKREST_REPO1_CIPHER_PASS`, `PGBACKREST_WAL_ARCHIVE_REQUIRED`,
@@ -1003,6 +1011,9 @@ M1 staging 완료로 표시하지 않는다.
 | 에이전트가 응답 안 함(D 데모) | `AgentWorker` 미기동 또는 hermes 게이트웨이 미연결. `HERMES_BASE_URL`/`HERMES_API_KEY` 확인. |
 | Centrifugo HTTP API 401 | compose가 `CENTRIFUGO_HTTP_API_KEY=${CENT_API_KEY}`로 주입되는지 확인. Centrifugo v6는 일반 JSON `"${CENT_API_KEY}"`를 치환하지 않는다. |
 | Centrifugo subscribe 거부 | `centrifugo.json`의 `channel.proxy.subscribe.endpoint`(`api:8080`)과 서버 `PORT` 불일치, 또는 `CENT_TOKEN_HMAC` 불일치. |
+| subscribe proxy 401 (`invalid or missing proxy secret`) | **MOMO-300**: Centrifugo static header(`X-Centrifugo-Proxy-Secret`)와 API `CENT_PROXY_SECRET` 불일치. compose env override(`CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`)와 서버 env가 같은 값을 쓰는지 확인. |
+| 로그인은 되는데 모든 API가 401 (`unknown token`) | **MOMO-300**: access token이 `token` 테이블에 기록되지 않았거나 revoke됨(로그아웃/rotation). 재로그인으로 새 세션 발급. 서버 배포 전 발급 토큰은 fail-closed로 전부 무효. |
+| REST가 429를 반환 | **MOMO-300** rate limit. `Retry-After` 헤더만큼 대기 후 재시도, 또는 `RATE_LIMIT_PER_MEMBER`/`RATE_LIMIT_PER_IP` 조정(0=비활성). |
 | `agent:` subscribe 거부 | target agent가 같은 workspace active member인지, observer와 target agent가 하나 이상의 active channel membership을 공유하는지 확인. 공유 채널이 없거나 다른 workspace token이면 정상적으로 deny된다. |
 | prod compose가 시크릿을 요구하며 실패 | `infra/prod/.env.example`은 예시다. 실제 staging/prod는 host-local env 또는 SOPS/age로 `change-me-*`를 모두 교체한다. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |

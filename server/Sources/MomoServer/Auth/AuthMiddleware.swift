@@ -8,12 +8,18 @@ import Hummingbird
 /// workspace_id / scopes) so downstream handlers and the RLS layer can scope
 /// queries. On a missing/invalid token it throws 401 (L4 §7).
 ///
+/// MOMO-300: beyond signature/exp, every access token is checked against the
+/// `token` table — a token that is unknown, revoked (`revoked_at`), or expired
+/// there is rejected with 401. Fail-closed: tokens issued before revocation
+/// support (no row) stop working; clients re-login.
+///
 /// Public routes (`/health`, `/v1/auth/login`) are mounted on a router group
 /// WITHOUT this middleware, so they remain reachable unauthenticated.
 struct AuthMiddleware: RouterMiddleware {
     typealias Context = AppRequestContext
 
     let jwt: JWTService
+    let tokenStore: TokenStore
 
     func handle(
         _ request: Request,
@@ -41,6 +47,10 @@ struct AuthMiddleware: RouterMiddleware {
         else {
             throw HTTPError(.unauthorized, message: "malformed token claims")
         }
+
+        // Revocation check (MOMO-300): the signature only proves issuance; the
+        // token row proves the session is still alive. 401 on revoked/unknown.
+        try await tokenStore.requireActive(rawToken: token, workspaceID: workspaceID)
 
         var context = context
         context.principal = AuthPrincipal(
