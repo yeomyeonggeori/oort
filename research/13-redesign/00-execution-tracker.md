@@ -21,7 +21,7 @@
 |---|---|---|---|
 | MOMO-316 | local gate `--auto` 프로파일 + compose `--wait` + 멱등 1-run | P0 | `done` (2026-07-06 구현+3-lens 리뷰 반영+머지, STATUS §0ay) |
 | MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `ready` |
-| MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | `ready` (316 머지됨) |
+| MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | `review` (2026-07-07 구현: Dockerfile resolve 레이어 분리 + `--mount=type=cache`, Makefile `SWIFT_SCRATCH_ROOT` opt-in 공유 캐시 + mkdir 락, setup.sh 기록, STATUS §0b1 — host-runtime 웜/콜드 풀게이트는 Fable 후속) |
 | MOMO-319 | runtime-db verifier 병렬화 + 웜 볼륨 opt-in | P2 | `blocked(317)` |
 
 > **후속 발견(316 검증 중, 새 티켓 후보):** verify_*.sh 계열이 host MomoServer를 누수시킬 수 있다 — `swift run` 부모만 trap kill 되고 자식 MomoServer 바이너리가 살아남아, 프로파일을 별도 호출로 연달아 돌리면 다음 verifier가 "already serving"으로 실패(`all` 프로파일은 내부 cleanup으로 방어). MOMO-319(Wave 3)에 process-group kill 또는 verifier 선행 port-guard로 흡수 권장.

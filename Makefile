@@ -16,6 +16,48 @@ MIGRATE_SCRIPT := scripts/migrate.sh
 ENV_FILE       ?= $(firstword $(wildcard .env.worktree .env infra/.env.example))
 COMPOSE_ENV    := $(if $(ENV_FILE),--env-file $(ENV_FILE),)
 
+# ---------------------------------------------------------------------------
+# SWIFT_SCRATCH_ROOT (opt-in, MOMO-317) — worktree 간 공유 Swift 빌드 캐시.
+#
+# 환경변수 SWIFT_SCRATCH_ROOT가 설정돼 있으면 build/test가 패키지별
+# `--scratch-path "$SWIFT_SCRATCH_ROOT/<pkg>"`로 .build를 공유한다(worktree들이
+# 같은 캐시를 재사용 → N개 worktree 초기 빌드 비용 1/N). 미설정이면 패키지 로컬
+# .build로 기존 동작 그대로 — 순수 opt-in(맨 `make build`는 회귀 없음).
+# `.conductor/setup.sh`가 이 변수를 .env.worktree에 기록하므로, 공유 캐시를 켜려면
+# `set -a; . .env.worktree; set +a; make build`처럼 env를 로드한 뒤 호출한다.
+#
+# 동시 빌드 오염 방지: macOS엔 flock이 없어 패키지별 mkdir 기반 lock 디렉터리를
+# 쓴다. 잠겨 있으면 SWIFT_SCRATCH_LOCK_WAIT초(기본 300)까지 2초 간격으로 대기하고,
+# 그래도 안 풀리면 패키지 로컬 .build로 폴백한다(교착 없이 항상 진행).
+# trap으로 중단(EXIT/INT/TERM) 시 lock을 해제한다. macOS /bin/sh(bash 3.2 POSIX) 호환.
+# 사용법: momo_swift <pkg> <build|test> [extra swift args...]
+# ---------------------------------------------------------------------------
+SWIFT_RUN_FUNC = momo_swift() { \
+  _pkg="$$1"; _sub="$$2"; shift 2; \
+  if [ -z "$${SWIFT_SCRATCH_ROOT:-}" ]; then \
+    ( cd "$$_pkg" && swift "$$_sub" "$$@" ); return $$?; \
+  fi; \
+  _key=`printf '%s' "$$_pkg" | tr '/ ' '--'`; \
+  _scratch="$$SWIFT_SCRATCH_ROOT/$$_key"; \
+  _lock="$$SWIFT_SCRATCH_ROOT/$$_key.lock"; \
+  mkdir -p "$$SWIFT_SCRATCH_ROOT"; \
+  _held=0; _deadline=$$(( $$(date +%s) + $${SWIFT_SCRATCH_LOCK_WAIT:-300} )); \
+  while : ; do \
+    if mkdir "$$_lock" 2>/dev/null; then _held=1; break; fi; \
+    if [ "$$(date +%s)" -ge "$$_deadline" ]; then break; fi; \
+    echo "   ($$_pkg) shared build cache busy; waiting on $$_lock"; \
+    sleep 2; \
+  done; \
+  if [ "$$_held" = 1 ]; then \
+    trap 'rmdir "$$_lock" 2>/dev/null || true' EXIT INT TERM; \
+    ( cd "$$_pkg" && swift "$$_sub" --scratch-path "$$_scratch" "$$@" ); _rc=$$?; \
+    rmdir "$$_lock" 2>/dev/null || true; trap - EXIT INT TERM; \
+    return $$_rc; \
+  fi; \
+  echo "   ($$_pkg) shared build cache lock busy > $${SWIFT_SCRATCH_LOCK_WAIT:-300}s; using package-local .build"; \
+  ( cd "$$_pkg" && swift "$$_sub" "$$@" ); \
+}
+
 .DEFAULT_GOAL := help
 .PHONY: help build migrate up down test local-alpha-plan local-alpha
 
@@ -30,12 +72,13 @@ help: ## 사용 가능한 타깃 출력
 	@echo "  make local-alpha       MOMO-240 로컬 알파 runner execute(mock Hermes)"
 
 build: ## 모든 Swift 패키지 빌드 (Package.swift 존재하는 것만)
-	@found=0; \
+	@$(SWIFT_RUN_FUNC); \
+	found=0; \
 	for pkg in $(SWIFT_PKGS); do \
 		if [ -f "$$pkg/Package.swift" ]; then \
 			found=1; \
 			echo "==> swift build ($$pkg)"; \
-			( cd "$$pkg" && swift build ) || exit 1; \
+			momo_swift "$$pkg" build || exit 1; \
 		fi; \
 	done; \
 	if [ "$$found" = "0" ]; then \
@@ -43,12 +86,13 @@ build: ## 모든 Swift 패키지 빌드 (Package.swift 존재하는 것만)
 	fi
 
 test: ## 모든 Swift 패키지 테스트 (Package.swift 존재하는 것만)
-	@found=0; \
+	@$(SWIFT_RUN_FUNC); \
+	found=0; \
 	for pkg in $(SWIFT_PKGS); do \
 		if [ -f "$$pkg/Package.swift" ]; then \
 			found=1; \
 			echo "==> swift test ($$pkg)"; \
-			( cd "$$pkg" && swift test ) || exit 1; \
+			momo_swift "$$pkg" test || exit 1; \
 		fi; \
 	done; \
 	if [ "$$found" = "0" ]; then \

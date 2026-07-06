@@ -183,26 +183,29 @@ for image in "$API_IMAGE" "$RELAY_IMAGE" "$WORKER_IMAGE" "$MIGRATE_IMAGE" "$MOCK
 done
 
 echo "[host-runtime] building local images"
-docker build \
+# MOMO-317: BuildKit을 계약으로 고정한다. swift-service.Dockerfile의
+# `--mount=type=cache` 빌드 캐시는 BuildKit 없이는 파싱조차 실패하므로,
+# 기본이 BuildKit인 환경이어도 각 build 호출에 DOCKER_BUILDKIT=1을 명시한다.
+DOCKER_BUILDKIT=1 docker build \
   -f "$SWIFT_DOCKERFILE" \
   --build-arg PACKAGE_PATH=server \
   --build-arg PRODUCT=MomoServer \
   -t "$API_IMAGE" \
   . 2>&1 | tee "$TMP_ROOT/build-api-${RUN_SLUG}.log"
-docker build \
+DOCKER_BUILDKIT=1 docker build \
   -f "$SWIFT_DOCKERFILE" \
   --build-arg PACKAGE_PATH=relay/OutboxRelay \
   --build-arg PRODUCT=OutboxRelay \
   -t "$RELAY_IMAGE" \
   . 2>&1 | tee "$TMP_ROOT/build-relay-${RUN_SLUG}.log"
-docker build \
+DOCKER_BUILDKIT=1 docker build \
   -f "$SWIFT_DOCKERFILE" \
   --build-arg PACKAGE_PATH=workers/AgentWorker \
   --build-arg PRODUCT=AgentWorker \
   -t "$WORKER_IMAGE" \
   . 2>&1 | tee "$TMP_ROOT/build-worker-${RUN_SLUG}.log"
-docker build -f "$MIGRATE_DOCKERFILE" -t "$MIGRATE_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-migrate-${RUN_SLUG}.log"
-docker build -f "$MOCK_DOCKERFILE" -t "$MOCK_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-mock-hermes-${RUN_SLUG}.log"
+DOCKER_BUILDKIT=1 docker build -f "$MIGRATE_DOCKERFILE" -t "$MIGRATE_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-migrate-${RUN_SLUG}.log"
+DOCKER_BUILDKIT=1 docker build -f "$MOCK_DOCKERFILE" -t "$MOCK_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-mock-hermes-${RUN_SLUG}.log"
 
 echo "[host-runtime] booting prod + internal-smoke stack (up -d --wait)"
 # MOMO-316: `--wait`가 HTTP 준비를 보장하는 근거 —
