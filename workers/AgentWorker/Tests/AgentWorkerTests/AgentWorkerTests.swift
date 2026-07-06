@@ -100,6 +100,56 @@ final class AgentWorkerTests: XCTestCase {
         )
     }
 
+    func testDBGateSnapshotVerdictsCoverG1ThroughG4() {
+        let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.db-gates"))
+        // Defaults from testConfig: maxConsecutiveAuto=3, maxSteps=12, maxDepth=4.
+        func snapshot(
+            stepCount: Int = 0,
+            runMaxSteps: Int = 12,
+            depth: Int = 0,
+            streak: Int = 0,
+            activeOthers: Int = 0,
+            maxConcurrent: Int = 1
+        ) -> LoopGuards.DBGateSnapshot {
+            .init(
+                runStatus: "queued",
+                stepCount: stepCount,
+                runMaxSteps: runMaxSteps,
+                depth: depth,
+                roundCount: 0,
+                consecutiveAutoStreak: streak,
+                activeOtherRuns: activeOthers,
+                maxConcurrentRuns: maxConcurrent
+            )
+        }
+
+        XCTAssertEqual(guards.evaluateSnapshot(snapshot()), .proceed)
+        XCTAssertEqual(
+            guards.evaluateSnapshot(snapshot(activeOthers: 1)),
+            .tripped(
+                gate: "G1",
+                reason: "G1 concurrency cap: 1 other live run(s) for this agent (max_concurrent_runs=1)"))
+        XCTAssertEqual(
+            guards.evaluateSnapshot(snapshot(streak: 3)),
+            .tripped(
+                gate: "G2",
+                reason: "G2 consecutive auto cap: 3 trailing agent replies (MAX_CONSECUTIVE_AUTO=3)"))
+        XCTAssertEqual(
+            guards.evaluateSnapshot(snapshot(stepCount: 12)),
+            .tripped(gate: "G3", reason: "G3 step cap: step_count=12 (max_steps=12)"))
+        // The run's own max_steps tightens below the env cap.
+        XCTAssertEqual(
+            guards.evaluateSnapshot(snapshot(stepCount: 5, runMaxSteps: 5)),
+            .tripped(gate: "G3", reason: "G3 step cap: step_count=5 (max_steps=5)"))
+        XCTAssertEqual(
+            guards.evaluateSnapshot(snapshot(depth: 4)),
+            .tripped(gate: "G4", reason: "G4 depth cap: depth=4 (MAX_DEPTH=4)"))
+        // Higher agent-owned concurrency cap admits parallel runs.
+        XCTAssertEqual(
+            guards.evaluateSnapshot(snapshot(activeOthers: 1, maxConcurrent: 2)),
+            .proceed)
+    }
+
     func testStrictProviderConfigRejectsMockOrPlaceholderHermes() {
         var config = testConfig()
         config.momoEnvironment = "staging"

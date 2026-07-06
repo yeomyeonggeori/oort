@@ -106,6 +106,16 @@ MESSAGE_ID=00000000-0000-7000-8000-000000000906
 TRIP_MESSAGE_ID=00000000-0000-7000-8000-000000000916
 CLIENT_MSG_ID=00000000-0000-7000-8000-000000000907
 TRIP_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000917
+GUARD_DEPTH_RUN_ID=00000000-0000-7000-8000-000000000934
+GUARD_DEPTH_MESSAGE_ID=00000000-0000-7000-8000-000000000935
+GUARD_DEPTH_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000936
+GUARD_STEP_RUN_ID=00000000-0000-7000-8000-000000000937
+GUARD_STEP_MESSAGE_ID=00000000-0000-7000-8000-000000000938
+GUARD_STEP_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000939
+GUARD_G1_RUN_ID=00000000-0000-7000-8000-000000000940
+GUARD_G1_DECOY_RUN_ID=00000000-0000-7000-8000-000000000941
+GUARD_G1_MESSAGE_ID=00000000-0000-7000-8000-000000000942
+GUARD_G1_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000943
 AGENT_CHANNEL=agent:ws${WORKSPACE_ID}.${AGENT_ID}
 CENT_CHANNEL=ch:ws${WORKSPACE_ID}.${CHANNEL_ID}
 NON_MEMBER_AGENT_ID=00000000-0000-7000-8000-000000215102
@@ -280,6 +290,22 @@ DELETE FROM usage_ledger
          AND idempotency_key LIKE 'mention:%:$AGENT_ID'
     );
 DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
+-- MOMO-301 loop-guard trip fixtures (audit/outbox/message/agent_run rerun hygiene)
+DELETE FROM audit_log
+ WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
+                  '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID');
+DELETE FROM outbox
+ WHERE payload->>'run_id' IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID')
+    OR payload->'data'->'payload'->>'run_id' IN
+       ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID');
+DELETE FROM message
+ WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID')
+    OR id IN ('$GUARD_DEPTH_MESSAGE_ID', '$GUARD_STEP_MESSAGE_ID', '$GUARD_G1_MESSAGE_ID')
+    OR client_msg_id IN ('$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
+                         '$GUARD_G1_CLIENT_MSG_ID');
+DELETE FROM agent_run
+ WHERE id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
+              '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID');
 DELETE FROM audit_log
  WHERE workspace_id = '$WORKSPACE_ID'
    AND run_id IN (
@@ -302,6 +328,15 @@ DELETE FROM outbox
  WHERE workspace_id = '$WORKSPACE_ID'
    AND kind = 'agent_job'
    AND status IN ('pending', 'processing');
+-- MOMO-301: this verifier also owns the demo agent's live-run semaphore (G1)
+-- while it runs. Neutralize lingering active runs for the demo agent (e.g. the
+-- macOS real-backend awaiting_approval fixture on shared volumes) so G1
+-- evaluates only this script's own fixtures; later verifiers reseed their own.
+UPDATE agent_run
+   SET status = 'cancelled', finished_at = now(), updated_at = now()
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND agent_member_id = '$AGENT_ID'
+   AND status IN ('running', 'awaiting_approval', 'paused');
 DELETE FROM outbox WHERE payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
    OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID'
    OR payload->>'trigger_message_id' IN (
@@ -712,4 +747,145 @@ if [ "$TRIP_OK" != "1" ]; then
 fi
 
 echo "[agent-worker] circuit-breaker path verified: low-limit budget trips before spend"
+
+# =============================================================================
+# MOMO-301 deterministic loop-guard trip scenarios (G1/G3/G4, DB SoT).
+# Payload gate seeds are intentionally 0 so a trip proves the worker read the
+# authoritative agent_run/agent state from Postgres, not the outbox payload.
+# =============================================================================
+
+seed_guard_fixture() {
+  guard_run_id=$1
+  guard_message_id=$2
+  guard_client_msg_id=$3
+  guard_body=$4
+  guard_step_count=$5
+  guard_depth=$6
+  guard_idem_key=$7
+
+  psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$CHANNEL_ID'
+  RETURNING last_seq
+)
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
+   type, body, client_msg_id)
+SELECT '$guard_message_id', '$WORKSPACE_ID', '$CHANNEL_ID', bumped.last_seq,
+       (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+       '$HUMAN_ID', 'text', '$guard_body', '$guard_client_msg_id'
+  FROM bumped;
+
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, trigger_message_id,
+   status, step_count, max_steps, depth, input, idempotency_key)
+VALUES
+  ('$guard_run_id', '$WORKSPACE_ID', '$AGENT_ID', '$CHANNEL_ID', '$guard_message_id',
+   'queued', $guard_step_count, 12, $guard_depth,
+   jsonb_build_object('prompt', '$guard_body'),
+   '$guard_idem_key');
+
+INSERT INTO outbox
+  (workspace_id, kind, status, method, payload, partition_key)
+VALUES
+  ('$WORKSPACE_ID', 'agent_job', 'pending', 'publish',
+   jsonb_build_object(
+     'run_id', '$guard_run_id',
+     'workspace_id', '$WORKSPACE_ID',
+     'agent_member_id', '$AGENT_ID',
+     'channel_id', '$CHANNEL_ID',
+     'model', 'hermes-agent',
+     'prompt', '$guard_body',
+     'max_output_tokens', 64,
+     'step_count', 0,
+     'depth', 0,
+     'consecutive_auto', 0
+   ),
+   '$AGENT_ID');
+
+COMMIT;
+SQL
+}
+
+wait_guard_trip() {
+  guard_run_id=$1
+  guard_gate=$2
+  guard_label=$3
+
+  guard_ok=0
+  deadline=$(($(date +%s) + 60))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    RUN_FAILED=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$guard_run_id' AND status='failed' AND error->>'code'='loop_guard_tripped' AND error->>'gate'='$guard_gate';")
+    AUDIT_OK=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$guard_run_id' AND action='agent.guard.tripped' AND target_type='agent_run' AND detail->>'gate'='$guard_gate';")
+    DEGRADED_OK=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$guard_run_id' AND type='system' AND author_member_id='$AGENT_ID' AND body LIKE '%loop-safety guard $guard_gate%' AND props->>'gate'='$guard_gate';")
+    BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND payload->'data'->'payload'->>'run_id'='$guard_run_id' AND payload->'data'->'payload'->>'type'='system' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending','processing','done') AND last_error IS NULL;")
+    JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$guard_run_id' AND status='done';")
+    NO_SPEND=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$guard_run_id';")
+
+    if [ "$RUN_FAILED" = "1" ] && [ "$AUDIT_OK" = "1" ] && [ "$DEGRADED_OK" = "1" ] \
+      && [ "$BROADCAST_OK" = "1" ] && [ "$JOB_DONE" = "1" ] && [ "$NO_SPEND" = "0" ]; then
+      guard_ok=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [ "$guard_ok" != "1" ]; then
+    echo "[agent-worker] loop-guard $guard_label trip did not verify" >&2
+    printf 'run_failed=%s audit=%s degraded=%s broadcast=%s job_done=%s no_spend=%s\n' \
+      "${RUN_FAILED:-}" "${AUDIT_OK:-}" "${DEGRADED_OK:-}" "${BROADCAST_OK:-}" "${JOB_DONE:-}" "${NO_SPEND:-}" >&2
+    tail -120 "$WORKER_LOG" >&2 || true
+    exit 1
+  fi
+  echo "[agent-worker] loop-guard $guard_label trip verified: failed run + audit_log + degraded system message + no spend"
+}
+
+echo "[agent-worker] seeding G4 depth-cap trip fixture (agent_run.depth=4, payload depth=0)"
+seed_guard_fixture "$GUARD_DEPTH_RUN_ID" "$GUARD_DEPTH_MESSAGE_ID" "$GUARD_DEPTH_CLIENT_MSG_ID" \
+  '@hermes MOMO-301 depth cap trip' 0 4 'momo-301-guard-depth'
+wait_guard_trip "$GUARD_DEPTH_RUN_ID" "G4" "G4(depth)"
+
+echo "[agent-worker] seeding G3 step-cap trip fixture (agent_run.step_count=12, payload step_count=0)"
+seed_guard_fixture "$GUARD_STEP_RUN_ID" "$GUARD_STEP_MESSAGE_ID" "$GUARD_STEP_CLIENT_MSG_ID" \
+  '@hermes MOMO-301 step cap trip' 12 0 'momo-301-guard-step'
+wait_guard_trip "$GUARD_STEP_RUN_ID" "G3" "G3(step)"
+
+echo "[agent-worker] seeding G1 concurrency trip fixture (decoy running run for the same agent)"
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id,
+   status, step_count, max_steps, depth, input, idempotency_key, started_at)
+VALUES
+  ('$GUARD_G1_DECOY_RUN_ID', '$WORKSPACE_ID', '$AGENT_ID', '$CHANNEL_ID',
+   'running', 1, 12, 0,
+   jsonb_build_object('prompt', 'MOMO-301 G1 decoy live run'),
+   'momo-301-guard-g1-decoy', now());
+COMMIT;
+SQL
+seed_guard_fixture "$GUARD_G1_RUN_ID" "$GUARD_G1_MESSAGE_ID" "$GUARD_G1_CLIENT_MSG_ID" \
+  '@hermes MOMO-301 concurrency trip' 0 0 'momo-301-guard-g1'
+wait_guard_trip "$GUARD_G1_RUN_ID" "G1" "G1(concurrency)"
+
+# Release the decoy semaphore so later verifiers (live-channel/hermes-bridge/
+# m3-dbc reruns) are not G1-blocked by a synthetic live run.
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+UPDATE agent_run
+   SET status = 'cancelled', finished_at = now(), updated_at = now()
+ WHERE id = '$GUARD_G1_DECOY_RUN_ID';
+COMMIT;
+SQL
+
+echo "[agent-worker] loop-guard trip scenarios verified: G4(depth) G3(step) G1(concurrency)"
 echo "[agent-worker] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG cost_projection=$COST_PROJECTION_JSON"
