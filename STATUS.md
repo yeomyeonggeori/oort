@@ -780,6 +780,17 @@
   - verifier: G2 트립 e2e 추가(`MAX_CONSECUTIVE_AUTO=2` env + 에이전트 연속 text 2건 시드 → 트립 + audit evidence, 검증 후 사람 메시지로 카운터 리셋), depth 트립을 env 정렬(`MAX_DEPTH=1` + depth=2 시드 — CHECK `depth<=4`와 무충돌), 트립 라벨 grep `a2a_depth` 갱신. 4종(a2a_depth/G3/G1/G2) 전부 failed run + audit + degraded system 메시지 + no-spend 단정.
   - 남은 honest gap: stale-running 제외의 e2e 시나리오는 verifier에 없음(단위/코드 경로만 — reaper 티켓에서 함께), SimHash G4·라운드 스케줄러는 계속 미구현(MOMO-313).
 
+## 0b1. MOMO-318 디자인 pre-flight → swift 프로파일 + snapshot testing (2026-07-07)
+
+- `scripts/verify_design_preflight.sh` 신규: `momo-design-taste` SKILL §5의 mechanical grep을 게이트 명령으로. 검사 4종(view 코드 = `clients/macOS/Sources`+`clients/Core/Sources`, Theme/Tokens 정의 파일·`Tests/` 제외) — (a) raw `Color(red:` (b) `Font.custom` (c) `.font(.system(size:` 고정 포인트 (d) 사용자 노출 문자열 리터럴 내 em-dash(`—`/`–`, 전체주석 라인 제외). `/bin/bash` 3.2 호환(연관배열/mapfile 미사용), `LC_ALL=C` 바이트 매칭으로 로케일 무관 결정론.
+- **Ratchet 방식(수용기준 ① 방식 변경 사유):** SKILL 원문은 "zero hits"지만 v0 데모 표면에 기존 위반이 다수 존재(`.font(.system(size:` 81건, `CostBreathingRing.swift`의 `"—"` 1건 등) — 하드 0 게이트는 MomoDS 마이그레이션(MOMO-303) 전까지 무관한 PR을 전부 막는다. 그래서 항목별 카운트 baseline(`scripts/design_preflight_baseline.txt`: color_red=0/font_custom=0/font_system_size=81/emdash_string=1, 실측 기록)을 커밋하고 **current>baseline이면 FAIL(신규 위반 유입 차단, 위반 목록 file:line evidence 출력)**, current<baseline이면 PASS+baseline 하향 안내. 신규 위반만 막고 baseline은 토큰 도입 시 조이는 구조.
+- `scripts/local_gate.sh`: `add_swift_commands()`에 design pre-flight를 build 앞에 연결(빠른 fail-fast) → `swift` 및 swift 포함 전 프로파일(runtime-*, macos-ui, m3-dbc)에서 위반=FAIL. shell-syntax 체크 목록에도 신규 스크립트 등록.
+- `swift-snapshot-testing`(pointfreeco, MIT, 1.19.2) 테스트 전용 의존성 추가(`clients/macOS/Package.swift` — `SnapshotTesting` product만 import → 전이 타깃(swift-syntax 등) 미컴파일, `swift build` 비용 무영향). `MessageBubbleSnapshotTests`: 고정 fixture(한국어+영어 혼합 본문, seq=128, em-dash 없음)를 `ImageRenderer`로 오프스크린 래스터화(윈도/NSHostingView 플레이키니스 회피) + `NSAppearance.performAsCurrentDrawingAppearance`로 light/darkAqua 강제 → `assertSnapshot(of:as:.image(precision:0.98, perceptualPrecision:0.98))`. 레퍼런스 PNG 2종 커밋(`__Snapshots__/MessageBubbleSnapshotTests/`), light≠dark 확인. `Package.resolved` 비커밋(AGENTS §5, `.gitignore` `*.resolved` 확인).
+- `legal/THIRD_PARTY_NOTICES.md`: swift-snapshot-testing(MIT, 테스트 전용/앱 번들 미포함) + 테스트 전용 전이(swift-custom-dump·xctest-dynamic-overlay MIT, swift-syntax Apache-2.0) 귀속 추가. permissive만, copyleft 없음.
+- `docs/LOCAL_PR_GATE.md` §6 신규: ratchet 규칙표 + baseline 갱신 절차 + **UI PR은 design-review 에이전트 리포트(Blocker 0)를 evidence로 포함**(AGENTS §5 재확인) + 스냅샷 결정론/precision/CI 부재 명문화. swift 프로파일 표 2곳 갱신. 기존 §6(Worker Handoff)→§7.
+- 검증(퀵 범위, DEVELOPER_DIR=Xcode): `verify_design_preflight.sh` 단독 PASS(baseline 일치, env bash + `/bin/bash` 3.2 exit 0), 4항목 각각 위반 1개 주입 시 FAIL(exit 1) 후 probe 제거 재PASS 확인. `clients/macOS` `swift build` green + `swift test` green(60개 = 기존 58 + 스냅샷 2), 스냅샷 재실행 2회 결정론 PASS. `clients/Core` swift build green. `bash -n`/`/bin/bash -n` 양쪽(신규 스크립트 + 편집된 local_gate.sh) OK.
+- 정직 표기(honest gap): `local_gate.sh --profile swift` **풀 실행은 미수행**(Fable 후속 배비싯 — 웨이브 역할분리) → runtime-unverified(swift 프로파일 풀런). 스냅샷은 **이 머신(macOS 26 / Swift 6.3.2 / retina @2x)에서만** 결정론 확인 — 다른 macOS point release에서 perceptualPrecision 0.98을 넘는 폰트 렌더 차이가 나면 재기록 필요(로컬 전용 evidence, repo에 CI 없음). em-dash 검사는 더블쿼트 문자열 리터럴 + 비주석 라인 휴리스틱(멀티라인/블록주석 내 문자열 em-dash는 미포착 — ratchet이 카운트 드리프트로 흡수).
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

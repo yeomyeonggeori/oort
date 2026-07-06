@@ -20,7 +20,7 @@
 | 티켓 | 내용 | 우선순위 | 상태 |
 |---|---|---|---|
 | MOMO-316 | local gate `--auto` 프로파일 + compose `--wait` + 멱등 1-run | P0 | `done` (2026-07-06 구현+3-lens 리뷰 반영+머지, STATUS §0ay) |
-| MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `ready` |
+| MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `review` (2026-07-07 구현: ratchet pre-flight + swift 프로파일 연결 + MessageBubble light/dark 스냅샷 결정론 PASS, STATUS §0b0) |
 | MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | `ready` (316 머지됨) |
 | MOMO-319 | runtime-db verifier 병렬화 + 웜 볼륨 opt-in | P2 | `blocked(317)` |
 

@@ -36,6 +36,11 @@ let package = Package(
         // Local path dependency on the shared client core (sibling dir).
         .package(name: "MomoCore", path: "../Core"),
         .package(url: "https://github.com/centrifugal/centrifuge-swift.git", exact: "0.9.0"),
+        // Test-only: deterministic light/dark image snapshots of the SwiftUI surface
+        // (MOMO-318). MIT-licensed; only the `SnapshotTesting` product is imported,
+        // whose target has no transitive build dependencies (swift-syntax is pulled by
+        // the unused InlineSnapshotTesting target only, so `swift build` stays cheap).
+        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing.git", from: "1.19.2"),
     ],
     targets: [
         .target(
@@ -69,7 +74,10 @@ let package = Package(
         ),
         .testTarget(
             name: "MomoMacTests",
-            dependencies: ["MomoMac"]
+            dependencies: [
+                "MomoMac",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ]
         ),
     ]
 )
