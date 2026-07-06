@@ -19,7 +19,7 @@ The connector is owned by momo. Google Workspace MCP servers and future domain-w
 
 ## 2. Non-Negotiable Rules
 
-- Per-user OAuth is the only v0 authorization model. Domain-wide delegation is out of scope for this spec and belongs to MOMO-123.
+- Per-user OAuth is the only v0 authorization model. Domain-wide delegation and the shared-drive-member service-account path (`boundary_kind: shared_drive_member`) are out of scope for this spec and belong to MOMO-123; this spec only records the carve-out below so the two documents stay consistent.
 - The connector stores provider ids, cursors, bounded excerpts, permission snapshots, and audit state. It must not store raw mailbox dumps, full Drive mirrors, broad calendar history, OAuth access tokens in Context Packets, or refresh tokens in Memory Plane/Capability Cache.
 - Bounded carve-out to "no full Drive mirrors" (MOMO-323): for the **momo-managed workspace shared drive only** (workspace archive mode — MOMO-123 `service_account_boundary` with `boundary_kind = shared_drive_member`), momo may keep a **revocable derived index**: embeddings plus chunked text, with a permission snapshot version on every row. Those files are momo-managed artifacts, the index is rebuildable from Drive, and delete/permission-loss tombstones must remove the derived rows. User personal Drive files (`drive.file` selected) stay excerpt-only as before — momo never builds a derived full-text/embedding index from a user's personal Drive.
 - Google source refs are citeable pointers, not credentials. Every ref has `workspace_id`, `subject_member_id`, provider resource id, scope snapshot, retrieval time, and delete/revoke path.
