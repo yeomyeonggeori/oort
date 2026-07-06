@@ -755,6 +755,15 @@
 - 3-lens 코드리뷰 반영(blocker 1 + high 4): ① `infra/*`(non-prod)·`server/*`(non-Migrations) 매핑을 staging-smoke/runtime-db 단독에서 **all로 확대**(로컬 런타임 compose와 relay/live/agent 표면의 silent coverage loss 차단) ② diff 베이스 부재/merge-base 실패 시 dirty-only로 좁히지 않고 all로 확대(fail-open 차단) ③ 분류 루프 `set -f`로 glob 확장 차단 ④ 게이트 migrate 스텝이 `MIGRATE_IDEMPOTENCY_CHECK=1` 강제 + `IDEMPOTENCY_OK` 마커 직접 grep 단정(env로 verify 패스가 조용히 꺼져도 게이트 FAIL).
 - 알려진 잔여(정직 표기): host-runtime 1-run 전환으로 기존 2번째 `compose run migrate`가 증명하던 컨테이너 entrypoint(internal-smoke-migrate.sh + bootstrap_roles.sql) 전체의 fresh 재실행 멱등성은 게이트가 더 이상 단정하지 않는다(마이그레이션 파일 skip 증명은 동일 경로+강화 유지, bootstrap_roles는 IF NOT EXISTS 가드). prod 정본 compose(docker-compose.prod.yml)에는 api healthcheck 미추가(핀 이미지의 curl 보장 불가 — 필요 시 이미지 계약 확정 후 별도 티켓).
 
+## 0az. MOMO-301 agent_run depth/round 스키마 + 루프가드 G1~G4 실쿼리 (2026-07-06)
+
+- `server/Migrations/007_agent_run_a2a_guards.sql` 추가: `agent_run`에 `round_count`/`consecutive_auto_count`(integer NOT NULL DEFAULT 0) + L4 §3.4 캡 CHECK(`depth <= 4`, `0 <= round_count <= 4`, `consecutive_auto_count >= 0`). `depth` 컬럼은 schema_v0에 이미 존재(`>= 0`만 있었음)라 캡 CHECK만 추가. 기존 테이블 ALTER라 RLS DO-block 신규 등록 불필요(`agent_run`은 schema_v0 RLS ARRAY에 이미 등록 — 확인함). schema_v0.sql 불변.
+- AgentWorker 루프가드를 스텁 → **실제 Postgres 쿼리(SoT)** 로 교체: 단일 tx에서 `agent` 행 `FOR UPDATE`(에이전트별 게이트 뮤텍스) → 자기 `agent_run` 행 FOR UPDATE → G1 라이브 run 카운트(`running/awaiting_approval/paused`; `queued`는 outbox partition_key가 직렬화하므로 제외) → G2 채널 테일 연속 에이전트 발화 streak(`type<>'system'` 제외 — 사람 발화가 구조적으로 리셋, 트립 메시지 자기증폭 차단) → G3 step 캡(`min(run.max_steps, MAX_STEPS)`) → G4 depth 캡(§3.4). proceed 시 같은 tx에서 run을 `running`으로 전이해 동시 클레임 레이스에 안전(뮤텍스 해제 전에 세마포어 가시화). 페이로드 시드 평가는 fast-fail 보완으로 유지(DB가 항상 우선).
+- 게이트 트립 처리(한 tx): run `failed` + `error={code:'loop_guard_tripped',gate,reason}` + `audit_log(action='agent.guard.tripped', snapshot 포함)` + 채널에 사람이 읽을 수 있는 degraded **system** 메시지(MOMO-256 패턴 — seq bump + message INSERT + outbox broadcast) + job done + `agent.status=error`.
+- `scripts/verify_agent_worker.sh`에 결정론적 트립 시나리오 3종(페이로드 게이트 시드는 전부 0으로 두고 DB 값만 트립 조건 — DB SoT 증명): G4(depth=4), G3(step_count=max_steps=12), G1(같은 에이전트 decoy running run, 검증 후 cancel). 각각 failed run + audit + degraded system 메시지 + broadcast(version=seq) + no-spend(usage_ledger 0행)를 단정. fixture 시작 시 데모 에이전트의 잔존 활성 run을 cancel해 공유 볼륨에서 macos-ui fixture와의 G1 간섭을 차단. local gate `runtime-agent` 커버리지 노트 갱신.
+- 스코프 밖(정직 표기): §3.4 라운드 배리어의 라운드 스케줄러(=A2A, MOMO-313)와 G2 트립 시나리오, §3.3 SimHash 시맨틱 루프 감지는 미구현 — `round_count`는 이번에 저장/CHECK까지만. `consecutive_auto_count`는 게이트 평가 시 관측 streak을 기록(SoT는 메시지 테일).
+- 검증: `--profile docs` PASS, `--profile swift` PASS(AgentWorker 단위테스트 27개 — G1~G4 스냅샷 verdict 포함), `--profile runtime-db` PASS(007 적용 + 1-run 멱등 IDEMPOTENCY_OK), `--profile runtime-agent` PASS(G4/G3/G1 트립 시나리오 포함, 프로파일 사이 포트 가드로 누수 MomoServer kill).
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
