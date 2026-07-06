@@ -17,11 +17,13 @@ import PostgresNIO
 //   * Excluded paths: `/health` (liveness must never 429) and
 //     `/v1/centrifugo/subscribe` (internal Centrifugo callbacks funnel through
 //     one IP and carry their own shared-secret auth).
-//   * On limit: 429 + `Retry-After`, plus ONE `audit_log` row
-//     (`rate_limit.exceeded`) per key per window when a workspace is known
-//     (member axis). Anonymous per-IP violations have no tenant, so they are
-//     logged (server log) but not audit-persisted — audit_log.workspace_id is
-//     NOT NULL by schema.
+//   * On limit: 429 + `Retry-After`. Only MEMBER-axis violations write the
+//     `audit_log` row (`rate_limit.exceeded`, one per key per burst). Per-IP
+//     violations are NEVER audit-persisted — regardless of whether the caller
+//     is authenticated — because this middleware runs globally BEFORE
+//     AuthMiddleware, so no principal/tenant exists at that point
+//     (audit_log.workspace_id is NOT NULL by schema). They surface in the
+//     server log only.
 //   * Entirely independent from the cost circuit breaker (budget_window):
 //     rate limits shed request floods; the cost breaker caps model spend.
 // =============================================================================
@@ -181,7 +183,8 @@ struct IPRateLimitMiddleware: RouterMiddleware {
         )
         guard verdict.allowed else {
             if verdict.shouldAudit {
-                // Anonymous axis: no tenant yet → server log only (see header).
+                // Per-IP axis runs before AuthMiddleware → no principal/tenant
+                // even for authenticated callers → server log only (see header).
                 logger.warning(
                     "rate limit exceeded (per-ip)",
                     metadata: ["ip": .string(ip), "path": .string(path),

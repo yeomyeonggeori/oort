@@ -12,6 +12,14 @@ struct AppJWTPayload: JWTPayload {
     var exp: ExpirationClaim
     /// iat = issued-at.
     var iat: IssuedAtClaim
+    /// jti = random UUID per issue (MOMO-300 review fix). iat/exp only have
+    /// second granularity, so without jti a logout→re-login within the same
+    /// second minted a byte-identical JWT whose `token` row was already
+    /// revoked — the fresh login got a 200 but every subsequent request 401'd.
+    /// A random jti makes every issued token (and its sha256 `token_hash`)
+    /// unique. Required claim: pre-jti tokens fail decoding → 401 → re-login
+    /// (fail-closed, same contract as the revocation rollout).
+    var jti: IDClaim
     /// ws = workspace_id (UUID string) — tenant scope for RLS.
     var ws: String
     /// scopes — coarse capability grants (e.g. messages:write).
@@ -114,6 +122,9 @@ struct JWTService: Sendable {
             sub: SubjectClaim(value: memberID.uuidString),
             exp: ExpirationClaim(value: expiresAt),
             iat: IssuedAtClaim(value: now),
+            // Random per-issue id — see AppJWTPayload.jti. Centrifugo
+            // connection tokens (centTokenHMAC) are separate and unchanged.
+            jti: IDClaim(value: UUID().uuidString),
             ws: workspaceID.uuidString,
             scopes: scopes,
             typ: typ

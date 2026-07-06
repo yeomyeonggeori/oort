@@ -28,9 +28,11 @@ struct TokenStore: Sendable {
 
     /// Record a freshly issued session JWT so it can be revoked later.
     ///
-    /// `ON CONFLICT DO NOTHING`: two identical logins within the same second
-    /// produce byte-identical JWTs (same claims/iat) and therefore the same
-    /// hash — the existing row already represents that session.
+    /// Every app JWT carries a random `jti` (MOMO-300 review fix), so two
+    /// logins in the same second can no longer mint byte-identical JWTs whose
+    /// shared `token_hash` row might already be revoked. The
+    /// `ON CONFLICT DO NOTHING` is therefore a pure defensive guard against a
+    /// (practically impossible) sha256 collision, not a dedupe path.
     func record(
         rawToken: String,
         label: String,

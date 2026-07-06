@@ -84,6 +84,9 @@ grep -Fq '{$REALTIME_DOMAIN}' "$CADDYFILE" || fail "Caddyfile missing REALTIME_D
 grep -Fq 'reverse_proxy api:8080' "$CADDYFILE" || fail "Caddyfile must proxy API to api:8080"
 grep -Fq 'reverse_proxy centrifugo:8000' "$CADDYFILE" || fail "Caddyfile must proxy realtime to centrifugo:8000"
 grep -Fq 'Strict-Transport-Security' "$CADDYFILE" || fail "Caddyfile missing HSTS header"
+# MOMO-300: rate-limit-excluded subscribe proxy must be edge-denied (403).
+grep -Fq 'handle /v1/centrifugo/*' "$CADDYFILE" || fail "Caddyfile must deny /v1/centrifugo/* at the edge (MOMO-300)"
+grep -A1 'handle /v1/centrifugo/\*' "$CADDYFILE" | grep -Eq 'respond .*403' || fail "Caddyfile /v1/centrifugo/* handle must respond 403"
 grep -Eq 'published: "?18080"?' "$CONFIG_OUT" || fail "internal smoke HTTP port must be local-only 18080 by default"
 grep -Eq 'published: "?18443"?' "$CONFIG_OUT" || fail "internal smoke HTTPS port must be local-only 18443 by default"
 if grep -Eq 'published: "?5432"?|published: "?6379"?|published: "?8000"?|published: "?8080"?' "$CONFIG_OUT"; then

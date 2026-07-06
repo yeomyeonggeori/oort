@@ -704,12 +704,45 @@ final class MomoServerTests: XCTestCase {
 
     // ---- MOMO-300: proxy secret / revocation / rate limit units ----
 
-    func testProxySecretConstantTimeEquals() {
-        XCTAssertTrue(CentrifugoRoutes.constantTimeEquals("secret-a", "secret-a"))
-        XCTAssertFalse(CentrifugoRoutes.constantTimeEquals("secret-a", "secret-b"))
-        XCTAssertFalse(CentrifugoRoutes.constantTimeEquals("secret-a", "secret-a-longer"))
-        XCTAssertFalse(CentrifugoRoutes.constantTimeEquals("", "secret-a"))
-        XCTAssertTrue(CentrifugoRoutes.constantTimeEquals("", ""))
+    func testSharedConstantTimeEquals() {
+        // Shared helper — used by both the subscribe-proxy secret check and
+        // the platform-admin login secret check (review fix: no plain `==`).
+        XCTAssertTrue(ConstantTime.equals("secret-a", "secret-a"))
+        XCTAssertFalse(ConstantTime.equals("secret-a", "secret-b"))
+        XCTAssertFalse(ConstantTime.equals("secret-a", "secret-a-longer"))
+        XCTAssertFalse(ConstantTime.equals("", "secret-a"))
+        XCTAssertTrue(ConstantTime.equals("", ""))
+    }
+
+    func testAppTokensCarryUniqueJTIPerIssue() async throws {
+        // MOMO-300 review fix: iat/exp are second-granular, so identical
+        // claims within the same second used to produce byte-identical JWTs
+        // (and identical token_hash rows — a revoked row then killed a fresh
+        // login). The random jti must make every issue unique.
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let jwt = await JWTService(config: testServerConfig())
+
+        let first = try await jwt.signAccess(
+            memberID: memberID, workspaceID: workspaceID, scopes: ["messages:read"])
+        let second = try await jwt.signAccess(
+            memberID: memberID, workspaceID: workspaceID, scopes: ["messages:read"])
+
+        XCTAssertNotEqual(first.token, second.token,
+                          "same-second same-claim tokens must differ (jti)")
+
+        let firstPayload = try await jwt.verify(first.token)
+        let secondPayload = try await jwt.verify(second.token)
+        XCTAssertFalse(firstPayload.jti.value.isEmpty)
+        XCTAssertNotEqual(firstPayload.jti.value, secondPayload.jti.value)
+        XCTAssertNotNil(UUID(uuidString: firstPayload.jti.value))
+
+        // refresh tokens carry jti too (rotation path).
+        let refresh = try await jwt.signRefresh(
+            memberID: memberID, workspaceID: workspaceID, scopes: ["messages:read"])
+        let refreshPayload = try await jwt.verify(refresh.token)
+        XCTAssertNotNil(UUID(uuidString: refreshPayload.jti.value))
+        XCTAssertNotEqual(refreshPayload.jti.value, firstPayload.jti.value)
     }
 
     func testSecurityBootValidationFailsFastOnPlaceholderProxySecretInStrictEnv() {

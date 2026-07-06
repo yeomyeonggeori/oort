@@ -179,11 +179,13 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `MAX_CONCURRENT_RUNS` | worker | `1` | 에이전트별 세마포어 G1. |
 | `RATE_LIMIT_WINDOW_SECONDS` | 서버 | `60` | **MOMO-300** rate limit sliding window 길이. |
 | `RATE_LIMIT_PER_MEMBER` | 서버 | `600` | 윈도당 인증 멤버별 요청 상한. `0`=축 비활성. 초과 시 429 + `Retry-After` + `audit_log(rate_limit.exceeded)`(버스트당 1회). |
-| `RATE_LIMIT_PER_IP` | 서버 | `1200` | 윈도당 클라이언트 IP별 요청 상한(`X-Forwarded-For` 우선). `0`=축 비활성. 익명(비인증) 위반은 tenant가 없어 audit_log 대신 서버 로그에만 남는다. |
+| `RATE_LIMIT_PER_IP` | 서버 | `1200` | 윈도당 클라이언트 IP별 요청 상한(`X-Forwarded-For` 우선). `0`=축 비활성. **per-IP 축 위반은 인증 여부와 무관하게 audit_log에 기록되지 않는다** — IP 미들웨어가 AuthMiddleware보다 앞의 전역 계층이라 principal(tenant)이 없어 서버 로그로만 남는다. audit_log(`rate_limit.exceeded`)는 member 축 위반만 기록. |
 
 > **rate limit v0 경계(문서화):** in-memory sliding window — 단일 노드 전제, 프로세스
 > 재시작 시 리셋, 레플리카 간 비공유. `/health`와 subscribe proxy 경로는 제외.
 > 비용 서킷브레이커(budget_window)와는 독립 축이다.
+> subscribe proxy(`/v1/centrifugo/*`)는 **내부 전용**(centrifugo → api compose 네트워크,
+> `CENT_PROXY_SECRET` 인증)이며 prod Caddy 엣지에서 403으로 차단된다(`infra/prod/Caddyfile`).
 
 > **보안:** `.env.example`의 `change-me-*` / 코드의 `dev-insecure-*` 기본값은 **개발용**이다.
 > 실배포에선 반드시 교체(`openssl rand -hex 32`). 기본값으로도 부팅은 되지만 안전하지 않다.
@@ -900,7 +902,7 @@ env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)�
 | 파일 | 역할 |
 |---|---|
 | `infra/prod/docker-compose.prod.yml` | Caddy 자동 TLS, PostgreSQL 18, Redis, Centrifugo v6 Redis engine, api/relay/worker 서비스 정의. |
-| `infra/prod/Caddyfile` | `API_DOMAIN` → `api:8080`, `REALTIME_DOMAIN` → `centrifugo:8000` reverse proxy + 보안 헤더. |
+| `infra/prod/Caddyfile` | `API_DOMAIN` → `api:8080`, `REALTIME_DOMAIN` → `centrifugo:8000` reverse proxy + 보안 헤더. **MOMO-300:** subscribe proxy(`/v1/centrifugo/*`)는 내부 전용이라 엣지에서 403으로 차단한다. |
 | `infra/prod/centrifugo.prod.json` | dev namespace 계약(ch/dm/agent/user)을 유지하면서 engine만 Redis로 전환. subscribe proxy는 compose 내부 `api:8080`. |
 | `infra/prod/.env.example` | staging/prod env 예시. 실제 시크릿은 커밋하지 않고 host-local env 또는 MOMO-006 SOPS/age로 주입. |
 | `infra/prod/docker-compose.internal-smoke.yml` | MOMO-216 내부 테스트용 single-node smoke override. prod compose에 겹쳐서 local image tag, one-shot migration, mock Hermes boundary를 검증한다. |

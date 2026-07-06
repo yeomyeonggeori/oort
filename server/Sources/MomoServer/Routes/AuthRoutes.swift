@@ -127,7 +127,9 @@ struct AuthRoutes: Sendable {
             throw HTTPError(.unauthorized, message: "malformed token claims")
         }
 
-        // Revocation check — a logged-out/rotated refresh token is dead.
+        // Revocation pre-check — a logged-out/rotated refresh token is dead.
+        // (Advisory only for precise error messages; the atomic gate is the
+        // revoke below.)
         try await tokenStore.requireActive(rawToken: dto.refreshToken, workspaceID: workspaceID)
 
         guard try await Self.isActiveMember(db: db, workspaceID: workspaceID, memberID: memberID)
@@ -135,8 +137,19 @@ struct AuthRoutes: Sendable {
             throw HTTPError(.forbidden, message: "member is not active in this workspace")
         }
 
-        // Rotation: the old refresh token can never be replayed.
-        _ = try await tokenStore.revoke(rawToken: dto.refreshToken, workspaceID: workspaceID)
+        // Rotation: the old refresh token can never be replayed. The revoke's
+        // `UPDATE … WHERE revoked_at IS NULL RETURNING` is the atomic
+        // single-use gate — under concurrent refreshes with the same token,
+        // exactly one request flips the row (`revokedNow == true`) and may
+        // mint a new pair; every loser sees `revokedNow == false` and gets a
+        // 401 (MOMO-300 review fix: previously the result was discarded, so
+        // the requireActive() pre-check raced TOCTOU-style and N concurrent
+        // replays could all rotate successfully).
+        let rotation = try await tokenStore.revoke(
+            rawToken: dto.refreshToken, workspaceID: workspaceID)
+        guard rotation.revokedNow else {
+            throw HTTPError(.unauthorized, message: "refresh token already used or revoked")
+        }
 
         let scopes = payload.scopes
         let access = try await jwt.signAccess(
@@ -278,8 +291,10 @@ struct AuthRoutes: Sendable {
         guard let platformAdminSecret, !platformAdminSecret.isEmpty else {
             return false
         }
+        // MOMO-300 review fix: secret comparison must be constant-time —
+        // a plain `==` short-circuits and leaks match-prefix length via timing.
         return platformAdminEmails.contains(email.lowercased())
-            && platformAdminSecret == platformAdminLoginSecret
+            && ConstantTime.equals(platformAdminSecret, platformAdminLoginSecret)
     }
 
     /// Persist a freshly issued access/refresh pair for revocation (MOMO-300).

@@ -43,7 +43,7 @@ struct CentrifugoRoutes: Sendable {
     ) async throws -> SubscribeProxyResponse {
         // 1. Authenticate the proxy caller before trusting anything in the body.
         guard let presented = request.headers[Self.proxySecretHeader],
-              Self.constantTimeEquals(presented, proxySecret)
+              ConstantTime.equals(presented, proxySecret)
         else {
             context.logger.warning("centrifugo subscribe proxy: missing/invalid proxy secret")
             throw HTTPError(.unauthorized, message: "invalid or missing proxy secret")
@@ -84,19 +84,6 @@ struct CentrifugoRoutes: Sendable {
         }
 
         return allowed ? .allow() : .deny(parsed.denyReason)
-    }
-
-    /// Constant-time string equality (avoids leaking the secret via timing).
-    /// Length is compared first — leaking length is acceptable for this secret.
-    static func constantTimeEquals(_ lhs: String, _ rhs: String) -> Bool {
-        let a = Array(lhs.utf8)
-        let b = Array(rhs.utf8)
-        guard a.count == b.count else { return false }
-        var diff: UInt8 = 0
-        for i in 0..<a.count {
-            diff |= a[i] ^ b[i]
-        }
-        return diff == 0
     }
 
     private func isMember(_ memberID: UUID, of channelID: UUID, in workspaceID: UUID) async throws -> Bool {

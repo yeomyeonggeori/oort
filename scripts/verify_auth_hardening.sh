@@ -406,6 +406,46 @@ api GET "/v1/workspaces/$DEMO_WORKSPACE_ID/roster" "" "$NEW_ACCESS"
 expect_status 200 "rotated access token works"
 
 # --------------------------------------------------------------------------
+# 3b. Refresh rotation is atomic under concurrency (MOMO-300 review fix)
+#     N parallel refreshes with ONE token: exactly one may win (200), every
+#     loser must get 401 — the atomic gate is TokenStore.revoke's
+#     `UPDATE … WHERE revoked_at IS NULL RETURNING`, not the pre-check.
+# --------------------------------------------------------------------------
+LOGIN3="$(login_json)"
+REFRESH3="$(printf '%s' "$LOGIN3" | jq -r '.refreshToken')"
+RACE_BODY="$(jq -cn --arg refreshToken "$REFRESH3" '{refreshToken:$refreshToken}')"
+RACE_N=6
+RACE_DIR="$TMP_DIR/refresh-race"
+mkdir -p "$RACE_DIR"
+echo "[auth-hardening] firing $RACE_N concurrent refresh requests with one refresh token"
+for i in $(seq 1 "$RACE_N"); do
+  curl -sS -o "$RACE_DIR/body-$i.json" -w '%{http_code}' \
+    -H "Content-Type: application/json" \
+    --data "$RACE_BODY" \
+    "$BASE_URL/v1/auth/refresh" > "$RACE_DIR/status-$i" &
+done
+wait
+RACE_WINS=0
+RACE_401=0
+for i in $(seq 1 "$RACE_N"); do
+  RACE_STATUS="$(cat "$RACE_DIR/status-$i" 2>/dev/null || true)"
+  case "$RACE_STATUS" in
+    200) RACE_WINS=$((RACE_WINS + 1)) ;;
+    401) RACE_401=$((RACE_401 + 1)) ;;
+    *)
+      echo "[auth-hardening] FAIL concurrent refresh $i returned unexpected HTTP '${RACE_STATUS:-none}'" >&2
+      cat "$RACE_DIR/body-$i.json" >&2 || true
+      exit 1
+      ;;
+  esac
+done
+if [ "$RACE_WINS" != "1" ]; then
+  echo "[auth-hardening] FAIL refresh rotation must be single-use under concurrency (got ${RACE_WINS}x200 / ${RACE_401}x401 of $RACE_N)" >&2
+  exit 1
+fi
+echo "[auth-hardening] PASS refresh rotation atomic under concurrency (1x200, ${RACE_401}x401 of $RACE_N)" >&2
+
+# --------------------------------------------------------------------------
 # 4. Per-member rate limit: 429 + Retry-After + audit_log
 # --------------------------------------------------------------------------
 echo "[auth-hardening] hammering roster with $((MEMBER_RATE_LIMIT + 8)) requests to trip the member limit"
