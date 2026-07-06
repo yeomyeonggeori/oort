@@ -50,7 +50,7 @@
 | MOMO-310 | pgvector RAG + RRF 하이브리드 + Memory Plane v0 구현 | `blocked(302,121)` |
 | MOMO-320 | AttachmentStore + Drive workspace archive + resumable 업로드 | `blocked(323)` |
 | MOMO-321 | Drive changes.list 폴러 + 추출/청크 인덱싱 | `blocked(320,310)` |
-| MOMO-323 | GWS 스펙 정정 3건 + Internal consent 런북 (문서만) | `ready` |
+| MOMO-323 | GWS 스펙 정정 3건 + Internal consent 런북 (문서만) | `review` (2026-07-06 스펙 정정 3건 + `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md` + fixtures `boundary_kind`, STATUS §0az) |
 
 ## Phase 3 — P2 마감 (M3+)
 

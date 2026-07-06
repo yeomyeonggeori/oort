@@ -755,6 +755,13 @@
 - 3-lens 코드리뷰 반영(blocker 1 + high 4): ① `infra/*`(non-prod)·`server/*`(non-Migrations) 매핑을 staging-smoke/runtime-db 단독에서 **all로 확대**(로컬 런타임 compose와 relay/live/agent 표면의 silent coverage loss 차단) ② diff 베이스 부재/merge-base 실패 시 dirty-only로 좁히지 않고 all로 확대(fail-open 차단) ③ 분류 루프 `set -f`로 glob 확장 차단 ④ 게이트 migrate 스텝이 `MIGRATE_IDEMPOTENCY_CHECK=1` 강제 + `IDEMPOTENCY_OK` 마커 직접 grep 단정(env로 verify 패스가 조용히 꺼져도 게이트 FAIL).
 - 알려진 잔여(정직 표기): host-runtime 1-run 전환으로 기존 2번째 `compose run migrate`가 증명하던 컨테이너 entrypoint(internal-smoke-migrate.sh + bootstrap_roles.sql) 전체의 fresh 재실행 멱등성은 게이트가 더 이상 단정하지 않는다(마이그레이션 파일 skip 증명은 동일 경로+강화 유지, bootstrap_roles는 IF NOT EXISTS 가드). prod 정본 compose(docker-compose.prod.yml)에는 api healthcheck 미추가(핀 이미지의 curl 보장 불가 — 필요 시 이미지 계약 확정 후 별도 티켓).
 
+## 0az. MOMO-323 GWS 스펙 정정 3건 + Internal consent 셋업 런북 (2026-07-06)
+
+- MOMO-122 스펙(`research/11-agent-runtime/12-google-workspace-connector-v0.md`) 정정: §4.2 scope 표에서 `drive.metadata.readonly`가 **restricted-class**임을 명기(기존 표는 가벼운 metadata tier처럼 읽혔음 — `drive.file`만 non-sensitive), self-hosted 배포는 배포 조직 소유 GCP 프로젝트 + OAuth consent **Internal**(같은 Workspace 조직) 전제에서 Google 검증/CASA가 면제됨을 배포 전제로 반영. §2 "no full Drive mirrors" 규칙에 **momo 관리 공유 드라이브 한정 revocable 파생 인덱스**(임베딩+청크, 행마다 permission snapshot version, tombstone 시 삭제) carve-out을 추가 — 사용자 개인 Drive(`drive.file` 선택 파일)는 기존대로 excerpt-only.
+- MOMO-123 스펙(`13-google-workspace-enterprise-admin-v0.md`)에 `service_account_boundary.boundary_kind` 도입: 기존 DWD 경로는 `dwd_delegation`(필드 부재 시 기본으로 읽음 — backward compatible), 제3모드 `shared_drive_member` 추가(**DWD 아님** — SA가 자기 자신으로서 momo 관리 공유 드라이브 1개의 Content Manager 멤버로만 동작, 사칭/delegated token 금지, Admin console API Controls 등록 불필요). §3 install mode 표·§5 scope inventory(`drive.file` SA-as-itself)·§6 boundary JSON/규칙·revoke 경로를 함께 갱신하고, fixtures 3종(`admin_install_scope_inventory`/`dwd_delegated_context_projection`/`audit_export_revoke_flow`)에 `boundary_kind` 필드 + `shared_drive_member` boundary 예시를 additive로 확장(jq green).
+- 신규 `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`: 배포 조직용 GCP 프로젝트 생성 → OAuth consent Internal → SA 생성/키 발급(시크릿 저장소 only, 키 바이트 비커밋) → 공유 드라이브 생성 + SA Content Manager 멤버 추가 → boundary 기록값 → 검증 스모크/철회 경로까지, 사람 단계는 전부 `[manual]` 표기. `docs/INDEX.md` §2에 등록.
+- 검증: `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(fixtures JSON jq 포함). 문서/fixture만 변경 — 코드/스키마 변경 없음. 정직 표기: 런북의 `[manual]` 단계(GCP/consent/SA/드라이브)는 미실행이며, SA `drive.file` scope의 changes.list/다운로드 충분성은 **runtime-unverified**(MOMO-320 착수 시 실증 — tracker 실증 항목 유지). 실행 트래커에서 MOMO-323 → `review`.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |
