@@ -787,6 +787,8 @@
 - 검증 하네스: `scripts/mock_hermes.py`에 opt-in 요청 덤프(`MOCK_HERMES_REQUEST_DUMP=<path>`, 기본 비활성)를 추가하고, 신규 `scripts/verify_agent_context.sh`를 `local_gate.sh --profile runtime-agent`에 연결했다. 시나리오: 채널에 사전 메시지 시드("파인애플 재고는 7개다" + 에이전트 발화 + 오래된 패딩)와 타 채널 off-topic 메시지 → @hermes 트리거 → 덤프에서 (a) 시드 히스토리 전달 (b) 에이전트 자신=assistant (c) 타 채널 미포함 (d) 작은 `AGENT_CONTEXT_MAX_CHARS`로 오래된 패딩 드랍/트리거 유지 검증.
 - 퀵 검증(PASS): `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build --package-path server`, `swift test --package-path workers/AgentWorker`(29 tests, role 매핑/예산 절단/하위호환 신규 3개 포함), server 순수 유닛 `swift test --package-path server --filter "AgentMention|Broadcast"`, `python3 -m py_compile scripts/mock_hermes.py` + `adapters/hermes/tests/test_momo_adapter_contract.py`(5 tests), `bash -n`/`/bin/bash -n scripts/verify_agent_context.sh scripts/local_gate.sh`, mock 덤프 기능 스모크. runtime-unverified(Docker Postgres/Centrifugo 기동이 필요한 `scripts/verify_agent_context.sh` 실 실행은 이번 웨이브의 역할 분리상 풀 게이트 `--profile runtime-agent`에서 momo-main이 실행) — SKIPPED+사유.
 
+- 3-lens 리뷰(2026-07-07) PASS, blocker 0. 리뷰 반영: diff/artifact/approval_request(body=NULL 구조화 타입)를 서버 `recentMessageBody`가 `[diff: path]`/`[artifact: title]`/`[approval_request]`로 요약(빈 content로 실제 hermes 호출이 거부되는 것 방지), ContextAssembler가 비-트리거 빈-content 턴을 스킵(방어). Follow-up(비-blocker): recent_messages의 non-trigger `source_id`가 `sources` 배열로 완전 resolve되는 것은 **MOMO-307(Context Broker)** 스코프; 스레드 우선 브랜치는 코드상 정확하나 send()가 아직 root_id/reply_to_id를 기록하지 않아 live 경로 미도달 → **MOMO-305(스레드 UI)**에서 재검증.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

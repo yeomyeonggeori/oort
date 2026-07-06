@@ -554,6 +554,23 @@ struct MessageRoutes: Sendable {
             return "[tool_call]"
         case "tool_result":
             return "[tool_result]"
+        case "diff":
+            // MOMO-302 (review high): structured types carry payload in props with
+            // body=NULL. Summarize them like tool_* so they never project to an empty
+            // chat turn (some OpenAI-compatible endpoints reject empty `content`).
+            if let object = jsonObject(propsJSON) as? [String: Any],
+               let path = object["path"] as? String, !path.isEmpty {
+                return "[diff: \(path)]"
+            }
+            return "[diff]"
+        case "artifact":
+            if let object = jsonObject(propsJSON) as? [String: Any],
+               let title = object["title"] as? String, !title.isEmpty {
+                return "[artifact: \(title)]"
+            }
+            return "[artifact]"
+        case "approval_request":
+            return "[approval_request]"
         default:
             let text = body ?? ""
             if text.count > 2000 {

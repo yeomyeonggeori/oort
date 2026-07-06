@@ -66,6 +66,14 @@ enum ContextAssembler {
             return Turn(role: "user", content: content, isTrigger: isTrigger)
         }
 
+        // MOMO-302 (review high): drop non-trigger turns whose content is
+        // empty/whitespace so we never emit a `{role, content:""}` chat message
+        // (some OpenAI-compatible endpoints reject empty content). The server
+        // already summarizes structured types (diff/artifact/approval_request);
+        // this is defense-in-depth for any residual empty body. The trigger is
+        // always kept (it is the mention text and never empty in practice).
+        turns = turns.filter { $0.isTrigger || !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
         // If the server never tagged a trigger (defensive), treat the newest
         // (last, since the window is ASC by seq) turn as always-keep so budget
         // trimming can never erase the current turn.
