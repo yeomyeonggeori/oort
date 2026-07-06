@@ -322,25 +322,8 @@ wait_http() {
   fail "$name did not become ready: $url"
 }
 
-wait_compose_healthy() {
-  service=$1
-  name=$2
-  deadline=$(($(date +%s) + 90))
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    cid=$(docker compose --env-file "$ENV_FILE" \
-      -f "$REPO_ROOT/infra/docker-compose.yml" \
-      -f "$COMPOSE_OVERRIDE" ps -q "$service" 2>/dev/null || true)
-    if [ "$cid" != "" ]; then
-      status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || true)
-      if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
-        echo "[local-alpha] ready: $name docker-health=$status"
-        return 0
-      fi
-    fi
-    sleep 1
-  done
-  fail "$name did not become healthy in Docker compose"
-}
+# (MOMO-316) wait_compose_healthy 폴링 헬퍼는 제거됨 —
+# compose 서비스 대기는 `docker compose up -d --wait`(healthcheck 기반)가 담당한다.
 
 assert_pid_alive() {
   pid=$1
@@ -472,7 +455,7 @@ print_plan() {
     return 0
   fi
   echo "Execute will run:"
-  echo "  1. docker compose up -d (PG18 + Centrifugo v6, local subscribe proxy override)"
+  echo "  1. docker compose up -d --wait (PG18 + Centrifugo v6, local subscribe proxy override)"
   echo "  2. scripts/migrate.sh"
   echo "  3. scripts/verify_rls.sh to prepare momo_app/momo_relay/momo_worker roles"
   echo "  4. MomoServer on http://127.0.0.1:\${PORT:-8080}"
@@ -611,13 +594,16 @@ echo "[local-alpha] evidence: $EVIDENCE_DIR"
 echo "[local-alpha] env file: $ENV_FILE"
 echo "[local-alpha] AWS resources: none"
 
+# MOMO-316: --wait가 postgres/centrifugo healthcheck healthy까지 대기하므로
+# 별도 wait_compose_healthy 폴링이 필요 없다. wait_http는 compose 밖의
+# host 프로세스(mock Hermes/MomoServer)에만 남는다 — 이들은 compose 서비스가
+# 아니라 healthcheck를 붙일 수 없다.
 run_cmd docker-up docker compose --env-file "$ENV_FILE" \
   -f "$REPO_ROOT/infra/docker-compose.yml" \
-  -f "$COMPOSE_OVERRIDE" up -d
+  -f "$COMPOSE_OVERRIDE" up -d --wait
 run_cmd docker-ps docker compose --env-file "$ENV_FILE" \
   -f "$REPO_ROOT/infra/docker-compose.yml" \
   -f "$COMPOSE_OVERRIDE" ps
-wait_compose_healthy centrifugo "Centrifugo"
 
 run_cmd migrate sh "$REPO_ROOT/scripts/migrate.sh"
 run_cmd verify-rls sh "$REPO_ROOT/scripts/verify_rls.sh"

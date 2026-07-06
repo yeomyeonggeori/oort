@@ -746,6 +746,13 @@
 - UI 품질 자동화 도구를 설치했다: `.claude/skills/momo-design-taste/`(SwiftUI anti-slop 하드 룰 + mechanical pre-flight + MomoDS 토큰 계약 시드) + `.claude/agents/design-review.md`(스크린샷 rubric 리뷰, Blocker 자동 반송). UI PR은 design-review 리포트(Blocker 0)를 evidence로 포함한다.
 - 문서/기획만 변경 — 코드/스키마/게이트 스크립트 변경 없음, 빌드 영향 없음. 다음 착수 = **MOMO-316(게이트 Wave 1)** → MOMO-300/301/302/303 병렬. 재설계 티켓 종료 시 이 STATUS와 tracker를 함께 갱신한다.
 
+## 0ay. MOMO-316 Local Gate Wave 1 — --auto 프로파일 + compose --wait + 멱등 1-run (2026-07-06)
+
+- `scripts/local_gate.sh --auto` 추가: `git diff --name-only <base>...HEAD`(base=`LOCAL_GATE_BASE_REF`/origin/main, 폴백 local main) + uncommitted 변경을 보수적 경로 매핑으로 프로파일 자동 선택(docs/clients/server/Migrations/relay/workers/infra(prod)/scripts 매핑, 모호·미매핑 경로는 `all`로 넓힘 — 좁히는 추측 금지). `--profile` 명시가 항상 우선(동시 지정 시 override 로그), 제안 프로파일과 per-path 이유는 evidence markdown의 "Auto profile selection" 섹션에 기록된다.
+- compose 기동 대기를 healthcheck 기반 `docker compose up -d --wait`로 교체: `make up`(postgres/centrifugo healthcheck), `scripts/verify_internal_host_runtime.sh`(internal-smoke override에 api `/health` healthcheck + caddy 짧은 간격 healthcheck 추가, `swift-service.Dockerfile` 런타임에 curl 추가), `scripts/local_alpha_runner.sh`(`wait_compose_healthy` 폴링 제거). host-runtime의 Caddy edge `/health` wait_http 1건은 유지 — edge 라우팅(host port 매핑 + local-TLS redirect)은 in-container healthcheck로 표현이 brittle하고, api HTTP 준비는 --wait가 이미 보장(주석으로 명시).
+- 마이그레이션 멱등성 검증을 2-run → 1-run으로: `scripts/migrate.sh`가 한 실행 안에서 apply→verify 2패스(동일 skip 판정 루프 재실행)를 돌고 두 번째 패스에서 신규 적용이 나오면 즉시 실패, 성공 시 `[migrate] IDEMPOTENCY_OK second-pass applied=0 skipped=<N>` 마커를 남긴다(`MIGRATE_IDEMPOTENCY_CHECK=0` opt-out). local gate runtime 부트스트랩은 `make migrate` 1회로, host-runtime은 별도 `compose run migrate` 없이 `compose logs migrate`의 마커 캡처로 evidence를 대체 — 판정 경로가 동일해 증명력 유지, 기존 grep '스킵'보다 강한 단정(전 파일 SKIP + 신규 적용 0).
+- 검증: `--profile docs` PASS, `--profile runtime-db` PASS(compose --wait + 1-run migrate IDEMPOTENCY_OK 실측), `--profile host-runtime` PASS(이미지 5개 빌드 → `up -d --wait`로 api /health healthy + migrate 완주 → Caddy edge 200 → `compose logs migrate`의 IDEMPOTENCY_OK 캡처 → relay/mock 김인턴 왕복까지 e2e). `--auto` 자체 테스트에서 이 브랜치의 scripts/infra 변경이 `all`로 넓게 매핑되고 `--profile` 명시가 override함을 확인. `local-alpha` runner의 `--wait` 전환은 프로파일 미실행으로 `runtime-unverified(local-alpha --wait)`.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

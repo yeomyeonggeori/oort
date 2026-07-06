@@ -19,7 +19,7 @@
 
 | 티켓 | 내용 | 우선순위 | 상태 |
 |---|---|---|---|
-| MOMO-316 | local gate `--auto` 프로파일 + compose `--wait` + 멱등 1-run | P0 | `ready` ← **다음 착수** |
+| MOMO-316 | local gate `--auto` 프로파일 + compose `--wait` + 멱등 1-run | P0 | `review` (2026-07-06 구현, STATUS §0ay) |
 | MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `ready` |
 | MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | `blocked(316)` |
 | MOMO-319 | runtime-db verifier 병렬화 + 웜 볼륨 opt-in | P2 | `blocked(317)` |

@@ -66,8 +66,10 @@ migrate: ## server/Migrations/*.sql 번호순 적용 (psql 필요)
 	fi
 
 up: ## 인프라 기동 (PostgreSQL 18 + Centrifugo v6)
+	@# --wait: postgres/centrifugo 모두 compose healthcheck가 정의되어 있어
+	@# healthy(=연결 수락 가능)까지 대기한다(MOMO-316). 폴링 루프 불필요.
 	@if [ -f "$(COMPOSE_FILE)" ]; then \
-		$(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" up -d; \
+		$(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" up -d --wait; \
 	else \
 		echo "up: $(COMPOSE_FILE) 없음 (후속 티켓 T02에서 추가). runtime-unverified (no docker/psql)."; \
 	fi

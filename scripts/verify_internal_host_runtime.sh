@@ -204,10 +204,21 @@ docker build \
 docker build -f "$MIGRATE_DOCKERFILE" -t "$MIGRATE_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-migrate-${RUN_SLUG}.log"
 docker build -f "$MOCK_DOCKERFILE" -t "$MOCK_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-mock-hermes-${RUN_SLUG}.log"
 
-echo "[host-runtime] booting prod + internal-smoke stack"
-compose up -d 2>&1 | tee "$COMPOSE_LOG"
+echo "[host-runtime] booting prod + internal-smoke stack (up -d --wait)"
+# MOMO-316: `--wait`가 HTTP 준비를 보장하는 근거 —
+#   api      = internal-smoke override의 /health healthcheck(healthy까지 대기)
+#   migrate  = one-shot 완주(service_completed_successfully) 대기
+#   postgres/redis/centrifugo/caddy/mock-hermes = 기존 healthcheck healthy 대기
+if ! compose up -d --wait --wait-timeout 300 2>&1 | tee "$COMPOSE_LOG"; then
+  fail "compose up -d --wait did not reach healthy/completed state"
+fi
 
-echo "[host-runtime] waiting for app health through Caddy edge"
+echo "[host-runtime] verifying app health through Caddy edge"
+# MOMO-316: 이 wait_http 폴링은 유지한다 — Caddy "edge 라우팅"(host port 매핑 +
+# Host 헤더 기반 reverse_proxy) 도달성은 컨테이너 내부 healthcheck로 표현하기
+# 어렵다(Caddy가 localhost 사이트를 local-TLS 308 redirect로 처리해 in-container
+# self-check이 brittle). api 자체의 HTTP 준비는 위 --wait healthcheck가 이미
+# 보장하므로 이 폴링은 사실상 1회 curl로 끝나는 edge 계약 확인이다.
 if ! wait_http "http://127.0.0.1:${HTTP_PORT}/health" "localhost" "Caddy edge /health"; then
   echo "[host-runtime] Caddy edge /health not ready; trying internal api route"
   compose exec -T mock-hermes python3 - <<'PY' >/dev/null || fail "internal api /health did not return 200"
@@ -216,10 +227,18 @@ urllib.request.urlopen("http://api:8080/health", timeout=5).read()
 PY
 fi
 
-echo "[host-runtime] verifying migration idempotency"
-compose run --rm migrate 2>&1 | tee "$TMP_ROOT/migrate-idempotency-${RUN_SLUG}.log"
+echo "[host-runtime] verifying migration idempotency (single-run evidence)"
+# MOMO-316: migrate 러너(scripts/migrate.sh)가 한 번의 컨테이너 실행 안에서
+# apply→verify 2패스를 돌고 두 번째 패스의 skip 마커(IDEMPOTENCY_OK)를 남긴다.
+# 별도 `compose run --rm migrate` 왕복을 없애고, 최초 부팅 때 완주한 migrate
+# 컨테이너의 `compose logs`를 evidence로 캡처한다. verify 패스는 apply 패스와
+# 동일한 skip 판정 루프를 재실행하므로 2-run 증명과 증명력이 동일하다.
+compose logs --no-color migrate > "$TMP_ROOT/migrate-idempotency-${RUN_SLUG}.log" 2>&1 || true
+if ! grep -Fq "IDEMPOTENCY_OK second-pass applied=0" "$TMP_ROOT/migrate-idempotency-${RUN_SLUG}.log"; then
+  fail "migrate logs did not show single-run idempotency evidence (IDEMPOTENCY_OK marker)"
+fi
 if ! grep -Fq "스킵" "$TMP_ROOT/migrate-idempotency-${RUN_SLUG}.log"; then
-  fail "second migrate run did not show idempotency skip evidence"
+  fail "migrate logs did not show idempotency skip evidence"
 fi
 
 BASE_URL="https://localhost:${HTTPS_PORT}"
@@ -380,9 +399,9 @@ compose logs --no-color > "$COMPOSE_LOG" 2>&1 || true
   echo "  - worker: \`${WORKER_IMAGE}\`"
   echo "  - migrate: \`${MIGRATE_IMAGE}\`"
   echo "  - mock Hermes: \`${MOCK_IMAGE}\`"
-  echo "- Health: Caddy/internal API \`/health\` returned 200"
+  echo "- Health: \`compose up -d --wait\` reached api /health healthcheck healthy + migrate completed; Caddy/internal API \`/health\` returned 200"
   echo "- Agent runtime status: \`/v1/agent-runtime/status\` reported internal-host-mock/mock without leaking provider secrets"
-  echo "- Migration: one-shot compose migrate succeeded during boot; second \`compose run migrate\` showed idempotent skip"
+  echo "- Migration: single migrate container run performed apply + idempotent re-apply (MOMO-316 1-run); \`compose logs migrate\` captured \`IDEMPOTENCY_OK second-pass applied=0\` skip evidence"
   echo "- REST message: message_id=\`${MESSAGE_ID}\`, seq=\`${MESSAGE_SEQ}\`, client_msg_id=\`${CLIENT_MSG_ID}\`, channel=\`${CENT_GENERAL_CHANNEL}\`"
   echo "- Relay publish: Centrifugo history contains matching \`message.new\` with \`seq=${MESSAGE_SEQ}\`"
   echo "- Agent mock: trigger_message_id=\`${AGENT_TRIGGER_MESSAGE_ID}\`, run_id=\`${AGENT_RUN_ID}\`, channel=\`${CENT_AGENT_LAB_CHANNEL}\`, progress=\`${AGENT_PROGRESS_CHANNEL}\`"
