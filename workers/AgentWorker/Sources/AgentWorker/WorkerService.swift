@@ -14,11 +14,15 @@ import ServiceLifecycle
 ///      per agent in flight (per-agent serialization, L4 §3.5). SKIP LOCKED is
 ///      loss-free (commit-visibility only) — a high-water-mark cursor is forbidden.
 ///   2. Open the §3.3 loop-safety gates (G1 concurrency / G2 consecutive / G3 step
-///      cap / G4 §3.4 depth) — payload-seed fast-fail first, then the authoritative
-///      DB snapshot in one tx (agent-row FOR UPDATE = per-agent mutex; on proceed
-///      the run flips to 'running' in the same tx so G1 is race-safe, MOMO-301).
-///      Trip → agent_run failed(loop_guard_tripped) + audit_log + degraded system
-///      message on the channel + job done + agent.status=error.
+///      cap / a2a_depth §3.4 hop cap) on the authoritative DB snapshot in one tx
+///      (agent-row FOR UPDATE = per-agent mutex; on proceed the run flips to
+///      'running' + step_count+1 in the same tx so G1 is race-safe and G3 is
+///      actually consumed, MOMO-301). The DB snapshot is the ONLY gate authority
+///      — no payload-seed pre-evaluation. Trip → agent_run
+///      failed(loop_guard_tripped) + audit_log + degraded system message on the
+///      channel + job done + agent.status=error. The claim UPDATE only applies
+///      to claimable run states; a cancelled/terminal-held run is never revived
+///      (skip + audit no-op).
 ///   3. Reserve estimated budget (§8.5) — trip → abort before any hermes spend.
 ///   4. publish agent.status=thinking; call hermes /v1/chat/completions
 ///      (stream=true). Each text delta → publish agent.partial + PATCH the
@@ -220,21 +224,12 @@ struct WorkerService: Service {
         }
 
         // ---- §3.3/§3.4 loop-safety gates (MOMO-301) ----
-        // Fast-fail complement on payload seeds (no DB round-trip).
-        let gateState = LoopGuards.RunGateState(
-            stepCount: p.stepCount ?? 0,
-            depth: p.depth ?? 0,
-            consecutiveAuto: p.consecutiveAuto ?? 0,
-            activeRunsForAgent: 0,
-            lastContentHash: nil)
-        if case .halt(let reason) = guards.evaluatePreInvoke(gateState) {
-            await handleGuardTrip(
-                job: job, agentRealtime: agentRealtime,
-                gate: Self.gateLabel(fromReason: reason), reason: reason, snapshot: nil)
-            return
-        }
-        // Authoritative DB gates G1–G4 (one tx; agent row FOR UPDATE = per-agent
-        // mutex, so concurrent claims for the same agent serialize race-free).
+        // The DB snapshot is the sole gate authority (one tx; agent row FOR
+        // UPDATE = per-agent mutex, so concurrent claims for the same agent
+        // serialize race-free). Payload gate seeds are intentionally ignored —
+        // a payload fast-fail could halt on stale seeds and contradict the
+        // DB-SoT contract. Jobs without run_id (legacy fixtures) have no
+        // agent_run row to guard and proceed ungated.
         if let runID = p.runID {
             let outcome: DBGateResult
             do {
@@ -245,10 +240,24 @@ struct WorkerService: Service {
                 await requeueJob(job, reason: "loop-guard evaluation failed: \(error)")
                 return
             }
-            if case .tripped(let gate, let reason, let snapshot) = outcome {
+            switch outcome {
+            case .proceed:
+                break
+            case .tripped(let gate, let reason, let snapshot):
                 await handleGuardTrip(
                     job: job, agentRealtime: agentRealtime,
                     gate: gate, reason: reason, snapshot: snapshot)
+                return
+            case .notClaimable(let status):
+                // The run left the claimable state machine (e.g. cancelled by a
+                // human) between enqueue and claim — never revive it. The audit
+                // no-op row was written in the same tx; just retire the job.
+                logger.info("agent_run not claimable; skipping execution", metadata: [
+                    "outboxId": .stringConvertible(job.id),
+                    "runId": .string(runID.uuidString),
+                    "runStatus": .string(status),
+                ])
+                await markJobDone(job.id)
                 return
             }
         }
@@ -398,17 +407,35 @@ struct WorkerService: Service {
         await markJobDone(job.id)
     }
 
-    // MARK: - loop-safety gates G1–G4 (MOMO-301, DB SoT)
+    // MARK: - loop-safety gates G1/G2/G3/a2a_depth (MOMO-301, DB SoT)
 
     private enum DBGateResult: Sendable {
         case proceed
         case tripped(gate: String, reason: String, snapshot: LoopGuards.DBGateSnapshot?)
+        /// The run's status was outside the claimable set — execution skipped,
+        /// audit no-op recorded (no revival of cancelled/held/terminal runs).
+        case notClaimable(status: String)
     }
 
-    /// Evaluate the authoritative G1–G4 snapshot and, on proceed, claim the
+    /// Run states the normal (method='publish') claim path may flip to 'running':
+    ///   * queued  — fresh mention-routed run;
+    ///   * running — crash-recovery / duplicate wake of a run this worker already
+    ///               claimed (idempotent re-claim);
+    ///   * failed  — transient-error retry: requeueJob marks the run failed
+    ///               before backoff, and the retried job re-claims it.
+    /// Everything else (cancelled/succeeded/timed_out/awaiting_approval/paused)
+    /// is terminal or human-held for this path and must never be revived here —
+    /// approvals resume through the dedicated resume_approval path instead.
+    /// Keep in sync with the literal IN (...) in evaluateAndClaimGates.
+    private static let claimableRunStatuses = ["queued", "running", "failed"]
+
+    /// Evaluate the authoritative gate snapshot and, on proceed, claim the
     /// per-agent semaphore by flipping the run to `running` in the SAME tx —
     /// the next gate evaluation for this agent (serialized on the agent-row
-    /// lock) then counts this run as live (G1 race safety).
+    /// lock) then counts this run as live (G1 race safety). The claim also
+    /// consumes one step (`step_count + 1`) so G3 is enforced at runtime, and
+    /// is status-guarded so a run cancelled between enqueue and claim stays
+    /// cancelled (0 rows → audit no-op + skip).
     private func evaluateAndClaimGates(job: ClaimedJob, runID: UUID) async throws -> DBGateResult {
         let p = job.payload
         return try await pg.withTransaction(logger: logger) { conn in
@@ -421,21 +448,73 @@ struct WorkerService: Service {
                 channelID: p.channelID,
                 runID: runID)
             else {
-                // No agent_run row → nothing to guard (payload fast-fail already ran).
+                // No agent_run row → nothing to guard (legacy/fixture job).
                 return .proceed
             }
+
+            // G1 stale-running observation: excluded-from-count abandoned runs
+            // are made visible in audit_log. TODO(follow-up reaper ticket):
+            // transition stale running runs to failed instead of observing only.
+            for staleRunID in snapshot.staleRunningRunIDs {
+                let detail = Self.jsonString([
+                    "stale_run_id": staleRunID.uuidString,
+                    "evaluating_run_id": runID.uuidString,
+                    "agent_member_id": p.agentMemberID.uuidString,
+                    "stale_threshold_seconds": config.g1StaleRunningSeconds,
+                    "note": "running run exceeded G1_STALE_RUNNING_SECONDS without progress; excluded from G1 count (reaper follow-up ticket needed)",
+                    "source": "agent_worker.loop_guard.v0",
+                ])
+                _ = try await conn.query(
+                    """
+                    INSERT INTO audit_log
+                      (workspace_id, actor_member_id, action, target_type,
+                       target_id, run_id, detail)
+                    VALUES
+                      (\(job.workspaceID), \(p.agentMemberID),
+                       'agent.guard.stale_running_observed', 'agent_run',
+                       \(staleRunID), \(staleRunID), \(detail)::jsonb)
+                    """,
+                    logger: logger)
+            }
+
             switch guards.evaluateSnapshot(snapshot) {
             case .proceed:
-                _ = try await conn.query(
+                let claimed = try await conn.query(
                     """
                     UPDATE agent_run
                        SET status = 'running',
+                           step_count = step_count + 1,
                            consecutive_auto_count = \(snapshot.consecutiveAutoStreak),
                            started_at = COALESCE(started_at, now()),
                            updated_at = now()
                      WHERE id = \(runID)
+                       AND status IN ('queued','running','failed')
+                    RETURNING id
                     """,
-                    logger: logger)
+                    logger: logger
+                ).collect()
+                if claimed.isEmpty {
+                    let detail = Self.jsonString([
+                        "run_id": runID.uuidString,
+                        "run_status": snapshot.runStatus,
+                        "outbox_id": job.id,
+                        "claimable_statuses": Self.claimableRunStatuses,
+                        "reason": "run status is not claimable; execution skipped so cancelled/held runs are never revived",
+                        "source": "agent_worker.loop_guard.v0",
+                    ])
+                    _ = try await conn.query(
+                        """
+                        INSERT INTO audit_log
+                          (workspace_id, actor_member_id, action, target_type,
+                           target_id, run_id, detail)
+                        VALUES
+                          (\(job.workspaceID), \(p.agentMemberID),
+                           'agent.run.claim_skipped', 'agent_run', \(runID),
+                           \(runID), \(detail)::jsonb)
+                        """,
+                        logger: logger)
+                    return .notClaimable(status: snapshot.runStatus)
+                }
                 return .proceed
             case .tripped(let gate, let reason):
                 return .tripped(gate: gate, reason: reason, snapshot: snapshot)
@@ -584,18 +663,20 @@ struct WorkerService: Service {
     }
 
     /// Human-readable degraded channel message (MOMO-256 pattern: tell the
-    /// humans what stopped and how to proceed, without agent-splaining).
+    /// humans what stopped and how to proceed, without agent-splaining). The
+    /// "how to proceed" tail must match what actually unblocks each gate —
+    /// e.g. a G1 trip means another run is genuinely executing right now
+    /// (approval-held runs no longer count), so re-mention after it finishes.
     private static func guardTripMessage(gate: String, reason: String) -> String {
-        "This agent run was stopped by loop-safety guard \(gate) before any provider call (no spend). \(reason). Mention the agent again to start a fresh run."
-    }
-
-    private static func gateLabel(fromReason reason: String) -> String {
-        for gate in ["G1", "G2", "G3", "G4"] where reason.hasPrefix(gate) {
-            return gate
+        let prefix = "This agent run was stopped by loop-safety guard \(gate) before any provider call (no spend). \(reason)."
+        switch gate {
+        case "G1":
+            return "\(prefix) Another run for this agent is still executing and was not interrupted; mention the agent again once it finishes."
+        case "G2":
+            return "\(prefix) Send a human message in this channel to reset the auto-reply counter, then mention the agent again."
+        default:
+            return "\(prefix) Mention the agent again to start a fresh run."
         }
-        // Payload-stub depth halt reads "depth cap (MAX_DEPTH=…)" — §3.4 = G4.
-        if reason.hasPrefix("depth cap") { return "G4" }
-        return "G?"
     }
 
     private static func guardTripProps(gate: String, reason: String, runID: UUID) -> String {

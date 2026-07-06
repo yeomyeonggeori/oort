@@ -53,54 +53,7 @@ final class AgentWorkerTests: XCTestCase {
         )
     }
 
-    func testLoopGuardDefaultsProceedForFreshRunAndHaltAtCaps() {
-        let config = Config(
-            pgHost: "localhost",
-            pgPort: 5432,
-            pgUser: "momo_worker",
-            pgPassword: "dev",
-            pgDatabase: "momo",
-            centAPIURL: "http://localhost:8000/api",
-            centAPIKey: "dev",
-            momoEnvironment: "local",
-            agentProviderMode: .localMock,
-            hermesBaseURL: "http://localhost:8088/v1",
-            hermesAPIKey: "dev",
-            agentModel: "hermes-agent",
-            allowLocalLoopbackExternalHermes: false,
-            pollInterval: .milliseconds(300),
-            maxAttempts: 3,
-            maxConsecutiveAuto: 3,
-            maxSteps: 12,
-            maxDepth: 4,
-            maxConcurrentRuns: 1
-        )
-        let guards = LoopGuards(config: config, logger: .init(label: "test.loop-guards"))
-
-        XCTAssertEqual(
-            guards.evaluatePreInvoke(.init(
-                stepCount: 0,
-                depth: 0,
-                consecutiveAuto: 0,
-                activeRunsForAgent: 0,
-                lastContentHash: nil
-            )),
-            .proceed
-        )
-
-        XCTAssertEqual(
-            guards.evaluatePreInvoke(.init(
-                stepCount: 12,
-                depth: 0,
-                consecutiveAuto: 0,
-                activeRunsForAgent: 0,
-                lastContentHash: nil
-            )),
-            .halt(reason: "G3 step cap (max_steps=12)")
-        )
-    }
-
-    func testDBGateSnapshotVerdictsCoverG1ThroughG4() {
+    func testDBGateSnapshotVerdictsCoverAllGates() {
         let guards = LoopGuards(config: testConfig(), logger: .init(label: "test.db-gates"))
         // Defaults from testConfig: maxConsecutiveAuto=3, maxSteps=12, maxDepth=4.
         func snapshot(
@@ -128,12 +81,12 @@ final class AgentWorkerTests: XCTestCase {
             guards.evaluateSnapshot(snapshot(activeOthers: 1)),
             .tripped(
                 gate: "G1",
-                reason: "G1 concurrency cap: 1 other live run(s) for this agent (max_concurrent_runs=1)"))
+                reason: "G1 concurrency cap: 1 other running run(s) for this agent (max_concurrent_runs=1)"))
         XCTAssertEqual(
             guards.evaluateSnapshot(snapshot(streak: 3)),
             .tripped(
                 gate: "G2",
-                reason: "G2 consecutive auto cap: 3 trailing agent replies (MAX_CONSECUTIVE_AUTO=3)"))
+                reason: "G2 consecutive auto cap: 3 consecutive auto replies by this agent since the last human message (MAX_CONSECUTIVE_AUTO=3)"))
         XCTAssertEqual(
             guards.evaluateSnapshot(snapshot(stepCount: 12)),
             .tripped(gate: "G3", reason: "G3 step cap: step_count=12 (max_steps=12)"))
@@ -141,13 +94,20 @@ final class AgentWorkerTests: XCTestCase {
         XCTAssertEqual(
             guards.evaluateSnapshot(snapshot(stepCount: 5, runMaxSteps: 5)),
             .tripped(gate: "G3", reason: "G3 step cap: step_count=5 (max_steps=5)"))
+        // §3.4: depth == MAX_DEPTH is still valid ("초과 시 차단"), depth > trips
+        // under the durable a2a_depth label (§3.3 canonical G4 = SimHash).
+        XCTAssertEqual(guards.evaluateSnapshot(snapshot(depth: 4)), .proceed)
         XCTAssertEqual(
-            guards.evaluateSnapshot(snapshot(depth: 4)),
-            .tripped(gate: "G4", reason: "G4 depth cap: depth=4 (MAX_DEPTH=4)"))
+            guards.evaluateSnapshot(snapshot(depth: 5)),
+            .tripped(gate: "a2a_depth", reason: "a2a_depth cap: depth=5 exceeds MAX_DEPTH=4"))
         // Higher agent-owned concurrency cap admits parallel runs.
         XCTAssertEqual(
             guards.evaluateSnapshot(snapshot(activeOthers: 1, maxConcurrent: 2)),
             .proceed)
+        // Stale running runs are carried in the snapshot but never counted.
+        var staleSnapshot = snapshot()
+        staleSnapshot.staleRunningRunIDs = [UUID()]
+        XCTAssertEqual(guards.evaluateSnapshot(staleSnapshot), .proceed)
     }
 
     func testStrictProviderConfigRejectsMockOrPlaceholderHermes() {

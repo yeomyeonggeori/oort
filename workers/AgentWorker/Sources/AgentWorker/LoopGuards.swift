@@ -4,75 +4,45 @@ import PostgresNIO
 
 /// Multi-agent loop-safety gates (L4 §3.3 6-gate AND-combination + §3.4 A2A).
 ///
-/// MOMO-301: G1–G4 are backed by **real Postgres queries** (SoT = L4 §3.3 table),
-/// evaluated inside one transaction on the worker's claim/turn path:
+/// MOMO-301: the gates are backed by **real Postgres queries** (SoT = L4 §3.3
+/// table), evaluated inside one transaction on the worker's claim/turn path.
+/// The DB snapshot is the ONLY gate authority — there is deliberately no
+/// payload-seeded pre-evaluation (removed in review: a payload fast-fail could
+/// halt a run on stale seeds and contradict the DB-SoT contract).
 ///
-///   G1 — per-agent concurrency: count of other live runs
-///        (`running/awaiting_approval/paused`) vs `agent.max_concurrent_runs`.
-///        The `agent` row is locked `FOR UPDATE` as the per-agent gate mutex, so
-///        two workers claiming jobs for the same agent serialize here and the
-///        winner's `status='running'` claim commits before the loser counts.
-///   G2 — consecutive auto-reply cap: the trailing streak of agent-authored
-///        (non-`system`) messages at the channel tail. A human utterance resets
-///        the streak to 0 structurally (it breaks the tail), matching §3.4
-///        "사람 개입 리셋" without a separate ingest-path counter write.
+///   G1 — per-agent concurrency: count of other `status='running'` runs vs
+///        `agent.max_concurrent_runs`. Held states (`awaiting_approval`,
+///        `paused`) are NOT counted — a run parked on a human decision must not
+///        starve re-mentions of the same agent. Stale running runs (updated_at
+///        older than `g1StaleRunningSeconds`, i.e. worker crashed mid-run) are
+///        also excluded and surfaced for an audit_log observation, so a dead
+///        run cannot permanently lock the agent out. The `agent` row is locked
+///        `FOR UPDATE` as the per-agent gate mutex, so two workers claiming
+///        jobs for the same agent serialize here and the winner's
+///        `status='running'` claim commits before the loser counts.
+///   G2 — per-agent consecutive auto-reply cap (§3.3 counter semantics): the
+///        number of THIS agent's auto text utterances in the channel since the
+///        last human utterance, one count per run. A human message resets the
+///        counter structurally (§3.4 "사람 개입 리셋"); tool_call/tool_result/
+///        system messages never count; other agents' messages neither count
+///        nor reset (round-barrier compatible — scheduler lands with MOMO-313).
 ///   G3 — step hard cap: `agent_run.step_count` vs
 ///        `min(agent_run.max_steps, MAX_STEPS)` (schema CHECK is the backstop).
-///   G4 — A2A hop-depth cap (§3.4): `agent_run.depth` vs `MAX_DEPTH`; the 007
-///        migration also enforces `depth <= 4` as a CHECK at the SoT.
+///        Each gate claim consumes one step (`step_count + 1` in the proceed
+///        UPDATE), so the cap is actually enforced at runtime.
+///   a2a_depth — §3.4 hop-depth cap: blocks when `agent_run.depth` EXCEEDS
+///        `MAX_DEPTH` ("MAX_DEPTH=4 초과 시 차단" — depth 4 itself is valid;
+///        the 007 migration CHECK `depth <= 4` agrees). Durable records use the
+///        `a2a_depth` label, NOT "G4": the L4 §3.3 canonical G4 is the SimHash
+///        semantic-loop detector (still a stub, `isSemanticLoop`). Once A2A
+///        spawn exists, the real enforcement point is child-run creation
+///        (reject when parent.depth >= MAX_DEPTH); this run-side gate is the
+///        belt-and-suspenders check.
 ///
-/// Gate id note: MOMO-301 numbers depth as **G4**. The L4 §3.3 table's own G4
-/// (SimHash semantic-loop detector) remains a stub (`isSemanticLoop`) and is out
-/// of MOMO-301 scope; G5 (budget) lives in CostAccounting, G6 (approval) below.
-///
-/// The payload-seeded `evaluatePreInvoke` remains as a zero-round-trip fast-fail
-/// complement; the DB snapshot is authoritative and wins on disagreement.
+/// G5 (budget) lives in CostAccounting; G6 (approval) below.
 struct LoopGuards: Sendable {
     let config: Config
     let logger: Logger
-
-    /// Aggregate gate verdict. `.proceed` runs the turn; `.halt(reason)` aborts
-    /// before any hermes call (no spend, no publish) and marks the run failed.
-    enum Verdict: Sendable, Equatable {
-        case proceed
-        case halt(reason: String)
-    }
-
-    /// Snapshot of the run's gate-relevant counters (claimed from agent_run +
-    /// read_state). v0 fills these from the job payload / defaults.
-    struct RunGateState: Sendable {
-        var stepCount: Int
-        var depth: Int
-        var consecutiveAuto: Int
-        var activeRunsForAgent: Int
-        var lastContentHash: UInt64?   // for G4 SimHash window (stub)
-    }
-
-    /// Evaluate G1–G3 + §3.4 depth on **payload seeds** before the DB round-trip
-    /// (fast-fail complement — the DB snapshot path in loadSnapshot/evaluateSnapshot
-    /// is authoritative). SimHash and G5 (budget) are checked at their own call
-    /// sites; G6 (human approval) is triggered inline when a tool_call needs it.
-    func evaluatePreInvoke(_ s: RunGateState) -> Verdict {
-        // G1 — per-agent semaphore. Payload seed only; the authority is the
-        // agent-row-locked live-run count in loadSnapshot (MOMO-301).
-        if !checkConcurrency(activeRuns: s.activeRunsForAgent) {
-            return .halt(reason: "G1 concurrency cap (max_concurrent_runs=\(config.maxConcurrentRuns))")
-        }
-        // G2 — consecutive auto-reply cap. Payload seed; the authority is the
-        // message-tail streak in loadSnapshot (human utterance breaks the tail).
-        if !checkConsecutiveAuto(count: s.consecutiveAuto) {
-            return .halt(reason: "G2 consecutive auto cap (MAX_CONSECUTIVE_AUTO=\(config.maxConsecutiveAuto))")
-        }
-        // G3 — step hard cap (turn-level infinite tool-call guard).
-        if !checkStepCap(stepCount: s.stepCount) {
-            return .halt(reason: "G3 step cap (max_steps=\(config.maxSteps))")
-        }
-        // §3.4 — A→B→A hop depth cap.
-        if !checkDepth(depth: s.depth) {
-            return .halt(reason: "depth cap (MAX_DEPTH=\(config.maxDepth))")
-        }
-        return .proceed
-    }
 
     // MARK: - DB-backed gate evaluation (MOMO-301, SoT = Postgres)
 
@@ -83,9 +53,13 @@ struct LoopGuards: Sendable {
         var runMaxSteps: Int          // agent_run.max_steps (per-run column)
         var depth: Int                // agent_run.depth (§3.4)
         var roundCount: Int           // agent_run.round_count (§3.4, stored; scheduler = MOMO-313)
-        var consecutiveAutoStreak: Int // trailing agent-authored streak (message tail)
-        var activeOtherRuns: Int      // running/awaiting_approval/paused, id <> run
+        var consecutiveAutoStreak: Int // this agent's auto text runs since the last human message
+        var activeOtherRuns: Int      // other status='running' runs (non-stale), id <> run
         var maxConcurrentRuns: Int    // agent.max_concurrent_runs (fallback: config)
+        // Abandoned `running` runs (updated_at older than g1StaleRunningSeconds)
+        // excluded from activeOtherRuns; the caller records an audit_log
+        // observation for each. Failing them for real = follow-up reaper ticket.
+        var staleRunningRunIDs: [UUID] = []
     }
 
     /// Gate decision over a DB snapshot, carrying the gate id for audit_log.
@@ -94,21 +68,22 @@ struct LoopGuards: Sendable {
         case tripped(gate: String, reason: String)
     }
 
-    /// Pure G1–G4 verdict over a snapshot (testable without Postgres).
+    /// Pure gate verdict over a snapshot (testable without Postgres).
     func evaluateSnapshot(_ s: DBGateSnapshot) -> GateOutcome {
-        // G1 — per-agent semaphore. Only *executing/held* runs count; queued runs
-        // are pending work already serialized by the outbox partition_key and must
-        // not starve their own agent.
+        // G1 — per-agent semaphore. Only *actually executing* runs count
+        // (status='running', non-stale). queued runs are pending work already
+        // serialized by the outbox partition_key; awaiting_approval/paused runs
+        // are parked on a human decision and must not block re-mentions.
         if s.activeOtherRuns >= s.maxConcurrentRuns {
             return .tripped(
                 gate: "G1",
-                reason: "G1 concurrency cap: \(s.activeOtherRuns) other live run(s) for this agent (max_concurrent_runs=\(s.maxConcurrentRuns))")
+                reason: "G1 concurrency cap: \(s.activeOtherRuns) other running run(s) for this agent (max_concurrent_runs=\(s.maxConcurrentRuns))")
         }
-        // G2 — consecutive agent auto-replies at the channel tail.
+        // G2 — this agent's consecutive auto replies since the last human message.
         if s.consecutiveAutoStreak >= config.maxConsecutiveAuto {
             return .tripped(
                 gate: "G2",
-                reason: "G2 consecutive auto cap: \(s.consecutiveAutoStreak) trailing agent replies (MAX_CONSECUTIVE_AUTO=\(config.maxConsecutiveAuto))")
+                reason: "G2 consecutive auto cap: \(s.consecutiveAutoStreak) consecutive auto replies by this agent since the last human message (MAX_CONSECUTIVE_AUTO=\(config.maxConsecutiveAuto))")
         }
         // G3 — step hard cap (run column, tightened by the env override).
         let stepCap = min(s.runMaxSteps, config.maxSteps)
@@ -117,11 +92,16 @@ struct LoopGuards: Sendable {
                 gate: "G3",
                 reason: "G3 step cap: step_count=\(s.stepCount) (max_steps=\(stepCap))")
         }
-        // G4 — §3.4 A→B→A hop depth cap (MOMO-301 gate id; schema CHECK <= 4).
-        if s.depth >= config.maxDepth {
+        // a2a_depth — §3.4 hop cap: block when depth EXCEEDS MAX_DEPTH (spec
+        // wording "MAX_DEPTH=4 초과 시 차단"; the 007 CHECK depth <= 4 agrees, so
+        // depth 4 is a valid run). Labeled a2a_depth in durable records — the
+        // canonical §3.3 G4 is the SimHash detector, not depth. When A2A spawn
+        // lands, child creation must reject parent.depth >= MAX_DEPTH; this
+        // run-side check is the backstop.
+        if s.depth > config.maxDepth {
             return .tripped(
-                gate: "G4",
-                reason: "G4 depth cap: depth=\(s.depth) (MAX_DEPTH=\(config.maxDepth))")
+                gate: "a2a_depth",
+                reason: "a2a_depth cap: depth=\(s.depth) exceeds MAX_DEPTH=\(config.maxDepth)")
         }
         return .proceed
     }
@@ -135,8 +115,7 @@ struct LoopGuards: Sendable {
     ///   2. own `agent_run` row `FOR UPDATE` = counter read is stable vs the
     ///      subsequent proceed/trip UPDATE in the same tx.
     ///
-    /// Returns nil when the agent_run row does not exist (nothing to guard —
-    /// the payload-seeded fast-fail already ran).
+    /// Returns nil when the agent_run row does not exist (nothing to guard).
     func loadSnapshot(
         on conn: PostgresConnection,
         agentMemberID: UUID,
@@ -176,45 +155,67 @@ struct LoopGuards: Sendable {
         let (status, stepCount, maxSteps, depth, roundCount, _) =
             try runRow.decode((String, Int, Int, Int, Int, Int).self)
 
-        // 3. G1 — other live runs for this agent (schema agent_run_active_idx
-        //    statuses minus 'queued'; see evaluateSnapshot for the rationale).
-        let activeRows = try await conn.query(
+        // 3. G1 — other *executing* runs for this agent: status='running' ONLY.
+        //    Held states (awaiting_approval/paused) are parked on a human
+        //    decision and must not permanently block re-mentions; queued runs
+        //    are already serialized by the outbox partition_key. A running run
+        //    whose updated_at is older than g1StaleRunningSeconds is treated as
+        //    abandoned (worker crash) and excluded from the count — the caller
+        //    records an audit_log observation per excluded run. TODO(follow-up
+        //    reaper ticket): actually transition stale running runs to failed
+        //    instead of only skipping them here.
+        let staleSeconds = config.g1StaleRunningSeconds
+        let runningRows = try await conn.query(
             """
-            SELECT count(*)::int
+            SELECT id,
+                   (updated_at <= now() - (\(staleSeconds) * interval '1 second')) AS is_stale
               FROM agent_run
              WHERE agent_member_id = \(agentMemberID)
                AND id <> \(runID)
-               AND status IN ('running','awaiting_approval','paused')
+               AND status = 'running'
             """,
             logger: logger
         ).collect()
-        let activeOthers = try activeRows.first?.decode(Int.self) ?? 0
+        var activeOthers = 0
+        var staleRunIDs: [UUID] = []
+        for row in runningRows {
+            let (otherRunID, isStale) = try row.decode((UUID, Bool).self)
+            if isStale {
+                staleRunIDs.append(otherRunID)
+            } else {
+                activeOthers += 1
+            }
+        }
 
-        // 4. G2 — trailing agent-authored streak at the channel tail. `system`
-        //    messages (e.g. guard-trip notices) are invisible to the streak so a
-        //    trip cannot amplify itself; a human message breaks the streak.
-        let streakBound = config.maxConsecutiveAuto + 1
+        // 4. G2 — per-agent counter (§3.3): THIS agent's auto text utterances in
+        //    the channel since the last human utterance, one count per run
+        //    (DISTINCT run_id; falls back to the message id for run-less rows).
+        //    Semantics encoded here:
+        //      * a human message of any type resets the counter (§3.4 사람 개입 리셋)
+        //        — structurally, by bounding the count to seq > last human seq;
+        //      * only type='text' counts — tool_call/tool_result are turn plumbing
+        //        and system messages (e.g. guard-trip notices) must not let a trip
+        //        amplify itself;
+        //      * other agents' messages neither count nor reset, so A2A round
+        //        alternation (A,B,A,B…) still trips each agent at its own cap
+        //        (round scheduler = MOMO-313).
         let streakRows = try await conn.query(
             """
-            WITH tail AS (
-              SELECT m.seq, mem.kind::text AS kind
+            WITH last_human AS (
+              SELECT COALESCE(max(m.seq), 0) AS seq
                 FROM message m
                 JOIN member mem ON mem.id = m.author_member_id
                WHERE m.channel_id = \(channelID)
                  AND m.deleted_at IS NULL
-                 AND m.type <> 'system'
-               ORDER BY m.seq DESC
-               LIMIT \(streakBound)
+                 AND mem.kind = 'human'
             )
-            SELECT count(*)::int
-              FROM (
-                SELECT bool_and(kind = 'agent') OVER (
-                         ORDER BY seq DESC
-                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                       ) AS trailing_agent
-                  FROM tail
-              ) t
-             WHERE trailing_agent
+            SELECT count(DISTINCT COALESCE(m.run_id::text, m.id::text))::int
+              FROM message m, last_human h
+             WHERE m.channel_id = \(channelID)
+               AND m.deleted_at IS NULL
+               AND m.author_member_id = \(agentMemberID)
+               AND m.type = 'text'
+               AND m.seq > h.seq
             """,
             logger: logger
         ).collect()
@@ -228,32 +229,9 @@ struct LoopGuards: Sendable {
             roundCount: roundCount,
             consecutiveAutoStreak: streak,
             activeOtherRuns: activeOthers,
-            maxConcurrentRuns: agentMaxConcurrent
+            maxConcurrentRuns: agentMaxConcurrent,
+            staleRunningRunIDs: staleRunIDs
         )
-    }
-
-    // MARK: - Individual gate checks (payload-seeded fast-fail complement)
-
-    /// G1: per-agent concurrent-run semaphore. DB SoT = loadSnapshot/evaluateSnapshot;
-    /// this in-process check is a fast-fail complement, not the authority.
-    func checkConcurrency(activeRuns: Int) -> Bool {
-        activeRuns < config.maxConcurrentRuns
-    }
-
-    /// G2: consecutive agent auto-replies before forced halt. DB SoT = read_state.
-    func checkConsecutiveAuto(count: Int) -> Bool {
-        count < config.maxConsecutiveAuto
-    }
-
-    /// G3: per-turn step hard cap. DB SoT = agent_run.step_count <= max_steps
-    /// (schema CHECK constraint agent_run_step_cap_ck).
-    func checkStepCap(stepCount: Int) -> Bool {
-        stepCount < config.maxSteps
-    }
-
-    /// §3.4: A2A hop-depth cap. DB SoT = agent_run.depth.
-    func checkDepth(depth: Int) -> Bool {
-        depth < config.maxDepth
     }
 
     /// G4: semantic-loop (SimHash) detector. Stub — returns false (no loop) until

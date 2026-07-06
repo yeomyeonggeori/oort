@@ -116,6 +116,20 @@ GUARD_G1_RUN_ID=00000000-0000-7000-8000-000000000940
 GUARD_G1_DECOY_RUN_ID=00000000-0000-7000-8000-000000000941
 GUARD_G1_MESSAGE_ID=00000000-0000-7000-8000-000000000942
 GUARD_G1_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000943
+GUARD_G2_RUN_ID=00000000-0000-7000-8000-000000000944
+GUARD_G2_MESSAGE_ID=00000000-0000-7000-8000-000000000945
+GUARD_G2_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000946
+GUARD_G2_AGENT_MSG1_ID=00000000-0000-7000-8000-000000000947
+GUARD_G2_AGENT_MSG2_ID=00000000-0000-7000-8000-000000000948
+GUARD_G2_RESET_MESSAGE_ID=00000000-0000-7000-8000-000000000949
+GUARD_G2_RESET_CLIENT_MSG_ID=00000000-0000-7000-8000-00000000094a
+# MOMO-301 review round: gate thresholds are lowered via env so the trip
+# scenarios stay compatible with the 007 SoT CHECKs (depth <= 4): the
+# a2a_depth trip seeds depth=2 with MAX_DEPTH=1 (gate blocks depth > MAX_DEPTH),
+# and the G2 trip seeds 2 consecutive agent text messages with
+# MAX_CONSECUTIVE_AUTO=2. All other fixtures sit at depth=0 / streak=0.
+GUARD_MAX_DEPTH=${GUARD_MAX_DEPTH:-1}
+GUARD_MAX_CONSECUTIVE_AUTO=${GUARD_MAX_CONSECUTIVE_AUTO:-2}
 AGENT_CHANNEL=agent:ws${WORKSPACE_ID}.${AGENT_ID}
 CENT_CHANNEL=ch:ws${WORKSPACE_ID}.${CHANNEL_ID}
 NON_MEMBER_AGENT_ID=00000000-0000-7000-8000-000000215102
@@ -293,19 +307,24 @@ DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESU
 -- MOMO-301 loop-guard trip fixtures (audit/outbox/message/agent_run rerun hygiene)
 DELETE FROM audit_log
  WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-                  '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID');
+                  '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID', '$GUARD_G2_RUN_ID');
 DELETE FROM outbox
- WHERE payload->>'run_id' IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID')
+ WHERE payload->>'run_id' IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
+                              '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID')
     OR payload->'data'->'payload'->>'run_id' IN
-       ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID');
+       ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID');
 DELETE FROM message
- WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID')
-    OR id IN ('$GUARD_DEPTH_MESSAGE_ID', '$GUARD_STEP_MESSAGE_ID', '$GUARD_G1_MESSAGE_ID')
+ WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
+                  '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID')
+    OR id IN ('$GUARD_DEPTH_MESSAGE_ID', '$GUARD_STEP_MESSAGE_ID', '$GUARD_G1_MESSAGE_ID',
+              '$GUARD_G2_MESSAGE_ID', '$GUARD_G2_AGENT_MSG1_ID', '$GUARD_G2_AGENT_MSG2_ID',
+              '$GUARD_G2_RESET_MESSAGE_ID')
     OR client_msg_id IN ('$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
-                         '$GUARD_G1_CLIENT_MSG_ID');
+                         '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID',
+                         '$GUARD_G2_RESET_CLIENT_MSG_ID');
 DELETE FROM agent_run
  WHERE id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-              '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID');
+              '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID', '$GUARD_G2_RUN_ID');
 DELETE FROM audit_log
  WHERE workspace_id = '$WORKSPACE_ID'
    AND run_id IN (
@@ -476,6 +495,8 @@ echo "[agent-worker] starting AgentWorker"
     HERMES_BASE_URL="$HERMES_BASE_URL" \
     HERMES_API_KEY="$HERMES_API_KEY" \
     WORKER_POLL_INTERVAL_MS="$WORKER_POLL_INTERVAL_MS" \
+    MAX_DEPTH="$GUARD_MAX_DEPTH" \
+    MAX_CONSECUTIVE_AUTO="$GUARD_MAX_CONSECUTIVE_AUTO" \
     "$WORKER_BIN"
 ) >"$WORKER_LOG" 2>&1 &
 WORKER_PID=$!
@@ -749,9 +770,11 @@ fi
 echo "[agent-worker] circuit-breaker path verified: low-limit budget trips before spend"
 
 # =============================================================================
-# MOMO-301 deterministic loop-guard trip scenarios (G1/G3/G4, DB SoT).
+# MOMO-301 deterministic loop-guard trip scenarios (a2a_depth/G3/G1/G2, DB SoT).
 # Payload gate seeds are intentionally 0 so a trip proves the worker read the
-# authoritative agent_run/agent state from Postgres, not the outbox payload.
+# authoritative agent_run/agent/message state from Postgres, not the outbox
+# payload. The §3.4 depth cap is labeled a2a_depth in durable records (audit
+# detail/props/agent_run.error) — the canonical L4 §3.3 G4 is SimHash.
 # =============================================================================
 
 seed_guard_fixture() {
@@ -846,10 +869,10 @@ wait_guard_trip() {
   echo "[agent-worker] loop-guard $guard_label trip verified: failed run + audit_log + degraded system message + no spend"
 }
 
-echo "[agent-worker] seeding G4 depth-cap trip fixture (agent_run.depth=4, payload depth=0)"
+echo "[agent-worker] seeding a2a_depth trip fixture (agent_run.depth=2 > MAX_DEPTH=$GUARD_MAX_DEPTH env, payload depth=0, CHECK depth<=4 respected)"
 seed_guard_fixture "$GUARD_DEPTH_RUN_ID" "$GUARD_DEPTH_MESSAGE_ID" "$GUARD_DEPTH_CLIENT_MSG_ID" \
-  '@hermes MOMO-301 depth cap trip' 0 4 'momo-301-guard-depth'
-wait_guard_trip "$GUARD_DEPTH_RUN_ID" "G4" "G4(depth)"
+  '@hermes MOMO-301 depth cap trip' 0 2 'momo-301-guard-depth'
+wait_guard_trip "$GUARD_DEPTH_RUN_ID" "a2a_depth" "a2a_depth(hop-depth)"
 
 echo "[agent-worker] seeding G3 step-cap trip fixture (agent_run.step_count=12, payload step_count=0)"
 seed_guard_fixture "$GUARD_STEP_RUN_ID" "$GUARD_STEP_MESSAGE_ID" "$GUARD_STEP_CLIENT_MSG_ID" \
@@ -887,5 +910,110 @@ UPDATE agent_run
 COMMIT;
 SQL
 
-echo "[agent-worker] loop-guard trip scenarios verified: G4(depth) G3(step) G1(concurrency)"
+# G2 per-agent consecutive-auto trip: seed a human message followed by 2 agent
+# text messages by the demo agent (no run_id -> each counts once), so the demo
+# agent's counter since the last human message is 2 = MAX_CONSECUTIVE_AUTO env.
+# The next run for this agent must trip G2 before any provider call.
+echo "[agent-worker] seeding G2 consecutive-auto trip fixture (2 trailing agent text messages, MAX_CONSECUTIVE_AUTO=$GUARD_MAX_CONSECUTIVE_AUTO env)"
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$CHANNEL_ID'
+  RETURNING last_seq
+)
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
+   type, body, client_msg_id)
+SELECT '$GUARD_G2_MESSAGE_ID', '$WORKSPACE_ID', '$CHANNEL_ID', bumped.last_seq,
+       (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+       '$HUMAN_ID', 'text', '@hermes MOMO-301 consecutive auto trip', '$GUARD_G2_CLIENT_MSG_ID'
+  FROM bumped;
+
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$CHANNEL_ID'
+  RETURNING last_seq
+)
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
+   type, body)
+SELECT '$GUARD_G2_AGENT_MSG1_ID', '$WORKSPACE_ID', '$CHANNEL_ID', bumped.last_seq,
+       (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+       '$AGENT_ID', 'text', 'MOMO-301 G2 auto reply 1'
+  FROM bumped;
+
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$CHANNEL_ID'
+  RETURNING last_seq
+)
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
+   type, body)
+SELECT '$GUARD_G2_AGENT_MSG2_ID', '$WORKSPACE_ID', '$CHANNEL_ID', bumped.last_seq,
+       (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+       '$AGENT_ID', 'text', 'MOMO-301 G2 auto reply 2'
+  FROM bumped;
+
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, trigger_message_id,
+   status, step_count, max_steps, depth, input, idempotency_key)
+VALUES
+  ('$GUARD_G2_RUN_ID', '$WORKSPACE_ID', '$AGENT_ID', '$CHANNEL_ID', '$GUARD_G2_MESSAGE_ID',
+   'queued', 0, 12, 0,
+   jsonb_build_object('prompt', '@hermes MOMO-301 consecutive auto trip'),
+   'momo-301-guard-g2');
+
+INSERT INTO outbox
+  (workspace_id, kind, status, method, payload, partition_key)
+VALUES
+  ('$WORKSPACE_ID', 'agent_job', 'pending', 'publish',
+   jsonb_build_object(
+     'run_id', '$GUARD_G2_RUN_ID',
+     'workspace_id', '$WORKSPACE_ID',
+     'agent_member_id', '$AGENT_ID',
+     'channel_id', '$CHANNEL_ID',
+     'model', 'hermes-agent',
+     'prompt', '@hermes MOMO-301 consecutive auto trip',
+     'max_output_tokens', 64,
+     'step_count', 0,
+     'depth', 0,
+     'consecutive_auto', 0
+   ),
+   '$AGENT_ID');
+
+COMMIT;
+SQL
+wait_guard_trip "$GUARD_G2_RUN_ID" "G2" "G2(consecutive-auto)"
+
+# Reset the demo agent's auto-reply counter with a human message so later
+# verifiers in the same profile do not inherit the seeded streak.
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$CHANNEL_ID'
+  RETURNING last_seq
+)
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
+   type, body, client_msg_id)
+SELECT '$GUARD_G2_RESET_MESSAGE_ID', '$WORKSPACE_ID', '$CHANNEL_ID', bumped.last_seq,
+       (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+       '$HUMAN_ID', 'text', 'MOMO-301 G2 counter reset', '$GUARD_G2_RESET_CLIENT_MSG_ID'
+  FROM bumped;
+COMMIT;
+SQL
+
+echo "[agent-worker] loop-guard trip scenarios verified: a2a_depth(hop-depth) G3(step) G1(concurrency) G2(consecutive-auto)"
 echo "[agent-worker] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG cost_projection=$COST_PROJECTION_JSON"
