@@ -58,6 +58,7 @@
 | [`docs/QA_GATE.md`](QA_GATE.md) | **M7 검수 게이트 단일 진입점**(G-0~G-H + 베타 전략 + 사용성 체크리스트 + GO 판정) | M7 |
 | [`docs/RUN.md`](RUN.md) | 로컬 기동/마이그레이션/롤백 절차(환경변수→`make up`→migrate→서버/relay/worker→macOS) | M0/M1 |
 | [`docs/INBOUND_MCP.md`](INBOUND_MCP.md) | Inbound MCP v0 서버 skeleton endpoint/security/permission model | M2 |
+| [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](GWS_INTERNAL_CONSENT_RUNBOOK.md) | 배포 조직용 GWS 사전 셋업 런북(MOMO-323): GCP 프로젝트 생성 → OAuth consent **Internal**(검증/CASA 면제 전제) → SA 생성/키 발급 → 공유 드라이브 + SA Content Manager 멤버(`boundary_kind=shared_drive_member`, DWD 아님) — 사람 단계 `[manual]` 표기 | M2 |
 | [`docs/GITHUB_OPS.md`](GITHUB_OPS.md) | GitHub 운영 구조(마일스톤=릴리스, 라벨 택소노미, Projects, Codex goal 흐름) | 전반 |
 | [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md) | GitHub Actions disabled/manual-only 기간 로컬 PR gate(명령/evidence/merge cycle) | M1/M6 |
 | [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) | external agent runtime smoke 계약: provider secret env 형식, mock/local/external 차이, credentialed 1왕복 gate, token 비저장 boundary | M1 |
@@ -148,6 +149,10 @@
 | [`research/12-agentic-work-os/02-plugin-manifest-v0.md`](../research/12-agentic-work-os/02-plugin-manifest-v0.md) | Plugin Manifest v0 정본 + `plugin_id`/tools/scopes/runtime boundary/license/provenance + Context Packet `tool_grants`/Capability Cache/approval metadata gate + source/audit/signature policy + catalog class/repo split 기준 |
 | [`research/12-agentic-work-os/03-agent-host-positioning.md`](../research/12-agentic-work-os/03-agent-host-positioning.md) | MOMO-184 agent host 제품 문장 + channel timeline execution ledger 1페이지 비교 + website/README/sales deck reusable copy |
 | [`research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`](../research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md) | First-party plugin repo strategy 정본(GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector, repo split 순서, plugin surface/audit/source/approval contract) |
+| [`research/13-redesign/00-execution-tracker.md`](../research/13-redesign/00-execution-tracker.md) | **재설계 실행 팔로업 보드** — Phase 0~3 × MOMO-300~323 상태(ready/blocked/in-progress/done), 착수 전 실증 항목, 사람 전용 항목. 재설계 티켓 종료 시 STATUS.md와 함께 갱신 |
+| [`research/13-redesign/01-agent-native-redesign-2026-07.md`](../research/13-redesign/01-agent-native-redesign-2026-07.md) | **2026-07 재설계 방향 문서** — 코드베이스 진단(P1~P7: 디자인 시스템 부재/테이블스테이크스 공백/에이전트 단발 컨텍스트/프로토콜 고립/보안 갭/온디바이스 반쪽) + 레퍼런스 채택(astryx/openagents/Codex app/Slack Kit/Discord/Compass/FoundationModels/SpeechTranscriber/pgvector) + 6트랙 재설계(MomoDS·코어UX·MCP/A2A/AG-UI·RAG/Context Broker·음성·보안) + MOMO-300~315 티켓 델타 |
+| [`research/13-redesign/02-gate-optimization.md`](../research/13-redesign/02-gate-optimization.md) | Local gate 실측 감사(Swift 10회 중복 빌드/worktree 캐시 비공유/2회 마이그레이션) + 3-wave 최적화(diff 기반 `--auto` 프로파일/BuildKit cache mount/공유 빌드 캐시) + 디자인 리뷰 자동화 루프(`.claude/skills/momo-design-taste` + `.claude/agents/design-review`) + MOMO-316~319 |
+| [`research/13-redesign/03-google-workspace-files-rag.md`](../research/13-redesign/03-google-workspace-files-rag.md) | 파일 저장+RAG를 Google Drive 기반으로 확정 — internal-consent 검증 면제, workspace당 공유 드라이브 + SA `shared_drive_member` 모드(DWD 아님), resumable 클라 직송, changes.list 폴러→pgvector 파생 인덱스, 김인턴 위키(승인 게이트 propose write) 2층 RAG, MOMO-122/123 정정 3건, MOMO-320~323 |
 | [`research/11-agent-runtime/fixtures/plugin-manifest-v0/`](../research/11-agent-runtime/fixtures/plugin-manifest-v0/) | Plugin Manifest v0 JSON fixtures(GitHub Issues, Google Workspace read-mostly, high-risk write approval policy) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 

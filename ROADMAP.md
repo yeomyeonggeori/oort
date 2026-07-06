@@ -56,6 +56,8 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · Docker compose/deploy layer 정본은 MOMO-182 ADR로 고정: dev(`infra/docker-compose.yml`), e2e(`infra/docker-compose.e2e.yml`), image-based prod, install/upgrade, backup/PITR
      · M2 진입: MOMO-010에서 schema_v0.sql 정본을 건드리지 않고 003_onboarding.sql 초대코드 DB 확장을 시작
      · CI/CD·QA·법무 문서는 선작성됨(docs/cicd/*, legal/*) — M7 실측/판정은 미진행
+     · 재설계 2026-07 overlay(§1.3, MOMO-300~323) 기획 완료 — 진입점은 MOMO-316(게이트 Wave 1) → P0(300~304),
+       팔로업 보드 = research/13-redesign/00-execution-tracker.md
 ```
 
 **Phase 0 baseline 상세는 `STATUS.md`. 빌드 백로그는 `BUILD_TICKETS.md`. 정본 스키마는 `schema_v0.sql`(이동·수정 금지, 확장은 `server/Migrations/00N_*.sql` 신규 파일).**
@@ -212,6 +214,24 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - `MOMO-186`: Deterministic e2e compose stack. 완료 후 정본은 `infra/docker-compose.e2e.yml` + docs/static local gate config validation.
 - `MOMO-183`: First-party plugin repo strategy. 완료 후 정본은 `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`.
 - `MOMO-184`: Agent host positioning/product messaging. 완료 후 정본은 `research/12-agentic-work-os/03-agent-host-positioning.md`.
+
+### 1.3 재설계 2026-07 overlay (MOMO-300~323)
+
+2026-07-06 전체 코드베이스 진단 + 레퍼런스 리서치로 확정된 재설계 트랙. **M0~M8 backbone과 M7 게이트 불변식은 불변**이며, 기존 마일스톤 위에 얹는 overlay다. 진단/설계 정본은 `research/13-redesign/01~03`, **실행 팔로업 보드는 `research/13-redesign/00-execution-tracker.md`**(재설계 티켓 종료 시 STATUS.md와 함께 갱신). 티켓 상세는 `docs/BACKLOG.md` §4 재설계 섹션.
+
+핵심 진단: 에이전트 네이티브 코어(스키마/outbox/비용/승인)는 경쟁력이 있으나 ①디자인 시스템 부재 ②메신저 테이블스테이크스(스레드/검색/파일/마크다운) 미티켓화 ③에이전트 단발 컨텍스트(히스토리 미전달) ④MCP 스텁/프로토콜 고립 ⑤보안 갭(proxy 미인증/revocation/rate limit/BYOK) ⑥온디바이스 AI 반쪽.
+
+| Phase | 티켓 | Milestone | 내용 |
+|---|---|---|---|
+| **Phase 0** 게이트/도구 | MOMO-316(P0)·318 → 317 → 319 | M1 | diff 기반 `--auto` 프로파일 + compose `--wait` + BuildKit/worktree 빌드 캐시 + 디자인 pre-flight/스냅샷. 이후 전 PR의 게이트 비용을 낮추는 선행 투자 |
+| **Phase 1** P0 코어 | MOMO-300·301·302·303·304 | M1/M3 | 보안 3종(proxy 인증/revocation/rate limit), depth/round 스키마+루프가드 실쿼리, **컨텍스트 조립 v1**(단일 메시지 폐기), MomoDS 토큰 4층, 마크다운/편집/멘션 |
+| **Phase 2** P1 확장 | MOMO-305·306·307·308·309·310·320·321·323 | M2/M3 | 스레드/unread/알림, 검색(Cmd+K)/리액션, Context Broker 실조립, MCP JSON-RPC 실구현, BYOK provider_config, pgvector RAG+Memory Plane, **파일=Google Drive**(공유 드라이브+SA 멤버, `research/13-redesign/03`) |
+| **Phase 3** P2 마감 | MOMO-311·312·313·314·315·319·322 | M3+ | FoundationModels 압축/트리아지, 음성 입력(SpeechTranscriber ko_KR), A2A Agent Card, reversibility 렌더(MOMO-091 선행 슬라이스), audit redaction/보존, 김인턴 위키 |
+
+로드맵 영향:
+- M3(데스크탑 v0 UX)의 실질 내용이 D/B/C 실데이터 + **MomoDS/코어 UX(303~306)**로 확장된다. Phase 1의 P0 4건(300/301/302/303)은 M3 본격 진입 전 게이트로 취급한다.
+- 파일 업로드는 자체 오브젝트 스토리지 대신 **Google Drive workspace archive 모드**로 확정(MinIO OSS 중단, internal-consent 검증 면제) — EP-GWORKSPACE(MOMO-122/123) 확장이며 스펙 정정 3건은 MOMO-323.
+- UI 작업은 `.claude/skills/momo-design-taste/` skill + design-review 에이전트 리포트(Blocker 0)를 PR evidence로 포함한다(사람 리뷰는 High 이하 판정만).
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 

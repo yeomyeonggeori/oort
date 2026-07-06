@@ -22,6 +22,7 @@
     "service_account_boundary_id": "gwe_sa_boundary_example_active",
     "workspace_id": "11111111-1111-7111-8111-111111111111",
     "google_customer_id": "C01example",
+    "boundary_kind": "dwd_delegation",
     "service_account_client_id_hash": "sha256:service-account-client-id-redacted-002",
     "service_account_email_redacted": "momo-enterprise@project.iam.gserviceaccount.com",
     "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_002/workload-identity",

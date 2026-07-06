@@ -15,6 +15,18 @@
 # 사용:  make migrate            (Makefile 이 `sh scripts/migrate.sh` 호출)
 #    또는 DATABASE_URL=... sh scripts/migrate.sh
 #
+# 멱등성 1-run evidence (MOMO-316):
+#   기본값으로 apply 패스 직후 같은 프로세스(=같은 컨테이너 실행) 안에서 verify
+#   패스를 한 번 더 돈다. verify 패스는 apply 패스와 동일한 skip 판정 루프
+#   (schema_migrations 조회 → SKIP/APPLY)를 재실행하므로 "러너를 두 번 실행"하던
+#   기존 2-run 증명과 판정 경로가 동일하고, 두 번째 패스에서 신규 적용(applied>0)이
+#   발생하면 즉시 실패한다 — 기존 grep '스킵' 증명보다 강한 단정(전 파일 SKIP +
+#   신규 적용 0). 성공 시 아래 마커를 남긴다:
+#     [migrate] IDEMPOTENCY_OK second-pass applied=0 skipped=<N>
+#   `docker compose logs migrate` 또는 local gate 로그에서 이 마커를 evidence로
+#   캡처한다. verify 패스는 read-only skip 판정만 수행하므로 기본 on이 안전하고,
+#   MIGRATE_IDEMPOTENCY_CHECK=0 으로 끌 수 있다.
+#
 # MOMO-001 runtime-verified: PG18 Docker + psql 18 apply 001/002 and idempotent
 # re-run pass. Later M1 tickets cover relay/RLS/hermes runtime gates.
 # =============================================================================
@@ -86,28 +98,47 @@ SQL
 echo "[migrate] 대상 디렉터리: $MIGRATIONS_DIR"
 
 # --- 번호순으로 .sql 적용 (LANG=C 로 안정적 정렬) -------------------------------
-applied=0
-skipped=0
-for f in $(ls "$MIGRATIONS_DIR"/*.sql 2>/dev/null | LANG=C sort); do
-  version=$(basename "$f")
+# run_pass <label>: apply/verify 두 패스가 완전히 같은 판정 루프를 공유한다.
+# (verify 패스가 별도의 "약한" 검사가 되지 않도록 — 2-run 증명과 동일 경로 보장)
+run_pass() {
+  pass_label=$1
+  applied=0
+  skipped=0
+  for f in $(ls "$MIGRATIONS_DIR"/*.sql 2>/dev/null | LANG=C sort); do
+    version=$(basename "$f")
 
-  # 이미 적용된 버전인가? (schema_migrations 조회)
-  already=$($PSQL $PSQL_FLAGS -tA \
-    -c "SELECT 1 FROM schema_migrations WHERE version = '${version}';" 2>/dev/null || true)
+    # 이미 적용된 버전인가? (schema_migrations 조회)
+    already=$($PSQL $PSQL_FLAGS -tA \
+      -c "SELECT 1 FROM schema_migrations WHERE version = '${version}';" 2>/dev/null || true)
 
-  if [ "$already" = "1" ]; then
-    echo "  = SKIP  $version (이미 적용됨)"
-    skipped=$((skipped + 1))
-    continue
+    if [ "$already" = "1" ]; then
+      echo "  = SKIP  $version (이미 적용됨)"
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    echo "  + APPLY $version"
+    # 각 마이그레이션 파일과 이력 기록을 하나의 트랜잭션으로 묶는다(원자적 적용).
+    # -1(--single-transaction): 파일 전체 + INSERT 가 함께 commit/rollback.
+    $PSQL $PSQL_FLAGS --single-transaction \
+      -f "$f" \
+      -c "INSERT INTO schema_migrations (version) VALUES ('${version}');"
+    applied=$((applied + 1))
+  done
+  echo "[migrate] (${pass_label}) 완료 — 적용 $applied, 스킵 $skipped."
+}
+
+run_pass apply
+
+# --- 멱등성 1-run verify 패스 (MOMO-316) ---------------------------------------
+# 같은 프로세스 안에서 동일 판정 루프를 재실행: 전 파일이 SKIP이어야 하고
+# 신규 적용이 하나라도 나오면 멱등성 위반으로 즉시 실패한다.
+if [ "${MIGRATE_IDEMPOTENCY_CHECK:-1}" = "1" ]; then
+  echo "[migrate] 멱등성 verify 패스 시작 (single-run evidence)"
+  run_pass verify
+  if [ "$applied" -ne 0 ]; then
+    echo "[migrate] IDEMPOTENCY_FAIL second-pass applied=$applied (재실행에서 신규 적용 발생 — 멱등성 위반)" >&2
+    exit 1
   fi
-
-  echo "  + APPLY $version"
-  # 각 마이그레이션 파일과 이력 기록을 하나의 트랜잭션으로 묶는다(원자적 적용).
-  # -1(--single-transaction): 파일 전체 + INSERT 가 함께 commit/rollback.
-  $PSQL $PSQL_FLAGS --single-transaction \
-    -f "$f" \
-    -c "INSERT INTO schema_migrations (version) VALUES ('${version}');"
-  applied=$((applied + 1))
-done
-
-echo "[migrate] 완료 — 적용 $applied, 스킵 $skipped."
+  echo "[migrate] IDEMPOTENCY_OK second-pass applied=0 skipped=$skipped"
+fi

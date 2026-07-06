@@ -1,6 +1,6 @@
 # Google Workspace Connector v0
 
-> Updated: 2026-06-27
+> Updated: 2026-07-06 (MOMO-323 corrections: `drive.metadata.readonly` is restricted-class, Internal-consent deployment assumption, momo-managed shared-drive derived-index carve-out — grounds: `research/13-redesign/03` §2·§5)
 > Status: normative spec for MOMO-122. No runtime/schema implementation in this ticket.
 
 ## 1. Purpose
@@ -19,8 +19,9 @@ The connector is owned by momo. Google Workspace MCP servers and future domain-w
 
 ## 2. Non-Negotiable Rules
 
-- Per-user OAuth is the only v0 authorization model. Domain-wide delegation is out of scope for this spec and belongs to MOMO-123.
+- Per-user OAuth is the only v0 authorization model. Domain-wide delegation and the shared-drive-member service-account path (`boundary_kind: shared_drive_member`) are out of scope for this spec and belong to MOMO-123; this spec only records the carve-out below so the two documents stay consistent.
 - The connector stores provider ids, cursors, bounded excerpts, permission snapshots, and audit state. It must not store raw mailbox dumps, full Drive mirrors, broad calendar history, OAuth access tokens in Context Packets, or refresh tokens in Memory Plane/Capability Cache.
+- Bounded carve-out to "no full Drive mirrors" (MOMO-323): for the **momo-managed workspace shared drive only** (workspace archive mode — MOMO-123 `service_account_boundary` with `boundary_kind = shared_drive_member`), momo may keep a **revocable derived index**: embeddings plus chunked text, with a permission snapshot version on every row. Those files are momo-managed artifacts, the index is rebuildable from Drive, and delete/permission-loss tombstones must remove the derived rows. User personal Drive files (`drive.file` selected) stay excerpt-only as before — momo never builds a derived full-text/embedding index from a user's personal Drive.
 - Google source refs are citeable pointers, not credentials. Every ref has `workspace_id`, `subject_member_id`, provider resource id, scope snapshot, retrieval time, and delete/revoke path.
 - Context Packet can include `sources.kind = google_drive|gmail|calendar` only after workspace membership, channel visibility, source grant, and redaction checks pass.
 - Memory Plane can store Google-backed durable references only as `memory_type = external_source_ref` or `artifact_ref`; it must not promote Gmail or Drive body text into unsourced long-term memory.
@@ -103,11 +104,15 @@ Boundary rules:
 
 Official scope pages classify broad data scopes as sensitive or restricted. v0 therefore prefers the narrowest scope that can satisfy the selected feature.
 
+**Verification-class correction (2026-07, MOMO-323):** `drive.metadata.readonly` is a **restricted-class** scope — the same app-verification class as `drive` and `drive.readonly`. It is not a lighter "metadata tier"; earlier revisions of the table below implied otherwise. Among the Drive scopes in this spec only `drive.file` is non-sensitive.
+
+**Deployment assumption (Internal consent):** self-hosted momo assumes each deploying organization owns its own GCP project and configures the OAuth consent screen as **User type = Internal** (users restricted to the same Google Workspace organization). Internal apps are exempt from Google app verification and the CASA security assessment, so restricted-class scopes carry no external verification burden in this deployment shape. The binding limit on scope selection is therefore momo's own policy — non-retention, least privilege, approval-gated writes — not Google verification economics. External/multi-tenant consent screens are out of scope for v0. Setup runbook: `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`; grounds: `research/13-redesign/03` §2.
+
 | Surface | Preferred scopes | Notes |
 |---|---|---|
-| Drive selected files | `https://www.googleapis.com/auth/drive.file` plus picker/resource allowlist | Preferred for user-selected Drive files because it keeps access resource-scoped. |
-| Drive metadata/index | `https://www.googleapis.com/auth/drive.metadata.readonly` | For metadata, changes, and source badge refresh. Broad Drive read remains restricted and is not default. |
-| Drive full/excerpt export | `https://www.googleapis.com/auth/drive.readonly` only after explicit user consent and policy approval | Restricted. Store bounded excerpts, not full mirrors. |
+| Drive selected files | `https://www.googleapis.com/auth/drive.file` plus picker/resource allowlist | Non-sensitive class. Preferred for user-selected Drive files because it keeps access resource-scoped. |
+| Drive metadata/index | `https://www.googleapis.com/auth/drive.metadata.readonly` | **Restricted-class** (same verification class as `drive.readonly`; corrected 2026-07, MOMO-323). For metadata, changes, and source badge refresh. Verification-exempt only under the Internal-consent deployment assumption above; still not default. |
+| Drive full/excerpt export | `https://www.googleapis.com/auth/drive.readonly` only after explicit user consent and policy approval | Restricted. Store bounded excerpts, not full mirrors (the §2 derived-index carve-out applies only to the momo-managed shared drive). |
 | Gmail metadata search | `https://www.googleapis.com/auth/gmail.metadata` | Restricted but narrower than full body read; supports headers/labels without body. |
 | Gmail thread/message read | `https://www.googleapis.com/auth/gmail.readonly` | Restricted. Use only for user-approved search/thread read windows and bounded excerpts. |
 | Calendar availability | `https://www.googleapis.com/auth/calendar.freebusy` or `https://www.googleapis.com/auth/calendar.events.freebusy` | Availability summaries should prefer busy windows over event bodies. |

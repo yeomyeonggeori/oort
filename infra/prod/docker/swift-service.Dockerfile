@@ -24,9 +24,12 @@ RUN mkdir -p /artifact \
 FROM ${RUNTIME_IMAGE}
 ARG PRODUCT
 ENV MOMO_PRODUCT=${PRODUCT}
+# curl(바이너리)은 compose healthcheck(`curl -fsS http://127.0.0.1:8080/health`)용
+# (MOMO-316). libcurl4는 Swift 런타임 링크 의존성으로 별개다.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
     ca-certificates \
+    curl \
     libcurl4 \
     libxml2 \
     libz3-4 \

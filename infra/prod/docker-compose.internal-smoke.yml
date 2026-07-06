@@ -17,12 +17,32 @@ services:
       - "${HTTP_PORT:-18080}:80"
       - "${HTTPS_PORT:-18443}:443"
       - "${HTTPS_PORT:-18443}:443/udp"
+    # MOMO-316: prod 정본의 caddy healthcheck는 interval 30s라 `--wait`가
+    # 첫 프로브까지 최대 30초를 기다리게 된다. 스모크에서는 같은 테스트를
+    # 짧은 간격으로 돌려 부팅 대기 시간 회귀를 막는다(검증 시맨틱 동일).
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 2s
 
   api:
     image: ${MOMO_API_IMAGE:-momo-api:internal-smoke}
     pull_policy: never
     environment:
       DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
+    # MOMO-316: /health 기반 healthcheck. `docker compose up -d --wait`가
+    # "HTTP 준비 완료"까지 보장하도록 한다(--wait는 healthcheck가 있어야만
+    # HTTP readiness를 의미한다). curl 바이너리는 swift-service.Dockerfile
+    # 런타임 스테이지에 포함. prod 정본 compose에는 넣지 않는다 —
+    # 레지스트리 핀 이미지에 curl이 있다는 보장이 없어 스모크 경계에서만 강제.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health >/dev/null"]
+      interval: 2s
+      timeout: 5s
+      retries: 45
+      start_period: 5s
     depends_on:
       postgres:
         condition: service_healthy
