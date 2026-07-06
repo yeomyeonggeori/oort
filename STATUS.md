@@ -739,6 +739,13 @@
 - 최종 판정값을 `AWS_READY` / `BLOCKED` / `NEEDS_MORE_LOCAL`로 고정하고, P0/P1/P2/P3 triage, daily report, evidence directory layout, start/stop/restart/recovery, MOMO-246 final report template을 추가했다.
 - `docs/INTERNAL_ALPHA.md`, `docs/AWS_INTERNAL_ALPHA.md`, `docs/LOCAL_PR_GATE.md`, `docs/INDEX.md`, `ROADMAP.md`, `BUILD_TICKETS.md`가 새 72h local dogfood contract를 참조한다. 실제 72시간 실행, credentialed external agent runtime side effect, local soak/resource monitor는 MOMO-242~246에서 계속 검증한다.
 
+## 0ax. 재설계 2026-07 기획 정본화 — MOMO-300~323 (2026-07-06)
+
+- 전체 코드베이스 진단(클라/서버/기획 3트랙) + 외부 레퍼런스 리서치(astryx/openagents/Codex app/Slack Kit/Discord/Compass/Apple on-device AI/pgvector/GWS)를 `research/13-redesign/01~03`으로 정본화했다. 핵심 진단: 디자인 시스템 부재, 메신저 테이블스테이크스 미티켓화, AgentWorker 단일 메시지 컨텍스트(히스토리 미전달), MCP 스텁/프로토콜 고립, 보안 갭(subscribe proxy 미인증/token revocation 미검사/rate limit 부재/BYOK 부재), 스키마 안전장치 누락(`agent_run` depth/round, `reversibility_tier`).
+- 재설계 티켓 24건(MOMO-300~323)을 `docs/BACKLOG.md` §4 재설계 섹션에 Phase 0(게이트/도구)→1(P0 코어)→2(P1 확장)→3(P2 마감) 순서로 기재하고, `ROADMAP.md` §1.3 overlay와 실행 팔로업 보드 `research/13-redesign/00-execution-tracker.md`를 추가했다. 파일 저장은 자체 오브젝트 스토리지 대신 Google Drive workspace archive 모드(공유 드라이브 + SA `shared_drive_member`, internal-consent 검증 면제)로 확정했다.
+- UI 품질 자동화 도구를 설치했다: `.claude/skills/momo-design-taste/`(SwiftUI anti-slop 하드 룰 + mechanical pre-flight + MomoDS 토큰 계약 시드) + `.claude/agents/design-review.md`(스크린샷 rubric 리뷰, Blocker 자동 반송). UI PR은 design-review 리포트(Blocker 0)를 evidence로 포함한다.
+- 문서/기획만 변경 — 코드/스키마/게이트 스크립트 변경 없음, 빌드 영향 없음. 다음 착수 = **MOMO-316(게이트 Wave 1)** → MOMO-300/301/302/303 병렬. 재설계 티켓 종료 시 이 STATUS와 tracker를 함께 갱신한다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

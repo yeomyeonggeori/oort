@@ -97,7 +97,7 @@ cp infra/.env.example .env && make up && make migrate && ( cd server && swift ru
 2. **선행 티켓을 깨지 않음**: 다른 패키지의 `swift build`가 여전히 green. 의존 그래프는 BUILD_TICKETS.md STEPS + ROADMAP §2.
 3. **정본 정합**: DDL/모델은 `schema_v0.sql`과 컬럼·타입 일치(`member.kind`, `channel_seq`, `uuidv7()` PK, `hlc_ts`/`hlc_count`, `client_msg_id` 멱등). 정본 **이동/수정 금지** — 확장은 `server/Migrations/00N_*.sql` 신규 + RLS DO-block ARRAY에 신규 테이블 등록.
 4. **runtime 미검증은 정직 표기**: 파일/주석/STATUS에 `runtime-unverified`. 검증 못 한 걸 "검증됨"이라 쓰지 마라.
-5. **STATUS.md 갱신**: 무엇을 추가/변경, 무엇이 여전히 미검증인지 1~3줄.
+5. **STATUS.md 갱신**: 무엇을 추가/변경, 무엇이 여전히 미검증인지 1~3줄. 재설계 티켓(MOMO-300~323)은 `research/13-redesign/00-execution-tracker.md` 상태도 함께 갱신.
 6. **PR 본문**이 §5 형식.
 7. 미완성 스텁은 `// TODO(#이슈번호): 설명` 형태로만(컴파일 항상 보장).
 8. **게이트/배포 불변식 준수**: 사용성 검수 게이트(M7) PASS 기록 없이 스토어/공증 배포(M8)·external TestFlight 진행 금지(§7).
@@ -130,6 +130,7 @@ Closes #<issue>
 ```
 - **절대 하지 말 것:** 시크릿 커밋(`.env`, `.env.worktree`), `schema_v0.sql` 수정/이동, `.build/`·`*.resolved`·`DerivedData/`·`.swiftpm/` 커밋, 무관한 리팩터, 의존성 메이저 임의 변경, 다른 패키지 깨기, **게이트(M7) PASS 기록 전 `release-*.yml` 트리거**(§7).
 - **Swift:** 타입 `PascalCase`, 함수/프로퍼티/let `camelCase`, enum case `camelCase`. 모델은 `MomoCore`에만 두고 import. SwiftPM 의존은 최신 안정 태그, `*.resolved` 비커밋. 서버 쓰기경로 단일 tx, async/await(블로킹 금지).
+- **macOS/Core UI 작업:** `.claude/skills/momo-design-taste/SKILL.md`의 하드 룰(시맨틱 컬러/텍스트 롤/스페이싱 스케일/Mac AI-Tells 금지)과 §5 mechanical pre-flight를 준수한다. 사람 리뷰 요청 전 design-review 에이전트 리포트(Blocker 0)를 PR evidence에 포함한다.
 
 ## 6. 다음 티켓 선택법 (자율 picker)
 진실 원천: **ROADMAP.md(마일스톤 순서·의존) → BUILD_TICKETS.md(STEPS) → 티켓 deps**.

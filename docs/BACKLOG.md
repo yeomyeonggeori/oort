@@ -74,6 +74,9 @@ M0(완료 baseline) ── M1 ── M2 ─┐
 | **EP-AGENT-RUNTIME** | Agent Runtime · Memory · Capability Cache | M1.5/M2/M3 | Hermes/Kim Intern/openclaw 분석을 바탕으로 context/capability/execution/ledger 4-plane 계약과 A2A/MCP 경계를 정리. |
 | **EP-GWORKSPACE** | Google Workspace Sync | M2/M3 | per-user OAuth read-mostly sync, source citation, approval-gated writes, domain-wide delegation은 enterprise 옵션. |
 | **EP-TRUST** | Enterprise Trust | M7 | NIST SSDF/SBOM/license scan/secret scanning/pentest/VDP/SOC2/ISO readiness를 QA gate 입력으로 승격. |
+| **EP-DESIGN-SYSTEM** | MomoDS 디자인 시스템 · 디자인 리뷰 자동화 | M3 | 토큰 4층(Primitive/Semantic/Component/Density) + ugly mode + 컴포넌트 추출 + `momo-design-taste` skill/design-review 루프. 정본: `research/13-redesign/01` Track A + `02` §3. |
+| **EP-MESSENGER-CORE** | 메신저 코어 UX (테이블스테이크스) | M3 | 마크다운/편집·삭제/멘션 자동완성/스레드/unread·알림/검색(Cmd+K)/리액션/음성 입력. 스키마는 이미 지원 — 라우트+UI 슬라이스. 정본: `research/13-redesign/01` Track B. |
+| **EP-SEC-CORE** | 런타임 보안 하드닝 · BYOK | M1/M2 | subscribe proxy 인증, token revocation, rate limit, BYOK provider_config(봉투 암호화), audit redaction, retention. 정본: `research/13-redesign/01` Track C/F. |
 
 ---
 
@@ -132,8 +135,9 @@ M0(baseline)
 
 ### 3.4 다음 착수 가능 티켓 (deps가 baseline=M0뿐)
 
-- **MOMO-001** (런타임 e2e 루트) — 거의 모든 백엔드 티켓의 선행.
+- **MOMO-001** (런타임 e2e 루트) — 거의 모든 백엔드 티켓의 선행. (검증됨 — 후속은 M1 잔여)
 - **MOMO-080** (법무 L0/L1) — deps 없음, 사람 위임 런북 준비.
+- **재설계 2026-07 진입점(§4 재설계 섹션):** MOMO-316(게이트 Wave 1) → MOMO-300/301/302/303(P0 병렬 가능). 팔로업 보드는 `research/13-redesign/00-execution-tracker.md`.
 
 ---
 
@@ -905,6 +909,274 @@ M0(baseline)
   - [ ] [spec] 예약/모니터링 트리거 디스패치 + 예산 가진 주도적 노크 경로
 - **라벨:** `type:spec`, `area:schema`, `priority:p2`, `status:runtime-unverified`
 - **참조:** 경험 P6(05)
+
+---
+
+### 재설계 2026-07 — EP-DESIGN-SYSTEM / EP-MESSENGER-CORE / EP-SEC-CORE + 기존 에픽 확장 (M1~M3)
+
+> **정본:** `research/13-redesign/01-agent-native-redesign-2026-07.md`(진단 P1~P7 + 6트랙) · `02-gate-optimization.md`(게이트/리뷰 루프) · `03-google-workspace-files-rag.md`(파일/RAG).
+> **팔로업 보드:** `research/13-redesign/00-execution-tracker.md` — 재설계 티켓 종료 시 STATUS.md와 함께 갱신.
+> **Phase 순서:** Phase 0(316·318, 317 병행) → Phase 1 P0(300~304) → Phase 2 P1(305~310, 320~321, 323) → Phase 3 P2(311~315, 319, 322). M0~M8 backbone과 M7 게이트 불변식은 불변.
+
+#### Phase 0 — 게이트/도구 정비 (EP-OPS 확장, M1)
+
+#### MOMO-316 · Local gate Wave 1: diff 기반 --auto 프로파일 + compose --wait + 멱등 1-run evidence
+- **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** ci · **추정:** S
+- **deps:** — (baseline)
+- **수용기준:**
+  - [ ] [infra] `scripts/local_gate.sh --auto`가 `git diff --name-only origin/main...HEAD` 경로 매핑(docs→docs, clients→swift+macos-ui, server/Migrations→runtime-db, relay→runtime-relay, workers→runtime-agent, infra/prod→staging-smoke)으로 프로파일을 보수적으로 선택하고, 수동 지정이 항상 override
+  - [ ] [infra] `docker compose up -d` 호출부를 `--wait`로 교체하고 `wait_http` 폴링 제거(verify_internal_host_runtime.sh 등)
+  - [ ] [runtime] 마이그레이션 멱등성 검증을 2회 실행 대신 1회 실행 + `compose logs migrate` skip 마커 캡처 evidence로 대체, 기존 profile 전부 PASS 유지
+- **라벨:** `type:infra`, `area:ops`, `priority:p0`
+- **참조:** `research/13-redesign/02` §2 Wave 1
+
+#### MOMO-317 · Local gate Wave 2: BuildKit cache mount + worktree 공유 Swift 빌드 캐시
+- **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** ci · **추정:** M
+- **deps:** MOMO-316
+- **수용기준:**
+  - [ ] [infra] `infra/prod/docker/swift-service.Dockerfile`에 BuildKit `--mount=type=cache` + Package.resolved 레이어 분리, `host-runtime` 2회차 run 빌드 시간 단축 evidence
+  - [ ] [infra] `.conductor/setup.sh`가 패키지별 공유 빌드 캐시(`--scratch-path`+flock)를 제공하고 브랜치 간 dirty state 누출이 없음을 검증
+  - [ ] [runtime] `scripts/local_gate.sh --profile host-runtime` PASS(웜 캐시/콜드 캐시 각 1회)
+- **라벨:** `type:infra`, `area:ops`, `priority:p1`
+- **참조:** `research/13-redesign/02` §2 Wave 2
+
+#### MOMO-318 · 디자인 pre-flight를 swift 프로파일에 연결 + snapshot testing 도입
+- **마일스톤:** M1/M3 준비 · **에픽:** EP-DESIGN-SYSTEM · **플랫폼:** ci · **추정:** S
+- **deps:** — (baseline)
+- **수용기준:**
+  - [ ] [infra] `.claude/skills/momo-design-taste/SKILL.md` §5의 mechanical pre-flight grep(raw Color/Font.custom/fixed size/em-dash)을 `local_gate --profile swift`에 위반=FAIL로 연결(토큰 정의 파일 제외 규칙 포함)
+  - [ ] [swift] `swift-snapshot-testing`을 clients/macOS Tests에 추가하고 대표 surface 1개(MessageBubble)의 light/dark 스냅샷이 결정론적으로 통과
+  - [ ] [infra] design-review 에이전트 리포트(Blocker 0)를 UI PR evidence 항목으로 `docs/LOCAL_PR_GATE.md`에 명문화
+- **라벨:** `type:infra`, `area:macos`, `priority:p1`
+- **참조:** `research/13-redesign/02` §3
+
+#### MOMO-319 · Local gate Wave 3: runtime-db verifier 부분 병렬화 + 웜 볼륨 opt-in
+- **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** ci · **추정:** M
+- **deps:** MOMO-317
+- **수용기준:**
+  - [ ] [runtime] `runtime-db`의 독립 verifier 3개(rls/roster/channels) 병렬 실행 + 결과 동일성 evidence
+  - [ ] [infra] `--reuse-volumes` opt-in(alpha/internal-alpha 게이트 제외, CI/fresh 기본 유지)
+- **라벨:** `type:infra`, `area:ops`, `priority:p2`
+- **참조:** `research/13-redesign/02` §2 Wave 3
+
+#### Phase 1 — P0 코어 (M1/M3)
+
+#### MOMO-300 · Realtime subscribe proxy 인증 + token revocation + rate limit
+- **마일스톤:** M1 · **에픽:** EP-SEC-CORE · **플랫폼:** backend · **추정:** M
+- **deps:** — (baseline)
+- **수용기준:**
+  - [ ] [runtime] Centrifugo subscribe proxy 요청을 공유 시크릿/HMAC으로 검증(현 CentrifugoRoutes TODO 해소), 미인증 요청 거부 evidence
+  - [ ] [runtime] 모든 인증 경로가 `token.revoked_at`을 검사하고, logout 엔드포인트가 revoke를 기록(revoked token 접근 거부 evidence)
+  - [ ] [runtime] per-member/per-IP rate limit 미들웨어(한도 초과 429 + audit_log 기록), 비용 브레이커와 독립 동작
+  - [ ] [swift] 전 패키지 build/test green, `runtime-db` gate PASS
+- **라벨:** `type:feat`, `area:server`, `priority:p0`
+- **참조:** `research/13-redesign/01` Track F 1~3
+
+#### MOMO-301 · agent_run depth/round 스키마 + 루프가드 G1~G4 실쿼리
+- **마일스톤:** M1 · **에픽:** EP-AGENT-RUNTIME · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-160
+- **수용기준:**
+  - [ ] [sql] 신규 마이그레이션으로 `agent_run`에 `depth`/`round_count`/`consecutive_auto_count` 추가(schema_v0.sql 불변, RLS DO-block 등록 확인) — L4 §3.4의 depth≤4/round≤4를 저장 가능하게
+  - [ ] [runtime] LoopGuards G1(동시성)/G2(연속자동)/G3(스텝캡)/G4(depth)를 스텁에서 실제 Postgres 쿼리로 교체, 각 게이트 트립 시 audit_log evidence
+  - [ ] [runtime] `runtime-agent` gate에 게이트 트립 시나리오 1개 이상 포함
+- **라벨:** `type:feat`, `area:worker`, `area:schema`, `priority:p0`
+- **참조:** `research/13-redesign/01` P5·Track C-7, 경험 A(05)
+
+#### MOMO-302 · 컨텍스트 조립 v1: 단일 메시지 → 대화 히스토리/토큰 예산 윈도
+- **마일스톤:** M1 · **에픽:** EP-AGENT-RUNTIME · **플랫폼:** backend · **추정:** M
+- **deps:** — (baseline; MOMO-151 스펙 참조)
+- **수용기준:**
+  - [ ] [runtime] AgentWorker hermes 호출이 트리거 메시지 1개 대신 same-channel recent-N(스레드 우선) 메시지를 role 매핑해 전달, 토큰 예산 상한 내 슬라이딩 윈도
+  - [ ] [runtime] Context Packet v0 `recent_messages` projection이 실제 히스토리를 담고 source attribution 유지
+  - [ ] [runtime] `runtime-agent` gate에 "이전 메시지를 참조하는 응답" 시나리오 evidence
+  - [ ] [swift] 세션 키 `(workspace, agent, channel)` 경계 준수(채널 간 컨텍스트 불혼합 테스트)
+- **라벨:** `type:feat`, `area:worker`, `priority:p0`
+- **참조:** `research/13-redesign/01` P3·Track C-1/2, openagents 세션 모델
+
+#### MOMO-303 · MomoDS v0: 토큰 4층 + ugly mode + 컴포넌트 1차 추출
+- **마일스톤:** M3 · **에픽:** EP-DESIGN-SYSTEM · **플랫폼:** macos · **추정:** L
+- **deps:** — (baseline)
+- **수용기준:**
+  - [ ] [swift] `MomoCore` 또는 macOS 패키지에 토큰 레이어(Primitive/Semantic/Component/Density) — `.claude/skills/momo-design-taste/references/tokens.md` 계약과 일치, 기존 `MomoTheme` 5색을 semantic 층으로 흡수
+  - [ ] [swift] 시맨틱 텍스트 롤(`.messageBody`/`.timestamp`/`.channelName`/`.agentPayloadMono`/`.costFigure`) 정의 + Dynamic Type 호환
+  - [ ] [swift] ugly mode 디버그 스킴(비토큰 색 마젠타 강제)으로 기존 뷰의 하드코딩 전수 회수(pre-flight grep 0건)
+  - [ ] [swift] 컴포넌트 추출 7종: Avatar/Badge/CardFrame/MessageHeader/StatusChip/IconButton/InlineBanner — 기존 surface 교체
+  - [ ] [swift] Density 3단이 spacing/rowHeight 토큰을 스케일(설정 저장)
+- **라벨:** `type:feat`, `area:macos`, `priority:p0`
+- **참조:** `research/13-redesign/01` Track A, Slack Kit ugly mode, Discord density
+
+#### MOMO-304 · 마크다운/코드블록 렌더 + 편집/삭제 UX + @멘션 자동완성
+- **마일스톤:** M3 · **에픽:** EP-MESSENGER-CORE · **플랫폼:** macos+backend · **추정:** M
+- **deps:** MOMO-303(토큰 레이어 슬라이스)
+- **수용기준:**
+  - [ ] [swift] message body를 AttributedString 기반 마크다운으로 렌더(굵게/기울임/링크/인라인코드/코드블록 monospace), 에이전트 응답 마크다운이 올바르게 표시
+  - [ ] [runtime] 편집/삭제 REST 라우트 노출 + macOS 컨텍스트 메뉴(편집/삭제) + edited 배지 + soft-delete placeholder, realtime `messageEdited/Deleted` 반영
+  - [ ] [swift] 컴포저 `@` 입력 시 roster 기반 자동완성 팝업(사람+에이전트, 키보드 탐색), 기존 insertMention 대체
+  - [ ] [runtime] `macos-ui` gate에 마크다운/편집/멘션 fixture evidence
+- **라벨:** `type:feat`, `area:macos`, `area:server`, `priority:p0`
+- **참조:** `research/13-redesign/01` Track B 1·7·8
+
+#### Phase 2 — P1 확장 (M2/M3)
+
+#### MOMO-305 · 스레드 UI(에이전트 세션 경계 겸용) + unread 마커 + 로컬 알림
+- **마일스톤:** M3 · **에픽:** EP-MESSENGER-CORE · **플랫폼:** macos+backend · **추정:** L
+- **deps:** MOMO-303, MOMO-304
+- **수용기준:**
+  - [ ] [runtime] thread 조회 라우트(`root_id` 기반) + 답글 작성이 `root_id/reply_to_id`를 설정, right-sidebar(inspector) 스레드 패널
+  - [ ] [swift] 타임라인에 reply-to 표시 + 스레드 열기, 스레드가 에이전트 서브세션 경계로 동작(MOMO-302 연계)
+  - [ ] [runtime] `read_state` 기반 채널 unread 배지 + jump-to-first-unread
+  - [ ] [swift] UNUserNotificationCenter 로컬 알림(멘션/DM/승인 요청) + 알림 클릭 시 해당 채널 이동
+- **라벨:** `type:feat`, `area:macos`, `area:server`, `priority:p1`
+- **참조:** `research/13-redesign/01` Track B 2·3
+
+#### MOMO-306 · 검색 라우트 + Cmd+K 커맨드 팔레트 + 리액션
+- **마일스톤:** M3 · **에픽:** EP-MESSENGER-CORE · **플랫폼:** macos+backend · **추정:** M
+- **deps:** MOMO-303
+- **수용기준:**
+  - [ ] [runtime] 메시지 검색 REST(pg_trgm+FTS, workspace/channel 필터, RLS 경계) + 한국어 결과 evidence
+  - [ ] [swift] Cmd+K 팔레트: 채널 점프 + 메시지 검색 결과 + 결과 클릭 시 해당 seq로 스크롤
+  - [ ] [runtime] 리액션 add/remove 라우트 + 이모지 피커 + 메시지 하단 리액션 표시(뷰모델의 reaction 이벤트 무시 해제)
+  - [ ] [swift] 단축키 체계 1차(Cmd+K/Cmd+N/↑최근 메시지 편집)
+- **라벨:** `type:feat`, `area:macos`, `area:server`, `priority:p1`
+- **참조:** `research/13-redesign/01` Track B 4·5·9
+
+#### MOMO-307 · Context Broker 서버 서비스 (Context Packet v0 실조립)
+- **마일스톤:** M2 · **에픽:** EP-CONTEXT · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-302, MOMO-120
+- **수용기준:**
+  - [ ] [runtime] mention→agent_job 경로에서 Context Packet을 스텁이 아닌 실제로 조립: recent_messages(MOMO-302), 권한 스냅샷, source refs, tool_grants(하드코딩 mock 제거), budget, redaction policy
+  - [ ] [runtime] fixture(`research/11-agent-runtime/fixtures/context-packet-v0/`)와 shape 정합 테스트
+  - [ ] [runtime] Broker 결정(포함/제외/redaction)이 audit 가능하게 기록
+- **라벨:** `type:feat`, `area:server`, `priority:p1`
+- **참조:** `research/10-local-ai-protocol-trust/01`, `research/13-redesign/01` P3·Track C-2
+
+#### MOMO-308 · Inbound MCP 실구현 (JSON-RPC) + scope 발급
+- **마일스톤:** M2 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-172
+- **수용기준:**
+  - [ ] [runtime] MCP 표준 JSON-RPC 전송으로 교체(HTTP-shape 스텁 제거), 4개 도구(search_messages/fetch_thread/post_message/create_tool_call) 실동작 — post/create는 정본 쓰기경로(단일 tx) 재사용
+  - [ ] [runtime] `mcp.*` scope 발급 플로우(admin install/token provisioning) + RLS/멤버십 preflight 유지
+  - [ ] [runtime] 외부 MCP 클라이언트(예: Claude Code) 접속 smoke evidence(로컬)
+- **라벨:** `type:feat`, `area:server`, `priority:p1`
+- **참조:** `research/11-agent-runtime/09`, `research/13-redesign/01` Track C-3
+
+#### MOMO-309 · BYOK: workspace provider_config + 봉투 암호화 + Settings UI
+- **마일스톤:** M2 · **에픽:** EP-SEC-CORE · **플랫폼:** backend+macos · **추정:** M
+- **deps:** MOMO-227
+- **수용기준:**
+  - [ ] [sql] 신규 마이그레이션 `provider_config`(workspace 단위, agent 단위 override): base_url/model/암호화 key(age/KMS 봉투, 평문 컬럼 금지), RLS 등록
+  - [ ] [runtime] AgentWorker가 글로벌 env 대신 workspace provider_config를 resolve(env는 fallback), key 회전 audit_log
+  - [ ] [swift] macOS Settings > AI Providers surface(키 마스킹, 검증 버튼), ADR-0004 경계 유지(Codex OAuth 토큰 비보관)
+  - [ ] [runtime] `/v1/agent-runtime/status`가 workspace별 provider mode를 redacted 반영
+- **라벨:** `type:feat`, `area:server`, `area:macos`, `priority:p1`
+- **참조:** `research/13-redesign/01` Track C-6, ADR-0004
+
+#### MOMO-310 · RAG 파이프라인: pgvector + 임베딩 워커 + RRF 하이브리드 + Memory Plane v0 구현
+- **마일스톤:** M2 · **에픽:** EP-CONTEXT · **플랫폼:** backend · **추정:** L
+- **deps:** MOMO-302, MOMO-121
+- **수용기준:**
+  - [ ] [sql] pgvector ≥0.8.4 확장 + `halfvec` HNSW 인덱스 마이그레이션(workspace/channel 필터 컬럼 포함, RLS 등록)
+  - [ ] [runtime] 임베딩 워커(서버측 단일 모델) — 메시지/문서 청크 인덱싱, 삭제 tombstone 반영
+  - [ ] [runtime] RRF 하이브리드 검색 함수(vector+FTS+pg_trgm) + 한국어 쿼리 evidence, Context Broker(MOMO-307)가 retrieval 소비
+  - [ ] [runtime] Memory Plane v0 구현: typed memory 쓰기/조회 + retrieval-time 권한 체크(fixture 정합)
+- **라벨:** `type:feat`, `area:server`, `area:schema`, `priority:p1`
+- **참조:** `research/11-agent-runtime/05`, `research/13-redesign/01` Track D
+
+#### MOMO-320 · AttachmentStore + Google Drive workspace archive 모드 + resumable 업로드
+- **마일스톤:** M2/M3 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend+macos · **추정:** L
+- **deps:** MOMO-122, MOMO-323
+- **수용기준:**
+  - [ ] [swift] `AttachmentStore` 프로토콜(backend: drive | local-volume, v0=drive) + `file` 테이블 확장(drive_file_id/head_revision_id/web_view_link)
+  - [ ] [runtime] workspace archive 모드: 공유 드라이브 프로비저닝 + SA `shared_drive_member`(Content Manager) — DWD 아님, MOMO-123 boundary 확장
+  - [ ] [runtime] 서버가 resumable 세션 발급 → 클라 직접 청크 PUT(파일 바이트 서버 비경유), 업로더 grant 우선/SA fallback
+  - [ ] [swift] macOS 첨부 UI: 파일 선택/드래그&드롭 업로드 + webViewLink 프리뷰 카드 + thumbnailLink 서버 프록시(비저장)
+  - [ ] [runtime] 비공개 채널 첨부는 공유 드라이브 제외(개인 Drive `drive.file`) 경계 검증
+- **라벨:** `type:feat`, `area:server`, `area:macos`, `priority:p1`
+- **참조:** `research/13-redesign/03` §2~3
+
+#### MOMO-321 · Drive changes.list 폴러 + 추출/청크 인덱싱 → pgvector
+- **마일스톤:** M2/M3 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-320, MOMO-310
+- **수용기준:**
+  - [ ] [runtime] workspace당 changes.list 폴러(SA credential, driveId 필터, start_page_token cursor — MOMO-122 sync_state 재사용), 1~5분 주기
+  - [ ] [runtime] files.export(>10MB는 exportLinks 우회)/files.get 추출 → 청크 → MOMO-310 파이프라인 인덱싱, 벡터 행에 permission snapshot version
+  - [ ] [runtime] 삭제/권한상실 tombstone → 벡터 삭제 + Memory Plane revalidation 큐 evidence
+  - [ ] [runtime] Drive API `fullText contains` 한국어 실측 결과 기록(recall 폴백 채택/기각 판정)
+- **라벨:** `type:feat`, `area:server`, `priority:p1`
+- **참조:** `research/13-redesign/03` §4.1
+
+#### MOMO-323 · GWS 스펙 정정 3건 + Internal consent 셋업 런북
+- **마일스톤:** M2 · **에픽:** EP-GWORKSPACE · **플랫폼:** shared · **추정:** S
+- **deps:** — (문서만)
+- **수용기준:**
+  - [ ] [infra] MOMO-122 스펙 정정: `drive.metadata.readonly`=restricted-class 명기 + Internal consent 전제
+  - [ ] [infra] "no full Drive mirrors" 규칙에 momo 관리 공유 드라이브 한정 revocable 파생 인덱스 허용 명시
+  - [ ] [infra] MOMO-123 `service_account_boundary`에 `boundary_kind: shared_drive_member` 추가
+  - [ ] [infra] `docs/`에 배포 조직용 GCP 프로젝트/Internal consent/SA 생성 런북(`[manual]` 단계 표기)
+- **라벨:** `type:spec`, `area:docs`, `priority:p1`
+- **참조:** `research/13-redesign/03` §5
+
+#### Phase 3 — P2 마감 (M3+)
+
+#### MOMO-311 · FoundationModels 컨텍스트 압축(클라우드 호출 전) + 스레드 제목/알림 트리아지
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-131, MOMO-305
+- **수용기준:**
+  - [ ] [swift] LocalContextCopilot 확장: 클라우드 LLM 호출 전 로컬 히스토리 요약 압축(TN3193 transcript-compaction 패턴, 4k/한국어 예산 준수), 미지원 OS deterministic fallback green
+  - [ ] [swift] 스레드 제목 `@Generable` 원샷 생성 + 알림 urgency 분류 enum
+  - [ ] [swift] 온디바이스/서버 라우팅 결정이 UI에 표시(기존 route badge 확장)
+- **라벨:** `type:feat`, `area:macos`, `priority:p2`
+- **참조:** `research/13-redesign/01` Track D, `research/10-local-ai-protocol-trust/01`
+
+#### MOMO-312 · 음성 입력: SpeechTranscriber push-to-talk + 한국어 자체 평가
+- **마일스톤:** M3 · **에픽:** EP-MESSENGER-CORE · **플랫폼:** macos · **추정:** M
+- **deps:** MOMO-303
+- **수용기준:**
+  - [ ] [swift] SpeechAnalyzer+SpeechTranscriber(`ko_KR`) hold-to-record: volatile 라이브 캡션 → finalized 텍스트 컴포저 삽입(자동 전송 아님), 마이크 권한/AssetInventory 처리
+  - [ ] [swift] 구 macOS SFSpeechRecognizer fallback + 미지원 시 버튼 숨김
+  - [ ] [manual] 팀 음성 샘플 한국어 WER 자체 평가 1회 기록(채택 판정)
+- **라벨:** `type:feat`, `area:macos`, `priority:p2`
+- **참조:** `research/13-redesign/01` Track E
+
+#### MOMO-313 · A2A Agent Card + agents/announce 초대 플로우
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-308
+- **수용기준:**
+  - [ ] [runtime] `/.well-known/agent.json` Agent Card 서빙(momo 자체 + 등록 에이전트) + `agents/announce` 등록 → member(kind=agent) 생성 → 채널 멤버십 플로우
+  - [ ] [runtime] 외부 에이전트 초대 e2e smoke(mock A2A 에이전트), 기존 승인/비용/audit 경계 그대로 적용
+  - [ ] [infra] `agent.partial`/`agent.status` envelope 필드를 AG-UI 어휘와 정렬(스펙 문서 + 호환 매핑표)
+- **라벨:** `type:feat`, `area:server`, `priority:p2`
+- **참조:** `research/13-redesign/01` Track C-4/5, openagents 단일 포트 레이아웃
+
+#### MOMO-314 · reversibility_tier props + 승인 상태 라이프사이클 렌더 (MOMO-091 v0 선행 슬라이스)
+- **마일스톤:** M3 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** backend+macos · **추정:** M
+- **deps:** MOMO-160, MOMO-303
+- **수용기준:**
+  - [ ] [sql] tool_call props에 `reversibility_tier`(green/amber/red) — 보상 레지스트리 본체는 MOMO-091 유지, 이 티켓은 표시/게이팅 필드만
+  - [ ] [swift] 승인 카드가 상태 라이프사이클(Reviewing/Approved/Denied/Aborted/Timed-out) 칩 + reversibility 배지 렌더(Codex 문법), 인박스 필터(risk/tier)
+  - [ ] [runtime] 채널 단위 에이전트 정책 2축(sandbox: read-only/workspace-write × approval: untrusted/on-request/never) 저장+게이트 연결
+- **라벨:** `type:feat`, `area:macos`, `area:schema`, `priority:p2`
+- **참조:** `research/13-redesign/01` Track C-7, 경험 H(05), MOMO-091
+
+#### MOMO-315 · audit redaction 규약 + 보존 TTL + 계정 삭제 캐스케이드
+- **마일스톤:** M2 · **에픽:** EP-SEC-CORE · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-300
+- **수용기준:**
+  - [ ] [runtime] audit_log `detail` 쓰기 경로에 시크릿 패턴 스크럽 강제(공용 redaction 헬퍼) + 회귀 테스트
+  - [ ] [sql] per-workspace 보존 TTL 설정 + 백그라운드 purge 잡(신규 마이그레이션)
+  - [ ] [runtime] 계정 삭제 엔드포인트: member soft-delete + 개인정보 캐스케이드(iOS 5.1.1(v) 선행 정합)
+- **라벨:** `type:feat`, `area:server`, `priority:p2`
+- **참조:** `research/13-redesign/01` Track F 5~6
+
+#### MOMO-322 · 김인턴 위키 v0: 위키 문서 규약 + propose-write 승인 플로우 + 인용 강제
+- **마일스톤:** M3 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend · **추정:** M
+- **deps:** MOMO-321
+- **수용기준:**
+  - [ ] [infra] 위키 문서 규약(공유 드라이브 내 Google Docs, 인덱스 페이지 + 상호링크) 스펙
+  - [ ] [runtime] 에이전트 위키 편집 = approval-gated `propose` write가 채널 타임라인 카드로 노출(기존 승인 경로 재사용)
+  - [ ] [runtime] 위키 응답의 모든 주장에 `source_id → webViewLink` 인용 강제, 위키 문서도 pgvector 인덱싱 확인
+- **라벨:** `type:feat`, `area:server`, `priority:p2`
+- **참조:** `research/13-redesign/03` §4.2
 
 ---
 
