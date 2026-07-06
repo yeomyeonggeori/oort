@@ -597,6 +597,16 @@ DELETE FROM outbox WHERE payload->>'run_id' = '{run_id}'
 DELETE FROM agent_run WHERE id = '{run_id}';
 DELETE FROM message WHERE id = '{message_id}' OR run_id = '{run_id}';
 
+-- MOMO-301: this verifier owns its agent's live-run semaphore (G1) while it
+-- runs. Earlier all-profile verifiers can leave active runs for this agent
+-- (e.g. approval-decision's nonmember fixture stays awaiting_approval);
+-- neutralize them so the seeded run does not trip the concurrency guard.
+UPDATE agent_run
+   SET status = 'cancelled', finished_at = now(), updated_at = now()
+ WHERE workspace_id = '{workspace_id}'
+   AND agent_member_id = '{agent_id}'
+   AND status IN ('running', 'awaiting_approval', 'paused');
+
 WITH bumped AS (
   UPDATE channel_seq
      SET last_seq = last_seq + 1

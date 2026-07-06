@@ -762,6 +762,24 @@
 - 신규 `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`: 배포 조직용 GCP 프로젝트 생성 → OAuth consent Internal → SA 생성/키 발급(시크릿 저장소 only, 키 바이트 비커밋) → 공유 드라이브 생성 + SA Content Manager 멤버 추가 → boundary 기록값 → 검증 스모크/철회 경로까지, 사람 단계는 전부 `[manual]` 표기. `docs/INDEX.md` §2에 등록.
 - 검증: `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(fixtures JSON jq 포함). 문서/fixture만 변경 — 코드/스키마 변경 없음. 정직 표기: 런북의 `[manual]` 단계(GCP/consent/SA/드라이브)는 미실행이며, SA `drive.file` scope의 changes.list/다운로드 충분성은 **runtime-unverified**(MOMO-320 착수 시 실증 — tracker 실증 항목 유지). 실행 트래커에서 MOMO-323 → `review`.
 
+## 0b0. MOMO-301 agent_run depth/round 스키마 + 루프가드 G1~G4 실쿼리 (2026-07-06)
+
+- `server/Migrations/007_agent_run_a2a_guards.sql` 추가: `agent_run`에 `round_count`/`consecutive_auto_count`(integer NOT NULL DEFAULT 0) + L4 §3.4 캡 CHECK(`depth <= 4`, `0 <= round_count <= 4`, `consecutive_auto_count >= 0`). `depth` 컬럼은 schema_v0에 이미 존재(`>= 0`만 있었음)라 캡 CHECK만 추가. 기존 테이블 ALTER라 RLS DO-block 신규 등록 불필요(`agent_run`은 schema_v0 RLS ARRAY에 이미 등록 — 확인함). schema_v0.sql 불변.
+- AgentWorker 루프가드를 스텁 → **실제 Postgres 쿼리(SoT)** 로 교체: 단일 tx에서 `agent` 행 `FOR UPDATE`(에이전트별 게이트 뮤텍스) → 자기 `agent_run` 행 FOR UPDATE → G1 라이브 run 카운트(`running/awaiting_approval/paused`; `queued`는 outbox partition_key가 직렬화하므로 제외) → G2 채널 테일 연속 에이전트 발화 streak(`type<>'system'` 제외 — 사람 발화가 구조적으로 리셋, 트립 메시지 자기증폭 차단) → G3 step 캡(`min(run.max_steps, MAX_STEPS)`) → G4 depth 캡(§3.4). proceed 시 같은 tx에서 run을 `running`으로 전이해 동시 클레임 레이스에 안전(뮤텍스 해제 전에 세마포어 가시화). 페이로드 시드 평가는 fast-fail 보완으로 유지(DB가 항상 우선).
+- 게이트 트립 처리(한 tx): run `failed` + `error={code:'loop_guard_tripped',gate,reason}` + `audit_log(action='agent.guard.tripped', snapshot 포함)` + 채널에 사람이 읽을 수 있는 degraded **system** 메시지(MOMO-256 패턴 — seq bump + message INSERT + outbox broadcast) + job done + `agent.status=error`.
+- `scripts/verify_agent_worker.sh`에 결정론적 트립 시나리오 3종(페이로드 게이트 시드는 전부 0으로 두고 DB 값만 트립 조건 — DB SoT 증명): G4(depth=4), G3(step_count=max_steps=12), G1(같은 에이전트 decoy running run, 검증 후 cancel). 각각 failed run + audit + degraded system 메시지 + broadcast(version=seq) + no-spend(usage_ledger 0행)를 단정. fixture 시작 시 데모 에이전트의 잔존 활성 run을 cancel해 공유 볼륨에서 macos-ui fixture와의 G1 간섭을 차단. local gate `runtime-agent` 커버리지 노트 갱신.
+- 스코프 밖(정직 표기): §3.4 라운드 배리어의 라운드 스케줄러(=A2A, MOMO-313)와 G2 트립 시나리오, §3.3 SimHash 시맨틱 루프 감지는 미구현 — `round_count`는 이번에 저장/CHECK까지만. `consecutive_auto_count`는 게이트 평가 시 관측 streak을 기록(SoT는 메시지 테일).
+- 검증: `--profile docs` PASS, `--profile swift` PASS(AgentWorker 단위테스트 27개 — G1~G4 스냅샷 verdict 포함), `--profile runtime-db` PASS(007 적용 + 1-run 멱등 IDEMPOTENCY_OK), `--profile runtime-agent` PASS(G4/G3/G1 트립 시나리오 포함, 프로파일 사이 포트 가드로 누수 MomoServer kill).
+- **코드리뷰 High 반영(2026-07-06 라운드):**
+  - G1을 `status='running'` 단독 계수로 축소(`awaiting_approval`/`paused`는 사람 대기 상태 — 승인 대기 중 재멘션 영구 차단 경로 제거) + stale running 제외(`updated_at`이 `G1_STALE_RUNNING_SECONDS`(기본 600s) 초과한 run은 워커 크래시 잔재로 보고 카운트 제외, 제외 발생 시 `audit_log(action='agent.guard.stale_running_observed')` 관찰 기록 — 실제 fail 전이는 후속 reaper 티켓 필요, 코드 주석 명시).
+  - 클레임 상태 가드: proceed UPDATE에 `WHERE status IN ('queued','running','failed')` + RETURNING(0행이면 실행 스킵 + `audit_log(action='agent.run.claim_skipped')` no-op — 취소된 run 부활 방지; `failed` 포함은 transient 재시도 경로 유지 목적, 주석 명시).
+  - §3.4 depth 게이트를 스펙 문언("MAX_DEPTH=4 **초과** 시 차단")과 007 CHECK(`depth<=4`)에 정렬: `depth > MAX_DEPTH`로 수정(depth=4는 유효). durable 라벨(audit detail/message props/agent_run.error)의 depth 캡 표기를 `G4` → **`a2a_depth`**로 교체(§3.3 정본 G4=SimHash와 충돌 해소; A2A 스폰 도입 시 실집행점은 child 생성 시 `parent.depth >= MAX_DEPTH` 검사임을 주석 명시).
+  - G2를 스펙 의미(per-agent counter)로 재작성: 채널 전체 에이전트 테일 합산 → **해당 에이전트의** 마지막 사람 메시지 이후 auto 발화만 계수(`type='text'`만 — tool_call/tool_result/system 제외, run당 1계수 = `DISTINCT run_id`; 다른 에이전트 발화는 계수도 리셋도 안 함 — 라운드 배리어 호환).
+  - G3 실집행: proceed 클레임 UPDATE에 `step_count = step_count + 1`(클레임당 1스텝 소모 — 기존엔 런타임 writer 부재로 G3가 시드값 전용이었음).
+  - payload 시드 fast-fail 평가 삭제(`evaluatePreInvoke`/`RunGateState` 제거) — DB snapshot이 유일한 게이트 authority(계약 모순 제거). degraded 메시지를 게이트별 실제 해제 조건에 맞게 수정(G1: "다른 run 실행 중, 끝나면 재멘션" / G2: "사람 메시지가 카운터 리셋").
+  - verifier: G2 트립 e2e 추가(`MAX_CONSECUTIVE_AUTO=2` env + 에이전트 연속 text 2건 시드 → 트립 + audit evidence, 검증 후 사람 메시지로 카운터 리셋), depth 트립을 env 정렬(`MAX_DEPTH=1` + depth=2 시드 — CHECK `depth<=4`와 무충돌), 트립 라벨 grep `a2a_depth` 갱신. 4종(a2a_depth/G3/G1/G2) 전부 failed run + audit + degraded system 메시지 + no-spend 단정.
+  - 남은 honest gap: stale-running 제외의 e2e 시나리오는 verifier에 없음(단위/코드 경로만 — reaper 티켓에서 함께), SimHash G4·라운드 스케줄러는 계속 미구현(MOMO-313).
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

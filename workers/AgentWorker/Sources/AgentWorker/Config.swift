@@ -38,8 +38,14 @@ struct Config: Sendable {
     // ---- Loop-safety gate defaults (L4 §3.3 / §3.4) — overridable for tuning ----
     var maxConsecutiveAuto: Int  // G2: consecutive agent auto-replies before halt
     var maxSteps: Int            // G3: per-turn tool-call hard cap (v0 override of schema 50)
-    var maxDepth: Int            // §3.4: A→B→A hop depth cap
-    var maxConcurrentRuns: Int   // G1: per-agent semaphore (in-process complement to DB)
+    var maxDepth: Int            // §3.4: A→B→A hop depth cap (blocks when depth EXCEEDS this)
+    var maxConcurrentRuns: Int   // G1: per-agent semaphore fallback when the agent row is missing
+    // G1 stale-running exclusion: a `running` run whose updated_at is older than
+    // this many seconds is treated as abandoned (worker crash mid-run) and does
+    // NOT count toward the G1 semaphore, so a dead run cannot permanently lock
+    // the agent out. Excluded runs are recorded in audit_log; actually failing
+    // them belongs to a follow-up reaper ticket.
+    var g1StaleRunningSeconds: Int = 600
 
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -82,7 +88,8 @@ struct Config: Sendable {
             maxConsecutiveAuto: envInt("MAX_CONSECUTIVE_AUTO", 3),
             maxSteps: envInt("MAX_STEPS", 12),
             maxDepth: envInt("MAX_DEPTH", 4),
-            maxConcurrentRuns: envInt("MAX_CONCURRENT_RUNS", 1)
+            maxConcurrentRuns: envInt("MAX_CONCURRENT_RUNS", 1),
+            g1StaleRunningSeconds: envInt("G1_STALE_RUNNING_SECONDS", 600)
         )
     }
 
