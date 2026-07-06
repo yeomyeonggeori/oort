@@ -1,6 +1,6 @@
 # Google Workspace Enterprise Admin v0
 
-> Updated: 2026-06-29
+> Updated: 2026-07-06 (MOMO-323: `service_account_boundary.boundary_kind` added with third mode `shared_drive_member` — not DWD; grounds: `research/13-redesign/03` §2·§5)
 > Status: normative spec for MOMO-123. No runtime/schema implementation in this ticket.
 
 ## 1. Purpose
@@ -28,6 +28,7 @@ This spec answers seven questions:
 
 - Per-user OAuth from MOMO-122 is the product default. Enterprise admin install must be explicitly enabled per momo workspace.
 - Domain-wide delegation (DWD) is disabled by default even after enterprise admin install. It requires a separate admin approval record, scope inventory, service account client id, and user-delegation policy.
+- A `shared_drive_member` service-account boundary (§6) is **not DWD**. The service account acts only as itself, holds Content Manager membership in exactly one momo-managed workspace shared drive, never impersonates a user, and never mints delegated tokens. Enabling it must not enable DWD and requires no Admin console API Controls client authorization.
 - A delegated request must name a human Google subject or user principal. Agents must not use a domain-wide grant as an ownerless mailbox, Drive, or Calendar identity.
 - The service account private key, workload identity credential, refresh token, or access token is never stored in Context Packet, Memory Plane, Capability Cache, fixtures, audit exports, logs, or user-visible props.
 - DWD read access is still source-scoped at momo policy time. A broad Workspace grant does not authorize broad Context Packet inclusion.
@@ -42,8 +43,11 @@ This spec answers seven questions:
 | `per_user_oauth` | yes | each human member | user's OAuth grant | MOMO-122 read-mostly Drive/Gmail/Calendar sources |
 | `enterprise_admin_install` | no | Google Workspace super/admin + momo workspace owner/admin | admin consent and workspace policy | central policy, scope inventory, audit export, optional app allowlisting |
 | `domain_wide_delegation` | no | Google Workspace super admin plus momo enterprise admin policy | service account client id with approved scopes | delegated read for enterprise tenants where per-user OAuth is operationally unsuitable |
+| `shared_drive_member` | no | momo workspace owner/admin plus a Workspace member/admin who creates the shared drive | service account **as itself** — Content Manager member of exactly one momo-managed shared drive (`boundary_kind = shared_drive_member`, §6) | workspace archive storage and indexing credential (MOMO-320/321); not DWD, no impersonation |
 
 Enterprise admin install can exist without DWD. For example, a customer may use admin approval only to pre-approve the OAuth app and export audits while keeping per-user OAuth as the only data access path.
+
+`shared_drive_member` can likewise exist without DWD and without a full enterprise admin install: a small self-hosted team provisions it with ordinary shared-drive membership plus the Internal-consent GCP project setup (`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`). It is still recorded as a `service_account_boundary` under this spec so scope inventory, credential storage, review cadence, and revoke rules apply.
 
 ## 4. Admin Consent and Manual Boundary
 
@@ -97,7 +101,7 @@ v0 recommended inventory:
 
 | Surface | Scope | DWD allowed | Default | Notes |
 |---|---|---:|---|---|
-| Drive selected/resource-scoped | `https://www.googleapis.com/auth/drive.file` | false | per-user only | Keep MOMO-122 selected-file default. |
+| Drive selected/resource-scoped | `https://www.googleapis.com/auth/drive.file` | false | per-user only | Keep MOMO-122 selected-file default. A `shared_drive_member` boundary may also use this scope **as the service account itself** (not DWD) for the momo-managed shared drive. |
 | Drive metadata | `https://www.googleapis.com/auth/drive.metadata.readonly` | true | off | Useful for enterprise source badge refresh; still resource filtered by momo. |
 | Drive readonly | `https://www.googleapis.com/auth/drive.readonly` | true | off | Restricted. Requires explicit admin justification and bounded excerpts. |
 | Gmail metadata | `https://www.googleapis.com/auth/gmail.metadata` | true | off | Prefer headers/labels/search metadata. |
@@ -109,13 +113,23 @@ v0 recommended inventory:
 
 ## 6. Service Account Boundary
 
-When DWD is enabled, momo records a service account boundary:
+momo records a service account boundary whenever a service-account credential exists for a workspace. `boundary_kind` selects the mode:
+
+| `boundary_kind` | What the service account is | Impersonation |
+|---|---|---|
+| `dwd_delegation` (default) | DWD client authorized in the Admin console; mints delegated tokens for named users | yes, per §7 |
+| `shared_drive_member` (added 2026-07-06, MOMO-323) | **Not DWD.** The service account acts only as itself; its entire authority is Content Manager membership in exactly one momo-managed workspace shared drive | none — no delegated subjects, no Admin console API Controls authorization |
+
+Boundary records without `boundary_kind` are read as `dwd_delegation` (backward compatible — all pre-2026-07 records are DWD).
+
+DWD boundary (`boundary_kind = dwd_delegation`):
 
 ```json
 {
   "service_account_boundary_id": "gwe_sa_boundary_001",
   "workspace_id": "uuid",
   "google_customer_id": "C01example",
+  "boundary_kind": "dwd_delegation",
   "service_account_client_id_hash": "sha256:...",
   "service_account_email_redacted": "momo-enterprise@project.iam.gserviceaccount.com",
   "credential_storage_ref": "secret://google-workspace-enterprise/.../workload-identity",
@@ -126,14 +140,43 @@ When DWD is enabled, momo records a service account boundary:
 }
 ```
 
-Boundary rules:
+Shared-drive-member boundary (`boundary_kind = shared_drive_member`):
+
+```json
+{
+  "service_account_boundary_id": "gwe_sa_boundary_002",
+  "workspace_id": "uuid",
+  "google_customer_id": "C01example",
+  "boundary_kind": "shared_drive_member",
+  "service_account_client_id_hash": "sha256:...",
+  "service_account_email_redacted": "momo-archive@project.iam.gserviceaccount.com",
+  "credential_storage_ref": "secret://google-workspace-enterprise/.../shared-drive-archive-sa",
+  "key_material_policy": "no_static_key_preferred",
+  "shared_drive_id": "0AExampleSharedDriveId",
+  "shared_drive_role": "content_manager",
+  "allowed_subject_domains": [],
+  "allowed_scopes_version": "google-workspace-enterprise-scopes@2026-07-06:001",
+  "status": "active"
+}
+```
+
+Boundary rules (both kinds):
 
 - Prefer keyless workload identity or secret-manager backed credentials. If a static key exists, it must have a rotation deadline and a delete path.
 - The boundary is workspace-scoped. A service account authorized for one customer must not be reused across unrelated momo workspaces unless a future multi-tenant enterprise contract explicitly allows it.
 - Token minting is runtime-only. Store `credential_storage_ref`, not credentials.
+- A disabled, revoked, stale, or unreviewed boundary denies projection and execution.
+
+`dwd_delegation`-only rules:
+
 - Token minting requires `(workspace_id, service_account_boundary_id, delegated_subject, scope_set, resource_scope, purpose)`.
 - DWD scopes must match the approved Google Admin console client authorization and momo scope inventory.
-- A disabled, revoked, stale, or unreviewed boundary denies projection and execution.
+
+`shared_drive_member`-only rules:
+
+- `shared_drive_id` names exactly one momo-managed shared drive; `shared_drive_role` is `content_manager` in v0. `allowed_subject_domains` is empty and the §7 delegated-subject model does not apply — the boundary must never mint delegated tokens.
+- Scope set follows the §5 inventory: `drive.file` as the service account itself is preferred. If runtime evidence shows SA-side `drive.file` is insufficient for changes.list/download on the shared drive, SA-only `drive.readonly` may be recorded with justification in the scope inventory (`research/13-redesign/03` §6, 실증 1 — runtime-unverified until MOMO-320).
+- Revoking the boundary = remove the service account from the shared drive membership `[manual]`, disable/delete credential material, set status `revoked`, and delete the derived index rows built from that drive (the MOMO-122 §2 carve-out is revocable by construction).
 
 ## 7. User Delegation Model
 
@@ -231,9 +274,11 @@ User delete/unlink flow:
 
 Fixtures live in `research/11-agent-runtime/fixtures/google-workspace-enterprise-admin-v0/`:
 
-- `admin_install_scope_inventory.json`: enterprise install policy, DWD disabled default, approved scope inventory, service account boundary placeholder.
+- `admin_install_scope_inventory.json`: enterprise install policy, DWD disabled default, approved scope inventory, service account boundary placeholder, plus a `shared_drive_member` boundary example (MOMO-323).
 - `dwd_delegated_context_projection.json`: active DWD read projection into Context Packet, Memory Plane, and Capability Cache without credentials.
 - `audit_export_revoke_flow.json`: exportable audit event bundle plus revoke/delete invalidation effects.
+
+Fixture boundary records carry `boundary_kind` since 2026-07-06; records without it are read as `dwd_delegation` (backward compatible).
 
 ## 12. External References
 

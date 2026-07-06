@@ -62,6 +62,7 @@
       "occurred_at": "2026-06-29T08:40:00Z",
       "actor_member_id": "44444444-4444-7444-8444-444444444410",
       "service_account_boundary_id": "gwe_sa_boundary_example_active",
+      "boundary_kind": "dwd_delegation",
       "service_account_client_id_hash": "sha256:service-account-client-id-redacted-002",
       "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_002/workload-identity",
       "key_material_policy": "no_static_key_preferred"

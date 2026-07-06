@@ -108,6 +108,7 @@
     "service_account_boundary_id": "gwe_sa_boundary_example_pending",
     "workspace_id": "11111111-1111-7111-8111-111111111111",
     "google_customer_id": "C01example",
+    "boundary_kind": "dwd_delegation",
     "service_account_client_id_hash": "sha256:pending-client-id-redacted",
     "service_account_email_redacted": "momo-enterprise@project.iam.gserviceaccount.com",
     "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_001/workload-identity",
@@ -118,6 +119,21 @@
     "allowed_scopes_version": "google-workspace-enterprise-scopes@2026-06-29:001",
     "status": "pending_admin"
   },
+  "shared_drive_member_boundary_example": {
+    "service_account_boundary_id": "gwe_sa_boundary_shared_drive_example",
+    "workspace_id": "11111111-1111-7111-8111-111111111111",
+    "google_customer_id": "C01example",
+    "boundary_kind": "shared_drive_member",
+    "service_account_client_id_hash": "sha256:archive-client-id-redacted",
+    "service_account_email_redacted": "momo-archive@project.iam.gserviceaccount.com",
+    "credential_storage_ref": "secret://google-workspace-enterprise/gwe_install_example_001/shared-drive-archive-sa",
+    "key_material_policy": "no_static_key_preferred",
+    "shared_drive_id": "0AExampleSharedDriveId",
+    "shared_drive_role": "content_manager",
+    "allowed_subject_domains": [],
+    "allowed_scopes_version": "google-workspace-enterprise-scopes@2026-07-06:001",
+    "status": "active"
+  },
   "audit": {
     "created_by": "codex-fixture",
     "policy_versions": [
@@ -127,7 +143,9 @@
     ],
     "notes": [
       "Domain-wide delegation is disabled by default.",
-      "Per-user OAuth remains the default authorization mode."
+      "Per-user OAuth remains the default authorization mode.",
+      "boundary_kind added 2026-07-06 (MOMO-323); boundary records without it are read as dwd_delegation.",
+      "shared_drive_member boundary is not DWD: the service account acts as itself and only holds Content Manager membership in one momo-managed shared drive."
     ]
   }
 }
