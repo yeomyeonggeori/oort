@@ -924,9 +924,9 @@ M0(baseline)
 - **마일스톤:** M1 · **에픽:** EP-OPS · **플랫폼:** ci · **추정:** S
 - **deps:** — (baseline)
 - **수용기준:**
-  - [ ] [infra] `scripts/local_gate.sh --auto`가 `git diff --name-only origin/main...HEAD` 경로 매핑(docs→docs, clients→swift+macos-ui, server/Migrations→runtime-db, relay→runtime-relay, workers→runtime-agent, infra/prod→staging-smoke)으로 프로파일을 보수적으로 선택하고, 수동 지정이 항상 override
-  - [ ] [infra] `docker compose up -d` 호출부를 `--wait`로 교체하고 `wait_http` 폴링 제거(verify_internal_host_runtime.sh 등)
-  - [ ] [runtime] 마이그레이션 멱등성 검증을 2회 실행 대신 1회 실행 + `compose logs migrate` skip 마커 캡처 evidence로 대체, 기존 profile 전부 PASS 유지
+  - [x] [infra] `scripts/local_gate.sh --auto`가 `git diff --name-only origin/main...HEAD` 경로 매핑(docs→docs, clients→swift+macos-ui, server/Migrations→runtime-db, relay→runtime-relay, workers→runtime-agent, infra/prod→staging-smoke)으로 프로파일을 보수적으로 선택하고, 수동 지정이 항상 override — *리뷰 보정: `server/**`(비 Migrations)·`infra/**`(비 prod)는 relay/live/agent·로컬 compose 표면을 포함하므로 단독 프로파일로 좁히지 않고 `all`로 확대, 베이스 부재/merge-base 실패도 all로 확대(fail-open 금지)*
+  - [x] [infra] 부팅 대기용 `wait_http` 폴링을 healthcheck 기반 `docker compose up -d --wait`로 교체(healthcheck 없는 서비스는 추가) — *carve-out(오너 승인): host-runtime의 Caddy edge `/health` 확인 1건은 edge 라우팅 검증 목적의 사후 확인이라 유지(사유 주석, api 준비는 --wait가 보장)*
+  - [x] [runtime] 마이그레이션 멱등성 검증을 2회 컨테이너 실행 대신 단일 실행 내 apply→verify 2패스 + `compose logs migrate`의 `IDEMPOTENCY_OK` 마커 단정으로 대체(게이트가 `MIGRATE_IDEMPOTENCY_CHECK=1` 강제 + 마커 직접 grep), docs/runtime-db/host-runtime/local-alpha profile PASS 유지
 - **라벨:** `type:infra`, `area:ops`, `priority:p0`
 - **참조:** `research/13-redesign/02` §2 Wave 1
 

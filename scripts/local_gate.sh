@@ -3,15 +3,23 @@
 # shellcheck disable=SC2016
 set -u -o pipefail
 
-PROFILE="docs"
+PROFILE=""
+PROFILE_EXPLICIT=0
+AUTO_MODE=0
 OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all]
 
 Options:
-  --profile PROFILE   Gate profile to run. Default: docs
+  --auto              Pick the profile from changed paths (MOMO-316):
+                      git diff --name-only <base>...HEAD plus uncommitted changes,
+                      mapped conservatively (ambiguous paths widen to `all`, never
+                      narrow). An explicit --profile always wins over --auto; the
+                      suggested profile and per-path reasons are still recorded in
+                      the evidence markdown.
+  --profile PROFILE   Gate profile to run. Default: docs (when --auto is not given)
   --output-dir DIR    Directory for log/evidence files. Default: $TMPDIR/momo-local-gate
   -h, --help          Show this help.
 
@@ -20,7 +28,8 @@ Environment:
   LOCAL_GATE_LAUNCH_UI=1  In macos-ui/local-alpha/all, launch MomoMacDevApp instead of smoke only.
                           Required by internal-alpha.
   LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
-  LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks.
+  LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks and
+                          --auto profile selection (falls back to local main).
   DEVELOPER_DIR           Defaults to /Applications/Xcode.app/Contents/Developer for Swift gates.
   ENV_FILE                Optional runtime env file consumed by Makefile/runtime scripts.
 EOF
@@ -30,7 +39,12 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --profile)
       PROFILE="${2:-}"
+      PROFILE_EXPLICIT=1
       shift 2
+      ;;
+    --auto)
+      AUTO_MODE=1
+      shift
       ;;
     --output-dir)
       OUT_DIR="${2:-}"
@@ -42,6 +56,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
       PROFILE="$1"
+      PROFILE_EXPLICIT=1
       shift
       ;;
     *)
@@ -52,6 +67,203 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+if [ "$PROFILE_EXPLICIT" -eq 0 ] && [ "$AUTO_MODE" -eq 0 ]; then
+  PROFILE="docs"
+fi
+
+if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
+  case "$PROFILE" in
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all) ;;
+    *)
+      echo "unknown profile: $PROFILE" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+fi
+
+if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+  echo "scripts/local_gate.sh must run inside a git repository" >&2
+  exit 1
+fi
+cd "$REPO_ROOT" || exit 1
+
+# =============================================================================
+# --auto profile selection (MOMO-316)
+#
+# 원칙: 보수적 경로 매핑. 모호하면 항상 더 넓은 커버리지(all)로 fail-closed —
+# 좁게 줄이는 방향의 추측 금지. --profile 명시가 항상 우선(동시 지정 시
+# --profile 승리, 로그/evidence로 알림). 선택된 프로파일과 per-path 이유는
+# evidence markdown의 "Auto profile selection" 섹션에 기록된다.
+# (bash 3.2 호환: 연관배열 없이 unit 플래그 + case 매핑만 사용)
+# =============================================================================
+AUTO_SUGGESTED=""
+AUTO_BASE_DESC=""
+declare -a AUTO_REASONS=()
+AUTO_NEED_MACOS=0
+AUTO_NEED_DB=0
+AUTO_NEED_RELAY=0
+AUTO_NEED_AGENT=0
+AUTO_NEED_LIVE=0
+AUTO_NEED_STAGING=0
+AUTO_NEED_HOSTRT=0
+AUTO_NEED_DIAG=0
+AUTO_NEED_ALL=0
+
+auto_classify_script() {
+  # scripts/** → docs + 해당 스크립트가 속한 runtime 프로파일. 모호하면 all.
+  case "$1" in
+    scripts/migrate.sh|scripts/verify_rls.sh|scripts/verify_roster.sh|scripts/verify_channel_list.sh|scripts/verify_channel_management.sh|scripts/verify_join.sh|scripts/verify_platform_admin.sh|scripts/verify_approval_decision.sh)
+      AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
+    scripts/verify_relay.sh)
+      AUTO_NEED_RELAY=1; AUTO_REASONS+=("$1 -> runtime-relay") ;;
+    scripts/verify_realtime_live.sh)
+      AUTO_NEED_LIVE=1; AUTO_REASONS+=("$1 -> runtime-live") ;;
+    scripts/verify_agent_worker.sh|scripts/verify_agent_live_channel.sh|scripts/verify_local_hermes_bridge.sh|scripts/verify_local_hermes_credentialed_smoke.sh|scripts/verify_external_agent_provider.sh|scripts/mock_hermes.py)
+      AUTO_NEED_AGENT=1; AUTO_REASONS+=("$1 -> runtime-agent") ;;
+    scripts/verify_staging_smoke.sh|scripts/verify_internal_hosting_smoke.sh|scripts/prod_env_preflight.sh|scripts/aws_internal_alpha_preflight.sh)
+      AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
+    scripts/verify_internal_host_runtime.sh|scripts/verify_backup_restore_rehearsal.sh)
+      AUTO_NEED_HOSTRT=1; AUTO_REASONS+=("$1 -> host-runtime") ;;
+    scripts/verify_macos_real_backend_ui.sh|scripts/macos_dev_run.sh)
+      AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> macos-ui") ;;
+    scripts/collect_diagnostics.sh)
+      AUTO_NEED_DIAG=1; AUTO_REASONS+=("$1 -> diagnostics") ;;
+    *)
+      # local_gate.sh 자신, goal_*, github/* 등 게이트 인프라 스크립트는
+      # 어느 runtime 프로파일에 속하는지 모호 → 좁히지 않고 all로 넓힌다.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (ambiguous script; widen, do not narrow)") ;;
+  esac
+}
+
+auto_classify_path() {
+  case "$1" in
+    docs/*|research/*|legal/*|*.md)
+      AUTO_REASONS+=("$1 -> docs") ;;
+    clients/*)
+      AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> swift+macos-ui") ;;
+    server/Migrations/*)
+      AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
+    server/*)
+      # MomoServer 소스는 outbox/realtime token/agent mention 등 relay·live·agent
+      # 표면을 포함한다 — runtime-db 단독은 좁힘(리뷰 high). all로 확대하고,
+      # 결합 프로파일 도입 시 재조정한다.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (server touches db+relay+live+agent surfaces; widen)") ;;
+    relay/*)
+      AUTO_NEED_RELAY=1; AUTO_REASONS+=("$1 -> swift+runtime-relay") ;;
+    workers/*)
+      AUTO_NEED_AGENT=1; AUTO_REASONS+=("$1 -> swift+runtime-agent") ;;
+    adapters/*)
+      AUTO_NEED_AGENT=1; AUTO_REASONS+=("$1 -> runtime-agent (hermes adapter surface)") ;;
+    infra/prod/*)
+      AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
+    infra/*)
+      # 로컬 런타임 정본(compose/centrifugo.json/e2e roles). staging-smoke는 이
+      # 파일들을 기동하지 않으므로(리뷰 blocker: silent coverage loss) all로 확대.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (local runtime compose surface; widen, do not narrow)") ;;
+    scripts/*)
+      auto_classify_script "$1" ;;
+    *)
+      # Makefile, .github, .conductor 등 미매핑 경로 → 넓게(all).
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (unmapped path; widen, do not narrow)") ;;
+  esac
+}
+
+auto_select_profile() {
+  local base="${LOCAL_GATE_BASE_REF:-origin/main}"
+  if git rev-parse --verify "$base" >/dev/null 2>&1; then
+    AUTO_BASE_DESC="$base (three-dot merge-base diff)"
+  elif git rev-parse --verify main >/dev/null 2>&1; then
+    base="main"
+    AUTO_BASE_DESC="main (origin/main unavailable; three-dot merge-base diff)"
+  else
+    base=""
+    AUTO_BASE_DESC="none (no origin/main or main; uncommitted changes only)"
+  fi
+
+  local committed=""
+  if [ -n "$base" ]; then
+    if ! committed="$(git diff --name-only "$base"...HEAD 2>/dev/null)"; then
+      # merge-base 부재(unrelated history 등)로 diff 실패 — committed 변경을
+      # 놓친 채 dirty-only로 좁히면 fail-open(리뷰 high). all로 확대한다.
+      AUTO_NEED_ALL=1
+      AUTO_REASONS+=("diff vs $base failed (no merge-base?); widen to all")
+    fi
+  else
+    # 베이스를 못 잡으면(shallow clone 등) committed 변경 전체를 볼 수 없다 —
+    # dirty-only 판정으로 좁히지 않고 all로 확대한다(리뷰 high).
+    AUTO_NEED_ALL=1
+    AUTO_REASONS+=("no diff base available; widen to all (do not narrow to dirty-only)")
+  fi
+  # LOCAL_GATE_ALLOW_DIRTY=1 pre-commit 탐색 실행도 커버하도록
+  # staged/unstaged/untracked 변경 경로를 합산한다(rename은 새 경로 기준).
+  local dirty
+  dirty="$(git status --porcelain 2>/dev/null | sed -e 's/^...//' -e 's/^.* -> //' -e 's/^"//' -e 's/"$//')"
+  local files
+  files="$(printf '%s\n%s\n' "$committed" "$dirty" | sed '/^$/d' | LANG=C sort -u)"
+
+  if [ -z "$files" ]; then
+    if [ "$AUTO_NEED_ALL" -eq 1 ]; then
+      AUTO_SUGGESTED="all"
+    else
+      AUTO_SUGGESTED="docs"
+      AUTO_REASONS+=("no changed paths vs ${base:-<none>}; defaulting to docs")
+    fi
+    return 0
+  fi
+
+  # 변경 경로에 glob 문자(*?[)가 있어도 repo root 기준으로 확장되지 않도록
+  # 루프 동안 pathname expansion을 끈다(리뷰 high; 공백 경로는 여전히 미지원).
+  local f
+  set -f
+  for f in $files; do
+    auto_classify_path "$f"
+  done
+  set +f
+
+  local units=$((AUTO_NEED_MACOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG))
+  if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
+    AUTO_SUGGESTED="all"
+    if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
+      AUTO_REASONS+=("note: profile 'all' does not include runtime-live; run --profile runtime-live separately")
+    fi
+    if [ "$AUTO_NEED_DIAG" -eq 1 ]; then
+      AUTO_REASONS+=("note: profile 'all' does not include the diagnostics smoke; run --profile diagnostics separately")
+    fi
+  elif [ "$AUTO_NEED_MACOS" -eq 1 ]; then
+    AUTO_SUGGESTED="macos-ui"
+  elif [ "$AUTO_NEED_DB" -eq 1 ]; then
+    AUTO_SUGGESTED="runtime-db"
+  elif [ "$AUTO_NEED_RELAY" -eq 1 ]; then
+    AUTO_SUGGESTED="runtime-relay"
+  elif [ "$AUTO_NEED_AGENT" -eq 1 ]; then
+    AUTO_SUGGESTED="runtime-agent"
+  elif [ "$AUTO_NEED_LIVE" -eq 1 ]; then
+    AUTO_SUGGESTED="runtime-live"
+  elif [ "$AUTO_NEED_STAGING" -eq 1 ]; then
+    AUTO_SUGGESTED="staging-smoke"
+  elif [ "$AUTO_NEED_HOSTRT" -eq 1 ]; then
+    AUTO_SUGGESTED="host-runtime"
+  elif [ "$AUTO_NEED_DIAG" -eq 1 ]; then
+    AUTO_SUGGESTED="diagnostics"
+  else
+    AUTO_SUGGESTED="docs"
+  fi
+}
+
+if [ "$AUTO_MODE" -eq 1 ]; then
+  auto_select_profile
+  if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
+    echo "local gate: --profile $PROFILE overrides --auto (auto suggested: $AUTO_SUGGESTED; base: $AUTO_BASE_DESC)"
+  else
+    PROFILE="$AUTO_SUGGESTED"
+    echo "local gate: --auto selected profile: $PROFILE (base: $AUTO_BASE_DESC)"
+  fi
+  for auto_note in "${AUTO_REASONS[@]:-}"; do
+    [ -n "$auto_note" ] && echo "  auto: $auto_note"
+  done
+fi
+
 case "$PROFILE" in
   docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all) ;;
   *)
@@ -60,12 +272,6 @@ case "$PROFILE" in
     exit 2
     ;;
 esac
-
-if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-  echo "scripts/local_gate.sh must run inside a git repository" >&2
-  exit 1
-fi
-cd "$REPO_ROOT" || exit 1
 
 mkdir -p "$OUT_DIR" || exit 1
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -194,9 +400,13 @@ add_runtime_bootstrap_commands() {
   if [ "$BOOTSTRAP_ADDED" -eq 1 ]; then
     return 0
   fi
-  add_cmd "docker compose up" "make up"
-  add_cmd "migrate first pass" "make migrate"
-  add_cmd "migrate idempotency pass" "make migrate"
+  # MOMO-316: make up은 `compose up -d --wait`(postgres/centrifugo healthcheck
+  # healthy까지 대기), make migrate는 단일 실행 안에서 apply→verify 2패스를 돌아
+  # IDEMPOTENCY_OK 마커를 남긴다(기존 migrate 2회 호출과 동일 판정 경로 + 강한 단정).
+  add_cmd "docker compose up (--wait healthy)" "make up"
+  # env 파일/프로파일이 MIGRATE_IDEMPOTENCY_CHECK=0을 품고 있어도 게이트 단정이
+  # 조용히 꺼지지 않도록(리뷰 high) env를 강제하고 IDEMPOTENCY_OK 마커를 직접 단정한다.
+  add_cmd "migrate apply + idempotency verify (single run)" "out=\"\$(MIGRATE_IDEMPOTENCY_CHECK=1 make migrate 2>&1)\"; status=\$?; printf '%s\n' \"\$out\"; [ \$status -eq 0 ] && printf '%s\n' \"\$out\" | grep -F '[migrate] IDEMPOTENCY_OK second-pass applied=0'"
   BOOTSTRAP_ADDED=1
 }
 
@@ -486,6 +696,20 @@ write_evidence() {
     echo "## Local Gate"
     echo "- Result: $RESULT"
     echo "- Profile: \`$PROFILE\`"
+    if [ "$AUTO_MODE" -eq 1 ]; then
+      echo "- Auto profile selection (--auto):"
+      echo "  - base: $AUTO_BASE_DESC"
+      echo "  - suggested: \`$AUTO_SUGGESTED\`"
+      if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
+        echo "  - applied: \`$PROFILE\` (explicit --profile overrides --auto)"
+      else
+        echo "  - applied: \`$PROFILE\`"
+      fi
+      echo "  - path mapping reasons:"
+      for note in "${AUTO_REASONS[@]:-}"; do
+        [ -n "$note" ] && echo "    - $note"
+      done
+    fi
     echo "- Started: $START_ISO"
     echo "- Finished: $END_STAMP"
     echo "- Run ID: \`$RUN_ID\`"
