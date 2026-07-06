@@ -279,6 +279,7 @@ struct MessageRoutes: Sendable {
         let model: String
         let toolSchemaJSON: String
         let configJSON: String
+        let systemPrompt: String?
         let maxRunSteps: Int
         let isChannelMember: Bool
     }
@@ -345,7 +346,7 @@ struct MessageRoutes: Sendable {
         let rows = try await conn.query(
             """
             SELECT m.id, m.handle, m.display_name, a.model,
-                   a.tool_schema::text, a.config::text, a.max_run_steps,
+                   a.tool_schema::text, a.config::text, a.system_prompt, a.max_run_steps,
                    EXISTS (
                      SELECT 1
                        FROM membership ms
@@ -365,8 +366,8 @@ struct MessageRoutes: Sendable {
         ).collect()
 
         return try rows.map { row in
-            let (id, handle, displayName, model, toolSchema, config, maxRunSteps, isChannelMember) =
-                try row.decode((UUID, String, String, String, String, String, Int, Bool).self)
+            let (id, handle, displayName, model, toolSchema, config, systemPrompt, maxRunSteps, isChannelMember) =
+                try row.decode((UUID, String, String, String, String, String, String?, Int, Bool).self)
             return AgentMentionCandidate(
                 id: id,
                 handle: handle,
@@ -374,9 +375,191 @@ struct MessageRoutes: Sendable {
                 model: model,
                 toolSchemaJSON: toolSchema,
                 configJSON: config,
+                systemPrompt: systemPrompt,
                 maxRunSteps: maxRunSteps,
                 isChannelMember: isChannelMember
             )
+        }
+    }
+
+    // MARK: - Context assembly window (MOMO-302)
+
+    /// `AGENT_CONTEXT_MAX_MESSAGES` (default 30, clamped 1…200): the recent-N
+    /// history window size projected into the agent_job payload.
+    private static func agentContextMaxMessages() -> Int {
+        let parsed = ProcessInfo.processInfo.environment["AGENT_CONTEXT_MAX_MESSAGES"]
+            .flatMap(Int.init) ?? 30
+        return min(max(parsed, 1), 200)
+    }
+
+    /// Fetch the same-channel history window for a trigger. Thread messages
+    /// (root + replies) are prioritized when the trigger is inside a thread
+    /// (thread = session boundary), then remaining budget is filled with the
+    /// channel's most-recent messages. `type='system'` and deleted messages are
+    /// excluded; the caller runs inside the tenant transaction so RLS is scoped.
+    private static func loadRecentMessages(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        triggerMessageID: UUID,
+        maxMessages: Int
+    ) async throws -> [[String: Any]] {
+        let rootRows = try await conn.query(
+            """
+            SELECT root_id
+              FROM message
+             WHERE id = \(triggerMessageID)
+               AND channel_id = \(channelID)
+            """,
+            logger: logger
+        ).collect()
+        let rootID: UUID?
+        if let firstRoot = rootRows.first {
+            rootID = try firstRoot.decode(UUID?.self)
+        } else {
+            rootID = nil
+        }
+
+        var rows: [PostgresRow]
+        if let rootID {
+            // Thread priority: root message + all its replies, newest-first.
+            let threadRows = try await conn.query(
+                """
+                SELECT m.seq, m.id, m.author_member_id, mem.kind::text,
+                       mem.display_name, m.type::text, m.body, m.props::text, m.created_at
+                  FROM message m
+                  JOIN member mem ON mem.id = m.author_member_id
+                 WHERE m.channel_id = \(channelID)
+                   AND (m.root_id = \(rootID) OR m.id = \(rootID))
+                   AND m.type <> 'system'
+                   AND m.state <> 'deleted'
+                   AND m.deleted_at IS NULL
+                 ORDER BY m.seq DESC
+                 LIMIT \(maxMessages)
+                """,
+                logger: logger
+            ).collect()
+            rows = threadRows
+            let remaining = maxMessages - threadRows.count
+            if remaining > 0 {
+                let fillRows = try await conn.query(
+                    """
+                    SELECT m.seq, m.id, m.author_member_id, mem.kind::text,
+                           mem.display_name, m.type::text, m.body, m.props::text, m.created_at
+                      FROM message m
+                      JOIN member mem ON mem.id = m.author_member_id
+                     WHERE m.channel_id = \(channelID)
+                       AND m.id <> \(rootID)
+                       AND m.root_id IS DISTINCT FROM \(rootID)
+                       AND m.type <> 'system'
+                       AND m.state <> 'deleted'
+                       AND m.deleted_at IS NULL
+                     ORDER BY m.seq DESC
+                     LIMIT \(remaining)
+                    """,
+                    logger: logger
+                ).collect()
+                rows.append(contentsOf: fillRows)
+            }
+        } else {
+            rows = try await conn.query(
+                """
+                SELECT m.seq, m.id, m.author_member_id, mem.kind::text,
+                       mem.display_name, m.type::text, m.body, m.props::text, m.created_at
+                  FROM message m
+                  JOIN member mem ON mem.id = m.author_member_id
+                 WHERE m.channel_id = \(channelID)
+                   AND m.type <> 'system'
+                   AND m.state <> 'deleted'
+                   AND m.deleted_at IS NULL
+                 ORDER BY m.seq DESC
+                 LIMIT \(maxMessages)
+                """,
+                logger: logger
+            ).collect()
+        }
+
+        // Dedupe by id (thread rows win), then order ASC by seq for chat replay.
+        var seen = Set<UUID>()
+        var ordered: [(seq: Int64, dict: [String: Any])] = []
+        for row in rows {
+            let (seq, id, author, kind, display, type, body, propsText, createdAt) =
+                try row.decode(
+                    (Int64, UUID, UUID, String, String, String, String?, String, Date).self)
+            guard seen.insert(id).inserted else { continue }
+            ordered.append((
+                seq,
+                recentMessageProjection(
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    seq: seq,
+                    messageID: id,
+                    authorMemberID: author,
+                    authorKind: kind,
+                    authorDisplay: display,
+                    type: type,
+                    body: body,
+                    propsJSON: propsText,
+                    createdAt: createdAt
+                )
+            ))
+        }
+        ordered.sort { $0.seq < $1.seq }
+        return ordered.map(\.dict)
+    }
+
+    private static func recentMessageProjection(
+        workspaceID: UUID,
+        channelID: UUID,
+        seq: Int64,
+        messageID: UUID,
+        authorMemberID: UUID,
+        authorKind: String,
+        authorDisplay: String,
+        type: String,
+        body: String?,
+        propsJSON: String,
+        createdAt: Date
+    ) -> [String: Any] {
+        [
+            "message_id": messageID.uuidString,
+            "channel_id": channelID.uuidString,
+            "seq": seq,
+            "author_member_id": authorMemberID.uuidString,
+            "author_kind": authorKind,
+            "author_display": authorDisplay,
+            "type": type,
+            "body": recentMessageBody(type: type, body: body, propsJSON: propsJSON),
+            "created_at": Int64(createdAt.timeIntervalSince1970 * 1000),
+            "source_id": "msg_\(messageID.uuidString)",
+        ]
+    }
+
+    /// Render a display body for the history window: text is trimmed to 2000
+    /// chars (with an ellipsis marker); structured tool events collapse to a
+    /// terse summary instead of leaking raw JSON payloads.
+    private static func recentMessageBody(
+        type: String,
+        body: String?,
+        propsJSON: String
+    ) -> String {
+        switch type {
+        case "tool_call":
+            if let object = jsonObject(propsJSON) as? [String: Any],
+               let name = object["name"] as? String,
+               !name.isEmpty {
+                return "[tool_call: \(name)]"
+            }
+            return "[tool_call]"
+        case "tool_result":
+            return "[tool_result]"
+        default:
+            let text = body ?? ""
+            if text.count > 2000 {
+                return String(text.prefix(2000)) + "…"
+            }
+            return text
         }
     }
 
@@ -456,6 +639,18 @@ struct MessageRoutes: Sendable {
             body: body,
             idempotencyKey: idempotencyKey
         )
+        // MOMO-302: materialize a same-channel history window (recent-N, thread
+        // priority) so the worker assembles a conversation instead of a single
+        // amnesiac trigger message. RLS/tenant scope comes from the enclosing
+        // `withTenantTransaction` (SET LOCAL app.workspace_id).
+        let recentMessages = try await loadRecentMessages(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            channelID: channelID,
+            triggerMessageID: messageID,
+            maxMessages: agentContextMaxMessages()
+        )
         let rows = try await conn.query(
             """
             INSERT INTO agent_run
@@ -483,7 +678,8 @@ struct MessageRoutes: Sendable {
             agent: agent,
             body: body,
             hlcTs: hlcTs,
-            idempotencyKey: idempotencyKey
+            idempotencyKey: idempotencyKey,
+            recentMessages: recentMessages
         )
         _ = try await conn.query(
             """
@@ -597,7 +793,8 @@ struct MessageRoutes: Sendable {
         agent: AgentMentionCandidate,
         body: String,
         hlcTs: Int64,
-        idempotencyKey: String
+        idempotencyKey: String,
+        recentMessages: [[String: Any]]
     ) -> String {
         let source = messageSource(
             workspaceID: workspaceID,
@@ -617,9 +814,10 @@ struct MessageRoutes: Sendable {
             agent: agent,
             body: body,
             idempotencyKey: idempotencyKey,
-            source: source
+            source: source,
+            recentMessages: recentMessages
         )
-        return jsonString([
+        var payload: [String: Any] = [
             "run_id": runID.uuidString,
             "workspace_id": workspaceID.uuidString,
             "channel_id": channelID.uuidString,
@@ -629,6 +827,8 @@ struct MessageRoutes: Sendable {
             "trigger_message_seq": messageSeq,
             "model": agent.model,
             "prompt": body,
+            // MOMO-302: worker-facing conversation window (recent-N/thread, ASC).
+            "recent_messages": recentMessages,
             "tools": jsonObject(agent.toolSchemaJSON),
             "tool_grants": readOnlyToolGrants(),
             "context_packet_projection": contextPacket,
@@ -639,7 +839,14 @@ struct MessageRoutes: Sendable {
             "consecutive_auto": 0,
             "created_from": "server.message_send.agent_mention.v0",
             "created_at_ms": hlcTs,
-        ])
+        ]
+        // The agent's own system prompt seeds the first `system` chat message; the
+        // worker keeps the amnesiac single-message path when it is absent.
+        if let systemPrompt = agent.systemPrompt,
+           !systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            payload["system_prompt"] = systemPrompt
+        }
+        return jsonString(payload)
     }
 
     private static func contextPacketProjection(
@@ -652,9 +859,14 @@ struct MessageRoutes: Sendable {
         agent: AgentMentionCandidate,
         body: String,
         idempotencyKey: String,
-        source: [String: Any]
+        source: [String: Any],
+        recentMessages: [[String: Any]]
     ) -> [String: Any] {
-        [
+        // Acceptance ②: the projection carries real channel history with source
+        // attribution, not just the trigger echo. Fall back to the trigger source
+        // when the window is somehow empty so the field is never absent.
+        let history = recentMessages.isEmpty ? [source] : recentMessages
+        return [
             "schema": "momo.context_packet.mention_projection.v0",
             "request": [
                 "surface": "mention",
@@ -680,7 +892,7 @@ struct MessageRoutes: Sendable {
                     "set_local_workspace_id": workspaceID.uuidString,
                 ],
             ],
-            "recent_messages": [source],
+            "recent_messages": history,
             "sources": [source],
             "tool_grants": readOnlyToolGrants(),
         ]

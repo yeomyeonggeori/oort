@@ -41,6 +41,9 @@ struct Config: Sendable {
     var maxDepth: Int            // §3.4: A→B→A hop depth cap
     var maxConcurrentRuns: Int   // G1: per-agent semaphore (in-process complement to DB)
 
+    // ---- Context assembly window (MOMO-302) ----
+    var maxContextChars: Int     // char-approx budget for the assembled history
+
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
     }
@@ -82,7 +85,9 @@ struct Config: Sendable {
             maxConsecutiveAuto: envInt("MAX_CONSECUTIVE_AUTO", 3),
             maxSteps: envInt("MAX_STEPS", 12),
             maxDepth: envInt("MAX_DEPTH", 4),
-            maxConcurrentRuns: envInt("MAX_CONCURRENT_RUNS", 1)
+            maxConcurrentRuns: envInt("MAX_CONCURRENT_RUNS", 1),
+            // MOMO-302: char-approx history budget; drop oldest over this cap.
+            maxContextChars: max(envInt("AGENT_CONTEXT_MAX_CHARS", 24000), 1)
         )
     }
 

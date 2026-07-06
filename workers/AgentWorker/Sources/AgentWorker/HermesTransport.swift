@@ -33,7 +33,7 @@ struct HermesTransport: Sendable {
 
     // MARK: - Request shapes (OpenAI-compatible)
 
-    struct ChatMessage: Encodable, Sendable {
+    struct ChatMessage: Encodable, Sendable, Equatable {
         let role: String
         let content: String
     }
