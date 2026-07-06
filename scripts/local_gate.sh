@@ -145,7 +145,10 @@ auto_classify_path() {
     server/Migrations/*)
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
     server/*)
-      AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> swift+runtime-db") ;;
+      # MomoServer 소스는 outbox/realtime token/agent mention 등 relay·live·agent
+      # 표면을 포함한다 — runtime-db 단독은 좁힘(리뷰 high). all로 확대하고,
+      # 결합 프로파일 도입 시 재조정한다.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (server touches db+relay+live+agent surfaces; widen)") ;;
     relay/*)
       AUTO_NEED_RELAY=1; AUTO_REASONS+=("$1 -> swift+runtime-relay") ;;
     workers/*)
@@ -155,7 +158,9 @@ auto_classify_path() {
     infra/prod/*)
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
     infra/*)
-      AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> docs+staging-smoke") ;;
+      # 로컬 런타임 정본(compose/centrifugo.json/e2e roles). staging-smoke는 이
+      # 파일들을 기동하지 않으므로(리뷰 blocker: silent coverage loss) all로 확대.
+      AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (local runtime compose surface; widen, do not narrow)") ;;
     scripts/*)
       auto_classify_script "$1" ;;
     *)
@@ -178,7 +183,17 @@ auto_select_profile() {
 
   local committed=""
   if [ -n "$base" ]; then
-    committed="$(git diff --name-only "$base"...HEAD 2>/dev/null)"
+    if ! committed="$(git diff --name-only "$base"...HEAD 2>/dev/null)"; then
+      # merge-base 부재(unrelated history 등)로 diff 실패 — committed 변경을
+      # 놓친 채 dirty-only로 좁히면 fail-open(리뷰 high). all로 확대한다.
+      AUTO_NEED_ALL=1
+      AUTO_REASONS+=("diff vs $base failed (no merge-base?); widen to all")
+    fi
+  else
+    # 베이스를 못 잡으면(shallow clone 등) committed 변경 전체를 볼 수 없다 —
+    # dirty-only 판정으로 좁히지 않고 all로 확대한다(리뷰 high).
+    AUTO_NEED_ALL=1
+    AUTO_REASONS+=("no diff base available; widen to all (do not narrow to dirty-only)")
   fi
   # LOCAL_GATE_ALLOW_DIRTY=1 pre-commit 탐색 실행도 커버하도록
   # staged/unstaged/untracked 변경 경로를 합산한다(rename은 새 경로 기준).
@@ -188,15 +203,23 @@ auto_select_profile() {
   files="$(printf '%s\n%s\n' "$committed" "$dirty" | sed '/^$/d' | LANG=C sort -u)"
 
   if [ -z "$files" ]; then
-    AUTO_SUGGESTED="docs"
-    AUTO_REASONS+=("no changed paths vs ${base:-<none>}; defaulting to docs")
+    if [ "$AUTO_NEED_ALL" -eq 1 ]; then
+      AUTO_SUGGESTED="all"
+    else
+      AUTO_SUGGESTED="docs"
+      AUTO_REASONS+=("no changed paths vs ${base:-<none>}; defaulting to docs")
+    fi
     return 0
   fi
 
+  # 변경 경로에 glob 문자(*?[)가 있어도 repo root 기준으로 확장되지 않도록
+  # 루프 동안 pathname expansion을 끈다(리뷰 high; 공백 경로는 여전히 미지원).
   local f
+  set -f
   for f in $files; do
     auto_classify_path "$f"
   done
+  set +f
 
   local units=$((AUTO_NEED_MACOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
@@ -381,7 +404,9 @@ add_runtime_bootstrap_commands() {
   # healthy까지 대기), make migrate는 단일 실행 안에서 apply→verify 2패스를 돌아
   # IDEMPOTENCY_OK 마커를 남긴다(기존 migrate 2회 호출과 동일 판정 경로 + 강한 단정).
   add_cmd "docker compose up (--wait healthy)" "make up"
-  add_cmd "migrate apply + idempotency verify (single run)" "make migrate"
+  # env 파일/프로파일이 MIGRATE_IDEMPOTENCY_CHECK=0을 품고 있어도 게이트 단정이
+  # 조용히 꺼지지 않도록(리뷰 high) env를 강제하고 IDEMPOTENCY_OK 마커를 직접 단정한다.
+  add_cmd "migrate apply + idempotency verify (single run)" "out=\"\$(MIGRATE_IDEMPOTENCY_CHECK=1 make migrate 2>&1)\"; status=\$?; printf '%s\n' \"\$out\"; [ \$status -eq 0 ] && printf '%s\n' \"\$out\" | grep -F '[migrate] IDEMPOTENCY_OK second-pass applied=0'"
   BOOTSTRAP_ADDED=1
 }
 
