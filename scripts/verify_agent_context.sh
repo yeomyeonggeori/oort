@@ -248,6 +248,16 @@ SELECT '$WORKSPACE_ID', '$OTHER_CHANNEL', b.last_seq,
        '$HUMAN_ID', 'text', 'CTX302 OTHERCHANNELSECRET off-topic'
   FROM b;
 
+-- Clear restrictive per-agent/per-channel budgets left in the shared DB volume
+-- by a prior verifier (e.g. verify_agent_worker's agent_channel trip budget,
+-- which it only cleans at the START of its own next run) so the cost reserve
+-- does not trip before the hermes call — only the generous workspace budget
+-- below should govern this smoke. budget_window cascades on delete.
+DELETE FROM budget
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND grain <> 'workspace'
+   AND (channel_id = '$TARGET_CHANNEL' OR agent_member_id = '$AGENT_ID');
+
 -- generous workspace budget so reserve never trips before the hermes call
 INSERT INTO budget (id, workspace_id, grain, limit_micro_usd, period_seconds)
 VALUES ('$BUDGET_ID', '$WORKSPACE_ID', 'workspace', 1000000, 3600)
