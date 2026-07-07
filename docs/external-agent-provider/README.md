@@ -1,7 +1,8 @@
 # External Agent Runtime Provider Smoke
 
 > Status: Accepted for MOMO-242; updated by MOMO-257 for local
-> Hermes/Codex-OAuth setup evidence.
+> Hermes/Codex-OAuth setup evidence and by MOMO-326 for real Hermes gateway
+> plugin/readiness smoke evidence.
 > Scope: local/internal-alpha smoke for an external agent runtime. This is not
 > provider account setup, billing setup, long-term memory, or AWS deployment.
 
@@ -16,6 +17,8 @@ External Hermes can connect to momo through two product-supported paths:
   Slack/Telegram-style messaging platform, receives momo `agent.job` events,
   and reports status/results back to momo REST. See
   [`hermes-gateway-native-platform.md`](hermes-gateway-native-platform.md).
+  Real readiness is checked with `scripts/momo hermes-gateway-smoke --real`;
+  the actual provider OAuth/login still happens inside Hermes and is user-owned.
 
 Both paths keep momo as the source of truth for channel messages, approval,
 usage, and audit.

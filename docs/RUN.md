@@ -292,7 +292,9 @@ write는 **momo REST -> Postgres -> outbox**로만 들어오며, adapter는 DB/C
 ```sh
 scripts/momo hermes-gateway-init
 scripts/momo hermes-gateway-status
+scripts/momo hermes-gateway-install-plugin
 scripts/momo hermes-gateway-smoke
+scripts/momo hermes-gateway-smoke --real
 ```
 
 서버 opt-in:
@@ -305,7 +307,23 @@ AGENT_GATEWAY_SECRET=<same secret as MOMO_AGENT_GATEWAY_SECRET>
 adapter/Hermes side env는 `$HOME/.momo/hermes-gateway.env`에 생성된다. provider OAuth/Codex/OpenAI
 token은 이 파일에 들어가지 않고 Hermes/provider runtime 내부에만 둔다. mock harness는
 `scripts/verify_hermes_gateway_adapter.sh`와 `scripts/local_gate.sh --profile runtime-agent`가
-검증한다. 실제 Hermes gateway CLI/plugin load와 provider side effect는 Hermes runtime이 없으면
+검증한다. MOMO-326은 real Hermes evidence layer를 추가했다. `--real`은 Hermes CLI,
+plugin install, provider-login marker, momo server 상태를 분리해서 evidence로 남기며,
+사용자가 Hermes 내부에서 provider OAuth/login을 끝낸 뒤에는 다음처럼 실제 1왕복까지 시도한다.
+
+```sh
+set -a
+. "$HOME/.momo/hermes-gateway.env"
+set +a
+AGENT_GATEWAY_MODE=gateway \
+AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
+scripts/momo start
+
+# 다른 터미널에서, Hermes gateway와 provider OAuth/login을 사용자가 준비한 뒤:
+MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
+```
+
+현재 Hermes runtime이 없으면 real CLI/plugin/provider call은
 `runtime-unverified(real hermes gateway missing)`로 남긴다. 정본 문서는
 [`docs/external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)다.
 

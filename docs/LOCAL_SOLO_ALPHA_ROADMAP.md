@@ -23,6 +23,10 @@ Local solo alpha is ready when all of the following are true on a chosen commit:
 - Sending `@hermes` in a channel creates an `agent_job`, AgentWorker calls the
   local OpenAI-compatible SSE provider, usage is minimally recorded, and the
   agent response is persisted back to the same channel timeline.
+- For the Hermes-native path, Hermes gateway can load the momo platform plugin,
+  receive momo `agent.job` events, run its provider-owned OAuth runtime, and
+  report final result/usage back to momo REST without direct DB/Centrifugo
+  writes.
 - A 3-day run can record daily evidence, failures, resource snapshots, and a
   final `AWS_READY`, `NEEDS_MORE_LOCAL`, or `BLOCKED` decision.
 
@@ -52,6 +56,7 @@ that makes the local solo path comfortable and repeatable.
 | MOMO-303 | MomoDS v0 | Establish tokens/components/density before more UI polish so dogfood UI work stops reintroducing hard-coded visual drift. | `swift` gate + design pre-flight count reduced |
 | MOMO-304 | Messenger core UX v0 | Add markdown/code rendering, edit/delete basics, and roster-based `@` autocomplete so one-person + agent chat feels like a usable messenger. | `macos-ui` + runtime route evidence |
 | LSA-005 | Credentialed Hermes setup rehearsal | Turn MOMO-257 into a user-followable local pairing flow: user logs into provider, `scripts/momo hermes-init` creates the out-of-repo env, `scripts/momo hermes` checks setup without printing secrets, and `scripts/momo hermes-smoke` runs the credentialed smoke. | `external-agent-provider` or documented `runtime-unverified(credentials)` |
+| MOMO-326 | Real Hermes gateway smoke | Turn MOMO-325 from mock-ledger proof into operator-led real Hermes readiness: plugin install, provider OAuth marker, gateway status, and optional `@hermes` same-channel roundtrip evidence. | `scripts/momo hermes-gateway-smoke --real [--trigger]` |
 | LSA-006 | Local solo dogfood start gate | Start a short operator-led run before 72h: launch app, send human messages, call `@hermes`, collect diagnostics/resource snapshots, and file P0/P1 bugs. | updated `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md` run packet |
 
 ## Operating Rules
