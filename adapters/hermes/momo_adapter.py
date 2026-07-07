@@ -436,6 +436,15 @@ class MomoAdapter(BasePlatformAdapter):
                 raise MomoAPIError(resp.status, path, text)
             return json.loads(text) if text else {}
 
+    async def _get(self, path: str) -> dict[str, Any]:
+        session = await self._ensure_session()
+        url = f"{self.cfg.api_base_url}{path}"
+        async with session.get(url, headers=self._auth_headers()) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise MomoAPIError(resp.status, path, text)
+            return json.loads(text) if text else {}
+
     # ----- connect (L4 §6.3) ----------------------------------------------
 
     async def connect(self, *, is_reconnect: bool = False) -> bool:
@@ -663,6 +672,57 @@ class MomoAdapter(BasePlatformAdapter):
                     parts.append(str(b.get("text") or b.get("body") or ""))
             return "\n".join(p for p in parts if p)
         return str(blocks)
+
+    async def get_chat_info(self, chat_id: str) -> dict[str, Any]:
+        """Return Hermes' minimal chat metadata for a momo channel.
+
+        Hermes v0.18 makes this an abstract platform contract. momo keeps the
+        source of truth in Postgres, so use the authenticated channel list when
+        available; during early gateway boot or degraded smoke, return a stable
+        env/default fallback instead of failing platform construction.
+        """
+        is_home_channel = chat_id in {
+            os.environ.get("MOMO_HOME_CHANNEL_ID", ""),
+            os.environ.get("MOMO_DEFAULT_CHANNEL_ID", ""),
+        }
+        fallback_name = (
+            os.environ.get("MOMO_HOME_CHANNEL_NAME")
+            if chat_id
+            and is_home_channel
+            else None
+        )
+        fallback_name = fallback_name or os.environ.get("MOMO_HOME_CHANNEL_NAME") or "momo"
+        fallback: dict[str, Any] = {
+            "id": str(chat_id),
+            "name": fallback_name if not chat_id or is_home_channel else str(chat_id),
+            "type": "channel",
+        }
+        if not self.cfg.workspace_id or not self._access_token:
+            return fallback
+
+        try:
+            data = await self._get(f"/v1/workspaces/{self.cfg.workspace_id}/channels")
+        except Exception as exc:  # noqa: BLE001 - chat info must not break gateway boot
+            log.debug("momo get_chat_info fallback for %s: %s", chat_id, exc)
+            return fallback
+
+        channels = data.get("channels")
+        if not isinstance(channels, Sequence) or isinstance(channels, (str, bytes, bytearray)):
+            return fallback
+        for channel in channels:
+            if not isinstance(channel, Mapping):
+                continue
+            channel_id = channel.get("id") or channel.get("channelId") or channel.get("channel_id")
+            if str(channel_id) != str(chat_id):
+                continue
+            kind = str(channel.get("kind") or "public")
+            return {
+                "id": str(channel_id),
+                "name": str(channel.get("name") or channel_id),
+                "type": "dm" if kind == "dm" else "channel",
+                "topic": channel.get("topic"),
+            }
+        return fallback
 
     # ----- handle_message (L4 §6.3 / §6.2) --------------------------------
 
@@ -1186,13 +1246,21 @@ def register(ctx: Any) -> type[MomoAdapter]:
                 "check_fn": check_requirements,
                 "validate_config": validate_config,
                 "required_env": list(REQUIRED_ENV),
-                "optional_env": list(OPTIONAL_ENV),
                 "env_enablement_fn": env_enablement,
-                "description": "momo native messaging platform adapter",
+                "emoji": "💬",
+                "platform_hint": "You are operating inside momo, an agent-native team messenger. Reply through momo only; never publish directly to Centrifugo.",
             }
             try:
                 fn(**official_kwargs)
             except TypeError:
+                official_kwargs.pop("env_enablement_fn", None)
+                official_kwargs.pop("emoji", None)
+                official_kwargs.pop("platform_hint", None)
+                try:
+                    fn(**official_kwargs)
+                    break
+                except TypeError:
+                    pass
                 try:
                     fn(
                         platform_name=MomoAdapter.platform_name,

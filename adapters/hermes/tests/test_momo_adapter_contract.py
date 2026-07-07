@@ -2,6 +2,7 @@ import asyncio
 import dataclasses
 import inspect
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -195,6 +196,104 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertEqual(context.kwargs["label"], "Momo")
         self.assertIs(context.kwargs["adapter_factory"], momo_adapter.adapter_factory)
         self.assertIn("MOMO_AGENT_GATEWAY_SECRET", context.kwargs["required_env"])
+
+    def test_register_accepts_strict_hermes_platform_entry_signature(self):
+        class Context:
+            def __init__(self):
+                self.kwargs = None
+
+            def register_platform(
+                self,
+                name,
+                label,
+                adapter_factory,
+                check_fn,
+                validate_config=None,
+                required_env=None,
+                install_hint="",
+                **entry_kwargs,
+            ):
+                allowed_entry_kwargs = {"env_enablement_fn", "emoji", "platform_hint"}
+                unknown = set(entry_kwargs) - allowed_entry_kwargs
+                if unknown:
+                    raise TypeError(f"unknown PlatformEntry kwargs: {unknown}")
+                self.kwargs = {
+                    "name": name,
+                    "label": label,
+                    "adapter_factory": adapter_factory,
+                    "check_fn": check_fn,
+                    "validate_config": validate_config,
+                    "required_env": required_env,
+                    "install_hint": install_hint,
+                    **entry_kwargs,
+                }
+
+        context = Context()
+        adapter_cls = momo_adapter.register(context)
+
+        self.assertIs(adapter_cls, momo_adapter.MomoAdapter)
+        self.assertEqual(context.kwargs["name"], "momo")
+        self.assertIs(context.kwargs["adapter_factory"], momo_adapter.adapter_factory)
+        self.assertIs(context.kwargs["env_enablement_fn"], momo_adapter.env_enablement)
+        self.assertNotIn("optional_env", context.kwargs)
+        self.assertNotIn("description", context.kwargs)
+
+    def test_get_chat_info_satisfies_hermes_v018_adapter_contract(self):
+        class ChannelInfoAdapter(CaptureAdapter):
+            async def _get(self, path):
+                self.get_path = path
+                return {
+                    "channels": [
+                        {
+                            "id": "channel-1",
+                            "name": "agent-lab",
+                            "kind": "public",
+                            "topic": "Hermes local smoke",
+                        }
+                    ]
+                }
+
+        adapter = ChannelInfoAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+        adapter._access_token = "access-token"
+
+        info = asyncio.run(adapter.get_chat_info("channel-1"))
+
+        self.assertEqual(adapter.get_path, "/v1/workspaces/workspace-1/channels")
+        self.assertEqual(info["name"], "agent-lab")
+        self.assertEqual(info["type"], "channel")
+        self.assertEqual(info["topic"], "Hermes local smoke")
+
+    def test_get_chat_info_falls_back_before_login(self):
+        old_home_id = os.environ.get("MOMO_HOME_CHANNEL_ID")
+        old_home_name = os.environ.get("MOMO_HOME_CHANNEL_NAME")
+        os.environ["MOMO_HOME_CHANNEL_ID"] = "channel-1"
+        os.environ["MOMO_HOME_CHANNEL_NAME"] = "general"
+        try:
+            adapter = CaptureAdapter(
+                workspace_id="workspace-1",
+                agent_member_id="agent-1",
+                run_id="run-1",
+                final_text="done",
+            )
+
+            info = asyncio.run(adapter.get_chat_info("channel-1"))
+        finally:
+            if old_home_id is None:
+                os.environ.pop("MOMO_HOME_CHANNEL_ID", None)
+            else:
+                os.environ["MOMO_HOME_CHANNEL_ID"] = old_home_id
+            if old_home_name is None:
+                os.environ.pop("MOMO_HOME_CHANNEL_NAME", None)
+            else:
+                os.environ["MOMO_HOME_CHANNEL_NAME"] = old_home_name
+
+        self.assertEqual(info["name"], "general")
+        self.assertEqual(info["type"], "channel")
 
     def test_env_enablement_requires_momo_facing_values_only(self):
         self.assertIsNone(momo_adapter.env_enablement({"MOMO_API_URL": "http://127.0.0.1:28180"}))
