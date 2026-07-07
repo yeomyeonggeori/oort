@@ -898,6 +898,47 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(status.endpointLabel.contains("token"))
     }
 
+    func testRESTBackendLoadsGatewayRuntimeStatus() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/agent-runtime/status"):
+                return MockHTTPResponse(json: """
+                {
+                  "schema": "momo.agent_runtime.status.v0",
+                  "agentHandle": "hermes",
+                  "displayName": "Hermes",
+                  "mode": "gateway",
+                  "availability": "available",
+                  "model": "hermes-agent",
+                  "endpointLabel": "Hermes gateway platform adapter",
+                  "keyConfigured": true,
+                  "diagnostics": []
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: .demo, accessToken: "")
+
+        let status = try await backend.agentRuntimeStatus()
+        XCTAssertEqual(status.mode, .gateway)
+        XCTAssertEqual(status.availability, .available)
+        XCTAssertEqual(status.endpointLabel, "Hermes gateway platform adapter")
+        XCTAssertTrue(status.keyConfigured)
+    }
+
     func testRESTBackendCreatesChannelAndMutatesMembership() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)

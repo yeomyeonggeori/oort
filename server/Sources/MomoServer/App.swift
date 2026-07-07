@@ -44,11 +44,11 @@ enum AppBuilder {
             HealthResponse(
                 status: "ok",
                 service: "MomoServer",
-                agentRuntime: config.agentProvider.statusResponse()
+                agentRuntime: config.agentRuntimeStatusResponse()
             )
         }
         router.get("/v1/agent-runtime/status") { _, _ -> AgentRuntimeStatusResponse in
-            config.agentProvider.statusResponse()
+            config.agentRuntimeStatusResponse()
         }
         let tokenStore = TokenStore(db: db)
         let authRoutes = AuthRoutes(
