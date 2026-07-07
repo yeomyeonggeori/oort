@@ -49,6 +49,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-239에서 로컬 1인 dogfood checklist와 AWS 승격 threshold를 고정해 `AWS_READY` evidence 없이는 AWS provisioning을 진행하지 않는다
      · MOMO-241에서 72h local dogfood의 Day 0~3 체크리스트, daily evidence, P0/P1/P2 triage, `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` decision contract를 `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`로 고정한다
      · MOMO-245에서 72시간 local soak/resource monitor를 추가해 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md` PASS/WARN/FAIL 판정을 남긴다
+     · 로컬 1인 테스트 승격 레인은 `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`를 정본으로 둔다. AWS 전에는 LSA-001 → MOMO-319 → MOMO-303 → MOMO-304 → credentialed Hermes setup rehearsal → short dogfood gate 순서로 간다
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
      · clients/iOS = 미존재, M5에서 생성
@@ -117,6 +118,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-264` | M3/M7 준비 | macOS native profile/settings/downloads UX | profile footer는 launcher로 축소하고 Profile/Settings/Downloads/Updates를 우측 설정 surface로 분리해 프로필 이미지, 언어/appearance, workspace icon, 다운로드 폴더/이력, update status를 다국어로 제공 |
 | `MOMO-245` | M1/M7 준비 | Local Soak/Resource Monitor | `scripts/local_soak_monitor.sh`; 72h local dogfood 중 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md`에 PASS/WARN/FAIL + P0/P1 기준 기록 |
 | `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정 |
+| `LSA-001` | M1/M7 준비 | Redesign-aligned local solo alpha readiness | `docs/LOCAL_SOLO_ALPHA_ROADMAP.md` + local runner/docs/app defaults; MOMO-300/301/302 이후 fresh login, generated `CENT_PROXY_SECRET`, migration 007 idempotency, rate-limit/context expectations, and local-alpha evidence are aligned before more dogfood work |
 | `MOMO-227` | M1 | Kim Intern runtime config + health/status visibility v0 | `AGENT_PROVIDER_MODE` local/internal-host/external Hermes contract, staging/prod/internal-host external-provider fail-fast, `/v1/agent-runtime/status` secret-redacted projection, macOS compact Kim Intern availability chip, host-runtime status/redaction evidence |
 | `MOMO-230` | M1 | External Kim Intern/Hermes provider smoke gate v0 | `scripts/verify_external_agent_provider.sh` + `local_gate --profile external-agent-provider`; credentials가 있으면 OpenAI-compatible SSE preflight + local server/worker/relay `@김인턴` 1왕복, 없으면 `runtime-unverified(external provider credentials)` evidence |
 | `MOMO-234` | M1 | Hermes Codex OAuth provider boundary v0 | `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` + external provider verifier evidence/guard; Codex OAuth access/refresh token은 provider-owned이고 momo app/API/DB/local gate에는 저장/전달하지 않음 |

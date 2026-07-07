@@ -818,6 +818,15 @@
 - **실행 주체 전환:** Opus 세션 오케스트레이션 → **Codex/GPT goal 기반 자율실행**. 인수인계·진입점(MOMO-303 MomoDS 우선, 병렬 308/309)·게이트 배비싯 함정은 `docs/HANDOFF_2026-07.md`, 상태는 `research/13-redesign/00-execution-tracker.md`.
 - **게이트가 잡아준 실이슈(하드닝 반영):** ① 300 verifier bare `wait`가 서버 서브셸 대기 → 무한 hang(PID 한정+curl 타임아웃 수정) ② 302 verifier가 공유 DB budget leftover에 서킷브레이커 트립(채널 예산 정리) ③ verifier 누적 프로세스 누수 → 메모리 OOM(302 full-sequence 실패 근본원인, 개별 verifier 전부 PASS — MOMO-319 하드닝 후속) ④ 머지 커밋 worktree gitlink 혼입(.gitignore 등록). **전부 인프라/verifier 이슈이며 제품코드 회귀 아님.**
 
+## 0b5. LSA-001 Redesign-aligned local solo alpha readiness (2026-07-07)
+
+- **목표/로드맵 정리:** `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`를 추가해 로컬 1인 테스트 DoD를 “Docker Desktop stack + macOS app + loopback Hermes-compatible runtime + 3-day evidence”로 고정했다. AWS/Kubernetes는 out of scope이며, 다음 순서는 **MOMO-319 게이트 누수 하드닝 → MOMO-303 MomoDS → MOMO-304 core messenger UX → credentialed Hermes rehearsal → short dogfood gate**다.
+- **재설계 반영:** `scripts/local_alpha_runner.sh`가 repo 밖 evidence dir에 0600 env 파일을 만들고 `CENT_TOKEN_HMAC`/`CENT_API_KEY`/`CENT_PROXY_SECRET`/`JWT_HMAC`/`HERMES_API_KEY`를 64-char 랜덤값으로 생성한다. `CENT_PROXY_SECRET`이 비면 fail-closed하고, `AGENT_CONTEXT_MAX_MESSAGES=30`/`AGENT_CONTEXT_MAX_CHARS=24000`를 명시한다. `scripts/verify_internal_host_runtime.sh` generated env에도 `CENT_PROXY_SECRET`을 추가했다.
+- **앱/문서 정렬:** macOS real-backend demo credential을 `demo@momo.local / dev-password`로 통일했고, `scripts/momo` help도 같은 값으로 맞췄다. `docs/RUN.md`·`docs/INTERNAL_ALPHA.md`·`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`는 foreground app launch, old-token 401→fresh login, migration 007 `IDEMPOTENCY_OK`, local rate-limit override, MOMO-302 recent-history context 기대값을 설명한다.
+- **검증:** docs gate PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260707T053148Z-pid17670-ns1783402308691257000-wt9a510db2fbf3-re9c071fded7c.md`), swift gate PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-swift-20260707T051032Z-pid55939-ns1783401032709813000-wt9a510db2fbf3-r54cc9b2aee90.md`), local-alpha gate PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-local-alpha-20260707T051139Z-pid60262-ns1783401099180296000-wt9a510db2fbf3-r4f6c27c3d523.md`). Runner 직접 smoke도 `PORT=28280 POSTGRES_PORT=28232 CENT_PORT=28200 HERMES_PORT=28288 scripts/local_alpha_runner.sh execute --hermes mock --stop-after-smoke` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T/momo-local-alpha/20260707T053154Z/summary.md`), 생성된 secret 길이 64자, env `0600`, summary redaction, foreground `MomoMacDevApp` 실행 명령 포함을 확인했다.
+- **리뷰 후속:** security reviewer는 블로커는 없다고 판단했다. 바로 반영한 수정은 provider URL query/fragment redaction과 `docs/RUN.md` legacy password 문구 제거다. 남은 local-only hardening인 child process env least-privilege는 credentialed Hermes rehearsal(LSA-005) acceptance로 넘겼다.
+- **남은 runtime-unverified:** 실제 credentialed Hermes/Codex OAuth provider login, foreground `MomoMacDevApp` launch with `LOCAL_GATE_LAUNCH_UI=1`, 72h dogfood, AWS provisioning은 후속 goal에서 닫는다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

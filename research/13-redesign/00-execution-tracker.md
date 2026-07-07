@@ -4,7 +4,7 @@
 > **갱신 규칙:** 재설계 티켓(MOMO-300~323)을 닫을 때 STATUS.md와 함께 이 표의 상태를 갱신한다(AGENTS.md DoD 5 참조). 상태 값: `ready`(착수 가능) / `blocked(<deps>)` / `in-progress` / `review` / `done` / `handoff` / `dropped`.
 > 최종 갱신: **2026-07-07** — Opus 세션에서 **316·323·301·300·302·318 머지 완료**(main HEAD `88234d2`). 이후 실행 주체는 **Codex/GPT로 인수**(핸드오프 브리프 `docs/HANDOFF_2026-07.md`, 실행 주체 전환은 AGENTS.md 참조).
 >
-> **Codex 진입점(다음 착수):** 아래 `ready` 티켓을 AGENTS.md §6 picker로 선택 — **MOMO-303(MomoDS v0)** 우선(Phase 1 마지막 P0, macOS UI의 모든 후속을 여는 토큰 레이어), 병렬 가능: **308(MCP)·309(BYOK)**(deps done). 그리고 **317**(아래, build-infra 브랜치 대기)과 **319**(게이트/verifier 하드닝). UI 티켓(303~306)은 `momo-design-taste` skill 준수 + design-review 리포트(Blocker 0) evidence 필수.
+> **Codex 진입점(다음 착수):** 로컬 1인 테스트 승격 레인은 `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`가 조정한다. 즉시 unblock은 **LSA-001**(MOMO-300/301/302 이후 local-alpha env/login/docs 재정렬)이고, 그다음은 **MOMO-319**(게이트/verifier 하드닝) 또는 **MOMO-303(MomoDS v0)**다. 일반 picker로는 MOMO-303 우선(Phase 1 마지막 P0, macOS UI 모든 후속 선행), 병렬 가능: **308(MCP)·309(BYOK)**(deps done). 그리고 **317**(아래, build-infra 브랜치 대기)과 **319**(게이트/verifier 하드닝). UI 티켓(303~306)은 `momo-design-taste` skill 준수 + design-review 리포트(Blocker 0) evidence 필수.
 
 ## 완료된 것 (기획/도구, 2026-07-06)
 

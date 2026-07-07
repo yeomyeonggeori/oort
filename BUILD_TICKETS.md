@@ -282,6 +282,18 @@
 - [ ] 실제 72h run 중 발견된 결함은 P0/P1/P2/P3 별도 이슈로 분리한다.
 - [ ] 최종 판정은 `AWS_READY` / `BLOCKED` / `NEEDS_MORE_LOCAL` 중 하나로만 남긴다.
 
+### LSA-001 수용기준 `[docs/tooling/runtime]`
+- [x] `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`를 추가해 로컬 1인 테스트의 Definition of Done과 buildable goal chain을 고정한다.
+- [x] `scripts/local_alpha_runner.sh`가 generated env에 `CENT_PROXY_SECRET`, `AGENT_CONTEXT_MAX_MESSAGES`, `AGENT_CONTEXT_MAX_CHARS`를 명시하고, local dev secrets는 repo 밖 evidence dir에 강한 랜덤값으로 생성한다.
+- [x] `scripts/verify_internal_host_runtime.sh` generated internal-smoke env가 `CENT_PROXY_SECRET`를 포함해 MOMO-300 preflight를 통과한다.
+- [x] macOS real-backend 기본 demo password와 `scripts/momo` help가 seeded credential `demo@momo.local / dev-password`와 일치한다.
+- [x] `docs/INTERNAL_ALPHA.md`와 `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`가 MOMO-300 old-token 재로그인, `CENT_PROXY_SECRET`, migration 007 idempotency, rate-limit override, MOMO-302 agent context expectations를 설명한다.
+- [x] `docs/INDEX.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `STATUS.md`를 갱신한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 남긴다.
+- [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 남긴다.
+- [x] `scripts/local_gate.sh --profile local-alpha` PASS evidence를 남긴다.
+- [x] 실제 credentialed Hermes/GPT provider login, 72h dogfood, AWS provisioning, MomoDS UI migration은 out of scope로 남긴다.
+
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
 - [ ] `.github/ISSUE_TEMPLATE/`에 internal alpha feedback template을 추가하고, raw report는 `type:feedback` + `area:alpha` + `status:needs-triage`로 시작한다.
