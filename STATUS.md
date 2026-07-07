@@ -118,6 +118,12 @@
 - Hermes v0.18 `BasePlatformAdapter`가 `get_chat_info(chat_id)`를 필수 추상 메서드로 요구해 momo adapter construction이 실패하던 문제를 수정했다. `MomoAdapter.get_chat_info`는 로그인 후 momo REST channel list에서 이름/타입을 조회하고, gateway boot/degraded smoke에서는 env/default fallback으로 fail-open 대신 platform construction을 유지한다.
 - 검증: `python3 -m py_compile adapters/hermes/__init__.py adapters/hermes/momo_adapter.py adapters/hermes/adapter.py adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS(11 tests), `bash -n scripts/momo` PASS, `scripts/momo hermes-gateway-install-plugin && scripts/momo hermes-gateway-status` PASS(`plugin enabled: yes`, momo server reachable), `scripts/momo hermes-gateway-smoke --real` PASS with evidence state `NEEDS_PROVIDER_LOGIN`(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260707T150741Z/summary.md`). 실제 provider OAuth 및 `@hermes` real gateway roundtrip은 사용자가 Hermes/provider login을 완료한 뒤 닫는다.
 
+## 0-4b-6e. MOMO-328 Local launcher login readiness hotfix (2026-07-08)
+
+- 로그인 버튼이 `internal server error`를 보인 원인은 7월 3일에 뜬 오래된 host-run `MomoServer`가 `:28180`을 계속 점유한 상태에서 `/health`만 200을 반환하고, DB-backed `/v1/auth/login`은 Postgres connection timeout으로 500을 내던 것이다. `scripts/momo start`가 `/health`만 보고 ready로 판단해 stale server를 정상으로 착각했다.
+- `scripts/momo`가 local alpha ready 판정에 `/health` + demo login/logout smoke를 함께 사용하도록 바꿨다. `/health`는 되지만 login smoke가 실패하면 stale/degraded server로 보고 restart path를 탄다. credentialed smoke는 기본적으로 loopback base URL에서만 수행하고, 성공 직후 `/v1/auth/logout`으로 발급된 토큰을 revoke한다. `scripts/momo stop/stop-stack`은 configured API port의 현재 repo 내부 `MomoServer` listener만 안전하게 종료하도록 보강했다.
+- 검증: `bash -n scripts/momo` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS. 실제 dogfood operator는 `scripts/momo stop && scripts/momo start`를 다시 실행하면 stale 28180 listener가 정리되고 로그인 smoke를 통과한 서버만 ready로 간주된다.
+
 ## 0-4b-7. MOMO-258 macOS UI Smoke Fixture Seq Hotfix (2026-07-02)
 
 - MOMO-257 merge 후 reused local Docker DB에서 `scripts/local_gate.sh --profile macos-ui`가 실패했다. 원인은 `verify_macos_real_backend_ui.sh`가 approval/cost fixture message seq를 `205901`로 고정했고, 같은 channel의 `channel_seq`가 이미 더 높게 진행되어 최신 `messages?limit=20` history에 fixture가 보이지 않은 것이다.
