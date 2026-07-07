@@ -79,6 +79,10 @@ services:
       CENTRIFUGO_ENGINE_TYPE: redis
       CENTRIFUGO_ENGINE_REDIS_ADDRESS: ${CENTRIFUGO_REDIS_ADDRESS:?set CENTRIFUGO_REDIS_ADDRESS}
       CENTRIFUGO_LOG_LEVEL: ${CENTRIFUGO_LOG_LEVEL:-info}
+      # MOMO-300: subscribe proxy shared-secret header. This env override wins
+      # over the change-me placeholder committed in centrifugo.prod.json; the
+      # API rejects proxy callbacks without the exact secret (fail closed).
+      CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS: '{"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}"}'
     volumes:
       - ./centrifugo.prod.json:/centrifugo/centrifugo.prod.json:ro
     depends_on:
@@ -105,6 +109,8 @@ services:
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
+      # MOMO-300: must match the centrifugo service's static proxy header.
+      CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
       AGENT_PROVIDER_MODE: ${AGENT_PROVIDER_MODE:?set AGENT_PROVIDER_MODE}
       AGENT_MODEL: ${AGENT_MODEL:-hermes-agent}
       AGENT_HANDLE: ${AGENT_HANDLE:-kim-intern}

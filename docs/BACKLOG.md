@@ -965,10 +965,10 @@ M0(baseline)
 - **마일스톤:** M1 · **에픽:** EP-SEC-CORE · **플랫폼:** backend · **추정:** M
 - **deps:** — (baseline)
 - **수용기준:**
-  - [ ] [runtime] Centrifugo subscribe proxy 요청을 공유 시크릿/HMAC으로 검증(현 CentrifugoRoutes TODO 해소), 미인증 요청 거부 evidence
-  - [ ] [runtime] 모든 인증 경로가 `token.revoked_at`을 검사하고, logout 엔드포인트가 revoke를 기록(revoked token 접근 거부 evidence)
-  - [ ] [runtime] per-member/per-IP rate limit 미들웨어(한도 초과 429 + audit_log 기록), 비용 브레이커와 독립 동작
-  - [ ] [swift] 전 패키지 build/test green, `runtime-db` gate PASS
+  - [x] [runtime] Centrifugo subscribe proxy 요청을 공유 시크릿/HMAC으로 검증(현 CentrifugoRoutes TODO 해소), 미인증 요청 거부 evidence — `X-Centrifugo-Proxy-Secret` static header + `CENT_PROXY_SECRET`(비-local fail-fast + preflight 연계), 401 evidence는 `scripts/verify_auth_hardening.sh`/`verify_realtime_live.sh`
+  - [x] [runtime] 모든 인증 경로가 `token.revoked_at`을 검사하고, logout 엔드포인트가 revoke를 기록(revoked token 접근 거부 evidence) — AuthMiddleware/refresh/realtime-token(미들웨어 경유)/subscribe proxy, `POST /v1/auth/logout`(멱등+audit) + `POST /v1/auth/refresh`(rotation), revoked 401 evidence는 `verify_auth_hardening.sh`
+  - [x] [runtime] per-member/per-IP rate limit 미들웨어(한도 초과 429 + audit_log 기록), 비용 브레이커와 독립 동작 — in-memory sliding window(단일 노드 v0 문서화), env 한도, `/health` 제외, 429+Retry-After+`rate_limit.exceeded` audit evidence
+  - [x] [swift] 전 패키지 build/test green, `runtime-db` gate PASS (STATUS §0az)
 - **라벨:** `type:feat`, `area:server`, `priority:p0`
 - **참조:** `research/13-redesign/01` Track F 1~3
 

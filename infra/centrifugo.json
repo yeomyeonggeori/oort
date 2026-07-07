@@ -18,7 +18,12 @@
         "history_meta_ttl": "192h", "force_recovery": true }
     ],
     "proxy": {
-      "subscribe": { "endpoint": "http://api:8080/v1/centrifugo/subscribe" }
+      "subscribe": {
+        "endpoint": "http://api:8080/v1/centrifugo/subscribe",
+        "http": {
+          "static_headers": { "X-Centrifugo-Proxy-Secret": "dev-insecure-cent-proxy-secret" }
+        }
+      }
     }
   },
   "client": { "subscription_token": { "enabled": true } }
