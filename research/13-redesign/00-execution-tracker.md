@@ -32,7 +32,7 @@
 |---|---|---|
 | MOMO-300 | subscribe proxy 인증 + token revocation + rate limit | `done` (2026-07-07 리뷰+게이트 전프로파일 PASS, STATUS 0b2) |
 | MOMO-301 | agent_run depth/round 스키마 + 루프가드 G1~G4 실쿼리 | `done` (2026-07-06 머지, STATUS 0b0) |
-| MOMO-302 | 컨텍스트 조립 v1 (단일 메시지 → 히스토리/토큰 윈도) | `review` (2026-07-07, STATUS 0b1) |
+| MOMO-302 | 컨텍스트 조립 v1 (단일 메시지 → 히스토리/토큰 윈도) | `done` (2026-07-07 리뷰+게이트, 개별 verifier 전부 PASS, STATUS 0b1) |
 | MOMO-303 | MomoDS v0: 토큰 4층 + ugly mode + 컴포넌트 7종 추출 | `ready` |
 | MOMO-304 | 마크다운/코드블록 + 편집/삭제 UX + @멘션 자동완성 | `blocked(303 토큰 슬라이스)` |
 
