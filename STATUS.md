@@ -827,6 +827,15 @@
 - **리뷰 후속:** security reviewer는 블로커는 없다고 판단했다. 바로 반영한 수정은 provider URL query/fragment redaction과 `docs/RUN.md` legacy password 문구 제거다. 남은 local-only hardening인 child process env least-privilege는 credentialed Hermes rehearsal(LSA-005) acceptance로 넘겼다.
 - **남은 runtime-unverified:** 실제 credentialed Hermes/Codex OAuth provider login, foreground `MomoMacDevApp` launch with `LOCAL_GATE_LAUNCH_UI=1`, 72h dogfood, AWS provisioning은 후속 goal에서 닫는다.
 
+## 0b6. MOMO-319 Local gate/verifier hardening for solo alpha (2026-07-07)
+
+- **목표:** 로컬 1인 테스트 전에 `runtime-agent` 계열 verifier를 반복 실행해도 이전 검증의 host process, port listener, stale `agent_run`/`agent_job` 상태가 다음 검증을 오염시키지 않도록 하드닝했다. 제품 runtime 프로토콜은 변경하지 않고 test harness/cleanup boundary만 좁게 수정했다.
+- **구현:** `scripts/runtime_process_guard.sh`를 추가해 repo-local MomoServer/AgentWorker/OutboxRelay/mock-Hermes verifier process만 tree cleanup 대상으로 삼는다. `verify_agent_worker.sh`, `verify_agent_context.sh`, `verify_agent_live_channel.sh`, `verify_external_agent_provider.sh`, `verify_local_hermes_bridge.sh`가 이 guard를 사용한다. `verify_agent_context.sh`와 local bridge는 worktree 기본 port quartet과 충돌하지 않도록 `.conductor` 10-port block 내부의 `base+4..6` 전용 포트를 쓴다.
+- **반복 실행 DB hygiene:** external/local Hermes smoke는 deterministic `client_msg_id`/run/message fixture만 cleanup한다. `verify_agent_worker.sh` loop-guard fixture cleanup은 FK 순서를 바로잡아 `agent_run.trigger_message_id`가 남은 상태에서 trigger message를 먼저 삭제하지 않는다.
+- **리뷰 반영:** security/performance review에서 나온 blocker를 수정했다. 추가 verifier 포트는 `.conductor` 10-port block 내부(`base+4..6`)로 제한했고, raw process command logging은 제거했으며, final cleanup은 gate 실패 후에도 always-run으로 분리했다. 포트 스캔 cleanup은 repo-local verifier/mock/server만 정리하고, user-owned Hermes/provider는 기본 fail-closed로 남긴다. DB cleanup도 deterministic verifier fixture/client_msg_id/run id 범위로 축소해 로컬 dogfood의 실제 pending agent job을 중립화하지 않는다.
+- **검증:** 타겟 bridge smoke PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-hermes-bridge/external-agent-provider-evidence-20260707T062812Z-74847.md`), AgentWorker verifier 단독 PASS, `LOCAL_GATE_ALLOW_DIRTY=1 ENV_FILE=.env.worktree scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260707T063018Z-pid88947-ns1783405819010789000-wtbc6bfebdfa56-r30ee5c6b2403.md`). 해당 full gate는 docs/static, `make build`, `make test`, Docker compose health, 007 migration idempotency, AgentWorker, Context assembly, Agent live channel, Local Hermes bridge, final cleanup까지 모두 통과했다.
+- **남은 최적화:** runtime-db 부분 병렬화와 warm volume opt-in은 1인 테스트 필수 안정성은 아니므로 후속 build-infra/performance 티켓으로 남긴다. 실제 credentialed Hermes provider login과 72h dogfood evidence는 여전히 LSA-005/LSA-006 범위다.
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

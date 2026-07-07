@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # =============================================================================
 # scripts/verify_agent_context.sh — MOMO-302 context assembly runtime gate
 #
@@ -30,6 +30,8 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+# shellcheck source=scripts/runtime_process_guard.sh
+. "$REPO_ROOT/scripts/runtime_process_guard.sh"
 
 ENV_FILE=${ENV_FILE:-}
 if [ "$ENV_FILE" = "" ]; then
@@ -82,11 +84,19 @@ psql_run() {
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 POSTGRES_DB=${POSTGRES_DB:-momo}
-# Dedicated ports so this verifier does not collide with verify_agent_worker.sh
-# when both run in the same local gate profile.
-PORT=${AGENT_CONTEXT_PORT:-8082}
+BASE_PORT=${PORT:-8080}
+case "$BASE_PORT" in
+  ""|*[!0-9]*) BASE_PORT=8080 ;;
+esac
+# Dedicated, worktree-relative ports inside the same 10-port block reserved by
+# .conductor so one worktree cannot clean or occupy another worktree's quartet.
+PORT=${AGENT_CONTEXT_PORT:-$((BASE_PORT + 4))}
 BASE_URL=http://127.0.0.1:${PORT}
-HERMES_PORT=${AGENT_CONTEXT_HERMES_PORT:-8090}
+BASE_HERMES_PORT=${HERMES_PORT:-8088}
+case "$BASE_HERMES_PORT" in
+  ""|*[!0-9]*) BASE_HERMES_PORT=8088 ;;
+esac
+HERMES_PORT=${AGENT_CONTEXT_HERMES_PORT:-$((BASE_PORT + 5))}
 HERMES_BASE_URL=http://localhost:${HERMES_PORT}/v1
 HERMES_API_KEY=${HERMES_API_KEY:-dev-insecure-hermes-bearer}
 CENT_API_KEY=${CENT_API_KEY:-dev-insecure-cent-api-key}
@@ -116,12 +126,7 @@ WORKER_PID=
 SERVER_PID=
 
 cleanup() {
-  for pid in "$WORKER_PID" "$SERVER_PID" "$MOCK_PID"; do
-    if [ "${pid:-}" != "" ] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-    fi
-  done
+  momo_cleanup_tracked_pids "agent-context verifier" "$WORKER_PID" "$SERVER_PID" "$MOCK_PID"
 }
 trap cleanup EXIT INT TERM
 
@@ -141,6 +146,10 @@ wait_http() {
 }
 
 echo "[agent-context] using env file: ${ENV_FILE:-<none>}"
+momo_cleanup_runtime_ports "agent-context verifier preflight" "$PORT" "$HERMES_PORT" || {
+  echo "[agent-context] verifier ports are occupied by non-momo processes; stop them or choose AGENT_CONTEXT_* port overrides." >&2
+  exit 1
+}
 echo "[agent-context] ensuring runtime DB roles exist"
 "$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
 

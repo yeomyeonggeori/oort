@@ -24,9 +24,9 @@
 | MOMO-316 | local gate `--auto` 프로파일 + compose `--wait` + 멱등 1-run | P0 | `done` (2026-07-06 구현+3-lens 리뷰 반영+머지, STATUS §0ay) |
 | MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `done` (2026-07-07 merged-main swift 게이트 PASS: ratchet baseline 81/1/0/0 + 60 tests + light/dark 스냅샷, STATUS 0b3) |
 | MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | **`handoff`** — 구현 완료(브랜치 `feat/MOMO-317-buildkit-cache` @ e31d30e, 6e01142 기반), 재작성 Dockerfile 단일이미지(OutboxRelay) 빌드+바이너리 실행 검증됨. **Codex 잔여:** main 머지(Makefile/swift-service.Dockerfile/verify_internal_host_runtime.sh에서 316/300과 build-infra 충돌 해소) → `--profile host-runtime` 게이트(5이미지, 이 세션 머신은 메모리 압박으로 미실행) → 머지 |
-| MOMO-319 | 게이트/verifier 하드닝 (verifier leaked-process 정리 + runtime-db 부분 병렬화 + 웜 볼륨 opt-in) | P2 | `ready` |
+| MOMO-319 | 게이트/verifier 하드닝 (verifier-owned leaked-process 정리 + stale runtime fixture cleanup; runtime-db 병렬화/웜 볼륨은 후속 최적화) | P2 | `done` (2026-07-07 local solo alpha slice, STATUS 0b6) |
 
-> **MOMO-319로 흡수된 게이트 하드닝(이 세션 실측 3건):** ① verify_*.sh가 `swift run` child MomoServer/mock/worker를 누수시킴 → 프로파일/verifier 연쇄 실행 시 "already serving" 또는 **누적 누수→메모리 OOM으로 워커 사망**(302 runtime-agent full-sequence 실패의 실제 원인, 개별 verifier는 전부 PASS). **verifier 선두에 자기 포트 process-group kill 가드** 필요. ② 300에서 verifier의 bare `wait`가 서버 서브셸을 기다려 무한 hang → 이미 300에서 수정, 같은 패턴 다른 verifier 점검. ③ 공유 DB volume에 leftover budget/state → verifier가 자기 채널 상태 정리 필요(302에서 예산 정리 패턴 적용).
+> **MOMO-319에서 닫은 게이트 하드닝:** ① verifier 선두/말미에 repo-local verifier/mock/server만 대상으로 하는 port/process-tree cleanup guard를 추가했다. raw command line은 evidence에 남기지 않는다. ② `runtime-agent` full sequence에서 AgentWorker/context/live/local-Hermes verifier가 `.conductor` 10-port block 안의 worktree-safe port 대역(`base+4..6`)을 쓰고 종료 시 tracked child process를 회수한다. ③ 공유 DB volume cleanup은 deterministic verifier fixture/client_msg_id/run id 범위로 축소해 local dogfood의 실제 Hermes agent job을 중립화하지 않는다. 실측 `runtime-agent` full gate PASS. 남은 runtime-db 병렬화/웜 볼륨 최적화는 별도 performance slice로 미룬다.
 
 ## Phase 1 — P0 코어 (M1/M3)
 

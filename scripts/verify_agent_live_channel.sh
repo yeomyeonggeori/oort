@@ -21,6 +21,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/runtime_process_guard.sh
+. "$REPO_ROOT/scripts/runtime_process_guard.sh"
 
 fail() {
   echo "[agent-live] FAIL: $*" >&2
@@ -126,12 +128,7 @@ MOCK_PID=""
 PROXY_CONTAINER="momo-agent-live-api-proxy-${RUN_SUFFIX}"
 
 cleanup() {
-  for pid in "${WORKER_PID:-}" "${SERVER_PID:-}" "${MOCK_PID:-}"; do
-    if [ "$pid" != "" ] && kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
-      wait "$pid" 2>/dev/null || true
-    fi
-  done
+  momo_cleanup_tracked_pids "agent-live verifier" "${WORKER_PID:-}" "${SERVER_PID:-}" "${MOCK_PID:-}"
   docker rm -f "$PROXY_CONTAINER" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -235,6 +232,9 @@ realtime_token() {
 
 echo "[agent-live] using env file: ${ENV_FILE:-<none>}"
 echo "[agent-live] compose project=${COMPOSE_PROJECT_NAME} api port=${PORT} centrifugo port=${CENT_PORT} postgres port=${POSTGRES_PORT}"
+momo_cleanup_runtime_ports "agent-live verifier preflight" "$PORT" "$HERMES_PORT" || {
+  fail "agent-live verifier ports are occupied by non-momo processes; stop them or choose PORT/HERMES_PORT overrides"
+}
 wait_tcp "127.0.0.1" "$CENT_PORT" "Centrifugo"
 
 echo "[agent-live] ensuring runtime DB roles exist"

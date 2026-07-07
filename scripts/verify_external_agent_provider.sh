@@ -14,6 +14,11 @@
 # =============================================================================
 set -euo pipefail
 
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+# shellcheck source=scripts/runtime_process_guard.sh
+. "$REPO_ROOT/scripts/runtime_process_guard.sh"
+
 fail() {
   FAILURE_CATEGORY="${1:-runtime}"
   FAILURE_REASON="${2:-external provider verifier failed}"
@@ -217,18 +222,7 @@ psql_scalar() {
 }
 
 cleanup() {
-  if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-  fi
-  if [ "${WORKER_PID:-}" != "" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
-    kill "$WORKER_PID" 2>/dev/null || true
-    wait "$WORKER_PID" 2>/dev/null || true
-  fi
-  if [ "${RELAY_PID:-}" != "" ] && kill -0 "$RELAY_PID" 2>/dev/null; then
-    kill "$RELAY_PID" 2>/dev/null || true
-    wait "$RELAY_PID" 2>/dev/null || true
-  fi
+  momo_cleanup_tracked_pids "external-agent verifier" "${SERVER_PID:-}" "${WORKER_PID:-}" "${RELAY_PID:-}"
 }
 trap cleanup EXIT INT TERM
 
@@ -757,11 +751,11 @@ HUMAN_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
 CHANNEL_ID=00000000-0000-7000-8000-000000000202
 CENT_CHANNEL="ch:ws${WORKSPACE_ID}.${CHANNEL_ID}"
-CLIENT_MSG_ID="$(uuidgen 2>/dev/null | tr '[:upper:]' '[:lower:]' || python3 - <<'PY'
-import uuid
-print(uuid.uuid4())
-PY
-)"
+CLIENT_MSG_ID="${EXTERNAL_AGENT_PROVIDER_CLIENT_MSG_ID:-00000000-0000-7000-8000-000000257107}"
+
+momo_cleanup_port_listener "$PORT" "external-agent API preflight" || {
+  fail "preflight" "API port ${PORT} is occupied by a non-momo process; stop it or choose PORT override"
+}
 
 provider_preflight
 
@@ -777,6 +771,9 @@ psql_run <<SQL
 BEGIN;
 SET LOCAL row_security = off;
 SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+-- Repeatability is scoped to this verifier's deterministic client_msg_id. Do
+-- not neutralize the seeded Hermes member/channel's whole queue because that
+-- can cancel user-owned local dogfood work.
 DELETE FROM outbox
  WHERE workspace_id = '$WORKSPACE_ID'
    AND (
