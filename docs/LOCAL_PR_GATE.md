@@ -56,7 +56,7 @@ Profiles:
 | Profile | Use when | What it runs |
 |---|---|---|
 | `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, JSON syntax, shell syntax, Python syntax, Hermes adapter smoke |
-| `swift` | Swift package/model/view changes | `docs` profile + `make build` + `make test` |
+| `swift` | Swift package/model/view changes | `docs` profile + design pre-flight ratchet (`scripts/verify_design_preflight.sh`) + `make build` + `make test` |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
 | `staging-smoke` | staging/prod/internal-hosting config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist |
 | `backup` | backup/PITR runbook or internal hosting changes that must prove restore rehearsal evidence before review | `docs` profile + `scripts/verify_backup_restore_rehearsal.sh` for temporary PostgreSQL 18 source DB marker writes, `pg_dump -Fc`, separate restore DB `pg_restore`, marker checksum equality, and markdown/json evidence generation |
@@ -341,7 +341,7 @@ Use the profile that matches the changed surface.
 | Profile | Use when | Commands |
 |---|---|---|
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
-| `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` |
+| `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` (includes design pre-flight ratchet + snapshot tests) |
 | `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
 | `staging-smoke` | MOMO-005/006/007/229 deploy config, Caddy/Centrifugo, public host preflight, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
@@ -374,7 +374,57 @@ Paste the block printed by `scripts/local_gate.sh`. Shape:
 - Not covered:
 ```
 
-## 6. Worker Handoff And Merge Cycle
+## 6. Design Pre-Flight (Ratchet) And UI PR Evidence
+
+Every `swift`-inclusive profile now runs `scripts/verify_design_preflight.sh`, the
+mechanical grep half of `.claude/skills/momo-design-taste/SKILL.md` §5, before
+`make build`. It scans view code (`clients/macOS/Sources` + `clients/Core/Sources`;
+Theme/Tokens definition files and `Tests/` are excluded) for four banned patterns:
+
+| Category (baseline key) | Banned in view code | Use instead |
+|---|---|---|
+| `color_red` | raw `Color(red:…)` | a MomoDS semantic token |
+| `font_custom` | `Font.custom(…)` | a semantic text style / role |
+| `font_system_size` | `.font(.system(size: N))` fixed points | a text style (keeps Dynamic Type) |
+| `emdash_string` | em-dash (`—`/`–`) inside a user-visible string literal | rewrite the copy (SKILL §2, binary rule) |
+
+**Ratchet, not a wall.** The v0 demo surface already carries pre-existing
+violations, so the gate compares against per-category counts in
+`scripts/design_preflight_baseline.txt` instead of demanding zero:
+
+- **current > baseline → FAIL.** A new violation leaked in; the offenders are
+  printed as `file:line` evidence. Fix it with a token / text role.
+- **current < baseline → PASS**, with a hint to lock the win by lowering the
+  baseline (`scripts/verify_design_preflight.sh --update-baseline`).
+- **current == baseline → PASS.**
+
+This is a deliberate change from the SKILL's "zero hits" phrasing: a hard zero
+gate would block every unrelated PR until the whole v0 surface is migrated to
+MomoDS (that migration is MOMO-303). The ratchet blocks *new* debt now and lets
+the baseline tighten as tokens land. If a new violation is a reviewed, deliberate
+exception, regenerate the baseline and justify it in the PR body.
+
+`scripts/verify_design_preflight.sh --list` prints every current violation without
+gating; use it while migrating a surface to tokens.
+
+**UI PR evidence (design-review agent).** Per `AGENTS.md` §5, a macOS/Core UI PR
+must include a `design-review` agent report (`.claude/agents/design-review.md`)
+with **zero Blockers** in the PR body, alongside the `## Local Gate` block.
+Screenshots for the review come from the snapshot tests
+(`clients/macOS/Tests/MomoMacTests/__Snapshots__/`) or from
+`LOCAL_GATE_LAUNCH_UI=1` + `screencapture -l <windowid>`. The mechanical
+pre-flight and the snapshot tests are the automated floor; the design-review
+report (Blocker 0) is the human/agent taste gate on top of them. Only
+High-priority-and-below findings reach the human reviewer.
+
+**Snapshot tests.** `MessageBubbleSnapshotTests` records deterministic light/dark
+PNG references under `__Snapshots__/`. They are committed and compared on re-run
+(recording a *new* reference fails, so a leaked/undecided snapshot is caught).
+Comparison uses `perceptualPrecision: 0.98` to tolerate sub-pixel font rendering
+differences across macOS point releases; it is macOS-local evidence only (this
+repo phase runs no CI). `Package.resolved` stays uncommitted (`AGENTS.md` §5).
+
+## 7. Worker Handoff And Merge Cycle
 
 1. Claim issue and work in a separate worktree.
    - `momo-main` checks `scripts/goal_status.sh`.

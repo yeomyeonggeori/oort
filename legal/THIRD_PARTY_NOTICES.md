@@ -16,10 +16,12 @@
 | postgres-nio | https://github.com/vapor/postgres-nio | Apache-2.0 | DB 드라이버 |
 | centrifuge-swift / SwiftCentrifuge | https://github.com/centrifugal/centrifuge-swift | MIT(검증됨, 0.9.0 LICENSE) | macOS Centrifugo live subscription |
 | swift-protobuf | https://github.com/apple/swift-protobuf | Apache-2.0(검증 필요) | SwiftCentrifuge 전이 의존성 |
+| swift-snapshot-testing / SnapshotTesting | https://github.com/pointfreeco/swift-snapshot-testing | MIT(검증됨, 1.19.2 LICENSE) | **테스트 전용** — macOS MessageBubble light/dark 스냅샷(MOMO-318). 배포 앱 번들 미포함 |
 
 ## 전이 의존성(주요, 자동 생성 권장)
 - SwiftNIO 계열(apple/swift-nio*) — Apache-2.0 (대부분).
 - swift-crypto, swift-collections, swift-atomics 등 — 각 LICENSE 확인.
+- **테스트 전용(배포 앱 번들 미포함)** — swift-snapshot-testing이 resolve하는 swift-custom-dump·xctest-dynamic-overlay(둘 다 MIT, Point-Free), swift-syntax(Apache-2.0). `SnapshotTesting` product만 import하므로 이 전이 타깃들은 컴파일되지 않는다(단, `Package.resolved`에는 등장).
 
 ## 런타임 인프라(앱 번들 외 — 서버 배포물)
 | 컴포넌트 | 라이선스(검증) | 메모 |
