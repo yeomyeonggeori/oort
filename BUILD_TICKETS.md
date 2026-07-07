@@ -180,6 +180,7 @@
 | `MOMO-246` | 72h Local Alpha Dogfood Run | manual/tracking | MOMO-241, MOMO-242, MOMO-243, MOMO-244, MOMO-245 |
 | `MOMO-319` | Local gate/verifier hardening for solo alpha | tooling/runtime | LSA-001, MOMO-300, MOMO-301, MOMO-302 |
 | `MOMO-320` | Local runtime env drift guard | tooling/runtime | LSA-001, MOMO-319, MOMO-300 |
+| `MOMO-324` | AgentWorker verifier cleanup FK rerun hardening | tooling/runtime | MOMO-320 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
