@@ -572,7 +572,8 @@ final class AgentWorkerTests: XCTestCase {
             maxConsecutiveAuto: 3,
             maxSteps: 12,
             maxDepth: 4,
-            maxConcurrentRuns: 1
+            maxConcurrentRuns: 1,
+            maxContextChars: 24000
         )
     }
 
@@ -609,5 +610,125 @@ final class AgentWorkerTests: XCTestCase {
         }
         """
         return try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
+    }
+
+    // MARK: - MOMO-302 context assembly
+
+    private static let ctxAgentID = UUID(uuidString: "00000000-0000-7000-8000-0000000000A1")!
+    private static let ctxHumanID = UUID(uuidString: "00000000-0000-7000-8000-0000000000B1")!
+    private static let ctxChannelID = UUID(uuidString: "00000000-0000-7000-8000-0000000000C1")!
+    private static let ctxTriggerID = UUID(uuidString: "00000000-0000-7000-8000-0000000000E9")!
+
+    func testContextAssemblerDecodesWindowAndMapsRolesWithSourceAttribution() throws {
+        let agent = Self.ctxAgentID.uuidString
+        let channel = Self.ctxChannelID.uuidString
+        let human = Self.ctxHumanID.uuidString
+        let trigger = Self.ctxTriggerID.uuidString
+        let json = """
+        {
+          "agent_member_id": "\(agent)",
+          "channel_id": "\(channel)",
+          "model": "hermes-agent",
+          "prompt": "@hermes 재고 몇 개야?",
+          "trigger_message_id": "\(trigger)",
+          "system_prompt": "You are Hermes.",
+          "recent_messages": [
+            {"message_id":"00000000-0000-7000-8000-000000000001","channel_id":"\(channel)","seq":1,"author_member_id":"\(human)","author_kind":"human","author_display":"Seun","type":"text","body":"파인애플 재고는 7개다"},
+            {"message_id":"00000000-0000-7000-8000-000000000002","channel_id":"\(channel)","seq":2,"author_member_id":"\(agent)","author_kind":"agent","author_display":"Hermes","type":"text","body":"확인했어, 7개 맞아"},
+            {"message_id":"\(trigger)","channel_id":"\(channel)","seq":3,"author_member_id":"\(human)","author_kind":"human","author_display":"Seun","type":"text","body":"@hermes 재고 몇 개야?"}
+          ]
+        }
+        """
+        let payload = try JSONDecoder().decode(AgentJobPayload.self, from: Data(json.utf8))
+        XCTAssertEqual(payload.recentMessages?.count, 3)
+        XCTAssertEqual(payload.systemPrompt, "You are Hermes.")
+
+        // Session boundary (workspace, agent, channel): the assembled window must
+        // be single-channel — the server guarantees it, and we lock the invariant.
+        let channels = Set((payload.recentMessages ?? []).compactMap { $0.channelID })
+        XCTAssertEqual(channels, [Self.ctxChannelID])
+
+        let result = ContextAssembler.assemble(
+            recentMessages: payload.recentMessages ?? [],
+            agentMemberID: payload.agentMemberID,
+            triggerMessageID: payload.triggerMessageID,
+            fallbackPrompt: payload.prompt,
+            systemPrompt: payload.systemPrompt,
+            maxChars: 24_000)
+
+        XCTAssertEqual(result.droppedCount, 0)
+        XCTAssertEqual(result.messages, [
+            .init(role: "system", content: "You are Hermes."),
+            .init(role: "user", content: "[Seun] 파인애플 재고는 7개다"),
+            .init(role: "assistant", content: "확인했어, 7개 맞아"),
+            .init(role: "user", content: "[Seun] @hermes 재고 몇 개야?"),
+        ])
+    }
+
+    func testContextAssemblerDropsOldestOverBudgetButAlwaysKeepsTrigger() {
+        func msg(_ suffix: String, _ seq: Int64, _ body: String, author: UUID) -> RecentMessage {
+            RecentMessage(
+                messageID: UUID(uuidString: "00000000-0000-7000-8000-0000000000\(suffix)")!,
+                channelID: Self.ctxChannelID,
+                seq: seq,
+                authorMemberID: author,
+                authorKind: author == Self.ctxAgentID ? "agent" : "human",
+                authorDisplay: author == Self.ctxAgentID ? "Hermes" : "Seun",
+                type: "text",
+                body: body)
+        }
+        // "[Seun] one" = 10, "two" (assistant, no prefix) = 3, "[Seun] three" = 12.
+        let window = [
+            msg("01", 1, "one", author: Self.ctxHumanID),
+            msg("02", 2, "two", author: Self.ctxAgentID),
+            msg("E9", 3, "three", author: Self.ctxHumanID),
+        ]
+        let trimmed = ContextAssembler.assemble(
+            recentMessages: window,
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: UUID(uuidString: "00000000-0000-7000-8000-0000000000E9")!,
+            fallbackPrompt: "unused",
+            systemPrompt: nil,
+            maxChars: 20)
+        XCTAssertEqual(trimmed.droppedCount, 1)
+        XCTAssertEqual(trimmed.messages, [
+            .init(role: "assistant", content: "two"),
+            .init(role: "user", content: "[Seun] three"),
+        ])
+
+        // Even a budget of 1 keeps the trigger — the current turn is never erased.
+        let onlyTrigger = ContextAssembler.assemble(
+            recentMessages: window,
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: UUID(uuidString: "00000000-0000-7000-8000-0000000000E9")!,
+            fallbackPrompt: "unused",
+            systemPrompt: nil,
+            maxChars: 1)
+        XCTAssertEqual(onlyTrigger.messages, [.init(role: "user", content: "[Seun] three")])
+        XCTAssertEqual(onlyTrigger.droppedCount, 2)
+    }
+
+    func testContextAssemblerLegacyEmptyWindowKeepsSingleMessagePath() {
+        let legacy = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "hi",
+            systemPrompt: nil,
+            maxChars: 24_000)
+        XCTAssertEqual(legacy.messages, [.init(role: "user", content: "hi")])
+        XCTAssertEqual(legacy.droppedCount, 0)
+
+        let withSystem = ContextAssembler.assemble(
+            recentMessages: [],
+            agentMemberID: Self.ctxAgentID,
+            triggerMessageID: nil,
+            fallbackPrompt: "hi",
+            systemPrompt: "You are Hermes.",
+            maxChars: 24_000)
+        XCTAssertEqual(withSystem.messages, [
+            .init(role: "system", content: "You are Hermes."),
+            .init(role: "user", content: "hi"),
+        ])
     }
 }

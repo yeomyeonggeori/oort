@@ -1,5 +1,6 @@
 import Foundation
 import Hummingbird
+import NIOCore
 
 /// Per-request context for the momo API.
 ///
@@ -11,16 +12,22 @@ import Hummingbird
 /// L4 §1.3: tenant isolation is enforced by `SET LOCAL app.workspace_id` per
 /// transaction (see `Database.withTenantTransaction`). The context provides the
 /// workspace/member identity that drives it.
-struct AppRequestContext: RequestContext {
+struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
     var coreContext: CoreRequestContextStorage
 
     /// Authenticated principal, populated by `AuthMiddleware` when a valid
     /// `Authorization: Bearer <app-jwt>` is present. nil on public routes.
     var principal: AuthPrincipal?
 
+    /// Peer socket address (MOMO-300 per-IP rate limiting). Behind the prod
+    /// reverse proxy this is the proxy; `RateLimitMiddleware` prefers
+    /// `X-Forwarded-For` when present.
+    let remoteAddress: SocketAddress?
+
     init(source: Source) {
         self.coreContext = .init(source: source)
         self.principal = nil
+        self.remoteAddress = source.channel.remoteAddress
     }
 }
 

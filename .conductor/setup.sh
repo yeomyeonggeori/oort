@@ -66,6 +66,7 @@ postgres_user="${POSTGRES_USER:-momo}"
 postgres_password="${POSTGRES_PASSWORD:-change-me-postgres}"
 cent_token_hmac="${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}"
 cent_api_key="${CENT_API_KEY:-change-me-cent-api-key}"
+cent_proxy_secret="${CENT_PROXY_SECRET:-dev-insecure-cent-proxy-secret}"
 jwt_hmac="${JWT_HMAC:-change-me-jwt-hmac}"
 hermes_api_key="${HERMES_API_KEY:-change-me-hermes-bearer}"
 case "${HERMES_BASE_URL:-}" in
@@ -93,6 +94,7 @@ HERMES_PORT=$hermes_port
 DATABASE_URL=postgres://$postgres_user:$postgres_password@localhost:$postgres_port/$postgres_db
 CENT_TOKEN_HMAC=$cent_token_hmac
 CENT_API_KEY=$cent_api_key
+CENT_PROXY_SECRET=$cent_proxy_secret
 CENT_API_URL=http://localhost:$cent_port/api
 JWT_HMAC=$jwt_hmac
 HERMES_BASE_URL=$hermes_base_url

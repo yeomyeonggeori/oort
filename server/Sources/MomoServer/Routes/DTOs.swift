@@ -44,6 +44,34 @@ struct LoginResponse: ResponseEncodable {
     let member: MemberDTO
 }
 
+/// POST /v1/auth/refresh request (MOMO-300 rotation).
+struct RefreshRequest: Decodable {
+    let refreshToken: String
+}
+
+/// POST /v1/auth/refresh response — the presented refresh token is revoked
+/// (rotation) and a fresh access/refresh pair is issued.
+struct RefreshResponse: ResponseEncodable {
+    let accessToken: String
+    let refreshToken: String
+}
+
+/// POST /v1/auth/logout optional request body. The access token comes from the
+/// Authorization header; the client may also hand in its refresh token so the
+/// whole session dies at once.
+struct LogoutRequest: Decodable {
+    let refreshToken: String?
+}
+
+/// POST /v1/auth/logout response (idempotent — repeat calls return 200 with
+/// `alreadyRevoked=true` and revoke nothing new).
+struct LogoutResponse: ResponseEncodable {
+    let status: String
+    let revokedAccess: Bool
+    let revokedRefresh: Bool
+    let alreadyRevoked: Bool
+}
+
 /// POST /v1/auth/realtime-token response.
 struct RealtimeTokenResponse: ResponseEncodable, Codable, Sendable {
     let token: String

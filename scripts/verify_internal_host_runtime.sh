@@ -227,6 +227,21 @@ urllib.request.urlopen("http://api:8080/health", timeout=5).read()
 PY
 fi
 
+echo "[host-runtime] verifying Centrifugo subscribe proxy is edge-denied (MOMO-300)"
+# The subscribe proxy is internal-only (centrifugo -> api over the compose
+# network) and excluded from API rate limiting; the Caddy edge must answer
+# 403 for /v1/centrifugo/* so CENT_PROXY_SECRET cannot be brute-forced from
+# the public edge. Checked on the HTTPS edge (the HTTP port only serves the
+# local-TLS 308 redirect, see the /health comment above).
+EDGE_PROXY_STATUS="$(curl -k -sS -o /dev/null -w '%{http_code}' \
+  -H "Host: localhost" \
+  -X POST \
+  "https://localhost:${HTTPS_PORT}/v1/centrifugo/subscribe" || true)"
+if [ "$EDGE_PROXY_STATUS" != "403" ]; then
+  fail "Caddy edge must deny /v1/centrifugo/subscribe with 403 (got ${EDGE_PROXY_STATUS:-none})"
+fi
+echo "[host-runtime] PASS Caddy edge denies /v1/centrifugo/subscribe (403)"
+
 echo "[host-runtime] verifying migration idempotency (single-run evidence)"
 # MOMO-316: migrate 러너(scripts/migrate.sh)가 한 번의 컨테이너 실행 안에서
 # apply→verify 2패스를 돌고 두 번째 패스의 skip 마커(IDEMPOTENCY_OK)를 남긴다.

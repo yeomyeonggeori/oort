@@ -1,4 +1,5 @@
 import Foundation
+import HTTPTypes
 import Hummingbird
 import PostgresNIO
 
@@ -12,15 +13,27 @@ import PostgresNIO
 /// that the observer and target agent are active members with at least one shared
 /// channel in the workspace. Clients still never publish directly to Centrifugo.
 ///
-/// v0 STUB scope: this endpoint is unauthenticated at the HTTP layer (Centrifugo
-/// is trusted on the private network and authenticated separately). The user id
-/// arrives in the proxy body; we trust it for v0. // TODO: verify the proxy
-/// request HMAC / shared secret before trusting `user`.
+/// MOMO-300 hardening (old v0 stub resolved):
+///   1. Proxy authentication — Centrifugo attaches a shared secret
+///      (`X-Centrifugo-Proxy-Secret` static header, `CENT_PROXY_SECRET` env,
+///      see infra/centrifugo*.json). Requests without the exact secret are
+///      rejected 401 before the body is trusted; network position alone no
+///      longer authenticates the callback.
+///   2. Session liveness — the subscribing member must still hold at least one
+///      unrevoked session token (`token.revoked_at IS NULL`), so logout also
+///      cuts off new realtime subscriptions even while a short-lived
+///      connection JWT is technically still valid.
 struct CentrifugoRoutes: Sendable {
     let db: Database
+    let tokenStore: TokenStore
+    /// Shared secret expected on every proxy callback (Config.centProxySecret).
+    let proxySecret: String
+
+    static let proxySecretHeader = HTTPField.Name("X-Centrifugo-Proxy-Secret")!
 
     func add(to router: Router<AppRequestContext>) {
-        // Public (internal) route — Centrifugo → API. NOT behind AuthMiddleware.
+        // Public (internal) route — Centrifugo → API. NOT behind AuthMiddleware;
+        // authenticated by the shared-secret header instead.
         router.post("/v1/centrifugo/subscribe", use: subscribe)
     }
 
@@ -28,6 +41,14 @@ struct CentrifugoRoutes: Sendable {
     func subscribe(
         _ request: Request, context: AppRequestContext
     ) async throws -> SubscribeProxyResponse {
+        // 1. Authenticate the proxy caller before trusting anything in the body.
+        guard let presented = request.headers[Self.proxySecretHeader],
+              ConstantTime.equals(presented, proxySecret)
+        else {
+            context.logger.warning("centrifugo subscribe proxy: missing/invalid proxy secret")
+            throw HTTPError(.unauthorized, message: "invalid or missing proxy secret")
+        }
+
         let dto = try await request.decode(as: SubscribeProxyRequest.self, context: context)
 
         // Channel naming (L4 §4.1): "<namespace>:ws<workspaceUUID>.<resourceUUID>".
@@ -40,6 +61,15 @@ struct CentrifugoRoutes: Sendable {
         // user channel ("#u_...") is server-side subscription, not proxied here.
         guard let userMemberID = dto.user.flatMap({ UUID(uuidString: $0) }) else {
             return .deny("missing or invalid user")
+        }
+
+        // 2. Revocation: a member whose sessions were all revoked (logout) may
+        // not open new subscriptions (MOMO-300; coarse per-member semantics,
+        // see TokenStore.hasActiveSessionToken).
+        guard try await tokenStore.hasActiveSessionToken(
+            memberID: userMemberID, workspaceID: parsed.workspaceID
+        ) else {
+            return .deny("no active session for this member")
         }
 
         let allowed: Bool = switch parsed {
@@ -117,6 +147,13 @@ struct CentrifugoRoutes: Sendable {
     enum ParsedChannel: Equatable {
         case channel(workspace: UUID, channel: UUID)
         case agent(workspace: UUID, agentMember: UUID)
+
+        var workspaceID: UUID {
+            switch self {
+            case .channel(let workspace, _), .agent(let workspace, _):
+                return workspace
+            }
+        }
 
         var denyReason: String {
             switch self {

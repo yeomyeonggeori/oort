@@ -17,6 +17,7 @@ x-e2e-common-env: &e2e-common-env
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
   CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
   CENT_API_KEY: ${CENT_API_KEY:-change-me-cent-api-key}
+  CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:-change-me-cent-proxy-secret}
   JWT_HMAC: ${JWT_HMAC:-change-me-jwt-hmac}
   HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
 
@@ -52,6 +53,9 @@ services:
     environment:
       CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC:-change-me-cent-token-hmac}
       CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY:-change-me-cent-api-key}
+      # MOMO-300: subscribe proxy shared-secret header (must match the api
+      # service's CENT_PROXY_SECRET below; unauthenticated callbacks are 401).
+      CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS: '{"X-Centrifugo-Proxy-Secret":"${CENT_PROXY_SECRET:-change-me-cent-proxy-secret}"}'
     ports:
       - "${CENT_PORT:-8000}:8000"
     volumes:

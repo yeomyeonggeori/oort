@@ -47,6 +47,9 @@ struct Config: Sendable {
     // them belongs to a follow-up reaper ticket.
     var g1StaleRunningSeconds: Int = 600
 
+    // ---- Context assembly window (MOMO-302) ----
+    var maxContextChars: Int     // char-approx budget for the assembled history
+
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
     }
@@ -89,7 +92,9 @@ struct Config: Sendable {
             maxSteps: envInt("MAX_STEPS", 12),
             maxDepth: envInt("MAX_DEPTH", 4),
             maxConcurrentRuns: envInt("MAX_CONCURRENT_RUNS", 1),
-            g1StaleRunningSeconds: envInt("G1_STALE_RUNNING_SECONDS", 600)
+            g1StaleRunningSeconds: envInt("G1_STALE_RUNNING_SECONDS", 600),
+            // MOMO-302: char-approx history budget; drop oldest over this cap.
+            maxContextChars: max(envInt("AGENT_CONTEXT_MAX_CHARS", 24000), 1)
         )
     }
 

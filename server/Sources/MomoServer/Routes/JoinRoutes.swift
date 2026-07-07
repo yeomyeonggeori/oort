@@ -13,6 +13,7 @@ import PostgresNIO
 struct JoinRoutes: Sendable {
     let db: Database
     let jwt: JWTService
+    let tokenStore: TokenStore
 
     func add(to router: Router<AppRequestContext>) {
         router.post("/v1/join", use: join)
@@ -139,20 +140,29 @@ struct JoinRoutes: Sendable {
         }
 
         let memberID = try UUID(uuidString: joined.member.id).unwrapJoinInternal()
+        let scopes = ["messages:write", "messages:read"]
         let access = try await jwt.signAccess(
             memberID: memberID,
             workspaceID: lookup.workspaceID,
-            scopes: ["messages:write", "messages:read"]
+            scopes: scopes
         )
         let refresh = try await jwt.signRefresh(
             memberID: memberID,
             workspaceID: lookup.workspaceID,
-            scopes: ["messages:write", "messages:read"]
+            scopes: scopes
+        )
+        try await AuthRoutes.recordSessionTokens(
+            tokenStore: tokenStore,
+            access: access,
+            refresh: refresh,
+            memberID: memberID,
+            workspaceID: lookup.workspaceID,
+            scopes: scopes
         )
 
         let body = JoinResponse(
-            accessToken: access,
-            refreshToken: refresh,
+            accessToken: access.token,
+            refreshToken: refresh.token,
             workspaceId: lookup.workspaceID.uuidString,
             member: joined.member,
             memberships: joined.memberships,

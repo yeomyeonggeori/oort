@@ -20,6 +20,8 @@ struct AgentJobPayload: Decodable, Sendable {
     let triggerMessageSeq: Int64?
     let model: String           // OpenAI-compatible model id (agent.model)
     let prompt: String          // user/trigger text
+    let systemPrompt: String?   // agent.system_prompt → first `system` chat message (MOMO-302)
+    let recentMessages: [RecentMessage]?  // same-channel history window (MOMO-302)
     let tools: JSONValue?       // OpenAI tool/function defs (agent.tool_schema), optional
     let toolGrants: [ToolGrantMetadata]? // Context Packet / Capability Cache projection
     let sourceAttribution: JSONValue?
@@ -43,6 +45,8 @@ struct AgentJobPayload: Decodable, Sendable {
         case triggerMessageSeq = "trigger_message_seq"
         case model
         case prompt
+        case systemPrompt = "system_prompt"
+        case recentMessages = "recent_messages"
         case tools
         case toolGrants = "tool_grants"
         case contextPacket = "context_packet"
@@ -75,6 +79,8 @@ struct AgentJobPayload: Decodable, Sendable {
 
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
         prompt = try c.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        systemPrompt = try c.decodeIfPresent(String.self, forKey: .systemPrompt)
+        recentMessages = try c.decodeIfPresent([RecentMessage].self, forKey: .recentMessages)
         tools = try c.decodeIfPresent(JSONValue.self, forKey: .tools)
 
         let directToolGrants = try c.decodeIfPresent(
@@ -107,6 +113,33 @@ struct AgentJobPayload: Decodable, Sendable {
         guard let first = present.first else { return nil }
         guard present.allSatisfy({ $0 == first }) else { return nil }
         return first
+    }
+}
+
+/// One entry of the same-channel history window projected by the server
+/// (`recent_messages`, MOMO-302). The shape mirrors the Context Packet v0
+/// `recent_messages` fixture with additive author-attribution fields. Unknown
+/// senders/malformed rows tolerate missing optionals so a partial projection
+/// never fails the whole job decode.
+struct RecentMessage: Decodable, Sendable {
+    let messageID: UUID?
+    let channelID: UUID?
+    let seq: Int64?
+    let authorMemberID: UUID?
+    let authorKind: String?
+    let authorDisplay: String?
+    let type: String?
+    let body: String?
+
+    enum CodingKeys: String, CodingKey {
+        case messageID = "message_id"
+        case channelID = "channel_id"
+        case seq
+        case authorMemberID = "author_member_id"
+        case authorKind = "author_kind"
+        case authorDisplay = "author_display"
+        case type
+        case body
     }
 }
 

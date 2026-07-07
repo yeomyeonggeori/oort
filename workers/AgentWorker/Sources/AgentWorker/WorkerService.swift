@@ -301,7 +301,25 @@ struct WorkerService: Service {
         // PATCH (streaming mimic) targets one growing message (L4 §6.2).
         var streamMessageID: UUID?
 
-        let messages = [HermesTransport.ChatMessage(role: "user", content: p.prompt)]
+        // MOMO-302: assemble the same-channel history window (recent-N/thread,
+        // token-budget) into the chat array instead of the amnesiac single turn.
+        // Empty/absent `recent_messages` (legacy payloads) keep the old path.
+        let assembled = ContextAssembler.assemble(
+            recentMessages: p.recentMessages ?? [],
+            agentMemberID: p.agentMemberID,
+            triggerMessageID: p.triggerMessageID,
+            fallbackPrompt: p.prompt,
+            systemPrompt: p.systemPrompt,
+            maxChars: config.maxContextChars)
+        if assembled.droppedCount > 0 {
+            // Count only — never log message bodies (redaction, L4 §7).
+            logger.info("context window trimmed to budget", metadata: [
+                "runId": .string(p.runID?.uuidString ?? "nil"),
+                "droppedCount": .stringConvertible(assembled.droppedCount),
+                "maxChars": .stringConvertible(config.maxContextChars),
+            ])
+        }
+        let messages = assembled.messages
         let stream = hermes.invoke(
             model: p.model, messages: messages, tools: p.tools, maxTokens: maxOutputTokens)
 

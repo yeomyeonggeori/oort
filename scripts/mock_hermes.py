@@ -15,12 +15,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 
 MOCK_TEXT = "김인턴 mock reply: MOMO-004 SSE path verified."
+
+# MOMO-302: opt-in request capture. When MOCK_HERMES_REQUEST_DUMP=<path> is set,
+# each received /v1/chat/completions body is appended as one JSON line so
+# verifiers can assert the assembled chat array (roles, history, budgeting).
+# Disabled by default — never writes anything unless the env var is present.
+REQUEST_DUMP_PATH = os.environ.get("MOCK_HERMES_REQUEST_DUMP") or None
 MOCK_TOOL_ARGS = {
     "repo": "Dawn-kim-official/momo",
     "query": "MOMO-201 live tool-call fixture",
@@ -52,11 +59,23 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             self.send_error(400, f"invalid JSON: {exc}")
             return
 
+        self._dump_request(body)
+
         if body.get("stream") is False:
             self._send_json(self._non_stream_response(body))
             return
 
         self._send_sse(body)
+
+    def _dump_request(self, body: dict[str, Any]) -> None:
+        if not REQUEST_DUMP_PATH:
+            return
+        try:
+            line = json.dumps(body, ensure_ascii=False) + "\n"
+            with open(REQUEST_DUMP_PATH, "a", encoding="utf-8") as handle:
+                handle.write(line)
+        except Exception as exc:  # never let capture break the mock response
+            print(f"[mock-hermes] request dump failed: {exc}")
 
     def _send_json(self, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
