@@ -34,7 +34,7 @@ Commands:
 
 Defaults:
   Server URL: http://127.0.0.1:28180
-  Login:      demo@momo.local / demo
+  Login:      demo@momo.local / dev-password
 
 Examples:
   scripts/momo start

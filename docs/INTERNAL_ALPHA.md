@@ -3,6 +3,7 @@
 > Purpose: one teammate should be able to start momo locally, attach the macOS dev app, exercise invite/join, Kim Intern, diagnostics, and file a useful bug report without reading the whole repo.
 > Scope: internal alpha on a developer Mac. This is not the M7 release gate and not a public/staging production launch.
 > Cloud host: for a one-week AWS team alpha, use `docs/AWS_INTERNAL_ALPHA.md` first. The local runbook below still applies to app behavior and smoke scenarios.
+> Local solo alpha: use [`docs/LOCAL_SOLO_ALPHA_ROADMAP.md`](LOCAL_SOLO_ALPHA_ROADMAP.md) for the narrower path to one-person Docker + macOS app + local Hermes-compatible provider dogfood before AWS.
 > 72-hour local dogfood: use [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) as the Day 0~Day 3 decision contract before MOMO-246 starts.
 
 ## 0. Read This First
@@ -13,6 +14,10 @@
 - The durable write path is still REST -> Postgres transaction -> outbox -> relay publish. The macOS app must not publish directly to Centrifugo.
 - Internal alpha can use repo-local mock Hermes. External agent runtime/provider side effects remain `runtime-unverified` unless a real gateway is explicitly attached with an out-of-repo provider env file.
 - "Kim Intern invited" and "Kim Intern connected" are separate checks: invited means the agent is an active `member.kind='agent'` with channel membership; connected means the provider status chip or `/v1/agent-runtime/status` reports mock/available instead of degraded.
+- MOMO-300 changed auth and realtime hardening. Old access/refresh tokens issued before this migration are expected to fail closed with 401; log out and log in again with the seeded credentials.
+- `CENT_PROXY_SECRET` must be set consistently for API and Centrifugo. A missing or mismatched subscribe-proxy secret makes realtime subscribe fail with 401.
+- MOMO-302 means agent calls are no longer single-message prompts. The server sends recent same-channel context to AgentWorker/Hermes, bounded by `AGENT_CONTEXT_MAX_MESSAGES` and `AGENT_CONTEXT_MAX_CHARS`.
+- Rate limiting is enabled by default (`RATE_LIMIT_PER_MEMBER=600`, `RATE_LIMIT_PER_IP=1200` per 60s window). If a local stress loop or repeated verifier run hits 429, record it and temporarily set the relevant limit to `0` in the local env only.
 
 ## 1. Tooling Checklist
 
@@ -34,6 +39,10 @@ git status --short --branch
 
 `.conductor/setup.sh` writes `.env.worktree` with unique `PORT`, `CENT_PORT`, `POSTGRES_PORT`, `HERMES_PORT`, `DATABASE_URL`, and `COMPOSE_PROJECT_NAME`. Use those values instead of hard-coding 8080/8000/5432 when several Codex sessions are running.
 
+It also passes through `CENT_PROXY_SECRET` from the primary `.env` when present.
+For manual local alpha without worktrees, copy `infra/.env.example` to `.env`,
+replace every `change-me-*` value, and make sure `CENT_PROXY_SECRET` is not blank.
+
 ## 2. Alpha Boot Sequence
 
 Run from the worktree root:
@@ -41,6 +50,7 @@ Run from the worktree root:
 ```bash
 make up
 make migrate
+make migrate   # second run should report IDEMPOTENCY_OK
 ```
 
 Open three long-running terminals:

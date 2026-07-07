@@ -496,7 +496,7 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
             self.password = password
         }
 
-        public static let demo = Login(email: "demo@momo.local", password: "demo")
+        public static let demo = Login(email: "demo@momo.local", password: "dev-password")
     }
 
     public static func fromEnvironment(_ environment: [String: String] = ProcessInfo.processInfo.environment) -> Self? {

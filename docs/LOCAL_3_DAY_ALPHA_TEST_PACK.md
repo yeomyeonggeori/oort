@@ -28,6 +28,15 @@ Before Day 0 starts:
 
 - A clean main or dedicated alpha worktree, not the root dirty checkout.
 - Docker Desktop running with enough resources for local compose.
+- Local env has an explicit `CENT_PROXY_SECRET` shared by API and Centrifugo.
+  The generated `scripts/local_alpha_runner.sh execute` env sets a dev-only
+  value outside the repo; manual `make up` flows must set it in `.env` or
+  `.env.worktree`.
+- `make migrate` has applied migration `007_agent_run_a2a_guards.sql`, and a
+  second run is idempotent (`IDEMPOTENCY_OK`).
+- Old app/API sessions are discarded. MOMO-300 token revocation makes
+  pre-migration access/refresh tokens fail closed with 401, so Day 0 starts
+  from a fresh login.
 - `scripts/local_gate.sh --profile docs` PASS on the chosen commit.
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS on the chosen commit.
 - `scripts/local_gate.sh --profile local-alpha` PASS on the chosen commit.
@@ -64,6 +73,10 @@ PASS or explicitly recorded as a blocker.
 | Check | Command or evidence | PASS threshold |
 |---|---|---|
 | Worktree | `git status --short --branch` | Clean alpha worktree, correct commit recorded. |
+| Security env | generated env, `.env`, or `.env.worktree` | `CENT_PROXY_SECRET` is explicit; old sessions were cleared and fresh login was used. |
+| Migration 007 | `make migrate && make migrate` or local-alpha evidence | `007_agent_run_a2a_guards.sql` applied and second run reports `IDEMPOTENCY_OK`. |
+| Rate limits | env snapshot or default note | Defaults did not block the scenario, or local-only `RATE_LIMIT_PER_MEMBER=0` / `RATE_LIMIT_PER_IP=0` override was recorded. |
+| Agent context | `AGENT_CONTEXT_MAX_MESSAGES` / `AGENT_CONTEXT_MAX_CHARS` env or default note | Agent runtime expectation uses recent channel context, not only the trigger message. |
 | Docs gate | `scripts/local_gate.sh --profile docs` | PASS evidence markdown path recorded. |
 | Swift gate | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` | PASS evidence markdown path recorded. |
 | Local alpha RC | `scripts/local_gate.sh --profile local-alpha` | PASS evidence for boot, migrate, health, message, relay, mock agent, backup restore, macOS smoke, diagnostics. |

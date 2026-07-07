@@ -136,6 +136,7 @@ REDIS_PASSWORD=change-me-redis
 CENTRIFUGO_REDIS_ADDRESS=redis://:change-me-redis@redis:6379/0
 CENT_TOKEN_HMAC=change-me-cent-token-hmac
 CENT_API_KEY=change-me-cent-api-key
+CENT_PROXY_SECRET=change-me-cent-proxy-secret
 CENTRIFUGO_LOG_LEVEL=debug
 JWT_HMAC=change-me-jwt-hmac
 LOG_LEVEL=debug

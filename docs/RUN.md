@@ -102,6 +102,7 @@ MomoServer: http://127.0.0.1:<PORT>/health
 Centrifugo: ws://127.0.0.1:<CENT_PORT>/connection/websocket
 mock Hermes: http://127.0.0.1:<HERMES_PORT>/health
 macOS dev launch: swift run --package-path clients/macOS MomoMacSmoke
+foreground app: scripts/momo start, or use SUMMARY for this stack's exact env
 evidence summary: /tmp/.../summary.md
 logs: /tmp/.../logs
 stop: /tmp/.../stop-local-alpha.sh
@@ -111,9 +112,11 @@ Centrifugo 컨테이너의 subscribe proxy는 local alpha 실행 중 host-run `M
 runner가 evidence 디렉터리에 임시 Centrifugo config/compose override를 생성한다. macOS Docker
 Desktop 기본값은 `host.docker.internal`이며, 필요하면 `--api-proxy-host <host>`로 바꾼다.
 
-현재 `main`의 macOS dev surface는 Xcode `.app`이 아니라 SwiftPM `MomoMacSmoke`다. 따라서 runner는
-실행 가능한 dev launch command로 `swift run --package-path clients/macOS MomoMacSmoke`를 출력한다.
-Xcode `.app` 번들 런치는 M4/C1 이후 같은 runner에 추가한다.
+runner는 기본 검증 경로에서 headless `MomoMacSmoke`를 실행한다. 사용자가 실제 앱 창을 열 때는
+기본 고정 포트 flow인 `scripts/momo start`를 쓰거나, runner가 생성한 `summary.md`의
+`MOMO_SERVER_BASE_URL`/`MOMO_CENTRIFUGO_WS_URL`/`MOMO_LOGIN_*` 환경변수 예시로
+`scripts/macos_dev_run.sh --launch --verify`를 실행한다. 현재 `MomoMacDevApp`은 개발용
+SwiftPM-staged `.app`이며, 서명/공증/배포용 패키징은 M4 범위다.
 
 ---
 
@@ -845,7 +848,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - REST dev mode 환경변수:
   `MOMO_SERVER_BASE_URL`(필수), `MOMO_ACCESS_TOKEN`(선택, 없으면 `/v1/auth/login`),
   `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(내부 alpha seed는 `demo@momo.local`/`dev-password`;
-  미설정 시 legacy transport default는 `demo@momo.local`/`demo`라 real-server mode에서는 명시 권장),
+  미설정 시 transport default도 같은 seed credential을 사용),
   `MOMO_WORKSPACE_ID`(기본 demo workspace), `MOMO_CHANNEL_ID`(기본 `#general`),
   `MOMO_CENTRIFUGO_WS_URL`(선택, 설정 시 `/v1/auth/realtime-token`으로 Centrifugo
   connection JWT를 받아 `ch:ws<workspace>.<channel>` live subscription을 연결).
