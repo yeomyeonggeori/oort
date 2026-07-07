@@ -486,6 +486,10 @@ hermes_plugin_dir() {
   printf '%s\n' "${MOMO_HERMES_PLUGIN_DIR:-$(hermes_home)/plugins/momo}"
 }
 
+hermes_config_file() {
+  printf '%s\n' "${HERMES_CONFIG_FILE:-$(hermes_home)/config.yaml}"
+}
+
 hermes_bin() {
   if [ "${HERMES_BIN:-}" != "" ]; then
     printf '%s\n' "$HERMES_BIN"
@@ -500,6 +504,54 @@ hermes_bin() {
     return 0
   fi
   return 1
+}
+
+hermes_gateway_enable_plugin_config() {
+  local config_file backup_file
+  config_file="$(hermes_config_file)"
+  mkdir -p "$(dirname "$config_file")"
+  if [ -f "$config_file" ] && grep -Eq '^[[:space:]]*-[[:space:]]*momo[[:space:]]*$' "$config_file"; then
+    info "Hermes momo plugin already enabled in $config_file"
+    return 0
+  fi
+  if ! command -v ruby >/dev/null 2>&1; then
+    warn "ruby not found; enable momo manually in $config_file:"
+    warn "plugins:"
+    warn "  enabled:"
+    warn "    - momo"
+    return 1
+  fi
+  if [ -f "$config_file" ]; then
+    backup_file="${config_file}.momo.bak.$(date -u '+%Y%m%dT%H%M%SZ')"
+    cp "$config_file" "$backup_file"
+    info "backed up Hermes config: $backup_file"
+  fi
+  ruby - "$config_file" <<'RUBY'
+require "yaml"
+
+file = ARGV.fetch(0)
+raw = File.exist?(file) ? File.read(file) : ""
+data = raw.strip.empty? ? {} : YAML.safe_load(raw, permitted_classes: [], aliases: true)
+data = {} unless data.is_a?(Hash)
+plugins = data["plugins"]
+plugins = {} unless plugins.is_a?(Hash)
+enabled = plugins["enabled"]
+enabled =
+  case enabled
+  when Array
+    enabled.map(&:to_s)
+  when String
+    enabled.split(/[,\s]+/)
+  else
+    []
+  end
+enabled << "momo" unless enabled.include?("momo")
+plugins["enabled"] = enabled
+data["plugins"] = plugins
+File.write(file, YAML.dump(data))
+RUBY
+  chmod 600 "$config_file" 2>/dev/null || true
+  info "enabled Hermes momo plugin in $config_file"
 }
 
 random_secret() {
@@ -575,6 +627,7 @@ hermes_gateway_install_plugin() {
   if [ -e "$target" ] || [ -L "$target" ]; then
     if [ -L "$target" ] && [ "$(readlink "$target")" = "$REPO_ROOT/adapters/hermes" ]; then
       info "Hermes momo plugin already linked: $target"
+      hermes_gateway_enable_plugin_config
       return 0
     fi
     warn "plugin target already exists: $target"
@@ -597,16 +650,19 @@ hermes_gateway_install_plugin() {
       ;;
   esac
   info "installed Hermes momo plugin: $target"
+  hermes_gateway_enable_plugin_config
 }
 
 hermes_gateway_status() {
-  local env_file secret bin plugin_dir
+  local env_file secret bin plugin_dir config_file
   env_file="$(gateway_env_file)"
   plugin_dir="$(hermes_plugin_dir)"
+  config_file="$(hermes_config_file)"
   info "Hermes gateway platform adapter"
   echo "  env file: $env_file"
   echo "  repo plugin dir: $REPO_ROOT/adapters/hermes"
   echo "  Hermes plugin dir: $plugin_dir"
+  echo "  Hermes config: $config_file"
   if bin="$(hermes_bin 2>/dev/null)"; then
     echo "  Hermes CLI: $bin"
     "$bin" --version 2>/dev/null | sed 's/^/    /' || true
@@ -618,6 +674,12 @@ hermes_gateway_status() {
     echo "  plugin load files: present"
   else
     echo "  plugin load files: missing"
+    echo "  next: scripts/momo hermes-gateway-install-plugin"
+  fi
+  if [ -f "$config_file" ] && grep -Eq '^[[:space:]]*-[[:space:]]*momo[[:space:]]*$' "$config_file"; then
+    echo "  plugin enabled: yes"
+  else
+    echo "  plugin enabled: no"
     echo "  next: scripts/momo hermes-gateway-install-plugin"
   fi
   if [ ! -f "$env_file" ]; then
