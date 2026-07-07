@@ -6,7 +6,7 @@
 > 사람용 장문 배경은 `STATUS.md`/`ROADMAP.md`/`BUILD_TICKETS.md`/`research/07-deepdive/04·05`에. 여기엔 **에이전트가 추론으로 못 얻는 것만** 적는다.
 >
 > **실행 주체:** 계획(마일스톤/티켓)은 릴리스 PM, **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**.
-> **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. Docker Desktop/psql 기반 M1 런타임 검증을 진행 중이며, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway가 필요하다.
+> **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. Docker Desktop/psql 기반 M1 런타임 검증을 진행 중이며, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway가 필요하다. **2026-07 재설계 6티켓(316/323/301/300/302/318) 머지 완료(main), 실행 주체 Opus 세션→Codex 인수 — 인수인계·진입점은 `docs/HANDOFF_2026-07.md`, 상태는 `research/13-redesign/00-execution-tracker.md`.**
 > **표기:** `(검증됨)`=교차확인 · `(추정)`=설계/일정 판단 · `runtime-unverified`=해당 goal에서 아직 e2e를 못 닫은 것. **법무 텍스트는 법률 자문 아님.**
 
 ## 0. 제품 1줄

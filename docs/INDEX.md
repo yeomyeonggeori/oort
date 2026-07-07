@@ -47,6 +47,7 @@
 
 | 문서 | 역할 | 마일스톤 |
 |---|---|---|
+| [`docs/HANDOFF_2026-07.md`](HANDOFF_2026-07.md) | **2026-07 재설계 실행 인수인계**(Opus 세션→Codex): main 머지분(316/323/301/300/302/318), 317 브랜치 대기, Codex 진입점(303 MomoDS→308/309), 게이트 배비싯 함정(watchdog/포트가드/verifier 누수) | M1/M3 |
 | [`docs/RELEASE_PLAYBOOK.md`](RELEASE_PLAYBOOK.md) | 데스크탑 공증 + iOS App Store + CI/CD **실행 마스터 체크리스트** + 비용/기간 표 + gotcha 집약 | M1~M8 |
 | [`docs/DEPLOY.md`](DEPLOY.md) | 백엔드 멀티팀 운영 배포(staging→prod: Caddy 자동TLS/Redis/SOPS+age/pgBackRest PITR/모니터링) | M1, M2 |
 | [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md) | AWS 1주일 internal alpha stack v0: EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, preflight | M1/M7 준비 |

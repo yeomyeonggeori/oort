@@ -811,6 +811,13 @@
 - 검증(퀵 범위, DEVELOPER_DIR=Xcode): `verify_design_preflight.sh` 단독 PASS(baseline 일치, env bash + `/bin/bash` 3.2 exit 0), 4항목 각각 위반 1개 주입 시 FAIL(exit 1) 후 probe 제거 재PASS 확인. `clients/macOS` `swift build` green + `swift test` green(60개 = 기존 58 + 스냅샷 2), 스냅샷 재실행 2회 결정론 PASS. `clients/Core` swift build green. `bash -n`/`/bin/bash -n` 양쪽(신규 스크립트 + 편집된 local_gate.sh) OK.
 - 정직 표기(honest gap): `local_gate.sh --profile swift` **풀 실행은 미수행**(Fable 후속 배비싯 — 웨이브 역할분리) → runtime-unverified(swift 프로파일 풀런). 스냅샷은 **이 머신(macOS 26 / Swift 6.3.2 / retina @2x)에서만** 결정론 확인 — 다른 macOS point release에서 perceptualPrecision 0.98을 넘는 폰트 렌더 차이가 나면 재기록 필요(로컬 전용 evidence, repo에 CI 없음). em-dash 검사는 더블쿼트 문자열 리터럴 + 비주석 라인 휴리스틱(멀티라인/블록주석 내 문자열 em-dash는 미포착 — ratchet이 카운트 드리프트로 흡수).
 
+## 0b4. 재설계 2026-07 실행 세션 요약 + Codex 인수 (2026-07-07)
+
+- **머지 완료(main, 6티켓, 전부 3-lens 리뷰 + 게이트 검증):** MOMO-316(게이트 --auto/wait/멱등) · 323(GWS 스펙/런북) · 301(루프가드 G1~G4 실쿼리) · 302(컨텍스트 조립 v1) · 300(proxy 인증/revocation/rate limit) · 318(디자인 pre-flight ratchet + 스냅샷). 각 §0ay/0az/0b0/0b1/0b2/0b3.
+- **브랜치 대기(Codex 완료):** MOMO-317 = `feat/MOMO-317-buildkit-cache`(재작성 Dockerfile 단일이미지 검증됨, 잔여=main 머지 build-infra 충돌 해소 + host-runtime 게이트, 이 세션 머신 메모리 압박으로 미실행).
+- **실행 주체 전환:** Opus 세션 오케스트레이션 → **Codex/GPT goal 기반 자율실행**. 인수인계·진입점(MOMO-303 MomoDS 우선, 병렬 308/309)·게이트 배비싯 함정은 `docs/HANDOFF_2026-07.md`, 상태는 `research/13-redesign/00-execution-tracker.md`.
+- **게이트가 잡아준 실이슈(하드닝 반영):** ① 300 verifier bare `wait`가 서버 서브셸 대기 → 무한 hang(PID 한정+curl 타임아웃 수정) ② 302 verifier가 공유 DB budget leftover에 서킷브레이커 트립(채널 예산 정리) ③ verifier 누적 프로세스 누수 → 메모리 OOM(302 full-sequence 실패 근본원인, 개별 verifier 전부 PASS — MOMO-319 하드닝 후속) ④ 머지 커밋 worktree gitlink 혼입(.gitignore 등록). **전부 인프라/verifier 이슈이며 제품코드 회귀 아님.**
+
 ## 1. 패키지별 빌드 상태 (로컬 `swift build` 실측)
 
 | 패키지 | 경로 | 빌드 | 비고 |

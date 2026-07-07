@@ -1,8 +1,10 @@
 # 재설계 2026-07 — 실행 팔로업 보드
 
 > **역할:** "지금 무얼 해야 하고, 무얼 했는지"를 한 화면에서 보는 보드. **티켓 정본은 `docs/BACKLOG.md` §4 재설계 섹션**, 마일스톤 정본은 `ROADMAP.md` §1.3 — 이 보드는 상태 뷰이며 충돌 시 정본이 우선.
-> **갱신 규칙:** 재설계 티켓(MOMO-300~323)을 닫을 때 STATUS.md와 함께 이 표의 상태를 갱신한다(AGENTS.md DoD 5 참조). 상태 값: `ready`(착수 가능) / `blocked(<deps>)` / `in-progress` / `review` / `done` / `dropped`.
-> 최종 갱신: 2026-07-06 (기획 정본화 시점 — 코드 티켓은 전부 미착수)
+> **갱신 규칙:** 재설계 티켓(MOMO-300~323)을 닫을 때 STATUS.md와 함께 이 표의 상태를 갱신한다(AGENTS.md DoD 5 참조). 상태 값: `ready`(착수 가능) / `blocked(<deps>)` / `in-progress` / `review` / `done` / `handoff` / `dropped`.
+> 최종 갱신: **2026-07-07** — Opus 세션에서 **316·323·301·300·302·318 머지 완료**(main HEAD `88234d2`). 이후 실행 주체는 **Codex/GPT로 인수**(핸드오프 브리프 `docs/HANDOFF_2026-07.md`, 실행 주체 전환은 AGENTS.md 참조).
+>
+> **Codex 진입점(다음 착수):** 아래 `ready` 티켓을 AGENTS.md §6 picker로 선택 — **MOMO-303(MomoDS v0)** 우선(Phase 1 마지막 P0, macOS UI의 모든 후속을 여는 토큰 레이어), 병렬 가능: **308(MCP)·309(BYOK)**(deps done). 그리고 **317**(아래, build-infra 브랜치 대기)과 **319**(게이트/verifier 하드닝). UI 티켓(303~306)은 `momo-design-taste` skill 준수 + design-review 리포트(Blocker 0) evidence 필수.
 
 ## 완료된 것 (기획/도구, 2026-07-06)
 
@@ -15,16 +17,16 @@
 | `design-review` 에이전트 설치 (`.claude/agents/design-review.md`) | ✅ done |
 | BACKLOG 티켓화(MOMO-300~323) + ROADMAP §1.3 overlay | ✅ done |
 
-## Phase 0 — 게이트/도구 정비 (M1) · **지금 여기**
+## Phase 0 — 게이트/도구 정비 (M1)
 
 | 티켓 | 내용 | 우선순위 | 상태 |
 |---|---|---|---|
 | MOMO-316 | local gate `--auto` 프로파일 + compose `--wait` + 멱등 1-run | P0 | `done` (2026-07-06 구현+3-lens 리뷰 반영+머지, STATUS §0ay) |
-| MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `review` (2026-07-07 구현: ratchet pre-flight + swift 프로파일 연결 + MessageBubble light/dark 스냅샷 결정론 PASS, STATUS §0b0) |
-| MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | `ready` (316 머지됨) |
-| MOMO-319 | runtime-db verifier 병렬화 + 웜 볼륨 opt-in | P2 | `blocked(317)` |
+| MOMO-318 | 디자인 pre-flight grep → swift 프로파일 + snapshot testing | P1 | `done` (2026-07-07 merged-main swift 게이트 PASS: ratchet baseline 81/1/0/0 + 60 tests + light/dark 스냅샷, STATUS 0b3) |
+| MOMO-317 | BuildKit cache mount + worktree 공유 빌드 캐시 | P1 | **`handoff`** — 구현 완료(브랜치 `feat/MOMO-317-buildkit-cache` @ e31d30e, 6e01142 기반), 재작성 Dockerfile 단일이미지(OutboxRelay) 빌드+바이너리 실행 검증됨. **Codex 잔여:** main 머지(Makefile/swift-service.Dockerfile/verify_internal_host_runtime.sh에서 316/300과 build-infra 충돌 해소) → `--profile host-runtime` 게이트(5이미지, 이 세션 머신은 메모리 압박으로 미실행) → 머지 |
+| MOMO-319 | 게이트/verifier 하드닝 (verifier leaked-process 정리 + runtime-db 부분 병렬화 + 웜 볼륨 opt-in) | P2 | `ready` |
 
-> **후속 발견(316 검증 중, 새 티켓 후보):** verify_*.sh 계열이 host MomoServer를 누수시킬 수 있다 — `swift run` 부모만 trap kill 되고 자식 MomoServer 바이너리가 살아남아, 프로파일을 별도 호출로 연달아 돌리면 다음 verifier가 "already serving"으로 실패(`all` 프로파일은 내부 cleanup으로 방어). MOMO-319(Wave 3)에 process-group kill 또는 verifier 선행 port-guard로 흡수 권장.
+> **MOMO-319로 흡수된 게이트 하드닝(이 세션 실측 3건):** ① verify_*.sh가 `swift run` child MomoServer/mock/worker를 누수시킴 → 프로파일/verifier 연쇄 실행 시 "already serving" 또는 **누적 누수→메모리 OOM으로 워커 사망**(302 runtime-agent full-sequence 실패의 실제 원인, 개별 verifier는 전부 PASS). **verifier 선두에 자기 포트 process-group kill 가드** 필요. ② 300에서 verifier의 bare `wait`가 서버 서브셸을 기다려 무한 hang → 이미 300에서 수정, 같은 패턴 다른 verifier 점검. ③ 공유 DB volume에 leftover budget/state → verifier가 자기 채널 상태 정리 필요(302에서 예산 정리 패턴 적용).
 
 ## Phase 1 — P0 코어 (M1/M3)
 
