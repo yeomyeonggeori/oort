@@ -1,8 +1,10 @@
 # Hermes Gateway Native Platform Integration
 
-> Status: MOMO-325 v1. Repo-local mock gateway harness verified; real Hermes
-> gateway CLI/plugin load remains `runtime-unverified(real hermes gateway missing)`
-> until an operator provides a local Hermes gateway runtime.
+> Status: MOMO-326 in progress. Repo-local mock gateway harness is verified.
+> Real Hermes CLI/plugin/provider smoke is now scripted, but this machine has no
+> Hermes install yet, so the real roundtrip remains
+> `runtime-unverified(real hermes gateway missing)` until the operator installs
+> Hermes and completes provider OAuth/login inside Hermes.
 
 ## Product Boundary
 
@@ -98,7 +100,9 @@ provider credential and is scoped to the local gateway integration.
 ```sh
 scripts/momo hermes-gateway-init
 scripts/momo hermes-gateway-status
+scripts/momo hermes-gateway-install-plugin
 scripts/momo hermes-gateway-smoke
+scripts/momo hermes-gateway-smoke --real
 ```
 
 `hermes-gateway-smoke` runs the repo-local mock gateway harness:
@@ -120,18 +124,68 @@ Expected coverage:
 
 ## Real Hermes Gateway
 
-The repo includes `adapters/hermes/PLUGIN.yaml`, `adapters/hermes/adapter.py`,
+The repo includes `adapters/hermes/plugin.yaml`, `adapters/hermes/adapter.py`,
 and `adapters/hermes/momo_adapter.py` in the documented Hermes plugin shape.
+On the default macOS case-insensitive filesystem this also resolves for Hermes
+runtimes that probe `PLUGIN.yaml`; use copy mode if a case-sensitive plugin
+directory requires an uppercase manifest file.
+
+- `kind: platform`
+- `entrypoint: adapter.py`
+- `requires_env`: `MOMO_API_URL`, `MOMO_WORKSPACE_ID`,
+  `MOMO_AGENT_MEMBER_ID`, `MOMO_AGENT_GATEWAY_SECRET`
+- `optional_env`: Centrifugo URL, local momo operator login, and handle
+
 Operator flow:
 
 1. Install or run Hermes gateway locally.
-2. Copy or mount `adapters/hermes/` into the Hermes plugin directory.
-3. Source `$HOME/.momo/hermes-gateway.env` for the momo-facing values.
-4. Complete provider OAuth/login inside Hermes.
-5. Start momo with `AGENT_GATEWAY_MODE=gateway` and the matching
+2. Generate momo-facing pairing env:
+   ```sh
+   scripts/momo hermes-gateway-init
+   ```
+3. Link the repo plugin into the local Hermes plugin directory:
+   ```sh
+   scripts/momo hermes-gateway-install-plugin
+   ```
+   The default target is `$HERMES_HOME/plugins/momo`, usually
+   `$HOME/.hermes/plugins/momo`. Set `MOMO_HERMES_PLUGIN_INSTALL_MODE=copy` if a
+   symlink is not acceptable for the local runtime.
+4. Complete provider OAuth/login inside Hermes. The OAuth/token material stays
+   inside Hermes/provider runtime and is not copied into momo.
+5. Start Hermes gateway through the user's Hermes flow, for example
+   `hermes gateway start` after provider setup.
+6. Start momo with `AGENT_GATEWAY_MODE=gateway` and the matching
    `AGENT_GATEWAY_SECRET`.
-6. Send `@hermes` from momo and confirm the final response lands in the same
+7. Send `@hermes` from momo and confirm the final response lands in the same
    channel timeline.
+
+Real evidence commands:
+
+```sh
+# Status/readiness only; safe to run before install/login.
+scripts/momo hermes-gateway-smoke --real
+
+# After the user has completed provider OAuth/login inside Hermes:
+MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real
+
+# Real 1-roundtrip: sends @hermes through momo REST and waits for a same-channel
+# agent response. This expects momo to be running in AGENT_GATEWAY_MODE=gateway
+# and Hermes gateway to be connected.
+MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
+```
+
+The real verifier writes a summary and events under
+`${TMPDIR:-/tmp}/momo-hermes-gateway-real/<timestamp>/`. It reports separate
+states for:
+
+- `NEEDS_USER_INSTALL`: Hermes CLI is not installed or not on `PATH`.
+- `NEEDS_PLUGIN_INSTALL`: the momo adapter is not visible in the Hermes plugin
+  directory.
+- `NEEDS_PROVIDER_LOGIN`: Hermes exists but the operator has not marked provider
+  OAuth/login as complete.
+- `NEEDS_MOMO_SERVER`: momo `/health` is not reachable in gateway mode.
+- `PASS`: `@hermes` produced a same-channel durable response from the agent
+  member.
 
 If step 1 is unavailable, keep the real gateway plugin load and provider call as
 `runtime-unverified(real hermes gateway missing)` while relying on the mock

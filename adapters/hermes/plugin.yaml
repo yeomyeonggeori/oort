@@ -1,17 +1,33 @@
 name: momo
+label: Momo
+kind: platform
 version: 0.1.0
-description: momo native messaging platform adapter for Hermes gateway
+description: Native momo messaging platform adapter for Hermes gateway.
+author: Dawn Kim / momo
 entrypoint: adapter.py
-platforms:
-  - momo
-env:
-  required:
-    - MOMO_API_URL
-    - MOMO_WORKSPACE_ID
-    - MOMO_AGENT_MEMBER_ID
-    - MOMO_AGENT_GATEWAY_SECRET
-  optional:
-    - MOMO_CENTRIFUGO_WS_URL
-    - MOMO_AGENT_EMAIL
-    - MOMO_AGENT_PASSWORD
-    - MOMO_AGENT_HANDLE
+requires_env:
+  - name: MOMO_API_URL
+    label: momo API URL
+    description: Local momo API base URL, for example http://127.0.0.1:28180.
+  - name: MOMO_WORKSPACE_ID
+    label: Workspace ID
+    description: momo workspace UUID the Hermes agent belongs to.
+  - name: MOMO_AGENT_MEMBER_ID
+    label: Agent member ID
+    description: momo member UUID where member.kind='agent'.
+  - name: MOMO_AGENT_GATEWAY_SECRET
+    label: Gateway callback secret
+    description: momo-facing shared secret for gateway status/result callbacks. Not a provider OAuth/API token.
+optional_env:
+  - name: MOMO_CENTRIFUGO_WS_URL
+    label: Centrifugo WebSocket URL
+    description: Realtime endpoint, for example ws://127.0.0.1:28100/connection/websocket.
+  - name: MOMO_AGENT_EMAIL
+    label: momo operator email
+    description: Optional local momo account used only for realtime subscription.
+  - name: MOMO_AGENT_PASSWORD
+    label: momo operator password
+    description: Optional local momo password used only for realtime subscription.
+  - name: MOMO_AGENT_HANDLE
+    label: Agent handle
+    description: Mention handle, usually hermes.

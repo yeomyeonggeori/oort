@@ -191,8 +191,27 @@ class HermesAdapterContractTests(unittest.TestCase):
         adapter_cls = momo_adapter.register(context)
 
         self.assertIs(adapter_cls, momo_adapter.MomoAdapter)
-        self.assertEqual(context.kwargs["platform_name"], "momo")
-        self.assertIs(context.kwargs["adapter_cls"], momo_adapter.MomoAdapter)
+        self.assertEqual(context.kwargs["name"], "momo")
+        self.assertEqual(context.kwargs["label"], "Momo")
+        self.assertIs(context.kwargs["adapter_factory"], momo_adapter.adapter_factory)
+        self.assertIn("MOMO_AGENT_GATEWAY_SECRET", context.kwargs["required_env"])
+
+    def test_env_enablement_requires_momo_facing_values_only(self):
+        self.assertIsNone(momo_adapter.env_enablement({"MOMO_API_URL": "http://127.0.0.1:28180"}))
+
+        enabled = momo_adapter.env_enablement(
+            {
+                "MOMO_API_URL": "http://127.0.0.1:28180",
+                "MOMO_WORKSPACE_ID": "workspace",
+                "MOMO_AGENT_MEMBER_ID": "agent",
+                "MOMO_AGENT_GATEWAY_SECRET": "gateway-secret",
+                "OPENAI_API_KEY": "must-not-be-consumed",
+            }
+        )
+
+        self.assertIsNotNone(enabled)
+        self.assertEqual(enabled["MOMO_AGENT_MEMBER_ID"], "agent")
+        self.assertNotIn("OPENAI_API_KEY", enabled)
 
 
 if __name__ == "__main__":

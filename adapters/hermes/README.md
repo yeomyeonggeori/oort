@@ -56,8 +56,8 @@ realtime stream and *writes* via REST. Every state change is
 
 | File | Purpose |
 |---|---|
-| `momo_adapter.py` | `MomoAdapter(BasePlatformAdapter)` + `register_platform()`. |
-| `plugin.yaml` | gateway plugin manifest (`register_platform` hook, platform = `momo`). |
+| `momo_adapter.py` | `MomoAdapter(BasePlatformAdapter)` + `register(ctx)` / `register_platform()`. |
+| `plugin.yaml` | Hermes platform plugin manifest (`kind: platform`, entrypoint `adapter.py`). On default macOS case-insensitive filesystems this also resolves as `PLUGIN.yaml`. |
 | `requirements.txt` | runtime deps (`aiohttp`, `websockets`). |
 | `tests/smoke_momo_adapter.py` | dependency-free local smoke: Centrifugo fixture in, REST calls captured, no network. |
 | `tests/test_momo_adapter_contract.py` | stdlib unittest for contract fixtures and smoke harness. |
@@ -65,8 +65,16 @@ realtime stream and *writes* via REST. Every state change is
 
 ## Install
 
-The gateway loads this directory as a plugin via `plugin.yaml`. To install deps
-into the gateway's environment:
+The gateway loads this directory as a plugin via the manifest.
+For a local Hermes install:
+
+```sh
+scripts/momo hermes-gateway-init
+scripts/momo hermes-gateway-install-plugin
+scripts/momo hermes-gateway-status
+```
+
+To install adapter deps into the gateway's environment:
 
 ```sh
 pip install -r adapters/hermes/requirements.txt
@@ -79,24 +87,25 @@ the module imports an internal shim so static checks still pass.
 
 ## Connect / configure
 
-The adapter is env-driven (see `plugin.yaml` `spec.env`, mirrors
-`infra/.env.example`):
+The adapter is env-driven (see `PLUGIN.yaml` `requires_env`/`optional_env`):
 
 | Env var | Meaning |
 |---|---|
 | `MOMO_API_URL` | momo REST API base, e.g. `http://api:8080`. |
 | `MOMO_CENTRIFUGO_WS_URL` | Centrifugo WS endpoint, e.g. `ws://centrifugo:8000/connection/websocket`. |
-| `MOMO_AGENT_EMAIL` / `MOMO_AGENT_PASSWORD` | service-account credentials the agent authenticates with. |
+| `MOMO_AGENT_EMAIL` / `MOMO_AGENT_PASSWORD` | optional local momo operator account used only to subscribe to realtime. |
 | `MOMO_WORKSPACE_ID` | target workspace UUID (tenant). |
 | `MOMO_AGENT_MEMBER_ID` | the agent's `member.id` (`kind='agent'`). |
-| `MOMO_AGENT_HANDLE` | agent display handle for logs/UI hints (default `kim-intern`). |
+| `MOMO_AGENT_HANDLE` | agent display handle for logs/UI hints (default `hermes`). |
+| `MOMO_AGENT_GATEWAY_SECRET` | momo-facing callback secret for gateway status/result REST calls; not a provider token. |
 
 Connection sequence (§6.3 / §7.1 / §4.3):
 
 1. `POST /v1/auth/login` → access(15m) / refresh(30d) JWT + member.
 2. `POST /v1/auth/realtime-token` → Centrifugo connection JWT (sub = memberId, 30m).
 3. WS connect to Centrifugo with that JWT.
-4. subscribe `agent:ws<workspaceUUID>.<agentMemberUUID>` + `user:ws<workspaceUUID>.<memberUUID>`.
+4. subscribe `agent:ws<workspaceUUID>.<agentMemberUUID>` for work and
+   `user:ws<workspaceUUID>.<operatorMemberUUID>` for local operator notices.
 5. listen loop feeds inbound pushes to `handle_message()`.
 
 Programmatic use (inside the gateway runtime):
@@ -110,6 +119,13 @@ await adapter.connect()        # auth + subscribe
 # ... on shutdown:
 await adapter.close()
 ```
+
+Current Hermes SDK compatibility:
+
+- official import path: `gateway.platforms.base.BasePlatformAdapter`
+- official registration path: `register(ctx)` with `adapter_factory`
+- legacy fallback: `register_platform(registry)` and import-safe local shim for
+  repo-local static gates
 
 ## Channel naming (§4.1)
 
@@ -139,8 +155,17 @@ REST calls that would be made:
 
 `scripts/local_gate.sh --profile docs` runs this smoke in addition to
 `python3 -m py_compile adapters/hermes/momo_adapter.py` and the contract unittest.
-Live Hermes gateway plugin loading and live momo/Centrifugo/Postgres e2e are still
-`runtime-unverified` until a Hermes test instance is available.
+
+Real Hermes readiness / smoke:
+
+```sh
+scripts/momo hermes-gateway-smoke --real
+MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
+```
+
+Live Hermes gateway plugin loading and real provider e2e remain
+`runtime-unverified(real hermes gateway missing)` until a Hermes test instance is
+installed and the operator completes provider OAuth/login.
 
 ## Server-contract status
 

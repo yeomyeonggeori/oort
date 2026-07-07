@@ -34,8 +34,10 @@ Commands:
               Create ~/.momo/hermes-gateway.env for Hermes platform adapter pairing.
   hermes-gateway-status
               Show momo-facing Hermes gateway adapter status.
+  hermes-gateway-install-plugin
+              Link/copy adapters/hermes into the local Hermes plugin directory.
   hermes-gateway-smoke
-              Run the mock Hermes gateway native platform smoke.
+              Run mock smoke, or pass --real [--trigger] for real Hermes evidence.
   stop        Stop the app and the local alpha stack when it can be identified.
   stop-app    Stop the macOS app only.
   stop-stack  Stop the local alpha stack only.
@@ -476,6 +478,30 @@ gateway_env_file() {
   printf '%s\n' "${MOMO_HERMES_GATEWAY_ENV_FILE:-${HOME:-}/.momo/hermes-gateway.env}"
 }
 
+hermes_home() {
+  printf '%s\n' "${HERMES_HOME:-${HOME:-}/.hermes}"
+}
+
+hermes_plugin_dir() {
+  printf '%s\n' "${MOMO_HERMES_PLUGIN_DIR:-$(hermes_home)/plugins/momo}"
+}
+
+hermes_bin() {
+  if [ "${HERMES_BIN:-}" != "" ]; then
+    printf '%s\n' "$HERMES_BIN"
+    return 0
+  fi
+  if command -v hermes >/dev/null 2>&1; then
+    command -v hermes
+    return 0
+  fi
+  if [ -x "$(hermes_home)/bin/hermes" ]; then
+    printf '%s\n' "$(hermes_home)/bin/hermes"
+    return 0
+  fi
+  return 1
+}
+
 random_secret() {
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 32
@@ -505,6 +531,7 @@ MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
 MOMO_AGENT_HANDLE=hermes
 MOMO_AGENT_GATEWAY_SECRET=${secret}
+MOMO_DEFAULT_CHANNEL_ID=00000000-0000-7000-8000-000000000202
 
 # Optional: a human/operator account the adapter can use only to subscribe to
 # momo realtime. Provider OAuth still belongs inside Hermes/provider runtime.
@@ -519,6 +546,7 @@ EOF
 [momo] Hermes gateway adapter setup:
   env:     $env_file
   plugin:  $REPO_ROOT/adapters/hermes
+  target:  $(hermes_plugin_dir)
 
 To run momo in gateway mode, source the generated secret into the server env:
   set -a; . "$env_file"; set +a
@@ -527,17 +555,71 @@ To run momo in gateway mode, source the generated secret into the server env:
 Then point Hermes gateway at the plugin directory above. momo still stores no
 Codex/OpenAI OAuth token; Hermes/provider runtime owns provider credentials.
 
+Install/link the plugin for a local Hermes install:
+  scripts/momo hermes-gateway-install-plugin
+
 Mock contract smoke:
   scripts/momo hermes-gateway-smoke
+
+Real Hermes status/smoke:
+  scripts/momo hermes-gateway-smoke --real
+  MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 EOF
 }
 
+hermes_gateway_install_plugin() {
+  local target mode
+  target="$(hermes_plugin_dir)"
+  mode="${MOMO_HERMES_PLUGIN_INSTALL_MODE:-symlink}"
+  mkdir -p "$(dirname "$target")"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    if [ -L "$target" ] && [ "$(readlink "$target")" = "$REPO_ROOT/adapters/hermes" ]; then
+      info "Hermes momo plugin already linked: $target"
+      return 0
+    fi
+    warn "plugin target already exists: $target"
+    warn "remove it manually or set MOMO_HERMES_PLUGIN_DIR to another path"
+    return 1
+  fi
+  case "$mode" in
+    symlink)
+      ln -s "$REPO_ROOT/adapters/hermes" "$target"
+      ;;
+    copy)
+      cp -R "$REPO_ROOT/adapters/hermes" "$target"
+      if [ -f "$target/plugin.yaml" ] && [ ! -f "$target/PLUGIN.yaml" ]; then
+        cp "$target/plugin.yaml" "$target/PLUGIN.yaml"
+      fi
+      ;;
+    *)
+      warn "MOMO_HERMES_PLUGIN_INSTALL_MODE must be symlink or copy"
+      return 2
+      ;;
+  esac
+  info "installed Hermes momo plugin: $target"
+}
+
 hermes_gateway_status() {
-  local env_file secret
+  local env_file secret bin plugin_dir
   env_file="$(gateway_env_file)"
+  plugin_dir="$(hermes_plugin_dir)"
   info "Hermes gateway platform adapter"
   echo "  env file: $env_file"
-  echo "  plugin dir: $REPO_ROOT/adapters/hermes"
+  echo "  repo plugin dir: $REPO_ROOT/adapters/hermes"
+  echo "  Hermes plugin dir: $plugin_dir"
+  if bin="$(hermes_bin 2>/dev/null)"; then
+    echo "  Hermes CLI: $bin"
+    "$bin" --version 2>/dev/null | sed 's/^/    /' || true
+  else
+    echo "  Hermes CLI: missing"
+    echo "  next: install Hermes, then run scripts/momo hermes-gateway-install-plugin"
+  fi
+  if [ -f "$plugin_dir/adapter.py" ] && { [ -f "$plugin_dir/PLUGIN.yaml" ] || [ -f "$plugin_dir/plugin.yaml" ]; }; then
+    echo "  plugin load files: present"
+  else
+    echo "  plugin load files: missing"
+    echo "  next: scripts/momo hermes-gateway-install-plugin"
+  fi
   if [ ! -f "$env_file" ]; then
     echo "  state: missing"
     echo "  next: scripts/momo hermes-gateway-init"
@@ -558,10 +640,27 @@ hermes_gateway_status() {
   else
     echo "  momo server: not running at $BASE_URL"
   fi
+  if [ "${MOMO_HERMES_PROVIDER_READY:-}" = "1" ]; then
+    echo "  provider login: user-marked ready"
+  else
+    echo "  provider login: unknown; set MOMO_HERMES_PROVIDER_READY=1 only after user-owned OAuth/login"
+  fi
 }
 
 hermes_gateway_smoke() {
-  "$REPO_ROOT/scripts/verify_hermes_gateway_adapter.sh"
+  case "${1:-}" in
+    --real|real)
+      shift || true
+      "$REPO_ROOT/scripts/verify_hermes_gateway_real_smoke.sh" "$@"
+      ;;
+    *)
+      "$REPO_ROOT/scripts/verify_hermes_gateway_adapter.sh" "$@"
+      ;;
+  esac
+}
+
+hermes_gateway_real_smoke() {
+  "$REPO_ROOT/scripts/verify_hermes_gateway_real_smoke.sh" "$@"
 }
 
 command="${1:-help}"
@@ -594,8 +693,16 @@ case "$command" in
   hermes-gateway-status)
     hermes_gateway_status
     ;;
+  hermes-gateway-install-plugin)
+    hermes_gateway_install_plugin
+    ;;
   hermes-gateway-smoke)
-    hermes_gateway_smoke
+    shift || true
+    hermes_gateway_smoke "$@"
+    ;;
+  hermes-gateway-real-smoke)
+    shift || true
+    hermes_gateway_real_smoke "$@"
     ;;
   stop)
     stop_app

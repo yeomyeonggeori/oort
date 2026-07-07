@@ -75,46 +75,81 @@ except Exception:  # pragma: no cover
 
 # ---------------------------------------------------------------------------
 # BasePlatformAdapter import.
-# The 김인턴/hermes plugin SDK supplies BasePlatformAdapter + register_platform.
-# We try a few likely module paths; if none resolve (e.g. running py_compile
-# outside the gateway), we fall back to a minimal local Protocol-shaped base so
-# this file imports and statically checks standalone. The real gateway always
-# overrides this with its own class (the MRO uses whichever is imported first).
+# The Hermes plugin SDK supplies BasePlatformAdapter through
+# `gateway.platforms.base` in the current public runtime. Older/internal builds
+# exposed it under `hermes.*`, so keep those as fallbacks. If none resolve
+# (e.g. py_compile outside the gateway), a tiny local shim keeps this file
+# import-safe for repo gates.
 # ---------------------------------------------------------------------------
 _BASE_IMPORTED = False
+_GATEWAY_BASE_IMPORTED = False
+Platform = None  # type: ignore[assignment]
+PlatformConfig = None  # type: ignore[assignment]
+SessionSource = None  # type: ignore[assignment]
+MessageEvent = None  # type: ignore[assignment]
+MessageType = None  # type: ignore[assignment]
 try:  # pragma: no cover - depends on gateway runtime
-    from hermes.platform import BasePlatformAdapter  # type: ignore
+    from gateway.config import Platform, PlatformConfig  # type: ignore
+    from gateway.platforms.base import (  # type: ignore
+        BasePlatformAdapter,
+        MessageEvent,
+        MessageType,
+        SendResult,
+    )
+    from gateway.session import SessionSource  # type: ignore
 
     _BASE_IMPORTED = True
+    _GATEWAY_BASE_IMPORTED = True
 except Exception:  # pragma: no cover
     try:
-        from hermes.plugins import BasePlatformAdapter  # type: ignore
+        from hermes.platform import BasePlatformAdapter  # type: ignore
 
         _BASE_IMPORTED = True
-    except Exception:
-        class BasePlatformAdapter:  # type: ignore[no-redef]
-            """Fallback shim mirroring the hermes BasePlatformAdapter surface.
+    except Exception:  # pragma: no cover
+        try:
+            from hermes.plugins import BasePlatformAdapter  # type: ignore
 
-            Only present so this module imports / py_compiles without the gateway
-            SDK. The live gateway provides the real base class. The three async
-            primitives below (connect/send/handle_message) are the contract a
-            platform adapter must implement (L4 §6.3).
-            """
+            _BASE_IMPORTED = True
+        except Exception:
+            class BasePlatformAdapter:  # type: ignore[no-redef]
+                """Fallback shim mirroring the Hermes adapter surface."""
 
-            #: platform identifier the gateway keys the registry on.
-            platform_name: str = "momo"
+                #: platform identifier the gateway keys the registry on.
+                platform_name: str = "momo"
 
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                ...
+                def __init__(self, *args: Any, **kwargs: Any) -> None:
+                    ...
 
-            async def connect(self) -> None:  # noqa: D401 - contract stub
-                raise NotImplementedError
+                async def connect(self, *args: Any, **kwargs: Any) -> bool:
+                    raise NotImplementedError
 
-            async def send(self, channel: str, blocks: Any) -> Any:
-                raise NotImplementedError
+                async def disconnect(self) -> None:
+                    raise NotImplementedError
 
-            async def handle_message(self, evt: Mapping[str, Any]) -> None:
-                raise NotImplementedError
+                async def send(self, channel: str, blocks: Any, *args: Any, **kwargs: Any) -> Any:
+                    raise NotImplementedError
+
+                async def handle_message(self, evt: Any) -> Any:
+                    raise NotImplementedError
+
+
+            @dataclass(slots=True)
+            class SendResult:  # type: ignore[no-redef]
+                success: bool
+                message_id: Optional[str] = None
+                error: Optional[str] = None
+                raw_response: Any = None
+
+else:
+    _BASE_IMPORTED = True
+
+if "SendResult" not in globals():  # pragma: no cover - legacy SDK import path
+    @dataclass(slots=True)
+    class SendResult:  # type: ignore[no-redef]
+        success: bool
+        message_id: Optional[str] = None
+        error: Optional[str] = None
+        raw_response: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +212,129 @@ def user_channel(workspace_id: str, member_id: str) -> str:
     return f"user:ws{workspace_id}.{member_id}"
 
 
+def _is_platform_config(value: Any) -> bool:
+    if value is None or PlatformConfig is None:
+        return False
+    try:
+        return isinstance(value, PlatformConfig)
+    except TypeError:  # pragma: no cover - exotic SDK typing object
+        return value.__class__.__name__ == "PlatformConfig"
+
+
+def _platform_value() -> Any:
+    if Platform is None:
+        return "momo"
+    for value in ("momo", "MOMO"):
+        try:
+            return Platform(value)
+        except Exception:
+            continue
+    momo_attr = getattr(Platform, "MOMO", None) or getattr(Platform, "momo", None)
+    return momo_attr or "momo"
+
+
+def _platform_extra(config: Any) -> Mapping[str, Any]:
+    if config is None:
+        return {}
+    extra = getattr(config, "extra", None)
+    if isinstance(extra, Mapping):
+        return extra
+    if isinstance(config, Mapping):
+        return config
+    return {}
+
+
+def _extra_value(extra: Mapping[str, Any], *keys: str) -> str:
+    for key in keys:
+        if key in extra and extra[key] is not None:
+            value = str(extra[key]).strip()
+            if value:
+                return value
+    return ""
+
+
+def _momo_config_from(config: Any) -> MomoConfig:
+    if isinstance(config, MomoConfig):
+        return config
+
+    cfg = MomoConfig()
+    extra = _platform_extra(config)
+    cfg.api_base_url = (
+        _extra_value(extra, "MOMO_API_URL", "momo_api_url", "api_base_url")
+        or cfg.api_base_url
+    )
+    cfg.centrifugo_ws_url = (
+        _extra_value(
+            extra,
+            "MOMO_CENTRIFUGO_WS_URL",
+            "momo_centrifugo_ws_url",
+            "centrifugo_ws_url",
+        )
+        or cfg.centrifugo_ws_url
+    )
+    cfg.login_email = (
+        _extra_value(extra, "MOMO_AGENT_EMAIL", "momo_agent_email", "login_email")
+        or cfg.login_email
+    )
+    cfg.login_password = (
+        _extra_value(
+            extra, "MOMO_AGENT_PASSWORD", "momo_agent_password", "login_password"
+        )
+        or cfg.login_password
+    )
+    cfg.workspace_id = (
+        _extra_value(extra, "MOMO_WORKSPACE_ID", "momo_workspace_id", "workspace_id")
+        or cfg.workspace_id
+    )
+    cfg.agent_member_id = (
+        _extra_value(
+            extra, "MOMO_AGENT_MEMBER_ID", "momo_agent_member_id", "agent_member_id"
+        )
+        or cfg.agent_member_id
+    )
+    cfg.agent_handle = (
+        _extra_value(extra, "MOMO_AGENT_HANDLE", "momo_agent_handle", "agent_handle")
+        or cfg.agent_handle
+    )
+    cfg.gateway_secret = (
+        _extra_value(
+            extra,
+            "MOMO_AGENT_GATEWAY_SECRET",
+            "momo_agent_gateway_secret",
+            "gateway_secret",
+        )
+        or cfg.gateway_secret
+    )
+    return cfg
+
+
+def _platform_config_from_momo(cfg: MomoConfig) -> Any:
+    if PlatformConfig is None:
+        return None
+    extra = {
+        "MOMO_API_URL": cfg.api_base_url,
+        "MOMO_CENTRIFUGO_WS_URL": cfg.centrifugo_ws_url,
+        "MOMO_WORKSPACE_ID": cfg.workspace_id,
+        "MOMO_AGENT_MEMBER_ID": cfg.agent_member_id,
+        "MOMO_AGENT_HANDLE": cfg.agent_handle,
+        "MOMO_AGENT_GATEWAY_SECRET": cfg.gateway_secret,
+        "MOMO_AGENT_EMAIL": cfg.login_email,
+        "MOMO_AGENT_PASSWORD": cfg.login_password,
+    }
+    attempts = (
+        {"platform": _platform_value(), "enabled": True, "extra": extra},
+        {"enabled": True, "extra": extra},
+        {"extra": extra},
+        {},
+    )
+    for kwargs in attempts:
+        try:
+            return PlatformConfig(**kwargs)
+        except Exception:
+            continue
+    return None
+
+
 # ---------------------------------------------------------------------------
 # The adapter.
 # ---------------------------------------------------------------------------
@@ -192,25 +350,39 @@ class MomoAdapter(BasePlatformAdapter):
 
     def __init__(
         self,
-        config: Optional[MomoConfig] = None,
+        config: Optional[Any] = None,
         *,
         hermes_runtime: Any = None,
         **kwargs: Any,
     ) -> None:
-        # The gateway may pass its own kwargs; forward what the base accepts.
+        self.cfg = _momo_config_from(config)
+        base_config = config if _is_platform_config(config) else _platform_config_from_momo(self.cfg)
+        platform = kwargs.pop("platform", None) or _platform_value()
+        # Current Hermes BasePlatformAdapter expects (PlatformConfig, Platform).
+        # Legacy shims accepted no args or **kwargs; try in that order without
+        # leaking momo/provider secrets into logs.
         try:
-            super().__init__(**kwargs)
+            if _GATEWAY_BASE_IMPORTED:
+                super().__init__(base_config, platform)
+            else:
+                super().__init__(**kwargs)
         except TypeError:
-            super().__init__()
-        self.cfg = config or MomoConfig()
+            try:
+                super().__init__(base_config, platform)
+            except TypeError:
+                try:
+                    super().__init__(**kwargs)
+                except TypeError:
+                    super().__init__()
         # `hermes_runtime` is the gateway handle used to invoke the model and to
         # observe the agent's run stream (the OpenAI-compat /v1/chat/completions
         # SSE path lives behind this — L4 §6.2). Injected by the gateway.
-        self.runtime = hermes_runtime
+        self.runtime = hermes_runtime or kwargs.get("hermes_runtime")
 
         self._access_token: Optional[str] = None
         self._refresh_token: Optional[str] = None
         self._realtime_token: Optional[str] = None
+        self._operator_member_id: Optional[str] = None
         self._member_id: Optional[str] = self.cfg.agent_member_id or None
 
         self._http: Any = None           # aiohttp.ClientSession
@@ -266,7 +438,7 @@ class MomoAdapter(BasePlatformAdapter):
 
     # ----- connect (L4 §6.3) ----------------------------------------------
 
-    async def connect(self) -> None:
+    async def connect(self, *, is_reconnect: bool = False) -> bool:
         """REST auth → realtime-token → subscribe agent: and user: channels.
 
         Steps (L4 §6.3 / §7.1 / §4.3):
@@ -280,10 +452,18 @@ class MomoAdapter(BasePlatformAdapter):
         await self._login()
         await self._fetch_realtime_token()
         await self._open_realtime()
+        mark_connected = getattr(self, "_mark_connected", None)
+        if callable(mark_connected):  # pragma: no cover - live Hermes SDK only
+            mark_connected()
         log.info(
-            "momo adapter connected: ws=%s agent=%s handle=%s",
-            self.cfg.workspace_id, self._member_id, self.cfg.agent_handle,
+            "momo adapter connected: ws=%s agent=%s operator=%s handle=%s reconnect=%s",
+            self.cfg.workspace_id,
+            self.cfg.agent_member_id or self._member_id,
+            self._operator_member_id,
+            self.cfg.agent_handle,
+            is_reconnect,
         )
+        return True
 
     async def _login(self) -> None:
         # L4 §5.1 POST /v1/auth/login. Matches server LoginRequest/LoginResponse.
@@ -299,9 +479,14 @@ class MomoAdapter(BasePlatformAdapter):
         self._access_token = data.get("accessToken")
         self._refresh_token = data.get("refreshToken")
         member = data.get("member") or {}
-        # Prefer the server-resolved member/workspace ids over env defaults.
-        self._member_id = member.get("id") or self._member_id
+        # The login principal is an operator/subscriber. Keep it separate from
+        # the agent member identity so we subscribe to the agent work stream,
+        # not accidentally to the operator's personal stream.
+        self._operator_member_id = member.get("id") or self._operator_member_id
         self.cfg.workspace_id = member.get("workspaceId") or self.cfg.workspace_id
+        if not self.cfg.agent_member_id and self._operator_member_id:
+            self.cfg.agent_member_id = self._operator_member_id
+            self._member_id = self.cfg.agent_member_id
         if not self._access_token:
             raise MomoAPIError(0, "/v1/auth/login", "no accessToken in response")
 
@@ -332,15 +517,16 @@ class MomoAdapter(BasePlatformAdapter):
         # subscribe command per channel. Subscribe to the agent work stream + the
         # personal notification channel (mentions / dm signals, L4 §5.2).
         await self._ws_send({"connect": {"token": self._realtime_token}, "id": 1})
-        member_id = self._member_id or self.cfg.agent_member_id
-        if not self.cfg.workspace_id or not member_id:
+        agent_member_id = self.cfg.agent_member_id or self._member_id
+        operator_member_id = self._operator_member_id or agent_member_id
+        if not self.cfg.workspace_id or not agent_member_id:
             raise MomoAPIError(
-                0, "/v1/auth/realtime-token", "missing workspace_id or member_id"
+                0, "/v1/auth/realtime-token", "missing workspace_id or agent_member_id"
             )
-        chans = [
-            agent_channel(self.cfg.workspace_id, member_id),
-            user_channel(self.cfg.workspace_id, member_id),
-        ]
+        chans = [agent_channel(self.cfg.workspace_id, agent_member_id)]
+        if operator_member_id:
+            chans.append(user_channel(self.cfg.workspace_id, operator_member_id))
+        chans = list(dict.fromkeys(chans))
         for i, ch in enumerate(chans, start=2):
             await self._ws_send({"subscribe": {"channel": ch}, "id": i})
         self._listen_task = asyncio.create_task(self._listen_loop())
@@ -403,6 +589,8 @@ class MomoAdapter(BasePlatformAdapter):
         self,
         channel: str,
         blocks: Any,
+        reply_to: Optional[str] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
         *,
         client_msg_id: Optional[str] = None,
         run_id: Optional[str] = None,
@@ -430,11 +618,32 @@ class MomoAdapter(BasePlatformAdapter):
             "type": msg_type,
             "body": body,
         }
+        merged_props: dict[str, str] = {}
         if props:
-            payload["props"] = dict(props)
+            merged_props.update({str(k): str(v) for k, v in dict(props).items()})
+        if reply_to:
+            merged_props["reply_to"] = reply_to
+        if metadata:
+            for k, v in metadata.items():
+                if isinstance(v, (str, int, float, bool)) or v is None:
+                    merged_props[f"hermes_{k}"] = "" if v is None else str(v)
+        if merged_props:
+            payload["props"] = merged_props
         if run_id:
             payload["runId"] = run_id
-        return await self._post(path, payload)
+        result = await self._post(path, payload)
+        return self._send_result(result, cmid)
+
+    @staticmethod
+    def _send_result(result: Mapping[str, Any], client_msg_id: str) -> Any:
+        message_id = str(result.get("id") or result.get("messageId") or client_msg_id)
+        try:
+            return SendResult(success=True, message_id=message_id, raw_response=dict(result))
+        except TypeError:  # pragma: no cover - SDK shape drift
+            try:
+                return SendResult(True, message_id, None, dict(result))
+            except Exception:
+                return dict(result)
 
     @staticmethod
     def _blocks_to_body(blocks: Any) -> str:
@@ -457,7 +666,7 @@ class MomoAdapter(BasePlatformAdapter):
 
     # ----- handle_message (L4 §6.3 / §6.2) --------------------------------
 
-    async def handle_message(self, evt: Mapping[str, Any]) -> None:
+    async def handle_message(self, evt: Any) -> None:
         """A mention / dm signal → invoke the agent → stream the reply back.
 
         Inbound `evt` (from the listen loop):
@@ -472,6 +681,16 @@ class MomoAdapter(BasePlatformAdapter):
           3. stream agent.partial/agent.status deltas and reflect the final text
              into the channel via send() (idempotent client_msg_id).
         """
+        if not isinstance(evt, Mapping):
+            base_handle = getattr(super(), "handle_message", None)
+            if callable(base_handle):  # pragma: no cover - live Hermes SDK only
+                result = base_handle(evt)
+                if inspect.isawaitable(result):
+                    await result
+                return
+            log.debug("skipping unknown Hermes event object: %r", type(evt))
+            return
+
         etype = evt.get("type")
         if etype == "agent.job":
             await self._handle_agent_job(evt)
@@ -591,6 +810,15 @@ class MomoAdapter(BasePlatformAdapter):
         We support a few narrow method names to keep the momo plugin resilient
         without importing Hermes internals in repo-local tests.
         """
+        handler = getattr(self, "_message_handler", None)
+        if callable(handler):
+            event = self._payload_to_hermes_message_event(payload)
+            if event is not None:
+                result = handler(event)
+                if inspect.isawaitable(result):
+                    result = await result
+                return self._normalize_gateway_result(result, payload)
+
         if self.runtime is None:
             raise RuntimeError("Hermes runtime handle is not configured")
 
@@ -614,6 +842,90 @@ class MomoAdapter(BasePlatformAdapter):
             return self._normalize_gateway_result(result, payload)
 
         raise RuntimeError("Hermes runtime does not expose a momo-compatible job method")
+
+    @staticmethod
+    def _payload_to_hermes_message_event(payload: Mapping[str, Any]) -> Any:
+        if MessageEvent is None or SessionSource is None:
+            return None
+        workspace_id = str(payload.get("workspace_id") or payload.get("workspaceId") or "")
+        channel_id = str(payload.get("channel_id") or payload.get("channelId") or "")
+        author_member_id = str(
+            payload.get("author_member_id") or payload.get("authorMemberId") or ""
+        )
+        trigger_message_id = str(
+            payload.get("trigger_message_id") or payload.get("triggerMessageId") or ""
+        )
+        prompt = str(payload.get("prompt") or payload.get("body") or "")
+        recent_context = MomoAdapter._recent_messages_context(payload)
+        source_kwargs = {
+            "platform": _platform_value(),
+            "chat_id": channel_id,
+            "chat_name": str(payload.get("channel_name") or channel_id),
+            "chat_type": "channel",
+            "user_id": author_member_id,
+            "user_name": str(payload.get("author_display_name") or author_member_id),
+            "message_id": trigger_message_id or None,
+            "scope_id": workspace_id or None,
+        }
+        try:
+            source = SessionSource(**source_kwargs)
+        except TypeError:
+            try:
+                source = SessionSource(
+                    platform=_platform_value(),
+                    chat_id=channel_id,
+                    user_id=author_member_id,
+                    message_id=trigger_message_id or None,
+                )
+            except Exception:
+                return None
+
+        event_kwargs = {
+            "text": prompt,
+            "source": source,
+            "raw_message": dict(payload),
+            "message_id": trigger_message_id or None,
+            "metadata": {
+                "momo_run_id": payload.get("run_id") or payload.get("runId"),
+                "momo_workspace_id": workspace_id,
+                "momo_channel_id": channel_id,
+            },
+        }
+        if MessageType is not None:
+            event_kwargs["message_type"] = getattr(MessageType, "TEXT", None) or getattr(MessageType, "text", None) or "text"
+        if recent_context:
+            event_kwargs["channel_context"] = recent_context
+        for kwargs in (
+            event_kwargs,
+            {k: v for k, v in event_kwargs.items() if k != "channel_context"},
+            {"text": prompt, "source": source},
+        ):
+            try:
+                return MessageEvent(**kwargs)
+            except TypeError:
+                continue
+        return None
+
+    @staticmethod
+    def _recent_messages_context(payload: Mapping[str, Any]) -> str:
+        recent = payload.get("recent_messages")
+        if not isinstance(recent, Sequence) or isinstance(recent, (str, bytes, bytearray)):
+            return ""
+        rows: list[str] = []
+        for item in recent:
+            if not isinstance(item, Mapping):
+                continue
+            body = str(item.get("body") or "").strip()
+            if not body:
+                continue
+            author = str(
+                item.get("author_display_name")
+                or item.get("author_handle")
+                or item.get("author_kind")
+                or "member"
+            )
+            rows.append(f"{author}: {body}")
+        return "\n".join(rows[-20:])
 
     @staticmethod
     def _payload_messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
@@ -746,6 +1058,13 @@ class MomoAdapter(BasePlatformAdapter):
             await self._http.close()
             self._http = None
 
+    async def disconnect(self) -> None:
+        """Hermes SDK teardown hook."""
+        await self.close()
+        mark_disconnected = getattr(self, "_mark_disconnected", None)
+        if callable(mark_disconnected):  # pragma: no cover - live Hermes SDK only
+            mark_disconnected()
+
 
 class MomoAPIError(RuntimeError):
     """Non-2xx (or malformed) response from the momo REST API."""
@@ -762,6 +1081,76 @@ class MomoAPIError(RuntimeError):
 # The hermes gateway calls register_platform(registry) on plugin load; we hand it
 # the MomoAdapter class keyed by platform name "momo".
 # ---------------------------------------------------------------------------
+REQUIRED_ENV = (
+    "MOMO_API_URL",
+    "MOMO_WORKSPACE_ID",
+    "MOMO_AGENT_MEMBER_ID",
+    "MOMO_AGENT_GATEWAY_SECRET",
+)
+
+OPTIONAL_ENV = (
+    "MOMO_CENTRIFUGO_WS_URL",
+    "MOMO_AGENT_EMAIL",
+    "MOMO_AGENT_PASSWORD",
+    "MOMO_AGENT_HANDLE",
+)
+
+
+def check_requirements() -> bool:
+    """Hermes plugin check hook.
+
+    Keep the check focused on import/load. Dependency absence is surfaced during
+    connect with a readable error so the plugin can still be listed by Hermes.
+    """
+    return True
+
+
+def validate_config(config: Any) -> tuple[bool, str | None]:
+    cfg = _momo_config_from(config)
+    missing = []
+    if not cfg.api_base_url:
+        missing.append("MOMO_API_URL")
+    if not cfg.workspace_id:
+        missing.append("MOMO_WORKSPACE_ID")
+    if not cfg.agent_member_id:
+        missing.append("MOMO_AGENT_MEMBER_ID")
+    if not cfg.gateway_secret:
+        missing.append("MOMO_AGENT_GATEWAY_SECRET")
+    if missing:
+        return False, "Missing momo adapter env: " + ", ".join(missing)
+    return True, None
+
+
+def env_enablement(env: Mapping[str, str]) -> Optional[dict[str, Any]]:
+    if not all(str(env.get(key) or "").strip() for key in REQUIRED_ENV):
+        return None
+    return {
+        "home_channel": {
+            "chat_id": env.get("MOMO_HOME_CHANNEL_ID")
+            or env.get("MOMO_DEFAULT_CHANNEL_ID")
+            or env["MOMO_AGENT_MEMBER_ID"],
+            "name": env.get("MOMO_HOME_CHANNEL_NAME", "momo"),
+        },
+        "MOMO_API_URL": env["MOMO_API_URL"],
+        "MOMO_CENTRIFUGO_WS_URL": env.get("MOMO_CENTRIFUGO_WS_URL", ""),
+        "MOMO_WORKSPACE_ID": env["MOMO_WORKSPACE_ID"],
+        "MOMO_AGENT_MEMBER_ID": env["MOMO_AGENT_MEMBER_ID"],
+        "MOMO_AGENT_HANDLE": env.get("MOMO_AGENT_HANDLE", "hermes"),
+        "MOMO_AGENT_GATEWAY_SECRET": env["MOMO_AGENT_GATEWAY_SECRET"],
+        "MOMO_AGENT_EMAIL": env.get("MOMO_AGENT_EMAIL", ""),
+        "MOMO_AGENT_PASSWORD": env.get("MOMO_AGENT_PASSWORD", ""),
+    }
+
+
+def adapter_factory(config: Any = None, **kwargs: Any) -> MomoAdapter:
+    runtime = (
+        kwargs.pop("hermes_runtime", None)
+        or kwargs.pop("runtime", None)
+        or kwargs.pop("gateway_runtime", None)
+    )
+    return MomoAdapter(config, hermes_runtime=runtime, **kwargs)
+
+
 def register_platform(registry: Any = None) -> type[MomoAdapter]:
     """Register MomoAdapter with the hermes platform registry.
 
@@ -790,22 +1179,32 @@ def register(ctx: Any) -> type[MomoAdapter]:
     for method in ("register_platform", "register", "add"):
         fn = getattr(ctx, method, None)
         if callable(fn):
+            official_kwargs = {
+                "name": MomoAdapter.platform_name,
+                "label": "Momo",
+                "adapter_factory": adapter_factory,
+                "check_fn": check_requirements,
+                "validate_config": validate_config,
+                "required_env": list(REQUIRED_ENV),
+                "optional_env": list(OPTIONAL_ENV),
+                "env_enablement_fn": env_enablement,
+                "description": "momo native messaging platform adapter",
+            }
             try:
-                fn(
-                    platform_name=MomoAdapter.platform_name,
-                    adapter_cls=MomoAdapter,
-                    config_cls=MomoConfig,
-                    env_enablement_fn=lambda env: bool(
-                        env.get("MOMO_API_URL")
-                        and env.get("MOMO_WORKSPACE_ID")
-                        and env.get("MOMO_AGENT_MEMBER_ID")
-                    ),
-                )
+                fn(**official_kwargs)
             except TypeError:
                 try:
-                    fn(MomoAdapter.platform_name, MomoAdapter)
+                    fn(
+                        platform_name=MomoAdapter.platform_name,
+                        adapter_cls=MomoAdapter,
+                        config_cls=MomoConfig,
+                        env_enablement_fn=env_enablement,
+                    )
                 except TypeError:
-                    fn(MomoAdapter)
+                    try:
+                        fn(MomoAdapter.platform_name, MomoAdapter)
+                    except TypeError:
+                        fn(MomoAdapter)
             break
     return MomoAdapter
 
