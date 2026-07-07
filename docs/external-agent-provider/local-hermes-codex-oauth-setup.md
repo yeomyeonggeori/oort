@@ -72,10 +72,7 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 3. Create the momo-facing env file outside this repository.
 
    ```bash
-   mkdir -p "$HOME/.momo"
-   cp docs/external-agent-provider/local-hermes-provider.env.example \
-     "$HOME/.momo/local-hermes-provider.env"
-   chmod 600 "$HOME/.momo/local-hermes-provider.env"
+   scripts/momo hermes-init
    ```
 
    Edit only the momo-facing values:
@@ -92,10 +89,16 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
    Do not put `OPENAI_API_KEY`, `CODEX_OAUTH_TOKEN`, refresh tokens, or provider
    account secrets in this file.
 
+   To check the setup without printing secret values:
+
+   ```bash
+   scripts/momo hermes
+   ```
+
 4. Run the credentialed smoke.
 
    ```bash
-   scripts/verify_local_hermes_credentialed_smoke.sh
+   scripts/momo hermes-smoke
    ```
 
    If the env file is missing, the script exits successfully with

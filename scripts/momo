@@ -27,6 +27,9 @@ Commands:
   up          Start local alpha only.
   app         Open the macOS app only.
   status      Show app/server/Docker status.
+  hermes      Show local Hermes provider setup status and next steps.
+  hermes-init Create ~/.momo/local-hermes-provider.env from the safe template.
+  hermes-smoke Run the credentialed Hermes provider smoke wrapper.
   stop        Stop the app and the local alpha stack when it can be identified.
   stop-app    Stop the macOS app only.
   stop-stack  Stop the local alpha stack only.
@@ -48,6 +51,7 @@ Environment overrides:
   MOMO_CENT_PORT=28100
   MOMO_HERMES_PORT=28188
   MOMO_HERMES_MODE=mock
+  LOCAL_HERMES_PROVIDER_ENV_FILE=$HOME/.momo/local-hermes-provider.env
 EOF
 }
 
@@ -235,6 +239,232 @@ show_status() {
   fi
 }
 
+provider_env_file() {
+  printf '%s\n' "${LOCAL_HERMES_PROVIDER_ENV_FILE:-${EXTERNAL_AGENT_PROVIDER_ENV_FILE:-${HOME:-}/.momo/local-hermes-provider.env}}"
+}
+
+provider_env_example() {
+  printf '%s\n' "$REPO_ROOT/docs/external-agent-provider/local-hermes-provider.env.example"
+}
+
+absolute_path() {
+  python3 - "$1" <<'PY'
+import os
+import sys
+print(os.path.realpath(os.path.expanduser(sys.argv[1])))
+PY
+}
+
+provider_env_inside_repo() {
+  local env_abs repo_abs
+  env_abs="$(absolute_path "$1")"
+  repo_abs="$(absolute_path "$REPO_ROOT")"
+  case "$env_abs" in
+    "$repo_abs"/*) return 0 ;;
+  esac
+  return 1
+}
+
+reject_repo_provider_env() {
+  local env_file="$1"
+  if provider_env_inside_repo "$env_file"; then
+    warn "Hermes provider env must live outside the repository: $env_file"
+    warn "Use the default ~/.momo/local-hermes-provider.env or another untracked path."
+    return 1
+  fi
+  return 0
+}
+
+provider_env_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v key="$key" '
+    {
+      line = $0
+      sub(/^[[:space:]]*/, "", line)
+      if (line == "" || line ~ /^#/) {
+        next
+      }
+      sub(/^export[[:space:]]+/, "", line)
+      lhs = line
+      sub(/=.*/, "", lhs)
+      gsub(/[[:space:]]/, "", lhs)
+    }
+    lhs == key {
+      sub(/^[^=]*=/, "", line)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      gsub(/^"|"$/, "", line)
+      gsub(/^'\''|'\''$/, "", line)
+      print line
+      exit
+    }
+  ' "$file"
+}
+
+redacted_provider_url() {
+  python3 - "$1" <<'PY'
+import sys
+from urllib.parse import urlsplit, urlunsplit
+
+raw = sys.argv[1]
+if not raw:
+    print("not configured")
+    raise SystemExit
+try:
+    parts = urlsplit(raw)
+except Exception:
+    print("invalid url")
+    raise SystemExit
+host = parts.hostname or ""
+if ":" in host and not host.startswith("["):
+    host = f"[{host}]"
+netloc = host
+try:
+    port = parts.port
+except ValueError:
+    print("invalid url")
+    raise SystemExit
+if port is not None:
+    netloc = f"{netloc}:{port}"
+print(urlunsplit((parts.scheme, netloc, parts.path, "", "")))
+PY
+}
+
+is_placeholder_value() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    ""|*"<"*">"*|*change-me*|*changeme*|*placeholder*|*example*|*dev-insecure*|*not-openai-key*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+forbidden_provider_env_names() {
+  local key
+  for key in CODEX_OAUTH_TOKEN CODEX_OAUTH_ACCESS_TOKEN CODEX_OAUTH_REFRESH_TOKEN \
+    CODEX_ACCESS_TOKEN CODEX_REFRESH_TOKEN CODEX_API_KEY CODEX_PROVIDER_API_KEY \
+    OPENAI_OAUTH_TOKEN OPENAI_OAUTH_ACCESS_TOKEN OPENAI_OAUTH_REFRESH_TOKEN \
+    OPENAI_ACCESS_TOKEN OPENAI_REFRESH_TOKEN OPENAI_API_KEY OPENAI_ADMIN_KEY \
+    OPENAI_PROVIDER_API_KEY; do
+    if [ "${!key+x}" ] && [ "${!key:-}" != "" ]; then
+      printf '%s\n' "$key"
+    fi
+  done
+}
+
+file_mode() {
+  local file="$1"
+  stat -f '%Lp' "$file" 2>/dev/null || stat -c '%a' "$file" 2>/dev/null || printf 'unknown'
+}
+
+hermes_init() {
+  local env_file example env_dir
+  env_file="$(provider_env_file)"
+  example="$(provider_env_example)"
+  env_dir="$(dirname "$env_file")"
+  reject_repo_provider_env "$env_file" || return 1
+
+  if [ -f "$env_file" ]; then
+    info "Hermes provider env already exists: $env_file"
+    chmod 600 "$env_file" || {
+      warn "failed to chmod 600 $env_file"
+      return 1
+    }
+  else
+    mkdir -p "$env_dir"
+    cp "$example" "$env_file"
+    chmod 600 "$env_file"
+    info "created Hermes provider env: $env_file"
+  fi
+
+  cat <<EOF
+[momo] edit this file with only momo-facing provider values:
+  $env_file
+
+Required values:
+  AGENT_MODEL=<provider-model-label>
+  HERMES_BASE_URL=http://127.0.0.1:<provider-port>/v1
+  HERMES_API_KEY=<local Hermes-facing bearer, not OpenAI/Codex token>
+
+Do not put OPENAI_API_KEY, Codex OAuth tokens, refresh tokens, or GPT provider
+credentials in this file. Those belong inside the local Hermes-compatible
+provider runtime.
+
+Next:
+  scripts/momo hermes
+  scripts/momo hermes-smoke
+EOF
+}
+
+hermes_status() {
+  local env_file mode model url key mode_bits forbidden_count status_json
+  env_file="$(provider_env_file)"
+
+  info "Hermes provider setup"
+  echo "  env file: $env_file"
+  if ! reject_repo_provider_env "$env_file"; then
+    echo "  state: unsafe path"
+    echo "  next:  unset LOCAL_HERMES_PROVIDER_ENV_FILE or point it outside the repo"
+    return 1
+  fi
+  if [ ! -f "$env_file" ]; then
+    echo "  state: missing"
+    echo "  next:  scripts/momo hermes-init"
+    return 0
+  fi
+
+  mode_bits="$(file_mode "$env_file")"
+  echo "  file mode: $mode_bits"
+  if [ "$mode_bits" != "600" ]; then
+    echo "  warning: expected chmod 600"
+  fi
+
+  mode="$(provider_env_value "$env_file" AGENT_PROVIDER_MODE)"
+  model="$(provider_env_value "$env_file" AGENT_MODEL)"
+  url="$(provider_env_value "$env_file" HERMES_BASE_URL)"
+  key="$(provider_env_value "$env_file" HERMES_API_KEY)"
+
+  echo "  provider mode: ${mode:-<missing>}"
+  echo "  model: ${model:-<missing>}"
+  echo "  endpoint: $(redacted_provider_url "$url")"
+  if is_placeholder_value "$key"; then
+    echo "  Hermes bearer: missing or placeholder"
+  else
+    echo "  Hermes bearer: configured (redacted)"
+  fi
+
+  forbidden_count="$(forbidden_provider_env_names | wc -l | tr -d '[:space:]')"
+  if [ "$forbidden_count" != "0" ]; then
+    echo "  boundary: FAIL - provider credential env is present in this shell"
+    forbidden_provider_env_names | sed 's/^/    - /'
+    echo "  fix: unset those variables and configure them only inside the provider runtime"
+  else
+    echo "  boundary: OK - no known OpenAI/Codex provider credential env in this shell"
+  fi
+
+  if health_check; then
+    status_json="$(curl -fsS --max-time 3 "$BASE_URL/v1/agent-runtime/status" 2>/dev/null || true)"
+    if [ -n "$status_json" ] && command -v jq >/dev/null 2>&1; then
+      echo "  momo runtime: $(printf '%s' "$status_json" | jq -r '.mode + " · " + .availability + " · " + (.endpointLabel // "not configured")' 2>/dev/null || printf 'status unavailable')"
+    else
+      echo "  momo runtime: server reachable; status unavailable"
+    fi
+  else
+    echo "  momo runtime: server not running at $BASE_URL"
+  fi
+
+  if is_placeholder_value "$key" || is_placeholder_value "$url" || is_placeholder_value "$model"; then
+    echo "  next: edit $env_file, then run scripts/momo hermes-smoke"
+  else
+    echo "  next: start/login to your local provider, then run scripts/momo hermes-smoke"
+  fi
+}
+
+hermes_smoke() {
+  LOCAL_HERMES_PROVIDER_ENV_FILE="$(provider_env_file)" \
+    "$REPO_ROOT/scripts/verify_local_hermes_credentialed_smoke.sh"
+}
+
 command="${1:-help}"
 case "$command" in
   start)
@@ -249,6 +479,15 @@ case "$command" in
     ;;
   status)
     show_status
+    ;;
+  hermes|hermes-status)
+    hermes_status
+    ;;
+  hermes-init)
+    hermes_init
+    ;;
+  hermes-smoke)
+    hermes_smoke
     ;;
   stop)
     stop_app
