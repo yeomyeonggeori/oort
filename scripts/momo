@@ -14,6 +14,9 @@ CENT_PORT="${MOMO_CENT_PORT:-28100}"
 HERMES_PORT="${MOMO_HERMES_PORT:-28188}"
 HERMES_MODE="${MOMO_HERMES_MODE:-mock}"
 APP_WAIT="${MOMO_APP_WAIT:-20}"
+LOGIN_EMAIL="${MOMO_LOGIN_EMAIL:-demo@momo.local}"
+LOGIN_PASSWORD="${MOMO_LOGIN_PASSWORD:-dev-password}"
+LOGIN_SMOKE_ALLOW_NON_LOOPBACK="${MOMO_LOGIN_SMOKE_ALLOW_NON_LOOPBACK:-0}"
 STATE_DIR="${MOMO_DOGFOOD_STATE_DIR:-${TMPDIR:-/tmp}/momo-dogfood}"
 STATE_FILE="$STATE_DIR/state.env"
 ALPHA_EVIDENCE_ROOT="${LOCAL_ALPHA_EVIDENCE_ROOT:-${TMPDIR:-/tmp}/momo-local-alpha}"
@@ -76,6 +79,80 @@ health_check() {
   curl -fsS --max-time 3 "$BASE_URL/health" >/dev/null 2>&1
 }
 
+base_url_is_loopback() {
+  python3 - "$BASE_URL" <<'PY'
+import ipaddress
+import sys
+from urllib.parse import urlparse
+
+host = urlparse(sys.argv[1]).hostname or ""
+if host == "localhost":
+    sys.exit(0)
+try:
+    sys.exit(0 if ipaddress.ip_address(host).is_loopback else 1)
+except ValueError:
+    sys.exit(1)
+PY
+}
+
+login_smoke_allowed() {
+  [ "$LOGIN_SMOKE_ALLOW_NON_LOOPBACK" = "1" ] || base_url_is_loopback
+}
+
+login_check() {
+  login_smoke_allowed || return 0
+  printf '%s\0%s\0%s' "$BASE_URL" "$LOGIN_EMAIL" "$LOGIN_PASSWORD" | python3 -c '
+import json
+import sys
+import urllib.error
+import urllib.request
+
+raw = sys.stdin.buffer.read().split(b"\0", 2)
+if len(raw) != 3:
+    sys.exit(1)
+base_url, email, password = [part.decode("utf-8") for part in raw]
+base_url = base_url.rstrip("/")
+
+def request_json(path, body, headers=None):
+    data = json.dumps(body, separators=(",", ":")).encode("utf-8")
+    req_headers = {"Content-Type": "application/json"}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(
+        base_url + path,
+        data=data,
+        headers=req_headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=5) as response:
+        payload = response.read()
+    return json.loads(payload.decode("utf-8") or "{}")
+
+try:
+    login = request_json(
+        "/v1/auth/login",
+        {"email": email, "password": password},
+    )
+    access_token = login.get("accessToken") or ""
+    refresh_token = login.get("refreshToken") or ""
+    if not access_token or not refresh_token:
+        sys.exit(1)
+    request_json(
+        "/v1/auth/logout",
+        {"refreshToken": refresh_token},
+        {"Authorization": "Bearer " + access_token},
+    )
+except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+    sys.exit(1)
+except Exception:
+    sys.exit(1)
+'
+}
+
+ready_check() {
+  health_check && login_check
+}
+
 print_health() {
   if curl -fsS --max-time 3 "$BASE_URL/health"; then
     printf '\n'
@@ -116,10 +193,63 @@ state_stop_script() {
   fi
 }
 
+listener_pids_for_port() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+  fi
+}
+
+process_cwd_for_pid() {
+  local pid="$1"
+  lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n 1
+}
+
+path_is_inside_repo() {
+  local path="$1"
+  case "$path" in
+    "$REPO_ROOT"|"$REPO_ROOT"/*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+stop_orphan_momo_server_on_port() {
+  local port="$1"
+  local pid command cwd process_name stopped_any=1
+  for pid in $(listener_pids_for_port "$port"); do
+    command="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    cwd="$(process_cwd_for_pid "$pid" || true)"
+    process_name="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+    case "$command" in
+      *MomoServer*|*"swift run --package-path server MomoServer"*)
+        if ! path_is_inside_repo "$cwd"; then
+          warn "leaving MomoServer listener pid=$pid on port $port outside this repo"
+          continue
+        fi
+        warn "stopping stale MomoServer listener pid=$pid on port $port"
+        kill "$pid" 2>/dev/null || true
+        stopped_any=0
+        ;;
+      *)
+        warn "leaving non-MomoServer listener pid=$pid on port $port (${process_name:-unknown})"
+        ;;
+    esac
+  done
+  return "$stopped_any"
+}
+
 start_stack() {
   if health_check; then
-    info "local alpha is already ready: $BASE_URL"
-    return 0
+    if login_check; then
+      info "local alpha is already ready: $BASE_URL"
+      return 0
+    fi
+    warn "server health is reachable but login smoke failed; restarting stale local alpha"
+    stop_stack || true
   fi
 
   info "starting local alpha stack on $BASE_URL"
@@ -136,10 +266,10 @@ start_stack() {
   stop_script="$(latest_stop_script || true)"
   write_state "$stop_script"
 
-  if health_check; then
+  if ready_check; then
     info "local alpha is ready: $BASE_URL"
   else
-    warn "local alpha command finished, but health is not reachable at $BASE_URL"
+    warn "local alpha command finished, but DB-backed login smoke is not ready at $BASE_URL"
     return 1
   fi
 }
@@ -216,6 +346,10 @@ stop_stack() {
     fi
   fi
 
+  if stop_orphan_momo_server_on_port "$API_PORT"; then
+    stopped=1
+  fi
+
   if [ "$stopped" = "0" ]; then
     warn "no local alpha stack was identified. App stop still completed."
   fi
@@ -231,7 +365,13 @@ show_status() {
 
   info "server"
   if print_health; then
-    :
+    if ! login_smoke_allowed; then
+      echo "  login smoke: skipped (non-loopback; set MOMO_LOGIN_SMOKE_ALLOW_NON_LOOPBACK=1 to enable)"
+    elif login_check; then
+      echo "  login smoke: ok"
+    else
+      echo "  login smoke: FAIL"
+    fi
   else
     echo "  not reachable: $BASE_URL"
   fi
