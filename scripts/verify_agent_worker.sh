@@ -330,6 +330,16 @@ DELETE FROM audit_log
       WHERE workspace_id = '$WORKSPACE_ID'
         AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
    );
+DELETE FROM audit_log
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND run_id IN (
+      SELECT ar.id
+        FROM agent_run ar
+        JOIN message trigger_message ON trigger_message.id = ar.trigger_message_id
+       WHERE ar.workspace_id = '$WORKSPACE_ID'
+         AND trigger_message.workspace_id = '$WORKSPACE_ID'
+         AND trigger_message.client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
+   );
 -- Keep cleanup verifier-owned. Do not clear the whole demo workspace agent_job
 -- queue because local dogfood may have real pending Hermes work in the same DB.
 DELETE FROM outbox
@@ -357,10 +367,40 @@ DELETE FROM message
 DELETE FROM message
  WHERE workspace_id = '$WORKSPACE_ID'
    AND run_id IN (
+      SELECT ar.id
+        FROM agent_run ar
+        JOIN message trigger_message ON trigger_message.id = ar.trigger_message_id
+       WHERE ar.workspace_id = '$WORKSPACE_ID'
+         AND trigger_message.workspace_id = '$WORKSPACE_ID'
+         AND trigger_message.client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
+    )
+   AND id NOT IN (
+      SELECT trigger_message_id
+        FROM agent_run
+       WHERE workspace_id = '$WORKSPACE_ID'
+         AND trigger_message_id IS NOT NULL
+   );
+DELETE FROM message
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND run_id IN (
       SELECT id FROM agent_run
        WHERE workspace_id = '$WORKSPACE_ID'
          AND idempotency_key LIKE 'mention:%:$AGENT_ID'
-    );
+    )
+   AND id NOT IN (
+      SELECT trigger_message_id FROM agent_run
+       WHERE workspace_id = '$WORKSPACE_ID'
+         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
+         AND trigger_message_id IS NOT NULL
+   );
+DELETE FROM agent_run
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND trigger_message_id IN (
+      SELECT id
+        FROM message
+       WHERE workspace_id = '$WORKSPACE_ID'
+         AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
+   );
 DELETE FROM agent_run
  WHERE id IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
     OR (
