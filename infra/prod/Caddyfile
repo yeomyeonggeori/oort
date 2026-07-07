@@ -16,7 +16,19 @@
 {$API_DOMAIN} {
     import security_headers
     encode zstd gzip
-    reverse_proxy api:8080
+
+    # MOMO-300: the Centrifugo subscribe-proxy callback is internal-only —
+    # Centrifugo reaches the api service over the compose network, never via
+    # this edge. The route authenticates with CENT_PROXY_SECRET and is excluded
+    # from API rate limiting, so exposing it publicly would open an unmetered
+    # brute-force surface. Deny it at the edge (403, fail closed).
+    handle /v1/centrifugo/* {
+        respond "forbidden" 403
+    }
+
+    handle {
+        reverse_proxy api:8080
+    }
 }
 
 {$REALTIME_DOMAIN} {

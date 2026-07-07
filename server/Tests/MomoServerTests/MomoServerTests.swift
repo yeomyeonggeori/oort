@@ -222,7 +222,7 @@ final class MomoServerTests: XCTestCase {
         )
 
         do {
-            _ = try await jwt.verify(expired)
+            _ = try await jwt.verify(expired.token)
             XCTFail("expired app access token should be rejected before realtime token issue")
         } catch {
             // Expected: JWTKit rejects the expired access token.
@@ -702,6 +702,144 @@ final class MomoServerTests: XCTestCase {
         )
     }
 
+    // ---- MOMO-300: proxy secret / revocation / rate limit units ----
+
+    func testSharedConstantTimeEquals() {
+        // Shared helper — used by both the subscribe-proxy secret check and
+        // the platform-admin login secret check (review fix: no plain `==`).
+        XCTAssertTrue(ConstantTime.equals("secret-a", "secret-a"))
+        XCTAssertFalse(ConstantTime.equals("secret-a", "secret-b"))
+        XCTAssertFalse(ConstantTime.equals("secret-a", "secret-a-longer"))
+        XCTAssertFalse(ConstantTime.equals("", "secret-a"))
+        XCTAssertTrue(ConstantTime.equals("", ""))
+    }
+
+    func testAppTokensCarryUniqueJTIPerIssue() async throws {
+        // MOMO-300 review fix: iat/exp are second-granular, so identical
+        // claims within the same second used to produce byte-identical JWTs
+        // (and identical token_hash rows — a revoked row then killed a fresh
+        // login). The random jti must make every issue unique.
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let jwt = await JWTService(config: testServerConfig())
+
+        let first = try await jwt.signAccess(
+            memberID: memberID, workspaceID: workspaceID, scopes: ["messages:read"])
+        let second = try await jwt.signAccess(
+            memberID: memberID, workspaceID: workspaceID, scopes: ["messages:read"])
+
+        XCTAssertNotEqual(first.token, second.token,
+                          "same-second same-claim tokens must differ (jti)")
+
+        let firstPayload = try await jwt.verify(first.token)
+        let secondPayload = try await jwt.verify(second.token)
+        XCTAssertFalse(firstPayload.jti.value.isEmpty)
+        XCTAssertNotEqual(firstPayload.jti.value, secondPayload.jti.value)
+        XCTAssertNotNil(UUID(uuidString: firstPayload.jti.value))
+
+        // refresh tokens carry jti too (rotation path).
+        let refresh = try await jwt.signRefresh(
+            memberID: memberID, workspaceID: workspaceID, scopes: ["messages:read"])
+        let refreshPayload = try await jwt.verify(refresh.token)
+        XCTAssertNotNil(UUID(uuidString: refreshPayload.jti.value))
+        XCTAssertNotEqual(refreshPayload.jti.value, firstPayload.jti.value)
+    }
+
+    func testSecurityBootValidationFailsFastOnPlaceholderProxySecretInStrictEnv() {
+        var config = testServerConfig()
+
+        // local env: placeholder allowed.
+        config.momoEnvironment = "local"
+        config.centProxySecret = "dev-insecure-cent-proxy-secret"
+        XCTAssertNoThrow(try config.validateSecurityForBoot())
+
+        // strict envs: placeholder/missing must fail fast.
+        for env in ["staging", "prod", "production", "internal-host"] {
+            config.momoEnvironment = env
+            config.centProxySecret = "dev-insecure-cent-proxy-secret"
+            XCTAssertThrowsError(try config.validateSecurityForBoot(), env)
+            config.centProxySecret = "change-me-cent-proxy-secret"
+            XCTAssertThrowsError(try config.validateSecurityForBoot(), env)
+            config.centProxySecret = ""
+            XCTAssertThrowsError(try config.validateSecurityForBoot(), env)
+            config.centProxySecret = "0f3f2c9a51e64b4bb1d2f8f4f5a6b7c8"
+            XCTAssertNoThrow(try config.validateSecurityForBoot(), env)
+        }
+    }
+
+    func testRateLimitConfigLoadsEnvAndClampsBadValues() {
+        let defaults = RateLimitConfig.load(environment: [:])
+        XCTAssertEqual(defaults.windowSeconds, 60)
+        XCTAssertEqual(defaults.perMemberLimit, 600)
+        XCTAssertEqual(defaults.perIPLimit, 1200)
+
+        let custom = RateLimitConfig.load(environment: [
+            "RATE_LIMIT_WINDOW_SECONDS": "10",
+            "RATE_LIMIT_PER_MEMBER": "5",
+            "RATE_LIMIT_PER_IP": "0",
+        ])
+        XCTAssertEqual(custom.windowSeconds, 10)
+        XCTAssertEqual(custom.perMemberLimit, 5)
+        XCTAssertEqual(custom.perIPLimit, 0) // 0 disables the axis
+
+        let clamped = RateLimitConfig.load(environment: [
+            "RATE_LIMIT_WINDOW_SECONDS": "0",
+            "RATE_LIMIT_PER_MEMBER": "-3",
+        ])
+        XCTAssertEqual(clamped.windowSeconds, 1)
+        XCTAssertEqual(clamped.perMemberLimit, 0)
+    }
+
+    func testSlidingWindowRateLimiterEnforcesWindowAndAuditsOnce() async {
+        let limiter = SlidingWindowRateLimiter()
+        let start = Date(timeIntervalSince1970: 1_000_000)
+
+        // Limit 3 per 10s: first three pass, fourth is limited.
+        for i in 0..<3 {
+            let verdict = await limiter.check(
+                key: "member:a", limit: 3, windowSeconds: 10,
+                now: start.addingTimeInterval(Double(i)))
+            XCTAssertTrue(verdict.allowed, "request \(i) should pass")
+        }
+        let limited = await limiter.check(
+            key: "member:a", limit: 3, windowSeconds: 10,
+            now: start.addingTimeInterval(3))
+        XCTAssertFalse(limited.allowed)
+        XCTAssertTrue(limited.shouldAudit, "first rejection audits")
+        XCTAssertGreaterThanOrEqual(limited.retryAfterSeconds, 1)
+
+        // Second rejection in the same burst must NOT audit again.
+        let limitedAgain = await limiter.check(
+            key: "member:a", limit: 3, windowSeconds: 10,
+            now: start.addingTimeInterval(4))
+        XCTAssertFalse(limitedAgain.allowed)
+        XCTAssertFalse(limitedAgain.shouldAudit)
+
+        // Keys are independent.
+        let other = await limiter.check(
+            key: "ip:203.0.113.7", limit: 3, windowSeconds: 10,
+            now: start.addingTimeInterval(4))
+        XCTAssertTrue(other.allowed)
+
+        // After the window slides past the burst, requests pass again.
+        let afterWindow = await limiter.check(
+            key: "member:a", limit: 3, windowSeconds: 10,
+            now: start.addingTimeInterval(20))
+        XCTAssertTrue(afterWindow.allowed)
+
+        // limit 0 = disabled axis.
+        let disabled = await limiter.check(
+            key: "member:a", limit: 0, windowSeconds: 10, now: start)
+        XCTAssertTrue(disabled.allowed)
+    }
+
+    func testRateLimit429ResponseCarriesRetryAfter() {
+        let response = RateLimitSupport.tooManyRequests(retryAfterSeconds: 7)
+        XCTAssertEqual(response.status, .tooManyRequests)
+        XCTAssertEqual(response.headers[RateLimitSupport.retryAfter], "7")
+        XCTAssertEqual(response.headers[.contentType], "application/json")
+    }
+
     private func testServerConfig(
         accessTokenTTL: TimeInterval = 15 * 60,
         centConnectionTokenTTL: TimeInterval = 5 * 60
@@ -721,6 +859,8 @@ final class MomoServerTests: XCTestCase {
             centAPIKey: "test-cent-api-key",
             centTokenHMAC: "test-cent-token-hmac",
             centConnectionTokenTTL: centConnectionTokenTTL,
+            centProxySecret: "test-cent-proxy-secret",
+            rateLimit: RateLimitConfig(windowSeconds: 60, perMemberLimit: 600, perIPLimit: 1200),
             platformAdminDatabaseURL: nil,
             platformAdminEmails: [],
             platformAdminLoginSecret: nil,

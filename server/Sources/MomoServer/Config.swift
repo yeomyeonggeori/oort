@@ -28,6 +28,13 @@ struct Config: Sendable {
     var centAPIKey: String   // X-API-Key for POST /api/publish
     var centTokenHMAC: String // connection/subscription JWT signing (HMAC)
     var centConnectionTokenTTL: TimeInterval // short-lived client connection token
+    // Shared secret Centrifugo attaches to subscribe-proxy callbacks
+    // (`X-Centrifugo-Proxy-Secret` static header, MOMO-300). The API rejects
+    // proxy requests that do not present this value.
+    var centProxySecret: String
+
+    // ---- Rate limiting (MOMO-300, in-memory sliding window, single node) ----
+    var rateLimit: RateLimitConfig
 
     // ---- Platform admin read-only inspection (MOMO-013) ----
     var platformAdminDatabaseURL: String?
@@ -72,6 +79,8 @@ struct Config: Sendable {
                     envInt("CENT_CONNECTION_TOKEN_TTL_SECONDS", 5 * 60)
                 )
             ),
+            centProxySecret: env("CENT_PROXY_SECRET", "dev-insecure-cent-proxy-secret"),
+            rateLimit: RateLimitConfig.load(environment: ProcessInfo.processInfo.environment),
             platformAdminDatabaseURL: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_DATABASE_URL"],
             platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
                 .split(separator: ",")
@@ -91,6 +100,23 @@ struct Config: Sendable {
         min(max(seconds, 60), 30 * 60)
     }
 
+    /// MOMO-300 fail-fast: in strict environments (staging/prod/internal-host)
+    /// the Centrifugo subscribe-proxy shared secret must be configured with a
+    /// real value. A missing/placeholder secret would either let anyone spoof
+    /// proxy callbacks (if we skipped verification) or silently deny every
+    /// subscribe (if Centrifugo sends the placeholder) — both are boot errors.
+    /// `scripts/prod_env_preflight.sh` enforces the same contract pre-compose.
+    func validateSecurityForBoot() throws {
+        guard AgentProviderConfig.requiresStrictExternalProvider(momoEnvironment) else {
+            return
+        }
+        if AgentProviderConfig.isUnsafeSecret(centProxySecret) {
+            throw SecurityConfigurationError(errors: [
+                "CENT_PROXY_SECRET is missing or uses a placeholder/dev value in \(momoEnvironment)"
+            ])
+        }
+    }
+
     /// Minimal `postgres://` URL parser (no extra deps). Returns nil if unparseable.
     private static func parseDatabaseURL(
         _ raw: String?
@@ -106,6 +132,45 @@ struct Config: Sendable {
             password: comps.password ?? "",
             database: db.isEmpty ? "momo" : db
         )
+    }
+}
+
+/// MOMO-300 request rate limiting knobs (per-member + per-IP).
+///
+/// v0 scope (documented, single-node): an **in-memory sliding-window** limiter
+/// inside the API process. State is per-process — restarting the server resets
+/// the windows and multiple API replicas do not share counters. `/health` and
+/// the Centrifugo subscribe proxy (its own shared-secret auth, internal traffic
+/// funnels through one IP) are excluded. Cost circuit breaking (budget_window)
+/// is an independent axis and is untouched by these limits.
+///
+/// A limit of 0 disables that axis.
+struct RateLimitConfig: Sendable {
+    /// Sliding window length in seconds (default 60).
+    var windowSeconds: Int
+    /// Max requests per authenticated member per window (default 600).
+    var perMemberLimit: Int
+    /// Max requests per client IP per window (default 1200).
+    var perIPLimit: Int
+
+    static func load(environment: [String: String]) -> RateLimitConfig {
+        RateLimitConfig(
+            windowSeconds: max(1, intValue(environment["RATE_LIMIT_WINDOW_SECONDS"], fallback: 60)),
+            perMemberLimit: max(0, intValue(environment["RATE_LIMIT_PER_MEMBER"], fallback: 600)),
+            perIPLimit: max(0, intValue(environment["RATE_LIMIT_PER_IP"], fallback: 1200))
+        )
+    }
+
+    private static func intValue(_ raw: String?, fallback: Int) -> Int {
+        raw.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? fallback
+    }
+}
+
+struct SecurityConfigurationError: Error, CustomStringConvertible {
+    let errors: [String]
+
+    var description: String {
+        "invalid security config: \(errors.joined(separator: "; "))"
     }
 }
 

@@ -261,6 +261,7 @@ rt.{$DOMAIN} {
 }
 ```
 > ⚠️ **subscribe proxy 콜백(`http://api:8080/v1/centrifugo/subscribe`)은 외부로 라우팅하지 않는다** — compose 내부 네트워크에서만 동작(centrifugo → api). 외부에 노출되는 건 api/rt 두 서브도메인뿐. `PORT` 변경 시 `centrifugo.prod.json`의 proxy URL과 Caddyfile을 함께 맞춘다.
+> **MOMO-300:** 내부 전용을 blanket reverse_proxy에 맡기지 않고, 정본 `infra/prod/Caddyfile`이 `handle /v1/centrifugo/*` 블록으로 엣지에서 **403 차단**한다(해당 라우트는 API rate limit 제외라 공개 시 `CENT_PROXY_SECRET` brute-force 표면이 됨).
 
 ### 4.3 centrifugo.prod.json (Redis 엔진 전환)
 dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로 유지**(L4 §4.2)하고 엔진만 추가:

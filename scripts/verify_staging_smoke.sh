@@ -66,6 +66,11 @@ grep -Fq 'reverse_proxy api:8080' "$CADDYFILE" || fail "Caddyfile must proxy API
 grep -Fq 'reverse_proxy centrifugo:8000' "$CADDYFILE" || fail "Caddyfile must proxy realtime to centrifugo:8000"
 grep -Fq 'Strict-Transport-Security' "$CADDYFILE" || fail "Caddyfile missing HSTS header"
 grep -Fq 'X-Content-Type-Options' "$CADDYFILE" || fail "Caddyfile missing X-Content-Type-Options header"
+# MOMO-300: subscribe proxy callback is internal-only (centrifugo -> api over
+# the compose network); the edge must deny /v1/centrifugo/* so the
+# rate-limit-excluded CENT_PROXY_SECRET route is never publicly reachable.
+grep -Fq 'handle /v1/centrifugo/*' "$CADDYFILE" || fail "Caddyfile must deny /v1/centrifugo/* at the edge (MOMO-300)"
+grep -A1 'handle /v1/centrifugo/\*' "$CADDYFILE" | grep -Eq 'respond .*403' || fail "Caddyfile /v1/centrifugo/* handle must respond 403"
 if command -v caddy >/dev/null 2>&1; then
   env ACME_EMAIL=ops@example.com \
     API_DOMAIN=api.staging.example.com \
@@ -151,6 +156,7 @@ CENTRIFUGO_REDIS_ADDRESS=redis://:redis_20260701_operator_generated_shape@redis:
 REDIS_VOLUME_NAME=momo-staging-redis-data
 CENT_TOKEN_HMAC=cent_token_hmac_20260701_operator_generated_shape
 CENT_API_KEY=cent_api_key_20260701_operator_generated_shape
+CENT_PROXY_SECRET=cent_proxy_secret_20260706_operator_generated_shape
 JWT_HMAC=jwt_hmac_20260701_operator_generated_shape
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_MODEL=hermes-agent

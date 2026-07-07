@@ -92,6 +92,9 @@ case "$CENT_API_URL" in
 esac
 JWT_HMAC="${JWT_HMAC:-dev-insecure-jwt-hmac-change-me}"
 CENT_TOKEN_HMAC="${CENT_TOKEN_HMAC:-dev-insecure-cent-token-hmac}"
+# MOMO-300: must match the dev compose Centrifugo static proxy header
+# (infra/docker-compose.yml defaults both sides to the same dev placeholder).
+CENT_PROXY_SECRET="${CENT_PROXY_SECRET:-dev-insecure-cent-proxy-secret}"
 RELAY_POLL_INTERVAL_MS="${RELAY_POLL_INTERVAL_MS:-100}"
 
 ADMIN_DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}}"
@@ -209,12 +212,25 @@ echo "[realtime-live] starting MomoServer on host"
   CENT_API_KEY="$CENT_API_KEY" \
   JWT_HMAC="$JWT_HMAC" \
   CENT_TOKEN_HMAC="$CENT_TOKEN_HMAC" \
+  CENT_PROXY_SECRET="$CENT_PROXY_SECRET" \
   LOG_LEVEL="${LOG_LEVEL:-info}" \
   swift run --package-path server MomoServer
 ) >"$SERVER_LOG" 2>&1 &
 SERVER_PID=$!
 
 wait_http "http://127.0.0.1:${PORT}/health" "MomoServer"
+
+echo "[realtime-live] MOMO-300 negative: subscribe proxy without shared secret must be rejected"
+PROXY_NEG_STATUS="$(
+  curl -s -o /dev/null -w '%{http_code}' \
+    -H "Content-Type: application/json" \
+    -d "{\"user\":\"00000000-0000-7000-8000-000000000101\",\"channel\":\"ch:ws${WORKSPACE_ID}.${CHANNEL_ID}\"}" \
+    "http://127.0.0.1:${PORT}/v1/centrifugo/subscribe"
+)"
+if [ "$PROXY_NEG_STATUS" != "401" ]; then
+  fail "unauthenticated subscribe proxy request must return 401, got ${PROXY_NEG_STATUS}"
+fi
+echo "[realtime-live] unauthenticated subscribe proxy rejected with 401"
 
 echo "[realtime-live] attaching api network proxy for Centrifugo subscribe callbacks"
 docker rm -f "$PROXY_CONTAINER" >/dev/null 2>&1 || true
@@ -607,6 +623,7 @@ fi
   echo "- Live publication: type=\`${EVENT_TYPE}\`, payload.message.seq=\`${PAYLOAD_SEQ}\`, publication_offset=\`${PUB_OFFSET:-n/a}\`"
   echo "- Version evidence: \`message.seq=${MESSAGE_SEQ}\` equals \`payload.message.seq=${PAYLOAD_SEQ}\`; Centrifugo publication offset \`${PUB_OFFSET:-n/a}\` captured as transport position."
   echo "- Negative path: invalid Centrifugo connection token rejected before subscribe."
+  echo "- Negative path (MOMO-300): subscribe proxy callback without X-Centrifugo-Proxy-Secret rejected with HTTP 401."
   echo "- Evidence files: publication=\`${LIVE_JSON}\`, websocket_log=\`${PY_LOG}\`, server_log=\`${SERVER_LOG}\`, relay_log=\`${RELAY_LOG}\`, api_proxy_log=\`${PROXY_LOG}\`"
 } >"$EVIDENCE_FILE"
 

@@ -30,3 +30,7 @@ Packages/
 *.resolved
 DerivedData/
 .swiftpm/
+
+# git worktrees (never track — embedded repos)
+.claude/worktrees/
+worktrees/
