@@ -124,6 +124,12 @@
 - `scripts/momo`가 local alpha ready 판정에 `/health` + demo login/logout smoke를 함께 사용하도록 바꿨다. `/health`는 되지만 login smoke가 실패하면 stale/degraded server로 보고 restart path를 탄다. credentialed smoke는 기본적으로 loopback base URL에서만 수행하고, 성공 직후 `/v1/auth/logout`으로 발급된 토큰을 revoke한다. `scripts/momo stop/stop-stack`은 configured API port의 현재 repo 내부 `MomoServer` listener만 안전하게 종료하도록 보강했다.
 - 검증: `bash -n scripts/momo` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS. 실제 dogfood operator는 `scripts/momo stop && scripts/momo start`를 다시 실행하면 stale 28180 listener가 정리되고 로그인 smoke를 통과한 서버만 ready로 간주된다.
 
+## 0-4b-6f. MOMO-329 Local alpha gateway mode env passthrough hotfix (2026-07-08)
+
+- `AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET=... scripts/momo up`로 실행해도 `/v1/agent-runtime/status`가 계속 `local-mock`으로 뜨던 원인을 확인했다. `scripts/momo`까지는 env를 받았지만, `scripts/local_alpha_runner.sh`가 host-run `MomoServer`를 시작할 때 explicit `env ... swift run` allowlist에 `AGENT_GATEWAY_MODE`/`AGENT_GATEWAY_SECRET`을 넣지 않아 서버 프로세스가 gateway mode를 보지 못했다.
+- `local_alpha_runner`가 gateway mode/secret을 로드·export·redacted summary 기록·MomoServer env 주입까지 전달하도록 수정했다. provider OAuth/Codex/OpenAI token은 여전히 momo env에 전달하지 않고, 이 secret은 momo↔Hermes gateway callback 인증용이다.
+- 검증: `bash -n scripts/local_alpha_runner.sh` 대상. 실제 operator는 `scripts/momo stop-stack` 후 `AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" scripts/momo up`를 다시 실행하면 `agentRuntime.mode=gateway`를 확인할 수 있어야 한다.
+
 ## 0-4b-7. MOMO-258 macOS UI Smoke Fixture Seq Hotfix (2026-07-02)
 
 - MOMO-257 merge 후 reused local Docker DB에서 `scripts/local_gate.sh --profile macos-ui`가 실패했다. 원인은 `verify_macos_real_backend_ui.sh`가 approval/cost fixture message seq를 `205901`로 고정했고, 같은 channel의 `channel_seq`가 이미 더 높게 진행되어 최신 `messages?limit=20` history에 fixture가 보이지 않은 것이다.
