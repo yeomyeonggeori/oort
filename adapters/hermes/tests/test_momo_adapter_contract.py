@@ -39,12 +39,17 @@ class CaptureAdapter(momo_adapter.MomoAdapter):
         self.run_id = run_id
         self.final_text = final_text
         self.posts = []
+        self.gateway_posts = []
 
     async def _post(self, path, body):
         self.posts.append({"method": "POST", "path": path, "body": dict(body)})
         if path.endswith("/invoke"):
             return {"runId": self.run_id}
         return {"id": "message-fixture", "seq": 43}
+
+    async def _post_gateway(self, path, body):
+        self.gateway_posts.append({"method": "POST", "path": path, "body": dict(body)})
+        return {"status": "accepted"}
 
     async def _collect_run_output(self, run_id):
         self.assert_run_id = run_id
@@ -118,6 +123,48 @@ class HermesAdapterContractTests(unittest.TestCase):
             summary["runtime_unverified"], "live Hermes gateway plugin load/e2e"
         )
 
+    def test_agent_job_event_reports_status_and_complete_to_momo_rest(self):
+        fixture = load_fixture("gateway_agent_job_mapping.json")
+        raw = json.dumps(fixture["input_centrifugo_push"])
+        frame = momo_adapter.MomoAdapter._iter_frames(raw)[0]
+        push = frame["push"]
+        envelope = push["pub"]["data"]
+        event = {
+            "channel": push["channel"],
+            "type": envelope["type"],
+            "seq": envelope["seq"],
+            "ts": envelope["ts"],
+            "payload": envelope["payload"],
+        }
+
+        class Runtime:
+            def run_momo_job(self, payload):
+                return {
+                    "body": "Drafted a release checklist issue proposal for approval.",
+                    "usage": {
+                        "model": payload["model"],
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cached_tokens": 0,
+                        "reasoning_tokens": 0,
+                        "cost_micro_usd": 0,
+                        "was_estimated": True,
+                    },
+                }
+
+        payload = event["payload"]
+        adapter = CaptureAdapter(
+            workspace_id=payload["workspace_id"],
+            agent_member_id=payload["agent_member_id"],
+            run_id=payload["run_id"],
+            final_text="unused",
+        )
+        adapter.runtime = Runtime()
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertEqual(adapter.gateway_posts, fixture["expected_momo_callbacks"])
+
     def test_register_platform_accepts_gateway_like_registry(self):
         class Registry:
             def __init__(self):
@@ -131,6 +178,21 @@ class HermesAdapterContractTests(unittest.TestCase):
 
         self.assertIs(adapter_cls, momo_adapter.MomoAdapter)
         self.assertEqual(registry.calls, [("momo", momo_adapter.MomoAdapter)])
+
+    def test_register_accepts_latest_context_style(self):
+        class Context:
+            def __init__(self):
+                self.kwargs = None
+
+            def register_platform(self, **kwargs):
+                self.kwargs = kwargs
+
+        context = Context()
+        adapter_cls = momo_adapter.register(context)
+
+        self.assertIs(adapter_cls, momo_adapter.MomoAdapter)
+        self.assertEqual(context.kwargs["platform_name"], "momo")
+        self.assertIs(context.kwargs["adapter_cls"], momo_adapter.MomoAdapter)
 
 
 if __name__ == "__main__":

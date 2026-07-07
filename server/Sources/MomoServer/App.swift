@@ -63,6 +63,7 @@ enum AppBuilder {
         CentrifugoRoutes(
             db: db, tokenStore: tokenStore, proxySecret: config.centProxySecret
         ).add(to: router)
+        AgentGatewayRoutes(db: db, config: config.agentGateway).add(to: router)
 
         // Protected routes (require valid access token) — mounted in a group that
         // applies AuthMiddleware (JWT + MOMO-300 revocation check), then the
@@ -73,7 +74,7 @@ enum AppBuilder {
                 limiter: rateLimiter, config: config.rateLimit, db: db, logger: logger
             ))
         authRoutes.addProtected(to: authed)
-        MessageRoutes(db: db).add(to: authed)
+        MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         CostProjectionRoutes(db: db).add(to: authed)

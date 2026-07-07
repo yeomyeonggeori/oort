@@ -13,6 +13,7 @@ import PostgresNIO
 /// loss-free (transactional outbox). The relay (separate package) then publishes.
 struct MessageRoutes: Sendable {
     let db: Database
+    let agentGateway: AgentGatewayConfig
 
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/channels/:ch/messages", use: send)
@@ -134,7 +135,8 @@ struct MessageRoutes: Sendable {
                     messageSeq: seq,
                     authorMemberID: principal.memberID,
                     body: body,
-                    hlcTs: ts
+                    hlcTs: ts,
+                    agentGateway: agentGateway
                 )
             }
 
@@ -293,7 +295,8 @@ struct MessageRoutes: Sendable {
         messageSeq: Int64,
         authorMemberID: UUID,
         body: String,
-        hlcTs: Int64
+        hlcTs: Int64,
+        agentGateway: AgentGatewayConfig
     ) async throws {
         let candidates = try await loadAgentMentionCandidates(
             conn: conn,
@@ -332,7 +335,8 @@ struct MessageRoutes: Sendable {
                 authorMemberID: authorMemberID,
                 body: body,
                 hlcTs: hlcTs,
-                agent: agent
+                agent: agent,
+                agentGateway: agentGateway
             )
         }
     }
@@ -643,7 +647,8 @@ struct MessageRoutes: Sendable {
         authorMemberID: UUID,
         body: String,
         hlcTs: Int64,
-        agent: AgentMentionCandidate
+        agent: AgentMentionCandidate,
+        agentGateway: AgentGatewayConfig
     ) async throws {
         let idempotencyKey = "mention:\(messageID.uuidString):\(agent.id.uuidString)"
         let input = mentionRunInput(
@@ -696,18 +701,43 @@ struct MessageRoutes: Sendable {
             body: body,
             hlcTs: hlcTs,
             idempotencyKey: idempotencyKey,
-            recentMessages: recentMessages
+            recentMessages: recentMessages,
+            delivery: agentGateway.enabled ? "gateway" : "worker"
         )
-        _ = try await conn.query(
+        let jobMethod = agentGateway.enabled ? "gateway" : "publish"
+        let jobRows = try await conn.query(
             """
             INSERT INTO outbox
               (workspace_id, kind, status, method, payload, partition_key)
             VALUES
-              (\(workspaceID), 'agent_job', 'pending', 'publish',
+              (\(workspaceID), 'agent_job', 'pending', \(jobMethod),
                \(payload)::jsonb, \(agent.id))
+            RETURNING id
             """,
             logger: logger
-        )
+        ).collect()
+
+        if agentGateway.enabled, let firstJob = jobRows.first {
+            let jobOutboxID = try firstJob.decode(Int64.self)
+            let gatewayPayload = agentJobBroadcastPayload(
+                workspaceID: workspaceID,
+                agentMemberID: agent.id,
+                jobOutboxID: jobOutboxID,
+                runID: runID,
+                payloadJSON: payload,
+                hlcTs: hlcTs
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO outbox
+                  (workspace_id, kind, status, method, payload, partition_key)
+                VALUES
+                  (\(workspaceID), 'broadcast', 'pending', 'publish',
+                   \(gatewayPayload)::jsonb, \(agent.id))
+                """,
+                logger: logger
+            )
+        }
 
         let detail = mentionDiagnosticDetail(
             workspaceID: workspaceID,
@@ -811,7 +841,8 @@ struct MessageRoutes: Sendable {
         body: String,
         hlcTs: Int64,
         idempotencyKey: String,
-        recentMessages: [[String: Any]]
+        recentMessages: [[String: Any]],
+        delivery: String
     ) -> String {
         let source = messageSource(
             workspaceID: workspaceID,
@@ -854,6 +885,7 @@ struct MessageRoutes: Sendable {
             "step_count": 0,
             "depth": 0,
             "consecutive_auto": 0,
+            "delivery": delivery,
             "created_from": "server.message_send.agent_mention.v0",
             "created_at_ms": hlcTs,
         ]
@@ -864,6 +896,33 @@ struct MessageRoutes: Sendable {
             payload["system_prompt"] = systemPrompt
         }
         return jsonString(payload)
+    }
+
+    private static func agentJobBroadcastPayload(
+        workspaceID: UUID,
+        agentMemberID: UUID,
+        jobOutboxID: Int64,
+        runID: UUID,
+        payloadJSON: String,
+        hlcTs: Int64
+    ) -> String {
+        let centChannel = "agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"
+        var jobPayload = (jsonObject(payloadJSON) as? [String: Any]) ?? [:]
+        jobPayload["agent_job_outbox_id"] = jobOutboxID
+        jobPayload["delivery"] = "gateway"
+
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "agent.job",
+                "v": 1,
+                "ts": hlcTs,
+                "seq": jobOutboxID,
+                "payload": jobPayload,
+            ],
+            "version": jobOutboxID,
+            "idempotency_key": "\(centChannel):agent_job:\(runID.uuidString)",
+        ])
     }
 
     private static func contextPacketProjection(

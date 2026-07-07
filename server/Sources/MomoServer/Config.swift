@@ -45,6 +45,9 @@ struct Config: Sendable {
     var momoEnvironment: String
     var agentProvider: AgentProviderConfig
 
+    // ---- Hermes gateway native platform adapter (MOMO-325) ----
+    var agentGateway: AgentGatewayConfig
+
     /// Read an env var, falling back to `default`.
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -89,7 +92,8 @@ struct Config: Sendable {
             platformAdminLoginSecret: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_LOGIN_SECRET"]
                 .flatMap { $0.isEmpty ? nil : $0 },
             momoEnvironment: env("MOMO_ENV", "local"),
-            agentProvider: AgentProviderConfig.load(environment: ProcessInfo.processInfo.environment)
+            agentProvider: AgentProviderConfig.load(environment: ProcessInfo.processInfo.environment),
+            agentGateway: AgentGatewayConfig.load(environment: ProcessInfo.processInfo.environment)
         )
     }
 
@@ -107,6 +111,11 @@ struct Config: Sendable {
     /// subscribe (if Centrifugo sends the placeholder) — both are boot errors.
     /// `scripts/prod_env_preflight.sh` enforces the same contract pre-compose.
     func validateSecurityForBoot() throws {
+        if agentGateway.enabled && !agentGateway.secretConfigured {
+            throw SecurityConfigurationError(errors: [
+                "AGENT_GATEWAY_SECRET is required when AGENT_GATEWAY_MODE=gateway"
+            ])
+        }
         guard AgentProviderConfig.requiresStrictExternalProvider(momoEnvironment) else {
             return
         }
@@ -163,6 +172,43 @@ struct RateLimitConfig: Sendable {
 
     private static func intValue(_ raw: String?, fallback: Int) -> Int {
         raw.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? fallback
+    }
+}
+
+enum AgentGatewayMode: String, Sendable {
+    case worker = "worker"
+    case gateway = "gateway"
+
+    static func parse(_ raw: String?) -> AgentGatewayMode {
+        guard let raw else { return .worker }
+        return AgentGatewayMode(rawValue: raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+            ?? .worker
+    }
+}
+
+/// MOMO-325 native Hermes gateway mode.
+///
+/// `worker` is the product default: AgentWorker claims `agent_job` outbox rows
+/// and calls the OpenAI-compatible provider directly. `gateway` is the optional
+/// Hermes platform-adapter path: the server still creates the authoritative
+/// agent_run/context/budget/audit shell, publishes an `agent.job` notification to
+/// the agent realtime channel, and accepts status/result callbacks through a
+/// momo-owned REST endpoint.
+struct AgentGatewayConfig: Sendable {
+    var mode: AgentGatewayMode
+    var secret: String
+
+    static func load(environment: [String: String]) -> AgentGatewayConfig {
+        AgentGatewayConfig(
+            mode: AgentGatewayMode.parse(environment["AGENT_GATEWAY_MODE"]),
+            secret: environment["AGENT_GATEWAY_SECRET"] ?? ""
+        )
+    }
+
+    var enabled: Bool { mode == .gateway }
+
+    var secretConfigured: Bool {
+        !AgentProviderConfig.isUnsafeSecret(secret)
     }
 }
 

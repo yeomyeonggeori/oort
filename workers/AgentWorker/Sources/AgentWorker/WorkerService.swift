@@ -154,6 +154,7 @@ struct WorkerService: Service {
                   SELECT id FROM outbox
                    WHERE kind = 'agent_job'
                      AND status = 'pending'
+                     AND method <> 'gateway'
                      AND available_at <= now()
                    ORDER BY id
                    FOR UPDATE SKIP LOCKED

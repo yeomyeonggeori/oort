@@ -1,0 +1,74 @@
+{
+  "schema": "momo.hermes_adapter_contract.gateway_agent_job_mapping.v0",
+  "mode": "hermes_gateway_native_platform",
+  "owner": "momo_creates_run_and_ledger_hermes_reports_result",
+  "input_centrifugo_push": {
+    "push": {
+      "channel": "agent:ws10000000-0000-7000-8000-000000000001.30000000-0000-7000-8000-000000000020",
+      "pub": {
+        "data": {
+          "type": "agent.job",
+          "v": 1,
+          "seq": 101,
+          "ts": 1783251000000,
+          "payload": {
+            "run_id": "40000000-0000-7000-8000-000000000030",
+            "workspace_id": "10000000-0000-7000-8000-000000000001",
+            "channel_id": "20000000-0000-7000-8000-000000000010",
+            "agent_member_id": "30000000-0000-7000-8000-000000000020",
+            "author_member_id": "70000000-0000-7000-8000-000000000060",
+            "trigger_message_id": "50000000-0000-7000-8000-000000000040",
+            "model": "hermes-agent",
+            "prompt": "@hermes draft the release checklist",
+            "recent_messages": [
+              {
+                "message_id": "50000000-0000-7000-8000-000000000040",
+                "channel_id": "20000000-0000-7000-8000-000000000010",
+                "seq": 42,
+                "author_member_id": "70000000-0000-7000-8000-000000000060",
+                "author_kind": "human",
+                "body": "@hermes draft the release checklist"
+              }
+            ],
+            "delivery": "gateway",
+            "agent_job_outbox_id": 101
+          }
+        }
+      }
+    }
+  },
+  "expected_momo_callbacks": [
+    {
+      "method": "POST",
+      "path": "/v1/workspaces/10000000-0000-7000-8000-000000000001/agent-runs/40000000-0000-7000-8000-000000000030/gateway/events",
+      "body": {
+        "status": "running",
+        "detail": "job received"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/v1/workspaces/10000000-0000-7000-8000-000000000001/agent-runs/40000000-0000-7000-8000-000000000030/gateway/complete",
+      "body": {
+        "status": "succeeded",
+        "body": "Drafted a release checklist issue proposal for approval.",
+        "error": null,
+        "usage": {
+          "model": "hermes-agent",
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "cached_tokens": 0,
+          "reasoning_tokens": 0,
+          "cost_micro_usd": 0,
+          "was_estimated": true
+        }
+      }
+    }
+  ],
+  "forbidden": [
+    "adapter_direct_db_write",
+    "adapter_direct_centrifugo_publish",
+    "momo_stores_openai_or_codex_oauth_token"
+  ],
+  "runtime_unverified": "live Hermes gateway plugin load/e2e"
+}

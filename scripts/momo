@@ -30,6 +30,12 @@ Commands:
   hermes      Show local Hermes provider setup status and next steps.
   hermes-init Create ~/.momo/local-hermes-provider.env from the safe template.
   hermes-smoke Run the credentialed Hermes provider smoke wrapper.
+  hermes-gateway-init
+              Create ~/.momo/hermes-gateway.env for Hermes platform adapter pairing.
+  hermes-gateway-status
+              Show momo-facing Hermes gateway adapter status.
+  hermes-gateway-smoke
+              Run the mock Hermes gateway native platform smoke.
   stop        Stop the app and the local alpha stack when it can be identified.
   stop-app    Stop the macOS app only.
   stop-stack  Stop the local alpha stack only.
@@ -52,6 +58,7 @@ Environment overrides:
   MOMO_HERMES_PORT=28188
   MOMO_HERMES_MODE=mock
   LOCAL_HERMES_PROVIDER_ENV_FILE=$HOME/.momo/local-hermes-provider.env
+  MOMO_HERMES_GATEWAY_ENV_FILE=$HOME/.momo/hermes-gateway.env
 EOF
 }
 
@@ -465,6 +472,98 @@ hermes_smoke() {
     "$REPO_ROOT/scripts/verify_local_hermes_credentialed_smoke.sh"
 }
 
+gateway_env_file() {
+  printf '%s\n' "${MOMO_HERMES_GATEWAY_ENV_FILE:-${HOME:-}/.momo/hermes-gateway.env}"
+}
+
+random_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  else
+    printf 'momo-gateway-%s-%s\n' "$(date +%s)" "$(uuidgen 2>/dev/null || printf 'local')"
+  fi
+}
+
+hermes_gateway_init() {
+  local env_file env_dir secret
+  env_file="$(gateway_env_file)"
+  env_dir="$(dirname "$env_file")"
+  reject_repo_provider_env "$env_file" || return 1
+  mkdir -p "$env_dir"
+  if [ -f "$env_file" ]; then
+    chmod 600 "$env_file"
+    info "Hermes gateway env already exists: $env_file"
+  else
+    secret="$(random_secret)"
+    umask 077
+    cat >"$env_file" <<EOF
+# momo-facing Hermes platform adapter pairing.
+# This file does not contain Codex/OpenAI OAuth or provider API keys.
+MOMO_API_URL=${BASE_URL}
+MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:${CENT_PORT}/connection/websocket
+MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
+MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
+MOMO_AGENT_HANDLE=hermes
+MOMO_AGENT_GATEWAY_SECRET=${secret}
+
+# Optional: a human/operator account the adapter can use only to subscribe to
+# momo realtime. Provider OAuth still belongs inside Hermes/provider runtime.
+MOMO_AGENT_EMAIL=demo@momo.local
+MOMO_AGENT_PASSWORD=dev-password
+EOF
+    chmod 600 "$env_file"
+    info "created Hermes gateway env: $env_file"
+  fi
+
+  cat <<EOF
+[momo] Hermes gateway adapter setup:
+  env:     $env_file
+  plugin:  $REPO_ROOT/adapters/hermes
+
+To run momo in gateway mode, source the generated secret into the server env:
+  set -a; . "$env_file"; set +a
+  AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="\$MOMO_AGENT_GATEWAY_SECRET" scripts/momo up
+
+Then point Hermes gateway at the plugin directory above. momo still stores no
+Codex/OpenAI OAuth token; Hermes/provider runtime owns provider credentials.
+
+Mock contract smoke:
+  scripts/momo hermes-gateway-smoke
+EOF
+}
+
+hermes_gateway_status() {
+  local env_file secret
+  env_file="$(gateway_env_file)"
+  info "Hermes gateway platform adapter"
+  echo "  env file: $env_file"
+  echo "  plugin dir: $REPO_ROOT/adapters/hermes"
+  if [ ! -f "$env_file" ]; then
+    echo "  state: missing"
+    echo "  next: scripts/momo hermes-gateway-init"
+    return 0
+  fi
+  echo "  file mode: $(file_mode "$env_file")"
+  echo "  api: $(provider_env_value "$env_file" MOMO_API_URL)"
+  echo "  workspace: $(provider_env_value "$env_file" MOMO_WORKSPACE_ID)"
+  echo "  agent: $(provider_env_value "$env_file" MOMO_AGENT_HANDLE) ($(provider_env_value "$env_file" MOMO_AGENT_MEMBER_ID))"
+  secret="$(provider_env_value "$env_file" MOMO_AGENT_GATEWAY_SECRET)"
+  if is_placeholder_value "$secret"; then
+    echo "  gateway secret: missing or placeholder"
+  else
+    echo "  gateway secret: configured (redacted)"
+  fi
+  if health_check; then
+    echo "  momo server: reachable at $BASE_URL"
+  else
+    echo "  momo server: not running at $BASE_URL"
+  fi
+}
+
+hermes_gateway_smoke() {
+  "$REPO_ROOT/scripts/verify_hermes_gateway_adapter.sh"
+}
+
 command="${1:-help}"
 case "$command" in
   start)
@@ -488,6 +587,15 @@ case "$command" in
     ;;
   hermes-smoke)
     hermes_smoke
+    ;;
+  hermes-gateway-init)
+    hermes_gateway_init
+    ;;
+  hermes-gateway-status)
+    hermes_gateway_status
+    ;;
+  hermes-gateway-smoke)
+    hermes_gateway_smoke
     ;;
   stop)
     stop_app

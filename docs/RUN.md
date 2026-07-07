@@ -149,6 +149,8 @@ cp infra/.env.example .env
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
+| `AGENT_GATEWAY_MODE` | 서버, worker | `worker`(기본) 또는 `gateway`. `gateway`면 `@hermes` mention이 AgentWorker provider call 대신 Hermes native platform adapter로 전달된다. |
+| `AGENT_GATEWAY_SECRET` | 서버, Hermes adapter | MOMO-325 gateway callback 공유 시크릿. `gateway` mode에서 비어 있거나 dev placeholder면 서버가 fail-closed. provider OAuth token이 아니며 momo-facing callback 인증에만 사용한다. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
 Codex OAuth access/refresh token은 momo 환경변수가 아니다. External runtime
@@ -279,6 +281,33 @@ localhost/mock/placeholder key면 fail-fast한다. credentials가 유효하면 O
 MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, Kim Intern
 active agent member + `#agent-lab` channel membership precondition, `@김인턴` 1왕복까지
 시도한다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
+
+#### 2.1.2 Hermes gateway native platform mode
+
+MOMO-325은 AgentWorker SSE 경로와 별개로 Hermes gateway가 momo를 Slack/Telegram 같은
+messaging platform으로 인식하는 native adapter path를 추가한다. 이 경로도 모든 사용자 가시
+write는 **momo REST -> Postgres -> outbox**로만 들어오며, adapter는 DB/Centrifugo에 직접 쓰지
+않는다.
+
+```sh
+scripts/momo hermes-gateway-init
+scripts/momo hermes-gateway-status
+scripts/momo hermes-gateway-smoke
+```
+
+서버 opt-in:
+
+```sh
+AGENT_GATEWAY_MODE=gateway
+AGENT_GATEWAY_SECRET=<same secret as MOMO_AGENT_GATEWAY_SECRET>
+```
+
+adapter/Hermes side env는 `$HOME/.momo/hermes-gateway.env`에 생성된다. provider OAuth/Codex/OpenAI
+token은 이 파일에 들어가지 않고 Hermes/provider runtime 내부에만 둔다. mock harness는
+`scripts/verify_hermes_gateway_adapter.sh`와 `scripts/local_gate.sh --profile runtime-agent`가
+검증한다. 실제 Hermes gateway CLI/plugin load와 provider side effect는 Hermes runtime이 없으면
+`runtime-unverified(real hermes gateway missing)`로 남긴다. 정본 문서는
+[`docs/external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)다.
 
 ### 2.3 staging/prod 시크릿과 백업 skeleton
 

@@ -5,6 +5,21 @@
 > Scope: local/internal-alpha smoke for an external agent runtime. This is not
 > provider account setup, billing setup, long-term memory, or AWS deployment.
 
+## Integration Paths
+
+External Hermes can connect to momo through two product-supported paths:
+
+- **AgentWorker SSE path**: momo owns the worker loop and calls a
+  Hermes/OpenAI-compatible `/v1/chat/completions` endpoint. This remains the
+  deterministic default for local gates.
+- **Hermes gateway native platform path**: Hermes treats momo like a
+  Slack/Telegram-style messaging platform, receives momo `agent.job` events,
+  and reports status/results back to momo REST. See
+  [`hermes-gateway-native-platform.md`](hermes-gateway-native-platform.md).
+
+Both paths keep momo as the source of truth for channel messages, approval,
+usage, and audit.
+
 ## Boundary
 
 momo treats an agent as a first-class `member.kind='agent'`. The external agent
@@ -115,6 +130,7 @@ without provider tokens or raw secrets.
 ## References
 
 - `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`
+- `docs/external-agent-provider/hermes-gateway-native-platform.md`
 - `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`
 - `docs/external-agent-provider/local-hermes-gpt.md`
 - `docs/INTERNAL_ALPHA.md`

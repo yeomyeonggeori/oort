@@ -174,6 +174,7 @@
 | `MOMO-242` | External Agent Runtime Smoke | runtime/docs | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-241 |
 | `MOMO-256` | Local Hermes Agent Bridge v0 | runtime-agent/macos-ui/swift | MOMO-215, MOMO-238, MOMO-242, MOMO-253 |
 | `MOMO-257` | Local Hermes/Codex OAuth provider setup | runtime-agent/macos-ui/docs | MOMO-234, MOMO-238, MOMO-242, MOMO-256 |
+| `MOMO-325` | Hermes Gateway Native Platform Integration v1 | runtime-agent/docs/swift | MOMO-212, MOMO-215, MOMO-256, MOMO-257 |
 | `MOMO-243` | In-App Alpha Command Center | swift/macos-ui | MOMO-228, MOMO-232, MOMO-241 |
 | `MOMO-244` | Dev Update Channel v0 | swift/docs | MOMO-235, MOMO-241 |
 | `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-224, MOMO-237, MOMO-239, MOMO-240, MOMO-241 |
@@ -189,6 +190,7 @@
 | `MOMO-242` | External agent runtime smoke contract | runtime/docs/swift | MOMO-230, MOMO-234, MOMO-236, MOMO-238, MOMO-240 |
 | `MOMO-256` | Local Hermes Agent Bridge v0 | runtime-agent/macos-ui/swift | MOMO-215, MOMO-238, MOMO-242, MOMO-253 |
 | `MOMO-257` | Local Hermes/Codex OAuth provider setup | runtime-agent/macos-ui/docs | MOMO-234, MOMO-238, MOMO-242, MOMO-256 |
+| `MOMO-325` | Hermes Gateway Native Platform Integration v1 | runtime-agent/docs/swift | MOMO-212, MOMO-215, MOMO-256, MOMO-257 |
 | `MOMO-224` | internal alpha diagnostics/observability bundle v0 | tooling/docs | MOMO-111, MOMO-220 |
 | `MOMO-225` | Internal alpha combined local gate v0 | tooling/runtime | MOMO-220, MOMO-222, MOMO-224, MOMO-205 |
 | `MOMO-228` | internal alpha runbook + feedback/known-limitations packet v0 | docs/manual | MOMO-213, MOMO-219, MOMO-224 |
@@ -380,6 +382,22 @@
 - [ ] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
 - [ ] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS evidence를 PR에 첨부한다.
 - [ ] PR 생성/리뷰/머지 후 issue #256을 `status:done`으로 전환한다.
+
+### MOMO-325 수용기준 `[runtime-agent/docs/swift]`
+- [x] GitHub issue #280을 `MOMO-325`로 발급하고 branch `feat/280-hermes-gateway-native-platform-integration-v1`에서 진행한다.
+- [x] 기존 AgentWorker SSE 경로를 유지하고, `AGENT_GATEWAY_MODE=gateway`에서만 Hermes native platform delivery를 opt-in한다.
+- [x] Hermes adapter가 최신 plugin path(`PLUGIN.yaml` + `adapter.py`)에서 load 가능한 구조와 `register(ctx)` hook을 제공한다.
+- [x] MomoServer가 `@hermes` mention에서 `agent_run`/context/budget/audit shell을 만들고 `agent.job` realtime broadcast + `agent_job(method=gateway)` ledger row를 생성한다.
+- [x] AgentWorker는 `method='gateway'` job을 claim하지 않는다.
+- [x] Gateway adapter는 job을 받아 provider runtime을 호출하고 result/usage/status를 momo REST callback endpoint로 보고한다.
+- [x] Gateway callback secret이 없거나 틀리면 fail-closed 401이고, momo는 final response를 same-channel durable message로 기록한다.
+- [x] usage ledger/audit 최소 기록, self-loop/idempotency/reconnect guard, direct Centrifugo publish 금지 경계를 문서화한다.
+- [x] `scripts/momo hermes-gateway-init/status/smoke`와 `scripts/verify_hermes_gateway_adapter.sh` mock gateway harness를 추가한다.
+- [x] `docs/external-agent-provider/hermes-gateway-native-platform.md`, `docs/RUN.md`, `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`를 갱신한다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [x] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
+- [x] 실제 Hermes CLI가 없으면 real gateway e2e는 `runtime-unverified(real hermes gateway missing)`로 남긴다.
+- [ ] PR 생성, 코드 리뷰 후 필요한 수정, 최종 local gate, merge까지 momo-main 파이프라인으로 진행한다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.

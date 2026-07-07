@@ -47,6 +47,7 @@ runtime-unverified (hermes 게이트웨이 필요):
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -150,7 +151,13 @@ class MomoConfig:
         default_factory=lambda: os.environ.get("MOMO_AGENT_MEMBER_ID", "")
     )
     agent_handle: str = field(
-        default_factory=lambda: os.environ.get("MOMO_AGENT_HANDLE", "kim-intern")
+        default_factory=lambda: os.environ.get("MOMO_AGENT_HANDLE", "hermes")
+    )
+    # Shared secret for momo-owned gateway callbacks. This is NOT an OpenAI/Codex
+    # credential; it only authorizes Hermes to report status/results for momo-
+    # created agent_run rows.
+    gateway_secret: str = field(
+        default_factory=lambda: os.environ.get("MOMO_AGENT_GATEWAY_SECRET", "")
     )
     request_timeout_s: float = 120.0
 
@@ -222,6 +229,12 @@ class MomoAdapter(BasePlatformAdapter):
             h["Authorization"] = f"Bearer {self._access_token}"
         return h
 
+    def _gateway_headers(self) -> dict[str, str]:
+        h = {"Content-Type": "application/json"}
+        if self.cfg.gateway_secret:
+            h["X-Momo-Agent-Gateway-Secret"] = self.cfg.gateway_secret
+        return h
+
     async def _ensure_session(self) -> Any:
         if aiohttp is None:  # pragma: no cover - runtime dep missing
             raise RuntimeError(
@@ -237,6 +250,15 @@ class MomoAdapter(BasePlatformAdapter):
         session = await self._ensure_session()
         url = f"{self.cfg.api_base_url}{path}"
         async with session.post(url, json=body, headers=self._auth_headers()) as resp:
+            text = await resp.text()
+            if resp.status >= 400:
+                raise MomoAPIError(resp.status, path, text)
+            return json.loads(text) if text else {}
+
+    async def _post_gateway(self, path: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        session = await self._ensure_session()
+        url = f"{self.cfg.api_base_url}{path}"
+        async with session.post(url, json=body, headers=self._gateway_headers()) as resp:
             text = await resp.text()
             if resp.status >= 400:
                 raise MomoAPIError(resp.status, path, text)
@@ -451,6 +473,10 @@ class MomoAdapter(BasePlatformAdapter):
              into the channel via send() (idempotent client_msg_id).
         """
         etype = evt.get("type")
+        if etype == "agent.job":
+            await self._handle_agent_job(evt)
+            return
+
         if etype not in ("mention", "dm.signal"):
             return  # not an actionable trigger (message.new echoes, etc.)
 
@@ -493,6 +519,149 @@ class MomoAdapter(BasePlatformAdapter):
                 client_msg_id=f"{run_id}:final" if run_id else None,
                 run_id=run_id,
             )
+
+    async def _handle_agent_job(self, evt: Mapping[str, Any]) -> None:
+        """Execute a momo-created agent job and report the result back to momo.
+
+        This is the MOMO-325 product path for Hermes-as-platform-gateway:
+        momo creates agent_run/context/budget/audit + `agent.job`, Hermes owns
+        provider OAuth/model execution, and the final user-visible message is
+        committed by momo's `/gateway/complete` endpoint.
+        """
+        payload = evt.get("payload") or {}
+        run_id = payload.get("run_id") or payload.get("runId")
+        workspace_id = payload.get("workspace_id") or payload.get("workspaceId") or self.cfg.workspace_id
+        channel_id = payload.get("channel_id") or payload.get("channelId")
+        agent_member_id = payload.get("agent_member_id") or payload.get("agentMemberId")
+        if not run_id or not workspace_id or not channel_id:
+            log.warning("agent.job missing run/workspace/channel; skipping: %s", payload)
+            return
+
+        trigger_key = f"agent.job:{run_id}"
+        if trigger_key in self._handled_triggers:
+            return
+        self._handled_triggers.add(trigger_key)
+
+        if agent_member_id and agent_member_id != self.cfg.agent_member_id:
+            log.debug("agent.job for another agent; skipping run=%s", run_id)
+            return
+
+        await self._report_gateway_event(workspace_id, run_id, "running", "job received")
+        try:
+            result = await self._run_gateway_job(payload)
+        except Exception as exc:  # noqa: BLE001 - report a readable timeline error
+            log.exception("gateway job failed: run=%s", run_id)
+            await self._complete_gateway_job(
+                workspace_id,
+                run_id,
+                {
+                    "status": "failed",
+                    "error": "Hermes runtime failed before producing a final response.",
+                    "usage": {
+                        "model": payload.get("model") or "hermes-agent",
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cached_tokens": 0,
+                        "reasoning_tokens": 0,
+                        "cost_micro_usd": 0,
+                        "was_estimated": True,
+                    },
+                },
+            )
+            return
+
+        await self._complete_gateway_job(workspace_id, run_id, result)
+
+    async def _report_gateway_event(
+        self, workspace_id: str, run_id: str, status: str, detail: str
+    ) -> None:
+        path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
+        await self._post_gateway(path, {"status": status, "detail": detail})
+
+    async def _complete_gateway_job(
+        self, workspace_id: str, run_id: str, result: Mapping[str, Any]
+    ) -> None:
+        path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/complete"
+        await self._post_gateway(path, dict(result))
+
+    async def _run_gateway_job(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Ask the injected Hermes runtime to execute a momo job.
+
+        The live gateway SDK is intentionally treated as an adapter boundary.
+        We support a few narrow method names to keep the momo plugin resilient
+        without importing Hermes internals in repo-local tests.
+        """
+        if self.runtime is None:
+            raise RuntimeError("Hermes runtime handle is not configured")
+
+        if hasattr(self.runtime, "run_momo_job"):
+            result = self.runtime.run_momo_job(payload)
+            if inspect.isawaitable(result):
+                result = await result
+            return self._normalize_gateway_result(result, payload)
+
+        if hasattr(self.runtime, "run_agent_job"):
+            result = self.runtime.run_agent_job(payload)
+            if inspect.isawaitable(result):
+                result = await result
+            return self._normalize_gateway_result(result, payload)
+
+        if hasattr(self.runtime, "chat"):
+            messages = self._payload_messages(payload)
+            result = self.runtime.chat(messages=messages, model=payload.get("model"))
+            if inspect.isawaitable(result):
+                result = await result
+            return self._normalize_gateway_result(result, payload)
+
+        raise RuntimeError("Hermes runtime does not expose a momo-compatible job method")
+
+    @staticmethod
+    def _payload_messages(payload: Mapping[str, Any]) -> list[dict[str, str]]:
+        recent = payload.get("recent_messages")
+        messages: list[dict[str, str]] = []
+        if isinstance(recent, Sequence) and not isinstance(recent, (str, bytes, bytearray)):
+            for item in recent:
+                if not isinstance(item, Mapping):
+                    continue
+                body = str(item.get("body") or "")
+                if not body:
+                    continue
+                role = "assistant" if item.get("author_kind") == "agent" else "user"
+                messages.append({"role": role, "content": body})
+        if not messages:
+            prompt = str(payload.get("prompt") or "")
+            messages.append({"role": "user", "content": prompt})
+        return messages
+
+    @staticmethod
+    def _normalize_gateway_result(result: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if isinstance(result, Mapping):
+            body = result.get("body") or result.get("text") or result.get("content")
+            usage = result.get("usage")
+            status = result.get("status") or "succeeded"
+            error = result.get("error")
+        else:
+            body = str(result)
+            usage = None
+            status = "succeeded"
+            error = None
+
+        if usage is None:
+            usage = {
+                "model": payload.get("model") or "hermes-agent",
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "cached_tokens": 0,
+                "reasoning_tokens": 0,
+                "cost_micro_usd": 0,
+                "was_estimated": True,
+            }
+        return {
+            "status": status,
+            "body": body,
+            "error": error,
+            "usage": usage,
+        }
 
     async def _invoke_agent(
         self, *, channel_id: str, prompt: str, idempotency_key: str
@@ -608,6 +777,36 @@ def register_platform(registry: Any = None) -> type[MomoAdapter]:
                 fn(MomoAdapter.platform_name, MomoAdapter)
                 break
     log.info("registered momo platform adapter (%s)", MomoAdapter.platform_name)
+    return MomoAdapter
+
+
+def register(ctx: Any) -> type[MomoAdapter]:
+    """Hermes plugin-SDK entrypoint (PLUGIN.yaml + adapter.py path).
+
+    Current Hermes docs recommend plugin registration through a context object
+    rather than editing the built-in gateway registry. Keep this thin and
+    tolerant because the SDK object is owned by Hermes, not momo.
+    """
+    for method in ("register_platform", "register", "add"):
+        fn = getattr(ctx, method, None)
+        if callable(fn):
+            try:
+                fn(
+                    platform_name=MomoAdapter.platform_name,
+                    adapter_cls=MomoAdapter,
+                    config_cls=MomoConfig,
+                    env_enablement_fn=lambda env: bool(
+                        env.get("MOMO_API_URL")
+                        and env.get("MOMO_WORKSPACE_ID")
+                        and env.get("MOMO_AGENT_MEMBER_ID")
+                    ),
+                )
+            except TypeError:
+                try:
+                    fn(MomoAdapter.platform_name, MomoAdapter)
+                except TypeError:
+                    fn(MomoAdapter)
+            break
     return MomoAdapter
 
 
