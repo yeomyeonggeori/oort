@@ -50,6 +50,7 @@ if [ "$ENV_FILE" = "" ]; then
 fi
 
 if [ "$ENV_FILE" != "" ] && [ -f "$ENV_FILE" ]; then
+  ENV_FILE="$ENV_FILE" bash "$REPO_ROOT/scripts/ensure_runtime_env.sh" >/dev/null
   set -a
   # shellcheck disable=SC1090
   . "$ENV_FILE"
@@ -600,14 +601,14 @@ DELETE FROM outbox WHERE payload->>'run_id' = '{run_id}'
 DELETE FROM agent_run WHERE id = '{run_id}';
 DELETE FROM message WHERE id = '{message_id}' OR run_id = '{run_id}';
 
--- MOMO-301: this verifier owns its agent's live-run semaphore (G1) while it
--- runs. Earlier all-profile verifiers can leave active runs for this agent
--- (e.g. approval-decision's nonmember fixture stays awaiting_approval);
--- neutralize them so the seeded run does not trip the concurrency guard.
+-- MOMO-301: this verifier owns its own live-run semaphore (G1) while it runs.
+-- Neutralize only prior MOMO-212 verifier runs; do not cancel arbitrary active
+-- Hermes runs because local dogfood may be using the deterministic demo agent.
 UPDATE agent_run
    SET status = 'cancelled', finished_at = now(), updated_at = now()
  WHERE workspace_id = '{workspace_id}'
    AND agent_member_id = '{agent_id}'
+   AND idempotency_key LIKE 'momo-212-%'
    AND status IN ('running', 'awaiting_approval', 'paused');
 
 WITH bumped AS (
@@ -762,6 +763,21 @@ case "$EVENT_TYPE" in
 esac
 [ "$PUB_RUN_ID" = "$RUN_ID" ] || fail "run_id mismatch: expected $RUN_ID got $PUB_RUN_ID"
 [ "$PUB_CHANNEL_ID" = "$CHANNEL_ID" ] || fail "channel_id mismatch: expected $CHANNEL_ID got $PUB_CHANNEL_ID"
+
+psql_admin <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+-- This verifier only waits for the first live progress event, then stops the
+-- worker. Do not leave its own run occupying the G1 concurrency semaphore for
+-- later runtime-agent profile steps.
+UPDATE agent_run
+   SET status = 'cancelled', finished_at = now(), updated_at = now()
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND id = '$RUN_ID'
+   AND status IN ('queued', 'running', 'awaiting_approval', 'paused');
+COMMIT;
+SQL
 
 {
   echo "## MOMO-212 Agent Live Channel Evidence"

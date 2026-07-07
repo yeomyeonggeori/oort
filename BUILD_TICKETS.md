@@ -179,6 +179,7 @@
 | `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-224, MOMO-237, MOMO-239, MOMO-240, MOMO-241 |
 | `MOMO-246` | 72h Local Alpha Dogfood Run | manual/tracking | MOMO-241, MOMO-242, MOMO-243, MOMO-244, MOMO-245 |
 | `MOMO-319` | Local gate/verifier hardening for solo alpha | tooling/runtime | LSA-001, MOMO-300, MOMO-301, MOMO-302 |
+| `MOMO-320` | Local runtime env drift guard | tooling/runtime | LSA-001, MOMO-319, MOMO-300 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -308,6 +309,14 @@
 - [x] `LOCAL_GATE_ALLOW_DIRTY=1 ENV_FILE=.env.worktree scripts/local_gate.sh --profile runtime-agent` PASS evidence를 남긴다.
 - [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`, `research/13-redesign/00-execution-tracker.md`를 갱신한다.
 - [x] runtime-db partial parallelization과 warm volume opt-in은 후속 performance slice로 남긴다.
+
+### MOMO-320 수용기준 `[tooling/runtime]`
+- [x] Runtime profile 시작 전 generated `.env.worktree`가 current runtime contract(`CENT_TOKEN_HMAC`, `CENT_API_KEY`, `CENT_PROXY_SECRET`, `JWT_HMAC`, port/runtime keys)를 만족하는지 검사한다.
+- [x] `ENV_FILE`이 비었거나 generated `.env.worktree`를 가리키면 stale/missing key 발견 시 `.conductor/setup.sh`로 재생성한다.
+- [x] Custom `ENV_FILE`은 덮어쓰지 않고, 필수 키가 빠져 있으면 secret 값을 출력하지 않는 fail-fast 메시지를 낸다.
+- [x] `scripts/local_gate.sh --profile docs` PASS evidence를 남긴다.
+- [x] stale generated env를 만든 뒤 `ENV_FILE=.env.worktree scripts/local_gate.sh --profile runtime-agent` PASS evidence를 남긴다.
+- [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`, `research/13-redesign/00-execution-tracker.md`를 갱신한다.
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.
