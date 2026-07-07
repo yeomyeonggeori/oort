@@ -87,6 +87,16 @@ FIXTURE_MEMBERSHIP_ID="00000000-0000-7000-8000-000000300301"
 FIXTURE_EMAIL="momo-300-auth-hardening@momo.local"
 PROXY_TEST_SECRET="momo-300-proxy-secret-$$"
 MEMBER_RATE_LIMIT=10
+# MOMO-300 gate-hang hardening: every curl must be bounded so a dead or
+# unresponsive server converts a would-be infinite wait into a clear FAIL.
+# --connect-timeout bounds the TCP handshake; --max-time bounds the whole
+# request (a server that accepts the socket but never answers under memory
+# pressure is the exact hang this verifier used to exhibit). Overridable via
+# env for slower machines.
+CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-5}"
+CURL_MAX_TIME="${CURL_MAX_TIME:-15}"
+HEALTH_CONNECT_TIMEOUT="${HEALTH_CONNECT_TIMEOUT:-3}"
+HEALTH_MAX_TIME="${HEALTH_MAX_TIME:-5}"
 RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-auth-hardening-$RUN_ID"
 SERVER_LOG="$TMP_DIR/momo-server.log"
@@ -100,7 +110,7 @@ cleanup() {
     wait "$SERVER_PID" >/dev/null 2>&1 || true
   fi
   for _ in $(seq 1 10); do
-    if ! curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+    if ! curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME" "$BASE_URL/health" >/dev/null 2>&1; then
       break
     fi
     sleep 1
@@ -125,7 +135,7 @@ api() {
   local extra_header="${5:-}"
   local out="$TMP_DIR/response.json"
   local status
-  local -a args=(-sS -o "$out" -w "%{http_code}" -X "$method")
+  local -a args=(-sS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" -o "$out" -w "%{http_code}" -X "$method")
   args+=(-H "Content-Type: application/json")
   if [ "$token" != "" ]; then
     args+=(-H "Authorization: Bearer $token")
@@ -136,8 +146,11 @@ api() {
   if [ "$body" != "" ]; then
     args+=(--data "$body")
   fi
-  status="$(curl "${args[@]}" "$BASE_URL$path")"
-  RESPONSE_BODY="$(cat "$out")"
+  # On connect failure / --max-time timeout curl still emits the %{http_code}
+  # write-out (000) but exits non-zero; the `|| status=000` keeps set -e from
+  # aborting mid-assertion so expect_status can report a clean mismatch + log.
+  status="$(curl "${args[@]}" "$BASE_URL$path")" || status="000"
+  RESPONSE_BODY="$(cat "$out" 2>/dev/null || true)"
   RESPONSE_STATUS="$status"
 }
 
@@ -260,7 +273,7 @@ reclaim_leaked_server_port() {
 
 start_server() {
   reclaim_leaked_server_port
-  if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+  if curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME" "$BASE_URL/health" >/dev/null 2>&1; then
     echo "[auth-hardening] $BASE_URL is already serving /health; stop the existing server before running this verifier." >&2
     exit 1
   fi
@@ -280,7 +293,7 @@ start_server() {
   SERVER_PID="$!"
 
   for _ in $(seq 1 90); do
-    if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
+    if curl -fsS --connect-timeout "$HEALTH_CONNECT_TIMEOUT" --max-time "$HEALTH_MAX_TIME" "$BASE_URL/health" >/dev/null 2>&1; then
       echo "[auth-hardening] server health is green"
       return 0
     fi
@@ -418,13 +431,26 @@ RACE_N=6
 RACE_DIR="$TMP_DIR/refresh-race"
 mkdir -p "$RACE_DIR"
 echo "[auth-hardening] firing $RACE_N concurrent refresh requests with one refresh token"
+# ROOT CAUSE of the MOMO-300 gate hang: a bare `wait` here waits for EVERY
+# background job of this shell — which includes the long-lived MomoServer
+# started with `&` in start_server (SERVER_PID). When the server stays healthy
+# through the burst (the normal path), that `wait` never returns and the gate
+# hangs forever. Collect only the curl PIDs and wait on exactly those.
+RACE_PIDS=()
 for i in $(seq 1 "$RACE_N"); do
-  curl -sS -o "$RACE_DIR/body-$i.json" -w '%{http_code}' \
+  # Bounded so a slow/dead server (memory pressure) makes each background curl
+  # emit http_code 000 and exit instead of stalling. 000 is caught by the
+  # status classifier below.
+  curl -sS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+    -o "$RACE_DIR/body-$i.json" -w '%{http_code}' \
     -H "Content-Type: application/json" \
     --data "$RACE_BODY" \
     "$BASE_URL/v1/auth/refresh" > "$RACE_DIR/status-$i" &
+  RACE_PIDS+=("$!")
 done
-wait
+for race_pid in "${RACE_PIDS[@]}"; do
+  wait "$race_pid" || true
+done
 RACE_WINS=0
 RACE_401=0
 for i in $(seq 1 "$RACE_N"); do
@@ -453,9 +479,18 @@ SAW_429=0
 RETRY_AFTER=""
 for _ in $(seq 1 $((MEMBER_RATE_LIMIT + 8))); do
   HDRS="$TMP_DIR/hammer-headers.txt"
-  STATUS="$(curl -sS -o /dev/null -D "$HDRS" -w '%{http_code}' \
+  STATUS="$(curl -sS --connect-timeout "$CURL_CONNECT_TIMEOUT" --max-time "$CURL_MAX_TIME" \
+    -o /dev/null -D "$HDRS" -w '%{http_code}' \
     -H "Authorization: Bearer $NEW_ACCESS" \
-    "$BASE_URL/v1/workspaces/$DEMO_WORKSPACE_ID/roster")"
+    "$BASE_URL/v1/workspaces/$DEMO_WORKSPACE_ID/roster")" || STATUS="000"
+  # A dead/unresponsive server (the historical hang point) now surfaces as a
+  # bounded 000 here; fail fast and loudly instead of looping into a wall.
+  if [ "$STATUS" = "000" ]; then
+    echo "[auth-hardening] FAIL roster hammer could not reach $BASE_URL (curl connect/timeout, http_code=000); the server likely died mid-burst" >&2
+    echo "[auth-hardening] server log: $SERVER_LOG" >&2
+    tail -80 "$SERVER_LOG" >&2 || true
+    exit 1
+  fi
   if [ "$STATUS" = "429" ]; then
     SAW_429=1
     RETRY_AFTER="$(awk 'tolower($1) == "retry-after:" {print $2}' "$HDRS" | tr -d '\r')"
