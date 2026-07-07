@@ -397,7 +397,7 @@
 - [x] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
 - [x] `scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
 - [x] 실제 Hermes CLI가 없으면 real gateway e2e는 `runtime-unverified(real hermes gateway missing)`로 남긴다.
-- [ ] PR 생성, 코드 리뷰 후 필요한 수정, 최종 local gate, merge까지 momo-main 파이프라인으로 진행한다.
+- [x] PR 생성, 코드 리뷰 후 필요한 수정, 최종 local gate, merge까지 momo-main 파이프라인으로 진행한다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
