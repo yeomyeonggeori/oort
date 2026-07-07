@@ -9,6 +9,8 @@ set -euo pipefail
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+# shellcheck source=scripts/runtime_process_guard.sh
+. "$REPO_ROOT/scripts/runtime_process_guard.sh"
 
 ENV_FILE="${ENV_FILE:-}"
 if [ "$ENV_FILE" = "" ]; then
@@ -36,18 +38,30 @@ case "$BASE_API_PORT" in
 esac
 # Run the bridge smoke on its own host API port so it can be chained after
 # other runtime-agent verifier scripts that may still be releasing PORT.
-API_PORT="${LOCAL_HERMES_BRIDGE_API_PORT:-$((BASE_API_PORT + 37))}"
+API_PORT="${LOCAL_HERMES_BRIDGE_API_PORT:-$((BASE_API_PORT + 6))}"
 API_BASE_URL="http://127.0.0.1:${API_PORT}"
 MOCK_LOG="${TMPDIR:-/tmp}/momo-local-hermes-bridge-mock-$$.log"
 MOCK_PID=""
 
 cleanup() {
-  if [ "${MOCK_PID:-}" != "" ] && kill -0 "$MOCK_PID" 2>/dev/null; then
-    kill "$MOCK_PID" 2>/dev/null || true
-    wait "$MOCK_PID" 2>/dev/null || true
-  fi
+  momo_cleanup_tracked_pids "local-hermes-bridge verifier" "${MOCK_PID:-}"
 }
 trap cleanup EXIT INT TERM
+
+momo_cleanup_port_listener "$API_PORT" "local-hermes-bridge API preflight" || {
+  echo "[local-hermes-bridge] API port ${API_PORT} is occupied by a non-momo process; choose LOCAL_HERMES_BRIDGE_API_PORT." >&2
+  exit 1
+}
+
+if ! momo_cleanup_port_listener "$HERMES_PORT" "local-hermes-bridge mock provider preflight"; then
+  if [ "${LOCAL_HERMES_BRIDGE_REUSE_EXISTING_PROVIDER:-0}" = "1" ]; then
+    echo "[local-hermes-bridge] preserving user-owned loopback provider at ${HERMES_BASE_URL}"
+  else
+    echo "[local-hermes-bridge] Hermes port ${HERMES_PORT} is occupied by a non-verifier process." >&2
+    echo "[local-hermes-bridge] Stop it, choose HERMES_PORT, or set LOCAL_HERMES_BRIDGE_REUSE_EXISTING_PROVIDER=1." >&2
+    exit 1
+  fi
+fi
 
 if curl -fsS "http://127.0.0.1:${HERMES_PORT}/health" >/dev/null 2>&1; then
   echo "[local-hermes-bridge] using existing loopback provider at ${HERMES_BASE_URL}"

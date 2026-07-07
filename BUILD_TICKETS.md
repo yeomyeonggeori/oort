@@ -178,6 +178,7 @@
 | `MOMO-244` | Dev Update Channel v0 | swift/docs | MOMO-235, MOMO-241 |
 | `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-224, MOMO-237, MOMO-239, MOMO-240, MOMO-241 |
 | `MOMO-246` | 72h Local Alpha Dogfood Run | manual/tracking | MOMO-241, MOMO-242, MOMO-243, MOMO-244, MOMO-245 |
+| `MOMO-319` | Local gate/verifier hardening for solo alpha | tooling/runtime | LSA-001, MOMO-300, MOMO-301, MOMO-302 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -293,6 +294,20 @@
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 남긴다.
 - [x] `scripts/local_gate.sh --profile local-alpha` PASS evidence를 남긴다.
 - [x] 실제 credentialed Hermes/GPT provider login, 72h dogfood, AWS provisioning, MomoDS UI migration은 out of scope로 남긴다.
+
+### MOMO-319 수용기준 `[tooling/runtime]`
+- [x] Runtime verifier host process cleanup은 repo-local verifier/mock/server 계열 process만 대상으로 삼고, Docker Postgres/Centrifugo 같은 non-momo listener나 user-owned provider는 건드리지 않는다.
+- [x] `runtime-agent` profile이 worktree env의 base ports를 읽고 AgentWorker/context/live/local-Hermes verifier 사이에서 API/Hermes/bridge 전용 포트를 정리한다.
+- [x] Agent context/bridge 보조 포트는 `.conductor` 10-port block 내부(`base+4..6`)만 사용해 다른 worktree의 API/Hermes 포트를 건드리지 않는다.
+- [x] 실패 중간에 gate가 멈춰도 runtime-agent final cleanup이 always-run으로 실행된다.
+- [x] process guard는 raw command line을 local gate evidence/log에 남기지 않는다.
+- [x] `verify_external_agent_provider.sh`/`verify_local_hermes_bridge.sh`는 deterministic verifier fixture/client_msg_id/run id만 cleanup하고 실제 dogfood 중인 pending agent job을 neutralize하지 않는다.
+- [x] user-owned Hermes/provider listener는 기본적으로 kill하지 않고 conflict/fail-closed로 남기며, standalone bridge verifier는 명시 opt-in(`LOCAL_HERMES_BRIDGE_REUSE_EXISTING_PROVIDER=1`) 때만 재사용한다.
+- [x] `verify_agent_worker.sh` fixture cleanup은 FK 순서상 `agent_run` 삭제/중립화 후 trigger/output message를 삭제한다.
+- [x] `scripts/verify_local_hermes_bridge.sh` 단독 PASS evidence와 `scripts/verify_agent_worker.sh` 단독 PASS evidence를 남긴다.
+- [x] `LOCAL_GATE_ALLOW_DIRTY=1 ENV_FILE=.env.worktree scripts/local_gate.sh --profile runtime-agent` PASS evidence를 남긴다.
+- [x] `STATUS.md`, `ROADMAP.md`, `BUILD_TICKETS.md`, `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`, `research/13-redesign/00-execution-tracker.md`를 갱신한다.
+- [x] runtime-db partial parallelization과 warm volume opt-in은 후속 performance slice로 남긴다.
 
 ### MOMO-231 수용기준 `[docs/tooling]`
 - [ ] GitHub #219를 `scripts/goal_claim.sh 219`로 claim하고 별도 branch/worktree에서 진행한다.

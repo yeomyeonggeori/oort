@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # =============================================================================
 # scripts/verify_agent_worker.sh — MOMO-004 AgentWorker runtime gate
 #
@@ -21,6 +21,8 @@ set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+# shellcheck source=scripts/runtime_process_guard.sh
+. "$REPO_ROOT/scripts/runtime_process_guard.sh"
 
 ENV_FILE=${ENV_FILE:-}
 if [ "$ENV_FILE" = "" ]; then
@@ -147,22 +149,7 @@ SERVER_PID=
 RELAY_PID=
 
 cleanup() {
-  if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-  fi
-  if [ "${WORKER_PID:-}" != "" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
-    kill "$WORKER_PID" 2>/dev/null || true
-    wait "$WORKER_PID" 2>/dev/null || true
-  fi
-  if [ "${RELAY_PID:-}" != "" ] && kill -0 "$RELAY_PID" 2>/dev/null; then
-    kill "$RELAY_PID" 2>/dev/null || true
-    wait "$RELAY_PID" 2>/dev/null || true
-  fi
-  if [ "${MOCK_PID:-}" != "" ] && kill -0 "$MOCK_PID" 2>/dev/null; then
-    kill "$MOCK_PID" 2>/dev/null || true
-    wait "$MOCK_PID" 2>/dev/null || true
-  fi
+  momo_cleanup_tracked_pids "agent-worker verifier" "$SERVER_PID" "$WORKER_PID" "$RELAY_PID" "$MOCK_PID"
 }
 trap cleanup EXIT INT TERM
 
@@ -278,6 +265,10 @@ verify_cost_projection_endpoint() {
 }
 
 echo "[agent-worker] using env file: ${ENV_FILE:-<none>}"
+momo_cleanup_runtime_ports "agent-worker verifier preflight" "$PORT" "$HERMES_PORT" || {
+  echo "[agent-worker] verifier ports are occupied by non-momo processes; stop them or choose PORT/HERMES_PORT overrides." >&2
+  exit 1
+}
 echo "[agent-worker] ensuring runtime DB roles exist"
 "$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
 
@@ -313,6 +304,9 @@ DELETE FROM outbox
                               '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID')
     OR payload->'data'->'payload'->>'run_id' IN
        ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID');
+DELETE FROM agent_run
+ WHERE id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
+              '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID', '$GUARD_G2_RUN_ID');
 DELETE FROM message
  WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
                   '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID')
@@ -322,9 +316,6 @@ DELETE FROM message
     OR client_msg_id IN ('$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
                          '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID',
                          '$GUARD_G2_RESET_CLIENT_MSG_ID');
-DELETE FROM agent_run
- WHERE id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-              '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID', '$GUARD_G2_RUN_ID');
 DELETE FROM audit_log
  WHERE workspace_id = '$WORKSPACE_ID'
    AND run_id IN (
@@ -339,35 +330,30 @@ DELETE FROM audit_log
       WHERE workspace_id = '$WORKSPACE_ID'
         AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
    );
--- The all-profile local gate runs approval-decision verification before this
--- script. That verifier intentionally leaves a resume_approval job as durable
--- evidence, but this AgentWorker verifier owns the demo workspace queue while
--- it runs and must not claim another verifier's pending agent_job first.
+-- Keep cleanup verifier-owned. Do not clear the whole demo workspace agent_job
+-- queue because local dogfood may have real pending Hermes work in the same DB.
 DELETE FROM outbox
  WHERE workspace_id = '$WORKSPACE_ID'
-   AND kind = 'agent_job'
-   AND status IN ('pending', 'processing');
--- MOMO-301: this verifier also owns the demo agent's live-run semaphore (G1)
--- while it runs. Neutralize lingering active runs for the demo agent (e.g. the
--- macOS real-backend awaiting_approval fixture on shared volumes) so G1
--- evaluates only this script's own fixtures; later verifiers reseed their own.
-UPDATE agent_run
-   SET status = 'cancelled', finished_at = now(), updated_at = now()
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND agent_member_id = '$AGENT_ID'
-   AND status IN ('running', 'awaiting_approval', 'paused');
-DELETE FROM outbox WHERE payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
+   AND (payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
    OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID'
    OR payload->>'trigger_message_id' IN (
      SELECT id::text FROM message
       WHERE workspace_id = '$WORKSPACE_ID'
         AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
    )
-   OR payload->'data'->'payload'->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID');
-DELETE FROM approval WHERE id = '$RESUME_APPROVAL_ID';
-DELETE FROM budget_window WHERE budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
-DELETE FROM budget WHERE id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
-DELETE FROM message WHERE run_id = '$RESUME_RUN_ID';
+   OR payload->'data'->'payload'->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID'));
+DELETE FROM approval
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND id = '$RESUME_APPROVAL_ID';
+DELETE FROM budget_window
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
+DELETE FROM budget
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
+DELETE FROM message
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND run_id = '$RESUME_RUN_ID';
 DELETE FROM message
  WHERE workspace_id = '$WORKSPACE_ID'
    AND run_id IN (

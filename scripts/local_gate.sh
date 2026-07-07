@@ -307,6 +307,9 @@ export LOCAL_GATE_INTERNAL_ALPHA_DIR="$OUT_DIR/internal-alpha-${RUN_ID}"
 declare -a CMD_LABELS=()
 declare -a CMD_STRINGS=()
 declare -a CMD_STATUS=()
+declare -a FINAL_CLEANUP_LABELS=()
+declare -a FINAL_CLEANUP_STRINGS=()
+declare -a FINAL_CLEANUP_STATUS=()
 declare -a RUNTIME_COVERAGE=()
 declare -a NOT_COVERED=()
 BOOTSTRAP_ADDED=0
@@ -331,6 +334,14 @@ add_cmd_once() {
   CMD_LABELS+=("$label")
   CMD_STRINGS+=("$command")
   CMD_STATUS+=("not-run")
+}
+
+add_final_cleanup_cmd() {
+  local label="$1"
+  local command="$2"
+  FINAL_CLEANUP_LABELS+=("$label")
+  FINAL_CLEANUP_STRINGS+=("$command")
+  FINAL_CLEANUP_STATUS+=("not-run")
 }
 
 add_note_once() {
@@ -358,7 +369,7 @@ add_static_commands() {
   add_cmd_once "e2e compose config" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; test -n "$env_file" || { echo "no env file found for e2e compose config"; exit 1; }; docker compose --env-file "$env_file" -f infra/docker-compose.e2e.yml config >/tmp/momo-compose-e2e-config.yml; echo "wrote /tmp/momo-compose-e2e-config.yml using $env_file"'
   add_cmd_once "AWS internal alpha topology preflight" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/aws-internal-alpha-preflight"; scripts/aws_internal_alpha_preflight.sh --env-file infra/prod/aws-internal-alpha.env.example --mode recommended --evidence-dir "$out"'
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_design_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/runtime_process_guard.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_design_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py; PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
 }
 
@@ -442,7 +453,17 @@ add_runtime_relay_commands() {
 
 add_runtime_host_api_cleanup_command() {
   local label="${1:-Runtime host MomoServer cleanup}"
-  add_cmd "$label" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi; port="${PORT:-8080}"; if ! command -v lsof >/dev/null 2>&1; then echo "lsof unavailable; skip host MomoServer cleanup"; exit 0; fi; pids="$(lsof -nP -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"; if [ -z "$pids" ]; then echo "no listener on port $port"; exit 0; fi; killed=""; for pid in $pids; do cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"; case "$cmd" in *MomoServer*) echo "stopping MomoServer listener pid=$pid port=$port"; kill "$pid" 2>/dev/null || true; killed="$killed $pid" ;; *) echo "leaving non-MomoServer listener pid=$pid port=$port command=$cmd" ;; esac; done; sleep 1; for pid in $killed; do if kill -0 "$pid" 2>/dev/null; then cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"; case "$cmd" in *MomoServer*) echo "force stopping MomoServer listener pid=$pid port=$port"; kill -9 "$pid" 2>/dev/null || true ;; esac; fi; done'
+  add_cmd "$label" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi; . scripts/runtime_process_guard.sh; momo_cleanup_port_listener "${PORT:-8080}" "host runtime API"'
+}
+
+add_runtime_agent_cleanup_command() {
+  local label="${1:-Runtime agent host process cleanup}"
+  add_cmd "$label" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi; export MOMO_RUNTIME_GUARD_REPO_ROOT="$(pwd)"; . scripts/runtime_process_guard.sh; base_port="${PORT:-8080}"; case "$base_port" in ""|*[!0-9]*) base_port=8080 ;; esac; base_hermes_port="${HERMES_PORT:-$((base_port + 3))}"; case "$base_hermes_port" in ""|*[!0-9]*) base_hermes_port=$((base_port + 3)) ;; esac; context_port="${AGENT_CONTEXT_PORT:-$((base_port + 4))}"; context_hermes_port="${AGENT_CONTEXT_HERMES_PORT:-$((base_port + 5))}"; bridge_api="${LOCAL_HERMES_BRIDGE_API_PORT:-$((base_port + 6))}"; momo_cleanup_repo_processes "runtime-agent gate"; momo_cleanup_runtime_ports "runtime-agent gate" "$base_port" "$base_hermes_port" "$context_port" "$context_hermes_port" "$bridge_api"'
+}
+
+add_runtime_agent_final_cleanup_command() {
+  local label="${1:-Final runtime agent host process cleanup}"
+  add_final_cleanup_cmd "$label" 'env_file="${ENV_FILE:-}"; if [ -z "$env_file" ]; then for f in .env.worktree .env infra/.env.example; do if [ -f "$f" ]; then env_file="$f"; break; fi; done; fi; if [ -n "$env_file" ] && [ -f "$env_file" ]; then set -a; . "$env_file"; set +a; fi; export MOMO_RUNTIME_GUARD_REPO_ROOT="$(pwd)"; . scripts/runtime_process_guard.sh; base_port="${PORT:-8080}"; case "$base_port" in ""|*[!0-9]*) base_port=8080 ;; esac; base_hermes_port="${HERMES_PORT:-$((base_port + 3))}"; case "$base_hermes_port" in ""|*[!0-9]*) base_hermes_port=$((base_port + 3)) ;; esac; context_port="${AGENT_CONTEXT_PORT:-$((base_port + 4))}"; context_hermes_port="${AGENT_CONTEXT_HERMES_PORT:-$((base_port + 5))}"; bridge_api="${LOCAL_HERMES_BRIDGE_API_PORT:-$((base_port + 6))}"; momo_cleanup_repo_processes "runtime-agent gate final"; momo_cleanup_runtime_ports "runtime-agent gate final" "$base_port" "$base_hermes_port" "$context_port" "$context_hermes_port" "$bridge_api"'
 }
 
 add_runtime_live_commands() {
@@ -584,7 +605,9 @@ case "$PROFILE" in
   runtime-agent)
     add_static_commands
     add_swift_commands
+    add_runtime_agent_cleanup_command "Pre-clean runtime agent host processes"
     add_runtime_agent_commands
+    add_runtime_agent_final_cleanup_command "Cleanup runtime agent host processes"
     ;;
   external-agent-provider)
     add_static_commands
@@ -607,8 +630,9 @@ case "$PROFILE" in
     add_runtime_host_api_cleanup_command "Cleanup host MomoServer after runtime DB verifiers"
     add_runtime_relay_commands
     add_runtime_host_api_cleanup_command "Cleanup host MomoServer after relay verifier"
+    add_runtime_agent_cleanup_command "Pre-clean runtime agent host processes"
     add_runtime_agent_commands
-    add_runtime_host_api_cleanup_command "Cleanup host MomoServer after agent verifier"
+    add_runtime_agent_final_cleanup_command "Cleanup runtime agent host processes after agent verifier"
     add_macos_ui_commands
     add_note_once not_covered "Realtime WebSocket live subscribe is isolated in scripts/local_gate.sh --profile runtime-live because it starts host API/relay processes plus a compose-network api proxy for Centrifugo subscribe callbacks."
     ;;
@@ -639,6 +663,7 @@ fi
 
 FAILED_INDEX=-1
 FAILED_CODE=0
+FINAL_CLEANUP_FAILED=0
 
 run_cmd() {
   local index="$1"
@@ -669,6 +694,38 @@ run_cmd() {
   fi
 }
 
+run_final_cleanup_cmd() {
+  local index="$1"
+  local label="${FINAL_CLEANUP_LABELS[$index]}"
+  local command="${FINAL_CLEANUP_STRINGS[$index]}"
+  local code
+
+  {
+    echo
+    echo "==> [final-cleanup $((index + 1))/${#FINAL_CLEANUP_STRINGS[@]}] $label"
+    echo "\$ $command"
+  } | tee -a "$LOG_FILE"
+
+  set +e
+  bash -lc "$command" 2>&1 | tee -a "$LOG_FILE"
+  code=${PIPESTATUS[0]}
+  set +e
+
+  if [ "$code" -eq 0 ]; then
+    FINAL_CLEANUP_STATUS[index]="pass"
+    echo "PASS: $label" | tee -a "$LOG_FILE"
+  else
+    FINAL_CLEANUP_STATUS[index]="fail"
+    FINAL_CLEANUP_FAILED=1
+    echo "FAIL: $label (exit $code)" | tee -a "$LOG_FILE"
+    if [ "$FAILED_INDEX" -eq -1 ]; then
+      FAILED_INDEX=-2
+      FAILED_CODE="$code"
+    fi
+    return "$code"
+  fi
+}
+
 idx=0
 while [ "$idx" -lt "${#CMD_STRINGS[@]}" ]; do
   if ! run_cmd "$idx"; then
@@ -676,6 +733,14 @@ while [ "$idx" -lt "${#CMD_STRINGS[@]}" ]; do
   fi
   idx=$((idx + 1))
 done
+
+if [ "${#FINAL_CLEANUP_STRINGS[@]}" -gt 0 ]; then
+  idx=0
+  while [ "$idx" -lt "${#FINAL_CLEANUP_STRINGS[@]}" ]; do
+    run_final_cleanup_cmd "$idx" || true
+    idx=$((idx + 1))
+  done
+fi
 
 END_STAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -747,6 +812,19 @@ write_evidence() {
       echo "  - $marker \`${CMD_STRINGS[$i]}\`"
       i=$((i + 1))
     done
+    if [ "${#FINAL_CLEANUP_STRINGS[@]}" -gt 0 ]; then
+      echo "- Final cleanup:"
+      local cleanup_i=0
+      while [ "$cleanup_i" -lt "${#FINAL_CLEANUP_STRINGS[@]}" ]; do
+        case "${FINAL_CLEANUP_STATUS[$cleanup_i]}" in
+          pass) marker="[x]" ;;
+          fail) marker="[ ]" ;;
+          *) marker="[ ]" ;;
+        esac
+        echo "  - $marker \`${FINAL_CLEANUP_STRINGS[$cleanup_i]}\`"
+        cleanup_i=$((cleanup_i + 1))
+      done
+    fi
     echo "- Runtime coverage:"
     if [ "${#RUNTIME_COVERAGE[@]}" -eq 0 ]; then
       echo "  - None declared."
@@ -764,7 +842,11 @@ write_evidence() {
       done
     fi
     if [ "$FAILED_INDEX" -ne -1 ]; then
-      echo "- Failed command: \`${CMD_STRINGS[$FAILED_INDEX]}\`"
+      if [ "$FAILED_INDEX" -eq -2 ]; then
+        echo "- Failed command: \`final cleanup\`"
+      else
+        echo "- Failed command: \`${CMD_STRINGS[$FAILED_INDEX]}\`"
+      fi
       echo "- Failed exit code: \`$FAILED_CODE\`"
     fi
     if [ "$PROFILE" = "local-alpha" ] || [ "$PROFILE" = "internal-alpha" ]; then
