@@ -628,7 +628,7 @@ verify_roundtrip() {
       curl -fsS \
         -H "X-API-Key: $CENT_API_KEY" \
         -H "Content-Type: application/json" \
-        -d "{\"channel\":\"$CENT_CHANNEL\",\"limit\":100}" \
+        -d "{\"channel\":\"$CENT_CHANNEL\",\"limit\":100,\"reverse\":true}" \
         "$CENT_API_URL/history" > "$CHANNEL_HISTORY_FILE" 2>/dev/null || true
       live_ok="$(jq -r --arg run "$AGENT_RUN_ID" '
         [.result.publications[]?.data
@@ -670,7 +670,10 @@ if [ "$ENV_FILE" = "" ]; then
   done
 fi
 
-[ "${ENV_FILE:-}" = "" ] || load_env_file "$ENV_FILE" preserve
+if [ "${ENV_FILE:-}" != "" ] && [ -f "$ENV_FILE" ]; then
+  ENV_FILE="$ENV_FILE" bash "$REPO_ROOT/scripts/ensure_runtime_env.sh" >/dev/null
+  load_env_file "$ENV_FILE" preserve
+fi
 if [ "${EXTERNAL_AGENT_PROVIDER_ENV_FILE:-}" != "" ]; then
   load_env_file "$EXTERNAL_AGENT_PROVIDER_ENV_FILE" override
 fi

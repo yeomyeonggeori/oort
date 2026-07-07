@@ -512,19 +512,19 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
 
   HISTORY_JSON=$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "{\"channel\":\"$AGENT_CHANNEL\",\"limit\":100}" \
+    -d "{\"channel\":\"$AGENT_CHANNEL\",\"limit\":100,\"reverse\":true}" \
     "$CENT_API_URL/history" 2>/dev/null || printf '{}')
   PARTIAL_OK=$(printf '%s' "$HISTORY_JSON" | jq -r --arg run "$RUN_ID" '
     [.result.publications[]?.data
       | select(.type == "agent.partial")
-      | select((.payload.run_id // .payload.runId) == $run)
+      | select(((.payload.run_id // .payload.runId // "") | ascii_downcase) == ($run | ascii_downcase))
       | select((.payload.text // "") | contains("MOMO-004 SSE path verified"))
     ] | length
   ')
   TOOL_PARTIAL_OK=$(printf '%s' "$HISTORY_JSON" | jq -r --arg run "$RUN_ID" '
     [.result.publications[]?.data
       | select(.type == "agent.partial")
-      | select((.payload.run_id // .payload.runId) == $run)
+      | select(((.payload.run_id // .payload.runId // "") | ascii_downcase) == ($run | ascii_downcase))
       | select(.payload.tool_call_name == "github.search_issues")
       | select((.payload.tool_call_args | type) == "object")
       | select(.payload.tool_call_args.query == "MOMO-201 live tool-call fixture")
@@ -534,12 +534,12 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   ')
   CHANNEL_HISTORY_JSON=$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
     -H "Content-Type: application/json" \
-    -d "{\"channel\":\"$CENT_CHANNEL\",\"limit\":100}" \
+    -d "{\"channel\":\"$CENT_CHANNEL\",\"limit\":100,\"reverse\":true}" \
     "$CENT_API_URL/history" 2>/dev/null || printf '{}')
   FINAL_LIVE_OK=$(printf '%s' "$CHANNEL_HISTORY_JSON" | jq -r --arg run "$RUN_ID" '
     [.result.publications[]?.data
       | select(.type == "message.new")
-      | select((.payload.run_id // .payload.runId) == $run)
+      | select(((.payload.run_id // .payload.runId // "") | ascii_downcase) == ($run | ascii_downcase))
       | select(.payload.type == "text")
       | select((.payload.body // "") | contains("MOMO-004 SSE path verified"))
       | select(.seq == .payload.seq)

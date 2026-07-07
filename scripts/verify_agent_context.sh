@@ -44,6 +44,7 @@ if [ "$ENV_FILE" = "" ]; then
 fi
 
 if [ "$ENV_FILE" != "" ] && [ -f "$ENV_FILE" ]; then
+  ENV_FILE="$ENV_FILE" bash "$REPO_ROOT/scripts/ensure_runtime_env.sh" >/dev/null
   set -a
   # shellcheck disable=SC1090
   . "$ENV_FILE"
@@ -197,16 +198,39 @@ BEGIN;
 SET LOCAL row_security = off;
 SET LOCAL app.workspace_id = '$WORKSPACE_ID';
 
--- Own the queue + clear any prior CTX302 fixtures so counts are deterministic.
-DELETE FROM outbox
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND kind = 'agent_job'
-   AND status IN ('pending', 'processing');
+-- Clear only this verifier's prior CTX302 fixtures so counts are deterministic.
+-- Do not clear the whole workspace agent_job queue: local dogfood may have
+-- real pending Hermes work in the same DB.
 DELETE FROM outbox
  WHERE workspace_id = '$WORKSPACE_ID'
    AND payload->>'trigger_message_id' IN (
      SELECT id::text FROM message
       WHERE workspace_id = '$WORKSPACE_ID' AND body LIKE 'CTX302%'
+   );
+DELETE FROM usage_ledger
+ WHERE run_id IN (
+   SELECT id FROM agent_run
+    WHERE workspace_id = '$WORKSPACE_ID'
+      AND trigger_message_id IN (
+        SELECT id FROM message
+         WHERE workspace_id = '$WORKSPACE_ID' AND body LIKE 'CTX302%'
+      )
+ );
+DELETE FROM audit_log
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND (
+     run_id IN (
+       SELECT id FROM agent_run
+        WHERE workspace_id = '$WORKSPACE_ID'
+          AND trigger_message_id IN (
+            SELECT id FROM message
+             WHERE workspace_id = '$WORKSPACE_ID' AND body LIKE 'CTX302%'
+          )
+     )
+     OR target_id IN (
+       SELECT id FROM message
+        WHERE workspace_id = '$WORKSPACE_ID' AND body LIKE 'CTX302%'
+     )
    );
 DELETE FROM agent_run
  WHERE workspace_id = '$WORKSPACE_ID'
@@ -257,15 +281,14 @@ SELECT '$WORKSPACE_ID', '$OTHER_CHANNEL', b.last_seq,
        '$HUMAN_ID', 'text', 'CTX302 OTHERCHANNELSECRET off-topic'
   FROM b;
 
--- Clear restrictive per-agent/per-channel budgets left in the shared DB volume
--- by a prior verifier (e.g. verify_agent_worker's agent_channel trip budget,
--- which it only cleans at the START of its own next run) so the cost reserve
--- does not trip before the hermes call — only the generous workspace budget
--- below should govern this smoke. budget_window cascades on delete.
+-- Clear only verifier-owned budgets left in the shared DB volume. Do not delete
+-- arbitrary per-agent/per-channel budgets: local dogfood may have real budget
+-- policy in the same workspace. The second id is verify_agent_worker's
+-- deterministic agent_channel trip budget.
+DELETE FROM budget_window
+ WHERE budget_id IN ('$BUDGET_ID', '00000000-0000-7000-8000-000000000915');
 DELETE FROM budget
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND grain <> 'workspace'
-   AND (channel_id = '$TARGET_CHANNEL' OR agent_member_id = '$AGENT_ID');
+ WHERE id IN ('$BUDGET_ID', '00000000-0000-7000-8000-000000000915');
 
 -- generous workspace budget so reserve never trips before the hermes call
 INSERT INTO budget (id, workspace_id, grain, limit_micro_usd, period_seconds)
@@ -420,5 +443,46 @@ if ! grep -q "context window trimmed to budget" "$WORKER_LOG"; then
   exit 1
 fi
 
+# This verifier stops after capturing the outbound Hermes request. The mock
+# response is intentionally irrelevant here, but AgentWorker may still leave the
+# run in an active state long enough to occupy the G1 per-agent semaphore for the
+# next runtime verifier. Release only the run/outbox created from our deterministic
+# trigger message; do not touch any user dogfood work in the shared local DB.
+echo "[agent-context] releasing verifier-owned agent run"
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+UPDATE agent_run
+   SET status = 'cancelled', finished_at = now(), updated_at = now()
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND agent_member_id = '$AGENT_ID'
+   AND trigger_message_id IN (
+     SELECT id
+       FROM message
+      WHERE workspace_id = '$WORKSPACE_ID'
+        AND client_msg_id = '$CLIENT_MSG_ID'
+   )
+   AND status IN ('queued', 'running', 'awaiting_approval', 'paused');
+
+UPDATE outbox
+   SET status = 'failed',
+       last_error = 'verifier cleanup: context request captured',
+       processed_at = now()
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND kind = 'agent_job'
+   AND status IN ('pending', 'processing')
+   AND payload->>'trigger_message_id' IN (
+     SELECT id::text
+       FROM message
+      WHERE workspace_id = '$WORKSPACE_ID'
+        AND client_msg_id = '$CLIENT_MSG_ID'
+   );
+COMMIT;
+SQL
+
+rm -f "$DUMP_FILE"
+
 echo "[agent-context] context assembly verified: recent-N history + role mapping + session boundary + token budget"
-echo "[agent-context] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG dump=$DUMP_FILE"
+echo "[agent-context] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG dump=<removed-after-assertion>"
