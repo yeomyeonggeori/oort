@@ -1293,6 +1293,8 @@ extension AgentProviderMode {
             return "Internal host mock"
         case .externalHermes:
             return "External Hermes"
+        case .gateway:
+            return "Hermes gateway"
         }
     }
 }

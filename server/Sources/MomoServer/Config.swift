@@ -126,6 +126,29 @@ struct Config: Sendable {
         }
     }
 
+    func agentRuntimeStatusResponse() -> AgentRuntimeStatusResponse {
+        guard agentGateway.enabled else {
+            return agentProvider.statusResponse()
+        }
+
+        let diagnostics = agentGateway.secretConfigured
+            ? []
+            : ["AGENT_GATEWAY_SECRET is required when AGENT_GATEWAY_MODE=gateway"]
+        let availability = diagnostics.isEmpty ? "available" : "degraded"
+        return AgentRuntimeStatusResponse(
+            schema: "momo.agent_runtime.status.v0",
+            agentHandle: agentProvider.agentHandle,
+            displayName: agentProvider.displayName,
+            mode: agentGateway.mode.rawValue,
+            availability: availability,
+            model: agentProvider.model,
+            endpointLabel: "Hermes gateway platform adapter",
+            keyConfigured: agentGateway.secretConfigured,
+            degradedReason: diagnostics.isEmpty ? nil : diagnostics.joined(separator: "; "),
+            diagnostics: diagnostics
+        )
+    }
+
     /// Minimal `postgres://` URL parser (no extra deps). Returns nil if unparseable.
     private static func parseDatabaseURL(
         _ raw: String?

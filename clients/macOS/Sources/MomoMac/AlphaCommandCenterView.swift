@@ -348,10 +348,13 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
     private static func providerSetup(_ status: AgentRuntimeStatus) -> AlphaCommandCenterStatus {
         switch status.availability {
         case .available:
+            let detail = status.mode == .gateway
+                ? "Hermes gateway delivery is configured. Provider OAuth stays inside the local Hermes runtime: \(status.internalAlphaProviderSummary)"
+                : "Credentialed Hermes-compatible provider is connected: \(status.internalAlphaProviderSummary)"
             return AlphaCommandCenterStatus(
                 area: .providerSetup,
                 health: .ready,
-                detail: "Credentialed Hermes-compatible provider is connected: \(status.internalAlphaProviderSummary)"
+                detail: detail
             )
         case .mock:
             return AlphaCommandCenterStatus(

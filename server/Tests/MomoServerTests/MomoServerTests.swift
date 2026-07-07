@@ -212,6 +212,43 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNoThrow(try config.validateSecurityForBoot())
     }
 
+    func testAgentRuntimeStatusReportsGatewayDeliveryModeWhenEnabled() {
+        var workerConfig = testServerConfig()
+        workerConfig.agentProvider = AgentProviderConfig(
+            mode: .localMock,
+            hermesBaseURL: "http://localhost:28188/v1",
+            hermesAPIKey: "dev-insecure-hermes-bearer",
+            model: "hermes-agent",
+            agentHandle: "hermes",
+            displayName: "Hermes",
+            allowLocalLoopback: true
+        )
+        workerConfig.agentGateway = AgentGatewayConfig(mode: .worker, secret: "")
+
+        XCTAssertEqual(workerConfig.agentRuntimeStatusResponse().mode, "local-mock")
+
+        var gatewayConfig = workerConfig
+        gatewayConfig.agentGateway = AgentGatewayConfig(
+            mode: .gateway,
+            secret: "momo-test-gateway-secret-000000000000000000000000"
+        )
+        let gatewayStatus = gatewayConfig.agentRuntimeStatusResponse()
+        XCTAssertEqual(gatewayStatus.mode, "gateway")
+        XCTAssertEqual(gatewayStatus.availability, "available")
+        XCTAssertEqual(gatewayStatus.endpointLabel, "Hermes gateway platform adapter")
+        XCTAssertTrue(gatewayStatus.keyConfigured)
+        XCTAssertTrue(gatewayStatus.diagnostics.isEmpty)
+
+        gatewayConfig.agentGateway = AgentGatewayConfig(mode: .gateway, secret: "change-me")
+        let degraded = gatewayConfig.agentRuntimeStatusResponse()
+        XCTAssertEqual(degraded.mode, "gateway")
+        XCTAssertEqual(degraded.availability, "degraded")
+        XCTAssertFalse(degraded.keyConfigured)
+        XCTAssertEqual(degraded.diagnostics, [
+            "AGENT_GATEWAY_SECRET is required when AGENT_GATEWAY_MODE=gateway"
+        ])
+    }
+
     func testAgentGatewayErrorSanitizerRedactsSecretsAndCredentialShapedText() {
         XCTAssertNil(AgentGatewayRoutes.sanitizedGatewayError("   ", gatewaySecret: "secret"))
         XCTAssertEqual(

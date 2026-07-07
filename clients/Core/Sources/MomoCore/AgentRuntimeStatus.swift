@@ -15,6 +15,7 @@ public enum AgentProviderMode: String, Codable, Sendable, Hashable {
     case localMock = "local-mock"
     case internalHostMock = "internal-host-mock"
     case externalHermes = "external-hermes"
+    case gateway = "gateway"
 }
 
 public struct AgentRuntimeStatus: Codable, Sendable, Hashable {

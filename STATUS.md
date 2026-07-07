@@ -130,6 +130,12 @@
 - `local_alpha_runner`가 gateway mode/secret을 로드·export·redacted summary 기록·MomoServer env 주입까지 전달하도록 수정했다. provider OAuth/Codex/OpenAI token은 여전히 momo env에 전달하지 않고, 이 secret은 momo↔Hermes gateway callback 인증용이다.
 - 검증: `bash -n scripts/local_alpha_runner.sh` 대상. 실제 operator는 `scripts/momo stop-stack` 후 `AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" scripts/momo up`를 다시 실행하면 `agentRuntime.mode=gateway`를 확인할 수 있어야 한다.
 
+## 0-4b-6g. MOMO-330 Agent runtime status gateway delivery hotfix (2026-07-08)
+
+- MOMO-329 후 MomoServer 실행 env에는 `AGENT_GATEWAY_MODE=gateway`가 들어갔지만, `/health`와 `/v1/agent-runtime/status`가 `AgentProviderConfig`만 반환해 실제 gateway delivery path를 `local-mock`처럼 보이게 했다. 이는 real Hermes gateway 연결 단계에서 운영자가 잘못된 경로를 보고 있다고 판단하게 만드는 상태 표시 버그다.
+- `Config.agentRuntimeStatusResponse()`를 추가해 gateway mode에서는 `mode=gateway`, `endpointLabel=Hermes gateway platform adapter`, gateway callback secret configured/degraded 상태를 반환하도록 정리했다. worker/direct provider mode에서는 기존 provider status를 그대로 유지한다.
+- 검증: `swift test --package-path server --filter MomoServerTests/testAgentRuntimeStatusReportsGatewayDeliveryModeWhenEnabled` PASS, `swift test --package-path clients/macOS --filter MomoMacTests/testRESTBackendLoadsGatewayRuntimeStatus` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260707T162918Z-pid25103-ns1783441758419039000-wt9a510db2fbf3-rb493e10783f9.md`). 실제 gateway roundtrip은 사용자가 Hermes gateway 프로세스를 켠 뒤 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger`로 닫는다.
+
 ## 0-4b-7. MOMO-258 macOS UI Smoke Fixture Seq Hotfix (2026-07-02)
 
 - MOMO-257 merge 후 reused local Docker DB에서 `scripts/local_gate.sh --profile macos-ui`가 실패했다. 원인은 `verify_macos_real_backend_ui.sh`가 approval/cost fixture message seq를 `205901`로 고정했고, 같은 channel의 `channel_seq`가 이미 더 높게 진행되어 최신 `messages?limit=20` history에 fixture가 보이지 않은 것이다.
