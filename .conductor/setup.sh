@@ -69,6 +69,8 @@ cent_api_key="${CENT_API_KEY:-change-me-cent-api-key}"
 cent_proxy_secret="${CENT_PROXY_SECRET:-dev-insecure-cent-proxy-secret}"
 jwt_hmac="${JWT_HMAC:-change-me-jwt-hmac}"
 hermes_api_key="${HERMES_API_KEY:-change-me-hermes-bearer}"
+agent_gateway_mode="${AGENT_GATEWAY_MODE:-worker}"
+agent_gateway_secret="${AGENT_GATEWAY_SECRET:-}"
 case "${HERMES_BASE_URL:-}" in
   ""|http://localhost:*|http://127.0.0.1:*)
     hermes_base_url="http://localhost:$hermes_port/v1"
@@ -99,6 +101,8 @@ CENT_API_URL=http://localhost:$cent_port/api
 JWT_HMAC=$jwt_hmac
 HERMES_BASE_URL=$hermes_base_url
 HERMES_API_KEY=$hermes_api_key
+AGENT_GATEWAY_MODE=$agent_gateway_mode
+AGENT_GATEWAY_SECRET=$agent_gateway_secret
 EOF
 
 mv "$tmp_env" .conductor/local.env

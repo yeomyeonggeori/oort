@@ -191,6 +191,46 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testAgentGatewayModeDefaultsToWorkerAndRequiresSecretWhenEnabled() {
+        let defaultGateway = AgentGatewayConfig.load(environment: [:])
+        XCTAssertEqual(defaultGateway.mode, .worker)
+        XCTAssertFalse(defaultGateway.enabled)
+        XCTAssertFalse(defaultGateway.secretConfigured)
+
+        var config = testServerConfig()
+        config.agentGateway = AgentGatewayConfig(mode: .gateway, secret: "change-me-agent-gateway-secret")
+        XCTAssertThrowsError(try config.validateSecurityForBoot()) { error in
+            let text = String(describing: error)
+            XCTAssertTrue(text.contains("AGENT_GATEWAY_SECRET"))
+            XCTAssertFalse(text.contains("change-me-agent-gateway-secret"))
+        }
+
+        config.agentGateway = AgentGatewayConfig(
+            mode: .gateway,
+            secret: "momo-test-gateway-secret-000000000000000000000000"
+        )
+        XCTAssertNoThrow(try config.validateSecurityForBoot())
+    }
+
+    func testAgentGatewayErrorSanitizerRedactsSecretsAndCredentialShapedText() {
+        XCTAssertNil(AgentGatewayRoutes.sanitizedGatewayError("   ", gatewaySecret: "secret"))
+        XCTAssertEqual(
+            AgentGatewayRoutes.sanitizedGatewayError(
+                "gateway secret secret leaked", gatewaySecret: "secret"),
+            "gateway [redacted] [redacted] leaked"
+        )
+        XCTAssertEqual(
+            AgentGatewayRoutes.sanitizedGatewayError(
+                "Authorization: Bearer sk-test", gatewaySecret: ""),
+            "Hermes gateway reported an error with redacted credential-shaped content."
+        )
+        let long = String(repeating: "x", count: 1_010)
+        XCTAssertTrue(
+            AgentGatewayRoutes.sanitizedGatewayError(long, gatewaySecret: "")?
+                .hasSuffix("... [truncated]") == true
+        )
+    }
+
     func testCentrifugoConnectionTokenCarriesMemberAndWorkspaceClaims() async throws {
         let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
@@ -873,7 +913,8 @@ final class MomoServerTests: XCTestCase {
                 agentHandle: "kim-intern",
                 displayName: "김인턴",
                 allowLocalLoopback: false
-            )
+            ),
+            agentGateway: AgentGatewayConfig(mode: .worker, secret: "")
         )
     }
 }
