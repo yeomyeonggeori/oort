@@ -163,6 +163,31 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testLocalProfileDraftUpdatesRosterAndMentionCandidates() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        await viewModel.selectChannel(channel)
+
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+        viewModel.applyLocalProfile(
+            member: agent.id,
+            displayName: "Hermes Local",
+            avatarPath: "",
+            presence: .working
+        )
+
+        let updated = try XCTUnwrap(viewModel.member(agent.id))
+        XCTAssertEqual(updated.displayName, "Hermes Local")
+        XCTAssertEqual(updated.presence, .working)
+
+        viewModel.composerDraft = "@local"
+        XCTAssertEqual(viewModel.mentionAutocompleteCandidates().first?.displayName, "Hermes Local")
+    }
+
+    @MainActor
     func testMentionAutocompleteUsesOnlyInvitedChannelMembers() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()

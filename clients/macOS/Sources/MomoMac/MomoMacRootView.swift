@@ -20,6 +20,7 @@ public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @State private var showDetailPane = false
     @State private var detailPane: MomoMacDetailPane = .alpha
+    @State private var selectedProfileMemberID: MemberID?
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     private let sessionChrome: MomoSessionChrome?
@@ -124,6 +125,13 @@ public struct MomoMacRootView: View {
             openProfile: {
                 openDetailPane(.profile)
             },
+            openMemberProfile: { memberID in
+                selectedProfileMemberID = memberID
+                openDetailPane(.memberProfile)
+            },
+            openWorkspaceSettings: {
+                openDetailPane(.workspaceSettings)
+            },
             openSettings: {
                 openDetailPane(.settings)
             },
@@ -203,8 +211,24 @@ public struct MomoMacRootView: View {
                 ApprovalInboxView(viewModel: viewModel)
             case .profile:
                 MomoProfileSettingsSurface(copy: copy, summary: sessionChrome?.summary)
+            case .memberProfile:
+                if let member = selectedProfileMemberID.flatMap({ viewModel.member($0) }) {
+                    MomoMemberProfileSettingsSurface(copy: copy, member: member) { displayName, avatarPath, presence in
+                        viewModel.applyLocalProfile(
+                            member: member.id,
+                            displayName: displayName,
+                            avatarPath: avatarPath,
+                            presence: presence
+                        )
+                    }
+                    .id(member.id)
+                } else {
+                    MomoEmptyProfileSelectionView(copy: copy)
+                }
             case .settings:
                 MomoAppSettingsSurface(copy: copy)
+            case .workspaceSettings:
+                MomoWorkspaceSettingsSurface(copy: copy)
             case .downloads:
                 MomoDownloadsSettingsSurface(copy: copy)
             case .updates:
@@ -273,7 +297,9 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
     case alpha
     case approvals
     case profile
+    case memberProfile
     case settings
+    case workspaceSettings
     case downloads
     case updates
 
@@ -285,7 +311,7 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
         switch self {
         case .alpha, .approvals:
             return true
-        case .profile, .settings, .downloads, .updates:
+        case .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
             return false
         }
     }
@@ -298,8 +324,12 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.approvals
         case .profile:
             return copy.profile
+        case .memberProfile:
+            return copy.memberProfile
         case .settings:
             return copy.settings
+        case .workspaceSettings:
+            return copy.serverSettings
         case .downloads:
             return copy.downloads
         case .updates:
@@ -315,8 +345,12 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.approvalsInspectorSubtitle
         case .profile:
             return copy.profileSettingsSubtitle
+        case .memberProfile:
+            return copy.memberProfileSettingsSubtitle
         case .settings:
             return copy.settingsSubtitle
+        case .workspaceSettings:
+            return copy.serverSettingsSubtitle
         case .downloads:
             return copy.downloadsSubtitle
         case .updates:
@@ -332,8 +366,12 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return "checkmark.seal"
         case .profile:
             return "person.crop.circle"
+        case .memberProfile:
+            return "person.text.rectangle"
         case .settings:
             return "gearshape"
+        case .workspaceSettings:
+            return "server.rack"
         case .downloads:
             return "tray.and.arrow.down"
         case .updates:

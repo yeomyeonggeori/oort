@@ -217,8 +217,8 @@ This chain is the current momo-main resumable tracker. The canonical operational
 source is `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`.
 
 1. GitHub `#300` / `MOMO-335`: roster-backed `@` autocomplete and Hermes working indicator. Done in this PR.
-2. GitHub `#263` / `MOMO-260`: workspace/member/agent profile settings v0.
-3. GitHub `#265` / `MOMO-262`: Agent Pairing Wizard v0.
+2. GitHub `#263` / `MOMO-260`: workspace/member/agent profile settings v0. Done in this PR.
+3. GitHub `#265` / `MOMO-262`: Agent Pairing Wizard v0. Next.
 4. GitHub `#264` / `MOMO-261`: approval/Command Center/typing activity UX.
 5. `MOMO-246`/`MOMO-252`: retarget or deprioritize 72h soak for the lighter
    one-person Hermes loop.

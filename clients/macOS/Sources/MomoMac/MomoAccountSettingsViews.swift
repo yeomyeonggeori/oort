@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import MomoCore
 
 // MARK: - Dogfood account/settings surfaces
 
@@ -101,11 +102,6 @@ struct MomoAppSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
-    @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
-    @AppStorage("momo.server.iconText") private var serverIconText = "m"
-    @AppStorage("momo.server.iconPath") private var serverIconPath = ""
-    @AppStorage("momo.server.agentInviteRequiresApproval") private var agentInviteRequiresApproval = true
-    @AppStorage("momo.server.memberInvitePolicy") private var memberInvitePolicy = "admins"
 
     var body: some View {
         MomoSettingsScrollView {
@@ -132,7 +128,24 @@ struct MomoAppSettingsSurface: View {
                     .frame(maxWidth: 320)
                 }
             }
+        }
+    }
 
+    private var currentAppearance: MomoAppearancePreference {
+        MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
+    }
+}
+
+struct MomoWorkspaceSettingsSurface: View {
+    let copy: MomoWorkspaceCopy
+    @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
+    @AppStorage("momo.server.iconText") private var serverIconText = "m"
+    @AppStorage("momo.server.iconPath") private var serverIconPath = ""
+    @AppStorage("momo.server.agentInviteRequiresApproval") private var agentInviteRequiresApproval = true
+    @AppStorage("momo.server.memberInvitePolicy") private var memberInvitePolicy = "admins"
+
+    var body: some View {
+        MomoSettingsScrollView {
             MomoSettingsSection(title: copy.workspaceAppearance, subtitle: copy.serverSettingsSubtitle) {
                 HStack(alignment: .top, spacing: 16) {
                     MomoSettingsAvatarMark(
@@ -189,16 +202,172 @@ struct MomoAppSettingsSurface: View {
         }
     }
 
-    private var currentAppearance: MomoAppearancePreference {
-        MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
-    }
-
     @MainActor
     private func chooseServerIcon() {
         if let path = MomoLocalAssetStore.chooseImage(named: "server-icon", title: copy.chooseImage) {
             serverIconPath = path
             if serverIconText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 serverIconText = "m"
+            }
+        }
+    }
+}
+
+struct MomoMemberProfileSettingsSurface: View {
+    let copy: MomoWorkspaceCopy
+    let member: Member
+    let onSave: (String, String?, Presence) -> Void
+    @State private var displayName: String
+    @State private var avatarPath: String
+    @State private var presenceRaw: String
+
+    init(
+        copy: MomoWorkspaceCopy,
+        member: Member,
+        onSave: @escaping (String, String?, Presence) -> Void
+    ) {
+        self.copy = copy
+        self.member = member
+        self.onSave = onSave
+        _displayName = State(initialValue: MomoLocalProfileStore.displayName(for: member) ?? member.displayName)
+        _avatarPath = State(initialValue: MomoLocalProfileStore.avatarPath(for: member) ?? member.avatarURL?.path ?? "")
+        _presenceRaw = State(initialValue: (MomoLocalProfileStore.presence(for: member) ?? member.presence).rawValue)
+    }
+
+    var body: some View {
+        MomoSettingsScrollView {
+            MomoSettingsSection(title: title, subtitle: copy.memberProfileSettingsSubtitle) {
+                HStack(alignment: .top, spacing: 16) {
+                    MomoSettingsAvatarMark(
+                        text: initials,
+                        imagePath: avatarPath,
+                        shape: .circle,
+                        size: 74
+                    )
+                    .overlay(alignment: .bottomTrailing) {
+                        Circle()
+                            .fill(previewPresenceColor)
+                            .frame(width: 18, height: 18)
+                            .overlay {
+                                Circle().stroke(.regularMaterial, lineWidth: 3)
+                            }
+                            .offset(x: 2, y: 2)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        MomoSettingsLabeledField(title: copy.displayName) {
+                            TextField(copy.displayName, text: $displayName)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.body)
+                        }
+
+                        MomoSettingsInfoGrid(rows: [
+                            (copy.handleLabel, "@\(member.handle)"),
+                            (copy.status, localizedPresence),
+                        ])
+
+                        HStack(spacing: 8) {
+                            Button {
+                                chooseProfileImage()
+                            } label: {
+                                Label(copy.chooseImage, systemImage: "photo")
+                            }
+
+                            Button {
+                                avatarPath = ""
+                            } label: {
+                                Label(copy.removeImage, systemImage: "arrow.uturn.backward")
+                            }
+                            .disabled(avatarPath.isEmpty)
+                        }
+                    }
+                }
+
+                Divider().opacity(0.5)
+
+                MomoSettingsControlRow(title: copy.status, systemImage: "circle.dashed") {
+                    Picker(copy.status, selection: $presenceRaw) {
+                        Text(copy.presenceOnline).tag(Presence.online.rawValue)
+                        Text(copy.presenceWorking).tag(Presence.working.rawValue)
+                        Text(copy.presenceAway).tag(Presence.away.rawValue)
+                        Text(copy.presenceOffline).tag(Presence.offline.rawValue)
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 190)
+                }
+
+                HStack {
+                    Spacer()
+                    Button {
+                        saveProfileDraft()
+                    } label: {
+                        Label(copy.saveProfile, systemImage: "checkmark.circle")
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+
+            Label(copy.profileLocalDraftNote, systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private var title: String {
+        member.isAgent ? copy.agentProfile : copy.memberProfile
+    }
+
+    private var initials: String {
+        guard let first = displayName.trimmingCharacters(in: .whitespacesAndNewlines).first else {
+            return member.isAgent ? "A" : "M"
+        }
+        return String(first).uppercased()
+    }
+
+    private var presence: Presence {
+        Presence(rawValue: presenceRaw) ?? .online
+    }
+
+    private var localizedPresence: String {
+        copy.presenceTitle(presence)
+    }
+
+    private var previewPresenceColor: Color {
+        switch presence {
+        case .online:
+            return MomoTheme.reversibleGreen
+        case .working:
+            return MomoTheme.costAmber
+        case .away, .offline:
+            return .secondary
+        }
+    }
+
+    @MainActor
+    private func chooseProfileImage() {
+        if let path = MomoLocalAssetStore.chooseImage(named: "member-\(member.id.description)-avatar", title: copy.chooseImage) {
+            avatarPath = path
+        }
+    }
+
+    private func saveProfileDraft() {
+        let avatarValue: String? = avatarPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : avatarPath
+        MomoLocalProfileStore.save(member: member, displayName: displayName, avatarPath: avatarValue, presence: presence)
+        onSave(displayName, avatarValue, presence)
+    }
+}
+
+struct MomoEmptyProfileSelectionView: View {
+    let copy: MomoWorkspaceCopy
+
+    var body: some View {
+        MomoSettingsScrollView {
+            MomoSettingsSection(title: copy.memberProfile, subtitle: copy.memberProfileMissingSubtitle) {
+                Label(copy.memberProfileMissingSubtitle, systemImage: "person.crop.circle.badge.questionmark")
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -613,7 +782,7 @@ private struct MomoSettingsAvatarMark: View {
 
     private var avatarImage: NSImage? {
         guard !imagePath.isEmpty else { return nil }
-        return NSImage(contentsOfFile: imagePath)
+        return MomoAvatarImageCache.image(atPath: imagePath)
     }
 }
 
@@ -633,9 +802,15 @@ private enum MomoLocalAssetStore {
 
         do {
             let directory = try appSupportAvatarDirectory()
-            let ext = source.pathExtension.isEmpty ? "png" : source.pathExtension
-            let destination = directory.appendingPathComponent("\(name)-\(UUID().uuidString).\(ext)")
-            try FileManager.default.copyItem(at: source, to: destination)
+            let destination = directory.appendingPathComponent("\(name)-\(UUID().uuidString).png")
+            if let png = normalizedPNGData(from: source) {
+                try png.write(to: destination, options: .atomic)
+                if let image = NSImage(data: png) {
+                    MomoAvatarImageCache.store(image, atPath: destination.path)
+                }
+            } else {
+                try FileManager.default.copyItem(at: source, to: destination)
+            }
             return destination.path
         } catch {
             NSSound.beep()
@@ -649,6 +824,108 @@ private enum MomoLocalAssetStore {
         let directory = base.appendingPathComponent("momo/avatars", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    @MainActor
+    private static func normalizedPNGData(from source: URL, maxPixelSize: CGFloat = 512) -> Data? {
+        guard let image = NSImage(contentsOf: source) else { return nil }
+        let sourceSize = image.size
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return nil }
+        let scale = min(1, maxPixelSize / max(sourceSize.width, sourceSize.height))
+        let targetSize = NSSize(width: max(1, sourceSize.width * scale), height: max(1, sourceSize.height * scale))
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(targetSize.width.rounded(.up)),
+            pixelsHigh: Int(targetSize.height.rounded(.up)),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+        bitmap.size = targetSize
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+        image.draw(
+            in: NSRect(origin: .zero, size: targetSize),
+            from: NSRect(origin: .zero, size: sourceSize),
+            operation: .copy,
+            fraction: 1
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
+enum MomoLocalProfileStore {
+    static func displayName(for member: Member) -> String? {
+        value(for: displayNameKey(member), fallback: member.isAgent && isHermes(member) ? "momo.dogfood.hermes.displayName" : nil)
+    }
+
+    static func avatarPath(for member: Member) -> String? {
+        value(for: avatarPathKey(member), fallback: member.isAgent && isHermes(member) ? "momo.dogfood.hermes.avatarPath" : nil)
+    }
+
+    static func presence(for member: Member) -> Presence? {
+        value(for: presenceKey(member), fallback: nil).flatMap(Presence.init(rawValue:))
+    }
+
+    static func save(member: Member, displayName: String, avatarPath: String?, presence: Presence) {
+        let defaults = UserDefaults.standard
+        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(trimmedName, forKey: displayNameKey(member))
+        if member.isAgent && isHermes(member) {
+            defaults.set(trimmedName, forKey: "momo.dogfood.hermes.displayName")
+        }
+
+        let trimmedPath = avatarPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if trimmedPath.isEmpty {
+            defaults.removeObject(forKey: avatarPathKey(member))
+            if member.isAgent && isHermes(member) {
+                defaults.removeObject(forKey: "momo.dogfood.hermes.avatarPath")
+            }
+        } else {
+            defaults.set(trimmedPath, forKey: avatarPathKey(member))
+            if member.isAgent && isHermes(member) {
+                defaults.set(trimmedPath, forKey: "momo.dogfood.hermes.avatarPath")
+            }
+        }
+        defaults.set(presence.rawValue, forKey: presenceKey(member))
+    }
+
+    private static func value(for key: String, fallback: String?) -> String? {
+        let primary = UserDefaults.standard.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let primary, !primary.isEmpty {
+            return primary
+        }
+        if let fallback {
+            let secondary = UserDefaults.standard.string(forKey: fallback)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let secondary, !secondary.isEmpty {
+                return secondary
+            }
+        }
+        return nil
+    }
+
+    private static func displayNameKey(_ member: Member) -> String {
+        "momo.member.\(member.id.description).displayName"
+    }
+
+    private static func avatarPathKey(_ member: Member) -> String {
+        "momo.member.\(member.id.description).avatarPath"
+    }
+
+    private static func presenceKey(_ member: Member) -> String {
+        "momo.member.\(member.id.description).presence"
+    }
+
+    private static func isHermes(_ member: Member) -> Bool {
+        let identity = "\(member.displayName) \(member.handle)".lowercased()
+        return identity.contains("hermes") || identity.contains("에르메스")
     }
 }
 

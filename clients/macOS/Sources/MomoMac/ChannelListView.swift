@@ -39,6 +39,8 @@ public struct ChannelListView: View {
     private let openCommandCenter: (() -> Void)?
     private let openApprovals: (() -> Void)?
     private let openProfile: (() -> Void)?
+    private let openMemberProfile: ((MemberID) -> Void)?
+    private let openWorkspaceSettings: (() -> Void)?
     private let openSettings: (() -> Void)?
     private let openDownloads: (() -> Void)?
     private let openUpdates: (() -> Void)?
@@ -49,6 +51,8 @@ public struct ChannelListView: View {
         self.openCommandCenter = nil
         self.openApprovals = nil
         self.openProfile = nil
+        self.openMemberProfile = nil
+        self.openWorkspaceSettings = nil
         self.openSettings = nil
         self.openDownloads = nil
         self.openUpdates = nil
@@ -60,6 +64,8 @@ public struct ChannelListView: View {
         openCommandCenter: (() -> Void)? = nil,
         openApprovals: (() -> Void)? = nil,
         openProfile: (() -> Void)? = nil,
+        openMemberProfile: ((MemberID) -> Void)? = nil,
+        openWorkspaceSettings: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
         openDownloads: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil
@@ -69,6 +75,8 @@ public struct ChannelListView: View {
         self.openCommandCenter = openCommandCenter
         self.openApprovals = openApprovals
         self.openProfile = openProfile
+        self.openMemberProfile = openMemberProfile
+        self.openWorkspaceSettings = openWorkspaceSettings
         self.openSettings = openSettings
         self.openDownloads = openDownloads
         self.openUpdates = openUpdates
@@ -157,6 +165,17 @@ public struct ChannelListView: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                Button {
+                    openWorkspaceSettings?()
+                } label: {
+                    Image(systemName: "server.rack")
+                        .font(.caption.weight(.semibold))
+                        .frame(width: 30, height: 30)
+                        .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help(copy.serverSettings)
+                .momoQuickTooltip(copy.serverSettings)
             }
 
             if let selected = viewModel.selectedChannel {
@@ -415,33 +434,30 @@ public struct ChannelListView: View {
 
     @ViewBuilder
     private func memberRow(_ member: Member) -> some View {
-        if member.isAgent {
-            Button {
-                viewModel.insertMention(for: member)
-            } label: {
-                memberRowContent(member)
-            }
-            .buttonStyle(.plain)
-            .disabled(!viewModel.canInsertMention(for: member))
+        memberRowContent(member)
             .contextMenu {
-                Button {
-                    viewModel.insertMention(for: member)
-                } label: {
-                    Label("Mention @\(member.displayName)", systemImage: "at")
+                if member.isAgent {
+                    Button {
+                        viewModel.insertMention(for: member)
+                    } label: {
+                        Label("Mention @\(member.displayName)", systemImage: "at")
+                    }
+                    .disabled(!viewModel.canInsertMention(for: member))
+
+                    Button {
+                        viewModel.insertMention(for: member, preferDisplayName: false)
+                    } label: {
+                        Label("Mention @\(member.handle)", systemImage: "number")
+                    }
+                    .disabled(!viewModel.canInsertMention(for: member))
                 }
-                .disabled(!viewModel.canInsertMention(for: member))
 
                 Button {
-                    viewModel.insertMention(for: member, preferDisplayName: false)
+                    openMemberProfile?(member.id)
                 } label: {
-                    Label("Mention @\(member.handle)", systemImage: "number")
+                    Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
                 }
-                .disabled(!viewModel.canInsertMention(for: member))
             }
-            .help(viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)")
-        } else {
-            memberRowContent(member)
-        }
     }
 
     private func memberRowContent(_ member: Member) -> some View {
@@ -474,6 +490,33 @@ public struct ChannelListView: View {
                 }
             }
             Spacer()
+            if member.isAgent {
+                Button {
+                    viewModel.insertMention(for: member)
+                } label: {
+                    Image(systemName: "at")
+                        .font(.caption.weight(.bold))
+                        .frame(width: 28, height: 28)
+                        .foregroundStyle(MomoTheme.agentAccent)
+                        .background(MomoTheme.agentAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!viewModel.canInsertMention(for: member))
+                .help(viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)")
+                .momoQuickTooltip(viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)")
+            }
+            Button {
+                openMemberProfile?(member.id)
+            } label: {
+                Image(systemName: "person.text.rectangle")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 28, height: 28)
+                    .foregroundStyle(.secondary)
+                    .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help(MomoWorkspaceCopy(language: language).editProfile)
+            .momoQuickTooltip(MomoWorkspaceCopy(language: language).editProfile)
             if viewModel.selectedChannelId != nil {
                 memberMutationButton(member)
             }
@@ -1015,23 +1058,35 @@ public struct ChannelListView: View {
     }
 
     private func displayMember(_ member: Member) -> Member {
-        guard isDogfoodHermesAgent(member) else { return member }
         var copy = member
-        let displayName = hermesDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !displayName.isEmpty {
-            copy.displayName = displayName
+        if let localName = MomoLocalProfileStore.displayName(for: member) {
+            copy.displayName = localName
+        } else if isDogfoodHermesAgent(member) {
+            let displayName = hermesDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !displayName.isEmpty {
+                copy.displayName = displayName
+            }
         }
-        copy.handle = normalizedAgentAlias(Self.dogfoodHermesAlias)
-        if !hermesAvatarPath.isEmpty {
+        if isDogfoodHermesAgent(member) {
+            copy.handle = normalizedAgentAlias(Self.dogfoodHermesAlias)
+        }
+        if let localAvatarPath = MomoLocalProfileStore.avatarPath(for: member) {
+            copy.avatarURL = URL(fileURLWithPath: localAvatarPath)
+        } else if isDogfoodHermesAgent(member), !hermesAvatarPath.isEmpty {
             copy.avatarURL = URL(fileURLWithPath: hermesAvatarPath)
         }
-        if copy.presence == .offline {
+        if let localPresence = MomoLocalProfileStore.presence(for: member) {
+            copy.presence = localPresence
+        } else if isDogfoodHermesAgent(member), copy.presence == .offline {
             copy.presence = .online
         }
         return copy
     }
 
     private func avatarPath(for member: Member) -> String {
+        if let local = MomoLocalProfileStore.avatarPath(for: member) {
+            return local
+        }
         if isDogfoodHermesAgent(member) {
             return hermesAvatarPath
         }
@@ -1052,7 +1107,10 @@ public struct ChannelListView: View {
         if viewModel.isAgentWorking(member) {
             return .working
         }
-        switch member.presence {
+        if member.status != .active {
+            return .error
+        }
+        switch MomoLocalProfileStore.presence(for: member) ?? member.presence {
         case .online:
             return .online
         case .working:
@@ -1400,7 +1458,7 @@ private struct MomoProfileAvatar: View {
 
     private var avatarImage: NSImage? {
         guard !imagePath.isEmpty else { return nil }
-        return NSImage(contentsOfFile: imagePath)
+        return MomoAvatarImageCache.image(atPath: imagePath)
     }
 }
 

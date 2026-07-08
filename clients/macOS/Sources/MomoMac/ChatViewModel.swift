@@ -802,6 +802,27 @@ public final class ChatViewModel: ObservableObject {
         members.first(where: { $0.id == id })
     }
 
+    public func applyLocalProfile(
+        member id: MemberID,
+        displayName rawDisplayName: String,
+        avatarPath: String?,
+        presence: Presence?
+    ) {
+        guard let index = members.firstIndex(where: { $0.id == id }) else { return }
+        let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !displayName.isEmpty {
+            members[index].displayName = displayName
+        }
+        if let avatarPath, !avatarPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            members[index].avatarURL = URL(fileURLWithPath: avatarPath)
+        } else if avatarPath != nil {
+            members[index].avatarURL = nil
+        }
+        if let presence {
+            members[index].presence = presence
+        }
+    }
+
     public var selectedChannel: Channel? {
         guard let selectedChannelId else { return nil }
         return channels.first(where: { $0.id == selectedChannelId })
@@ -999,13 +1020,21 @@ public final class ChatViewModel: ObservableObject {
 
     private func mergeConfiguredMembershipHints(_ loaded: [Member]) -> [Member] {
         loaded.map { member in
-            guard member.channelIds.isEmpty,
-                  let configured = members.first(where: { $0.id == member.id }),
-                  !configured.channelIds.isEmpty else {
-                return member
-            }
             var copy = member
-            copy.channelIds = configured.channelIds
+            if member.channelIds.isEmpty,
+               let configured = members.first(where: { $0.id == member.id }),
+               !configured.channelIds.isEmpty {
+                copy.channelIds = configured.channelIds
+            }
+            if let localName = MomoLocalProfileStore.displayName(for: copy) {
+                copy.displayName = localName
+            }
+            if let avatarPath = MomoLocalProfileStore.avatarPath(for: copy) {
+                copy.avatarURL = URL(fileURLWithPath: avatarPath)
+            }
+            if let localPresence = MomoLocalProfileStore.presence(for: copy) {
+                copy.presence = localPresence
+            }
             return copy
         }
     }
