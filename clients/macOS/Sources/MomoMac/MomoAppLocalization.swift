@@ -282,8 +282,36 @@ struct MomoWorkspaceCopy {
 
     var agentInviteBody: String {
         switch language {
-        case .korean: return "에르메스 같은 로컬 에이전트를 설치하고 provider를 설정한 뒤, 별칭과 초대코드로 momo에 연결하는 흐름입니다."
-        case .english: return "Install a local agent such as Hermes, configure a provider, then connect it to momo with an alias and invite code."
+        case .korean: return "로컬 Hermes gateway를 실행한 뒤, 이 워크스페이스에 표시할 별칭과 프로필을 확정합니다."
+        case .english: return "Run the local Hermes gateway, then confirm the alias and profile shown in this workspace."
+        }
+    }
+
+    var agentDisplayName: String {
+        switch language {
+        case .korean: return "표시 이름"
+        case .english: return "Display name"
+        }
+    }
+
+    var completeAgentInvite: String {
+        switch language {
+        case .korean: return "에이전트 초대 완료"
+        case .english: return "Complete agent invite"
+        }
+    }
+
+    var updateAgentProfile: String {
+        switch language {
+        case .korean: return "에이전트 프로필 저장"
+        case .english: return "Save agent profile"
+        }
+    }
+
+    var agentAliasRequired: String {
+        switch language {
+        case .korean: return "에이전트 별칭이 필요합니다."
+        case .english: return "Agent alias is required."
         }
     }
 
@@ -296,15 +324,15 @@ struct MomoWorkspaceCopy {
 
     var providerEndpoint: String {
         switch language {
-        case .korean: return "Provider endpoint"
+        case .korean: return "연결 endpoint"
         case .english: return "Provider endpoint"
         }
     }
 
     var agentInviteNetworkNote: String {
         switch language {
-        case .korean: return "다음 단계에서 초대코드와 네트워크 핸드셰이크로 에이전트 통신 채널을 엽니다."
-        case .english: return "Next, an invite-code network handshake will open the agent communication channel."
+        case .korean: return "momo는 provider OAuth/token을 저장하지 않습니다. 토큰은 Hermes/provider 런타임 안에만 둡니다."
+        case .english: return "momo does not store provider OAuth tokens. Credentials stay inside the Hermes/provider runtime."
         }
     }
 
@@ -312,6 +340,20 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "에이전트 연결 준비"
         case .english: return "Prepare agent connection"
+        }
+    }
+
+    var agentNotInvitedStatus: String {
+        switch language {
+        case .korean: return "아직 이 워크스페이스에 초대되지 않았습니다."
+        case .english: return "Not invited into this workspace yet."
+        }
+    }
+
+    func agentInvitedStatus(alias: String) -> String {
+        switch language {
+        case .korean: return "\(alias)로 이 채널에서 호출할 수 있습니다."
+        case .english: return "Callable in this channel as \(alias)."
         }
     }
 

@@ -118,6 +118,13 @@
 - Hermes v0.18 `BasePlatformAdapter`가 `get_chat_info(chat_id)`를 필수 추상 메서드로 요구해 momo adapter construction이 실패하던 문제를 수정했다. `MomoAdapter.get_chat_info`는 로그인 후 momo REST channel list에서 이름/타입을 조회하고, gateway boot/degraded smoke에서는 env/default fallback으로 fail-open 대신 platform construction을 유지한다.
 - 검증: `python3 -m py_compile adapters/hermes/__init__.py adapters/hermes/momo_adapter.py adapters/hermes/adapter.py adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS(11 tests), `bash -n scripts/momo` PASS, `scripts/momo hermes-gateway-install-plugin && scripts/momo hermes-gateway-status` PASS(`plugin enabled: yes`, momo server reachable), `scripts/momo hermes-gateway-smoke --real` PASS with evidence state `NEEDS_PROVIDER_LOGIN`(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260707T150741Z/summary.md`). 실제 provider OAuth 및 `@hermes` real gateway roundtrip은 사용자가 Hermes/provider login을 완료한 뒤 닫는다.
 
+## 0-4b-6f. MOMO-334 Dogfood Hermes Invite Roster UX v0 (2026-07-08)
+
+- macOS dogfood UI에서 Hermes가 앱 최초 진입부터 자동 초대된 것처럼 보이지 않도록 `@hermes` 서버/fixture member를 초대 전에는 숨기고, 멤버 `+` → 사람/에이전트 초대 분기 → 에이전트 초대 완료 후 roster/channel member에 표시되는 흐름으로 바꿨다.
+- 에이전트 초대 팝오버는 Hermes display name, alias, endpoint label, local avatar, pairing status를 dogfood v0 수준으로 관리한다. 프로필 저장 후 roster row는 프로필 이미지와 presence badge를 표시하며, `@hermes` mention은 기존 MOMO-333/MOMO-325 real gateway path를 그대로 사용한다.
+- 기존 Kim Intern/buildbot/mock fixture는 기본 dogfood roster에서 숨기고 dev tools/diagnostics 경계로 밀었다. 서버의 Hermes agent seed/runtime contract는 유지하되, 사용자가 초대하기 전에는 제품 UI에서 “이미 초대됨”으로 보이지 않는다.
+- 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(63 tests), `scripts/local_gate.sh --profile docs` PASS, `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui` PASS.
+
 ## 0-4b-6e. MOMO-328 Local launcher login readiness hotfix (2026-07-08)
 
 - 로그인 버튼이 `internal server error`를 보인 원인은 7월 3일에 뜬 오래된 host-run `MomoServer`가 `:28180`을 계속 점유한 상태에서 `/health`만 200을 반환하고, DB-backed `/v1/auth/login`은 Postgres connection timeout으로 500을 내던 것이다. `scripts/momo start`가 `/health`만 보고 ready로 판단해 stale server를 정상으로 착각했다.

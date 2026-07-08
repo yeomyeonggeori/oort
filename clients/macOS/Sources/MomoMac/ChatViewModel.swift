@@ -6,6 +6,23 @@ public protocol MomoSessionSensitiveStateClearing: Sendable {
     func clearSessionSensitiveState() async
 }
 
+public enum DogfoodAgentInviteError: Error, LocalizedError {
+    case selectChannelFirst
+    case unsupportedAlias(String)
+    case missingHermesAgent
+
+    public var errorDescription: String? {
+        switch self {
+        case .selectChannelFirst:
+            return "Select a channel before inviting Hermes."
+        case .unsupportedAlias(let alias):
+            return "Dogfood v0 only supports @hermes. \(alias) needs the server alias API first."
+        case .missingHermesAgent:
+            return "Hermes runtime member is not available. Start local alpha or run the Hermes gateway setup first."
+        }
+    }
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -357,6 +374,56 @@ public final class ChatViewModel: ObservableObject {
             return "\(member.displayName) is not active."
         }
         return nil
+    }
+
+    @discardableResult
+    public func inviteDogfoodAgent(
+        displayName rawDisplayName: String,
+        handle rawHandle: String,
+        avatarPath: String? = nil
+    ) async throws -> Member {
+        let normalizedHandle = Self.normalizedAgentHandle(rawHandle)
+        guard normalizedHandle == "hermes" else {
+            throw DogfoodAgentInviteError.unsupportedAlias("@\(normalizedHandle)")
+        }
+        guard let channel = selectedChannelId else {
+            throw DogfoodAgentInviteError.selectChannelFirst
+        }
+        let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveDisplayName = displayName.isEmpty ? normalizedHandle.capitalized : displayName
+        let existingIndex = members.firstIndex { member in
+            member.isAgent
+                && member.handle.caseInsensitiveCompare(normalizedHandle) == .orderedSame
+        }
+        guard let existingIndex else {
+            throw DogfoodAgentInviteError.missingHermesAgent
+        }
+        var agent = members[existingIndex]
+
+        agent.displayName = effectiveDisplayName
+        agent.handle = normalizedHandle
+        if let avatarPath, !avatarPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            agent.avatarURL = URL(fileURLWithPath: avatarPath)
+        }
+        if agent.presence == Presence.offline {
+            agent.presence = Presence.online
+        }
+
+        if !agent.channelIds.contains(channel) {
+            do {
+                let membership = try await chat.addMember(agent.id, to: channel, role: .member)
+                apply(membership)
+                agent.channelIds = member(agent.id)?.channelIds ?? agent.channelIds
+                connectionError = nil
+            } catch {
+                connectionError = "Hermes invite failed: \(error)"
+                throw error
+            }
+        }
+
+        members[existingIndex] = agent
+        mentionNotice = "\(agent.displayName) invited. Mention @\(agent.handle) in this channel."
+        return agent
     }
 
     // MARK: Onboarding invite flow
@@ -811,5 +878,14 @@ public final class ChatViewModel: ObservableObject {
         return needles.contains { token in
             body.range(of: token, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
+    }
+
+    nonisolated private static func normalizedAgentHandle(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutAt = trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
+        let normalized = withoutAt.lowercased().filter { character in
+            character.isLetter || character.isNumber || character == "-" || character == "_"
+        }
+        return normalized.isEmpty ? "hermes" : normalized
     }
 }

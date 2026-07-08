@@ -19,8 +19,9 @@ public struct ChannelListView: View {
     @State private var newChannelTopic = ""
     @State private var newChannelKind: ChannelKind = .publicChannel
     @State private var inviteMode: MomoInviteMode = .human
-    @State private var agentAlias = "@hermes"
-    @State private var agentEndpoint = "http://127.0.0.1:28088/v1"
+    @State private var agentInviteInFlight = false
+    @State private var agentInviteError: String?
+    @State private var hermesInvited = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
@@ -30,6 +31,10 @@ public struct ChannelListView: View {
     @AppStorage("momo.server.memberInvitePolicy") private var memberInvitePolicy = "admins"
     @AppStorage("momo.profile.displayName") private var profileDisplayNameDraft = ""
     @AppStorage("momo.profile.avatarPath") private var profileAvatarPath = ""
+    @AppStorage("momo.dogfood.hermes.displayName") private var hermesDisplayName = "Hermes"
+    @AppStorage("momo.dogfood.hermes.endpoint") private var hermesEndpoint = "http://127.0.0.1:28188/v1"
+    @AppStorage("momo.dogfood.hermes.avatarPath") private var hermesAvatarPath = ""
+    private static let dogfoodHermesAlias = "@hermes"
     private let sessionChrome: MomoSessionChrome?
     private let openCommandCenter: (() -> Void)?
     private let openApprovals: (() -> Void)?
@@ -121,6 +126,12 @@ public struct ChannelListView: View {
         }
         .background(MomoSidebarGlassBackground())
         .animation(sidebarPanelAnimation, value: showProfilePanel)
+        .onAppear {
+            refreshHermesInviteState()
+        }
+        .onChange(of: hermesInviteScopeKey) { _, _ in
+            refreshHermesInviteState()
+        }
     }
 
     private var language: MomoUILanguage {
@@ -290,7 +301,7 @@ public struct ChannelListView: View {
                 sidebarEmptyRow(copy.noMembersInChannel, systemImage: "person.2")
             } else {
                 ForEach(visibleChannelMembers) { member in
-                    memberRow(member)
+                    memberRow(displayMember(member))
                 }
             }
         }
@@ -435,9 +446,12 @@ public struct ChannelListView: View {
 
     private func memberRowContent(_ member: Member) -> some View {
         HStack(spacing: 10) {
-            Circle()
-                .fill(member.presence.dotColor)
-                .frame(width: 10, height: 10)
+            MomoProfileAvatar(
+                initials: memberInitials(member),
+                status: presenceBadge(for: member),
+                imagePath: avatarPath(for: member),
+                size: 28
+            )
             Text(member.displayName)
                 .font(.system(size: 16, weight: .semibold))
                 .lineLimit(1)
@@ -722,26 +736,61 @@ public struct ChannelListView: View {
                 .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             case .agent:
                 VStack(alignment: .leading, spacing: 10) {
-                    Label(copy.agentInviteTitle, systemImage: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 14, weight: .semibold))
+                    HStack(spacing: 10) {
+                        MomoProfileAvatar(
+                            initials: hermesInitials,
+                            status: hermesInvited ? .online : .away,
+                            imagePath: hermesAvatarPath,
+                            size: 38
+                        )
+                        Label(copy.agentInviteTitle, systemImage: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
                     Text(copy.agentInviteBody)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                    TextField(copy.agentAlias, text: $agentAlias)
+                    TextField(copy.agentDisplayName, text: $hermesDisplayName)
                         .textFieldStyle(.roundedBorder)
-                    TextField(copy.providerEndpoint, text: $agentEndpoint)
+                    TextField(copy.agentAlias, text: .constant(Self.dogfoodHermesAlias))
                         .textFieldStyle(.roundedBorder)
+                        .disabled(true)
+                    TextField(copy.providerEndpoint, text: $hermesEndpoint)
+                        .textFieldStyle(.roundedBorder)
+                    HStack(spacing: 8) {
+                        Button {
+                            chooseHermesAvatar()
+                        } label: {
+                            Label(copy.chooseImage, systemImage: "photo")
+                        }
+                        .controlSize(.small)
+
+                        Button {
+                            hermesAvatarPath = ""
+                        } label: {
+                            Label(copy.removeImage, systemImage: "arrow.uturn.backward")
+                        }
+                        .controlSize(.small)
+                        .disabled(hermesAvatarPath.isEmpty)
+                    }
                     Label(copy.agentInviteNetworkNote, systemImage: "network")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Label(agentPairingStatusText(copy: copy), systemImage: agentPairingStatusIcon)
+                        .font(.caption)
+                        .foregroundStyle(agentPairingStatusTint)
+                    if let agentInviteError {
+                        Label(agentInviteError, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(MomoTheme.irreversibleRed)
+                    }
                     Button {
-                        showMemberInvite = false
-                        openCommandCenter?()
+                        Task { await completeAgentInvite() }
                     } label: {
-                        Label(copy.prepareAgentInvite, systemImage: "terminal")
+                        Label(hermesInvited ? copy.updateAgentProfile : copy.completeAgentInvite, systemImage: "checkmark.circle")
                     }
                     .controlSize(.regular)
+                    .disabled(agentInviteInFlight)
                 }
                 .padding(12)
                 .background(MomoTheme.agentAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -749,6 +798,93 @@ public struct ChannelListView: View {
         }
         .padding(8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var hermesInitials: String {
+        let name = hermesDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = name.first else { return "H" }
+        return String(first).uppercased()
+    }
+
+    private var agentPairingStatusIcon: String {
+        hermesInvited ? "checkmark.circle.fill" : "clock"
+    }
+
+    private var agentPairingStatusTint: Color {
+        hermesInvited ? MomoTheme.reversibleGreen : .secondary
+    }
+
+    private func agentPairingStatusText(copy: MomoWorkspaceCopy) -> String {
+        if hermesInvited {
+            return copy.agentInvitedStatus(alias: displayAgentAlias)
+        }
+        return copy.agentNotInvitedStatus
+    }
+
+    private var displayAgentAlias: String {
+        Self.dogfoodHermesAlias
+    }
+
+    @MainActor
+    private func completeAgentInvite() async {
+        guard !agentInviteInFlight else { return }
+        agentInviteInFlight = true
+        agentInviteError = nil
+        defer { agentInviteInFlight = false }
+
+        if hermesDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            hermesDisplayName = "Hermes"
+        }
+
+        do {
+            _ = try await viewModel.inviteDogfoodAgent(
+                displayName: hermesDisplayName,
+                handle: Self.dogfoodHermesAlias,
+                avatarPath: hermesAvatarPath
+            )
+            setHermesInvited(true)
+            withAnimation(.easeInOut(duration: 0.16)) {
+                showMemberInvite = false
+            }
+        } catch {
+            setHermesInvited(false)
+            agentInviteError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func chooseHermesAvatar() {
+        if let path = chooseLocalImage(named: "hermes-agent-avatar") {
+            hermesAvatarPath = path
+        }
+    }
+
+    @MainActor
+    private func chooseLocalImage(named name: String) -> String? {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.title = MomoWorkspaceCopy(language: language).chooseImage
+
+        guard panel.runModal() == .OK, let source = panel.url else {
+            return nil
+        }
+
+        do {
+            let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support", isDirectory: true)
+            let directory = base.appendingPathComponent("momo/avatars", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let ext = source.pathExtension.isEmpty ? "png" : source.pathExtension
+            let destination = directory.appendingPathComponent("\(name)-\(UUID().uuidString).\(ext)")
+            try FileManager.default.copyItem(at: source, to: destination)
+            return destination.path
+        } catch {
+            NSSound.beep()
+            return nil
+        }
     }
 
     private var profileDisplayName: String {
@@ -812,7 +948,109 @@ public struct ChannelListView: View {
     private func isHiddenDogfoodAgent(_ member: Member) -> Bool {
         guard member.isAgent else { return false }
         let identity = "\(member.displayName) \(member.handle)".lowercased()
-        return identity.contains("김인턴") || identity.contains("kim") || identity.contains("intern")
+        if isDogfoodHermesAgent(member) {
+            return !hermesInvited
+        }
+        return identity.contains("김인턴")
+            || identity.contains("kim")
+            || identity.contains("intern")
+            || identity.contains("빌드봇")
+            || identity.contains("buildbot")
+    }
+
+    private func isDogfoodHermesAgent(_ member: Member) -> Bool {
+        guard member.isAgent else { return false }
+        let identity = "\(member.displayName) \(member.handle)".lowercased()
+        return identity.contains("hermes") || identity.contains("에르메스")
+    }
+
+    private var hermesInviteScopeKey: String {
+        guard let workspace = viewModel.workspaceId,
+              let channel = viewModel.selectedChannelId
+        else {
+            return "none"
+        }
+        return "\(workspace.description).\(channel.description)"
+    }
+
+    private var hermesInviteDefaultsKey: String {
+        "momo.dogfood.hermes.invited.\(hermesInviteScopeKey)"
+    }
+
+    private func refreshHermesInviteState() {
+        guard hermesInviteScopeKey != "none" else {
+            hermesInvited = false
+            return
+        }
+        let persisted = UserDefaults.standard.bool(forKey: hermesInviteDefaultsKey)
+        let hasChannelMember = viewModel.members.contains { member in
+            isDogfoodHermesAgent(member) && viewModel.isMember(member.id)
+        }
+        hermesInvited = persisted && hasChannelMember
+    }
+
+    private func setHermesInvited(_ value: Bool) {
+        guard hermesInviteScopeKey != "none" else {
+            hermesInvited = false
+            return
+        }
+        UserDefaults.standard.set(value, forKey: hermesInviteDefaultsKey)
+        hermesInvited = value
+    }
+
+    private func normalizedAgentAlias(_ rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutAt = trimmed.hasPrefix("@") ? String(trimmed.dropFirst()) : trimmed
+        return withoutAt.lowercased().filter { character in
+            character.isLetter || character.isNumber || character == "-" || character == "_"
+        }
+    }
+
+    private func displayMember(_ member: Member) -> Member {
+        guard isDogfoodHermesAgent(member) else { return member }
+        var copy = member
+        let displayName = hermesDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !displayName.isEmpty {
+            copy.displayName = displayName
+        }
+        copy.handle = normalizedAgentAlias(Self.dogfoodHermesAlias)
+        if !hermesAvatarPath.isEmpty {
+            copy.avatarURL = URL(fileURLWithPath: hermesAvatarPath)
+        }
+        if copy.presence == .offline {
+            copy.presence = .online
+        }
+        return copy
+    }
+
+    private func avatarPath(for member: Member) -> String {
+        if isDogfoodHermesAgent(member) {
+            return hermesAvatarPath
+        }
+        if member.id == viewModel.members.first(where: { !$0.isAgent })?.id {
+            return profileAvatarPath
+        }
+        return member.avatarURL?.isFileURL == true ? member.avatarURL?.path ?? "" : ""
+    }
+
+    private func memberInitials(_ member: Member) -> String {
+        guard let first = member.displayName.trimmingCharacters(in: .whitespacesAndNewlines).first else {
+            return member.isAgent ? "A" : "M"
+        }
+        return String(first).uppercased()
+    }
+
+    private func presenceBadge(for member: Member) -> MomoPresenceBadge {
+        switch member.presence {
+        case .online:
+            return .online
+        case .working:
+            return .working
+        case .away:
+            return .away
+        case .offline:
+            return .away
+        }
     }
 
     private func sidebarEmptyRow(_ title: String, systemImage: String) -> some View {

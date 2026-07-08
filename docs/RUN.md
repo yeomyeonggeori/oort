@@ -329,6 +329,12 @@ scripts/momo start
 MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 ```
 
+macOS dogfood 앱에서는 Hermes가 서버/fixture에 존재해도 처음부터 roster에 보이지 않는다.
+멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
+label, avatar를 확인한 뒤 초대 완료를 누르면 그때 `member.kind='agent'` roster row가 나타난다.
+이 UX는 provider OAuth/token을 momo에 넘기는 절차가 아니다. provider login은 Hermes runtime
+안에서 사용자가 직접 수행하고, momo 앱은 초대/표시/mention entrypoint만 관리한다.
+
 현재 Hermes runtime이 없으면 real CLI/plugin/provider call은
 `runtime-unverified(real hermes gateway missing)`로 남긴다. 정본 문서는
 [`docs/external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)다.

@@ -135,6 +135,56 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testDogfoodHermesInviteRevealsAgentForMention() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        await viewModel.selectChannel(channel)
+
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+        await viewModel.removeMember(agent.id, from: channel)
+        XCTAssertFalse(viewModel.isMember(agent.id, in: channel))
+
+        let invited = try await viewModel.inviteDogfoodAgent(
+            displayName: "Hermes Local",
+            handle: "@hermes",
+            avatarPath: nil
+        )
+
+        XCTAssertTrue(invited.isAgent)
+        XCTAssertEqual(viewModel.member(invited.id)?.displayName, "Hermes Local")
+        XCTAssertTrue(viewModel.isMember(invited.id, in: channel))
+        XCTAssertTrue(viewModel.canInsertMention(for: invited))
+
+        viewModel.insertMention(for: invited)
+        XCTAssertEqual(viewModel.composerDraft, "@hermes ")
+    }
+
+    @MainActor
+    func testDogfoodHermesInviteRejectsAliasBeforeServerAliasSupport() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        await viewModel.selectChannel(seed.channels[0].id)
+
+        do {
+            _ = try await viewModel.inviteDogfoodAgent(
+                displayName: "Hermes",
+                handle: "@helper",
+                avatarPath: nil
+            )
+            XCTFail("Expected non-hermes alias to be rejected in dogfood v0")
+        } catch let error as DogfoodAgentInviteError {
+            guard case .unsupportedAlias = error else {
+                return XCTFail("Unexpected dogfood invite error: \(error)")
+            }
+        }
+    }
+
+    @MainActor
     func testViewModelRESTFallbackRefreshesFinalDurableMentionMessage() async throws {
         let workspace = WorkspaceID()
         let channel = ChannelID()
