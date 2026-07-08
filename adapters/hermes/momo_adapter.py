@@ -555,9 +555,13 @@ class MomoAdapter(BasePlatformAdapter):
         try:
             async for raw in self._ws:
                 for frame in self._iter_frames(raw):
+                    pong = self._pong_for_frame(frame)
+                    if pong is not None:
+                        await self._ws_send(pong)
+                        continue
                     push = frame.get("push")
                     if not push:
-                        continue  # connect/subscribe acks, pings — ignore
+                        continue  # connect/subscribe acks
                     pub = push.get("pub") or {}
                     envelope = pub.get("data") or {}
                     evt = {
@@ -591,6 +595,15 @@ class MomoAdapter(BasePlatformAdapter):
             except json.JSONDecodeError:
                 log.debug("skipping non-JSON frame: %r", line[:80])
         return frames
+
+    @staticmethod
+    def _pong_for_frame(frame: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+        """Return the Centrifugo JSON protocol pong response for a ping frame."""
+        if not frame:
+            return {}
+        if "ping" in frame:
+            return {"pong": {}}
+        return None
 
     # ----- send (L4 §6.3 / §3.1 / §5.1) -----------------------------------
 

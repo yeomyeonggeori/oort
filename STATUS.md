@@ -136,6 +136,12 @@
 - `Config.agentRuntimeStatusResponse()`를 추가해 gateway mode에서는 `mode=gateway`, `endpointLabel=Hermes gateway platform adapter`, gateway callback secret configured/degraded 상태를 반환하도록 정리했다. worker/direct provider mode에서는 기존 provider status를 그대로 유지한다.
 - 검증: `swift test --package-path server --filter MomoServerTests/testAgentRuntimeStatusReportsGatewayDeliveryModeWhenEnabled` PASS, `swift test --package-path clients/macOS --filter MomoMacTests/testRESTBackendLoadsGatewayRuntimeStatus` PASS, `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260707T162918Z-pid25103-ns1783441758419039000-wt9a510db2fbf3-rb493e10783f9.md`). 실제 gateway roundtrip은 사용자가 Hermes gateway 프로세스를 켠 뒤 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger`로 닫는다.
 
+## 0-4b-6h. MOMO-331 Hermes adapter Centrifugo ping/pong hotfix (2026-07-08)
+
+- 실제 `hermes gateway run`에서 momo platform adapter가 연결되고 `Gateway running with 1 platform(s)`까지 갔지만, 잠시 후 realtime listen loop가 Centrifugo close code `3012 no pong`으로 종료됐다. 원인은 adapter가 Centrifugo JSON protocol heartbeat frame을 push가 아니라는 이유로 무시해 server-side heartbeat에 응답하지 못한 것이다.
+- `MomoAdapter._listen_loop()`가 빈 heartbeat frame에는 빈 pong command를, 명시적 `ping` frame에는 `{"pong": {}}`를 보내도록 수정했다. connect/subscribe ack와 publish push 처리는 그대로 유지한다.
+- 검증: `python3 -m py_compile adapters/hermes/momo_adapter.py && python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS(12 tests), `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260708T004604Z-pid62511-ns1783471564069844000-wt9a510db2fbf3-r90750a762add.md`). 실제 roundtrip은 Hermes gateway 재실행 후 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger`로 닫는다.
+
 ## 0-4b-7. MOMO-258 macOS UI Smoke Fixture Seq Hotfix (2026-07-02)
 
 - MOMO-257 merge 후 reused local Docker DB에서 `scripts/local_gate.sh --profile macos-ui`가 실패했다. 원인은 `verify_macos_real_backend_ui.sh`가 approval/cost fixture message seq를 `205901`로 고정했고, 같은 channel의 `channel_seq`가 이미 더 높게 진행되어 최신 `messages?limit=20` history에 fixture가 보이지 않은 것이다.

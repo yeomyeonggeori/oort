@@ -94,6 +94,15 @@ class HermesAdapterContractTests(unittest.TestCase):
 
         self.assertEqual(event, fixture["unwrapped_adapter_event"])
 
+    def test_centrifugo_ping_frame_maps_to_pong_command(self):
+        frame = momo_adapter.MomoAdapter._iter_frames('{}')[0]
+
+        self.assertEqual(momo_adapter.MomoAdapter._pong_for_frame(frame), {})
+        self.assertEqual(
+            momo_adapter.MomoAdapter._pong_for_frame({"ping": {}}), {"pong": {}}
+        )
+        self.assertIsNone(momo_adapter.MomoAdapter._pong_for_frame({"id": 1}))
+
     def test_handle_message_maps_platform_event_to_momo_rest_shapes(self):
         fixture = load_fixture("platform_adapter_event_mapping.json")
         event = fixture["unwrapped_adapter_event"]
