@@ -332,6 +332,9 @@ MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 macOS dogfood 앱에서는 Hermes가 서버/fixture에 존재해도 처음부터 roster에 보이지 않는다.
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
 label, avatar를 확인한 뒤 초대 완료를 누르면 그때 `member.kind='agent'` roster row가 나타난다.
+초대 후 composer에서 `@`를 입력하면 현재 채널의 초대된 멤버/에이전트 후보가 나타나고,
+`@hermes` 전송 뒤에는 Hermes 응답 또는 실패가 도착할 때까지 timeline과 member row에 작업 중
+상태가 표시된다.
 이 UX는 provider OAuth/token을 momo에 넘기는 절차가 아니다. provider login은 Hermes runtime
 안에서 사용자가 직접 수행하고, momo 앱은 초대/표시/mention entrypoint만 관리한다.
 

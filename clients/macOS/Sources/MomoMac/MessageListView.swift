@@ -39,7 +39,7 @@ public struct MessageListView: View {
                 Divider()
             }
             Divider()
-            timeline
+            timeline(copy: copy)
             Divider()
             composer(copy: copy)
         }
@@ -273,7 +273,7 @@ public struct MessageListView: View {
 
     // MARK: Timeline (seq order)
 
-    private var timeline: some View {
+    private func timeline(copy: MomoWorkspaceCopy) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -299,6 +299,15 @@ public struct MessageListView: View {
                             status: viewModel.agentStatuses[partial.runId]
                         )
                     }
+
+                    ForEach(viewModel.visibleWorkingAgents) { agent in
+                        AgentWorkingTimelineRow(agent: agent, copy: copy)
+                            .id("working-\(agent.id.description)")
+                    }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id("timeline-bottom")
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
@@ -308,26 +317,82 @@ public struct MessageListView: View {
                     withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
                 }
             }
+            .onChange(of: viewModel.visibleWorkingAgents.map(\.id)) { _, ids in
+                guard !ids.isEmpty else { return }
+                withAnimation { proxy.scrollTo("timeline-bottom", anchor: .bottom) }
+            }
         }
     }
 
     // MARK: Composer (optimistic send)
 
     private func composer(copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: 8) {
-            TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...5)
-                .font(.system(size: 14))
-                .onSubmit(submit)
-            Button(action: submit) {
-                Image(systemName: "paperplane.fill")
+        let candidates = viewModel.mentionAutocompleteCandidates()
+        return VStack(alignment: .leading, spacing: 8) {
+            if !candidates.isEmpty {
+                mentionAutocomplete(candidates: Array(candidates.prefix(6)), copy: copy)
             }
-            .disabled(viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                      || viewModel.selectedChannelId == nil)
+
+            HStack(spacing: 8) {
+                TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(1...5)
+                    .font(.body)
+                    .onSubmit(submit)
+                Button(action: submit) {
+                    Image(systemName: "paperplane.fill")
+                }
+                .disabled(viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          || viewModel.selectedChannelId == nil)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    private func mentionAutocomplete(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(copy.mentionAutocompleteTitle)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+            ForEach(candidates) { member in
+                Button {
+                    viewModel.completeMentionAutocomplete(with: member)
+                } label: {
+                    HStack(spacing: 10) {
+                        MentionCandidateAvatar(member: member, isWorking: viewModel.isAgentWorking(member))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(member.displayName)
+                                .font(.callout.weight(.semibold))
+                            Text("@\(member.handle) · \(member.isAgent ? copy.agent : copy.human)")
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        if member.isAgent {
+                            Text("AGENT")
+                                .font(.caption2.weight(.bold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
+                                .foregroundStyle(MomoTheme.agentAccent)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .frame(width: 300, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        }
     }
 
     private var preferredAgent: Member? {
@@ -388,5 +453,58 @@ private struct MomoGuideStepPill: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 4)
         .background(.thinMaterial, in: Capsule())
+    }
+}
+
+private struct AgentWorkingTimelineRow: View {
+    var agent: Member
+    var copy: MomoWorkspaceCopy
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(copy.agentWorkingTitle(agent.displayName))
+                    .font(.callout.weight(.semibold))
+                Text(copy.agentWorkingSubtitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(MomoTheme.agentAccent.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(MomoTheme.agentAccent.opacity(0.16), lineWidth: 1)
+        }
+    }
+}
+
+private struct MentionCandidateAvatar: View {
+    var member: Member
+    var isWorking: Bool
+
+    private var initials: String {
+        guard let first = member.displayName.trimmingCharacters(in: .whitespacesAndNewlines).first else {
+            return member.isAgent ? "A" : "M"
+        }
+        return String(first).uppercased()
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            Text(initials)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(member.isAgent ? MomoTheme.agentAccent : MomoTheme.humanAccent, in: Circle())
+            Circle()
+                .fill(isWorking ? MomoTheme.costAmber : .green)
+                .frame(width: 8, height: 8)
+                .overlay(Circle().stroke(.black.opacity(0.35), lineWidth: 1))
+        }
     }
 }

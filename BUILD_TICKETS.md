@@ -205,6 +205,26 @@
 | `MOMO-259` | macOS shell/layout/performance polish | swift/macos-ui | MOMO-253 |
 | `MOMO-263` | macOS responsive drawer/profile/downloads UX | swift/macos-ui | MOMO-259, MOMO-244 |
 | `MOMO-264` | macOS native profile/settings/downloads UX | swift/macos-ui | MOMO-263 |
+| `MOMO-334` | Dogfood Hermes invite roster UX v0 | swift/macos-ui | MOMO-333 |
+| `MOMO-335` (`#300`) | Mention autocomplete + Hermes working indicator | swift/macos-ui | MOMO-334 |
+| `MOMO-260` (`#263`) | Workspace/member/agent profile settings v0 | swift/macos-ui | MOMO-334 |
+| `MOMO-262` (`#265`) | Agent Pairing Wizard v0 | runtime-agent/macos-ui/docs | MOMO-334, MOMO-333 |
+| `MOMO-261` (`#264`) | Approval/Command Center/typing activity UX | swift/macos-ui | MOMO-335 |
+
+### Local Solo Hermes Dogfood Active Chain
+
+This chain is the current momo-main resumable tracker. The canonical operational
+source is `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`.
+
+1. GitHub `#300` / `MOMO-335`: roster-backed `@` autocomplete and Hermes working indicator. Done in this PR.
+2. GitHub `#263` / `MOMO-260`: workspace/member/agent profile settings v0.
+3. GitHub `#265` / `MOMO-262`: Agent Pairing Wizard v0.
+4. GitHub `#264` / `MOMO-261`: approval/Command Center/typing activity UX.
+5. `MOMO-246`/`MOMO-252`: retarget or deprioritize 72h soak for the lighter
+   one-person Hermes loop.
+
+For each item: issue contract -> implementation -> local gate evidence -> code
+review -> fix if needed -> merge -> main gate -> roadmap/status update.
 
 ### MOMO-233 수용기준 `[infra/docs]`
 - [x] GitHub #224를 `scripts/goal_claim.sh 224`로 claim하고 별도 branch/worktree `chore/224-aws-internal-alpha-stack-v0`에서 진행한다.

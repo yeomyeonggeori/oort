@@ -44,6 +44,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-253에서 post-login 기본 shell을 channel/member/approval 중심으로 단순화하고, diagnostics/session/logout/update/invite는 sidebar footer profile menu와 detail pane으로 숨긴다
      · MOMO-259에서 macOS root layout을 안정적인 sidebar+timeline+optional inspector 구조로 고정해 우측 패널 open/close 시 sidebar/toolbar 흔들림을 줄이고 profile menu/language/appearance UX를 보강한다
      · MOMO-334에서 dogfood 앱 최초 진입 시 Hermes가 자동 초대된 것처럼 보이지 않게 숨기고, 멤버 `+`의 사람/에이전트 초대 분기에서 `@hermes` 프로필/별칭/endpoint를 확인한 뒤 roster에 표시되는 경험으로 바꾼다
+     · MOMO-335에서 composer `@` autocomplete와 Hermes working indicator를 추가해 초대된 Hermes를 후보에서 선택하고, gateway latency 동안 timeline/member row에서 작업 중 상태를 볼 수 있게 한다
      · MOMO-229에서 public/staging host preflight를 보강해 DNS/TLS, pinned registry images, SOPS/age secret source, DB/Redis volumes, pgBackRest WAL/full-backup/PITR required env를 fail-fast하고 redacted markdown/json evidence packet을 만든다
      · MOMO-233에서 AWS 1주일 internal alpha stack v0를 EC2/Lightsail topology, 비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback, static preflight로 고정한다
      · MOMO-237에서 AWS 생성 전에 실행하는 `local-alpha` RC gate를 추가해 local Docker boot/migrate/health/message/relay/mock Kim Intern/macOS real-backend/diagnostics를 한 evidence packet으로 묶는다
@@ -117,6 +118,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-253` | M3/M7 준비 | macOS dogfood UX shell polish | post-login UI를 channel/member/approval 중심으로 단순화하고 session/profile/language/update/invite/logout controls를 sidebar footer profile menu로 이동 |
 | `MOMO-259` | M3/M7 준비 | macOS shell/layout/performance polish | root `NavigationSplitView` swap을 제거하고 optional inspector, lightweight profile menu, direct language menu, appearance preference, quick tooltip을 보강 |
 | `MOMO-334` | M3/M7 준비 | Dogfood Hermes invite roster UX v0 | Hermes는 초대 전 기본 roster에서 숨기고, 멤버 `+` → 사람/에이전트 초대 분기 → `@hermes` profile/alias/endpoint 확인 → channel member 표시로 연결. 기존 gateway mention path는 유지 |
+| `MOMO-335` | M3/M7 준비 | Mention autocomplete + Hermes working indicator | 현재 채널에 초대된 member/agent만 `@` 후보로 표시하고, Hermes mention 후 agent pending/running 상태를 timeline + member row working badge로 보여준다 |
 | `MOMO-264` | M3/M7 준비 | macOS native profile/settings/downloads UX | profile footer는 launcher로 축소하고 Profile/Settings/Downloads/Updates를 우측 설정 surface로 분리해 프로필 이미지, 언어/appearance, workspace icon, 다운로드 폴더/이력, update status를 다국어로 제공 |
 | `MOMO-245` | M1/M7 준비 | Local Soak/Resource Monitor | `scripts/local_soak_monitor.sh`; 72h local dogfood 중 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md`에 PASS/WARN/FAIL + P0/P1 기준 기록 |
 | `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정 |

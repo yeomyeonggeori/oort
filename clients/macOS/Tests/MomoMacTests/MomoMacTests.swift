@@ -163,6 +163,179 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testMentionAutocompleteUsesOnlyInvitedChannelMembers() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        await viewModel.selectChannel(channel)
+
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+        await viewModel.removeMember(agent.id, from: channel)
+        viewModel.composerDraft = "@he"
+        XCTAssertFalse(viewModel.mentionAutocompleteCandidates().contains { $0.id == agent.id })
+
+        let invited = try await viewModel.inviteDogfoodAgent(
+            displayName: "Hermes Local",
+            handle: "@hermes",
+            avatarPath: nil
+        )
+        viewModel.composerDraft = "@he"
+
+        let candidates = viewModel.mentionAutocompleteCandidates()
+        XCTAssertEqual(candidates.first?.id, invited.id)
+
+        viewModel.completeMentionAutocomplete(with: invited)
+        XCTAssertEqual(viewModel.composerDraft, "@hermes ")
+        XCTAssertEqual(viewModel.mentionNotice, "Hermes Local mention inserted.")
+    }
+
+    @MainActor
+    func testManualAgentMentionRequiresChannelMembership() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        await viewModel.selectChannel(channel)
+
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+        await viewModel.removeMember(agent.id, from: channel)
+        XCTAssertFalse(viewModel.isMember(agent.id, in: channel))
+
+        await viewModel.send(body: "@hermes hi before invite", to: channel)
+
+        XCTAssertFalse(viewModel.isAgentWorking(agent, in: channel))
+        XCTAssertFalse(viewModel.visibleWorkingAgents.contains { $0.id == agent.id })
+        XCTAssertFalse(viewModel.visibleMessages.contains { message in
+            message.authorMemberId == agent.id && (message.body?.contains("mock reply") == true)
+        })
+    }
+
+    @MainActor
+    func testAgentStatusAndFinalMessageDriveWorkingIndicator() async throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let human = MemberID()
+        let agent = MemberID()
+        let run = RunID()
+        let statusOnlyBackend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human", channelIds: [channel]),
+                Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "Hermes", handle: "hermes", channelIds: [channel]),
+            ],
+            channels: [
+                Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "general", createdBy: human),
+            ],
+            history: [channel: []],
+            events: [
+                .agentStatus(AgentStatus(
+                    runId: run,
+                    agentMemberId: agent,
+                    channelId: channel,
+                    phase: .thinking,
+                    runStatus: .running
+                )),
+            ]
+        )
+        let viewModel = ChatViewModel(chat: statusOnlyBackend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(viewModel.isAgentWorking(try XCTUnwrap(viewModel.member(agent))))
+
+        let final = Message(
+            id: MessageID(),
+            channelId: channel,
+            seq: 2,
+            hlcTs: 2,
+            authorMemberId: agent,
+            type: .text,
+            body: "Hermes response",
+            runId: run
+        )
+        let finalBackend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human", channelIds: [channel]),
+                Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "Hermes", handle: "hermes", channelIds: [channel]),
+            ],
+            channels: [
+                Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "general", createdBy: human),
+            ],
+            history: [channel: []],
+            events: [
+                .agentStatus(AgentStatus(
+                    runId: run,
+                    agentMemberId: agent,
+                    channelId: channel,
+                    phase: .thinking,
+                    runStatus: .running
+                )),
+                .message(final),
+            ]
+        )
+        let finalViewModel = ChatViewModel(chat: finalBackend, agentTransport: FailingDecisionAgentTransport())
+        await finalViewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await finalViewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(finalViewModel.isAgentWorking(try XCTUnwrap(finalViewModel.member(agent))))
+        XCTAssertTrue(finalViewModel.visibleWorkingAgents.isEmpty)
+    }
+
+    @MainActor
+    func testApprovalRequestDoesNotClearAgentWorkingIndicator() async throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let human = MemberID()
+        let agent = MemberID()
+        let run = RunID()
+        let approval = Message(
+            id: MessageID(),
+            channelId: channel,
+            seq: 2,
+            hlcTs: 2,
+            authorMemberId: agent,
+            type: .approvalRequest,
+            body: "Approve GitHub issue creation?",
+            props: .object(["approval_id": .string(ApprovalID().description)]),
+            runId: run
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human", channelIds: [channel]),
+                Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "Hermes", handle: "hermes", channelIds: [channel]),
+            ],
+            channels: [
+                Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "general", createdBy: human),
+            ],
+            history: [channel: []],
+            events: [
+                .agentStatus(AgentStatus(
+                    runId: run,
+                    agentMemberId: agent,
+                    channelId: channel,
+                    phase: .thinking,
+                    runStatus: .running
+                )),
+                .message(approval),
+            ]
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(80))
+
+        XCTAssertTrue(viewModel.isAgentWorking(try XCTUnwrap(viewModel.member(agent))))
+        XCTAssertEqual(viewModel.agentStatuses[run]?.runStatus, .awaitingApproval)
+    }
+
+    @MainActor
     func testDogfoodHermesInviteRejectsAliasBeforeServerAliasSupport() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -2239,8 +2412,8 @@ private actor AgentMentionFallbackChatBackend: ChatBackend {
 
     func members(workspace: WorkspaceID) async throws -> [Member] {
         [
-            Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human"),
-            Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "김인턴", handle: "kim-intern"),
+            Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human", channelIds: [channel]),
+            Member(id: agent, workspaceId: workspace, kind: .agent, displayName: "김인턴", handle: "kim-intern", channelIds: [channel]),
         ]
     }
 
