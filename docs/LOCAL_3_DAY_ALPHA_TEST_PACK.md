@@ -10,7 +10,9 @@
 ## 0. Decision Contract
 
 Use this document when MOMO-241~245 have landed and MOMO-246 starts the actual
-72-hour local alpha run.
+72-hour local alpha run. For the first local solo Hermes dogfood, MOMO-336
+reduces the entry hurdle: run the start gate below first, then decide whether to
+continue for 1 day, 3 days, or a later full 72h/pre-production soak.
 
 | Decision | Meaning | Required next step |
 |---|---|---|
@@ -21,6 +23,41 @@ Use this document when MOMO-241~245 have landed and MOMO-246 starts the actual
 Do not use "it felt fine" as a decision. Every decision must name the commit,
 local gate evidence, diagnostics bundle, open issue list, and agent runtime
 status.
+
+### 0.1 MOMO-336 Reduced Start Gate
+
+The reduced start gate answers a smaller question than the original 72h run:
+"Can one operator start momo locally, invite Hermes, exchange useful messages,
+and collect enough evidence to file P0/P1 bugs?"
+
+The full 72h soak remains useful before AWS/pre-production, but it is no longer
+required before the first local solo Hermes loop.
+
+| Check | PASS threshold | Evidence |
+|---|---|---|
+| Local stack | `scripts/momo up` or `scripts/momo start` brings up Docker/Postgres/Centrifugo/API/relay/worker without port conflicts. | command output or local-alpha evidence path |
+| Fresh session | macOS app logs in after MOMO-300 token revocation; stale tokens are discarded. | screenshot or app/server log |
+| Hermes invite | Hermes is not pre-seeded as a mock-looking member; operator invites/adds it through the dogfood agent flow. | screenshot or REST roster/member evidence |
+| One roundtrip | `@hermes` creates an agent job and produces a same-channel response. A readable stage-specific error is useful evidence, but it yields `BLOCKED` or `NEEDS_FIX`, not `START_SOLO`. | timeline screenshot, history JSON, or smoke evidence |
+| Activity visibility | During the request, Hermes working/typing state is visible in the timeline or roster and clears after success/failure. | screenshot or macOS UI gate evidence |
+| Diagnostics | A diagnostics/resource snapshot is collected outside the repo. | diagnostics directory or summary path |
+| Blockers | No open P0/P1 blocks the next local solo session. | GitHub issue list or local triage note |
+
+Start-gate report:
+
+```md
+## MOMO-336 Local Solo Hermes Start Gate
+- Commit:
+- Worktree:
+- Local stack:
+- App login:
+- Hermes invite:
+- @hermes roundtrip:
+- Diagnostics/resource evidence:
+- Open P0/P1:
+- Decision: START_SOLO / BLOCKED / NEEDS_FIX
+- Notes:
+```
 
 ## 1. Required Inputs
 
@@ -81,7 +118,7 @@ PASS or explicitly recorded as a blocker.
 | Swift gate | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` | PASS evidence markdown path recorded. |
 | Local alpha RC | `scripts/local_gate.sh --profile local-alpha` | PASS evidence for boot, migrate, health, message, relay, mock agent, backup restore, macOS smoke, diagnostics. |
 | App launch | `LOCAL_GATE_LAUNCH_UI=1 ... scripts/local_gate.sh --profile macos-ui` | Foreground process/window/log evidence recorded when UI dogfood is in scope. |
-| External runtime | `scripts/local_gate.sh --profile external-agent-provider` with real env, or explicit skip | Credentialed PASS is required for `AWS_READY`; no-credential skip is acceptable only for `NEEDS_MORE_LOCAL`. |
+| External runtime | `scripts/momo hermes-gateway-smoke --real --trigger`, `scripts/local_gate.sh --profile external-agent-provider` with real env, or explicit skip | Credentialed PASS is required for `AWS_READY`; `START_SOLO` requires a provider-owned Hermes gateway roundtrip PASS. A named blocker is valid evidence only for `BLOCKED` or `NEEDS_FIX`. |
 | Evidence root | local path outside repo | Directory exists and contains Day 0 notes. |
 | Issue board | `scripts/goal_status.sh --repo Dawn-kim-official/momo` | No known open P0/P1 blocks the local run. |
 
@@ -97,7 +134,7 @@ Day 0 output:
 - macOS UI launch:
 - External agent runtime:
 - Open P0/P1:
-- Decision to start 72h: yes/no
+- Decision to start local solo: START_SOLO / BLOCKED / NEEDS_FIX
 - Notes:
 ```
 
