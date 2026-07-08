@@ -180,6 +180,7 @@
 | `MOMO-244` | Dev Update Channel v0 | swift/docs | MOMO-235, MOMO-241 |
 | `MOMO-245` | Local Soak/Resource Monitor | tooling/runtime/docs | MOMO-224, MOMO-237, MOMO-239, MOMO-240, MOMO-241 |
 | `MOMO-246` | 72h Local Alpha Dogfood Run | manual/tracking | MOMO-241, MOMO-242, MOMO-243, MOMO-244, MOMO-245 |
+| `MOMO-336` (`#305`) | Local Solo Hermes Dogfood Start Gate | docs/manual | MOMO-335, MOMO-260, MOMO-262, MOMO-261 |
 | `MOMO-319` | Local gate/verifier hardening for solo alpha | tooling/runtime | LSA-001, MOMO-300, MOMO-301, MOMO-302 |
 | `MOMO-320` | Local runtime env drift guard | tooling/runtime | LSA-001, MOMO-319, MOMO-300 |
 | `MOMO-324` | AgentWorker verifier cleanup FK rerun hardening | tooling/runtime | MOMO-320 |
@@ -216,12 +217,12 @@
 This chain is the current momo-main resumable tracker. The canonical operational
 source is `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`.
 
-1. GitHub `#300` / `MOMO-335`: roster-backed `@` autocomplete and Hermes working indicator. Done in this PR.
-2. GitHub `#263` / `MOMO-260`: workspace/member/agent profile settings v0. Done in this PR.
+1. GitHub `#300` / `MOMO-335`: roster-backed `@` autocomplete and Hermes working indicator. Done.
+2. GitHub `#263` / `MOMO-260`: workspace/member/agent profile settings v0. Done.
 3. GitHub `#265` / `MOMO-262`: Agent Pairing Wizard v0. Done.
-4. GitHub `#264` / `MOMO-261`: approval/Command Center/typing activity UX. Done in this PR.
-5. `MOMO-246`/`MOMO-252`: retarget or deprioritize 72h soak for the lighter
-   one-person Hermes loop.
+4. GitHub `#264` / `MOMO-261`: approval/Command Center/typing activity UX. Done.
+5. GitHub `#305` / `MOMO-336`: retarget full 72h soak into a reduced Local
+   Solo Hermes Dogfood Start Gate. Done in this PR.
 
 For each item: issue contract -> implementation -> local gate evidence -> code
 review -> fix if needed -> merge -> main gate -> roadmap/status update.
@@ -308,6 +309,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] MOMO-246은 momo-main tracking/run issue로 진행하고 worker implementation goal로 claim하지 않는다.
 - [ ] 실제 72h run 중 발견된 결함은 P0/P1/P2/P3 별도 이슈로 분리한다.
 - [ ] 최종 판정은 `AWS_READY` / `BLOCKED` / `NEEDS_MORE_LOCAL` 중 하나로만 남긴다.
+- [ ] MOMO-336 이후 full 72h soak은 local solo dogfood entry blocker가 아니라 AWS/pre-production promotion evidence로 취급한다.
+
+### MOMO-336 수용기준 `[docs/manual]`
+- [x] GitHub #305를 `scripts/goal_claim.sh 305`로 claim하고 별도 branch/worktree `chore/305-local-solo-hermes-dogfood-start-gate`에서 진행한다.
+- [x] `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`의 Active Buildable Goal Chain을 MOMO-335/260/262/261 완료와 MOMO-336 retarget으로 정리한다.
+- [x] `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`에 reduced start gate를 추가해 local stack, fresh login, Hermes invite, `@hermes` roundtrip PASS, activity visibility, diagnostics, blocker triage를 고정한다.
+- [x] MOMO-252 / PR #253은 false PASS evidence risk 때문에 merge하지 않고 close/retarget 처리한다.
+- [x] `ROADMAP.md`, `STATUS.md`, `BUILD_TICKETS.md`에 full 72h soak이 AWS/pre-production signal이고 첫 local solo entry blocker가 아님을 반영한다.
+- [ ] `scripts/local_gate.sh --profile docs` PASS evidence를 PR에 첨부한다.
+- [ ] PR 생성 후 GitHub #305를 `status:needs-review`로 전환한다.
 
 ### LSA-001 수용기준 `[docs/tooling/runtime]`
 - [x] `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`를 추가해 로컬 1인 테스트의 Definition of Done과 buildable goal chain을 고정한다.

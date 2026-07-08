@@ -222,6 +222,13 @@
 - `docs/INTERNAL_ALPHA.md`에 monitor 실행법, `summary.md` PASS/WARN/FAIL 판정, P0/P1 감지 기준, Docker Desktop CPU/memory/disk 권장값을 추가했다. AWS 승격은 실제 72h `PASS` summary 또는 모든 `WARN`의 follow-up 없이는 진행하지 않는다.
 - 실제 72h soak 완료와 AWS monitoring/Prometheus/Grafana/Kubernetes는 out of scope다. 검증: `scripts/local_gate.sh --profile docs`, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` 대상.
 
+## 0-4g. MOMO-336 Local Solo Hermes Dogfood Start Gate (2026-07-08)
+
+- MOMO-246/MOMO-252의 full 72h soak을 첫 로컬 1인 Hermes dogfood의 진입조건에서 내렸다. full 72h soak은 AWS/pre-production promotion evidence로 유지하되, 첫 local solo loop는 reduced start gate로 시작한다.
+- PR #253은 momo-main review에서 merge하지 않고 닫았다. 이유는 host API/Centrifugo/Postgres 접근 실패를 Docker 내부 fallback PASS로 바꿀 수 있어 evidence 신뢰도를 떨어뜨리고, 현재 Hermes-native gateway local-solo 경로와도 stale했기 때문이다.
+- `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`와 `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`는 이제 local stack, fresh login, Hermes invite, `@hermes` same-channel roundtrip PASS, working indicator, diagnostics/resource evidence, open P0/P1 0을 reduced start gate로 본다. readable failure는 `START_SOLO`가 아니라 `BLOCKED` 또는 `NEEDS_FIX` evidence로 남긴다.
+- 남은 runtime-unverified: 실제 사용자가 provider-owned Hermes/Codex OAuth를 완료한 뒤 장시간 dogfood를 계속하는 것과 AWS host provisioning은 후속 실행/운영 단계다.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.

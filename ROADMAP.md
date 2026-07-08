@@ -53,6 +53,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
      · MOMO-239에서 로컬 1인 dogfood checklist와 AWS 승격 threshold를 고정해 `AWS_READY` evidence 없이는 AWS provisioning을 진행하지 않는다
      · MOMO-241에서 72h local dogfood의 Day 0~3 체크리스트, daily evidence, P0/P1/P2 triage, `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` decision contract를 `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`로 고정한다
      · MOMO-245에서 72시간 local soak/resource monitor를 추가해 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md` PASS/WARN/FAIL 판정을 남긴다
+     · MOMO-336에서 full 72h soak을 첫 local solo Hermes dogfood의 entry blocker에서 내리고, local stack + fresh login + Hermes invite + `@hermes` roundtrip PASS + diagnostics + open P0/P1 0을 reduced start gate로 고정한다. 72h soak은 AWS/pre-production promotion evidence로 유지한다
      · 로컬 1인 테스트 승격 레인은 `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`를 정본으로 둔다. AWS 전에는 LSA-001 → MOMO-319 → MOMO-303 → MOMO-304 → credentialed Hermes setup rehearsal → short dogfood gate 순서로 간다
      · 실제 staging URL/TLS, SOPS 복호화, pgBackRest stanza/check/full backup/WAL/PITR restore rehearsal, 외부 hermes staging 연결은 public host-runtime 검증 필요
      · clients/macOS = SwiftPM dev app 가능 단계, 릴리스용 Xcode .app은 M4에서 진행
@@ -126,7 +127,8 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-261` | M3/M7 준비 | Approval/Command Center/typing activity UX | 에이전트 승인함/Command Center의 의미와 닫기 흐름을 명확히 하고, 사람 typing indicator와 에이전트 working status badge를 macOS dogfood shell에 추가한다 |
 | `MOMO-264` | M3/M7 준비 | macOS native profile/settings/downloads UX | profile footer는 launcher로 축소하고 Profile/Settings/Downloads/Updates를 우측 설정 surface로 분리해 프로필 이미지, 언어/appearance, workspace icon, 다운로드 폴더/이력, update status를 다국어로 제공 |
 | `MOMO-245` | M1/M7 준비 | Local Soak/Resource Monitor | `scripts/local_soak_monitor.sh`; 72h local dogfood 중 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md`에 PASS/WARN/FAIL + P0/P1 기준 기록 |
-| `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정 |
+| `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정. MOMO-336 이후에는 첫 local solo dogfood entry blocker가 아니라 AWS/pre-production promotion evidence로 취급 |
+| `MOMO-336` | M1/M7 준비 | Local Solo Hermes Dogfood Start Gate | full 72h soak 대신 local stack, fresh session, explicit Hermes invite, `@hermes` roundtrip PASS, activity visibility, diagnostics/resource evidence, open P0/P1 0으로 `START_SOLO` / `BLOCKED` / `NEEDS_FIX` 판단 |
 | `LSA-001` | M1/M7 준비 | Redesign-aligned local solo alpha readiness | `docs/LOCAL_SOLO_ALPHA_ROADMAP.md` + local runner/docs/app defaults; MOMO-300/301/302 이후 fresh login, generated `CENT_PROXY_SECRET`, migration 007 idempotency, rate-limit/context expectations, and local-alpha evidence are aligned before more dogfood work |
 | `MOMO-319` | M1/M7 준비 | Local gate/verifier hardening for solo alpha | repo-local verifier-owned port/process-tree cleanup + fixture-scoped DB cleanup; `runtime-agent` full gate repeatability restored before local solo dogfood |
 | `MOMO-320` | M1/M7 준비 | Local runtime env drift guard | stale generated `.env.worktree`가 `CENT_API_KEY`/`CENT_TOKEN_HMAC`/`CENT_PROXY_SECRET`/`JWT_HMAC`를 누락해 Centrifugo publish 401을 만들지 않도록 runtime gate가 generated env를 재생성하거나 custom `ENV_FILE` 누락을 명확히 fail-fast |
