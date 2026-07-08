@@ -17,12 +17,16 @@ import MomoCore
 
 public struct ApprovalInboxView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
     }
 
     private var pending: [ApprovalEvent] { viewModel.pendingApprovals }
+    private var copy: MomoWorkspaceCopy {
+        MomoWorkspaceCopy(language: MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault)
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,9 +34,9 @@ public struct ApprovalInboxView: View {
             Divider()
             if pending.isEmpty {
                 ContentUnavailableViewCompat(
-                    title: "No pending approvals",
+                    title: copy.noPendingApprovals,
                     systemImage: "checkmark.seal",
-                    description: "Agent actions that need a human decision will queue here."
+                    description: copy.agentApprovalInboxSubtitle
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -46,13 +50,20 @@ public struct ApprovalInboxView: View {
 
     private var header: some View {
         HStack {
-            Text("Approvals (\(pending.count))").font(.headline)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(copy.approvals) (\(pending.count))")
+                    .font(.headline)
+                Text(copy.agentApprovalInboxSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
             Spacer()
             // Batch action (experience C money-shot): approve only reversible ones.
             Button {
                 Task { await approveAllReversible() }
             } label: {
-                Label("Approve all reversible", systemImage: "checkmark.circle")
+                Label(copy.approveAllReversible, systemImage: "checkmark.circle")
             }
             .disabled(!pending.contains { $0.isReversible == true })
         }
@@ -75,15 +86,15 @@ public struct ApprovalInboxView: View {
                 }
                 Text(approval.actionType).font(.callout.monospaced())
                 if let cost = approval.estimatedMicroUSD {
-                    Text("est. \(CostFormat.usd(cost))")
+                    Text(copy.estimatedCost(CostFormat.usd(cost)))
                         .font(.caption).foregroundStyle(MomoTheme.costAmber)
                 }
             }
             Spacer()
             VStack(spacing: 6) {
-                Button("승인") { Task { await viewModel.decideApproval(approval.approvalId, approve: true) } }
+                Button(copy.approve) { Task { await viewModel.decideApproval(approval.approvalId, approve: true) } }
                     .buttonStyle(.borderedProminent).controlSize(.small)
-                Button("거부") { Task { await viewModel.decideApproval(approval.approvalId, approve: false) } }
+                Button(copy.reject) { Task { await viewModel.decideApproval(approval.approvalId, approve: false) } }
                     .buttonStyle(.bordered).controlSize(.small)
                 if isInFlight {
                     ProgressView().controlSize(.small)
@@ -101,7 +112,7 @@ public struct ApprovalInboxView: View {
             .fill(isReversible ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
             .frame(width: 10, height: 10)
             .padding(.top, 5)
-            .help(isReversible ? "reversible" : "irreversible")
+            .help(isReversible ? copy.reversible : copy.irreversible)
     }
 
     private func approveAllReversible() async {
@@ -117,7 +128,7 @@ public struct ApprovalInboxView: View {
     }
 
     private func delegationLabel(_ subject: MemberID) -> String {
-        "as \(viewModel.member(subject)?.displayName ?? "someone")"
+        copy.approvalDelegationLabel(viewModel.member(subject)?.displayName ?? "someone")
     }
 }
 

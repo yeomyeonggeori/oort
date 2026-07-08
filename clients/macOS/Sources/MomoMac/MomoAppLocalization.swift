@@ -127,6 +127,23 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    func typingIndicator(_ names: [String]) -> String {
+        let visible = names.prefix(2).joined(separator: ", ")
+        let remainder = max(0, names.count - 2)
+        switch language {
+        case .korean:
+            if remainder > 0 {
+                return "\(visible) 외 \(remainder)명이 입력 중..."
+            }
+            return "\(visible)이 입력 중..."
+        case .english:
+            if remainder > 0 {
+                return "\(visible) and \(remainder) more are typing..."
+            }
+            return names.count == 1 ? "\(visible) is typing..." : "\(visible) are typing..."
+        }
+    }
+
     func agentWorkingTitle(_ name: String) -> String {
         switch language {
         case .korean: return "\(name)이 작업 중"
@@ -194,6 +211,13 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "외부 작업 전 확인할 요청 없음"
         case .english: return "No external actions need review"
+        }
+    }
+
+    var agentApprovalInboxSubtitle: String {
+        switch language {
+        case .korean: return "에이전트가 외부 작업을 하기 전 확인이 필요한 요청입니다."
+        case .english: return "Requests that need review before an agent performs external work."
         }
     }
 
@@ -865,8 +889,8 @@ struct MomoWorkspaceCopy {
 
     var commandCenterInspectorSubtitle: String {
         switch language {
-        case .korean: return "테스트와 진단은 필요할 때만 여는 보조 패널입니다."
-        case .english: return "Open test and diagnostic controls only when you need them."
+        case .korean: return "연결, 런타임, 테스트 상태를 필요할 때만 확인하는 진단 패널입니다."
+        case .english: return "A diagnostic panel for connection, runtime, and test status when you need it."
         }
     }
 
@@ -874,6 +898,55 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "에이전트가 외부 작업 전 확인을 요청하면 여기에 모입니다."
         case .english: return "Agent actions that need human review collect here."
+        }
+    }
+
+    var approveAllReversible: String {
+        switch language {
+        case .korean: return "되돌릴 수 있는 요청 모두 승인"
+        case .english: return "Approve all reversible"
+        }
+    }
+
+    var approve: String {
+        switch language {
+        case .korean: return "승인"
+        case .english: return "Approve"
+        }
+    }
+
+    var reject: String {
+        switch language {
+        case .korean: return "거부"
+        case .english: return "Reject"
+        }
+    }
+
+    var reversible: String {
+        switch language {
+        case .korean: return "되돌릴 수 있음"
+        case .english: return "Reversible"
+        }
+    }
+
+    var irreversible: String {
+        switch language {
+        case .korean: return "되돌리기 어려움"
+        case .english: return "Irreversible"
+        }
+    }
+
+    func approvalDelegationLabel(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name) 대신"
+        case .english: return "as \(name)"
+        }
+    }
+
+    func estimatedCost(_ cost: String) -> String {
+        switch language {
+        case .korean: return "예상 \(cost)"
+        case .english: return "est. \(cost)"
         }
     }
 

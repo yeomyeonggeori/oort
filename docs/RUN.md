@@ -340,6 +340,11 @@ non-loopback `http://...` endpoint는 사용자가 명시적으로 opt-in하지 
 초대 후 composer에서 `@`를 입력하면 현재 채널의 초대된 멤버/에이전트 후보가 나타나고,
 `@hermes` 전송 뒤에는 Hermes 응답 또는 실패가 도착할 때까지 timeline과 member row에 작업 중
 상태가 표시된다.
+composer에 사람이 입력 중이면 하단에 typing indicator가 표시된다. 현재 dogfood v0 typing은
+local/demo fallback과 backend hook 중심이며, production typing fanout은 후속 범위다. sidebar의
+`에이전트 승인함`은 일반 알림함이 아니라 에이전트가 외부 작업을 수행하기 전에 사람이 확인해야
+하는 approval queue다. Command Center는 실사용 중 필요한 경우에만 여는 진단 surface이며, 일반
+대화는 `#general`, 에이전트 연결/실험은 `#agent-lab`에서 시작한다.
 이 UX는 provider OAuth/token을 momo에 넘기는 절차가 아니다. provider login은 Hermes runtime
 안에서 사용자가 직접 수행하고, momo 앱은 초대/표시/mention entrypoint만 관리한다.
 

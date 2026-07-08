@@ -382,14 +382,22 @@ public struct ChannelListView: View {
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(isSelected(channel) ? MomoTheme.humanAccent : .secondary)
                     .frame(width: 24)
-                Text(channel.name ?? "DM")
-                    .font(.system(size: 16, weight: isSelected(channel) ? .semibold : .medium))
-                    .lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(channel.name ?? "DM")
+                        .font(.system(size: 16, weight: isSelected(channel) ? .semibold : .medium))
+                        .lineLimit(1)
+                    if let topic = channel.topic, !topic.isEmpty {
+                        Text(topic)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 8)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(minHeight: 42)
+            .padding(.vertical, channel.topic?.isEmpty == false ? 8 : 10)
+            .frame(minHeight: channel.topic?.isEmpty == false ? 52 : 42)
             .contentShape(Rectangle())
             .background(
                 isSelected(channel) ? Color.primary.opacity(0.13) : Color.clear,
@@ -469,7 +477,8 @@ public struct ChannelListView: View {
     }
 
     private func memberRowContent(_ member: Member) -> some View {
-        HStack(spacing: 10) {
+        let copy = MomoWorkspaceCopy(language: language)
+        return HStack(spacing: 10) {
             MomoProfileAvatar(
                 initials: memberInitials(member),
                 status: presenceBadge(for: member),
@@ -489,12 +498,14 @@ public struct ChannelListView: View {
                     .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
                     .foregroundStyle(MomoTheme.agentAccent)
                 if viewModel.isAgentWorking(member) {
-                    Text("WORKING")
-                        .font(.system(size: 8, weight: .bold))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(MomoTheme.costAmber.opacity(0.18), in: Capsule())
+                    Label(copy.presenceWorking, systemImage: "ellipsis.bubble.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.caption2.weight(.bold))
+                        .frame(width: 20, height: 20)
+                        .background(MomoTheme.costAmber.opacity(0.18), in: Circle())
                         .foregroundStyle(MomoTheme.costAmber)
+                        .help(copy.agentWorkingTitle(member.displayName))
+                        .momoQuickTooltip(copy.agentWorkingTitle(member.displayName))
                 }
             }
             Spacer()
@@ -523,8 +534,8 @@ public struct ChannelListView: View {
                     .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(MomoWorkspaceCopy(language: language).editProfile)
-            .momoQuickTooltip(MomoWorkspaceCopy(language: language).editProfile)
+            .help(copy.editProfile)
+            .momoQuickTooltip(copy.editProfile)
             if viewModel.selectedChannelId != nil {
                 memberMutationButton(member)
             }
@@ -1149,7 +1160,7 @@ public struct ChannelListView: View {
 
     private func approvalSummary(copy: MomoWorkspaceCopy) -> String {
         let count = viewModel.pendingApprovals.count
-        return count == 0 ? copy.noPendingAgentApprovals : "\(count) \(copy.pendingApprovals)"
+        return count == 0 ? copy.agentApprovalInboxSubtitle : "\(count) \(copy.pendingApprovals)"
     }
 
     private var currentAppearance: MomoAppearancePreference {
