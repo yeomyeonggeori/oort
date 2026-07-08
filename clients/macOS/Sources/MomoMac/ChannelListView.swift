@@ -21,6 +21,7 @@ public struct ChannelListView: View {
     @State private var inviteMode: MomoInviteMode = .human
     @State private var agentInviteInFlight = false
     @State private var agentInviteError: String?
+    @State private var agentInviteNotice: String?
     @State private var hermesInvited = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
@@ -32,8 +33,13 @@ public struct ChannelListView: View {
     @AppStorage("momo.profile.displayName") private var profileDisplayNameDraft = ""
     @AppStorage("momo.profile.avatarPath") private var profileAvatarPath = ""
     @AppStorage("momo.dogfood.hermes.displayName") private var hermesDisplayName = "Hermes"
-    @AppStorage("momo.dogfood.hermes.endpoint") private var hermesEndpoint = "http://127.0.0.1:28188/v1"
+    @AppStorage("momo.dogfood.hermes.alias") private var hermesAlias = "@hermes"
+    @AppStorage("momo.dogfood.hermes.endpoint") private var storedHermesEndpoint = "http://127.0.0.1:28188/v1"
+    @AppStorage("momo.dogfood.hermes.modelLabel") private var hermesModelLabel = "gpt-oauth-provider"
+    @AppStorage("momo.dogfood.hermes.permissionScope") private var hermesPermissionScopeRaw = MomoAgentPairingPermissionScope.channelReadReply.rawValue
+    @AppStorage("momo.dogfood.hermes.allowNonLoopbackHTTP") private var allowNonLoopbackHTTP = false
     @AppStorage("momo.dogfood.hermes.avatarPath") private var hermesAvatarPath = ""
+    @State private var hermesEndpointDraft = ""
     private static let dogfoodHermesAlias = "@hermes"
     private let sessionChrome: MomoSessionChrome?
     private let openCommandCenter: (() -> Void)?
@@ -135,6 +141,8 @@ public struct ChannelListView: View {
         .background(MomoSidebarGlassBackground())
         .animation(sidebarPanelAnimation, value: showProfilePanel)
         .onAppear {
+            refreshHermesEndpointDraftIfNeeded()
+            hermesAlias = Self.dogfoodHermesAlias
             refreshHermesInviteState()
         }
         .onChange(of: hermesInviteScopeKey) { _, _ in
@@ -806,8 +814,24 @@ public struct ChannelListView: View {
                     TextField(copy.agentAlias, text: .constant(Self.dogfoodHermesAlias))
                         .textFieldStyle(.roundedBorder)
                         .disabled(true)
-                    TextField(copy.providerEndpoint, text: $hermesEndpoint)
+                    TextField(copy.providerEndpoint, text: $hermesEndpointDraft)
                         .textFieldStyle(.roundedBorder)
+                    TextField(copy.modelLabel, text: $hermesModelLabel)
+                        .textFieldStyle(.roundedBorder)
+                    Picker(copy.permissionScope, selection: $hermesPermissionScopeRaw) {
+                        ForEach(MomoAgentPairingPermissionScope.allCases) { scope in
+                            Text(copy.pairingScopeTitle(scope)).tag(scope.rawValue)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Text(copy.pairingScopeDetail(selectedPairingScope))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if agentEndpointPolicy.requiresExplicitOptIn {
+                        Toggle(copy.nonLoopbackHTTPOptIn, isOn: $allowNonLoopbackHTTP)
+                            .font(.caption.weight(.semibold))
+                    }
                     HStack(spacing: 8) {
                         Button {
                             chooseHermesAvatar()
@@ -827,9 +851,19 @@ public struct ChannelListView: View {
                     Label(copy.agentInviteNetworkNote, systemImage: "network")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Label(agentEndpointPolicy.isAllowed ? agentEndpointPolicy.reason : "\(copy.pairingEndpointBlocked) \(agentEndpointPolicy.reason)", systemImage: agentEndpointPolicy.isAllowed ? "checkmark.shield" : "lock.trianglebadge.exclamationmark")
+                        .font(.caption)
+                        .foregroundStyle(agentEndpointPolicy.isAllowed ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
                     Label(agentPairingStatusText(copy: copy), systemImage: agentPairingStatusIcon)
                         .font(.caption)
                         .foregroundStyle(agentPairingStatusTint)
+                    agentPairingChecklist(copy: copy)
+                    pairingManifestBox(copy: copy)
+                    if let agentInviteNotice {
+                        Label(agentInviteNotice, systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(MomoTheme.reversibleGreen)
+                    }
                     if let agentInviteError {
                         Label(agentInviteError, systemImage: "exclamationmark.triangle")
                             .font(.caption)
@@ -841,7 +875,7 @@ public struct ChannelListView: View {
                         Label(hermesInvited ? copy.updateAgentProfile : copy.completeAgentInvite, systemImage: "checkmark.circle")
                     }
                     .controlSize(.regular)
-                    .disabled(agentInviteInFlight)
+                    .disabled(agentInviteInFlight || !agentEndpointPolicy.isAllowed)
                 }
                 .padding(12)
                 .background(MomoTheme.agentAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -876,11 +910,136 @@ public struct ChannelListView: View {
         Self.dogfoodHermesAlias
     }
 
+    private var selectedPairingScope: MomoAgentPairingPermissionScope {
+        MomoAgentPairingPermissionScope(rawValue: hermesPermissionScopeRaw) ?? .channelReadReply
+    }
+
+    private var agentEndpointPolicy: MomoAgentPairingEndpointPolicy {
+        MomoAgentPairingSecurity.endpointPolicy(hermesEndpointDraft, allowNonLoopbackHTTP: allowNonLoopbackHTTP)
+    }
+
+    private var currentPairingManifest: MomoAgentPairingManifest {
+        MomoAgentPairingManifest.make(
+            displayName: hermesDisplayName,
+            handle: displayAgentAlias,
+            endpoint: agentEndpointPolicy.sanitizedEndpoint ?? hermesEndpointDraft,
+            modelLabel: hermesModelLabel,
+            permissionScope: selectedPairingScope,
+            workspaceID: viewModel.workspaceId,
+            channelID: viewModel.selectedChannelId,
+            apiURL: sessionChrome?.summary.serverURLString
+        )
+    }
+
+    private func agentPairingChecklist(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(copy.agentPairingChecklist)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            pairingStep(1, copy.pairingStepProvider, isDone: true)
+            pairingStep(2, copy.pairingStepOAuth, isDone: false)
+            pairingStep(3, copy.pairingStepValues, isDone: agentEndpointPolicy.isAllowed)
+            pairingStep(4, copy.pairingStepSmoke, isDone: hermesInvited)
+            Text(copy.runbookReference)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func pairingStep(_ index: Int, _ title: String, isDone: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: isDone ? "checkmark.circle.fill" : "\(index).circle")
+                .foregroundStyle(isDone ? MomoTheme.reversibleGreen : .secondary)
+            Text(title)
+                .font(.caption)
+            Spacer()
+        }
+    }
+
+    private func pairingManifestBox(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(copy.pairingManifest, systemImage: "doc.text")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(currentPairingManifest.inviteCode)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            HStack(spacing: 8) {
+                Button {
+                    copyToPasteboard(currentPairingManifest.inviteCode)
+                    agentInviteNotice = copy.inviteCodeCopied
+                    agentInviteError = nil
+                } label: {
+                    Label(copy.copyInviteCode, systemImage: "number.square")
+                }
+                .controlSize(.small)
+                .disabled(!agentEndpointPolicy.isAllowed)
+                Button {
+                    copyToPasteboard(currentPairingManifest.prettyJSONString)
+                    agentInviteNotice = copy.manifestCopied
+                    agentInviteError = nil
+                } label: {
+                    Label(copy.copyManifest, systemImage: "doc.on.doc")
+                }
+                .controlSize(.small)
+                .disabled(!agentEndpointPolicy.isAllowed)
+                Button {
+                    exportPairingManifest(copy: copy)
+                } label: {
+                    Label(copy.exportManifest, systemImage: "square.and.arrow.down")
+                }
+                .controlSize(.small)
+                .disabled(!agentEndpointPolicy.isAllowed)
+            }
+        }
+        .padding(10)
+        .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @MainActor
+    private func exportPairingManifest(copy: MomoWorkspaceCopy) {
+        guard agentEndpointPolicy.isAllowed else {
+            agentInviteNotice = nil
+            agentInviteError = agentEndpointPolicy.reason
+            return
+        }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "momo-agent-\(normalizedAgentAlias(displayAgentAlias))-pairing.json"
+        panel.title = copy.exportManifest
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try currentPairingManifest.prettyJSONString.write(to: url, atomically: true, encoding: .utf8)
+            agentInviteNotice = copy.manifestCopied
+            agentInviteError = nil
+        } catch {
+            agentInviteNotice = nil
+            agentInviteError = error.localizedDescription
+        }
+    }
+
     @MainActor
     private func completeAgentInvite() async {
         guard !agentInviteInFlight else { return }
+        guard agentEndpointPolicy.isAllowed else {
+            agentInviteNotice = nil
+            agentInviteError = agentEndpointPolicy.reason
+            return
+        }
         agentInviteInFlight = true
         agentInviteError = nil
+        agentInviteNotice = nil
         defer { agentInviteInFlight = false }
 
         if hermesDisplayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -888,9 +1047,14 @@ public struct ChannelListView: View {
         }
 
         do {
+            if let sanitizedEndpoint = agentEndpointPolicy.sanitizedEndpoint {
+                storedHermesEndpoint = sanitizedEndpoint
+                hermesEndpointDraft = sanitizedEndpoint
+            }
+            hermesAlias = Self.dogfoodHermesAlias
             _ = try await viewModel.inviteDogfoodAgent(
                 displayName: hermesDisplayName,
-                handle: Self.dogfoodHermesAlias,
+                handle: displayAgentAlias,
                 avatarPath: hermesAvatarPath
             )
             setHermesInvited(true)
@@ -1026,6 +1190,11 @@ public struct ChannelListView: View {
 
     private var hermesInviteDefaultsKey: String {
         "momo.dogfood.hermes.invited.\(hermesInviteScopeKey)"
+    }
+
+    private func refreshHermesEndpointDraftIfNeeded() {
+        guard hermesEndpointDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        hermesEndpointDraft = storedHermesEndpoint
     }
 
     private func refreshHermesInviteState() {

@@ -331,7 +331,12 @@ MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 
 macOS dogfood 앱에서는 Hermes가 서버/fixture에 존재해도 처음부터 roster에 보이지 않는다.
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
-label, avatar를 확인한 뒤 초대 완료를 누르면 그때 `member.kind='agent'` roster row가 나타난다.
+label, model label, permission scope, avatar를 확인한다. 앱은 pairing manifest와 invite code를
+생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing connection metadata와
+`$HOME/.momo/hermes-gateway.env:MOMO_AGENT_GATEWAY_SECRET` secret source만 들어가며,
+Codex/OpenAI OAuth token, refresh token, provider API key 값은 절대 포함하지 않는다.
+non-loopback `http://...` endpoint는 사용자가 명시적으로 opt-in하지 않으면 초대 완료가 막힌다.
+초대 완료를 누르면 그때 `member.kind='agent'` roster row가 나타난다.
 초대 후 composer에서 `@`를 입력하면 현재 채널의 초대된 멤버/에이전트 후보가 나타나고,
 `@hermes` 전송 뒤에는 Hermes 응답 또는 실패가 도착할 때까지 timeline과 member row에 작업 중
 상태가 표시된다.

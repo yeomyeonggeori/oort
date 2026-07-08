@@ -382,6 +382,116 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
+    func testAgentPairingManifestExcludesProviderSecrets() throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let manifest = MomoAgentPairingManifest.make(
+            displayName: "Hermes",
+            handle: "@hermes",
+            endpoint: "http://127.0.0.1:28188/v1",
+            modelLabel: "gpt-oauth-provider",
+            permissionScope: .channelReadReplyApprovalTools,
+            workspaceID: workspace,
+            channelID: channel,
+            apiURL: "http://127.0.0.1:28180",
+            generatedAtMs: 123
+        )
+
+        let json = manifest.prettyJSONString
+        XCTAssertTrue(json.contains("\"schema\" : \"momo.agent_pairing_manifest.v0\""))
+        XCTAssertTrue(json.contains("\"handle\" : \"hermes\""))
+        XCTAssertTrue(json.contains("MOMO_AGENT_GATEWAY_SECRET"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("oauth_token"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("refresh_token"))
+        XCTAssertFalse(json.localizedCaseInsensitiveContains("openai_api_key"))
+        XCTAssertFalse(json.contains("OPENAI_API_KEY"))
+        XCTAssertFalse(json.contains("HERMES_API_KEY"))
+        XCTAssertTrue(manifest.inviteCode.hasPrefix("momo-agent-"))
+    }
+
+    func testAgentPairingEndpointPolicyFailsClosedForNonLoopbackHTTP() {
+        let blocked = MomoAgentPairingSecurity.endpointPolicy(
+            "http://192.168.0.2:28188/v1",
+            allowNonLoopbackHTTP: false
+        )
+        XCTAssertFalse(blocked.isAllowed)
+        XCTAssertTrue(blocked.requiresExplicitOptIn)
+
+        let optedIn = MomoAgentPairingSecurity.endpointPolicy(
+            "http://192.168.0.2:28188/v1",
+            allowNonLoopbackHTTP: true
+        )
+        XCTAssertTrue(optedIn.isAllowed)
+        XCTAssertFalse(optedIn.isLoopback)
+
+        let loopback = MomoAgentPairingSecurity.endpointPolicy(
+            "http://localhost:28188/v1",
+            allowNonLoopbackHTTP: false
+        )
+        XCTAssertTrue(loopback.isAllowed)
+        XCTAssertTrue(loopback.isLoopback)
+    }
+
+    func testAgentPairingEndpointPolicyRejectsCredentialBearingURLs() {
+        let userInfo = MomoAgentPairingSecurity.endpointPolicy(
+            "https://token@example.com/v1",
+            allowNonLoopbackHTTP: true
+        )
+        XCTAssertFalse(userInfo.isAllowed)
+        XCTAssertNil(userInfo.sanitizedEndpoint)
+
+        let querySecret = MomoAgentPairingSecurity.endpointPolicy(
+            "http://127.0.0.1:28188/v1?api_key=secret#token",
+            allowNonLoopbackHTTP: false
+        )
+        XCTAssertFalse(querySecret.isAllowed)
+        XCTAssertNil(querySecret.sanitizedEndpoint)
+
+        let manifest = MomoAgentPairingManifest.make(
+            displayName: "Hermes",
+            handle: "@hermes",
+            endpoint: "https://token@example.com/v1?api_key=secret",
+            modelLabel: "gpt-oauth-provider",
+            permissionScope: .channelReadReply,
+            workspaceID: WorkspaceID(),
+            channelID: ChannelID(),
+            apiURL: "http://127.0.0.1:28180",
+            generatedAtMs: 123
+        )
+        let json = manifest.prettyJSONString
+        XCTAssertFalse(json.contains("token@example.com"))
+        XCTAssertFalse(json.contains("api_key=secret"))
+        XCTAssertEqual(manifest.runtime.endpoint, "invalid-endpoint")
+    }
+
+    func testAgentPairingInviteCodeIsStableAcrossGenerationTime() {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let first = MomoAgentPairingManifest.make(
+            displayName: "Hermes",
+            handle: "@hermes",
+            endpoint: "http://127.0.0.1:28188/v1",
+            modelLabel: "gpt-oauth-provider",
+            permissionScope: .channelReadReply,
+            workspaceID: workspace,
+            channelID: channel,
+            apiURL: "http://127.0.0.1:28180",
+            generatedAtMs: 123
+        )
+        let second = MomoAgentPairingManifest.make(
+            displayName: "Hermes",
+            handle: "@hermes",
+            endpoint: "http://127.0.0.1:28188/v1",
+            modelLabel: "gpt-oauth-provider",
+            permissionScope: .channelReadReply,
+            workspaceID: workspace,
+            channelID: channel,
+            apiURL: "http://127.0.0.1:28180",
+            generatedAtMs: 456
+        )
+        XCTAssertEqual(first.inviteCode, second.inviteCode)
+    }
+
     @MainActor
     func testViewModelRESTFallbackRefreshesFinalDurableMentionMessage() async throws {
         let workspace = WorkspaceID()
