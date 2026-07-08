@@ -1,4 +1,5 @@
 import SwiftUI
+import MomoCore
 
 public extension MomoUILanguage {
     static let appStorageKey = "momo.ui.language"
@@ -343,6 +344,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var handleLabel: String {
+        switch language {
+        case .korean: return "핸들"
+        case .english: return "Handle"
+        }
+    }
+
     var providerEndpoint: String {
         switch language {
         case .korean: return "연결 endpoint"
@@ -427,6 +435,48 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var memberProfile: String {
+        switch language {
+        case .korean: return "멤버 프로필"
+        case .english: return "Member profile"
+        }
+    }
+
+    var agentProfile: String {
+        switch language {
+        case .korean: return "에이전트 프로필"
+        case .english: return "Agent profile"
+        }
+    }
+
+    var memberProfileSettingsSubtitle: String {
+        switch language {
+        case .korean: return "표시 이름, 이미지, 상태 뱃지를 로컬 dogfood 표시값으로 관리합니다."
+        case .english: return "Manage display name, image, and status badge as a local dogfood display value."
+        }
+    }
+
+    var memberProfileMissingSubtitle: String {
+        switch language {
+        case .korean: return "프로필을 편집할 멤버를 왼쪽 목록에서 선택하세요."
+        case .english: return "Select a member from the left roster to edit a profile."
+        }
+    }
+
+    var editProfile: String {
+        switch language {
+        case .korean: return "프로필 편집"
+        case .english: return "Edit profile"
+        }
+    }
+
+    var saveProfile: String {
+        switch language {
+        case .korean: return "프로필 저장"
+        case .english: return "Save profile"
+        }
+    }
+
     var displayName: String {
         switch language {
         case .korean: return "표시 이름"
@@ -457,8 +507,8 @@ struct MomoWorkspaceCopy {
 
     var settingsSubtitle: String {
         switch language {
-        case .korean: return "언어, 화면 모드, 워크스페이스 표시를 관리합니다."
-        case .english: return "Manage language, appearance, and workspace display."
+        case .korean: return "언어와 화면 모드를 관리합니다."
+        case .english: return "Manage language and appearance."
         }
     }
 
@@ -1032,6 +1082,47 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "상태"
         case .english: return "Status"
+        }
+    }
+
+    var presenceOnline: String {
+        switch language {
+        case .korean: return "온라인"
+        case .english: return "Online"
+        }
+    }
+
+    var presenceWorking: String {
+        switch language {
+        case .korean: return "작업 중"
+        case .english: return "Working"
+        }
+    }
+
+    var presenceAway: String {
+        switch language {
+        case .korean: return "자리 비움"
+        case .english: return "Away"
+        }
+    }
+
+    var presenceOffline: String {
+        switch language {
+        case .korean: return "오프라인"
+        case .english: return "Offline"
+        }
+    }
+
+    func presenceTitle(_ presence: Presence) -> String {
+        switch presence {
+        case .online:
+            return presenceOnline
+        case .working:
+            return presenceWorking
+        case .away:
+            return presenceAway
+        case .offline:
+            return presenceOffline
         }
     }
 

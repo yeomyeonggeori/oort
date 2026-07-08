@@ -162,6 +162,14 @@
 - `@hermes` 전송 직후 또는 `agent.status` running/thinking/streaming 이벤트 수신 시 Hermes working state를 켜고, 같은 channel timeline의 final agent message 또는 terminal/error 상태에서 해제한다. 멤버 row는 working presence badge와 `WORKING` chip을 표시한다. 전송 실패 시 connection error와 mention notice를 남겨 침묵하지 않는다.
 - 검증: `swift test --package-path clients/macOS` PASS(65 tests). `macos-ui` local gate는 PR 최종 gate에서 실행한다.
 
+## 0-4b-6k. MOMO-260 Workspace/Member/Agent Profile Settings v0 (2026-07-08)
+
+- macOS 설정 레이어를 분리했다. 개인 profile footer의 `Settings`는 언어/appearance만 다루고, workspace/server 이름·아이콘·초대 정책 초안은 sidebar workspace header의 server settings inspector에서 관리한다.
+- member/agent profile editor v0를 추가했다. roster의 멤버/에이전트 row에서 로컬 표시 이름, avatar image, presence badge draft를 편집할 수 있으며, 이미지는 `Application Support/momo/avatars/`로 복사하고 local path만 저장한다.
+- Hermes는 기존 dogfood invite key와 profile draft를 동기화해 초대 후 `@hermes` 표시 이름/avatar/status가 roster와 mention 후보에 일관되게 반영된다. 김인턴/legacy fixture는 기존 숨김 정책을 유지한다.
+- 서버 영속 workspace/profile API, object storage upload, full account settings는 후속 범위다. 이번 변경은 dogfood용 local display draft다.
+- 검증: `swift build --package-path clients/macOS --product MomoMacDevApp` PASS, `swift test --package-path clients/macOS` PASS(68 tests), `LOCAL_GATE_ALLOW_DIRTY=1 LOCAL_GATE_LAUNCH_UI=1 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile macos-ui` PASS(evidence: `local-gate-macos-ui-20260708T071921Z-pid13710-ns1783495161811154000-wtcc364397ce1e-r216c670d7444.md`). 코드리뷰에서 stale profile editor state, avatar decode/cache 비용, STATUS evidence 문구를 지적했고 `.id(member.id)`, avatar PNG normalization+cache, evidence 문구 갱신으로 반영했다.
+
 ## 0-4b-7. MOMO-258 macOS UI Smoke Fixture Seq Hotfix (2026-07-02)
 
 - MOMO-257 merge 후 reused local Docker DB에서 `scripts/local_gate.sh --profile macos-ui`가 실패했다. 원인은 `verify_macos_real_backend_ui.sh`가 approval/cost fixture message seq를 `205901`로 고정했고, 같은 channel의 `channel_seq`가 이미 더 높게 진행되어 최신 `messages?limit=20` history에 fixture가 보이지 않은 것이다.

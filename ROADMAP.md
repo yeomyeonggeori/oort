@@ -119,6 +119,7 @@ M6 (CI/CD) ─────────────── 게이트/배포 자동
 | `MOMO-259` | M3/M7 준비 | macOS shell/layout/performance polish | root `NavigationSplitView` swap을 제거하고 optional inspector, lightweight profile menu, direct language menu, appearance preference, quick tooltip을 보강 |
 | `MOMO-334` | M3/M7 준비 | Dogfood Hermes invite roster UX v0 | Hermes는 초대 전 기본 roster에서 숨기고, 멤버 `+` → 사람/에이전트 초대 분기 → `@hermes` profile/alias/endpoint 확인 → channel member 표시로 연결. 기존 gateway mention path는 유지 |
 | `MOMO-335` | M3/M7 준비 | Mention autocomplete + Hermes working indicator | 현재 채널에 초대된 member/agent만 `@` 후보로 표시하고, Hermes mention 후 agent pending/running 상태를 timeline + member row working badge로 보여준다 |
+| `MOMO-260` | M3/M7 준비 | Workspace/member/agent profile settings v0 | 서버 설정을 workspace header inspector로 분리하고, member/agent profile editor에서 로컬 표시 이름·avatar·presence badge draft를 관리한다. 서버 영속 API는 후속 |
 | `MOMO-264` | M3/M7 준비 | macOS native profile/settings/downloads UX | profile footer는 launcher로 축소하고 Profile/Settings/Downloads/Updates를 우측 설정 surface로 분리해 프로필 이미지, 언어/appearance, workspace icon, 다운로드 폴더/이력, update status를 다국어로 제공 |
 | `MOMO-245` | M1/M7 준비 | Local Soak/Resource Monitor | `scripts/local_soak_monitor.sh`; 72h local dogfood 중 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md`에 PASS/WARN/FAIL + P0/P1 기준 기록 |
 | `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정 |
