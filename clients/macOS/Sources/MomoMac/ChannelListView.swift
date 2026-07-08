@@ -464,6 +464,14 @@ public struct ChannelListView: View {
                     .padding(.horizontal, 4).padding(.vertical, 1)
                     .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
                     .foregroundStyle(MomoTheme.agentAccent)
+                if viewModel.isAgentWorking(member) {
+                    Text("WORKING")
+                        .font(.system(size: 8, weight: .bold))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(MomoTheme.costAmber.opacity(0.18), in: Capsule())
+                        .foregroundStyle(MomoTheme.costAmber)
+                }
             }
             Spacer()
             if viewModel.selectedChannelId != nil {
@@ -1041,6 +1049,9 @@ public struct ChannelListView: View {
     }
 
     private func presenceBadge(for member: Member) -> MomoPresenceBadge {
+        if viewModel.isAgentWorking(member) {
+            return .working
+        }
         switch member.presence {
         case .online:
             return .online

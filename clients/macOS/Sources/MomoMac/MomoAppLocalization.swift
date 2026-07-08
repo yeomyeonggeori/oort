@@ -119,6 +119,27 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var mentionAutocompleteTitle: String {
+        switch language {
+        case .korean: return "멘션할 멤버"
+        case .english: return "Mention"
+        }
+    }
+
+    func agentWorkingTitle(_ name: String) -> String {
+        switch language {
+        case .korean: return "\(name)이 작업 중"
+        case .english: return "\(name) is working"
+        }
+    }
+
+    var agentWorkingSubtitle: String {
+        switch language {
+        case .korean: return "응답이 준비되면 같은 채널 타임라인에 표시됩니다."
+        case .english: return "The response will appear in this channel timeline."
+        }
+    }
+
     var workspace: String {
         switch language {
         case .korean: return "워크스페이스"

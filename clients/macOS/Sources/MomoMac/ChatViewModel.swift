@@ -23,6 +23,19 @@ public enum DogfoodAgentInviteError: Error, LocalizedError {
     }
 }
 
+public struct AgentWorkingState: Identifiable, Sendable, Equatable {
+    public var id: MemberID { memberId }
+    public var memberId: MemberID
+    public var channelId: ChannelID
+    public var message: String
+
+    public init(memberId: MemberID, channelId: ChannelID, message: String) {
+        self.memberId = memberId
+        self.channelId = channelId
+        self.message = message
+    }
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -63,6 +76,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var costSnapshots: [RunID: CostSnapshot] = [:]
     @Published public private(set) var realtimeStatuses: [ChannelID: RealtimeConnectionStatus] = [:]
     @Published public private(set) var agentRuntimeStatus: AgentRuntimeStatus = .localMock
+    @Published public private(set) var agentWorkingStates: [MemberID: AgentWorkingState] = [:]
     @Published public var composerDraft: String = ""
     @Published public private(set) var mentionNotice: String?
 
@@ -149,6 +163,7 @@ public final class ChatViewModel: ObservableObject {
         costSnapshots = [:]
         realtimeStatuses = [:]
         agentRuntimeStatus = .localMock
+        agentWorkingStates = [:]
         composerDraft = ""
         mentionNotice = nil
         approvals = [:]
@@ -325,9 +340,16 @@ public final class ChatViewModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         let clientMsgId = UUID()
         let draft = DraftMessage(channelId: channel, type: .text, body: trimmed)
-        let mentionedAgent = mentionedAgent(in: trimmed)
+        let mentionedAgent = mentionedAgent(in: trimmed, channel: channel)
         let optimistic = optimisticMessage(body: trimmed, channel: channel, clientMsgId: clientMsgId)
         upsert(optimistic, channel: channel)
+        if let mentionedAgent {
+            markAgentWorking(
+                mentionedAgent,
+                channel: channel,
+                message: "\(mentionedAgent.displayName) is working on your mention..."
+            )
+        }
         if let mentionedAgent, isRESTFallback(channel: channel) {
             showFallbackMentionProgress(agent: mentionedAgent, channel: channel)
         }
@@ -341,11 +363,14 @@ public final class ChatViewModel: ObservableObject {
             }
         } catch {
             connectionError = String(describing: error)
+            if let mentionedAgent {
+                clearAgentWorking(mentionedAgent.id, channel: channel)
+                mentionNotice = "\(mentionedAgent.displayName) request failed: \(error)"
+            }
         }
     }
 
     public func insertMention(for member: Member, preferDisplayName: Bool = false) {
-        guard member.isAgent else { return }
         guard selectedChannelId != nil else {
             mentionNotice = "Select a channel before mentioning \(member.displayName)."
             return
@@ -362,18 +387,51 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func canInsertMention(for member: Member) -> Bool {
-        member.isAgent && member.status == .active && selectedChannelId != nil
+        member.status == .active && selectedChannelId != nil && isMember(member.id)
     }
 
     public func mentionUnavailableReason(for member: Member) -> String? {
-        guard member.isAgent else { return nil }
         if selectedChannelId == nil {
             return "Select a channel first."
         }
         if member.status != .active {
             return "\(member.displayName) is not active."
         }
+        if !isMember(member.id) {
+            return "\(member.displayName) is not in this channel."
+        }
         return nil
+    }
+
+    public func mentionAutocompleteCandidates(for draft: String? = nil) -> [Member] {
+        guard let query = Self.activeMentionQuery(in: draft ?? composerDraft) else { return [] }
+        let normalizedQuery = query.lowercased()
+        return members
+            .filter { member in
+                guard canInsertMention(for: member) else { return false }
+                guard !normalizedQuery.isEmpty else { return true }
+                return member.handle.lowercased().hasPrefix(normalizedQuery)
+                    || member.displayName.lowercased().contains(normalizedQuery)
+            }
+            .sorted { lhs, rhs in
+                if lhs.isAgent != rhs.isAgent { return lhs.isAgent && !rhs.isAgent }
+                return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+    }
+
+    public func completeMentionAutocomplete(with member: Member) {
+        guard canInsertMention(for: member) else {
+            mentionNotice = mentionUnavailableReason(for: member)
+            return
+        }
+        let token = "@\(member.handle) "
+        if let range = Self.activeMentionTokenRange(in: composerDraft) {
+            composerDraft.replaceSubrange(range, with: token)
+        } else {
+            let needsSeparator = composerDraft.last.map { !$0.isWhitespace && !$0.isNewline } ?? false
+            composerDraft += "\(needsSeparator ? " " : "")\(token)"
+        }
+        mentionNotice = "\(member.displayName) mention inserted."
     }
 
     @discardableResult
@@ -468,6 +526,7 @@ public final class ChatViewModel: ObservableObject {
         case .agentStatus(let status):
             agentStatuses[status.runId] = status
             mergeCostSnapshot(from: status)
+            reconcileAgentWorking(from: status)
         case .agentPartial(let partial):
             coalesce(partial)
         case .approval(let ev):
@@ -489,6 +548,7 @@ public final class ChatViewModel: ObservableObject {
         messagesByChannel[channel] = msgs.sorted(by: Self.seqOrder)
         hydrateSidecars(from: message)
         reconcileFinalMessage(message)
+        reconcileAgentWorking(from: message)
     }
 
     private func hydrateSidecars(from message: Message) {
@@ -496,7 +556,18 @@ public final class ChatViewModel: ObservableObject {
         let reserved = Self.microUSD(from: message.props["reserved_micro_usd"])
             ?? Self.microUSD(from: message.props["estimated_micro_usd"])
         let spent = Self.microUSD(from: message.props["spent_micro_usd"])
-        if reserved != nil || spent != nil {
+        if message.type == .approvalRequest {
+            let existing = agentStatuses[runId]
+            agentStatuses[runId] = AgentStatus(
+                runId: runId,
+                agentMemberId: message.authorMemberId,
+                channelId: message.channelId,
+                phase: existing?.phase ?? .thinking,
+                runStatus: .awaitingApproval,
+                reservedMicroUSD: reserved ?? existing?.reservedMicroUSD,
+                spentMicroUSD: spent ?? existing?.spentMicroUSD
+            )
+        } else if reserved != nil || spent != nil {
             agentStatuses[runId] = AgentStatus(
                 runId: runId,
                 agentMemberId: message.authorMemberId,
@@ -594,6 +665,58 @@ public final class ChatViewModel: ObservableObject {
         pendingFallbackMentionRuns[channel] = nil
     }
 
+    private func markAgentWorking(_ agent: Member, channel: ChannelID, message: String) {
+        guard agent.isAgent else { return }
+        agentWorkingStates[agent.id] = AgentWorkingState(
+            memberId: agent.id,
+            channelId: channel,
+            message: message
+        )
+    }
+
+    private func clearAgentWorking(_ member: MemberID, channel: ChannelID? = nil) {
+        guard let channel else {
+            agentWorkingStates[member] = nil
+            return
+        }
+        if agentWorkingStates[member]?.channelId == channel {
+            agentWorkingStates[member] = nil
+        }
+    }
+
+    private func reconcileAgentWorking(from status: AgentStatus) {
+        if status.runStatus.isTerminal || status.phase == .done || status.phase == .error {
+            clearAgentWorking(status.agentMemberId, channel: status.channelId)
+        } else if member(status.agentMemberId)?.isAgent == true,
+                  isMember(status.agentMemberId, in: status.channelId) {
+            agentWorkingStates[status.agentMemberId] = AgentWorkingState(
+                memberId: status.agentMemberId,
+                channelId: status.channelId,
+                message: "\(member(status.agentMemberId)?.displayName ?? "Agent") is working..."
+            )
+        }
+    }
+
+    private func reconcileAgentWorking(from message: Message) {
+        guard member(message.authorMemberId)?.isAgent == true else { return }
+        guard isAgentFinalResponse(message) else { return }
+        if let runId = message.runId, var status = agentStatuses[runId] {
+            status.phase = .done
+            status.runStatus = .succeeded
+            agentStatuses[runId] = status
+        }
+        clearAgentWorking(message.authorMemberId, channel: message.channelId)
+    }
+
+    private func isAgentFinalResponse(_ message: Message) -> Bool {
+        switch message.type {
+        case .text, .toolResult, .system:
+            return message.state != .failed
+        case .toolCall, .diff, .artifact, .approvalRequest:
+            return false
+        }
+    }
+
     private func hasFinalMessage(for partial: AgentPartial) -> Bool {
         let messages = messagesByChannel[partial.channelId] ?? []
         return messages.contains { message in
@@ -689,6 +812,34 @@ public final class ChatViewModel: ObservableObject {
         return members.first(where: { $0.id == member })?.channelIds.contains(channel) == true
     }
 
+    public func isAgentWorking(_ member: Member, in channel: ChannelID? = nil) -> Bool {
+        guard member.isAgent else { return false }
+        let channel = channel ?? selectedChannelId
+        if let channel, !isMember(member.id, in: channel) {
+            return false
+        }
+        if let state = agentWorkingStates[member.id],
+           channel == nil || state.channelId == channel {
+            return true
+        }
+        return agentStatuses.values.contains { status in
+            status.agentMemberId == member.id
+                && (channel == nil || status.channelId == channel)
+                && !status.runStatus.isTerminal
+                && status.phase != .done
+                && status.phase != .error
+        }
+    }
+
+    public var visibleWorkingAgents: [Member] {
+        guard let selectedChannelId else { return [] }
+        return members
+            .filter { member in
+                member.isAgent && isMember(member.id, in: selectedChannelId) && isAgentWorking(member, in: selectedChannelId)
+            }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
     /// Total reserved/spent micro_usd across live runs (cost chip in headers).
     public var liveSpentMicroUSD: Int64 {
         costSnapshots.values.map(\.spentMicroUSD).reduce(0, +)
@@ -742,9 +893,12 @@ public final class ChatViewModel: ObservableObject {
         )
     }
 
-    private func mentionedAgent(in body: String) -> Member? {
+    private func mentionedAgent(in body: String, channel: ChannelID) -> Member? {
         members.first { member in
-            member.isAgent && Self.body(body, mentions: member)
+            member.isAgent
+                && member.status == .active
+                && member.channelIds.contains(channel)
+                && Self.body(body, mentions: member)
         }
     }
 
@@ -878,6 +1032,24 @@ public final class ChatViewModel: ObservableObject {
         return needles.contains { token in
             body.range(of: token, options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }
+    }
+
+    nonisolated public static func activeMentionQuery(in text: String) -> String? {
+        guard let range = activeMentionTokenRange(in: text) else { return nil }
+        let queryStart = text.index(after: range.lowerBound)
+        return String(text[queryStart..<range.upperBound])
+    }
+
+    nonisolated private static func activeMentionTokenRange(in text: String) -> Range<String.Index>? {
+        guard let at = text.lastIndex(of: "@") else { return nil }
+        if at > text.startIndex {
+            let before = text[text.index(before: at)]
+            guard before.isWhitespace || before.isNewline else { return nil }
+        }
+        let tokenStart = text.index(after: at)
+        let tail = text[tokenStart..<text.endIndex]
+        guard !tail.contains(where: { $0.isWhitespace || $0.isNewline }) else { return nil }
+        return at..<text.endIndex
     }
 
     nonisolated private static func normalizedAgentHandle(_ value: String) -> String {

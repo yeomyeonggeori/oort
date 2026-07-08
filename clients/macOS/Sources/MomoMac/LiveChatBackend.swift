@@ -455,7 +455,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         sentClientMsgIds[ch, default: []].insert(clientMsgId)
         if draft.type == .text,
            let body = draft.body,
-           let agent = mentionedAgent(in: body) {
+           let agent = mentionedAgent(in: body, channel: ch) {
             appendDemoMentionResponse(agent: agent, channel: ch, trigger: msg, prompt: body)
         }
         return msg
@@ -813,9 +813,11 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         Int64(Date().timeIntervalSince1970 * 1000)
     }
 
-    private func mentionedAgent(in body: String) -> Member? {
+    private func mentionedAgent(in body: String, channel: ChannelID) -> Member? {
         members.first { member in
-            guard member.isAgent else { return false }
+            guard member.isAgent,
+                  member.status == .active,
+                  member.channelIds.contains(channel) else { return false }
             return body.range(of: "@\(member.handle)", options: [.caseInsensitive, .diacriticInsensitive]) != nil
                 || body.range(of: "@\(member.displayName)", options: [.caseInsensitive, .diacriticInsensitive]) != nil
         }

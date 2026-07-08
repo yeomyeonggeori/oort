@@ -59,6 +59,37 @@ that makes the local solo path comfortable and repeatable.
 | MOMO-326 | Real Hermes gateway smoke | Turn MOMO-325 from mock-ledger proof into operator-led real Hermes readiness: plugin install, provider OAuth marker, gateway status, and optional `@hermes` same-channel roundtrip evidence. | `scripts/momo hermes-gateway-smoke --real [--trigger]` |
 | LSA-006 | Local solo dogfood start gate | Start a short operator-led run before 72h: launch app, send human messages, call `@hermes`, collect diagnostics/resource snapshots, and file P0/P1 bugs. | updated `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md` run packet |
 
+## Active Buildable Goal Chain
+
+This is the current momo-main tracker for getting to a comfortable one-person
+local Hermes dogfood. If context is compacted, resume from this table before
+choosing or creating more issues.
+
+| Order | Issue | Status | Why now | Merge gate |
+|---|---|---|---|---|
+| 1 | GitHub `#300` / `MOMO-335` | done in this PR | `@hermes` works only if the user remembers the handle. Roster-backed `@` autocomplete and Hermes working indicators make the chat feel alive during gateway latency. | `swift test --package-path clients/macOS`; `scripts/local_gate.sh --profile macos-ui` |
+| 2 | GitHub `#263` / `MOMO-260` | next | Profile/settings remain local-draft and confusing. Finish workspace/member/agent profile editing, avatar/status chips, and keep Hermes alias/profile display consistent after invite. | `scripts/local_gate.sh --profile macos-ui`; docs gate |
+| 3 | GitHub `#265` / `MOMO-262` | open ready | Agent invite currently has a dogfood v0 UI shell but not a full pairing wizard. Turn it into a user-followable Hermes pairing flow that never stores provider OAuth credentials in momo. | `scripts/local_gate.sh --profile runtime-agent`; `macos-ui`; docs gate |
+| 4 | GitHub `#264` / `MOMO-261` | open ready | Approval/Command Center/developer tools still feel like internal diagnostics. Clarify approval semantics, hide diagnostics by default, and keep the right surface from disrupting chat. | `scripts/local_gate.sh --profile macos-ui`; design pre-flight |
+| 5 | `MOMO-246` / `MOMO-252` | deprioritize or close/retarget | 72h soak is too heavy for the current 1-person Hermes loop. Keep the monitor tooling, but do not block local solo testing on a full 72h run. | docs-only decision or reduced 3-day note |
+
+### momo-main Pipeline for This Chain
+
+For each row above, `momo-main` should:
+
+1. Ensure the issue exists and has `Goal / Context / Acceptance / Out of scope`.
+2. Claim or create one branch/worktree for that issue.
+3. Implement the scoped change.
+4. Run the issue-specific local gate and attach evidence to the PR.
+5. Run a code-review pass focused on security, correctness, and performance.
+6. Apply necessary review fixes before merging.
+7. Merge only after final local gate is green.
+8. Re-run the relevant main local gate after merge.
+9. Update this table, `STATUS.md`, and `BUILD_TICKETS.md` if priority or scope
+   changes.
+10. Choose the next row or pause for roadmap research if the previous task
+    changes product direction or reveals a blocker.
+
 ## Operating Rules
 
 - AWS is out of scope until this lane produces `AWS_READY` evidence.
