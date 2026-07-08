@@ -361,6 +361,117 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testRealtimeTypingEventDrivesVisibleTypingIndicator() async throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let human = MemberID()
+        let teammate = MemberID()
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human", channelIds: [channel]),
+                Member(id: teammate, workspaceId: workspace, kind: .human, displayName: "Dana", handle: "dana", channelIds: [channel]),
+            ],
+            channels: [
+                Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "general", createdBy: human),
+            ],
+            history: [channel: []],
+            events: [
+                .typing(TypingDelta(channelId: channel, memberId: teammate, isTyping: true)),
+            ]
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel)
+        try await Task.sleep(for: .milliseconds(40))
+
+        XCTAssertEqual(viewModel.visibleTypingMembers.map(\.displayName), ["Dana"])
+    }
+
+    @MainActor
+    func testComposerDraftPublishesLocalTypingIndicator() async throws {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let human = MemberID()
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(id: human, workspaceId: workspace, kind: .human, displayName: "Human", handle: "human", channelIds: [channel]),
+            ],
+            channels: [
+                Channel(id: channel, workspaceId: workspace, kind: .publicChannel, name: "general", createdBy: human),
+            ],
+            history: [channel: []],
+            events: []
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel)
+        viewModel.composerDraft = "hello"
+        viewModel.composerDraftDidChange(viewModel.composerDraft)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertEqual(viewModel.visibleTypingMembers.map(\.id), [human])
+        let startedTypingCalls = await backend.typingCalls()
+        XCTAssertEqual(startedTypingCalls.map { $0.isTyping }, [true])
+
+        viewModel.composerDraft = ""
+        viewModel.composerDraftDidChange(viewModel.composerDraft)
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(viewModel.visibleTypingMembers.isEmpty)
+        let finishedTypingCalls = await backend.typingCalls()
+        XCTAssertEqual(finishedTypingCalls.map { $0.isTyping }, [true, false])
+    }
+
+    @MainActor
+    func testLocalTypingTimeoutsAreScopedPerChannel() async throws {
+        let workspace = WorkspaceID()
+        let firstChannel = ChannelID()
+        let secondChannel = ChannelID()
+        let human = MemberID()
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [
+                Member(
+                    id: human,
+                    workspaceId: workspace,
+                    kind: .human,
+                    displayName: "Human",
+                    handle: "human",
+                    channelIds: [firstChannel, secondChannel]
+                ),
+            ],
+            channels: [
+                Channel(id: firstChannel, workspaceId: workspace, kind: .publicChannel, name: "general", createdBy: human),
+                Channel(id: secondChannel, workspaceId: workspace, kind: .publicChannel, name: "agent-lab", createdBy: human),
+            ],
+            history: [firstChannel: [], secondChannel: []],
+            events: []
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: FailingDecisionAgentTransport())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(firstChannel)
+        viewModel.composerDraft = "first"
+        viewModel.composerDraftDidChange(viewModel.composerDraft)
+        await viewModel.selectChannel(secondChannel)
+        viewModel.composerDraft = "second"
+        viewModel.composerDraftDidChange(viewModel.composerDraft)
+
+        try await Task.sleep(for: .milliseconds(2_250))
+
+        let calls = await backend.typingCalls()
+        XCTAssertTrue(calls.contains { $0.channel == firstChannel && $0.isTyping })
+        XCTAssertTrue(calls.contains { $0.channel == secondChannel && $0.isTyping })
+        XCTAssertTrue(calls.contains { $0.channel == firstChannel && !$0.isTyping })
+        XCTAssertTrue(calls.contains { $0.channel == secondChannel && !$0.isTyping })
+        XCTAssertTrue(viewModel.visibleTypingMembers.isEmpty)
+    }
+
+    @MainActor
     func testDogfoodHermesInviteRejectsAliasBeforeServerAliasSupport() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -518,6 +629,7 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(final.body, "김인턴 final durable response for @kim-intern")
         XCTAssertNotNil(final.runId)
         XCTAssertTrue(viewModel.partials.isEmpty)
+        XCTAssertFalse(viewModel.isAgentWorking(try XCTUnwrap(viewModel.member(agent)), in: channel))
     }
 
     func testInviteJoinStubAcceptsDemoCodeAndRejectsUnknownCode() async throws {
@@ -2681,6 +2793,7 @@ private actor FixtureRealtimeChatBackend: ChatBackend {
     private let storedChannels: [Channel]
     private let storedHistory: [ChannelID: [Message]]
     private let storedEvents: [RealtimeEvent]
+    private var storedTypingCalls: [(channel: ChannelID, isTyping: Bool)] = []
 
     init(
         workspace: WorkspaceID,
@@ -2739,7 +2852,13 @@ private actor FixtureRealtimeChatBackend: ChatBackend {
         storedHistory.values.flatMap { $0 }.filter { $0.body?.contains(query) == true }
     }
 
-    func setTyping(channel: ChannelID, isTyping: Bool) async {}
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        storedTypingCalls.append((channel: channel, isTyping: isTyping))
+    }
+
+    func typingCalls() -> [(channel: ChannelID, isTyping: Bool)] {
+        storedTypingCalls
+    }
 
     func editMessage(_ id: MessageID, body: String) async throws -> Message {
         throw BackendError.notConnected

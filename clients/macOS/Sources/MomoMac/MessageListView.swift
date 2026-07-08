@@ -333,12 +333,19 @@ public struct MessageListView: View {
                 mentionAutocomplete(candidates: Array(candidates.prefix(6)), copy: copy)
             }
 
+            if !viewModel.visibleTypingMembers.isEmpty {
+                typingIndicator(copy: copy)
+            }
+
             HStack(spacing: 8) {
                 TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .font(.body)
                     .onSubmit(submit)
+                    .onChange(of: viewModel.composerDraft) { _, draft in
+                        viewModel.composerDraftDidChange(draft)
+                    }
                 Button(action: submit) {
                     Image(systemName: "paperplane.fill")
                 }
@@ -348,6 +355,23 @@ public struct MessageListView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    private func typingIndicator(copy: MomoWorkspaceCopy) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "ellipsis.bubble.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MomoTheme.humanAccent)
+            Text(copy.typingIndicator(viewModel.visibleTypingMembers.map(\.displayName)))
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(MomoTheme.humanAccent.opacity(0.08), in: Capsule())
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func mentionAutocomplete(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {

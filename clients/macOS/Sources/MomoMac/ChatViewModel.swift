@@ -36,6 +36,19 @@ public struct AgentWorkingState: Identifiable, Sendable, Equatable {
     }
 }
 
+public struct TypingActivity: Identifiable, Sendable, Equatable {
+    public var id: MemberID { memberId }
+    public var memberId: MemberID
+    public var channelId: ChannelID
+    public var isLocalEcho: Bool
+
+    public init(memberId: MemberID, channelId: ChannelID, isLocalEcho: Bool = false) {
+        self.memberId = memberId
+        self.channelId = channelId
+        self.isLocalEcho = isLocalEcho
+    }
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -77,6 +90,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var realtimeStatuses: [ChannelID: RealtimeConnectionStatus] = [:]
     @Published public private(set) var agentRuntimeStatus: AgentRuntimeStatus = .localMock
     @Published public private(set) var agentWorkingStates: [MemberID: AgentWorkingState] = [:]
+    @Published public private(set) var typingStates: [ChannelID: [MemberID: TypingActivity]] = [:]
     @Published public var composerDraft: String = ""
     @Published public private(set) var mentionNotice: String?
 
@@ -101,6 +115,8 @@ public final class ChatViewModel: ObservableObject {
     private var channelSubscription: Task<Void, Never>?
     private var realtimeStatusSubscription: Task<Void, Never>?
     private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
+    private var localTypingChannels: Set<ChannelID> = []
+    private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
 
     public init(
         chat: any ChatBackend,
@@ -164,6 +180,10 @@ public final class ChatViewModel: ObservableObject {
         realtimeStatuses = [:]
         agentRuntimeStatus = .localMock
         agentWorkingStates = [:]
+        typingStates = [:]
+        localTypingChannels = []
+        typingStopTasks.values.forEach { $0.cancel() }
+        typingStopTasks = [:]
         composerDraft = ""
         mentionNotice = nil
         approvals = [:]
@@ -253,6 +273,8 @@ public final class ChatViewModel: ObservableObject {
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
             for message in history {
                 hydrateSidecars(from: message)
+                reconcileFinalMessage(message)
+                reconcileAgentWorking(from: message)
             }
         } catch {
             connectionError = String(describing: error)
@@ -334,10 +356,21 @@ public final class ChatViewModel: ObservableObject {
 
     // MARK: Sending
 
+    public func composerDraftDidChange(_ draft: String) {
+        guard let channel = selectedChannelId else { return }
+        let isTyping = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if isTyping {
+            startLocalTyping(channel: channel)
+        } else {
+            stopLocalTyping(channel: channel)
+        }
+    }
+
     /// Optimistic send: local echo with nil seq, reconciled by the returned message.
     public func send(body: String, to channel: ChannelID) async {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        stopLocalTyping(channel: channel)
         let clientMsgId = UUID()
         let draft = DraftMessage(channelId: channel, type: .text, body: trimmed)
         let mentionedAgent = mentionedAgent(in: trimmed, channel: channel)
@@ -531,7 +564,9 @@ public final class ChatViewModel: ObservableObject {
             coalesce(partial)
         case .approval(let ev):
             approvals[ev.approvalId] = ev
-        case .reaction, .typing, .presence:
+        case .typing(let delta):
+            applyTyping(delta)
+        case .reaction, .presence:
             // Rendered elsewhere / not material to the v0 demo surfaces.
             break
         }
@@ -852,6 +887,25 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    public var visibleTypingActivities: [TypingActivity] {
+        guard let selectedChannelId else { return [] }
+        guard let activities = typingStates[selectedChannelId]?.values else { return [] }
+        return Array(activities)
+            .filter { activity in
+                guard let member = member(activity.memberId) else { return false }
+                return member.kind == .human && member.status == .active
+            }
+            .sorted { lhs, rhs in
+                let left = member(lhs.memberId)?.displayName ?? ""
+                let right = member(rhs.memberId)?.displayName ?? ""
+                return left.localizedCaseInsensitiveCompare(right) == .orderedAscending
+            }
+    }
+
+    public var visibleTypingMembers: [Member] {
+        visibleTypingActivities.compactMap { member($0.memberId) }
+    }
+
     public var visibleWorkingAgents: [Member] {
         guard let selectedChannelId else { return [] }
         return members
@@ -926,6 +980,61 @@ public final class ChatViewModel: ObservableObject {
     private func isRESTFallback(channel: ChannelID) -> Bool {
         guard let status = realtimeStatuses[channel] else { return false }
         return status.fallback == .restHistory && !status.isLive
+    }
+
+    private var currentHumanMember: Member? {
+        members.first { $0.kind == .human && $0.status == .active }
+    }
+
+    private func startLocalTyping(channel: ChannelID) {
+        guard let member = currentHumanMember else { return }
+        setTyping(member: member.id, channel: channel, isTyping: true, isLocalEcho: true)
+        if !localTypingChannels.contains(channel) {
+            localTypingChannels.insert(channel)
+            Task { await chat.setTyping(channel: channel, isTyping: true) }
+        }
+
+        typingStopTasks[channel]?.cancel()
+        typingStopTasks[channel] = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            await MainActor.run {
+                self?.stopLocalTyping(channel: channel)
+            }
+        }
+    }
+
+    private func stopLocalTyping(channel: ChannelID) {
+        guard let member = currentHumanMember else { return }
+        typingStopTasks[channel]?.cancel()
+        typingStopTasks[channel] = nil
+        setTyping(member: member.id, channel: channel, isTyping: false, isLocalEcho: true)
+        if localTypingChannels.remove(channel) != nil {
+            Task { await chat.setTyping(channel: channel, isTyping: false) }
+        }
+    }
+
+    private func applyTyping(_ delta: TypingDelta) {
+        setTyping(
+            member: delta.memberId,
+            channel: delta.channelId,
+            isTyping: delta.isTyping,
+            isLocalEcho: localTypingChannels.contains(delta.channelId) && currentHumanMember?.id == delta.memberId
+        )
+    }
+
+    private func setTyping(member: MemberID, channel: ChannelID, isTyping: Bool, isLocalEcho: Bool) {
+        guard members.contains(where: { $0.id == member && $0.channelIds.contains(channel) }) else { return }
+        var channelTyping = typingStates[channel] ?? [:]
+        if isTyping {
+            channelTyping[member] = TypingActivity(memberId: member, channelId: channel, isLocalEcho: isLocalEcho)
+        } else {
+            channelTyping[member] = nil
+        }
+        if channelTyping.isEmpty {
+            typingStates[channel] = nil
+        } else {
+            typingStates[channel] = channelTyping
+        }
     }
 
     private func showFallbackMentionProgress(agent: Member, channel: ChannelID) {

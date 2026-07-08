@@ -189,17 +189,21 @@ public struct MomoMacRootView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            if detailPane.showsOperationalSwitcher {
-                Picker("Detail", selection: $detailPane) {
-                    ForEach(MomoMacDetailPane.operationalCases) { pane in
-                        Label(pane.title(copy: copy), systemImage: pane.systemImage)
-                            .tag(pane)
+            if let relatedPane = detailPane.relatedOperationalPane {
+                HStack {
+                    Button {
+                        openDetailPane(relatedPane)
+                    } label: {
+                        Label(relatedPane.title(copy: copy), systemImage: relatedPane.systemImage)
+                            .font(.caption.weight(.semibold))
                     }
+                    .buttonStyle(.borderless)
+                    .help(relatedPane.subtitle(copy: copy))
+                    .momoQuickTooltip(relatedPane.subtitle(copy: copy))
+                    Spacer()
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
                 .padding(.horizontal, 14)
-                .padding(.bottom, 10)
+                .padding(.bottom, 9)
             }
 
             Divider()
@@ -305,14 +309,14 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    static let operationalCases: [MomoMacDetailPane] = [.alpha, .approvals]
-
-    var showsOperationalSwitcher: Bool {
+    var relatedOperationalPane: MomoMacDetailPane? {
         switch self {
-        case .alpha, .approvals:
-            return true
+        case .alpha:
+            return .approvals
+        case .approvals:
+            return .alpha
         case .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
-            return false
+            return nil
         }
     }
 
