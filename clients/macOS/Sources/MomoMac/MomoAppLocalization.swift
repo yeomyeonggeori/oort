@@ -304,8 +304,8 @@ struct MomoWorkspaceCopy {
 
     var agentInviteBody: String {
         switch language {
-        case .korean: return "로컬 Hermes gateway를 실행한 뒤, 이 워크스페이스에 표시할 별칭과 프로필을 확정합니다."
-        case .english: return "Run the local Hermes gateway, then confirm the alias and profile shown in this workspace."
+        case .korean: return "로컬 Hermes gateway가 momo와 통신할 pairing manifest를 만들고, 이 채널에 에이전트를 초대합니다."
+        case .english: return "Create a pairing manifest for the local Hermes gateway, then invite the agent into this channel."
         }
     }
 
@@ -358,10 +358,151 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var modelLabel: String {
+        switch language {
+        case .korean: return "모델 라벨"
+        case .english: return "Model label"
+        }
+    }
+
+    var permissionScope: String {
+        switch language {
+        case .korean: return "권한 범위"
+        case .english: return "Permission scope"
+        }
+    }
+
+    func pairingScopeTitle(_ scope: MomoAgentPairingPermissionScope) -> String {
+        switch (language, scope) {
+        case (.korean, .channelReadReply): return "채널 읽기 + 답변"
+        case (.english, .channelReadReply): return "Read channel + reply"
+        case (.korean, .channelReadReplyApprovalTools): return "채널 읽기 + 답변 + 승인형 도구"
+        case (.english, .channelReadReplyApprovalTools): return "Read/reply + approval-gated tools"
+        }
+    }
+
+    func pairingScopeDetail(_ scope: MomoAgentPairingPermissionScope) -> String {
+        switch (language, scope) {
+        case (.korean, .channelReadReply):
+            return "선택한 채널 컨텍스트를 읽고 같은 타임라인에 답변합니다."
+        case (.english, .channelReadReply):
+            return "Reads selected-channel context and replies in the same timeline."
+        case (.korean, .channelReadReplyApprovalTools):
+            return "외부 쓰기 작업은 승인 카드 뒤에서만 실행합니다."
+        case (.english, .channelReadReplyApprovalTools):
+            return "External writes must pause behind approval cards."
+        }
+    }
+
     var agentInviteNetworkNote: String {
         switch language {
         case .korean: return "momo는 provider OAuth/token을 저장하지 않습니다. 토큰은 Hermes/provider 런타임 안에만 둡니다."
         case .english: return "momo does not store provider OAuth tokens. Credentials stay inside the Hermes/provider runtime."
+        }
+    }
+
+    var pairingManifest: String {
+        switch language {
+        case .korean: return "Pairing manifest"
+        case .english: return "Pairing manifest"
+        }
+    }
+
+    var pairingInviteCode: String {
+        switch language {
+        case .korean: return "초대 코드"
+        case .english: return "Invite code"
+        }
+    }
+
+    var copyManifest: String {
+        switch language {
+        case .korean: return "manifest 복사"
+        case .english: return "Copy manifest"
+        }
+    }
+
+    var exportManifest: String {
+        switch language {
+        case .korean: return "JSON 내보내기"
+        case .english: return "Export JSON"
+        }
+    }
+
+    var copyInviteCode: String {
+        switch language {
+        case .korean: return "코드 복사"
+        case .english: return "Copy code"
+        }
+    }
+
+    var manifestCopied: String {
+        switch language {
+        case .korean: return "Pairing manifest를 클립보드에 복사했습니다."
+        case .english: return "Pairing manifest copied to the clipboard."
+        }
+    }
+
+    var inviteCodeCopied: String {
+        switch language {
+        case .korean: return "에이전트 초대 코드를 클립보드에 복사했습니다."
+        case .english: return "Agent invite code copied to the clipboard."
+        }
+    }
+
+    var nonLoopbackHTTPOptIn: String {
+        switch language {
+        case .korean: return "비-loopback HTTP endpoint를 명시적으로 허용"
+        case .english: return "Explicitly allow non-loopback HTTP endpoint"
+        }
+    }
+
+    var pairingEndpointBlocked: String {
+        switch language {
+        case .korean: return "보안상 기본값은 로컬 loopback endpoint만 허용합니다."
+        case .english: return "For safety, the default only allows local loopback endpoints."
+        }
+    }
+
+    var agentPairingChecklist: String {
+        switch language {
+        case .korean: return "연결 체크리스트"
+        case .english: return "Pairing checklist"
+        }
+    }
+
+    var pairingStepProvider: String {
+        switch language {
+        case .korean: return "provider 실행"
+        case .english: return "Start provider"
+        }
+    }
+
+    var pairingStepOAuth: String {
+        switch language {
+        case .korean: return "OAuth 완료"
+        case .english: return "Finish OAuth"
+        }
+    }
+
+    var pairingStepValues: String {
+        switch language {
+        case .korean: return "pairing 값 입력"
+        case .english: return "Enter pairing values"
+        }
+    }
+
+    var pairingStepSmoke: String {
+        switch language {
+        case .korean: return "smoke 실행"
+        case .english: return "Run smoke"
+        }
+    }
+
+    var runbookReference: String {
+        switch language {
+        case .korean: return "런북: scripts/momo hermes-gateway-init/status/smoke"
+        case .english: return "Runbook: scripts/momo hermes-gateway-init/status/smoke"
         }
     }
 
