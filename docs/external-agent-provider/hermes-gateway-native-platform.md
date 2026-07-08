@@ -85,6 +85,14 @@ MOMO_AGENT_GATEWAY_SECRET=<same value as AGENT_GATEWAY_SECRET>
 subscription in local setups where the gateway logs in as an agent operator.
 They are not provider OAuth credentials.
 
+The `agent:` work stream is a Centrifugo subscription, not a durable write path.
+It still goes through MomoServer's subscribe proxy. Dev, local-alpha, and prod
+Centrifugo configs must all allow `agent:ws<workspace>.<agentMember>` through
+the same workspace-qualified regex and proxy check. If Hermes logs
+`permission denied` for `agent:...`, the adapter is connected but cannot receive
+jobs; in local alpha, inspect the generated `centrifugo.local-alpha.json` before
+debugging provider/OAuth.
+
 ## Credential Boundary
 
 Codex/OpenAI OAuth access tokens, refresh tokens, OpenAI API keys, and provider

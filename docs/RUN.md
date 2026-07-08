@@ -111,6 +111,12 @@ stop: /tmp/.../stop-local-alpha.sh
 Centrifugo 컨테이너의 subscribe proxy는 local alpha 실행 중 host-run `MomoServer`를 호출해야 하므로
 runner가 evidence 디렉터리에 임시 Centrifugo config/compose override를 생성한다. macOS Docker
 Desktop 기본값은 `host.docker.internal`이며, 필요하면 `--api-proxy-host <host>`로 바꾼다.
+이 임시 config도 `infra/centrifugo.json`과 같은 namespace 계약을 유지해야 한다. 특히
+`ch:ws<workspace>.<channel>`뿐 아니라 Hermes gateway work stream인
+`agent:ws<workspace>.<agentMember>`도 subscribe proxy를 통과해야 한다. local alpha에서
+Hermes adapter 로그에 `permission denied`가 보이면 먼저 runner가 새로 생성한
+`centrifugo.local-alpha.json`의 `agent` namespace에 `subscribe_proxy_enabled`와
+workspace-qualified `channel_regex`가 들어 있는지 확인한다.
 
 runner는 기본 검증 경로에서 headless `MomoMacSmoke`를 실행한다. 사용자가 실제 앱 창을 열 때는
 기본 고정 포트 flow인 `scripts/momo start`를 쓰거나, runner가 생성한 `summary.md`의
@@ -1066,7 +1072,7 @@ M1 staging 완료로 표시하지 않는다.
 | subscribe proxy 401 (`invalid or missing proxy secret`) | **MOMO-300**: Centrifugo static header(`X-Centrifugo-Proxy-Secret`)와 API `CENT_PROXY_SECRET` 불일치. compose env override(`CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`)와 서버 env가 같은 값을 쓰는지 확인. |
 | 로그인은 되는데 모든 API가 401 (`unknown token`) | **MOMO-300**: access token이 `token` 테이블에 기록되지 않았거나 revoke됨(로그아웃/rotation). 재로그인으로 새 세션 발급. 서버 배포 전 발급 토큰은 fail-closed로 전부 무효. |
 | REST가 429를 반환 | **MOMO-300** rate limit. `Retry-After` 헤더만큼 대기 후 재시도, 또는 `RATE_LIMIT_PER_MEMBER`/`RATE_LIMIT_PER_IP` 조정(0=비활성). |
-| `agent:` subscribe 거부 | target agent가 같은 workspace active member인지, observer와 target agent가 하나 이상의 active channel membership을 공유하는지 확인. 공유 채널이 없거나 다른 workspace token이면 정상적으로 deny된다. |
+| `agent:` subscribe 거부 | target agent가 같은 workspace active member인지, observer와 target agent가 하나 이상의 active channel membership을 공유하는지 확인. 공유 채널이 없거나 다른 workspace token이면 정상적으로 deny된다. local alpha 전용이면 runner가 생성한 `centrifugo.local-alpha.json`의 `agent` namespace가 subscribe proxy를 켰는지도 확인한다. stale config면 Hermes gateway가 `agent.job`을 못 받아 `agent_job`이 pending에 남는다. |
 | prod compose가 시크릿을 요구하며 실패 | `infra/prod/.env.example`은 예시다. 실제 staging/prod는 host-local env 또는 SOPS/age로 `change-me-*`를 모두 교체한다. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |
 
