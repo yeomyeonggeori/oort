@@ -29,7 +29,7 @@ flowchart LR
     AW["AgentWorker (SSE)<br/>worker 모드 실행 경로"]
 
     MAC -->|REST 읽기/쓰기| API
-    HG -->|"잡 수신·콜백 (현행: 공유 시크릿 → ADR-0101)"| API
+        HG -->|"잡 수신·콜백 (per-agent bearer; legacy flag 한정)"| API
     API -->|1 트랜잭션| PG
     RELAY -->|poll| PG
     RELAY -->|publish| CENT
@@ -55,8 +55,8 @@ sequenceDiagram
     S->>P: 한 트랜잭션: message + seq + agent_run(queued) + agent_job outbox
     P-->>C: (relay 경유) agent.job → agent:ws<ws>.<agentMember>
     C-->>H: push (유실 시 2s pending 폴링으로 회수)
-    H->>S: POST /gateway/events (running)
-    H->>S: POST /gateway/complete (본문+usage)
+    H->>S: Bearer(agent) POST /gateway/events (running)
+    H->>S: Bearer(agent) POST /gateway/complete (본문+usage)
     S->>P: 한 트랜잭션: agent 명의 message + usage_ledger + audit_log + run 종결 (멱등)
     P-->>C: message.new broadcast
     C-->>U: 같은 채널에 응답 표시
@@ -78,7 +78,7 @@ erDiagram
     member ||--o{ message : "authors (사람=에이전트 대칭)"
     message ||--o{ agent_run : triggers
     agent_run ||--o{ approval : requests
-    member ||--o{ token : "agent_bearer·delegation (스키마만, 미사용 → ADR-0101)"
+    member ||--o{ token : "agent_bearer(Phase 1 사용)·delegation(Phase 2)"
     channel ||--|| channel_seq : "gapless 카운터"
     workspace ||--o{ outbox : "broadcast + agent_job"
     agent_run ||--o{ usage_ledger : bills
@@ -92,7 +92,7 @@ erDiagram
 |---|---|---|
 | 골격(불변식·스키마·쓰기경로) | ✅ 견고 | 재설계해도 같은 결론에 도달할 수준 |
 | 에이전트 데이터 모델 | ✅ 1급 | Slack 봇 모델보다 앞선 설계 |
-| 에이전트 신원/인증 | ❌ 봇 수준 | 전역 공유 시크릿 1개 → **ADR-0101** |
+| 에이전트 신원/인증 | ⚠️ 이관 중 | 서버 per-agent bearer·스코프·회전/폐기 완료(MOMO-337), 어댑터/UI 이관은 MOMO-338/339 |
 | 존재감(프레즌스·타이핑·스트리밍) | ❌ 부재 | 서버에 이벤트 자체가 없음 → ADR-0104 |
 | 메신저 기본기(스레드UI·언리드·페이지네이션) | ❌ 미착수 | 스키마는 준비됨 → ADR-0109 |
 | 한국어 검색 | ❌ 부적합 | pg_trgm은 CJK 재현율 낮음 → ADR-0105 |

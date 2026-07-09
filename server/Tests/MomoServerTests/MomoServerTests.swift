@@ -191,25 +191,39 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
-    func testAgentGatewayModeDefaultsToWorkerAndRequiresSecretWhenEnabled() {
+    func testAgentGatewayModeDefaultsToTokenAuthAndGatesLegacySecret() {
         let defaultGateway = AgentGatewayConfig.load(environment: [:])
         XCTAssertEqual(defaultGateway.mode, .worker)
         XCTAssertFalse(defaultGateway.enabled)
         XCTAssertFalse(defaultGateway.secretConfigured)
+        XCTAssertFalse(defaultGateway.allowLegacySecret)
 
         var config = testServerConfig()
-        config.agentGateway = AgentGatewayConfig(mode: .gateway, secret: "change-me-agent-gateway-secret")
+        config.agentGateway = AgentGatewayConfig(
+            mode: .gateway,
+            secret: "change-me-agent-gateway-secret"
+        )
+        XCTAssertNoThrow(try config.validateSecurityForBoot())
+
+        config.agentGateway = AgentGatewayConfig(
+            mode: .gateway,
+            secret: "change-me-agent-gateway-secret",
+            allowLegacySecret: true
+        )
         XCTAssertThrowsError(try config.validateSecurityForBoot()) { error in
             let text = String(describing: error)
             XCTAssertTrue(text.contains("AGENT_GATEWAY_SECRET"))
+            XCTAssertTrue(text.contains("MOMO_ALLOW_LEGACY_GATEWAY_SECRET"))
             XCTAssertFalse(text.contains("change-me-agent-gateway-secret"))
         }
 
         config.agentGateway = AgentGatewayConfig(
             mode: .gateway,
-            secret: "momo-test-gateway-secret-000000000000000000000000"
+            secret: "momo-test-gateway-secret-000000000000000000000000",
+            allowLegacySecret: true
         )
         XCTAssertNoThrow(try config.validateSecurityForBoot())
+        XCTAssertTrue(config.agentGateway.legacySecretEnabled)
     }
 
     func testAgentRuntimeStatusReportsGatewayDeliveryModeWhenEnabled() {
@@ -239,14 +253,92 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(gatewayStatus.keyConfigured)
         XCTAssertTrue(gatewayStatus.diagnostics.isEmpty)
 
-        gatewayConfig.agentGateway = AgentGatewayConfig(mode: .gateway, secret: "change-me")
+        gatewayConfig.agentGateway = AgentGatewayConfig(
+            mode: .gateway,
+            secret: "change-me",
+            allowLegacySecret: true
+        )
         let degraded = gatewayConfig.agentRuntimeStatusResponse()
         XCTAssertEqual(degraded.mode, "gateway")
         XCTAssertEqual(degraded.availability, "degraded")
         XCTAssertFalse(degraded.keyConfigured)
         XCTAssertEqual(degraded.diagnostics, [
-            "AGENT_GATEWAY_SECRET is required when AGENT_GATEWAY_MODE=gateway"
+            "AGENT_GATEWAY_SECRET is required when MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1"
         ])
+    }
+
+    func testAgentBearerEnvelopeCarriesOnlyTenantRoutingHint() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let first = AgentBearerToken.mint(workspaceID: workspaceID)
+        let second = AgentBearerToken.mint(workspaceID: workspaceID)
+
+        XCTAssertNotEqual(first, second)
+        XCTAssertEqual(AgentBearerToken.workspaceID(from: first), workspaceID)
+        XCTAssertNil(AgentBearerToken.workspaceID(from: "momo_agent_v1.bad.short"))
+        XCTAssertEqual(first.split(separator: ".").count, 3)
+        XCTAssertFalse(first.contains("000000000103"), "actor id must come from the token row")
+    }
+
+    func testAgentBearerRouteScopesAreFailClosed() {
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(method: "POST", path: "/v1/auth/realtime-token"),
+            "realtime:subscribe"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
+                path: "/v1/workspaces/ws/channels/ch/messages"
+            ),
+            "messages:write"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "GET",
+                path: "/v1/workspaces/ws/agents/agent/gateway/jobs/pending"
+            ),
+            "agent:jobs:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
+                path: "/v1/workspaces/ws/agent-runs/run/gateway/complete"
+            ),
+            "agent:runs:callback"
+        )
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "GET",
+            path: "/v1/workspaces/ws/members"
+        ))
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "POST",
+            path: "/v1/workspaces/ws/agents/agent/credentials"
+        ))
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "POST",
+            path: "/v1/admin/messages"
+        ))
+    }
+
+    func testAgentCredentialValidationDefaultsAndRejectsPrivilegeExpansion() throws {
+        XCTAssertEqual(
+            try AgentCredentialRoutes.normalizedScopes(nil),
+            AgentCredentialRoutes.defaultScopes
+        )
+        XCTAssertEqual(
+            try AgentCredentialRoutes.normalizedScopes([
+                " messages:write ", "messages:write", "realtime:subscribe",
+            ]),
+            ["messages:write", "realtime:subscribe"]
+        )
+        XCTAssertThrowsError(try AgentCredentialRoutes.normalizedScopes([]))
+        XCTAssertThrowsError(try AgentCredentialRoutes.normalizedScopes(["platform:read"]))
+        XCTAssertEqual(try AgentCredentialRoutes.validatedRotationGraceSeconds(nil), 86_400)
+        XCTAssertEqual(try AgentCredentialRoutes.validatedRotationGraceSeconds(0), 0)
+        XCTAssertThrowsError(try AgentCredentialRoutes.validatedRotationGraceSeconds(-1))
+        XCTAssertThrowsError(try AgentCredentialRoutes.validatedRotationGraceSeconds(
+            AgentCredentialRoutes.maximumRotationGraceSeconds + 1
+        ))
+        XCTAssertEqual(try AgentCredentialRoutes.normalizedLabel(nil), "agent bearer")
     }
 
     func testAgentGatewayErrorSanitizerRedactsSecretsAndCredentialShapedText() {

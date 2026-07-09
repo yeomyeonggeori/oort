@@ -15,9 +15,13 @@ import NIOCore
 struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
     var coreContext: CoreRequestContextStorage
 
-    /// Authenticated principal, populated by `AuthMiddleware` when a valid
-    /// `Authorization: Bearer <app-jwt>` is present. nil on public routes.
+    /// Authenticated principal, populated by `AuthMiddleware` when a valid app
+    /// JWT or agent bearer is present. nil on public routes.
     var principal: AuthPrincipal?
+
+    /// True only for the explicitly enabled shared-secret migration path on
+    /// Hermes gateway callbacks. New agent traffic always uses `principal`.
+    var usedLegacyAgentGatewaySecret: Bool
 
     /// Peer socket address (MOMO-300 per-IP rate limiting). Behind the prod
     /// reverse proxy this is the proxy; `RateLimitMiddleware` prefers
@@ -27,13 +31,22 @@ struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
     init(source: Source) {
         self.coreContext = .init(source: source)
         self.principal = nil
+        self.usedLegacyAgentGatewaySecret = false
         self.remoteAddress = source.channel.remoteAddress
     }
 }
 
-/// The authenticated caller, derived from the App JWT (L4 §7.1: sub=member_id, ws, scopes).
+enum AuthPrincipalKind: String, Sendable {
+    case human
+    case agent
+}
+
+/// The authenticated caller. Human principals come from App JWTs; agent
+/// principals come from `token(kind='agent_bearer')` after a sha256 lookup.
 struct AuthPrincipal: Sendable {
     let memberID: UUID
     let workspaceID: UUID
     let scopes: [String]
+    let kind: AuthPrincipalKind
+    let tokenID: UUID
 }

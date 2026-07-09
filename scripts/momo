@@ -723,6 +723,7 @@ MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
 MOMO_AGENT_HANDLE=hermes
 MOMO_AGENT_GATEWAY_SECRET=${secret}
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1
 MOMO_DEFAULT_CHANNEL_ID=00000000-0000-7000-8000-000000000202
 
 # Optional: a human/operator account the adapter can use only to subscribe to
@@ -742,7 +743,7 @@ EOF
 
 To run momo in gateway mode, source the generated secret into the server env:
   set -a; . "$env_file"; set +a
-  AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="\$MOMO_AGENT_GATEWAY_SECRET" scripts/momo up
+  AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="\$MOMO_AGENT_GATEWAY_SECRET" MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 scripts/momo up
 
 Then point Hermes gateway at the plugin directory above. momo still stores no
 Codex/OpenAI OAuth token; Hermes/provider runtime owns provider credentials.

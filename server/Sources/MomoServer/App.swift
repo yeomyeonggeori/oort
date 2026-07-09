@@ -63,7 +63,17 @@ enum AppBuilder {
         CentrifugoRoutes(
             db: db, tokenStore: tokenStore, proxySecret: config.centProxySecret
         ).add(to: router)
-        AgentGatewayRoutes(db: db, config: config.agentGateway).add(to: router)
+
+        // Gateway callbacks accept per-agent bearer credentials. The shared
+        // secret is available only on this narrow group and only when the
+        // explicit migration flag is enabled.
+        let gatewayAuthed = router.group()
+            .add(middleware: AuthMiddleware(
+                jwt: jwt,
+                tokenStore: tokenStore,
+                legacyGatewayConfig: config.agentGateway
+            ))
+        AgentGatewayRoutes(db: db, config: config.agentGateway).add(to: gatewayAuthed)
 
         // Protected routes (require valid access token) — mounted in a group that
         // applies AuthMiddleware (JWT + MOMO-300 revocation check), then the
@@ -75,6 +85,7 @@ enum AppBuilder {
             ))
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
+        AgentCredentialRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         CostProjectionRoutes(db: db).add(to: authed)

@@ -251,8 +251,11 @@ struct AuthRoutes: Sendable {
     @Sendable
     func realtimeToken(_ request: Request, context: AppRequestContext) async throws -> Response {
         let principal = try context.requirePrincipal()
-        guard principal.scopes.contains("messages:read") else {
-            throw HTTPError(.forbidden, message: "messages:read scope required")
+        let requiredScope = principal.kind == .agent
+            ? "realtime:subscribe"
+            : "messages:read"
+        guard principal.scopes.contains(requiredScope) else {
+            throw HTTPError(.forbidden, message: "\(requiredScope) scope required")
         }
 
         let active = try await Self.isActiveMember(

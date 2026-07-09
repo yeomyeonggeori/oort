@@ -17,16 +17,86 @@ struct AgentGatewayRoutes: Sendable {
 
     static let gatewaySecretHeader = HTTPField.Name("X-Momo-Agent-Gateway-Secret")!
 
-    func add(to router: Router<AppRequestContext>) {
-        router.post("/v1/workspaces/:ws/agent-runs/:run/gateway/events", use: event)
-        router.post("/v1/workspaces/:ws/agent-runs/:run/gateway/complete", use: complete)
+    func add(to group: RouterGroup<AppRequestContext>) {
+        group.get(
+            "/v1/workspaces/:ws/agents/:agent/gateway/jobs/pending",
+            use: pendingJobs
+        )
+        group.post("/v1/workspaces/:ws/agent-runs/:run/gateway/events", use: event)
+        group.post("/v1/workspaces/:ws/agent-runs/:run/gateway/complete", use: complete)
+    }
+
+    @Sendable
+    func pendingJobs(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> AgentGatewayPendingJobsResponse {
+        try requireGatewayMode()
+        let workspaceID = try Self.workspaceID(context)
+        let targetAgentID = try Self.agentID(context)
+        let principal = try Self.gatewayPrincipal(context, workspaceID: workspaceID)
+        if let principal, principal.memberID != targetAgentID {
+            throw HTTPError(.forbidden, message: "agent bearer actor does not match target agent")
+        }
+        let limit = min(max(request.uri.queryParameters["limit"].flatMap { Int($0) } ?? 20, 1), 100)
+        let activeAgent = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            try await Self.isActiveAgent(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                agentID: targetAgentID
+            )
+        }
+        guard activeAgent else {
+            throw HTTPError(.notFound, message: "active agent not found")
+        }
+
+        let jobs: [AgentGatewayPendingJobDTO] = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT id, payload::text, created_at
+                  FROM outbox
+                 WHERE workspace_id = \(workspaceID)
+                   AND kind = 'agent_job'
+                   AND method = 'gateway'
+                   AND status = 'pending'
+                   AND partition_key = \(targetAgentID)
+                   AND payload->>'agent_member_id' = \(targetAgentID.uuidString)
+                 ORDER BY id ASC
+                 LIMIT \(limit)
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.map { row in
+                let (id, payloadJSON, createdAt) = try row.decode((Int64, String, Date).self)
+                guard let data = payloadJSON.data(using: .utf8) else {
+                    throw HTTPError(.internalServerError, message: "gateway job payload encoding failed")
+                }
+                let payload = try JSONDecoder().decode(JSONValue.self, from: data)
+                return AgentGatewayPendingJobDTO(
+                    id: id,
+                    runId: payload.objectValue?["run_id"]?.stringValue ?? "",
+                    payload: payload,
+                    createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
+                )
+            }
+        }
+        return AgentGatewayPendingJobsResponse(jobs: jobs)
     }
 
     @Sendable
     func event(_ request: Request, context: AppRequestContext) async throws -> AgentGatewayEventResponse {
-        try requireGatewaySecret(request, context: context)
+        try requireGatewayMode()
         let workspaceID = try Self.workspaceID(context)
+        let principal = try Self.gatewayPrincipal(context, workspaceID: workspaceID)
         let runID = try Self.runID(context)
+        try await requireRunActorBinding(
+            principal: principal,
+            workspaceID: workspaceID,
+            runID: runID
+        )
         let dto = try await request.decode(as: AgentGatewayEventRequest.self, context: context)
         let normalizedStatus = Self.normalizedStatus(dto.status ?? "running")
 
@@ -34,7 +104,6 @@ struct AgentGatewayRoutes: Sendable {
             guard let run = try await Self.lockGatewayRun(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, runID: runID)
             else { return false }
-
             if normalizedStatus == "running" || normalizedStatus == "thinking" {
                 _ = try await conn.query(
                     """
@@ -64,10 +133,11 @@ struct AgentGatewayRoutes: Sendable {
                 """
                 INSERT INTO audit_log
                   (workspace_id, actor_member_id, action, target_type,
-                   target_id, run_id, detail)
+                   target_id, via_token_id, run_id, detail)
                 VALUES
                   (\(workspaceID), \(run.agentMemberID),
-                   'agent.gateway.status', 'agent_run', \(runID), \(runID),
+                   'agent.gateway.status', 'agent_run', \(runID),
+                   \(principal?.tokenID), \(runID),
                    \(detail)::jsonb)
                 """,
                 logger: db.logger
@@ -101,9 +171,15 @@ struct AgentGatewayRoutes: Sendable {
 
     @Sendable
     func complete(_ request: Request, context: AppRequestContext) async throws -> AgentGatewayCompleteResponse {
-        try requireGatewaySecret(request, context: context)
+        try requireGatewayMode()
         let workspaceID = try Self.workspaceID(context)
+        let principal = try Self.gatewayPrincipal(context, workspaceID: workspaceID)
         let runID = try Self.runID(context)
+        try await requireRunActorBinding(
+            principal: principal,
+            workspaceID: workspaceID,
+            runID: runID
+        )
         let dto = try await request.decode(as: AgentGatewayCompleteRequest.self, context: context)
         let completionStatus = Self.normalizedCompletionStatus(dto.status)
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -278,10 +354,11 @@ struct AgentGatewayRoutes: Sendable {
                 """
                 INSERT INTO audit_log
                   (workspace_id, actor_member_id, action, target_type,
-                   target_id, run_id, detail)
+                   target_id, via_token_id, run_id, detail)
                 VALUES
                   (\(workspaceID), \(run.agentMemberID),
-                   'agent.gateway.completed', 'agent_run', \(runID), \(runID),
+                   'agent.gateway.completed', 'agent_run', \(runID),
+                   \(principal?.tokenID), \(runID),
                    \(detail)::jsonb)
                 """,
                 logger: db.logger
@@ -320,19 +397,36 @@ struct AgentGatewayRoutes: Sendable {
         let model: String
     }
 
-    private func requireGatewaySecret(_ request: Request, context: AppRequestContext) throws {
+    private func requireGatewayMode() throws {
         guard config.enabled else {
             throw HTTPError(.forbidden, message: "agent gateway mode is disabled")
         }
-        guard config.secretConfigured else {
-            context.logger.warning("agent gateway secret is missing/unsafe")
-            throw HTTPError(.unauthorized, message: "agent gateway secret is not configured")
+    }
+
+    private func requireRunActorBinding(
+        principal: AuthPrincipal?,
+        workspaceID: UUID,
+        runID: UUID
+    ) async throws {
+        guard let principal else { return }
+        let targetAgentID: UUID? = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT agent_member_id
+                  FROM agent_run
+                 WHERE id = \(runID)
+                   AND workspace_id = \(workspaceID)
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(UUID.self)
         }
-        guard let presented = request.headers[Self.gatewaySecretHeader],
-              ConstantTime.equals(presented, config.secret)
-        else {
-            context.logger.warning("agent gateway callback missing/invalid secret")
-            throw HTTPError(.unauthorized, message: "invalid or missing agent gateway secret")
+        guard let targetAgentID else { return }
+        guard targetAgentID == principal.memberID else {
+            throw HTTPError(.forbidden, message: "agent bearer actor does not match run agent")
         }
     }
 
@@ -445,6 +539,56 @@ struct AgentGatewayRoutes: Sendable {
             throw HTTPError(.badRequest, message: "invalid workspace id")
         }
         return id
+    }
+
+    private static func agentID(_ context: AppRequestContext) throws -> UUID {
+        let raw = try context.parameters.require("agent")
+        guard let id = UUID(uuidString: raw) else {
+            throw HTTPError(.badRequest, message: "invalid agent id")
+        }
+        return id
+    }
+
+    private static func gatewayPrincipal(
+        _ context: AppRequestContext,
+        workspaceID: UUID
+    ) throws -> AuthPrincipal? {
+        if context.usedLegacyAgentGatewaySecret {
+            return nil
+        }
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .agent else {
+            throw HTTPError(.forbidden, message: "agent bearer required")
+        }
+        guard principal.workspaceID == workspaceID else {
+            throw HTTPError(.forbidden, message: "workspace scope mismatch")
+        }
+        return principal
+    }
+
+    private static func isActiveAgent(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        agentID: UUID
+    ) async throws -> Bool {
+        let rows = try await conn.query(
+            """
+            SELECT 1
+              FROM member m
+              JOIN agent a
+                ON a.member_id = m.id
+               AND a.workspace_id = m.workspace_id
+             WHERE m.id = \(agentID)
+               AND m.workspace_id = \(workspaceID)
+               AND m.kind = 'agent'
+               AND m.status = 'active'
+               AND m.deleted_at IS NULL
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        return !rows.isEmpty
     }
 
     private static func runID(_ context: AppRequestContext) throws -> UUID {
@@ -738,4 +882,15 @@ struct AgentGatewayCompleteResponse: ResponseEncodable {
     let runId: String
     let messageId: String
     let seq: Int64
+}
+
+struct AgentGatewayPendingJobDTO: ResponseEncodable, Codable, Sendable {
+    let id: Int64
+    let runId: String
+    let payload: JSONValue
+    let createdAtMs: Int64
+}
+
+struct AgentGatewayPendingJobsResponse: ResponseEncodable {
+    let jobs: [AgentGatewayPendingJobDTO]
 }
