@@ -211,6 +211,9 @@
 | `MOMO-260` (`#263`) | Workspace/member/agent profile settings v0 | swift/macos-ui | MOMO-334 |
 | `MOMO-262` (`#265`) | Agent Pairing Wizard v0 | runtime-agent/macos-ui/docs | MOMO-334, MOMO-333 |
 | `MOMO-261` (`#264`) | Approval/Command Center/typing activity UX | swift/macos-ui | MOMO-335 |
+| `MOMO-337` (`#307`) | Agent bearer 인증 v1 (per-agent 자격증명·스코프·회전) — ADR-0101 Phase 1 | swift/runtime-agent | MOMO-325, MOMO-333 |
+| `MOMO-338` (`#308`) | Hermes 어댑터 bearer 단일화 (오퍼레이터 로그인 제거) — ADR-0101 | python/runtime-agent | MOMO-337 |
+| `MOMO-339` (`#309`) | 페어링 위저드 자격증명 발급/회전 UI — ADR-0101 | swift/macos-ui | MOMO-337, MOMO-262 |
 
 ### Local Solo Hermes Dogfood Active Chain
 
@@ -442,7 +445,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] real smoke verifier가 Hermes CLI/plugin/provider-login/momo-server/roundtrip failure를 단계별 evidence로 분리하고 provider OAuth/Codex/OpenAI credential env가 momo process에 보이면 fail-fast한다.
 - [x] `bash -n scripts/momo scripts/verify_hermes_gateway_real_smoke.sh` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS.
 - [x] 현재 머신에 Hermes CLI가 없으면 `scripts/momo hermes-gateway-smoke --real`이 `NEEDS_USER_INSTALL` evidence를 남기고, real provider roundtrip은 `runtime-unverified(real hermes gateway missing; user install/login required)`로 표기한다.
-- [ ] 사용자 설치/OAuth 후 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger` PASS evidence를 추가해 local solo alpha readiness를 갱신한다.
+- [x] 사용자 설치/OAuth 후 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger` PASS evidence를 추가해 local solo alpha readiness를 갱신한다. Evidence: `/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260708T162458Z/summary.md`.
+- [x] Centrifugo token expiry/reconnect window에서 `agent.job` realtime event를 놓쳐도 Hermes adapter가 gateway-secret REST pending-job recovery endpoint로 `agent_job(method=gateway)`를 drain하고 final callback을 완료한다.
 
 ### MOMO-228 수용기준 `[docs/manual]`
 - [ ] `docs/INTERNAL_ALPHA.md`에 internal alpha quickstart, local tools/env/gate sequence, `MomoMacDevApp` launch 절차, seeded account/workspace/channel/agent assumptions를 정리한다.
@@ -1534,6 +1538,32 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☐ P6 — scheduled trigger `(v1 · M/N 스탠드업, Sentinel, O 노크)`
 - [ ] cron/트리거 테이블(outbox `agent_job` 재사용 가능, kind 확장으로 흡수).
 - [ ] 예약/모니터링 트리거 디스패치.
+
+---
+
+## ADR-0101 에이전트 신원 티켓 (Accepted 2026-07-10 → Codex 구현 대상)
+
+### ☐ MOMO-337 수용기준 — Agent bearer 인증 v1 (서버) `[swift/runtime-agent]` · 의존: MOMO-325, MOMO-333
+> 정본: `docs/adr/0101-agent-identity-credentials.md` (Option A Phase 1). 스키마 변경 불필요 — `token`(`kind='agent_bearer'`, `scopes`, `token_hash`, `revoked_at`)과 `audit_log.via_token_id`는 `001_init.sql`에 이미 존재.
+- [ ] [swift] 발급: human admin 인증으로 `POST /v1/workspaces/:ws/agents/:agent/credentials` → agent_bearer 토큰 mint. sha256 해시만 `token` 테이블 저장, 원문은 응답에서 1회 반환. scopes 기본값 `agent:jobs:read agent:runs:callback messages:write realtime:subscribe`, 만료 옵션.
+- [ ] [swift] 검증: AuthMiddleware가 Bearer가 agent_bearer면 agent principal(member.kind='agent')로 해석 + scope 검사. 폐기/만료 토큰 401 fail-closed.
+- [ ] [swift] 이관: agent realtime-token·`/gateway/jobs/pending`·`/gateway/events`·`/gateway/complete`가 agent_bearer를 수용하고 **토큰 actor와 대상 agent member 일치**를 검증. `AGENT_GATEWAY_SECRET`는 `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1`일 때만 병행 수용(deprecation 로그).
+- [ ] [swift] 에이전트 메시지 전송: agent_bearer로 `POST .../messages` 시 author=agent member (오퍼레이터 계정 불필요).
+- [ ] [swift] 회전/폐기: revoke 엔드포인트 + 재발급 시 구토큰 유예기간(기본 24h) 이중 유효. 모든 agent_bearer 사용이 `audit_log.via_token_id`에 기록.
+- [ ] [swift] 테스트: 발급/스코프 거부/폐기 후 401/타 에이전트 토큰으로 콜백 시도 거부.
+- [ ] [runtime] `verify_hermes_gateway_adapter.sh`가 bearer 경로로 PASS (legacy secret 경로는 flag 하에 별도 케이스).
+
+### ☐ MOMO-338 수용기준 — Hermes 어댑터 bearer 단일화 `[python]` · 의존: MOMO-337
+- [ ] [python] 오퍼레이터 email/password 로그인 경로 제거. `MOMO_AGENT_TOKEN` bearer 하나로 REST 전송·realtime-token·pending 폴링·gateway 콜백 전부 인증.
+- [ ] [python] 시크릿 소스는 `~/.momo/hermes-gateway.env`(`chmod 600`) — Codex/OpenAI OAuth env fail-fast 경계(ADR-0004)는 그대로 유지.
+- [ ] [python] 401 수신 시 "토큰 폐기/만료 — 페어링에서 재발급" readable error를 남기고 지수 백오프 재시도(자격증명 자동 재발급 시도 금지).
+- [ ] [python] contract 테스트 갱신: 로그인 없는 플로우, bearer 헤더 형태, 미사용 refreshToken 코드 제거 확인.
+
+### ☐ MOMO-339 수용기준 — 페어링 위저드 자격증명 발급/회전 UI `[swift/macos-ui]` · 의존: MOMO-337, MOMO-262
+- [ ] [swift] 에이전트 초대 완료 시 MOMO-337 발급 API 호출 → 토큰 원문 1회 표시 + `~/.momo/hermes-gateway.env` 기록 안내(복사 버튼). 매니페스트/export에는 계속 시크릿 비포함(MOMO-262 계약 유지).
+- [ ] [swift] 멤버 프로필/페어링 패널에 자격증명 상태 칩(configured/revoked)과 회전·폐기 액션.
+- [ ] [swift] 테스트: 매니페스트 시크릿 배제 회귀 + mock 백엔드 발급/회전 플로우.
+- [ ] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙).
 
 ---
 

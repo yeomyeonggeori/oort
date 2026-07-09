@@ -7,7 +7,9 @@
 
 `momo-main` is the orchestration thread. It should stay light and avoid heavy implementation except for urgent fixes.
 
-Worker threads are implementation threads. Each worker claims exactly one GitHub Issue and works only in the worktree created for that issue.
+Worker threads are implementation threads. Each worker claims exactly one GitHub Issue and works only in the worktree created for that issue. **Concurrent implementation goals are capped at 5** (planning contract `docs/planning/README.md` §3); excess work waits in `status:ready`.
+
+Planning-layer inputs (who issues tickets, handoff packets, deviation feedback) are defined in `docs/planning/README.md`. Workers read the handoff packet linked in the issue Context before starting.
 
 Workers stop at PR handoff: claim issue -> worktree work -> local gate -> PR -> `status:needs-review` -> handoff to `momo-main`. Workers must not merge PRs, close issues, run the post-merge `main` gate, or reorder roadmap/backlog state. Those actions are `momo-main` only.
 
@@ -158,24 +160,20 @@ Paste this into a worker chat:
 
 ```md
 Use repo /Users/kwakseongjae/projects/momo.
-Claim GitHub issue #<number> and work in a separate worktree.
+Read docs/planning/handoffs/<packet>.md first, then claim GitHub issue #<number> and work in a separate worktree.
 Do not touch root dirty changes.
 
-Goal:
-<issue goal>
-
-Acceptance:
-<issue acceptance>
-
 Operational:
-- Use issue #<number> as the only goal.
+- Use issue #<number> as the only goal. The handoff packet + issue body are the full contract; the packet carries file map, contracts, pitfalls, and merge order.
 - Prefer scripts/goal_claim.sh <number>; if unavailable, create a canonical branch/worktree manually.
 - Branch/worktree lock required before editing.
 - Use .env.worktree for runtime work and avoid shared ports/compose projects.
 - Run scripts/local_gate.sh --profile <docs|swift|runtime-db|runtime-relay|runtime-agent|macos-ui>.
-- Open one PR, paste Local Gate evidence, run scripts/goal_release.sh <number> --review --pr <PR URL>, and hand off the PR URL back to momo-main.
+- Open one PR, paste Local Gate evidence, fill the "## 계획 이탈" (deviation) section honestly, run scripts/goal_release.sh <number> --review --pr <PR URL>, and hand off the PR URL back to momo-main.
 - Stop after the handoff. Do not merge, close the issue, run the post-merge main gate, or adjust roadmap/backlog state from the worker thread.
 ```
+
+If no handoff packet exists for the issue, ask `momo-main` for one instead of reconstructing intent from chat history — packets are mandatory for planned batches (`docs/planning/README.md` §2).
 
 ## 6. Worker Handoff Report
 

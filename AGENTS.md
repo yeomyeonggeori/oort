@@ -5,7 +5,7 @@
 > **핵심 내용은 `CODEX.md`와 동일**(CODEX.md = 사람·도구가 직접 읽는 풀 가이드). 둘이 어긋나면 이 `AGENTS.md`가 우선.
 > 사람용 장문 배경은 `STATUS.md`/`ROADMAP.md`/`BUILD_TICKETS.md`/`research/07-deepdive/04·05`에. 여기엔 **에이전트가 추론으로 못 얻는 것만** 적는다.
 >
-> **실행 주체:** 계획(마일스톤/티켓)은 릴리스 PM, **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**.
+> **실행 주체:** 기획(ADR/티켓/핸드오프)은 기획 레이어(성재+Fable 또는 GPT 5.6 — 계약: `docs/planning/README.md`), **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**. **이 파일은 구현(worker) 계약이다 — 지금 세션이 기획/오케스트레이션이면 `docs/planning/README.md`를 먼저 읽어라.** 동시 구현은 최대 **5 goal**(`docs/MULTI_SESSION_OPS.md`).
 > **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. Docker Desktop/psql 기반 M1 런타임 검증을 진행 중이며, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway가 필요하다. **2026-07 재설계 6티켓(316/323/301/300/302/318) 머지 완료(main), 실행 주체 Opus 세션→Codex 인수 — 인수인계·진입점은 `docs/HANDOFF_2026-07.md`, 상태는 `research/13-redesign/00-execution-tracker.md`.**
 > **표기:** `(검증됨)`=교차확인 · `(추정)`=설계/일정 판단 · `runtime-unverified`=해당 goal에서 아직 e2e를 못 닫은 것. **법무 텍스트는 법률 자문 아님.**
 
@@ -16,6 +16,7 @@ momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 
 ## 1. 작업을 받는 법 (goal = 이슈)
 - **하나의 GitHub Issue = 하나의 goal.** 이슈 본문이 작업 프롬프트. `## Goal / ## Context / ## Acceptance / ## Out of scope`가 있으면 그것이 계약.
+- **이슈 Context에 핸드오프 패킷(`docs/planning/handoffs/*.md`)이 링크돼 있으면 반드시 먼저 읽는다** — 파일 맵, 지켜야 할 계약, 함정, 머지 순서가 거기 있다. 패킷과 실제 코드가 다르면 코드가 진실이되, **계약 수준이 다르면 멈추고 이탈 보고**.
 - 다음에 집을 티켓 선택법은 §6. 임의로 스코프를 늘리지 말 것 — 이슈에 없는 것은 새 이슈로 제안.
 - 1 이슈 = 1 PR. 여러 이슈를 한 PR에 섞지 않는다.
 
@@ -101,6 +102,8 @@ cp infra/.env.example .env && make up && make migrate && ( cd server && swift ru
 6. **PR 본문**이 §5 형식.
 7. 미완성 스텁은 `// TODO(#이슈번호): 설명` 형태로만(컴파일 항상 보장).
 8. **게이트/배포 불변식 준수**: 사용성 검수 게이트(M7) PASS 기록 없이 스토어/공증 배포(M8)·external TestFlight 진행 금지(§7).
+9. **결정 거버넌스(ADR-0100)**: 공개 API 표면·보안 경계(시크릿/토큰/스코프/RLS)·DB 스키마 계약·제품 방향·기술스택을 바꾸는 변경은 **Accepted 상태의 ADR**(`docs/adr/`) 참조 없이 머지 금지. 결정은 ADR, 증거는 STATUS, 계획은 ROADMAP — STATUS.md에 결정 서술을 새로 쓰지 마라. 핫픽스로 경계를 건드렸으면 24h 내 소급 ADR 기안.
+10. **계획 이탈 보고**: 구현이 수용기준·ADR·핸드오프 패킷과 달라진 모든 지점(스코프 축소, 우회, 발견된 설계 결함 포함)을 PR `## 계획 이탈` 섹션에 정직하게 기록한다(없으면 "없음"). 설계 판단이 필요하면 임의 재설계 대신 `scripts/goal_release.sh <issue> --blocked`로 멈춘다. 이 보고는 `docs/planning/DEVIATION_LOG.md` 환류 파이프라인의 입력이다.
 
 ## 5. 컨벤션 (브랜치 / 커밋 / PR)
 - **브랜치(org `Dawn-kim-official`/repo `momo`):** `feat/<issue#>-<slug>` · `fix/…` · `chore/…` · `docs/…`. SPINE 티켓 id면 `feat/MOMO-NNN-<slug>`도 허용. **main 직접 push 금지**(브랜치 보호 가정).
@@ -146,7 +149,7 @@ Closes #<issue>
 ## 7. 설계 맥락 + 런타임 미검증 + 게이트 + 라이선스
 **불변식(day-1 강제):** ①Postgres=SoT, Centrifugo=전송계층 ②쓰기경로 단일화(클라 직접 publish 금지) ③순서 SoT=`message.seq` ④에이전트=`member`(kind='agent'), 동일 REST/멱등 ⑤commit↔publish 무손실=transactional outbox ⑥seq=`channel_seq` 행카운터 `UPDATE...RETURNING`(시퀀스 금지), `client_msg_id` 멱등 ⑦멀티테넌시 `workspace→channel→membership`, 모든 행 `workspace_id`, RLS FORCE, tx마다 `SET LOCAL app.workspace_id`.
 
-**읽을 곳:** `STATUS.md`(항상 먼저) · `ROADMAP.md`(마일스톤/게이트/비용) · `schema_v0.sql`(정본 DDL) · `research/07-deepdive/04`(L4 스펙) · `…/05`(D/B/C 경험) · `BUILD_TICKETS.md`(빌드 STEPS) · `docs/cicd/05-qa-release-gate.md`(게이트 객관기준 정본) · `docs/cicd/03-store-readiness-gate.md`(PASS 블록 기록 위치) · `docs/cicd/00~04`(Apple CI/CD·setup·시크릿·티켓) · `docs/RUN.md`(기동) · `legal/*`·`docs/legal/*`(법무).
+**읽을 곳:** `STATUS.md`(항상 먼저) · `docs/adr/`(**결정 정본** — 특히 0100 거버넌스, 0101 에이전트 신원) · `docs/architecture/overview.md`(아키텍처 정본 — 어긋나는 변경은 같은 PR에서 갱신) · `docs/ux-bible/README.md`(UX 원칙 P1~P15 — UI 티켓 수용기준이 인용) · `ROADMAP.md`(마일스톤/게이트/비용) · `schema_v0.sql`(정본 DDL) · `research/07-deepdive/04`(L4 스펙) · `…/05`(D/B/C 경험) · `BUILD_TICKETS.md`(빌드 STEPS) · `docs/cicd/05-qa-release-gate.md`(게이트 객관기준 정본) · `docs/cicd/03-store-readiness-gate.md`(PASS 블록 기록 위치) · `docs/cicd/00~04`(Apple CI/CD·setup·시크릿·티켓) · `docs/RUN.md`(기동) · `legal/*`·`docs/legal/*`(법무).
 
 **런타임 미검증:** Docker/psql로 가능한 PG18+Centrifugo 검증은 각 M1 goal에서 실제 수행한다. hermes, APNs, Apple 배포 등 외부 의존이 남으면 실제 의존성 또는 mock 준비를 먼저 검토하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + `docs/RUN.md`에 절차를 남긴다.
 

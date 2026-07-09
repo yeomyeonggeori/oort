@@ -33,6 +33,9 @@ Closes #<issue>
 ## STATUS 영향
 - <!-- STATUS.md에 반영한 줄(무엇이 추가/변경, 무엇이 여전히 미검증). -->
 
+## 계획 이탈 (Deviation — AGENTS.md §4-10)
+- <!-- 수용기준·ADR·핸드오프 패킷과 다르게 구현한 모든 지점 + 이유. 없으면 "없음". momo-main이 docs/planning/DEVIATION_LOG.md로 환류한다. -->
+
 ## 🔒 게이트 / 배포 불변식 (해당 시)
 - [ ] 이 PR은 `release-ios.yml`/`release-macos.yml`을 **트리거하지 않는다** (M7 게이트 PASS + docs/cicd/03 PASS 블록 기록 전까지 release 금지)
 - [ ] (M4/M5 스토어 관련이면) 검수 게이트(M7) 선행 의존 표기
@@ -41,5 +44,6 @@ Closes #<issue>
 - <!-- 스코프 밖이라 새 이슈로 뺀 것. -->
 
 ---
+- [ ] **ADR 거버넌스(ADR-0100)**: 이 PR이 공개 API·보안 경계·스키마 계약·제품 방향·스택을 바꾸면 근거 ADR 번호 명시 — `ADR-____` / 해당 없으면 "ADR 불필요"
 - [ ] 시크릿 미커밋(.env), `.build/`·`*.resolved`·`DerivedData/` 미포함, 무관한 리팩터 없음 (AGENTS.md §5)
 - [ ] 법무/스토어 정책 관련 텍스트는 1차 출처 링크 + "(추정)" 표기 — **법률 자문 아님**
