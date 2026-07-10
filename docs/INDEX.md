@@ -77,10 +77,11 @@
 | [`docs/adr/0101-agent-identity-credentials.md`](adr/0101-agent-identity-credentials.md) | **에이전트 신원 ADR(Accepted — Option A)**: 공유 시크릿 → per-agent `agent_bearer` + Phase 2 delegation. 구현: MOMO-337~339 | M1/보안 |
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
-| [`docs/planning/README.md`](planning/README.md) | **기획 레이어 운영 정본**: 역할 3분할(기획/오케스트레이터/worker), ADR→티켓→핸드오프 체인, 병렬 최대 5, 이탈 환류 루프 | 전반 |
+| [`docs/planning/README.md`](planning/README.md) | **기획 레이어 운영 정본**: 제품 오너/planner/momo-main/worker 역할, 병렬 planning claim, ADR→티켓→핸드오프 체인, 구현 병렬 최대 5, 이탈 환류 | 전반 |
+| [`docs/planning/CURRENT_STATE.md`](planning/CURRENT_STATE.md) | **컨텍스트 압축 복원 정본**: 활성 planning owner, 결정 대기, 구현 handoff, 다음 체크포인트. `momo-main`만 통합 갱신 | 전반 |
 | [`docs/planning/HANDOFF_TEMPLATE.md`](planning/HANDOFF_TEMPLATE.md) | 핸드오프 패킷 템플릿 — 기획 맥락을 레포 안에 고정하는 장치, worker 채팅 메시지는 3줄로 | 전반 |
 | [`docs/planning/DEVIATION_LOG.md`](planning/DEVIATION_LOG.md) | 계획 이탈 로그 — PR 이탈 보고 → 오케스트레이터 기록 → 기획 판정 → 로드맵 환류 | 전반 |
-| [`docs/planning/JOURNAL.md`](planning/JOURNAL.md) | 기획 세션 저널(append-only) — Fable↔GPT 5.6 세션 간 이어달리기: 한 일/열린 것/다음 | 전반 |
+| [`docs/planning/JOURNAL.md`](planning/JOURNAL.md) | 기획 세션 저널(newest-first, 기존 항목 불변) — Fable↔GPT 5.6 세션 간 이어달리기 | 전반 |
 | [`docs/planning/handoffs/`](planning/handoffs/) | 발급된 핸드오프 패킷 (첫 패킷: 2026-07-10 ADR-0101 agent identity 배치) | 전반 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)

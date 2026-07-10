@@ -2,7 +2,7 @@
 
 > **이 파일 하나만 읽으면 Codex가 momo 리포에서 바로 착수할 수 있다.** (`AGENTS.md`와 핵심 내용 동일 — `AGENTS.md`는 Codex 런타임이 자동 머지하는 정식 진입점, 이 `CODEX.md`는 사람·도구가 직접 읽는 풀 가이드. 둘이 어긋나면 `AGENTS.md`가 우선.)
 >
-> **실행 주체:** 계획(마일스톤/티켓)은 릴리스 PM이 세우고, **실제 구현은 Codex가 goal(= GitHub Issue)로 자율 실행**한다.
+> **실행 주체:** 기획은 성재(최종 승인)+Fable/GPT 5.6(병렬 planner), 공용 정본 통합은 `momo-main`이 맡고, **실제 구현은 Codex가 goal(= GitHub Issue)로 자율 실행**한다. 기획 세션은 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽는다.
 > **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. Docker Desktop/psql 기반 M1 런타임 검증을 진행 중이며, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway가 필요하다.
 > **사실 표기 규칙:** `(검증됨)` = 공식문서/리포 교차확인 · `(추정)` = 설계/일정 판단 · `runtime-unverified` = 해당 goal에서 아직 e2e를 못 닫은 것. **법무 관련 텍스트는 법률 자문이 아님.**
 

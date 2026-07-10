@@ -6,7 +6,7 @@
 
 | 날짜 | 출처 (티켓/PR) | 이탈 내용 | 오케스트레이터 분석·리서치 | 상태 | 판정·후속 |
 |---|---|---|---|---|---|
-| _(아직 없음)_ | | | | | |
+| 2026-07-10 | MOMO-337 / PR #310 | 핸드오프는 `/gateway/jobs/pending`을 기존 경로로 전제했으나 실제 코드에는 없었다. 수용기준의 4-route bearer 이관을 닫기 위해 actor-bound pending recovery endpoint를 신설했다. | Postgres/outbox SoT와 REST 경계를 유지하고 `available_at <= now()` 및 token actor binding을 강제하므로 제품 경계 변경이 아닌 누락된 recovery surface 보완으로 판정했다. 다만 bearer 사용 audit write 증폭을 피하려면 adapter가 realtime-first여야 한다. | `accepted` | MOMO-338 #308에 realtime-first, bounded reconnect/recovery, idle tight polling 금지를 추가. |
 
 ## 소급 항목 (2026-07-09 감사에서 발견된 역사적 이탈)
 

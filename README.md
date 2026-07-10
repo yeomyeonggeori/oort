@@ -14,7 +14,8 @@ momo는 봇/슬래시커맨드가 아니라, presence·lifecycle·상태머신�
 - 빌드 티켓: [`BUILD_TICKETS.md`](BUILD_TICKETS.md)
 
 **협업 파이프라인 (역할별 진입점):**
-- 기획 세션(Fable/GPT 5.6/사람) → [`docs/planning/README.md`](docs/planning/README.md) — ADR 기안 → 티켓 발급 → 핸드오프 패킷 → 병렬 구현(최대 5) → 코드리뷰·순차 머지 → 이탈 환류
+- 기획 세션(Fable/GPT 5.6/사람) → [`docs/planning/README.md`](docs/planning/README.md) — ADR 기안·승인 → 빌드 계약 → 버전 고정 handoff → Issue → 병렬 구현(최대 5) → 코드리뷰·순차 머지 → 이탈 환류
+- 압축/세션 전환 후 현재 상태 → [`docs/planning/CURRENT_STATE.md`](docs/planning/CURRENT_STATE.md) 또는 `scripts/planning_context.sh`
 - 구현 세션(Codex worker) → [`AGENTS.md`](AGENTS.md) — goal(=GitHub Issue) 자율 실행 계약
 - 결정 정본 [`docs/adr/`](docs/adr/) · 아키텍처 정본 [`docs/architecture/overview.md`](docs/architecture/overview.md) · UX 원칙 [`docs/ux-bible/README.md`](docs/ux-bible/README.md)
 

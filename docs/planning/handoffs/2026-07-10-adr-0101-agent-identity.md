@@ -1,7 +1,10 @@
 # HANDOFF: ADR-0101 에이전트 신원 — agent_bearer 인증 배치
 
-> 발급: 2026-07-10 · 기획 세션: Fable(+성재 승인) · 근거 ADR: **ADR-0101 (Accepted 2026-07-10, Option A)**
-> 대상 goal: MOMO-337(#307), MOMO-338(#308), MOMO-339(#309) · 병렬: 337 머지 후 338‖339 병렬 가능
+> Status: `active` — MOMO-337 완료, MOMO-338/339 ready
+> Planning ID: `ADR-0101` · Planner owner: Fable · Integrator: `momo-main`
+> 발급: 2026-07-10 · 최신 통합 커밋: `8d97c82ef1710e0a66e95ec50f72b9ff8d8cc41a` · Supersedes: 없음
+> 근거 ADR: **ADR-0101 (Accepted 2026-07-10, Option A)** · 대상 goal: MOMO-337, MOMO-338, MOMO-339 · 병렬: 337 머지 후 338‖339 병렬 가능
+> GitHub binding: MOMO-337=#307, MOMO-338=#308, MOMO-339=#309
 
 ## 1. 결정 요약
 
@@ -11,11 +14,11 @@ momo의 에이전트 인증은 현재 전 에이전트·전 워크스페이스 *
 
 | 순서 | goal | 이슈 | 의존 | 병렬 |
 |---|---|---|---|---|
-| 1 | MOMO-337 서버 agent_bearer 발급/검증/이관 | #307 | MOMO-325, 333 (머지됨) | 단독 선행 |
-| 2 | MOMO-338 어댑터 bearer 단일화 | #308 | MOMO-337 | 339와 병렬 가능 |
-| 2 | MOMO-339 페어링 위저드 발급/회전 UI | #309 | MOMO-337, 262(머지됨) | 338과 병렬 가능 |
+| 1 | MOMO-337 서버 agent_bearer 발급/검증/이관 | #307 | 완료(PR #310, `8d97c82`) | 단독 선행 완료 |
+| 2 | MOMO-338 어댑터 bearer 단일화 | #308 | MOMO-337 완료 | 339와 병렬 가능, `ready` |
+| 2 | MOMO-339 페어링 위저드 발급/회전 UI | #309 | MOMO-337, 262 완료 | 338과 병렬 가능, `ready` |
 
-**머지 순서: 337 → (338, 339 완료순).** 337 머지 전에 338/339 착수 금지 (API 계약이 337에서 확정됨).
+**머지 순서: 337 완료 → (338, 339 완료순).** 두 후속은 서로 다른 worktree에서 병렬 가능하다.
 
 ## 3. 파일 맵 (2026-07-09 감사 기준 — 착수 시 실제 코드와 대조)
 
@@ -31,6 +34,8 @@ momo의 에이전트 인증은 현재 전 에이전트·전 워크스페이스 *
 | 페어링 위저드 | `clients/macOS/Sources/MomoMac/ChannelListView.swift:769+`(popover), `MomoAgentPairing.swift`(:110 manifest, :20 endpointPolicy), `ChatViewModel.swift:477`(inviteDogfoodAgent) | 매니페스트/초대코드 생성, 시크릿은 env 파일 참조만 | 초대 완료 시 발급 API 호출 → 토큰 1회 표시 + env 기록 안내, 상태 칩/회전/폐기 |
 | 시크릿 파일 | `~/.momo/hermes-gateway.env` (chmod 600, `scripts/momo hermes-gateway-init`이 생성) | `MOMO_AGENT_GATEWAY_SECRET` | `MOMO_AGENT_TOKEN` 추가 (구 키는 병행기 동안 유지) |
 | e2e 검증 | `scripts/verify_hermes_gateway_adapter.sh` | 시크릿 헤더로 콜백 검증 (401 가드 포함) | bearer 경로로 갱신, legacy는 flag 케이스로 분리 |
+
+> MOMO-337 구현 후 델타: 실제 서버에는 감사 당시 예상한 `/gateway/jobs/pending`이 없어서 PR #310에서 actor-bound recovery endpoint를 신설했다. `available_at <= now()`를 지키며, MOMO-338은 realtime-first를 유지하고 이 endpoint를 고빈도 idle polling에 사용하지 않는다.
 
 ## 4. 지켜야 할 계약
 
@@ -66,3 +71,10 @@ scripts/goal_claim.sh <issue-number>
 # 구현 → 게이트 → PR(이탈 섹션 포함) →
 scripts/goal_release.sh <issue-number> --review --pr <PR URL>
 ```
+
+## 9. 컨텍스트 델타
+
+- 새로 고정: 기존 전역 gateway secret을 per-agent `agent_bearer`로 단계적으로 대체한다.
+- 결정하지 않음: Phase 2 delegation 모델과 ADR-0102의 worker/gateway 실행 경로 선택.
+- 재기획 질문: MOMO-337 구현에서 기존 gateway secret 호환 기간 또는 회전 UX가 계약과 달라지면 deviation으로 환류한다.
+- MOMO-337 리뷰 결과: one-time token 응답 no-store, `token.created_by`, pending `available_at` guard를 보강했다. 후속의 남은 관찰은 bearer 사용 audit write 증폭이며, adapter의 bounded recovery로 우선 제어한다.

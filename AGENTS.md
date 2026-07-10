@@ -5,7 +5,7 @@
 > **핵심 내용은 `CODEX.md`와 동일**(CODEX.md = 사람·도구가 직접 읽는 풀 가이드). 둘이 어긋나면 이 `AGENTS.md`가 우선.
 > 사람용 장문 배경은 `STATUS.md`/`ROADMAP.md`/`BUILD_TICKETS.md`/`research/07-deepdive/04·05`에. 여기엔 **에이전트가 추론으로 못 얻는 것만** 적는다.
 >
-> **실행 주체:** 기획(ADR/티켓/핸드오프)은 기획 레이어(성재+Fable 또는 GPT 5.6 — 계약: `docs/planning/README.md`), **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**. **이 파일은 구현(worker) 계약이다 — 지금 세션이 기획/오케스트레이션이면 `docs/planning/README.md`를 먼저 읽어라.** 동시 구현은 최대 **5 goal**(`docs/MULTI_SESSION_OPS.md`).
+> **실행 주체:** 기획은 성재(최종 승인)+Fable/GPT 5.6(병렬 planner), 공용 정본 통합은 `momo-main`(계약: `docs/planning/README.md`), **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**. **지금 세션이 기획/오케스트레이션이면 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽어라.** 동시 구현은 최대 **5 goal**(`docs/MULTI_SESSION_OPS.md`).
 > **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. Docker Desktop/psql 기반 M1 런타임 검증을 진행 중이며, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway가 필요하다. **2026-07 재설계 6티켓(316/323/301/300/302/318) 머지 완료(main), 실행 주체 Opus 세션→Codex 인수 — 인수인계·진입점은 `docs/HANDOFF_2026-07.md`, 상태는 `research/13-redesign/00-execution-tracker.md`.**
 > **표기:** `(검증됨)`=교차확인 · `(추정)`=설계/일정 판단 · `runtime-unverified`=해당 goal에서 아직 e2e를 못 닫은 것. **법무 텍스트는 법률 자문 아님.**
 
