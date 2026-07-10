@@ -66,6 +66,7 @@ AGENT_GATEWAY_SECRET=${AGENT_GATEWAY_SECRET:-momo-325-local-gateway-secret-00000
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_EMAIL=demo@momo.local
 HUMAN_PASSWORD=dev-password
+HUMAN_MEMBER_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
 OTHER_AGENT_ID=00000000-0000-7337-8000-000000000104
 CHANNEL_ID=00000000-0000-7000-8000-000000000202
@@ -79,10 +80,12 @@ OTHER_BODY='@momo337-other MOMO-337 actor binding smoke'
 
 TMP_ROOT=${TMPDIR:-/tmp}
 SERVER_LOG=${TMP_ROOT}/momo-hermes-gateway-server-$$.log
+CREDENTIAL_HEADERS=${TMP_ROOT}/momo-hermes-gateway-credential-headers-$$.txt
 SERVER_PID=
 
 cleanup() {
   momo_cleanup_tracked_pids "hermes-gateway verifier" "$SERVER_PID"
+  rm -f "$CREDENTIAL_HEADERS"
 }
 trap cleanup EXIT INT TERM
 
@@ -195,7 +198,7 @@ create_agent_credential() {
   human_token=$1
   agent_id=$2
   payload=$3
-  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials" \
+  curl -fsS -D "$CREDENTIAL_HEADERS" -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials" \
     -H "Authorization: Bearer ${human_token}" \
     -H 'Content-Type: application/json' \
     -d "$payload"
@@ -415,8 +418,18 @@ if [ "$AGENT_TOKEN" = "" ] || [ "$AGENT_TOKEN" = "null" ] || [ "$AGENT_TOKEN_ID"
 fi
 HASH_MATCH=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND token_hash=digest('${AGENT_TOKEN}','sha256') AND kind='agent_bearer'")
 assert_equals "1" "$HASH_MATCH" "agent bearer stored as sha256"
+CREATOR_MATCH=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND created_by='${HUMAN_MEMBER_ID}'")
+assert_equals "1" "$CREATOR_MATCH" "agent bearer records issuing admin"
 RAW_LEAK_COUNT=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND coalesce(label,'') LIKE '%${AGENT_TOKEN}%'")
 assert_equals "0" "$RAW_LEAK_COUNT" "raw agent bearer is not stored in text columns"
+if ! grep -Eiq '^cache-control:[[:space:]]*no-store' "$CREDENTIAL_HEADERS"; then
+  echo "[hermes-gateway] assertion failed: one-time credential response must be no-store" >&2
+  exit 1
+fi
+if ! grep -Eiq '^pragma:[[:space:]]*no-cache' "$CREDENTIAL_HEADERS"; then
+  echo "[hermes-gateway] assertion failed: one-time credential response must be no-cache" >&2
+  exit 1
+fi
 
 REALTIME_JSON=$(fetch_realtime_token "$AGENT_TOKEN")
 REALTIME_MEMBER=$(printf '%s' "$REALTIME_JSON" | jq -r '.memberId')
@@ -464,6 +477,11 @@ assert_equals "pending" "$JOB_STATUS" "agent_job initial status"
 AGENT_JOB_BROADCAST=$(psql_scalar "SELECT payload->'data'->>'type' FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='agent.job' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') LIMIT 1")
 assert_equals "agent.job" "$AGENT_JOB_BROADCAST" "agent: realtime job broadcast"
 
+psql_scalar "UPDATE outbox SET available_at=now()+interval '10 minutes' WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') RETURNING id" >/dev/null
+DELAYED_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+DELAYED_PENDING_COUNT=$(printf '%s' "$DELAYED_PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
+assert_equals "0" "$DELAYED_PENDING_COUNT" "future retry is not delivered before available_at"
+psql_scalar "UPDATE outbox SET available_at=now() WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') RETURNING id" >/dev/null
 PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
 PENDING_COUNT=$(printf '%s' "$PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
 assert_equals "1" "$PENDING_COUNT" "agent bearer pending-job fallback"

@@ -62,6 +62,7 @@ struct AgentGatewayRoutes: Sendable {
                    AND kind = 'agent_job'
                    AND method = 'gateway'
                    AND status = 'pending'
+                   AND available_at <= now()
                    AND partition_key = \(targetAgentID)
                    AND payload->>'agent_member_id' = \(targetAgentID.uuidString)
                  ORDER BY id ASC

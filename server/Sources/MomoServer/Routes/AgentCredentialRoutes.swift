@@ -1,4 +1,5 @@
 import Foundation
+import HTTPTypes
 import Hummingbird
 import Logging
 import PostgresNIO
@@ -77,10 +78,11 @@ struct AgentCredentialRoutes: Sendable {
                     """
                     INSERT INTO token
                       (workspace_id, kind, actor_member_id, subject_member_id,
-                       token_hash, scopes, label, expires_at)
+                       token_hash, scopes, label, expires_at, created_by)
                     VALUES
                       (\(workspaceID), 'agent_bearer', \(agentID), NULL,
-                       digest(\(rawToken), 'sha256'), \(scopes), \(label), \(expiresAt))
+                       digest(\(rawToken), 'sha256'), \(scopes), \(label), \(expiresAt),
+                       \(principal.memberID))
                     RETURNING id, actor_member_id, scopes, label, last_used_at,
                               expires_at, revoked_at, created_at
                     """,
@@ -123,6 +125,10 @@ struct AgentCredentialRoutes: Sendable {
         )
         var encoded = try response.response(from: request, context: context)
         encoded.status = .created
+        // The raw bearer is returned exactly once. Keep it out of browser,
+        // intermediary, and shared response caches.
+        encoded.headers[.cacheControl] = "no-store"
+        encoded.headers[HTTPField.Name("Pragma")!] = "no-cache"
         return encoded
     }
 
