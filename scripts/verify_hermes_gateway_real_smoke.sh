@@ -44,11 +44,59 @@ require_bin() {
 }
 
 json_escape() {
-  python3 - "$1" <<'PY'
+  printf '%s' "$1" | python3 -c '
 import json
 import sys
-print(json.dumps(sys.argv[1]))
-PY
+print(json.dumps(sys.stdin.read()))
+'
+}
+
+api_request() {
+  local method path bearer body
+  method="$1"
+  path="$2"
+  bearer="${3:-}"
+  body="${4:-}"
+  printf '%s\0%s\0%s\0%s' "$MOMO_API_URL$path" "$method" "$bearer" "$body" | python3 -c '
+import sys
+import urllib.error
+import urllib.request
+
+parts = sys.stdin.buffer.read().split(b"\0", 3)
+if len(parts) != 4:
+    raise SystemExit(2)
+url, method, bearer, body = (part.decode("utf-8") for part in parts)
+headers = {"Accept": "application/json"}
+if bearer:
+    headers["Authorization"] = "Bearer " + bearer
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        sys.stdout.buffer.write(response.read())
+except urllib.error.HTTPError as exc:
+    sys.stderr.write(f"momo API request failed: HTTP {exc.code}\n")
+    raise SystemExit(22)
+'
+}
+
+redact_file_value() {
+  local file value
+  file="$1"
+  value="${2:-}"
+  [ -f "$file" ] && [ "$value" != "" ] || return 0
+  printf '%s' "$value" | python3 -c '
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+secret = sys.stdin.read()
+if secret:
+    path.write_text(path.read_text(encoding="utf-8").replace(secret, "[redacted]"), encoding="utf-8")
+' "$file"
 }
 
 redacted_url() {
@@ -70,6 +118,17 @@ print(urlunsplit((p.scheme, netloc, p.path, "", "")))
 PY
 }
 
+is_placeholder_value() {
+  case "${1:-}" in
+    ""|*"<"*">"*|*change-me*|*changeme*|*replace-with*|*placeholder*|*example*)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 forbidden_provider_env_names() {
   local key
   for key in CODEX_OAUTH_TOKEN CODEX_OAUTH_ACCESS_TOKEN CODEX_OAUTH_REFRESH_TOKEN \
@@ -87,7 +146,19 @@ EVIDENCE_DIR="${MOMO_HERMES_REAL_EVIDENCE_DIR:-${TMPDIR:-/tmp}/momo-hermes-gatew
 LOG_DIR="$EVIDENCE_DIR/logs"
 SUMMARY="$EVIDENCE_DIR/summary.md"
 EVENTS="$EVIDENCE_DIR/events.ndjson"
+umask 077
 mkdir -p "$LOG_DIR"
+
+ACCESS_TOKEN=
+REFRESH_TOKEN=
+cleanup_session() {
+  local logout_body
+  if [ "$ACCESS_TOKEN" != "" ] && [ "$REFRESH_TOKEN" != "" ]; then
+    logout_body="{\"refreshToken\":$(json_escape "$REFRESH_TOKEN")}"
+    api_request POST /v1/auth/logout "$ACCESS_TOKEN" "$logout_body" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_session EXIT
 
 event() {
   python3 - "$1" "$2" "$3" >>"$EVENTS" <<'PY'
@@ -122,7 +193,7 @@ finish() {
   echo "[hermes-gateway-real] ${result}: ${detail}"
   echo "[hermes-gateway-real] evidence: $SUMMARY"
   case "$result" in
-    PASS|READY_FOR_TRIGGER|NEEDS_USER_INSTALL|NEEDS_PLUGIN_INSTALL|NEEDS_PROVIDER_LOGIN|NEEDS_MOMO_SERVER)
+    PASS|READY_FOR_TRIGGER|NEEDS_PAIRING|NEEDS_USER_INSTALL|NEEDS_PLUGIN_INSTALL|NEEDS_PROVIDER_LOGIN|NEEDS_MOMO_SERVER)
       [ "$REQUIRE_REAL" = "0" ] || [ "$result" = "PASS" ]
       ;;
     *)
@@ -154,8 +225,8 @@ MOMO_WORKSPACE_ID="${MOMO_WORKSPACE_ID:-00000000-0000-7000-8000-000000000001}"
 MOMO_AGENT_MEMBER_ID="${MOMO_AGENT_MEMBER_ID:-00000000-0000-7000-8000-000000000103}"
 MOMO_AGENT_HANDLE="${MOMO_AGENT_HANDLE:-hermes}"
 MOMO_DEFAULT_CHANNEL_ID="${MOMO_DEFAULT_CHANNEL_ID:-00000000-0000-7000-8000-000000000202}"
-MOMO_AGENT_EMAIL="${MOMO_AGENT_EMAIL:-demo@momo.local}"
-MOMO_AGENT_PASSWORD="${MOMO_AGENT_PASSWORD:-dev-password}"
+MOMO_OPERATOR_EMAIL="${MOMO_OPERATOR_EMAIL:-demo@momo.local}"
+MOMO_OPERATOR_PASSWORD="${MOMO_OPERATOR_PASSWORD:-dev-password}"
 
 forbidden_count="$(forbidden_provider_env_names | wc -l | tr -d '[:space:]')"
 if [ "$forbidden_count" != "0" ]; then
@@ -165,6 +236,13 @@ if [ "$forbidden_count" != "0" ]; then
   exit 1
 fi
 event boundary PASS "no known Codex/OpenAI provider credential env is visible"
+
+if is_placeholder_value "${MOMO_AGENT_TOKEN:-}"; then
+  event pairing_token NEEDS_PAIRING "MOMO_AGENT_TOKEN is missing or placeholder"
+  finish NEEDS_PAIRING "issue one scoped credential from momo agent pairing and update the gateway env" || exit 1
+  exit 0
+fi
+event pairing_token PASS "scoped agent bearer is configured (redacted)"
 
 HERMES_BIN_RESOLVED="${HERMES_BIN:-}"
 if [ "$HERMES_BIN_RESOLVED" = "" ] && command -v hermes >/dev/null 2>&1; then
@@ -196,6 +274,7 @@ fi
 event plugin PASS "$PLUGIN_DIR"
 
 "$HERMES_BIN_RESOLVED" gateway status >"$LOG_DIR/hermes-gateway-status.log" 2>&1 || true
+redact_file_value "$LOG_DIR/hermes-gateway-status.log" "${MOMO_AGENT_TOKEN:-}"
 event gateway_status RECORDED "wrote logs/hermes-gateway-status.log"
 
 if [ "${MOMO_HERMES_PROVIDER_READY:-}" != "1" ]; then
@@ -207,7 +286,7 @@ event provider_login USER_MARKED_READY "operator marked provider login ready"
 
 if ! curl -fsS --max-time 3 "$MOMO_API_URL/health" >"$LOG_DIR/momo-health.json" 2>"$LOG_DIR/momo-health.err"; then
   event momo_server NEEDS_MOMO_SERVER "momo /health is not reachable"
-  finish NEEDS_MOMO_SERVER "start momo in gateway mode with AGENT_GATEWAY_MODE=gateway and matching AGENT_GATEWAY_SECRET" || exit 1
+  finish NEEDS_MOMO_SERVER "start momo with AGENT_GATEWAY_MODE=gateway; the adapter authenticates with MOMO_AGENT_TOKEN" || exit 1
   exit 0
 fi
 event momo_server PASS "$MOMO_API_URL/health"
@@ -218,17 +297,16 @@ if [ "$TRIGGER_ROUNDTRIP" != "1" ]; then
   exit 0
 fi
 
-LOGIN_JSON="$(curl -fsS -X POST "$MOMO_API_URL/v1/auth/login" \
-  -H 'Content-Type: application/json' \
-  -d "{\"email\":$(json_escape "$MOMO_AGENT_EMAIL"),\"password\":$(json_escape "$MOMO_AGENT_PASSWORD"),\"workspace\":$(json_escape "$MOMO_WORKSPACE_ID")}")"
+LOGIN_BODY="{\"email\":$(json_escape "$MOMO_OPERATOR_EMAIL"),\"password\":$(json_escape "$MOMO_OPERATOR_PASSWORD"),\"workspace\":$(json_escape "$MOMO_WORKSPACE_ID")}"
+LOGIN_JSON="$(api_request POST /v1/auth/login "" "$LOGIN_BODY")"
 ACCESS_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken // empty')"
-if [ "$ACCESS_TOKEN" = "" ]; then
+REFRESH_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.refreshToken // empty')"
+if [ "$ACCESS_TOKEN" = "" ] || [ "$REFRESH_TOKEN" = "" ]; then
   event login FAIL "momo login returned no accessToken"
-  printf '%s\n' "$LOGIN_JSON" >"$LOG_DIR/login-response.json"
   finish BLOCKED_MOMO_LOGIN "momo demo/operator login failed" || exit 1
   exit 1
 fi
-event login PASS "$MOMO_AGENT_EMAIL"
+event login PASS "$MOMO_OPERATOR_EMAIL"
 
 CLIENT_MSG_ID="$(uuidgen 2>/dev/null || python3 - <<'PY'
 import uuid
@@ -236,18 +314,15 @@ print(uuid.uuid4())
 PY
 )"
 BODY="@${MOMO_AGENT_HANDLE} MOMO-326 real Hermes gateway credentialed smoke $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-SEND_JSON="$(curl -fsS -X POST "$MOMO_API_URL/v1/workspaces/${MOMO_WORKSPACE_ID}/channels/${MOMO_DEFAULT_CHANNEL_ID}/messages" \
-  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-  -H 'Content-Type: application/json' \
-  -d "{\"clientMsgId\":\"${CLIENT_MSG_ID}\",\"type\":\"text\",\"body\":$(json_escape "$BODY"),\"props\":{\"gate\":\"MOMO-326\",\"path\":\"real-hermes-gateway\"}}")"
+SEND_BODY="{\"clientMsgId\":\"${CLIENT_MSG_ID}\",\"type\":\"text\",\"body\":$(json_escape "$BODY"),\"props\":{\"gate\":\"MOMO-326\",\"path\":\"real-hermes-gateway\"}}"
+SEND_JSON="$(api_request POST "/v1/workspaces/${MOMO_WORKSPACE_ID}/channels/${MOMO_DEFAULT_CHANNEL_ID}/messages" "$ACCESS_TOKEN" "$SEND_BODY")"
 printf '%s\n' "$SEND_JSON" >"$LOG_DIR/send-response.json"
 START_SEQ="$(printf '%s' "$SEND_JSON" | jq -r '.seq // 0')"
 event send PASS "client_msg_id=${CLIENT_MSG_ID} seq=${START_SEQ}"
 
 deadline=$(($(date +%s) + ${MOMO_HERMES_REAL_WAIT_SECONDS:-180}))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-  HISTORY_JSON="$(curl -fsS "$MOMO_API_URL/v1/workspaces/${MOMO_WORKSPACE_ID}/channels/${MOMO_DEFAULT_CHANNEL_ID}/messages?after=${START_SEQ}&limit=50" \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" || true)"
+  HISTORY_JSON="$(api_request GET "/v1/workspaces/${MOMO_WORKSPACE_ID}/channels/${MOMO_DEFAULT_CHANNEL_ID}/messages?after=${START_SEQ}&limit=50" "$ACCESS_TOKEN" "" || true)"
   if [ "$HISTORY_JSON" != "" ]; then
     printf '%s\n' "$HISTORY_JSON" >"$LOG_DIR/latest-history.json"
     FOUND="$(printf '%s' "$HISTORY_JSON" | jq -r --arg agent "$MOMO_AGENT_MEMBER_ID" '

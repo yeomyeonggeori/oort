@@ -1,6 +1,6 @@
 # momo — hermes platform adapter (`MomoAdapter`)
 
-A 김인턴 (hermes) gateway plugin that makes a hermes agent a **first-class member**
+A Hermes gateway plugin that makes an agent a **first-class member**
 of a momo workspace (`member.kind = 'agent'`) instead of a webhook bot. This is the
 `BasePlatformAdapter` implementation from the L4 spec **§6.3**.
 
@@ -19,24 +19,21 @@ This platform adapter remains useful for dogfood and gateway interop, but it doe
 not replace the momo-owned execution path. The normative decision and fixtures are
 in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research/11-agent-runtime/11-hermes-adapter-contract-v0.md).
 
-> **runtime-unverified (hermes 게이트웨이 필요).** This adapter only runs inside a
-> live 김인턴/hermes gateway connected to a running momo stack (Hummingbird API +
-> Centrifugo v6 + PostgreSQL 18). This build env has **no hermes gateway and no
-> docker/psql**, so it is validated by static check only:
+> A credentialed end-to-end run still requires a user-owned Hermes provider
+> login. The adapter contract and momo bearer surfaces are covered locally by:
 >
 > ```sh
 > python3 -m py_compile adapters/hermes/momo_adapter.py
 > ```
 >
-> HTTP/WS shapes match L4 §5.1 / §5.2 / §4.1. The repo-local smoke below
-> verifies fixture → adapter event → captured REST invoke/final-message mapping
-> without a live gateway, but live plugin load/e2e remains runtime-unverified.
+> The repo-local contract tests verify the login-free bearer path and recovery
+> behavior without reading or storing provider credentials.
 
 ## What it does (the three primitives, §6.3)
 
 | Primitive | Behavior |
 |---|---|
-| `connect()` | momo REST auth (`POST /v1/auth/login`, Bearer) → realtime-token exchange (`POST /v1/auth/realtime-token`) → subscribe the agent's `agent:` Centrifugo channel (work stream) + `user:` channel (mention / dm signals) over WebSocket. |
+| `connect()` | Use `MOMO_AGENT_TOKEN` for realtime-token exchange, subscribe only to the agent's `agent:` work stream, then perform one durable pending-job recovery read. |
 | `send(channel, blocks)` | REST `POST .../messages` with a `client_msg_id` for **idempotency** (§3.1 — server dedups on `(channel_id, author_member_id, client_msg_id)` in the single `channel_seq`-bump + message + outbox tx). |
 | `handle_message(evt)` | A `mention` / `dm.signal` arrives on the realtime stream → `invoke` the agent → stream `agent.partial` / `agent.status` deltas and reflect the final 1급 message into the channel via `send()`. |
 
@@ -93,20 +90,26 @@ The adapter is env-driven (see `PLUGIN.yaml` `requires_env`/`optional_env`):
 |---|---|
 | `MOMO_API_URL` | momo REST API base, e.g. `http://api:8080`. |
 | `MOMO_CENTRIFUGO_WS_URL` | Centrifugo WS endpoint, e.g. `ws://centrifugo:8000/connection/websocket`. |
-| `MOMO_AGENT_EMAIL` / `MOMO_AGENT_PASSWORD` | optional local momo operator account used only to subscribe to realtime. |
 | `MOMO_WORKSPACE_ID` | target workspace UUID (tenant). |
 | `MOMO_AGENT_MEMBER_ID` | the agent's `member.id` (`kind='agent'`). |
 | `MOMO_AGENT_HANDLE` | agent display handle for logs/UI hints (default `hermes`). |
-| `MOMO_AGENT_GATEWAY_SECRET` | momo-facing callback secret for gateway status/result REST calls; not a provider token. |
+| `MOMO_AGENT_TOKEN` | scoped per-agent momo bearer used for realtime, pending recovery, callbacks, and message writes. It is not a provider token. |
+| `MOMO_AGENT_ALLOW_INSECURE_HTTP` | optional explicit opt-in for trusted non-loopback private networks. Without it, non-loopback API/WS endpoints require `https`/`wss`. |
 
 Connection sequence (§6.3 / §7.1 / §4.3):
 
-1. `POST /v1/auth/login` → access(15m) / refresh(30d) JWT + member.
-2. `POST /v1/auth/realtime-token` → Centrifugo connection JWT (sub = memberId, 30m).
-3. WS connect to Centrifugo with that JWT.
-4. subscribe `agent:ws<workspaceUUID>.<agentMemberUUID>` for work and
-   `user:ws<workspaceUUID>.<operatorMemberUUID>` for local operator notices.
-5. listen loop feeds inbound pushes to `handle_message()`.
+1. Send `MOMO_AGENT_TOKEN` to `POST /v1/auth/realtime-token`.
+2. WS connect to Centrifugo with the returned short-lived JWT.
+3. Subscribe only to `agent:ws<workspaceUUID>.<agentMemberUUID>`.
+4. Fetch pending jobs once after connect, reconnect, or a detected publication
+   offset gap; there is no idle polling loop.
+5. Use the same bearer for pending jobs, gateway events/completion, and messages.
+
+On a 401, the adapter performs three bounded exponential-backoff attempts and
+then asks the operator to reissue the credential from pairing. It never logs the
+token or attempts to mint a replacement credential. A permanently rejected
+credential stops reconnect attempts until the Hermes process is restarted with
+the rotated token.
 
 Programmatic use (inside the gateway runtime):
 
@@ -130,9 +133,8 @@ Current Hermes SDK compatibility:
 ## Channel naming (§4.1)
 
 ```
-agent : agent:ws<workspaceUUID>.<agentMemberUUID> # the agent's work stream
-user  : user:ws<workspaceUUID>.<memberUUID>       # personal notifications
-ch    : ch:ws<workspaceUUID>.<channelUUID>        # group channel
+agent : agent:ws<workspaceUUID>.<agentMemberUUID> # subscribed work stream
+ch    : ch:ws<workspaceUUID>.<channelUUID>        # timeline transport
 ```
 
 The adapter treats channel ids handed to `send()` as opaque and still writes only
@@ -163,13 +165,12 @@ scripts/momo hermes-gateway-smoke --real
 MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 ```
 
-Live Hermes gateway plugin loading and real provider e2e remain
-`runtime-unverified(real hermes gateway missing)` until a Hermes test instance is
-installed and the operator completes provider OAuth/login.
+Real provider completion remains user-credentialed: provider OAuth stays inside
+Hermes and is never copied into momo or this adapter configuration.
 
 ## Server-contract status
 
-As of build ticket **T05**, the momo API implements `/v1/auth/login` and the
-messages endpoints. `/v1/auth/realtime-token` and the agent `/invoke` endpoint are
-specified (§5.1) but not yet wired server-side. This adapter targets the spec
-contract; those calls work once the server ships them.
+MOMO-337 wires and runtime-tests the scoped agent bearer across realtime-token,
+pending jobs, gateway event/completion callbacks, and agent-authored messages.
+Legacy shared-secret support is migration-only and is not consumed by this
+adapter.

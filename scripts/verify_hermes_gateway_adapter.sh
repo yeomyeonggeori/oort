@@ -62,6 +62,7 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-momo}
 PORT=${PORT:-8080}
 BASE_URL=${BASE_URL:-http://127.0.0.1:${PORT}}
 AGENT_GATEWAY_SECRET=${AGENT_GATEWAY_SECRET:-momo-325-local-gateway-secret-00000000000000000000000000000000}
+CENT_PROXY_SECRET=${CENT_PROXY_SECRET:-momo-338-local-cent-proxy-secret-000000000000000000000000000000}
 
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_EMAIL=demo@momo.local
@@ -138,6 +139,7 @@ start_server() {
     PORT="$PORT" \
     AGENT_GATEWAY_MODE=gateway \
     AGENT_GATEWAY_SECRET="$AGENT_GATEWAY_SECRET" \
+    CENT_PROXY_SECRET="$CENT_PROXY_SECRET" \
     MOMO_ALLOW_LEGACY_GATEWAY_SECRET="$allow_legacy" \
     RATE_LIMIT_PER_MEMBER=0 \
     RATE_LIMIT_PER_IP=0 \
@@ -227,6 +229,15 @@ fetch_realtime_token() {
     -H "Authorization: Bearer ${token}" \
     -H 'Content-Type: application/json' \
     -d '{}'
+}
+
+subscribe_agent_stream() {
+  user_member_id=$1
+  target_agent_id=$2
+  curl -fsS -X POST "$BASE_URL/v1/centrifugo/subscribe" \
+    -H "X-Centrifugo-Proxy-Secret: ${CENT_PROXY_SECRET}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"client\":\"momo-338-verifier\",\"user\":\"${user_member_id}\",\"channel\":\"agent:ws${WORKSPACE_ID}.${target_agent_id}\"}"
 }
 
 cleanup_fixture_rows() {
@@ -413,7 +424,6 @@ AGENT_TOKEN=$(printf '%s' "$FULL_CREDENTIAL_JSON" | jq -r '.token')
 AGENT_TOKEN_ID=$(printf '%s' "$FULL_CREDENTIAL_JSON" | jq -r '.credential.id')
 if [ "$AGENT_TOKEN" = "" ] || [ "$AGENT_TOKEN" = "null" ] || [ "$AGENT_TOKEN_ID" = "null" ]; then
   echo "[hermes-gateway] agent credential mint failed" >&2
-  printf '%s\n' "$FULL_CREDENTIAL_JSON" >&2
   exit 1
 fi
 HASH_MATCH=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND token_hash=digest('${AGENT_TOKEN}','sha256') AND kind='agent_bearer'")
@@ -434,6 +444,10 @@ fi
 REALTIME_JSON=$(fetch_realtime_token "$AGENT_TOKEN")
 REALTIME_MEMBER=$(printf '%s' "$REALTIME_JSON" | jq -r '.memberId')
 assert_equals "$AGENT_ID" "$REALTIME_MEMBER" "agent realtime token subject"
+SELF_STREAM_JSON=$(subscribe_agent_stream "$AGENT_ID" "$AGENT_ID")
+assert_equals "true" "$(printf '%s' "$SELF_STREAM_JSON" | jq -r '.result != null')" "agent can subscribe its own work stream"
+CROSS_STREAM_JSON=$(subscribe_agent_stream "$AGENT_ID" "$OTHER_AGENT_ID")
+assert_equals "403" "$(printf '%s' "$CROSS_STREAM_JSON" | jq -r '.error.code')" "agent cannot subscribe another agent work stream"
 
 AGENT_MESSAGE_JSON=$(send_message "$AGENT_TOKEN" "$AGENT_CLIENT_MSG_ID" "$AGENT_BODY")
 AGENT_MESSAGE_AUTHOR=$(printf '%s' "$AGENT_MESSAGE_JSON" | jq -r '.authorMemberId')

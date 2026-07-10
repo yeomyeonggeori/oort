@@ -9,9 +9,9 @@ import PostgresNIO
 ///
 /// Centrifugo calls this on every subscribe attempt; returning allow/deny means
 /// an eviction (membership removed) takes effect immediately (L4 §C4). `ch:`/`dm:`
-/// subscriptions check direct channel membership. `agent:` subscriptions check
-/// that the observer and target agent are active members with at least one shared
-/// channel in the workspace. Clients still never publish directly to Centrifugo.
+/// subscriptions check direct channel membership. `agent:` is a private work
+/// stream: only that exact active agent member may subscribe. Clients still
+/// never publish directly to Centrifugo.
 ///
 /// MOMO-300 hardening (old v0 stub resolved):
 ///   1. Proxy authentication — Centrifugo attaches a shared secret
@@ -72,15 +72,18 @@ struct CentrifugoRoutes: Sendable {
             return .deny("no active realtime credential for this member")
         }
 
-        let allowed: Bool = switch parsed {
+        let allowed: Bool
+        switch parsed {
         case .channel(let workspace, let channel):
-            try await isMember(userMemberID, of: channel, in: workspace)
+            allowed = try await isMember(userMemberID, of: channel, in: workspace)
         case .agent(let workspace, let agentMemberID):
-            try await canObserveAgent(
-                observerMemberID: userMemberID,
-                agentMemberID: agentMemberID,
-                workspaceID: workspace
-            )
+            guard Self.isSelfAgentSubscription(
+                userMemberID: userMemberID,
+                agentMemberID: agentMemberID
+            ) else {
+                return .deny(parsed.denyReason)
+            }
+            allowed = try await isActiveAgent(agentMemberID, in: workspace)
         }
 
         return allowed ? .allow() : .deny(parsed.denyReason)
@@ -103,39 +106,20 @@ struct CentrifugoRoutes: Sendable {
         }
     }
 
-    private func canObserveAgent(
-        observerMemberID: UUID,
-        agentMemberID: UUID,
-        workspaceID: UUID
-    ) async throws -> Bool {
+    static func isSelfAgentSubscription(userMemberID: UUID, agentMemberID: UUID) -> Bool {
+        userMemberID == agentMemberID
+    }
+
+    private func isActiveAgent(_ agentMemberID: UUID, in workspaceID: UUID) async throws -> Bool {
         try await db.withTenantConnection(workspaceID: workspaceID) { conn in
             let rows = try await conn.query(
                 """
                 SELECT 1
-                  FROM member agent_member
-                  JOIN member observer_member
-                    ON observer_member.id = \(observerMemberID)
-                   AND observer_member.workspace_id = \(workspaceID)
-                   AND observer_member.status = 'active'
-                 WHERE agent_member.id = \(agentMemberID)
-                   AND agent_member.workspace_id = \(workspaceID)
-                   AND agent_member.kind = 'agent'
-                   AND agent_member.status = 'active'
-                   AND EXISTS (
-                     SELECT 1
-                       FROM membership observer_ms
-                       JOIN membership agent_ms
-                         ON agent_ms.channel_id = observer_ms.channel_id
-                        AND agent_ms.member_id = agent_member.id
-                        AND agent_ms.left_at IS NULL
-                       JOIN channel shared_channel
-                         ON shared_channel.id = observer_ms.channel_id
-                        AND shared_channel.workspace_id = \(workspaceID)
-                        AND shared_channel.archived_at IS NULL
-                      WHERE observer_ms.workspace_id = \(workspaceID)
-                        AND observer_ms.member_id = observer_member.id
-                        AND observer_ms.left_at IS NULL
-                   )
+                  FROM member
+                 WHERE id = \(agentMemberID)
+                   AND workspace_id = \(workspaceID)
+                   AND kind = 'agent'
+                   AND status = 'active'
                  LIMIT 1
                 """,
                 logger: db.logger

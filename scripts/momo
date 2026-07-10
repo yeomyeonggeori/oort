@@ -481,7 +481,7 @@ PY
 
 is_placeholder_value() {
   case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
-    ""|*"<"*">"*|*change-me*|*changeme*|*placeholder*|*example*|*dev-insecure*|*not-openai-key*)
+    ""|*"<"*">"*|*change-me*|*changeme*|*replace-with*|*placeholder*|*example*|*dev-insecure*|*not-openai-key*)
       return 0
       ;;
   esac
@@ -618,6 +618,26 @@ gateway_env_file() {
   printf '%s\n' "${MOMO_HERMES_GATEWAY_ENV_FILE:-${HOME:-}/.momo/hermes-gateway.env}"
 }
 
+migrate_legacy_gateway_env() {
+  local env_file backup temp_file
+  env_file="$1"
+  if ! grep -Eq '^[[:space:]]*(MOMO_AGENT_GATEWAY_SECRET|MOMO_ALLOW_LEGACY_GATEWAY_SECRET|MOMO_AGENT_EMAIL|MOMO_AGENT_PASSWORD)=' "$env_file"; then
+    return 0
+  fi
+  backup="${env_file}.legacy-$(date -u '+%Y%m%dT%H%M%SZ').bak"
+  temp_file="$(mktemp "${env_file}.tmp.XXXXXX")"
+  cp -p "$env_file" "$backup"
+  awk '
+    /^[[:space:]]*(MOMO_AGENT_GATEWAY_SECRET|MOMO_ALLOW_LEGACY_GATEWAY_SECRET|MOMO_AGENT_EMAIL|MOMO_AGENT_PASSWORD)=/ { next }
+    { print }
+  ' "$env_file" >"$temp_file"
+  chmod 600 "$temp_file" "$backup"
+  mv "$temp_file" "$env_file"
+  info "removed deprecated gateway/operator keys from $env_file"
+  warn "private migration backup created: $backup"
+  warn "delete the backup after the new agent-token smoke succeeds"
+}
+
 hermes_home() {
   printf '%s\n' "${HERMES_HOME:-${HOME:-}/.hermes}"
 }
@@ -694,16 +714,8 @@ RUBY
   info "enabled Hermes momo plugin in $config_file"
 }
 
-random_secret() {
-  if command -v openssl >/dev/null 2>&1; then
-    openssl rand -hex 32
-  else
-    printf 'momo-gateway-%s-%s\n' "$(date +%s)" "$(uuidgen 2>/dev/null || printf 'local')"
-  fi
-}
-
 hermes_gateway_init() {
-  local env_file env_dir secret
+  local env_file env_dir agent_token
   env_file="$(gateway_env_file)"
   env_dir="$(dirname "$env_file")"
   reject_repo_provider_env "$env_file" || return 1
@@ -711,8 +723,20 @@ hermes_gateway_init() {
   if [ -f "$env_file" ]; then
     chmod 600 "$env_file"
     info "Hermes gateway env already exists: $env_file"
+    migrate_legacy_gateway_env "$env_file"
+    agent_token="$(provider_env_value "$env_file" MOMO_AGENT_TOKEN)"
+    if is_placeholder_value "$agent_token"; then
+      if ! grep -Eq '^[[:space:]]*MOMO_AGENT_TOKEN=' "$env_file"; then
+        {
+          printf '\n# Scoped momo credential returned once by agent pairing.\n'
+          printf 'MOMO_AGENT_TOKEN=replace-with-one-time-agent-token\n'
+        } >>"$env_file"
+        info "added MOMO_AGENT_TOKEN placeholder to the existing env"
+      fi
+      warn "MOMO_AGENT_TOKEN is missing or still a placeholder."
+      warn "Issue one agent credential from pairing and replace only that value."
+    fi
   else
-    secret="$(random_secret)"
     umask 077
     cat >"$env_file" <<EOF
 # momo-facing Hermes platform adapter pairing.
@@ -722,14 +746,9 @@ MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:${CENT_PORT}/connection/websocket
 MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
 MOMO_AGENT_HANDLE=hermes
-MOMO_AGENT_GATEWAY_SECRET=${secret}
-MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1
+# Paste the one-time-issued credential from momo's agent pairing surface.
+MOMO_AGENT_TOKEN=replace-with-one-time-agent-token
 MOMO_DEFAULT_CHANNEL_ID=00000000-0000-7000-8000-000000000202
-
-# Optional: a human/operator account the adapter can use only to subscribe to
-# momo realtime. Provider OAuth still belongs inside Hermes/provider runtime.
-MOMO_AGENT_EMAIL=demo@momo.local
-MOMO_AGENT_PASSWORD=dev-password
 EOF
     chmod 600 "$env_file"
     info "created Hermes gateway env: $env_file"
@@ -741,12 +760,19 @@ EOF
   plugin:  $REPO_ROOT/adapters/hermes
   target:  $(hermes_plugin_dir)
 
-To run momo in gateway mode, source the generated secret into the server env:
-  set -a; . "$env_file"; set +a
-  AGENT_GATEWAY_MODE=gateway AGENT_GATEWAY_SECRET="\$MOMO_AGENT_GATEWAY_SECRET" MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 scripts/momo up
+To run momo in gateway mode:
+  AGENT_GATEWAY_MODE=gateway MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 scripts/momo up
 
-Then point Hermes gateway at the plugin directory above. momo still stores no
-Codex/OpenAI OAuth token; Hermes/provider runtime owns provider credentials.
+Then issue a scoped credential from momo pairing and replace only
+MOMO_AGENT_TOKEN in the env file. The adapter does not log in as a human and
+does not mint or refresh its own credential.
+
+Load the momo-facing env only into the Hermes process, then start the gateway:
+  set -a; . "$env_file"; set +a
+  HERMES_ACCEPT_HOOKS=1 hermes gateway run --replace -v
+
+momo still stores no Codex/OpenAI OAuth token; Hermes/provider runtime owns
+provider credentials.
 
 Install/link the plugin for a local Hermes install:
   scripts/momo hermes-gateway-install-plugin
@@ -795,7 +821,7 @@ hermes_gateway_install_plugin() {
 }
 
 hermes_gateway_status() {
-  local env_file secret bin plugin_dir config_file
+  local env_file agent_token bin plugin_dir config_file
   env_file="$(gateway_env_file)"
   plugin_dir="$(hermes_plugin_dir)"
   config_file="$(hermes_config_file)"
@@ -832,11 +858,12 @@ hermes_gateway_status() {
   echo "  api: $(provider_env_value "$env_file" MOMO_API_URL)"
   echo "  workspace: $(provider_env_value "$env_file" MOMO_WORKSPACE_ID)"
   echo "  agent: $(provider_env_value "$env_file" MOMO_AGENT_HANDLE) ($(provider_env_value "$env_file" MOMO_AGENT_MEMBER_ID))"
-  secret="$(provider_env_value "$env_file" MOMO_AGENT_GATEWAY_SECRET)"
-  if is_placeholder_value "$secret"; then
-    echo "  gateway secret: missing or placeholder"
+  agent_token="$(provider_env_value "$env_file" MOMO_AGENT_TOKEN)"
+  if is_placeholder_value "$agent_token"; then
+    echo "  agent token: missing or placeholder"
+    echo "  next: issue one credential from agent pairing and update MOMO_AGENT_TOKEN"
   else
-    echo "  gateway secret: configured (redacted)"
+    echo "  agent token: configured (redacted)"
   fi
   if health_check; then
     echo "  momo server: reachable at $BASE_URL"

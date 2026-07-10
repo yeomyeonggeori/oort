@@ -1,6 +1,6 @@
 # HANDOFF: ADR-0101 에이전트 신원 — agent_bearer 인증 배치
 
-> Status: `active` — MOMO-337 완료, MOMO-338/339 ready
+> Status: `active` — MOMO-337/338 완료, MOMO-339 ready
 > Planning ID: `ADR-0101` · Planner owner: Fable · Integrator: `momo-main`
 > 발급: 2026-07-10 · 최신 통합 커밋: `8d97c82ef1710e0a66e95ec50f72b9ff8d8cc41a` · Supersedes: 없음
 > 근거 ADR: **ADR-0101 (Accepted 2026-07-10, Option A)** · 대상 goal: MOMO-337, MOMO-338, MOMO-339 · 병렬: 337 머지 후 338‖339 병렬 가능
@@ -15,7 +15,7 @@ momo의 에이전트 인증은 현재 전 에이전트·전 워크스페이스 *
 | 순서 | goal | 이슈 | 의존 | 병렬 |
 |---|---|---|---|---|
 | 1 | MOMO-337 서버 agent_bearer 발급/검증/이관 | #307 | 완료(PR #310, `8d97c82`) | 단독 선행 완료 |
-| 2 | MOMO-338 어댑터 bearer 단일화 | #308 | MOMO-337 완료 | 339와 병렬 가능, `ready` |
+| 2 | MOMO-338 어댑터 bearer 단일화 | #308 | MOMO-337 완료 | `done` — realtime-first + self-only agent stream |
 | 2 | MOMO-339 페어링 위저드 발급/회전 UI | #309 | MOMO-337, 262 완료 | 338과 병렬 가능, `ready` |
 
 **머지 순서: 337 완료 → (338, 339 완료순).** 두 후속은 서로 다른 worktree에서 병렬 가능하다.

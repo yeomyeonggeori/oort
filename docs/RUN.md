@@ -156,8 +156,9 @@ cp infra/.env.example .env
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `AGENT_GATEWAY_MODE` | 서버, worker | `worker`(기본) 또는 `gateway`. `gateway`면 `@hermes` mention이 AgentWorker provider call 대신 Hermes native platform adapter로 전달된다. |
-| `AGENT_GATEWAY_SECRET` | 서버, Hermes adapter | ADR-0101 이관 중에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
-| `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 어댑터 bearer 이관 후 제거 대상. |
+| `MOMO_AGENT_TOKEN` | Hermes adapter | Pairing에서 1회 발급하는 agent-scoped momo bearer. `~/.momo/hermes-gateway.env`에만 저장하며 provider OAuth token과 별개다. |
+| `AGENT_GATEWAY_SECRET` | 서버 | ADR-0101 이관 회귀검증에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
+| `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 adapter는 이 경로를 사용하지 않는다. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
 Codex OAuth access/refresh token은 momo 환경변수가 아니다. External runtime
@@ -324,13 +325,15 @@ POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
 기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:write`,
 `realtime:subscribe`다. agent bearer는 이 네 서버 surface 외의 human/admin API에
 사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
-MOMO-338 전의 현재 Hermes adapter는 아직 공유 시크릿을 보내므로 짧은 이관 기간에는
-아래 opt-in을 함께 설정한다.
+`agent:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
+target agent가 정확히 같을 때만 subscribe가 허용된다. 같은 채널 membership만으로
+다른 에이전트의 Context Packet을 관찰할 수 없다.
+MOMO-338부터 Hermes adapter는 human login과 공유 시크릿을 사용하지 않는다. 서버는
+gateway mode만 켜고 legacy secret 병행 수용은 기본적으로 닫는다.
 
 ```sh
 AGENT_GATEWAY_MODE=gateway \
-AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
-MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 \
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 \
 scripts/momo start
 ```
 
@@ -342,15 +345,13 @@ plugin install, provider-login marker, momo server 상태를 분리해서 eviden
 사용자가 Hermes 내부에서 provider OAuth/login을 끝낸 뒤에는 다음처럼 실제 1왕복까지 시도한다.
 
 ```sh
-set -a
-. "$HOME/.momo/hermes-gateway.env"
-set +a
 AGENT_GATEWAY_MODE=gateway \
-AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
-MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 \
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 \
 scripts/momo start
 
-# 다른 터미널에서, Hermes gateway와 provider OAuth/login을 사용자가 준비한 뒤:
+# Pairing에서 발급한 원문 토큰을 ~/.momo/hermes-gateway.env의
+# MOMO_AGENT_TOKEN에 한 번 붙여넣고, 다른 터미널에서 Hermes를 실행한다.
+# provider OAuth/login은 Hermes 내부에서 사용자가 준비한다.
 MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 ```
 
@@ -358,7 +359,7 @@ macOS dogfood 앱에서는 Hermes가 서버/fixture에 존재해도 처음부터
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
 label, model label, permission scope, avatar를 확인한다. 앱은 pairing manifest와 invite code를
 생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing connection metadata와
-`$HOME/.momo/hermes-gateway.env:MOMO_AGENT_GATEWAY_SECRET` secret source만 들어가며,
+`$HOME/.momo/hermes-gateway.env:MOMO_AGENT_TOKEN` 설정 위치만 들어가며, 토큰 원문이나
 Codex/OpenAI OAuth token, refresh token, provider API key 값은 절대 포함하지 않는다.
 non-loopback `http://...` endpoint는 사용자가 명시적으로 opt-in하지 않으면 초대 완료가 막힌다.
 초대 완료를 누르면 그때 `member.kind='agent'` roster row가 나타난다.
@@ -986,7 +987,8 @@ python3 -m py_compile adapters/hermes/momo_adapter.py
 pip install -r adapters/hermes/requirements.txt
 ```
 
-env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)는
+env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_WORKSPACE_ID`,
+`MOMO_AGENT_MEMBER_ID`, `MOMO_AGENT_TOKEN` 등)는
 `adapters/hermes/README.md` 및 `plugin.yaml`의 `spec.env` 참고.
 
 > **`runtime-unverified (hermes 게이트웨이 필요)`** — 게이트웨이/실행 momo 스택 없이는

@@ -671,6 +671,24 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).not-a-uuid"))
     }
 
+    func testAgentWorkStreamSubscriptionIsSelfOnly() {
+        let agentA = UUID()
+        let agentB = UUID()
+
+        XCTAssertTrue(
+            CentrifugoRoutes.isSelfAgentSubscription(
+                userMemberID: agentA,
+                agentMemberID: agentA
+            )
+        )
+        XCTAssertFalse(
+            CentrifugoRoutes.isSelfAgentSubscription(
+                userMemberID: agentA,
+                agentMemberID: agentB
+            )
+        )
+    }
+
     func testApprovalDecisionRouteRejectsMismatchedBodyApprovalID() throws {
         let pathID = UUID(uuidString: "00000000-0000-7000-8000-000000000901")!
         let bodyID = UUID(uuidString: "00000000-0000-7000-8000-000000000902")!

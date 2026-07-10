@@ -1,4 +1,4 @@
-# momo platform adapter for the 김인턴 (hermes) gateway — runtime deps.
+# momo platform adapter for the Hermes gateway — runtime deps.
 #
 # runtime-unverified (hermes 게이트웨이 필요): these are the deps the adapter needs
 # when loaded by a live hermes gateway against a running momo stack. In this build
@@ -6,7 +6,7 @@
 # the adapter falls back to import-safe shims (the static gate is
 # `python3 -m py_compile momo_adapter.py`, which needs none of these).
 #
-# BasePlatformAdapter + register_platform are provided by the 김인턴/hermes plugin
+# BasePlatformAdapter + register_platform are provided by the Hermes plugin
 # SDK at load time (not a PyPI package), so it is intentionally NOT pinned here.
 
 # Async HTTP client for the momo REST surface (login / realtime-token / messages /

@@ -234,13 +234,20 @@
 - 기존 `token(kind='agent_bearer')` 스키마를 사용해 human admin 발급/목록/24h overlap 회전/폐기 API와 AuthMiddleware agent principal·4-scope fail-closed 검증을 추가했다. 원문은 1회 반환하고 DB에는 sha256만 저장한다.
 - agent 명의 REST 메시지, realtime token, pending-job 폴백, gateway event/complete에 token actor binding과 `audit_log.via_token_id`를 강제했다. 공유 시크릿은 `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1`인 이관 케이스에서만 deprecation 로그와 함께 수용한다.
 - momo-main 보안/성능 리뷰에서 1회 토큰 응답에 `Cache-Control: no-store`/`Pragma: no-cache`, 토큰 `created_by` 발급자 추적, pending fallback의 `available_at <= now()` 예약 준수를 추가했다.
-- 검증: `swift test --package-path server` PASS(47 tests), clean commit `cb47b54`에서 `scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260710T000557Z-pid30082-ns1783641957942474000-wtec169ce4b610-r13a2e73e660f.md`). 실제 Hermes adapter의 bearer 단일화와 페어링 UI는 MOMO-338/339 후속이다.
+- 검증: `swift test --package-path server` PASS(47 tests), clean commit `cb47b54`에서 `scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260710T000557Z-pid30082-ns1783641957942474000-wtec169ce4b610-r13a2e73e660f.md`). Hermes adapter의 bearer 단일화는 MOMO-338에서 이어받았고 페어링 UI는 MOMO-339 후속이다.
 
 ## 0-4i. MOMO-340 Planning Sync Authority + Compaction-Safe Context (2026-07-10)
 
 - `docs/planning/CURRENT_STATE.md`와 `scripts/planning_context.sh`를 추가해 Fable/GPT 5.6 병렬 planning owner, Accepted/Proposed ADR, 구현 handoff, 다음 체크포인트를 컨텍스트 압축 뒤에도 repo에서 복원한다. `--github` 옵션은 live Issue/PR/worktree 보드를 붙이고 기본 실행은 네트워크 없이 동작한다.
 - planning 계약을 제품 오너·planner·`momo-main`·Codex worker 4개 역할로 정리하고, 한 planning ID당 한 owner, `momo-main` 순차 통합, 기준 커밋이 있는 versioned handoff/supersede, 구현 deviation 환류를 고정했다. MOMO-337 완료 및 MOMO-338/339 ready 상태와 첫 accepted deviation을 반영했다.
 - 검증: clean commit `adfa43c`에서 `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS. 제품 runtime 경계 변경은 없으며 ADR-0102 결정과 MOMO-338/339 구현은 후속이다.
+
+## 0-4j. MOMO-338 Hermes Adapter Per-Agent Bearer 단일화 (2026-07-10)
+
+- Hermes platform adapter의 human email/password 로그인, refresh token 보관, 전역 gateway shared-secret 헤더를 제거했다. 이제 `MOMO_AGENT_TOKEN` 하나가 realtime-token, `agent:` work stream, bounded pending recovery, gateway event/complete, agent message REST에 동일하게 쓰인다.
+- pending endpoint는 connect/reconnect/publication-gap에서만 1회 조회하며 idle polling loop는 없다. realtime transport drop은 capped exponential backoff+jitter로 재연결하고, 401은 서버 원문을 버린 redacted 안내 후 세 번만 재시도하며 자격증명을 자동 발급하지 않는다.
+- 보안/성능 리뷰에서 다른 agent stream 관찰, 정상 WS close 재연결 누락, callback 실패 후 영구 suppress, backlog 단일 page, 초기 connect 누수, legacy env 잔존을 발견해 모두 수정했다. `agent:` subscribe proxy는 self-only이며 adapter는 realtime-token actor를 pairing identity와 대조한다. dedup/result cache는 bounded이고 non-loopback 평문은 명시 opt-in 없이는 거부한다.
+- `scripts/momo hermes-gateway-init/status`와 real smoke는 chmod-600 env의 token configured 여부만 표시하고 legacy keys를 private backup 후 active env에서 제거한다. provider OAuth는 계속 Hermes 내부 소유다. 검증: adapter contract 25 tests, server self-only unit test, shell syntax, docs gate PASS; runtime-agent 최종 gate 대상.
 
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
