@@ -236,6 +236,12 @@
 - momo-main 보안/성능 리뷰에서 1회 토큰 응답에 `Cache-Control: no-store`/`Pragma: no-cache`, 토큰 `created_by` 발급자 추적, pending fallback의 `available_at <= now()` 예약 준수를 추가했다.
 - 검증: `swift test --package-path server` PASS(47 tests), clean commit `cb47b54`에서 `scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260710T000557Z-pid30082-ns1783641957942474000-wtec169ce4b610-r13a2e73e660f.md`). 실제 Hermes adapter의 bearer 단일화와 페어링 UI는 MOMO-338/339 후속이다.
 
+## 0-4i. MOMO-340 Planning Sync Authority + Compaction-Safe Context (2026-07-10)
+
+- `docs/planning/CURRENT_STATE.md`와 `scripts/planning_context.sh`를 추가해 Fable/GPT 5.6 병렬 planning owner, Accepted/Proposed ADR, 구현 handoff, 다음 체크포인트를 컨텍스트 압축 뒤에도 repo에서 복원한다. `--github` 옵션은 live Issue/PR/worktree 보드를 붙이고 기본 실행은 네트워크 없이 동작한다.
+- planning 계약을 제품 오너·planner·`momo-main`·Codex worker 4개 역할로 정리하고, 한 planning ID당 한 owner, `momo-main` 순차 통합, 기준 커밋이 있는 versioned handoff/supersede, 구현 deviation 환류를 고정했다. MOMO-337 완료 및 MOMO-338/339 ready 상태와 첫 accepted deviation을 반영했다.
+- 검증: clean commit `adfa43c`에서 `scripts/local_gate.sh --profile docs` PASS, `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS. 제품 runtime 경계 변경은 없으며 ADR-0102 결정과 MOMO-338/339 구현은 후속이다.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.
