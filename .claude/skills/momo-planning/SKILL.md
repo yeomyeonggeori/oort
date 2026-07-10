@@ -12,13 +12,21 @@ description: >
 정본은 `docs/planning/README.md` — 이 스킬은 그 절차의 실행 체크리스트다. 충돌 시 정본 우선.
 
 ## A. 기획 세션 시작
-1. `docs/planning/JOURNAL.md` 최근 항목 — 직전 세션(Fable/GPT 5.6)이 어디서 멈췄는지.
-2. `docs/planning/DEVIATION_LOG.md`에서 `pending` 판정부터 (차기 티켓보다 우선).
-3. 읽기 순서: `docs/adr/`(0100·0101 필수 + Proposed 확인) → `docs/architecture/overview.md` → `docs/ux-bible/README.md` → `ROADMAP.md` → `STATUS.md` 최신 → 결정 큐.
+1. `scripts/planning_context.sh` — current state, dirty worktree, Proposed ADR, pending deviation, 최신 journal을 한 번에 복원.
+2. `docs/planning/CURRENT_STATE.md`에서 planning ID/owner와 다음 체크포인트 확인.
+3. `docs/planning/DEVIATION_LOG.md`에서 `pending` 판정부터 (차기 티켓보다 우선).
+4. 읽기 순서: `docs/adr/`(0100·0101 필수 + Proposed 확인) → `docs/architecture/overview.md` → `docs/ux-bible/README.md` → `ROADMAP.md` → `STATUS.md` 최신 → 결정 큐.
+
+## A-1. 병렬 기획 claim
+- [ ] `CURRENT_STATE.md`에서 서로 다른 `ADR-01NN`/`PLN-YYYYMMDD-NN`을 claim했는가
+- [ ] 다른 planner가 소유한 ADR/research를 덮어쓰지 않는가
+- [ ] planner branch에서는 ADR/research/proposal만 변경하고 공용 정본/Issue 발급은 `momo-main` 통합으로 남겼는가
+- [ ] 반대안은 원안 수정이 아니라 Review Notes/별도 research로 남겼는가
 
 ## A-2. 기획 세션 종료 (플러시)
 - [ ] 이 세션의 결정/티켓/패킷이 전부 정본 파일에 존재하는가 (채팅에만 있으면 손실)
 - [ ] `JOURNAL.md` 상단에 항목 추가: 한 일 / 열린 것 / 다음 (5줄 이내)
+- [ ] `momo-main` 통합 세션이라면 `CURRENT_STATE.md`의 기준 커밋/owner/상태/다음 체크포인트를 갱신했는가
 
 ## B. ADR 기안 체크리스트
 - [ ] 번호 = 0100번대 다음 가용 (`ls docs/adr/`)
@@ -34,7 +42,9 @@ description: >
 - [ ] 수용기준을 이슈에 복사하지 않는다(정본 이중화 금지)
 
 ## D. 핸드오프 패킷 체크리스트 (`docs/planning/HANDOFF_TEMPLATE.md` 복사)
-- [ ] 결정 요약(ADR 링크) / goal 체인·머지 순서 / **파일 맵(file:line)** / 지켜야 할 계약 / 함정 / 검증 / 이탈 보고 의무 / 착수 명령
+- [ ] `status=ready`, planning ID/owner/integrator, 기준 커밋, supersedes를 기록했는가
+- [ ] Issue 발급 전 MOMO ID로 계약을 고정하고, 발급 후 GitHub 번호는 metadata-only binding으로 붙였는가
+- [ ] 결정 요약(ADR 링크) / goal 체인·머지 순서 / **파일 맵(file:line)** / 지켜야 할 계약 / 함정 / 검증 / 이탈 보고 의무 / 착수 명령 / 컨텍스트 델타
 - [ ] 합격 기준: worker가 채팅 맥락 없이 패킷+이슈만 읽고 착수 가능한가
 - [ ] worker 전달 메시지는 3줄: 레포 경로 + 패킷 경로 + 시작 goal 번호
 
@@ -52,5 +62,6 @@ description: >
 
 ## 하드 룰
 - Fable/GPT 5.6은 구현하지 않는다(핫픽스 포함 — 티켓으로).
+- Fable/GPT 5.6은 동등한 planner지만 한 planning ID에는 owner가 하나뿐이다. 공용 정본은 `momo-main`만 순차 통합한다.
 - 패킷 없는 핸드오프 금지. 병렬 배치는 같은 파일군 충돌 금지(`docs/MULTI_SESSION_OPS.md` §4).
 - 로드맵·ADR 최종 승인은 항상 성재.

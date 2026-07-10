@@ -8,8 +8,13 @@
 
 # HANDOFF: <배치 이름>
 
-> 발급: YYYY-MM-DD · 기획 세션: <Fable/GPT 5.6/성재> · 근거 ADR: <ADR-01NN (Accepted 날짜)>
-> 대상 goal: <MOMO-NNN(#이슈), ...> · 병렬 가능: <예/아니오 + 머지 순서>
+> Status: `draft | ready | active | superseded`
+> Planning ID: `<ADR-01NN | PLN-YYYYMMDD-NN>` · Planner owner: `<Fable | GPT 5.6>` · Integrator: `momo-main`
+> 발급: YYYY-MM-DD · 기준 커밋: `<full commit SHA>` · Supersedes: `<없음 | 이전 패킷 경로>`
+> 근거 ADR: `<ADR-01NN (Accepted 날짜) | ADR not required: 근거>` · 대상 goal: <MOMO-NNN, ...> · 병렬 가능: <예/아니오 + 머지 순서>
+> GitHub binding: `<미발급 | MOMO-NNN=#이슈, ...>`
+
+`ready` 이후 계약을 바꿀 때 이 파일을 조용히 덮어쓰지 않는다. worker가 하나라도 착수하면 `active`로 전환할 수 있다. 계약 변경은 새 패킷을 만들고 이전 패킷을 `superseded`로 바꾼 뒤 Issue Context 링크를 갱신한다. Issue 번호 binding과 goal 상태만 추가하는 것은 metadata update로 허용한다.
 
 ## 1. 결정 요약 (왜 이 작업인가 — 3~5줄)
 <ADR의 Decision을 worker 관점으로 요약. ADR 링크 필수.>
@@ -49,3 +54,8 @@ scripts/goal_claim.sh <issue-number>   # branch/worktree/assignee lock
 scripts/goal_release.sh <issue-number> --review --pr <PR URL>
 # 여기서 정지. merge/close/로드맵은 momo-main 몫.
 ```
+
+## 9. 컨텍스트 델타 (오케스트레이터/다음 planner용)
+- 이 패킷이 기존 정본에서 새로 고정한 것:
+- 의도적으로 결정하지 않은 것:
+- 구현 결과에 따라 다시 기획해야 하는 질문:
