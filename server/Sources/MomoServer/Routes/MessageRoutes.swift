@@ -926,7 +926,7 @@ struct MessageRoutes: Sendable {
         payloadJSON: String,
         hlcTs: Int64
     ) -> String {
-        let centChannel = "agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"
+        let centChannel = "agentwork:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"
         var jobPayload = (jsonObject(payloadJSON) as? [String: Any]) ?? [:]
         jobPayload["agent_job_outbox_id"] = jobOutboxID
         jobPayload["delivery"] = "gateway"

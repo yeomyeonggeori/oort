@@ -7,7 +7,7 @@ What this adapter does (the three BasePlatformAdapter primitives, §6.3):
 
   connect()         authenticate every momo surface with one scoped per-agent
                     bearer (`MOMO_AGENT_TOKEN`) → realtime-token exchange →
-                    subscribe the agent's `agent:` Centrifugo work stream.
+                    subscribe the agent's private `agentwork:` Centrifugo stream.
 
   send(channel, …)  REST POST .../messages with a client_msg_id for idempotency
                     (§3.1 — the server's UPDATE channel_seq + INSERT message +
@@ -194,11 +194,11 @@ class MomoConfig:
 # ---------------------------------------------------------------------------
 # Centrifugo channel naming (L4 §4.1).
 #   ch    : ch:ws<workspaceUUID>.<channelUUID>       # group channel
-#   agent : agent:ws<workspaceUUID>.<agentMemberUUID> # agent work stream
+#   agentwork : agentwork:ws<workspaceUUID>.<agentMemberUUID> # private work stream
 # Channel ids handed to send() remain opaque; REST is the only write path.
 # ---------------------------------------------------------------------------
 def agent_channel(workspace_id: str, agent_member_id: str) -> str:
-    return f"agent:ws{workspace_id}.{agent_member_id}"
+    return f"agentwork:ws{workspace_id}.{agent_member_id}"
 
 
 def _is_platform_config(value: Any) -> bool:
@@ -330,8 +330,10 @@ class MomoAdapter(BasePlatformAdapter):
     platform_name = "momo"
     _max_handled_triggers = 4096
     _max_pending_results = 128
+    _max_queued_jobs = 64
     _pending_page_size = 100
     _max_pending_pages = 10
+    _max_pending_recovery_attempts = 3
 
     def __init__(
         self,
@@ -370,9 +372,13 @@ class MomoAdapter(BasePlatformAdapter):
         self._http: Any = None           # aiohttp.ClientSession
         self._ws: Any = None             # websockets connection
         self._listen_task: Optional[asyncio.Task[None]] = None
+        self._work_task: Optional[asyncio.Task[None]] = None
         self._reconnect_task: Optional[asyncio.Task[None]] = None
         self._pending_recovery_task: Optional[asyncio.Task[None]] = None
         self._pending_recovery_requested = False
+        # Python 3.9 binds asyncio.Queue to the current loop at construction.
+        # Hermes creates adapters outside a running loop, so initialize lazily.
+        self._work_queue: Any = None
         self._closing = False
         self._last_publication_offset: Optional[int] = None
         # idempotency cache: dedup re-deliveries of the same trigger message so an
@@ -381,6 +387,7 @@ class MomoAdapter(BasePlatformAdapter):
         self._handled_triggers: OrderedDict[str, None] = OrderedDict()
         self._inflight_triggers: set[str] = set()
         self._pending_gateway_results: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._gateway_result_reservations: set[str] = set()
 
     # ----- HTTP helpers ----------------------------------------------------
 
@@ -426,7 +433,10 @@ class MomoAdapter(BasePlatformAdapter):
             if response_status < 400:
                 return json.loads(response_text) if response_text else {}
             if response_status != 401 or attempt == attempts - 1:
-                raise MomoAPIError(response_status, path, response_text)
+                error = MomoAPIError(response_status, path, response_text)
+                if response_status == 401:
+                    await self._handle_terminal_credential_failure(path)
+                raise error
             delay = self._auth_retry_delay(attempt)
             log.warning(
                 "momo agent bearer rejected on %s; retrying in %.2fs "
@@ -453,7 +463,7 @@ class MomoAdapter(BasePlatformAdapter):
         Steps (L4 §6.3 / §7.1 / §4.3):
           1. POST /v1/auth/realtime-token with MOMO_AGENT_TOKEN
           2. WS connect to Centrifugo with the returned short-lived JWT
-          3. subscribe agent:ws<workspaceUUID>.<agentMemberUUID>
+          3. subscribe agentwork:ws<workspaceUUID>.<agentMemberUUID>
           4. drain durable pending jobs once to recover a missed realtime signal
         """
         valid, detail = validate_config(self.cfg)
@@ -466,6 +476,9 @@ class MomoAdapter(BasePlatformAdapter):
             await self._drain_pending_gateway_jobs(reason="connect")
             if self._pending_recovery_requested:
                 self._schedule_pending_recovery(reason="connect-continuation")
+        except asyncio.CancelledError:
+            await self.close()
+            raise
         except Exception:
             await self.close()
             raise
@@ -526,6 +539,7 @@ class MomoAdapter(BasePlatformAdapter):
             "subscribe": {"channel": agent_channel(self.cfg.workspace_id, agent_member_id)},
             "id": 2,
         })
+        self._ensure_work_task()
         self._listen_task = asyncio.create_task(self._listen_loop())
 
     async def _ws_send(self, command: Mapping[str, Any]) -> None:
@@ -570,10 +584,21 @@ class MomoAdapter(BasePlatformAdapter):
                         "ts": envelope.get("ts"),
                         "payload": envelope.get("payload") or {},
                     }
-                    try:
-                        await self.handle_message(evt)
-                    except Exception:  # one bad event must not kill the loop
-                        log.exception("handle_message failed for %s", evt.get("type"))
+                    if evt.get("type") == "agent.job":
+                        try:
+                            self._ensure_work_queue().put_nowait(evt)
+                        except asyncio.QueueFull:
+                            log.error(
+                                "momo gateway work queue is full; deferring to durable pending recovery"
+                            )
+                            self._schedule_pending_recovery(
+                                reason="realtime-work-queue-full", delay_s=1.0
+                            )
+                    else:
+                        try:
+                            await self.handle_message(evt)
+                        except Exception:  # one bad event must not kill the loop
+                            log.exception("handle_message failed for %s", evt.get("type"))
         except asyncio.CancelledError:  # pragma: no cover
             raise
         except Exception:  # pragma: no cover - transport drop → caller reconnects
@@ -587,6 +612,59 @@ class MomoAdapter(BasePlatformAdapter):
                 log.warning("momo realtime stream closed; scheduling reconnect")
                 self._schedule_reconnect()
 
+    async def _work_loop(self) -> None:
+        """Execute gateway jobs away from the Centrifugo receive/ping loop."""
+        queue = self._ensure_work_queue()
+        while not self._closing:
+            evt = await queue.get()
+            try:
+                await self.handle_message(evt)
+            except asyncio.CancelledError:
+                raise
+            except MomoAPIError as exc:
+                if exc.status == 401:
+                    await self._handle_terminal_credential_failure(exc.path)
+                    return
+                log.error("gateway job callback failed; scheduling recovery: %s", exc)
+                self._schedule_pending_recovery(
+                    reason="gateway-job-callback-failed", delay_s=1.0
+                )
+            except MomoGatewayBackpressure:
+                log.warning("gateway work deferred by completion backpressure")
+                self._schedule_pending_recovery(
+                    reason="gateway-result-backpressure", delay_s=1.0
+                )
+            except Exception:
+                log.exception("gateway job processing failed; scheduling recovery")
+                self._schedule_pending_recovery(
+                    reason="gateway-job-failed", delay_s=1.0
+                )
+            finally:
+                queue.task_done()
+
+    def _ensure_work_queue(self) -> Any:
+        if self._work_queue is None:
+            self._work_queue = asyncio.Queue(maxsize=self._max_queued_jobs)
+        return self._work_queue
+
+    def _ensure_work_task(self) -> None:
+        self._ensure_work_queue()
+        if self._work_task is None or self._work_task.done():
+            self._work_task = asyncio.create_task(self._work_loop())
+
+    async def _enqueue_gateway_work(self, evt: Mapping[str, Any]) -> None:
+        self._ensure_work_task()
+        await self._ensure_work_queue().put(dict(evt))
+
+    async def _handle_terminal_credential_failure(self, path: str) -> None:
+        if self._closing:
+            return
+        log.error(
+            "momo agent credential rejected on %s; stopping adapter until pairing reissues it",
+            path,
+        )
+        await self.close()
+
     def _schedule_reconnect(self) -> None:
         if self._closing:
             return
@@ -597,10 +675,10 @@ class MomoAdapter(BasePlatformAdapter):
     async def _reconnect_realtime(self) -> None:
         attempt = 0
         while not self._closing:
-            delay = min(2.0 ** attempt, 30.0) + random.uniform(0.0, 0.5)
+            delay = self._reconnect_delay(attempt)
             await asyncio.sleep(delay)
             try:
-                await self._close_ws_only()
+                await self._close_realtime_attempt()
                 await self._fetch_realtime_token()
                 await self._open_realtime()
                 await self._drain_pending_gateway_jobs(reason="reconnect")
@@ -609,19 +687,37 @@ class MomoAdapter(BasePlatformAdapter):
                 log.info("momo realtime reconnected")
                 return
             except asyncio.CancelledError:  # pragma: no cover
+                await self._close_realtime_attempt()
                 raise
             except MomoAPIError as exc:
+                await self._close_realtime_attempt()
                 log.error("momo realtime reconnect blocked: %s", exc)
                 if exc.status == 401:
-                    self._closing = True
-                    await self._close_ws_only()
-                    log.error(
-                        "momo agent credential is invalid; reconnect stopped until restart"
-                    )
+                    await self._handle_terminal_credential_failure(exc.path)
                     return
             except Exception:
+                await self._close_realtime_attempt()
                 log.exception("momo realtime reconnect failed")
             attempt += 1
+
+    @staticmethod
+    def _reconnect_delay(attempt: int) -> float:
+        exponent = min(max(attempt, 0), 5)
+        return min(2.0 ** exponent, 30.0) + random.uniform(0.0, 0.5)
+
+    async def _close_realtime_attempt(self) -> None:
+        """Close one WS attempt, including a listener started before recovery failed."""
+        task = self._listen_task
+        self._listen_task = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # pragma: no cover - best-effort transport teardown
+                log.debug("momo realtime listener teardown failed", exc_info=True)
+        await self._close_ws_only()
 
     async def _close_ws_only(self) -> None:
         if self._ws is None:
@@ -632,7 +728,7 @@ class MomoAdapter(BasePlatformAdapter):
             pass
         self._ws = None
 
-    def _schedule_pending_recovery(self, *, reason: str) -> None:
+    def _schedule_pending_recovery(self, *, reason: str, delay_s: float = 0.0) -> None:
         if self._closing:
             return
         if self._pending_recovery_task is not None and not self._pending_recovery_task.done():
@@ -640,10 +736,15 @@ class MomoAdapter(BasePlatformAdapter):
             return
         self._pending_recovery_requested = False
         self._pending_recovery_task = asyncio.create_task(
-            self._recover_pending_safely(reason=reason)
+            self._recover_pending_safely(reason=reason, initial_delay_s=delay_s)
         )
 
-    async def _recover_pending_safely(self, *, reason: str) -> None:
+    async def _recover_pending_safely(
+        self, *, reason: str, initial_delay_s: float = 0.0
+    ) -> None:
+        failures = 0
+        if initial_delay_s > 0:
+            await asyncio.sleep(initial_delay_s)
         while not self._closing:
             self._pending_recovery_requested = False
             try:
@@ -652,13 +753,29 @@ class MomoAdapter(BasePlatformAdapter):
                 raise
             except MomoAPIError as exc:
                 log.error("momo pending recovery blocked (%s): %s", reason, exc)
-                return
+                if exc.status == 401:
+                    await self._handle_terminal_credential_failure(exc.path)
+                    return
+                failures += 1
             except Exception:
                 log.exception("momo pending recovery failed (%s)", reason)
-                return
-            if not self._pending_recovery_requested:
-                return
-            reason = "coalesced-signal"
+                failures += 1
+            else:
+                failures = 0
+                if not self._pending_recovery_requested:
+                    return
+                reason = "coalesced-signal"
+                continue
+
+            delay = min(2.0 ** min(max(failures - 1, 0), 5), 30.0)
+            if failures % self._max_pending_recovery_attempts == 0:
+                log.error(
+                    "momo pending recovery remains unavailable after %s attempts; "
+                    "continuing with capped backoff",
+                    failures,
+                )
+            await asyncio.sleep(delay)
+            reason = "retry-after-failure"
 
     async def _drain_pending_gateway_jobs(self, *, reason: str) -> None:
         if not (self.cfg.workspace_id and self.cfg.agent_member_id):
@@ -668,6 +785,7 @@ class MomoAdapter(BasePlatformAdapter):
             f"/agents/{self.cfg.agent_member_id}/gateway/jobs/pending"
             f"?limit={self._pending_page_size}"
         )
+        queued_work = False
         for page in range(self._max_pending_pages):
             data = await self._get(path)
             jobs = data.get("jobs") or []
@@ -695,7 +813,7 @@ class MomoAdapter(BasePlatformAdapter):
                         continue
                 if not isinstance(payload, Mapping):
                     continue
-                await self.handle_message({
+                await self._enqueue_gateway_work({
                     "channel": agent_channel(
                         self.cfg.workspace_id, self.cfg.agent_member_id
                     ),
@@ -704,8 +822,13 @@ class MomoAdapter(BasePlatformAdapter):
                     "ts": job.get("createdAtMs") or payload.get("created_at_ms"),
                     "payload": payload,
                 })
+                queued_work = True
             if len(jobs) < self._pending_page_size:
+                if queued_work:
+                    await self._ensure_work_queue().join()
                 return
+        if queued_work:
+            await self._ensure_work_queue().join()
         log.warning(
             "momo pending recovery reached the bounded page limit; scheduling one continuation"
         )
@@ -752,14 +875,26 @@ class MomoAdapter(BasePlatformAdapter):
             self._handled_triggers.popitem(last=False)
 
     def _cache_gateway_result(self, run_id: str, result: dict[str, Any]) -> None:
+        if (
+            run_id not in self._pending_gateway_results
+            and len(self._pending_gateway_results) >= self._max_pending_results
+        ):
+            raise RuntimeError("unacknowledged gateway result cache is full")
         self._pending_gateway_results[run_id] = result
         self._pending_gateway_results.move_to_end(run_id)
-        while len(self._pending_gateway_results) > self._max_pending_results:
-            evicted_run_id, _ = self._pending_gateway_results.popitem(last=False)
-            log.warning(
-                "evicted unacknowledged gateway result from bounded cache: run=%s",
-                evicted_run_id,
-            )
+
+    def _reserve_gateway_result_slot(self, run_id: str) -> bool:
+        if run_id in self._pending_gateway_results:
+            return True
+        if run_id in self._gateway_result_reservations:
+            return False
+        if (
+            len(self._pending_gateway_results) + len(self._gateway_result_reservations)
+            >= self._max_pending_results
+        ):
+            return False
+        self._gateway_result_reservations.add(run_id)
+        return True
 
     # ----- send (L4 §6.3 / §3.1 / §5.1) -----------------------------------
 
@@ -977,15 +1112,22 @@ class MomoAdapter(BasePlatformAdapter):
         """
         payload = evt.get("payload") or {}
         run_id = payload.get("run_id") or payload.get("runId")
-        workspace_id = payload.get("workspace_id") or payload.get("workspaceId") or self.cfg.workspace_id
+        workspace_id = payload.get("workspace_id") or payload.get("workspaceId")
         channel_id = payload.get("channel_id") or payload.get("channelId")
         agent_member_id = payload.get("agent_member_id") or payload.get("agentMemberId")
-        if not run_id or not workspace_id or not channel_id:
-            log.warning("agent.job missing run/workspace/channel; skipping: %s", payload)
-            return
-
-        if agent_member_id and agent_member_id != self.cfg.agent_member_id:
-            log.debug("agent.job for another agent; skipping run=%s", run_id)
+        expected_work_channel = agent_channel(
+            self.cfg.workspace_id, self.cfg.agent_member_id
+        )
+        if (
+            not run_id
+            or not workspace_id
+            or not channel_id
+            or not agent_member_id
+            or str(workspace_id) != self.cfg.workspace_id
+            or str(agent_member_id) != self.cfg.agent_member_id
+            or str(evt.get("channel") or "") != expected_work_channel
+        ):
+            log.warning("agent.job actor/channel binding rejected; run=%s", run_id)
             return
 
         trigger_key = f"agent.job:{run_id}"
@@ -995,6 +1137,10 @@ class MomoAdapter(BasePlatformAdapter):
         try:
             result = self._pending_gateway_results.get(str(run_id))
             if result is None:
+                if not self._reserve_gateway_result_slot(str(run_id)):
+                    raise MomoGatewayBackpressure(
+                        "gateway completion backlog is full"
+                    )
                 await self._report_gateway_event(
                     workspace_id, run_id, "running", "job received"
                 )
@@ -1003,24 +1149,31 @@ class MomoAdapter(BasePlatformAdapter):
                 except Exception:  # noqa: BLE001 - durable readable failure
                     log.exception("gateway job failed: run=%s", run_id)
                     result = {
-                    "status": "failed",
-                    "error": "Hermes runtime failed before producing a final response.",
-                    "usage": {
-                        "model": payload.get("model") or "hermes-agent",
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "cached_tokens": 0,
-                        "reasoning_tokens": 0,
-                        "cost_micro_usd": 0,
-                        "was_estimated": True,
-                    },
+                        "status": "failed",
+                        "error": "Hermes runtime failed before producing a final response.",
+                        "usage": {
+                            "model": payload.get("model") or "hermes-agent",
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "cached_tokens": 0,
+                            "reasoning_tokens": 0,
+                            "cost_micro_usd": 0,
+                            "was_estimated": True,
+                        },
                     }
-                self._cache_gateway_result(str(run_id), result)
+                try:
+                    self._cache_gateway_result(str(run_id), result)
+                finally:
+                    self._gateway_result_reservations.discard(str(run_id))
 
             await self._complete_gateway_job(workspace_id, run_id, result)
             self._pending_gateway_results.pop(str(run_id), None)
+            self._schedule_pending_recovery(
+                reason="gateway-result-slot-released", delay_s=0.1
+            )
             handled = True
         finally:
+            self._gateway_result_reservations.discard(str(run_id))
             self._finish_trigger(trigger_key, handled=handled)
 
     async def _report_gateway_event(
@@ -1275,9 +1428,17 @@ class MomoAdapter(BasePlatformAdapter):
         """Cancel the listen loop and close WS + HTTP transports."""
         self._closing = True
         current_task = asyncio.current_task()
-        for name in ("_pending_recovery_task", "_reconnect_task", "_listen_task"):
+        for name in (
+            "_pending_recovery_task",
+            "_reconnect_task",
+            "_listen_task",
+            "_work_task",
+        ):
             task = getattr(self, name)
-            if task is None or task is current_task:
+            if task is None:
+                continue
+            if task is current_task:
+                setattr(self, name, None)
                 continue
             task.cancel()
             try:
@@ -1302,6 +1463,10 @@ class MomoAdapter(BasePlatformAdapter):
 
 class MomoConfigurationError(RuntimeError):
     """Missing or unsafe local adapter configuration."""
+
+
+class MomoGatewayBackpressure(RuntimeError):
+    """Provider work is deferred until a durable completion slot is available."""
 
 
 class MomoAPIError(RuntimeError):

@@ -24,7 +24,7 @@ REST and is persisted as `message` + `outbox` with `message.seq` ordering.
 2. MomoServer creates `agent_run` plus Context Packet projection and audit shell.
 3. In `AGENT_GATEWAY_MODE=gateway`, MomoServer writes:
    - `outbox(kind='agent_job', method='gateway')` for ledger tracking.
-   - `outbox(kind='broadcast')` on `agent:ws<workspace>.<agentMember>` with
+   - `outbox(kind='broadcast')` on `agentwork:ws<workspace>.<agentMember>` with
      `data.type='agent.job'`.
 4. OutboxRelay publishes the realtime job; AgentWorker intentionally skips
    `method='gateway'`.
@@ -85,17 +85,21 @@ The adapter does not accept a human email/password and does not mint its own
 credential. The raw agent token is returned once by momo pairing, stored only in
 the chmod-600 env file, and can be rotated or revoked by a human admin.
 
-The `agent:` work stream is a Centrifugo subscription, not a durable write path.
+The `agentwork:` work stream is a Centrifugo subscription, not a durable write path.
 It still goes through MomoServer's subscribe proxy. Dev, local-alpha, and prod
-Centrifugo configs must all allow `agent:ws<workspace>.<agentMember>` through
+Centrifugo configs must all allow `agentwork:ws<workspace>.<agentMember>` through
 the same workspace-qualified regex and proxy check. The proxy authorizes this
 namespace **self-only**: the connection JWT member must equal the target agent
 member. Sharing a channel never grants access to another agent's Context Packet.
 The adapter also rejects a realtime-token response whose workspace/member actor
 does not match its configured pairing identity. If Hermes logs
-`permission denied` for `agent:...`, the adapter is connected but cannot receive
+`permission denied` for `agentwork:...`, the adapter is connected but cannot receive
 jobs; in local alpha, inspect the generated `centrifugo.local-alpha.json` before
 debugging provider/OAuth.
+
+The separate `agent:` namespace remains an observable `agent.status` /
+`agent.partial` surface for active members who share a channel with the agent. It
+never carries `agent.job` payloads.
 
 ## Credential Boundary
 

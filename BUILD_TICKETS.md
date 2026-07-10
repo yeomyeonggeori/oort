@@ -440,7 +440,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] Hermes gateway runtime 설치/실행 절차와 provider OAuth boundary를 `docs/external-agent-provider/hermes-gateway-native-platform.md`와 `docs/RUN.md`에 문서화한다.
 - [x] `adapters/hermes/plugin.yaml`이 실제 Hermes platform plugin manifest(`kind: platform`, `requires_env`, `optional_env`) 형태를 갖는다.
 - [x] `momo_adapter.py`가 최신 `gateway.platforms.base.BasePlatformAdapter(config, platform)` path와 legacy registry를 모두 import/register-safe하게 지원한다.
-- [x] adapter login operator와 agent member를 분리해 `agent:ws<workspace>.<agentMember>` work stream을 구독한다.
+- [x] adapter login operator와 agent member를 분리해 private `agentwork:ws<workspace>.<agentMember>` work stream을 구독한다. (`agent:`는 후속 observable progress surface.)
 - [x] `scripts/momo hermes-gateway-install-plugin`과 `scripts/momo hermes-gateway-smoke --real [--trigger]`를 제공한다.
 - [x] real smoke verifier가 Hermes CLI/plugin/provider-login/momo-server/roundtrip failure를 단계별 evidence로 분리하고 provider OAuth/Codex/OpenAI credential env가 momo process에 보이면 fail-fast한다.
 - [x] `bash -n scripts/momo scripts/verify_hermes_gateway_real_smoke.sh` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS.
@@ -603,12 +603,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 
 ### MOMO-212 수용기준 `[runtime-agent/swift]`
 - [x] GitHub #180을 `scripts/goal_claim.sh 180`으로 claim하고 별도 branch/worktree에서 진행한다.
-- [x] Centrifugo `agent` namespace가 `agent:ws<workspaceUUID>.<agentMemberUUID>` channel shape에 대해 subscribe proxy를 타도록 설정한다.
-- [x] `/v1/centrifugo/subscribe`가 `agent:` namespace를 fail-closed로 파싱하고, observer와 target agent가 같은 workspace의 active member이며 하나 이상의 active channel membership을 공유할 때만 허용한다.
+- [x] Centrifugo `agentwork` namespace가 `agentwork:ws<workspaceUUID>.<agentMemberUUID>` private job shape에 대해 subscribe proxy를 타도록 설정한다. Observable `agent:` progress도 별도 proxy 경계를 유지한다.
+- [x] `/v1/centrifugo/subscribe`가 `agent:` namespace를 fail-closed로 파싱하고, observer와 target agent가 이벤트가 발생한 정확한 active channel의 멤버일 때만 허용한다.
 - [x] 기존 `ch:`/`dm:` channel membership guard와 client direct publish 금지, server/worker publish path를 유지한다.
 - [x] `scripts/verify_agent_live_channel.sh`가 Docker dev compose + host API/worker + mock Hermes + Centrifugo subscribe proxy 경로를 검증한다.
 - [x] authorized member가 `agent.status` 또는 `agent.partial` live publication을 수신한다.
-- [x] invalid connection token, same-workspace no-shared-channel member, other-workspace member/token, client direct publish가 차단된다.
+- [x] invalid connection token, same-workspace different-channel-only member, other-workspace member/token, client direct publish가 차단된다.
 - [x] `agent.status`/`agent.partial`은 ephemeral progress projection이며 `message.seq` ordering authority가 아님을 `docs/RUN.md`/STATUS에 기록한다.
 - [x] focused server tests를 추가하고 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile swift` PASS evidence를 PR에 첨부한다.
 - [x] `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile runtime-agent` PASS evidence를 PR에 첨부한다.
@@ -1070,7 +1070,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-200 수용기준 `[swift/macos-ui/runtime-relay]`
 - [x] macOS SwiftCentrifuge adapter를 추가하기 전 라이선스(MIT/permissive) 확인과 NOTICE/THIRD_PARTY 반영 여부를 결정한다.
 - [x] adapter가 `POST /v1/auth/realtime-token`으로 connection JWT를 가져오고 SwiftCentrifuge token getter/refresh path에 연결한다.
-- [x] `ch:ws<workspace>.<channel>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. `agent:ws<workspace>.<agentMember>` live boundary는 MOMO-212에서 verifier로 닫는다.
+- [x] `ch:ws<workspace>.<channel>` 구독을 지원하고 `/v1/centrifugo/subscribe` membership guard를 통과한다. `agent:ws<workspace>.<channel>.<agentMember>` live boundary는 MOMO-212/MOMO-338 verifier로 닫는다.
 - [x] SwiftCentrifuge publication data를 `RealtimeEnvelope`로 decode하는 `RealtimeEnvelopeSubscriptionTransport` 구현을 추가한다.
 - [x] `MomoServerRESTChatBackend` dev config에서 live driver를 주입할 수 있고, driver 미주입 fallback은 유지한다.
 - [x] duplicate/gap/backfill은 기존 `RealtimeReplayController` 테스트를 깨지 않는다.
@@ -1558,6 +1558,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] [python] 시크릿 소스는 `~/.momo/hermes-gateway.env`(`chmod 600`) — Codex/OpenAI OAuth env fail-fast 경계(ADR-0004)는 그대로 유지.
 - [x] [python] 401 수신 시 "토큰 폐기/만료 — 페어링에서 재발급" readable error를 남기고 지수 백오프 재시도(자격증명 자동 재발급 시도 금지).
 - [x] [python] contract 테스트 갱신: 로그인 없는 플로우, bearer 헤더 형태, 미사용 refreshToken 코드 제거 확인.
+- [x] [security/runtime] exact-channel observable `agent:` status/partial과 private self-only `agentwork:` job을 분리하고 dev/local-alpha/prod Centrifugo proxy 계약 및 실제 WebSocket e2e를 일치시킨다.
+- [x] [python/performance] cancellation·partial reconnect listener cleanup, bounded recovery retry, completion backlog backpressure를 regression test로 고정한다.
 
 ### ☐ MOMO-339 수용기준 — 페어링 위저드 자격증명 발급/회전 UI `[swift/macos-ui]` · 의존: MOMO-337, MOMO-262
 - [ ] [swift] 에이전트 초대 완료 시 MOMO-337 발급 API 호출 → 토큰 원문 1회 표시 + `~/.momo/hermes-gateway.env` 기록 안내(복사 버튼). 매니페스트/export에는 계속 시크릿 비포함(MOMO-262 계약 유지).

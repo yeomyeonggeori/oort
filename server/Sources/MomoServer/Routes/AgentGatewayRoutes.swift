@@ -146,6 +146,7 @@ struct AgentGatewayRoutes: Sendable {
 
             let payload = Self.agentStatusBroadcastPayload(
                 workspaceID: workspaceID,
+                channelID: run.channelID,
                 agentMemberID: run.agentMemberID,
                 runID: runID,
                 status: normalizedStatus,
@@ -693,13 +694,14 @@ struct AgentGatewayRoutes: Sendable {
 
     private static func agentStatusBroadcastPayload(
         workspaceID: UUID,
+        channelID: UUID,
         agentMemberID: UUID,
         runID: UUID,
         status: String,
         detail: String?
     ) -> String {
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
-        let centChannel = "agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"
+        let centChannel = "agent:ws\(workspaceID.uuidString).\(channelID.uuidString).\(agentMemberID.uuidString)"
         return jsonString([
             "channel": centChannel,
             "data": [

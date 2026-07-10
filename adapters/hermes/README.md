@@ -33,7 +33,7 @@ in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research
 
 | Primitive | Behavior |
 |---|---|
-| `connect()` | Use `MOMO_AGENT_TOKEN` for realtime-token exchange, subscribe only to the agent's `agent:` work stream, then perform one durable pending-job recovery read. |
+| `connect()` | Use `MOMO_AGENT_TOKEN` for realtime-token exchange, subscribe only to the agent's private `agentwork:` stream, then perform one durable pending-job recovery read. |
 | `send(channel, blocks)` | REST `POST .../messages` with a `client_msg_id` for **idempotency** (§3.1 — server dedups on `(channel_id, author_member_id, client_msg_id)` in the single `channel_seq`-bump + message + outbox tx). |
 | `handle_message(evt)` | A `mention` / `dm.signal` arrives on the realtime stream → `invoke` the agent → stream `agent.partial` / `agent.status` deltas and reflect the final 1급 message into the channel via `send()`. |
 
@@ -100,7 +100,7 @@ Connection sequence (§6.3 / §7.1 / §4.3):
 
 1. Send `MOMO_AGENT_TOKEN` to `POST /v1/auth/realtime-token`.
 2. WS connect to Centrifugo with the returned short-lived JWT.
-3. Subscribe only to `agent:ws<workspaceUUID>.<agentMemberUUID>`.
+3. Subscribe only to `agentwork:ws<workspaceUUID>.<agentMemberUUID>`.
 4. Fetch pending jobs once after connect, reconnect, or a detected publication
    offset gap; there is no idle polling loop.
 5. Use the same bearer for pending jobs, gateway events/completion, and messages.
@@ -133,8 +133,9 @@ Current Hermes SDK compatibility:
 ## Channel naming (§4.1)
 
 ```
-agent : agent:ws<workspaceUUID>.<agentMemberUUID> # subscribed work stream
-ch    : ch:ws<workspaceUUID>.<channelUUID>        # timeline transport
+agentwork : agentwork:ws<workspaceUUID>.<agentMemberUUID> # private work stream
+agent     : agent:ws<workspaceUUID>.<channelUUID>.<agentMemberUUID> # channel-scoped progress
+ch        : ch:ws<workspaceUUID>.<channelUUID>            # timeline transport
 ```
 
 The adapter treats channel ids handed to `send()` as opaque and still writes only

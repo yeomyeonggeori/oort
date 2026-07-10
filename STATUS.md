@@ -5,7 +5,7 @@
 
 ## 0. Repo Bootstrap Hardening (2026-06-24)
 
-- Centrifugo/server 계약을 `/v1/centrifugo/subscribe` + `ch:ws<workspaceUUID>.<channelUUID>` / `agent:ws<workspaceUUID>.<agentMemberUUID>`로 정렬하고, legacy GitHub bootstrap은 guard 처리.
+- Centrifugo/server 계약을 `/v1/centrifugo/subscribe` + `ch:ws<workspaceUUID>.<channelUUID>` / exact-channel observable `agent:ws<workspaceUUID>.<channelUUID>.<agentMemberUUID>` / private `agentwork:ws<workspaceUUID>.<agentMemberUUID>`로 정렬하고, legacy GitHub bootstrap은 guard 처리.
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
@@ -109,7 +109,7 @@
 ## 0-4b-6c. MOMO-326 Real Hermes Gateway Credentialed Smoke Prep (2026-07-07)
 
 - 실제 Hermes gateway 런타임을 대상으로 한 설치/플러그인/credentialed smoke 레이어를 추가했다. `scripts/momo hermes-gateway-install-plugin`은 `adapters/hermes/`를 로컬 Hermes plugin directory(`$HERMES_HOME/plugins/momo`)에 symlink/copy하고, `scripts/momo hermes-gateway-smoke --real [--trigger]`는 Hermes CLI, plugin load files, 사용자 provider OAuth/login marker, momo gateway-mode `/health`, `@hermes` same-channel response를 단계별 evidence로 분리한다.
-- `adapters/hermes/plugin.yaml`을 Hermes 공식 platform manifest 형태(`kind: platform`, `requires_env`, `optional_env`)로 정렬했고, `momo_adapter.py`는 최신 `gateway.platforms.base.BasePlatformAdapter(config, platform)` 경로와 legacy registry를 모두 지원한다. 로그인 operator member와 agent member를 분리해 `agent:ws<workspace>.<agentMember>` work stream을 확실히 구독하도록 수정했다.
+- `adapters/hermes/plugin.yaml`을 Hermes 공식 platform manifest 형태(`kind: platform`, `requires_env`, `optional_env`)로 정렬했고, `momo_adapter.py`는 최신 `gateway.platforms.base.BasePlatformAdapter(config, platform)` 경로와 legacy registry를 모두 지원한다. MOMO-338에서 operator login을 제거하고 per-agent bearer로 private `agentwork:ws<workspace>.<agentMember>`를 구독하도록 대체했다.
 - 검증: `python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/adapter.py` PASS, `python3 adapters/hermes/tests/test_momo_adapter_contract.py` PASS, `bash -n scripts/momo scripts/verify_hermes_gateway_real_smoke.sh` PASS, `scripts/momo hermes-gateway-smoke --real` PASS with evidence state `NEEDS_USER_INSTALL`, `scripts/local_gate.sh --profile docs` PASS, `scripts/local_gate.sh --profile runtime-agent` PASS (`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260707T115936Z-pid70974-ns1783425576779580000-wt9a510db2fbf3-ra293c905ef49.md`). 이 머신에는 아직 Hermes CLI가 없어 실제 provider OAuth 및 `@hermes` real gateway roundtrip은 `runtime-unverified(real hermes gateway missing; user install/login required)`로 남는다.
 
 ## 0-4b-6d. MOMO-327 Hermes v0.18 plugin load compatibility (2026-07-07)
@@ -151,7 +151,7 @@
 
 ## 0-4b-6i. MOMO-333 Local alpha Hermes gateway agent stream subscribe unblock (2026-07-08)
 
-- 실제 앱에서 `@hermes hi`를 보내면 `message`와 `agent_job(method=gateway)` 생성, OutboxRelay의 `agent.job` publish까지는 성공했지만 Hermes gateway adapter가 `agent:ws<workspace>.<agentMember>` subscribe에서 Centrifugo `permission denied`를 받아 job을 수신하지 못했다. DB membership/RLS 경로는 정상이라 원인은 local alpha runner가 생성하는 임시 `centrifugo.local-alpha.json`의 `agent` namespace가 stale하여 subscribe proxy와 channel regex를 빠뜨린 것이었다.
+- 당시 실제 앱에서 `@hermes hi`를 보냈을 때 `message`와 `agent_job(method=gateway)` 생성, OutboxRelay publish까지는 성공했지만 stale local-alpha Centrifugo config 때문에 구독이 거부됐다. MOMO-333에서 최초 복구했고, MOMO-338은 private job을 `agentwork:ws<workspace>.<agentMember>`로 분리해 실제 agent-bearer WebSocket 수신까지 검증한다.
 - `scripts/local_alpha_runner.sh`의 generated Centrifugo config를 `infra/centrifugo.json`과 맞춰 `agent` namespace도 `subscribe_proxy_enabled=true`와 workspace-qualified `channel_regex`를 갖도록 수정했다. `docs/RUN.md`와 Hermes gateway native platform runbook에는 local alpha에서도 `agent:` stream proxy가 필수라는 진단 기준을 추가했다.
 - 검증: generated config 확인(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T/momo-local-alpha/20260708T033819Z/centrifugo.local-alpha.json`: `agent.subscribe_proxy_enabled=true`, regex `^ws...\\....$`), 서버 `GET /v1/agent-runtime/status` = `mode=gateway`, `docker logs momo240_72373-centrifugo-1`에서 `namespace=agent subscribe proxy enabled` 및 `agent:ws... permission denied` 없음. 사용자-owned Hermes gateway(`openai-codex gpt-5.5`, provider token은 momo에 저장/로그하지 않음) 연결 상태에서 `MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-hermes-gateway-real/20260708T034009Z/summary.md`). DB evidence: `outbox(kind=agent_job, method=gateway)=done`, `agent_run.status=succeeded`, `audit_log`에 `agent.gateway.status/completed`, `usage_ledger` 1건, Hermes final response가 같은 channel `message.seq=4`로 기록됨. 정적 gate: `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-docs-20260708T034450Z-pid17038-ns1783482290079413000-wt9a510db2fbf3-r5e9aa29fc209.md`).
 
@@ -244,10 +244,11 @@
 
 ## 0-4j. MOMO-338 Hermes Adapter Per-Agent Bearer 단일화 (2026-07-10)
 
-- Hermes platform adapter의 human email/password 로그인, refresh token 보관, 전역 gateway shared-secret 헤더를 제거했다. 이제 `MOMO_AGENT_TOKEN` 하나가 realtime-token, `agent:` work stream, bounded pending recovery, gateway event/complete, agent message REST에 동일하게 쓰인다.
-- pending endpoint는 connect/reconnect/publication-gap에서만 1회 조회하며 idle polling loop는 없다. realtime transport drop은 capped exponential backoff+jitter로 재연결하고, 401은 서버 원문을 버린 redacted 안내 후 세 번만 재시도하며 자격증명을 자동 발급하지 않는다.
-- 보안/성능 리뷰에서 다른 agent stream 관찰, 정상 WS close 재연결 누락, callback 실패 후 영구 suppress, backlog 단일 page, 초기 connect 누수, legacy env 잔존을 발견해 모두 수정했다. `agent:` subscribe proxy는 self-only이며 adapter는 realtime-token actor를 pairing identity와 대조한다. dedup/result cache는 bounded이고 non-loopback 평문은 명시 opt-in 없이는 거부한다.
-- `scripts/momo hermes-gateway-init/status`와 real smoke는 chmod-600 env의 token configured 여부만 표시하고 legacy keys를 private backup 후 active env에서 제거한다. provider OAuth는 계속 Hermes 내부 소유다. 검증: adapter contract 25 tests, server self-only unit test, shell syntax, docs gate PASS; runtime-agent 최종 gate 대상.
+- Hermes platform adapter의 human email/password 로그인, refresh token 보관, 전역 gateway shared-secret 헤더를 제거했다. 이제 `MOMO_AGENT_TOKEN` 하나가 realtime-token, private `agentwork:` stream, bounded pending recovery, gateway event/complete, agent message REST에 동일하게 쓰인다.
+- pending endpoint는 connect/reconnect/publication-gap에서만 조회하며 idle polling loop는 없다. realtime transport drop은 capped exponential backoff+jitter로 재연결하고, 취소·부분 재연결 실패는 listener/WS를 정리한다. 일시적 recovery 실패는 bounded retry하고, 401은 fail-closed로 재연결을 멈춘다.
+- 보안/성능 리뷰에서 Context Packet이 user-visible `agent:` progress와 같은 stream에 섞인 문제와 채널 간 progress 노출 가능성을 발견했다. `agent:`는 이벤트가 발생한 정확한 채널의 멤버만 status/partial을 관찰하도록 channel id를 포함하고, `agentwork:`는 exact agent actor만 subscribe 가능하게 분리했다. realtime reader와 provider 실행은 bounded queue로 분리하고 completion 장애 중 결과를 보존한 채 capped-backoff pending recovery를 계속한다.
+- `scripts/momo hermes-gateway-init/status`와 real smoke는 chmod-600 env의 token configured 여부만 표시하고 legacy keys를 private backup 후 active env에서 제거한다. 실행 안내는 env를 subshell에만 로드하며 verifier도 credential을 process argv에 싣지 않고 종료 시 세션/테스트 credential을 폐기한다. provider OAuth는 계속 Hermes 내부 소유다.
+- 검증: adapter contract 33 tests PASS(실시간+recovery 동시 유입 최대 provider concurrency=1 포함), server 48 tests PASS. `scripts/verify_agent_live_channel.sh`는 exact-channel progress와 private `agentwork:` actual WebSocket/OutboxRelay path를, `scripts/verify_hermes_gateway_adapter.sh`는 actor-bound REST/callback/rotation/revoke path를 검증한다. 동일 agent gateway 다중 인스턴스의 durable claim/lease는 MOMO-341 후속이다.
 
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
@@ -342,9 +343,9 @@
 
 ## 0-16. MOMO-212 Agent Channel Live Subscription Verifier v0 (2026-06-30)
 
-- Centrifugo `agent` namespace에 subscribe proxy와 `agent:ws<workspaceUUID>.<agentMemberUUID>` regex를 적용하고, `/v1/centrifugo/subscribe`가 agent namespace를 fail-closed로 파싱/인가한다.
-- v0 agent live boundary는 observer와 target agent가 같은 workspace의 active member이고, 하나 이상의 active channel membership을 공유할 때만 구독을 허용한다. 일반 channel `ch:`/`dm:` membership guard와 client direct publish 금지, REST→Postgres→outbox publish 경로는 유지한다.
-- `scripts/verify_agent_live_channel.sh`를 추가해 Docker dev compose + host MomoServer/AgentWorker + mock Hermes + Centrifugo subscribe proxy에서 authorized member의 live `agent.status`/`agent.partial` 수신, invalid token, same-workspace no-shared-channel member, other-workspace token/member, client direct publish deny를 검증한다.
+- Centrifugo `agent` namespace에 subscribe proxy와 `agent:ws<workspaceUUID>.<channelUUID>.<agentMemberUUID>` regex를 적용하고, `/v1/centrifugo/subscribe`가 exact-channel membership을 fail-closed로 파싱/인가한다.
+- v0 agent live boundary는 observer와 target agent가 같은 workspace의 active member이고 이벤트가 발생한 정확한 active channel에 함께 속할 때만 구독을 허용한다. 일반 channel `ch:`/`dm:` membership guard와 client direct publish 금지, REST→Postgres→outbox publish 경로는 유지한다.
+- `scripts/verify_agent_live_channel.sh`를 추가해 Docker dev compose + host MomoServer/AgentWorker/OutboxRelay + mock Hermes + Centrifugo subscribe proxy에서 exact-channel live `agent.status`/`agent.partial`, private `agentwork:` 수신, invalid token, same-workspace different-channel member, other-workspace token/member, client direct publish deny를 검증한다.
 - `agent.status`/`agent.partial`은 ephemeral progress projection이며 `message.seq` ordering authority가 아니다. 최종 durable 결과는 기존 channel timeline의 `message.new`/`message.seq`로 reconcile한다.
 - 검증: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test --package-path server` PASS, `scripts/verify_agent_live_channel.sh` PASS. 전체 `swift`/`runtime-agent` local gate evidence는 PR에 첨부한다. Presence/APNs, external Hermes staging connection, production reconnect UX polish는 계속 후속 범위다.
 
@@ -1011,7 +1012,7 @@
 > **MOMO-176에서 검증됨:** `GET /v1/workspaces/{ws}/roster`/`members`는 일반 tenant token + `SET LOCAL app.workspace_id` + active membership guard로 human/agent roster를 반환한다. `scripts/verify_roster.sh`가 demo human+agent, active-membership 없는 member 제외, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증했다.
 > **MOMO-197에서 검증됨:** `GET /v1/workspaces/{ws}/channels`는 일반 tenant token + `SET LOCAL app.workspace_id` + active workspace/channel membership guard로 visible channel list를 반환한다. `scripts/verify_channel_list.sh`가 demo active channels, left/archived filtering, nonmember 403, workspace A/B 교차 403을 runtime-db profile에서 검증한다.
 > **MOMO-196에서 검증됨:** repo-local live WebSocket verifier가 demo login → realtime-token → Centrifugo subscribe → REST send → live `message.new` publication 수신과 invalid connection token reject를 검증한다.
-> **MOMO-212에서 검증됨:** `agent:ws<workspace>.<agentMember>` live subscription boundary가 authorized shared-channel member에게 `agent.status`/`agent.partial`을 전달하고, invalid token/no-shared-channel/other-workspace/direct publish 경로를 차단한다.
+> **MOMO-212/MOMO-338에서 검증됨:** `agent:ws<workspace>.<channel>.<agentMember>` live subscription boundary가 그 정확한 채널의 authorized member에게 `agent.status`/`agent.partial`을 전달하고, invalid token/different-channel/other-workspace/direct publish 경로를 차단한다. `agentwork:`는 agent bearer WebSocket + OutboxRelay 실제 publication으로 self-only 수신을 검증한다.
 > **남은 runtime-unverified:** presence, APNs, external Hermes staging connection, Inbound MCP JSON-RPC transport/tool execution/canonical write path/RLS-idempotency e2e.
 
 ## 3. 생성 파일 트리 (핵심)

@@ -112,11 +112,11 @@ Centrifugo 컨테이너의 subscribe proxy는 local alpha 실행 중 host-run `M
 runner가 evidence 디렉터리에 임시 Centrifugo config/compose override를 생성한다. macOS Docker
 Desktop 기본값은 `host.docker.internal`이며, 필요하면 `--api-proxy-host <host>`로 바꾼다.
 이 임시 config도 `infra/centrifugo.json`과 같은 namespace 계약을 유지해야 한다. 특히
-`ch:ws<workspace>.<channel>`뿐 아니라 Hermes gateway work stream인
-`agent:ws<workspace>.<agentMember>`도 subscribe proxy를 통과해야 한다. local alpha에서
-Hermes adapter 로그에 `permission denied`가 보이면 먼저 runner가 새로 생성한
-`centrifugo.local-alpha.json`의 `agent` namespace에 `subscribe_proxy_enabled`와
-workspace-qualified `channel_regex`가 들어 있는지 확인한다.
+	`ch:ws<workspace>.<channel>`뿐 아니라 Hermes gateway private work stream인
+	`agentwork:ws<workspace>.<agentMember>`도 subscribe proxy를 통과해야 한다. local alpha에서
+	Hermes adapter 로그에 `permission denied`가 보이면 먼저 runner가 새로 생성한
+	`centrifugo.local-alpha.json`의 `agentwork` namespace에 `subscribe_proxy_enabled`와
+	workspace-qualified `channel_regex`가 들어 있는지 확인한다.
 
 runner는 기본 검증 경로에서 headless `MomoMacSmoke`를 실행한다. 사용자가 실제 앱 창을 열 때는
 기본 고정 포트 flow인 `scripts/momo start`를 쓰거나, runner가 생성한 `summary.md`의
@@ -325,7 +325,7 @@ POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
 기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:write`,
 `realtime:subscribe`다. agent bearer는 이 네 서버 surface 외의 human/admin API에
 사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
-`agent:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
+`agentwork:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
 target agent가 정확히 같을 때만 subscribe가 허용된다. 같은 채널 membership만으로
 다른 에이전트의 Context Packet을 관찰할 수 없다.
 MOMO-338부터 Hermes adapter는 human login과 공유 시크릿을 사용하지 않는다. 서버는
@@ -696,11 +696,14 @@ Boundary:
 - Normal `ch:`/`dm:` subscriptions still go through Centrifugo subscribe proxy
   `POST /v1/centrifugo/subscribe`, which parses `ch:ws<workspace>.<channel>` and
   checks active channel `membership` under tenant RLS.
-- Agent progress subscriptions use `agent:ws<workspace>.<agentMember>`. The
+- Agent progress subscriptions use `agent:ws<workspace>.<channel>.<agentMember>`. The
   subscribe proxy checks that the observer and target agent are active members
   in the same workspace and share at least one active channel membership. This
   boundary is for live `agent.status`/`agent.partial` progress only; durable
   final output still reconciles through channel `message.new` and `message.seq`.
+- Private gateway jobs use `agentwork:ws<workspace>.<agentMember>`. Only a
+  connection authenticated as that exact active agent may subscribe, so Context
+  Packets and work payloads are never exposed through the observer progress stream.
 - Clients never publish to Centrifugo. All durable writes remain REST → Postgres
   transaction → outbox → OutboxRelay/AgentWorker server-side publish.
 - TTL defaults to 300 seconds and is configurable with
@@ -840,7 +843,7 @@ MOMO-204 범위 밖이다.
 
 #### 5.3.3 MOMO-212 Agent live-channel 게이트
 
-`agent:ws<workspace>.<agentMember>` namespace의 live subscribe 경계는 아래
+`agent:ws<workspace>.<channel>.<agentMember>` namespace의 live subscribe 경계는 아래
 verifier가 닫는다. 메시지 채널 `ch:` live gate는 MOMO-196의
 `scripts/verify_realtime_live.sh`가 담당하고, 이 gate는 agent status/partial
 progress가 agent channel boundary에서만 전달되는지 확인한다.
@@ -854,7 +857,7 @@ scripts/local_gate.sh --profile runtime-agent
 
 검증 범위는 Docker dev compose PG/Centrifugo bootstrap → host MomoServer →
 mock Hermes → host AgentWorker → compose network의 `api:8080` proxy 연결 →
-authorized demo member의 `agent:ws<workspace>.<agentMember>` subscribe →
+authorized demo member의 `agent:ws<workspace>.<channel>.<agentMember>` subscribe →
 `agent.status` 또는 `agent.partial` live publication 수신이다. 같은 run에서
 invalid Centrifugo connection token, same-workspace member without shared channel,
 other-workspace member/token, client direct publish deny를 함께 확인한다.
@@ -1118,7 +1121,8 @@ M1 staging 완료로 표시하지 않는다.
 | subscribe proxy 401 (`invalid or missing proxy secret`) | **MOMO-300**: Centrifugo static header(`X-Centrifugo-Proxy-Secret`)와 API `CENT_PROXY_SECRET` 불일치. compose env override(`CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`)와 서버 env가 같은 값을 쓰는지 확인. |
 | 로그인은 되는데 모든 API가 401 (`unknown token`) | **MOMO-300**: access token이 `token` 테이블에 기록되지 않았거나 revoke됨(로그아웃/rotation). 재로그인으로 새 세션 발급. 서버 배포 전 발급 토큰은 fail-closed로 전부 무효. |
 | REST가 429를 반환 | **MOMO-300** rate limit. `Retry-After` 헤더만큼 대기 후 재시도, 또는 `RATE_LIMIT_PER_MEMBER`/`RATE_LIMIT_PER_IP` 조정(0=비활성). |
-| `agent:` subscribe 거부 | target agent가 같은 workspace active member인지, observer와 target agent가 하나 이상의 active channel membership을 공유하는지 확인. 공유 채널이 없거나 다른 workspace token이면 정상적으로 deny된다. local alpha 전용이면 runner가 생성한 `centrifugo.local-alpha.json`의 `agent` namespace가 subscribe proxy를 켰는지도 확인한다. stale config면 Hermes gateway가 `agent.job`을 못 받아 `agent_job`이 pending에 남는다. |
+| `agent:` subscribe 거부 | channel 이름이 `agent:ws<workspace>.<channel>.<agentMember>`인지, observer와 target agent가 그 정확한 active channel의 멤버인지 확인한다. 다른 채널만 공유하거나 다른 workspace token이면 deny가 정상이다. |
+| `agentwork:` subscribe 거부 또는 gateway job pending | channel 이름이 `agentwork:ws<workspace>.<agentMember>`인지, connection token subject가 그 exact active agent인지 확인한다. local alpha runner의 generated config에도 `agentwork` subscribe proxy가 있어야 하며, stale config면 Hermes가 `agent.job`을 받지 못한다. |
 | prod compose가 시크릿을 요구하며 실패 | `infra/prod/.env.example`은 예시다. 실제 staging/prod는 host-local env 또는 SOPS/age로 `change-me-*`를 모두 교체한다. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |
 

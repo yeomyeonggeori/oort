@@ -205,7 +205,7 @@ struct WorkerService: Service {
     private func process(_ job: ClaimedJob) async {
         let p = job.payload
         let agentRealtime = AgentRealtimeContext(
-            channel: "agent:ws\(job.workspaceID.uuidString).\(p.agentMemberID.uuidString)",
+            channel: "agent:ws\(job.workspaceID.uuidString).\(p.channelID.uuidString).\(p.agentMemberID.uuidString)",
             channelID: p.channelID,
             agentMemberID: p.agentMemberID
         )

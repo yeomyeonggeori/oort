@@ -767,9 +767,9 @@ Then issue a scoped credential from momo pairing and replace only
 MOMO_AGENT_TOKEN in the env file. The adapter does not log in as a human and
 does not mint or refresh its own credential.
 
-Load the momo-facing env only into the Hermes process, then start the gateway:
-  set -a; . "$env_file"; set +a
-  HERMES_ACCEPT_HOOKS=1 hermes gateway run --replace -v
+Load the momo-facing env in a subshell so the agent bearer does not remain in
+your parent shell, then replace that subshell with Hermes:
+  ( set -a; . "$env_file"; set +a; exec env HERMES_ACCEPT_HOOKS=1 hermes gateway run --replace -v )
 
 momo still stores no Codex/OpenAI OAuth token; Hermes/provider runtime owns
 provider credentials.

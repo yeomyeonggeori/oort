@@ -37,7 +37,18 @@
         "history_size": 100,
         "history_ttl": "24h",
         "history_meta_ttl": "48h",
-        "force_recovery": true
+        "force_recovery": true,
+        "subscribe_proxy_enabled": true,
+        "channel_regex": "^ws[0-9A-Fa-f-]{36}\\.[0-9A-Fa-f-]{36}\\.[0-9A-Fa-f-]{36}$"
+      },
+      {
+        "name": "agentwork",
+        "history_size": 100,
+        "history_ttl": "24h",
+        "history_meta_ttl": "48h",
+        "force_recovery": true,
+        "subscribe_proxy_enabled": true,
+        "channel_regex": "^ws[0-9A-Fa-f-]{36}\\.[0-9A-Fa-f-]{36}$"
       },
       {
         "name": "user",

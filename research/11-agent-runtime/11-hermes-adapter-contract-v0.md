@@ -64,7 +64,9 @@ This path lets the Hermes gateway treat momo as one messaging platform.
 
 Adapter contract:
 
-- `connect()` authenticates to momo REST, fetches a Centrifugo token, and subscribes to `agent:` and `user:` streams.
+- `connect()` authenticates with a per-agent bearer, fetches a Centrifugo token,
+  and subscribes only to the private `agentwork:` stream. Observable `agent:`
+  status/partial remains a separate client surface.
 - `send(channel, blocks)` writes through REST `POST /messages` with `client_msg_id` idempotency.
 - `handle_message(evt)` acts only on `mention` and `dm.signal`, ignores self-authored events, derives an idempotent trigger key, invokes the target agent, and reflects final output with `send()`.
 

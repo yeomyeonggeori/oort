@@ -432,7 +432,7 @@ class HermesAdapterContractTests(unittest.TestCase):
             [
                 {"connect": {"token": "short-lived-realtime-token"}, "id": 1},
                 {
-                    "subscribe": {"channel": "agent:wsworkspace-1.agent-1"},
+                    "subscribe": {"channel": "agentwork:wsworkspace-1.agent-1"},
                     "id": 2,
                 },
             ],
@@ -603,6 +603,93 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertTrue(adapter._closing)
         self.assertIsNone(adapter._listen_task)
 
+    def test_cancelled_connect_closes_started_transport(self):
+        class CancelledConnectAdapter(CaptureAdapter):
+            async def _fetch_realtime_token(self):
+                return None
+
+            async def _open_realtime(self):
+                self._listen_task = asyncio.create_task(asyncio.sleep(30))
+
+            async def _drain_pending_gateway_jobs(self, *, reason):
+                await asyncio.Event().wait()
+
+        adapter = CancelledConnectAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+
+        async def exercise():
+            task = asyncio.create_task(adapter.connect())
+            await asyncio.sleep(0)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        asyncio.run(exercise())
+
+        self.assertTrue(adapter._closing)
+        self.assertIsNone(adapter._listen_task)
+
+    def test_failed_reconnect_cleans_partially_started_listener(self):
+        class FailedReconnectAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.close_attempts = 0
+
+            async def _fetch_realtime_token(self):
+                return None
+
+            async def _open_realtime(self):
+                self._listen_task = asyncio.create_task(asyncio.sleep(30))
+
+            async def _drain_pending_gateway_jobs(self, *, reason):
+                raise momo_adapter.MomoAPIError(503, "pending", "unavailable")
+
+            async def _close_realtime_attempt(self):
+                self.close_attempts += 1
+                await super()._close_realtime_attempt()
+                if self.close_attempts >= 2:
+                    self._closing = True
+
+        adapter = FailedReconnectAdapter()
+        with patch.object(asyncio, "sleep", new=AsyncMock()):
+            asyncio.run(adapter._reconnect_realtime())
+
+        self.assertGreaterEqual(adapter.close_attempts, 2)
+        self.assertIsNone(adapter._listen_task)
+
+    def test_failed_pending_recovery_retries_and_consumes_coalesced_signal(self):
+        class RecoveryAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.recovery_calls = 0
+
+            async def _drain_pending_gateway_jobs(self, *, reason):
+                self.recovery_calls += 1
+                if self.recovery_calls == 1:
+                    self._pending_recovery_requested = True
+                    raise momo_adapter.MomoAPIError(503, "pending", "unavailable")
+
+        adapter = RecoveryAdapter()
+        with patch.object(asyncio, "sleep", new=AsyncMock()):
+            asyncio.run(adapter._recover_pending_safely(reason="publication-gap"))
+
+        self.assertEqual(adapter.recovery_calls, 2)
+        self.assertFalse(adapter._pending_recovery_requested)
+
     def test_failed_completion_retries_cached_result_without_rerunning_provider(self):
         class RetryAdapter(CaptureAdapter):
             def __init__(self):
@@ -629,6 +716,7 @@ class HermesAdapterContractTests(unittest.TestCase):
 
         adapter = RetryAdapter()
         event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
             "type": "agent.job",
             "payload": {
                 "run_id": "run-1",
@@ -646,6 +734,225 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertEqual(adapter.complete_calls, 2)
         self.assertNotIn("run-1", adapter._pending_gateway_results)
         self.assertIn("agent.job:run-1", adapter._handled_triggers)
+
+    def test_completion_backlog_defers_new_provider_work_without_eviction(self):
+        class BackpressureAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.provider_calls = 0
+
+            async def _run_gateway_job(self, _payload):
+                self.provider_calls += 1
+                return {"status": "succeeded", "body": "done", "usage": {}}
+
+        adapter = BackpressureAdapter()
+        adapter._max_pending_results = 1
+        adapter._pending_gateway_results["unacknowledged-run"] = {
+            "status": "succeeded",
+            "body": "preserve me",
+            "usage": {},
+        }
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "new-run",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        }
+
+        with self.assertRaises(momo_adapter.MomoGatewayBackpressure):
+            asyncio.run(adapter.handle_message(event))
+
+        self.assertEqual(adapter.provider_calls, 0)
+        self.assertEqual(list(adapter._pending_gateway_results), ["unacknowledged-run"])
+        self.assertNotIn("agent.job:new-run", adapter._handled_triggers)
+
+    def test_agent_job_requires_exact_actor_and_private_channel_binding(self):
+        class BoundAdapter(CaptureAdapter):
+            async def _run_gateway_job(self, _payload):
+                self.provider_called = True
+                return {"status": "succeeded", "body": "done", "usage": {}}
+
+        adapter = BoundAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+        base_payload = {
+            "run_id": "run-1",
+            "workspace_id": "workspace-1",
+            "channel_id": "channel-1",
+            "agent_member_id": "agent-1",
+        }
+        invalid_events = [
+            {"type": "agent.job", "payload": base_payload},
+            {
+                "channel": "agentwork:wsworkspace-2.agent-1",
+                "type": "agent.job",
+                "payload": base_payload,
+            },
+            {
+                "channel": "agentwork:wsworkspace-1.agent-1",
+                "type": "agent.job",
+                "payload": {**base_payload, "workspace_id": "workspace-2"},
+            },
+            {
+                "channel": "agentwork:wsworkspace-1.agent-1",
+                "type": "agent.job",
+                "payload": {**base_payload, "agent_member_id": "agent-2"},
+            },
+        ]
+
+        for event in invalid_events:
+            asyncio.run(adapter.handle_message(event))
+
+        self.assertFalse(getattr(adapter, "provider_called", False))
+
+    def test_realtime_reader_queues_provider_work_and_still_answers_ping(self):
+        class FakeWebSocket:
+            def __init__(self):
+                self.sent = []
+                self.frames = iter(
+                    [
+                        json.dumps(
+                            {
+                                "push": {
+                                    "channel": "agentwork:wsworkspace-1.agent-1",
+                                    "pub": {
+                                        "data": {
+                                            "type": "agent.job",
+                                            "payload": {
+                                                "run_id": "run-1",
+                                                "workspace_id": "workspace-1",
+                                                "channel_id": "channel-1",
+                                                "agent_member_id": "agent-1",
+                                            },
+                                        }
+                                    },
+                                }
+                            }
+                        ),
+                        json.dumps({"ping": {}}),
+                    ]
+                )
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self.frames)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+            async def send(self, value):
+                self.sent.append(json.loads(value))
+
+            async def close(self):
+                return None
+
+        class QueueAdapter(CaptureAdapter):
+            async def handle_message(self, _event):
+                await asyncio.Event().wait()
+
+        adapter = QueueAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+        adapter._ws = FakeWebSocket()
+
+        async def exercise():
+            adapter._work_task = asyncio.create_task(adapter._work_loop())
+            await adapter._listen_loop()
+            sent = list(adapter._ws.sent)
+            await adapter.close()
+            return sent
+
+        sent = asyncio.run(exercise())
+
+        self.assertIn({"pong": {}}, sent)
+
+    def test_realtime_and_pending_recovery_share_one_provider_worker(self):
+        class SequentialAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.current = 0
+                self.max_current = 0
+                self.processed = []
+                self.release = None
+
+            async def _get(self, _path):
+                return {
+                    "jobs": [
+                        {
+                            "id": 2,
+                            "type": "agent.job",
+                            "payload": {
+                                "run_id": "recovered",
+                                "workspace_id": "workspace-1",
+                                "channel_id": "channel-1",
+                                "agent_member_id": "agent-1",
+                            },
+                        }
+                    ]
+                }
+
+            async def handle_message(self, event):
+                self.current += 1
+                self.max_current = max(self.max_current, self.current)
+                try:
+                    await self.release.wait()
+                    self.processed.append(event["payload"]["run_id"])
+                finally:
+                    self.current -= 1
+
+        adapter = SequentialAdapter()
+        realtime_event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "realtime",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        }
+
+        async def exercise():
+            adapter.release = asyncio.Event()
+            await adapter._enqueue_gateway_work(realtime_event)
+            recovery = asyncio.create_task(
+                adapter._drain_pending_gateway_jobs(reason="queue-full")
+            )
+            await asyncio.sleep(0)
+            adapter.release.set()
+            await recovery
+            await adapter.close()
+
+        asyncio.run(exercise())
+
+        self.assertEqual(adapter.max_current, 1)
+        self.assertEqual(adapter.processed, ["realtime", "recovered"])
+
+    def test_reconnect_backoff_is_bounded_for_large_attempts(self):
+        with patch.object(momo_adapter.random, "uniform", return_value=0.0):
+            self.assertEqual(momo_adapter.MomoAdapter._reconnect_delay(10_000), 30.0)
 
     def test_permanent_401_stops_reconnect_until_restart(self):
         class ReconnectAdapter(CaptureAdapter):

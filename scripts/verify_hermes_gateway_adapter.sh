@@ -82,33 +82,127 @@ OTHER_BODY='@momo337-other MOMO-337 actor binding smoke'
 TMP_ROOT=${TMPDIR:-/tmp}
 SERVER_LOG=${TMP_ROOT}/momo-hermes-gateway-server-$$.log
 CREDENTIAL_HEADERS=${TMP_ROOT}/momo-hermes-gateway-credential-headers-$$.txt
+PGPASS_FILE=${TMP_ROOT}/momo-hermes-gateway-pgpass-$$
 SERVER_PID=
+ACCESS_TOKEN=
+REFRESH_TOKEN=
+AGENT_TOKEN_ID=
+RESTRICTED_TOKEN_ID=
 
 cleanup() {
+  if [ "$ACCESS_TOKEN" != "" ]; then
+    [ "$AGENT_TOKEN_ID" = "" ] || revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$AGENT_TOKEN_ID" >/dev/null 2>&1 || true
+    [ "$RESTRICTED_TOKEN_ID" = "" ] || revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$RESTRICTED_TOKEN_ID" >/dev/null 2>&1 || true
+    logout_human_session >/dev/null 2>&1 || true
+  fi
   momo_cleanup_tracked_pids "hermes-gateway verifier" "$SERVER_PID"
-  rm -f "$CREDENTIAL_HEADERS"
+  rm -f "$CREDENTIAL_HEADERS" "$PGPASS_FILE"
 }
 trap cleanup EXIT INT TERM
 
+(umask 077; printf '%s:%s:%s:%s:%s\n' \
+  "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" \
+  "$POSTGRES_USER" "$POSTGRES_PASSWORD" >"$PGPASS_FILE")
+
 psql_url() {
-  printf 'postgres://%s:%s@%s:%s/%s' \
-    "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB"
+  printf 'postgres://%s@%s:%s/%s' \
+    "$POSTGRES_USER" "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB"
 }
 
 psql_run() {
-  "$PSQL_BIN" "$(psql_url)" -v ON_ERROR_STOP=1 --no-psqlrc "$@"
+  PGPASSFILE="$PGPASS_FILE" "$PSQL_BIN" "$(psql_url)" \
+    -v ON_ERROR_STOP=1 --no-psqlrc "$@"
 }
 
 psql_scalar() {
-  psql_run -t -A -c "$1" | tr -d '[:space:]'
+  printf '%s\n' "$1" | psql_run -t -A | tr -d '[:space:]'
 }
 
 json_escape() {
-  python3 - "$1" <<'PY'
-import json
+  printf '%s' "$1" | python3 -c 'import json, sys; print(json.dumps(sys.stdin.read()))'
+}
+
+# Request metadata and credentials travel through stdin, never process argv.
+api_request() {
+  method=$1
+  path=$2
+  bearer=${3:-}
+  body=${4:-}
+  auth_header=${5:-Authorization}
+  headers_file=${6:-}
+  printf '%s\0%s\0%s\0%s\0%s\0%s' \
+    "$BASE_URL$path" "$method" "$bearer" "$body" "$auth_header" "$headers_file" | python3 -c '
+import pathlib
 import sys
-print(json.dumps(sys.argv[1]))
-PY
+import urllib.error
+import urllib.request
+
+parts = sys.stdin.buffer.read().split(b"\0", 5)
+if len(parts) != 6:
+    raise SystemExit(2)
+url, method, secret, body, auth_header, headers_file = (
+    part.decode("utf-8") for part in parts
+)
+headers = {"Accept": "application/json"}
+if secret:
+    headers[auth_header] = ("Bearer " + secret) if auth_header == "Authorization" else secret
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        if headers_file:
+            pathlib.Path(headers_file).write_text(str(response.headers), encoding="utf-8")
+        sys.stdout.buffer.write(response.read())
+except urllib.error.HTTPError as exc:
+    if headers_file:
+        pathlib.Path(headers_file).write_text(str(exc.headers), encoding="utf-8")
+    sys.stderr.write(f"momo API request failed: HTTP {exc.code}\n")
+    raise SystemExit(22)
+'
+}
+
+api_status() {
+  method=$1
+  path=$2
+  bearer=${3:-}
+  body=${4:-}
+  auth_header=${5:-Authorization}
+  printf '%s\0%s\0%s\0%s\0%s' \
+    "$BASE_URL$path" "$method" "$bearer" "$body" "$auth_header" | python3 -c '
+import sys
+import urllib.error
+import urllib.request
+
+parts = sys.stdin.buffer.read().split(b"\0", 4)
+if len(parts) != 5:
+    raise SystemExit(2)
+url, method, secret, body, auth_header = (part.decode("utf-8") for part in parts)
+headers = {"Accept": "application/json"}
+if secret:
+    headers[auth_header] = ("Bearer " + secret) if auth_header == "Authorization" else secret
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        print(response.status)
+except urllib.error.HTTPError as exc:
+    print(exc.code)
+'
+}
+
+logout_human_session() {
+  if [ "$ACCESS_TOKEN" != "" ] && [ "$REFRESH_TOKEN" != "" ]; then
+    api_request POST /v1/auth/logout "$ACCESS_TOKEN" \
+      "{\"refreshToken\":$(json_escape "$REFRESH_TOKEN")}" >/dev/null
+  fi
+  ACCESS_TOKEN=
+  REFRESH_TOKEN=
 }
 
 wait_http() {
@@ -155,89 +249,72 @@ stop_server() {
 }
 
 login() {
-  curl -fsS -X POST "$BASE_URL/v1/auth/login" \
-    -H 'Content-Type: application/json' \
-    -d "{\"email\":$(json_escape "$HUMAN_EMAIL"),\"password\":$(json_escape "$HUMAN_PASSWORD"),\"workspace\":$(json_escape "$WORKSPACE_ID")}"
+  login_body="{\"email\":$(json_escape "$HUMAN_EMAIL"),\"password\":$(json_escape "$HUMAN_PASSWORD"),\"workspace\":$(json_escape "$WORKSPACE_ID")}";
+  api_request POST /v1/auth/login "" "$login_body"
 }
 
 send_message() {
   token=$1
   client_msg_id=$2
   body=$3
-  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" \
-    -H "Authorization: Bearer ${token}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"clientMsgId\":\"${client_msg_id}\",\"type\":\"text\",\"body\":$(json_escape "$body"),\"props\":{\"gate\":\"MOMO-337\",\"path\":\"hermes-gateway\"}}"
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" "$token" \
+    "{\"clientMsgId\":\"${client_msg_id}\",\"type\":\"text\",\"body\":$(json_escape "$body"),\"props\":{\"gate\":\"MOMO-337\",\"path\":\"hermes-gateway\"}}"
 }
 
 post_gateway_event() {
   token=$1
   run_id=$2
-  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
-    -H "Authorization: Bearer ${token}" \
-    -H 'Content-Type: application/json' \
-    -d '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
+    '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
 }
 
 post_legacy_gateway_event() {
   run_id=$1
-  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
-    -H "X-Momo-Agent-Gateway-Secret: ${AGENT_GATEWAY_SECRET}" \
-    -H 'Content-Type: application/json' \
-    -d '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
+    "$AGENT_GATEWAY_SECRET" '{"status":"running","detail":"mock gateway accepted agent.job"}' \
+    X-Momo-Agent-Gateway-Secret >/dev/null
 }
 
 post_gateway_complete() {
   token=$1
   run_id=$2
-  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/complete" \
-    -H "Authorization: Bearer ${token}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"status\":\"succeeded\",\"body\":$(json_escape "$FINAL_BODY"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/complete" "$token" \
+    "{\"status\":\"succeeded\",\"body\":$(json_escape "$FINAL_BODY"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
 }
 
 create_agent_credential() {
   human_token=$1
   agent_id=$2
   payload=$3
-  curl -fsS -D "$CREDENTIAL_HEADERS" -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials" \
-    -H "Authorization: Bearer ${human_token}" \
-    -H 'Content-Type: application/json' \
-    -d "$payload"
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials" \
+    "$human_token" "$payload" Authorization "$CREDENTIAL_HEADERS"
 }
 
 revoke_agent_credential() {
   human_token=$1
   agent_id=$2
   credential_id=$3
-  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials/${credential_id}/revoke" \
-    -H "Authorization: Bearer ${human_token}" \
-    -H 'Content-Type: application/json' \
-    -d '{"reason":"MOMO-337 runtime verifier"}'
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials/${credential_id}/revoke" \
+    "$human_token" '{"reason":"MOMO-337 runtime verifier"}'
 }
 
 fetch_pending_jobs() {
   token=$1
   agent_id=$2
-  curl -fsS "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/gateway/jobs/pending" \
-    -H "Authorization: Bearer ${token}"
+  api_request GET "/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/gateway/jobs/pending" "$token" ""
 }
 
 fetch_realtime_token() {
   token=$1
-  curl -fsS -X POST "$BASE_URL/v1/auth/realtime-token" \
-    -H "Authorization: Bearer ${token}" \
-    -H 'Content-Type: application/json' \
-    -d '{}'
+  api_request POST /v1/auth/realtime-token "$token" '{}'
 }
 
 subscribe_agent_stream() {
   user_member_id=$1
   target_agent_id=$2
-  curl -fsS -X POST "$BASE_URL/v1/centrifugo/subscribe" \
-    -H "X-Centrifugo-Proxy-Secret: ${CENT_PROXY_SECRET}" \
-    -H 'Content-Type: application/json' \
-    -d "{\"client\":\"momo-338-verifier\",\"user\":\"${user_member_id}\",\"channel\":\"agent:ws${WORKSPACE_ID}.${target_agent_id}\"}"
+  api_request POST /v1/centrifugo/subscribe "$CENT_PROXY_SECRET" \
+    "{\"client\":\"momo-338-verifier\",\"user\":\"${user_member_id}\",\"channel\":\"agentwork:ws${WORKSPACE_ID}.${target_agent_id}\"}" \
+    X-Centrifugo-Proxy-Secret
 }
 
 cleanup_fixture_rows() {
@@ -413,6 +490,7 @@ momo_cleanup_port_listener "$PORT" "hermes-gateway verifier API" || {
 start_server 0
 LOGIN_JSON=$(login)
 ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
+REFRESH_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.refreshToken // empty')
 if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   echo "[hermes-gateway] login failed" >&2
   printf '%s\n' "$LOGIN_JSON" >&2
@@ -463,14 +541,14 @@ assert_equals "1" "$ROTATED_COUNT" "rotation schedules prior credential grace"
 GRACE_SECONDS=$(psql_scalar "SELECT floor(extract(epoch FROM (expires_at-now())))::int FROM token WHERE id='${AGENT_TOKEN_ID}'")
 assert_between 82800 "$GRACE_SECONDS" 90000 "default 24h rotation grace"
 
-SCOPE_DENIED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" -H "Authorization: Bearer ${RESTRICTED_TOKEN}" -H 'Content-Type: application/json' -d "{\"clientMsgId\":\"00000000-0000-7337-8000-000000337003\",\"type\":\"text\",\"body\":\"scope denied\"}")
+SCOPE_DENIED_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" "$RESTRICTED_TOKEN" '{"clientMsgId":"00000000-0000-7337-8000-000000337003","type":"text","body":"scope denied"}')
 assert_equals "403" "$SCOPE_DENIED_CODE" "agent bearer missing messages:write"
 SCOPE_DENIED_AUDIT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE action='auth.agent_bearer.scope_denied' AND via_token_id='${RESTRICTED_TOKEN_ID}'")
 assert_equals "1" "$SCOPE_DENIED_AUDIT" "scope denial audit via_token_id"
 
 REVOKE_JSON=$(revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$RESTRICTED_TOKEN_ID")
 assert_equals "true" "$(printf '%s' "$REVOKE_JSON" | jq -r '.revokedNow')" "credential revoke"
-REVOKED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/auth/realtime-token" -H "Authorization: Bearer ${RESTRICTED_TOKEN}" -H 'Content-Type: application/json' -d '{}')
+REVOKED_CODE=$(api_status POST /v1/auth/realtime-token "$RESTRICTED_TOKEN" '{}')
 assert_equals "401" "$REVOKED_CODE" "revoked agent bearer fails closed"
 
 SEND_JSON=$(send_message "$ACCESS_TOKEN" "$CLIENT_MSG_ID" "$BODY")
@@ -489,7 +567,9 @@ JOB_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND l
 assert_equals "pending" "$JOB_STATUS" "agent_job initial status"
 
 AGENT_JOB_BROADCAST=$(psql_scalar "SELECT payload->'data'->>'type' FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='agent.job' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') LIMIT 1")
-assert_equals "agent.job" "$AGENT_JOB_BROADCAST" "agent: realtime job broadcast"
+assert_equals "agent.job" "$AGENT_JOB_BROADCAST" "agentwork: realtime job broadcast"
+AGENT_JOB_CHANNEL=$(psql_scalar "SELECT payload->>'channel' FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='agent.job' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') LIMIT 1")
+assert_equals "agentwork:ws${WORKSPACE_ID}.${AGENT_ID}" "$AGENT_JOB_CHANNEL" "private agentwork channel"
 
 psql_scalar "UPDATE outbox SET available_at=now()+interval '10 minutes' WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') RETURNING id" >/dev/null
 DELAYED_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
@@ -500,9 +580,9 @@ PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
 PENDING_COUNT=$(printf '%s' "$PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
 assert_equals "1" "$PENDING_COUNT" "agent bearer pending-job fallback"
 
-UNAUTHORIZED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H 'Content-Type: application/json' -d '{"status":"running"}')
+UNAUTHORIZED_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "" '{"status":"running"}')
 assert_equals "401" "$UNAUTHORIZED_CODE" "gateway callback without bearer"
-LEGACY_DISABLED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H "X-Momo-Agent-Gateway-Secret: ${AGENT_GATEWAY_SECRET}" -H 'Content-Type: application/json' -d '{"status":"running"}')
+LEGACY_DISABLED_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "$AGENT_GATEWAY_SECRET" '{"status":"running"}' X-Momo-Agent-Gateway-Secret)
 assert_equals "401" "$LEGACY_DISABLED_CODE" "legacy gateway secret disabled by default"
 
 OTHER_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$OTHER_CLIENT_MSG_ID" "$OTHER_BODY")
@@ -512,7 +592,7 @@ if [ "$OTHER_RUN_ID" = "" ]; then
   printf '%s\n' "$OTHER_SEND_JSON" >&2
   exit 1
 fi
-CROSS_AGENT_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" -H "Authorization: Bearer ${AGENT_TOKEN}" -H 'Content-Type: application/json' -d '{"status":"running"}')
+CROSS_AGENT_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"running"}')
 assert_equals "403" "$CROSS_AGENT_CODE" "agent bearer cannot callback another agent run"
 
 post_gateway_event "$AGENT_TOKEN" "$RUN_ID"
@@ -549,7 +629,7 @@ assert_equals "done" "$JOB_DONE" "agent_job settled"
 
 FULL_REVOKE_JSON=$(revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$AGENT_TOKEN_ID")
 assert_equals "true" "$(printf '%s' "$FULL_REVOKE_JSON" | jq -r '.revokedNow')" "full credential revoke"
-REVOKED_CALLBACK_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H "Authorization: Bearer ${AGENT_TOKEN}" -H 'Content-Type: application/json' -d '{"status":"running"}')
+REVOKED_CALLBACK_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"running"}')
 assert_equals "401" "$REVOKED_CALLBACK_CODE" "revoked token cannot callback"
 
 stop_server
@@ -558,6 +638,7 @@ post_legacy_gateway_event "$OTHER_RUN_ID"
 LEGACY_AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${OTHER_RUN_ID}' AND action='agent.gateway.status' AND via_token_id IS NULL")
 assert_equals "1" "$LEGACY_AUDIT_COUNT" "legacy flag migration case has no bearer provenance"
 
+logout_human_session
 stop_server
 cleanup_fixture_rows
 

@@ -664,14 +664,19 @@ final class MomoServerTests: XCTestCase {
             .channel(workspace: workspaceID, channel: channelID)
         )
         XCTAssertEqual(
-            CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"),
-            .agent(workspace: workspaceID, agentMember: agentMemberID)
+            CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).\(channelID.uuidString).\(agentMemberID.uuidString)"),
+            .agent(workspace: workspaceID, channel: channelID, agentMember: agentMemberID)
+        )
+        XCTAssertEqual(
+            CentrifugoRoutes.parseChannel("agentwork:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"),
+            .agentWork(workspace: workspaceID, agentMember: agentMemberID)
         )
         XCTAssertNil(CentrifugoRoutes.parseChannel("user:\(agentMemberID.uuidString)"))
+        XCTAssertNil(CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"))
         XCTAssertNil(CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).not-a-uuid"))
     }
 
-    func testAgentWorkStreamSubscriptionIsSelfOnly() {
+    func testPrivateAgentWorkStreamSubscriptionIsSelfOnly() {
         let agentA = UUID()
         let agentB = UUID()
 

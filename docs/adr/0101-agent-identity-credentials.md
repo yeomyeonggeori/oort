@@ -28,6 +28,10 @@ Slack의 봇은 **앱 단위 bot token(`xoxb-`)** — 워크스페이스별 발�
 - 스코프 v0: `agent:jobs:read`, `agent:runs:callback`, `messages:write`, `realtime:subscribe` — 로그인 시 하드코딩되는 사람 스코프보다 먼저 에이전트 쪽에 진짜 스코프 검사를 도입.
 - AuthMiddleware가 agent principal을 해석 → 메시지 작성자가 곧바로 agent member (오퍼레이터 로그인 우회 제거 → 토큰 리프레시 버그 클래스 소멸).
 - 회전/폐기: `revoked_at` + 페어링 UI에서 재발급. 회전 중 이중 유효 기간 허용.
+- realtime 경계: user-visible `agent:` progress와 private `agentwork:` job을
+  분리한다. `agent:`는 같은 활성 채널을 공유한 멤버가 관찰할 수 있지만,
+  Context Packet을 포함하는 `agentwork:`는 token actor와 target agent가 정확히
+  같은 경우만 허용한다. 한 namespace에 관찰 이벤트와 실행 입력을 섞지 않는다.
 - **Phase 2 (같은 ADR 범위, 후속 티켓)**: `delegation` 토큰 — 승인(approval) 통과 시 해당 run 한정으로 "사람 X를 대신해" 토큰을 단기 발급, `audit_log.via_token_id`로 추적. "Who-as-Whom" 시그니처 경험의 기반.
 - 마이그레이션: `AGENT_GATEWAY_SECRET`는 deprecation 기간 동안 병행 수용(env flag) 후 제거.
 

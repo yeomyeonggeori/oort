@@ -1,7 +1,7 @@
 {
   "fixture_id": "realtime_client_subscription_contract_v0_agent_partial_event",
   "ticket": "MOMO-179",
-  "channel": "agent:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000102",
+  "channel": "agent:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000202.00000000-0000-7000-8000-000000000102",
   "envelope": {
     "type": "agent.partial",
     "v": 1,

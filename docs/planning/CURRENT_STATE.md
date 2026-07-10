@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer)은 Accepted. ADR-0102(Worker/Gateway 실행 경로)는 Proposed이며 성재 결정 대기다.
-- 현재 구현 체인: MOMO-337(`#307`) 서버 bearer와 MOMO-338(`#308`) adapter bearer 단일화가 완료됐다. 다음은 MOMO-339(`#309`, macOS pairing credential UI)다.
+- 현재 구현 체인: MOMO-337(`#307`) 서버 bearer와 MOMO-338(`#308`) adapter bearer 단일화가 완료됐다. MOMO-338은 observable `agent:` progress와 private self-only `agentwork:` job을 분리했다. 다음은 MOMO-339(`#309`, macOS pairing credential UI)다.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
 ## 1. 활성 기획 레인
@@ -34,7 +34,7 @@
 | Batch | Handoff packet | Goal | 상태 | 머지 순서 |
 |---|---|---|---|---|
 | ADR-0101 Phase 1 | `docs/planning/handoffs/2026-07-10-adr-0101-agent-identity.md` | MOMO-337 `#307` | `done` (PR #310, main `8d97c82`) | 1 완료 |
-| ADR-0101 Phase 1 | 같은 패킷 | MOMO-338 `#308` | `done` (adapter bearer + transport self-only) | 2 완료 |
+| ADR-0101 Phase 1 | 같은 패킷 | MOMO-338 `#308` | `done` (adapter bearer + private `agentwork:` self-only) | 2 완료 |
 | ADR-0101 Phase 1 | 같은 패킷 | MOMO-339 `#309` | `ready` (M3) | 3 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.

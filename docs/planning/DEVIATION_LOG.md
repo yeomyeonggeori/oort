@@ -7,7 +7,7 @@
 | 날짜 | 출처 (티켓/PR) | 이탈 내용 | 오케스트레이터 분석·리서치 | 상태 | 판정·후속 |
 |---|---|---|---|---|---|
 | 2026-07-10 | MOMO-337 / PR #310 | 핸드오프는 `/gateway/jobs/pending`을 기존 경로로 전제했으나 실제 코드에는 없었다. 수용기준의 4-route bearer 이관을 닫기 위해 actor-bound pending recovery endpoint를 신설했다. | Postgres/outbox SoT와 REST 경계를 유지하고 `available_at <= now()` 및 token actor binding을 강제하므로 제품 경계 변경이 아닌 누락된 recovery surface 보완으로 판정했다. 다만 bearer 사용 audit write 증폭을 피하려면 adapter가 realtime-first여야 한다. | `accepted` | MOMO-338 #308에 realtime-first, bounded reconnect/recovery, idle tight polling 금지를 추가. |
-| 2026-07-10 | MOMO-338 / #308 | 어댑터 bearer 단일화 리뷰에서 기존 `agent:` subscribe proxy가 같은 채널의 다른 멤버에게 Context Packet work stream을 허용하는 교차-agent disclosure를 발견해, Python 범위를 넘어 서버 proxy를 self-only로 강화했다. | ADR-0101의 per-agent 신원 경계를 실제 transport까지 일치시키는 보안 수정이다. adapter도 realtime-token의 actor/workspace와 pairing env를 대조해 이중 fail-closed한다. 다중 gateway 인스턴스의 provider 중복 실행은 durable claim/lease 없이는 닫히지 않아 후속 서버 티켓으로 분리한다. | `accepted` | MOMO-338 merge에 self-only regression 포함. 후속: gateway pending claim/lease + takeover ticket 발급. |
+| 2026-07-10 | MOMO-338 / #308 | 어댑터 bearer 단일화 리뷰에서 기존 `agent:` namespace가 user-visible status/partial과 Context Packet job을 함께 운반해 같은 채널 관찰자에게 private work가 노출되는 문제를 발견했다. Python 범위를 넘어 `agentwork:` namespace와 서버 proxy/config를 추가했다. | `agent:` 전체를 self-only로 만들면 기존 macOS working UX와 MOMO-212 live gate가 깨진다. 따라서 ADR-0101에 observable progress와 exact-actor private work 분리를 반영하고 dev/local-alpha/prod config를 함께 갱신했다. 다중 gateway 인스턴스의 provider 중복 실행은 durable claim/lease 없이는 닫히지 않아 후속 서버 티켓으로 분리한다. | `accepted` | MOMO-338 merge에 `agentwork:` self-only regression 포함. 후속: MOMO-341 claim/lease + takeover. |
 
 ## 소급 항목 (2026-07-09 감사에서 발견된 역사적 이탈)
 
