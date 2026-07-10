@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# scripts/verify_hermes_gateway_adapter.sh — MOMO-325 Hermes gateway platform path
+# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337 Hermes gateway path
 #
 # Verifies the product direction where Hermes treats momo as a messaging
 # platform, while momo keeps the execution ledger SoT:
 #   REST @hermes mention -> agent_run + outbox(agent_job, method=gateway)
-#   -> agent: realtime job broadcast row -> gateway status/complete REST callback
-#   -> durable timeline message + usage_ledger + audit_log.
+#   -> per-agent bearer pending/status/complete REST -> durable timeline message
+#   + usage_ledger + audit_log.via_token_id. The legacy shared secret is tested
+#   only after an explicit migration-flag restart.
 set -eu
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
@@ -65,18 +66,26 @@ AGENT_GATEWAY_SECRET=${AGENT_GATEWAY_SECRET:-momo-325-local-gateway-secret-00000
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_EMAIL=demo@momo.local
 HUMAN_PASSWORD=dev-password
+HUMAN_MEMBER_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
+OTHER_AGENT_ID=00000000-0000-7337-8000-000000000104
 CHANNEL_ID=00000000-0000-7000-8000-000000000202
 CLIENT_MSG_ID=00000000-0000-7000-8000-000000325001
 BODY='@hermes MOMO-325 gateway native platform smoke'
 FINAL_BODY='Hermes gateway mock completed MOMO-325 through momo REST.'
+AGENT_CLIENT_MSG_ID=00000000-0000-7337-8000-000000337001
+AGENT_BODY='MOMO-337 agent bearer authored this message.'
+OTHER_CLIENT_MSG_ID=00000000-0000-7337-8000-000000337002
+OTHER_BODY='@momo337-other MOMO-337 actor binding smoke'
 
 TMP_ROOT=${TMPDIR:-/tmp}
 SERVER_LOG=${TMP_ROOT}/momo-hermes-gateway-server-$$.log
+CREDENTIAL_HEADERS=${TMP_ROOT}/momo-hermes-gateway-credential-headers-$$.txt
 SERVER_PID=
 
 cleanup() {
   momo_cleanup_tracked_pids "hermes-gateway verifier" "$SERVER_PID"
+  rm -f "$CREDENTIAL_HEADERS"
 }
 trap cleanup EXIT INT TERM
 
@@ -117,6 +126,7 @@ wait_http() {
 }
 
 start_server() {
+  allow_legacy=${1:-0}
   if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
     echo "[hermes-gateway] $BASE_URL is already serving /health; stop it before this isolated verifier." >&2
     exit 1
@@ -128,6 +138,7 @@ start_server() {
     PORT="$PORT" \
     AGENT_GATEWAY_MODE=gateway \
     AGENT_GATEWAY_SECRET="$AGENT_GATEWAY_SECRET" \
+    MOMO_ALLOW_LEGACY_GATEWAY_SECRET="$allow_legacy" \
     RATE_LIMIT_PER_MEMBER=0 \
     RATE_LIMIT_PER_IP=0 \
     swift run --package-path server MomoServer
@@ -136,21 +147,37 @@ start_server() {
   wait_http "$BASE_URL/health" "MomoServer"
 }
 
+stop_server() {
+  momo_cleanup_tracked_pids "hermes-gateway verifier restart" "$SERVER_PID"
+  SERVER_PID=
+}
+
 login() {
   curl -fsS -X POST "$BASE_URL/v1/auth/login" \
     -H 'Content-Type: application/json' \
     -d "{\"email\":$(json_escape "$HUMAN_EMAIL"),\"password\":$(json_escape "$HUMAN_PASSWORD"),\"workspace\":$(json_escape "$WORKSPACE_ID")}"
 }
 
-send_mention() {
+send_message() {
   token=$1
+  client_msg_id=$2
+  body=$3
   curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" \
     -H "Authorization: Bearer ${token}" \
     -H 'Content-Type: application/json' \
-    -d "{\"clientMsgId\":\"${CLIENT_MSG_ID}\",\"type\":\"text\",\"body\":$(json_escape "$BODY"),\"props\":{\"gate\":\"MOMO-325\",\"path\":\"hermes-gateway\"}}"
+    -d "{\"clientMsgId\":\"${client_msg_id}\",\"type\":\"text\",\"body\":$(json_escape "$body"),\"props\":{\"gate\":\"MOMO-337\",\"path\":\"hermes-gateway\"}}"
 }
 
 post_gateway_event() {
+  token=$1
+  run_id=$2
+  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
+    -H "Authorization: Bearer ${token}" \
+    -H 'Content-Type: application/json' \
+    -d '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
+}
+
+post_legacy_gateway_event() {
   run_id=$1
   curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
     -H "X-Momo-Agent-Gateway-Secret: ${AGENT_GATEWAY_SECRET}" \
@@ -159,16 +186,58 @@ post_gateway_event() {
 }
 
 post_gateway_complete() {
-  run_id=$1
+  token=$1
+  run_id=$2
   curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/complete" \
-    -H "X-Momo-Agent-Gateway-Secret: ${AGENT_GATEWAY_SECRET}" \
+    -H "Authorization: Bearer ${token}" \
     -H 'Content-Type: application/json' \
     -d "{\"status\":\"succeeded\",\"body\":$(json_escape "$FINAL_BODY"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
+}
+
+create_agent_credential() {
+  human_token=$1
+  agent_id=$2
+  payload=$3
+  curl -fsS -D "$CREDENTIAL_HEADERS" -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials" \
+    -H "Authorization: Bearer ${human_token}" \
+    -H 'Content-Type: application/json' \
+    -d "$payload"
+}
+
+revoke_agent_credential() {
+  human_token=$1
+  agent_id=$2
+  credential_id=$3
+  curl -fsS -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/credentials/${credential_id}/revoke" \
+    -H "Authorization: Bearer ${human_token}" \
+    -H 'Content-Type: application/json' \
+    -d '{"reason":"MOMO-337 runtime verifier"}'
+}
+
+fetch_pending_jobs() {
+  token=$1
+  agent_id=$2
+  curl -fsS "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/gateway/jobs/pending" \
+    -H "Authorization: Bearer ${token}"
+}
+
+fetch_realtime_token() {
+  token=$1
+  curl -fsS -X POST "$BASE_URL/v1/auth/realtime-token" \
+    -H "Authorization: Bearer ${token}" \
+    -H 'Content-Type: application/json' \
+    -d '{}'
 }
 
 cleanup_fixture_rows() {
   psql_run >/dev/null <<SQL
 SELECT set_config('app.workspace_id', '${WORKSPACE_ID}', false);
+CREATE TEMP TABLE momo337_tokens AS
+SELECT id
+  FROM token
+ WHERE workspace_id = '${WORKSPACE_ID}'
+   AND kind = 'agent_bearer'
+   AND label LIKE 'MOMO-337%';
 CREATE TEMP TABLE momo325_runs AS
 SELECT id
   FROM agent_run
@@ -179,7 +248,10 @@ SELECT id
        SELECT id
          FROM message
         WHERE workspace_id = '${WORKSPACE_ID}'
-          AND (client_msg_id = '${CLIENT_MSG_ID}' OR body = '${BODY}')
+          AND (
+            client_msg_id IN ('${CLIENT_MSG_ID}', '${OTHER_CLIENT_MSG_ID}')
+            OR body IN ('${BODY}', '${OTHER_BODY}')
+          )
      )
    );
 DELETE FROM outbox
@@ -189,6 +261,8 @@ DELETE FROM outbox
      OR payload::text LIKE '%${CLIENT_MSG_ID}%'
      OR payload::text LIKE '%${BODY}%'
      OR payload::text LIKE '%${FINAL_BODY}%'
+     OR payload::text LIKE '%${AGENT_BODY}%'
+     OR payload::text LIKE '%${OTHER_BODY}%'
      OR payload->'data'->'payload'->>'run_id' IN (
        SELECT id::text FROM momo325_runs
      )
@@ -203,7 +277,13 @@ DELETE FROM audit_log
    AND (
      detail::text LIKE '%${CLIENT_MSG_ID}%'
      OR detail::text LIKE '%MOMO-325%'
+     OR detail::text LIKE '%MOMO-337%'
      OR action LIKE 'agent.gateway.%'
+     OR via_token_id IN (SELECT id FROM momo337_tokens)
+     OR (
+       actor_member_id IN ('${AGENT_ID}', '${OTHER_AGENT_ID}')
+       AND action IN ('auth.agent_bearer.used', 'auth.agent_bearer.scope_denied', 'message.sent')
+     )
      OR run_id IN (
        SELECT id FROM momo325_runs
      )
@@ -215,11 +295,73 @@ DELETE FROM message
  WHERE workspace_id = '${WORKSPACE_ID}'
    AND (
      client_msg_id = '${CLIENT_MSG_ID}'
+     OR client_msg_id = '${AGENT_CLIENT_MSG_ID}'
+     OR client_msg_id = '${OTHER_CLIENT_MSG_ID}'
      OR body = '${BODY}'
      OR body = '${FINAL_BODY}'
+     OR body = '${AGENT_BODY}'
+     OR body = '${OTHER_BODY}'
      OR props->>'source' = 'hermes_gateway'
    );
+DELETE FROM token
+ WHERE id IN (SELECT id FROM momo337_tokens);
+DELETE FROM membership
+ WHERE workspace_id = '${WORKSPACE_ID}'
+   AND member_id = '${OTHER_AGENT_ID}';
+DELETE FROM agent
+ WHERE workspace_id = '${WORKSPACE_ID}'
+   AND member_id = '${OTHER_AGENT_ID}';
+DELETE FROM member
+ WHERE workspace_id = '${WORKSPACE_ID}'
+   AND id = '${OTHER_AGENT_ID}';
 DROP TABLE momo325_runs;
+DROP TABLE momo337_tokens;
+SQL
+}
+
+seed_other_agent() {
+  psql_run >/dev/null <<SQL
+SELECT set_config('app.workspace_id', '${WORKSPACE_ID}', false);
+INSERT INTO member
+  (id, workspace_id, kind, status, display_name, handle)
+VALUES
+  ('${OTHER_AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active',
+   'MOMO-337 Other Agent', 'momo337-other')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO agent
+  (member_id, workspace_id, model, base_url, owner_human_id)
+VALUES
+  ('${OTHER_AGENT_ID}', '${WORKSPACE_ID}', 'hermes-agent',
+   'http://localhost:8088/v1', '00000000-0000-7000-8000-000000000101')
+ON CONFLICT (member_id) DO NOTHING;
+INSERT INTO membership
+  (workspace_id, channel_id, member_id, role)
+VALUES
+  ('${WORKSPACE_ID}', '${CHANNEL_ID}', '${OTHER_AGENT_ID}', 'member')
+ON CONFLICT (channel_id, member_id)
+DO UPDATE SET left_at = NULL;
+SQL
+}
+
+prepare_app_role() {
+  psql_run >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
+    CREATE ROLE momo_app LOGIN PASSWORD 'momo_app_dev_pw';
+  END IF;
+END $$;
+ALTER ROLE momo_app
+  WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  PASSWORD 'momo_app_dev_pw';
+DO $$
+BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO momo_app', current_database());
+END $$;
+GRANT USAGE ON SCHEMA public TO momo_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO momo_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO momo_app;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO momo_app;
 SQL
 }
 
@@ -234,16 +376,30 @@ assert_equals() {
   fi
 }
 
+assert_between() {
+  minimum=$1
+  actual=$2
+  maximum=$3
+  label=$4
+  if [ "$actual" -lt "$minimum" ] || [ "$actual" -gt "$maximum" ]; then
+    echo "[hermes-gateway] assertion failed: ${label}: expected ${minimum}..${maximum}, actual=${actual}" >&2
+    tail -120 "$SERVER_LOG" >&2 || true
+    exit 1
+  fi
+}
+
 echo "[hermes-gateway] ensuring docker compose + migrations"
 ( cd "$REPO_ROOT" && make up >/dev/null && MIGRATE_IDEMPOTENCY_CHECK=1 make migrate >/dev/null )
 
 cleanup_fixture_rows
+prepare_app_role
+seed_other_agent
 momo_cleanup_port_listener "$PORT" "hermes-gateway verifier API" || {
   echo "[hermes-gateway] API port ${PORT} is occupied by a non-momo process" >&2
   exit 1
 }
 
-start_server
+start_server 0
 LOGIN_JSON=$(login)
 ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
 if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
@@ -252,7 +408,58 @@ if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   exit 1
 fi
 
-SEND_JSON=$(send_mention "$ACCESS_TOKEN")
+FULL_CREDENTIAL_JSON=$(create_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" '{"label":"MOMO-337 full"}')
+AGENT_TOKEN=$(printf '%s' "$FULL_CREDENTIAL_JSON" | jq -r '.token')
+AGENT_TOKEN_ID=$(printf '%s' "$FULL_CREDENTIAL_JSON" | jq -r '.credential.id')
+if [ "$AGENT_TOKEN" = "" ] || [ "$AGENT_TOKEN" = "null" ] || [ "$AGENT_TOKEN_ID" = "null" ]; then
+  echo "[hermes-gateway] agent credential mint failed" >&2
+  printf '%s\n' "$FULL_CREDENTIAL_JSON" >&2
+  exit 1
+fi
+HASH_MATCH=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND token_hash=digest('${AGENT_TOKEN}','sha256') AND kind='agent_bearer'")
+assert_equals "1" "$HASH_MATCH" "agent bearer stored as sha256"
+CREATOR_MATCH=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND created_by='${HUMAN_MEMBER_ID}'")
+assert_equals "1" "$CREATOR_MATCH" "agent bearer records issuing admin"
+RAW_LEAK_COUNT=$(psql_scalar "SELECT count(*) FROM token WHERE id='${AGENT_TOKEN_ID}' AND coalesce(label,'') LIKE '%${AGENT_TOKEN}%'")
+assert_equals "0" "$RAW_LEAK_COUNT" "raw agent bearer is not stored in text columns"
+if ! grep -Eiq '^cache-control:[[:space:]]*no-store' "$CREDENTIAL_HEADERS"; then
+  echo "[hermes-gateway] assertion failed: one-time credential response must be no-store" >&2
+  exit 1
+fi
+if ! grep -Eiq '^pragma:[[:space:]]*no-cache' "$CREDENTIAL_HEADERS"; then
+  echo "[hermes-gateway] assertion failed: one-time credential response must be no-cache" >&2
+  exit 1
+fi
+
+REALTIME_JSON=$(fetch_realtime_token "$AGENT_TOKEN")
+REALTIME_MEMBER=$(printf '%s' "$REALTIME_JSON" | jq -r '.memberId')
+assert_equals "$AGENT_ID" "$REALTIME_MEMBER" "agent realtime token subject"
+
+AGENT_MESSAGE_JSON=$(send_message "$AGENT_TOKEN" "$AGENT_CLIENT_MSG_ID" "$AGENT_BODY")
+AGENT_MESSAGE_AUTHOR=$(printf '%s' "$AGENT_MESSAGE_JSON" | jq -r '.authorMemberId')
+assert_equals "$AGENT_ID" "$AGENT_MESSAGE_AUTHOR" "agent bearer message author"
+MESSAGE_AUDIT_VIA=$(psql_scalar "SELECT count(*) FROM audit_log WHERE action='message.sent' AND target_id=(SELECT id FROM message WHERE client_msg_id='${AGENT_CLIENT_MSG_ID}' LIMIT 1) AND via_token_id='${AGENT_TOKEN_ID}'")
+assert_equals "1" "$MESSAGE_AUDIT_VIA" "agent message audit via_token_id"
+
+RESTRICTED_JSON=$(create_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" '{"label":"MOMO-337 restricted","scopes":["realtime:subscribe"],"rotationGraceSeconds":86400}')
+RESTRICTED_TOKEN=$(printf '%s' "$RESTRICTED_JSON" | jq -r '.token')
+RESTRICTED_TOKEN_ID=$(printf '%s' "$RESTRICTED_JSON" | jq -r '.credential.id')
+ROTATED_COUNT=$(printf '%s' "$RESTRICTED_JSON" | jq -r '.rotatedCredentialCount')
+assert_equals "1" "$ROTATED_COUNT" "rotation schedules prior credential grace"
+GRACE_SECONDS=$(psql_scalar "SELECT floor(extract(epoch FROM (expires_at-now())))::int FROM token WHERE id='${AGENT_TOKEN_ID}'")
+assert_between 82800 "$GRACE_SECONDS" 90000 "default 24h rotation grace"
+
+SCOPE_DENIED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" -H "Authorization: Bearer ${RESTRICTED_TOKEN}" -H 'Content-Type: application/json' -d "{\"clientMsgId\":\"00000000-0000-7337-8000-000000337003\",\"type\":\"text\",\"body\":\"scope denied\"}")
+assert_equals "403" "$SCOPE_DENIED_CODE" "agent bearer missing messages:write"
+SCOPE_DENIED_AUDIT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE action='auth.agent_bearer.scope_denied' AND via_token_id='${RESTRICTED_TOKEN_ID}'")
+assert_equals "1" "$SCOPE_DENIED_AUDIT" "scope denial audit via_token_id"
+
+REVOKE_JSON=$(revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$RESTRICTED_TOKEN_ID")
+assert_equals "true" "$(printf '%s' "$REVOKE_JSON" | jq -r '.revokedNow')" "credential revoke"
+REVOKED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/auth/realtime-token" -H "Authorization: Bearer ${RESTRICTED_TOKEN}" -H 'Content-Type: application/json' -d '{}')
+assert_equals "401" "$REVOKED_CODE" "revoked agent bearer fails closed"
+
+SEND_JSON=$(send_message "$ACCESS_TOKEN" "$CLIENT_MSG_ID" "$BODY")
 RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
 if [ "$RUN_ID" = "" ]; then
   echo "[hermes-gateway] @hermes mention did not create agent_run" >&2
@@ -270,18 +477,39 @@ assert_equals "pending" "$JOB_STATUS" "agent_job initial status"
 AGENT_JOB_BROADCAST=$(psql_scalar "SELECT payload->'data'->>'type' FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='agent.job' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') LIMIT 1")
 assert_equals "agent.job" "$AGENT_JOB_BROADCAST" "agent: realtime job broadcast"
 
-UNAUTHORIZED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H 'Content-Type: application/json' -d '{"status":"running"}')
-assert_equals "401" "$UNAUTHORIZED_CODE" "gateway callback without secret"
+psql_scalar "UPDATE outbox SET available_at=now()+interval '10 minutes' WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') RETURNING id" >/dev/null
+DELAYED_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+DELAYED_PENDING_COUNT=$(printf '%s' "$DELAYED_PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
+assert_equals "0" "$DELAYED_PENDING_COUNT" "future retry is not delivered before available_at"
+psql_scalar "UPDATE outbox SET available_at=now() WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') RETURNING id" >/dev/null
+PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+PENDING_COUNT=$(printf '%s' "$PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
+assert_equals "1" "$PENDING_COUNT" "agent bearer pending-job fallback"
 
-post_gateway_event "$RUN_ID"
-COMPLETE_JSON=$(post_gateway_complete "$RUN_ID")
+UNAUTHORIZED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H 'Content-Type: application/json' -d '{"status":"running"}')
+assert_equals "401" "$UNAUTHORIZED_CODE" "gateway callback without bearer"
+LEGACY_DISABLED_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H "X-Momo-Agent-Gateway-Secret: ${AGENT_GATEWAY_SECRET}" -H 'Content-Type: application/json' -d '{"status":"running"}')
+assert_equals "401" "$LEGACY_DISABLED_CODE" "legacy gateway secret disabled by default"
+
+OTHER_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$OTHER_CLIENT_MSG_ID" "$OTHER_BODY")
+OTHER_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${OTHER_CLIENT_MSG_ID}' LIMIT 1) AND agent_member_id='${OTHER_AGENT_ID}' LIMIT 1")
+if [ "$OTHER_RUN_ID" = "" ]; then
+  echo "[hermes-gateway] other-agent mention did not create agent_run" >&2
+  printf '%s\n' "$OTHER_SEND_JSON" >&2
+  exit 1
+fi
+CROSS_AGENT_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" -H "Authorization: Bearer ${AGENT_TOKEN}" -H 'Content-Type: application/json' -d '{"status":"running"}')
+assert_equals "403" "$CROSS_AGENT_CODE" "agent bearer cannot callback another agent run"
+
+post_gateway_event "$AGENT_TOKEN" "$RUN_ID"
+COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$RUN_ID")
 FINAL_SEQ=$(printf '%s' "$COMPLETE_JSON" | jq -r '.seq')
 if [ "$FINAL_SEQ" = "" ] || [ "$FINAL_SEQ" = "null" ]; then
   echo "[hermes-gateway] completion response missing seq" >&2
   printf '%s\n' "$COMPLETE_JSON" >&2
   exit 1
 fi
-RETRY_COMPLETE_JSON=$(post_gateway_complete "$RUN_ID")
+RETRY_COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$RUN_ID")
 RETRY_FINAL_SEQ=$(printf '%s' "$RETRY_COMPLETE_JSON" | jq -r '.seq')
 assert_equals "$FINAL_SEQ" "$RETRY_FINAL_SEQ" "gateway complete idempotent retry seq"
 
@@ -296,6 +524,8 @@ assert_equals "1" "$USAGE_COUNT" "usage ledger row"
 
 AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${RUN_ID}' AND action IN ('agent.gateway.status','agent.gateway.completed')")
 assert_equals "2" "$AUDIT_COUNT" "gateway audit rows"
+AUDIT_VIA_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${RUN_ID}' AND action IN ('agent.gateway.status','agent.gateway.completed') AND via_token_id='${AGENT_TOKEN_ID}'")
+assert_equals "2" "$AUDIT_VIA_COUNT" "gateway audit rows via agent credential"
 
 FINAL_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}')")
 assert_equals "1" "$FINAL_BROADCAST_COUNT" "durable final message broadcast idempotency"
@@ -303,5 +533,19 @@ assert_equals "1" "$FINAL_BROADCAST_COUNT" "durable final message broadcast idem
 JOB_DONE=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') LIMIT 1")
 assert_equals "done" "$JOB_DONE" "agent_job settled"
 
-echo "[hermes-gateway] PASS: run=${RUN_ID} final_seq=${FINAL_SEQ}"
+FULL_REVOKE_JSON=$(revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$AGENT_TOKEN_ID")
+assert_equals "true" "$(printf '%s' "$FULL_REVOKE_JSON" | jq -r '.revokedNow')" "full credential revoke"
+REVOKED_CALLBACK_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" -H "Authorization: Bearer ${AGENT_TOKEN}" -H 'Content-Type: application/json' -d '{"status":"running"}')
+assert_equals "401" "$REVOKED_CALLBACK_CODE" "revoked token cannot callback"
+
+stop_server
+start_server 1
+post_legacy_gateway_event "$OTHER_RUN_ID"
+LEGACY_AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${OTHER_RUN_ID}' AND action='agent.gateway.status' AND via_token_id IS NULL")
+assert_equals "1" "$LEGACY_AUDIT_COUNT" "legacy flag migration case has no bearer provenance"
+
+stop_server
+cleanup_fixture_rows
+
+echo "[hermes-gateway] PASS: bearer_run=${RUN_ID} final_seq=${FINAL_SEQ} legacy_run=${OTHER_RUN_ID}"
 echo "[hermes-gateway] real Hermes gateway CLI/plugin load remains runtime-unverified(real hermes gateway missing) unless a user-provided Hermes runtime is present."

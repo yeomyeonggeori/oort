@@ -111,9 +111,12 @@ struct Config: Sendable {
     /// subscribe (if Centrifugo sends the placeholder) — both are boot errors.
     /// `scripts/prod_env_preflight.sh` enforces the same contract pre-compose.
     func validateSecurityForBoot() throws {
-        if agentGateway.enabled && !agentGateway.secretConfigured {
+        if agentGateway.enabled
+            && agentGateway.allowLegacySecret
+            && !agentGateway.secretConfigured
+        {
             throw SecurityConfigurationError(errors: [
-                "AGENT_GATEWAY_SECRET is required when AGENT_GATEWAY_MODE=gateway"
+                "AGENT_GATEWAY_SECRET is required when MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1"
             ])
         }
         guard AgentProviderConfig.requiresStrictExternalProvider(momoEnvironment) else {
@@ -131,9 +134,9 @@ struct Config: Sendable {
             return agentProvider.statusResponse()
         }
 
-        let diagnostics = agentGateway.secretConfigured
-            ? []
-            : ["AGENT_GATEWAY_SECRET is required when AGENT_GATEWAY_MODE=gateway"]
+        let diagnostics = agentGateway.allowLegacySecret && !agentGateway.secretConfigured
+            ? ["AGENT_GATEWAY_SECRET is required when MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1"]
+            : []
         let availability = diagnostics.isEmpty ? "available" : "degraded"
         return AgentRuntimeStatusResponse(
             schema: "momo.agent_runtime.status.v0",
@@ -143,7 +146,7 @@ struct Config: Sendable {
             availability: availability,
             model: agentProvider.model,
             endpointLabel: "Hermes gateway platform adapter",
-            keyConfigured: agentGateway.secretConfigured,
+            keyConfigured: !agentGateway.allowLegacySecret || agentGateway.secretConfigured,
             degradedReason: diagnostics.isEmpty ? nil : diagnostics.joined(separator: "; "),
             diagnostics: diagnostics
         )
@@ -220,11 +223,15 @@ enum AgentGatewayMode: String, Sendable {
 struct AgentGatewayConfig: Sendable {
     var mode: AgentGatewayMode
     var secret: String
+    var allowLegacySecret: Bool = false
 
     static func load(environment: [String: String]) -> AgentGatewayConfig {
         AgentGatewayConfig(
             mode: AgentGatewayMode.parse(environment["AGENT_GATEWAY_MODE"]),
-            secret: environment["AGENT_GATEWAY_SECRET"] ?? ""
+            secret: environment["AGENT_GATEWAY_SECRET"] ?? "",
+            allowLegacySecret: AgentProviderConfig.boolFlag(
+                environment["MOMO_ALLOW_LEGACY_GATEWAY_SECRET"]
+            )
         )
     }
 
@@ -232,6 +239,10 @@ struct AgentGatewayConfig: Sendable {
 
     var secretConfigured: Bool {
         !AgentProviderConfig.isUnsafeSecret(secret)
+    }
+
+    var legacySecretEnabled: Bool {
+        enabled && allowLegacySecret && secretConfigured
     }
 }
 

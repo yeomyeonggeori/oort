@@ -229,6 +229,13 @@
 - `docs/LOCAL_SOLO_ALPHA_ROADMAP.md`와 `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`는 이제 local stack, fresh login, Hermes invite, `@hermes` same-channel roundtrip PASS, working indicator, diagnostics/resource evidence, open P0/P1 0을 reduced start gate로 본다. readable failure는 `START_SOLO`가 아니라 `BLOCKED` 또는 `NEEDS_FIX` evidence로 남긴다.
 - 남은 runtime-unverified: 실제 사용자가 provider-owned Hermes/Codex OAuth를 완료한 뒤 장시간 dogfood를 계속하는 것과 AWS host provisioning은 후속 실행/운영 단계다.
 
+## 0-4h. MOMO-337 Agent bearer 인증 v1 서버 (2026-07-10)
+
+- 기존 `token(kind='agent_bearer')` 스키마를 사용해 human admin 발급/목록/24h overlap 회전/폐기 API와 AuthMiddleware agent principal·4-scope fail-closed 검증을 추가했다. 원문은 1회 반환하고 DB에는 sha256만 저장한다.
+- agent 명의 REST 메시지, realtime token, pending-job 폴백, gateway event/complete에 token actor binding과 `audit_log.via_token_id`를 강제했다. 공유 시크릿은 `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1`인 이관 케이스에서만 deprecation 로그와 함께 수용한다.
+- momo-main 보안/성능 리뷰에서 1회 토큰 응답에 `Cache-Control: no-store`/`Pragma: no-cache`, 토큰 `created_by` 발급자 추적, pending fallback의 `available_at <= now()` 예약 준수를 추가했다.
+- 검증: `swift test --package-path server` PASS(47 tests), clean commit `cb47b54`에서 `scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260710T000557Z-pid30082-ns1783641957942474000-wtec169ce4b610-r13a2e73e660f.md`). 실제 Hermes adapter의 bearer 단일화와 페어링 UI는 MOMO-338/339 후속이다.
+
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.

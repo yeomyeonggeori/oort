@@ -19,10 +19,10 @@ import PostgresNIO
 ///      see infra/centrifugo*.json). Requests without the exact secret are
 ///      rejected 401 before the body is trusted; network position alone no
 ///      longer authenticates the callback.
-///   2. Session liveness — the subscribing member must still hold at least one
-///      unrevoked session token (`token.revoked_at IS NULL`), so logout also
-///      cuts off new realtime subscriptions even while a short-lived
-///      connection JWT is technically still valid.
+///   2. Credential liveness — humans must hold an unrevoked session token;
+///      agents must hold an unrevoked agent bearer with `realtime:subscribe`.
+///      Revocation therefore cuts off new subscriptions even while a
+///      short-lived connection JWT is technically still valid.
 struct CentrifugoRoutes: Sendable {
     let db: Database
     let tokenStore: TokenStore
@@ -63,13 +63,13 @@ struct CentrifugoRoutes: Sendable {
             return .deny("missing or invalid user")
         }
 
-        // 2. Revocation: a member whose sessions were all revoked (logout) may
-        // not open new subscriptions (MOMO-300; coarse per-member semantics,
-        // see TokenStore.hasActiveSessionToken).
-        guard try await tokenStore.hasActiveSessionToken(
+        // 2. Revocation: a member with no active credential may not open a new
+        // subscription (coarse per-member semantics; connection JWTs are not
+        // stored individually).
+        guard try await tokenStore.hasActiveRealtimeCredential(
             memberID: userMemberID, workspaceID: parsed.workspaceID
         ) else {
-            return .deny("no active session for this member")
+            return .deny("no active realtime credential for this member")
         }
 
         let allowed: Bool = switch parsed {

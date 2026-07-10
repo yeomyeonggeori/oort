@@ -156,7 +156,8 @@ cp infra/.env.example .env
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `AGENT_GATEWAY_MODE` | 서버, worker | `worker`(기본) 또는 `gateway`. `gateway`면 `@hermes` mention이 AgentWorker provider call 대신 Hermes native platform adapter로 전달된다. |
-| `AGENT_GATEWAY_SECRET` | 서버, Hermes adapter | MOMO-325 gateway callback 공유 시크릿. `gateway` mode에서 비어 있거나 dev placeholder면 서버가 fail-closed. provider OAuth token이 아니며 momo-facing callback 인증에만 사용한다. |
+| `AGENT_GATEWAY_SECRET` | 서버, Hermes adapter | ADR-0101 이관 중에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
+| `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 어댑터 bearer 이관 후 제거 대상. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
 Codex OAuth access/refresh token은 momo 환경변수가 아니다. External runtime
@@ -307,7 +308,30 @@ scripts/momo hermes-gateway-smoke --real
 
 ```sh
 AGENT_GATEWAY_MODE=gateway
-AGENT_GATEWAY_SECRET=<same secret as MOMO_AGENT_GATEWAY_SECRET>
+# token-only 서버 경로는 공유 시크릿이 필요하지 않다.
+```
+
+MOMO-337부터 human workspace owner/admin은 agent credential을 발급한다. 응답의
+`token` 원문은 이 응답에서만 노출되고 서버에는 sha256만 저장된다. 같은 POST를
+다시 호출하면 기존 active credential은 기본 24시간 overlap 후 만료된다.
+
+```text
+POST /v1/workspaces/{workspace}/agents/{agent}/credentials
+GET  /v1/workspaces/{workspace}/agents/{agent}/credentials
+POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
+```
+
+기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:write`,
+`realtime:subscribe`다. agent bearer는 이 네 서버 surface 외의 human/admin API에
+사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
+MOMO-338 전의 현재 Hermes adapter는 아직 공유 시크릿을 보내므로 짧은 이관 기간에는
+아래 opt-in을 함께 설정한다.
+
+```sh
+AGENT_GATEWAY_MODE=gateway \
+AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 \
+scripts/momo start
 ```
 
 adapter/Hermes side env는 `$HOME/.momo/hermes-gateway.env`에 생성된다. provider OAuth/Codex/OpenAI
@@ -323,6 +347,7 @@ set -a
 set +a
 AGENT_GATEWAY_MODE=gateway \
 AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 \
 scripts/momo start
 
 # 다른 터미널에서, Hermes gateway와 provider OAuth/login을 사용자가 준비한 뒤:

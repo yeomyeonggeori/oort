@@ -2,8 +2,8 @@ import Foundation
 import Hummingbird
 import PostgresNIO
 
-/// Persists issued App JWTs in the `token` table (schema_v0 `kind='session'`)
-/// so they can be revoked (MOMO-300 / L4 §7.1).
+/// Persists and verifies App JWTs (`kind='session'`) and per-agent credentials
+/// (`kind='agent_bearer'`) in the schema_v0 `token` table.
 ///
 /// Only `sha256(jwt)` is stored (`token_hash`, computed by pgcrypto `digest()`
 /// inside Postgres — the raw token is never written to a table). Every
@@ -17,6 +17,20 @@ import PostgresNIO
 /// only visible inside its own workspace.
 struct TokenStore: Sendable {
     let db: Database
+
+    struct AgentBearerIdentity: Sendable, Equatable {
+        let tokenID: UUID
+        let memberID: UUID
+        let workspaceID: UUID
+        let scopes: [String]
+    }
+
+    private enum AgentBearerResolution: Sendable {
+        case active(AgentBearerIdentity, scopeGranted: Bool)
+        case revoked
+        case expired
+        case unknown
+    }
 
     /// Outcome of looking up a presented token against the `token` table.
     enum TokenState: Sendable, Equatable {
@@ -91,6 +105,109 @@ struct TokenStore: Sendable {
         }
     }
 
+    /// Resolve an opaque agent bearer under tenant RLS, enforce the route's
+    /// required scope, update liveness, and audit the presentation without ever
+    /// persisting the raw secret.
+    ///
+    /// Scope-denied presentations are also committed to `audit_log` before the
+    /// 403 is returned. Revoked/expired/unknown credentials fail closed with
+    /// 401 and never become a principal.
+    func authenticateAgentBearer(
+        rawToken: String,
+        requiredScope: String,
+        method: String,
+        path: String
+    ) async throws -> AgentBearerIdentity {
+        guard let workspaceID = AgentBearerToken.workspaceID(from: rawToken) else {
+            throw HTTPError(.unauthorized, message: "invalid agent bearer token")
+        }
+
+        let result: AgentBearerResolution = try await db
+            .withTenantTransaction(workspaceID: workspaceID) { conn in
+                let rows = try await conn.query(
+                    """
+                    SELECT t.id, t.actor_member_id, t.scopes, t.revoked_at, t.expires_at
+                      FROM token t
+                      JOIN member m
+                        ON m.id = t.actor_member_id
+                       AND m.workspace_id = t.workspace_id
+                       AND m.kind = 'agent'
+                       AND m.status = 'active'
+                       AND m.deleted_at IS NULL
+                      JOIN agent a
+                        ON a.member_id = m.id
+                       AND a.workspace_id = m.workspace_id
+                     WHERE t.workspace_id = \(workspaceID)
+                       AND t.kind = 'agent_bearer'
+                       AND t.subject_member_id IS NULL
+                       AND t.token_hash = digest(\(rawToken), 'sha256')
+                     LIMIT 1
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let row = rows.first else { return .unknown }
+                let (tokenID, memberID, scopes, revokedAt, expiresAt) = try row.decode(
+                    (UUID, UUID, [String], Date?, Date?).self
+                )
+                if revokedAt != nil { return .revoked }
+                if let expiresAt, expiresAt <= Date() {
+                    return .expired
+                }
+
+                let granted = scopes.contains(requiredScope)
+                if granted {
+                    _ = try await conn.query(
+                        "UPDATE token SET last_used_at = now() WHERE id = \(tokenID)",
+                        logger: db.logger
+                    )
+                }
+
+                let action = granted
+                    ? "auth.agent_bearer.used"
+                    : "auth.agent_bearer.scope_denied"
+                let detail = Self.agentBearerAuditDetail(
+                    method: method,
+                    path: path,
+                    requiredScope: requiredScope,
+                    granted: granted
+                )
+                _ = try await conn.query(
+                    """
+                    INSERT INTO audit_log
+                      (workspace_id, actor_member_id, action, target_type,
+                       via_token_id, detail)
+                    VALUES
+                      (\(workspaceID), \(memberID), \(action), 'route',
+                       \(tokenID), \(detail)::jsonb)
+                    """,
+                    logger: db.logger
+                )
+
+                return .active(
+                    AgentBearerIdentity(
+                        tokenID: tokenID,
+                        memberID: memberID,
+                        workspaceID: workspaceID,
+                        scopes: scopes
+                    ),
+                    scopeGranted: granted
+                )
+            }
+
+        switch result {
+        case .active(let identity, true):
+            return identity
+        case .active(_, false):
+            throw HTTPError(.forbidden, message: "\(requiredScope) scope required")
+        case .revoked:
+            throw HTTPError(.unauthorized, message: "agent bearer token has been revoked")
+        case .expired:
+            throw HTTPError(.unauthorized, message: "agent bearer token has expired")
+        case .unknown:
+            throw HTTPError(.unauthorized, message: "unknown agent bearer token")
+        }
+    }
+
     /// Revoke the presented token (idempotent).
     ///
     /// Returns the affected token id and whether this call actually flipped
@@ -153,5 +270,56 @@ struct TokenStore: Sendable {
             ).collect()
             return !rows.isEmpty
         }
+    }
+
+    /// Realtime connection JWTs are short-lived and not stored. Human members
+    /// therefore prove liveness with a session token, while agent members prove
+    /// it with an active agent bearer carrying `realtime:subscribe`.
+    func hasActiveRealtimeCredential(memberID: UUID, workspaceID: UUID) async throws -> Bool {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT 1
+                  FROM token t
+                  JOIN member m
+                    ON m.id = t.actor_member_id
+                   AND m.workspace_id = t.workspace_id
+                   AND m.status = 'active'
+                   AND m.deleted_at IS NULL
+                 WHERE t.actor_member_id = \(memberID)
+                   AND t.workspace_id = \(workspaceID)
+                   AND t.revoked_at IS NULL
+                   AND (t.expires_at IS NULL OR t.expires_at > now())
+                   AND (
+                     (m.kind = 'human' AND t.kind = 'session')
+                     OR
+                     (m.kind = 'agent' AND t.kind = 'agent_bearer'
+                      AND 'realtime:subscribe' = ANY(t.scopes))
+                   )
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            return !rows.isEmpty
+        }
+    }
+
+    private static func agentBearerAuditDetail(
+        method: String,
+        path: String,
+        requiredScope: String,
+        granted: Bool
+    ) -> String {
+        let object: [String: Any] = [
+            "schema": "momo.agent_bearer.use.v1",
+            "method": method,
+            "path": path,
+            "required_scope": requiredScope,
+            "granted": granted,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]),
+              let value = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return value
     }
 }

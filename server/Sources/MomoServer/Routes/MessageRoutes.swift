@@ -140,6 +140,26 @@ struct MessageRoutes: Sendable {
                 )
             }
 
+            if didInsert, principal.kind == .agent {
+                let detail = Self.jsonString([
+                    "schema": "momo.agent_message.sent.v1",
+                    "channel_id": channelID.uuidString,
+                    "client_msg_id": dto.clientMsgId.uuidString,
+                    "message_type": type,
+                ])
+                _ = try await conn.query(
+                    """
+                    INSERT INTO audit_log
+                      (workspace_id, actor_member_id, action, target_type,
+                       target_id, via_token_id, detail)
+                    VALUES
+                      (\(workspaceID), \(principal.memberID), 'message.sent',
+                       'message', \(id), \(principal.tokenID), \(detail)::jsonb)
+                    """,
+                    logger: db.logger
+                )
+            }
+
             return (true, MessageDTO(
                 id: id.uuidString, channelId: channelID.uuidString, seq: seq,
                 hlcTs: ts, hlcCount: count, authorMemberId: principal.memberID.uuidString,
