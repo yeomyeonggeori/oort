@@ -233,7 +233,8 @@
 
 - 기존 `token(kind='agent_bearer')` 스키마를 사용해 human admin 발급/목록/24h overlap 회전/폐기 API와 AuthMiddleware agent principal·4-scope fail-closed 검증을 추가했다. 원문은 1회 반환하고 DB에는 sha256만 저장한다.
 - agent 명의 REST 메시지, realtime token, pending-job 폴백, gateway event/complete에 token actor binding과 `audit_log.via_token_id`를 강제했다. 공유 시크릿은 `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1`인 이관 케이스에서만 deprecation 로그와 함께 수용한다.
-- 검증: `swift test --package-path server` PASS(47 tests), `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260709T232953Z-pid1234-ns1783639793762272000-wtec169ce4b610-re5d9a34139a7.md`). 실제 Hermes adapter의 bearer 단일화와 페어링 UI는 MOMO-338/339 후속이다.
+- momo-main 보안/성능 리뷰에서 1회 토큰 응답에 `Cache-Control: no-store`/`Pragma: no-cache`, 토큰 `created_by` 발급자 추적, pending fallback의 `available_at <= now()` 예약 준수를 추가했다.
+- 검증: `swift test --package-path server` PASS(47 tests), clean commit `cb47b54`에서 `scripts/local_gate.sh --profile runtime-agent` PASS(`/var/folders/zj/v6yd5tj104l14xhlpn1bx1r80000gn/T//momo-local-gate/local-gate-runtime-agent-20260710T000557Z-pid30082-ns1783641957942474000-wtec169ce4b610-r13a2e73e660f.md`). 실제 Hermes adapter의 bearer 단일화와 페어링 UI는 MOMO-338/339 후속이다.
 
 ## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
