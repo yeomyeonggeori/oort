@@ -216,18 +216,22 @@ struct MomoWorkspaceSettingsSurface: View {
 struct MomoMemberProfileSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     let member: Member
+    @ObservedObject var viewModel: ChatViewModel
     let onSave: (String, String?, Presence) -> Void
     @State private var displayName: String
     @State private var avatarPath: String
     @State private var presenceRaw: String
+    @State private var credentialReveal: MomoAgentCredentialReveal?
 
     init(
         copy: MomoWorkspaceCopy,
         member: Member,
+        viewModel: ChatViewModel,
         onSave: @escaping (String, String?, Presence) -> Void
     ) {
         self.copy = copy
         self.member = member
+        self.viewModel = viewModel
         self.onSave = onSave
         _displayName = State(initialValue: MomoLocalProfileStore.displayName(for: member) ?? member.displayName)
         _avatarPath = State(initialValue: MomoLocalProfileStore.avatarPath(for: member) ?? member.avatarURL?.path ?? "")
@@ -308,10 +312,22 @@ struct MomoMemberProfileSettingsSurface: View {
                 }
             }
 
+            if member.isAgent {
+                MomoAgentCredentialManagementView(
+                    copy: copy,
+                    agent: member,
+                    viewModel: viewModel,
+                    onReveal: { credentialReveal = $0 }
+                )
+            }
+
             Label(copy.profileLocalDraftNote, systemImage: "info.circle")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
+        }
+        .sheet(item: $credentialReveal) { reveal in
+            MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
         }
     }
 

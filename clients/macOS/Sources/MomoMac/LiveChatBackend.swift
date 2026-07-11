@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var connected = false
@@ -29,6 +29,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
     private var approvalsById: [ApprovalID: Approval] = [:]
     private var inviteJoinState: InviteJoinState = .idle
+    private var credentialsByAgent: [MemberID: [MomoAgentCredential]] = [:]
 
     // Realtime fan-out continuations, keyed by channel.
     private var channelStreams: [ChannelID: [UUID: AsyncStream<RealtimeEvent>.Continuation]] = [:]
@@ -53,6 +54,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         demoCostSnapshotsByChannel = [:]
         replayedDemoDeltaChannels = []
         approvalsById = [:]
+        credentialsByAgent = [:]
 
         var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
@@ -435,6 +437,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         agentStreams = [:]
         realtimeStatusStreams = [:]
         realtimeStatusByChannel = [:]
+        credentialsByAgent = [:]
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
@@ -578,6 +581,85 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         )
         apply(membership)
         return membership
+    }
+
+    func agentCredentials(
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> [MomoAgentCredential] {
+        guard connected, self.workspace == workspace else { throw BackendError.notConnected }
+        return (credentialsByAgent[agent] ?? []).sorted { $0.createdAtMs > $1.createdAtMs }
+    }
+
+    func issueAgentCredential(
+        workspace: WorkspaceID,
+        agent: MemberID,
+        rotationGraceSeconds: Int = 24 * 60 * 60
+    ) async throws -> MomoAgentCredentialReveal {
+        guard connected, self.workspace == workspace else { throw BackendError.notConnected }
+        guard members.contains(where: { $0.id == agent && $0.isAgent && $0.status == .active }) else {
+            throw BackendError.problem(status: 404, title: "active agent not found", detail: nil)
+        }
+
+        let now = Date()
+        let graceDeadline = now.addingTimeInterval(TimeInterval(rotationGraceSeconds))
+        var stored = credentialsByAgent[agent] ?? []
+        var rotatedCount = 0
+        for index in stored.indices where stored[index].displayStatus(now: now) != .revoked {
+            let currentExpiry = stored[index].expiresAtMs.map {
+                Date(timeIntervalSince1970: TimeInterval($0) / 1_000)
+            }
+            if currentExpiry == nil || currentExpiry! > graceDeadline {
+                stored[index].expiresAtMs = Int64(graceDeadline.timeIntervalSince1970 * 1_000)
+            }
+            rotatedCount += 1
+        }
+
+        let issued = MomoAgentCredential(
+            id: UUID(),
+            agentMemberId: agent,
+            serverStatus: "active",
+            scopes: [
+                "agent:jobs:read",
+                "agent:runs:callback",
+                "messages:write",
+                "realtime:subscribe",
+            ],
+            label: "Hermes gateway",
+            lastUsedAtMs: nil,
+            expiresAtMs: nil,
+            revokedAtMs: nil,
+            createdAtMs: Int64(now.timeIntervalSince1970 * 1_000)
+        )
+        stored.append(issued)
+        credentialsByAgent[agent] = stored
+
+        return MomoAgentCredentialReveal(
+            credential: issued,
+            token: "momo_agent_demo_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())",
+            tokenType: "Bearer",
+            rotatedCredentialCount: rotatedCount,
+            rotationGraceEndsAtMs: rotatedCount > 0
+                ? Int64(graceDeadline.timeIntervalSince1970 * 1_000)
+                : nil
+        )
+    }
+
+    func revokeAgentCredential(
+        _ credential: UUID,
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> MomoAgentCredential {
+        guard connected, self.workspace == workspace else { throw BackendError.notConnected }
+        guard var stored = credentialsByAgent[agent],
+              let index = stored.firstIndex(where: { $0.id == credential })
+        else {
+            throw BackendError.problem(status: 404, title: "agent credential not found", detail: nil)
+        }
+        stored[index].serverStatus = "revoked"
+        stored[index].revokedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
+        credentialsByAgent[agent] = stored
+        return stored[index]
     }
 
     public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {

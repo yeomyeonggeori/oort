@@ -9,6 +9,12 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
+## 0-1. MOMO-339 macOS Agent Credential Pairing UI (2026-07-11)
+
+- 페어링 초대 완료를 per-agent bearer 발급 API에 연결하고, 원문을 transient one-time reveal sheet에서만 표시한다. 프로필과 페어링 패널은 configured/active/expiring/revoked 메타데이터, 24시간 grace 회전, 확인 후 폐기, 401 복구 안내를 공유한다.
+- 매니페스트는 env 위치와 `MOMO_AGENT_TOKEN` 키 이름만 포함하며 bearer 원문은 계속 제외한다. 앱은 `~/.momo/hermes-gateway.env`를 직접 쓰지 않고 mode 600 확인과 gateway 재시작을 안내한다.
+- 검증: `swift build --disable-sandbox` PASS, credential 계약/스냅샷 포함 `swift test --disable-sandbox --skip MessageBubbleSnapshotTests` 82 tests PASS, design-review Blocker 0. 기존 MessageBubble ImageRenderer 테스트 2개는 이 샌드박스에서 SnapshotTesting 내부 signal 5로 단독 재현되며, `macos-ui` 런타임 게이트 evidence는 오케스트레이터가 merge 전에 수행한다.
+
 ## 0-1. MOMO-342 AgentWorker Persistent DB Fixture Hardening (2026-07-11)
 
 - MOMO-338 merge 후 root main의 오래 유지된 DB에서 사용자가 제거한 Hermes channel membership 때문에 `verify_agent_worker.sh`의 positive mention route가 run 없이 끝나는 main gate 간섭을 확인했다. 제품 runtime 회귀가 아니라 migration seed가 영구히 유지된다고 가정한 verifier 결함이었다.

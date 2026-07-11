@@ -68,6 +68,7 @@ public final class ChatViewModel: ObservableObject {
     private let chat: any ChatBackend
     private let agentTransport: any AgentTransport
     private let onboarding: (any OnboardingInviteBackend)?
+    private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
 
     // Workspace context.
@@ -99,6 +100,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     @Published public private(set) var channelCreateInFlight = false
     @Published public private(set) var channelMemberMutationIds: Set<MemberID> = []
+    @Published private(set) var agentCredentialsByMember: [MemberID: [MomoAgentCredential]] = [:]
+    @Published private(set) var agentCredentialLoadingMembers: Set<MemberID> = []
 
     // Onboarding / invite flow v0. The dev app drives this through LiveChatBackend
     // until the production REST join API lands.
@@ -128,6 +131,7 @@ public final class ChatViewModel: ObservableObject {
         self.chat = chat
         self.agentTransport = agentTransport
         self.onboarding = onboarding
+        self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.foundationModelsCapability = foundationModelsCapability
         self.localContextCopilot = localContextCopilot
     }
@@ -180,6 +184,8 @@ public final class ChatViewModel: ObservableObject {
         realtimeStatuses = [:]
         agentRuntimeStatus = .localMock
         agentWorkingStates = [:]
+        agentCredentialsByMember = [:]
+        agentCredentialLoadingMembers = []
         typingStates = [:]
         localTypingChannels = []
         typingStopTasks.values.forEach { $0.cancel() }
@@ -465,6 +471,70 @@ public final class ChatViewModel: ObservableObject {
             composerDraft += "\(needsSeparator ? " " : "")\(token)"
         }
         mentionNotice = "\(member.displayName) mention inserted."
+    }
+
+    func agentCredentials(for member: MemberID) -> [MomoAgentCredential] {
+        agentCredentialsByMember[member] ?? []
+    }
+
+    func isLoadingAgentCredentials(for member: MemberID) -> Bool {
+        agentCredentialLoadingMembers.contains(member)
+    }
+
+    func refreshAgentCredentials(for agent: MemberID) async throws {
+        guard let workspaceId else { throw BackendError.notConnected }
+        guard let agentCredentialBackend else {
+            throw BackendError.problem(
+                status: 501,
+                title: "agent credentials unavailable",
+                detail: nil
+            )
+        }
+        guard !agentCredentialLoadingMembers.contains(agent) else { return }
+        agentCredentialLoadingMembers.insert(agent)
+        defer { agentCredentialLoadingMembers.remove(agent) }
+        agentCredentialsByMember[agent] = try await agentCredentialBackend.agentCredentials(
+            workspace: workspaceId,
+            agent: agent
+        )
+    }
+
+    func issueAgentCredential(
+        for agent: MemberID,
+        rotationGraceSeconds: Int = 24 * 60 * 60
+    ) async throws -> MomoAgentCredentialReveal {
+        guard let workspaceId else { throw BackendError.notConnected }
+        guard let agentCredentialBackend else {
+            throw BackendError.problem(
+                status: 501,
+                title: "agent credentials unavailable",
+                detail: nil
+            )
+        }
+        let reveal = try await agentCredentialBackend.issueAgentCredential(
+            workspace: workspaceId,
+            agent: agent,
+            rotationGraceSeconds: rotationGraceSeconds
+        )
+        try await refreshAgentCredentials(for: agent)
+        return reveal
+    }
+
+    func revokeAgentCredential(_ credential: UUID, for agent: MemberID) async throws {
+        guard let workspaceId else { throw BackendError.notConnected }
+        guard let agentCredentialBackend else {
+            throw BackendError.problem(
+                status: 501,
+                title: "agent credentials unavailable",
+                detail: nil
+            )
+        }
+        _ = try await agentCredentialBackend.revokeAgentCredential(
+            credential,
+            workspace: workspaceId,
+            agent: agent
+        )
+        try await refreshAgentCredentials(for: agent)
     }
 
     @discardableResult

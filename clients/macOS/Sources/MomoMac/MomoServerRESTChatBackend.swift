@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing {
     public let config: MomoServerRESTChatBackendConfig
 
     private let session: URLSession
@@ -261,6 +261,51 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
         ).membership.membership()
     }
 
+    func agentCredentials(
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> [MomoAgentCredential] {
+        let response = try await get(
+            "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/credentials",
+            queryItems: [],
+            response: AgentCredentialListResponseDTO.self
+        )
+        return response.credentials.map(\.credential)
+    }
+
+    func issueAgentCredential(
+        workspace: WorkspaceID,
+        agent: MemberID,
+        rotationGraceSeconds: Int = 24 * 60 * 60
+    ) async throws -> MomoAgentCredentialReveal {
+        let response = try await post(
+            "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/credentials",
+            body: CreateAgentCredentialRequestDTO(
+                scopes: nil,
+                label: "Hermes gateway",
+                expiresAtMs: nil,
+                rotationGraceSeconds: rotationGraceSeconds
+            ),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: CreateAgentCredentialResponseDTO.self
+        )
+        return response.reveal
+    }
+
+    func revokeAgentCredential(
+        _ credential: UUID,
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> MomoAgentCredential {
+        try await post(
+            "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/credentials/\(credential.uuidString)/revoke",
+            body: RevokeAgentCredentialRequestDTO(reason: "revoked from macOS pairing"),
+            authorized: true,
+            response: RevokeAgentCredentialResponseDTO.self
+        ).credential.credential
+    }
+
     public func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
         guard let workspace else { throw BackendError.notConnected }
         let page = try await get(
@@ -375,9 +420,13 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, RealtimeSta
         _ path: String,
         body: RequestBody,
         authorized: Bool,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
         response: ResponseBody.Type
     ) async throws -> ResponseBody {
-        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        var request = URLRequest(
+            url: config.baseURL.appendingPathComponent(path),
+            cachePolicy: cachePolicy
+        )
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
@@ -614,6 +663,71 @@ private struct LoginResponse: Decodable {
     let accessToken: String
     let refreshToken: String
     let member: MemberDTO
+}
+
+private struct CreateAgentCredentialRequestDTO: Encodable {
+    let scopes: [String]?
+    let label: String?
+    let expiresAtMs: Int64?
+    let rotationGraceSeconds: Int
+}
+
+private struct RevokeAgentCredentialRequestDTO: Encodable {
+    let reason: String
+}
+
+private struct AgentCredentialDTO: Decodable {
+    let id: UUID
+    let agentMemberId: MemberID
+    let status: String
+    let scopes: [String]
+    let label: String?
+    let lastUsedAtMs: Int64?
+    let expiresAtMs: Int64?
+    let revokedAtMs: Int64?
+    let createdAtMs: Int64
+
+    var credential: MomoAgentCredential {
+        MomoAgentCredential(
+            id: id,
+            agentMemberId: agentMemberId,
+            serverStatus: status,
+            scopes: scopes,
+            label: label,
+            lastUsedAtMs: lastUsedAtMs,
+            expiresAtMs: expiresAtMs,
+            revokedAtMs: revokedAtMs,
+            createdAtMs: createdAtMs
+        )
+    }
+}
+
+private struct AgentCredentialListResponseDTO: Decodable {
+    let credentials: [AgentCredentialDTO]
+}
+
+private struct CreateAgentCredentialResponseDTO: Decodable {
+    let credential: AgentCredentialDTO
+    let token: String
+    let tokenType: String
+    let rotatedCredentialCount: Int
+    let rotationGraceEndsAtMs: Int64?
+
+    var reveal: MomoAgentCredentialReveal {
+        MomoAgentCredentialReveal(
+            credential: credential.credential,
+            token: token,
+            tokenType: tokenType,
+            rotatedCredentialCount: rotatedCredentialCount,
+            rotationGraceEndsAtMs: rotationGraceEndsAtMs
+        )
+    }
+}
+
+private struct RevokeAgentCredentialResponseDTO: Decodable {
+    let credential: AgentCredentialDTO
+    let revokedNow: Bool
+    let alreadyRevoked: Bool
 }
 
 private struct MemberDTO: Decodable {

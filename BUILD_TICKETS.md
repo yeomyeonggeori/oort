@@ -1567,10 +1567,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] [python/performance] cancellation·partial reconnect listener cleanup, bounded recovery retry, completion backlog backpressure를 regression test로 고정한다.
 
 ### ☐ MOMO-339 수용기준 — 페어링 위저드 자격증명 발급/회전 UI `[swift/macos-ui]` · 의존: MOMO-337, MOMO-262
-- [ ] [swift] 에이전트 초대 완료 시 MOMO-337 발급 API 호출 → 토큰 원문 1회 표시 + `~/.momo/hermes-gateway.env` 기록 안내(복사 버튼). 매니페스트/export에는 계속 시크릿 비포함(MOMO-262 계약 유지).
-- [ ] [swift] 멤버 프로필/페어링 패널에 자격증명 상태 칩(configured/revoked)과 회전·폐기 액션.
-- [ ] [swift] 테스트: 매니페스트 시크릿 배제 회귀 + mock 백엔드 발급/회전 플로우.
-- [ ] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙).
+- [x] [swift] 에이전트 초대 완료 시 MOMO-337 발급 API 호출 → 토큰 원문 1회 표시 + `~/.momo/hermes-gateway.env` 기록 안내(복사 버튼). 매니페스트/export에는 계속 시크릿 비포함(MOMO-262 계약 유지).
+- [x] [swift] 멤버 프로필/페어링 패널에 자격증명 상태 칩(configured/revoked)과 회전·폐기 액션.
+- [x] [swift] 테스트: 매니페스트 시크릿 배제 회귀 + mock 백엔드 발급/회전 플로우.
+- [x] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙).
+> Worker 구현·정적/Swift 검증 완료. `macos-ui` 런타임 게이트 evidence는 오케스트레이터가 merge 전에 수행하므로 goal 표시는 미완료로 유지한다.
 
 ### ☐ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-337, MOMO-338
 > MOMO-338 성능 리뷰 후속. 현재 pending endpoint는 actor-bound read지만 lease/claim이 없어 동일 agent의 gateway 인스턴스가 겹치면 provider turn과 비용이 중복될 수 있다.

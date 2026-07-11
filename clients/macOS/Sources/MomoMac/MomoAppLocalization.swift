@@ -1360,4 +1360,275 @@ struct MomoWorkspaceCopy {
         case .english: return "Known Limits"
         }
     }
+
+    var agentCredentialSectionTitle: String {
+        switch language {
+        case .korean: return "에이전트 자격증명"
+        case .english: return "Agent credentials"
+        }
+    }
+
+    var agentCredentialSectionSubtitle: String {
+        switch language {
+        case .korean: return "momo와 Hermes gateway 사이에서만 사용하는 에이전트별 bearer입니다. Provider OAuth 자격증명과는 별개입니다."
+        case .english: return "This per-agent bearer is only for momo and the Hermes gateway. It is separate from provider OAuth credentials."
+        }
+    }
+
+    var agentCredentialLoading: String {
+        switch language {
+        case .korean: return "자격증명 상태를 불러오는 중"
+        case .english: return "Loading credential status"
+        }
+    }
+
+    var noAgentCredentials: String {
+        switch language {
+        case .korean: return "발급된 자격증명이 없습니다."
+        case .english: return "No credential has been issued."
+        }
+    }
+
+    var issueAgentCredential: String {
+        switch language {
+        case .korean: return "자격증명 발급"
+        case .english: return "Issue credential"
+        }
+    }
+
+    var rotateAgentCredential: String {
+        switch language {
+        case .korean: return "자격증명 회전"
+        case .english: return "Rotate credential"
+        }
+    }
+
+    var revokeAgentCredential: String {
+        switch language {
+        case .korean: return "자격증명 폐기"
+        case .english: return "Revoke credential"
+        }
+    }
+
+    var revokeAgentCredentialTitle: String {
+        switch language {
+        case .korean: return "이 자격증명을 폐기할까요?"
+        case .english: return "Revoke this credential?"
+        }
+    }
+
+    var revokeAgentCredentialConfirmation: String {
+        switch language {
+        case .korean: return "이 자격증명을 사용하는 gateway는 즉시 401을 받습니다. 새 자격증명을 발급하고 env 파일을 갱신해야 다시 연결할 수 있습니다."
+        case .english: return "A gateway using this credential will immediately receive 401. Issue a new credential and update the env file to reconnect."
+        }
+    }
+
+    var agentCredentialActions: String {
+        switch language {
+        case .korean: return "자격증명 동작"
+        case .english: return "Credential actions"
+        }
+    }
+
+    var agentCredentialRotationHint: String {
+        switch language {
+        case .korean: return "회전하면 기존 자격증명은 기본 24시간 유예 동안 함께 동작합니다. 새 값을 env 파일에 반영하고 gateway를 다시 시작하세요."
+        case .english: return "Rotation keeps the previous credential working for a 24-hour grace period. Update the env file and restart the gateway."
+        }
+    }
+
+    var agentCredential401Recovery: String {
+        switch language {
+        case .korean: return "Gateway가 401을 받으면 여기서 새 자격증명을 발급하고 ~/.momo/hermes-gateway.env의 MOMO_AGENT_TOKEN을 교체하세요."
+        case .english: return "If the gateway receives 401, issue a new credential here and replace MOMO_AGENT_TOKEN in ~/.momo/hermes-gateway.env."
+        }
+    }
+
+    var agentCredentialRevokedRecovery: String {
+        switch language {
+        case .korean: return "자격증명을 폐기했습니다. Gateway가 401을 받으면 새 값을 발급해 env 파일을 갱신하세요."
+        case .english: return "Credential revoked. If the gateway receives 401, issue a new value and update the env file."
+        }
+    }
+
+    var agentCredentialDefaultLabel: String {
+        switch language {
+        case .korean: return "Hermes gateway"
+        case .english: return "Hermes gateway"
+        }
+    }
+
+    var agentCredentialNeverUsed: String {
+        switch language {
+        case .korean: return "아직 사용되지 않음"
+        case .english: return "Not used yet"
+        }
+    }
+
+    func agentCredentialCreated(_ milliseconds: Int64) -> String {
+        switch language {
+        case .korean: return "발급 \(agentCredentialDate(milliseconds))"
+        case .english: return "Issued \(agentCredentialDate(milliseconds))"
+        }
+    }
+
+    func agentCredentialLastUsed(_ milliseconds: Int64) -> String {
+        switch language {
+        case .korean: return "최근 사용 \(agentCredentialDate(milliseconds))"
+        case .english: return "Last used \(agentCredentialDate(milliseconds))"
+        }
+    }
+
+    func agentCredentialExpires(_ milliseconds: Int64) -> String {
+        switch language {
+        case .korean: return "만료 \(agentCredentialDate(milliseconds))"
+        case .english: return "Expires \(agentCredentialDate(milliseconds))"
+        }
+    }
+
+    func agentCredentialStatus(_ status: MomoAgentCredentialDisplayStatus) -> String {
+        switch (language, status) {
+        case (.korean, .configured): return "설정됨"
+        case (.english, .configured): return "Configured"
+        case (.korean, .active): return "사용 중"
+        case (.english, .active): return "Active"
+        case (.korean, .expiring): return "만료 임박"
+        case (.english, .expiring): return "Expiring"
+        case (.korean, .revoked): return "폐기됨"
+        case (.english, .revoked): return "Revoked"
+        }
+    }
+
+    func agentCredentialStatusAccessibility(_ status: MomoAgentCredentialDisplayStatus) -> String {
+        switch language {
+        case .korean: return "자격증명 상태: \(agentCredentialStatus(status))"
+        case .english: return "Credential status: \(agentCredentialStatus(status))"
+        }
+    }
+
+    var agentCredentialOneTimeTitle: String {
+        switch language {
+        case .korean: return "새 자격증명을 지금 저장하세요"
+        case .english: return "Save the new credential now"
+        }
+    }
+
+    var agentCredentialOneTimeSubtitle: String {
+        switch language {
+        case .korean: return "이 bearer 원문은 이 화면에서 한 번만 표시되며 다시 조회할 수 없습니다."
+        case .english: return "The raw bearer is shown once on this screen and cannot be retrieved again."
+        }
+    }
+
+    var agentCredentialTokenLabel: String {
+        switch language {
+        case .korean: return "일회 표시 bearer"
+        case .english: return "One-time bearer"
+        }
+    }
+
+    var agentCredentialTokenAccessibility: String {
+        switch language {
+        case .korean: return "한 번만 표시되는 에이전트 bearer 값"
+        case .english: return "One-time agent bearer value"
+        }
+    }
+
+    var copyAgentCredentialToken: String {
+        switch language {
+        case .korean: return "토큰 복사"
+        case .english: return "Copy token"
+        }
+    }
+
+    var copyAgentCredentialEnvironmentLine: String {
+        switch language {
+        case .korean: return "env 줄 복사"
+        case .english: return "Copy env line"
+        }
+    }
+
+    var agentCredentialTokenCopied: String {
+        switch language {
+        case .korean: return "토큰을 클립보드에 복사했습니다."
+        case .english: return "Token copied to the clipboard."
+        }
+    }
+
+    var agentCredentialEnvironmentLineCopied: String {
+        switch language {
+        case .korean: return "MOMO_AGENT_TOKEN env 줄을 클립보드에 복사했습니다."
+        case .english: return "MOMO_AGENT_TOKEN env line copied to the clipboard."
+        }
+    }
+
+    var agentCredentialEnvironmentTitle: String {
+        switch language {
+        case .korean: return "Hermes gateway env에 반영"
+        case .english: return "Update the Hermes gateway env"
+        }
+    }
+
+    var agentCredentialEnvironmentInstructions: String {
+        switch language {
+        case .korean: return "복사한 MOMO_AGENT_TOKEN 줄을 이 파일에 넣고 파일 권한이 600인지 확인한 뒤 gateway를 다시 시작하세요. momo 앱은 이 파일을 직접 쓰지 않습니다."
+        case .english: return "Add the copied MOMO_AGENT_TOKEN line to this file, verify that its mode is 600, then restart the gateway. The momo app does not write this file."
+        }
+    }
+
+    func agentCredentialGraceMessage(_ milliseconds: Int64) -> String {
+        switch language {
+        case .korean: return "기존 자격증명은 \(agentCredentialDate(milliseconds))까지 유효합니다. 그 전에 gateway를 새 값으로 다시 시작하세요."
+        case .english: return "The previous credential remains valid until \(agentCredentialDate(milliseconds)). Restart the gateway with the new value before then."
+        }
+    }
+
+    var agentCredentialRevealSecurityNote: String {
+        switch language {
+        case .korean: return "이 창을 닫으면 원문은 메모리에서 제거됩니다. 매니페스트와 export에는 bearer가 포함되지 않습니다."
+        case .english: return "Closing this window removes the raw value from transient state. Pairing manifests and exports never include the bearer."
+        }
+    }
+
+    func agentCredentialErrorMessage(_ error: Error) -> String {
+        if case BackendError.notConnected = error {
+            switch language {
+            case .korean: return "오프라인 상태입니다. 서버 연결을 복구한 뒤 자격증명 상태를 새로고침하세요."
+            case .english: return "You are offline. Restore the server connection, then refresh credential status."
+            }
+        }
+        if case BackendError.realtime(_) = error {
+            switch language {
+            case .korean: return "서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도하세요."
+            case .english: return "The server is unreachable. Check the network, then try again."
+            }
+        }
+        if case BackendError.problem(let status, _, _) = error {
+            if status == 401 {
+                switch language {
+                case .korean: return "관리자 세션이 만료되었습니다. 다시 로그인한 뒤 자격증명 상태를 새로고침하세요."
+                case .english: return "The admin session expired. Sign in again, then refresh credential status."
+                }
+            }
+            if status == 403 {
+                switch language {
+                case .korean: return "워크스페이스 관리자만 에이전트 자격증명을 관리할 수 있습니다."
+                case .english: return "Only workspace admins can manage agent credentials."
+                }
+            }
+        }
+        switch language {
+        case .korean: return "자격증명 요청을 완료하지 못했습니다. 서버 연결을 확인하고 다시 시도하세요."
+        case .english: return "The credential request could not be completed. Check the server connection and try again."
+        }
+    }
+
+    private func agentCredentialDate(_ milliseconds: Int64) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .korean ? "ko_KR" : "en_US")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000))
+    }
 }

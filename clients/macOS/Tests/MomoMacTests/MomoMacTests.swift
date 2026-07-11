@@ -511,13 +511,80 @@ final class MomoMacTests: XCTestCase {
         let json = manifest.prettyJSONString
         XCTAssertTrue(json.contains("\"schema\" : \"momo.agent_pairing_manifest.v0\""))
         XCTAssertTrue(json.contains("\"handle\" : \"hermes\""))
-        XCTAssertTrue(json.contains("MOMO_AGENT_GATEWAY_SECRET"))
+        XCTAssertTrue(json.contains("MOMO_AGENT_TOKEN"))
+        XCTAssertFalse(json.contains("MOMO_AGENT_GATEWAY_SECRET"))
+        XCTAssertFalse(json.contains("MOMO_AGENT_TOKEN="))
         XCTAssertFalse(json.localizedCaseInsensitiveContains("oauth_token"))
         XCTAssertFalse(json.localizedCaseInsensitiveContains("refresh_token"))
         XCTAssertFalse(json.localizedCaseInsensitiveContains("openai_api_key"))
         XCTAssertFalse(json.contains("OPENAI_API_KEY"))
         XCTAssertFalse(json.contains("HERMES_API_KEY"))
         XCTAssertTrue(manifest.inviteCode.hasPrefix("momo-agent-"))
+    }
+
+    func testAgentCredentialDisplayStatusUsesOnlyConfiguredActiveExpiringRevoked() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let agent = MemberID()
+        let base = MomoAgentCredential(
+            id: UUID(),
+            agentMemberId: agent,
+            serverStatus: "active",
+            scopes: ["messages:write"],
+            label: "Hermes gateway",
+            lastUsedAtMs: nil,
+            expiresAtMs: nil,
+            revokedAtMs: nil,
+            createdAtMs: 1_700_000_000_000
+        )
+
+        XCTAssertEqual(base.displayStatus(now: now), .configured)
+
+        var active = base
+        active.lastUsedAtMs = 1_799_000_000_000
+        XCTAssertEqual(active.displayStatus(now: now), .active)
+
+        var expiring = active
+        expiring.expiresAtMs = Int64(now.addingTimeInterval(24 * 60 * 60).timeIntervalSince1970 * 1_000)
+        XCTAssertEqual(expiring.displayStatus(now: now), .expiring)
+
+        var revoked = active
+        revoked.serverStatus = "revoked"
+        revoked.revokedAtMs = Int64(now.timeIntervalSince1970 * 1_000)
+        XCTAssertEqual(revoked.displayStatus(now: now), .revoked)
+    }
+
+    @MainActor
+    func testMockBackendAgentCredentialIssueRotateAndRevokeFlow() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        await viewModel.selectChannel(seed.channels[0].id)
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+
+        let first = try await viewModel.issueAgentCredential(for: agent.id)
+        XCTAssertFalse(first.token.isEmpty)
+        XCTAssertEqual(first.rotatedCredentialCount, 0)
+        XCTAssertEqual(viewModel.agentCredentials(for: agent.id).map { $0.displayStatus() }, [.configured])
+
+        let second = try await viewModel.issueAgentCredential(for: agent.id)
+        XCTAssertFalse(second.token.isEmpty)
+        XCTAssertNotEqual(first.token, second.token)
+        XCTAssertEqual(second.rotatedCredentialCount, 1)
+        XCTAssertNotNil(second.rotationGraceEndsAtMs)
+
+        let afterRotation = viewModel.agentCredentials(for: agent.id)
+        XCTAssertEqual(afterRotation.count, 2)
+        XCTAssertEqual(afterRotation.first(where: { $0.id == first.credential.id })?.displayStatus(), .expiring)
+        XCTAssertEqual(afterRotation.first(where: { $0.id == second.credential.id })?.displayStatus(), .configured)
+
+        try await viewModel.revokeAgentCredential(second.credential.id, for: agent.id)
+        XCTAssertEqual(
+            viewModel.agentCredentials(for: agent.id)
+                .first(where: { $0.id == second.credential.id })?
+                .displayStatus(),
+            .revoked
+        )
     }
 
     func testAgentPairingEndpointPolicyFailsClosedForNonLoopbackHTTP() {
@@ -2049,6 +2116,117 @@ final class MomoMacTests: XCTestCase {
 
         let token = try await provider.realtimeConnectionToken()
         XCTAssertEqual(token, "cent-token")
+    }
+
+    func testRESTBackendAgentCredentialCreateListAndRevokeContracts() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let agent = MemberID.demoAgent
+        let credentialID = UUID(uuidString: "00000000-0000-7000-8000-000000339001")!
+        let requestCount = SynchronizedCounter()
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer admin-token")
+            let call = requestCount.increment()
+            switch call {
+            case 1:
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.cachePolicy, .reloadIgnoringLocalCacheData)
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/credentials"
+                )
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["label"] as? String, "Hermes gateway")
+                XCTAssertEqual(body?["rotationGraceSeconds"] as? Int, 86_400)
+                return MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "credential": {
+                    "id": "\(credentialID.uuidString)",
+                    "agentMemberId": "\(agent.description)",
+                    "status": "active",
+                    "scopes": ["agent:jobs:read", "messages:write"],
+                    "label": "Hermes gateway",
+                    "lastUsedAtMs": null,
+                    "expiresAtMs": null,
+                    "revokedAtMs": null,
+                    "createdAtMs": 1800000000000
+                  },
+                  "token": "one-time-value",
+                  "tokenType": "Bearer",
+                  "rotatedCredentialCount": 0,
+                  "rotationGraceEndsAtMs": null
+                }
+                """)
+            case 2:
+                XCTAssertEqual(request.httpMethod, "GET")
+                return MockHTTPResponse(json: """
+                {
+                  "credentials": [{
+                    "id": "\(credentialID.uuidString)",
+                    "agentMemberId": "\(agent.description)",
+                    "status": "active",
+                    "scopes": ["agent:jobs:read", "messages:write"],
+                    "label": "Hermes gateway",
+                    "lastUsedAtMs": null,
+                    "expiresAtMs": null,
+                    "revokedAtMs": null,
+                    "createdAtMs": 1800000000000
+                  }]
+                }
+                """)
+            case 3:
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/workspaces/\(workspace.description)/agents/\(agent.description)/credentials/\(credentialID.uuidString)/revoke"
+                )
+                return MockHTTPResponse(json: """
+                {
+                  "credential": {
+                    "id": "\(credentialID.uuidString)",
+                    "agentMemberId": "\(agent.description)",
+                    "status": "revoked",
+                    "scopes": ["agent:jobs:read", "messages:write"],
+                    "label": "Hermes gateway",
+                    "lastUsedAtMs": null,
+                    "expiresAtMs": null,
+                    "revokedAtMs": 1800000001000,
+                    "createdAtMs": 1800000000000
+                  },
+                  "revokedNow": true,
+                  "alreadyRevoked": false
+                }
+                """)
+            default:
+                XCTFail("unexpected credential request")
+                return MockHTTPResponse(statusCode: 404, json: "{}")
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "admin-token"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "admin-token")
+
+        let reveal = try await backend.issueAgentCredential(workspace: workspace, agent: agent)
+        XCTAssertEqual(reveal.token, "one-time-value")
+        XCTAssertEqual(reveal.credential.displayStatus(), .configured)
+
+        let listed = try await backend.agentCredentials(workspace: workspace, agent: agent)
+        XCTAssertEqual(listed.map { $0.id }, [credentialID])
+
+        let revoked = try await backend.revokeAgentCredential(
+            credentialID,
+            workspace: workspace,
+            agent: agent
+        )
+        XCTAssertEqual(revoked.displayStatus(), .revoked)
     }
 
     // MARK: Real-server session onboarding

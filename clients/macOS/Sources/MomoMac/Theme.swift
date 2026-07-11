@@ -22,6 +22,9 @@ public enum MomoTheme {
 
     public static let bubbleCorner: CGFloat = 12
     public static let gutter: CGFloat = 12
+    public static let credentialRevealMinimumWidth: CGFloat = 320
+    public static let credentialRevealIdealWidth: CGFloat = 480
+    public static let credentialRevealMaximumWidth: CGFloat = 640
 }
 
 // MARK: - micro_usd formatting (display only; never accounting math — L4 §8.5)
