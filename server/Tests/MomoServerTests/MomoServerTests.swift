@@ -353,10 +353,41 @@ final class MomoServerTests: XCTestCase {
                 "Authorization: Bearer sk-test", gatewaySecret: ""),
             "Hermes gateway reported an error with redacted credential-shaped content."
         )
+        XCTAssertEqual(
+            AgentGatewayRoutes.sanitizedGatewayError(
+                "provider echoed momo_agent_v1.workspace.secret-value", gatewaySecret: ""),
+            "provider echoed [redacted-agent-token]"
+        )
+        XCTAssertEqual(
+            AgentGatewayRoutes.sanitizedGatewayError(
+                "provider sk-proj-abcdefghijklmnop jwt eyJheader12.eyJpayload12.signature12",
+                gatewaySecret: ""
+            ),
+            "provider [redacted-provider-token] jwt [redacted-jwt]"
+        )
         let long = String(repeating: "x", count: 1_010)
         XCTAssertTrue(
             AgentGatewayRoutes.sanitizedGatewayError(long, gatewaySecret: "")?
                 .hasSuffix("... [truncated]") == true
+        )
+    }
+
+    func testAgentGatewayCompletionStatusFailsClosedForErrorsAndUnknownValues() throws {
+        XCTAssertEqual(
+            try AgentGatewayRoutes.normalizedCompletionStatus(nil, error: "provider failed"),
+            "failed"
+        )
+        XCTAssertEqual(
+            try AgentGatewayRoutes.normalizedCompletionStatus(nil, error: nil),
+            "succeeded"
+        )
+        XCTAssertThrowsError(
+            try AgentGatewayRoutes.normalizedCompletionStatus(
+                "succeeded", error: "conflicting provider failure"
+            )
+        )
+        XCTAssertThrowsError(
+            try AgentGatewayRoutes.normalizedCompletionStatus("mystery", error: nil)
         )
     }
 
@@ -367,7 +398,8 @@ final class MomoServerTests: XCTestCase {
 
         let issued = try await jwt.signCentrifugoConnection(
             memberID: memberID,
-            workspaceID: workspaceID
+            workspaceID: workspaceID,
+            credentialTokenID: UUID(uuidString: "00000000-0000-7000-8000-000000000901")!
         )
         let payload = try await jwt.verifyCentrifugoConnection(issued.token)
         let info = try JSONDecoder().decode(RealtimeTokenInfo.self, from: Data(payload.info.utf8))
@@ -378,6 +410,8 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(info.schema, "momo.realtime.connection.v0")
         XCTAssertEqual(info.workspaceId, workspaceID.uuidString)
         XCTAssertEqual(info.memberId, memberID.uuidString)
+        XCTAssertEqual(payload.meta.schema, "momo.realtime.credential.v1")
+        XCTAssertEqual(payload.meta.tokenId, "00000000-0000-7000-8000-000000000901")
     }
 
     func testExpiredAppAccessTokenCannotBackRealtimeTokenFlow() async throws {
@@ -664,11 +698,34 @@ final class MomoServerTests: XCTestCase {
             .channel(workspace: workspaceID, channel: channelID)
         )
         XCTAssertEqual(
-            CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"),
-            .agent(workspace: workspaceID, agentMember: agentMemberID)
+            CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).\(channelID.uuidString).\(agentMemberID.uuidString)"),
+            .agent(workspace: workspaceID, channel: channelID, agentMember: agentMemberID)
+        )
+        XCTAssertEqual(
+            CentrifugoRoutes.parseChannel("agentwork:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"),
+            .agentWork(workspace: workspaceID, agentMember: agentMemberID)
         )
         XCTAssertNil(CentrifugoRoutes.parseChannel("user:\(agentMemberID.uuidString)"))
+        XCTAssertNil(CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"))
         XCTAssertNil(CentrifugoRoutes.parseChannel("agent:ws\(workspaceID.uuidString).not-a-uuid"))
+    }
+
+    func testPrivateAgentWorkStreamSubscriptionIsSelfOnly() {
+        let agentA = UUID()
+        let agentB = UUID()
+
+        XCTAssertTrue(
+            CentrifugoRoutes.isSelfAgentSubscription(
+                userMemberID: agentA,
+                agentMemberID: agentA
+            )
+        )
+        XCTAssertFalse(
+            CentrifugoRoutes.isSelfAgentSubscription(
+                userMemberID: agentA,
+                agentMemberID: agentB
+            )
+        )
     }
 
     func testApprovalDecisionRouteRejectsMismatchedBodyApprovalID() throws {

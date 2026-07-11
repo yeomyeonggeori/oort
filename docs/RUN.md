@@ -112,11 +112,11 @@ Centrifugo 컨테이너의 subscribe proxy는 local alpha 실행 중 host-run `M
 runner가 evidence 디렉터리에 임시 Centrifugo config/compose override를 생성한다. macOS Docker
 Desktop 기본값은 `host.docker.internal`이며, 필요하면 `--api-proxy-host <host>`로 바꾼다.
 이 임시 config도 `infra/centrifugo.json`과 같은 namespace 계약을 유지해야 한다. 특히
-`ch:ws<workspace>.<channel>`뿐 아니라 Hermes gateway work stream인
-`agent:ws<workspace>.<agentMember>`도 subscribe proxy를 통과해야 한다. local alpha에서
-Hermes adapter 로그에 `permission denied`가 보이면 먼저 runner가 새로 생성한
-`centrifugo.local-alpha.json`의 `agent` namespace에 `subscribe_proxy_enabled`와
-workspace-qualified `channel_regex`가 들어 있는지 확인한다.
+	`ch:ws<workspace>.<channel>`뿐 아니라 Hermes gateway private work stream인
+	`agentwork:ws<workspace>.<agentMember>`도 subscribe proxy를 통과해야 한다. local alpha에서
+	Hermes adapter 로그에 `permission denied`가 보이면 먼저 runner가 새로 생성한
+	`centrifugo.local-alpha.json`의 `agentwork` namespace에 `subscribe_proxy_enabled`와
+	workspace-qualified `channel_regex`가 들어 있는지 확인한다.
 
 runner는 기본 검증 경로에서 headless `MomoMacSmoke`를 실행한다. 사용자가 실제 앱 창을 열 때는
 기본 고정 포트 flow인 `scripts/momo start`를 쓰거나, runner가 생성한 `summary.md`의
@@ -156,8 +156,9 @@ cp infra/.env.example .env
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `AGENT_GATEWAY_MODE` | 서버, worker | `worker`(기본) 또는 `gateway`. `gateway`면 `@hermes` mention이 AgentWorker provider call 대신 Hermes native platform adapter로 전달된다. |
-| `AGENT_GATEWAY_SECRET` | 서버, Hermes adapter | ADR-0101 이관 중에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
-| `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 어댑터 bearer 이관 후 제거 대상. |
+| `MOMO_AGENT_TOKEN` | Hermes adapter | Pairing에서 1회 발급하는 agent-scoped momo bearer. `~/.momo/hermes-gateway.env`에만 저장하며 provider OAuth token과 별개다. |
+| `AGENT_GATEWAY_SECRET` | 서버 | ADR-0101 이관 회귀검증에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
+| `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 adapter는 이 경로를 사용하지 않는다. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
 
 Codex OAuth access/refresh token은 momo 환경변수가 아니다. External runtime
@@ -324,13 +325,20 @@ POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
 기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:write`,
 `realtime:subscribe`다. agent bearer는 이 네 서버 surface 외의 human/admin API에
 사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
-MOMO-338 전의 현재 Hermes adapter는 아직 공유 시크릿을 보내므로 짧은 이관 기간에는
-아래 opt-in을 함께 설정한다.
+`agentwork:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
+target agent가 정확히 같을 때만 subscribe가 허용된다. 같은 채널 membership만으로
+다른 에이전트의 Context Packet을 관찰할 수 없다. connection JWT에는 발급 원본
+credential id가 server-only `meta`로 포함되고 subscribe proxy는 그 exact token이
+active인지 확인한다. Centrifugo subscribe proxy 설정의
+`include_connection_meta=true`를 제거하면 모든 신규 subscription이 fail-closed된다.
+realtime `agent.job` payload는 wake-up으로만 사용하며, 실제 실행 입력은 같은
+agent bearer로 pending REST를 재조회해 Postgres 경계를 통과한 값만 사용한다.
+MOMO-338부터 Hermes adapter는 human login과 공유 시크릿을 사용하지 않는다. 서버는
+gateway mode만 켜고 legacy secret 병행 수용은 기본적으로 닫는다.
 
 ```sh
 AGENT_GATEWAY_MODE=gateway \
-AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
-MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 \
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 \
 scripts/momo start
 ```
 
@@ -342,15 +350,13 @@ plugin install, provider-login marker, momo server 상태를 분리해서 eviden
 사용자가 Hermes 내부에서 provider OAuth/login을 끝낸 뒤에는 다음처럼 실제 1왕복까지 시도한다.
 
 ```sh
-set -a
-. "$HOME/.momo/hermes-gateway.env"
-set +a
 AGENT_GATEWAY_MODE=gateway \
-AGENT_GATEWAY_SECRET="$MOMO_AGENT_GATEWAY_SECRET" \
-MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 \
+MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 \
 scripts/momo start
 
-# 다른 터미널에서, Hermes gateway와 provider OAuth/login을 사용자가 준비한 뒤:
+# Pairing에서 발급한 원문 토큰을 ~/.momo/hermes-gateway.env의
+# MOMO_AGENT_TOKEN에 한 번 붙여넣고, 다른 터미널에서 Hermes를 실행한다.
+# provider OAuth/login은 Hermes 내부에서 사용자가 준비한다.
 MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 ```
 
@@ -358,7 +364,7 @@ macOS dogfood 앱에서는 Hermes가 서버/fixture에 존재해도 처음부터
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
 label, model label, permission scope, avatar를 확인한다. 앱은 pairing manifest와 invite code를
 생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing connection metadata와
-`$HOME/.momo/hermes-gateway.env:MOMO_AGENT_GATEWAY_SECRET` secret source만 들어가며,
+`$HOME/.momo/hermes-gateway.env:MOMO_AGENT_TOKEN` 설정 위치만 들어가며, 토큰 원문이나
 Codex/OpenAI OAuth token, refresh token, provider API key 값은 절대 포함하지 않는다.
 non-loopback `http://...` endpoint는 사용자가 명시적으로 opt-in하지 않으면 초대 완료가 막힌다.
 초대 완료를 누르면 그때 `member.kind='agent'` roster row가 나타난다.
@@ -695,11 +701,14 @@ Boundary:
 - Normal `ch:`/`dm:` subscriptions still go through Centrifugo subscribe proxy
   `POST /v1/centrifugo/subscribe`, which parses `ch:ws<workspace>.<channel>` and
   checks active channel `membership` under tenant RLS.
-- Agent progress subscriptions use `agent:ws<workspace>.<agentMember>`. The
+- Agent progress subscriptions use `agent:ws<workspace>.<channel>.<agentMember>`. The
   subscribe proxy checks that the observer and target agent are active members
   in the same workspace and share at least one active channel membership. This
   boundary is for live `agent.status`/`agent.partial` progress only; durable
   final output still reconciles through channel `message.new` and `message.seq`.
+- Private gateway jobs use `agentwork:ws<workspace>.<agentMember>`. Only a
+  connection authenticated as that exact active agent may subscribe, so Context
+  Packets and work payloads are never exposed through the observer progress stream.
 - Clients never publish to Centrifugo. All durable writes remain REST → Postgres
   transaction → outbox → OutboxRelay/AgentWorker server-side publish.
 - TTL defaults to 300 seconds and is configurable with
@@ -839,7 +848,7 @@ MOMO-204 범위 밖이다.
 
 #### 5.3.3 MOMO-212 Agent live-channel 게이트
 
-`agent:ws<workspace>.<agentMember>` namespace의 live subscribe 경계는 아래
+`agent:ws<workspace>.<channel>.<agentMember>` namespace의 live subscribe 경계는 아래
 verifier가 닫는다. 메시지 채널 `ch:` live gate는 MOMO-196의
 `scripts/verify_realtime_live.sh`가 담당하고, 이 gate는 agent status/partial
 progress가 agent channel boundary에서만 전달되는지 확인한다.
@@ -853,7 +862,7 @@ scripts/local_gate.sh --profile runtime-agent
 
 검증 범위는 Docker dev compose PG/Centrifugo bootstrap → host MomoServer →
 mock Hermes → host AgentWorker → compose network의 `api:8080` proxy 연결 →
-authorized demo member의 `agent:ws<workspace>.<agentMember>` subscribe →
+authorized demo member의 `agent:ws<workspace>.<channel>.<agentMember>` subscribe →
 `agent.status` 또는 `agent.partial` live publication 수신이다. 같은 run에서
 invalid Centrifugo connection token, same-workspace member without shared channel,
 other-workspace member/token, client direct publish deny를 함께 확인한다.
@@ -986,7 +995,8 @@ python3 -m py_compile adapters/hermes/momo_adapter.py
 pip install -r adapters/hermes/requirements.txt
 ```
 
-env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_AGENT_EMAIL/PASSWORD` 등)는
+env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_WORKSPACE_ID`,
+`MOMO_AGENT_MEMBER_ID`, `MOMO_AGENT_TOKEN` 등)는
 `adapters/hermes/README.md` 및 `plugin.yaml`의 `spec.env` 참고.
 
 > **`runtime-unverified (hermes 게이트웨이 필요)`** — 게이트웨이/실행 momo 스택 없이는
@@ -1116,7 +1126,8 @@ M1 staging 완료로 표시하지 않는다.
 | subscribe proxy 401 (`invalid or missing proxy secret`) | **MOMO-300**: Centrifugo static header(`X-Centrifugo-Proxy-Secret`)와 API `CENT_PROXY_SECRET` 불일치. compose env override(`CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS`)와 서버 env가 같은 값을 쓰는지 확인. |
 | 로그인은 되는데 모든 API가 401 (`unknown token`) | **MOMO-300**: access token이 `token` 테이블에 기록되지 않았거나 revoke됨(로그아웃/rotation). 재로그인으로 새 세션 발급. 서버 배포 전 발급 토큰은 fail-closed로 전부 무효. |
 | REST가 429를 반환 | **MOMO-300** rate limit. `Retry-After` 헤더만큼 대기 후 재시도, 또는 `RATE_LIMIT_PER_MEMBER`/`RATE_LIMIT_PER_IP` 조정(0=비활성). |
-| `agent:` subscribe 거부 | target agent가 같은 workspace active member인지, observer와 target agent가 하나 이상의 active channel membership을 공유하는지 확인. 공유 채널이 없거나 다른 workspace token이면 정상적으로 deny된다. local alpha 전용이면 runner가 생성한 `centrifugo.local-alpha.json`의 `agent` namespace가 subscribe proxy를 켰는지도 확인한다. stale config면 Hermes gateway가 `agent.job`을 못 받아 `agent_job`이 pending에 남는다. |
+| `agent:` subscribe 거부 | channel 이름이 `agent:ws<workspace>.<channel>.<agentMember>`인지, observer와 target agent가 그 정확한 active channel의 멤버인지 확인한다. 다른 채널만 공유하거나 다른 workspace token이면 deny가 정상이다. |
+| `agentwork:` subscribe 거부 또는 gateway job pending | channel 이름이 `agentwork:ws<workspace>.<agentMember>`인지, connection token subject가 그 exact active agent인지 확인한다. local alpha runner의 generated config에도 `agentwork` subscribe proxy가 있어야 하며, stale config면 Hermes가 `agent.job`을 받지 못한다. |
 | prod compose가 시크릿을 요구하며 실패 | `infra/prod/.env.example`은 예시다. 실제 staging/prod는 host-local env 또는 SOPS/age로 `change-me-*`를 모두 교체한다. |
 | RLS로 행이 안 보임 | 서버는 트랜잭션마다 `SET LOCAL app.workspace_id` 필요. relay/worker는 BYPASSRLS 역할(`momo_relay`)인지 확인. |
 

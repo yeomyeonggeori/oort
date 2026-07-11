@@ -9,9 +9,10 @@ import PostgresNIO
 ///
 /// Centrifugo calls this on every subscribe attempt; returning allow/deny means
 /// an eviction (membership removed) takes effect immediately (L4 §C4). `ch:`/`dm:`
-/// subscriptions check direct channel membership. `agent:` subscriptions check
-/// that the observer and target agent are active members with at least one shared
-/// channel in the workspace. Clients still never publish directly to Centrifugo.
+/// subscriptions check direct channel membership. `agent:` carries observable
+/// progress for members who share a channel with the agent. `agentwork:` is the
+/// private job stream and only that exact active agent may subscribe. Clients
+/// still never publish directly to Centrifugo.
 ///
 /// MOMO-300 hardening (old v0 stub resolved):
 ///   1. Proxy authentication — Centrifugo attaches a shared secret
@@ -51,8 +52,9 @@ struct CentrifugoRoutes: Sendable {
 
         let dto = try await request.decode(as: SubscribeProxyRequest.self, context: context)
 
-        // Channel naming (L4 §4.1): "<namespace>:ws<workspaceUUID>.<resourceUUID>".
-        // For ch:/dm: resource=channel_id. For agent: resource=agent_member_id.
+        // Channel naming (L4 §4.1): ch:/dm: use workspace + channel,
+        // agent: uses workspace + channel + agent, and agentwork: uses
+        // workspace + agent. Unknown shapes fail closed.
         guard let parsed = Self.parseChannel(dto.channel) else {
             // Unknown channel shape → deny (fail closed).
             return .deny("unrecognized channel")
@@ -63,24 +65,41 @@ struct CentrifugoRoutes: Sendable {
             return .deny("missing or invalid user")
         }
 
-        // 2. Revocation: a member with no active credential may not open a new
-        // subscription (coarse per-member semantics; connection JWTs are not
-        // stored individually).
+        // 2. Revocation: connection JWT metadata binds this subscription to the
+        // exact access/agent bearer that minted it. Pre-binding tokens fail
+        // closed and rotation cannot keep a revoked credential alive.
+        guard let tokenIDString = dto.meta?.tokenId,
+              let tokenID = UUID(uuidString: tokenIDString)
+        else {
+            return .deny("missing or invalid realtime credential binding")
+        }
         guard try await tokenStore.hasActiveRealtimeCredential(
-            memberID: userMemberID, workspaceID: parsed.workspaceID
+            tokenID: tokenID,
+            memberID: userMemberID,
+            workspaceID: parsed.workspaceID
         ) else {
-            return .deny("no active realtime credential for this member")
+            return .deny("realtime credential is no longer active")
         }
 
-        let allowed: Bool = switch parsed {
+        let allowed: Bool
+        switch parsed {
         case .channel(let workspace, let channel):
-            try await isMember(userMemberID, of: channel, in: workspace)
-        case .agent(let workspace, let agentMemberID):
-            try await canObserveAgent(
+            allowed = try await isMember(userMemberID, of: channel, in: workspace)
+        case .agent(let workspace, let channel, let agentMemberID):
+            allowed = try await canObserveAgent(
                 observerMemberID: userMemberID,
                 agentMemberID: agentMemberID,
+                channelID: channel,
                 workspaceID: workspace
             )
+        case .agentWork(let workspace, let agentMemberID):
+            guard Self.isSelfAgentSubscription(
+                userMemberID: userMemberID,
+                agentMemberID: agentMemberID
+            ) else {
+                return .deny(parsed.denyReason)
+            }
+            allowed = try await isActiveAgent(agentMemberID, in: workspace)
         }
 
         return allowed ? .allow() : .deny(parsed.denyReason)
@@ -103,9 +122,14 @@ struct CentrifugoRoutes: Sendable {
         }
     }
 
+    static func isSelfAgentSubscription(userMemberID: UUID, agentMemberID: UUID) -> Bool {
+        userMemberID == agentMemberID
+    }
+
     private func canObserveAgent(
         observerMemberID: UUID,
         agentMemberID: UUID,
+        channelID: UUID,
         workspaceID: UUID
     ) async throws -> Bool {
         try await db.withTenantConnection(workspaceID: workspaceID) { conn in
@@ -123,19 +147,37 @@ struct CentrifugoRoutes: Sendable {
                    AND agent_member.status = 'active'
                    AND EXISTS (
                      SELECT 1
-                       FROM membership observer_ms
-                       JOIN membership agent_ms
-                         ON agent_ms.channel_id = observer_ms.channel_id
-                        AND agent_ms.member_id = agent_member.id
-                        AND agent_ms.left_at IS NULL
-                       JOIN channel shared_channel
-                         ON shared_channel.id = observer_ms.channel_id
-                        AND shared_channel.workspace_id = \(workspaceID)
-                        AND shared_channel.archived_at IS NULL
-                      WHERE observer_ms.workspace_id = \(workspaceID)
+                       FROM channel progress_channel
+                       JOIN membership observer_ms
+                         ON observer_ms.channel_id = progress_channel.id
                         AND observer_ms.member_id = observer_member.id
                         AND observer_ms.left_at IS NULL
+                       JOIN membership agent_ms
+                         ON agent_ms.channel_id = progress_channel.id
+                        AND agent_ms.member_id = agent_member.id
+                        AND agent_ms.left_at IS NULL
+                      WHERE progress_channel.id = \(channelID)
+                        AND progress_channel.workspace_id = \(workspaceID)
+                        AND progress_channel.archived_at IS NULL
                    )
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            return !rows.isEmpty
+        }
+    }
+
+    private func isActiveAgent(_ agentMemberID: UUID, in workspaceID: UUID) async throws -> Bool {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT 1
+                  FROM member
+                 WHERE id = \(agentMemberID)
+                   AND workspace_id = \(workspaceID)
+                   AND kind = 'agent'
+                   AND status = 'active'
                  LIMIT 1
                 """,
                 logger: db.logger
@@ -146,11 +188,12 @@ struct CentrifugoRoutes: Sendable {
 
     enum ParsedChannel: Equatable {
         case channel(workspace: UUID, channel: UUID)
-        case agent(workspace: UUID, agentMember: UUID)
+        case agent(workspace: UUID, channel: UUID, agentMember: UUID)
+        case agentWork(workspace: UUID, agentMember: UUID)
 
         var workspaceID: UUID {
             switch self {
-            case .channel(let workspace, _), .agent(let workspace, _):
+            case .channel(let workspace, _), .agent(let workspace, _, _), .agentWork(let workspace, _):
                 return workspace
             }
         }
@@ -161,28 +204,41 @@ struct CentrifugoRoutes: Sendable {
                 return "not a member of this channel"
             case .agent:
                 return "not allowed to observe this agent"
+            case .agentWork:
+                return "not allowed to consume this agent work stream"
             }
         }
     }
 
-    /// Parse "<namespace>:ws<UUID>.<UUID>". Only `ch`, `dm`, and `agent` are
-    /// client-subscribe namespaces for this proxy.
+    /// Parse "<namespace>:ws<UUID>.<UUID>". `agentwork` is intentionally
+    /// separate from the observable `agent` progress namespace.
     static func parseChannel(_ name: String) -> ParsedChannel? {
-        // Expected form produced by the server: "<ns>:ws<wsUUID>.<channelUUID>".
+        // Expected forms are validated independently below.
         let parts = name.split(separator: ":", maxSplits: 1)
         guard parts.count == 2 else { return nil }
         let namespace = String(parts[0])
         let body = parts[1] // e.g. "ws<wsUUID>.<channelUUID>"
         guard body.hasPrefix("ws") else { return nil }
         let afterWS = body.dropFirst(2) // "<wsUUID>.<channelUUID>"
-        let segs = afterWS.split(separator: ".", maxSplits: 1)
-        if segs.count == 2, let ws = UUID(uuidString: String(segs[0])),
-           let resource = UUID(uuidString: String(segs[1])) {
+        let segs = afterWS.split(separator: ".", maxSplits: 2)
+        if segs.count >= 2, let ws = UUID(uuidString: String(segs[0])) {
             switch namespace {
             case "ch", "dm":
-                return .channel(workspace: ws, channel: resource)
+                guard segs.count == 2, let channel = UUID(uuidString: String(segs[1])) else {
+                    return nil
+                }
+                return .channel(workspace: ws, channel: channel)
             case "agent":
-                return .agent(workspace: ws, agentMember: resource)
+                guard segs.count == 3,
+                      let channel = UUID(uuidString: String(segs[1])),
+                      let agent = UUID(uuidString: String(segs[2]))
+                else { return nil }
+                return .agent(workspace: ws, channel: channel, agentMember: agent)
+            case "agentwork":
+                guard segs.count == 2, let agent = UUID(uuidString: String(segs[1])) else {
+                    return nil
+                }
+                return .agentWork(workspace: ws, agentMember: agent)
             default:
                 return nil
             }

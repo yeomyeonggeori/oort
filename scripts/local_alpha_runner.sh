@@ -244,8 +244,8 @@ load_env_file() {
 write_local_centrifugo_config() {
   CENTRIFUGO_CONFIG="$EVIDENCE_DIR/centrifugo.local-alpha.json"
   # Keep the generated local-alpha namespaces aligned with infra/centrifugo.json.
-  # Hermes gateway consumes agent work from agent:ws<workspace>.<agentMember>, so
-  # the agent namespace must go through MomoServer's subscribe proxy as well.
+  # Hermes gateway consumes private work from agentwork:ws<workspace>.<agentMember>.
+  # Observable agent: progress remains available to shared-channel members.
   cat >"$CENTRIFUGO_CONFIG" <<EOF
 {
   "channel": {
@@ -262,12 +262,19 @@ write_local_centrifugo_config() {
         "history_size": 100, "history_ttl": "24h", "history_meta_ttl": "48h",
         "force_recovery": true,
         "subscribe_proxy_enabled": true,
+        "channel_regex": "^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$" },
+      { "name": "agentwork", "history_size": 100, "history_ttl": "24h",
+        "history_meta_ttl": "48h", "force_recovery": true,
+        "subscribe_proxy_enabled": true,
         "channel_regex": "^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$" },
       { "name": "user", "history_size": 50, "history_ttl": "168h",
         "history_meta_ttl": "192h", "force_recovery": true }
     ],
     "proxy": {
-      "subscribe": { "endpoint": "http://${API_PROXY_HOST}:${PORT}/v1/centrifugo/subscribe" }
+      "subscribe": {
+        "endpoint": "http://${API_PROXY_HOST}:${PORT}/v1/centrifugo/subscribe",
+        "include_connection_meta": true
+      }
     }
   },
   "client": { "subscription_token": { "enabled": true } }

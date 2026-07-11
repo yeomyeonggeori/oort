@@ -146,6 +146,7 @@ struct AgentGatewayRoutes: Sendable {
 
             let payload = Self.agentStatusBroadcastPayload(
                 workspaceID: workspaceID,
+                channelID: run.channelID,
                 agentMemberID: run.agentMemberID,
                 runID: runID,
                 status: normalizedStatus,
@@ -182,7 +183,10 @@ struct AgentGatewayRoutes: Sendable {
             runID: runID
         )
         let dto = try await request.decode(as: AgentGatewayCompleteRequest.self, context: context)
-        let completionStatus = Self.normalizedCompletionStatus(dto.status)
+        let completionStatus = try Self.normalizedCompletionStatus(
+            dto.status,
+            error: dto.error
+        )
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
 
         let result = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
@@ -605,12 +609,24 @@ struct AgentGatewayRoutes: Sendable {
         return value.isEmpty ? "running" : value
     }
 
-    private static func normalizedCompletionStatus(_ raw: String?) -> String {
-        switch raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+    static func normalizedCompletionStatus(_ raw: String?, error: String?) throws -> String {
+        let status = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let hasError = !(error?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        switch status {
+        case nil, "":
+            return hasError ? "failed" : "succeeded"
         case "failed", "error", "cancelled", "timed_out":
             return "failed"
-        default:
+        case "succeeded", "success", "done":
+            guard !hasError else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "successful completion cannot include an error"
+                )
+            }
             return "succeeded"
+        default:
+            throw HTTPError(.badRequest, message: "unknown gateway completion status")
         }
     }
 
@@ -678,6 +694,21 @@ struct AgentGatewayRoutes: Sendable {
         if !gatewaySecret.isEmpty {
             value = value.replacingOccurrences(of: gatewaySecret, with: "[redacted]")
         }
+        value = value.replacingOccurrences(
+            of: #"momo_agent_v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#,
+            with: "[redacted-agent-token]",
+            options: .regularExpression
+        )
+        value = value.replacingOccurrences(
+            of: #"(?i)\b(?:sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9_-]{8,}|github_pat_[A-Za-z0-9_-]{8,}|xox[baprs]-[A-Za-z0-9_-]{8,}|ya29\.[A-Za-z0-9._-]{8,})\b"#,
+            with: "[redacted-provider-token]",
+            options: .regularExpression
+        )
+        value = value.replacingOccurrences(
+            of: #"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b"#,
+            with: "[redacted-jwt]",
+            options: .regularExpression
+        )
         let sensitiveHints = ["bearer ", "authorization:", "api_key", "access_token", "refresh_token"]
         let lower = value.lowercased()
         if sensitiveHints.contains(where: { lower.contains($0) }) {
@@ -693,13 +724,14 @@ struct AgentGatewayRoutes: Sendable {
 
     private static func agentStatusBroadcastPayload(
         workspaceID: UUID,
+        channelID: UUID,
         agentMemberID: UUID,
         runID: UUID,
         status: String,
         detail: String?
     ) -> String {
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
-        let centChannel = "agent:ws\(workspaceID.uuidString).\(agentMemberID.uuidString)"
+        let centChannel = "agent:ws\(workspaceID.uuidString).\(channelID.uuidString).\(agentMemberID.uuidString)"
         return jsonString([
             "channel": centChannel,
             "data": [

@@ -34,7 +34,7 @@ flowchart LR
     RELAY -->|poll| PG
     RELAY -->|publish| CENT
     CENT -->|"ws push: ch:/dm:/agent:/user:"| MAC
-    CENT -->|agent.job push| HG
+    CENT -->|"private agentwork: job push"| HG
     AW -->|agent_job claim| PG
 ```
 
@@ -53,8 +53,8 @@ sequenceDiagram
 
     U->>S: POST messages ("@hermes ...")
     S->>P: 한 트랜잭션: message + seq + agent_run(queued) + agent_job outbox
-    P-->>C: (relay 경유) agent.job → agent:ws<ws>.<agentMember>
-    C-->>H: push (유실 시 2s pending 폴링으로 회수)
+    P-->>C: (relay 경유) agent.job → agentwork:ws<ws>.<agentMember>
+    C-->>H: push (connect/reconnect/gap 시 pending REST로 회수)
     H->>S: Bearer(agent) POST /gateway/events (running)
     H->>S: Bearer(agent) POST /gateway/complete (본문+usage)
     S->>P: 한 트랜잭션: agent 명의 message + usage_ledger + audit_log + run 종결 (멱등)
@@ -62,7 +62,13 @@ sequenceDiagram
     C-->>U: 같은 채널에 응답 표시
 ```
 
-Slack 봇 대비 실질 우위: `agent_job`이 durable outbox 행이라 at-least-once 회수 가능, 최종 응답·비용·감사가 원자적으로 기록.
+`agent:`는 공유 채널 멤버가 보는 status/partial progress만 전달하고,
+Context Packet을 담은 `agentwork:`는 exact agent bearer만 구독한다. Slack 봇 대비
+실질 우위는 `agent_job`이 durable outbox 행이라 at-least-once 회수 가능하고,
+최종 응답·비용·감사가 원자적으로 기록된다는 점이다.
+`agentwork:` publication은 DB 작업이 있다는 wake-up일 뿐 신뢰 입력이 아니다.
+어댑터는 bearer-authenticated pending endpoint에서 작업을 재조회하고, connection
+JWT의 `meta.token_id`와 active token 행이 일치할 때만 private stream을 구독한다.
 
 ## 엔티티 지도 (요약)
 

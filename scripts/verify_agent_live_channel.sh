@@ -99,9 +99,12 @@ WORKER_POLL_INTERVAL_MS="${WORKER_POLL_INTERVAL_MS:-100}"
 ADMIN_DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}}"
 APP_DATABASE_URL="postgres://momo_app:momo_app_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
 WORKER_DATABASE_URL="postgres://momo_worker:momo_worker_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
+RELAY_DATABASE_URL="postgres://momo_relay:momo_relay_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
+RELAY_POLL_INTERVAL_MS="${RELAY_POLL_INTERVAL_MS:-100}"
 
 WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 CHANNEL_ID="00000000-0000-7000-8000-000000000202"
+CROSS_CHANNEL_ID="00000000-0000-7212-8000-000000000299"
 HUMAN_EMAIL="demo@momo.local"
 AGENT_ID="00000000-0000-7000-8000-000000000102"
 NO_SHARED_MEMBER_ID="00000000-0000-7000-8000-000000212101"
@@ -109,15 +112,18 @@ NO_SHARED_EMAIL="momo-212-no-shared@momo.local"
 OTHER_WORKSPACE_ID="00000000-0000-7000-8000-000000212201"
 OTHER_MEMBER_ID="00000000-0000-7000-8000-000000212202"
 OTHER_EMAIL="momo-212-other@momo.local"
-AGENT_CHANNEL="agent:ws${WORKSPACE_ID}.${AGENT_ID}"
+AGENT_CHANNEL="agent:ws${WORKSPACE_ID}.${CHANNEL_ID}.${AGENT_ID}"
+AGENT_WORK_CHANNEL="agentwork:ws${WORKSPACE_ID}.${AGENT_ID}"
 RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 MESSAGE_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CROSS_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 RUN_SUFFIX="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 TMP_ROOT="${TMPDIR:-/tmp}"
 SERVER_LOG="${TMP_ROOT}/momo-agent-live-server-${RUN_SUFFIX}.log"
 WORKER_LOG="${TMP_ROOT}/momo-agent-live-worker-${RUN_SUFFIX}.log"
+RELAY_LOG="${TMP_ROOT}/momo-agent-live-relay-${RUN_SUFFIX}.log"
 MOCK_LOG="${TMP_ROOT}/momo-agent-live-mock-hermes-${RUN_SUFFIX}.log"
 PROXY_LOG="${TMP_ROOT}/momo-agent-live-api-proxy-${RUN_SUFFIX}.log"
 PY_LOG="${TMP_ROOT}/momo-agent-live-ws-${RUN_SUFFIX}.log"
@@ -125,11 +131,18 @@ LIVE_JSON="${TMP_ROOT}/momo-agent-live-publication-${RUN_SUFFIX}.json"
 EVIDENCE_FILE="${TMP_ROOT}/momo-agent-live-evidence-${RUN_SUFFIX}.md"
 SERVER_PID=""
 WORKER_PID=""
+RELAY_PID=""
 MOCK_PID=""
 PROXY_CONTAINER="momo-agent-live-api-proxy-${RUN_SUFFIX}"
 
 cleanup() {
-  momo_cleanup_tracked_pids "agent-live verifier" "${WORKER_PID:-}" "${SERVER_PID:-}" "${MOCK_PID:-}"
+  if [ "${ACCESS_TOKEN:-}" != "" ] && [ "${AGENT_CREDENTIAL_ID:-}" != "" ]; then
+    api_request POST \
+      "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials/${AGENT_CREDENTIAL_ID}/revoke" \
+      "$ACCESS_TOKEN" '{"reason":"MOMO-338 agentwork websocket verifier"}' \
+      >/dev/null 2>&1 || true
+  fi
+  momo_cleanup_tracked_pids "agent-live verifier" "${WORKER_PID:-}" "${RELAY_PID:-}" "${SERVER_PID:-}" "${MOCK_PID:-}"
   docker rm -f "$PROXY_CONTAINER" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
@@ -213,22 +226,78 @@ psql_admin() {
   "$PSQL_BIN" "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 --no-psqlrc "$@"
 }
 
+# Request metadata and credentials travel through stdin, never process argv.
+api_request() {
+  local method="$1"
+  local path="$2"
+  local bearer="${3:-}"
+  local body="${4:-}"
+  printf '%s\0%s\0%s\0%s' \
+    "http://127.0.0.1:${PORT}${path}" "$method" "$bearer" "$body" | python3 -c '
+import sys
+import urllib.error
+import urllib.request
+
+parts = sys.stdin.buffer.read().split(b"\0", 3)
+if len(parts) != 4:
+    raise SystemExit(2)
+url, method, bearer, body = (part.decode("utf-8") for part in parts)
+headers = {"Accept": "application/json"}
+if bearer:
+    headers["Authorization"] = "Bearer " + bearer
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        sys.stdout.buffer.write(response.read())
+except urllib.error.HTTPError as exc:
+    sys.stderr.write(f"momo API request failed: HTTP {exc.code}\n")
+    raise SystemExit(22)
+'
+}
+
+api_status() {
+  local method="$1"
+  local path="$2"
+  local bearer="${3:-}"
+  local body="${4:-}"
+  printf '%s\0%s\0%s\0%s' \
+    "http://127.0.0.1:${PORT}${path}" "$method" "$bearer" "$body" | python3 -c '
+import sys
+import urllib.error
+import urllib.request
+url, method, bearer, body = (
+    part.decode("utf-8") for part in sys.stdin.buffer.read().split(b"\0", 3)
+)
+headers = {"Accept": "application/json"}
+if bearer:
+    headers["Authorization"] = "Bearer " + bearer
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        print(response.status)
+except urllib.error.HTTPError as exc:
+    print(exc.code)
+'
+}
+
 login() {
   local email="$1"
   local workspace="$2"
-  curl -fsS \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"${email}\",\"password\":\"dev-password\",\"workspace\":\"${workspace}\"}" \
-    "http://127.0.0.1:${PORT}/v1/auth/login"
+  api_request POST /v1/auth/login "" \
+    "{\"email\":\"${email}\",\"password\":\"dev-password\",\"workspace\":\"${workspace}\"}"
 }
 
 realtime_token() {
   local access_token="$1"
-  curl -fsS \
-    -H "Authorization: Bearer ${access_token}" \
-    -H "Content-Type: application/json" \
-    -d '{}' \
-    "http://127.0.0.1:${PORT}/v1/auth/realtime-token"
+  api_request POST /v1/auth/realtime-token "$access_token" '{}'
 }
 
 echo "[agent-live] using env file: ${ENV_FILE:-<none>}"
@@ -272,7 +341,30 @@ ON CONFLICT (member_id) DO UPDATE
   SET email = EXCLUDED.email,
       email_verified = EXCLUDED.email_verified,
       password_hash = EXCLUDED.password_hash,
-      tz = EXCLUDED.tz;
+    tz = EXCLUDED.tz;
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
+VALUES
+  ('$CROSS_CHANNEL_ID', '$WORKSPACE_ID', 'private',
+   'momo-212-cross-channel', 'Exact-channel progress isolation fixture',
+   '00000000-0000-7000-8000-000000000101', NULL)
+ON CONFLICT (id) DO UPDATE
+  SET archived_at = NULL,
+      topic = EXCLUDED.topic,
+      updated_at = now();
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES ('$CROSS_CHANNEL_ID', '$WORKSPACE_ID', 0)
+ON CONFLICT (channel_id) DO NOTHING;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role, left_at)
+VALUES
+  ('00000000-0000-7212-8000-000000000399', '$WORKSPACE_ID',
+   '$CROSS_CHANNEL_ID', '$NO_SHARED_MEMBER_ID', 'member', NULL),
+  ('00000000-0000-7212-8000-000000000400', '$WORKSPACE_ID',
+   '$CROSS_CHANNEL_ID', '$AGENT_ID', 'member', NULL)
+ON CONFLICT (channel_id, member_id)
+DO UPDATE SET left_at = NULL;
 
 COMMIT;
 SQL
@@ -359,6 +451,19 @@ echo "[agent-live] starting AgentWorker"
 WORKER_PID=$!
 wait_log_pattern "$WORKER_LOG" "agent worker starting" "AgentWorker" "$WORKER_PID"
 
+echo "[agent-live] starting OutboxRelay for private agentwork WebSocket evidence"
+(
+  cd "$REPO_ROOT"
+  RELAY_DATABASE_URL="$RELAY_DATABASE_URL" \
+  CENT_API_URL="$CENT_API_URL" \
+  CENT_API_KEY="$CENT_API_KEY" \
+  RELAY_POLL_INTERVAL_MS="$RELAY_POLL_INTERVAL_MS" \
+  LOG_LEVEL="${LOG_LEVEL:-info}" \
+  swift run --package-path relay/OutboxRelay OutboxRelay
+) >"$RELAY_LOG" 2>&1 &
+RELAY_PID=$!
+wait_log_pattern "$RELAY_LOG" "outbox relay starting" "OutboxRelay" "$RELAY_PID"
+
 echo "[agent-live] logging in authorized and unauthorized users"
 LOGIN_JSON="$(login "$HUMAN_EMAIL" "$WORKSPACE_ID")"
 ACCESS_TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken // empty')"
@@ -370,6 +475,62 @@ OTHER_ACCESS_TOKEN="$(printf '%s' "$OTHER_LOGIN_JSON" | jq -r '.accessToken // e
 if [ "$ACCESS_TOKEN" = "" ] || [ "$NO_SHARED_ACCESS_TOKEN" = "" ] || [ "$OTHER_ACCESS_TOKEN" = "" ]; then
   fail "login did not return all access tokens"
 fi
+
+AGENT_CREDENTIAL_JSON="$(
+  api_request POST \
+    "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials" \
+    "$ACCESS_TOKEN" '{"label":"MOMO-338 agentwork websocket"}'
+)"
+AGENT_BEARER="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.token // empty')"
+REVOKED_AGENT_CREDENTIAL_ID="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.credential.id // empty')"
+if [ "$AGENT_BEARER" = "" ] || [ "$REVOKED_AGENT_CREDENTIAL_ID" = "" ]; then
+  fail "agent bearer mint failed for private work stream"
+fi
+REVOKED_AGENT_REALTIME_JSON="$(realtime_token "$AGENT_BEARER")"
+REVOKED_AGENT_REALTIME_TOKEN="$(printf '%s' "$REVOKED_AGENT_REALTIME_JSON" | jq -r '.token // empty')"
+
+# Keep another credential active, then revoke the credential which minted the
+# first connection JWT. Exact-token metadata must prevent that old JWT from
+# borrowing the new credential's liveness.
+AGENT_CREDENTIAL_JSON="$(
+  api_request POST \
+    "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials" \
+    "$ACCESS_TOKEN" '{"label":"MOMO-338 active agentwork websocket"}'
+)"
+AGENT_BEARER="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.token // empty')"
+AGENT_CREDENTIAL_ID="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.credential.id // empty')"
+api_request POST \
+  "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials/${REVOKED_AGENT_CREDENTIAL_ID}/revoke" \
+  "$ACCESS_TOKEN" '{"reason":"MOMO-338 exact realtime credential binding"}' >/dev/null
+
+AGENT_REALTIME_JSON="$(realtime_token "$AGENT_BEARER")"
+AGENT_REALTIME_TOKEN="$(printf '%s' "$AGENT_REALTIME_JSON" | jq -r '.token // empty')"
+if [ "$REVOKED_AGENT_REALTIME_TOKEN" = "" ] || [ "$AGENT_BEARER" = "" ] \
+  || [ "$AGENT_CREDENTIAL_ID" = "" ] || [ "$AGENT_REALTIME_TOKEN" = "" ]; then
+  fail "agent realtime token mint failed"
+fi
+
+psql_admin <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+DELETE FROM agent_run WHERE id = '$CROSS_RUN_ID';
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key,
+   finished_at)
+VALUES
+  ('$CROSS_RUN_ID', '$WORKSPACE_ID', '$AGENT_ID', '$CROSS_CHANNEL_ID',
+   'succeeded', '{}'::jsonb, 'momo-338-cross-channel-' || '$CROSS_RUN_ID', now());
+COMMIT;
+SQL
+CROSS_RUN_MESSAGE_STATUS="$(
+  api_status POST \
+    "/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" \
+    "$AGENT_BEARER" \
+    "{\"clientMsgId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"type\":\"text\",\"body\":\"must be denied\",\"runId\":\"${CROSS_RUN_ID}\"}"
+)"
+[ "$CROSS_RUN_MESSAGE_STATUS" = "403" ] \
+  || fail "agent cross-channel run association was not denied (HTTP ${CROSS_RUN_MESSAGE_STATUS})"
 
 REALTIME_JSON="$(realtime_token "$ACCESS_TOKEN")"
 REALTIME_TOKEN="$(printf '%s' "$REALTIME_JSON" | jq -r '.token // empty')"
@@ -390,8 +551,11 @@ PY_OUT="$(
   REALTIME_TOKEN="$REALTIME_TOKEN" \
   NO_SHARED_REALTIME_TOKEN="$NO_SHARED_REALTIME_TOKEN" \
   OTHER_REALTIME_TOKEN="$OTHER_REALTIME_TOKEN" \
+  AGENT_REALTIME_TOKEN="$AGENT_REALTIME_TOKEN" \
+  REVOKED_AGENT_REALTIME_TOKEN="$REVOKED_AGENT_REALTIME_TOKEN" \
   CENT_WS_URL="ws://127.0.0.1:${CENT_PORT}/connection/websocket?format=json" \
   AGENT_CHANNEL="$AGENT_CHANNEL" \
+  AGENT_WORK_CHANNEL="$AGENT_WORK_CHANNEL" \
   RUN_ID="$RUN_ID" \
   WORKSPACE_ID="$WORKSPACE_ID" \
   CHANNEL_ID="$CHANNEL_ID" \
@@ -582,6 +746,56 @@ def agent_publication_for(msg, channel, run_id, channel_id):
     )
 
 
+def seed_private_agentwork_broadcast():
+    workspace_id = os.environ["WORKSPACE_ID"]
+    channel_id = os.environ["CHANNEL_ID"]
+    agent_id = os.environ["AGENT_ID"]
+    run_id = os.environ["RUN_ID"]
+    work_channel = os.environ["AGENT_WORK_CHANNEL"]
+    # Centrifugo suppresses a publication whose version does not advance for a
+    # channel.  Use a monotonic wall-clock value here instead of a constant so
+    # repeated verifier runs exercise the live path rather than dedup recovery.
+    publication_version = time.time_ns() // 1_000
+    sql = f"""
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '{workspace_id}';
+DELETE FROM outbox
+ WHERE kind = 'broadcast'
+   AND payload->>'idempotency_key' = 'momo-338-agentwork-ws:{run_id}';
+INSERT INTO outbox
+  (workspace_id, kind, status, method, payload, partition_key)
+VALUES
+  ('{workspace_id}', 'broadcast', 'pending', 'publish',
+   jsonb_build_object(
+     'channel', '{work_channel}',
+     'data', jsonb_build_object(
+       'type', 'agent.job',
+       'v', 1,
+       'payload', jsonb_build_object(
+         'run_id', '{run_id}',
+         'workspace_id', '{workspace_id}',
+         'channel_id', '{channel_id}',
+         'agent_member_id', '{agent_id}',
+         'prompt', 'MOMO-338 private work stream websocket evidence'
+       )
+     ),
+     'version', {publication_version},
+     'idempotency_key', 'momo-338-agentwork-ws:{run_id}'
+   ),
+   '{agent_id}');
+COMMIT;
+"""
+    subprocess.run(
+        [os.environ["PSQL_BIN"], os.environ["ADMIN_DATABASE_URL"], "-v", "ON_ERROR_STOP=1", "--no-psqlrc"],
+        input=sql,
+        text=True,
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+
 def seed_agent_job():
     workspace_id = os.environ["WORKSPACE_ID"]
     channel_id = os.environ["CHANNEL_ID"]
@@ -680,8 +894,61 @@ run_id = os.environ["RUN_ID"]
 channel_id = os.environ["CHANNEL_ID"]
 
 invalid = invalid_connect_result(ws_url)
-no_shared = subscribe_denied(ws_url, os.environ["NO_SHARED_REALTIME_TOKEN"], channel, "momo-agent-live-no-shared")
+different_channel = subscribe_denied(
+    ws_url,
+    os.environ["NO_SHARED_REALTIME_TOKEN"],
+    channel,
+    "momo-agent-live-different-channel",
+)
 other_workspace = subscribe_denied(ws_url, os.environ["OTHER_REALTIME_TOKEN"], channel, "momo-agent-live-other-workspace")
+
+work_channel = os.environ["AGENT_WORK_CHANNEL"]
+revoked_agent_credential = subscribe_denied(
+    ws_url,
+    os.environ["REVOKED_AGENT_REALTIME_TOKEN"],
+    work_channel,
+    "momo-agentwork-revoked-credential",
+)
+private_ws = WS(ws_url)
+try:
+    private_ws.send_json({
+        "id": 1,
+        "connect": {
+            "token": os.environ["AGENT_REALTIME_TOKEN"],
+            "name": "momo-agentwork-live-verifier",
+            "version": "0.0.1",
+        },
+    })
+    wait_for(private_ws, lambda m: command_ok(m, 1, "connect"), timeout=20)
+    private_ws.send_json({
+        "id": 2,
+        "subscribe": {"channel": work_channel, "recover": False},
+    })
+    private_subscribe = wait_for(
+        private_ws, lambda m: command_ok(m, 2, "subscribe"), timeout=20
+    )
+    seed_private_agentwork_broadcast()
+    private_live = wait_for(
+        private_ws,
+        lambda m: (
+            (m.get("push") or {}).get("channel") == work_channel
+            and (((m.get("push") or {}).get("pub") or {}).get("data") or {}).get("type")
+            == "agent.job"
+            and str(
+                (
+                    (((m.get("push") or {}).get("pub") or {}).get("data") or {}).get(
+                        "payload"
+                    )
+                    or {}
+                ).get("run_id")
+                or ""
+            ).lower()
+            == run_id.lower()
+        ),
+        timeout=30,
+    )
+finally:
+    private_ws.close()
 
 ws = WS(ws_url)
 try:
@@ -717,9 +984,15 @@ try:
     payload = data["payload"]
     result = {
         "invalid_token": invalid,
-        "unauthorized_no_shared_channel": no_shared,
+        "unauthorized_different_channel": different_channel,
         "unauthorized_other_workspace": other_workspace,
+        "revoked_agent_credential": revoked_agent_credential,
         "direct_publish": {"ok": bool(direct_publish.get("error")), "message": direct_publish},
+        "private_agentwork": {
+            "ok": bool(private_live),
+            "channel": work_channel,
+            "subscribe": private_subscribe.get("subscribe", {}),
+        },
         "connect": connect_msg.get("connect", {}),
         "subscribe": subscribe_msg.get("subscribe", {}),
         "publication": {
@@ -750,11 +1023,13 @@ EVENT_TYPE="$(jq -r '.publication.data.type' "$LIVE_JSON")"
 PUB_RUN_ID="$(jq -r '(.publication.data.payload.run_id // .publication.data.payload.runId // empty) | ascii_downcase' "$LIVE_JSON")"
 PUB_CHANNEL_ID="$(jq -r '(.publication.data.payload.channel_id // .publication.data.payload.channelId // empty) | ascii_downcase' "$LIVE_JSON")"
 INVALID_OK="$(jq -r '.invalid_token.ok' "$LIVE_JSON")"
-NO_SHARED_OK="$(jq -r '.unauthorized_no_shared_channel.ok' "$LIVE_JSON")"
+NO_SHARED_OK="$(jq -r '.unauthorized_different_channel.ok' "$LIVE_JSON")"
 OTHER_WS_OK="$(jq -r '.unauthorized_other_workspace.ok' "$LIVE_JSON")"
+REVOKED_AGENT_OK="$(jq -r '.revoked_agent_credential.ok' "$LIVE_JSON")"
 DIRECT_PUBLISH_OK="$(jq -r '.direct_publish.ok' "$LIVE_JSON")"
+PRIVATE_AGENTWORK_OK="$(jq -r '.private_agentwork.ok' "$LIVE_JSON")"
 PUB_OFFSET="$(jq -r '.publication.offset // empty' "$LIVE_JSON")"
-for check in "$INVALID_OK" "$NO_SHARED_OK" "$OTHER_WS_OK" "$DIRECT_PUBLISH_OK"; do
+for check in "$INVALID_OK" "$NO_SHARED_OK" "$OTHER_WS_OK" "$REVOKED_AGENT_OK" "$DIRECT_PUBLISH_OK" "$PRIVATE_AGENTWORK_OK"; do
   [ "$check" = "true" ] || fail "one or more negative authorization checks did not fail closed"
 done
 case "$EVENT_TYPE" in
@@ -776,6 +1051,7 @@ UPDATE agent_run
  WHERE workspace_id = '$WORKSPACE_ID'
    AND id = '$RUN_ID'
    AND status IN ('queued', 'running', 'awaiting_approval', 'paused');
+DELETE FROM agent_run WHERE id = '$CROSS_RUN_ID';
 COMMIT;
 SQL
 
@@ -785,11 +1061,12 @@ SQL
   echo "- Stack: dev compose project \`${COMPOSE_PROJECT_NAME}\`, host api=\`http://127.0.0.1:${PORT}\`, centrifugo=\`ws://127.0.0.1:${CENT_PORT}\`, mock hermes=\`${HERMES_BASE_URL}\`, subscribe proxy alias=\`api:8080\`"
   echo "- Authorized member: member_id=\`${MEMBER_ID}\`, workspace_id=\`${WORKSPACE_ID}\`"
   echo "- Agent channel: \`${AGENT_CHANNEL}\`"
+  echo "- Private agent work channel: \`${AGENT_WORK_CHANNEL}\` (agent bearer WebSocket subscribe + OutboxRelay publication received)"
   echo "- Realtime token: type=\`${TOKEN_TYPE}\`, ttl_seconds=\`${TTL_SECONDS}\`, token_len=\`${#REALTIME_TOKEN}\`"
   echo "- Live publication: type=\`${EVENT_TYPE}\`, run_id=\`${PUB_RUN_ID}\`, channel_id=\`${PUB_CHANNEL_ID}\`, publication_offset=\`${PUB_OFFSET:-n/a}\`"
-  echo "- Negative paths: invalid connection token rejected; same-workspace member without shared channel denied; other-workspace member/token denied; client direct publish denied."
+  echo "- Negative paths: invalid connection token rejected; same-workspace member who shares only a different channel with the agent denied; other-workspace member/token denied; revoked credential-bound realtime JWT denied while another bearer stayed active; agent cross-channel run association denied; client direct publish denied."
   echo "- Ordering note: \`agent.status\`/\`agent.partial\` are ephemeral progress events without \`message.seq\`; final durable output remains on channel timeline through Postgres message/outbox/relay with \`message.seq\` as SoT."
-  echo "- Evidence files: publication=\`${LIVE_JSON}\`, websocket_log=\`${PY_LOG}\`, server_log=\`${SERVER_LOG}\`, worker_log=\`${WORKER_LOG}\`, mock_log=\`${MOCK_LOG}\`, api_proxy_log=\`${PROXY_LOG}\`"
+  echo "- Evidence files: publication=\`${LIVE_JSON}\`, websocket_log=\`${PY_LOG}\`, server_log=\`${SERVER_LOG}\`, worker_log=\`${WORKER_LOG}\`, relay_log=\`${RELAY_LOG}\`, mock_log=\`${MOCK_LOG}\`, api_proxy_log=\`${PROXY_LOG}\`"
 } >"$EVIDENCE_FILE"
 
 cat "$EVIDENCE_FILE"

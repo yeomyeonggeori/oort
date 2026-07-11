@@ -59,8 +59,8 @@ Required endpoints/events:
 - `POST /v1/auth/realtime-token`
 - `GET /v1/workspaces/{ws}/channels/{ch}/messages?after=<seq>`
 - Centrifugo subscribe proxy `POST /v1/centrifugo/subscribe`
-- `agent.partial` on `agent:ws<workspace>.<agentMember>`
-- `agent.status` on `agent:ws<workspace>.<agentMember>`
+- `agent.partial` on `agent:ws<workspace>.<channel>.<agentMember>`
+- `agent.status` on `agent:ws<workspace>.<channel>.<agentMember>`
 - `message.new` on `ch:ws<workspace>.<channel>`
 
 Fixture/runtime evidence:

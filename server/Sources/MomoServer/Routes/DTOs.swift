@@ -598,6 +598,7 @@ struct SubscribeProxyRequest: Decodable {
     let client: String?
     let user: String?
     let channel: String
+    let meta: RealtimeTokenMeta?
 }
 
 /// Subscribe proxy success/deny envelope (Centrifugo proxy protocol).

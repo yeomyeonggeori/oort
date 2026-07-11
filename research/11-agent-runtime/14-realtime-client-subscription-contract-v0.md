@@ -56,7 +56,8 @@ Clients derive channel names only from authenticated workspace/member/channel id
 |---|---|---|---|
 | Channel timeline | `ch:ws<workspaceUUID>.<channelUUID>` | Human clients and agents that are active channel members | Centrifugo subscribe proxy calls `POST /v1/centrifugo/subscribe`; server checks `membership.left_at IS NULL` under RLS. |
 | DM timeline | `dm:ws<workspaceUUID>.<channelUUID>` | DM members | Same membership rule. |
-| Agent progress | `agent:ws<workspaceUUID>.<agentMemberUUID>` | Members allowed to observe that agent in the current workspace/channel context | v0 contract: authorized by realtime token/subscription policy. Current server-side auth is `runtime-unverified`. |
+| Agent progress | `agent:ws<workspaceUUID>.<channelUUID>.<agentMemberUUID>` | Active members of that exact channel when the agent is also active there | Subscribe proxy checks both memberships on every attempt; this prevents progress/tool data crossing channel boundaries. |
+| Agent private work | `agentwork:ws<workspaceUUID>.<agentMemberUUID>` | The exact active agent bearer actor only | Gateway jobs are private; human/member observation and direct publish are denied. |
 | User private notifications | `user:<memberUUID>` or server-side connection JWT channel | One member | Server-side subscription only; not used for timeline ordering. |
 
 Publish source:
