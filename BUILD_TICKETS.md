@@ -184,6 +184,7 @@
 | `MOMO-319` | Local gate/verifier hardening for solo alpha | tooling/runtime | LSA-001, MOMO-300, MOMO-301, MOMO-302 |
 | `MOMO-320` | Local runtime env drift guard | tooling/runtime | LSA-001, MOMO-319, MOMO-300 |
 | `MOMO-324` | AgentWorker verifier cleanup FK rerun hardening | tooling/runtime | MOMO-320 |
+| `MOMO-342` (`#314`) | AgentWorker verifier persistent DB fixture hardening | tooling/runtime | MOMO-324, MOMO-338 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -1574,6 +1575,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] [runtime] 두 gateway consumer가 같은 agent를 동시에 claim해도 provider execution은 한 번만 시작된다.
 - [ ] [runtime] consumer crash 후 lease expiry/takeover로 job이 영구 pending에 남지 않는다.
 - [ ] [security] bearer actor binding, Postgres SoT, REST-only callback, provider credential boundary를 유지한다.
+
+### ☑ MOMO-342 수용기준 — AgentWorker verifier persistent DB fixture hardening `[tooling/runtime]` · 의존: MOMO-324, MOMO-338
+- [x] positive mention route는 user-owned `@hermes`를 복구/수정하지 않고 deterministic verifier-only agent/member/membership을 idempotent upsert한다.
+- [x] verifier 고정 ID/handle이 기존 행과 충돌하면 기존 데이터를 덮지 않고 소유권 오류로 fail-closed한다.
+- [x] verifier runtime은 소유 marker가 있는 별도 migration DB, marker-bound 전용 app/relay/worker role, DB generation 기반 UUID namespace와 전용 workspace/human/channel/budget에서 실행되어 source/dogfood DB의 queue, budget window, 비용 원장을 물리적으로 claim하거나 변경하지 않는다.
+- [x] source/system/unmarked DB 지정과 verifier role identity collision은 migration/fixture write 전에 fail-closed한다.
+- [x] 실제 local dogfood message/pending agent job/무관한 membership은 cleanup하지 않는다.
+- [x] 비어 있는 run id를 UUID SQL에 전달하지 않고 fixture/mention 실패를 readable evidence로 구분한다.
+- [x] `runtime-agent` local gate가 같은 persistent verifier DB에서 verifier를 연속 2회 실행하고 보존 sentinel, source DB 비변경, Centrifugo generation namespace 재실행 경계를 확인한다.
 
 ---
 

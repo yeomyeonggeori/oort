@@ -7,7 +7,7 @@
 #   make migrate
 #
 # Verifies:
-#   1) REST channel send with @hermes creates exactly one agent_job outbox row
+#   1) REST channel send to a verifier-owned agent creates exactly one agent_job
 #   2) duplicate client_msg_id REST retry does not create a duplicate job
 #   3) AgentWorker claims it with SKIP LOCKED and calls an OpenAI-compatible
 #      SSE gateway (scripts/mock_hermes.py by default)
@@ -78,7 +78,10 @@ psql_scalar() {
 
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
-POSTGRES_DB=${POSTGRES_DB:-momo}
+POSTGRES_USER=${POSTGRES_USER:-momo}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-momo_dev_pw}
+SOURCE_POSTGRES_DB=${POSTGRES_DB:-momo}
+POSTGRES_DB=${AGENT_WORKER_VERIFIER_DB:-momo_agent_worker_verify_v2_${POSTGRES_PORT}}
 PORT=${PORT:-8080}
 BASE_URL=${BASE_URL:-http://127.0.0.1:${PORT}}
 CENT_PORT=${CENT_PORT:-8000}
@@ -94,37 +97,9 @@ esac
 
 HERMES_BASE_URL=${HERMES_BASE_URL:-http://localhost:${HERMES_PORT}/v1}
 
-WORKSPACE_ID=00000000-0000-7000-8000-000000000001
-HUMAN_ID=00000000-0000-7000-8000-000000000101
-AGENT_ID=00000000-0000-7000-8000-000000000103
-CHANNEL_ID=00000000-0000-7000-8000-000000000202
-RUN_ID=00000000-0000-7000-8000-000000000904
-RESUME_RUN_ID=00000000-0000-7000-8000-000000000924
-RESUME_APPROVAL_ID=00000000-0000-7000-8000-000000000925
-TRIP_RUN_ID=00000000-0000-7000-8000-000000000914
-BUDGET_ID=00000000-0000-7000-8000-000000000905
-TRIP_BUDGET_ID=00000000-0000-7000-8000-000000000915
-MESSAGE_ID=00000000-0000-7000-8000-000000000906
-TRIP_MESSAGE_ID=00000000-0000-7000-8000-000000000916
-CLIENT_MSG_ID=00000000-0000-7000-8000-000000000907
-TRIP_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000917
-GUARD_DEPTH_RUN_ID=00000000-0000-7000-8000-000000000934
-GUARD_DEPTH_MESSAGE_ID=00000000-0000-7000-8000-000000000935
-GUARD_DEPTH_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000936
-GUARD_STEP_RUN_ID=00000000-0000-7000-8000-000000000937
-GUARD_STEP_MESSAGE_ID=00000000-0000-7000-8000-000000000938
-GUARD_STEP_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000939
-GUARD_G1_RUN_ID=00000000-0000-7000-8000-000000000940
-GUARD_G1_DECOY_RUN_ID=00000000-0000-7000-8000-000000000941
-GUARD_G1_MESSAGE_ID=00000000-0000-7000-8000-000000000942
-GUARD_G1_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000943
-GUARD_G2_RUN_ID=00000000-0000-7000-8000-000000000944
-GUARD_G2_MESSAGE_ID=00000000-0000-7000-8000-000000000945
-GUARD_G2_CLIENT_MSG_ID=00000000-0000-7000-8000-000000000946
-GUARD_G2_AGENT_MSG1_ID=00000000-0000-7000-8000-000000000947
-GUARD_G2_AGENT_MSG2_ID=00000000-0000-7000-8000-000000000948
-GUARD_G2_RESET_MESSAGE_ID=00000000-0000-7000-8000-000000000949
-GUARD_G2_RESET_CLIENT_MSG_ID=00000000-0000-7000-8000-00000000094a
+HUMAN_EMAIL=agent-worker-verifier@momo.local
+AGENT_HANDLE=agent-worker-verifier
+HERMES_AGENT_ID=00000000-0000-7000-8000-000000000103
 # MOMO-301 review round: gate thresholds are lowered via env so the trip
 # scenarios stay compatible with the 007 SoT CHECKs (depth <= 4): the
 # a2a_depth trip seeds depth=2 with MAX_DEPTH=1 (gate blocks depth > MAX_DEPTH),
@@ -132,10 +107,180 @@ GUARD_G2_RESET_CLIENT_MSG_ID=00000000-0000-7000-8000-00000000094a
 # MAX_CONSECUTIVE_AUTO=2. All other fixtures sit at depth=0 / streak=0.
 GUARD_MAX_DEPTH=${GUARD_MAX_DEPTH:-1}
 GUARD_MAX_CONSECUTIVE_AUTO=${GUARD_MAX_CONSECUTIVE_AUTO:-2}
-AGENT_CHANNEL=agent:ws${WORKSPACE_ID}.${CHANNEL_ID}.${AGENT_ID}
-CENT_CHANNEL=ch:ws${WORKSPACE_ID}.${CHANNEL_ID}
-NON_MEMBER_AGENT_ID=00000000-0000-7000-8000-000000215102
-NON_MEMBER_CLIENT_MSG_ID=00000000-0000-7000-8000-000000215107
+SENTINEL_OUTBOX_ID=-343
+VERIFIER_SYSTEM_PROMPT='Verifier-owned AgentWorker fixture. Do not use for local dogfood.'
+NON_MEMBER_SYSTEM_PROMPT='This agent is intentionally not a channel member for MOMO-215.'
+VERIFIER_DB_MARKER_PREFIX='momo:agent-worker-verifier:v1:'
+VERIFIER_APP_PASSWORD=momo_aw_verify_app_pw
+VERIFIER_RELAY_PASSWORD=momo_aw_verify_relay_pw
+VERIFIER_WORKER_PASSWORD=momo_aw_verify_worker_pw
+
+configure_verifier_identity() {
+  FIXTURE_NAMESPACE=$(printf '%s' "$VERIFIER_DB_MARKER" | shasum -a 256 | cut -c 1-6)
+  ROLE_SUFFIX=$(printf '%s' "$VERIFIER_DB_MARKER" | shasum -a 256 | cut -c 1-12)
+  WORKSPACE_SLUG=agent-worker-verifier-${FIXTURE_NAMESPACE}
+  VERIFIER_APP_ROLE=momo_aw_${ROLE_SUFFIX}_app
+  VERIFIER_RELAY_ROLE=momo_aw_${ROLE_SUFFIX}_relay
+  VERIFIER_WORKER_ROLE=momo_aw_${ROLE_SUFFIX}_worker
+
+  WORKSPACE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343001
+  HUMAN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343101
+  HUMAN_MEMBERSHIP_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343301
+  AGENT_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343113
+  AGENT_MEMBERSHIP_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343316
+  CHANNEL_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343202
+  RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343904
+  RESUME_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343924
+  RESUME_APPROVAL_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343925
+  TRIP_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343914
+  BUDGET_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343905
+  TRIP_BUDGET_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343915
+  MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343906
+  TRIP_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343916
+  CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343907
+  TRIP_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343917
+  GUARD_DEPTH_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343934
+  GUARD_DEPTH_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343935
+  GUARD_DEPTH_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343936
+  GUARD_STEP_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343937
+  GUARD_STEP_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343938
+  GUARD_STEP_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343939
+  GUARD_G1_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343940
+  GUARD_G1_DECOY_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343941
+  GUARD_G1_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343942
+  GUARD_G1_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343943
+  GUARD_G2_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343944
+  GUARD_G2_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343945
+  GUARD_G2_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343946
+  GUARD_G2_AGENT_MSG1_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343947
+  GUARD_G2_AGENT_MSG2_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343948
+  GUARD_G2_RESET_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343949
+  GUARD_G2_RESET_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}34394a
+  NON_MEMBER_AGENT_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343102
+  NON_MEMBER_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343107
+  SENTINEL_MESSAGE_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343390
+  SENTINEL_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343391
+  SENTINEL_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343392
+  TRANSPORT_WORKSPACE_ID=$(printf '%s' "$WORKSPACE_ID" | tr '[:lower:]' '[:upper:]')
+  TRANSPORT_CHANNEL_ID=$(printf '%s' "$CHANNEL_ID" | tr '[:lower:]' '[:upper:]')
+  TRANSPORT_AGENT_ID=$(printf '%s' "$AGENT_ID" | tr '[:lower:]' '[:upper:]')
+  AGENT_CHANNEL=agent:ws${TRANSPORT_WORKSPACE_ID}.${TRANSPORT_CHANNEL_ID}.${TRANSPORT_AGENT_ID}
+  CENT_CHANNEL=ch:ws${TRANSPORT_WORKSPACE_ID}.${TRANSPORT_CHANNEL_ID}
+}
+
+case "$POSTGRES_DB" in
+  ''|*[!a-zA-Z0-9_]*)
+    echo "[agent-worker] invalid verifier database name: $POSTGRES_DB" >&2
+    exit 1
+    ;;
+esac
+
+case "$POSTGRES_DB" in
+  "$SOURCE_POSTGRES_DB"|postgres|template0|template1)
+    echo "[agent-worker] refusing unsafe verifier database target: $POSTGRES_DB" >&2
+    exit 1
+    ;;
+esac
+
+provision_verifier_database() {
+  local exists marker
+  exists=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB';" | tr -d '[:space:]')
+  if [ "$exists" != "1" ]; then
+    echo "[agent-worker] creating isolated verifier database: $POSTGRES_DB"
+    marker="${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+      -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+      -v ON_ERROR_STOP=1 --no-psqlrc -c "CREATE DATABASE \"$POSTGRES_DB\";"
+    PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+      -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+      -v ON_ERROR_STOP=1 -v marker="$marker" --no-psqlrc \
+      -c "COMMENT ON DATABASE \"$POSTGRES_DB\" IS :'marker';"
+  fi
+
+  marker=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = '$POSTGRES_DB';" | tr -d '[:space:]')
+  marker_uuid=${marker#"$VERIFIER_DB_MARKER_PREFIX"}
+  if [ "$marker_uuid" = "$marker" ] \
+    || ! [[ "$marker_uuid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+    echo "[agent-worker] refusing unowned verifier database: $POSTGRES_DB (invalid verifier marker)" >&2
+    exit 1
+  fi
+  VERIFIER_DB_MARKER=${VERIFIER_DB_MARKER_PREFIX}${marker_uuid}
+  configure_verifier_identity
+
+  export PGHOST="$POSTGRES_HOST"
+  export PGPORT="$POSTGRES_PORT"
+  export PGDATABASE="$POSTGRES_DB"
+  export PGUSER="$POSTGRES_USER"
+  export PGPASSWORD="$POSTGRES_PASSWORD"
+  DATABASE_URL=
+  export DATABASE_URL
+
+  ENV_FILE=/dev/null DATABASE_URL= \
+    PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" \
+    PGUSER="$PGUSER" PGPASSWORD="$PGPASSWORD" \
+    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+}
+
+provision_verifier_roles() {
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+SELECT set_config('momo.verifier_marker', :'marker', false) AS verifier_marker_setting \gset
+DO \$roles\$
+DECLARE
+  role_name text;
+  role_marker text;
+BEGIN
+  FOREACH role_name IN ARRAY ARRAY['$VERIFIER_APP_ROLE', '$VERIFIER_RELAY_ROLE', '$VERIFIER_WORKER_ROLE']
+  LOOP
+    SELECT shobj_description(oid, 'pg_authid')
+      INTO role_marker
+      FROM pg_roles
+     WHERE rolname = role_name;
+    IF FOUND AND role_marker IS DISTINCT FROM current_setting('momo.verifier_marker') THEN
+      RAISE EXCEPTION 'AgentWorker verifier role identity collision: %', role_name;
+    END IF;
+  END LOOP;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$VERIFIER_APP_ROLE') THEN
+    CREATE ROLE $VERIFIER_APP_ROLE LOGIN PASSWORD '$VERIFIER_APP_PASSWORD';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$VERIFIER_RELAY_ROLE') THEN
+    CREATE ROLE $VERIFIER_RELAY_ROLE LOGIN PASSWORD '$VERIFIER_RELAY_PASSWORD';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$VERIFIER_WORKER_ROLE') THEN
+    CREATE ROLE $VERIFIER_WORKER_ROLE LOGIN PASSWORD '$VERIFIER_WORKER_PASSWORD';
+  END IF;
+END \$roles\$;
+
+COMMENT ON ROLE $VERIFIER_APP_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_RELAY_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_WORKER_ROLE IS :'marker';
+ALTER ROLE $VERIFIER_APP_ROLE
+  WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD '$VERIFIER_APP_PASSWORD';
+ALTER ROLE $VERIFIER_RELAY_ROLE
+  WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD '$VERIFIER_RELAY_PASSWORD';
+ALTER ROLE $VERIFIER_WORKER_ROLE
+  WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD '$VERIFIER_WORKER_PASSWORD';
+GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO $VERIFIER_APP_ROLE, $VERIFIER_RELAY_ROLE, $VERIFIER_WORKER_ROLE;
+SQL
+
+  psql_run <<SQL
+GRANT USAGE ON SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_RELAY_ROLE, $VERIFIER_WORKER_ROLE;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public
+  TO $VERIFIER_APP_ROLE, $VERIFIER_RELAY_ROLE, $VERIFIER_WORKER_ROLE;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public
+  TO $VERIFIER_APP_ROLE, $VERIFIER_RELAY_ROLE, $VERIFIER_WORKER_ROLE;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public
+  TO $VERIFIER_APP_ROLE, $VERIFIER_RELAY_ROLE, $VERIFIER_WORKER_ROLE;
+SQL
+}
 
 TMP_ROOT=${TMPDIR:-/tmp}
 MOCK_LOG=${TMP_ROOT}/momo-mock-hermes-$$.log
@@ -147,8 +292,23 @@ MOCK_PID=
 WORKER_PID=
 SERVER_PID=
 RELAY_PID=
+SENTINELS_ARMED=0
 
 cleanup() {
+  if [ "$SENTINELS_ARMED" = "1" ]; then
+    psql_run >/dev/null 2>&1 <<SQL || true
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+DELETE FROM outbox
+ WHERE id = $SENTINEL_OUTBOX_ID
+   AND payload->>'fixture' = 'momo-342-preserve';
+DELETE FROM message
+ WHERE id = '$SENTINEL_MESSAGE_ID'
+   AND client_msg_id = '$SENTINEL_CLIENT_MSG_ID';
+COMMIT;
+SQL
+  fi
   momo_cleanup_tracked_pids "agent-worker verifier" "$SERVER_PID" "$WORKER_PID" "$RELAY_PID" "$MOCK_PID"
 }
 trap cleanup EXIT INT TERM
@@ -168,6 +328,23 @@ wait_http() {
   return 1
 }
 
+reset_verifier_transport_history() {
+  local channel response
+  for channel in "$AGENT_CHANNEL" "$CENT_CHANNEL"; do
+    response=$(curl -fsS \
+      -H "X-API-Key: $CENT_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d "{\"channel\":\"$channel\"}" \
+      "$CENT_API_URL/history_remove")
+    if ! printf '%s' "$response" | jq -e '.error == null' >/dev/null; then
+      echo "[agent-worker] failed to reset verifier-owned Centrifugo history: $channel" >&2
+      printf '%s\n' "$response" >&2
+      exit 1
+    fi
+  done
+  echo "[agent-worker] reset verifier-owned Centrifugo history"
+}
+
 start_server() {
   if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
     if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -181,9 +358,12 @@ start_server() {
   echo "[agent-worker] starting MomoServer for cost projection endpoint"
   (
     cd "$REPO_ROOT"
-    DATABASE_URL="postgres://momo_app:momo_app_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
-    PORT="$PORT" \
-    swift run --package-path server MomoServer
+    swift build --package-path server --product MomoServer >/dev/null
+    SERVER_BIN="$(swift build --package-path server --show-bin-path)/MomoServer"
+    exec env \
+      DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+      PORT="$PORT" \
+      "$SERVER_BIN"
   ) >"$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
 
@@ -216,7 +396,7 @@ start_relay() {
     swift build --package-path relay/OutboxRelay --product OutboxRelay >/dev/null
     RELAY_BIN="$(swift build --package-path relay/OutboxRelay --show-bin-path)/OutboxRelay"
     exec env \
-      RELAY_DATABASE_URL="postgres://momo_relay:momo_relay_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
+      RELAY_DATABASE_URL="postgres://${VERIFIER_RELAY_ROLE}:${VERIFIER_RELAY_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
       CENT_API_URL="$CENT_API_URL" \
       CENT_API_KEY="$CENT_API_KEY" \
       RELAY_POLL_INTERVAL_MS=100 \
@@ -229,7 +409,7 @@ verify_cost_projection_endpoint() {
   start_server
   LOGIN_JSON=$(curl -fsS \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"demo@momo.local\",\"password\":\"dev-password\",\"workspace\":\"$WORKSPACE_ID\"}" \
+    -d "{\"email\":\"$HUMAN_EMAIL\",\"password\":\"dev-password\",\"workspace\":\"$WORKSPACE_ID\"}" \
     "$BASE_URL/v1/auth/login")
   ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
   if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
@@ -245,9 +425,9 @@ verify_cost_projection_endpoint() {
 
   if ! jq -e --arg run "$RUN_ID" '
       .schema == "momo.cost_snapshot.channel.v0"
-      and .channel_id == "'"$CHANNEL_ID"'"
+      and ((.channel_id | ascii_downcase) == ("'"$CHANNEL_ID"'" | ascii_downcase))
       and any(.snapshots[]?;
-        .run_id == $run
+        ((.run_id | ascii_downcase) == ($run | ascii_downcase))
         and .reserved_micro_usd == 0
         and .spent_micro_usd == 6
         and .is_reconciled == true
@@ -269,8 +449,10 @@ momo_cleanup_runtime_ports "agent-worker verifier preflight" "$PORT" "$HERMES_PO
   echo "[agent-worker] verifier ports are occupied by non-momo processes; stop them or choose PORT/HERMES_PORT overrides." >&2
   exit 1
 }
-echo "[agent-worker] ensuring runtime DB roles exist"
-"$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
+provision_verifier_database
+echo "[agent-worker] isolated database ready: $POSTGRES_DB (source database untouched: $SOURCE_POSTGRES_DB)"
+echo "[agent-worker] ensuring verifier-owned runtime DB roles exist"
+provision_verifier_roles
 
 start_server
 start_relay
@@ -281,137 +463,472 @@ python3 "$REPO_ROOT/scripts/mock_hermes.py" --host 127.0.0.1 --port "$HERMES_POR
 MOCK_PID=$!
 wait_http "http://127.0.0.1:${HERMES_PORT}/health" "mock hermes"
 
+echo "[agent-worker] ensuring dedicated verifier workspace"
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+DO \$workspace_fixture\$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM workspace
+     WHERE id = '$WORKSPACE_ID'
+       AND (slug IS DISTINCT FROM '$WORKSPACE_SLUG'
+            OR name IS DISTINCT FROM 'AgentWorker Verifier Workspace')
+  ) OR EXISTS (
+    SELECT 1 FROM workspace
+     WHERE slug = '$WORKSPACE_SLUG' AND id <> '$WORKSPACE_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier workspace identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM member
+     WHERE id = '$HUMAN_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR kind IS DISTINCT FROM 'human'
+            OR handle IS DISTINCT FROM 'agent-worker-human'
+            OR display_name IS DISTINCT FROM 'AgentWorker Human')
+  ) OR EXISTS (
+    SELECT 1 FROM member
+     WHERE workspace_id = '$WORKSPACE_ID'
+       AND lower(btrim(handle)) = lower('agent-worker-human') AND id <> '$HUMAN_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier human member identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM human
+     WHERE member_id = '$HUMAN_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR email IS DISTINCT FROM '$HUMAN_EMAIL')
+  ) OR EXISTS (
+    SELECT 1 FROM human
+     WHERE workspace_id = '$WORKSPACE_ID' AND email = '$HUMAN_EMAIL'
+       AND member_id <> '$HUMAN_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier human identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM channel
+     WHERE id = '$CHANNEL_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR kind IS DISTINCT FROM 'public'
+            OR name IS DISTINCT FROM 'agent-worker-verifier'
+            OR created_by IS DISTINCT FROM '$HUMAN_ID')
+  ) OR EXISTS (
+    SELECT 1 FROM channel
+     WHERE workspace_id = '$WORKSPACE_ID' AND lower(name) = 'agent-worker-verifier'
+       AND id <> '$CHANNEL_ID' AND archived_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier channel identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM membership
+     WHERE id = '$HUMAN_MEMBERSHIP_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR channel_id IS DISTINCT FROM '$CHANNEL_ID'
+            OR member_id IS DISTINCT FROM '$HUMAN_ID')
+  ) OR EXISTS (
+    SELECT 1 FROM membership
+     WHERE channel_id = '$CHANNEL_ID' AND member_id = '$HUMAN_ID'
+       AND id <> '$HUMAN_MEMBERSHIP_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier human membership identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM channel_seq
+     WHERE channel_id = '$CHANNEL_ID' AND workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier channel sequence identity collision';
+  END IF;
+END
+\$workspace_fixture\$;
+
+INSERT INTO workspace (id, slug, name)
+VALUES ('$WORKSPACE_ID', '$WORKSPACE_SLUG', 'AgentWorker Verifier Workspace')
+ON CONFLICT (id) DO UPDATE SET deleted_at = NULL;
+
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES ('$HUMAN_ID', '$WORKSPACE_ID', 'human', 'active',
+        'AgentWorker Human', 'agent-worker-human')
+ON CONFLICT (id) DO UPDATE
+  SET status = 'active', deleted_at = NULL;
+
+INSERT INTO human
+  (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$HUMAN_ID', '$WORKSPACE_ID', '$HUMAN_EMAIL', true,
+        momo_password_hash('dev-password'), 'UTC')
+ON CONFLICT (member_id) DO UPDATE
+  SET password_hash = momo_password_hash('dev-password'),
+      email_verified = true;
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by)
+VALUES ('$CHANNEL_ID', '$WORKSPACE_ID', 'public', 'agent-worker-verifier',
+        'Isolated AgentWorker runtime verifier channel', '$HUMAN_ID')
+ON CONFLICT (id) DO UPDATE SET archived_at = NULL;
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES ('$CHANNEL_ID', '$WORKSPACE_ID', 0)
+ON CONFLICT (channel_id) DO NOTHING;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
+VALUES ('$HUMAN_MEMBERSHIP_ID', '$WORKSPACE_ID', '$CHANNEL_ID', '$HUMAN_ID', 'owner')
+ON CONFLICT (channel_id, member_id) DO UPDATE
+  SET role = 'owner', left_at = NULL;
+
+COMMIT;
+SQL
+
+PRESERVED_MEMBERSHIP_STATE_BEFORE=$(psql_scalar "SELECT md5(coalesce(jsonb_agg(jsonb_build_object('id', id, 'workspace_id', workspace_id, 'channel_id', channel_id, 'member_id', member_id, 'role', role, 'muted', muted, 'left_at', left_at) ORDER BY id)::text, '[]')) FROM membership WHERE workspace_id='$WORKSPACE_ID' AND member_id <> '$AGENT_ID' AND id <> '$AGENT_MEMBERSHIP_ID';")
+PRESERVED_HERMES_STATE_BEFORE=$(psql_scalar "SELECT md5(jsonb_build_object('member', (SELECT to_jsonb(m) FROM member m WHERE m.id='$HERMES_AGENT_ID'), 'agent', (SELECT to_jsonb(a) FROM agent a WHERE a.member_id='$HERMES_AGENT_ID'), 'memberships', (SELECT coalesce(jsonb_agg(to_jsonb(ms) ORDER BY ms.id), '[]'::jsonb) FROM membership ms WHERE ms.member_id='$HERMES_AGENT_ID'))::text);")
+
 echo "[agent-worker] preparing REST mention-routing fixture"
 psql_run <<SQL
 BEGIN;
 SET LOCAL row_security = off;
 SET LOCAL app.workspace_id = '$WORKSPACE_ID';
 
-DELETE FROM usage_ledger
- WHERE run_id IN ('$RUN_ID', '$TRIP_RUN_ID')
-    OR run_id IN (
-      SELECT id FROM agent_run
-       WHERE workspace_id = '$WORKSPACE_ID'
-         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
-    );
-DELETE FROM audit_log WHERE target_id = '$RESUME_APPROVAL_ID' OR run_id = '$RESUME_RUN_ID';
--- MOMO-301 loop-guard trip fixtures (audit/outbox/message/agent_run rerun hygiene)
-DELETE FROM audit_log
- WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-                  '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID', '$GUARD_G2_RUN_ID');
-DELETE FROM outbox
- WHERE payload->>'run_id' IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-                              '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID')
-    OR payload->'data'->'payload'->>'run_id' IN
-       ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID', '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID');
-DELETE FROM agent_run
- WHERE id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-              '$GUARD_G1_RUN_ID', '$GUARD_G1_DECOY_RUN_ID', '$GUARD_G2_RUN_ID');
-DELETE FROM message
- WHERE run_id IN ('$GUARD_DEPTH_RUN_ID', '$GUARD_STEP_RUN_ID',
-                  '$GUARD_G1_RUN_ID', '$GUARD_G2_RUN_ID')
-    OR id IN ('$GUARD_DEPTH_MESSAGE_ID', '$GUARD_STEP_MESSAGE_ID', '$GUARD_G1_MESSAGE_ID',
-              '$GUARD_G2_MESSAGE_ID', '$GUARD_G2_AGENT_MSG1_ID', '$GUARD_G2_AGENT_MSG2_ID',
-              '$GUARD_G2_RESET_MESSAGE_ID')
-    OR client_msg_id IN ('$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
-                         '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID',
-                         '$GUARD_G2_RESET_CLIENT_MSG_ID');
-DELETE FROM audit_log
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND run_id IN (
-      SELECT id FROM agent_run
-       WHERE workspace_id = '$WORKSPACE_ID'
-         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
-   );
-DELETE FROM audit_log
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND target_id IN (
-     SELECT id FROM message
-      WHERE workspace_id = '$WORKSPACE_ID'
-        AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
-   );
-DELETE FROM audit_log
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND run_id IN (
-      SELECT ar.id
-        FROM agent_run ar
-        JOIN message trigger_message ON trigger_message.id = ar.trigger_message_id
-       WHERE ar.workspace_id = '$WORKSPACE_ID'
-         AND trigger_message.workspace_id = '$WORKSPACE_ID'
-         AND trigger_message.client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
-   );
--- Keep cleanup verifier-owned. Do not clear the whole demo workspace agent_job
--- queue because local dogfood may have real pending Hermes work in the same DB.
-DELETE FROM outbox
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND (payload->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
-   OR payload->>'resume_from_approval_id' = '$RESUME_APPROVAL_ID'
-   OR payload->>'trigger_message_id' IN (
-     SELECT id::text FROM message
-      WHERE workspace_id = '$WORKSPACE_ID'
-        AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
+-- Fixed IDs are safe only when an existing row is already owned by this
+-- verifier. Never mutate a user row merely because it collides with a fixture
+-- ID or handle in a persistent dogfood database.
+DO \$fixture\$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM member
+     WHERE id = '$AGENT_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID' OR kind IS DISTINCT FROM 'agent'
+            OR handle IS DISTINCT FROM '$AGENT_HANDLE'
+            OR display_name IS DISTINCT FROM 'AgentWorker Verifier')
+  ) OR EXISTS (
+    SELECT 1 FROM member
+     WHERE workspace_id = '$WORKSPACE_ID'
+       AND lower(btrim(handle)) = lower('$AGENT_HANDLE') AND id <> '$AGENT_ID'
+  ) OR EXISTS (
+    SELECT 1 FROM member
+     WHERE workspace_id = '$WORKSPACE_ID' AND kind = 'agent'
+       AND btrim(display_name) = '$AGENT_HANDLE' AND id <> '$AGENT_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier member identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM agent
+     WHERE member_id = '$AGENT_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR owner_human_id IS DISTINCT FROM '$HUMAN_ID'
+            OR system_prompt IS DISTINCT FROM '$VERIFIER_SYSTEM_PROMPT')
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier agent identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM membership
+     WHERE id = '$AGENT_MEMBERSHIP_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR channel_id IS DISTINCT FROM '$CHANNEL_ID'
+            OR member_id IS DISTINCT FROM '$AGENT_ID')
+  ) OR EXISTS (
+    SELECT 1 FROM membership
+     WHERE channel_id = '$CHANNEL_ID' AND member_id = '$AGENT_ID'
+       AND id <> '$AGENT_MEMBERSHIP_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker verifier membership identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM member
+     WHERE id = '$NON_MEMBER_AGENT_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID' OR kind IS DISTINCT FROM 'agent'
+            OR handle IS DISTINCT FROM 'no-channel-agent'
+            OR display_name IS DISTINCT FROM 'No Channel Agent')
+  ) OR EXISTS (
+    SELECT 1 FROM member
+     WHERE workspace_id = '$WORKSPACE_ID'
+       AND lower(btrim(handle)) = lower('no-channel-agent')
+       AND id <> '$NON_MEMBER_AGENT_ID'
+  ) OR EXISTS (
+    SELECT 1 FROM member
+     WHERE workspace_id = '$WORKSPACE_ID' AND kind = 'agent'
+       AND btrim(display_name) = 'no-channel-agent' AND id <> '$NON_MEMBER_AGENT_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker non-member verifier identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM agent
+     WHERE member_id = '$NON_MEMBER_AGENT_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR owner_human_id IS DISTINCT FROM '$HUMAN_ID'
+            OR system_prompt IS DISTINCT FROM '$NON_MEMBER_SYSTEM_PROMPT')
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker non-member agent identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM membership
+     WHERE workspace_id = '$WORKSPACE_ID' AND channel_id = '$CHANNEL_ID'
+       AND member_id = '$NON_MEMBER_AGENT_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker non-member fixture unexpectedly has channel membership';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM message
+     WHERE id = '$SENTINEL_MESSAGE_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR channel_id IS DISTINCT FROM '$CHANNEL_ID'
+            OR author_member_id IS DISTINCT FROM '$HUMAN_ID'
+            OR client_msg_id IS DISTINCT FROM '$SENTINEL_CLIENT_MSG_ID'
+            OR body IS DISTINCT FROM '@$AGENT_HANDLE MOMO-004 AgentWorker 검증해줘')
+  ) OR EXISTS (
+    SELECT 1 FROM message
+     WHERE channel_id = '$CHANNEL_ID' AND author_member_id = '$HUMAN_ID'
+       AND client_msg_id = '$SENTINEL_CLIENT_MSG_ID' AND id <> '$SENTINEL_MESSAGE_ID'
+  ) OR EXISTS (
+    SELECT 1 FROM message
+     WHERE channel_id = '$CHANNEL_ID' AND seq = -343 AND id <> '$SENTINEL_MESSAGE_ID'
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker preservation sentinel message collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM outbox
+     WHERE id = $SENTINEL_OUTBOX_ID
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR kind IS DISTINCT FROM 'agent_job'
+            OR status IS DISTINCT FROM 'pending'
+            OR method IS DISTINCT FROM 'publish'
+            OR available_at IS DISTINCT FROM 'infinity'::timestamptz
+            OR payload->>'fixture' IS DISTINCT FROM 'momo-342-preserve'
+            OR lower(payload->>'run_id') IS DISTINCT FROM lower('$SENTINEL_RUN_ID')
+            OR lower(payload->>'agent_member_id') IS DISTINCT FROM lower('$HERMES_AGENT_ID')
+            OR lower(payload->>'trigger_message_id') IS DISTINCT FROM lower('$SENTINEL_MESSAGE_ID'))
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker preservation sentinel outbox collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM message
+     WHERE id = '$GUARD_G2_AGENT_MSG1_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID' OR channel_id IS DISTINCT FROM '$CHANNEL_ID'
+            OR author_member_id NOT IN ('$AGENT_ID', '$HERMES_AGENT_ID')
+            OR body IS DISTINCT FROM 'MOMO-301 G2 auto reply 1')
+  ) OR EXISTS (
+    SELECT 1 FROM message
+     WHERE id = '$GUARD_G2_AGENT_MSG2_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID' OR channel_id IS DISTINCT FROM '$CHANNEL_ID'
+            OR author_member_id NOT IN ('$AGENT_ID', '$HERMES_AGENT_ID')
+            OR body IS DISTINCT FROM 'MOMO-301 G2 auto reply 2')
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker G2 verifier message identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+      FROM agent_run ar
+      JOIN (VALUES
+        ('$RESUME_RUN_ID'::uuid, 'momo-178-approved-resume'),
+        ('$TRIP_RUN_ID'::uuid, 'momo-004-trip'),
+        ('$GUARD_DEPTH_RUN_ID'::uuid, 'momo-301-guard-depth'),
+        ('$GUARD_STEP_RUN_ID'::uuid, 'momo-301-guard-step'),
+        ('$GUARD_G1_RUN_ID'::uuid, 'momo-301-guard-g1'),
+        ('$GUARD_G1_DECOY_RUN_ID'::uuid, 'momo-301-guard-g1-decoy'),
+        ('$GUARD_G2_RUN_ID'::uuid, 'momo-301-guard-g2')
+      ) expected(id, idempotency_key) ON expected.id = ar.id
+     WHERE ar.workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+        OR ar.channel_id IS DISTINCT FROM '$CHANNEL_ID'
+        OR ar.agent_member_id NOT IN ('$AGENT_ID', '$HERMES_AGENT_ID')
+        OR ar.idempotency_key IS DISTINCT FROM expected.idempotency_key
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker fixed run identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM approval
+     WHERE id = '$RESUME_APPROVAL_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR run_id IS DISTINCT FROM '$RESUME_RUN_ID'
+            OR channel_id IS DISTINCT FROM '$CHANNEL_ID'
+            OR requested_by NOT IN ('$AGENT_ID', '$HERMES_AGENT_ID')
+            OR action_type IS DISTINCT FROM 'tool_call')
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker approval fixture identity collision';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM budget
+     WHERE id = '$BUDGET_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR grain IS DISTINCT FROM 'workspace'
+            OR agent_member_id IS NOT NULL OR channel_id IS NOT NULL)
+  ) OR EXISTS (
+    SELECT 1 FROM budget
+     WHERE id = '$TRIP_BUDGET_ID'
+       AND (workspace_id IS DISTINCT FROM '$WORKSPACE_ID'
+            OR grain IS DISTINCT FROM 'agent_channel'
+            OR agent_member_id NOT IN ('$AGENT_ID', '$HERMES_AGENT_ID')
+            OR channel_id IS DISTINCT FROM '$CHANNEL_ID')
+  ) THEN
+    RAISE EXCEPTION 'AgentWorker budget fixture identity collision';
+  END IF;
+END
+\$fixture\$;
+
+INSERT INTO message
+  (id, workspace_id, channel_id, seq, hlc_ts, hlc_count,
+   author_member_id, type, body, client_msg_id)
+VALUES
+  ('$SENTINEL_MESSAGE_ID', '$WORKSPACE_ID', '$CHANNEL_ID', -343, 0, 0,
+   '$HUMAN_ID', 'text', '@$AGENT_HANDLE MOMO-004 AgentWorker 검증해줘',
+   '$SENTINEL_CLIENT_MSG_ID')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO outbox
+  (id, workspace_id, kind, status, method, payload, partition_key, available_at)
+VALUES
+  ($SENTINEL_OUTBOX_ID, '$WORKSPACE_ID', 'agent_job', 'pending', 'publish',
+   jsonb_build_object(
+     'fixture', 'momo-342-preserve',
+     'run_id', '$SENTINEL_RUN_ID',
+     'workspace_id', '$WORKSPACE_ID',
+     'agent_member_id', '$HERMES_AGENT_ID',
+     'channel_id', '$CHANNEL_ID',
+     'trigger_message_id', '$SENTINEL_MESSAGE_ID',
+     'model', 'hermes-agent',
+     'prompt', '@$AGENT_HANDLE MOMO-004 AgentWorker 검증해줘',
+     'step_count', 0,
+     'depth', 0
+   ), '$HERMES_AGENT_ID', 'infinity'::timestamptz)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TEMP TABLE _momo_agent_worker_fixture_runs (
+  id uuid PRIMARY KEY
+) ON COMMIT DROP;
+
+INSERT INTO _momo_agent_worker_fixture_runs (id)
+VALUES ('$RESUME_RUN_ID'), ('$TRIP_RUN_ID'),
+       ('$GUARD_DEPTH_RUN_ID'), ('$GUARD_STEP_RUN_ID'),
+       ('$GUARD_G1_RUN_ID'), ('$GUARD_G1_DECOY_RUN_ID'), ('$GUARD_G2_RUN_ID')
+ON CONFLICT DO NOTHING;
+
+-- Capture both current verifier runs and legacy runs created by the old
+-- @hermes fixture, but only through the exact verifier trigger messages.
+INSERT INTO _momo_agent_worker_fixture_runs (id)
+SELECT ar.id
+  FROM agent_run ar
+  JOIN message trigger_message ON trigger_message.id = ar.trigger_message_id
+ WHERE ar.workspace_id = '$WORKSPACE_ID'
+   AND trigger_message.workspace_id = '$WORKSPACE_ID'
+   AND trigger_message.channel_id = '$CHANNEL_ID'
+   AND trigger_message.author_member_id = '$HUMAN_ID'
+   AND trigger_message.client_msg_id IN (
+     '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
+     '$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
+     '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID'
    )
-   OR payload->'data'->'payload'->>'run_id' IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID'));
+ON CONFLICT DO NOTHING;
+
+CREATE TEMP TABLE _momo_agent_worker_fixture_messages (
+  id uuid PRIMARY KEY
+) ON COMMIT DROP;
+
+INSERT INTO _momo_agent_worker_fixture_messages (id)
+SELECT id FROM message
+ WHERE id IN ('$GUARD_G2_AGENT_MSG1_ID', '$GUARD_G2_AGENT_MSG2_ID')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO _momo_agent_worker_fixture_messages (id)
+SELECT id FROM message
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND channel_id = '$CHANNEL_ID'
+   AND author_member_id IN ('$HUMAN_ID', '$AGENT_ID', '$HERMES_AGENT_ID')
+   AND client_msg_id IN (
+     '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
+     '$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
+     '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID'
+   )
+ON CONFLICT DO NOTHING;
+
+INSERT INTO _momo_agent_worker_fixture_messages (id)
+SELECT id FROM message WHERE run_id IN (SELECT id FROM _momo_agent_worker_fixture_runs)
+ON CONFLICT DO NOTHING;
+
+DELETE FROM usage_ledger
+ WHERE run_id IN (SELECT id FROM _momo_agent_worker_fixture_runs);
+DELETE FROM audit_log
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND (
+     run_id IN (SELECT id FROM _momo_agent_worker_fixture_runs)
+     OR (
+       target_type = 'message'
+       AND action IN ('agent.mention.queued', 'agent.mention.skipped')
+       AND target_id IN (SELECT id FROM _momo_agent_worker_fixture_messages)
+     )
+   );
+DELETE FROM outbox
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND (
+     lower(payload->>'run_id') IN (SELECT lower(id::text) FROM _momo_agent_worker_fixture_runs)
+     OR lower(payload->'data'->'payload'->>'run_id') IN (SELECT lower(id::text) FROM _momo_agent_worker_fixture_runs)
+     OR lower(payload->>'trigger_message_id') IN (SELECT lower(id::text) FROM _momo_agent_worker_fixture_messages)
+     OR lower(payload->'data'->'payload'->>'id') IN (SELECT lower(id::text) FROM _momo_agent_worker_fixture_messages)
+     OR lower(payload->>'resume_from_approval_id') = lower('$RESUME_APPROVAL_ID')
+   );
 DELETE FROM approval
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND id = '$RESUME_APPROVAL_ID';
+ WHERE workspace_id = '$WORKSPACE_ID' AND id = '$RESUME_APPROVAL_ID';
 DELETE FROM budget_window
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
+ WHERE workspace_id = '$WORKSPACE_ID' AND budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
 DELETE FROM budget
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
+ WHERE workspace_id = '$WORKSPACE_ID' AND id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
+
+-- Break the circular trigger-message/run references in dependency order.
 DELETE FROM message
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND run_id = '$RESUME_RUN_ID';
-DELETE FROM message
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND run_id IN (
-      SELECT ar.id
-        FROM agent_run ar
-        JOIN message trigger_message ON trigger_message.id = ar.trigger_message_id
-       WHERE ar.workspace_id = '$WORKSPACE_ID'
-         AND trigger_message.workspace_id = '$WORKSPACE_ID'
-         AND trigger_message.client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
-    )
+ WHERE id IN (SELECT id FROM _momo_agent_worker_fixture_messages)
    AND id NOT IN (
-      SELECT trigger_message_id
-        FROM agent_run
-       WHERE workspace_id = '$WORKSPACE_ID'
-         AND trigger_message_id IS NOT NULL
-   );
-DELETE FROM message
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND run_id IN (
-      SELECT id FROM agent_run
-       WHERE workspace_id = '$WORKSPACE_ID'
-         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
-    )
-   AND id NOT IN (
-      SELECT trigger_message_id FROM agent_run
-       WHERE workspace_id = '$WORKSPACE_ID'
-         AND idempotency_key LIKE 'mention:%:$AGENT_ID'
-         AND trigger_message_id IS NOT NULL
+     SELECT trigger_message_id FROM agent_run
+      WHERE id IN (SELECT id FROM _momo_agent_worker_fixture_runs)
+        AND trigger_message_id IS NOT NULL
    );
 DELETE FROM agent_run
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND trigger_message_id IN (
-      SELECT id
-        FROM message
-       WHERE workspace_id = '$WORKSPACE_ID'
-         AND client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
-   );
-DELETE FROM agent_run
- WHERE id IN ('$RUN_ID', '$RESUME_RUN_ID', '$TRIP_RUN_ID')
-    OR (
-      workspace_id = '$WORKSPACE_ID'
-      AND idempotency_key LIKE 'mention:%:$AGENT_ID'
-    );
+ WHERE id IN (SELECT id FROM _momo_agent_worker_fixture_runs);
 DELETE FROM message
- WHERE id IN ('$MESSAGE_ID', '$TRIP_MESSAGE_ID')
-    OR client_msg_id IN ('$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID')
-    OR body IN ('@hermes MOMO-256 Local Hermes bridge 검증해줘',
-                '@no-channel-agent should not be invoked');
+ WHERE id IN (SELECT id FROM _momo_agent_worker_fixture_messages);
+
+-- The positive route uses a verifier-owned agent. Never restore or mutate the
+-- user-owned Hermes seed: local dogfood may have intentionally removed,
+-- renamed, or re-paired it between gate runs.
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES ('$AGENT_ID', '$WORKSPACE_ID', 'agent', 'active',
+        'AgentWorker Verifier', '$AGENT_HANDLE')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status,
+      display_name = EXCLUDED.display_name,
+      handle = EXCLUDED.handle,
+      deleted_at = NULL;
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
+                   owner_human_id, max_concurrent_runs, max_run_steps)
+VALUES ('$AGENT_ID', '$WORKSPACE_ID', 'hermes-agent',
+        'http://localhost:$HERMES_PORT/v1',
+        '$VERIFIER_SYSTEM_PROMPT',
+        '$HUMAN_ID', 1, 12)
+ON CONFLICT (member_id) DO UPDATE
+  SET model = EXCLUDED.model,
+      base_url = EXCLUDED.base_url,
+      system_prompt = EXCLUDED.system_prompt,
+      max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+      max_run_steps = EXCLUDED.max_run_steps;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
+VALUES ('$AGENT_MEMBERSHIP_ID', '$WORKSPACE_ID', '$CHANNEL_ID', '$AGENT_ID', 'member')
+ON CONFLICT (channel_id, member_id) DO UPDATE
+  SET left_at = NULL,
+      role = EXCLUDED.role;
 
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('$NON_MEMBER_AGENT_ID', '$WORKSPACE_ID', 'agent', 'active',
@@ -419,23 +936,19 @@ VALUES ('$NON_MEMBER_AGENT_ID', '$WORKSPACE_ID', 'agent', 'active',
 ON CONFLICT (id) DO UPDATE
   SET status = EXCLUDED.status,
       display_name = EXCLUDED.display_name,
-      handle = EXCLUDED.handle;
+      handle = EXCLUDED.handle,
+      deleted_at = NULL;
 
 INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
                    owner_human_id, max_concurrent_runs, max_run_steps)
 VALUES ('$NON_MEMBER_AGENT_ID', '$WORKSPACE_ID', 'hermes-agent',
         'http://localhost:8088/v1',
-        'This agent is intentionally not a channel member for MOMO-215.',
+        '$NON_MEMBER_SYSTEM_PROMPT',
         '$HUMAN_ID', 1, 12)
 ON CONFLICT (member_id) DO UPDATE
   SET model = EXCLUDED.model,
       base_url = EXCLUDED.base_url,
       system_prompt = EXCLUDED.system_prompt;
-
-DELETE FROM membership
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND channel_id = '$CHANNEL_ID'
-   AND member_id = '$NON_MEMBER_AGENT_ID';
 
 INSERT INTO budget
   (id, workspace_id, grain, limit_micro_usd, period_seconds)
@@ -444,10 +957,38 @@ VALUES
 
 COMMIT;
 SQL
+SENTINELS_ARMED=1
+
+PRESERVED_MEMBERSHIP_STATE_AFTER=$(psql_scalar "SELECT md5(coalesce(jsonb_agg(jsonb_build_object('id', id, 'workspace_id', workspace_id, 'channel_id', channel_id, 'member_id', member_id, 'role', role, 'muted', muted, 'left_at', left_at) ORDER BY id)::text, '[]')) FROM membership WHERE workspace_id='$WORKSPACE_ID' AND member_id <> '$AGENT_ID' AND id <> '$AGENT_MEMBERSHIP_ID';")
+PRESERVED_HERMES_STATE_AFTER=$(psql_scalar "SELECT md5(jsonb_build_object('member', (SELECT to_jsonb(m) FROM member m WHERE m.id='$HERMES_AGENT_ID'), 'agent', (SELECT to_jsonb(a) FROM agent a WHERE a.member_id='$HERMES_AGENT_ID'), 'memberships', (SELECT coalesce(jsonb_agg(to_jsonb(ms) ORDER BY ms.id), '[]'::jsonb) FROM membership ms WHERE ms.member_id='$HERMES_AGENT_ID'))::text);")
+SENTINEL_MESSAGE_PRESERVED=$(psql_scalar "SELECT count(*) FROM message WHERE id='$SENTINEL_MESSAGE_ID' AND workspace_id='$WORKSPACE_ID' AND channel_id='$CHANNEL_ID' AND author_member_id='$HUMAN_ID' AND client_msg_id='$SENTINEL_CLIENT_MSG_ID' AND body='@$AGENT_HANDLE MOMO-004 AgentWorker 검증해줘';")
+SENTINEL_JOB_PRESERVED=$(psql_scalar "SELECT count(*) FROM outbox WHERE id=$SENTINEL_OUTBOX_ID AND workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND status='pending' AND method='publish' AND available_at='infinity'::timestamptz AND payload->>'fixture'='momo-342-preserve' AND lower(payload->>'run_id')=lower('$SENTINEL_RUN_ID') AND lower(payload->>'agent_member_id')=lower('$HERMES_AGENT_ID') AND lower(payload->>'trigger_message_id')=lower('$SENTINEL_MESSAGE_ID');")
+if [ "$PRESERVED_MEMBERSHIP_STATE_BEFORE" != "$PRESERVED_MEMBERSHIP_STATE_AFTER" ] \
+  || [ "$PRESERVED_HERMES_STATE_BEFORE" != "$PRESERVED_HERMES_STATE_AFTER" ] \
+  || [ "$SENTINEL_MESSAGE_PRESERVED" != "1" ] || [ "$SENTINEL_JOB_PRESERVED" != "1" ]; then
+  echo "[agent-worker] verifier cleanup changed data outside its owned fixture" >&2
+  printf 'memberships=%s/%s hermes=%s/%s sentinel_message=%s sentinel_job=%s\n' \
+    "$PRESERVED_MEMBERSHIP_STATE_BEFORE" "$PRESERVED_MEMBERSHIP_STATE_AFTER" \
+    "$PRESERVED_HERMES_STATE_BEFORE" "$PRESERVED_HERMES_STATE_AFTER" \
+    "$SENTINEL_MESSAGE_PRESERVED" "$SENTINEL_JOB_PRESERVED" >&2
+  exit 1
+fi
+
+psql_run <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+DELETE FROM outbox WHERE id = $SENTINEL_OUTBOX_ID AND payload->>'fixture' = 'momo-342-preserve';
+DELETE FROM message WHERE id = '$SENTINEL_MESSAGE_ID' AND client_msg_id = '$SENTINEL_CLIENT_MSG_ID';
+COMMIT;
+SQL
+SENTINELS_ARMED=0
+echo "[agent-worker] persistent DB preservation verified: unrelated message/job/membership and user-owned Hermes unchanged"
+reset_verifier_transport_history
 
 LOGIN_JSON=$(curl -fsS \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"demo@momo.local\",\"password\":\"dev-password\",\"workspace\":\"$WORKSPACE_ID\"}" \
+  -d "{\"email\":\"$HUMAN_EMAIL\",\"password\":\"dev-password\",\"workspace\":\"$WORKSPACE_ID\"}" \
   "$BASE_URL/v1/auth/login")
 ACCESS_TOKEN=$(printf '%s' "$LOGIN_JSON" | jq -r '.accessToken')
 if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
@@ -456,7 +997,7 @@ if [ "$ACCESS_TOKEN" = "" ] || [ "$ACCESS_TOKEN" = "null" ]; then
   exit 1
 fi
 
-MENTION_BODY='@hermes MOMO-256 Local Hermes bridge 검증해줘'
+MENTION_BODY="@$AGENT_HANDLE MOMO-004 AgentWorker 검증해줘"
 SEND_PAYLOAD=$(jq -cn --arg client "$CLIENT_MSG_ID" --arg body "$MENTION_BODY" \
   '{clientMsgId:$client,type:"text",body:$body}')
 SEND_JSON=$(curl -fsS \
@@ -480,13 +1021,26 @@ if [ "$MESSAGE_ID" = "" ] || [ "$MESSAGE_ID" = "null" ] || [ "$MESSAGE_ID" != "$
   exit 1
 fi
 
-RUN_ID=$(psql_scalar "SELECT upper(id::text) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$MESSAGE_ID' AND agent_member_id='$AGENT_ID' AND idempotency_key='mention:${MESSAGE_ID}:${AGENT_ID}';")
-JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND payload->>'trigger_message_id'='$MESSAGE_ID' AND payload->>'agent_member_id'='$AGENT_ID';")
+RUN_ID=$(psql_scalar "SELECT upper(id::text) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$MESSAGE_ID' AND agent_member_id='$AGENT_ID' AND lower(idempotency_key)=lower('mention:${MESSAGE_ID}:${AGENT_ID}');")
+JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'trigger_message_id')=lower('$MESSAGE_ID') AND lower(payload->>'agent_member_id')=lower('$AGENT_ID');")
+TOTAL_RUN_COUNT=$(psql_scalar "SELECT count(*) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$MESSAGE_ID';")
+TOTAL_JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'trigger_message_id')=lower('$MESSAGE_ID');")
+if [ "$RUN_ID" = "" ]; then
+  SKIP_REASON=$(psql_scalar "SELECT coalesce(string_agg(coalesce(detail->>'reason', 'unknown'), ','), '') FROM audit_log WHERE workspace_id='$WORKSPACE_ID' AND action='agent.mention.skipped' AND target_id='$MESSAGE_ID';")
+  echo "[agent-worker] verifier-owned agent mention did not create an agent_run" >&2
+  printf 'message=%s agent=%s handle=%s jobs=%s skip_reason=%s\n' \
+    "$MESSAGE_ID" "$AGENT_ID" "$AGENT_HANDLE" "$JOB_COUNT" "${SKIP_REASON:-none}" >&2
+  exit 1
+fi
 CONTEXT_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'run_id')=lower('$RUN_ID') AND payload->'context_packet_projection'->>'schema'='momo.context_packet.mention_projection.v0' AND lower(payload->'source_attribution'->>'message_id')=lower('$MESSAGE_ID') AND lower(payload->>'author_member_id')=lower('$HUMAN_ID');")
 AUDIT_QUEUED=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='$WORKSPACE_ID' AND action='agent.mention.queued' AND target_id='$MESSAGE_ID' AND run_id='$RUN_ID';")
-if [ "$RUN_ID" = "" ] || [ "$JOB_COUNT" != "1" ] || [ "$CONTEXT_OK" != "1" ] || [ "$AUDIT_QUEUED" != "1" ]; then
+if [ "$RUN_ID" = "" ] || [ "$JOB_COUNT" != "1" ] \
+  || [ "$TOTAL_RUN_COUNT" != "1" ] || [ "$TOTAL_JOB_COUNT" != "1" ] \
+  || [ "$CONTEXT_OK" != "1" ] || [ "$AUDIT_QUEUED" != "1" ]; then
   echo "[agent-worker] REST mention routing did not create exactly one contextual agent_job" >&2
-  printf 'message=%s run=%s jobs=%s context=%s audit=%s\n' "$MESSAGE_ID" "$RUN_ID" "$JOB_COUNT" "$CONTEXT_OK" "$AUDIT_QUEUED" >&2
+  printf 'message=%s run=%s verifier_jobs=%s total_runs=%s total_jobs=%s context=%s audit=%s\n' \
+    "$MESSAGE_ID" "$RUN_ID" "$JOB_COUNT" "$TOTAL_RUN_COUNT" "$TOTAL_JOB_COUNT" \
+    "$CONTEXT_OK" "$AUDIT_QUEUED" >&2
   exit 1
 fi
 
@@ -499,15 +1053,20 @@ NON_MEMBER_SEND_JSON=$(curl -fsS \
   -d "$NON_MEMBER_PAYLOAD" \
   "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/$CHANNEL_ID/messages")
 NON_MEMBER_MESSAGE_ID=$(printf '%s' "$NON_MEMBER_SEND_JSON" | jq -r '.id')
-NON_MEMBER_JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND payload->>'trigger_message_id'='$NON_MEMBER_MESSAGE_ID' AND payload->>'agent_member_id'='$NON_MEMBER_AGENT_ID';")
+NON_MEMBER_JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'trigger_message_id')=lower('$NON_MEMBER_MESSAGE_ID') AND lower(payload->>'agent_member_id')=lower('$NON_MEMBER_AGENT_ID');")
 NON_MEMBER_AUDIT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='$WORKSPACE_ID' AND action='agent.mention.skipped' AND target_id='$NON_MEMBER_MESSAGE_ID' AND subject_member_id='$NON_MEMBER_AGENT_ID' AND detail->>'reason'='agent_not_channel_member';")
-if [ "$NON_MEMBER_JOB_COUNT" != "0" ] || [ "$NON_MEMBER_AUDIT" != "1" ]; then
+NON_MEMBER_TOTAL_RUN_COUNT=$(psql_scalar "SELECT count(*) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$NON_MEMBER_MESSAGE_ID';")
+NON_MEMBER_TOTAL_JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'trigger_message_id')=lower('$NON_MEMBER_MESSAGE_ID');")
+if [ "$NON_MEMBER_JOB_COUNT" != "0" ] || [ "$NON_MEMBER_AUDIT" != "1" ] \
+  || [ "$NON_MEMBER_TOTAL_RUN_COUNT" != "0" ] || [ "$NON_MEMBER_TOTAL_JOB_COUNT" != "0" ]; then
   echo "[agent-worker] non-channel agent mention did not fail closed as no-op + audit" >&2
-  printf 'message=%s jobs=%s audit=%s\n' "$NON_MEMBER_MESSAGE_ID" "$NON_MEMBER_JOB_COUNT" "$NON_MEMBER_AUDIT" >&2
+  printf 'message=%s verifier_jobs=%s total_runs=%s total_jobs=%s audit=%s\n' \
+    "$NON_MEMBER_MESSAGE_ID" "$NON_MEMBER_JOB_COUNT" "$NON_MEMBER_TOTAL_RUN_COUNT" \
+    "$NON_MEMBER_TOTAL_JOB_COUNT" "$NON_MEMBER_AUDIT" >&2
   exit 1
 fi
 
-echo "[agent-worker] REST @hermes mention routing verified: message=$MESSAGE_ID seq=$MESSAGE_SEQ run=$RUN_ID duplicate_jobs=$JOB_COUNT non_member_noop=ok"
+echo "[agent-worker] REST @$AGENT_HANDLE mention routing verified: message=$MESSAGE_ID seq=$MESSAGE_SEQ run=$RUN_ID duplicate_jobs=$JOB_COUNT non_member_noop=ok"
 
 echo "[agent-worker] starting AgentWorker"
 (
@@ -515,7 +1074,7 @@ echo "[agent-worker] starting AgentWorker"
   swift build --package-path workers/AgentWorker --product AgentWorker >/dev/null
   WORKER_BIN="$(swift build --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
   exec env \
-    RELAY_DATABASE_URL="postgres://momo_worker:momo_worker_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    RELAY_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
     CENT_API_URL="$CENT_API_URL" \
     CENT_API_KEY="$CENT_API_KEY" \
     HERMES_BASE_URL="$HERMES_BASE_URL" \
@@ -529,7 +1088,7 @@ WORKER_PID=$!
 
 echo "[agent-worker] polling success path"
 SUCCESS_OK=0
-deadline=$(($(date +%s) + 90))
+deadline=$(($(date +%s) + 180))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   if ! kill -0 "$WORKER_PID" 2>/dev/null; then
     echo "[agent-worker] AgentWorker exited early" >&2
@@ -538,11 +1097,11 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   fi
 
   RUN_OK=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RUN_ID' AND status='succeeded';")
-  OUTBOX_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$RUN_ID' AND status='done';")
+  OUTBOX_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('$RUN_ID') AND status='done';")
   USAGE_OK=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$RUN_ID' AND prompt_tokens=11 AND completion_tokens=7 AND cost_micro_usd=6 AND was_estimated=false;")
   PROJECTION_OK=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RUN_ID' AND input #>> '{cost_projection,source}' = 'agent_worker' AND (input #>> '{cost_projection,reserved_micro_usd}')::bigint = 0;")
   FINAL_MESSAGE_OK=$(psql_scalar "SELECT count(*) FROM message WHERE workspace_id='$WORKSPACE_ID' AND channel_id='$CHANNEL_ID' AND run_id='$RUN_ID' AND author_member_id='$AGENT_ID' AND type='text' AND body LIKE '%MOMO-004 SSE path verified%';")
-  FINAL_BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND payload->'data'->'payload'->>'run_id'='$RUN_ID' AND payload->'data'->'payload'->>'type'='text' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending', 'processing', 'done') AND last_error IS NULL;")
+  FINAL_BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('$RUN_ID') AND payload->'data'->'payload'->>'type'='text' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending', 'processing', 'done') AND last_error IS NULL;")
   # In the full local gate, approval-decision verification can leave a valid
   # same-run resume agent_job that the worker processes before this fixture.
   # The immutable usage_ledger assertion above proves this run's exact cost;
@@ -600,6 +1159,10 @@ done
 
 if [ "$SUCCESS_OK" != "1" ]; then
   echo "[agent-worker] success path did not verify" >&2
+  printf 'run=%s outbox=%s usage=%s window=%s projection=%s final_message=%s final_broadcast=%s partial=%s tool_partial=%s final_live=%s\n' \
+    "${RUN_OK:-unset}" "${OUTBOX_OK:-unset}" "${USAGE_OK:-unset}" "${WINDOW_OK:-unset}" \
+    "${PROJECTION_OK:-unset}" "${FINAL_MESSAGE_OK:-unset}" "${FINAL_BROADCAST_OK:-unset}" \
+    "${PARTIAL_OK:-unset}" "${TOOL_PARTIAL_OK:-unset}" "${FINAL_LIVE_OK:-unset}" >&2
   echo "[agent-worker] worker log:" >&2
   tail -120 "$WORKER_LOG" >&2 || true
   echo "[agent-worker] mock hermes log:" >&2
@@ -691,14 +1254,14 @@ RESUME_OK=0
 deadline=$(($(date +%s) + 60))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   RUN_DONE=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$RESUME_RUN_ID' AND status='succeeded' AND output->>'ok'='true';")
-  JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND method='resume_approval' AND payload->>'resume_from_approval_id'='$RESUME_APPROVAL_ID' AND status='done' AND last_error IS NULL;")
-  RESULT_MSG=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$RESUME_RUN_ID' AND type='tool_result' AND props->>'approval_id'='$RESUME_APPROVAL_ID' AND props->>'call_id'='call_momo_178_echo' AND props->>'is_error'='false';")
+  JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND method='resume_approval' AND lower(payload->>'resume_from_approval_id')=lower('$RESUME_APPROVAL_ID') AND status='done' AND last_error IS NULL;")
+  RESULT_MSG=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$RESUME_RUN_ID' AND type='tool_result' AND lower(props->>'approval_id')=lower('$RESUME_APPROVAL_ID') AND props->>'call_id'='call_momo_178_echo' AND props->>'is_error'='false';")
   AUDIT_OK=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$RESUME_RUN_ID' AND action IN ('approval.resume','tool.executed');")
   # In the all-profile gate, a relay process from the previous verifier can
   # consume this broadcast quickly. The invariant is that AgentWorker created a
   # non-failed broadcast outbox row for the tool_result, not that it remains
   # pending at the exact polling instant.
-  BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND payload->'data'->'payload'->>'run_id'='$RESUME_RUN_ID' AND payload->'data'->'payload'->>'type'='tool_result' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending', 'done') AND last_error IS NULL;")
+  BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('$RESUME_RUN_ID') AND payload->'data'->'payload'->>'type'='tool_result' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending', 'done') AND last_error IS NULL;")
 
   if [ "$RUN_DONE" = "1" ] && [ "$JOB_DONE" = "1" ] \
     && [ "$RESULT_MSG" = "1" ] && [ "$AUDIT_OK" = "2" ] \
@@ -777,7 +1340,7 @@ TRIP_OK=0
 deadline=$(($(date +%s) + 60))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   RUN_FAILED=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$TRIP_RUN_ID' AND status='failed' AND error #>> '{}' = 'G5 budget trip (agent_channel)';")
-  OUTBOX_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$TRIP_RUN_ID' AND status='done';")
+  OUTBOX_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('$TRIP_RUN_ID') AND status='done';")
   NO_SPEND=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$TRIP_RUN_ID';")
 
   if [ "$RUN_FAILED" = "1" ] && [ "$OUTBOX_DONE" = "1" ] && [ "$NO_SPEND" = "0" ]; then
@@ -873,8 +1436,8 @@ wait_guard_trip() {
     RUN_FAILED=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$guard_run_id' AND status='failed' AND error->>'code'='loop_guard_tripped' AND error->>'gate'='$guard_gate';")
     AUDIT_OK=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$guard_run_id' AND action='agent.guard.tripped' AND target_type='agent_run' AND detail->>'gate'='$guard_gate';")
     DEGRADED_OK=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$guard_run_id' AND type='system' AND author_member_id='$AGENT_ID' AND body LIKE '%loop-safety guard $guard_gate%' AND props->>'gate'='$guard_gate';")
-    BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND payload->'data'->'payload'->>'run_id'='$guard_run_id' AND payload->'data'->'payload'->>'type'='system' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending','processing','done') AND last_error IS NULL;")
-    JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND payload->>'run_id'='$guard_run_id' AND status='done';")
+    BROADCAST_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('$guard_run_id') AND payload->'data'->'payload'->>'type'='system' AND (payload->>'version')::bigint = (payload->'data'->>'seq')::bigint AND status IN ('pending','processing','done') AND last_error IS NULL;")
+    JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('$guard_run_id') AND status='done';")
     NO_SPEND=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$guard_run_id';")
 
     if [ "$RUN_FAILED" = "1" ] && [ "$AUDIT_OK" = "1" ] && [ "$DEGRADED_OK" = "1" ] \

@@ -9,6 +9,13 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
+## 0-1. MOMO-342 AgentWorker Persistent DB Fixture Hardening (2026-07-11)
+
+- MOMO-338 merge 후 root main의 오래 유지된 DB에서 사용자가 제거한 Hermes channel membership 때문에 `verify_agent_worker.sh`의 positive mention route가 run 없이 끝나는 main gate 간섭을 확인했다. 제품 runtime 회귀가 아니라 migration seed가 영구히 유지된다고 가정한 verifier 결함이었다.
+- verifier runtime 전체를 source DB와 물리적으로 분리된 migration DB 및 deterministic 전용 workspace/human/channel/agent/member/membership/budget으로 분리했다. DB와 app/relay/worker role은 generation marker 소유권을 fail-closed 검증하고, source/system/unmarked DB는 거부한다. server/relay/worker가 모두 같은 `POSTGRES_HOST`의 verifier DB와 marker-bound role만 바라보므로 전역 claim consumer도 user-owned queue를 가져갈 수 없다.
+- cleanup은 exact client message에서 유도한 run/message만 정리하고 UUID JSON 비교를 정규화한다. DB generation marker에서 fixture UUID를 파생해 DB 재생성 후 Centrifugo version stream과도 충돌하지 않는다. unrelated message/pending job sentinel, 비-fixture membership digest, user-owned Hermes digest를 전후 비교하며 `runtime-agent` gate가 같은 verifier DB에서 두 번 실행한다. MomoServer는 사전 build한 executable을 직접 실행해 SwiftPM planning lock이 health timeout으로 오인되는 경로도 제거했다.
+- 검증: 같은 persistent verifier DB에서 `scripts/verify_agent_worker.sh` 연속 2회 PASS. 두 실행 모두 REST mention route, SSE/tool progress, final outbox publish, 비용 reserve/reconcile, approval resume, budget circuit breaker, G1/G2/G3/depth guard와 프로세스 cleanup을 닫았고 source database는 untouched로 보고됐다.
+
 ## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
 
 - `infra/docker-compose.e2e.yml`을 추가해 local gate 전용 api/relay/worker/mock-Hermes/PostgreSQL 18/Centrifugo v6 경계를 dev compose 및 prod compose와 분리했다. e2e는 source checkout + local Swift build를 허용하고, prod는 계속 image-based/source-checkout-free 계약을 유지한다.
