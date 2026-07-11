@@ -1026,7 +1026,9 @@ WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
 CHANNEL_ID="$(python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1] + ":agent-lab-channel"))' "$VERIFIER_DB_MARKER")"
-CENT_CHANNEL="ch:ws${WORKSPACE_ID}.${CHANNEL_ID}"
+# Centrifugo 채널명은 대소문자 구분 문자열이고 서버(Swift UUID)는 UUID를 대문자로
+# 렌더링한다. per-run 소문자 UUID를 그대로 쓰면 live 검증이 빈 채널을 폴링한다.
+CENT_CHANNEL="ch:ws$(printf '%s' "${WORKSPACE_ID}.${CHANNEL_ID}" | tr '[:lower:]' '[:upper:]')"
 CLIENT_MSG_ID="${EXTERNAL_AGENT_PROVIDER_CLIENT_MSG_ID:-00000000-0000-7000-8000-000000257107}"
 
 momo_cleanup_port_listener "$PORT" "external-agent API preflight" || {
