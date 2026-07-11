@@ -22,6 +22,7 @@ public struct ChannelListView: View {
     @State private var agentInviteInFlight = false
     @State private var agentInviteError: String?
     @State private var agentInviteNotice: String?
+    @State private var agentCredentialReveal: MomoAgentCredentialReveal?
     @State private var hermesInvited = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
@@ -147,6 +148,9 @@ public struct ChannelListView: View {
         }
         .onChange(of: hermesInviteScopeKey) { _, _ in
             refreshHermesInviteState()
+        }
+        .sheet(item: $agentCredentialReveal) { reveal in
+            MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
         }
     }
 
@@ -870,6 +874,14 @@ public struct ChannelListView: View {
                         .foregroundStyle(agentPairingStatusTint)
                     agentPairingChecklist(copy: copy)
                     pairingManifestBox(copy: copy)
+                    if hermesInvited, let agent = hermesAgent {
+                        MomoAgentCredentialManagementView(
+                            copy: copy,
+                            agent: agent,
+                            viewModel: viewModel,
+                            onReveal: { agentCredentialReveal = $0 }
+                        )
+                    }
                     if let agentInviteNotice {
                         Label(agentInviteNotice, systemImage: "checkmark.circle")
                             .font(.caption)
@@ -919,6 +931,13 @@ public struct ChannelListView: View {
 
     private var displayAgentAlias: String {
         Self.dogfoodHermesAlias
+    }
+
+    private var hermesAgent: Member? {
+        viewModel.members.first { member in
+            member.isAgent
+                && member.handle.caseInsensitiveCompare("hermes") == .orderedSame
+        }
     }
 
     private var selectedPairingScope: MomoAgentPairingPermissionScope {
@@ -1057,24 +1076,34 @@ public struct ChannelListView: View {
             hermesDisplayName = "Hermes"
         }
 
+        if let sanitizedEndpoint = agentEndpointPolicy.sanitizedEndpoint {
+            storedHermesEndpoint = sanitizedEndpoint
+            hermesEndpointDraft = sanitizedEndpoint
+        }
+        hermesAlias = Self.dogfoodHermesAlias
+
+        let agent: Member
         do {
-            if let sanitizedEndpoint = agentEndpointPolicy.sanitizedEndpoint {
-                storedHermesEndpoint = sanitizedEndpoint
-                hermesEndpointDraft = sanitizedEndpoint
-            }
-            hermesAlias = Self.dogfoodHermesAlias
-            _ = try await viewModel.inviteDogfoodAgent(
+            agent = try await viewModel.inviteDogfoodAgent(
                 displayName: hermesDisplayName,
                 handle: displayAgentAlias,
                 avatarPath: hermesAvatarPath
             )
             setHermesInvited(true)
-            withAnimation(.easeInOut(duration: 0.16)) {
-                showMemberInvite = false
-            }
         } catch {
             setHermesInvited(false)
             agentInviteError = error.localizedDescription
+            return
+        }
+
+        do {
+            let reveal = try await viewModel.issueAgentCredential(for: agent.id)
+            withAnimation(.easeInOut(duration: 0.16)) {
+                showMemberInvite = false
+            }
+            agentCredentialReveal = reveal
+        } catch {
+            agentInviteError = MomoWorkspaceCopy(language: language).agentCredentialErrorMessage(error)
         }
     }
 

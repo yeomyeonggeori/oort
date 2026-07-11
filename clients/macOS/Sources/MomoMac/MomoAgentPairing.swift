@@ -1,6 +1,70 @@
 import Foundation
 import MomoCore
 
+enum MomoAgentCredentialDisplayStatus: String, CaseIterable, Sendable {
+    case configured
+    case active
+    case expiring
+    case revoked
+}
+
+struct MomoAgentCredential: Identifiable, Equatable, Sendable {
+    var id: UUID
+    var agentMemberId: MemberID
+    var serverStatus: String
+    var scopes: [String]
+    var label: String?
+    var lastUsedAtMs: Int64?
+    var expiresAtMs: Int64?
+    var revokedAtMs: Int64?
+    var createdAtMs: Int64
+
+    func displayStatus(now: Date = Date()) -> MomoAgentCredentialDisplayStatus {
+        if revokedAtMs != nil || serverStatus == "revoked" || serverStatus == "expired" {
+            return .revoked
+        }
+        if let expiresAtMs {
+            let expiry = Date(timeIntervalSince1970: TimeInterval(expiresAtMs) / 1_000)
+            if expiry <= now.addingTimeInterval(7 * 24 * 60 * 60) {
+                return .expiring
+            }
+        }
+        return lastUsedAtMs == nil ? .configured : .active
+    }
+}
+
+/// The raw token exists only in the response path that presents the one-time
+/// reveal sheet. It is never included in credential lists or persisted state.
+struct MomoAgentCredentialReveal: Identifiable, Sendable {
+    var credential: MomoAgentCredential
+    var token: String
+    var tokenType: String
+    var rotatedCredentialCount: Int
+    var rotationGraceEndsAtMs: Int64?
+
+    var id: UUID { credential.id }
+    var environmentLine: String { "MOMO_AGENT_TOKEN=\(token)" }
+}
+
+protocol MomoAgentCredentialBackend: Sendable {
+    func agentCredentials(
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> [MomoAgentCredential]
+
+    func issueAgentCredential(
+        workspace: WorkspaceID,
+        agent: MemberID,
+        rotationGraceSeconds: Int
+    ) async throws -> MomoAgentCredentialReveal
+
+    func revokeAgentCredential(
+        _ credential: UUID,
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> MomoAgentCredential
+}
+
 enum MomoAgentPairingPermissionScope: String, CaseIterable, Identifiable, Codable, Sendable {
     case channelReadReply = "channel.read_reply"
     case channelReadReplyApprovalTools = "channel.read_reply.approval_tools"
@@ -170,7 +234,7 @@ struct MomoAgentPairingManifest: Codable, Equatable, Sendable {
                 apiURL: apiURL ?? "http://127.0.0.1:28180",
                 workspaceID: workspaceID?.description,
                 channelID: channelID?.description,
-                gatewaySecretSource: "$HOME/.momo/hermes-gateway.env:MOMO_AGENT_GATEWAY_SECRET",
+                gatewaySecretSource: "$HOME/.momo/hermes-gateway.env:MOMO_AGENT_TOKEN",
                 helperCommands: [
                     "scripts/momo hermes-gateway-init",
                     "scripts/momo hermes-gateway-install-plugin",

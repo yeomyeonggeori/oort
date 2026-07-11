@@ -217,7 +217,11 @@ public struct MomoMacRootView: View {
                 MomoProfileSettingsSurface(copy: copy, summary: sessionChrome?.summary)
             case .memberProfile:
                 if let member = selectedProfileMemberID.flatMap({ viewModel.member($0) }) {
-                    MomoMemberProfileSettingsSurface(copy: copy, member: member) { displayName, avatarPath, presence in
+                    MomoMemberProfileSettingsSurface(
+                        copy: copy,
+                        member: member,
+                        viewModel: viewModel
+                    ) { displayName, avatarPath, presence in
                         viewModel.applyLocalProfile(
                             member: member.id,
                             displayName: displayName,
