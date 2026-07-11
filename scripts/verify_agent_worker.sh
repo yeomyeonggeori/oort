@@ -76,6 +76,14 @@ psql_scalar() {
   psql_run -t -A -c "$1" | tr -d '[:space:]'
 }
 
+admin_scalar() {
+  local output
+  output=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc -c "$1") || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 POSTGRES_USER=${POSTGRES_USER:-momo}
@@ -183,21 +191,55 @@ case "$POSTGRES_DB" in
 esac
 
 provision_verifier_database() {
-  local exists marker
+  local exists marker marker_uuid_override
   exists=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
     -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
     -t -A -v ON_ERROR_STOP=1 --no-psqlrc \
     -c "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB';" | tr -d '[:space:]')
   if [ "$exists" != "1" ]; then
     echo "[agent-worker] creating isolated verifier database: $POSTGRES_DB"
-    marker="${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    marker_uuid_override=${AGENT_WORKER_VERIFIER_TEST_MARKER_UUID:-}
+    if [ "$marker_uuid_override" != "" ]; then
+      if ! [[ "$marker_uuid_override" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+        echo "[agent-worker] invalid test verifier marker UUID" >&2
+        exit 1
+      fi
+      marker="${VERIFIER_DB_MARKER_PREFIX}${marker_uuid_override}"
+    else
+      marker="${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    fi
+    VERIFIER_DB_MARKER=$marker
     PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
       -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
       -v ON_ERROR_STOP=1 --no-psqlrc -c "CREATE DATABASE \"$POSTGRES_DB\";"
-    PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    VERIFIER_DB_CREATED_THIS_RUN=1
+    VERIFIER_DB_CREATED_OID=$(admin_scalar "SELECT oid FROM pg_database WHERE datname = '$POSTGRES_DB';")
+    if [ "$VERIFIER_DB_CREATED_OID" = "" ]; then
+      echo "[agent-worker] failed to capture newly created verifier database identity" >&2
+      exit 1
+    fi
+    if [ "${AGENT_WORKER_VERIFIER_TEST_FAIL_COMMENT:-0}" = "1" ]; then
+      if PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+        -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+        -v ON_ERROR_STOP=1 --no-psqlrc -c "SELECT momo_verifier_forced_comment_failure();" >/dev/null 2>&1; then
+        echo "[agent-worker] forced COMMENT failure unexpectedly succeeded" >&2
+        exit 1
+      fi
+      echo "[agent-worker] intentional database COMMENT failure (test only)" >&2
+      exit 96
+    elif ! PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
       -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
-      -v ON_ERROR_STOP=1 -v marker="$marker" --no-psqlrc \
-      -c "COMMENT ON DATABASE \"$POSTGRES_DB\" IS :'marker';"
+      -v ON_ERROR_STOP=1 -v marker="$marker" --no-psqlrc <<SQL
+COMMENT ON DATABASE "$POSTGRES_DB" IS :'marker';
+SQL
+    then
+      echo "[agent-worker] failed to mark newly created verifier database: $POSTGRES_DB" >&2
+      exit 1
+    fi
+    if [ "${AGENT_WORKER_VERIFIER_TEST_FAIL_AFTER_MARKER:-0}" = "1" ]; then
+      echo "[agent-worker] intentional bootstrap failure after marker (test only)" >&2
+      exit 97
+    fi
   fi
 
   marker=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
@@ -232,6 +274,7 @@ provision_verifier_roles() {
     -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
     -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
 SELECT set_config('momo.verifier_marker', :'marker', false) AS verifier_marker_setting \gset
+BEGIN;
 DO \$roles\$
 DECLARE
   role_name text;
@@ -269,6 +312,7 @@ ALTER ROLE $VERIFIER_RELAY_ROLE
 ALTER ROLE $VERIFIER_WORKER_ROLE
   WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS PASSWORD '$VERIFIER_WORKER_PASSWORD';
 GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO $VERIFIER_APP_ROLE, $VERIFIER_RELAY_ROLE, $VERIFIER_WORKER_ROLE;
+COMMIT;
 SQL
 
   psql_run <<SQL
@@ -292,7 +336,50 @@ MOCK_PID=
 WORKER_PID=
 SERVER_PID=
 RELAY_PID=
+SERVER_BIN=
+RELAY_BIN=
+WORKER_BIN=
 SENTINELS_ARMED=0
+VERIFIER_DB_CREATED_THIS_RUN=0
+VERIFIER_DB_CREATED_OID=
+
+cleanup_incomplete_verifier_database() {
+  local current_marker current_oid role role_marker drop_succeeded
+  current_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = '$POSTGRES_DB';") || return 1
+  current_oid=$(admin_scalar "SELECT COALESCE(oid::text, '') FROM pg_database WHERE datname = '$POSTGRES_DB';") || return 1
+  if ! { [ "${VERIFIER_DB_MARKER:-}" != "" ] && [ "$current_marker" = "$VERIFIER_DB_MARKER" ]; } \
+    && ! { [ "$current_marker" = "" ] && [ "${VERIFIER_DB_CREATED_OID:-}" != "" ] && [ "$current_oid" = "$VERIFIER_DB_CREATED_OID" ]; }; then
+    echo "[agent-worker] refusing incomplete bootstrap cleanup: database marker changed or is absent" >&2
+    return 1
+  fi
+
+  for role in "${VERIFIER_APP_ROLE:-}" "${VERIFIER_RELAY_ROLE:-}" "${VERIFIER_WORKER_ROLE:-}"; do
+    [ "$role" != "" ] || continue
+    role_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';") || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+        -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+        -v ON_ERROR_STOP=1 --no-psqlrc -c "ALTER ROLE \"$role\" NOLOGIN;" >/dev/null || return 1
+    fi
+  done
+
+  drop_succeeded=0
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "DROP DATABASE \"$POSTGRES_DB\" WITH (FORCE);" >/dev/null && drop_succeeded=1
+  [ "$drop_succeeded" = "1" ] || return 1
+
+  for role in "${VERIFIER_APP_ROLE:-}" "${VERIFIER_RELAY_ROLE:-}" "${VERIFIER_WORKER_ROLE:-}"; do
+    [ "$role" != "" ] || continue
+    role_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';") || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+        -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+        -v ON_ERROR_STOP=1 --no-psqlrc -c "DROP ROLE \"$role\";" >/dev/null || return 1
+    fi
+  done
+}
 
 cleanup() {
   if [ "$SENTINELS_ARMED" = "1" ]; then
@@ -310,8 +397,16 @@ COMMIT;
 SQL
   fi
   momo_cleanup_tracked_pids "agent-worker verifier" "$SERVER_PID" "$WORKER_PID" "$RELAY_PID" "$MOCK_PID"
+  if [ "$VERIFIER_DB_CREATED_THIS_RUN" = "1" ] \
+    || [ "${AGENT_WORKER_VERIFIER_TEST_CLEANUP_ON_EXIT:-0}" = "1" ]; then
+    echo "[agent-worker] removing verifier-owned database lifecycle target: $POSTGRES_DB" >&2
+    cleanup_incomplete_verifier_database || \
+      echo "[agent-worker] incomplete bootstrap cleanup refused or failed; inspect marker before manual cleanup" >&2
+  fi
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 wait_http() {
   url=$1
@@ -345,6 +440,16 @@ reset_verifier_transport_history() {
   echo "[agent-worker] reset verifier-owned Centrifugo history"
 }
 
+build_verifier_binaries() {
+  echo "[agent-worker] building verifier runtime binaries before process timeouts"
+  swift build --package-path "$REPO_ROOT/server" --product MomoServer >/dev/null
+  SERVER_BIN="$(swift build --package-path "$REPO_ROOT/server" --show-bin-path)/MomoServer"
+  swift build --package-path "$REPO_ROOT/relay/OutboxRelay" --product OutboxRelay >/dev/null
+  RELAY_BIN="$(swift build --package-path "$REPO_ROOT/relay/OutboxRelay" --show-bin-path)/OutboxRelay"
+  swift build --package-path "$REPO_ROOT/workers/AgentWorker" --product AgentWorker >/dev/null
+  WORKER_BIN="$(swift build --package-path "$REPO_ROOT/workers/AgentWorker" --show-bin-path)/AgentWorker"
+}
+
 start_server() {
   if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
     if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
@@ -357,9 +462,6 @@ start_server() {
 
   echo "[agent-worker] starting MomoServer for cost projection endpoint"
   (
-    cd "$REPO_ROOT"
-    swift build --package-path server --product MomoServer >/dev/null
-    SERVER_BIN="$(swift build --package-path server --show-bin-path)/MomoServer"
     exec env \
       DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
       PORT="$PORT" \
@@ -392,9 +494,6 @@ start_relay() {
 
   echo "[agent-worker] starting OutboxRelay for final channel message.new evidence"
   (
-    cd "$REPO_ROOT"
-    swift build --package-path relay/OutboxRelay --product OutboxRelay >/dev/null
-    RELAY_BIN="$(swift build --package-path relay/OutboxRelay --show-bin-path)/OutboxRelay"
     exec env \
       RELAY_DATABASE_URL="postgres://${VERIFIER_RELAY_ROLE}:${VERIFIER_RELAY_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
       CENT_API_URL="$CENT_API_URL" \
@@ -453,6 +552,8 @@ provision_verifier_database
 echo "[agent-worker] isolated database ready: $POSTGRES_DB (source database untouched: $SOURCE_POSTGRES_DB)"
 echo "[agent-worker] ensuring verifier-owned runtime DB roles exist"
 provision_verifier_roles
+VERIFIER_DB_CREATED_THIS_RUN=0
+build_verifier_binaries
 
 start_server
 start_relay
@@ -1070,9 +1171,6 @@ echo "[agent-worker] REST @$AGENT_HANDLE mention routing verified: message=$MESS
 
 echo "[agent-worker] starting AgentWorker"
 (
-  cd "$REPO_ROOT"
-  swift build --package-path workers/AgentWorker --product AgentWorker >/dev/null
-  WORKER_BIN="$(swift build --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
   exec env \
     RELAY_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
     CENT_API_URL="$CENT_API_URL" \
