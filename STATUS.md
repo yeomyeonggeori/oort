@@ -23,6 +23,12 @@
 - 2026-07-11 오케스트레이터 검수: worker 샌드박스에서 기록된 스냅샷 참조 6종이 정본 게이트 머신에서 전부 불일치 → 재기록(레이아웃 동일, 렌더링 환경 교정) 후 84 tests green(worker 환경의 MessageBubble signal 5는 재현 안 됨). fresh-context design-review 재판정 **PASS Blocker 0** (High 2·Medium 4는 MOMO-347 `#324`로 후속). main 위 rebase 후 PR #323 merge (`881518b`).
 - worktree clean `macos-ui` gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md`. root post-merge `macos-ui`는 선재하던 `verify_macos_real_backend_ui.sh`의 dogfood 결합(hermes 멤버십 drift로 mention→agent_job count=0 + shared DB mutation)에서 중단 → MOMO-348 `#325` 발급 (MOMO-346 후속, macos-ui 프로파일 격리).
 
+## 0-1. MOMO-348 macOS Real-Backend Verifier DB 격리 (2026-07-12)
+
+- `verify_macos_real_backend_ui.sh`를 매 실행 unique marker/OID-owned migrated DB로 분리하고 marker-bound app(NOBYPASSRLS)·worker/relay(BYPASSRLS) role, per-run #agent-lab UUID, demo/Hermes·approval/cost fixture를 자체 seed한다.
+- source dogfood DB의 로그인/초대/채널/멤버십/메시지/agent queue 관련 digest를 EXIT trap에서 성공·실패 전후 비교하고, exact OID+marker DB와 marker-bound role만 fail-closed 정리한다. pre-marker COMMENT 실패(exit 96) rollback 회귀를 `macos-ui`에 추가했다.
+- worker 검증은 DB/Docker/verifier 접속 없이 수정·신규 shell의 `bash -n` PASS. fresh login/invite/join/member/send/mention→agent_job/history와 clean/root `macos-ui` evidence는 오케스트레이터가 merge 전 수행 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-342 AgentWorker Persistent DB Fixture Hardening (2026-07-11)
 
 - MOMO-338 merge 후 root main의 오래 유지된 DB에서 사용자가 제거한 Hermes channel membership 때문에 `verify_agent_worker.sh`의 positive mention route가 run 없이 끝나는 main gate 간섭을 확인했다. 제품 runtime 회귀가 아니라 migration seed가 영구히 유지된다고 가정한 verifier 결함이었다.

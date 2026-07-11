@@ -2,14 +2,17 @@
 # =============================================================================
 # scripts/verify_macos_real_backend_ui.sh — MOMO-205 real-backend macOS smoke gate
 #
-# Verifies the SwiftPM MomoMacDevApp REST backend path against local Docker +
-# host MomoServer. GUI launch is opt-in with LOCAL_GATE_LAUNCH_UI=1 so headless
-# runners can still PASS the deterministic REST/evidence portion.
+# Verifies the SwiftPM MomoMacDevApp REST backend path against a per-run,
+# marker/OID-owned database on local Docker + host MomoServer. GUI launch is
+# opt-in with LOCAL_GATE_LAUNCH_UI=1 so headless runners can still PASS the
+# deterministic REST/evidence portion without touching source dogfood data.
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/runtime_process_guard.sh
+. "$REPO_ROOT/scripts/runtime_process_guard.sh"
 
 fail() {
   echo "[macos-real-backend] FAIL: $*" >&2
@@ -47,6 +50,8 @@ fi
 
 require_bin curl
 require_bin jq
+require_bin python3
+require_bin shasum
 require_bin swift
 require_bin uuidgen
 
@@ -61,9 +66,24 @@ else
 fi
 
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
-POSTGRES_DB="${POSTGRES_DB:-momo}"
+POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_USER="${POSTGRES_USER:-momo}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-momo}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-momo_dev_pw}"
+SOURCE_POSTGRES_DB="${POSTGRES_DB:-momo}"
+SOURCE_DATABASE_URL="${DATABASE_URL:-}"
+POSTGRES_DB="${MACOS_REAL_BACKEND_VERIFIER_DB:-momo_macos_ui_verify_${POSTGRES_PORT}_$$}"
+VERIFIER_DB_MARKER_PREFIX="momo:macos-real-backend-verifier:v1:"
+VERIFIER_DB_MARKER="${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')"
+VERIFIER_DB_CREATED_OID=""
+VERIFIER_DB_OWNED=0
+SOURCE_DIGEST_ARMED=0
+ROLE_SUFFIX="$(printf '%s' "$VERIFIER_DB_MARKER" | shasum -a 256 | cut -c 1-12)"
+VERIFIER_APP_ROLE="momo_mac_${ROLE_SUFFIX}_app"
+VERIFIER_WORKER_ROLE="momo_mac_${ROLE_SUFFIX}_worker"
+VERIFIER_RELAY_ROLE="momo_mac_${ROLE_SUFFIX}_relay"
+VERIFIER_APP_PASSWORD="momo_macos_verify_app_pw"
+VERIFIER_WORKER_PASSWORD="momo_macos_verify_worker_pw"
+VERIFIER_RELAY_PASSWORD="momo_macos_verify_relay_pw"
 PORT="${PORT:-8080}"
 CENT_PORT="${CENT_PORT:-8000}"
 CENT_API_KEY="${CENT_API_KEY:-dev-insecure-cent-api-key}"
@@ -71,8 +91,7 @@ CENT_API_URL="${CENT_API_URL:-http://localhost:${CENT_PORT}/api}"
 JWT_HMAC="${JWT_HMAC:-dev-insecure-jwt-hmac-change-me}"
 CENT_TOKEN_HMAC="${CENT_TOKEN_HMAC:-dev-insecure-cent-token-hmac}"
 
-ADMIN_DATABASE_URL="${DATABASE_URL:-postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT}/${POSTGRES_DB}}"
-APP_DATABASE_URL="postgres://momo_app:momo_app_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}"
+APP_DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 BASE_URL="http://127.0.0.1:${PORT}"
 
 WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
@@ -80,7 +99,10 @@ HUMAN_EMAIL="demo@momo.local"
 HUMAN_ID="00000000-0000-7000-8000-000000000101"
 AGENT_ID="00000000-0000-7000-8000-000000000103"
 AGENT_HANDLE="hermes"
-CHANNEL_ID="00000000-0000-7000-8000-000000000202"
+CHANNEL_ID="$(python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1] + ":agent-lab-channel"))' "$VERIFIER_DB_MARKER")"
+# Centrifugo channel strings are case-sensitive while Swift UUID rendering is
+# uppercase. Keep the verifier-side spelling aligned if history checks are added.
+CENT_CHANNEL="ch:ws$(printf '%s' "${WORKSPACE_ID}.${CHANNEL_ID}" | tr '[:lower:]' '[:upper:]')"
 RUN_ID_FIXTURE="00000000-0000-7000-8000-000000205101"
 APPROVAL_MSG_ID="00000000-0000-7000-8000-000000205201"
 APPROVAL_ID="00000000-0000-7000-8000-000000205301"
@@ -132,16 +154,181 @@ unset_launchctl_env() {
 }
 
 cleanup() {
+  local original_rc=$?
+  local cleanup_failed=0
+  local source_after
+  trap - EXIT
   unset_launchctl_env
-  if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
+  momo_cleanup_tracked_pids "macos real-backend verifier" "${SERVER_PID:-}"
+  if [ "${SOURCE_DIGEST_ARMED:-0}" = "1" ]; then
+    source_after="$(source_digest)" || cleanup_failed=1
+    if [ "$cleanup_failed" = "0" ] && [ "$source_after" != "$SOURCE_DIGEST_BEFORE" ]; then
+      echo "[macos-real-backend] source dogfood DB changed while isolated verifier ran" >&2
+      cleanup_failed=1
+    elif [ "$cleanup_failed" = "0" ]; then
+      echo "[macos-real-backend] source dogfood DB digest preserved"
+    fi
   fi
+  cleanup_verifier_database || {
+    echo "[macos-real-backend] exact verifier DB cleanup failed" >&2
+    cleanup_failed=1
+  }
+  if [ "$original_rc" = "0" ] && [ "$cleanup_failed" = "1" ]; then
+    original_rc=1
+  fi
+  exit "$original_rc"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 psql_admin() {
-  "$PSQL_BIN" "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 --no-psqlrc "$@"
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v ON_ERROR_STOP=1 --no-psqlrc "$@"
+}
+
+admin_scalar() {
+  local output
+  output="$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc -c "$1")" || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
+source_digest() {
+  local output
+  output="$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$SOURCE_POSTGRES_DB" \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+SELECT md5(COALESCE(string_agg(
+  format('%I.%I:%s:%s',
+         n.nspname,
+         c.relname,
+         table_to_xmlschema(c.oid::regclass, true, false, ''),
+         table_to_xml(c.oid::regclass, true, false, '')),
+  '|' ORDER BY n.nspname, c.relname), ''))
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND c.relkind IN ('r', 'p');
+SQL
+  )" || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
+validate_admin_target() {
+  case "$POSTGRES_HOST" in
+    localhost|127.0.0.1|::1) ;;
+    *) fail "destructive verifier DB target must be loopback: $POSTGRES_HOST" ;;
+  esac
+  if [ "$SOURCE_DATABASE_URL" != "" ]; then
+    python3 - "$SOURCE_DATABASE_URL" "$POSTGRES_HOST" "$POSTGRES_PORT" "$SOURCE_POSTGRES_DB" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+url, expected_host, expected_port, expected_db = sys.argv[1:]
+parsed = urlparse(url)
+host = parsed.hostname or ""
+port = parsed.port or 5432
+database = parsed.path.lstrip("/")
+loopback = {"localhost", "127.0.0.1", "::1"}
+if host not in loopback or expected_host not in loopback:
+    raise SystemExit("[macos-real-backend] DATABASE_URL and admin target must both be loopback")
+if port != int(expected_port) or database != expected_db:
+    raise SystemExit("[macos-real-backend] DATABASE_URL source does not match admin port/database")
+PY
+  fi
+}
+
+provision_verifier_database() {
+  local exists
+  case "$POSTGRES_DB" in
+    ''|*[!a-zA-Z0-9_]*|"$SOURCE_POSTGRES_DB"|postgres|template0|template1)
+      fail "refusing unsafe verifier database target: $POSTGRES_DB"
+      ;;
+  esac
+  exists="$(admin_scalar "SELECT count(*) FROM pg_database WHERE datname = '$POSTGRES_DB';")"
+  [ "$exists" = "0" ] || fail "refusing pre-existing verifier database: $POSTGRES_DB"
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 --no-psqlrc -c "CREATE DATABASE \"$POSTGRES_DB\";"
+  VERIFIER_DB_OWNED=1
+  VERIFIER_DB_CREATED_OID="$(admin_scalar "SELECT oid FROM pg_database WHERE datname = '$POSTGRES_DB';")"
+  [ "$VERIFIER_DB_CREATED_OID" != "" ] || fail "failed to capture verifier DB OID"
+  if [ "${MACOS_REAL_BACKEND_VERIFIER_TEST_FAIL_COMMENT:-0}" = "1" ]; then
+    echo "[macos-real-backend] intentional verifier COMMENT failure (test only)" >&2
+    exit 96
+  fi
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+COMMENT ON DATABASE "$POSTGRES_DB" IS :'marker';
+SQL
+
+  ENV_FILE=/dev/null DATABASE_URL= \
+    PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB" \
+    PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" \
+    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+BEGIN;
+CREATE ROLE $VERIFIER_APP_ROLE LOGIN PASSWORD '$VERIFIER_APP_PASSWORD';
+CREATE ROLE $VERIFIER_WORKER_ROLE LOGIN PASSWORD '$VERIFIER_WORKER_PASSWORD';
+CREATE ROLE $VERIFIER_RELAY_ROLE LOGIN PASSWORD '$VERIFIER_RELAY_PASSWORD';
+COMMENT ON ROLE $VERIFIER_APP_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_WORKER_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_RELAY_ROLE IS :'marker';
+ALTER ROLE $VERIFIER_APP_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE $VERIFIER_WORKER_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+ALTER ROLE $VERIFIER_RELAY_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+COMMIT;
+SQL
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v ON_ERROR_STOP=1 --no-psqlrc <<SQL
+GRANT USAGE ON SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+SQL
+}
+
+cleanup_verifier_database() {
+  local current_oid current_marker role role_marker
+  [ "${VERIFIER_DB_OWNED:-0}" = "1" ] || return 0
+  current_oid="$(admin_scalar "SELECT COALESCE(oid::text, '') FROM pg_database WHERE datname = '$POSTGRES_DB';")" || return 1
+  current_marker="$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = '$POSTGRES_DB';")" || return 1
+  if [ "$current_oid" != "$VERIFIER_DB_CREATED_OID" ] \
+    || { [ "$current_marker" != "$VERIFIER_DB_MARKER" ] && [ "$current_marker" != "" ]; }; then
+    echo "[macos-real-backend] refusing verifier cleanup: DB identity changed" >&2
+    return 1
+  fi
+  for role in "$VERIFIER_APP_ROLE" "$VERIFIER_WORKER_ROLE" "$VERIFIER_RELAY_ROLE"; do
+    role_marker="$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';")" || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+        -c "ALTER ROLE \"$role\" NOLOGIN;" >/dev/null || return 1
+    fi
+  done
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+    -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "DROP DATABASE \"$POSTGRES_DB\" WITH (FORCE);" >/dev/null || return 1
+  for role in "$VERIFIER_APP_ROLE" "$VERIFIER_WORKER_ROLE" "$VERIFIER_RELAY_ROLE"; do
+    role_marker="$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';")" || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+        -c "DROP ROLE \"$role\";" >/dev/null || return 1
+    fi
+  done
+  VERIFIER_DB_OWNED=0
 }
 
 wait_http() {
@@ -164,19 +351,87 @@ wait_http() {
 }
 
 echo "[macos-real-backend] using env file: ${ENV_FILE:-<none>}"
-echo "[macos-real-backend] api=${BASE_URL} postgres_port=${POSTGRES_PORT} launch_ui=${LOCAL_GATE_LAUNCH_UI:-0}"
+echo "[macos-real-backend] api=${BASE_URL} postgres_port=${POSTGRES_PORT} source_db=${SOURCE_POSTGRES_DB} launch_ui=${LOCAL_GATE_LAUNCH_UI:-0}"
 
-echo "[macos-real-backend] starting Docker compose and applying migrations"
-(cd "$REPO_ROOT" && make up)
-(cd "$REPO_ROOT" && make migrate)
+echo "[macos-real-backend] ensuring local PostgreSQL/Centrifugo services are running"
+(cd "$REPO_ROOT" && POSTGRES_DB="$SOURCE_POSTGRES_DB" make ENV_FILE="$ENV_FILE" up)
+validate_admin_target
+SOURCE_DIGEST_BEFORE="$(source_digest)"
+SOURCE_DIGEST_ARMED=1
+echo "[macos-real-backend] provisioning isolated verifier database: $POSTGRES_DB"
+provision_verifier_database
 
-echo "[macos-real-backend] ensuring runtime DB roles exist"
-"$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
-
-echo "[macos-real-backend] seeding approval/cost UI fixture"
+echo "[macos-real-backend] seeding isolated demo/Hermes and approval/cost fixtures"
 psql_admin <<SQL
 BEGIN;
 SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '${WORKSPACE_ID}';
+
+INSERT INTO workspace (id, slug, name)
+VALUES ('${WORKSPACE_ID}', 'macos-ui-verifier', 'macOS UI Verifier Workspace')
+ON CONFLICT (id) DO UPDATE
+  SET deleted_at = NULL,
+      name = EXCLUDED.name;
+
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES
+  ('${HUMAN_ID}', '${WORKSPACE_ID}', 'human', 'active', 'macOS UI Verifier Human', 'demo'),
+  ('${AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active', 'Hermes', '${AGENT_HANDLE}')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status,
+      display_name = EXCLUDED.display_name,
+      handle = EXCLUDED.handle,
+      deleted_at = NULL;
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('${HUMAN_ID}', '${WORKSPACE_ID}', '${HUMAN_EMAIL}', true,
+        momo_password_hash('dev-password'), 'UTC')
+ON CONFLICT (member_id) DO UPDATE
+  SET email = EXCLUDED.email,
+      email_verified = true,
+      password_hash = EXCLUDED.password_hash,
+      tz = EXCLUDED.tz;
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
+                   owner_human_id, max_concurrent_runs, max_run_steps)
+VALUES ('${AGENT_ID}', '${WORKSPACE_ID}', 'hermes-agent', 'http://localhost:8088/v1',
+        'macOS real-backend verifier Hermes fixture', '${HUMAN_ID}', 1, 12)
+ON CONFLICT (member_id) DO UPDATE
+  SET model = EXCLUDED.model,
+      base_url = EXCLUDED.base_url,
+      system_prompt = EXCLUDED.system_prompt,
+      owner_human_id = EXCLUDED.owner_human_id,
+      max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+      max_run_steps = EXCLUDED.max_run_steps;
+
+-- Migration 002 owns a fixed #agent-lab UUID. Replace it inside this isolated
+-- DB so every verifier generation uses a distinct Centrifugo version stream.
+DELETE FROM channel
+ WHERE workspace_id = '${WORKSPACE_ID}'
+   AND id <> '${CHANNEL_ID}'
+   AND lower(name) = 'agent-lab';
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
+VALUES ('${CHANNEL_ID}', '${WORKSPACE_ID}', 'public', 'agent-lab',
+        'macOS real-backend verifier channel', '${HUMAN_ID}', NULL)
+ON CONFLICT (id) DO UPDATE
+  SET name = EXCLUDED.name,
+      topic = EXCLUDED.topic,
+      archived_at = NULL,
+      updated_at = now();
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES ('${CHANNEL_ID}', '${WORKSPACE_ID}', 0)
+ON CONFLICT (channel_id) DO NOTHING;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role, left_at)
+VALUES
+  ('00000000-0000-7000-8000-000000000303', '${WORKSPACE_ID}',
+   '${CHANNEL_ID}', '${HUMAN_ID}', 'owner', NULL),
+  ('00000000-0000-7000-8000-000000000306', '${WORKSPACE_ID}',
+   '${CHANNEL_ID}', '${AGENT_ID}', 'member', NULL)
+ON CONFLICT (channel_id, member_id)
+DO UPDATE SET role = EXCLUDED.role, left_at = NULL;
 
 DELETE FROM usage_ledger WHERE id = '${USAGE_ID}' OR run_id = '${RUN_ID_FIXTURE}';
 DELETE FROM approval_decision WHERE approval_id = '${APPROVAL_ID}';
@@ -477,11 +732,13 @@ else
 fi
 
 {
-  echo "## MOMO-205 macOS Real-Backend Smoke Evidence"
+  echo "## MOMO-205/MOMO-348 macOS Real-Backend Smoke Evidence"
   echo "- Result: PASS"
   echo "- Base URL: \`${BASE_URL}\`"
+  echo "- Database boundary: isolated migrated DB \`${POSTGRES_DB}\`; app=NOBYPASSRLS, worker/relay=BYPASSRLS marker-bound roles; source \`${SOURCE_POSTGRES_DB}\` digest is enforced unchanged on exit."
   echo "- Workspace: \`${WORKSPACE_ID}\`"
   echo "- Channel: \`agent-lab\` / \`${CHANNEL_ID}\`"
+  echo "- Centrifugo channel spelling: \`${CENT_CHANNEL}\` (Swift UUID uppercase normalization)"
   echo "- REST login: member=\`${HUMAN_ID}\`, access_token_len=\`$(jq -r '.accessToken | length' "$REST_LOGIN_FILE")\`"
   echo "- REST channel list: count=\`$(jq -r '.channels | length' "$REST_CHANNELS_FILE")\`, includes \`agent-lab\`"
   echo "- REST invite admin: created invite \`${INVITE_REVOKE_ID}\`, listed active state, revoked with reason \`MOMO-226 revoke smoke\`"
