@@ -1610,6 +1610,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
 - [ ] root main persistent dogfood DB의 fixture drift(예: agent 멤버십 left_at)와 무관하게 verifier PASS.
 - [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
+  - 구현: marker/OID-owned fresh migrated DB, marker-bound app/worker/relay role, deterministic live fixtures, source digest, pre-marker rollback helper를 추가했다.
+  - 검증 상태: `bash -n` PASS; runtime evidence는 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
 
 ---
 
