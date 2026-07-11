@@ -13,43 +13,67 @@ final class AgentCredentialSnapshotTests: XCTestCase {
         width: CGFloat = 480,
         height: CGFloat = 620,
         notice: String? = "자격증명을 폐기했습니다. 새 env 값을 반영하세요.",
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        presentation: MomoAgentCredentialManagementPresentation = .grouped,
+        includeLongThirdCredential: Bool = false,
+        outerPadding: CGFloat = 16
     ) -> some View {
-        MomoAgentCredentialManagementContent(
-            copy: MomoWorkspaceCopy(language: .korean),
-            credentials: [
+        let revokedCredentialID = UUID(uuidString: "00000000-0000-7000-8000-000000339102")!
+        var credentials = [
+            MomoAgentCredential(
+                id: UUID(uuidString: "00000000-0000-7000-8000-000000339101")!,
+                agentMemberId: agent,
+                serverStatus: "active",
+                scopes: ["agent:jobs:read", "messages:write"],
+                label: "Hermes gateway",
+                lastUsedAtMs: nil,
+                expiresAtMs: nil,
+                revokedAtMs: nil,
+                createdAtMs: 1_800_000_000_000
+            ),
+            MomoAgentCredential(
+                id: revokedCredentialID,
+                agentMemberId: agent,
+                serverStatus: "revoked",
+                scopes: ["agent:jobs:read", "messages:write"],
+                label: "Hermes gateway 이전 값",
+                lastUsedAtMs: 1_799_900_000_000,
+                expiresAtMs: nil,
+                revokedAtMs: 1_800_000_100_000,
+                createdAtMs: 1_799_000_000_000
+            ),
+        ]
+        if includeLongThirdCredential {
+            credentials.append(
                 MomoAgentCredential(
-                    id: UUID(uuidString: "00000000-0000-7000-8000-000000339101")!,
+                    id: UUID(uuidString: "00000000-0000-7000-8000-000000339104")!,
                     agentMemberId: agent,
                     serverStatus: "active",
                     scopes: ["agent:jobs:read", "messages:write"],
-                    label: "Hermes gateway",
-                    lastUsedAtMs: nil,
-                    expiresAtMs: nil,
+                    label: "서울 운영팀 Hermes gateway 장기 이름",
+                    lastUsedAtMs: 1_799_950_000_000,
+                    expiresAtMs: 1_800_086_400_000,
                     revokedAtMs: nil,
-                    createdAtMs: 1_800_000_000_000
-                ),
-                MomoAgentCredential(
-                    id: UUID(uuidString: "00000000-0000-7000-8000-000000339102")!,
-                    agentMemberId: agent,
-                    serverStatus: "revoked",
-                    scopes: ["agent:jobs:read", "messages:write"],
-                    label: "Hermes gateway 이전 값",
-                    lastUsedAtMs: 1_799_900_000_000,
-                    expiresAtMs: nil,
-                    revokedAtMs: 1_800_000_100_000,
-                    createdAtMs: 1_799_000_000_000
-                ),
-            ],
+                    createdAtMs: 1_798_000_000_000
+                )
+            )
+        }
+
+        return MomoAgentCredentialManagementContent(
+            copy: MomoWorkspaceCopy(language: .korean),
+            credentials: credentials,
             isLoading: false,
             actionInFlight: false,
-            notice: notice,
+            notice: notice.map {
+                MomoAgentCredentialNotice(credentialID: revokedCredentialID, message: $0)
+            },
             errorMessage: errorMessage,
+            presentation: presentation,
             issueOrRotate: {},
             retry: {},
             requestRevoke: { _ in }
         )
-        .padding(16)
+        .padding(outerPadding)
         .frame(width: width, height: height, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.colorScheme, scheme)
@@ -163,13 +187,28 @@ final class AgentCredentialSnapshotTests: XCTestCase {
         )
     }
 
-    func testCredentialRevealLargeTypeSnapshot() throws {
+    func testCredentialRevealConstrainedWindowSnapshot() throws {
         let surface = revealSurface(.dark, width: 440, height: 720)
-            .environment(\.dynamicTypeSize, .accessibility1)
         assertSnapshot(
             of: try render(surface, scheme: .dark, size: CGSize(width: 440, height: 720)),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "large-type"
+            named: "constrained-window"
+        )
+    }
+
+    func testCredentialManagementPopoverWidthSnapshot() throws {
+        let surface = managementSurface(
+            .light,
+            width: 290,
+            height: 620,
+            presentation: .popover,
+            includeLongThirdCredential: true,
+            outerPadding: 0
+        )
+        assertSnapshot(
+            of: try render(surface, scheme: .light, size: CGSize(width: 290, height: 620)),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "popover-effective-width"
         )
     }
 }

@@ -9,6 +9,12 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
+## 0-1. MOMO-347 Pairing Popover Credential Embedding Hardening (2026-07-11)
+
+- 340pt pairing popover를 최대 640pt 높이의 `ScrollView`로 제한하고 24pt inset(유효 폭 약 292pt)에서 자격증명 행이 좁은 헤더/메타데이터 레이아웃으로 전환되게 했다. popover의 material/accent/GroupBox 3중 카드는 flat 자격증명 섹션으로 줄였다.
+- 폐기 피드백은 대상 credential 행에 귀속하고, 발급/폐기 직후 refresh는 기존 in-flight 조회를 합친 뒤 mutation 이후 최신 조회를 한 번 더 수행한다. 명목상 large-type 스냅샷은 기존 PNG 바이트를 보존한 채 constrained-window 검증으로 정직화하고 신규 290pt 스냅샷을 추가했다.
+- 검증: macOS `swift build --disable-sandbox` PASS, snapshot suite 제외 77 tests PASS, 신규 290pt snapshot PASS, refresh 경합/manifest secret 비포함/issue-rotate-revoke 타깃 3 tests PASS, fresh-context design-review **PASS Blocker 0/High 0**. 기존 snapshot 참조 재기록과 `macos-ui` gate는 오케스트레이터 정본 머신에서 merge 전 수행 대기.
+
 ## 0-1. MOMO-339 macOS Agent Credential Pairing UI (2026-07-11)
 
 - 페어링 초대 완료를 per-agent bearer 발급 API에 연결하고, 원문을 transient one-time reveal sheet에서만 표시한다. 프로필과 페어링 패널은 configured/active/expiring/revoked 메타데이터, 24시간 grace 회전, 확인 후 폐기, 401 복구 안내를 공유한다.

@@ -25,6 +25,8 @@ public enum MomoTheme {
     public static let credentialRevealMinimumWidth: CGFloat = 320
     public static let credentialRevealIdealWidth: CGFloat = 480
     public static let credentialRevealMaximumWidth: CGFloat = 640
+    public static let memberInvitePopoverWidth: CGFloat = 340
+    public static let memberInvitePopoverMaximumHeight: CGFloat = 640
 }
 
 // MARK: - micro_usd formatting (display only; never accounting math — L4 §8.5)

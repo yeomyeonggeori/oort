@@ -587,6 +587,36 @@ final class MomoMacTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testAgentCredentialIssueRefreshesAfterAnOlderListRequest() async throws {
+        let workspace = WorkspaceID()
+        let agent = MemberID()
+        let backend = ControlledCredentialRefreshBackend(agent: agent)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+        await viewModel.bootstrap(workspace: workspace, accessToken: "fixture-access")
+
+        let olderRefresh = Task {
+            try await viewModel.refreshAgentCredentials(for: agent)
+        }
+        await backend.waitForListCallCount(1)
+
+        let issue = Task {
+            try await viewModel.issueAgentCredential(for: agent)
+        }
+        await backend.waitForIssueCallCount(1)
+
+        await backend.releaseNextListCall()
+        await backend.waitForListCallCount(2)
+        await backend.releaseNextListCall()
+
+        try await olderRefresh.value
+        let reveal = try await issue.value
+        let listCallCount = await backend.listCallCount()
+        XCTAssertEqual(listCallCount, 2)
+        XCTAssertEqual(viewModel.agentCredentials(for: agent).map(\.id), [reveal.credential.id])
+        XCTAssertFalse(viewModel.isLoadingAgentCredentials(for: agent))
+    }
+
     func testAgentPairingEndpointPolicyFailsClosedForNonLoopbackHTTP() {
         let blocked = MomoAgentPairingSecurity.endpointPolicy(
             "http://192.168.0.2:28188/v1",
@@ -2770,6 +2800,146 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(controller.form.savePassword)
         XCTAssertTrue(controller.sessionNotice?.contains("Logged out") == true)
     }
+}
+
+private actor ControlledCredentialRefreshBackend: ChatBackend, AgentTransport, MomoAgentCredentialBackend {
+    private struct CallWaiter {
+        let target: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private let agent: MemberID
+    private var storedCredentials: [MomoAgentCredential] = []
+    private var listCalls = 0
+    private var issueCalls = 0
+    private var listCallWaiters: [CallWaiter] = []
+    private var issueCallWaiters: [CallWaiter] = []
+    private var listCallReleases: [CheckedContinuation<Void, Never>] = []
+
+    init(agent: MemberID) {
+        self.agent = agent
+    }
+
+    func waitForListCallCount(_ target: Int) async {
+        guard listCalls < target else { return }
+        await withCheckedContinuation { continuation in
+            listCallWaiters.append(CallWaiter(target: target, continuation: continuation))
+        }
+    }
+
+    func waitForIssueCallCount(_ target: Int) async {
+        guard issueCalls < target else { return }
+        await withCheckedContinuation { continuation in
+            issueCallWaiters.append(CallWaiter(target: target, continuation: continuation))
+        }
+    }
+
+    func releaseNextListCall() {
+        listCallReleases.removeFirst().resume()
+    }
+
+    func listCallCount() -> Int {
+        listCalls
+    }
+
+    func agentCredentials(
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> [MomoAgentCredential] {
+        let snapshot = storedCredentials
+        listCalls += 1
+        resumeSatisfiedWaiters(&listCallWaiters, count: listCalls)
+        await withCheckedContinuation { continuation in
+            listCallReleases.append(continuation)
+        }
+        return snapshot
+    }
+
+    func issueAgentCredential(
+        workspace: WorkspaceID,
+        agent: MemberID,
+        rotationGraceSeconds: Int
+    ) async throws -> MomoAgentCredentialReveal {
+        let credential = MomoAgentCredential(
+            id: UUID(),
+            agentMemberId: self.agent,
+            serverStatus: "active",
+            scopes: ["agent:jobs:read", "messages:write"],
+            label: "Hermes gateway",
+            lastUsedAtMs: nil,
+            expiresAtMs: nil,
+            revokedAtMs: nil,
+            createdAtMs: 1_800_000_000_000
+        )
+        storedCredentials = [credential]
+        issueCalls += 1
+        resumeSatisfiedWaiters(&issueCallWaiters, count: issueCalls)
+        return MomoAgentCredentialReveal(
+            credential: credential,
+            token: "not-a-real-token",
+            tokenType: "Bearer",
+            rotatedCredentialCount: 0,
+            rotationGraceEndsAtMs: nil
+        )
+    }
+
+    func revokeAgentCredential(
+        _ credential: UUID,
+        workspace: WorkspaceID,
+        agent: MemberID
+    ) async throws -> MomoAgentCredential {
+        throw BackendError.notConnected
+    }
+
+    private func resumeSatisfiedWaiters(_ waiters: inout [CallWaiter], count: Int) {
+        var remaining: [CallWaiter] = []
+        for waiter in waiters {
+            if count >= waiter.target {
+                waiter.continuation.resume()
+            } else {
+                remaining.append(waiter)
+            }
+        }
+        waiters = remaining
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {}
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        throw BackendError.notConnected
+    }
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        AsyncStream { $0.finish() }
+    }
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] { [] }
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] { [] }
+    func members(workspace: WorkspaceID) async throws -> [Member] { [] }
+    func channels(workspace: WorkspaceID) async throws -> [Channel] { [] }
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] { [] }
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] { [] }
+    func setTyping(channel: ChannelID, isTyping: Bool) async {}
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        throw BackendError.notConnected
+    }
+    func addReaction(_ id: MessageID, emoji: String) async throws {}
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] { [] }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        throw BackendError.notConnected
+    }
+    func observe(agent: MemberID, channel: ChannelID) async throws -> AsyncStream<AgentEvent> {
+        AsyncStream { $0.finish() }
+    }
+    func invoke(
+        agent: MemberID,
+        channel: ChannelID,
+        prompt: String,
+        idempotencyKey: UUID
+    ) async throws -> RunID {
+        throw BackendError.notConnected
+    }
+    func decideApproval(_ id: ApprovalID, approve: Bool, reason: String?) async throws {
+        throw BackendError.notConnected
+    }
+    func cancelRun(_ id: RunID) async throws {}
 }
 
 private actor AgentMentionFallbackChatBackend: ChatBackend {

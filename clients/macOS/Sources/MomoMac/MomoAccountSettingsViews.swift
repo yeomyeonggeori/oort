@@ -317,6 +317,7 @@ struct MomoMemberProfileSettingsSurface: View {
                     copy: copy,
                     agent: member,
                     viewModel: viewModel,
+                    presentation: .grouped,
                     onReveal: { credentialReveal = $0 }
                 )
             }
