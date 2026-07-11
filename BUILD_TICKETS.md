@@ -1636,14 +1636,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] design-review 재판정 Blocker 0/High 0 + `macos-ui` gate PASS — 오케스트레이터 fresh-context 재판정 **PASS (Blocker 0/High 0/Medium 2/Nitpick 3)**, 스냅샷 3종 정본 머신 재기록, worktree clean `macos-ui` gate full PASS(`local-gate-macos-ui-20260711T160222Z-…-r7fc05a1bc084.md`), PR #327 merge (`51db851`). root post-merge macos-ui는 선재 MOMO-348 지점에서만 중단(신규 회귀 없음 확인).
   - 잔여(후속 후보, 티켓 미발급): [Medium] 리스트 레벨 error가 행 귀속 notice와 동일 해부구조로 렌더돼 스코프 오독 소지(`MomoAgentCredentialViews.swift:169`) · 행별 ViewThatFits로 상태 칩 세로 스캔 붕괴(`:227`). [Nitpick] large-Dynamic-Type 실증 부재(장기), 자식 소유 Divider, human 모드 카드 elevation 불일치.
 
-### ☐ MOMO-348 수용기준 — macos-ui real backend verifier isolated DB boundary `[tooling/macos-ui]` · 의존: MOMO-346
-- [ ] `verify_macos_real_backend_ui.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 demo/hermes fixture를 자체 seed한다.
-- [ ] login/invite/join/member/send/mention→agent_job/history assertion이 fresh 격리 DB에서 PASS하고 dogfood DB에 mutation을 남기지 않는다 (digest 전후 동일).
-- [ ] root main persistent dogfood DB drift와 무관하게 `macos-ui` full gate가 root main에서 PASS한다.
-- [ ] clean gate + root post-merge gate evidence, 정본 3종 갱신.
-  - worker 구현: unique marker/OID-owned migrated DB + app(NOBYPASSRLS)/worker·relay(BYPASSRLS) role, per-run uuid5 channel, demo/Hermes·approval/cost fixture 자체 seed, source digest EXIT trap, exact-identity cleanup을 배선했다.
-  - worker 정적 검증: 수정·신규 shell `bash -n` PASS. pre-marker COMMENT 실패(exit 96) rollback helper를 `macos-ui` profile·auto-classify·shell-syntax 목록에 연결했다.
-  - 런타임 게이트 evidence는 오케스트레이터가 merge 전 수행하므로 acceptance/gate 체크박스는 미체크 유지(`runtime-unverified`).
+### ☑ MOMO-348 수용기준 — macos-ui real backend verifier isolated DB boundary `[tooling/macos-ui]` · 의존: MOMO-346
+- [x] `verify_macos_real_backend_ui.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 demo/hermes fixture를 자체 seed한다 — per-run uuid5 channel + CENT_CHANNEL 대문자 정규화(MOMO-346 교훈)까지 첫 커밋부터 반영.
+- [x] login/invite/join/member/send/mention→agent_job/history assertion이 fresh 격리 DB에서 PASS하고 dogfood DB에 mutation을 남기지 않는다 (digest 전후 동일).
+- [x] root main persistent dogfood DB drift와 무관하게 `macos-ui` full gate가 root main에서 PASS한다.
+- [x] clean gate + root post-merge gate evidence, 정본 3종 갱신.
+  - worktree: bootstrap 회귀 + 단독 verifier + clean full gate PASS (`local-gate-macos-ui-20260711T185500Z-…-rff8c71d8f960.md`)
+  - root post-merge full gate PASS (`local-gate-macos-ui-20260711T190121Z-…-r0e6956276818.md`, source digest 보존) — **verifier 격리 캐스케이드(MOMO-342→348) 전 프로파일 종결 (2026-07-12)**. PR #328 merge (`444ee59`).
+  - 검수 노트: 1차 worker 실행이 API 무응답으로 행(CPU 0, 2.5h) → kill 후 재스폰으로 10분 완주. 1차 root gate는 이전 실패 게이트 런의 잔류 MomoServer(26560) 점유로 fail-fast → 정리 후 PASS. 잔류 프로세스 자동 정리는 drift-guard 티켓 제안에 병합 예정.
 
 ---
 
