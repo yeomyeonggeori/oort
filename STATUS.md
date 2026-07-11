@@ -49,6 +49,8 @@
 - external-provider 엔진과 local bridge wrapper를 매 실행 unique marker/OID-owned migrated DB로 분리하고 marker-bound app(NOBYPASSRLS)·worker/relay(BYPASSRLS) role 및 Hermes/#agent-lab fixture를 연결했다. gateway verifier도 별도 fresh DB와 marker-bound app role을 사용한다.
 - 두 경로 모두 source dogfood DB의 agent queue/run/approval/message 관련 digest를 EXIT trap에서 성공/실패 전후 비교하고, exact OID+marker DB 및 marker-bound role만 fail-closed 정리한다. external/gateway pre-marker COMMENT 실패(exit 96) rollback 회귀를 `runtime-agent`에 추가했다.
 - worker 검증은 DB/Docker/verifier 접속 없이 수정·신규 shell의 `bash -n`만 PASS. invite/roundtrip/bearer assertions, 성공·실패 digest 및 clean/root `runtime-agent` evidence는 오케스트레이터가 merge 전 수행 대기(`runtime-unverified`).
+- 2026-07-12 오케스트레이터 검수에서 순서 의존 결함 2건을 규명·수정: ① relay가 `version=message.seq`를 전달하는데 격리 DB는 seq를 리셋하고 채널명이 고정이라, 공유 Centrifugo가 이전 verifier 세션의 저장 version과 비교해 **성공 응답을 주면서 조용히 drop**(stale skip, TTL 없음) → per-run 채널 UUID로 수정(worker resume). ② per-run UUID 도입 후 서버(Swift UUID, 대문자)와 verifier(python, 소문자)의 채널명 케이스 불일치 → `CENT_CHANNEL` 대문자 정규화(오케스트레이터). 고정 fixture UUID(숫자만)에서는 둘 다 잠복 불가능했던 결함.
+- PR #326 merge (`beceaa1`). worktree clean full gate PASS + **root main post-merge runtime-agent full gate PASS** (`local-gate-runtime-agent-20260711T155410Z-…-re2f9b4903131.md`, 4-verifier source digest 보존) — **verifier 격리 캐스케이드(MOMO-342→346) 종결**. 잔여는 macos-ui 프로파일의 MOMO-348.
 
 ## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
 

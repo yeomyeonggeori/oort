@@ -1618,15 +1618,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - worktree clean gate full PASS: `local-gate-runtime-agent-20260711T112751Z-…-red25beecd13d.md`
   - root post-merge: live channel verifier PASS + source digest 보존 (drift 있는 dogfood DB 위에서 실증). full gate는 선재하던 hermes bridge/gateway verifier의 dogfood 결합(→ MOMO-346 `#322`)으로 별도 추적.
 
-### ☐ MOMO-346 수용기준 — Hermes bridge/gateway verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-345
-- [ ] `verify_local_hermes_bridge.sh`/`verify_external_agent_provider.sh`/`verify_hermes_gateway_adapter.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 Hermes/#agent-lab fixture를 자체 seed한다.
-- [ ] invite precondition·external-hermes roundtrip·gateway bearer assertion이 fresh 격리 DB에서 PASS한다 (dogfood 채널에 메시지 비작성).
-- [ ] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
-- [ ] root main persistent dogfood DB의 drift와 무관하게 `runtime-agent` full gate가 root main에서 PASS한다 — verifier 격리 캐스케이드 종결 조건.
-- [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
-  - worker 구현: external-provider/bridge는 marker/OID-owned fresh migrated DB + app(NOBYPASSRLS)/worker·relay(BYPASSRLS) role, gateway는 별도 fresh DB + app(NOBYPASSRLS) role을 사용하며 두 경로 모두 Hermes/#agent-lab fixture를 자체 seed한다.
-  - worker 정적 검증: 수정·신규 shell `bash -n` PASS. source digest EXIT trap, exact-OID+marker cleanup, external/gateway pre-marker COMMENT 실패(exit 96) bootstrap 회귀를 배선했다.
-  - 런타임 게이트 evidence는 오케스트레이터가 merge 전 수행하므로 모든 acceptance/gate 체크박스는 미체크 유지(`runtime-unverified`).
+### ☑ MOMO-346 수용기준 — Hermes bridge/gateway verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-345
+- [x] `verify_local_hermes_bridge.sh`/`verify_external_agent_provider.sh`/`verify_hermes_gateway_adapter.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 Hermes/#agent-lab fixture를 자체 seed한다.
+- [x] invite precondition·external-hermes roundtrip·gateway bearer assertion이 fresh 격리 DB에서 PASS한다 (dogfood 채널에 메시지 비작성).
+- [x] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
+- [x] root main persistent dogfood DB의 drift와 무관하게 `runtime-agent` full gate가 root main에서 PASS한다 — **verifier 격리 캐스케이드 종결 (2026-07-12)**.
+- [x] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
+  - worktree clean full gate PASS: `local-gate-runtime-agent-20260711T154717Z-…-r1feb7be05908.md`
+  - root post-merge full gate PASS: `local-gate-runtime-agent-20260711T155410Z-…-re2f9b4903131.md` (context/live/bridge/gateway 4-verifier source digest 보존 확인)
+  - 검수 이탈 2건 수정: ① relay `version=message.seq` 기반 stale skip — 격리 DB seq 리셋 + 고정 채널명 조합이 공유 Centrifugo에서 조용히 drop됨 → per-run 채널 UUID(worker resume 수정, `1706590`) ② 채널명 대소문자 불일치 — 서버(Swift UUID)는 대문자, verifier(python)는 소문자 → CENT_CHANNEL 대문자 정규화(오케스트레이터 직접 수정, `0bb685e`)
+  - gate 잔류 프로세스 누수 관찰(MOMO-319 유형): 실패한 게이트 런의 MomoServer 2개가 포트를 점유해 pre-clean fail-fast — 수동 정리 후 재실행.
 
 ### ☐ MOMO-347 수용기준 — Pairing popover credential embedding hardening `[swift/macos-ui]` · 의존: MOMO-339
 - [ ] ~290pt 유효 폭 스냅샷 또는 popover 실임베딩 캡처 evidence (High 1).
