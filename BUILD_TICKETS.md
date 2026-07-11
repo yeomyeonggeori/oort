@@ -187,6 +187,7 @@
 | `MOMO-342` (`#314`) | AgentWorker verifier persistent DB fixture hardening | tooling/runtime | MOMO-324, MOMO-338 |
 | `MOMO-343` (`#316`) | AgentWorker verifier fresh DB marker bootstrap regression | tooling/runtime | MOMO-342 |
 | `MOMO-344` (`#318`) | Agent context verifier isolated DB boundary | tooling/runtime-agent | MOMO-343 |
+| `MOMO-345` (`#320`) | Agent live channel verifier isolated DB boundary | tooling/runtime-agent | MOMO-344 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -1599,6 +1600,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] verifier app role은 NOBYPASSRLS, worker role만 BYPASSRLS이며 exact marker cleanup 전 NOLOGIN 처리한다.
 - [x] source DB의 agent_job/agent_run/approval/message digest가 전후 동일함을 검증한다.
 - [x] unrelated pending `resume_approval`이 source DB에 있어도 context assembly history/role/cross-channel/char-budget assertions가 PASS한다.
+- [x] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
+  - worktree clean gate PASS: `local-gate-runtime-agent-20260711T101151Z-…-rb7797b74d2f5.md`
+  - root post-merge: MOMO-344 범위 verifier(bootstrap rollback + context + source digest 보존) 전부 PASS. full gate는 선재하던 `verify_agent_live_channel.sh` 격리 결함(→ MOMO-345 `#320`)과 momo_main Centrifugo 낡은 running-config(재시작으로 해소)로 별도 추적.
+
+### ☐ MOMO-345 수용기준 — Agent live channel verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-344
+- [ ] live channel verifier의 MomoServer/AgentWorker/OutboxRelay/fixture를 MOMO-344 패턴의 marker/OID-owned migrated DB로 격리한다.
+- [ ] authorized/unauthorized/other-workspace/revoked-credential/agentwork exact-actor assertion이 fresh 격리 DB에서 PASS한다.
+- [ ] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
+- [ ] root main persistent dogfood DB의 fixture drift(예: agent 멤버십 left_at)와 무관하게 verifier PASS.
 - [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
 
 ---

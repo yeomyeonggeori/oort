@@ -26,6 +26,8 @@
 
 - MOMO-343 merge 후 root `runtime-agent`에서 context verifier Worker가 source dogfood DB의 unrelated pending `resume_approval`을 먼저 claim하는 격리 결함을 확인했다.
 - context verifier는 이제 매 실행마다 별도 migrated DB와 marker-bound app/worker role을 사용하고, source DB의 agent queue/run/approval/message digest를 전후 비교한다. cleanup은 exact DB OID+marker와 role marker가 일치할 때만 수행한다.
+- 2026-07-11 PR #319 merge (`0b2c94a`). worktree clean runtime-agent gate PASS, root post-merge에서 MOMO-344 범위 verifier 전부 PASS + source digest 보존 확인.
+- root post-merge full gate에서 두 가지 선재 문제를 발견했다: ① `verify_agent_live_channel.sh`가 dogfood DB의 demo 시드 상태(agent `…102`의 채널 `…202` 멤버십, 2026-07-08 left_at 처리됨)에 의존해 authorized observer 케이스가 403으로 실패 → MOMO-345 `#320` 발급. ② momo_main Centrifugo 컨테이너가 MOMO-338 이전 config로 기동된 채 남아 `agent:` 3-파트 regex/`agentwork:` namespace가 없었음 → 컨테이너 재시작으로 해소, running-config drift guard는 후속 티켓 제안.
 
 ## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
 
