@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-12 · 기준선: main `beceaa1` (MOMO-346 merge — **runtime-agent verifier 격리 캐스케이드 종결, root full gate green**) · 통합 책임: `momo-main`
+> 기준일: 2026-07-12 · 기준선: main `51db851` (MOMO-347 merge — 배치 2 완료. runtime-agent root full gate green) · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer)은 Accepted. ADR-0102(Worker/Gateway 실행 경로)는 Proposed이며 성재 결정 대기다.
-- 현재 구현 체인: **ADR-0101 Phase 1 완료 + verifier 격리 체인 MOMO-342~346 완료** — root main `runtime-agent` full gate green (2026-07-12). 진행: MOMO-347(`#324`, PR #327 검수 중). ready: MOMO-348(`#325`, macos-ui verifier 격리 — 마지막 잔여 프로파일).
+- 현재 구현 체인: **ADR-0101 Phase 1 + 후속(347) 완료, verifier 격리 체인 342~346 완료** — root `runtime-agent` full gate green. 남은 ready goal: **MOMO-348(`#325`)** 하나 — macos-ui 프로파일 격리, 이것까지 landing되면 root 전 프로파일 green.
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -38,8 +38,8 @@
 | ADR-0101 Phase 1 | 같은 패킷 | MOMO-338 `#308` | `done` (adapter bearer + private `agentwork:` self-only) | 2 완료 |
 | ADR-0101 Phase 1 | 같은 패킷 (Status `done`) | MOMO-339 `#309` | `done` (PR #323, main `881518b`) | 3 완료 — 배치 종결 |
 | verifier 격리 체인 | issue 본문이 패킷 역할 (`#318` 패턴 승계) | MOMO-346 `#322` | `done` (PR #326, main `beceaa1`) — 캐스케이드 종결 | 완료 |
-| MOMO-339 후속 | issue `#324` 본문 (design review High/Medium) | MOMO-347 `#324` | `needs-review` (PR #327 검수 중) | 다음 머지 |
-| verifier 격리 체인 | issue `#325` 본문 | MOMO-348 `#325` | `ready` | 347 다음 |
+| MOMO-339 후속 | issue `#324` 본문 (design review High/Medium) | MOMO-347 `#324` | `done` (PR #327, main `51db851`) | 완료 |
+| verifier 격리 체인 | issue `#325` 본문 | MOMO-348 `#325` | `ready` — 유일한 대기 goal | 다음 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
@@ -55,8 +55,8 @@
 ## 4. 다음 체크포인트
 
 1. 성재가 ADR-0102를 결정한다. Accepted라면 `momo-main`이 파생 티켓/패킷/ROADMAP을 한 change set으로 통합한다.
-2. MOMO-347(`#324`, PR #327) 랜딩으로 popover 하드닝을 닫고, MOMO-348(`#325`)로 macos-ui full gate까지 root green을 완성한다.
-3. ~~MOMO-346 runtime-agent full gate~~ — 2026-07-12 완료 (root green).
+2. MOMO-348(`#325`)로 macos-ui full gate까지 root green을 완성한다 — verifier 격리의 마지막 조각.
+3. ~~MOMO-346/347~~ — 2026-07-12 완료 (runtime-agent root green + popover 하드닝).
 4. Hermes gateway 중복 실행 방지 claim/lease + takeover는 MOMO-341 — 착수 대기.
 5. ADR-0102 결정을 완료해 AgentWorker SSE와 Hermes Gateway의 제품 기본 경로를 정본화한다.
 

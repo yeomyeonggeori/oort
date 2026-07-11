@@ -1629,11 +1629,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 검수 이탈 2건 수정: ① relay `version=message.seq` 기반 stale skip — 격리 DB seq 리셋 + 고정 채널명 조합이 공유 Centrifugo에서 조용히 drop됨 → per-run 채널 UUID(worker resume 수정, `1706590`) ② 채널명 대소문자 불일치 — 서버(Swift UUID)는 대문자, verifier(python)는 소문자 → CENT_CHANNEL 대문자 정규화(오케스트레이터 직접 수정, `0bb685e`)
   - gate 잔류 프로세스 누수 관찰(MOMO-319 유형): 실패한 게이트 런의 MomoServer 2개가 포트를 점유해 pre-clean fail-fast — 수동 정리 후 재실행.
 
-### ☐ MOMO-347 수용기준 — Pairing popover credential embedding hardening `[swift/macos-ui]` · 의존: MOMO-339
+### ☑ MOMO-347 수용기준 — Pairing popover credential embedding hardening `[swift/macos-ui]` · 의존: MOMO-339
 - [x] ~290pt 유효 폭 스냅샷 또는 popover 실임베딩 캡처 evidence (High 1) — 290×620pt, 3 credentials + 긴 한·영 혼합 label fixture.
 - [x] popover 수직 성장 스크롤 전략 결정·구현 (High 2) — 340pt 폭/최대 640pt 높이 `ScrollView`, 24pt inset으로 bottom action까지 스크롤 접근.
 - [x] Medium 4건(명목상 large-type 스냅샷, 폐기 notice 귀속, 3중 중첩 카드, refresh 경합) 각각 수정 또는 명시적 won't-fix 근거 — constrained-window로 정직화, row-scoped notice, flat popover section, mutation-after-in-flight refresh + 회귀 테스트.
-- [ ] design-review 재판정 Blocker 0/High 0 + `macos-ui` gate PASS (worktree clean + root post-merge) — fresh-context design-review PASS(Blocker 0/High 0), `macos-ui` gate는 오케스트레이터 정본 머신 대기.
+- [x] design-review 재판정 Blocker 0/High 0 + `macos-ui` gate PASS — 오케스트레이터 fresh-context 재판정 **PASS (Blocker 0/High 0/Medium 2/Nitpick 3)**, 스냅샷 3종 정본 머신 재기록, worktree clean `macos-ui` gate full PASS(`local-gate-macos-ui-20260711T160222Z-…-r7fc05a1bc084.md`), PR #327 merge (`51db851`). root post-merge macos-ui는 선재 MOMO-348 지점에서만 중단(신규 회귀 없음 확인).
+  - 잔여(후속 후보, 티켓 미발급): [Medium] 리스트 레벨 error가 행 귀속 notice와 동일 해부구조로 렌더돼 스코프 오독 소지(`MomoAgentCredentialViews.swift:169`) · 행별 ViewThatFits로 상태 칩 세로 스캔 붕괴(`:227`). [Nitpick] large-Dynamic-Type 실증 부재(장기), 자식 소유 Divider, human 모드 카드 elevation 불일치.
 
 ### ☐ MOMO-348 수용기준 — macos-ui real backend verifier isolated DB boundary `[tooling/macos-ui]` · 의존: MOMO-346
 - [ ] `verify_macos_real_backend_ui.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 demo/hermes fixture를 자체 seed한다.
