@@ -1641,6 +1641,9 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] login/invite/join/member/send/mention→agent_job/history assertion이 fresh 격리 DB에서 PASS하고 dogfood DB에 mutation을 남기지 않는다 (digest 전후 동일).
 - [ ] root main persistent dogfood DB drift와 무관하게 `macos-ui` full gate가 root main에서 PASS한다.
 - [ ] clean gate + root post-merge gate evidence, 정본 3종 갱신.
+  - worker 구현: unique marker/OID-owned migrated DB + app(NOBYPASSRLS)/worker·relay(BYPASSRLS) role, per-run uuid5 channel, demo/Hermes·approval/cost fixture 자체 seed, source digest EXIT trap, exact-identity cleanup을 배선했다.
+  - worker 정적 검증: 수정·신규 shell `bash -n` PASS. pre-marker COMMENT 실패(exit 96) rollback helper를 `macos-ui` profile·auto-classify·shell-syntax 목록에 연결했다.
+  - 런타임 게이트 evidence는 오케스트레이터가 merge 전 수행하므로 acceptance/gate 체크박스는 미체크 유지(`runtime-unverified`).
 
 ---
 
