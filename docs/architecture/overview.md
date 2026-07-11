@@ -66,6 +66,9 @@ sequenceDiagram
 Context Packet을 담은 `agentwork:`는 exact agent bearer만 구독한다. Slack 봇 대비
 실질 우위는 `agent_job`이 durable outbox 행이라 at-least-once 회수 가능하고,
 최종 응답·비용·감사가 원자적으로 기록된다는 점이다.
+`agentwork:` publication은 DB 작업이 있다는 wake-up일 뿐 신뢰 입력이 아니다.
+어댑터는 bearer-authenticated pending endpoint에서 작업을 재조회하고, connection
+JWT의 `meta.token_id`와 active token 행이 일치할 때만 private stream을 구독한다.
 
 ## 엔티티 지도 (요약)
 

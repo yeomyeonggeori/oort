@@ -31,7 +31,10 @@ Slack의 봇은 **앱 단위 bot token(`xoxb-`)** — 워크스페이스별 발�
 - realtime 경계: user-visible `agent:` progress와 private `agentwork:` job을
   분리한다. `agent:`는 같은 활성 채널을 공유한 멤버가 관찰할 수 있지만,
   Context Packet을 포함하는 `agentwork:`는 token actor와 target agent가 정확히
-  같은 경우만 허용한다. 한 namespace에 관찰 이벤트와 실행 입력을 섞지 않는다.
+  같은 경우만 허용한다. connection JWT의 server-only `meta.token_id`는 발급에
+  사용한 exact credential에 묶이고 subscribe proxy는 그 행의 liveness를 확인한다.
+  realtime payload는 실행 입력이 아니라 wake-up으로만 취급하고, Hermes는 같은
+  bearer로 pending REST를 다시 조회한 뒤에만 provider를 실행한다.
 - **Phase 2 (같은 ADR 범위, 후속 티켓)**: `delegation` 토큰 — 승인(approval) 통과 시 해당 run 한정으로 "사람 X를 대신해" 토큰을 단기 발급, `audit_log.via_token_id`로 추적. "Who-as-Whom" 시그니처 경험의 기반.
 - 마이그레이션: `AGENT_GATEWAY_SECRET`는 deprecation 기간 동안 병행 수용(env flag) 후 제거.
 

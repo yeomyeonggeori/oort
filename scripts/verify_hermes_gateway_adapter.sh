@@ -312,9 +312,26 @@ fetch_realtime_token() {
 subscribe_agent_stream() {
   user_member_id=$1
   target_agent_id=$2
+  connection_meta=$3
   api_request POST /v1/centrifugo/subscribe "$CENT_PROXY_SECRET" \
-    "{\"client\":\"momo-338-verifier\",\"user\":\"${user_member_id}\",\"channel\":\"agentwork:ws${WORKSPACE_ID}.${target_agent_id}\"}" \
+    "{\"client\":\"momo-338-verifier\",\"user\":\"${user_member_id}\",\"channel\":\"agentwork:ws${WORKSPACE_ID}.${target_agent_id}\",\"meta\":${connection_meta}}" \
     X-Centrifugo-Proxy-Secret
+}
+
+realtime_connection_meta() {
+  printf '%s' "$1" | python3 -c '
+import base64
+import json
+import sys
+
+token = sys.stdin.read().strip()
+parts = token.split(".")
+if len(parts) != 3:
+    raise SystemExit("invalid realtime JWT")
+payload = parts[1] + "=" * (-len(parts[1]) % 4)
+decoded = json.loads(base64.urlsafe_b64decode(payload.encode("ascii")))
+print(json.dumps(decoded.get("meta") or {}, separators=(",", ":")))
+'
 }
 
 cleanup_fixture_rows() {
@@ -521,10 +538,12 @@ fi
 
 REALTIME_JSON=$(fetch_realtime_token "$AGENT_TOKEN")
 REALTIME_MEMBER=$(printf '%s' "$REALTIME_JSON" | jq -r '.memberId')
+REALTIME_TOKEN=$(printf '%s' "$REALTIME_JSON" | jq -r '.token')
+REALTIME_META=$(realtime_connection_meta "$REALTIME_TOKEN")
 assert_equals "$AGENT_ID" "$REALTIME_MEMBER" "agent realtime token subject"
-SELF_STREAM_JSON=$(subscribe_agent_stream "$AGENT_ID" "$AGENT_ID")
+SELF_STREAM_JSON=$(subscribe_agent_stream "$AGENT_ID" "$AGENT_ID" "$REALTIME_META")
 assert_equals "true" "$(printf '%s' "$SELF_STREAM_JSON" | jq -r '.result != null')" "agent can subscribe its own work stream"
-CROSS_STREAM_JSON=$(subscribe_agent_stream "$AGENT_ID" "$OTHER_AGENT_ID")
+CROSS_STREAM_JSON=$(subscribe_agent_stream "$AGENT_ID" "$OTHER_AGENT_ID" "$REALTIME_META")
 assert_equals "403" "$(printf '%s' "$CROSS_STREAM_JSON" | jq -r '.error.code')" "agent cannot subscribe another agent work stream"
 
 AGENT_MESSAGE_JSON=$(send_message "$AGENT_TOKEN" "$AGENT_CLIENT_MSG_ID" "$AGENT_BODY")

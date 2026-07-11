@@ -269,7 +269,8 @@ struct AuthRoutes: Sendable {
 
         let issued = try await jwt.signCentrifugoConnection(
             memberID: principal.memberID,
-            workspaceID: principal.workspaceID
+            workspaceID: principal.workspaceID,
+            credentialTokenID: principal.tokenID
         )
         let body = RealtimeTokenResponse(
             token: issued.token,

@@ -117,6 +117,7 @@ AGENT_WORK_CHANNEL="agentwork:ws${WORKSPACE_ID}.${AGENT_ID}"
 RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 MESSAGE_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CROSS_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 RUN_SUFFIX="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 
 TMP_ROOT="${TMPDIR:-/tmp}"
@@ -136,11 +137,9 @@ PROXY_CONTAINER="momo-agent-live-api-proxy-${RUN_SUFFIX}"
 
 cleanup() {
   if [ "${ACCESS_TOKEN:-}" != "" ] && [ "${AGENT_CREDENTIAL_ID:-}" != "" ]; then
-    curl -fsS -X POST \
-      -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-      -H "Content-Type: application/json" \
-      -d '{"reason":"MOMO-338 agentwork websocket verifier"}' \
-      "http://127.0.0.1:${PORT}/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials/${AGENT_CREDENTIAL_ID}/revoke" \
+    api_request POST \
+      "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials/${AGENT_CREDENTIAL_ID}/revoke" \
+      "$ACCESS_TOKEN" '{"reason":"MOMO-338 agentwork websocket verifier"}' \
       >/dev/null 2>&1 || true
   fi
   momo_cleanup_tracked_pids "agent-live verifier" "${WORKER_PID:-}" "${RELAY_PID:-}" "${SERVER_PID:-}" "${MOCK_PID:-}"
@@ -227,22 +226,78 @@ psql_admin() {
   "$PSQL_BIN" "$ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 --no-psqlrc "$@"
 }
 
+# Request metadata and credentials travel through stdin, never process argv.
+api_request() {
+  local method="$1"
+  local path="$2"
+  local bearer="${3:-}"
+  local body="${4:-}"
+  printf '%s\0%s\0%s\0%s' \
+    "http://127.0.0.1:${PORT}${path}" "$method" "$bearer" "$body" | python3 -c '
+import sys
+import urllib.error
+import urllib.request
+
+parts = sys.stdin.buffer.read().split(b"\0", 3)
+if len(parts) != 4:
+    raise SystemExit(2)
+url, method, bearer, body = (part.decode("utf-8") for part in parts)
+headers = {"Accept": "application/json"}
+if bearer:
+    headers["Authorization"] = "Bearer " + bearer
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        sys.stdout.buffer.write(response.read())
+except urllib.error.HTTPError as exc:
+    sys.stderr.write(f"momo API request failed: HTTP {exc.code}\n")
+    raise SystemExit(22)
+'
+}
+
+api_status() {
+  local method="$1"
+  local path="$2"
+  local bearer="${3:-}"
+  local body="${4:-}"
+  printf '%s\0%s\0%s\0%s' \
+    "http://127.0.0.1:${PORT}${path}" "$method" "$bearer" "$body" | python3 -c '
+import sys
+import urllib.error
+import urllib.request
+url, method, bearer, body = (
+    part.decode("utf-8") for part in sys.stdin.buffer.read().split(b"\0", 3)
+)
+headers = {"Accept": "application/json"}
+if bearer:
+    headers["Authorization"] = "Bearer " + bearer
+data = None
+if body:
+    headers["Content-Type"] = "application/json"
+    data = body.encode("utf-8")
+request = urllib.request.Request(url, data=data, headers=headers, method=method)
+try:
+    with urllib.request.urlopen(request, timeout=15) as response:
+        print(response.status)
+except urllib.error.HTTPError as exc:
+    print(exc.code)
+'
+}
+
 login() {
   local email="$1"
   local workspace="$2"
-  curl -fsS \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"${email}\",\"password\":\"dev-password\",\"workspace\":\"${workspace}\"}" \
-    "http://127.0.0.1:${PORT}/v1/auth/login"
+  api_request POST /v1/auth/login "" \
+    "{\"email\":\"${email}\",\"password\":\"dev-password\",\"workspace\":\"${workspace}\"}"
 }
 
 realtime_token() {
   local access_token="$1"
-  curl -fsS \
-    -H "Authorization: Bearer ${access_token}" \
-    -H "Content-Type: application/json" \
-    -d '{}' \
-    "http://127.0.0.1:${PORT}/v1/auth/realtime-token"
+  api_request POST /v1/auth/realtime-token "$access_token" '{}'
 }
 
 echo "[agent-live] using env file: ${ENV_FILE:-<none>}"
@@ -422,22 +477,60 @@ if [ "$ACCESS_TOKEN" = "" ] || [ "$NO_SHARED_ACCESS_TOKEN" = "" ] || [ "$OTHER_A
 fi
 
 AGENT_CREDENTIAL_JSON="$(
-  curl -fsS \
-    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -d '{"label":"MOMO-338 agentwork websocket"}' \
-    "http://127.0.0.1:${PORT}/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials"
+  api_request POST \
+    "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials" \
+    "$ACCESS_TOKEN" '{"label":"MOMO-338 agentwork websocket"}'
+)"
+AGENT_BEARER="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.token // empty')"
+REVOKED_AGENT_CREDENTIAL_ID="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.credential.id // empty')"
+if [ "$AGENT_BEARER" = "" ] || [ "$REVOKED_AGENT_CREDENTIAL_ID" = "" ]; then
+  fail "agent bearer mint failed for private work stream"
+fi
+REVOKED_AGENT_REALTIME_JSON="$(realtime_token "$AGENT_BEARER")"
+REVOKED_AGENT_REALTIME_TOKEN="$(printf '%s' "$REVOKED_AGENT_REALTIME_JSON" | jq -r '.token // empty')"
+
+# Keep another credential active, then revoke the credential which minted the
+# first connection JWT. Exact-token metadata must prevent that old JWT from
+# borrowing the new credential's liveness.
+AGENT_CREDENTIAL_JSON="$(
+  api_request POST \
+    "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials" \
+    "$ACCESS_TOKEN" '{"label":"MOMO-338 active agentwork websocket"}'
 )"
 AGENT_BEARER="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.token // empty')"
 AGENT_CREDENTIAL_ID="$(printf '%s' "$AGENT_CREDENTIAL_JSON" | jq -r '.credential.id // empty')"
-if [ "$AGENT_BEARER" = "" ] || [ "$AGENT_CREDENTIAL_ID" = "" ]; then
-  fail "agent bearer mint failed for private work stream"
-fi
+api_request POST \
+  "/v1/workspaces/${WORKSPACE_ID}/agents/${AGENT_ID}/credentials/${REVOKED_AGENT_CREDENTIAL_ID}/revoke" \
+  "$ACCESS_TOKEN" '{"reason":"MOMO-338 exact realtime credential binding"}' >/dev/null
+
 AGENT_REALTIME_JSON="$(realtime_token "$AGENT_BEARER")"
 AGENT_REALTIME_TOKEN="$(printf '%s' "$AGENT_REALTIME_JSON" | jq -r '.token // empty')"
-if [ "$AGENT_REALTIME_TOKEN" = "" ]; then
+if [ "$REVOKED_AGENT_REALTIME_TOKEN" = "" ] || [ "$AGENT_BEARER" = "" ] \
+  || [ "$AGENT_CREDENTIAL_ID" = "" ] || [ "$AGENT_REALTIME_TOKEN" = "" ]; then
   fail "agent realtime token mint failed"
 fi
+
+psql_admin <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+DELETE FROM agent_run WHERE id = '$CROSS_RUN_ID';
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key,
+   finished_at)
+VALUES
+  ('$CROSS_RUN_ID', '$WORKSPACE_ID', '$AGENT_ID', '$CROSS_CHANNEL_ID',
+   'succeeded', '{}'::jsonb, 'momo-338-cross-channel-' || '$CROSS_RUN_ID', now());
+COMMIT;
+SQL
+CROSS_RUN_MESSAGE_STATUS="$(
+  api_status POST \
+    "/v1/workspaces/${WORKSPACE_ID}/channels/${CHANNEL_ID}/messages" \
+    "$AGENT_BEARER" \
+    "{\"clientMsgId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"type\":\"text\",\"body\":\"must be denied\",\"runId\":\"${CROSS_RUN_ID}\"}"
+)"
+[ "$CROSS_RUN_MESSAGE_STATUS" = "403" ] \
+  || fail "agent cross-channel run association was not denied (HTTP ${CROSS_RUN_MESSAGE_STATUS})"
 
 REALTIME_JSON="$(realtime_token "$ACCESS_TOKEN")"
 REALTIME_TOKEN="$(printf '%s' "$REALTIME_JSON" | jq -r '.token // empty')"
@@ -459,6 +552,7 @@ PY_OUT="$(
   NO_SHARED_REALTIME_TOKEN="$NO_SHARED_REALTIME_TOKEN" \
   OTHER_REALTIME_TOKEN="$OTHER_REALTIME_TOKEN" \
   AGENT_REALTIME_TOKEN="$AGENT_REALTIME_TOKEN" \
+  REVOKED_AGENT_REALTIME_TOKEN="$REVOKED_AGENT_REALTIME_TOKEN" \
   CENT_WS_URL="ws://127.0.0.1:${CENT_PORT}/connection/websocket?format=json" \
   AGENT_CHANNEL="$AGENT_CHANNEL" \
   AGENT_WORK_CHANNEL="$AGENT_WORK_CHANNEL" \
@@ -658,6 +752,10 @@ def seed_private_agentwork_broadcast():
     agent_id = os.environ["AGENT_ID"]
     run_id = os.environ["RUN_ID"]
     work_channel = os.environ["AGENT_WORK_CHANNEL"]
+    # Centrifugo suppresses a publication whose version does not advance for a
+    # channel.  Use a monotonic wall-clock value here instead of a constant so
+    # repeated verifier runs exercise the live path rather than dedup recovery.
+    publication_version = time.time_ns() // 1_000
     sql = f"""
 BEGIN;
 SET LOCAL row_security = off;
@@ -682,7 +780,7 @@ VALUES
          'prompt', 'MOMO-338 private work stream websocket evidence'
        )
      ),
-     'version', 1,
+     'version', {publication_version},
      'idempotency_key', 'momo-338-agentwork-ws:{run_id}'
    ),
    '{agent_id}');
@@ -805,6 +903,12 @@ different_channel = subscribe_denied(
 other_workspace = subscribe_denied(ws_url, os.environ["OTHER_REALTIME_TOKEN"], channel, "momo-agent-live-other-workspace")
 
 work_channel = os.environ["AGENT_WORK_CHANNEL"]
+revoked_agent_credential = subscribe_denied(
+    ws_url,
+    os.environ["REVOKED_AGENT_REALTIME_TOKEN"],
+    work_channel,
+    "momo-agentwork-revoked-credential",
+)
 private_ws = WS(ws_url)
 try:
     private_ws.send_json({
@@ -882,6 +986,7 @@ try:
         "invalid_token": invalid,
         "unauthorized_different_channel": different_channel,
         "unauthorized_other_workspace": other_workspace,
+        "revoked_agent_credential": revoked_agent_credential,
         "direct_publish": {"ok": bool(direct_publish.get("error")), "message": direct_publish},
         "private_agentwork": {
             "ok": bool(private_live),
@@ -920,10 +1025,11 @@ PUB_CHANNEL_ID="$(jq -r '(.publication.data.payload.channel_id // .publication.d
 INVALID_OK="$(jq -r '.invalid_token.ok' "$LIVE_JSON")"
 NO_SHARED_OK="$(jq -r '.unauthorized_different_channel.ok' "$LIVE_JSON")"
 OTHER_WS_OK="$(jq -r '.unauthorized_other_workspace.ok' "$LIVE_JSON")"
+REVOKED_AGENT_OK="$(jq -r '.revoked_agent_credential.ok' "$LIVE_JSON")"
 DIRECT_PUBLISH_OK="$(jq -r '.direct_publish.ok' "$LIVE_JSON")"
 PRIVATE_AGENTWORK_OK="$(jq -r '.private_agentwork.ok' "$LIVE_JSON")"
 PUB_OFFSET="$(jq -r '.publication.offset // empty' "$LIVE_JSON")"
-for check in "$INVALID_OK" "$NO_SHARED_OK" "$OTHER_WS_OK" "$DIRECT_PUBLISH_OK" "$PRIVATE_AGENTWORK_OK"; do
+for check in "$INVALID_OK" "$NO_SHARED_OK" "$OTHER_WS_OK" "$REVOKED_AGENT_OK" "$DIRECT_PUBLISH_OK" "$PRIVATE_AGENTWORK_OK"; do
   [ "$check" = "true" ] || fail "one or more negative authorization checks did not fail closed"
 done
 case "$EVENT_TYPE" in
@@ -945,6 +1051,7 @@ UPDATE agent_run
  WHERE workspace_id = '$WORKSPACE_ID'
    AND id = '$RUN_ID'
    AND status IN ('queued', 'running', 'awaiting_approval', 'paused');
+DELETE FROM agent_run WHERE id = '$CROSS_RUN_ID';
 COMMIT;
 SQL
 
@@ -957,7 +1064,7 @@ SQL
   echo "- Private agent work channel: \`${AGENT_WORK_CHANNEL}\` (agent bearer WebSocket subscribe + OutboxRelay publication received)"
   echo "- Realtime token: type=\`${TOKEN_TYPE}\`, ttl_seconds=\`${TTL_SECONDS}\`, token_len=\`${#REALTIME_TOKEN}\`"
   echo "- Live publication: type=\`${EVENT_TYPE}\`, run_id=\`${PUB_RUN_ID}\`, channel_id=\`${PUB_CHANNEL_ID}\`, publication_offset=\`${PUB_OFFSET:-n/a}\`"
-  echo "- Negative paths: invalid connection token rejected; same-workspace member who shares only a different channel with the agent denied; other-workspace member/token denied; client direct publish denied."
+  echo "- Negative paths: invalid connection token rejected; same-workspace member who shares only a different channel with the agent denied; other-workspace member/token denied; revoked credential-bound realtime JWT denied while another bearer stayed active; agent cross-channel run association denied; client direct publish denied."
   echo "- Ordering note: \`agent.status\`/\`agent.partial\` are ephemeral progress events without \`message.seq\`; final durable output remains on channel timeline through Postgres message/outbox/relay with \`message.seq\` as SoT."
   echo "- Evidence files: publication=\`${LIVE_JSON}\`, websocket_log=\`${PY_LOG}\`, server_log=\`${SERVER_LOG}\`, worker_log=\`${WORKER_LOG}\`, relay_log=\`${RELAY_LOG}\`, mock_log=\`${MOCK_LOG}\`, api_proxy_log=\`${PROXY_LOG}\`"
 } >"$EVIDENCE_FILE"

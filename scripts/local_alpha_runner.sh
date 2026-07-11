@@ -271,7 +271,10 @@ write_local_centrifugo_config() {
         "history_meta_ttl": "192h", "force_recovery": true }
     ],
     "proxy": {
-      "subscribe": { "endpoint": "http://${API_PROXY_HOST}:${PORT}/v1/centrifugo/subscribe" }
+      "subscribe": {
+        "endpoint": "http://${API_PROXY_HOST}:${PORT}/v1/centrifugo/subscribe",
+        "include_connection_meta": true
+      }
     }
   },
   "client": { "subscription_token": { "enabled": true } }

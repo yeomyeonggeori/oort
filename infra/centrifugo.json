@@ -24,6 +24,7 @@
     "proxy": {
       "subscribe": {
         "endpoint": "http://api:8080/v1/centrifugo/subscribe",
+        "include_connection_meta": true,
         "http": {
           "static_headers": { "X-Centrifugo-Proxy-Secret": "dev-insecure-cent-proxy-secret" }
         }

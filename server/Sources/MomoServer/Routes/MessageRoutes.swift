@@ -38,6 +38,32 @@ struct MessageRoutes: Sendable {
         // props/run_id are passed as JSON/uuid; v0 stub serializes props to a JSON string.
         let propsJSON = Self.encodeProps(dto.props)
 
+        if principal.kind == .agent, let runID = dto.runId {
+            let runMatchesActorAndChannel = try await db.withTenantConnection(
+                workspaceID: workspaceID
+            ) { conn in
+                let rows = try await conn.query(
+                    """
+                    SELECT 1
+                      FROM agent_run
+                     WHERE id = \(runID)
+                       AND workspace_id = \(workspaceID)
+                       AND channel_id = \(channelID)
+                       AND agent_member_id = \(principal.memberID)
+                     LIMIT 1
+                    """,
+                    logger: db.logger
+                ).collect()
+                return !rows.isEmpty
+            }
+            guard runMatchesActorAndChannel else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "agent run does not match this channel and actor"
+                )
+            }
+        }
+
         let result: (isMember: Bool, message: MessageDTO?) = try await db.withTenantTransaction(
             workspaceID: workspaceID
         ) { conn in

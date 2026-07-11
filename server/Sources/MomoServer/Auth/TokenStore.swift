@@ -272,10 +272,14 @@ struct TokenStore: Sendable {
         }
     }
 
-    /// Realtime connection JWTs are short-lived and not stored. Human members
-    /// therefore prove liveness with a session token, while agent members prove
-    /// it with an active agent bearer carrying `realtime:subscribe`.
-    func hasActiveRealtimeCredential(memberID: UUID, workspaceID: UUID) async throws -> Bool {
+    /// Exact credential liveness for a Centrifugo connection JWT.  A token
+    /// minted from one bearer must not remain subscribable merely because a
+    /// rotated bearer for the same member is still active.
+    func hasActiveRealtimeCredential(
+        tokenID: UUID,
+        memberID: UUID,
+        workspaceID: UUID
+    ) async throws -> Bool {
         try await db.withTenantConnection(workspaceID: workspaceID) { conn in
             let rows = try await conn.query(
                 """
@@ -286,7 +290,8 @@ struct TokenStore: Sendable {
                    AND m.workspace_id = t.workspace_id
                    AND m.status = 'active'
                    AND m.deleted_at IS NULL
-                 WHERE t.actor_member_id = \(memberID)
+                 WHERE t.id = \(tokenID)
+                   AND t.actor_member_id = \(memberID)
                    AND t.workspace_id = \(workspaceID)
                    AND t.revoked_at IS NULL
                    AND (t.expires_at IS NULL OR t.expires_at > now())

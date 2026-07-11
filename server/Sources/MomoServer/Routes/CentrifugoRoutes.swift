@@ -65,13 +65,20 @@ struct CentrifugoRoutes: Sendable {
             return .deny("missing or invalid user")
         }
 
-        // 2. Revocation: a member with no active credential may not open a new
-        // subscription (coarse per-member semantics; connection JWTs are not
-        // stored individually).
+        // 2. Revocation: connection JWT metadata binds this subscription to the
+        // exact access/agent bearer that minted it. Pre-binding tokens fail
+        // closed and rotation cannot keep a revoked credential alive.
+        guard let tokenIDString = dto.meta?.tokenId,
+              let tokenID = UUID(uuidString: tokenIDString)
+        else {
+            return .deny("missing or invalid realtime credential binding")
+        }
         guard try await tokenStore.hasActiveRealtimeCredential(
-            memberID: userMemberID, workspaceID: parsed.workspaceID
+            tokenID: tokenID,
+            memberID: userMemberID,
+            workspaceID: parsed.workspaceID
         ) else {
-            return .deny("no active realtime credential for this member")
+            return .deny("realtime credential is no longer active")
         }
 
         let allowed: Bool

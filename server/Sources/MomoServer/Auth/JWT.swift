@@ -50,6 +50,20 @@ struct RealtimeTokenInfo: Codable, Equatable, Sendable {
     }
 }
 
+/// Server-only connection metadata forwarded to subscribe proxies when
+/// `include_connection_meta` is enabled.  Binding the connection JWT to the
+/// credential that minted it prevents a revoked bearer from borrowing the
+/// liveness of a different active token for the same agent.
+struct RealtimeTokenMeta: Codable, Equatable, Sendable {
+    let schema: String
+    let tokenId: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case tokenId = "token_id"
+    }
+}
+
 /// Centrifugo connection JWT payload.
 ///
 /// Required Centrifugo claims: `sub` and `exp`. momo-specific workspace claim:
@@ -61,6 +75,7 @@ struct CentrifugoConnectionJWTPayload: JWTPayload {
     var iat: IssuedAtClaim
     var ws: String
     var info: String
+    var meta: RealtimeTokenMeta
 
     func verify(using _: some JWTAlgorithm) async throws {
         try exp.verifyNotExpired()
@@ -146,6 +161,7 @@ struct JWTService: Sendable {
     func signCentrifugoConnection(
         memberID: UUID,
         workspaceID: UUID,
+        credentialTokenID: UUID,
         ttl: TimeInterval? = nil
     ) async throws -> RealtimeTokenIssueResult {
         let ttlSeconds = Int(ttl ?? config.centConnectionTokenTTL)
@@ -157,7 +173,11 @@ struct JWTService: Sendable {
             exp: ExpirationClaim(value: expiresAt),
             iat: IssuedAtClaim(value: now),
             ws: workspaceID.uuidString,
-            info: info
+            info: info,
+            meta: RealtimeTokenMeta(
+                schema: "momo.realtime.credential.v1",
+                tokenId: credentialTokenID.uuidString
+            )
         )
         let token = try await keys.sign(payload, kid: Self.centKID)
         return RealtimeTokenIssueResult(token: token, expiresAt: expiresAt, ttlSeconds: ttlSeconds)

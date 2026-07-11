@@ -506,6 +506,173 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertEqual(adapter.pages, 2)
         self.assertEqual(len(adapter.events), adapter._pending_page_size + 1)
 
+    def test_full_pending_page_completes_before_next_fetch(self):
+        class DurablePageAdapter(CaptureAdapter):
+            _pending_page_size = 2
+
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.fetches = 0
+                self.completed = []
+
+            async def _get(self, _path):
+                self.fetches += 1
+                pending = [run for run in ("run-a", "run-b") if run not in self.completed]
+                return {
+                    "jobs": [
+                        {
+                            "id": index + 1,
+                            "type": "agent.job",
+                            "payload": {
+                                "run_id": run,
+                                "workspace_id": "workspace-1",
+                                "channel_id": "channel-1",
+                                "agent_member_id": "agent-1",
+                            },
+                        }
+                        for index, run in enumerate(pending)
+                    ]
+                }
+
+            async def handle_message(self, event):
+                self.completed.append(event["payload"]["run_id"])
+
+        adapter = DurablePageAdapter()
+        asyncio.run(adapter._drain_pending_gateway_jobs(reason="full-page"))
+
+        self.assertEqual(adapter.completed, ["run-a", "run-b"])
+        self.assertEqual(adapter.fetches, 2)
+
+    def test_terminal_worker_401_unblocks_pending_recovery(self):
+        class TerminalAdapter(CaptureAdapter):
+            async def _get(self, _path):
+                return {
+                    "jobs": [
+                        {
+                            "id": 1,
+                            "type": "agent.job",
+                            "payload": {
+                                "run_id": "run-401",
+                                "workspace_id": "workspace-1",
+                                "channel_id": "channel-1",
+                                "agent_member_id": "agent-1",
+                            },
+                        }
+                    ]
+                }
+
+            async def handle_message(self, _event):
+                raise momo_adapter.MomoAPIError(401, "gateway/complete", "revoked")
+
+        adapter = TerminalAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+
+        async def exercise():
+            with self.assertRaises(momo_adapter.MomoAPIError):
+                await asyncio.wait_for(
+                    adapter._drain_pending_gateway_jobs(reason="connect"), timeout=1
+                )
+
+        asyncio.run(exercise())
+        self.assertTrue(adapter._closing)
+
+    def test_nonretryable_callback_failure_stops_with_operator_visible_state(self):
+        class TerminalAdapter(CaptureAdapter):
+            async def _get(self, _path):
+                return {
+                    "jobs": [
+                        {
+                            "id": 1,
+                            "type": "agent.job",
+                            "payload": {
+                                "run_id": "run-400",
+                                "workspace_id": "workspace-1",
+                                "channel_id": "channel-1",
+                                "agent_member_id": "agent-1",
+                            },
+                        }
+                    ]
+                }
+
+            async def handle_message(self, _event):
+                raise momo_adapter.MomoAPIError(400, "gateway/complete", "bad result")
+
+        adapter = TerminalAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+
+        async def exercise():
+            with self.assertRaises(momo_adapter.MomoAPIError):
+                await asyncio.wait_for(
+                    adapter._drain_pending_gateway_jobs(reason="connect"), timeout=1
+                )
+
+        asyncio.run(exercise())
+        self.assertTrue(adapter._closing)
+        self.assertIn("HTTP 400", adapter._terminal_failure)
+
+    def test_close_settles_queued_completion_waiters(self):
+        class BlockingAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def handle_message(self, _event):
+                self.started.set()
+                await self.release.wait()
+
+        async def exercise():
+            adapter = BlockingAdapter()
+            first = asyncio.create_task(
+                adapter._enqueue_gateway_work(
+                    {"type": "agent.job", "payload": {"run_id": "first"}},
+                    wait_until_complete=True,
+                )
+            )
+            await adapter.started.wait()
+            second = asyncio.create_task(
+                adapter._enqueue_gateway_work(
+                    {"type": "agent.job", "payload": {"run_id": "second"}},
+                    wait_until_complete=True,
+                )
+            )
+            await asyncio.sleep(0)
+            await adapter.close()
+            results = await asyncio.gather(first, second, return_exceptions=True)
+            return results, adapter._ensure_work_queue().qsize()
+
+        results, queue_size = asyncio.run(exercise())
+        self.assertTrue(all(isinstance(result, BaseException) for result in results))
+        self.assertEqual(queue_size, 0)
+
+    def test_non401_api_error_redacts_credential_shaped_response(self):
+        error = momo_adapter.MomoAPIError(
+            400,
+            "gateway/complete",
+            "echo sk-proj-abcdefghijklmnop eyJheader12.eyJpayload12.signature12",
+        )
+        self.assertNotIn("sk-proj", str(error))
+        self.assertNotIn("eyJheader", str(error))
+        self.assertIn("[redacted-provider-token]", str(error))
+
     def test_401_retries_are_bounded_and_error_is_redacted(self):
         class FakeResponse:
             status = 401
@@ -817,7 +984,7 @@ class HermesAdapterContractTests(unittest.TestCase):
 
         self.assertFalse(getattr(adapter, "provider_called", False))
 
-    def test_realtime_reader_queues_provider_work_and_still_answers_ping(self):
+    def test_realtime_reader_treats_job_as_wakeup_and_still_answers_ping(self):
         class FakeWebSocket:
             def __init__(self):
                 self.sent = []
@@ -860,16 +1027,24 @@ class HermesAdapterContractTests(unittest.TestCase):
             async def close(self):
                 return None
 
-        class QueueAdapter(CaptureAdapter):
-            async def handle_message(self, _event):
-                await asyncio.Event().wait()
+        class WakeOnlyAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.recovery_reasons = []
+                self.provider_called = False
 
-        adapter = QueueAdapter(
-            workspace_id="workspace-1",
-            agent_member_id="agent-1",
-            run_id="run-1",
-            final_text="done",
-        )
+            def _schedule_pending_recovery(self, *, reason, delay_s=0.0):
+                self.recovery_reasons.append((reason, delay_s))
+
+            async def handle_message(self, _event):
+                self.provider_called = True
+
+        adapter = WakeOnlyAdapter()
         adapter._ws = FakeWebSocket()
 
         async def exercise():
@@ -882,6 +1057,40 @@ class HermesAdapterContractTests(unittest.TestCase):
         sent = asyncio.run(exercise())
 
         self.assertIn({"pong": {}}, sent)
+        self.assertIn(("realtime-agent-job", 0.0), adapter.recovery_reasons)
+        self.assertFalse(adapter.provider_called)
+
+    def test_gateway_result_redacts_exact_and_token_shaped_bearers(self):
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+        adapter.cfg.agent_token = "momo_agent_v1.workspace-1.exact-secret"
+
+        result = adapter._normalize_gateway_result(
+            {
+                "status": "failed",
+                "error": (
+                    "exact=momo_agent_v1.workspace-1.exact-secret "
+                    "other=momo_agent_v1.workspace-2.other-secret "
+                    "provider=sk-proj-abcdefghijklmnop "
+                    "jwt=eyJheader12.eyJpayload12.signature12"
+                ),
+            },
+            {"model": "hermes-agent"},
+        )
+
+        self.assertEqual(
+            result["error"],
+            "exact=[redacted] other=[redacted-agent-token] "
+            "provider=[redacted-provider-token] jwt=[redacted-jwt]",
+        )
+        implicit_failure = adapter._normalize_gateway_result(
+            {"error": "provider failed"}, {"model": "hermes-agent"}
+        )
+        self.assertEqual(implicit_failure["status"], "failed")
 
     def test_realtime_and_pending_recovery_share_one_provider_worker(self):
         class SequentialAdapter(CaptureAdapter):
@@ -953,6 +1162,46 @@ class HermesAdapterContractTests(unittest.TestCase):
     def test_reconnect_backoff_is_bounded_for_large_attempts(self):
         with patch.object(momo_adapter.random, "uniform", return_value=0.0):
             self.assertEqual(momo_adapter.MomoAdapter._reconnect_delay(10_000), 30.0)
+
+    def test_reconnect_retries_when_replacement_listener_dies_during_recovery(self):
+        class ReconnectAdapter(CaptureAdapter):
+            def __init__(self):
+                super().__init__(
+                    workspace_id="workspace-1",
+                    agent_member_id="agent-1",
+                    run_id="run-1",
+                    final_text="done",
+                )
+                self.opens = 0
+                self.live_listener_release = None
+
+            async def _fetch_realtime_token(self):
+                return None
+
+            async def _open_realtime(self):
+                self.opens += 1
+                if self.opens == 1:
+                    self._listen_task = asyncio.get_running_loop().create_future()
+                    self._listen_task.set_result(None)
+                else:
+                    self.live_listener_release = asyncio.Event()
+                    self._listen_task = asyncio.create_task(
+                        self.live_listener_release.wait()
+                    )
+
+            async def _drain_pending_gateway_jobs(self, *, reason):
+                await asyncio.sleep(0)
+
+        adapter = ReconnectAdapter()
+
+        async def exercise():
+            with patch.object(adapter, "_reconnect_delay", return_value=0.0):
+                await asyncio.wait_for(adapter._reconnect_realtime(), timeout=1)
+            opens = adapter.opens
+            await adapter.close()
+            return opens
+
+        self.assertEqual(asyncio.run(exercise()), 2)
 
     def test_permanent_401_stops_reconnect_until_restart(self):
         class ReconnectAdapter(CaptureAdapter):

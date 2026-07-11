@@ -327,7 +327,12 @@ POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
 사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
 `agentwork:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
 target agent가 정확히 같을 때만 subscribe가 허용된다. 같은 채널 membership만으로
-다른 에이전트의 Context Packet을 관찰할 수 없다.
+다른 에이전트의 Context Packet을 관찰할 수 없다. connection JWT에는 발급 원본
+credential id가 server-only `meta`로 포함되고 subscribe proxy는 그 exact token이
+active인지 확인한다. Centrifugo subscribe proxy 설정의
+`include_connection_meta=true`를 제거하면 모든 신규 subscription이 fail-closed된다.
+realtime `agent.job` payload는 wake-up으로만 사용하며, 실제 실행 입력은 같은
+agent bearer로 pending REST를 재조회해 Postgres 경계를 통과한 값만 사용한다.
 MOMO-338부터 Hermes adapter는 human login과 공유 시크릿을 사용하지 않는다. 서버는
 gateway mode만 켜고 legacy secret 병행 수용은 기본적으로 닫는다.
 
