@@ -186,6 +186,7 @@
 | `MOMO-324` | AgentWorker verifier cleanup FK rerun hardening | tooling/runtime | MOMO-320 |
 | `MOMO-342` (`#314`) | AgentWorker verifier persistent DB fixture hardening | tooling/runtime | MOMO-324, MOMO-338 |
 | `MOMO-343` (`#316`) | AgentWorker verifier fresh DB marker bootstrap regression | tooling/runtime | MOMO-342 |
+| `MOMO-344` (`#318`) | Agent context verifier isolated DB boundary | tooling/runtime-agent | MOMO-343 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -1592,6 +1593,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 기존 unmarked/source/system DB는 migration·fixture write 전에 fail-closed한다.
 - [x] fresh bootstrap 1회와 같은 persistent verifier DB 재실행 1회가 모두 PASS한다.
 - [x] root main `runtime-agent` post-merge gate 회귀를 재현하고 복구한다.
+
+### ☑ MOMO-344 수용기준 — Agent context verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-343
+- [x] context verifier의 MomoServer/AgentWorker/fixture를 source dogfood DB가 아닌 marker/OID-owned migrated DB로 격리한다.
+- [x] verifier app role은 NOBYPASSRLS, worker role만 BYPASSRLS이며 exact marker cleanup 전 NOLOGIN 처리한다.
+- [x] source DB의 agent_job/agent_run/approval/message digest가 전후 동일함을 검증한다.
+- [x] unrelated pending `resume_approval`이 source DB에 있어도 context assembly history/role/cross-channel/char-budget assertions가 PASS한다.
+- [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
 
 ---
 
