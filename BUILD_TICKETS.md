@@ -1624,6 +1624,9 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
 - [ ] root main persistent dogfood DB의 drift와 무관하게 `runtime-agent` full gate가 root main에서 PASS한다 — verifier 격리 캐스케이드 종결 조건.
 - [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
+  - worker 구현: external-provider/bridge는 marker/OID-owned fresh migrated DB + app(NOBYPASSRLS)/worker·relay(BYPASSRLS) role, gateway는 별도 fresh DB + app(NOBYPASSRLS) role을 사용하며 두 경로 모두 Hermes/#agent-lab fixture를 자체 seed한다.
+  - worker 정적 검증: 수정·신규 shell `bash -n` PASS. source digest EXIT trap, exact-OID+marker cleanup, external/gateway pre-marker COMMENT 실패(exit 96) bootstrap 회귀를 배선했다.
+  - 런타임 게이트 evidence는 오케스트레이터가 merge 전 수행하므로 모든 acceptance/gate 체크박스는 미체크 유지(`runtime-unverified`).
 
 ### ☐ MOMO-347 수용기준 — Pairing popover credential embedding hardening `[swift/macos-ui]` · 의존: MOMO-339
 - [ ] ~290pt 유효 폭 스냅샷 또는 popover 실임베딩 캡처 evidence (High 1).
