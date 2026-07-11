@@ -56,9 +56,20 @@ fi
 
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
-POSTGRES_DB=${POSTGRES_DB:-momo}
 POSTGRES_USER=${POSTGRES_USER:-momo}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-momo}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-momo_dev_pw}
+SOURCE_POSTGRES_DB=${POSTGRES_DB:-momo}
+SOURCE_DATABASE_URL=${DATABASE_URL:-}
+POSTGRES_DB=${HERMES_GATEWAY_VERIFIER_DB:-momo_hermes_gateway_verify_${POSTGRES_PORT}_$$}
+VERIFIER_DB_MARKER_PREFIX=momo:hermes-gateway-verifier:v1:
+VERIFIER_DB_MARKER=${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')
+VERIFIER_DB_CREATED_OID=
+VERIFIER_DB_OWNED=0
+SOURCE_DIGEST_ARMED=0
+ROLE_SUFFIX=$(printf '%s' "$VERIFIER_DB_MARKER" | shasum -a 256 | cut -c 1-12)
+VERIFIER_APP_ROLE=momo_gw_${ROLE_SUFFIX}_app
+VERIFIER_APP_PASSWORD=momo_gateway_verify_app_pw
+APP_DATABASE_URL=postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
 PORT=${PORT:-8080}
 BASE_URL=${BASE_URL:-http://127.0.0.1:${PORT}}
 AGENT_GATEWAY_SECRET=${AGENT_GATEWAY_SECRET:-momo-325-local-gateway-secret-00000000000000000000000000000000}
@@ -90,6 +101,9 @@ AGENT_TOKEN_ID=
 RESTRICTED_TOKEN_ID=
 
 cleanup() {
+  original_rc=$?
+  cleanup_failed=0
+  trap - EXIT
   if [ "$ACCESS_TOKEN" != "" ]; then
     [ "$AGENT_TOKEN_ID" = "" ] || revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$AGENT_TOKEN_ID" >/dev/null 2>&1 || true
     [ "$RESTRICTED_TOKEN_ID" = "" ] || revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$RESTRICTED_TOKEN_ID" >/dev/null 2>&1 || true
@@ -97,8 +111,27 @@ cleanup() {
   fi
   momo_cleanup_tracked_pids "hermes-gateway verifier" "$SERVER_PID"
   rm -f "$CREDENTIAL_HEADERS" "$PGPASS_FILE"
+  if [ "$SOURCE_DIGEST_ARMED" = "1" ]; then
+    source_after=$(source_digest) || cleanup_failed=1
+    if [ "$cleanup_failed" = "0" ] && [ "$source_after" != "$SOURCE_DIGEST_BEFORE" ]; then
+      echo "[hermes-gateway] source dogfood DB changed while isolated verifier ran" >&2
+      cleanup_failed=1
+    elif [ "$cleanup_failed" = "0" ]; then
+      echo "[hermes-gateway] source dogfood DB digest preserved"
+    fi
+  fi
+  cleanup_verifier_database || {
+    echo "[hermes-gateway] exact verifier DB cleanup failed" >&2
+    cleanup_failed=1
+  }
+  if [ "$original_rc" = "0" ] && [ "$cleanup_failed" = "1" ]; then
+    original_rc=1
+  fi
+  exit "$original_rc"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 (umask 077; printf '%s:%s:%s:%s:%s\n' \
   "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_DB" \
@@ -116,6 +149,135 @@ psql_run() {
 
 psql_scalar() {
   printf '%s\n' "$1" | psql_run -t -A | tr -d '[:space:]'
+}
+
+admin_scalar() {
+  output=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc -c "$1") || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
+source_digest() {
+  output=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$SOURCE_POSTGRES_DB" \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+SELECT encode(digest(concat_ws('|',
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM outbox t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM agent_run t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM approval t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM approval_decision t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM usage_ledger t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM budget_window t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM audit_log t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM message t)
+), 'sha256'), 'hex');
+SQL
+  ) || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
+validate_admin_target() {
+  case "$POSTGRES_HOST" in
+    localhost|127.0.0.1|::1) ;;
+    *) echo "[hermes-gateway] destructive verifier DB target must be loopback: $POSTGRES_HOST" >&2; exit 1 ;;
+  esac
+  if [ "$SOURCE_DATABASE_URL" != "" ]; then
+    python3 - "$SOURCE_DATABASE_URL" "$POSTGRES_HOST" "$POSTGRES_PORT" "$SOURCE_POSTGRES_DB" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+url, expected_host, expected_port, expected_db = sys.argv[1:]
+parsed = urlparse(url)
+host = parsed.hostname or ""
+port = parsed.port or 5432
+database = parsed.path.lstrip("/")
+loopback = {"localhost", "127.0.0.1", "::1"}
+if host not in loopback or expected_host not in loopback:
+    raise SystemExit("[hermes-gateway] DATABASE_URL and admin target must both be loopback")
+if port != int(expected_port) or database != expected_db:
+    raise SystemExit("[hermes-gateway] DATABASE_URL source does not match admin port/database")
+PY
+  fi
+}
+
+provision_verifier_database() {
+  case "$POSTGRES_DB" in
+    ''|*[!a-zA-Z0-9_]*|"$SOURCE_POSTGRES_DB"|postgres|template0|template1)
+      echo "[hermes-gateway] refusing unsafe verifier database target: $POSTGRES_DB" >&2
+      exit 1
+      ;;
+  esac
+  exists=$(admin_scalar "SELECT count(*) FROM pg_database WHERE datname = '$POSTGRES_DB';")
+  [ "$exists" = "0" ] || { echo "[hermes-gateway] refusing pre-existing verifier database: $POSTGRES_DB" >&2; exit 1; }
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 --no-psqlrc -c "CREATE DATABASE \"$POSTGRES_DB\";"
+  VERIFIER_DB_OWNED=1
+  VERIFIER_DB_CREATED_OID=$(admin_scalar "SELECT oid FROM pg_database WHERE datname = '$POSTGRES_DB';")
+  [ "$VERIFIER_DB_CREATED_OID" != "" ] || { echo "[hermes-gateway] failed to capture verifier DB OID" >&2; exit 1; }
+  if [ "${HERMES_GATEWAY_VERIFIER_TEST_FAIL_COMMENT:-0}" = "1" ]; then
+    echo "[hermes-gateway] intentional verifier COMMENT failure (test only)" >&2
+    exit 96
+  fi
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+COMMENT ON DATABASE "$POSTGRES_DB" IS :'marker';
+SQL
+
+  ENV_FILE=/dev/null DATABASE_URL= \
+    PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB" \
+    PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" \
+    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+BEGIN;
+CREATE ROLE $VERIFIER_APP_ROLE LOGIN PASSWORD '$VERIFIER_APP_PASSWORD';
+COMMENT ON ROLE $VERIFIER_APP_ROLE IS :'marker';
+ALTER ROLE $VERIFIER_APP_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO $VERIFIER_APP_ROLE;
+COMMIT;
+SQL
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v ON_ERROR_STOP=1 --no-psqlrc <<SQL
+GRANT USAGE ON SCHEMA public TO $VERIFIER_APP_ROLE;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $VERIFIER_APP_ROLE;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $VERIFIER_APP_ROLE;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO $VERIFIER_APP_ROLE;
+SQL
+}
+
+cleanup_verifier_database() {
+  [ "$VERIFIER_DB_OWNED" = "1" ] || return 0
+  current_oid=$(admin_scalar "SELECT COALESCE(oid::text, '') FROM pg_database WHERE datname = '$POSTGRES_DB';") || return 1
+  current_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = '$POSTGRES_DB';") || return 1
+  if [ "$current_oid" != "$VERIFIER_DB_CREATED_OID" ] \
+    || { [ "$current_marker" != "$VERIFIER_DB_MARKER" ] && [ "$current_marker" != "" ]; }; then
+    echo "[hermes-gateway] refusing verifier cleanup: DB identity changed" >&2
+    return 1
+  fi
+  role_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$VERIFIER_APP_ROLE';") || return 1
+  if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+    PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+      -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+      -c "ALTER ROLE \"$VERIFIER_APP_ROLE\" NOLOGIN;" >/dev/null || return 1
+  fi
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+    -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "DROP DATABASE \"$POSTGRES_DB\" WITH (FORCE);" >/dev/null || return 1
+  role_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$VERIFIER_APP_ROLE';") || return 1
+  if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+    PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+      -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+      -c "DROP ROLE \"$VERIFIER_APP_ROLE\";" >/dev/null || return 1
+  fi
+  VERIFIER_DB_OWNED=0
 }
 
 json_escape() {
@@ -229,7 +391,7 @@ start_server() {
   echo "[hermes-gateway] starting MomoServer in AGENT_GATEWAY_MODE=gateway"
   (
     cd "$REPO_ROOT"
-    DATABASE_URL="postgres://momo_app:momo_app_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    DATABASE_URL="$APP_DATABASE_URL" \
     PORT="$PORT" \
     AGENT_GATEWAY_MODE=gateway \
     AGENT_GATEWAY_SECRET="$AGENT_GATEWAY_SECRET" \
@@ -424,6 +586,75 @@ DROP TABLE momo337_tokens;
 SQL
 }
 
+seed_isolated_fixture() {
+  psql_run >/dev/null <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '${WORKSPACE_ID}';
+
+INSERT INTO workspace (id, slug, name)
+VALUES ('${WORKSPACE_ID}', 'hermes-gateway-verifier', 'Hermes Gateway Verifier Workspace')
+ON CONFLICT (id) DO UPDATE
+  SET deleted_at = NULL,
+      name = EXCLUDED.name;
+
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES
+  ('${HUMAN_MEMBER_ID}', '${WORKSPACE_ID}', 'human', 'active', 'Gateway Human', 'demo'),
+  ('${AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active', 'Hermes', 'hermes')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status,
+      display_name = EXCLUDED.display_name,
+      handle = EXCLUDED.handle,
+      deleted_at = NULL;
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('${HUMAN_MEMBER_ID}', '${WORKSPACE_ID}', '${HUMAN_EMAIL}', true,
+        momo_password_hash('${HUMAN_PASSWORD}'), 'UTC')
+ON CONFLICT (member_id) DO UPDATE
+  SET email = EXCLUDED.email,
+      email_verified = true,
+      password_hash = EXCLUDED.password_hash,
+      tz = EXCLUDED.tz;
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
+                   owner_human_id, max_concurrent_runs, max_run_steps)
+VALUES ('${AGENT_ID}', '${WORKSPACE_ID}', 'hermes-agent', 'http://localhost:8088/v1',
+        'Hermes gateway verifier fixture', '${HUMAN_MEMBER_ID}', 1, 12)
+ON CONFLICT (member_id) DO UPDATE
+  SET model = EXCLUDED.model,
+      base_url = EXCLUDED.base_url,
+      system_prompt = EXCLUDED.system_prompt,
+      owner_human_id = EXCLUDED.owner_human_id,
+      max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+      max_run_steps = EXCLUDED.max_run_steps;
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
+VALUES ('${CHANNEL_ID}', '${WORKSPACE_ID}', 'public', 'agent-lab',
+        'Hermes gateway verifier channel', '${HUMAN_MEMBER_ID}', NULL)
+ON CONFLICT (id) DO UPDATE
+  SET name = EXCLUDED.name,
+      topic = EXCLUDED.topic,
+      archived_at = NULL,
+      updated_at = now();
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES ('${CHANNEL_ID}', '${WORKSPACE_ID}', 0)
+ON CONFLICT (channel_id) DO NOTHING;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role, left_at)
+VALUES
+  ('00000000-0000-7000-8000-000000000303', '${WORKSPACE_ID}',
+   '${CHANNEL_ID}', '${HUMAN_MEMBER_ID}', 'owner', NULL),
+  ('00000000-0000-7000-8000-000000000306', '${WORKSPACE_ID}',
+   '${CHANNEL_ID}', '${AGENT_ID}', 'member', NULL)
+ON CONFLICT (channel_id, member_id)
+DO UPDATE SET role = EXCLUDED.role, left_at = NULL;
+
+COMMIT;
+SQL
+}
+
 seed_other_agent() {
   psql_run >/dev/null <<SQL
 SELECT set_config('app.workspace_id', '${WORKSPACE_ID}', false);
@@ -445,28 +676,6 @@ VALUES
   ('${WORKSPACE_ID}', '${CHANNEL_ID}', '${OTHER_AGENT_ID}', 'member')
 ON CONFLICT (channel_id, member_id)
 DO UPDATE SET left_at = NULL;
-SQL
-}
-
-prepare_app_role() {
-  psql_run >/dev/null <<'SQL'
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
-    CREATE ROLE momo_app LOGIN PASSWORD 'momo_app_dev_pw';
-  END IF;
-END $$;
-ALTER ROLE momo_app
-  WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
-  PASSWORD 'momo_app_dev_pw';
-DO $$
-BEGIN
-  EXECUTE format('GRANT CONNECT ON DATABASE %I TO momo_app', current_database());
-END $$;
-GRANT USAGE ON SCHEMA public TO momo_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO momo_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO momo_app;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO momo_app;
 SQL
 }
 
@@ -493,11 +702,15 @@ assert_between() {
   fi
 }
 
-echo "[hermes-gateway] ensuring docker compose + migrations"
-( cd "$REPO_ROOT" && make up >/dev/null && MIGRATE_IDEMPOTENCY_CHECK=1 make migrate >/dev/null )
-
-cleanup_fixture_rows
-prepare_app_role
+echo "[hermes-gateway] ensuring docker compose services"
+( cd "$REPO_ROOT" && POSTGRES_DB="$SOURCE_POSTGRES_DB" make up >/dev/null )
+validate_admin_target
+SOURCE_DIGEST_BEFORE=$(source_digest)
+SOURCE_DIGEST_ARMED=1
+echo "[hermes-gateway] provisioning isolated verifier database: $POSTGRES_DB"
+provision_verifier_database
+echo "[hermes-gateway] seeding isolated Hermes/#agent-lab fixture"
+seed_isolated_fixture
 seed_other_agent
 momo_cleanup_port_listener "$PORT" "hermes-gateway verifier API" || {
   echo "[hermes-gateway] API port ${PORT} is occupied by a non-momo process" >&2
@@ -662,4 +875,5 @@ stop_server
 cleanup_fixture_rows
 
 echo "[hermes-gateway] PASS: bearer_run=${RUN_ID} final_seq=${FINAL_SEQ} legacy_run=${OTHER_RUN_ID}"
+echo "[hermes-gateway] database boundary: isolated=${POSTGRES_DB} app=NOBYPASSRLS source=${SOURCE_POSTGRES_DB} digest-enforced"
 echo "[hermes-gateway] real Hermes gateway CLI/plugin load remains runtime-unverified(real hermes gateway missing) unless a user-provided Hermes runtime is present."

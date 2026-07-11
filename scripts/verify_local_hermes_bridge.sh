@@ -3,7 +3,9 @@
 # scripts/verify_local_hermes_bridge.sh — MOMO-256 Local Hermes Agent Bridge gate
 #
 # Starts a repo-local OpenAI-compatible SSE mock on loopback, then runs the
-# external provider verifier in `external-hermes` mode with `@hermes`.
+# external provider verifier in `external-hermes` mode with `@hermes`. The
+# engine owns a fresh marker/OID-bound DB, so this wrapper never writes to the
+# source dogfood #agent-lab timeline.
 # =============================================================================
 set -euo pipefail
 
@@ -84,7 +86,7 @@ else
   }
 fi
 
-echo "[local-hermes-bridge] running external-hermes verifier against @hermes"
+echo "[local-hermes-bridge] running isolated external-hermes verifier against @hermes"
 ENV_FILE="$ENV_FILE" \
 MOMO_ENV=local \
 PORT="$API_PORT" \

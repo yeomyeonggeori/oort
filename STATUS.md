@@ -44,6 +44,12 @@
 - 2026-07-11 오케스트레이터 검증 완료 후 PR #321 merge (`5854c2f`): worktree clean runtime-agent gate full PASS, root post-merge에서 live channel verifier가 drift 있는 dogfood DB 위에서 PASS + source digest 보존 실증.
 - root post-merge full gate는 다음 선재 결함에서 중단: `verify_local_hermes_bridge.sh`(엔진 `verify_external_agent_provider.sh`)가 dogfood DB의 Hermes(`…103`) #agent-lab 멤버십(2026-07-08 left_at drift)을 전제하고 roundtrip에서 dogfood 채널에 실제 메시지를 작성한다. `verify_hermes_gateway_adapter.sh`도 shared DB 사용 → 잔여 두 갈래를 MOMO-346 `#322`로 발급 (캐스케이드 종결 티켓).
 
+### MOMO-346 Hermes bridge/gateway verifier DB 격리
+
+- external-provider 엔진과 local bridge wrapper를 매 실행 unique marker/OID-owned migrated DB로 분리하고 marker-bound app(NOBYPASSRLS)·worker/relay(BYPASSRLS) role 및 Hermes/#agent-lab fixture를 연결했다. gateway verifier도 별도 fresh DB와 marker-bound app role을 사용한다.
+- 두 경로 모두 source dogfood DB의 agent queue/run/approval/message 관련 digest를 EXIT trap에서 성공/실패 전후 비교하고, exact OID+marker DB 및 marker-bound role만 fail-closed 정리한다. external/gateway pre-marker COMMENT 실패(exit 96) rollback 회귀를 `runtime-agent`에 추가했다.
+- worker 검증은 DB/Docker/verifier 접속 없이 수정·신규 shell의 `bash -n`만 PASS. invite/roundtrip/bearer assertions, 성공·실패 digest 및 clean/root `runtime-agent` evidence는 오케스트레이터가 merge 전 수행 대기(`runtime-unverified`).
+
 ## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
 
 - `infra/docker-compose.e2e.yml`을 추가해 local gate 전용 api/relay/worker/mock-Hermes/PostgreSQL 18/Centrifugo v6 경계를 dev compose 및 prod compose와 분리했다. e2e는 source checkout + local Swift build를 허용하고, prod는 계속 image-based/source-checkout-free 계약을 유지한다.

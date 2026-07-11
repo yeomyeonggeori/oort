@@ -221,10 +221,180 @@ psql_scalar() {
   psql_run -t -A -c "$1" | tr -d '[:space:]'
 }
 
-cleanup() {
-  momo_cleanup_tracked_pids "external-agent verifier" "${SERVER_PID:-}" "${WORKER_PID:-}" "${RELAY_PID:-}"
+admin_scalar() {
+  local output
+  output="$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc -c "$1")" || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
 }
-trap cleanup EXIT INT TERM
+
+source_digest() {
+  local output
+  output="$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$SOURCE_POSTGRES_DB" \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+SELECT encode(digest(concat_ws('|',
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM outbox t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM agent_run t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM approval t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM approval_decision t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM usage_ledger t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM budget_window t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM audit_log t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM message t)
+), 'sha256'), 'hex');
+SQL
+  )" || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
+validate_admin_target() {
+  case "$POSTGRES_HOST" in
+    localhost|127.0.0.1|::1) ;;
+    *) fail "database-boundary" "destructive verifier DB target must be loopback: $POSTGRES_HOST" ;;
+  esac
+  if [ "$SOURCE_DATABASE_URL" != "" ]; then
+    python3 - "$SOURCE_DATABASE_URL" "$POSTGRES_HOST" "$POSTGRES_PORT" "$SOURCE_POSTGRES_DB" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+url, expected_host, expected_port, expected_db = sys.argv[1:]
+parsed = urlparse(url)
+host = parsed.hostname or ""
+port = parsed.port or 5432
+database = parsed.path.lstrip("/")
+loopback = {"localhost", "127.0.0.1", "::1"}
+if host not in loopback or expected_host not in loopback:
+    raise SystemExit("[external-agent] DATABASE_URL and admin target must both be loopback")
+if port != int(expected_port) or database != expected_db:
+    raise SystemExit("[external-agent] DATABASE_URL source does not match admin port/database")
+PY
+  fi
+}
+
+provision_verifier_database() {
+  local exists
+  case "$POSTGRES_DB" in
+    ''|*[!a-zA-Z0-9_]*|"$SOURCE_POSTGRES_DB"|postgres|template0|template1)
+      fail "database-boundary" "refusing unsafe verifier database target: $POSTGRES_DB"
+      ;;
+  esac
+  exists="$(admin_scalar "SELECT count(*) FROM pg_database WHERE datname = '$POSTGRES_DB';")"
+  [ "$exists" = "0" ] || fail "database-boundary" "refusing pre-existing verifier database: $POSTGRES_DB"
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 --no-psqlrc -c "CREATE DATABASE \"$POSTGRES_DB\";"
+  VERIFIER_DB_OWNED=1
+  VERIFIER_DB_CREATED_OID="$(admin_scalar "SELECT oid FROM pg_database WHERE datname = '$POSTGRES_DB';")"
+  [ "$VERIFIER_DB_CREATED_OID" != "" ] || fail "database-boundary" "failed to capture verifier DB OID"
+  if [ "${EXTERNAL_AGENT_PROVIDER_VERIFIER_TEST_FAIL_COMMENT:-0}" = "1" ]; then
+    echo "[external-agent] intentional verifier COMMENT failure (test only)" >&2
+    exit 96
+  fi
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+COMMENT ON DATABASE "$POSTGRES_DB" IS :'marker';
+SQL
+
+  ENV_FILE=/dev/null DATABASE_URL= \
+    PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB" \
+    PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" \
+    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+BEGIN;
+CREATE ROLE $VERIFIER_APP_ROLE LOGIN PASSWORD '$VERIFIER_APP_PASSWORD';
+CREATE ROLE $VERIFIER_WORKER_ROLE LOGIN PASSWORD '$VERIFIER_WORKER_PASSWORD';
+CREATE ROLE $VERIFIER_RELAY_ROLE LOGIN PASSWORD '$VERIFIER_RELAY_PASSWORD';
+COMMENT ON ROLE $VERIFIER_APP_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_WORKER_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_RELAY_ROLE IS :'marker';
+ALTER ROLE $VERIFIER_APP_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE $VERIFIER_WORKER_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+ALTER ROLE $VERIFIER_RELAY_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+COMMIT;
+SQL
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v ON_ERROR_STOP=1 --no-psqlrc <<SQL
+GRANT USAGE ON SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE, $VERIFIER_RELAY_ROLE;
+SQL
+
+  export PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB"
+  export PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD"
+  DATABASE_URL=
+  export DATABASE_URL
+}
+
+cleanup_verifier_database() {
+  local current_oid current_marker role role_marker
+  [ "${VERIFIER_DB_OWNED:-0}" = "1" ] || return 0
+  current_oid="$(admin_scalar "SELECT COALESCE(oid::text, '') FROM pg_database WHERE datname = '$POSTGRES_DB';")" || return 1
+  current_marker="$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = '$POSTGRES_DB';")" || return 1
+  if [ "$current_oid" != "$VERIFIER_DB_CREATED_OID" ] \
+    || { [ "$current_marker" != "$VERIFIER_DB_MARKER" ] && [ "$current_marker" != "" ]; }; then
+    echo "[external-agent] refusing verifier cleanup: DB identity changed" >&2
+    return 1
+  fi
+  for role in "$VERIFIER_APP_ROLE" "$VERIFIER_WORKER_ROLE" "$VERIFIER_RELAY_ROLE"; do
+    role_marker="$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';")" || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+        -c "ALTER ROLE \"$role\" NOLOGIN;" >/dev/null || return 1
+    fi
+  done
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+    -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "DROP DATABASE \"$POSTGRES_DB\" WITH (FORCE);" >/dev/null || return 1
+  for role in "$VERIFIER_APP_ROLE" "$VERIFIER_WORKER_ROLE" "$VERIFIER_RELAY_ROLE"; do
+    role_marker="$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';")" || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+        -c "DROP ROLE \"$role\";" >/dev/null || return 1
+    fi
+  done
+  VERIFIER_DB_OWNED=0
+}
+
+cleanup() {
+  local original_rc=$?
+  local cleanup_failed=0
+  local source_after
+  trap - EXIT
+  momo_cleanup_tracked_pids "external-agent verifier" "${SERVER_PID:-}" "${WORKER_PID:-}" "${RELAY_PID:-}"
+  if [ "${SOURCE_DIGEST_ARMED:-0}" = "1" ]; then
+    source_after="$(source_digest)" || cleanup_failed=1
+    if [ "$cleanup_failed" = "0" ] && [ "$source_after" != "$SOURCE_DIGEST_BEFORE" ]; then
+      echo "[external-agent] source dogfood DB changed while isolated verifier ran" >&2
+      cleanup_failed=1
+    elif [ "$cleanup_failed" = "0" ]; then
+      echo "[external-agent] source dogfood DB digest preserved"
+    fi
+  fi
+  cleanup_verifier_database || {
+    echo "[external-agent] exact verifier DB cleanup failed" >&2
+    cleanup_failed=1
+  }
+  if [ "$original_rc" = "0" ] && [ "$cleanup_failed" = "1" ]; then
+    original_rc=1
+  fi
+  exit "$original_rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 wait_http() {
   local url="$1"
@@ -257,6 +427,7 @@ write_evidence() {
     echo "- Model: \`${AGENT_MODEL:-<unset>}\`"
     echo "- Endpoint label: \`${ENDPOINT_LABEL:-not configured}\`"
     echo "- Stack env file: \`${ENV_FILE:-<none>}\`"
+    echo "- Database boundary: isolated migrated DB \`${POSTGRES_DB:-not-provisioned}\`; app=NOBYPASSRLS, worker/relay=BYPASSRLS marker-bound roles; source \`${SOURCE_POSTGRES_DB:-unknown}\` digest is enforced unchanged once armed."
     echo "- Credential boundary ADR: \`docs/adr/0004-codex-oauth-hermes-provider-boundary.md\`"
     echo "- Codex/OpenAI credential boundary: momo app/API/DB/verifier receive no Codex/OpenAI OAuth token or API key; the external runtime host owns provider credential storage/refresh."
     echo "- Required credentialed smoke env: \`AGENT_PROVIDER_MODE=external-hermes\`, \`HERMES_BASE_URL=https://.../v1\`, \`HERMES_API_KEY\`, \`AGENT_MODEL\`. For local Codex/OAuth-backed Hermes setup, use \`scripts/verify_local_hermes_credentialed_smoke.sh\` and keep provider credentials in the provider host."
@@ -430,7 +601,7 @@ start_server() {
     SERVER_BIN="$(swift build --package-path server --show-bin-path)/MomoServer"
     exec env \
       MOMO_ENV="$VERIFY_MOMO_ENV" \
-      DATABASE_URL="postgres://momo_app:momo_app_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+      DATABASE_URL="$APP_DATABASE_URL" \
       PORT="$PORT" \
       CENT_API_URL="$CENT_API_URL" \
       CENT_API_KEY="$CENT_API_KEY" \
@@ -470,7 +641,7 @@ start_relay() {
     swift build --package-path relay/OutboxRelay --product OutboxRelay >/dev/null
     RELAY_BIN="$(swift build --package-path relay/OutboxRelay --show-bin-path)/OutboxRelay"
     exec env \
-      RELAY_DATABASE_URL="postgres://momo_relay:momo_relay_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+      RELAY_DATABASE_URL="$RELAY_DATABASE_URL" \
       CENT_API_URL="$CENT_API_URL" \
       CENT_API_KEY="$CENT_API_KEY" \
       RELAY_POLL_INTERVAL_MS=100 \
@@ -487,7 +658,7 @@ start_worker() {
     WORKER_BIN="$(swift build --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
     exec env \
       MOMO_ENV="$VERIFY_MOMO_ENV" \
-      RELAY_DATABASE_URL="postgres://momo_worker:momo_worker_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+      RELAY_DATABASE_URL="$WORKER_DATABASE_URL" \
       CENT_API_URL="$CENT_API_URL" \
       CENT_API_KEY="$CENT_API_KEY" \
       AGENT_PROVIDER_MODE="external-hermes" \
@@ -523,6 +694,81 @@ verify_agent_runtime_status() {
   fi
   assert_file_does_not_contain_secret "$AGENT_STATUS_FILE"
   RUNTIME_STATUS="pass"
+}
+
+seed_isolated_fixture() {
+  echo "[external-agent] seeding isolated Hermes/#agent-lab fixture"
+  psql_run \
+    -v agent_display="$AGENT_DISPLAY_NAME" \
+    -v agent_handle="$AGENT_HANDLE" \
+    -v agent_model="$AGENT_MODEL" \
+    -v agent_base_url="$HERMES_BASE_URL" \
+    >/dev/null <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+INSERT INTO workspace (id, slug, name)
+VALUES ('$WORKSPACE_ID', 'external-agent-verifier', 'External Agent Verifier Workspace')
+ON CONFLICT (id) DO UPDATE
+  SET deleted_at = NULL,
+      name = EXCLUDED.name;
+
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES
+  ('$HUMAN_ID', '$WORKSPACE_ID', 'human', 'active', 'External Agent Human', 'demo'),
+  ('$AGENT_ID', '$WORKSPACE_ID', 'agent', 'active', :'agent_display', :'agent_handle')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status,
+      display_name = EXCLUDED.display_name,
+      handle = EXCLUDED.handle,
+      deleted_at = NULL;
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$HUMAN_ID', '$WORKSPACE_ID', 'demo@momo.local', true,
+        momo_password_hash('dev-password'), 'UTC')
+ON CONFLICT (member_id) DO UPDATE
+  SET email = EXCLUDED.email,
+      email_verified = true,
+      password_hash = EXCLUDED.password_hash,
+      tz = EXCLUDED.tz;
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
+                   owner_human_id, max_concurrent_runs, max_run_steps)
+VALUES ('$AGENT_ID', '$WORKSPACE_ID', :'agent_model', :'agent_base_url',
+        'External provider verifier Hermes fixture', '$HUMAN_ID', 1, 12)
+ON CONFLICT (member_id) DO UPDATE
+  SET model = EXCLUDED.model,
+      base_url = EXCLUDED.base_url,
+      system_prompt = EXCLUDED.system_prompt,
+      owner_human_id = EXCLUDED.owner_human_id,
+      max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+      max_run_steps = EXCLUDED.max_run_steps;
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
+VALUES ('$CHANNEL_ID', '$WORKSPACE_ID', 'public', 'agent-lab',
+        'External provider verifier channel', '$HUMAN_ID', NULL)
+ON CONFLICT (id) DO UPDATE
+  SET name = EXCLUDED.name,
+      topic = EXCLUDED.topic,
+      archived_at = NULL,
+      updated_at = now();
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES ('$CHANNEL_ID', '$WORKSPACE_ID', 0)
+ON CONFLICT (channel_id) DO NOTHING;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role, left_at)
+VALUES
+  ('00000000-0000-7000-8000-000000000303', '$WORKSPACE_ID',
+   '$CHANNEL_ID', '$HUMAN_ID', 'owner', NULL),
+  ('00000000-0000-7000-8000-000000000306', '$WORKSPACE_ID',
+   '$CHANNEL_ID', '$AGENT_ID', 'member', NULL)
+ON CONFLICT (channel_id, member_id)
+DO UPDATE SET role = EXCLUDED.role, left_at = NULL;
+
+COMMIT;
+SQL
 }
 
 verify_internal_alpha_invite_precondition() {
@@ -739,7 +985,26 @@ fi
 
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
-POSTGRES_DB="${POSTGRES_DB:-momo}"
+POSTGRES_USER="${POSTGRES_USER:-momo}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-momo_dev_pw}"
+SOURCE_POSTGRES_DB="${POSTGRES_DB:-momo}"
+SOURCE_DATABASE_URL="${DATABASE_URL:-}"
+POSTGRES_DB="${EXTERNAL_AGENT_PROVIDER_VERIFIER_DB:-momo_external_agent_verify_${POSTGRES_PORT}_$$}"
+VERIFIER_DB_MARKER_PREFIX="momo:external-agent-verifier:v1:"
+VERIFIER_DB_MARKER="${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')"
+VERIFIER_DB_CREATED_OID=""
+VERIFIER_DB_OWNED=0
+SOURCE_DIGEST_ARMED=0
+ROLE_SUFFIX="$(printf '%s' "$VERIFIER_DB_MARKER" | shasum -a 256 | cut -c 1-12)"
+VERIFIER_APP_ROLE="momo_ext_${ROLE_SUFFIX}_app"
+VERIFIER_WORKER_ROLE="momo_ext_${ROLE_SUFFIX}_worker"
+VERIFIER_RELAY_ROLE="momo_ext_${ROLE_SUFFIX}_relay"
+VERIFIER_APP_PASSWORD="momo_external_verify_app_pw"
+VERIFIER_WORKER_PASSWORD="momo_external_verify_worker_pw"
+VERIFIER_RELAY_PASSWORD="momo_external_verify_relay_pw"
+APP_DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+WORKER_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+RELAY_DATABASE_URL="postgres://${VERIFIER_RELAY_ROLE}:${VERIFIER_RELAY_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 PORT="${PORT:-8080}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:${PORT}}"
 CENT_PORT="${CENT_PORT:-8000}"
@@ -760,86 +1025,16 @@ momo_cleanup_port_listener "$PORT" "external-agent API preflight" || {
   fail "preflight" "API port ${PORT} is occupied by a non-momo process; stop it or choose PORT override"
 }
 
-provider_preflight
-
-echo "[external-agent] bootstrapping local Postgres/Centrifugo stack"
-make ENV_FILE="$ENV_FILE" up
-make ENV_FILE="$ENV_FILE" migrate
-
-echo "[external-agent] ensuring runtime DB roles exist"
-"$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
+echo "[external-agent] ensuring local Postgres/Centrifugo services are running"
+POSTGRES_DB="$SOURCE_POSTGRES_DB" make ENV_FILE="$ENV_FILE" up
+validate_admin_target
+SOURCE_DIGEST_BEFORE="$(source_digest)"
+SOURCE_DIGEST_ARMED=1
+echo "[external-agent] provisioning isolated verifier database: $POSTGRES_DB"
+provision_verifier_database
+seed_isolated_fixture
 verify_internal_alpha_invite_precondition
-
-psql_run <<SQL
-BEGIN;
-SET LOCAL row_security = off;
-SET LOCAL app.workspace_id = '$WORKSPACE_ID';
--- Repeatability is scoped to this verifier's deterministic client_msg_id. Do
--- not neutralize the seeded Hermes member/channel's whole queue because that
--- can cancel user-owned local dogfood work.
-DELETE FROM outbox
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND (
-     payload->>'client_msg_id' = '$CLIENT_MSG_ID'
-     OR payload->'data'->'payload'->>'client_msg_id' = '$CLIENT_MSG_ID'
-     OR payload->>'trigger_message_id' IN (
-       SELECT id::text FROM message
-        WHERE workspace_id = '$WORKSPACE_ID'
-          AND client_msg_id = '$CLIENT_MSG_ID'
-     )
-   );
-DELETE FROM usage_ledger
- WHERE run_id IN (
-   SELECT id FROM agent_run
-    WHERE workspace_id = '$WORKSPACE_ID'
-      AND trigger_message_id IN (
-        SELECT id FROM message
-         WHERE workspace_id = '$WORKSPACE_ID'
-           AND client_msg_id = '$CLIENT_MSG_ID'
-      )
- );
-DELETE FROM audit_log
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND target_id IN (
-     SELECT id FROM message
-      WHERE workspace_id = '$WORKSPACE_ID'
-        AND client_msg_id = '$CLIENT_MSG_ID'
-   );
-DELETE FROM budget_window
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND budget_id IN (
-     SELECT id FROM budget
-      WHERE workspace_id = '$WORKSPACE_ID'
-        AND agent_member_id = '$AGENT_ID'
-        AND (channel_id IS NULL OR channel_id = '$CHANNEL_ID')
-   );
-DELETE FROM budget
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND agent_member_id = '$AGENT_ID'
-   AND (channel_id IS NULL OR channel_id = '$CHANNEL_ID');
-DELETE FROM message
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND run_id IN (
-     SELECT id FROM agent_run
-      WHERE workspace_id = '$WORKSPACE_ID'
-        AND trigger_message_id IN (
-          SELECT id FROM message
-           WHERE workspace_id = '$WORKSPACE_ID'
-             AND client_msg_id = '$CLIENT_MSG_ID'
-        )
-   );
-DELETE FROM agent_run
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND trigger_message_id IN (
-     SELECT id FROM message
-      WHERE workspace_id = '$WORKSPACE_ID'
-        AND client_msg_id = '$CLIENT_MSG_ID'
-   );
-DELETE FROM message
- WHERE workspace_id = '$WORKSPACE_ID'
-   AND client_msg_id = '$CLIENT_MSG_ID';
-COMMIT;
-SQL
+provider_preflight
 
 start_server
 start_relay
