@@ -2,14 +2,25 @@ import AppKit
 import SwiftUI
 import MomoCore
 
+enum MomoAgentCredentialManagementPresentation {
+    case grouped
+    case popover
+}
+
+struct MomoAgentCredentialNotice: Equatable {
+    let credentialID: UUID
+    let message: String
+}
+
 struct MomoAgentCredentialManagementView: View {
     let copy: MomoWorkspaceCopy
     let agent: Member
     @ObservedObject var viewModel: ChatViewModel
+    let presentation: MomoAgentCredentialManagementPresentation
     let onReveal: (MomoAgentCredentialReveal) -> Void
 
     @State private var actionInFlight = false
-    @State private var notice: String?
+    @State private var notice: MomoAgentCredentialNotice?
     @State private var errorMessage: String?
     @State private var pendingRevoke: MomoAgentCredential?
 
@@ -21,6 +32,7 @@ struct MomoAgentCredentialManagementView: View {
             actionInFlight: actionInFlight,
             notice: notice,
             errorMessage: errorMessage,
+            presentation: presentation,
             issueOrRotate: issueOrRotate,
             retry: refresh,
             requestRevoke: { pendingRevoke = $0 }
@@ -88,7 +100,10 @@ struct MomoAgentCredentialManagementView: View {
             defer { actionInFlight = false }
             do {
                 try await viewModel.revokeAgentCredential(credential.id, for: agent.id)
-                notice = copy.agentCredentialRevokedRecovery
+                notice = MomoAgentCredentialNotice(
+                    credentialID: credential.id,
+                    message: copy.agentCredentialRevokedRecovery
+                )
             } catch {
                 errorMessage = copy.agentCredentialErrorMessage(error)
             }
@@ -101,83 +116,91 @@ struct MomoAgentCredentialManagementContent: View {
     let credentials: [MomoAgentCredential]
     let isLoading: Bool
     let actionInFlight: Bool
-    let notice: String?
+    let notice: MomoAgentCredentialNotice?
     let errorMessage: String?
+    let presentation: MomoAgentCredentialManagementPresentation
     let issueOrRotate: () -> Void
     let retry: () -> Void
     let requestRevoke: (MomoAgentCredential) -> Void
 
+    @ViewBuilder
     var body: some View {
-        GroupBox {
+        switch presentation {
+        case .grouped:
+            GroupBox {
+                managementContent
+                    .padding(4)
+            } label: {
+                sectionLabel
+            }
+        case .popover:
             VStack(alignment: .leading, spacing: 12) {
-                Text(copy.agentCredentialSectionSubtitle)
-                    .font(.caption)
+                Divider()
+                sectionLabel
+                managementContent
+            }
+        }
+    }
+
+    private var sectionLabel: some View {
+        Label(copy.agentCredentialSectionTitle, systemImage: "key.horizontal")
+            .font(.subheadline.weight(.semibold))
+    }
+
+    private var managementContent: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(copy.agentCredentialSectionSubtitle)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isLoading && credentials.isEmpty {
+                Label(copy.agentCredentialLoading, systemImage: "arrow.triangle.2.circlepath")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            } else if credentials.isEmpty {
+                Label(copy.noAgentCredentials, systemImage: "key.slash")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else {
+                credentialRows
+            }
 
-                if isLoading && credentials.isEmpty {
-                    Label(copy.agentCredentialLoading, systemImage: "arrow.triangle.2.circlepath")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else if credentials.isEmpty {
-                    Label(copy.noAgentCredentials, systemImage: "key.slash")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else {
-                    credentialRows
-                }
-
-                if let notice {
+            if let errorMessage {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: "checkmark.circle")
-                            .foregroundStyle(MomoTheme.reversibleGreen)
-                        Text(notice)
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(MomoTheme.irreversibleRed)
+                        Text(errorMessage)
                             .foregroundStyle(.primary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .font(.caption)
+                    Button(copy.retry, action: retry)
+                        .controlSize(.small)
                 }
-
-                if let errorMessage {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundStyle(MomoTheme.irreversibleRed)
-                            Text(errorMessage)
-                                .foregroundStyle(.primary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .font(.caption)
-                        Button(copy.retry, action: retry)
-                            .controlSize(.small)
-                    }
-                }
-
-                Divider()
-
-                Text(copy.agentCredentialRotationHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                HStack {
-                    Spacer()
-                    Button(action: issueOrRotate) {
-                        Label(primaryActionTitle, systemImage: "arrow.triangle.2.circlepath.key")
-                    }
-                    .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(actionInFlight || isLoading)
-                }
-
-                Label(copy.agentCredential401Recovery, systemImage: "lifepreserver")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(4)
-        } label: {
-            Label(copy.agentCredentialSectionTitle, systemImage: "key.horizontal")
-                .font(.subheadline.weight(.semibold))
+
+            Divider()
+
+            Text(copy.agentCredentialRotationHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button(action: issueOrRotate) {
+                    Label(primaryActionTitle, systemImage: "arrow.triangle.2.circlepath.key")
+                }
+                .keyboardShortcut("r", modifiers: [.command, .shift])
+                .disabled(actionInFlight || isLoading)
+            }
+
+            Label(copy.agentCredential401Recovery, systemImage: "lifepreserver")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -201,43 +224,54 @@ struct MomoAgentCredentialManagementContent: View {
     private func credentialRow(_ credential: MomoAgentCredential) -> some View {
         let status = credential.displayStatus()
         return VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(credential.label ?? copy.agentCredentialDefaultLabel)
-                        .font(.body.weight(.semibold))
-                        .lineLimit(1)
-                    Text(copy.agentCredentialCreated(credential.createdAtMs))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    credentialIdentity(credential, lineLimit: 1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    Spacer()
+                    statusChip(status)
+                    credentialActionsMenu(credential, status: status)
                 }
-                Spacer()
-                statusChip(status)
-                Menu {
-                    Button(role: .destructive) {
-                        requestRevoke(credential)
-                    } label: {
-                        Label(copy.revokeAgentCredential, systemImage: "key.slash")
+
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        credentialIdentity(credential, lineLimit: 2)
+                        Spacer()
+                        credentialActionsMenu(credential, status: status)
                     }
-                    .disabled(status == .revoked || actionInFlight)
-                } label: {
-                    Label(copy.agentCredentialActions, systemImage: "ellipsis.circle")
-                        .labelStyle(.iconOnly)
+                    statusChip(status)
                 }
-                .menuStyle(.borderlessButton)
-                .help(copy.agentCredentialActions)
             }
 
-            HStack(spacing: 12) {
-                Label(
-                    credential.lastUsedAtMs.map(copy.agentCredentialLastUsed) ?? copy.agentCredentialNeverUsed,
-                    systemImage: "clock"
-                )
-                if let expiresAtMs = credential.expiresAtMs {
-                    Label(copy.agentCredentialExpires(expiresAtMs), systemImage: "calendar.badge.clock")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    credentialLastUsedLabel(credential)
+                    if let expiresAtMs = credential.expiresAtMs {
+                        Label(copy.agentCredentialExpires(expiresAtMs), systemImage: "calendar.badge.clock")
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    credentialLastUsedLabel(credential)
+                    if let expiresAtMs = credential.expiresAtMs {
+                        Label(copy.agentCredentialExpires(expiresAtMs), systemImage: "calendar.badge.clock")
+                    }
                 }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            if notice?.credentialID == credential.id, let message = notice?.message {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "checkmark.circle")
+                        .foregroundStyle(MomoTheme.reversibleGreen)
+                    Text(message)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+            }
         }
         .contextMenu {
             Button(role: .destructive) {
@@ -247,6 +281,43 @@ struct MomoAgentCredentialManagementContent: View {
             }
             .disabled(status == .revoked || actionInFlight)
         }
+    }
+
+    private func credentialIdentity(_ credential: MomoAgentCredential, lineLimit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(credential.label ?? copy.agentCredentialDefaultLabel)
+                .font(.body.weight(.semibold))
+                .lineLimit(lineLimit)
+            Text(copy.agentCredentialCreated(credential.createdAtMs))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func credentialLastUsedLabel(_ credential: MomoAgentCredential) -> some View {
+        Label(
+            credential.lastUsedAtMs.map(copy.agentCredentialLastUsed) ?? copy.agentCredentialNeverUsed,
+            systemImage: "clock"
+        )
+    }
+
+    private func credentialActionsMenu(
+        _ credential: MomoAgentCredential,
+        status: MomoAgentCredentialDisplayStatus
+    ) -> some View {
+        Menu {
+            Button(role: .destructive) {
+                requestRevoke(credential)
+            } label: {
+                Label(copy.revokeAgentCredential, systemImage: "key.slash")
+            }
+            .disabled(status == .revoked || actionInFlight)
+        } label: {
+            Label(copy.agentCredentialActions, systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
+        }
+        .menuStyle(.borderlessButton)
+        .help(copy.agentCredentialActions)
     }
 
     private func statusChip(_ status: MomoAgentCredentialDisplayStatus) -> some View {

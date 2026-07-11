@@ -648,8 +648,7 @@ public struct ChannelListView: View {
         .buttonStyle(.plain)
         .popover(isPresented: $showMemberInvite, arrowEdge: .bottom) {
             memberInvitePopover(copy: copy)
-                .frame(width: 340)
-                .padding(10)
+                .frame(width: MomoTheme.memberInvitePopoverWidth)
         }
         .popover(isPresented: $showInvites) {
             if let context = sessionChrome?.inviteAdminContext {
@@ -762,14 +761,22 @@ public struct ChannelListView: View {
     }
 
     private func memberInvitePopover(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
+        ScrollView {
+            memberInvitePopoverContent(copy: copy)
+                .padding(24)
+        }
+        .frame(maxHeight: MomoTheme.memberInvitePopoverMaximumHeight)
+    }
+
+    private func memberInvitePopoverContent(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 8) {
                 Image(systemName: "plus.circle")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(MomoTheme.humanAccent)
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(copy.inviteMembers)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.headline)
                     Text(copy.inviteMembersSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -787,9 +794,9 @@ public struct ChannelListView: View {
 
             switch inviteMode {
             case .human:
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Label(copy.humanInviteTitle, systemImage: "person.crop.circle.badge.plus")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.subheadline.weight(.semibold))
                     Text(copy.humanInviteBody)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -809,8 +816,8 @@ public struct ChannelListView: View {
                 .padding(12)
                 .background(.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             case .agent:
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 12) {
                         MomoProfileAvatar(
                             initials: hermesInitials,
                             status: hermesInvited ? .online : .away,
@@ -818,7 +825,7 @@ public struct ChannelListView: View {
                             size: 38
                         )
                         Label(copy.agentInviteTitle, systemImage: "point.3.connected.trianglepath.dotted")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(.subheadline.weight(.semibold))
                     }
                     Text(copy.agentInviteBody)
                         .font(.caption)
@@ -879,6 +886,7 @@ public struct ChannelListView: View {
                             copy: copy,
                             agent: agent,
                             viewModel: viewModel,
+                            presentation: .popover,
                             onReveal: { agentCredentialReveal = $0 }
                         )
                     }
@@ -900,12 +908,8 @@ public struct ChannelListView: View {
                     .controlSize(.regular)
                     .disabled(agentInviteInFlight || !agentEndpointPolicy.isAllowed)
                 }
-                .padding(12)
-                .background(MomoTheme.agentAccent.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         }
-        .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var hermesInitials: String {

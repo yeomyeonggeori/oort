@@ -64,6 +64,11 @@ public struct TypingActivity: Identifiable, Sendable, Equatable {
 
 @MainActor
 public final class ChatViewModel: ObservableObject {
+    private struct AgentCredentialRefresh {
+        let id: UUID
+        let task: Task<[MomoAgentCredential], Error>
+    }
+
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
     private let agentTransport: any AgentTransport
@@ -120,6 +125,7 @@ public final class ChatViewModel: ObservableObject {
     private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
     private var localTypingChannels: Set<ChannelID> = []
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
+    private var agentCredentialRefreshes: [MemberID: AgentCredentialRefresh] = [:]
 
     public init(
         chat: any ChatBackend,
@@ -186,6 +192,8 @@ public final class ChatViewModel: ObservableObject {
         agentWorkingStates = [:]
         agentCredentialsByMember = [:]
         agentCredentialLoadingMembers = []
+        agentCredentialRefreshes.values.forEach { $0.task.cancel() }
+        agentCredentialRefreshes = [:]
         typingStates = [:]
         localTypingChannels = []
         typingStopTasks.values.forEach { $0.cancel() }
@@ -482,6 +490,13 @@ public final class ChatViewModel: ObservableObject {
     }
 
     func refreshAgentCredentials(for agent: MemberID) async throws {
+        try await refreshAgentCredentials(for: agent, refreshAfterInFlight: false)
+    }
+
+    private func refreshAgentCredentials(
+        for agent: MemberID,
+        refreshAfterInFlight: Bool
+    ) async throws {
         guard let workspaceId else { throw BackendError.notConnected }
         guard let agentCredentialBackend else {
             throw BackendError.problem(
@@ -490,13 +505,51 @@ public final class ChatViewModel: ObservableObject {
                 detail: nil
             )
         }
-        guard !agentCredentialLoadingMembers.contains(agent) else { return }
+
+        if let inFlight = agentCredentialRefreshes[agent] {
+            let credentials: [MomoAgentCredential]?
+            do {
+                credentials = try await inFlight.task.value
+            } catch {
+                guard refreshAfterInFlight else { throw error }
+                credentials = nil
+            }
+            if let credentials, agentCredentialRefreshes[agent]?.id == inFlight.id {
+                agentCredentialsByMember[agent] = credentials
+            }
+
+            guard refreshAfterInFlight else { return }
+            guard self.workspaceId == workspaceId else { throw BackendError.notConnected }
+
+            if let newer = agentCredentialRefreshes[agent], newer.id != inFlight.id {
+                let newerCredentials = try await newer.task.value
+                if agentCredentialRefreshes[agent]?.id == newer.id {
+                    agentCredentialsByMember[agent] = newerCredentials
+                }
+                return
+            }
+
+            agentCredentialRefreshes[agent] = nil
+        }
+
+        let refreshID = UUID()
+        let refreshTask = Task {
+            try await agentCredentialBackend.agentCredentials(
+                workspace: workspaceId,
+                agent: agent
+            )
+        }
+        agentCredentialRefreshes[agent] = AgentCredentialRefresh(id: refreshID, task: refreshTask)
         agentCredentialLoadingMembers.insert(agent)
-        defer { agentCredentialLoadingMembers.remove(agent) }
-        agentCredentialsByMember[agent] = try await agentCredentialBackend.agentCredentials(
-            workspace: workspaceId,
-            agent: agent
-        )
+        defer {
+            if agentCredentialRefreshes[agent]?.id == refreshID {
+                agentCredentialRefreshes[agent] = nil
+                agentCredentialLoadingMembers.remove(agent)
+            }
+        }
+        let credentials = try await refreshTask.value
+        guard agentCredentialRefreshes[agent]?.id == refreshID else { return }
+        agentCredentialsByMember[agent] = credentials
     }
 
     func issueAgentCredential(
@@ -516,7 +569,11 @@ public final class ChatViewModel: ObservableObject {
             agent: agent,
             rotationGraceSeconds: rotationGraceSeconds
         )
-        try await refreshAgentCredentials(for: agent)
+        do {
+            try await refreshAgentCredentials(for: agent, refreshAfterInFlight: true)
+        } catch {
+            upsertAgentCredential(reveal.credential, for: agent)
+        }
         return reveal
     }
 
@@ -529,12 +586,24 @@ public final class ChatViewModel: ObservableObject {
                 detail: nil
             )
         }
-        _ = try await agentCredentialBackend.revokeAgentCredential(
+        let revokedCredential = try await agentCredentialBackend.revokeAgentCredential(
             credential,
             workspace: workspaceId,
             agent: agent
         )
-        try await refreshAgentCredentials(for: agent)
+        do {
+            try await refreshAgentCredentials(for: agent, refreshAfterInFlight: true)
+        } catch {
+            upsertAgentCredential(revokedCredential, for: agent)
+        }
+    }
+
+    private func upsertAgentCredential(_ credential: MomoAgentCredential, for agent: MemberID) {
+        var credentials = agentCredentialsByMember[agent] ?? []
+        credentials.removeAll { $0.id == credential.id }
+        credentials.append(credential)
+        credentials.sort { $0.createdAtMs > $1.createdAtMs }
+        agentCredentialsByMember[agent] = credentials
     }
 
     @discardableResult
