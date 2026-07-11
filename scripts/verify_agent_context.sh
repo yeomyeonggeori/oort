@@ -23,8 +23,8 @@
 #      (d) a small AGENT_CONTEXT_MAX_CHARS drops the oldest padding while the
 #          trigger + newest history survive (worker logs a trim count).
 #
-# This verifier owns the demo workspace agent_job queue while it runs and
-# cleans up its own server/worker/mock processes on exit.
+# This verifier owns an isolated migrated database and cleans up its exact
+# marker-bound database/roles plus server/worker/mock processes on exit.
 # =============================================================================
 set -eu
 
@@ -84,7 +84,20 @@ psql_run() {
 
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
-POSTGRES_DB=${POSTGRES_DB:-momo}
+POSTGRES_USER=${POSTGRES_USER:-momo}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-momo_dev_pw}
+SOURCE_POSTGRES_DB=${POSTGRES_DB:-momo}
+POSTGRES_DB=${AGENT_CONTEXT_VERIFIER_DB:-momo_agent_context_verify_${POSTGRES_PORT}_$$}
+VERIFIER_DB_MARKER_PREFIX=momo:agent-context-verifier:v1:
+VERIFIER_DB_MARKER=${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')
+VERIFIER_DB_CREATED_OID=
+VERIFIER_DB_OWNED=0
+SOURCE_DIGEST_ARMED=0
+ROLE_SUFFIX=$(printf '%s' "$VERIFIER_DB_MARKER" | shasum -a 256 | cut -c 1-12)
+VERIFIER_APP_ROLE=momo_ctx_${ROLE_SUFFIX}_app
+VERIFIER_WORKER_ROLE=momo_ctx_${ROLE_SUFFIX}_worker
+VERIFIER_APP_PASSWORD=momo_ctx_verify_app_pw
+VERIFIER_WORKER_PASSWORD=momo_ctx_verify_worker_pw
 BASE_PORT=${PORT:-8080}
 case "$BASE_PORT" in
   ""|*[!0-9]*) BASE_PORT=8080 ;;
@@ -126,10 +139,177 @@ MOCK_PID=
 WORKER_PID=
 SERVER_PID=
 
-cleanup() {
-  momo_cleanup_tracked_pids "agent-context verifier" "$WORKER_PID" "$SERVER_PID" "$MOCK_PID"
+admin_scalar() {
+  output=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc -c "$1") || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
 }
-trap cleanup EXIT INT TERM
+
+source_digest() {
+  output=$(PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$SOURCE_POSTGRES_DB" \
+    -t -A -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+SELECT encode(digest(concat_ws('|',
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM outbox t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM agent_run t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM approval t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM approval_decision t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM usage_ledger t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM budget_window t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM audit_log t),
+  (SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text)::text, '[]') FROM message t)
+), 'sha256'), 'hex');
+SQL
+  ) || return 1
+  printf '%s' "$output" | tr -d '[:space:]'
+}
+
+validate_admin_target() {
+  case "$POSTGRES_HOST" in
+    localhost|127.0.0.1|::1) ;;
+    *) echo "[agent-context] destructive verifier DB target must be loopback: $POSTGRES_HOST" >&2; exit 1 ;;
+  esac
+  if [ "${DATABASE_URL:-}" != "" ]; then
+    python3 - "$DATABASE_URL" "$POSTGRES_HOST" "$POSTGRES_PORT" "$SOURCE_POSTGRES_DB" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+url, expected_host, expected_port, expected_db = sys.argv[1:]
+parsed = urlparse(url)
+host = parsed.hostname or ""
+port = parsed.port or 5432
+database = parsed.path.lstrip("/")
+loopback = {"localhost", "127.0.0.1", "::1"}
+if host not in loopback or expected_host not in loopback:
+    raise SystemExit("[agent-context] DATABASE_URL and admin target must both be loopback")
+if port != int(expected_port) or database != expected_db:
+    raise SystemExit("[agent-context] DATABASE_URL source does not match admin port/database")
+PY
+  fi
+}
+
+provision_verifier_database() {
+  case "$POSTGRES_DB" in
+    ''|*[!a-zA-Z0-9_]*|"$SOURCE_POSTGRES_DB"|postgres|template0|template1)
+      echo "[agent-context] refusing unsafe verifier database target: $POSTGRES_DB" >&2
+      exit 1
+      ;;
+  esac
+  exists=$(admin_scalar "SELECT count(*) FROM pg_database WHERE datname = '$POSTGRES_DB';")
+  if [ "$exists" != "0" ]; then
+    echo "[agent-context] refusing pre-existing verifier database: $POSTGRES_DB" >&2
+    exit 1
+  fi
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 --no-psqlrc -c "CREATE DATABASE \"$POSTGRES_DB\";"
+  VERIFIER_DB_OWNED=1
+  VERIFIER_DB_CREATED_OID=$(admin_scalar "SELECT oid FROM pg_database WHERE datname = '$POSTGRES_DB';")
+  [ "$VERIFIER_DB_CREATED_OID" != "" ] || { echo "[agent-context] failed to capture verifier DB OID" >&2; exit 1; }
+  if [ "${AGENT_CONTEXT_VERIFIER_TEST_FAIL_COMMENT:-0}" = "1" ]; then
+    echo "[agent-context] intentional verifier COMMENT failure (test only)" >&2
+    exit 96
+  fi
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+COMMENT ON DATABASE "$POSTGRES_DB" IS :'marker';
+SQL
+
+  ENV_FILE=/dev/null DATABASE_URL= \
+    PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB" \
+    PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" \
+    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
+    -v ON_ERROR_STOP=1 -v marker="$VERIFIER_DB_MARKER" --no-psqlrc <<SQL
+SELECT set_config('momo.verifier_marker', :'marker', false) AS verifier_marker_setting \gset
+BEGIN;
+CREATE ROLE $VERIFIER_APP_ROLE LOGIN PASSWORD '$VERIFIER_APP_PASSWORD';
+CREATE ROLE $VERIFIER_WORKER_ROLE LOGIN PASSWORD '$VERIFIER_WORKER_PASSWORD';
+COMMENT ON ROLE $VERIFIER_APP_ROLE IS :'marker';
+COMMENT ON ROLE $VERIFIER_WORKER_ROLE IS :'marker';
+ALTER ROLE $VERIFIER_APP_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+ALTER ROLE $VERIFIER_WORKER_ROLE WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+GRANT CONNECT ON DATABASE "$POSTGRES_DB" TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE;
+COMMIT;
+SQL
+
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
+    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -v ON_ERROR_STOP=1 --no-psqlrc <<SQL
+GRANT USAGE ON SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO $VERIFIER_APP_ROLE, $VERIFIER_WORKER_ROLE;
+SQL
+
+  export PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB"
+  export PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD"
+  DATABASE_URL=
+  export DATABASE_URL
+}
+
+cleanup_verifier_database() {
+  [ "$VERIFIER_DB_OWNED" = "1" ] || return 0
+  current_oid=$(admin_scalar "SELECT COALESCE(oid::text, '') FROM pg_database WHERE datname = '$POSTGRES_DB';") || return 1
+  current_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = '$POSTGRES_DB';") || return 1
+  if [ "$current_oid" != "$VERIFIER_DB_CREATED_OID" ] \
+    || { [ "$current_marker" != "$VERIFIER_DB_MARKER" ] && [ "$current_marker" != "" ]; }; then
+    echo "[agent-context] refusing verifier cleanup: DB identity changed" >&2
+    return 1
+  fi
+  for role in "$VERIFIER_APP_ROLE" "$VERIFIER_WORKER_ROLE"; do
+    role_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';") || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+        -c "ALTER ROLE \"$role\" NOLOGIN;" >/dev/null || return 1
+    fi
+  done
+  PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+    -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+    -c "DROP DATABASE \"$POSTGRES_DB\" WITH (FORCE);" >/dev/null || return 1
+  for role in "$VERIFIER_APP_ROLE" "$VERIFIER_WORKER_ROLE"; do
+    role_marker=$(admin_scalar "SELECT COALESCE(shobj_description(oid, 'pg_authid'), '') FROM pg_roles WHERE rolname = '$role';") || return 1
+    if [ "$role_marker" = "$VERIFIER_DB_MARKER" ]; then
+      PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 --no-psqlrc \
+        -c "DROP ROLE \"$role\";" >/dev/null || return 1
+    fi
+  done
+  VERIFIER_DB_OWNED=0
+}
+
+cleanup() {
+  original_rc=$?
+  trap - EXIT
+  momo_cleanup_tracked_pids "agent-context verifier" "$WORKER_PID" "$SERVER_PID" "$MOCK_PID"
+  cleanup_failed=0
+  if [ "$SOURCE_DIGEST_ARMED" = "1" ]; then
+    source_after=$(source_digest) || cleanup_failed=1
+    if [ "$cleanup_failed" = "0" ] && [ "$source_after" != "$SOURCE_DIGEST_BEFORE" ]; then
+      echo "[agent-context] source dogfood DB changed while isolated verifier ran" >&2
+      cleanup_failed=1
+    elif [ "$cleanup_failed" = "0" ]; then
+      echo "[agent-context] source dogfood DB digest preserved"
+    fi
+  fi
+  cleanup_verifier_database || {
+    echo "[agent-context] exact verifier DB cleanup failed" >&2
+    cleanup_failed=1
+  }
+  if [ "$original_rc" = "0" ] && [ "$cleanup_failed" = "1" ]; then
+    original_rc=1
+  fi
+  exit "$original_rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 wait_http() {
   url=$1
@@ -151,8 +331,11 @@ momo_cleanup_runtime_ports "agent-context verifier preflight" "$PORT" "$HERMES_P
   echo "[agent-context] verifier ports are occupied by non-momo processes; stop them or choose AGENT_CONTEXT_* port overrides." >&2
   exit 1
 }
-echo "[agent-context] ensuring runtime DB roles exist"
-"$REPO_ROOT/scripts/verify_rls.sh" >/dev/null
+validate_admin_target
+SOURCE_DIGEST_BEFORE=$(source_digest)
+SOURCE_DIGEST_ARMED=1
+echo "[agent-context] provisioning isolated verifier database: $POSTGRES_DB"
+provision_verifier_database
 
 if curl -fsS "$BASE_URL/health" >/dev/null 2>&1; then
   echo "[agent-context] $BASE_URL already serving /health; stop it before running this verifier." >&2
@@ -162,7 +345,7 @@ fi
 echo "[agent-context] starting MomoServer (AGENT_CONTEXT_MAX_MESSAGES=$SERVER_MAX_MESSAGES)"
 (
   cd "$REPO_ROOT"
-  DATABASE_URL="postgres://momo_app:momo_app_dev_pw@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+  DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
   PORT="$PORT" \
   AGENT_CONTEXT_MAX_MESSAGES="$SERVER_MAX_MESSAGES" \
   swift run --package-path server MomoServer
@@ -304,7 +487,7 @@ echo "[agent-context] starting AgentWorker (AGENT_CONTEXT_MAX_CHARS=$WORKER_MAX_
   swift build --package-path workers/AgentWorker --product AgentWorker >/dev/null
   WORKER_BIN="$(swift build --package-path workers/AgentWorker --show-bin-path)/AgentWorker"
   exec env \
-    RELAY_DATABASE_URL="postgres://momo_worker:momo_worker_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}" \
+    RELAY_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
     CENT_API_URL="$CENT_API_URL" \
     CENT_API_KEY="$CENT_API_KEY" \
     HERMES_BASE_URL="$HERMES_BASE_URL" \
@@ -447,7 +630,7 @@ fi
 # response is intentionally irrelevant here, but AgentWorker may still leave the
 # run in an active state long enough to occupy the G1 per-agent semaphore for the
 # next runtime verifier. Release only the run/outbox created from our deterministic
-# trigger message; do not touch any user dogfood work in the shared local DB.
+# trigger message. The whole fixture lives in the isolated verifier DB.
 echo "[agent-context] releasing verifier-owned agent run"
 psql_run <<SQL
 BEGIN;

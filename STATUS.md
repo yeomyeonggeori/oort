@@ -22,6 +22,11 @@
 - marker COMMENT를 psql stdin SQL로 옮기고, 새 DB 생성부터 marker/migration/전용 role bootstrap 완료 전까지 실패하면 exact generation marker를 재확인한 verifier DB와 동일 marker의 전용 role만 정리하도록 lifecycle guard를 추가했다. role bootstrap은 트랜잭션이며 기존 unmarked/source/system DB의 fail-closed 경계는 유지한다.
 - fresh worktree의 Swift dependency materialization이 health timeout에 포함되던 경로도 확인해 server/relay/worker 바이너리를 동기적으로 먼저 build한 뒤 process timeout을 시작하도록 분리했다.
 
+### MOMO-344 context verifier DB 격리
+
+- MOMO-343 merge 후 root `runtime-agent`에서 context verifier Worker가 source dogfood DB의 unrelated pending `resume_approval`을 먼저 claim하는 격리 결함을 확인했다.
+- context verifier는 이제 매 실행마다 별도 migrated DB와 marker-bound app/worker role을 사용하고, source DB의 agent queue/run/approval/message digest를 전후 비교한다. cleanup은 exact DB OID+marker와 role marker가 일치할 때만 수행한다.
+
 ## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
 
 - `infra/docker-compose.e2e.yml`을 추가해 local gate 전용 api/relay/worker/mock-Hermes/PostgreSQL 18/Centrifugo v6 경계를 dev compose 및 prod compose와 분리했다. e2e는 source checkout + local Swift build를 허용하고, prod는 계속 image-based/source-checkout-free 계약을 유지한다.
