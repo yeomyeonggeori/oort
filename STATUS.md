@@ -32,7 +32,9 @@
 ### MOMO-345 live channel verifier DB 격리
 
 - live channel verifier를 매 실행마다 생성하는 marker/OID-owned migrated DB로 분리하고, marker-bound app(NOBYPASSRLS)·worker/relay(BYPASSRLS) role과 deterministic authorized/unauthorized fixture를 연결했다. source dogfood DB는 agent queue/run/approval/message 관련 digest 전후 비교만 수행한다.
-- pre-marker COMMENT 실패 시 exact OID DB만 롤백하는 bootstrap 회귀를 `runtime-agent`에 추가했다. `bash -n` 정적 검증만 완료했으며, fresh bootstrap·live assertion·성공/실패 digest·cleanup과 clean/root `runtime-agent`는 오케스트레이터 merge 전 검증 대기(`runtime-unverified`).
+- pre-marker COMMENT 실패 시 exact OID DB만 롤백하는 bootstrap 회귀를 `runtime-agent`에 추가했다.
+- 2026-07-11 오케스트레이터 검증 완료 후 PR #321 merge (`5854c2f`): worktree clean runtime-agent gate full PASS, root post-merge에서 live channel verifier가 drift 있는 dogfood DB 위에서 PASS + source digest 보존 실증.
+- root post-merge full gate는 다음 선재 결함에서 중단: `verify_local_hermes_bridge.sh`(엔진 `verify_external_agent_provider.sh`)가 dogfood DB의 Hermes(`…103`) #agent-lab 멤버십(2026-07-08 left_at drift)을 전제하고 roundtrip에서 dogfood 채널에 실제 메시지를 작성한다. `verify_hermes_gateway_adapter.sh`도 shared DB 사용 → 잔여 두 갈래를 MOMO-346 `#322`로 발급 (캐스케이드 종결 티켓).
 
 ## 0-2. MOMO-186 Deterministic E2E Compose Stack (2026-06-29)
 

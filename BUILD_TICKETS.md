@@ -188,6 +188,7 @@
 | `MOMO-343` (`#316`) | AgentWorker verifier fresh DB marker bootstrap regression | tooling/runtime | MOMO-342 |
 | `MOMO-344` (`#318`) | Agent context verifier isolated DB boundary | tooling/runtime-agent | MOMO-343 |
 | `MOMO-345` (`#320`) | Agent live channel verifier isolated DB boundary | tooling/runtime-agent | MOMO-344 |
+| `MOMO-346` (`#322`) | Hermes bridge/gateway verifier isolated DB boundary | tooling/runtime-agent | MOMO-345 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -1604,14 +1605,22 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - worktree clean gate PASS: `local-gate-runtime-agent-20260711T101151Z-…-rb7797b74d2f5.md`
   - root post-merge: MOMO-344 범위 verifier(bootstrap rollback + context + source digest 보존) 전부 PASS. full gate는 선재하던 `verify_agent_live_channel.sh` 격리 결함(→ MOMO-345 `#320`)과 momo_main Centrifugo 낡은 running-config(재시작으로 해소)로 별도 추적.
 
-### ☐ MOMO-345 수용기준 — Agent live channel verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-344
-- [ ] live channel verifier의 MomoServer/AgentWorker/OutboxRelay/fixture를 MOMO-344 패턴의 marker/OID-owned migrated DB로 격리한다.
-- [ ] authorized/unauthorized/other-workspace/revoked-credential/agentwork exact-actor assertion이 fresh 격리 DB에서 PASS한다.
+### ☑ MOMO-345 수용기준 — Agent live channel verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-344
+- [x] live channel verifier의 MomoServer/AgentWorker/OutboxRelay/fixture를 MOMO-344 패턴의 marker/OID-owned migrated DB로 격리한다.
+- [x] authorized/unauthorized/other-workspace/revoked-credential/agentwork exact-actor assertion이 fresh 격리 DB에서 PASS한다.
+- [x] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
+- [x] root main persistent dogfood DB의 fixture drift(예: agent 멤버십 left_at)와 무관하게 verifier PASS.
+- [x] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
+  - 구현: marker/OID-owned fresh migrated DB, marker-bound app/worker/relay role, deterministic live fixtures, source digest, pre-marker rollback helper.
+  - worktree clean gate full PASS: `local-gate-runtime-agent-20260711T112751Z-…-red25beecd13d.md`
+  - root post-merge: live channel verifier PASS + source digest 보존 (drift 있는 dogfood DB 위에서 실증). full gate는 선재하던 hermes bridge/gateway verifier의 dogfood 결합(→ MOMO-346 `#322`)으로 별도 추적.
+
+### ☐ MOMO-346 수용기준 — Hermes bridge/gateway verifier isolated DB boundary `[tooling/runtime-agent]` · 의존: MOMO-345
+- [ ] `verify_local_hermes_bridge.sh`/`verify_external_agent_provider.sh`/`verify_hermes_gateway_adapter.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 Hermes/#agent-lab fixture를 자체 seed한다.
+- [ ] invite precondition·external-hermes roundtrip·gateway bearer assertion이 fresh 격리 DB에서 PASS한다 (dogfood 채널에 메시지 비작성).
 - [ ] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
-- [ ] root main persistent dogfood DB의 fixture drift(예: agent 멤버십 left_at)와 무관하게 verifier PASS.
+- [ ] root main persistent dogfood DB의 drift와 무관하게 `runtime-agent` full gate가 root main에서 PASS한다 — verifier 격리 캐스케이드 종결 조건.
 - [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
-  - 구현: marker/OID-owned fresh migrated DB, marker-bound app/worker/relay role, deterministic live fixtures, source digest, pre-marker rollback helper를 추가했다.
-  - 검증 상태: `bash -n` PASS; runtime evidence는 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
 
 ---
 
