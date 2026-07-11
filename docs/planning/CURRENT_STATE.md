@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-11 · 기준선: main `5854c2f` (MOMO-345 merge, verifier 격리 체인 342→345 완료·346 잔여) · 통합 책임: `momo-main`
+> 기준일: 2026-07-11 · 기준선: main `881518b` (MOMO-339 merge — **ADR-0101 Phase 1 배치 종결**) · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer)은 Accepted. ADR-0102(Worker/Gateway 실행 경로)는 Proposed이며 성재 결정 대기다.
-- 현재 구현 체인: MOMO-337/338 bearer 단일화와 verifier 격리 체인 MOMO-342~345(`#314`/`#316`/`#318`/`#320`)가 완료됐다. MOMO-339(`#309`)는 codex-fleet worker가 작업 중이고, 캐스케이드 종결 티켓 MOMO-346(`#322`, hermes bridge/gateway verifier 격리)이 `ready`다.
+- 현재 구현 체인: **ADR-0101 Phase 1(MOMO-337/338/339) 완료** + verifier 격리 체인 MOMO-342~345 완료. ready goal: MOMO-346(`#322`, runtime-agent 캐스케이드 종결) · MOMO-347(`#324`, popover 하드닝) · MOMO-348(`#325`, macos-ui verifier 격리, 346 후속). root full gate green 조건 = 346(runtime-agent) + 348(macos-ui).
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -36,8 +36,10 @@
 |---|---|---|---|---|
 | ADR-0101 Phase 1 | `docs/planning/handoffs/2026-07-10-adr-0101-agent-identity.md` | MOMO-337 `#307` | `done` (PR #310, main `8d97c82`) | 1 완료 |
 | ADR-0101 Phase 1 | 같은 패킷 | MOMO-338 `#308` | `done` (adapter bearer + private `agentwork:` self-only) | 2 완료 |
-| ADR-0101 Phase 1 | 같은 패킷 | MOMO-339 `#309` | `in-progress` (codex-fleet goal-309) | 3 |
-| verifier 격리 체인 | issue 본문이 패킷 역할 (`#318` 패턴 승계) | MOMO-346 `#322` | `ready` | 339와 병렬 가능 |
+| ADR-0101 Phase 1 | 같은 패킷 (Status `done`) | MOMO-339 `#309` | `done` (PR #323, main `881518b`) | 3 완료 — 배치 종결 |
+| verifier 격리 체인 | issue 본문이 패킷 역할 (`#318` 패턴 승계) | MOMO-346 `#322` | `ready` | 347과 병렬 가능 |
+| MOMO-339 후속 | issue `#324` 본문 (design review High/Medium) | MOMO-347 `#324` | `ready` | 346과 병렬 가능 |
+| verifier 격리 체인 | issue `#325` 본문 | MOMO-348 `#325` | `ready` (346 merge 후 착수) | 346 다음 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
@@ -53,9 +55,9 @@
 ## 4. 다음 체크포인트
 
 1. 성재가 ADR-0102를 결정한다. Accepted라면 `momo-main`이 파생 티켓/패킷/ROADMAP을 한 change set으로 통합한다.
-2. MOMO-339에서 agent credential 원문 1회 표시·복사, 회전/폐기 UI를 현재 pairing wizard에 연결한다.
-3. MOMO-346(`#322`)로 hermes bridge/gateway verifier를 격리해 root main runtime-agent full gate를 green으로 복구한다 — verifier 격리 캐스케이드의 마지막 티켓 (339와 병렬 가능).
-4. Hermes gateway가 둘 이상 겹칠 때 provider turn이 중복 실행되지 않도록 pending claim/lease + takeover 서버 티켓을 발급한다.
+2. MOMO-346(`#322`)로 runtime-agent full gate, MOMO-348(`#325`, 346 후속)로 macos-ui full gate를 root main green으로 복구한다.
+3. MOMO-347(`#324`)로 pairing popover 임베딩을 하드닝한다 (design review High 2·Medium 4).
+4. Hermes gateway 중복 실행 방지 claim/lease + takeover는 MOMO-341 — 착수 대기.
 5. ADR-0102 결정을 완료해 AgentWorker SSE와 Hermes Gateway의 제품 기본 경로를 정본화한다.
 
 ## 5. 이 문서 갱신 규칙

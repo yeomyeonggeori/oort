@@ -14,6 +14,8 @@
 - 페어링 초대 완료를 per-agent bearer 발급 API에 연결하고, 원문을 transient one-time reveal sheet에서만 표시한다. 프로필과 페어링 패널은 configured/active/expiring/revoked 메타데이터, 24시간 grace 회전, 확인 후 폐기, 401 복구 안내를 공유한다.
 - 매니페스트는 env 위치와 `MOMO_AGENT_TOKEN` 키 이름만 포함하며 bearer 원문은 계속 제외한다. 앱은 `~/.momo/hermes-gateway.env`를 직접 쓰지 않고 mode 600 확인과 gateway 재시작을 안내한다.
 - 검증: `swift build --disable-sandbox` PASS, credential 계약/스냅샷 포함 `swift test --disable-sandbox --skip MessageBubbleSnapshotTests` 82 tests PASS, design-review Blocker 0. 기존 MessageBubble ImageRenderer 테스트 2개는 이 샌드박스에서 SnapshotTesting 내부 signal 5로 단독 재현되며, `macos-ui` 런타임 게이트 evidence는 오케스트레이터가 merge 전에 수행한다.
+- 2026-07-11 오케스트레이터 검수: worker 샌드박스에서 기록된 스냅샷 참조 6종이 정본 게이트 머신에서 전부 불일치 → 재기록(레이아웃 동일, 렌더링 환경 교정) 후 84 tests green(worker 환경의 MessageBubble signal 5는 재현 안 됨). fresh-context design-review 재판정 **PASS Blocker 0** (High 2·Medium 4는 MOMO-347 `#324`로 후속). main 위 rebase 후 PR #323 merge (`881518b`).
+- worktree clean `macos-ui` gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md`. root post-merge `macos-ui`는 선재하던 `verify_macos_real_backend_ui.sh`의 dogfood 결합(hermes 멤버십 drift로 mention→agent_job count=0 + shared DB mutation)에서 중단 → MOMO-348 `#325` 발급 (MOMO-346 후속, macos-ui 프로파일 격리).
 
 ## 0-1. MOMO-342 AgentWorker Persistent DB Fixture Hardening (2026-07-11)
 

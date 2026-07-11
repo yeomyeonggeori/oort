@@ -1,6 +1,6 @@
 # HANDOFF: ADR-0101 에이전트 신원 — agent_bearer 인증 배치
 
-> Status: `active` — MOMO-337/338 완료, MOMO-339 ready
+> Status: `done` — MOMO-337(#310, `8d97c82`)/MOMO-338(`561bd03`)/MOMO-339(#323, `881518b`) 전부 merge. Phase 1 배치 종결 (2026-07-11). 후속: MOMO-347 `#324`(popover 하드닝), MOMO-341(claim/lease), Phase 2(delegation)는 별도 ADR.
 > Planning ID: `ADR-0101` · Planner owner: Fable · Integrator: `momo-main`
 > 발급: 2026-07-10 · 최신 통합 커밋: `8d97c82ef1710e0a66e95ec50f72b9ff8d8cc41a` · Supersedes: 없음
 > 근거 ADR: **ADR-0101 (Accepted 2026-07-10, Option A)** · 대상 goal: MOMO-337, MOMO-338, MOMO-339 · 병렬: 337 머지 후 338‖339 병렬 가능

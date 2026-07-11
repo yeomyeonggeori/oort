@@ -189,6 +189,8 @@
 | `MOMO-344` (`#318`) | Agent context verifier isolated DB boundary | tooling/runtime-agent | MOMO-343 |
 | `MOMO-345` (`#320`) | Agent live channel verifier isolated DB boundary | tooling/runtime-agent | MOMO-344 |
 | `MOMO-346` (`#322`) | Hermes bridge/gateway verifier isolated DB boundary | tooling/runtime-agent | MOMO-345 |
+| `MOMO-347` (`#324`) | Pairing popover credential embedding hardening | swift/macos-ui | MOMO-339 |
+| `MOMO-348` (`#325`) | macos-ui real backend verifier isolated DB boundary | tooling/macos-ui | MOMO-346 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -1566,12 +1568,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] [security/runtime] exact-channel observable `agent:` status/partial과 private self-only `agentwork:` job을 분리하고 dev/local-alpha/prod Centrifugo proxy 계약 및 실제 WebSocket e2e를 일치시킨다.
 - [x] [python/performance] cancellation·partial reconnect listener cleanup, bounded recovery retry, completion backlog backpressure를 regression test로 고정한다.
 
-### ☐ MOMO-339 수용기준 — 페어링 위저드 자격증명 발급/회전 UI `[swift/macos-ui]` · 의존: MOMO-337, MOMO-262
+### ☑ MOMO-339 수용기준 — 페어링 위저드 자격증명 발급/회전 UI `[swift/macos-ui]` · 의존: MOMO-337, MOMO-262
 - [x] [swift] 에이전트 초대 완료 시 MOMO-337 발급 API 호출 → 토큰 원문 1회 표시 + `~/.momo/hermes-gateway.env` 기록 안내(복사 버튼). 매니페스트/export에는 계속 시크릿 비포함(MOMO-262 계약 유지).
 - [x] [swift] 멤버 프로필/페어링 패널에 자격증명 상태 칩(configured/revoked)과 회전·폐기 액션.
 - [x] [swift] 테스트: 매니페스트 시크릿 배제 회귀 + mock 백엔드 발급/회전 플로우.
-- [x] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙).
-> Worker 구현·정적/Swift 검증 완료. `macos-ui` 런타임 게이트 evidence는 오케스트레이터가 merge 전에 수행하므로 goal 표시는 미완료로 유지한다.
+- [x] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙) — fresh-context 재판정 PASS (High 2·Medium 4 → MOMO-347 `#324`).
+- [x] [macos-ui] worktree clean gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md` (스냅샷 참조 6종은 정본 게이트 머신 재기록, 84 tests green). root post-merge macos-ui는 선재 `verify_macos_real_backend_ui.sh` dogfood 결합(→ MOMO-348 `#325`)으로 별도 추적. PR #323 merge (`881518b`).
 
 ### ☐ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-337, MOMO-338
 > MOMO-338 성능 리뷰 후속. 현재 pending endpoint는 actor-bound read지만 lease/claim이 없어 동일 agent의 gateway 인스턴스가 겹치면 provider turn과 비용이 중복될 수 있다.
@@ -1622,6 +1624,18 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] source DB digest가 성공/실패 경로 모두에서 전후 동일하고 cleanup은 fail-closed다.
 - [ ] root main persistent dogfood DB의 drift와 무관하게 `runtime-agent` full gate가 root main에서 PASS한다 — verifier 격리 캐스케이드 종결 조건.
 - [ ] clean `runtime-agent` gate와 root main post-merge gate evidence를 남긴다.
+
+### ☐ MOMO-347 수용기준 — Pairing popover credential embedding hardening `[swift/macos-ui]` · 의존: MOMO-339
+- [ ] ~290pt 유효 폭 스냅샷 또는 popover 실임베딩 캡처 evidence (High 1).
+- [ ] popover 수직 성장 스크롤 전략 결정·구현 (High 2).
+- [ ] Medium 4건(명목상 large-type 스냅샷, 폐기 notice 귀속, 3중 중첩 카드, refresh 경합) 각각 수정 또는 명시적 won't-fix 근거.
+- [ ] design-review 재판정 Blocker 0/High 0 + `macos-ui` gate PASS (worktree clean + root post-merge).
+
+### ☐ MOMO-348 수용기준 — macos-ui real backend verifier isolated DB boundary `[tooling/macos-ui]` · 의존: MOMO-346
+- [ ] `verify_macos_real_backend_ui.sh`가 MOMO-344/345 패턴의 격리 DB와 marker-bound role을 사용하고 demo/hermes fixture를 자체 seed한다.
+- [ ] login/invite/join/member/send/mention→agent_job/history assertion이 fresh 격리 DB에서 PASS하고 dogfood DB에 mutation을 남기지 않는다 (digest 전후 동일).
+- [ ] root main persistent dogfood DB drift와 무관하게 `macos-ui` full gate가 root main에서 PASS한다.
+- [ ] clean gate + root post-merge gate evidence, 정본 3종 갱신.
 
 ---
 
