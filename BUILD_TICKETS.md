@@ -185,6 +185,7 @@
 | `MOMO-320` | Local runtime env drift guard | tooling/runtime | LSA-001, MOMO-319, MOMO-300 |
 | `MOMO-324` | AgentWorker verifier cleanup FK rerun hardening | tooling/runtime | MOMO-320 |
 | `MOMO-342` (`#314`) | AgentWorker verifier persistent DB fixture hardening | tooling/runtime | MOMO-324, MOMO-338 |
+| `MOMO-343` (`#316`) | AgentWorker verifier fresh DB marker bootstrap regression | tooling/runtime | MOMO-342 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -1584,6 +1585,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 실제 local dogfood message/pending agent job/무관한 membership은 cleanup하지 않는다.
 - [x] 비어 있는 run id를 UUID SQL에 전달하지 않고 fixture/mention 실패를 readable evidence로 구분한다.
 - [x] `runtime-agent` local gate가 같은 persistent verifier DB에서 verifier를 연속 2회 실행하고 보존 sentinel, source DB 비변경, Centrifugo generation namespace 재실행 경계를 확인한다.
+
+### ☑ MOMO-343 수용기준 — AgentWorker verifier fresh DB marker bootstrap regression `[tooling/runtime]` · 의존: MOMO-342
+- [x] fresh verifier DB의 canonical UUIDv4 ownership marker를 psql stdin SQL에서 literal-safe하게 기록한다.
+- [x] marker/migration/role bootstrap 실패 시 이번 실행이 새로 만든 exact verifier DB만 정리하며, 의도적 post-marker failure regression으로 DB 부재를 검증한다.
+- [x] 기존 unmarked/source/system DB는 migration·fixture write 전에 fail-closed한다.
+- [x] fresh bootstrap 1회와 같은 persistent verifier DB 재실행 1회가 모두 PASS한다.
+- [x] root main `runtime-agent` post-merge gate 회귀를 재현하고 복구한다.
 
 ---
 
