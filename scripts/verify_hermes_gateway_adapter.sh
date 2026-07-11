@@ -81,7 +81,7 @@ HUMAN_PASSWORD=dev-password
 HUMAN_MEMBER_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
 OTHER_AGENT_ID=00000000-0000-7337-8000-000000000104
-CHANNEL_ID=00000000-0000-7000-8000-000000000202
+CHANNEL_ID=$(python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1] + ":agent-lab-channel"))' "$VERIFIER_DB_MARKER")
 CLIENT_MSG_ID=00000000-0000-7000-8000-000000325001
 BODY='@hermes MOMO-325 gateway native platform smoke'
 FINAL_BODY='Hermes gateway mock completed MOMO-325 through momo REST.'
@@ -628,6 +628,13 @@ ON CONFLICT (member_id) DO UPDATE
       owner_human_id = EXCLUDED.owner_human_id,
       max_concurrent_runs = EXCLUDED.max_concurrent_runs,
       max_run_steps = EXCLUDED.max_run_steps;
+
+-- Migration 002 owns a fixed #agent-lab UUID. Replace it inside this isolated
+-- DB so each verifier generation has a distinct channel/idempotency namespace.
+DELETE FROM channel
+ WHERE workspace_id = '${WORKSPACE_ID}'
+   AND id <> '${CHANNEL_ID}'
+   AND lower(name) = 'agent-lab';
 
 INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
 VALUES ('${CHANNEL_ID}', '${WORKSPACE_ID}', 'public', 'agent-lab',

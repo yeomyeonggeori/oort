@@ -745,6 +745,14 @@ ON CONFLICT (member_id) DO UPDATE
       max_concurrent_runs = EXCLUDED.max_concurrent_runs,
       max_run_steps = EXCLUDED.max_run_steps;
 
+-- Migration 002 owns a fixed #agent-lab UUID. Replace it inside this isolated
+-- DB so each verifier generation publishes to a distinct Centrifugo channel;
+-- otherwise <channel>:<seq> idempotency keys collide with earlier gate steps.
+DELETE FROM channel
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND id <> '$CHANNEL_ID'
+   AND lower(name) = 'agent-lab';
+
 INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
 VALUES ('$CHANNEL_ID', '$WORKSPACE_ID', 'public', 'agent-lab',
         'External provider verifier channel', '$HUMAN_ID', NULL)
@@ -1017,7 +1025,7 @@ esac
 WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 HUMAN_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
-CHANNEL_ID=00000000-0000-7000-8000-000000000202
+CHANNEL_ID="$(python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1] + ":agent-lab-channel"))' "$VERIFIER_DB_MARKER")"
 CENT_CHANNEL="ch:ws${WORKSPACE_ID}.${CHANNEL_ID}"
 CLIENT_MSG_ID="${EXTERNAL_AGENT_PROVIDER_CLIENT_MSG_ID:-00000000-0000-7000-8000-000000257107}"
 
