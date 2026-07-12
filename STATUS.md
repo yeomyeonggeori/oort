@@ -8,6 +8,7 @@
 - macOS REST backend의 demo member/channel fixture fallback과 이름 기반 agent 숨김을 제거하고, 서버 `/roster`의 active `channelIds`를 멤버 사이드바·멘션 후보·메시지 작성자·agent realtime 구독의 공통 권위로 사용한다. offline demo fixture는 `LiveChatBackend`에만 남는다.
 - login/join 응답의 `realtimeWebSocketUrl`을 서버가 광고하고 앱은 이를 환경값보다 우선해 SwiftCentrifuge transport를 구성한다. API 계약은 Accepted ADR-0110에 기록했고 prod/e2e env를 정렬했다.
 - 검증: server build + 63 tests PASS, macOS build + 비스냅샷 79 tests PASS, 신규 roster light/dark snapshot 2종은 정본 PNG 부재로 명시적 skip, Python no-network/no-DB contract + 수정 shell `bash -n`/실행권한 PASS, design-review PASS(Blocker 0/High 0/Medium 1). 지시된 경계에 따라 Docker/DB/verifier/`local_gate.sh`는 미실행이며 clean `macos-ui`와 snapshot 재기록은 오케스트레이터 대기(`runtime-unverified`).
+- fresh-context 반려 High 2건 수정: server-SoT 세션의 로컬 프로필 편집 진입점과 `applyLocalProfile`을 동일 경계로 차단하고 안내 카피를 추가했다. roster snapshot은 `NSHostingView` 2x 래스터로 교체하고 light/dark 모두 Hermes `AGENT` accent 픽셀 100개 초과를 강제한다. macOS 비스냅샷 79 tests + roster snapshot 3 tests(정본 대기 2 skip, pixel 보장 1 PASS), static contract/design pre-flight PASS, fresh design-review PASS(Blocker 0/High 0/Medium 0/Low 0). 정본 PNG 재기록은 오케스트레이터 대기.
 
 ## 0-1. MOMO-355 Dogfood Agent Seed Opt-in (2026-07-13)
 

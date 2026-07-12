@@ -473,8 +473,13 @@ public struct ChannelListView: View {
                 Button {
                     openMemberProfile?(member.id)
                 } label: {
-                    Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
+                    if viewModel.allowsLocalProfileEditing {
+                        Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
+                    } else {
+                        Label(MomoWorkspaceCopy(language: language).serverManagedProfileNote, systemImage: "lock")
+                    }
                 }
+                .disabled(!viewModel.allowsLocalProfileEditing)
             }
     }
 
@@ -536,8 +541,9 @@ public struct ChannelListView: View {
                     .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(copy.editProfile)
-            .momoQuickTooltip(copy.editProfile)
+            .disabled(!viewModel.allowsLocalProfileEditing)
+            .help(viewModel.allowsLocalProfileEditing ? copy.editProfile : copy.serverManagedProfileNote)
+            .momoQuickTooltip(viewModel.allowsLocalProfileEditing ? copy.editProfile : copy.serverManagedProfileNote)
             if viewModel.selectedChannelId != nil {
                 memberMutationButton(member)
             }
@@ -673,9 +679,21 @@ public struct ChannelListView: View {
 
             Divider()
 
-            profileAction(copy.profile, systemImage: "person.crop.circle") {
+            profileAction(
+                copy.profile,
+                systemImage: "person.crop.circle",
+                isDisabled: !viewModel.allowsLocalProfileEditing,
+                helpText: viewModel.allowsLocalProfileEditing ? copy.profile : copy.serverManagedProfileNote
+            ) {
                 showProfilePanel = false
                 openProfile?()
+            }
+            if !viewModel.allowsLocalProfileEditing {
+                Label(copy.serverManagedProfileNote, systemImage: "lock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
             }
             profileAction(copy.settings, systemImage: "gearshape") {
                 showProfilePanel = false
@@ -716,6 +734,8 @@ public struct ChannelListView: View {
         _ title: String,
         systemImage: String,
         role: ButtonRole? = nil,
+        isDisabled: Bool = false,
+        helpText: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(role: role, action: action) {
@@ -732,6 +752,8 @@ public struct ChannelListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(helpText ?? title)
     }
 
     private func profilePill(

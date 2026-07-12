@@ -1718,6 +1718,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] login/join의 `realtimeWebSocketUrl`을 앱이 우선 사용하고 앱 env는 이전 서버 fallback으로만 남긴다 (ADR-0110).
 - [ ] server/macOS 단위 테스트 + light/dark roster snapshot 정본 재기록 + design-review Blocker 0 + clean/root `macos-ui` gate evidence.
   - worker evidence: server 63 tests, macOS 비스냅샷 79 tests, 신규 snapshot 2종 compile+reference-wait skip, Python no-DB contract, 수정 shell `bash -n`/실행권한 PASS, design-review PASS(Blocker 0/High 0/Medium 1).
+  - review fix evidence: server-SoT 로컬 프로필 편집 UI/상태 이중 차단, `NSHostingView` 2x roster 캡처 + light/dark `AGENT` accent pixel assertion PASS. macOS 비스냅샷 79 tests와 roster snapshot 3 tests(2 skip/1 pixel PASS), static contract/design pre-flight, fresh design-review PASS(Blocker 0/High 0/Medium 0/Low 0). 정본 PNG는 오케스트레이터 재기록 대기.
   - 오케스트레이터 대기: 신규 PNG 2종 정본 머신 재기록, Docker/DB/verifier, clean/root `macos-ui`; gate 체크박스는 미체크 유지한다.
 
 ---

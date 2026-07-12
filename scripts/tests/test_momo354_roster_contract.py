@@ -17,6 +17,7 @@ sidebar = read("clients/macOS/Sources/MomoMac/ChannelListView.swift")
 session = read("clients/macOS/Sources/MomoMac/MomoServerSession.swift")
 dtos = read("server/Sources/MomoServer/Routes/DTOs.swift")
 verifier = read("scripts/verify_macos_real_backend_ui.sh")
+snapshot_test = read("clients/macOS/Tests/MomoMacTests/ChannelRosterSnapshotTests.swift")
 
 assert '"/v1/workspaces/\\(workspace.description)/roster"' in backend
 assert '"/v1/workspaces/\\(workspace.description)/members"' not in backend
@@ -28,6 +29,12 @@ assert "public func activeMembers" in view_model
 assert "return activeMembers()" in view_model
 assert "viewModel.activeMembers()" in sidebar
 assert "isHiddenDogfoodAgent" not in sidebar
+assert "guard allowsLocalProfileEditing else { return }" in view_model
+assert ".disabled(!viewModel.allowsLocalProfileEditing)" in sidebar
+
+assert "NSHostingView" in snapshot_test
+assert "testChannelRosterRasterContainsAgentBadgePixels" in snapshot_test
+assert "agentAccentPixelCount" in snapshot_test
 
 assert dtos.count("let realtimeWebSocketUrl: String") >= 2
 assert "serverValue: response.realtimeWebSocketUrl" in session

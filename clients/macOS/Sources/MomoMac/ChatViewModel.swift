@@ -81,6 +81,10 @@ public final class ChatViewModel: ObservableObject {
     private let localContextCopilot: LocalContextCopilotService
     public let usesServerRosterSourceOfTruth: Bool
 
+    public var allowsLocalProfileEditing: Bool {
+        !usesServerRosterSourceOfTruth
+    }
+
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
     @Published public private(set) var members: [Member] = []
@@ -989,6 +993,7 @@ public final class ChatViewModel: ObservableObject {
         avatarPath: String?,
         presence: Presence?
     ) {
+        guard allowsLocalProfileEditing else { return }
         guard let index = members.firstIndex(where: { $0.id == id }) else { return }
         let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !displayName.isEmpty {

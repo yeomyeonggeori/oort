@@ -1558,6 +1558,17 @@ final class MomoMacTests: XCTestCase {
         let message = try XCTUnwrap(viewModel.visibleMessages.first)
         XCTAssertEqual(viewModel.member(message.authorMemberId)?.displayName, "Hermes")
 
+        XCTAssertFalse(viewModel.allowsLocalProfileEditing)
+        let serverPresence = try XCTUnwrap(viewModel.member(invitedAgent)?.presence)
+        viewModel.applyLocalProfile(
+            member: invitedAgent,
+            displayName: "로컬 Hermes",
+            avatarPath: "",
+            presence: .away
+        )
+        XCTAssertEqual(viewModel.member(invitedAgent)?.displayName, "Hermes")
+        XCTAssertEqual(viewModel.member(invitedAgent)?.presence, serverPresence)
+
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertTrue(requests.contains { $0.url?.path == "/v1/workspaces/\(workspace.description)/roster" })
         XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/members") == true })
