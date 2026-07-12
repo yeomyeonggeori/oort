@@ -27,6 +27,28 @@ if "slots" not in inspect.signature(dataclasses.dataclass).parameters:
 import momo_adapter  # noqa: E402
 import smoke_momo_adapter  # noqa: E402
 
+TEST_JOB_ID = 341
+TEST_LEASE_ID = "00000000-0000-7341-8000-000000000341"
+TEST_LEASE_EXPIRES_AT_MS = 4_102_444_800_000
+
+
+def claimed_job(job, *, job_id=TEST_JOB_ID):
+    return {
+        **job,
+        "id": job_id,
+        "leaseId": TEST_LEASE_ID,
+        "leaseExpiresAtMs": TEST_LEASE_EXPIRES_AT_MS,
+    }
+
+
+def claimed_event(event, *, job_id=TEST_JOB_ID):
+    return {
+        **event,
+        "job_id": job_id,
+        "lease_id": TEST_LEASE_ID,
+        "lease_expires_at_ms": TEST_LEASE_EXPIRES_AT_MS,
+    }
+
 
 class CaptureAdapter(momo_adapter.MomoAdapter):
     def __init__(self, *, workspace_id, agent_member_id, run_id, final_text):
@@ -54,6 +76,15 @@ class CaptureAdapter(momo_adapter.MomoAdapter):
         if path.endswith("/invoke"):
             return {"runId": self.run_id}
         return {"id": "message-fixture", "seq": 43}
+
+    async def handle_message(self, event):
+        if (
+            isinstance(event, dict)
+            and event.get("type") == "agent.job"
+            and "lease_id" not in event
+        ):
+            event = claimed_event(event)
+        await super().handle_message(event)
 
     async def _collect_run_output(self, run_id):
         self.assert_run_id = run_id
@@ -158,6 +189,7 @@ class HermesAdapterContractTests(unittest.TestCase):
             "seq": envelope["seq"],
             "ts": envelope["ts"],
             "payload": envelope["payload"],
+            **fixture["pending_claim"],
         }
 
         class Runtime:
@@ -671,16 +703,21 @@ class HermesAdapterContractTests(unittest.TestCase):
 
     def test_pending_recovery_accepts_current_and_legacy_payload_shapes(self):
         class PendingAdapter(CaptureAdapter):
+            _pending_page_size = 2
+            _max_pending_pages = 1
+
             async def _get(self, path):
                 self.pending_path = path
                 return {
                     "jobs": [
-                        {"id": 1, "type": "agent.job", "payload": {"run_id": "run-1"}},
-                        {
-                            "id": 2,
+                        claimed_job(
+                            {"type": "agent.job", "payload": {"run_id": "run-1"}},
+                            job_id=1,
+                        ),
+                        claimed_job({
                             "type": "agent.job",
                             "payloadJson": json.dumps({"run_id": "run-2"}),
-                        },
+                        }, job_id=2),
                     ]
                 }
 
@@ -695,11 +732,78 @@ class HermesAdapterContractTests(unittest.TestCase):
         )
         asyncio.run(adapter._drain_pending_gateway_jobs(reason="reconnect"))
 
-        self.assertIn("/gateway/jobs/pending?limit=100", adapter.pending_path)
+        self.assertIn("/gateway/jobs/pending?limit=2", adapter.pending_path)
         self.assertEqual(
             [event["payload"]["run_id"] for event in adapter.events],
             ["run-1", "run-2"],
         )
+
+    def test_pending_claim_requires_well_formed_server_lease(self):
+        lease = momo_adapter.MomoAdapter._gateway_job_lease(claimed_job({}))
+
+        self.assertEqual(lease.job_id, TEST_JOB_ID)
+        self.assertEqual(lease.lease_id, TEST_LEASE_ID)
+        self.assertIsNone(momo_adapter.MomoAdapter._gateway_job_lease({"id": 1}))
+        self.assertIsNone(momo_adapter.MomoAdapter._gateway_job_lease({
+            "id": 1,
+            "leaseId": "not-a-uuid",
+            "leaseExpiresAtMs": TEST_LEASE_EXPIRES_AT_MS,
+        }))
+
+    def test_gateway_callback_fails_closed_without_owned_lease(self):
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="done",
+        )
+
+        with self.assertRaises(momo_adapter.MomoGatewayLeaseLost):
+            adapter._gateway_callback_body("run-1", {"status": "running"})
+
+    def test_lease_renewal_failure_cancels_inflight_provider(self):
+        class Runtime:
+            def __init__(self):
+                self.cancelled = False
+
+            async def run_momo_job(self, _payload):
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    self.cancelled = True
+
+        class LeaseLossAdapter(CaptureAdapter):
+            async def _post(self, path, body):
+                if path.endswith("/lease/renew"):
+                    raise momo_adapter.MomoAPIError(409, path, "lease taken over")
+                return await super()._post(path, body)
+
+        runtime = Runtime()
+        adapter = LeaseLossAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.runtime = runtime
+        event = claimed_event({
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        })
+        event["lease_expires_at_ms"] = 1
+
+        async def exercise():
+            with self.assertRaises(momo_adapter.MomoGatewayLeaseLost):
+                await asyncio.wait_for(adapter.handle_message(event), timeout=1)
+
+        asyncio.run(exercise())
+        self.assertTrue(runtime.cancelled)
 
     def test_pending_recovery_drains_successive_bounded_pages(self):
         class PagedAdapter(CaptureAdapter):
@@ -715,14 +819,13 @@ class HermesAdapterContractTests(unittest.TestCase):
 
             async def _get(self, _path):
                 self.pages += 1
-                count = self._pending_page_size if self.pages == 1 else 1
+                count = 1 if self.pages <= 2 else 0
                 return {
                     "jobs": [
-                        {
-                            "id": self.pages * 1000 + index,
+                        claimed_job({
                             "type": "agent.job",
                             "payload": {"run_id": f"run-{self.pages}-{index}"},
-                        }
+                        }, job_id=self.pages * 1000 + index)
                         for index in range(count)
                     ]
                 }
@@ -733,8 +836,8 @@ class HermesAdapterContractTests(unittest.TestCase):
         adapter = PagedAdapter()
         asyncio.run(adapter._drain_pending_gateway_jobs(reason="reconnect"))
 
-        self.assertEqual(adapter.pages, 2)
-        self.assertEqual(len(adapter.events), adapter._pending_page_size + 1)
+        self.assertEqual(adapter.pages, 3)
+        self.assertEqual(len(adapter.events), 2)
 
     def test_full_pending_page_completes_before_next_fetch(self):
         class DurablePageAdapter(CaptureAdapter):
@@ -755,8 +858,7 @@ class HermesAdapterContractTests(unittest.TestCase):
                 pending = [run for run in ("run-a", "run-b") if run not in self.completed]
                 return {
                     "jobs": [
-                        {
-                            "id": index + 1,
+                        claimed_job({
                             "type": "agent.job",
                             "payload": {
                                 "run_id": run,
@@ -764,7 +866,7 @@ class HermesAdapterContractTests(unittest.TestCase):
                                 "channel_id": "channel-1",
                                 "agent_member_id": "agent-1",
                             },
-                        }
+                        }, job_id=index + 1)
                         for index, run in enumerate(pending)
                     ]
                 }
@@ -783,8 +885,7 @@ class HermesAdapterContractTests(unittest.TestCase):
             async def _get(self, _path):
                 return {
                     "jobs": [
-                        {
-                            "id": 1,
+                        claimed_job({
                             "type": "agent.job",
                             "payload": {
                                 "run_id": "run-401",
@@ -792,7 +893,7 @@ class HermesAdapterContractTests(unittest.TestCase):
                                 "channel_id": "channel-1",
                                 "agent_member_id": "agent-1",
                             },
-                        }
+                        }, job_id=1)
                     ]
                 }
 
@@ -820,8 +921,7 @@ class HermesAdapterContractTests(unittest.TestCase):
             async def _get(self, _path):
                 return {
                     "jobs": [
-                        {
-                            "id": 1,
+                        claimed_job({
                             "type": "agent.job",
                             "payload": {
                                 "run_id": "run-400",
@@ -829,7 +929,7 @@ class HermesAdapterContractTests(unittest.TestCase):
                                 "channel_id": "channel-1",
                                 "agent_member_id": "agent-1",
                             },
-                        }
+                        }, job_id=1)
                     ]
                 }
 
@@ -1355,6 +1455,8 @@ class HermesAdapterContractTests(unittest.TestCase):
 
     def test_realtime_and_pending_recovery_share_one_provider_worker(self):
         class SequentialAdapter(CaptureAdapter):
+            _pending_page_size = 2
+
             def __init__(self):
                 super().__init__(
                     workspace_id="workspace-1",
@@ -1370,8 +1472,7 @@ class HermesAdapterContractTests(unittest.TestCase):
             async def _get(self, _path):
                 return {
                     "jobs": [
-                        {
-                            "id": 2,
+                        claimed_job({
                             "type": "agent.job",
                             "payload": {
                                 "run_id": "recovered",
@@ -1379,7 +1480,7 @@ class HermesAdapterContractTests(unittest.TestCase):
                                 "channel_id": "channel-1",
                                 "agent_member_id": "agent-1",
                             },
-                        }
+                        }, job_id=2)
                     ]
                 }
 

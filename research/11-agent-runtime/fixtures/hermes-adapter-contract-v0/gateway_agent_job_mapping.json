@@ -1,7 +1,12 @@
 {
-  "schema": "momo.hermes_adapter_contract.gateway_agent_job_mapping.v0",
+  "schema": "momo.hermes_adapter_contract.gateway_agent_job_mapping.v1",
   "mode": "hermes_gateway_native_platform",
   "owner": "momo_creates_run_and_ledger_hermes_reports_result",
+  "pending_claim": {
+    "job_id": 341,
+    "lease_id": "00000000-0000-7341-8000-000000000341",
+    "lease_expires_at_ms": 4102444800000
+  },
   "input_centrifugo_push": {
     "push": {
       "channel": "agentwork:ws10000000-0000-7000-8000-000000000001.30000000-0000-7000-8000-000000000020",
@@ -42,6 +47,8 @@
       "method": "POST",
       "path": "/v1/workspaces/10000000-0000-7000-8000-000000000001/agent-runs/40000000-0000-7000-8000-000000000030/gateway/events",
       "body": {
+        "job_id": 341,
+        "lease_id": "00000000-0000-7341-8000-000000000341",
         "status": "running",
         "detail": "job received"
       }
@@ -50,6 +57,8 @@
       "method": "POST",
       "path": "/v1/workspaces/10000000-0000-7000-8000-000000000001/agent-runs/40000000-0000-7000-8000-000000000030/gateway/complete",
       "body": {
+        "job_id": 341,
+        "lease_id": "00000000-0000-7341-8000-000000000341",
         "status": "succeeded",
         "body": "Drafted a release checklist issue proposal for approval.",
         "error": null,

@@ -142,6 +142,18 @@ struct AuthMiddleware: RouterMiddleware {
             return "agent:jobs:read"
         }
         if method == "POST",
+           segments.count == 10,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "agents",
+           segments[5] == "gateway",
+           segments[6] == "jobs",
+           segments[8] == "lease",
+           segments[9] == "renew" || segments[9] == "release"
+        {
+            return "agent:jobs:read"
+        }
+        if method == "POST",
            segments.count == 7,
            segments[0] == "v1",
            segments[1] == "workspaces",

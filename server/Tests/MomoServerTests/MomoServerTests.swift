@@ -1,4 +1,5 @@
 import XCTest
+import Hummingbird
 @testable import MomoServer
 
 final class MomoServerTests: XCTestCase {
@@ -301,6 +302,20 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(
             AuthMiddleware.requiredAgentScope(
                 method: "POST",
+                path: "/v1/workspaces/ws/agents/agent/gateway/jobs/341/lease/renew"
+            ),
+            "agent:jobs:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
+                path: "/v1/workspaces/ws/agents/agent/gateway/jobs/341/lease/release"
+            ),
+            "agent:jobs:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
                 path: "/v1/workspaces/ws/agent-runs/run/gateway/complete"
             ),
             "agent:runs:callback"
@@ -396,6 +411,24 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(AgentGatewayRoutes.isApprovalHeldRunStatus("queued"))
     }
 
+    func testAgentGatewayCompletionRejectsApprovalHeldRunBeforeLeaseValidation() {
+        XCTAssertEqual(
+            AgentGatewayRoutes.completionPreLeaseDisposition(for: "awaiting_approval"),
+            .approvalHeld
+        )
+        XCTAssertEqual(
+            AgentGatewayRoutes.completionPreLeaseDisposition(for: "paused"),
+            .approvalHeld
+        )
+        for status in ["queued", "running", "succeeded", "failed", "cancelled", "timed_out"] {
+            XCTAssertEqual(
+                AgentGatewayRoutes.completionPreLeaseDisposition(for: status),
+                .requireLease,
+                "\(status) must retain exact-owner lease validation"
+            )
+        }
+    }
+
     func testAgentGatewayProgressEventsDecodeWithBoundedStreamingDelta() throws {
         let eventID = UUID(uuidString: "00000000-0000-7350-8000-000000350001")!
         let thinking = try JSONDecoder().decode(
@@ -411,6 +444,181 @@ final class MomoServerTests: XCTestCase {
             from: Data(#"{"event_id":"\#(eventID.uuidString)","status":"streaming","text_delta":"안녕"}"#.utf8)
         ).validatedProgress(status: "streaming")
         XCTAssertEqual(streaming.textDelta, "안녕")
+    }
+
+    func testAgentGatewayCallbacksRequireExactJobLeaseBinding() throws {
+        let leaseID = UUID(uuidString: "00000000-0000-7341-8000-000000000341")!
+        let event = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(
+                #"{"job_id":341,"lease_id":"\#(leaseID.uuidString)","status":"running"}"#.utf8
+            )
+        )
+        XCTAssertEqual(
+            try event.validatedLease(),
+            AgentGatewayLeaseBinding(jobID: 341, leaseID: leaseID)
+        )
+
+        let complete = try JSONDecoder().decode(
+            AgentGatewayCompleteRequest.self,
+            from: Data(
+                #"{"job_id":341,"lease_id":"\#(leaseID.uuidString)","status":"succeeded"}"#.utf8
+            )
+        )
+        XCTAssertEqual(
+            try complete.validatedLease(),
+            AgentGatewayLeaseBinding(jobID: 341, leaseID: leaseID)
+        )
+
+        let missing = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"status":"running"}"#.utf8)
+        )
+        XCTAssertThrowsError(try missing.validatedLease())
+
+        let wrongPath = try JSONDecoder().decode(
+            AgentGatewayLeaseRequest.self,
+            from: Data(
+                #"{"job_id":342,"lease_id":"\#(leaseID.uuidString)"}"#.utf8
+            )
+        )
+        XCTAssertThrowsError(try wrongPath.validated(jobID: 341))
+    }
+
+    func testAgentGatewayConcurrentConsumersOnlyFirstClaimIsEligible() {
+        let unclaimed = AgentGatewayRoutes.GatewayClaimSnapshot(
+            status: "pending",
+            available: true,
+            leaseActive: false
+        )
+        XCTAssertTrue(AgentGatewayRoutes.gatewayClaimEligible(snapshot: unclaimed))
+
+        let claimedByFirstConsumer = AgentGatewayRoutes.GatewayClaimSnapshot(
+            status: "pending",
+            available: true,
+            leaseActive: true
+        )
+        XCTAssertFalse(
+            AgentGatewayRoutes.gatewayClaimEligible(snapshot: claimedByFirstConsumer),
+            "the second concurrent consumer must not start provider execution"
+        )
+    }
+
+    func testAgentGatewayCrashExpiryEnablesTakeover() {
+        let expiredOwner = AgentGatewayRoutes.GatewayClaimSnapshot(
+            status: "pending",
+            available: true,
+            leaseActive: false
+        )
+        XCTAssertTrue(
+            AgentGatewayRoutes.gatewayClaimEligible(snapshot: expiredOwner),
+            "an expired crashed-owner lease must be takeover eligible"
+        )
+
+        let staleOwner = UUID(uuidString: "00000000-0000-7341-8000-000000000001")!
+        let takeoverOwner = UUID(uuidString: "00000000-0000-7341-8000-000000000002")!
+        let takenOver = AgentGatewayRoutes.GatewayLeaseSnapshot(
+            status: "pending",
+            owner: takeoverOwner,
+            active: true
+        )
+        XCTAssertFalse(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: takenOver,
+                presentedLeaseID: staleOwner,
+                allowSettled: false
+            )
+        )
+        XCTAssertTrue(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: takenOver,
+                presentedLeaseID: takeoverOwner,
+                allowSettled: false
+            )
+        )
+    }
+
+    func testAgentGatewayStaleOwnerEventCompleteRenewAndReleaseFailClosedAs409() {
+        let staleOwner = UUID(uuidString: "00000000-0000-7341-8000-000000000011")!
+        let currentOwner = UUID(uuidString: "00000000-0000-7341-8000-000000000012")!
+        let snapshot = AgentGatewayRoutes.GatewayLeaseSnapshot(
+            status: "pending",
+            owner: currentOwner,
+            active: true
+        )
+
+        for surface in ["events", "complete", "renew", "release"] {
+            XCTAssertFalse(
+                AgentGatewayRoutes.gatewayLeaseAuthorized(
+                    snapshot: snapshot,
+                    presentedLeaseID: staleOwner,
+                    allowSettled: surface == "complete"
+                ),
+                "stale owner must be rejected by gateway \(surface)"
+            )
+        }
+
+        XCTAssertThrowsError(try AgentGatewayRoutes.rejectGatewayLease()) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .conflict)
+        }
+    }
+
+    func testAgentGatewayExpiredLeaseCannotMutateAndCanBeReclaimed() {
+        let owner = UUID(uuidString: "00000000-0000-7341-8000-000000000021")!
+        let expired = AgentGatewayRoutes.GatewayLeaseSnapshot(
+            status: "pending",
+            owner: owner,
+            active: false
+        )
+        XCTAssertFalse(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: expired,
+                presentedLeaseID: owner,
+                allowSettled: false
+            )
+        )
+        XCTAssertTrue(
+            AgentGatewayRoutes.gatewayClaimEligible(
+                snapshot: .init(status: "pending", available: true, leaseActive: false)
+            )
+        )
+    }
+
+    func testAgentGatewayMissingAndSettledLeasePolicyFailsClosed() {
+        let owner = UUID(uuidString: "00000000-0000-7341-8000-000000000031")!
+        XCTAssertFalse(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: nil,
+                presentedLeaseID: owner,
+                allowSettled: false
+            )
+        )
+        XCTAssertFalse(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: .init(status: "pending", owner: nil, active: false),
+                presentedLeaseID: owner,
+                allowSettled: false
+            )
+        )
+        let settled = AgentGatewayRoutes.GatewayLeaseSnapshot(
+            status: "done",
+            owner: owner,
+            active: false
+        )
+        XCTAssertFalse(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: settled,
+                presentedLeaseID: owner,
+                allowSettled: false
+            )
+        )
+        XCTAssertTrue(
+            AgentGatewayRoutes.gatewayLeaseAuthorized(
+                snapshot: settled,
+                presentedLeaseID: owner,
+                allowSettled: true
+            )
+        )
     }
 
     func testAgentGatewayProgressEventsFailClosedOnShapeAndSize() throws {

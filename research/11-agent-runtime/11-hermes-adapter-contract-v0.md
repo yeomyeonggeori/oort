@@ -38,7 +38,7 @@ A runtime integration is acceptable only if every row stays under momo server ow
 | Audit | server writes `audit_log` with workspace, actor, run, and `via_token_id` provenance | both paths call/execute only through server-authorized transitions |
 | Ordering / durability | user-visible output receives `message.seq` in the same transaction as message/outbox writes; Postgres is SoT and Centrifugo is transport only | worker and gateway both finish through REST/PG/outbox; neither publishes client-visible state directly |
 | Progress | server records/validates progress and publishes observable `agent.status` / `agent.partial` only to `agent:` | worker forwards SSE deltas; gateway posts bounded status/partial events (MOMO-350) |
-| Recovery | durable outbox rows are the work source; retries remain idempotent | worker claim retry; gateway realtime wake-up plus actor-bound pending recovery, with lease/takeover from MOMO-341 |
+| Recovery | durable outbox rows are the work source; retries remain idempotent | worker claim retry; gateway realtime wake-up plus actor-bound `FOR UPDATE SKIP LOCKED` pending claim, 30s renewable lease, and expiry takeover |
 | Provider credential | provider OAuth/API keys stay inside the runtime selected by the operator (ADR-0004) | managed deployment configures provider access for AgentWorker; BYOA keeps it entirely inside user-owned Hermes |
 
 ## 3. Mode A: AgentWorker OpenAI-Compatible SSE
@@ -68,7 +68,8 @@ This is the official **BYOA** path. Hermes treats momo as one messaging platform
 Adapter contract:
 
 - `connect()` authenticates with a per-agent bearer through `POST /v1/auth/realtime-token`, fetches a Centrifugo token, and subscribes only to the private `agentwork:` stream. Observable `agent:` status/partial remains a separate client surface.
-- An `agentwork:` publication is a wake-up, not trusted execution input. On connect, reconnect, or a wake-up, the adapter reads `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending` with the same bearer and bounded pagination.
+- An `agentwork:` publication is a wake-up, not trusted execution input. On connect, reconnect, or a wake-up, the adapter claims one row at a time through `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending`; the response carries an opaque job lease capability.
+- The adapter renews the lease while provider work and callbacks are in flight. `events`/`complete`, renew, and release bind the exact job id + lease id + bearer actor; an expired/non-owner capability fails closed, and an expired pending row can be taken over.
 - `send(channel, blocks)` writes through REST `POST /messages` with `client_msg_id` idempotency.
 - For a server-created job, the adapter reports status/tool proposals/partial output through `POST .../gateway/events` and final output/usage through `POST .../gateway/complete`. The server commits all user-visible state.
 - Legacy `handle_message(evt)` interop still acts only on `mention` and `dm.signal`, ignores self-authored events, derives an idempotent trigger key, and writes through REST.
@@ -99,6 +100,7 @@ The fixture `fixtures/hermes-adapter-contract-v0/platform_adapter_event_mapping.
 
 - `POST /v1/auth/realtime-token`: scoped connection-token exchange for agent realtime access.
 - `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending`: actor-bound durable recovery endpoint.
+- `POST /v1/workspaces/:ws/agents/:agent/gateway/jobs/:job/lease/renew|release`: exact-owner bounded lease lifecycle (`agent:jobs:read`).
 - `AGENT_GATEWAY_MODE=worker|gateway`: selects managed or BYOA delivery without changing the guarantee owner.
 
 ### 5.2 Agent identity and legacy secret removal
