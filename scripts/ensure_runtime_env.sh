@@ -35,6 +35,86 @@ HERMES_BASE_URL
 HERMES_API_KEY
 "
 
+centrifugo_config_digest() {
+  local config_file="${1:-infra/centrifugo.json}"
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$config_file" | awk '{ print $1 }'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$config_file" | awk '{ print $1 }'
+  else
+    echo "sha256 tool unavailable; install shasum or sha256sum" >&2
+    return 1
+  fi
+}
+
+centrifugo_container_digest() {
+  local container_id="$1"
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$container_id" \
+    | sed -n 's/^MOMO_CENTRIFUGO_CONFIG_SHA256=//p' \
+    | sed -n '1p'
+}
+
+centrifugo_container_id() {
+  docker compose --env-file "$env_file" -f infra/docker-compose.yml ps -q centrifugo
+}
+
+validate_centrifugo_running_config() {
+  local desired_digest container_id running_digest
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "Centrifugo running-config check deferred: docker CLI unavailable"
+    return 0
+  fi
+  if [ ! -f infra/centrifugo.json ] || [ ! -f infra/docker-compose.yml ]; then
+    echo "Centrifugo running-config check requires repo infra files; run from the repo root" >&2
+    return 1
+  fi
+
+  desired_digest="$(centrifugo_config_digest infra/centrifugo.json)"
+  if ! container_id="$(centrifugo_container_id 2>/dev/null)"; then
+    echo "failed to inspect the local compose Centrifugo service" >&2
+    return 1
+  fi
+  if [ -z "$container_id" ]; then
+    echo "Centrifugo running-config check deferred: no running compose container"
+    return 0
+  fi
+
+  running_digest="$(centrifugo_container_digest "$container_id")"
+  if [ "$running_digest" = "$desired_digest" ]; then
+    echo "Centrifugo running-config ready: repo fingerprint ${desired_digest:0:16}"
+    return 0
+  fi
+
+  if [ "${MOMO_CENTRIFUGO_AUTO_RECREATE:-0}" = "1" ]; then
+    echo "Centrifugo running-config drift detected; recreating opted-in service"
+    MOMO_CENTRIFUGO_CONFIG_SHA256="$desired_digest" \
+      docker compose --env-file "$env_file" -f infra/docker-compose.yml \
+      up -d --wait --force-recreate centrifugo
+    container_id="$(centrifugo_container_id)"
+    running_digest="$(centrifugo_container_digest "$container_id")"
+    if [ "$running_digest" = "$desired_digest" ]; then
+      echo "Centrifugo running-config recreated: repo fingerprint ${desired_digest:0:16}"
+      return 0
+    fi
+    echo "Centrifugo recreate completed but running fingerprint still differs" >&2
+    return 1
+  fi
+
+  cat >&2 <<EOF
+Centrifugo running-config drift detected.
+The running container was created from a different infra/centrifugo.json
+fingerprint (or predates MOMO-353), so namespace/regex/proxy changes are not
+proven active.
+
+Fix (opt-in service recreate, PostgreSQL is not recreated):
+  MOMO_CENTRIFUGO_AUTO_RECREATE=1 ENV_FILE=${env_file} bash scripts/ensure_runtime_env.sh
+
+Values and secrets are not printed. The gate will not continue with stale
+Centrifugo configuration.
+EOF
+  return 1
+}
+
 missing_keys() {
   local file="$1"
   local key value missing
@@ -195,5 +275,6 @@ fi
 
 validate_safe_shell_env "$env_file"
 validate_local_database_url "$env_file"
+validate_centrifugo_running_config
 
-echo "runtime env ready: ${env_file} (required keys present; values redacted)"
+echo "runtime env ready: ${env_file} (required keys present; values redacted; running config checked when present)"

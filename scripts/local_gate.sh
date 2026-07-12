@@ -303,6 +303,30 @@ export LOCAL_GATE_OUTPUT_DIR="$OUT_DIR"
 export LOCAL_GATE_RUN_ID="$RUN_ID"
 export LOCAL_GATE_LOCAL_ALPHA_DIR="$OUT_DIR/local-alpha-${RUN_ID}"
 export LOCAL_GATE_INTERNAL_ALPHA_DIR="$OUT_DIR/internal-alpha-${RUN_ID}"
+export MOMO_RUNTIME_GUARD_REPO_ROOT="$REPO_ROOT"
+case "$PROFILE" in
+  local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
+    # shellcheck source=scripts/runtime_process_guard.sh
+    . "$REPO_ROOT/scripts/runtime_process_guard.sh"
+    if ! momo_guard_begin_gate_run "$RUN_ID" >/dev/null; then
+      echo "failed to create runtime process ownership marker" >&2
+      exit 1
+    fi
+
+    # shellcheck disable=SC2329 # invoked indirectly by EXIT trap
+    local_gate_emergency_cleanup() {
+      local original_rc=$?
+      trap - EXIT INT TERM
+      if momo_guard_validate_marker "${MOMO_GATE_RUN_MARKER:-}"; then
+        momo_cleanup_gate_marker "$MOMO_GATE_RUN_MARKER" "local gate emergency cleanup" || true
+      fi
+      exit "$original_rc"
+    }
+    trap local_gate_emergency_cleanup EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    ;;
+esac
 
 declare -a CMD_LABELS=()
 declare -a CMD_STRINGS=()
@@ -370,14 +394,18 @@ add_static_commands() {
   add_cmd_once "AWS internal alpha topology preflight" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/aws-internal-alpha-preflight"; scripts/aws_internal_alpha_preflight.sh --env-file infra/prod/aws-internal-alpha.env.example --mode recommended --evidence-dir "$out"'
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
   add_cmd_once "Centrifugo exact credential metadata contract" 'test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/centrifugo.json)" = "true"; test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/prod/centrifugo.prod.json)" = "true"; grep -Fq "\"include_connection_meta\": true" scripts/local_alpha_runner.sh'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_design_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/tests/test_local_gate_drift_guard.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_design_preflight.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/adapter.py scripts/mock_hermes.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py'
 }
 
 add_runtime_env_guard_command() {
   add_cmd_once "runtime env drift guard" "bash scripts/ensure_runtime_env.sh"
-  add_note_once coverage "MOMO-320 runtime env drift guard: generated .env.worktree files missing CENT_TOKEN_HMAC/CENT_API_KEY/CENT_PROXY_SECRET/JWT_HMAC or port/runtime keys are regenerated via .conductor/setup.sh before Docker/Centrifugo gates run; custom ENV_FILE values fail clear without printing secrets."
+  add_cmd_once "pre-clean stale gate-owned processes" '. scripts/runtime_process_guard.sh; momo_cleanup_stale_gate_runs "local gate pre-clean"'
+  add_final_cleanup_cmd "reap current gate-owned processes" '. scripts/runtime_process_guard.sh; momo_cleanup_gate_marker "$MOMO_GATE_RUN_MARKER" "local gate final cleanup"'
+  add_note_once coverage "MOMO-320/MOMO-353 runtime drift guard: generated env keys are validated without printing secrets; a running Centrifugo container must carry the current repo config fingerprint (or fail with an opt-in recreate command); pre-clean and EXIT/final cleanup reap only processes that inherited a valid gate-run ownership marker."
+  add_note_once not_covered "MOMO-353 running-config comparison and service recreate require Docker access; worker static verification does not execute them, and momo-main records clean/root runtime evidence before merge."
 }
 
 add_diagnostics_commands() {
@@ -427,6 +455,7 @@ add_runtime_bootstrap_commands() {
   # healthy까지 대기), make migrate는 단일 실행 안에서 apply→verify 2패스를 돌아
   # IDEMPOTENCY_OK 마커를 남긴다(기존 migrate 2회 호출과 동일 판정 경로 + 강한 단정).
   add_cmd "docker compose up (--wait healthy)" "make up"
+  add_cmd "Centrifugo post-start running-config verification" "bash scripts/ensure_runtime_env.sh"
   # env 파일/프로파일이 MIGRATE_IDEMPOTENCY_CHECK=0을 품고 있어도 게이트 단정이
   # 조용히 꺼지지 않도록(리뷰 high) env를 강제하고 IDEMPOTENCY_OK 마커를 직접 단정한다.
   add_cmd "migrate apply + idempotency verify (single run)" "out=\"\$(MIGRATE_IDEMPOTENCY_CHECK=1 make migrate 2>&1)\"; status=\$?; printf '%s\n' \"\$out\"; [ \$status -eq 0 ] && printf '%s\n' \"\$out\" | grep -F '[migrate] IDEMPOTENCY_OK second-pass applied=0'"
@@ -686,7 +715,6 @@ fi
 
 FAILED_INDEX=-1
 FAILED_CODE=0
-FINAL_CLEANUP_FAILED=0
 
 run_cmd() {
   local index="$1"
@@ -739,7 +767,6 @@ run_final_cleanup_cmd() {
     echo "PASS: $label" | tee -a "$LOG_FILE"
   else
     FINAL_CLEANUP_STATUS[index]="fail"
-    FINAL_CLEANUP_FAILED=1
     echo "FAIL: $label (exit $code)" | tee -a "$LOG_FILE"
     if [ "$FAILED_INDEX" -eq -1 ]; then
       FAILED_INDEX=-2

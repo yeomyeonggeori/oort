@@ -15,6 +15,11 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
+## 0-1. MOMO-353 Local Gate Drift Guard (2026-07-12)
+
+- `make up`이 repo `infra/centrifugo.json` SHA-256을 컨테이너 생성 시 fingerprint로 고정하고, `ensure_runtime_env.sh`가 실행 컨테이너와 현재 repo fingerprint를 대조해 drift를 fail-closed하거나 `MOMO_CENTRIFUGO_AUTO_RECREATE=1` opt-in으로 Centrifugo 서비스만 재생성한다.
+- local gate는 run별 marker를 자식 verifier에 상속하고 유효 marker+repo command를 함께 증명한 프로세스만 pre-clean/EXIT reaping한다. unmarked dogfood MomoServer(합성 28180 포트)와 사용자 프로세스를 kill set에서 배제하는 격리 테스트 PASS; Docker running-config 및 clean/root runtime gate는 오케스트레이터 수행 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-347 Pairing Popover Credential Embedding Hardening (2026-07-11)
 
 - 340pt pairing popover를 최대 640pt 높이의 `ScrollView`로 제한하고 24pt inset(유효 폭 약 292pt)에서 자격증명 행이 좁은 헤더/메타데이터 레이아웃으로 전환되게 했다. popover의 material/accent/GroupBox 3중 카드는 flat 자격증명 섹션으로 줄였다.
