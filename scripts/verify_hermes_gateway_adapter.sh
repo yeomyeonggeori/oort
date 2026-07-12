@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337 Hermes gateway path
+# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337/349 Hermes gateway path
 #
 # Verifies the product direction where Hermes treats momo as a messaging
 # platform, while momo keeps the execution ledger SoT:
 #   REST @hermes mention -> agent_run + outbox(agent_job, method=gateway)
-#   -> per-agent bearer pending/status/complete REST -> durable timeline message
+#   -> per-agent bearer pending/status/approval/complete REST -> durable timeline message
 #   + usage_ledger + audit_log.via_token_id. The legacy shared secret is tested
 #   only after an explicit migration-flag restart.
 set -eu
@@ -89,6 +89,13 @@ AGENT_CLIENT_MSG_ID=00000000-0000-7337-8000-000000337001
 AGENT_BODY='MOMO-337 agent bearer authored this message.'
 OTHER_CLIENT_MSG_ID=00000000-0000-7337-8000-000000337002
 OTHER_BODY='@momo337-other MOMO-337 actor binding smoke'
+APPROVAL_CLIENT_MSG_ID=00000000-0000-7349-8000-000000349001
+APPROVAL_BODY='@hermes MOMO-349 approval resume smoke'
+APPROVAL_FINAL_BODY='Hermes gateway resumed MOMO-349 after approval.'
+APPROVAL_DECISION_ID=00000000-0000-7349-8000-000000349101
+REJECTION_CLIENT_MSG_ID=00000000-0000-7349-8000-000000349002
+REJECTION_BODY='@hermes MOMO-349 approval rejection smoke'
+REJECTION_DECISION_ID=00000000-0000-7349-8000-000000349102
 
 TMP_ROOT=${TMPDIR:-/tmp}
 SERVER_LOG=${TMP_ROOT}/momo-hermes-gateway-server-$$.log
@@ -430,6 +437,20 @@ post_gateway_event() {
     '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
 }
 
+post_gateway_approval_request() {
+  token=$1
+  run_id=$2
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
+    '{"status":"approval_request","approval_request":{"action_type":"tool_call","title":"Create release issue","summary":"Review the issue before Hermes creates it.","tool_call":{"call_id":"call-momo-349","name":"create_github_issue","arguments":{"title":"MOMO-349 release checklist"},"tool_grant":{"tool_name":"create_github_issue","approval_policy":"require_approval"}},"estimated_micro_usd":1200,"is_reversible":false}}' >/dev/null
+}
+
+post_gateway_cancelled() {
+  token=$1
+  run_id=$2
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
+    '{"status":"cancelled","detail":"approval rejected; provider execution stopped"}' >/dev/null
+}
+
 post_legacy_gateway_event() {
   run_id=$1
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
@@ -440,8 +461,18 @@ post_legacy_gateway_event() {
 post_gateway_complete() {
   token=$1
   run_id=$2
+  final_body=${3:-$FINAL_BODY}
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/complete" "$token" \
-    "{\"status\":\"succeeded\",\"body\":$(json_escape "$FINAL_BODY"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
+    "{\"status\":\"succeeded\",\"body\":$(json_escape "$final_body"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
+}
+
+decide_approval() {
+  token=$1
+  approval_id=$2
+  approve=$3
+  client_decision_id=$4
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/approvals/${approval_id}/decision" "$token" \
+    "{\"approval_id\":\"${approval_id}\",\"approve\":${approve},\"reason\":\"MOMO-349 gateway verifier\",\"client_decision_id\":\"${client_decision_id}\"}"
 }
 
 create_agent_credential() {
@@ -516,8 +547,11 @@ SELECT id
          FROM message
         WHERE workspace_id = '${WORKSPACE_ID}'
           AND (
-            client_msg_id IN ('${CLIENT_MSG_ID}', '${OTHER_CLIENT_MSG_ID}')
-            OR body IN ('${BODY}', '${OTHER_BODY}')
+            client_msg_id IN (
+              '${CLIENT_MSG_ID}', '${OTHER_CLIENT_MSG_ID}',
+              '${APPROVAL_CLIENT_MSG_ID}', '${REJECTION_CLIENT_MSG_ID}'
+            )
+            OR body IN ('${BODY}', '${OTHER_BODY}', '${APPROVAL_BODY}', '${REJECTION_BODY}')
           )
      )
    );
@@ -530,6 +564,9 @@ DELETE FROM outbox
      OR payload::text LIKE '%${FINAL_BODY}%'
      OR payload::text LIKE '%${AGENT_BODY}%'
      OR payload::text LIKE '%${OTHER_BODY}%'
+     OR payload::text LIKE '%${APPROVAL_BODY}%'
+     OR payload::text LIKE '%${APPROVAL_FINAL_BODY}%'
+     OR payload::text LIKE '%${REJECTION_BODY}%'
      OR payload->'data'->'payload'->>'run_id' IN (
        SELECT id::text FROM momo325_runs
      )
@@ -545,6 +582,7 @@ DELETE FROM audit_log
      detail::text LIKE '%${CLIENT_MSG_ID}%'
      OR detail::text LIKE '%MOMO-325%'
      OR detail::text LIKE '%MOMO-337%'
+     OR detail::text LIKE '%MOMO-349%'
      OR action LIKE 'agent.gateway.%'
      OR via_token_id IN (SELECT id FROM momo337_tokens)
      OR (
@@ -564,10 +602,15 @@ DELETE FROM message
      client_msg_id = '${CLIENT_MSG_ID}'
      OR client_msg_id = '${AGENT_CLIENT_MSG_ID}'
      OR client_msg_id = '${OTHER_CLIENT_MSG_ID}'
+     OR client_msg_id = '${APPROVAL_CLIENT_MSG_ID}'
+     OR client_msg_id = '${REJECTION_CLIENT_MSG_ID}'
      OR body = '${BODY}'
      OR body = '${FINAL_BODY}'
      OR body = '${AGENT_BODY}'
      OR body = '${OTHER_BODY}'
+     OR body = '${APPROVAL_BODY}'
+     OR body = '${APPROVAL_FINAL_BODY}'
+     OR body = '${REJECTION_BODY}'
      OR props->>'source' = 'hermes_gateway'
    );
 DELETE FROM token
@@ -833,6 +876,8 @@ if [ "$OTHER_RUN_ID" = "" ]; then
 fi
 CROSS_AGENT_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"running"}')
 assert_equals "403" "$CROSS_AGENT_CODE" "agent bearer cannot callback another agent run"
+CROSS_APPROVAL_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"approval_request","approval_request":{"tool_call":{"call_id":"cross-agent","name":"forbidden_tool","arguments":{}}}}')
+assert_equals "403" "$CROSS_APPROVAL_CODE" "approval callback preserves run actor binding"
 
 post_gateway_event "$AGENT_TOKEN" "$RUN_ID"
 COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$RUN_ID")
@@ -866,6 +911,87 @@ assert_equals "1" "$FINAL_BROADCAST_COUNT" "durable final message broadcast idem
 JOB_DONE=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') LIMIT 1")
 assert_equals "done" "$JOB_DONE" "agent_job settled"
 
+APPROVAL_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$APPROVAL_CLIENT_MSG_ID" "$APPROVAL_BODY")
+APPROVAL_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${APPROVAL_CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
+if [ "$APPROVAL_RUN_ID" = "" ]; then
+  echo "[hermes-gateway] approval mention did not create agent_run" >&2
+  printf '%s\n' "$APPROVAL_SEND_JSON" >&2
+  exit 1
+fi
+post_gateway_event "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
+post_gateway_approval_request "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
+post_gateway_approval_request "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
+
+APPROVAL_ID=$(psql_scalar "SELECT id FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND status='pending' LIMIT 1")
+if [ "$APPROVAL_ID" = "" ]; then
+  echo "[hermes-gateway] approval_request callback did not create approval" >&2
+  exit 1
+fi
+APPROVAL_COUNT=$(psql_scalar "SELECT count(*) FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}'")
+assert_equals "1" "$APPROVAL_COUNT" "approval callback idempotent retry"
+APPROVAL_RUN_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
+assert_equals "awaiting_approval" "$APPROVAL_RUN_STATUS" "gateway run pauses awaiting approval"
+APPROVAL_BYPASS_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${APPROVAL_RUN_ID}/gateway/complete" "$AGENT_TOKEN" '{"status":"succeeded","body":"must wait for human approval"}')
+assert_equals "409" "$APPROVAL_BYPASS_CODE" "gateway completion cannot bypass pending human approval"
+APPROVAL_MESSAGE_TYPE=$(psql_scalar "SELECT type FROM message WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND lower(props->>'approval_id')=lower('${APPROVAL_ID}') LIMIT 1")
+assert_equals "approval_request" "$APPROVAL_MESSAGE_TYPE" "approval request appears on durable timeline"
+APPROVAL_INITIAL_JOB_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${APPROVAL_RUN_ID}') AND NOT (payload ? 'resume_from_approval_id') LIMIT 1")
+assert_equals "done" "$APPROVAL_INITIAL_JOB_STATUS" "approval callback settles initial gateway job"
+APPROVAL_AUDIT_VIA=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND action='approval.requested' AND via_token_id='${AGENT_TOKEN_ID}'")
+assert_equals "1" "$APPROVAL_AUDIT_VIA" "approval request audit binds agent credential"
+
+APPROVAL_INBOX_JSON=$(api_request GET "/v1/workspaces/${WORKSPACE_ID}/approvals?status=pending" "$ACCESS_TOKEN" "")
+APPROVAL_INBOX_COUNT=$(printf '%s' "$APPROVAL_INBOX_JSON" | jq --arg id "$APPROVAL_ID" '[.approvals[] | select((.id | ascii_downcase) == ($id | ascii_downcase) and .status == "pending")] | length')
+assert_equals "1" "$APPROVAL_INBOX_COUNT" "macOS approval inbox REST projection exposes gateway approval"
+
+APPROVAL_DECISION_JSON=$(decide_approval "$ACCESS_TOKEN" "$APPROVAL_ID" true "$APPROVAL_DECISION_ID")
+assert_equals "approved" "$(printf '%s' "$APPROVAL_DECISION_JSON" | jq -r '.status')" "human approves gateway request"
+APPROVAL_RESUME_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
+assert_equals "queued" "$APPROVAL_RESUME_STATUS" "approved gateway run requeues"
+APPROVAL_RESUME_METHOD=$(psql_scalar "SELECT method FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('${APPROVAL_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${APPROVAL_ID}') LIMIT 1")
+assert_equals "gateway" "$APPROVAL_RESUME_METHOD" "approved resume stays on gateway delivery"
+APPROVAL_RESUME_DECISION=$(psql_scalar "SELECT payload #>> '{approval_decision,status}' FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('${APPROVAL_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${APPROVAL_ID}') LIMIT 1")
+assert_equals "approved" "$APPROVAL_RESUME_DECISION" "resume payload carries approved decision"
+APPROVAL_RESUME_BROADCAST=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='agent.job' AND lower(payload->'data'->'payload'->>'run_id')=lower('${APPROVAL_RUN_ID}') AND lower(payload->'data'->'payload'->>'resume_from_approval_id')=lower('${APPROVAL_ID}') AND payload->>'channel'='agentwork:ws${WORKSPACE_ID}.${AGENT_ID}'")
+assert_equals "1" "$APPROVAL_RESUME_BROADCAST" "approved resume publishes private agent.job"
+APPROVAL_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+APPROVAL_PENDING_COUNT=$(printf '%s' "$APPROVAL_PENDING_JSON" | jq --arg run "$APPROVAL_RUN_ID" --arg approval "$APPROVAL_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase) and (.payload.resume_from_approval_id | ascii_downcase) == ($approval | ascii_downcase))] | length')
+assert_equals "1" "$APPROVAL_PENDING_COUNT" "adapter recovery can fetch approved resume"
+
+post_gateway_event "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
+APPROVAL_COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$APPROVAL_RUN_ID" "$APPROVAL_FINAL_BODY")
+APPROVAL_FINAL_SEQ=$(printf '%s' "$APPROVAL_COMPLETE_JSON" | jq -r '.seq')
+APPROVAL_FINAL_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
+assert_equals "succeeded" "$APPROVAL_FINAL_STATUS" "approved gateway resume completes same run"
+APPROVAL_RESUME_DONE=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${APPROVAL_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${APPROVAL_ID}') LIMIT 1")
+assert_equals "done" "$APPROVAL_RESUME_DONE" "approved resume gateway job settled"
+
+REJECTION_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$REJECTION_CLIENT_MSG_ID" "$REJECTION_BODY")
+REJECTION_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${REJECTION_CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
+if [ "$REJECTION_RUN_ID" = "" ]; then
+  echo "[hermes-gateway] rejection mention did not create agent_run" >&2
+  printf '%s\n' "$REJECTION_SEND_JSON" >&2
+  exit 1
+fi
+post_gateway_event "$AGENT_TOKEN" "$REJECTION_RUN_ID"
+post_gateway_approval_request "$AGENT_TOKEN" "$REJECTION_RUN_ID"
+REJECTION_APPROVAL_ID=$(psql_scalar "SELECT id FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${REJECTION_RUN_ID}' AND status='pending' LIMIT 1")
+REJECTION_DECISION_JSON=$(decide_approval "$ACCESS_TOKEN" "$REJECTION_APPROVAL_ID" false "$REJECTION_DECISION_ID")
+assert_equals "rejected" "$(printf '%s' "$REJECTION_DECISION_JSON" | jq -r '.status')" "human rejects gateway request"
+REJECTION_RUN_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${REJECTION_RUN_ID}'")
+assert_equals "cancelled" "$REJECTION_RUN_STATUS" "rejected gateway run stays cancelled"
+REJECTION_RESUME_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${REJECTION_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${REJECTION_APPROVAL_ID}') LIMIT 1")
+assert_equals "pending" "$REJECTION_RESUME_STATUS" "rejection publishes gateway stop job"
+REJECTION_RESUME_DECISION=$(psql_scalar "SELECT payload #>> '{approval_decision,status}' FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('${REJECTION_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${REJECTION_APPROVAL_ID}') LIMIT 1")
+assert_equals "rejected" "$REJECTION_RESUME_DECISION" "stop payload carries rejected decision"
+post_gateway_cancelled "$AGENT_TOKEN" "$REJECTION_RUN_ID"
+REJECTION_RESUME_DONE=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${REJECTION_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${REJECTION_APPROVAL_ID}') LIMIT 1")
+assert_equals "done" "$REJECTION_RESUME_DONE" "adapter cancellation acknowledgement settles stop job"
+REJECTION_FINAL_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${REJECTION_RUN_ID}'")
+assert_equals "cancelled" "$REJECTION_FINAL_STATUS" "cancellation acknowledgement cannot revive rejected run"
+REJECTION_LATE_COMPLETE_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${REJECTION_RUN_ID}/gateway/complete" "$AGENT_TOKEN" '{"status":"succeeded","body":"must not revive rejected run"}')
+assert_equals "409" "$REJECTION_LATE_COMPLETE_CODE" "late gateway completion cannot override human rejection"
+
 FULL_REVOKE_JSON=$(revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$AGENT_TOKEN_ID")
 assert_equals "true" "$(printf '%s' "$FULL_REVOKE_JSON" | jq -r '.revokedNow')" "full credential revoke"
 REVOKED_CALLBACK_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"running"}')
@@ -881,6 +1007,6 @@ logout_human_session
 stop_server
 cleanup_fixture_rows
 
-echo "[hermes-gateway] PASS: bearer_run=${RUN_ID} final_seq=${FINAL_SEQ} legacy_run=${OTHER_RUN_ID}"
+echo "[hermes-gateway] PASS: bearer_run=${RUN_ID} final_seq=${FINAL_SEQ} approval_run=${APPROVAL_RUN_ID} approval_seq=${APPROVAL_FINAL_SEQ} rejection_run=${REJECTION_RUN_ID} legacy_run=${OTHER_RUN_ID}"
 echo "[hermes-gateway] database boundary: isolated=${POSTGRES_DB} app=NOBYPASSRLS source=${SOURCE_POSTGRES_DB} digest-enforced"
 echo "[hermes-gateway] real Hermes gateway CLI/plugin load remains runtime-unverified(real hermes gateway missing) unless a user-provided Hermes runtime is present."

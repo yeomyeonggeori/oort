@@ -389,6 +389,93 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(
             try AgentGatewayRoutes.normalizedCompletionStatus("mystery", error: nil)
         )
+        XCTAssertFalse(AgentGatewayRoutes.isTerminalRunStatus("awaiting_approval"))
+        XCTAssertTrue(AgentGatewayRoutes.isTerminalRunStatus("cancelled"))
+        XCTAssertTrue(AgentGatewayRoutes.isTerminalRunStatus("timed_out"))
+        XCTAssertTrue(AgentGatewayRoutes.isApprovalHeldRunStatus("awaiting_approval"))
+        XCTAssertFalse(AgentGatewayRoutes.isApprovalHeldRunStatus("queued"))
+    }
+
+    func testAgentGatewayApprovalRequestDecodesAndBuildsWorkerCompatiblePayload() throws {
+        let json = """
+        {
+          "action_type": "tool_call",
+          "title": "Create release issue",
+          "summary": "Review the issue before Hermes creates it.",
+          "tool_call": {
+            "call_id": "call-release-1",
+            "name": "create_github_issue",
+            "arguments": {"title": "Release checklist"},
+            "tool_grant": {
+              "tool_name": "create_github_issue",
+              "approval_policy": "require_approval"
+            }
+          },
+          "estimated_micro_usd": 1200,
+          "is_reversible": false
+        }
+        """
+        let request = try JSONDecoder().decode(
+            AgentGatewayApprovalRequest.self,
+            from: Data(json.utf8)
+        ).validated()
+        let runID = UUID(uuidString: "00000000-0000-7000-8000-000000000777")!
+        let payload = AgentGatewayRoutes.approvalPayload(runID: runID, request: request)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any]
+        )
+        let toolCall = try XCTUnwrap(object["tool_call"] as? [String: Any])
+
+        XCTAssertEqual(object["run_id"] as? String, runID.uuidString)
+        XCTAssertEqual(object["resume_model"] as? String, "gateway_resume_agent_job")
+        XCTAssertEqual(object["source"] as? String, "hermes_gateway")
+        XCTAssertEqual(object["estimated_micro_usd"] as? Int, 1200)
+        XCTAssertEqual(object["is_reversible"] as? Bool, false)
+        XCTAssertEqual(toolCall["call_id"] as? String, "call-release-1")
+        XCTAssertEqual(toolCall["name"] as? String, "create_github_issue")
+        XCTAssertEqual(
+            (toolCall["arguments"] as? [String: Any])?["title"] as? String,
+            "Release checklist"
+        )
+        XCTAssertEqual(
+            (toolCall["tool_grant"] as? [String: Any])?["approval_policy"] as? String,
+            "require_approval"
+        )
+    }
+
+    func testAgentGatewayApprovalRequestValidationFailsClosed() throws {
+        let missingCallID = """
+        {
+          "tool_call": {
+            "call_id": "   ",
+            "name": "create_github_issue",
+            "arguments": {}
+          }
+        }
+        """
+        let malformedGrant = """
+        {
+          "tool_call": {
+            "call_id": "call-1",
+            "name": "create_github_issue",
+            "arguments": {},
+            "tool_grant": "require_approval"
+          }
+        }
+        """
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AgentGatewayApprovalRequest.self,
+                from: Data(missingCallID.utf8)
+            ).validated()
+        )
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(
+                AgentGatewayApprovalRequest.self,
+                from: Data(malformedGrant.utf8)
+            ).validated()
+        )
     }
 
     func testCentrifugoConnectionTokenCarriesMemberAndWorkspaceClaims() async throws {

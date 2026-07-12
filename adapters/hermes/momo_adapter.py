@@ -227,8 +227,19 @@ class MomoConfig:
 #   agentwork : agentwork:ws<workspaceUUID>.<agentMemberUUID> # private work stream
 # Channel ids handed to send() remain opaque; REST is the only write path.
 # ---------------------------------------------------------------------------
+def _canonical_uuid_text(value: Any) -> str:
+    text = str(value)
+    try:
+        return str(uuid.UUID(text)).upper()
+    except (ValueError, TypeError, AttributeError):
+        return text
+
+
 def agent_channel(workspace_id: str, agent_member_id: str) -> str:
-    return f"agentwork:ws{workspace_id}.{agent_member_id}"
+    return (
+        f"agentwork:ws{_canonical_uuid_text(workspace_id)}."
+        f"{_canonical_uuid_text(agent_member_id)}"
+    )
 
 
 def _is_platform_config(value: Any) -> bool:
@@ -1238,8 +1249,10 @@ class MomoAdapter(BasePlatformAdapter):
             or not workspace_id
             or not channel_id
             or not agent_member_id
-            or str(workspace_id) != self.cfg.workspace_id
-            or str(agent_member_id) != self.cfg.agent_member_id
+            or _canonical_uuid_text(workspace_id)
+            != _canonical_uuid_text(self.cfg.workspace_id)
+            or _canonical_uuid_text(agent_member_id)
+            != _canonical_uuid_text(self.cfg.agent_member_id)
             or str(evt.get("channel") or "") != expected_work_channel
         ):
             log.warning("agent.job actor/channel binding rejected; run=%s", run_id)
@@ -1256,8 +1269,23 @@ class MomoAdapter(BasePlatformAdapter):
                     raise MomoGatewayBackpressure(
                         "gateway completion backlog is full"
                     )
+                resume_status = self._resume_decision_status(payload)
+                if resume_status is not None and resume_status != "approved":
+                    await self._report_gateway_event(
+                        workspace_id,
+                        run_id,
+                        "cancelled",
+                        f"approval {resume_status}; provider execution stopped",
+                    )
+                    handled = True
+                    return
                 await self._report_gateway_event(
-                    workspace_id, run_id, "running", "job received"
+                    workspace_id,
+                    run_id,
+                    "running",
+                    "approval approved; resuming job"
+                    if resume_status == "approved"
+                    else "job received",
                 )
                 try:
                     result = await self._run_gateway_job(payload)
@@ -1285,6 +1313,18 @@ class MomoAdapter(BasePlatformAdapter):
                 finally:
                     self._gateway_result_reservations.discard(str(run_id))
 
+            approval_request = self._approval_request_from_result(result)
+            if approval_request is not None:
+                await self._report_gateway_approval_request(
+                    workspace_id, run_id, approval_request
+                )
+                self._pending_gateway_results.pop(str(run_id), None)
+                self._schedule_pending_recovery(
+                    reason="gateway-approval-slot-released", delay_s=0.1
+                )
+                handled = True
+                return
+
             await self._complete_gateway_job(workspace_id, run_id, result)
             self._pending_gateway_results.pop(str(run_id), None)
             self._schedule_pending_recovery(
@@ -1301,6 +1341,21 @@ class MomoAdapter(BasePlatformAdapter):
         path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
         await self._post(path, {"status": status, "detail": detail})
 
+    async def _report_gateway_approval_request(
+        self,
+        workspace_id: str,
+        run_id: str,
+        approval_request: Mapping[str, Any],
+    ) -> None:
+        path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
+        await self._post(
+            path,
+            {
+                "status": "approval_request",
+                "approval_request": dict(approval_request),
+            },
+        )
+
     async def _complete_gateway_job(
         self, workspace_id: str, run_id: str, result: Mapping[str, Any]
     ) -> None:
@@ -1314,6 +1369,16 @@ class MomoAdapter(BasePlatformAdapter):
         We support a few narrow method names to keep the momo plugin resilient
         without importing Hermes internals in repo-local tests.
         """
+        if (
+            payload.get("resume_from_approval_id")
+            and self.runtime is not None
+            and hasattr(self.runtime, "resume_momo_job")
+        ):
+            result = self.runtime.resume_momo_job(payload)
+            if inspect.isawaitable(result):
+                result = await result
+            return self._normalize_gateway_result(result, payload)
+
         handler = getattr(self, "_message_handler", None)
         if callable(handler):
             event = self._payload_to_hermes_message_event(payload)
@@ -1451,6 +1516,21 @@ class MomoAdapter(BasePlatformAdapter):
 
     def _normalize_gateway_result(self, result: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(result, Mapping):
+            approval_request = self._normalize_approval_request(result)
+            if approval_request is not None:
+                return {
+                    "status": "awaiting_approval",
+                    "approval_request": approval_request,
+                }
+            status_hint = str(result.get("status") or "").strip().lower()
+            if "approval_request" in result or status_hint in {
+                "approval_required",
+                "requires_approval",
+                "awaiting_approval",
+            }:
+                raise MomoApprovalContractError(
+                    "Hermes approval request is missing a bounded tool call id/name"
+                )
             body = result.get("body") or result.get("text") or result.get("content")
             usage = result.get("usage")
             raw_error = result.get("error")
@@ -1478,6 +1558,71 @@ class MomoAdapter(BasePlatformAdapter):
             "error": error,
             "usage": usage,
         }
+
+    @staticmethod
+    def _resume_decision_status(payload: Mapping[str, Any]) -> Optional[str]:
+        if not payload.get("resume_from_approval_id"):
+            return None
+        decision = payload.get("approval_decision")
+        if not isinstance(decision, Mapping):
+            return "missing"
+        status = str(decision.get("status") or "missing").strip().lower()
+        return status or "missing"
+
+    @staticmethod
+    def _approval_request_from_result(
+        result: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        value = result.get("approval_request")
+        return dict(value) if isinstance(value, Mapping) else None
+
+    @staticmethod
+    def _normalize_approval_request(
+        result: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        status = str(result.get("status") or "").strip().lower()
+        raw = result.get("approval_request")
+        if raw is None and status in {
+            "approval_required",
+            "requires_approval",
+            "awaiting_approval",
+        }:
+            raw = {
+                "action_type": result.get("action_type") or "tool_call",
+                "title": result.get("title"),
+                "summary": result.get("summary"),
+                "tool_call": result.get("tool_call"),
+                "estimated_micro_usd": result.get("estimated_micro_usd"),
+                "is_reversible": result.get("is_reversible"),
+            }
+        if not isinstance(raw, Mapping):
+            return None
+
+        tool_call = raw.get("tool_call")
+        if not isinstance(tool_call, Mapping):
+            return None
+        call_id = str(tool_call.get("call_id") or tool_call.get("id") or "").strip()
+        name = str(tool_call.get("name") or "").strip()
+        if not call_id or not name:
+            return None
+
+        normalized_tool_call: dict[str, Any] = {
+            "call_id": call_id,
+            "name": name,
+            "arguments": tool_call.get("arguments", {}),
+        }
+        tool_grant = tool_call.get("tool_grant") or raw.get("policy_evidence")
+        if isinstance(tool_grant, Mapping):
+            normalized_tool_call["tool_grant"] = dict(tool_grant)
+
+        normalized: dict[str, Any] = {
+            "action_type": str(raw.get("action_type") or "tool_call"),
+            "tool_call": normalized_tool_call,
+        }
+        for key in ("title", "summary", "estimated_micro_usd", "is_reversible"):
+            if raw.get(key) is not None:
+                normalized[key] = raw[key]
+        return normalized
 
     def _redact_gateway_error(self, raw: Any) -> Any:
         if raw is None:
@@ -1593,6 +1738,10 @@ class MomoConfigurationError(RuntimeError):
 
 class MomoGatewayBackpressure(RuntimeError):
     """Provider work is deferred until a durable completion slot is available."""
+
+
+class MomoApprovalContractError(RuntimeError):
+    """Hermes requested approval without a valid tool-call contract."""
 
 
 class MomoAPIError(RuntimeError):
