@@ -1590,11 +1590,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] worktree clean `runtime-agent` gate + root post-merge gate.
   - 오케스트레이터 재검증: 보안 리뷰(actor↔run binding `requireRunActorBinding` 상속 확인) + 어댑터 46 tests 재실행 OK. main 위 rebase(1c7e766) 후 worktree clean gate full PASS(`local-gate-runtime-agent-20260712T060222Z-…-rc85f176c30ed.md`), PR #337 merge(`b5b39df`), root post-merge full gate PASS(`local-gate-runtime-agent-20260712T061006Z-…-r00cd892de0ef.md`, digest 3중 보존). **승인 왕복이 gateway(BYOA) 실트래픽 경로에 랜딩.**
 
-### ☐ MOMO-350 수용기준 — Gateway status/partial 브로드캐스트 `[swift/python/runtime-agent]` · 의존: MOMO-349 (`#330`, ADR-0102)
-- [ ] `/gateway/events`가 `thinking`/`streaming` 델타를 수용해 `agent.status`/`agent.partial`로 `agent:` namespace 브로드캐스트.
-- [ ] actor/run binding + 서버측 rate/size 상한. 어댑터가 provider 델타를 전달(버퍼링 허용).
-- [ ] macOS 클라 실렌더 증명 + gateway verifier 시나리오 + clean/root gate + 정본 3종.
-> Worker #330 handoff: server/outbox·adapter sampling·macOS exact `agent:` subscription과 verifier 시나리오를 구현했다. server 54 tests, adapter 49 tests, macOS 비스냅샷 78 tests(실렌더 타깃 포함) 및 정적 검증은 PASS. acceptance/runtime gate 체크박스는 오케스트레이터의 격리 DB verifier + clean/root `runtime-agent` evidence 전까지 미체크 유지한다.
+### ☑ MOMO-350 수용기준 — Gateway status/partial 브로드캐스트 `[swift/python/runtime-agent]` · 의존: MOMO-349 (`#330`, ADR-0102)
+- [x] `/gateway/events`가 `thinking`/`streaming` 델타를 수용해 `agent.status`/`agent.partial`로 `agent:` namespace 브로드캐스트 — **outbox broadcast 경유** (단일 쓰기경로 유지).
+- [x] actor/run binding(진입점 결속 상속) + 서버측 상한: 8 KiB delta / 2 KiB detail / run당 240 events/min(429). 어댑터는 512B/250ms 샘플링 전달.
+- [x] macOS exact `agent:` 구독 → 기존 `AgentPartialView` 렌더(비스냅샷 78 tests) + gateway verifier status/partial·위조·크기·namespace 시나리오.
+  - 오케스트레이터 검수: outbox 발행·상한·채널 케이스 확인, worktree clean gate full PASS(`…20260712T065703Z-…-re580a53c4cc4.md`), PR #338 merge(`f079279`), root post-merge gate PASS(`…20260712T070419Z-…-r52b8ed1d9f21.md`).
 
 ### ☐ MOMO-352 수용기준 — 이중 경로 동등성 verifier `[tooling/runtime-agent]` · 의존: MOMO-349, MOMO-350, MOMO-341 (`#332`, ADR-0102)
 - [ ] 신규 `verify_agent_path_equivalence.sh` — 격리 DB 패턴(per-run 채널 UUID, CENT_CHANNEL 대문자, digest, exit 96) 준수.
