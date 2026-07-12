@@ -1711,6 +1711,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 리뷰 보강: context verifier도 human(…101)/Hermes(…103)와 두 채널·membership을 자체 시드하며, 고정 seed ID 참조 전수 점검 및 contract 회귀 검사를 추가했다. runtime 체크박스는 오케스트레이터 재검증 전까지 미체크 유지한다.
 - [ ] `schema_v0.sql` 무변경. 수정/new shell `bash -n`, Python contract test, Swift build/test PASS.
 - [ ] clean/root `runtime-agent` + `macos-ui` PASS — worker는 DB/Docker/verifier/local gate 금지로 미체크 유지; 오케스트레이터가 merge 전에 실행한다 (`runtime-unverified`).
+### ☐ MOMO-354 수용기준 — real-server roster SoT + invite-gated visibility `[swift/macos-ui]` · Issue #341
+- [ ] real-server 연결은 `/v1/workspaces/:ws/roster`의 active member/channel membership를 사용하고 REST backend에서 demo fixture로 fallback하지 않는다.
+- [ ] 선택 채널의 active human/agent만 사이드바에 표시하며 agent는 `AGENT` 배지를 유지한다. 이름 기반 dogfood 숨김 예외는 없다.
+- [ ] 멘션 후보와 agent realtime 구독은 선택 채널 active membership로 동일하게 제한하고, 메시지 작성자 표시도 roster member identity를 사용한다.
+- [ ] login/join의 `realtimeWebSocketUrl`을 앱이 우선 사용하고 앱 env는 이전 서버 fallback으로만 남긴다 (ADR-0110).
+- [ ] server/macOS 단위 테스트 + light/dark roster snapshot 정본 재기록 + design-review Blocker 0 + clean/root `macos-ui` gate evidence.
+  - worker evidence: server 63 tests, macOS 비스냅샷 79 tests, 신규 snapshot 2종 compile+reference-wait skip, Python no-DB contract, 수정 shell `bash -n`/실행권한 PASS, design-review PASS(Blocker 0/High 0/Medium 1).
+  - 오케스트레이터 대기: 신규 PNG 2종 정본 머신 재기록, Docker/DB/verifier, clean/root `macos-ui`; gate 체크박스는 미체크 유지한다.
 
 ---
 

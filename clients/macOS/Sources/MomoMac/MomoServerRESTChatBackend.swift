@@ -8,11 +8,13 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
     public let config: MomoServerRESTChatBackendConfig
+    public private(set) var realtimeWebSocketURL: URL?
 
     private let session: URLSession
     private var realtimeDriver: (any RealtimeSubscriptionDriver)?
+    private var hasExplicitRealtimeDriver: Bool
     private var agentRealtimeTransport: (any AgentRealtimeEnvelopeSubscriptionTransport)?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -31,8 +33,10 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         realtimeDriver: (any RealtimeSubscriptionDriver)? = nil
     ) {
         self.config = config
+        self.realtimeWebSocketURL = config.centrifugoWebSocketURL
         self.session = session
         self.realtimeDriver = realtimeDriver
+        self.hasExplicitRealtimeDriver = realtimeDriver != nil
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
         self.decoder.keyDecodingStrategy = .useDefaultKeys
@@ -42,10 +46,12 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         self.workspace = workspace
         if !accessToken.isEmpty {
             self.accessToken = accessToken
+            try configureRealtime(config.centrifugoWebSocketURL?.absoluteString)
             return
         }
         if let configured = config.accessToken, !configured.isEmpty {
             self.accessToken = configured
+            try configureRealtime(config.centrifugoWebSocketURL?.absoluteString)
             return
         }
 
@@ -60,11 +66,15 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
             response: LoginResponse.self
         )
         self.accessToken = login.accessToken
-        self.authenticatedMember = login.member.member
+        self.authenticatedMember = try login.member.member()
+        try configureRealtime(
+            login.realtimeWebSocketUrl ?? config.centrifugoWebSocketURL?.absoluteString
+        )
     }
 
     public func setRealtimeDriver(_ realtimeDriver: (any RealtimeSubscriptionDriver)?) {
         self.realtimeDriver = realtimeDriver
+        hasExplicitRealtimeDriver = true
     }
 
     public func setAgentRealtimeTransport(
@@ -92,6 +102,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
             }
         }
         realtimeStatusStreams = [:]
+        realtimeWebSocketURL = config.centrifugoWebSocketURL
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
@@ -139,9 +150,9 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         }
 
         if let agentRealtimeTransport {
-            let members = cachedMembers ?? config.members
+            let members = cachedMembers ?? []
             let agents = members.filter {
-                $0.kind == .agent && ($0.channelIds.isEmpty || $0.channelIds.contains(channel))
+                $0.kind == .agent && $0.status == .active && $0.channelIds.contains(channel)
             }
             for agent in agents {
                 if let stream = try? await Self.agentRealtimeEvents(
@@ -211,29 +222,20 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
     }
 
     public func presence(channel: ChannelID) async throws -> [PresenceEntry] {
-        config.members.map {
+        (cachedMembers ?? []).filter {
+            $0.status == .active && $0.channelIds.contains(channel)
+        }.map {
             PresenceEntry(memberId: $0.id, channelId: channel, presence: $0.presence)
         }
     }
 
     public func members(workspace: WorkspaceID) async throws -> [Member] {
-        do {
-            let response = try await get(
-                "/v1/workspaces/\(workspace.description)/members",
-                queryItems: [],
-                response: WorkspaceRosterResponse.self
-            )
-            var all = response.members.map(\.member)
-            if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
-                all.insert(authenticatedMember, at: 0)
-            }
-            cachedMembers = all
-            return all
-        } catch BackendError.problem(let status, _, _) where status == 404 && !config.members.isEmpty {
-            // Older mocks and offline demo configs predate the roster endpoint.
-        }
-
-        var all = config.members
+        let response = try await get(
+            "/v1/workspaces/\(workspace.description)/roster",
+            queryItems: [],
+            response: WorkspaceRosterResponse.self
+        )
+        var all = try response.members.map { try $0.member() }
         if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
             all.insert(authenticatedMember, at: 0)
         }
@@ -565,6 +567,32 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         realtimeStatusStreams[channel]?[token] = nil
     }
 
+    private func configureRealtime(_ rawURL: String?) throws {
+        guard let rawURL else { return }
+        guard let endpoint = URL(string: rawURL),
+              endpoint.host != nil,
+              endpoint.scheme == "ws" || endpoint.scheme == "wss"
+        else {
+            throw BackendError.decoding("invalid server realtime WebSocket URL")
+        }
+        realtimeWebSocketURL = endpoint
+        guard !hasExplicitRealtimeDriver else { return }
+        let tokenProvider = MomoServerRealtimeTokenProvider(
+            baseURL: config.baseURL,
+            accessTokenProvider: { [weak self] in
+                guard let self else { throw BackendError.notConnected }
+                return try await self.requireAccessToken()
+            }
+        )
+        let transport = SwiftCentrifugeRealtimeSubscriptionTransport(
+            endpoint: endpoint,
+            workspace: workspace ?? config.workspace,
+            tokenProvider: tokenProvider
+        )
+        realtimeDriver = DefaultRealtimeSubscriptionDriver(transport: transport)
+        agentRealtimeTransport = transport
+    }
+
     private static func agentRealtimeEvents(
         transport: any AgentRealtimeEnvelopeSubscriptionTransport,
         agent: MemberID,
@@ -627,8 +655,6 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
     public var accessToken: String?
     public var login: Login
     public var workspace: WorkspaceID
-    public var channels: [Channel]
-    public var members: [Member]
     public var defaultChannel: ChannelID
 
     public init(
@@ -637,8 +663,6 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
         accessToken: String? = nil,
         login: Login = .demo,
         workspace: WorkspaceID = .demo,
-        channels: [Channel]? = nil,
-        members: [Member]? = nil,
         defaultChannel: ChannelID = .demoGeneral
     ) {
         self.baseURL = baseURL
@@ -646,8 +670,6 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
         self.accessToken = accessToken
         self.login = login
         self.workspace = workspace
-        self.channels = channels ?? Self.demoChannels(workspace: workspace)
-        self.members = members ?? Self.demoMembers(workspace: workspace)
         self.defaultChannel = defaultChannel
     }
 
@@ -680,16 +702,13 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
             email: environment["MOMO_LOGIN_EMAIL"] ?? Login.demo.email,
             password: environment["MOMO_LOGIN_PASSWORD"] ?? Login.demo.password
         )
-        let channels = Self.demoChannels(workspace: workspace)
         return Self(
             baseURL: baseURL,
             centrifugoWebSocketURL: centrifugoWebSocketURL,
             accessToken: token,
             login: login,
             workspace: workspace,
-            channels: channels,
-            members: Self.demoMembers(workspace: workspace),
-            defaultChannel: channels.contains(where: { $0.id == defaultChannel }) ? defaultChannel : channels[0].id
+            defaultChannel: defaultChannel
         )
     }
 
@@ -703,49 +722,6 @@ public struct MomoServerRESTChatBackendConfig: Sendable, Hashable {
         return nil
     }
 
-    public static func demoChannels(workspace: WorkspaceID = .demo) -> [Channel] {
-        [
-            Channel(
-                id: .demoGeneral,
-                workspaceId: workspace,
-                kind: .publicChannel,
-                name: "general",
-                topic: "팀 일반 채널",
-                createdBy: .demoHuman
-            ),
-            Channel(
-                id: .demoAgentLab,
-                workspaceId: workspace,
-                kind: .publicChannel,
-                name: "agent-lab",
-                topic: "에이전트 실험실 - Hermes 로컬 브리지 데모(D/B/C)",
-                createdBy: .demoHuman
-            ),
-        ]
-    }
-
-    public static func demoMembers(workspace: WorkspaceID = .demo) -> [Member] {
-        [
-            Member(
-                id: .demoHuman,
-                workspaceId: workspace,
-                kind: .human,
-                displayName: "데모 사용자",
-                handle: "demo",
-                channelIds: [.demoGeneral, .demoAgentLab],
-                presence: .online
-            ),
-            Member(
-                id: .demoAgent,
-                workspaceId: workspace,
-                kind: .agent,
-                displayName: "Hermes",
-                handle: "hermes",
-                channelIds: [.demoAgentLab],
-                presence: .working
-            ),
-        ]
-    }
 }
 
 public extension MomoServerRESTChatBackendConfig {
@@ -778,6 +754,7 @@ private struct LoginResponse: Decodable {
     let accessToken: String
     let refreshToken: String
     let member: MemberDTO
+    let realtimeWebSocketUrl: String?
 }
 
 private struct CreateAgentCredentialRequestDTO: Encodable {
@@ -855,10 +832,15 @@ private struct MemberDTO: Decodable {
     let avatarUrl: String?
     let channelIds: [String]?
 
-    var member: Member {
-        Member(
-            id: MemberID(uuidString: id) ?? .demoHuman,
-            workspaceId: WorkspaceID(uuidString: workspaceId) ?? .demo,
+    func member() throws -> Member {
+        guard let memberID = MemberID(uuidString: id),
+              let workspaceID = WorkspaceID(uuidString: workspaceId)
+        else {
+            throw BackendError.decoding("invalid roster member identity")
+        }
+        return Member(
+            id: memberID,
+            workspaceId: workspaceID,
             kind: MemberKind(rawValue: kind) ?? .human,
             status: status.flatMap(MemberStatus.init(rawValue:)) ?? .active,
             displayName: displayName,

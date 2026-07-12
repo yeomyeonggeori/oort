@@ -159,9 +159,7 @@ public struct ChannelListView: View {
     }
 
     private var visibleChannelMembers: [Member] {
-        viewModel.members.filter { member in
-            viewModel.isMember(member.id) && !isHiddenDogfoodAgent(member)
-        }
+        viewModel.activeMembers()
     }
 
     private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
@@ -1204,19 +1202,6 @@ public struct ChannelListView: View {
         .timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18)
     }
 
-    private func isHiddenDogfoodAgent(_ member: Member) -> Bool {
-        guard member.isAgent else { return false }
-        let identity = "\(member.displayName) \(member.handle)".lowercased()
-        if isDogfoodHermesAgent(member) {
-            return !hermesInvited
-        }
-        return identity.contains("김인턴")
-            || identity.contains("kim")
-            || identity.contains("intern")
-            || identity.contains("빌드봇")
-            || identity.contains("buildbot")
-    }
-
     private func isDogfoodHermesAgent(_ member: Member) -> Bool {
         guard member.isAgent else { return false }
         let identity = "\(member.displayName) \(member.handle)".lowercased()
@@ -1271,6 +1256,7 @@ public struct ChannelListView: View {
     }
 
     private func displayMember(_ member: Member) -> Member {
+        guard !viewModel.usesServerRosterSourceOfTruth else { return member }
         var copy = member
         if let localName = MomoLocalProfileStore.displayName(for: member) {
             copy.displayName = localName
@@ -1297,6 +1283,9 @@ public struct ChannelListView: View {
     }
 
     private func avatarPath(for member: Member) -> String {
+        if viewModel.usesServerRosterSourceOfTruth {
+            return member.avatarURL?.isFileURL == true ? member.avatarURL?.path ?? "" : ""
+        }
         if let local = MomoLocalProfileStore.avatarPath(for: member) {
             return local
         }
@@ -1323,7 +1312,10 @@ public struct ChannelListView: View {
         if member.status != .active {
             return .error
         }
-        switch MomoLocalProfileStore.presence(for: member) ?? member.presence {
+        let presence = viewModel.usesServerRosterSourceOfTruth
+            ? member.presence
+            : MomoLocalProfileStore.presence(for: member) ?? member.presence
+        switch presence {
         case .online:
             return .online
         case .working:

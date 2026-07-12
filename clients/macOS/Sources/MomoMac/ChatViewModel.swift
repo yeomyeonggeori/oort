@@ -6,6 +6,10 @@ public protocol MomoSessionSensitiveStateClearing: Sendable {
     func clearSessionSensitiveState() async
 }
 
+/// Marker for backends whose member identity and channel scope must remain
+/// server-owned. Local demo profile hints are never merged into these rosters.
+public protocol ServerRosterSourceOfTruth: Sendable {}
+
 public enum DogfoodAgentInviteError: Error, LocalizedError {
     case selectChannelFirst
     case unsupportedAlias(String)
@@ -75,6 +79,7 @@ public final class ChatViewModel: ObservableObject {
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
+    public let usesServerRosterSourceOfTruth: Bool
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
@@ -138,6 +143,7 @@ public final class ChatViewModel: ObservableObject {
         self.agentTransport = agentTransport
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
+        self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
         self.foundationModelsCapability = foundationModelsCapability
         self.localContextCopilot = localContextCopilot
     }
@@ -154,9 +160,11 @@ public final class ChatViewModel: ObservableObject {
         do {
             try await chat.connect(workspace: workspace, accessToken: accessToken)
             self.workspaceId = workspace
-            self.members = try await chat.members(workspace: workspace)
+            let loadedMembers = try await chat.members(workspace: workspace)
+            self.members = usesServerRosterSourceOfTruth
+                ? loadedMembers
+                : applyLocalProfileHints(to: loadedMembers)
             self.channels = try await chat.channels(workspace: workspace)
-            self.members = mergeConfiguredMembershipHints(members)
             await refreshAgentRuntimeStatus()
             await loadPendingApprovals(workspace: workspace)
             if selectedChannelId == nil {
@@ -453,9 +461,8 @@ public final class ChatViewModel: ObservableObject {
     public func mentionAutocompleteCandidates(for draft: String? = nil) -> [Member] {
         guard let query = Self.activeMentionQuery(in: draft ?? composerDraft) else { return [] }
         let normalizedQuery = query.lowercased()
-        return members
+        return activeMembers()
             .filter { member in
-                guard canInsertMention(for: member) else { return false }
                 guard !normalizedQuery.isEmpty else { return true }
                 return member.handle.lowercased().hasPrefix(normalizedQuery)
                     || member.displayName.lowercased().contains(normalizedQuery)
@@ -1007,6 +1014,13 @@ public final class ChatViewModel: ObservableObject {
         return members.first(where: { $0.id == member })?.channelIds.contains(channel) == true
     }
 
+    public func activeMembers(in channel: ChannelID? = nil) -> [Member] {
+        guard let channel = channel ?? selectedChannelId else { return [] }
+        return members.filter { member in
+            member.status == .active && member.channelIds.contains(channel)
+        }
+    }
+
     public func isAgentWorking(_ member: Member, in channel: ChannelID? = nil) -> Bool {
         guard member.isAgent else { return false }
         let channel = channel ?? selectedChannelId
@@ -1266,14 +1280,9 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func mergeConfiguredMembershipHints(_ loaded: [Member]) -> [Member] {
+    private func applyLocalProfileHints(to loaded: [Member]) -> [Member] {
         loaded.map { member in
             var copy = member
-            if member.channelIds.isEmpty,
-               let configured = members.first(where: { $0.id == member.id }),
-               !configured.channelIds.isEmpty {
-                copy.channelIds = configured.channelIds
-            }
             if let localName = MomoLocalProfileStore.displayName(for: copy) {
                 copy.displayName = localName
             }

@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-12 (ADR-0102 Option C) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-13 (ADR-0110) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -41,6 +41,18 @@ flowchart LR
 
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
 - 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = momo 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
+
+### 클라이언트 roster와 realtime discovery
+
+macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 active
+`channelIds`의 유일한 권위로 사용한다(ADR-0110). 선택 채널 membership가 없는
+에이전트는 사이드바·멘션 후보·agent realtime 구독에 나타나지 않는다. offline demo
+fixture는 `LiveChatBackend`에만 존재한다.
+
+로그인과 invite join 응답은 `realtimeWebSocketUrl`을 함께 반환한다. 앱은 이 서버 소유
+주소로 centrifuge-swift transport를 구성하고 앱 환경의 `MOMO_CENTRIFUGO_WS_URL`은
+이전 서버/개발용 fallback으로만 사용한다. REST API와 realtime 공개 도메인은 계속
+분리할 수 있으며(ADR-0002), 클라이언트는 API URL에서 realtime 주소를 추론하지 않는다.
 
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 

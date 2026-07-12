@@ -221,6 +221,17 @@ assert_public_https_url() {
   assert_public_domain_value "$key host" "$host"
 }
 
+assert_realtime_websocket_url() {
+  local key="$1"
+  local value
+  value="$(get_var "$key")"
+  [ "$value" != "" ] || return 0
+  case "$value" in
+    wss://*/connection/websocket) pass "$key uses the secure Centrifugo websocket endpoint" ;;
+    *) fail "$key must use wss:// and end with /connection/websocket outside local development" ;;
+  esac
+}
+
 assert_email() {
   local key="$1"
   local value
@@ -413,7 +424,7 @@ esac
 
 if [ "$runtime_mode" = "strict" ]; then
   require_vars \
-    COMPOSE_PROJECT_NAME MOMO_ENV PUBLIC_BASE_URL API_DOMAIN REALTIME_DOMAIN CADDY_EMAIL ACME_EMAIL HTTP_PORT HTTPS_PORT \
+    COMPOSE_PROJECT_NAME MOMO_ENV PUBLIC_BASE_URL API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL CADDY_EMAIL ACME_EMAIL HTTP_PORT HTTPS_PORT \
     MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
     POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL RELAY_DATABASE_URL \
     REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS CENT_TOKEN_HMAC CENT_API_KEY CENT_PROXY_SECRET JWT_HMAC \
@@ -423,7 +434,7 @@ if [ "$runtime_mode" = "strict" ]; then
     PGBACKREST_STANZA_CHECK_REQUIRED PGBACKREST_FULL_BACKUP_REQUIRED PGBACKREST_PITR_REHEARSAL_REQUIRED
 
   for key in \
-    API_DOMAIN REALTIME_DOMAIN ACME_EMAIL MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
+    API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL ACME_EMAIL MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
     PUBLIC_BASE_URL CADDY_EMAIL \
     POSTGRES_PASSWORD DATABASE_URL RELAY_DATABASE_URL REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS \
     CENT_TOKEN_HMAC CENT_API_KEY CENT_PROXY_SECRET JWT_HMAC HERMES_BASE_URL HERMES_API_KEY SECRET_SOURCE \
@@ -434,6 +445,7 @@ if [ "$runtime_mode" = "strict" ]; then
 
   assert_public_domain API_DOMAIN
   assert_public_domain REALTIME_DOMAIN
+  assert_realtime_websocket_url MOMO_CENTRIFUGO_WS_URL
   assert_public_https_url PUBLIC_BASE_URL
   assert_email CADDY_EMAIL
   assert_email ACME_EMAIL
@@ -460,7 +472,7 @@ if [ "$runtime_mode" = "strict" ]; then
   esac
 elif [ "$runtime_mode" = "internal-smoke" ]; then
   require_vars \
-    COMPOSE_PROJECT_NAME MOMO_ENV API_DOMAIN REALTIME_DOMAIN ACME_EMAIL HTTP_PORT HTTPS_PORT \
+    COMPOSE_PROJECT_NAME MOMO_ENV API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL ACME_EMAIL HTTP_PORT HTTPS_PORT \
     MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
     POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL \
     DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL MOMO_BOOTSTRAP_RUNTIME_ROLES \
@@ -474,6 +486,7 @@ elif [ "$runtime_mode" = "internal-smoke" ]; then
 
   assert_exact API_DOMAIN localhost
   assert_exact REALTIME_DOMAIN rt.localhost
+  assert_exact MOMO_CENTRIFUGO_WS_URL wss://rt.localhost/connection/websocket
   assert_exact POSTGRES_PASSWORD change-me-postgres
   assert_exact REDIS_PASSWORD change-me-redis
   assert_exact CENT_TOKEN_HMAC change-me-cent-token-hmac

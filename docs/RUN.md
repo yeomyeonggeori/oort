@@ -973,17 +973,20 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
   `/v1/auth/login`, `GET/POST /v1/workspaces/{ws}/channels/{ch}/messages`를 사용한다.
   기본값은 `server/Migrations/002_seed.sql`의 demo workspace/human/channel fixture다. agent는
   pairing invite 전에는 존재하지 않는다.
+  `/v1/auth/login`, `GET /v1/workspaces/{ws}/roster`,
+  `GET/POST /v1/workspaces/{ws}/channels/{ch}/messages`를 사용한다. real-server의 멤버
+  신원과 채널 초대 범위는 roster가 SoT이며 demo member fixture로 fallback하지 않는다.
 - REST dev mode 환경변수:
   `MOMO_SERVER_BASE_URL`(필수), `MOMO_ACCESS_TOKEN`(선택, 없으면 `/v1/auth/login`),
   `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(내부 alpha seed는 `demo@momo.local`/`dev-password`;
   미설정 시 transport default도 같은 seed credential을 사용),
   `MOMO_WORKSPACE_ID`(기본 demo workspace), `MOMO_CHANNEL_ID`(기본 `#general`),
-  `MOMO_CENTRIFUGO_WS_URL`(선택, 설정 시 `/v1/auth/realtime-token`으로 Centrifugo
-  connection JWT를 받아 `ch:ws<workspace>.<channel>` live subscription을 연결).
+  `MOMO_CENTRIFUGO_WS_URL`(서버가 login/join의 `realtimeWebSocketUrl`로 광고하며 앱은
+  서버 값을 우선 사용; 이전 서버에서는 앱 env가 fallback. 설정 시 `/v1/auth/realtime-token`으로
+  Centrifugo connection JWT를 받아 `ch:ws<workspace>.<channel>` live subscription을 연결).
 - REST dev mode 검증 범위: message history fetch와 send는 실제 MomoServer REST/DB 경로를 탄다.
-  `MOMO_CENTRIFUGO_WS_URL`을 설정하면 WebSocket/Centrifugo live subscription도 실제
-  SwiftCentrifuge adapter를 탄다. full auth/session UI와 production reconnect UX polish는
-  후속 범위다.
+  서버가 `realtimeWebSocketUrl`을 광고하면 별도 앱 env 없이 WebSocket/Centrifugo live
+  subscription도 실제 SwiftCentrifuge adapter를 탄다. production reconnect UX polish는 후속 범위다.
 - `scripts/macos_dev_run.sh`: build-macos-apps SwiftPM GUI workflow에 맞춘 dev-only run loop다.
   `swift build --package-path clients/macOS --product MomoMacDevApp` 후 `dist/MomoMacDevApp.app`을
   생성하고 `/usr/bin/open -n`으로 띄운다. `--verify`는 process/window smoke, `--logs`는 unified

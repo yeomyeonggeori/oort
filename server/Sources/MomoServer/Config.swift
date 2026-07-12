@@ -26,6 +26,7 @@ struct Config: Sendable {
     // ---- Centrifugo (transport, L4 §4) ----
     var centAPIURL: String   // e.g. http://centrifugo:8000/api
     var centAPIKey: String   // X-API-Key for POST /api/publish
+    var realtimeWebSocketURL: String // public ws(s) endpoint advertised to app sessions
     var centTokenHMAC: String // connection/subscription JWT signing (HMAC)
     var centConnectionTokenTTL: TimeInterval // short-lived client connection token
     // Shared secret Centrifugo attaches to subscribe-proxy callbacks
@@ -76,6 +77,9 @@ struct Config: Sendable {
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: env("CENT_API_URL", "http://localhost:8000/api"),
             centAPIKey: env("CENT_API_KEY", "dev-insecure-cent-api-key"),
+            realtimeWebSocketURL: realtimeWebSocketURL(
+                environment: ProcessInfo.processInfo.environment
+            ),
             centTokenHMAC: env("CENT_TOKEN_HMAC", "dev-insecure-cent-token-hmac"),
             centConnectionTokenTTL: TimeInterval(
                 clampedCentConnectionTokenTTL(
@@ -102,6 +106,21 @@ struct Config: Sendable {
     /// zero/negative dev env values that would make every connect fail.
     static func clampedCentConnectionTokenTTL(_ seconds: Int) -> Int {
         min(max(seconds, 60), 30 * 60)
+    }
+
+    /// Public endpoint returned with login/join sessions. The API URL remains
+    /// compose-internal; clients must never derive their WebSocket endpoint from it.
+    static func realtimeWebSocketURL(environment: [String: String]) -> String {
+        if let raw = environment["MOMO_CENTRIFUGO_WS_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           let url = URL(string: raw),
+           url.scheme == "ws" || url.scheme == "wss",
+           url.host != nil
+        {
+            return url.absoluteString
+        }
+        let port = environment["CENT_PORT"].flatMap(Int.init).flatMap { $0 > 0 ? $0 : nil } ?? 8000
+        return "ws://127.0.0.1:\(port)/connection/websocket"
     }
 
     /// MOMO-300 fail-fast: in strict environments (staging/prod/internal-host)

@@ -56,10 +56,16 @@ enum AppBuilder {
             jwt: jwt,
             tokenStore: tokenStore,
             platformAdminEmails: config.platformAdminEmails,
-            platformAdminLoginSecret: config.platformAdminLoginSecret
+            platformAdminLoginSecret: config.platformAdminLoginSecret,
+            realtimeWebSocketURL: config.realtimeWebSocketURL
         )
         authRoutes.add(to: router)
-        JoinRoutes(db: db, jwt: jwt, tokenStore: tokenStore).add(to: router)
+        JoinRoutes(
+            db: db,
+            jwt: jwt,
+            tokenStore: tokenStore,
+            realtimeWebSocketURL: config.realtimeWebSocketURL
+        ).add(to: router)
         CentrifugoRoutes(
             db: db, tokenStore: tokenStore, proxySecret: config.centProxySecret
         ).add(to: router)

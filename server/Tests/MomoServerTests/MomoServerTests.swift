@@ -815,6 +815,43 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(object?["memberId"] as? String, "00000000-0000-7000-8000-000000000101")
     }
 
+    func testAuthSessionResponseAdvertisesRealtimeWebSocketURL() throws {
+        let response = LoginResponse(
+            accessToken: "access",
+            refreshToken: "refresh",
+            member: MemberDTO(
+                id: "00000000-0000-7000-8000-000000000101",
+                workspaceId: "00000000-0000-7000-8000-000000000001",
+                kind: "human",
+                displayName: "성재",
+                handle: "seongjae"
+            ),
+            realtimeWebSocketUrl: "wss://rt.momo.test/connection/websocket"
+        )
+
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(response)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            object["realtimeWebSocketUrl"] as? String,
+            "wss://rt.momo.test/connection/websocket"
+        )
+    }
+
+    func testRealtimeWebSocketURLConfigUsesAdvertisedValueAndLocalFallback() {
+        XCTAssertEqual(
+            Config.realtimeWebSocketURL(environment: [
+                "MOMO_CENTRIFUGO_WS_URL": "wss://rt.momo.test/connection/websocket",
+                "CENT_PORT": "29999",
+            ]),
+            "wss://rt.momo.test/connection/websocket"
+        )
+        XCTAssertEqual(
+            Config.realtimeWebSocketURL(environment: ["CENT_PORT": "28100"]),
+            "ws://127.0.0.1:28100/connection/websocket"
+        )
+    }
+
     func testRosterKindFilterValidation() throws {
         XCTAssertNil(try RosterRoutes.validatedKindFilter(nil))
         XCTAssertNil(try RosterRoutes.validatedKindFilter("   "))
@@ -1444,6 +1481,7 @@ final class MomoServerTests: XCTestCase {
             refreshTokenTTL: 30 * 24 * 60 * 60,
             centAPIURL: "http://localhost:8000/api",
             centAPIKey: "test-cent-api-key",
+            realtimeWebSocketURL: "ws://127.0.0.1:8000/connection/websocket",
             centTokenHMAC: "test-cent-token-hmac",
             centConnectionTokenTTL: centConnectionTokenTTL,
             centProxySecret: "test-cent-proxy-secret",

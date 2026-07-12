@@ -138,6 +138,7 @@ SECRET_SOURCE=sops://infra/prod/secrets.sops.env
 PUBLIC_BASE_URL=https://api.staging.momo-alpha.dev
 API_DOMAIN=api.staging.momo-alpha.dev
 REALTIME_DOMAIN=rt.staging.momo-alpha.dev
+MOMO_CENTRIFUGO_WS_URL=wss://rt.staging.momo-alpha.dev/connection/websocket
 CADDY_EMAIL=ops@momo-alpha.dev
 ACME_EMAIL=ops@momo-alpha.dev
 HTTP_PORT=80
@@ -177,6 +178,7 @@ cat >> "$RESERVED_ENV" <<'EOF'
 PUBLIC_BASE_URL=https://api.staging.momo.test
 API_DOMAIN=api.staging.momo.test
 REALTIME_DOMAIN=rt.staging.momo.test
+MOMO_CENTRIFUGO_WS_URL=wss://rt.staging.momo.test/connection/websocket
 EOF
 if "$PREFLIGHT" --env-file "$RESERVED_ENV" --mode staging >/tmp/momo-prod-preflight-reserved-expected-fail.log 2>&1; then
   cat /tmp/momo-prod-preflight-reserved-expected-fail.log >&2
