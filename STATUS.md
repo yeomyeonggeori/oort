@@ -6,9 +6,9 @@
 ## 0-1. MOMO-341 Gateway Pending Durable Claim/Lease (2026-07-12)
 
 - 신규 `008_gateway_job_lease.sql`이 gateway `agent_job` outbox row에 단일 owner/acquired/expiry를 멱등 추가한다. actor-bound pending recovery는 tenant transaction의 `FOR UPDATE SKIP LOCKED`로 원자 claim하며, 만료된 pending row만 새 lease로 takeover한다. `schema_v0.sql`은 변경하지 않았다.
-- events/complete/renew/release는 exact job+lease+run+agent 결속을 강제하고 non-owner/expired callback을 409로 닫는다. Hermes adapter는 realtime을 wake-up으로 유지하고 한 row씩 claim해 provider 실행 중 lease를 renew하며, renew 상실 시 provider task를 취소한다. provider credential은 계속 사용자 Hermes 내부에만 있다.
+- events/complete/renew/release는 exact job+lease+run+agent 결속을 강제하고 lease 부재·non-owner·expired·takeover 뒤 stale owner를 명시적 409로 닫는다. transaction closure의 예상 가능한 lease 거부는 결과값으로 반환한 뒤 transaction 밖에서 409로 매핑해 PostgresNIO error wrapping이 500으로 새지 않게 했다. Hermes adapter는 realtime을 wake-up으로 유지하고 한 row씩 claim해 provider 실행 중 lease를 renew하며, renew 상실 시 provider task를 취소한다. provider credential은 계속 사용자 Hermes 내부에만 있다.
 - 리뷰 반영: approval callback이 job을 정산한 `awaiting_approval` run의 late complete는 lease DTO/DB 검증보다 human-decision guard를 먼저 적용해 항상 409로 닫는다. queued/running/terminal callback의 exact-owner lease 검증은 유지한다.
-- 검증: server build + 56 tests PASS(approval-held pre-lease 판정 단위 회귀 포함), adapter contract 52 tests PASS, adapter py_compile + verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/clean-root `runtime-agent` 재검증은 worker 금지 범위로 실행하지 않았으며 오케스트레이터 수행 대기(`runtime-unverified`).
+- 검증: server build + 61 tests PASS(approval-held pre-lease 409, 동시 consumer 단일 claim, crash expiry/takeover, stale owner event/complete/renew/release 409, expiry reclaim 단위 회귀 포함), adapter contract 52 tests PASS, adapter py_compile + verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/clean-root `runtime-agent` 재검증은 worker 금지 범위로 실행하지 않았으며 오케스트레이터 수행 대기(`runtime-unverified`).
 
 ## 0-1. MOMO-350 Gateway Status/Partial Broadcast (2026-07-12)
 

@@ -177,9 +177,7 @@ struct AgentGatewayRoutes: Sendable {
             ).collect()
             return try rows.first?.decode(Date.self)
         }
-        guard let expiresAt else {
-            throw HTTPError(.conflict, message: "gateway job lease is expired or not owned")
-        }
+        guard let expiresAt else { try Self.rejectGatewayLease() }
         return AgentGatewayLeaseResponse(
             status: "renewed",
             jobId: jobID,
@@ -225,9 +223,7 @@ struct AgentGatewayRoutes: Sendable {
             ).collect()
             return !rows.isEmpty
         }
-        guard released else {
-            throw HTTPError(.conflict, message: "gateway job lease is expired or not owned")
-        }
+        guard released else { try Self.rejectGatewayLease() }
         return AgentGatewayLeaseResponse(
             status: "released",
             jobId: jobID,
@@ -248,7 +244,7 @@ struct AgentGatewayRoutes: Sendable {
             runID: runID
         )
         let dto = try await request.decode(as: AgentGatewayEventRequest.self, context: context)
-        let lease = try dto.validatedLease()
+        guard let lease = dto.leaseBinding else { try Self.rejectGatewayLease() }
         let normalizedStatus = Self.normalizedStatus(dto.status ?? "running")
 
         if normalizedStatus == "approval_request" {
@@ -256,15 +252,22 @@ struct AgentGatewayRoutes: Sendable {
                 throw HTTPError(.badRequest, message: "approval_request payload is required")
             }
             let validated = try approvalRequest.validated()
-            let accepted = try await recordApprovalRequest(
+            let result = try await recordApprovalRequest(
                 principal: principal,
                 workspaceID: workspaceID,
                 runID: runID,
                 request: validated,
                 lease: lease
             )
-            guard accepted else {
+            switch result {
+            case .notFound:
                 throw HTTPError(.notFound, message: "agent run not found")
+            case .leaseRejected:
+                try Self.rejectGatewayLease()
+            case .runConflict(let message):
+                throw HTTPError(.conflict, message: message)
+            case .accepted:
+                break
             }
             return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
         }
@@ -281,11 +284,11 @@ struct AgentGatewayRoutes: Sendable {
             }
         }
 
-        let accepted = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+        let result = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             guard let run = try await Self.lockGatewayRun(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, runID: runID)
-            else { return false }
-            try await Self.requireGatewayLease(
+            else { return GatewayEventResult.notFound }
+            guard try await Self.gatewayLeaseIsAuthorized(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
@@ -293,7 +296,7 @@ struct AgentGatewayRoutes: Sendable {
                 agentID: run.agentMemberID,
                 lease: lease,
                 allowSettled: normalizedStatus == "cancelled" && run.status == "cancelled"
-            )
+            ) else { return GatewayEventResult.leaseRejected }
             let existingEvent = try await conn.query(
                 """
                 SELECT 1
@@ -309,20 +312,18 @@ struct AgentGatewayRoutes: Sendable {
                 logger: db.logger
             ).collect()
             if !existingEvent.isEmpty {
-                return true
+                return GatewayEventResult.accepted
             }
             if Self.isApprovalHeldRunStatus(run.status) {
-                throw HTTPError(
-                    .conflict,
+                return GatewayEventResult.runConflict(
                     message: "agent run is awaiting a human approval decision"
                 )
             }
             if Self.isTerminalRunStatus(run.status), normalizedStatus != "cancelled" {
-                throw HTTPError(.conflict, message: "agent run is already terminal")
+                return GatewayEventResult.runConflict(message: "agent run is already terminal")
             }
             if normalizedStatus == "cancelled", run.status != "cancelled" {
-                throw HTTPError(
-                    .conflict,
+                return GatewayEventResult.runConflict(
                     message: "gateway cancellation acknowledgement has no rejected run"
                 )
             }
@@ -429,11 +430,18 @@ struct AgentGatewayRoutes: Sendable {
                     logger: db.logger
                 )
             }
-            return true
+            return GatewayEventResult.accepted
         }
 
-        guard accepted else {
+        switch result {
+        case .notFound:
             throw HTTPError(.notFound, message: "agent run not found")
+        case .leaseRejected:
+            try Self.rejectGatewayLease()
+        case .runConflict(let message):
+            throw HTTPError(.conflict, message: message)
+        case .accepted:
+            break
         }
         return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
     }
@@ -444,7 +452,7 @@ struct AgentGatewayRoutes: Sendable {
         runID: UUID,
         request: AgentGatewayApprovalRequest,
         lease: AgentGatewayLeaseBinding
-    ) async throws -> Bool {
+    ) async throws -> GatewayEventResult {
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
         return try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             guard let run = try await Self.lockGatewayRun(
@@ -452,7 +460,7 @@ struct AgentGatewayRoutes: Sendable {
                 logger: db.logger,
                 workspaceID: workspaceID,
                 runID: runID
-            ) else { return false }
+            ) else { return GatewayEventResult.notFound }
 
             let existing = try await conn.query(
                 """
@@ -469,12 +477,11 @@ struct AgentGatewayRoutes: Sendable {
             ).collect()
             if !existing.isEmpty {
                 guard run.status == "awaiting_approval" else {
-                    throw HTTPError(
-                        .conflict,
+                    return GatewayEventResult.runConflict(
                         message: "approval request retry does not match run state"
                     )
                 }
-                try await Self.requireGatewayLease(
+                guard try await Self.gatewayLeaseIsAuthorized(
                     conn: conn,
                     logger: db.logger,
                     workspaceID: workspaceID,
@@ -482,7 +489,7 @@ struct AgentGatewayRoutes: Sendable {
                     agentID: run.agentMemberID,
                     lease: lease,
                     allowSettled: true
-                )
+                ) else { return GatewayEventResult.leaseRejected }
                 try await Self.settleGatewayJobForApproval(
                     conn: conn,
                     logger: db.logger,
@@ -490,10 +497,10 @@ struct AgentGatewayRoutes: Sendable {
                     runID: runID,
                     lease: lease
                 )
-                return true
+                return GatewayEventResult.accepted
             }
 
-            try await Self.requireGatewayLease(
+            guard try await Self.gatewayLeaseIsAuthorized(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
@@ -501,11 +508,10 @@ struct AgentGatewayRoutes: Sendable {
                 agentID: run.agentMemberID,
                 lease: lease,
                 allowSettled: false
-            )
+            ) else { return GatewayEventResult.leaseRejected }
 
             guard run.status == "queued" || run.status == "running" else {
-                throw HTTPError(
-                    .conflict,
+                return GatewayEventResult.runConflict(
                     message: "agent run is not eligible for an approval request"
                 )
             }
@@ -626,7 +632,7 @@ struct AgentGatewayRoutes: Sendable {
                 runID: runID,
                 lease: lease
             )
-            return true
+            return GatewayEventResult.accepted
         }
     }
 
@@ -653,8 +659,10 @@ struct AgentGatewayRoutes: Sendable {
             if Self.completionPreLeaseDisposition(for: run.status) == .approvalHeld {
                 return CompletionResult.approvalHeld(status: run.status)
             }
-            let lease = try dto.validatedLease()
-            try await Self.requireGatewayLease(
+            guard let lease = dto.leaseBinding else {
+                return CompletionResult.leaseRejected
+            }
+            guard try await Self.gatewayLeaseIsAuthorized(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
@@ -662,7 +670,7 @@ struct AgentGatewayRoutes: Sendable {
                 agentID: run.agentMemberID,
                 lease: lease,
                 allowSettled: Self.isTerminalRunStatus(run.status)
-            )
+            ) else { return CompletionResult.leaseRejected }
             if Self.isTerminalRunStatus(run.status),
                let existing = try await Self.existingFinalMessage(
                 conn: conn,
@@ -862,6 +870,8 @@ struct AgentGatewayRoutes: Sendable {
                 .conflict,
                 message: "agent run requires a human approval decision (\(status))"
             )
+        case .leaseRejected:
+            try Self.rejectGatewayLease()
         case .completed(let messageID, let seq, let status):
             return AgentGatewayCompleteResponse(
                 status: status,
@@ -876,7 +886,17 @@ struct AgentGatewayRoutes: Sendable {
         case notFound
         case terminal(status: String)
         case approvalHeld(status: String)
+        case leaseRejected
         case completed(messageID: UUID, seq: Int64, status: String)
+    }
+
+    private enum GatewayEventResult {
+        // Expected 4xx outcomes must cross the Postgres transaction as values.
+        // PostgresNIO wraps errors thrown by the closure in PostgresTransactionError.
+        case notFound
+        case leaseRejected
+        case runConflict(message: String)
+        case accepted
     }
 
     enum CompletionPreLeaseDisposition: Equatable {
@@ -894,6 +914,18 @@ struct AgentGatewayRoutes: Sendable {
         let channelID: UUID
         let status: String
         let model: String
+    }
+
+    struct GatewayLeaseSnapshot: Equatable, Sendable {
+        let status: String
+        let owner: UUID?
+        let active: Bool
+    }
+
+    struct GatewayClaimSnapshot: Equatable, Sendable {
+        let status: String
+        let available: Bool
+        let leaseActive: Bool
     }
 
     private func requireGatewayMode() throws {
@@ -971,7 +1003,7 @@ struct AgentGatewayRoutes: Sendable {
         )
     }
 
-    private static func requireGatewayLease(
+    private static func gatewayLeaseIsAuthorized(
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
@@ -979,10 +1011,11 @@ struct AgentGatewayRoutes: Sendable {
         agentID: UUID,
         lease: AgentGatewayLeaseBinding,
         allowSettled: Bool
-    ) async throws {
+    ) async throws -> Bool {
         let rows = try await conn.query(
             """
-            SELECT status::text, lease_expires_at > now()
+            SELECT status::text, lease_owner,
+                   COALESCE(lease_expires_at > now(), false)
               FROM outbox
              WHERE id = \(lease.jobID)
                AND workspace_id = \(workspaceID)
@@ -991,18 +1024,38 @@ struct AgentGatewayRoutes: Sendable {
                AND partition_key = \(agentID)
                AND payload->>'agent_member_id' = \(agentID.uuidString)
                AND payload->>'run_id' = \(runID.uuidString)
-               AND lease_owner = \(lease.leaseID)
              FOR UPDATE
             """,
             logger: logger
         ).collect()
-        guard let row = rows.first else {
-            throw HTTPError(.conflict, message: "gateway job lease is not owned")
+        let snapshot = try rows.first.map { row in
+            let (status, owner, active) = try row.decode((String, UUID?, Bool).self)
+            return GatewayLeaseSnapshot(status: status, owner: owner, active: active)
         }
-        let (status, active) = try row.decode((String, Bool).self)
-        guard (status == "pending" && active) || (status == "done" && allowSettled) else {
-            throw HTTPError(.conflict, message: "gateway job lease is expired or settled")
-        }
+        return gatewayLeaseAuthorized(
+            snapshot: snapshot,
+            presentedLeaseID: lease.leaseID,
+            allowSettled: allowSettled
+        )
+    }
+
+    static func gatewayLeaseAuthorized(
+        snapshot: GatewayLeaseSnapshot?,
+        presentedLeaseID: UUID,
+        allowSettled: Bool
+    ) -> Bool {
+        guard let snapshot, snapshot.owner == presentedLeaseID else { return false }
+        return (snapshot.status == "pending" && snapshot.active)
+            || (snapshot.status == "done" && allowSettled)
+    }
+
+    static func gatewayClaimEligible(snapshot: GatewayClaimSnapshot) -> Bool {
+        // Mirrors the pending claim CTE eligibility contract above.
+        snapshot.status == "pending" && snapshot.available && !snapshot.leaseActive
+    }
+
+    static func rejectGatewayLease() throws -> Never {
+        throw HTTPError(.conflict, message: "gateway job lease is expired or not owned")
     }
 
     static func isTerminalRunStatus(_ status: String) -> Bool {
@@ -1553,9 +1606,14 @@ struct AgentGatewayEventRequest: Decodable {
     }
 
     func validatedLease() throws -> AgentGatewayLeaseBinding {
-        guard let jobID, jobID > 0, let leaseID else {
+        guard let leaseBinding else {
             throw HTTPError(.badRequest, message: "job_id and lease_id are required")
         }
+        return leaseBinding
+    }
+
+    var leaseBinding: AgentGatewayLeaseBinding? {
+        guard let jobID, jobID > 0, let leaseID else { return nil }
         return AgentGatewayLeaseBinding(jobID: jobID, leaseID: leaseID)
     }
 
@@ -1755,9 +1813,14 @@ struct AgentGatewayCompleteRequest: Decodable {
     }
 
     func validatedLease() throws -> AgentGatewayLeaseBinding {
-        guard let jobID, jobID > 0, let leaseID else {
+        guard let leaseBinding else {
             throw HTTPError(.badRequest, message: "job_id and lease_id are required")
         }
+        return leaseBinding
+    }
+
+    var leaseBinding: AgentGatewayLeaseBinding? {
+        guard let jobID, jobID > 0, let leaseID else { return nil }
         return AgentGatewayLeaseBinding(jobID: jobID, leaseID: leaseID)
     }
 }
@@ -1861,7 +1924,7 @@ struct AgentGatewayLeaseRequest: Decodable {
             throw HTTPError(.conflict, message: "gateway job id does not match path")
         }
         guard let leaseID else {
-            throw HTTPError(.badRequest, message: "lease_id is required")
+            throw HTTPError(.conflict, message: "lease_id is required")
         }
         return AgentGatewayLeaseBinding(jobID: pathJobID, leaseID: leaseID)
     }

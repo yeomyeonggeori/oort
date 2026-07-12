@@ -1622,8 +1622,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] [runtime] consumer crash 후 lease expiry/takeover로 job이 영구 pending에 남지 않는다.
 - [ ] [security] bearer actor binding, Postgres SoT, REST-only callback, provider credential boundary를 유지한다.
   - worker 구현: `008_gateway_job_lease.sql`이 기존 outbox에 owner/acquired/expiry를 멱등 추가하고, actor-bound pending GET이 tenant transaction의 `FOR UPDATE SKIP LOCKED` CTE로 단일 row capability를 발급한다. `schema_v0.sql` 변경 없음.
-  - worker 구현: event/complete/renew/release는 exact outbox id+lease UUID+run+agent를 결속하며 active owner가 아니면 409로 닫는다. Hermes adapter는 realtime을 wake-up으로만 쓰고 serial claim(limit=1) 후 provider 실행과 lease renew를 함께 감독하며 renew 상실 시 provider task를 취소한다.
-  - worker 정적 evidence: server build, server 56 tests(approval-held complete가 lease 검증보다 먼저 409로 닫히는 회귀 포함), adapter contract 52 tests, py_compile, verifier `bash -n`/실행권한 PASS. 격리 DB 동시 claim·expiry takeover verifier와 clean/root `runtime-agent` 재검증 전이라 체크박스를 미체크 유지(`runtime-unverified`).
+  - worker 구현: event/complete/renew/release는 exact outbox id+lease UUID+run+agent를 결속하며 lease 부재·non-owner·expired·takeover 뒤 stale owner를 transaction 밖의 명시적 409로 닫는다. Hermes adapter는 realtime을 wake-up으로만 쓰고 serial claim(limit=1) 후 provider 실행과 lease renew를 함께 감독하며 renew 상실 시 provider task를 취소한다.
+  - worker 정적 evidence: server build, server 61 tests(approval-held pre-lease 409 + 동시 consumer 단일 claim + crash expiry/takeover + stale owner event/complete/renew/release 409 + expiry reclaim 포함), adapter contract 52 tests, py_compile, verifier `bash -n`/실행권한 PASS. 격리 DB 동시 claim·expiry takeover verifier와 clean/root `runtime-agent` 재검증 전이라 체크박스를 미체크 유지(`runtime-unverified`).
 
 ### ☑ MOMO-342 수용기준 — AgentWorker verifier persistent DB fixture hardening `[tooling/runtime]` · 의존: MOMO-324, MOMO-338
 - [x] positive mention route는 user-owned `@hermes`를 복구/수정하지 않고 deterministic verifier-only agent/member/membership을 idempotent upsert한다.
