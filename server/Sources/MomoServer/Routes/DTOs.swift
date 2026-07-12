@@ -42,6 +42,7 @@ struct LoginResponse: ResponseEncodable {
     let accessToken: String
     let refreshToken: String
     let member: MemberDTO
+    let realtimeWebSocketUrl: String
 }
 
 /// POST /v1/auth/refresh request (MOMO-300 rotation).
@@ -520,6 +521,7 @@ struct JoinResponse: ResponseEncodable {
     let refreshToken: String
     let workspaceId: String
     let member: MemberDTO
+    let realtimeWebSocketUrl: String
     let memberships: [JoinMembershipDTO]
     let invite: InviteCodeDTO
     let redemptionId: String

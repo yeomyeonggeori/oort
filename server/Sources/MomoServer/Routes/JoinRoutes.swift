@@ -14,6 +14,7 @@ struct JoinRoutes: Sendable {
     let db: Database
     let jwt: JWTService
     let tokenStore: TokenStore
+    let realtimeWebSocketURL: String
 
     func add(to router: Router<AppRequestContext>) {
         router.post("/v1/join", use: join)
@@ -165,6 +166,7 @@ struct JoinRoutes: Sendable {
             refreshToken: refresh.token,
             workspaceId: lookup.workspaceID.uuidString,
             member: joined.member,
+            realtimeWebSocketUrl: realtimeWebSocketURL,
             memberships: joined.memberships,
             invite: joined.invite,
             redemptionId: joined.redemptionID.uuidString,

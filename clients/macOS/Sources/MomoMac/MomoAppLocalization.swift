@@ -635,6 +635,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var serverManagedProfileNote: String {
+        switch language {
+        case .korean: return "프로필은 서버 멤버 목록에서 관리됩니다. 이 앱에서는 아직 편집할 수 없습니다."
+        case .english: return "Profiles are managed by the server member directory. Editing is not available in this app yet."
+        }
+    }
+
     var saveProfile: String {
         switch language {
         case .korean: return "프로필 저장"

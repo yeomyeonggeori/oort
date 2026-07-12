@@ -134,6 +134,7 @@ services:
       PORT: 8080
       DATABASE_URL: postgres://momo_app:momo_app_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
       CENT_API_URL: http://centrifugo:8000/api
+      MOMO_CENTRIFUGO_WS_URL: ws://127.0.0.1:${CENT_PORT:-8000}/connection/websocket
       HERMES_BASE_URL: http://mock-hermes:8088/v1
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
     ports:

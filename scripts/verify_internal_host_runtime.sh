@@ -115,6 +115,7 @@ COMPOSE_PROJECT_NAME=${PROJECT}
 MOMO_ENV=internal-smoke
 API_DOMAIN=localhost
 REALTIME_DOMAIN=rt.localhost
+MOMO_CENTRIFUGO_WS_URL=wss://rt.localhost/connection/websocket
 ACME_EMAIL=ops@example.com
 HTTP_PORT=${HTTP_PORT}
 HTTPS_PORT=${HTTPS_PORT}

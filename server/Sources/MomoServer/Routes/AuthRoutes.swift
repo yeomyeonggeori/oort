@@ -19,6 +19,7 @@ struct AuthRoutes: Sendable {
     let tokenStore: TokenStore
     let platformAdminEmails: [String]
     let platformAdminLoginSecret: String?
+    let realtimeWebSocketURL: String
 
     /// The demo workspace seeded by `server/Migrations/002_seed.sql`. Used when a
     /// login request omits an explicit workspace (single-tenant v0).
@@ -98,7 +99,11 @@ struct AuthRoutes: Sendable {
         )
 
         let body = LoginResponse(
-            accessToken: access.token, refreshToken: refresh.token, member: member)
+            accessToken: access.token,
+            refreshToken: refresh.token,
+            member: member,
+            realtimeWebSocketUrl: realtimeWebSocketURL
+        )
         return try body.response(from: request, context: context)
     }
 

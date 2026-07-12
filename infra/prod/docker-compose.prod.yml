@@ -109,6 +109,7 @@ services:
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:?set CENT_API_KEY}
+      MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
       # MOMO-300: must match the centrifugo service's static proxy header.
       CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
       AGENT_PROVIDER_MODE: ${AGENT_PROVIDER_MODE:?set AGENT_PROVIDER_MODE}

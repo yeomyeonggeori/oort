@@ -1284,6 +1284,7 @@ final class MomoMacTests: XCTestCase {
                 {
                   "accessToken": "token-123",
                   "refreshToken": "refresh-123",
+                  "realtimeWebSocketUrl": "wss://rt.momo.test/connection/websocket",
                   "member": {
                     "id": "\(MemberID.demoHuman.description)",
                     "workspaceId": "\(workspace.description)",
@@ -1344,6 +1345,11 @@ final class MomoMacTests: XCTestCase {
             session: session
         )
         try await backend.connect(workspace: workspace, accessToken: "")
+        let realtimeWebSocketURL = await backend.realtimeWebSocketURL
+        XCTAssertEqual(
+            realtimeWebSocketURL?.absoluteString,
+            "wss://rt.momo.test/connection/websocket"
+        )
 
         let history = try await backend.history(channel: channel, after: nil, limit: 200)
         XCTAssertEqual(history.map(\.id), [messageID])
@@ -1382,6 +1388,18 @@ final class MomoMacTests: XCTestCase {
                     "handle": "demo"
                   }
                 }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
+                return MockHTTPResponse(json: """
+                {"members":[{
+                  "id":"\(MemberID.demoHuman.description)",
+                  "workspaceId":"\(workspace.description)",
+                  "kind":"human",
+                  "status":"active",
+                  "displayName":"데모 사용자",
+                  "handle":"demo",
+                  "channelIds":["\(ChannelID.demoGeneral.description)"]
+                }]}
                 """)
             case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
                 XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
@@ -1430,6 +1448,130 @@ final class MomoMacTests: XCTestCase {
 
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
+    }
+
+    @MainActor
+    func testRealServerRosterDrivesChannelMembersMentionsAndMessageAuthors() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let invitedAgent = MemberID(uuidString: "00000000-0000-7000-8000-000000000103")!
+        let uninvitedAgent = MemberID.demoAgent
+        let messageID = MessageID(uuidString: "00000000-0000-7000-8000-000000354001")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
+                return MockHTTPResponse(json: """
+                {
+                  "members": [
+                    {
+                      "id": "\(MemberID.demoHuman.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "human",
+                      "status": "active",
+                      "displayName": "성재",
+                      "handle": "seongjae",
+                      "channelIds": ["\(channel.description)"]
+                    },
+                    {
+                      "id": "\(invitedAgent.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "agent",
+                      "status": "active",
+                      "displayName": "Hermes",
+                      "handle": "hermes",
+                      "channelIds": ["\(channel.description)"]
+                    },
+                    {
+                      "id": "\(uninvitedAgent.description)",
+                      "workspaceId": "\(workspace.description)",
+                      "kind": "agent",
+                      "status": "active",
+                      "displayName": "김인턴",
+                      "handle": "kim-intern",
+                      "channelIds": ["\(ChannelID.demoAgentLab.description)"]
+                    }
+                  ]
+                }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                return MockHTTPResponse(json: """
+                {"channels":[{
+                  "id":"\(channel.description)",
+                  "workspaceId":"\(workspace.description)",
+                  "kind":"public",
+                  "name":"general",
+                  "topic":"dogfood",
+                  "dmKey":null,
+                  "createdBy":"\(MemberID.demoHuman.description)",
+                  "archivedAtMs":null
+                }]}
+                """)
+            case ("GET", "/v1/agent-runtime/status"):
+                return MockHTTPResponse(json: """
+                {"schema":"momo.agent_runtime.status.v0","agentHandle":"hermes","displayName":"Hermes","mode":"gateway","availability":"available","model":"hermes-agent","endpointLabel":"gateway","keyConfigured":true,"diagnostics":[]}
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/approvals"):
+                return MockHTTPResponse(json: #"{"approvals":[]}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"):
+                return MockHTTPResponse(json: """
+                {"messages":[{
+                  "id":"\(messageID.description)",
+                  "channelId":"\(channel.description)",
+                  "seq":1,
+                  "hlcTs":1800000000000,
+                  "hlcCount":0,
+                  "authorMemberId":"\(invitedAgent.description)",
+                  "type":"text",
+                  "body":"server roster author",
+                  "createdAtMs":1800000000000
+                }],"nextBefore":null}
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/cost-snapshots"):
+                return MockHTTPResponse(json: """
+                {"schema":"momo.cost_snapshot.channel.v0","channel_id":"\(channel.description)","as_of_ms":1800000000000,"snapshots":[]}
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace,
+                defaultChannel: channel
+            ),
+            session: session
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token-123")
+        await viewModel.selectChannel(channel)
+
+        XCTAssertEqual(Set(viewModel.activeMembers().map(\.id)), [MemberID.demoHuman, invitedAgent])
+        viewModel.composerDraft = "@"
+        XCTAssertTrue(viewModel.mentionAutocompleteCandidates().contains { $0.id == invitedAgent })
+        XCTAssertFalse(viewModel.mentionAutocompleteCandidates().contains { $0.id == uninvitedAgent })
+        let message = try XCTUnwrap(viewModel.visibleMessages.first)
+        XCTAssertEqual(viewModel.member(message.authorMemberId)?.displayName, "Hermes")
+
+        XCTAssertFalse(viewModel.allowsLocalProfileEditing)
+        let serverPresence = try XCTUnwrap(viewModel.member(invitedAgent)?.presence)
+        viewModel.applyLocalProfile(
+            member: invitedAgent,
+            displayName: "로컬 Hermes",
+            avatarPath: "",
+            presence: .away
+        )
+        XCTAssertEqual(viewModel.member(invitedAgent)?.displayName, "Hermes")
+        XCTAssertEqual(viewModel.member(invitedAgent)?.presence, serverPresence)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertTrue(requests.contains { $0.url?.path == "/v1/workspaces/\(workspace.description)/roster" })
+        XCTAssertFalse(requests.contains { $0.url?.path.hasSuffix("/members") == true })
     }
 
     func testRESTBackendLoadsKimInternRuntimeStatus() async throws {
@@ -1742,6 +1884,18 @@ final class MomoMacTests: XCTestCase {
                     "handle": "demo"
                   }
                 }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
+                return MockHTTPResponse(json: """
+                {"members":[{
+                  "id":"\(MemberID.demoHuman.description)",
+                  "workspaceId":"\(workspace.description)",
+                  "kind":"human",
+                  "status":"active",
+                  "displayName":"데모 사용자",
+                  "handle":"demo",
+                  "channelIds":["\(ChannelID.demoGeneral.description)"]
+                }]}
                 """)
             case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
                 return MockHTTPResponse(statusCode: 503, json: #"{"title":"channels unavailable","detail":"db offline"}"#)
@@ -2078,8 +2232,6 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(config.centrifugoWebSocketURL?.absoluteString, "ws://127.0.0.1:8000/connection/websocket")
         XCTAssertEqual(config.workspace, .demo)
         XCTAssertEqual(config.defaultChannel, .demoGeneral)
-        XCTAssertEqual(config.channels.map(\.name), ["general", "agent-lab"])
-        XCTAssertEqual(config.members.map(\.handle), ["demo", "hermes"])
         XCTAssertNil(MomoServerRESTChatBackendConfig.fromEnvironment([:]))
     }
 
@@ -2108,6 +2260,23 @@ final class MomoMacTests: XCTestCase {
     }
 
     func testRESTBackendMapsGatewayAgentNamespaceProgressIntoRealtimeEvents() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { request in
+            guard request.url?.path == "/v1/workspaces/\(WorkspaceID.demo.description)/roster" else {
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+            return MockHTTPResponse(json: """
+            {"members":[{
+              "id":"\(MemberID.demoAgent.description)",
+              "workspaceId":"\(WorkspaceID.demo.description)",
+              "kind":"agent",
+              "status":"active",
+              "displayName":"Hermes",
+              "handle":"hermes",
+              "channelIds":["\(ChannelID.demoAgentLab.description)"]
+            }]}
+            """)
+        }
         let run = RunID(uuidString: "00000000-0000-7350-8000-000000350001")!
         let transport = FixtureAgentRealtimeTransport(envelopes: [
             RealtimeEnvelope(
@@ -2136,9 +2305,11 @@ final class MomoMacTests: XCTestCase {
             config: MomoServerRESTChatBackendConfig(
                 baseURL: URL(string: "https://momo.test")!,
                 accessToken: "token-123"
-            )
+            ),
+            session: URLSession(configuration: .momoMocked)
         )
         try await backend.connect(workspace: .demo, accessToken: "token-123")
+        _ = try await backend.members(workspace: .demo)
         await backend.setAgentRealtimeTransport(transport)
 
         let stream = try await backend.subscribe(channel: .demoAgentLab)
@@ -2147,7 +2318,9 @@ final class MomoMacTests: XCTestCase {
             events.append(event)
         }
 
-        XCTAssertEqual(events.count, 2)
+        guard events.count == 2 else {
+            return XCTFail("active roster agent should produce status and partial events")
+        }
         guard case .agentStatus(let status) = events[0] else {
             return XCTFail("gateway status must reach the existing realtime model")
         }
@@ -2344,6 +2517,7 @@ final class MomoMacTests: XCTestCase {
             {
               "accessToken": "access-session",
               "refreshToken": "refresh-session",
+              "realtimeWebSocketUrl": "wss://rt.momo.test/connection/websocket",
               "member": {
                 "id": "\(MemberID.demoHuman.description)",
                 "workspaceId": "\(workspace.description)",
@@ -2355,7 +2529,10 @@ final class MomoMacTests: XCTestCase {
             """)
         }
 
-        let client = MomoServerSessionClient(session: URLSession(configuration: .momoMocked))
+        let client = MomoServerSessionClient(
+            session: URLSession(configuration: .momoMocked),
+            environment: ["MOMO_CENTRIFUGO_WS_URL": "ws://env.test/connection/websocket"]
+        )
         let session = try await client.login(form: MomoServerSessionForm(
             baseURLString: "https://momo.test",
             email: "demo@momo.local",
@@ -2366,6 +2543,10 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(session.workspace, workspace)
         XCTAssertEqual(session.member.id, .demoHuman)
         XCTAssertEqual(session.accessToken, "access-session")
+        XCTAssertEqual(
+            session.centrifugoWebSocketURL?.absoluteString,
+            "wss://rt.momo.test/connection/websocket"
+        )
         XCTAssertFalse(session.joinedWithInvite)
     }
 
@@ -2385,6 +2566,7 @@ final class MomoMacTests: XCTestCase {
             {
               "accessToken": "join-access",
               "refreshToken": "join-refresh",
+              "realtimeWebSocketUrl": "wss://rt.join.momo.test/connection/websocket",
               "workspaceId": "\(workspace.description)",
               "member": {
                 "id": "\(MemberID.demoHuman.description)",
@@ -2411,6 +2593,10 @@ final class MomoMacTests: XCTestCase {
 
         XCTAssertEqual(session.workspace, workspace)
         XCTAssertEqual(session.accessToken, "join-access")
+        XCTAssertEqual(
+            session.centrifugoWebSocketURL?.absoluteString,
+            "wss://rt.join.momo.test/connection/websocket"
+        )
         XCTAssertTrue(session.joinedWithInvite)
         XCTAssertEqual(session.member.displayName, "New User")
     }

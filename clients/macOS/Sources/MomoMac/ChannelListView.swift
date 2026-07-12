@@ -159,9 +159,7 @@ public struct ChannelListView: View {
     }
 
     private var visibleChannelMembers: [Member] {
-        viewModel.members.filter { member in
-            viewModel.isMember(member.id) && !isHiddenDogfoodAgent(member)
-        }
+        viewModel.activeMembers()
     }
 
     private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
@@ -475,8 +473,13 @@ public struct ChannelListView: View {
                 Button {
                     openMemberProfile?(member.id)
                 } label: {
-                    Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
+                    if viewModel.allowsLocalProfileEditing {
+                        Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
+                    } else {
+                        Label(MomoWorkspaceCopy(language: language).serverManagedProfileNote, systemImage: "lock")
+                    }
                 }
+                .disabled(!viewModel.allowsLocalProfileEditing)
             }
     }
 
@@ -538,8 +541,9 @@ public struct ChannelListView: View {
                     .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
             }
             .buttonStyle(.plain)
-            .help(copy.editProfile)
-            .momoQuickTooltip(copy.editProfile)
+            .disabled(!viewModel.allowsLocalProfileEditing)
+            .help(viewModel.allowsLocalProfileEditing ? copy.editProfile : copy.serverManagedProfileNote)
+            .momoQuickTooltip(viewModel.allowsLocalProfileEditing ? copy.editProfile : copy.serverManagedProfileNote)
             if viewModel.selectedChannelId != nil {
                 memberMutationButton(member)
             }
@@ -675,9 +679,21 @@ public struct ChannelListView: View {
 
             Divider()
 
-            profileAction(copy.profile, systemImage: "person.crop.circle") {
+            profileAction(
+                copy.profile,
+                systemImage: "person.crop.circle",
+                isDisabled: !viewModel.allowsLocalProfileEditing,
+                helpText: viewModel.allowsLocalProfileEditing ? copy.profile : copy.serverManagedProfileNote
+            ) {
                 showProfilePanel = false
                 openProfile?()
+            }
+            if !viewModel.allowsLocalProfileEditing {
+                Label(copy.serverManagedProfileNote, systemImage: "lock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 8)
             }
             profileAction(copy.settings, systemImage: "gearshape") {
                 showProfilePanel = false
@@ -718,6 +734,8 @@ public struct ChannelListView: View {
         _ title: String,
         systemImage: String,
         role: ButtonRole? = nil,
+        isDisabled: Bool = false,
+        helpText: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
         Button(role: role, action: action) {
@@ -734,6 +752,8 @@ public struct ChannelListView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(helpText ?? title)
     }
 
     private func profilePill(
@@ -1204,19 +1224,6 @@ public struct ChannelListView: View {
         .timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18)
     }
 
-    private func isHiddenDogfoodAgent(_ member: Member) -> Bool {
-        guard member.isAgent else { return false }
-        let identity = "\(member.displayName) \(member.handle)".lowercased()
-        if isDogfoodHermesAgent(member) {
-            return !hermesInvited
-        }
-        return identity.contains("김인턴")
-            || identity.contains("kim")
-            || identity.contains("intern")
-            || identity.contains("빌드봇")
-            || identity.contains("buildbot")
-    }
-
     private func isDogfoodHermesAgent(_ member: Member) -> Bool {
         guard member.isAgent else { return false }
         let identity = "\(member.displayName) \(member.handle)".lowercased()
@@ -1271,6 +1278,7 @@ public struct ChannelListView: View {
     }
 
     private func displayMember(_ member: Member) -> Member {
+        guard !viewModel.usesServerRosterSourceOfTruth else { return member }
         var copy = member
         if let localName = MomoLocalProfileStore.displayName(for: member) {
             copy.displayName = localName
@@ -1297,6 +1305,9 @@ public struct ChannelListView: View {
     }
 
     private func avatarPath(for member: Member) -> String {
+        if viewModel.usesServerRosterSourceOfTruth {
+            return member.avatarURL?.isFileURL == true ? member.avatarURL?.path ?? "" : ""
+        }
         if let local = MomoLocalProfileStore.avatarPath(for: member) {
             return local
         }
@@ -1323,7 +1334,10 @@ public struct ChannelListView: View {
         if member.status != .active {
             return .error
         }
-        switch MomoLocalProfileStore.presence(for: member) ?? member.presence {
+        let presence = viewModel.usesServerRosterSourceOfTruth
+            ? member.presence
+            : MomoLocalProfileStore.presence(for: member) ?? member.presence
+        switch presence {
         case .online:
             return .online
         case .working:

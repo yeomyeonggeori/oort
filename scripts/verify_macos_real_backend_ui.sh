@@ -119,6 +119,7 @@ SERVER_LOG="$OUT_DIR/momo-server-${RUN_SUFFIX}.log"
 UI_LOG="$OUT_DIR/macos-dev-app-${RUN_SUFFIX}.log"
 REST_LOGIN_FILE="$OUT_DIR/login-${RUN_SUFFIX}.json"
 REST_CHANNELS_FILE="$OUT_DIR/channels-${RUN_SUFFIX}.json"
+REST_ROSTER_FILE="$OUT_DIR/roster-${RUN_SUFFIX}.json"
 REST_INVITE_CREATE_FILE="$OUT_DIR/invite-create-${RUN_SUFFIX}.json"
 REST_INVITE_LIST_FILE="$OUT_DIR/invite-list-${RUN_SUFFIX}.json"
 REST_INVITE_REVOKE_FILE="$OUT_DIR/invite-revoke-${RUN_SUFFIX}.json"
@@ -530,6 +531,7 @@ echo "[macos-real-backend] starting MomoServer"
   PORT="$PORT" \
   CENT_API_URL="$CENT_API_URL" \
   CENT_API_KEY="$CENT_API_KEY" \
+  MOMO_CENTRIFUGO_WS_URL="ws://127.0.0.1:${CENT_PORT}/connection/websocket" \
   JWT_HMAC="$JWT_HMAC" \
   CENT_TOKEN_HMAC="$CENT_TOKEN_HMAC" \
   LOG_LEVEL="${LOG_LEVEL:-info}" \
@@ -547,6 +549,8 @@ ACCESS_TOKEN="$(jq -r '.accessToken // empty' "$REST_LOGIN_FILE")"
 [ "$ACCESS_TOKEN" != "" ] || fail "login did not return accessToken"
 jq -e --arg member "$HUMAN_ID" '.member.id == $member and (.accessToken | length) > 20' "$REST_LOGIN_FILE" >/dev/null \
   || fail "login response missing expected seeded member"
+jq -e --arg url "ws://127.0.0.1:${CENT_PORT}/connection/websocket" '.realtimeWebSocketUrl == $url' "$REST_LOGIN_FILE" >/dev/null \
+  || fail "login response missing server-advertised realtime WebSocket URL"
 
 echo "[macos-real-backend] REST channel list"
 curl -fsS \
@@ -554,6 +558,16 @@ curl -fsS \
   "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/channels" >"$REST_CHANNELS_FILE"
 jq -e --arg channel "$CHANNEL_ID" '.channels[] | select(.id == $channel and .name == "agent-lab")' "$REST_CHANNELS_FILE" >/dev/null \
   || fail "channel list did not include agent-lab"
+
+echo "[macos-real-backend] REST server-owned roster"
+curl -fsS \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/roster" >"$REST_ROSTER_FILE"
+jq -e --arg human "$HUMAN_ID" --arg agent "$AGENT_ID" --arg channel "$CHANNEL_ID" '
+  any(.members[]; .id == $human and .kind == "human" and (.channelIds | index($channel) != null))
+  and any(.members[]; .id == $agent and .kind == "agent" and .status == "active" and (.channelIds | index($channel) != null))
+' "$REST_ROSTER_FILE" >/dev/null \
+  || fail "roster did not include active human/agent memberships for agent-lab"
 
 INVITE_EXPIRES_AT_MS="$(( ($(date +%s) + 7 * 24 * 60 * 60) * 1000 ))"
 echo "[macos-real-backend] REST invite create/list/revoke"
@@ -605,7 +619,12 @@ SECOND_ACCESS_TOKEN="$(jq -r '.accessToken // empty' "$REST_JOIN_FILE")"
 SECOND_MEMBER_ID="$(jq -r '.member.id // empty' "$REST_JOIN_FILE" | tr '[:upper:]' '[:lower:]')"
 [ "$SECOND_ACCESS_TOKEN" != "" ] && [ "$SECOND_MEMBER_ID" != "" ] \
   || fail "second user join response missing token/member: $(cat "$REST_JOIN_FILE")"
-jq -e --arg ws "$WORKSPACE_ID" '.workspaceId == $ws and .createdMember == true and (.memberships | length) >= 1' "$REST_JOIN_FILE" >/dev/null \
+jq -e --arg ws "$WORKSPACE_ID" --arg url "ws://127.0.0.1:${CENT_PORT}/connection/websocket" '
+  .workspaceId == $ws
+  and .createdMember == true
+  and (.memberships | length) >= 1
+  and .realtimeWebSocketUrl == $url
+' "$REST_JOIN_FILE" >/dev/null \
   || fail "second user join response missing workspace/memberships"
 
 curl -fsS \
@@ -622,7 +641,7 @@ jq -e --arg channel "$CHANNEL_ID" '.channels[] | select(.id == $channel and .nam
 
 curl -fsS \
   -H "Authorization: Bearer ${SECOND_ACCESS_TOKEN}" \
-  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/members" >"$REST_SECOND_MEMBERS_FILE"
+  "$BASE_URL/v1/workspaces/${WORKSPACE_ID}/roster" >"$REST_SECOND_MEMBERS_FILE"
 jq -e --arg member "$SECOND_MEMBER_ID" '.members[] | select((.id | ascii_downcase) == $member and .kind == "human")' "$REST_SECOND_MEMBERS_FILE" >/dev/null \
   || fail "second user member roster did not include joined member"
 
@@ -740,7 +759,9 @@ fi
   echo "- Channel: \`agent-lab\` / \`${CHANNEL_ID}\`"
   echo "- Centrifugo channel spelling: \`${CENT_CHANNEL}\` (Swift UUID uppercase normalization)"
   echo "- REST login: member=\`${HUMAN_ID}\`, access_token_len=\`$(jq -r '.accessToken | length' "$REST_LOGIN_FILE")\`"
+  echo "- Realtime discovery: login advertised \`$(jq -r '.realtimeWebSocketUrl' "$REST_LOGIN_FILE")\`; UI launch does not inject a WebSocket env override."
   echo "- REST channel list: count=\`$(jq -r '.channels | length' "$REST_CHANNELS_FILE")\`, includes \`agent-lab\`"
+  echo "- REST roster SoT: active human \`${HUMAN_ID}\` and agent \`${AGENT_ID}\` both carry selected channel membership \`${CHANNEL_ID}\`."
   echo "- REST invite admin: created invite \`${INVITE_REVOKE_ID}\`, listed active state, revoked with reason \`MOMO-226 revoke smoke\`"
   echo "- REST invite join: second_user=\`${SECOND_EMAIL}\`, member_id=\`${SECOND_MEMBER_ID}\`, invite=\`${JOIN_INVITE_ID}\`, used_count=\`1\`"
   echo "- REST second-user state load: channels include \`agent-lab\`, members include joined human"
@@ -756,7 +777,7 @@ fi
   else
     echo "- UI process/window evidence: \`${UI_LOG}\`"
   fi
-  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, invite_create=\`${REST_INVITE_CREATE_FILE}\`, invite_list=\`${REST_INVITE_LIST_FILE}\`, invite_revoke=\`${REST_INVITE_REVOKE_FILE}\`, join_invite_create=\`${REST_JOIN_INVITE_CREATE_FILE}\`, join=\`${REST_JOIN_FILE}\`, join_invite_list=\`${REST_JOIN_INVITE_LIST_FILE}\`, second_channels=\`${REST_SECOND_CHANNELS_FILE}\`, second_members=\`${REST_SECOND_MEMBERS_FILE}\`, channel_create=\`${REST_CHANNEL_CREATE_FILE}\`, member_add=\`${REST_MEMBER_ADD_FILE}\`, member_remove=\`${REST_MEMBER_REMOVE_FILE}\`, send=\`${REST_SEND_FILE}\`, mention_send=\`${REST_MENTION_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
+  echo "- Evidence files: login=\`${REST_LOGIN_FILE}\`, channels=\`${REST_CHANNELS_FILE}\`, roster=\`${REST_ROSTER_FILE}\`, invite_create=\`${REST_INVITE_CREATE_FILE}\`, invite_list=\`${REST_INVITE_LIST_FILE}\`, invite_revoke=\`${REST_INVITE_REVOKE_FILE}\`, join_invite_create=\`${REST_JOIN_INVITE_CREATE_FILE}\`, join=\`${REST_JOIN_FILE}\`, join_invite_list=\`${REST_JOIN_INVITE_LIST_FILE}\`, second_channels=\`${REST_SECOND_CHANNELS_FILE}\`, second_roster=\`${REST_SECOND_MEMBERS_FILE}\`, channel_create=\`${REST_CHANNEL_CREATE_FILE}\`, member_add=\`${REST_MEMBER_ADD_FILE}\`, member_remove=\`${REST_MEMBER_REMOVE_FILE}\`, send=\`${REST_SEND_FILE}\`, mention_send=\`${REST_MENTION_SEND_FILE}\`, history=\`${REST_HISTORY_FILE}\`, server_log=\`${SERVER_LOG}\`"
 } >"$EVIDENCE_FILE"
 
 cat "$EVIDENCE_FILE"

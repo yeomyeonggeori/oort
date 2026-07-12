@@ -355,11 +355,16 @@ public actor MomoInviteAdminClient {
 
 public actor MomoServerSessionClient {
     private let session: URLSession
+    private let environment: [String: String]
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init(session: URLSession = .shared) {
+    public init(
+        session: URLSession = .shared,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) {
         self.session = session
+        self.environment = environment
     }
 
     public func login(form: MomoServerSessionForm, workspace: WorkspaceID? = nil) async throws -> MomoServerSession {
@@ -371,10 +376,13 @@ public actor MomoServerSessionClient {
             to: baseURL.appendingPathComponent("/v1/auth/login"),
             response: LoginResponse.self
         )
-        let member = response.member.member
+        let member = try response.member.member()
         return MomoServerSession(
             baseURL: baseURL,
-            centrifugoWebSocketURL: Self.centrifugoWebSocketURL(from: ProcessInfo.processInfo.environment),
+            centrifugoWebSocketURL: try Self.preferredRealtimeWebSocketURL(
+                serverValue: response.realtimeWebSocketUrl,
+                environment: environment
+            ),
             workspace: member.workspaceId,
             member: member,
             accessToken: response.accessToken,
@@ -409,9 +417,12 @@ public actor MomoServerSessionClient {
         }
         return MomoServerSession(
             baseURL: baseURL,
-            centrifugoWebSocketURL: Self.centrifugoWebSocketURL(from: ProcessInfo.processInfo.environment),
+            centrifugoWebSocketURL: try Self.preferredRealtimeWebSocketURL(
+                serverValue: response.realtimeWebSocketUrl,
+                environment: environment
+            ),
             workspace: workspace,
-            member: response.member.member,
+            member: try response.member.member(),
             accessToken: response.accessToken,
             refreshToken: response.refreshToken,
             email: email,
@@ -481,6 +492,22 @@ public actor MomoServerSessionClient {
             return URL(string: "ws://127.0.0.1:\(port)/connection/websocket")
         }
         return nil
+    }
+
+    private static func preferredRealtimeWebSocketURL(
+        serverValue: String?,
+        environment: [String: String]
+    ) throws -> URL? {
+        if let serverValue {
+            guard let url = URL(string: serverValue),
+                  url.host != nil,
+                  url.scheme == "ws" || url.scheme == "wss"
+            else {
+                throw MomoServerSessionError.decoding("Server returned an invalid realtime WebSocket URL.")
+            }
+            return url
+        }
+        return centrifugoWebSocketURL(from: environment)
     }
 }
 
@@ -772,9 +799,7 @@ public final class MomoServerSessionController: ObservableObject {
             centrifugoWebSocketURL: session.centrifugoWebSocketURL,
             accessToken: session.accessToken,
             login: .init(email: session.email, password: password),
-            workspace: session.workspace,
-            channels: [],
-            members: [session.member]
+            workspace: session.workspace
         )
         return await MomoMacDemo.makeRESTViewModel(config: config)
     }
@@ -2165,6 +2190,7 @@ private struct LoginResponse: Decodable {
     let accessToken: String
     let refreshToken: String
     let member: SessionMemberDTO
+    let realtimeWebSocketUrl: String?
 }
 
 private struct JoinRequest: Encodable {
@@ -2181,6 +2207,7 @@ private struct JoinResponse: Decodable {
     let refreshToken: String
     let workspaceId: String
     let member: SessionMemberDTO
+    let realtimeWebSocketUrl: String?
 }
 
 private struct CreateInviteResponse: Decodable {
@@ -2241,10 +2268,15 @@ private struct SessionMemberDTO: Decodable {
     let displayName: String
     let handle: String
 
-    var member: Member {
-        Member(
-            id: MemberID(uuidString: id) ?? .demoHuman,
-            workspaceId: WorkspaceID(uuidString: workspaceId) ?? .demo,
+    func member() throws -> Member {
+        guard let memberID = MemberID(uuidString: id),
+              let workspaceID = WorkspaceID(uuidString: workspaceId)
+        else {
+            throw MomoServerSessionError.decoding("Server returned an invalid session member identity.")
+        }
+        return Member(
+            id: memberID,
+            workspaceId: workspaceID,
             kind: MemberKind(rawValue: kind) ?? .human,
             displayName: displayName,
             handle: handle,
