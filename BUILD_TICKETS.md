@@ -221,6 +221,12 @@
 | `MOMO-337` (`#307`) | Agent bearer 인증 v1 (per-agent 자격증명·스코프·회전) — ADR-0101 Phase 1 | swift/runtime-agent | MOMO-325, MOMO-333 |
 | `MOMO-338` (`#308`) | Hermes 어댑터 bearer 단일화 (오퍼레이터 로그인 제거) — ADR-0101 | python/runtime-agent | MOMO-337 |
 | `MOMO-339` (`#309`) | 페어링 위저드 자격증명 발급/회전 UI — ADR-0101 | swift/macos-ui | MOMO-337, MOMO-262 |
+| `MOMO-349` (`#329`) | gateway 승인 왕복 (approval_request→resume) — ADR-0102 | swift/python/runtime-agent | MOMO-337, MOMO-338 |
+| `MOMO-350` (`#330`) | gateway status/partial 브로드캐스트 — ADR-0102 | swift/python/runtime-agent | MOMO-349 |
+| `MOMO-341` (`#333`) | gateway pending durable claim/lease + takeover — ADR-0102 합류 | swift/runtime-agent | MOMO-350 |
+| `MOMO-352` (`#332`) | 이중 경로 동등성 verifier — ADR-0102 보장 매트릭스 게이트 | tooling/runtime-agent | MOMO-349, MOMO-350, MOMO-341 |
+| `MOMO-351` (`#331`) | 이중 경로 스펙/다이어그램/계약 재정렬 + SD-5 소급 — ADR-0102 | docs | 없음 (병렬) |
+| `MOMO-353` (`#334`) | 로컬 게이트 drift-guard (config drift 검출 + 잔류 프로세스 정리) | tooling | 없음 (병렬) |
 
 ### Local Solo Hermes Dogfood Active Chain
 
@@ -1575,7 +1581,32 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙) — fresh-context 재판정 PASS (High 2·Medium 4 → MOMO-347 `#324`).
 - [x] [macos-ui] worktree clean gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md` (스냅샷 참조 6종은 정본 게이트 머신 재기록, 84 tests green). root post-merge macos-ui는 선재 `verify_macos_real_backend_ui.sh` dogfood 결합(→ MOMO-348 `#325`)으로 별도 추적. PR #323 merge (`881518b`).
 
-### ☐ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-337, MOMO-338
+### ☐ MOMO-349 수용기준 — Gateway 승인 왕복 `[swift/python/runtime-agent]` · 의존: MOMO-337, MOMO-338 (`#329`, ADR-0102)
+- [ ] gateway 콜백에 `approval_request` 이벤트: `approval` 생성 + run `awaiting_approval` 전이 (기존 상태머신 재사용, 스키마 변경 금지).
+- [ ] 사람 결정 시 기존 `resume_approval` outbox가 gateway에도 resume `agent.job`을 publish, 어댑터가 재개/중단 처리.
+- [ ] actor/run binding fail-closed, 단일 쓰기경로 불변, 승인 대기 run이 macOS 승인 인박스에 실데이터 노출.
+- [ ] 어댑터 tests + `verify_hermes_gateway_adapter.sh` 승인 왕복 시나리오(격리 DB 패턴) + clean/root `runtime-agent` gate + 정본 3종.
+
+### ☐ MOMO-350 수용기준 — Gateway status/partial 브로드캐스트 `[swift/python/runtime-agent]` · 의존: MOMO-349 (`#330`, ADR-0102)
+- [ ] `/gateway/events`가 `thinking`/`streaming` 델타를 수용해 `agent.status`/`agent.partial`로 `agent:` namespace 브로드캐스트.
+- [ ] actor/run binding + 서버측 rate/size 상한. 어댑터가 provider 델타를 전달(버퍼링 허용).
+- [ ] macOS 클라 실렌더 증명 + gateway verifier 시나리오 + clean/root gate + 정본 3종.
+
+### ☐ MOMO-352 수용기준 — 이중 경로 동등성 verifier `[tooling/runtime-agent]` · 의존: MOMO-349, MOMO-350, MOMO-341 (`#332`, ADR-0102)
+- [ ] 신규 `verify_agent_path_equivalence.sh` — 격리 DB 패턴(per-run 채널 UUID, CENT_CHANNEL 대문자, digest, exit 96) 준수.
+- [ ] 동일 시나리오(트리거→승인→resume→최종)를 worker/gateway 2회 실행, run 전이·approval·usage/audit·durable message 동등성 비교 (허용 차이는 allowlist).
+- [ ] `runtime-agent` profile 배선 + clean/root gate + 정본 3종.
+
+### ☐ MOMO-351 수용기준 — 이중 경로 문서 재정렬 `[docs]` · 의존 없음 (`#331`, ADR-0102)
+- [ ] adapter-contract-v0 "기본 경로 아님" 문구 → 이중 경로 계약으로 교체. L4 §6·README·overview 다이어그램 재작성.
+- [ ] SD-5 API 표면 소급 승인 명시 + legacy gateway 시크릿 폐기 일정 문서화 + `docs` gate PASS.
+
+### ☐ MOMO-353 수용기준 — 로컬 게이트 drift-guard `[tooling]` · 의존 없음 (`#334`)
+- [ ] `ensure_runtime_env.sh`가 실행 중 Centrifugo running-config를 repo config와 대조 (불일치 시 안내/opt-in 재시작).
+- [ ] 게이트 pre-clean이 이전 게이트 런 잔류 verifier 프로세스를 소유권 증명 기반으로 자동 정리 (dogfood/사용자 프로세스 절대 비접촉 + 오탐 방지 검증).
+- [ ] 실패 경로 포함 게이트 종료 시 reaping 보강 + clean/root gate + 정본 3종.
+
+### ☐ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-350 (ADR-0102 배치 합류, `#333`)
 > MOMO-338 성능 리뷰 후속. 현재 pending endpoint는 actor-bound read지만 lease/claim이 없어 동일 agent의 gateway 인스턴스가 겹치면 provider turn과 비용이 중복될 수 있다.
 - [ ] [swift/sql] pending job에 단일 owner lease와 만료/takeover 계약을 추가한다. `schema_v0.sql`은 수정하지 않고 신규 migration을 사용한다.
 - [ ] [swift] claim은 `FOR UPDATE SKIP LOCKED` 또는 동등한 원자 경로이며, lease owner가 아닌 callback/renew/release는 fail-closed한다.

@@ -1,7 +1,7 @@
 # ADR 0102: 에이전트 실행 경로 정본화 — AgentWorker SSE vs Hermes Gateway
 
-> Status: Proposed (성재 옵션 선택 대기 — 권고안: Option C "역할 분리 이중 경로 + 보장 매트릭스")
-> Date: 2026-07-10
+> Status: **Accepted** (2026-07-12, 성재 — Option C "역할 분리 이중 경로 + 보장 매트릭스")
+> Date: 2026-07-10 (Proposed) → 2026-07-12 (Accepted)
 > Related: ADR-0100 (SD-2/SD-5 소급), ADR-0101(에이전트 신원 — 두 경로 모두 agent_bearer로 수렴), ADR-0004
 
 ## Context
@@ -48,7 +48,14 @@ Slack의 대응물은 "앱을 어디서 실행하느냐"다: 초기에는 외부
 
 ## Decision
 
-(성재 선택 대기 — Fable 권고: **Option C**. Accepted 시 파생 티켓: ①gateway 승인 왕복 ②gateway status/partial 브로드캐스트 ③스펙/다이어그램 재정렬 ④이중 경로 동등성 verifier)
+**Option C 채택** (2026-07-12, 성재). 두 경로를 에이전트 유형별 공식 경로로 정본화하고(gateway=BYOA, worker=managed), 승인·비용·감사 보장은 서버 기계장치로 통일한다.
+
+파생 티켓 (같은 배치, 핸드오프 패킷 `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md`):
+- **MOMO-349** gateway 승인 왕복 (approval_request 콜백 → awaiting_approval → resume publish)
+- **MOMO-350** gateway status/partial 브로드캐스트 (`/gateway/events` → `agent.status`/`agent.partial`)
+- **MOMO-351** 스펙/다이어그램/계약 문서 재정렬 + SD-5 소급 승인
+- **MOMO-352** 이중 경로 동등성 verifier (같은 시나리오, 두 경로 동일 보장 증명)
+- **MOMO-341** gateway 다중 인스턴스 claim/lease + takeover (기존 수용기준, 이 배치에 합류 — 성재 지시 2026-07-12)
 
 ## Consequences (Option C 기준)
 

@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-12 · 기준선: main `444ee59` (MOMO-348 merge — **verifier 격리 캐스케이드 전 프로파일 종결, root runtime-agent+macos-ui full gate green**) · 통합 책임: `momo-main`
+> 기준일: 2026-07-12 · 기준선: **ADR-0102 Accepted (Option C)** + verifier 격리 캐스케이드 종결 (root 전 프로파일 green) · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -9,8 +9,8 @@
 - 제품 방향: momo는 채널 타임라인을 사람·에이전트의 실행/승인/비용/감사 원장으로 만드는 self-hosted agent messenger다.
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
-- 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer)은 Accepted. ADR-0102(Worker/Gateway 실행 경로)는 Proposed이며 성재 결정 대기다.
-- 현재 구현 체인: **ADR-0101 Phase 1 + 후속(347) 완료, verifier 격리 체인 342~348 전체 완료** — root main에서 `runtime-agent`·`macos-ui` full gate 모두 green (2026-07-12). **ready 구현 goal 없음** — 다음 작업은 기획 결정(ADR-0102 등)에서 나온다.
+- 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer), **ADR-0102(실행 경로 — Option C 이중 경로 + 서버 보장 매트릭스, 2026-07-12)** 전부 Accepted. 다음 결정 큐는 ADR-0103(로드맵 정렬)부터.
+- 현재 구현 체인: ADR-0101 Phase 1 + verifier 격리 체인 완료 (root 전 프로파일 green). **새 배치: ADR-0102 파생 6 goal ready** — 패킷 `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md`. 순서: 349(#329)→350(#330)→341(#333)→352(#332), 병렬: 351(#331 docs)·353(#334 drift-guard). 핵심 성과물: **승인 UX가 실트래픽(gateway)에서 처음 동작**.
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -18,9 +18,9 @@
 
 | Planning ID | 주제 | Planner owner | 상태 | 결정권자 | 다음 행동 |
 |---|---|---|---|---|---|
-| `ADR-0102` | AgentWorker SSE vs Hermes Gateway 정본화 | Fable (기안 완료) | `decision-needed` | 성재 | Option C 권고안을 검토해 Accept/수정/Reject |
-| `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | ADR-0102 결정 또는 명시적 우선순위 지시 후 claim |
-| `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | ADR-0102의 실행 경로 보장 매트릭스와 함께 검토 |
+| `ADR-0102` | AgentWorker SSE vs Hermes Gateway 정본화 | Fable | **`accepted`** (2026-07-12, Option C) | 성재 ✓ | 파생 배치 실행 (패킷 2026-07-12) |
+| `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` — **다음 결정 순번** | 성재 | claim 후 기안 |
+| `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |
 | `ADR-0105..0109` | 검색·정체성·CI·서버 스택·메신저 기본기 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |
 
 ### 병렬 기획 claim 규칙
@@ -40,6 +40,12 @@
 | verifier 격리 체인 | issue 본문이 패킷 역할 (`#318` 패턴 승계) | MOMO-346 `#322` | `done` (PR #326, main `beceaa1`) — 캐스케이드 종결 | 완료 |
 | MOMO-339 후속 | issue `#324` 본문 (design review High/Medium) | MOMO-347 `#324` | `done` (PR #327, main `51db851`) | 완료 |
 | verifier 격리 체인 | issue `#325` 본문 | MOMO-348 `#325` | `done` (PR #328, main `444ee59`) — 캐스케이드 전 프로파일 종결 | 완료 |
+| **ADR-0102 실행 경로** | `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md` | MOMO-349 `#329` | `ready` | 1 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-350 `#330` | `ready` (349 후) | 2 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-341 `#333` | `ready` (350 후) | 3 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-352 `#332` | `ready` (349+350+341 후) | 4 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-351 `#331` (docs) | `ready` | 병렬 |
+| 독립 tooling | issue `#334` 본문 | MOMO-353 `#334` (drift-guard) | `ready` | 병렬 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
@@ -54,9 +60,11 @@
 
 ## 4. 다음 체크포인트
 
-1. 성재가 ADR-0102를 결정한다. Accepted라면 `momo-main`이 파생 티켓/패킷/ROADMAP을 한 change set으로 통합한다.
-2. ~~MOMO-346/347/348~~ — 2026-07-12 전부 완료. root 전 프로파일 green.
-3. 성재 승인 대기 제안: drift-guard 티켓 (Centrifugo running-config drift 검출 + 실패 게이트 런의 잔류 프로세스 자동 정리 — 오늘 수동 정리 3회 발생).
+1. ~~ADR-0102 결정~~ — **Accepted (Option C, 2026-07-12)**. 파생 배치 발급 완료 — 착수는 성재 트리거 ("349부터 spawn해줘").
+2. MOMO-349(gateway 승인 왕복)가 배치의 1번이자 최고 가치 — 승인 인박스가 실트래픽에서 처음 동작한다.
+3. ~~drift-guard 제안~~ — MOMO-353 `#334`로 발급됨 (배치와 병렬 가능).
+4. design-review 잔여 Medium 2는 보류 확정 (성재 2026-07-12) — BUILD_TICKETS 기록 유지.
+5. 다음 기획 결정 순번: ADR-0103 (로드맵 정렬).
 4. Hermes gateway 중복 실행 방지 claim/lease + takeover는 MOMO-341 — 착수 대기.
 5. ADR-0102 결정을 완료해 AgentWorker SSE와 Hermes Gateway의 제품 기본 경로를 정본화한다.
 
