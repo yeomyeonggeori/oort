@@ -301,6 +301,20 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(
             AuthMiddleware.requiredAgentScope(
                 method: "POST",
+                path: "/v1/workspaces/ws/agents/agent/gateway/jobs/341/lease/renew"
+            ),
+            "agent:jobs:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
+                path: "/v1/workspaces/ws/agents/agent/gateway/jobs/341/lease/release"
+            ),
+            "agent:jobs:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
                 path: "/v1/workspaces/ws/agent-runs/run/gateway/complete"
             ),
             "agent:runs:callback"
@@ -411,6 +425,45 @@ final class MomoServerTests: XCTestCase {
             from: Data(#"{"event_id":"\#(eventID.uuidString)","status":"streaming","text_delta":"안녕"}"#.utf8)
         ).validatedProgress(status: "streaming")
         XCTAssertEqual(streaming.textDelta, "안녕")
+    }
+
+    func testAgentGatewayCallbacksRequireExactJobLeaseBinding() throws {
+        let leaseID = UUID(uuidString: "00000000-0000-7341-8000-000000000341")!
+        let event = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(
+                #"{"job_id":341,"lease_id":"\#(leaseID.uuidString)","status":"running"}"#.utf8
+            )
+        )
+        XCTAssertEqual(
+            try event.validatedLease(),
+            AgentGatewayLeaseBinding(jobID: 341, leaseID: leaseID)
+        )
+
+        let complete = try JSONDecoder().decode(
+            AgentGatewayCompleteRequest.self,
+            from: Data(
+                #"{"job_id":341,"lease_id":"\#(leaseID.uuidString)","status":"succeeded"}"#.utf8
+            )
+        )
+        XCTAssertEqual(
+            try complete.validatedLease(),
+            AgentGatewayLeaseBinding(jobID: 341, leaseID: leaseID)
+        )
+
+        let missing = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"status":"running"}"#.utf8)
+        )
+        XCTAssertThrowsError(try missing.validatedLease())
+
+        let wrongPath = try JSONDecoder().decode(
+            AgentGatewayLeaseRequest.self,
+            from: Data(
+                #"{"job_id":342,"lease_id":"\#(leaseID.uuidString)"}"#.utf8
+            )
+        )
+        XCTAssertThrowsError(try wrongPath.validated(jobID: 341))
     }
 
     func testAgentGatewayProgressEventsFailClosedOnShapeAndSize() throws {

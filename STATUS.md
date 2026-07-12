@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-341 Gateway Pending Durable Claim/Lease (2026-07-12)
+
+- 신규 `008_gateway_job_lease.sql`이 gateway `agent_job` outbox row에 단일 owner/acquired/expiry를 멱등 추가한다. actor-bound pending recovery는 tenant transaction의 `FOR UPDATE SKIP LOCKED`로 원자 claim하며, 만료된 pending row만 새 lease로 takeover한다. `schema_v0.sql`은 변경하지 않았다.
+- events/complete/renew/release는 exact job+lease+run+agent 결속을 강제하고 non-owner/expired callback을 409로 닫는다. Hermes adapter는 realtime을 wake-up으로 유지하고 한 row씩 claim해 provider 실행 중 lease를 renew하며, renew 상실 시 provider task를 취소한다. provider credential은 계속 사용자 Hermes 내부에만 있다.
+- 검증: server build + 55 tests PASS, adapter contract 52 tests PASS, adapter py_compile + verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/clean-root `runtime-agent`는 worker 금지 범위로 실행하지 않았으며 오케스트레이터 수행 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-350 Gateway Status/Partial Broadcast (2026-07-12)
 
 - actor/run-bound `/gateway/events`가 bounded `thinking`/`streaming` callback을 받아 macOS wire shape의 `agent.status`/`agent.partial`을 observable `agent:` outbox에 기록한다. gateway bearer는 기존 sliding-window per-member rate limit을 공유하고 progress에는 별도 run당 240 events/minute 하드캡, detail 2 KiB, text delta 8 KiB 상한을 둔다.

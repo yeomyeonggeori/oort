@@ -14,6 +14,7 @@ import PostgresNIO
 struct AgentGatewayRoutes: Sendable {
     static let progressRateWindowSeconds = 60
     static let maximumProgressEventsPerWindow = 240
+    static let leaseDurationSeconds = 30
 
     let db: Database
     let config: AgentGatewayConfig
@@ -36,6 +37,14 @@ struct AgentGatewayRoutes: Sendable {
             "/v1/workspaces/:ws/agents/:agent/gateway/jobs/pending",
             use: pendingJobs
         )
+        group.post(
+            "/v1/workspaces/:ws/agents/:agent/gateway/jobs/:job/lease/renew",
+            use: renewLease
+        )
+        group.post(
+            "/v1/workspaces/:ws/agents/:agent/gateway/jobs/:job/lease/release",
+            use: releaseLease
+        )
         group.post("/v1/workspaces/:ws/agent-runs/:run/gateway/events", use: event)
         group.post("/v1/workspaces/:ws/agent-runs/:run/gateway/complete", use: complete)
     }
@@ -53,39 +62,66 @@ struct AgentGatewayRoutes: Sendable {
             throw HTTPError(.forbidden, message: "agent bearer actor does not match target agent")
         }
         let limit = min(max(request.uri.queryParameters["limit"].flatMap { Int($0) } ?? 20, 1), 100)
-        let activeAgent = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
-            try await Self.isActiveAgent(
+        let jobs: [AgentGatewayPendingJobDTO] = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            guard try await Self.isActiveAgent(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
                 agentID: targetAgentID
-            )
-        }
-        guard activeAgent else {
-            throw HTTPError(.notFound, message: "active agent not found")
-        }
-
-        let jobs: [AgentGatewayPendingJobDTO] = try await db.withTenantConnection(
-            workspaceID: workspaceID
-        ) { conn in
+            ) else {
+                throw HTTPError(.notFound, message: "active agent not found")
+            }
             let rows = try await conn.query(
                 """
-                SELECT id, payload::text, created_at
-                  FROM outbox
-                 WHERE workspace_id = \(workspaceID)
-                   AND kind = 'agent_job'
-                   AND method = 'gateway'
-                   AND status = 'pending'
-                   AND available_at <= now()
-                   AND partition_key = \(targetAgentID)
-                   AND payload->>'agent_member_id' = \(targetAgentID.uuidString)
+                WITH candidate AS (
+                  SELECT o.id
+                    FROM outbox o
+                   WHERE o.workspace_id = \(workspaceID)
+                     AND o.kind = 'agent_job'
+                     AND o.method = 'gateway'
+                     AND o.status = 'pending'
+                     AND o.available_at <= now()
+                     AND o.partition_key = \(targetAgentID)
+                     AND o.payload->>'agent_member_id' = \(targetAgentID.uuidString)
+                     AND (o.lease_expires_at IS NULL OR o.lease_expires_at <= now())
+                     AND EXISTS (
+                       SELECT 1
+                         FROM member m
+                         JOIN agent a
+                           ON a.member_id = m.id
+                          AND a.workspace_id = m.workspace_id
+                        WHERE m.id = \(targetAgentID)
+                          AND m.workspace_id = \(workspaceID)
+                          AND m.kind = 'agent'
+                          AND m.status = 'active'
+                          AND m.deleted_at IS NULL
+                     )
+                   ORDER BY o.id ASC
+                   FOR UPDATE OF o SKIP LOCKED
+                   LIMIT \(limit)
+                ), claimed AS (
+                  UPDATE outbox o
+                     SET lease_owner = uuidv7(),
+                         lease_acquired_at = now(),
+                         lease_expires_at = now()
+                           + make_interval(secs => \(Self.leaseDurationSeconds))
+                    FROM candidate c
+                   WHERE o.id = c.id
+                  RETURNING o.id, o.payload::text, o.created_at,
+                            o.lease_owner, o.lease_expires_at
+                )
+                SELECT id, payload, created_at, lease_owner, lease_expires_at
+                  FROM claimed
                  ORDER BY id ASC
-                 LIMIT \(limit)
                 """,
                 logger: db.logger
             ).collect()
             return try rows.map { row in
-                let (id, payloadJSON, createdAt) = try row.decode((Int64, String, Date).self)
+                let (id, payloadJSON, createdAt, leaseID, leaseExpiresAt) = try row.decode(
+                    (Int64, String, Date, UUID, Date).self
+                )
                 guard let data = payloadJSON.data(using: .utf8) else {
                     throw HTTPError(.internalServerError, message: "gateway job payload encoding failed")
                 }
@@ -94,11 +130,110 @@ struct AgentGatewayRoutes: Sendable {
                     id: id,
                     runId: payload.objectValue?["run_id"]?.stringValue ?? "",
                     payload: payload,
-                    createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
+                    createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
+                    leaseId: leaseID.uuidString,
+                    leaseExpiresAtMs: Int64(leaseExpiresAt.timeIntervalSince1970 * 1000)
                 )
             }
         }
         return AgentGatewayPendingJobsResponse(jobs: jobs)
+    }
+
+    @Sendable
+    func renewLease(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> AgentGatewayLeaseResponse {
+        try requireGatewayMode()
+        let workspaceID = try Self.workspaceID(context)
+        let targetAgentID = try Self.agentID(context)
+        let jobID = try Self.jobID(context)
+        let principal = try Self.gatewayPrincipal(context, workspaceID: workspaceID)
+        if let principal, principal.memberID != targetAgentID {
+            throw HTTPError(.forbidden, message: "agent bearer actor does not match target agent")
+        }
+        let lease = try await request.decode(as: AgentGatewayLeaseRequest.self, context: context)
+            .validated(jobID: jobID)
+        let expiresAt: Date? = try await db.withTenantTransaction(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                UPDATE outbox
+                   SET lease_expires_at = now()
+                     + make_interval(secs => \(Self.leaseDurationSeconds))
+                 WHERE id = \(jobID)
+                   AND workspace_id = \(workspaceID)
+                   AND kind = 'agent_job'
+                   AND method = 'gateway'
+                   AND status = 'pending'
+                   AND partition_key = \(targetAgentID)
+                   AND payload->>'agent_member_id' = \(targetAgentID.uuidString)
+                   AND lease_owner = \(lease.leaseID)
+                   AND lease_expires_at > now()
+                RETURNING lease_expires_at
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.first?.decode(Date.self)
+        }
+        guard let expiresAt else {
+            throw HTTPError(.conflict, message: "gateway job lease is expired or not owned")
+        }
+        return AgentGatewayLeaseResponse(
+            status: "renewed",
+            jobId: jobID,
+            leaseId: lease.leaseID.uuidString,
+            leaseExpiresAtMs: Int64(expiresAt.timeIntervalSince1970 * 1000)
+        )
+    }
+
+    @Sendable
+    func releaseLease(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> AgentGatewayLeaseResponse {
+        try requireGatewayMode()
+        let workspaceID = try Self.workspaceID(context)
+        let targetAgentID = try Self.agentID(context)
+        let jobID = try Self.jobID(context)
+        let principal = try Self.gatewayPrincipal(context, workspaceID: workspaceID)
+        if let principal, principal.memberID != targetAgentID {
+            throw HTTPError(.forbidden, message: "agent bearer actor does not match target agent")
+        }
+        let lease = try await request.decode(as: AgentGatewayLeaseRequest.self, context: context)
+            .validated(jobID: jobID)
+        let released: Bool = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            let rows = try await conn.query(
+                """
+                UPDATE outbox
+                   SET lease_owner = NULL,
+                       lease_acquired_at = NULL,
+                       lease_expires_at = NULL
+                 WHERE id = \(jobID)
+                   AND workspace_id = \(workspaceID)
+                   AND kind = 'agent_job'
+                   AND method = 'gateway'
+                   AND status = 'pending'
+                   AND partition_key = \(targetAgentID)
+                   AND payload->>'agent_member_id' = \(targetAgentID.uuidString)
+                   AND lease_owner = \(lease.leaseID)
+                   AND lease_expires_at > now()
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            return !rows.isEmpty
+        }
+        guard released else {
+            throw HTTPError(.conflict, message: "gateway job lease is expired or not owned")
+        }
+        return AgentGatewayLeaseResponse(
+            status: "released",
+            jobId: jobID,
+            leaseId: lease.leaseID.uuidString,
+            leaseExpiresAtMs: nil
+        )
     }
 
     @Sendable
@@ -113,6 +248,7 @@ struct AgentGatewayRoutes: Sendable {
             runID: runID
         )
         let dto = try await request.decode(as: AgentGatewayEventRequest.self, context: context)
+        let lease = try dto.validatedLease()
         let normalizedStatus = Self.normalizedStatus(dto.status ?? "running")
 
         if normalizedStatus == "approval_request" {
@@ -124,7 +260,8 @@ struct AgentGatewayRoutes: Sendable {
                 principal: principal,
                 workspaceID: workspaceID,
                 runID: runID,
-                request: validated
+                request: validated,
+                lease: lease
             )
             guard accepted else {
                 throw HTTPError(.notFound, message: "agent run not found")
@@ -148,6 +285,15 @@ struct AgentGatewayRoutes: Sendable {
             guard let run = try await Self.lockGatewayRun(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, runID: runID)
             else { return false }
+            try await Self.requireGatewayLease(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID,
+                agentID: run.agentMemberID,
+                lease: lease,
+                allowSettled: normalizedStatus == "cancelled" && run.status == "cancelled"
+            )
             let existingEvent = try await conn.query(
                 """
                 SELECT 1
@@ -270,9 +416,11 @@ struct AgentGatewayRoutes: Sendable {
                            processed_at = now(),
                            last_error = 'gateway stopped after approval rejection'
                      WHERE workspace_id = \(workspaceID)
+                       AND id = \(lease.jobID)
                        AND kind = 'agent_job'
                        AND method = 'gateway'
                        AND status = 'pending'
+                       AND lease_owner = \(lease.leaseID)
                        AND payload->>'run_id' = \(runID.uuidString)
                        AND payload ? 'resume_from_approval_id'
                        AND payload #>> '{approval_decision,status}' IN
@@ -294,7 +442,8 @@ struct AgentGatewayRoutes: Sendable {
         principal: AuthPrincipal?,
         workspaceID: UUID,
         runID: UUID,
-        request: AgentGatewayApprovalRequest
+        request: AgentGatewayApprovalRequest,
+        lease: AgentGatewayLeaseBinding
     ) async throws -> Bool {
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
         return try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
@@ -325,14 +474,34 @@ struct AgentGatewayRoutes: Sendable {
                         message: "approval request retry does not match run state"
                     )
                 }
+                try await Self.requireGatewayLease(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    runID: runID,
+                    agentID: run.agentMemberID,
+                    lease: lease,
+                    allowSettled: true
+                )
                 try await Self.settleGatewayJobForApproval(
                     conn: conn,
                     logger: db.logger,
                     workspaceID: workspaceID,
-                    runID: runID
+                    runID: runID,
+                    lease: lease
                 )
                 return true
             }
+
+            try await Self.requireGatewayLease(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID,
+                agentID: run.agentMemberID,
+                lease: lease,
+                allowSettled: false
+            )
 
             guard run.status == "queued" || run.status == "running" else {
                 throw HTTPError(
@@ -454,7 +623,8 @@ struct AgentGatewayRoutes: Sendable {
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                runID: runID
+                runID: runID,
+                lease: lease
             )
             return true
         }
@@ -472,6 +642,7 @@ struct AgentGatewayRoutes: Sendable {
             runID: runID
         )
         let dto = try await request.decode(as: AgentGatewayCompleteRequest.self, context: context)
+        let lease = try dto.validatedLease()
         let completionStatus = try Self.normalizedCompletionStatus(
             dto.status,
             error: dto.error
@@ -484,6 +655,15 @@ struct AgentGatewayRoutes: Sendable {
             else {
                 return CompletionResult.notFound
             }
+            try await Self.requireGatewayLease(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID,
+                agentID: run.agentMemberID,
+                lease: lease,
+                allowSettled: Self.isTerminalRunStatus(run.status)
+            )
             if Self.isTerminalRunStatus(run.status),
                let existing = try await Self.existingFinalMessage(
                 conn: conn,
@@ -635,8 +815,10 @@ struct AgentGatewayRoutes: Sendable {
                          ELSE \(safeError ?? "gateway reported failure")
                        END
                  WHERE workspace_id = \(workspaceID)
+                   AND id = \(lease.jobID)
                    AND kind = 'agent_job'
                    AND method = 'gateway'
+                   AND lease_owner = \(lease.leaseID)
                    AND payload->>'run_id' = \(runID.uuidString)
                 """,
                 logger: db.logger
@@ -784,6 +966,40 @@ struct AgentGatewayRoutes: Sendable {
         )
     }
 
+    private static func requireGatewayLease(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        runID: UUID,
+        agentID: UUID,
+        lease: AgentGatewayLeaseBinding,
+        allowSettled: Bool
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT status::text, lease_expires_at > now()
+              FROM outbox
+             WHERE id = \(lease.jobID)
+               AND workspace_id = \(workspaceID)
+               AND kind = 'agent_job'
+               AND method = 'gateway'
+               AND partition_key = \(agentID)
+               AND payload->>'agent_member_id' = \(agentID.uuidString)
+               AND payload->>'run_id' = \(runID.uuidString)
+               AND lease_owner = \(lease.leaseID)
+             FOR UPDATE
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.conflict, message: "gateway job lease is not owned")
+        }
+        let (status, active) = try row.decode((String, Bool).self)
+        guard (status == "pending" && active) || (status == "done" && allowSettled) else {
+            throw HTTPError(.conflict, message: "gateway job lease is expired or settled")
+        }
+    }
+
     static func isTerminalRunStatus(_ status: String) -> Bool {
         status == "succeeded" || status == "failed" || status == "cancelled"
             || status == "timed_out"
@@ -862,6 +1078,14 @@ struct AgentGatewayRoutes: Sendable {
         let raw = try context.parameters.require("agent")
         guard let id = UUID(uuidString: raw) else {
             throw HTTPError(.badRequest, message: "invalid agent id")
+        }
+        return id
+    }
+
+    private static func jobID(_ context: AppRequestContext) throws -> Int64 {
+        let raw = try context.parameters.require("job")
+        guard let id = Int64(raw), id > 0 else {
+            throw HTTPError(.badRequest, message: "invalid gateway job id")
         }
         return id
     }
@@ -1038,7 +1262,8 @@ struct AgentGatewayRoutes: Sendable {
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
-        runID: UUID
+        runID: UUID,
+        lease: AgentGatewayLeaseBinding
     ) async throws {
         _ = try await conn.query(
             """
@@ -1047,11 +1272,12 @@ struct AgentGatewayRoutes: Sendable {
                    processed_at = now(),
                    last_error = NULL
              WHERE workspace_id = \(workspaceID)
+               AND id = \(lease.jobID)
                AND kind = 'agent_job'
                AND method = 'gateway'
                AND status = 'pending'
+               AND lease_owner = \(lease.leaseID)
                AND payload->>'run_id' = \(runID.uuidString)
-               AND NOT (payload ? 'resume_from_approval_id')
             """,
             logger: logger
         )
@@ -1298,6 +1524,8 @@ struct AgentGatewayEventRequest: Decodable {
     static let maximumTextDeltaBytes = 8_192
 
     let eventID: UUID?
+    let jobID: Int64?
+    let leaseID: UUID?
     let status: String?
     let detail: String?
     let textDelta: String?
@@ -1305,10 +1533,19 @@ struct AgentGatewayEventRequest: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case eventID = "event_id"
+        case jobID = "job_id"
+        case leaseID = "lease_id"
         case status
         case detail
         case textDelta = "text_delta"
         case approvalRequest = "approval_request"
+    }
+
+    func validatedLease() throws -> AgentGatewayLeaseBinding {
+        guard let jobID, jobID > 0, let leaseID else {
+            throw HTTPError(.badRequest, message: "job_id and lease_id are required")
+        }
+        return AgentGatewayLeaseBinding(jobID: jobID, leaseID: leaseID)
     }
 
     func validatedProgress(status: String) throws -> AgentGatewayProgressEvent {
@@ -1490,10 +1727,28 @@ struct AgentGatewayApprovalToolCall: Decodable, Equatable, Sendable {
 }
 
 struct AgentGatewayCompleteRequest: Decodable {
+    let jobID: Int64?
+    let leaseID: UUID?
     let status: String?
     let body: String?
     let error: String?
     let usage: AgentGatewayUsage?
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case leaseID = "lease_id"
+        case status
+        case body
+        case error
+        case usage
+    }
+
+    func validatedLease() throws -> AgentGatewayLeaseBinding {
+        guard let jobID, jobID > 0, let leaseID else {
+            throw HTTPError(.badRequest, message: "job_id and lease_id are required")
+        }
+        return AgentGatewayLeaseBinding(jobID: jobID, leaseID: leaseID)
+    }
 }
 
 struct AgentGatewayUsage: Decodable {
@@ -1568,8 +1823,42 @@ struct AgentGatewayPendingJobDTO: ResponseEncodable, Codable, Sendable {
     let runId: String
     let payload: JSONValue
     let createdAtMs: Int64
+    let leaseId: String
+    let leaseExpiresAtMs: Int64
 }
 
 struct AgentGatewayPendingJobsResponse: ResponseEncodable {
     let jobs: [AgentGatewayPendingJobDTO]
+}
+
+struct AgentGatewayLeaseBinding: Equatable, Sendable {
+    let jobID: Int64
+    let leaseID: UUID
+}
+
+struct AgentGatewayLeaseRequest: Decodable {
+    let jobID: Int64?
+    let leaseID: UUID?
+
+    private enum CodingKeys: String, CodingKey {
+        case jobID = "job_id"
+        case leaseID = "lease_id"
+    }
+
+    func validated(jobID pathJobID: Int64) throws -> AgentGatewayLeaseBinding {
+        if let jobID, jobID != pathJobID {
+            throw HTTPError(.conflict, message: "gateway job id does not match path")
+        }
+        guard let leaseID else {
+            throw HTTPError(.badRequest, message: "lease_id is required")
+        }
+        return AgentGatewayLeaseBinding(jobID: pathJobID, leaseID: leaseID)
+    }
+}
+
+struct AgentGatewayLeaseResponse: ResponseEncodable {
+    let status: String
+    let jobId: Int64
+    let leaseId: String
+    let leaseExpiresAtMs: Int64?
 }

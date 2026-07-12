@@ -62,7 +62,11 @@ sequenceDiagram
     else AGENT_GATEWAY_MODE=gateway (BYOA)
         P-->>R: relay: agent.job → private agentwork: wake-up
         R-->>H: push (신뢰 입력 아님)
-        H->>S: Bearer(agent) GET /gateway/jobs/pending
+        H->>S: Bearer(agent) GET /gateway/jobs/pending (atomic claim)
+        loop provider turn + callback
+            H->>S: POST /gateway/jobs/:job/lease/renew
+            S-->>H: bounded lease expiry
+        end
         H->>S: Bearer(agent) POST /gateway/events
         H->>S: Bearer(agent) POST /gateway/complete
     end
@@ -93,13 +97,13 @@ JWT의 `meta.token_id`와 active token 행이 일치할 때만 private stream을
 | 승인 | `agent_run` + `approval` + human decision + resume outbox | worker pause/resume | approval callback/resume job (MOMO-349) |
 | 비용·감사 | budget/`usage_ledger`/`audit_log` 서버 커밋 | SSE usage evidence | completion usage evidence |
 | progress | 서버 검증 후 `agent:`에 status/partial publish | SSE delta | bounded callback delta (MOMO-350) |
-| 순서·복구 | Postgres SoT, `message.seq`, transactional outbox | SKIP LOCKED retry | realtime wake-up + pending recovery; lease/takeover는 MOMO-341 |
+| 순서·복구 | Postgres SoT, `message.seq`, transactional outbox | SKIP LOCKED retry | realtime wake-up + actor-bound SKIP LOCKED claim; 30s renewable single-owner lease + expiry takeover |
 
 MOMO-352는 같은 trigger→approval→resume→final 시나리오를 두 경로로 실행해 이 매트릭스의 동등성을 검증한다. 349/350/341/352가 열려 있는 동안 해당 gateway 셀은 Accepted ADR의 규범 계약이지 완료 evidence가 아니다.
 
 ### SD-5와 agent identity
 
-ADR-0102는 `POST /v1/auth/realtime-token`, `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending`, `AGENT_GATEWAY_MODE=worker|gateway`를 Option C의 공식 API/운영 표면으로 소급 승인한다. 두 경로는 ADR-0101의 `agent_bearer`로 수렴하며 gateway callback도 actor/run binding을 강제한다.
+ADR-0102는 `POST /v1/auth/realtime-token`, `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending`, `AGENT_GATEWAY_MODE=worker|gateway`를 Option C의 공식 API/운영 표면으로 소급 승인한다. MOMO-341은 pending GET을 원자 claim으로 강화하고 exact-owner `POST .../jobs/:job/lease/renew|release`를 추가했다. 두 경로는 ADR-0101의 `agent_bearer`로 수렴하며 gateway callback도 actor/run/job/lease binding을 강제한다.
 
 legacy `X-Momo-Agent-Gateway-Secret`는 기본 거부(`MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0`)인 이관 회귀 경로뿐이다. MOMO-349/350/341 반영 + MOMO-352 clean/root equivalence PASS 직후 별도 보안 정리에서 legacy header와 `AGENT_GATEWAY_SECRET`/flag를 제거하며, 늦어도 M7 진입 전에 끝낸다.
 

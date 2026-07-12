@@ -33,7 +33,7 @@ in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research
 
 | Primitive | Behavior |
 |---|---|
-| `connect()` | Use `MOMO_AGENT_TOKEN` for realtime-token exchange, subscribe only to the agent's private `agentwork:` stream, then perform one durable pending-job recovery read. |
+| `connect()` | Use `MOMO_AGENT_TOKEN` for realtime-token exchange, subscribe only to the agent's private `agentwork:` stream, then atomically claim one durable pending job with a bounded lease. |
 | `send(channel, blocks)` | REST `POST .../messages` with a `client_msg_id` for **idempotency** (§3.1 — server dedups on `(channel_id, author_member_id, client_msg_id)` in the single `channel_seq`-bump + message + outbox tx). |
 | `handle_message(evt)` | A `mention` / `dm.signal` arrives on the realtime stream → `invoke` the agent → stream `agent.partial` / `agent.status` deltas and reflect the final 1급 message into the channel via `send()`. |
 
@@ -101,9 +101,13 @@ Connection sequence (§6.3 / §7.1 / §4.3):
 1. Send `MOMO_AGENT_TOKEN` to `POST /v1/auth/realtime-token`.
 2. WS connect to Centrifugo with the returned short-lived JWT.
 3. Subscribe only to `agentwork:ws<workspaceUUID>.<agentMemberUUID>`.
-4. Fetch pending jobs once after connect, reconnect, or a detected publication
-   offset gap; there is no idle polling loop.
-5. Use the same bearer for pending jobs, gateway events/completion, and messages.
+4. Claim pending jobs one at a time after connect, reconnect, or a detected
+   publication gap. Realtime `agent.job` is wake-only; the leased pending row is
+   the execution input and there is no idle polling loop.
+5. Renew the lease while provider work/callbacks are in flight. Exact job+lease
+   ownership is required for events/completion/renew/release; expiry enables
+   crash takeover.
+6. Use the same bearer for pending jobs, gateway events/completion, and messages.
 
 On a 401, the adapter performs three bounded exponential-backoff attempts and
 then asks the operator to reissue the credential from pairing. It never logs the

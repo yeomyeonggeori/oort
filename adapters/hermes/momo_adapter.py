@@ -48,10 +48,11 @@ import logging
 import os
 import random
 import re
+import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Mapping, Optional, Sequence
+from typing import Any, AsyncIterator, Awaitable, Mapping, Optional, Sequence
 from urllib.parse import urlsplit
 
 log = logging.getLogger("momo.adapter")
@@ -221,6 +222,13 @@ class MomoConfig:
     request_timeout_s: float = 120.0
 
 
+@dataclass(frozen=True, slots=True)
+class GatewayJobLease:
+    job_id: int
+    lease_id: str
+    expires_at_ms: int
+
+
 # ---------------------------------------------------------------------------
 # Centrifugo channel naming (L4 §4.1).
 #   ch    : ch:ws<workspaceUUID>.<channelUUID>       # group channel
@@ -372,7 +380,9 @@ class MomoAdapter(BasePlatformAdapter):
     _max_handled_triggers = 4096
     _max_pending_results = 128
     _max_queued_jobs = 64
-    _pending_page_size = 100
+    # One serial provider worker claims one row at a time. Claiming a page would
+    # start leases for queued work before this adapter can renew or execute it.
+    _pending_page_size = 1
     _max_pending_pages = 10
     _max_pending_recovery_attempts = 3
     _gateway_progress_flush_bytes = 512
@@ -435,6 +445,7 @@ class MomoAdapter(BasePlatformAdapter):
         self._inflight_triggers: set[str] = set()
         self._pending_gateway_results: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._gateway_result_reservations: set[str] = set()
+        self._gateway_job_leases: dict[str, GatewayJobLease] = {}
 
     # ----- HTTP helpers ----------------------------------------------------
 
@@ -945,6 +956,12 @@ class MomoAdapter(BasePlatformAdapter):
                         continue
                 if not isinstance(payload, Mapping):
                     continue
+                lease = self._gateway_job_lease(job)
+                if lease is None:
+                    log.warning(
+                        "skipping unleased pending gateway job id=%s", job.get("id")
+                    )
+                    continue
                 await self._enqueue_gateway_work(
                     {
                         "channel": agent_channel(
@@ -954,6 +971,9 @@ class MomoAdapter(BasePlatformAdapter):
                         "seq": job.get("id"),
                         "ts": job.get("createdAtMs") or payload.get("created_at_ms"),
                         "payload": payload,
+                        "job_id": lease.job_id,
+                        "lease_id": lease.lease_id,
+                        "lease_expires_at_ms": lease.expires_at_ms,
                     },
                     wait_until_complete=True,
                 )
@@ -963,6 +983,25 @@ class MomoAdapter(BasePlatformAdapter):
             "momo pending recovery reached the bounded page limit; scheduling one continuation"
         )
         self._pending_recovery_requested = True
+
+    @staticmethod
+    def _gateway_job_lease(job: Mapping[str, Any]) -> Optional["GatewayJobLease"]:
+        try:
+            job_id = int(job.get("id"))
+            lease_id = str(job.get("leaseId") or job.get("lease_id") or "")
+            expires_at_ms = int(
+                job.get("leaseExpiresAtMs") or job.get("lease_expires_at_ms")
+            )
+            uuid.UUID(lease_id)
+        except (TypeError, ValueError):
+            return None
+        if job_id <= 0 or expires_at_ms <= 0:
+            return None
+        return GatewayJobLease(
+            job_id=job_id,
+            lease_id=lease_id,
+            expires_at_ms=expires_at_ms,
+        )
 
     @staticmethod
     def _iter_frames(raw: Any) -> list[dict[str, Any]]:
@@ -1245,11 +1284,19 @@ class MomoAdapter(BasePlatformAdapter):
         workspace_id = payload.get("workspace_id") or payload.get("workspaceId")
         channel_id = payload.get("channel_id") or payload.get("channelId")
         agent_member_id = payload.get("agent_member_id") or payload.get("agentMemberId")
+        lease = self._gateway_job_lease(
+            {
+                "id": evt.get("job_id"),
+                "lease_id": evt.get("lease_id"),
+                "lease_expires_at_ms": evt.get("lease_expires_at_ms"),
+            }
+        )
         expected_work_channel = agent_channel(
             self.cfg.workspace_id, self.cfg.agent_member_id
         )
         if (
             not run_id
+            or lease is None
             or not workspace_id
             or not channel_id
             or not agent_member_id
@@ -1262,82 +1309,94 @@ class MomoAdapter(BasePlatformAdapter):
             log.warning("agent.job actor/channel binding rejected; run=%s", run_id)
             return
 
+        self._gateway_job_leases[str(run_id)] = lease
+
         trigger_key = f"agent.job:{run_id}"
         if not self._begin_trigger(trigger_key):
             return
         handled = False
         try:
-            result = self._pending_gateway_results.get(str(run_id))
-            if result is None:
-                if not self._reserve_gateway_result_slot(str(run_id)):
-                    raise MomoGatewayBackpressure(
-                        "gateway completion backlog is full"
-                    )
-                resume_status = self._resume_decision_status(payload)
-                if resume_status is not None and resume_status != "approved":
-                    await self._report_gateway_event(
-                        workspace_id,
-                        run_id,
-                        "cancelled",
-                        f"approval {resume_status}; provider execution stopped",
-                    )
-                    handled = True
-                    return
-                await self._report_gateway_event(
-                    workspace_id,
-                    run_id,
-                    "running",
-                    "approval approved; resuming job"
-                    if resume_status == "approved"
-                    else "job received",
-                )
-                try:
-                    result = await self._run_gateway_job(payload)
-                except Exception as exc:  # noqa: BLE001 - durable readable failure
-                    log.error(
-                        "gateway job failed: run=%s error=%s",
-                        run_id,
-                        self._redact_gateway_error(exc),
-                    )
-                    result = {
-                        "status": "failed",
-                        "error": "Hermes runtime failed before producing a final response.",
-                        "usage": {
-                            "model": payload.get("model") or "hermes-agent",
-                            "prompt_tokens": 0,
-                            "completion_tokens": 0,
-                            "cached_tokens": 0,
-                            "reasoning_tokens": 0,
-                            "cost_micro_usd": 0,
-                            "was_estimated": True,
-                        },
-                    }
-                try:
-                    self._cache_gateway_result(str(run_id), result)
-                finally:
-                    self._gateway_result_reservations.discard(str(run_id))
-
-            approval_request = self._approval_request_from_result(result)
-            if approval_request is not None:
-                await self._report_gateway_approval_request(
-                    workspace_id, run_id, approval_request
-                )
-                self._pending_gateway_results.pop(str(run_id), None)
-                self._schedule_pending_recovery(
-                    reason="gateway-approval-slot-released", delay_s=0.1
-                )
-                handled = True
-                return
-
-            await self._complete_gateway_job(workspace_id, run_id, result)
-            self._pending_gateway_results.pop(str(run_id), None)
-            self._schedule_pending_recovery(
-                reason="gateway-result-slot-released", delay_s=0.1
+            await self._run_gateway_job_with_lease(
+                str(run_id),
+                self._process_claimed_gateway_job(
+                    str(workspace_id), str(run_id), payload
+                ),
             )
+            self._gateway_job_leases.pop(str(run_id), None)
             handled = True
         finally:
             self._gateway_result_reservations.discard(str(run_id))
             self._finish_trigger(trigger_key, handled=handled)
+
+    async def _process_claimed_gateway_job(
+        self,
+        workspace_id: str,
+        run_id: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        result = self._pending_gateway_results.get(run_id)
+        if result is None:
+            if not self._reserve_gateway_result_slot(run_id):
+                raise MomoGatewayBackpressure("gateway completion backlog is full")
+            resume_status = self._resume_decision_status(payload)
+            if resume_status is not None and resume_status != "approved":
+                await self._report_gateway_event(
+                    workspace_id,
+                    run_id,
+                    "cancelled",
+                    f"approval {resume_status}; provider execution stopped",
+                )
+                return
+            await self._report_gateway_event(
+                workspace_id,
+                run_id,
+                "running",
+                "approval approved; resuming job"
+                if resume_status == "approved"
+                else "job received",
+            )
+            try:
+                result = await self._run_gateway_job(payload)
+            except Exception as exc:  # noqa: BLE001 - durable readable failure
+                log.error(
+                    "gateway job failed: run=%s error=%s",
+                    run_id,
+                    self._redact_gateway_error(exc),
+                )
+                result = {
+                    "status": "failed",
+                    "error": "Hermes runtime failed before producing a final response.",
+                    "usage": {
+                        "model": payload.get("model") or "hermes-agent",
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "cached_tokens": 0,
+                        "reasoning_tokens": 0,
+                        "cost_micro_usd": 0,
+                        "was_estimated": True,
+                    },
+                }
+            try:
+                self._cache_gateway_result(run_id, result)
+            finally:
+                self._gateway_result_reservations.discard(run_id)
+
+        approval_request = self._approval_request_from_result(result)
+        if approval_request is not None:
+            await self._report_gateway_approval_request(
+                workspace_id, run_id, approval_request
+            )
+            self._pending_gateway_results.pop(run_id, None)
+            self._schedule_pending_recovery(
+                reason="gateway-approval-slot-released", delay_s=0.1
+            )
+            return
+
+        await self._complete_gateway_job(workspace_id, run_id, result)
+        self._pending_gateway_results.pop(run_id, None)
+        self._schedule_pending_recovery(
+            reason="gateway-result-slot-released", delay_s=0.1
+        )
 
     async def _report_gateway_event(
         self,
@@ -1350,7 +1409,9 @@ class MomoAdapter(BasePlatformAdapter):
         event_id: Optional[str] = None,
     ) -> None:
         path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
-        body: dict[str, Any] = {"status": status, "detail": detail}
+        body: dict[str, Any] = self._gateway_callback_body(
+            str(run_id), {"status": status, "detail": detail}
+        )
         if text_delta is not None:
             body["text_delta"] = text_delta
         if event_id is not None:
@@ -1366,17 +1427,103 @@ class MomoAdapter(BasePlatformAdapter):
         path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
         await self._post(
             path,
-            {
+            self._gateway_callback_body(str(run_id), {
                 "status": "approval_request",
                 "approval_request": dict(approval_request),
-            },
+            }),
         )
 
     async def _complete_gateway_job(
         self, workspace_id: str, run_id: str, result: Mapping[str, Any]
     ) -> None:
         path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/complete"
-        await self._post(path, dict(result))
+        await self._post(
+            path, self._gateway_callback_body(str(run_id), dict(result))
+        )
+
+    def _gateway_callback_body(
+        self, run_id: str, body: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        lease = self._gateway_job_leases.get(str(run_id))
+        if lease is None:
+            raise MomoGatewayLeaseLost("gateway callback has no owned job lease")
+        result = dict(body)
+        result["job_id"] = lease.job_id
+        result["lease_id"] = lease.lease_id
+        return result
+
+    async def _renew_gateway_job_lease(self, run_id: str) -> None:
+        while not self._closing:
+            lease = self._gateway_job_leases.get(str(run_id))
+            if lease is None:
+                raise MomoGatewayLeaseLost("gateway job lease disappeared")
+            wall_now_ms = int(time.time() * 1000)
+            remaining_seconds = (lease.expires_at_ms - wall_now_ms) / 1000.0
+            await asyncio.sleep(max(0.25, min(10.0, remaining_seconds / 3.0)))
+            current = self._gateway_job_leases.get(str(run_id))
+            if current != lease:
+                continue
+            path = (
+                f"/v1/workspaces/{self.cfg.workspace_id}"
+                f"/agents/{self.cfg.agent_member_id}/gateway/jobs/{lease.job_id}"
+                "/lease/renew"
+            )
+            response = await self._post(
+                path,
+                {"job_id": lease.job_id, "lease_id": lease.lease_id},
+            )
+            try:
+                expires_at_ms = int(
+                    response.get("leaseExpiresAtMs")
+                    or response.get("lease_expires_at_ms")
+                )
+            except (TypeError, ValueError) as exc:
+                raise MomoGatewayLeaseLost(
+                    "gateway lease renewal response is missing expiry"
+                ) from exc
+            self._gateway_job_leases[str(run_id)] = GatewayJobLease(
+                job_id=lease.job_id,
+                lease_id=lease.lease_id,
+                expires_at_ms=expires_at_ms,
+            )
+
+    async def _run_gateway_job_with_lease(
+        self, run_id: str, work: Awaitable[None]
+    ) -> None:
+        provider = asyncio.create_task(work)
+        renewal = asyncio.create_task(self._renew_gateway_job_lease(run_id))
+        try:
+            done, _ = await asyncio.wait(
+                {provider, renewal}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if renewal in done:
+                error = renewal.exception()
+                provider.cancel()
+                try:
+                    await provider
+                except asyncio.CancelledError:
+                    pass
+                if error is not None:
+                    raise MomoGatewayLeaseLost(
+                        "gateway job lease renewal failed"
+                    ) from error
+                raise MomoGatewayLeaseLost("gateway job lease renewal stopped")
+            try:
+                await provider
+            except MomoAPIError as exc:
+                if exc.status == 409:
+                    raise MomoGatewayLeaseLost(
+                        "gateway callback lease was rejected"
+                    ) from exc
+                raise
+        finally:
+            renewal.cancel()
+            try:
+                await renewal
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
 
     async def _run_gateway_job(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Ask the injected Hermes runtime to execute a momo job.
@@ -1903,6 +2050,10 @@ class MomoConfigurationError(RuntimeError):
 
 class MomoGatewayBackpressure(RuntimeError):
     """Provider work is deferred until a durable completion slot is available."""
+
+
+class MomoGatewayLeaseLost(RuntimeError):
+    """The durable gateway job lease expired, was taken over, or could not renew."""
 
 
 class MomoApprovalContractError(RuntimeError):

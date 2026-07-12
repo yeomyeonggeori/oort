@@ -97,16 +97,22 @@ APPROVAL_DECISION_ID=00000000-0000-7349-8000-000000349101
 REJECTION_CLIENT_MSG_ID=00000000-0000-7349-8000-000000349002
 REJECTION_BODY='@hermes MOMO-349 approval rejection smoke'
 REJECTION_DECISION_ID=00000000-0000-7349-8000-000000349102
+TAKEOVER_CLIENT_MSG_ID=00000000-0000-7341-8000-000000341001
+TAKEOVER_BODY='@hermes MOMO-341 crash lease takeover smoke'
 
 TMP_ROOT=${TMPDIR:-/tmp}
 SERVER_LOG=${TMP_ROOT}/momo-hermes-gateway-server-$$.log
 CREDENTIAL_HEADERS=${TMP_ROOT}/momo-hermes-gateway-credential-headers-$$.txt
+CLAIM_A_FILE=${TMP_ROOT}/momo-hermes-gateway-claim-a-$$.json
+CLAIM_B_FILE=${TMP_ROOT}/momo-hermes-gateway-claim-b-$$.json
 PGPASS_FILE=${TMP_ROOT}/momo-hermes-gateway-pgpass-$$
 SERVER_PID=
 ACCESS_TOKEN=
 REFRESH_TOKEN=
 AGENT_TOKEN_ID=
 RESTRICTED_TOKEN_ID=
+CURRENT_JOB_ID=
+CURRENT_LEASE_ID=
 
 cleanup() {
   original_rc=$?
@@ -118,7 +124,7 @@ cleanup() {
     logout_human_session >/dev/null 2>&1 || true
   fi
   momo_cleanup_tracked_pids "hermes-gateway verifier" "$SERVER_PID"
-  rm -f "$CREDENTIAL_HEADERS" "$PGPASS_FILE"
+  rm -f "$CREDENTIAL_HEADERS" "$CLAIM_A_FILE" "$CLAIM_B_FILE" "$PGPASS_FILE"
   if [ "$SOURCE_DIGEST_ARMED" = "1" ]; then
     source_after=$(source_digest) || cleanup_failed=1
     if [ "$cleanup_failed" = "0" ] && [ "$source_after" != "$SOURCE_DIGEST_BEFORE" ]; then
@@ -435,41 +441,41 @@ post_gateway_event() {
   token=$1
   run_id=$2
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
-    '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
+    "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"running\",\"detail\":\"mock gateway accepted agent.job\"}" >/dev/null
 }
 
 post_gateway_thinking() {
   token=$1
   run_id=$2
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
-    '{"event_id":"00000000-0000-7350-8000-000000350001","status":"thinking","detail":"reading gateway context"}' >/dev/null
+    "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"event_id\":\"00000000-0000-7350-8000-000000350001\",\"status\":\"thinking\",\"detail\":\"reading gateway context\"}" >/dev/null
 }
 
 post_gateway_streaming() {
   token=$1
   run_id=$2
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
-    '{"event_id":"00000000-0000-7350-8000-000000350002","status":"streaming","detail":"provider text delta","text_delta":"MOMO-350 gateway streaming preview"}' >/dev/null
+    "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"event_id\":\"00000000-0000-7350-8000-000000350002\",\"status\":\"streaming\",\"detail\":\"provider text delta\",\"text_delta\":\"MOMO-350 gateway streaming preview\"}" >/dev/null
 }
 
 post_gateway_approval_request() {
   token=$1
   run_id=$2
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
-    '{"status":"approval_request","approval_request":{"action_type":"tool_call","title":"Create release issue","summary":"Review the issue before Hermes creates it.","tool_call":{"call_id":"call-momo-349","name":"create_github_issue","arguments":{"title":"MOMO-349 release checklist"},"tool_grant":{"tool_name":"create_github_issue","approval_policy":"require_approval"}},"estimated_micro_usd":1200,"is_reversible":false}}' >/dev/null
+    "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"approval_request\",\"approval_request\":{\"action_type\":\"tool_call\",\"title\":\"Create release issue\",\"summary\":\"Review the issue before Hermes creates it.\",\"tool_call\":{\"call_id\":\"call-momo-349\",\"name\":\"create_github_issue\",\"arguments\":{\"title\":\"MOMO-349 release checklist\"},\"tool_grant\":{\"tool_name\":\"create_github_issue\",\"approval_policy\":\"require_approval\"}},\"estimated_micro_usd\":1200,\"is_reversible\":false}}" >/dev/null
 }
 
 post_gateway_cancelled() {
   token=$1
   run_id=$2
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
-    '{"status":"cancelled","detail":"approval rejected; provider execution stopped"}' >/dev/null
+    "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"cancelled\",\"detail\":\"approval rejected; provider execution stopped\"}" >/dev/null
 }
 
 post_legacy_gateway_event() {
   run_id=$1
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
-    "$AGENT_GATEWAY_SECRET" '{"status":"running","detail":"mock gateway accepted agent.job"}' \
+    "$AGENT_GATEWAY_SECRET" "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"running\",\"detail\":\"mock gateway accepted agent.job\"}" \
     X-Momo-Agent-Gateway-Secret >/dev/null
 }
 
@@ -478,7 +484,7 @@ post_gateway_complete() {
   run_id=$2
   final_body=${3:-$FINAL_BODY}
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/complete" "$token" \
-    "{\"status\":\"succeeded\",\"body\":$(json_escape "$final_body"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
+    "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"succeeded\",\"body\":$(json_escape "$final_body"),\"usage\":{\"model\":\"hermes-agent\",\"prompt_tokens\":11,\"completion_tokens\":7,\"cached_tokens\":0,\"reasoning_tokens\":0,\"cost_micro_usd\":0,\"was_estimated\":true}}"
 }
 
 decide_approval() {
@@ -510,6 +516,35 @@ fetch_pending_jobs() {
   token=$1
   agent_id=$2
   api_request GET "/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/gateway/jobs/pending" "$token" ""
+}
+
+set_current_claim() {
+  claim_json=$1
+  run_id=$2
+  CURRENT_JOB_ID=$(printf '%s' "$claim_json" | jq -r --arg run "$run_id" '.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase)) | .id' | head -1)
+  CURRENT_LEASE_ID=$(printf '%s' "$claim_json" | jq -r --arg run "$run_id" '.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase)) | .leaseId' | head -1)
+  [ "$CURRENT_JOB_ID" != "" ] && [ "$CURRENT_JOB_ID" != "null" ] \
+    || fail "claimed gateway job is missing id for run ${run_id}"
+  [ "$CURRENT_LEASE_ID" != "" ] && [ "$CURRENT_LEASE_ID" != "null" ] \
+    || fail "claimed gateway job is missing leaseId for run ${run_id}"
+}
+
+renew_gateway_lease_status() {
+  token=$1
+  agent_id=$2
+  job_id=$3
+  lease_id=$4
+  api_status POST "/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/gateway/jobs/${job_id}/lease/renew" "$token" \
+    "{\"job_id\":${job_id},\"lease_id\":\"${lease_id}\"}"
+}
+
+release_gateway_lease_status() {
+  token=$1
+  agent_id=$2
+  job_id=$3
+  lease_id=$4
+  api_status POST "/v1/workspaces/${WORKSPACE_ID}/agents/${agent_id}/gateway/jobs/${job_id}/lease/release" "$token" \
+    "{\"job_id\":${job_id},\"lease_id\":\"${lease_id}\"}"
 }
 
 fetch_realtime_token() {
@@ -873,9 +908,18 @@ DELAYED_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
 DELAYED_PENDING_COUNT=$(printf '%s' "$DELAYED_PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
 assert_equals "0" "$DELAYED_PENDING_COUNT" "future retry is not delivered before available_at"
 psql_scalar "UPDATE outbox SET available_at=now() WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${RUN_ID}') RETURNING id" >/dev/null
-PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID" >"$CLAIM_A_FILE" &
+CLAIM_A_PID=$!
+fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID" >"$CLAIM_B_FILE" &
+CLAIM_B_PID=$!
+wait "$CLAIM_A_PID"
+wait "$CLAIM_B_PID"
+PENDING_JSON=$(jq -s '{jobs: ([.[].jobs[]])}' "$CLAIM_A_FILE" "$CLAIM_B_FILE")
 PENDING_COUNT=$(printf '%s' "$PENDING_JSON" | jq --arg run "$RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
-assert_equals "1" "$PENDING_COUNT" "agent bearer pending-job fallback"
+assert_equals "1" "$PENDING_COUNT" "two gateway consumers receive one provider-start capability"
+set_current_claim "$PENDING_JSON" "$RUN_ID"
+LEASE_SHAPE_COUNT=$(printf '%s' "$PENDING_JSON" | jq '[.jobs[] | select((.leaseId | type) == "string" and (.leaseExpiresAtMs | type) == "number")] | length')
+assert_equals "1" "$LEASE_SHAPE_COUNT" "claimed job carries bounded lease capability"
 
 UNAUTHORIZED_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "" '{"status":"running"}')
 assert_equals "401" "$UNAUTHORIZED_CODE" "gateway callback without bearer"
@@ -900,7 +944,7 @@ post_gateway_event "$AGENT_TOKEN" "$RUN_ID"
 post_gateway_thinking "$AGENT_TOKEN" "$RUN_ID"
 post_gateway_streaming "$AGENT_TOKEN" "$RUN_ID"
 post_gateway_streaming "$AGENT_TOKEN" "$RUN_ID"
-OVERSIZED_EVENT_BODY=$(python3 -c 'import json; print(json.dumps({"status":"streaming","text_delta":"x" * 8193}))')
+OVERSIZED_EVENT_BODY=$(python3 -c 'import json, sys; print(json.dumps({"job_id":int(sys.argv[1]),"lease_id":sys.argv[2],"status":"streaming","text_delta":"x" * 8193}))' "$CURRENT_JOB_ID" "$CURRENT_LEASE_ID")
 OVERSIZED_DELTA_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "$AGENT_TOKEN" "$OVERSIZED_EVENT_BODY")
 assert_equals "400" "$OVERSIZED_DELTA_CODE" "gateway streaming delta size cap"
 STATUS_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->>'channel'='${CENT_CHANNEL}' AND payload->'data'->>'type'='agent.status' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') AND payload->'data'->'payload'->>'phase' IN ('thinking','streaming') AND payload->'data'->'payload'->>'run_status'='running' AND payload->'data'->'payload'->>'detail' IN ('reading gateway context','provider text delta')")
@@ -947,6 +991,8 @@ if [ "$APPROVAL_RUN_ID" = "" ]; then
   printf '%s\n' "$APPROVAL_SEND_JSON" >&2
   exit 1
 fi
+APPROVAL_INITIAL_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$APPROVAL_INITIAL_PENDING_JSON" "$APPROVAL_RUN_ID"
 post_gateway_event "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
 post_gateway_approval_request "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
 post_gateway_approval_request "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
@@ -960,7 +1006,7 @@ APPROVAL_COUNT=$(psql_scalar "SELECT count(*) FROM approval WHERE workspace_id='
 assert_equals "1" "$APPROVAL_COUNT" "approval callback idempotent retry"
 APPROVAL_RUN_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
 assert_equals "awaiting_approval" "$APPROVAL_RUN_STATUS" "gateway run pauses awaiting approval"
-APPROVAL_BYPASS_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${APPROVAL_RUN_ID}/gateway/complete" "$AGENT_TOKEN" '{"status":"succeeded","body":"must wait for human approval"}')
+APPROVAL_BYPASS_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${APPROVAL_RUN_ID}/gateway/complete" "$AGENT_TOKEN" "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"succeeded\",\"body\":\"must wait for human approval\"}")
 assert_equals "409" "$APPROVAL_BYPASS_CODE" "gateway completion cannot bypass pending human approval"
 APPROVAL_MESSAGE_TYPE=$(psql_scalar "SELECT type FROM message WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND lower(props->>'approval_id')=lower('${APPROVAL_ID}') LIMIT 1")
 assert_equals "approval_request" "$APPROVAL_MESSAGE_TYPE" "approval request appears on durable timeline"
@@ -986,6 +1032,7 @@ assert_equals "1" "$APPROVAL_RESUME_BROADCAST" "approved resume publishes privat
 APPROVAL_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
 APPROVAL_PENDING_COUNT=$(printf '%s' "$APPROVAL_PENDING_JSON" | jq --arg run "$APPROVAL_RUN_ID" --arg approval "$APPROVAL_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase) and (.payload.resume_from_approval_id | ascii_downcase) == ($approval | ascii_downcase))] | length')
 assert_equals "1" "$APPROVAL_PENDING_COUNT" "adapter recovery can fetch approved resume"
+set_current_claim "$APPROVAL_PENDING_JSON" "$APPROVAL_RUN_ID"
 
 post_gateway_event "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
 APPROVAL_COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$APPROVAL_RUN_ID" "$APPROVAL_FINAL_BODY")
@@ -1002,6 +1049,8 @@ if [ "$REJECTION_RUN_ID" = "" ]; then
   printf '%s\n' "$REJECTION_SEND_JSON" >&2
   exit 1
 fi
+REJECTION_INITIAL_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$REJECTION_INITIAL_PENDING_JSON" "$REJECTION_RUN_ID"
 post_gateway_event "$AGENT_TOKEN" "$REJECTION_RUN_ID"
 post_gateway_approval_request "$AGENT_TOKEN" "$REJECTION_RUN_ID"
 REJECTION_APPROVAL_ID=$(psql_scalar "SELECT id FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${REJECTION_RUN_ID}' AND status='pending' LIMIT 1")
@@ -1013,13 +1062,56 @@ REJECTION_RESUME_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE kind='age
 assert_equals "pending" "$REJECTION_RESUME_STATUS" "rejection publishes gateway stop job"
 REJECTION_RESUME_DECISION=$(psql_scalar "SELECT payload #>> '{approval_decision,status}' FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('${REJECTION_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${REJECTION_APPROVAL_ID}') LIMIT 1")
 assert_equals "rejected" "$REJECTION_RESUME_DECISION" "stop payload carries rejected decision"
+REJECTION_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$REJECTION_PENDING_JSON" "$REJECTION_RUN_ID"
 post_gateway_cancelled "$AGENT_TOKEN" "$REJECTION_RUN_ID"
 REJECTION_RESUME_DONE=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${REJECTION_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${REJECTION_APPROVAL_ID}') LIMIT 1")
 assert_equals "done" "$REJECTION_RESUME_DONE" "adapter cancellation acknowledgement settles stop job"
 REJECTION_FINAL_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${REJECTION_RUN_ID}'")
 assert_equals "cancelled" "$REJECTION_FINAL_STATUS" "cancellation acknowledgement cannot revive rejected run"
-REJECTION_LATE_COMPLETE_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${REJECTION_RUN_ID}/gateway/complete" "$AGENT_TOKEN" '{"status":"succeeded","body":"must not revive rejected run"}')
+REJECTION_LATE_COMPLETE_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${REJECTION_RUN_ID}/gateway/complete" "$AGENT_TOKEN" "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"succeeded\",\"body\":\"must not revive rejected run\"}")
 assert_equals "409" "$REJECTION_LATE_COMPLETE_CODE" "late gateway completion cannot override human rejection"
+
+TAKEOVER_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$TAKEOVER_CLIENT_MSG_ID" "$TAKEOVER_BODY")
+TAKEOVER_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${TAKEOVER_CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
+if [ "$TAKEOVER_RUN_ID" = "" ]; then
+  echo "[hermes-gateway] takeover mention did not create agent_run" >&2
+  printf '%s\n' "$TAKEOVER_SEND_JSON" >&2
+  exit 1
+fi
+TAKEOVER_FIRST_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$TAKEOVER_FIRST_JSON" "$TAKEOVER_RUN_ID"
+TAKEOVER_JOB_ID=$CURRENT_JOB_ID
+CRASHED_LEASE_ID=$CURRENT_LEASE_ID
+TAKEOVER_BLOCKED_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+TAKEOVER_BLOCKED_COUNT=$(printf '%s' "$TAKEOVER_BLOCKED_JSON" | jq --arg run "$TAKEOVER_RUN_ID" '[.jobs[] | select((.runId | ascii_downcase) == ($run | ascii_downcase))] | length')
+assert_equals "0" "$TAKEOVER_BLOCKED_COUNT" "active lease hides job from a second consumer"
+
+psql_scalar "UPDATE outbox SET lease_acquired_at=now()-interval '2 minutes', lease_expires_at=now()-interval '1 minute' WHERE id=${TAKEOVER_JOB_ID} AND lease_owner='${CRASHED_LEASE_ID}' RETURNING id" >/dev/null
+TAKEOVER_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$TAKEOVER_JSON" "$TAKEOVER_RUN_ID"
+assert_equals "$TAKEOVER_JOB_ID" "$CURRENT_JOB_ID" "expired crash lease takes over the same durable job"
+[ "$CURRENT_LEASE_ID" != "$CRASHED_LEASE_ID" ] || fail "takeover reused crashed lease owner"
+
+STALE_CALLBACK_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${TAKEOVER_RUN_ID}/gateway/events" "$AGENT_TOKEN" "{\"job_id\":${TAKEOVER_JOB_ID},\"lease_id\":\"${CRASHED_LEASE_ID}\",\"status\":\"running\"}")
+assert_equals "409" "$STALE_CALLBACK_CODE" "crashed lease owner callback fails closed after takeover"
+FORGED_LEASE_ID=00000000-0000-7341-8000-000000000999
+FORGED_RENEW_CODE=$(renew_gateway_lease_status "$AGENT_TOKEN" "$AGENT_ID" "$CURRENT_JOB_ID" "$FORGED_LEASE_ID")
+assert_equals "409" "$FORGED_RENEW_CODE" "non-owner lease renew fails closed"
+FORGED_RELEASE_CODE=$(release_gateway_lease_status "$AGENT_TOKEN" "$AGENT_ID" "$CURRENT_JOB_ID" "$FORGED_LEASE_ID")
+assert_equals "409" "$FORGED_RELEASE_CODE" "non-owner lease release fails closed"
+OWNED_RENEW_CODE=$(renew_gateway_lease_status "$AGENT_TOKEN" "$AGENT_ID" "$CURRENT_JOB_ID" "$CURRENT_LEASE_ID")
+assert_equals "200" "$OWNED_RENEW_CODE" "lease owner can renew bounded provider work"
+OWNED_RELEASE_CODE=$(release_gateway_lease_status "$AGENT_TOKEN" "$AGENT_ID" "$CURRENT_JOB_ID" "$CURRENT_LEASE_ID")
+assert_equals "200" "$OWNED_RELEASE_CODE" "lease owner can release unstarted work"
+RECLAIMED_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$RECLAIMED_JSON" "$TAKEOVER_RUN_ID"
+[ "$CURRENT_LEASE_ID" != "$CRASHED_LEASE_ID" ] || fail "released job reclaimed crashed lease owner"
+post_gateway_event "$AGENT_TOKEN" "$TAKEOVER_RUN_ID"
+TAKEOVER_COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$TAKEOVER_RUN_ID" "MOMO-341 takeover completed after simulated crash.")
+assert_equals "succeeded" "$(printf '%s' "$TAKEOVER_COMPLETE_JSON" | jq -r '.status')" "takeover consumer completes durable job"
+TAKEOVER_JOB_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE id=${TAKEOVER_JOB_ID}")
+assert_equals "done" "$TAKEOVER_JOB_STATUS" "takeover prevents permanently pending gateway job"
 
 FULL_REVOKE_JSON=$(revoke_agent_credential "$ACCESS_TOKEN" "$AGENT_ID" "$AGENT_TOKEN_ID")
 assert_equals "true" "$(printf '%s' "$FULL_REVOKE_JSON" | jq -r '.revokedNow')" "full credential revoke"
@@ -1028,6 +1120,9 @@ assert_equals "401" "$REVOKED_CALLBACK_CODE" "revoked token cannot callback"
 
 stop_server
 start_server 1
+LEGACY_PENDING_JSON=$(api_request GET "/v1/workspaces/${WORKSPACE_ID}/agents/${OTHER_AGENT_ID}/gateway/jobs/pending?limit=1" \
+  "$AGENT_GATEWAY_SECRET" "" X-Momo-Agent-Gateway-Secret)
+set_current_claim "$LEGACY_PENDING_JSON" "$OTHER_RUN_ID"
 post_legacy_gateway_event "$OTHER_RUN_ID"
 LEGACY_AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${OTHER_RUN_ID}' AND action='agent.gateway.status' AND via_token_id IS NULL")
 assert_equals "1" "$LEGACY_AUDIT_COUNT" "legacy flag migration case has no bearer provenance"
@@ -1036,6 +1131,6 @@ logout_human_session
 stop_server
 cleanup_fixture_rows
 
-echo "[hermes-gateway] PASS: bearer_run=${RUN_ID} final_seq=${FINAL_SEQ} approval_run=${APPROVAL_RUN_ID} approval_seq=${APPROVAL_FINAL_SEQ} rejection_run=${REJECTION_RUN_ID} legacy_run=${OTHER_RUN_ID}"
+echo "[hermes-gateway] PASS: bearer_run=${RUN_ID} final_seq=${FINAL_SEQ} approval_run=${APPROVAL_RUN_ID} approval_seq=${APPROVAL_FINAL_SEQ} rejection_run=${REJECTION_RUN_ID} takeover_run=${TAKEOVER_RUN_ID} legacy_run=${OTHER_RUN_ID}"
 echo "[hermes-gateway] database boundary: isolated=${POSTGRES_DB} app=NOBYPASSRLS source=${SOURCE_POSTGRES_DB} digest-enforced"
 echo "[hermes-gateway] real Hermes gateway CLI/plugin load remains runtime-unverified(real hermes gateway missing) unless a user-provided Hermes runtime is present."
