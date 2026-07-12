@@ -101,10 +101,42 @@ struct AgentGatewayRoutes: Sendable {
         let dto = try await request.decode(as: AgentGatewayEventRequest.self, context: context)
         let normalizedStatus = Self.normalizedStatus(dto.status ?? "running")
 
+        if normalizedStatus == "approval_request" {
+            guard let approvalRequest = dto.approvalRequest else {
+                throw HTTPError(.badRequest, message: "approval_request payload is required")
+            }
+            let validated = try approvalRequest.validated()
+            let accepted = try await recordApprovalRequest(
+                principal: principal,
+                workspaceID: workspaceID,
+                runID: runID,
+                request: validated
+            )
+            guard accepted else {
+                throw HTTPError(.notFound, message: "agent run not found")
+            }
+            return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
+        }
+
         let accepted = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             guard let run = try await Self.lockGatewayRun(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, runID: runID)
             else { return false }
+            if Self.isApprovalHeldRunStatus(run.status) {
+                throw HTTPError(
+                    .conflict,
+                    message: "agent run is awaiting a human approval decision"
+                )
+            }
+            if Self.isTerminalRunStatus(run.status), normalizedStatus != "cancelled" {
+                throw HTTPError(.conflict, message: "agent run is already terminal")
+            }
+            if normalizedStatus == "cancelled", run.status != "cancelled" {
+                throw HTTPError(
+                    .conflict,
+                    message: "gateway cancellation acknowledgement has no rejected run"
+                )
+            }
             if normalizedStatus == "running" || normalizedStatus == "thinking" {
                 _ = try await conn.query(
                     """
@@ -162,6 +194,25 @@ struct AgentGatewayRoutes: Sendable {
                 """,
                 logger: db.logger
             )
+            if normalizedStatus == "cancelled" {
+                _ = try await conn.query(
+                    """
+                    UPDATE outbox
+                       SET status = 'done',
+                           processed_at = now(),
+                           last_error = 'gateway stopped after approval rejection'
+                     WHERE workspace_id = \(workspaceID)
+                       AND kind = 'agent_job'
+                       AND method = 'gateway'
+                       AND status = 'pending'
+                       AND payload->>'run_id' = \(runID.uuidString)
+                       AND payload ? 'resume_from_approval_id'
+                       AND payload #>> '{approval_decision,status}' IN
+                           ('rejected','cancelled','expired')
+                    """,
+                    logger: db.logger
+                )
+            }
             return true
         }
 
@@ -169,6 +220,176 @@ struct AgentGatewayRoutes: Sendable {
             throw HTTPError(.notFound, message: "agent run not found")
         }
         return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
+    }
+
+    private func recordApprovalRequest(
+        principal: AuthPrincipal?,
+        workspaceID: UUID,
+        runID: UUID,
+        request: AgentGatewayApprovalRequest
+    ) async throws -> Bool {
+        let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
+        return try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            guard let run = try await Self.lockGatewayRun(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID
+            ) else { return false }
+
+            let existing = try await conn.query(
+                """
+                SELECT id
+                  FROM approval
+                 WHERE workspace_id = \(workspaceID)
+                   AND run_id = \(runID)
+                   AND status = 'pending'
+                   AND payload #>> '{tool_call,call_id}' = \(request.toolCall.callId)
+                 ORDER BY created_at DESC
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            if !existing.isEmpty {
+                guard run.status == "awaiting_approval" else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "approval request retry does not match run state"
+                    )
+                }
+                try await Self.settleGatewayJobForApproval(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    runID: runID
+                )
+                return true
+            }
+
+            guard run.status == "queued" || run.status == "running" else {
+                throw HTTPError(
+                    .conflict,
+                    message: "agent run is not eligible for an approval request"
+                )
+            }
+
+            let approvalPayload = Self.approvalPayload(runID: runID, request: request)
+            let approvalRows = try await conn.query(
+                """
+                INSERT INTO approval
+                  (workspace_id, run_id, channel_id, requested_by,
+                   action_type, payload, status)
+                VALUES
+                  (\(workspaceID), \(runID), \(run.channelID), \(run.agentMemberID),
+                   \(request.actionType), \(approvalPayload)::jsonb, 'pending')
+                RETURNING id
+                """,
+                logger: db.logger
+            ).collect()
+            guard let approvalID = try approvalRows.first?.decode(UUID.self) else {
+                throw HTTPError(.internalServerError, message: "approval insert failed")
+            }
+
+            let props = Self.approvalRequestProps(
+                approvalID: approvalID,
+                runID: runID,
+                channelID: run.channelID,
+                request: request
+            )
+            let body = request.summary ?? "Approval required: \(request.toolCall.name)"
+            let messageRows = try await conn.query(
+                """
+                WITH bumped AS (
+                  UPDATE channel_seq
+                     SET last_seq = last_seq + 1
+                   WHERE channel_id = \(run.channelID)
+                  RETURNING last_seq AS seq
+                )
+                INSERT INTO message
+                  (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+                   author_member_id, type, body, props, run_id)
+                SELECT \(workspaceID), \(run.channelID), b.seq, \(hlcTs), 0,
+                       \(run.agentMemberID), 'approval_request'::message_type,
+                       \(body), \(props)::jsonb, \(runID)
+                  FROM bumped b
+                RETURNING id, seq
+                """,
+                logger: db.logger
+            ).collect()
+            guard let messageRow = messageRows.first else {
+                throw HTTPError(.conflict, message: "approval channel sequence is unavailable")
+            }
+            let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+
+            _ = try await conn.query(
+                """
+                UPDATE approval
+                   SET request_message_id = \(messageID)
+                 WHERE id = \(approvalID)
+                """,
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                """
+                UPDATE agent_run
+                   SET status = 'awaiting_approval',
+                       updated_at = now()
+                 WHERE id = \(runID)
+                   AND status IN ('queued','running')
+                """,
+                logger: db.logger
+            )
+
+            let outboxPayload = Self.timelineBroadcastPayload(
+                workspaceID: workspaceID,
+                channelID: run.channelID,
+                messageID: messageID,
+                seq: seq,
+                authorMemberID: run.agentMemberID,
+                runID: runID,
+                type: "approval_request",
+                body: body,
+                props: props,
+                hlcTs: hlcTs
+            )
+            _ = try await conn.query(
+                """
+                INSERT INTO outbox
+                  (workspace_id, kind, method, payload, partition_key)
+                VALUES
+                  (\(workspaceID), 'broadcast', 'publish',
+                   \(outboxPayload)::jsonb, \(run.channelID))
+                """,
+                logger: db.logger
+            )
+
+            let auditDetail = Self.jsonString([
+                "schema": "momo.agent_gateway.approval_request.v0",
+                "approval_id": approvalID.uuidString,
+                "run_id": runID.uuidString,
+                "source": "hermes_gateway",
+                "request": Self.jsonObject(approvalPayload),
+            ])
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type,
+                   target_id, via_token_id, run_id, detail)
+                VALUES
+                  (\(workspaceID), \(run.agentMemberID),
+                   'approval.requested', 'approval', \(approvalID),
+                   \(principal?.tokenID), \(runID), \(auditDetail)::jsonb)
+                """,
+                logger: db.logger
+            )
+            try await Self.settleGatewayJobForApproval(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID
+            )
+            return true
+        }
     }
 
     @Sendable
@@ -208,6 +429,12 @@ struct AgentGatewayRoutes: Sendable {
                     seq: existing.seq,
                     status: run.status
                 )
+            }
+            if Self.isTerminalRunStatus(run.status) {
+                return CompletionResult.terminal(status: run.status)
+            }
+            if Self.isApprovalHeldRunStatus(run.status) {
+                return CompletionResult.approvalHeld(status: run.status)
             }
 
             let safeError = Self.sanitizedGatewayError(dto.error, gatewaySecret: config.secret)
@@ -375,6 +602,16 @@ struct AgentGatewayRoutes: Sendable {
         switch result {
         case .notFound:
             throw HTTPError(.notFound, message: "agent run not found")
+        case .terminal(let status):
+            throw HTTPError(
+                .conflict,
+                message: "agent run is already terminal (\(status))"
+            )
+        case .approvalHeld(let status):
+            throw HTTPError(
+                .conflict,
+                message: "agent run requires a human approval decision (\(status))"
+            )
         case .completed(let messageID, let seq, let status):
             return AgentGatewayCompleteResponse(
                 status: status,
@@ -387,6 +624,8 @@ struct AgentGatewayRoutes: Sendable {
 
     private enum CompletionResult {
         case notFound
+        case terminal(status: String)
+        case approvalHeld(status: String)
         case completed(messageID: UUID, seq: Int64, status: String)
     }
 
@@ -477,8 +716,13 @@ struct AgentGatewayRoutes: Sendable {
         )
     }
 
-    private static func isTerminalRunStatus(_ status: String) -> Bool {
+    static func isTerminalRunStatus(_ status: String) -> Bool {
         status == "succeeded" || status == "failed" || status == "cancelled"
+            || status == "timed_out"
+    }
+
+    static func isApprovalHeldRunStatus(_ status: String) -> Bool {
+        status == "awaiting_approval" || status == "paused"
     }
 
     private static func existingFinalMessage(
@@ -722,6 +966,108 @@ struct AgentGatewayRoutes: Sendable {
         return value
     }
 
+    private static func settleGatewayJobForApproval(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        runID: UUID
+    ) async throws {
+        _ = try await conn.query(
+            """
+            UPDATE outbox
+               SET status = 'done',
+                   processed_at = now(),
+                   last_error = NULL
+             WHERE workspace_id = \(workspaceID)
+               AND kind = 'agent_job'
+               AND method = 'gateway'
+               AND status = 'pending'
+               AND payload->>'run_id' = \(runID.uuidString)
+               AND NOT (payload ? 'resume_from_approval_id')
+            """,
+            logger: logger
+        )
+    }
+
+    static func approvalPayload(
+        runID: UUID,
+        request: AgentGatewayApprovalRequest
+    ) -> String {
+        var toolCall: [String: Any] = [
+            "call_id": request.toolCall.callId,
+            "name": request.toolCall.name,
+            "arguments": jsonValue(request.toolCall.arguments),
+        ]
+        if let toolGrant = request.toolCall.toolGrant {
+            toolCall["tool_grant"] = jsonValue(toolGrant)
+        }
+        var payload: [String: Any] = [
+            "run_id": runID.uuidString,
+            "action_type": request.actionType,
+            "tool_call": toolCall,
+            "resume_model": "gateway_resume_agent_job",
+            "source": "hermes_gateway",
+        ]
+        if let estimatedMicroUsd = request.estimatedMicroUsd {
+            payload["estimated_micro_usd"] = estimatedMicroUsd
+        }
+        if let isReversible = request.isReversible {
+            payload["is_reversible"] = isReversible
+        }
+        return jsonString(payload)
+    }
+
+    private static func approvalRequestProps(
+        approvalID: UUID,
+        runID: UUID,
+        channelID: UUID,
+        request: AgentGatewayApprovalRequest
+    ) -> String {
+        var props: [String: Any] = [
+            "approval_id": approvalID.uuidString,
+            "run_id": runID.uuidString,
+            "channel_id": channelID.uuidString,
+            "action_type": request.actionType,
+            "call_id": request.toolCall.callId,
+            "tool_name": request.toolCall.name,
+            "title": request.title ?? "Approve \(request.toolCall.name)",
+            "summary": request.summary
+                ?? "Review the proposed tool call before Hermes executes it.",
+            "arguments": jsonValue(request.toolCall.arguments),
+            "status": "pending",
+            "source": "hermes_gateway",
+        ]
+        if let toolGrant = request.toolCall.toolGrant {
+            props["tool_grant"] = jsonValue(toolGrant)
+        }
+        if let estimatedMicroUsd = request.estimatedMicroUsd {
+            props["estimated_micro_usd"] = estimatedMicroUsd
+        }
+        if let isReversible = request.isReversible {
+            props["is_reversible"] = isReversible
+        }
+        return jsonString(props)
+    }
+
+    private static func jsonValue(_ value: JSONValue) -> Any {
+        switch value {
+        case .object(let object):
+            return object.mapValues(jsonValue)
+        case .array(let array):
+            return array.map(jsonValue)
+        case .string(let string):
+            return string
+        case .int(let int):
+            return int
+        case .double(let double):
+            return double
+        case .bool(let bool):
+            return bool
+        case .null:
+            return NSNull()
+        }
+    }
+
     private static func agentStatusBroadcastPayload(
         workspaceID: UUID,
         channelID: UUID,
@@ -841,6 +1187,152 @@ struct AgentGatewayRoutes: Sendable {
 struct AgentGatewayEventRequest: Decodable {
     let status: String?
     let detail: String?
+    let approvalRequest: AgentGatewayApprovalRequest?
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case detail
+        case approvalRequest = "approval_request"
+    }
+}
+
+struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
+    let actionType: String
+    let title: String?
+    let summary: String?
+    let toolCall: AgentGatewayApprovalToolCall
+    let estimatedMicroUsd: Int64?
+    let isReversible: Bool?
+
+    private enum CodingKeys: String, CodingKey {
+        case actionType = "action_type"
+        case title
+        case summary
+        case toolCall = "tool_call"
+        case estimatedMicroUsd = "estimated_micro_usd"
+        case isReversible = "is_reversible"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        actionType = try container.decodeIfPresent(String.self, forKey: .actionType)
+            ?? "tool_call"
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        toolCall = try container.decode(AgentGatewayApprovalToolCall.self, forKey: .toolCall)
+        estimatedMicroUsd = try container.decodeIfPresent(Int64.self, forKey: .estimatedMicroUsd)
+        isReversible = try container.decodeIfPresent(Bool.self, forKey: .isReversible)
+    }
+
+    private init(
+        actionType: String,
+        title: String?,
+        summary: String?,
+        toolCall: AgentGatewayApprovalToolCall,
+        estimatedMicroUsd: Int64?,
+        isReversible: Bool?
+    ) {
+        self.actionType = actionType
+        self.title = title
+        self.summary = summary
+        self.toolCall = toolCall
+        self.estimatedMicroUsd = estimatedMicroUsd
+        self.isReversible = isReversible
+    }
+
+    func validated() throws -> AgentGatewayApprovalRequest {
+        let actionType = try Self.required(actionType, field: "action_type", limit: 128)
+        let title = Self.optional(title, limit: 500)
+        let summary = Self.optional(summary, limit: 2_000)
+        guard estimatedMicroUsd.map({ $0 >= 0 }) ?? true else {
+            throw HTTPError(.badRequest, message: "estimated_micro_usd must be non-negative")
+        }
+        return AgentGatewayApprovalRequest(
+            actionType: actionType,
+            title: title,
+            summary: summary,
+            toolCall: try toolCall.validated(),
+            estimatedMicroUsd: estimatedMicroUsd,
+            isReversible: isReversible
+        )
+    }
+
+    private static func required(_ raw: String, field: String, limit: Int) throws -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            throw HTTPError(.badRequest, message: "\(field) is required")
+        }
+        guard value.count <= limit else {
+            throw HTTPError(.badRequest, message: "\(field) is too long")
+        }
+        return value
+    }
+
+    private static func optional(_ raw: String?, limit: Int) -> String? {
+        guard let value = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else { return nil }
+        return String(value.prefix(limit))
+    }
+}
+
+struct AgentGatewayApprovalToolCall: Decodable, Equatable, Sendable {
+    let callId: String
+    let name: String
+    let arguments: JSONValue
+    let toolGrant: JSONValue?
+
+    private enum CodingKeys: String, CodingKey {
+        case callId = "call_id"
+        case name
+        case arguments
+        case toolGrant = "tool_grant"
+    }
+
+    private init(
+        callId: String,
+        name: String,
+        arguments: JSONValue,
+        toolGrant: JSONValue?
+    ) {
+        self.callId = callId
+        self.name = name
+        self.arguments = arguments
+        self.toolGrant = toolGrant
+    }
+
+    func validated() throws -> AgentGatewayApprovalToolCall {
+        let callId = try required(callId, field: "tool_call.call_id", limit: 512)
+        let name = try required(name, field: "tool_call.name", limit: 256)
+        guard (try? JSONEncoder().encode(arguments).count).map({ $0 <= 65_536 }) == true else {
+            throw HTTPError(.badRequest, message: "tool_call.arguments is too large")
+        }
+        if let toolGrant, toolGrant.objectValue == nil {
+            throw HTTPError(.badRequest, message: "tool_call.tool_grant must be an object")
+        }
+        if let toolGrant,
+           (try? JSONEncoder().encode(toolGrant).count).map({ $0 <= 32_768 }) != true
+        {
+            throw HTTPError(.badRequest, message: "tool_call.tool_grant is too large")
+        }
+        return AgentGatewayApprovalToolCall(
+            callId: callId,
+            name: name,
+            arguments: arguments,
+            toolGrant: toolGrant
+        )
+    }
+
+    private func required(_ raw: String, field: String, limit: Int) throws -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else {
+            throw HTTPError(.badRequest, message: "\(field) is required")
+        }
+        guard value.count <= limit else {
+            throw HTTPError(.badRequest, message: "\(field) is too long")
+        }
+        return value
+    }
 }
 
 struct AgentGatewayCompleteRequest: Decodable {

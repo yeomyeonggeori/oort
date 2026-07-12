@@ -15,6 +15,12 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
+## 0-1. MOMO-349 Gateway Approval Roundtrip (2026-07-12)
+
+- agent bearer actor/run binding 뒤 `approval_request` callback을 받아 기존 `approval`/`agent_run.awaiting_approval`/`approval_request` message/audit/outbox 상태머신을 한 tenant transaction에서 기록한다. callback 재시도는 같은 `tool_call.call_id`의 pending approval을 재사용하며 초기 gateway job을 정산한다.
+- human approve/reject는 원 run의 gateway delivery를 DB에서 판별해 private `agentwork:` resume `agent.job`을 만든다. 어댑터는 approved payload를 `resume_momo_job`(지원 시)으로 재개하고 rejected payload는 provider를 호출하지 않은 채 cancellation ack로 정산한다. 승인 대기·거부 후 late `/gateway/complete`는 409로 막아 human 결정을 우회/되살리지 못하게 했다.
+- macOS 기존 승인 인박스가 읽는 `/approvals?status=pending` projection과 durable timeline message를 그대로 재사용한다. diff 보안/correctness 리뷰에서 callback JSON 크기 상한, terminal/held 상태 결속, reject ack 결속, Swift UUID 대문자 채널 정규화를 확인했다(Blocker 0). 검증: server build + 51 tests PASS, adapter contract 46 tests PASS, 수정 verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/`runtime-agent`는 worker에서 실행하지 않았으며 clean/root gate evidence는 오케스트레이터가 merge 전 수행 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-353 Local Gate Drift Guard (2026-07-12)
 
 - `make up`이 repo `infra/centrifugo.json` SHA-256을 컨테이너 생성 시 fingerprint로 고정하고, `ensure_runtime_env.sh`가 실행 컨테이너와 현재 repo fingerprint를 대조해 drift를 fail-closed하거나 `MOMO_CENTRIFUGO_AUTO_RECREATE=1` opt-in으로 Centrifugo 서비스만 재생성한다.

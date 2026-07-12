@@ -271,13 +271,27 @@ struct ApprovalDecisionRoutes: Sendable {
                 logger: db.logger
             )
 
+            let gatewayRun: Bool
+            if approval.payload.objectValue?["source"]?.stringValue == "hermes_gateway" {
+                gatewayRun = true
+            } else {
+                gatewayRun = try await Self.isGatewayRun(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    runID: approval.runID
+                )
+            }
+
             if dto.approve {
                 try await Self.enqueueResume(
                     conn: conn,
                     logger: db.logger,
                     workspaceID: workspaceID,
                     approval: approval,
-                    eventPayload: eventPayload
+                    eventPayload: eventPayload,
+                    gatewayRun: gatewayRun,
+                    decidedAtMs: decidedAtMs
                 )
             } else {
                 try await Self.cancelRunAndAppendToolResult(
@@ -289,6 +303,16 @@ struct ApprovalDecisionRoutes: Sendable {
                     reason: reason,
                     decidedAtMs: decidedAtMs
                 )
+                if gatewayRun {
+                    try await Self.enqueueGatewayStop(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        approval: approval,
+                        eventPayload: eventPayload,
+                        decidedAtMs: decidedAtMs
+                    )
+                }
             }
 
             try await Self.enqueueDecisionBroadcast(
@@ -583,6 +607,28 @@ struct ApprovalDecisionRoutes: Sendable {
         return !rows.isEmpty
     }
 
+    private static func isGatewayRun(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        runID: UUID
+    ) async throws -> Bool {
+        let rows = try await conn.query(
+            """
+            SELECT EXISTS (
+              SELECT 1
+                FROM outbox
+               WHERE workspace_id = \(workspaceID)
+                 AND kind = 'agent_job'
+                 AND method = 'gateway'
+                 AND payload->>'run_id' = \(runID.uuidString)
+            )
+            """,
+            logger: logger
+        ).collect()
+        return try rows.first?.decode(Bool.self) ?? false
+    }
+
     // MARK: - Effects
 
     private static func patchApprovalRequestMessage(
@@ -617,7 +663,9 @@ struct ApprovalDecisionRoutes: Sendable {
         logger: Logger,
         workspaceID: UUID,
         approval: LockedApproval,
-        eventPayload: String
+        eventPayload: String,
+        gatewayRun: Bool,
+        decidedAtMs: Int64
     ) async throws {
         _ = try await conn.query(
             """
@@ -633,15 +681,96 @@ struct ApprovalDecisionRoutes: Sendable {
         let payload = resumePayload(
             workspaceID: workspaceID,
             approval: approval,
-            eventPayload: eventPayload
+            eventPayload: eventPayload,
+            delivery: gatewayRun ? "gateway" : nil
+        )
+        let jobMethod = gatewayRun ? "gateway" : "resume_approval"
+        let rows = try await conn.query(
+            """
+            INSERT INTO outbox
+              (workspace_id, kind, method, payload, partition_key)
+            VALUES
+              (\(workspaceID), 'agent_job', \(jobMethod),
+               \(payload)::jsonb, \(approval.requestedBy))
+            RETURNING id
+            """,
+            logger: logger
+        ).collect()
+        if gatewayRun, let row = rows.first {
+            let jobOutboxID = try row.decode(Int64.self)
+            try await enqueueGatewayJobBroadcast(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                approval: approval,
+                jobOutboxID: jobOutboxID,
+                payload: payload,
+                decidedAtMs: decidedAtMs
+            )
+        }
+    }
+
+    private static func enqueueGatewayStop(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        approval: LockedApproval,
+        eventPayload: String,
+        decidedAtMs: Int64
+    ) async throws {
+        let payload = resumePayload(
+            workspaceID: workspaceID,
+            approval: approval,
+            eventPayload: eventPayload,
+            delivery: "gateway"
+        )
+        let rows = try await conn.query(
+            """
+            INSERT INTO outbox
+              (workspace_id, kind, method, payload, partition_key)
+            VALUES
+              (\(workspaceID), 'agent_job', 'gateway',
+               \(payload)::jsonb, \(approval.requestedBy))
+            RETURNING id
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else { return }
+        let jobOutboxID = try row.decode(Int64.self)
+        try await enqueueGatewayJobBroadcast(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            approval: approval,
+            jobOutboxID: jobOutboxID,
+            payload: payload,
+            decidedAtMs: decidedAtMs
+        )
+    }
+
+    private static func enqueueGatewayJobBroadcast(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        approval: LockedApproval,
+        jobOutboxID: Int64,
+        payload: String,
+        decidedAtMs: Int64
+    ) async throws {
+        let broadcast = gatewayJobBroadcastPayload(
+            workspaceID: workspaceID,
+            approval: approval,
+            jobOutboxID: jobOutboxID,
+            payload: payload,
+            decidedAtMs: decidedAtMs
         )
         _ = try await conn.query(
             """
             INSERT INTO outbox
               (workspace_id, kind, method, payload, partition_key)
             VALUES
-              (\(workspaceID), 'agent_job', 'resume_approval',
-               \(payload)::jsonb, \(approval.requestedBy))
+              (\(workspaceID), 'broadcast', 'publish',
+               \(broadcast)::jsonb, \(approval.requestedBy))
             """,
             logger: logger
         )
@@ -951,13 +1080,14 @@ struct ApprovalDecisionRoutes: Sendable {
     private static func resumePayload(
         workspaceID: UUID,
         approval: LockedApproval,
-        eventPayload: String
+        eventPayload: String,
+        delivery: String?
     ) -> String {
         let payload = approval.payload.objectValue ?? [:]
         let toolCall = payload["tool_call"]?.objectValue ?? [:]
         let toolGrant = toolCall["tool_grant"].map(anyValue) ?? [:]
         let runInput = approval.runInput.objectValue ?? [:]
-        return jsonString([
+        var result: [String: Any] = [
             "run_id": approval.runID.uuidString,
             "workspace_id": workspaceID.uuidString,
             "channel_id": approval.channelID.uuidString,
@@ -976,6 +1106,35 @@ struct ApprovalDecisionRoutes: Sendable {
             "step_count": approval.stepCount,
             "max_steps": approval.maxSteps,
             "depth": approval.depth,
+        ]
+        if let delivery {
+            result["delivery"] = delivery
+        }
+        return jsonString(result)
+    }
+
+    private static func gatewayJobBroadcastPayload(
+        workspaceID: UUID,
+        approval: LockedApproval,
+        jobOutboxID: Int64,
+        payload: String,
+        decidedAtMs: Int64
+    ) -> String {
+        let centChannel = "agentwork:ws\(workspaceID.uuidString).\(approval.requestedBy.uuidString)"
+        var jobPayload = jsonObject(payload)
+        jobPayload["agent_job_outbox_id"] = jobOutboxID
+        jobPayload["delivery"] = "gateway"
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "agent.job",
+                "v": 1,
+                "ts": decidedAtMs,
+                "seq": jobOutboxID,
+                "payload": jobPayload,
+            ],
+            "version": jobOutboxID,
+            "idempotency_key": "\(centChannel):agent_job:\(approval.runID.uuidString):resume:\(approval.id.uuidString)",
         ])
     }
 

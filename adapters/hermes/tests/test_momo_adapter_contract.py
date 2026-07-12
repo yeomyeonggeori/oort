@@ -106,6 +106,16 @@ class HermesAdapterContractTests(unittest.TestCase):
         )
         self.assertIsNone(momo_adapter.MomoAdapter._pong_for_frame({"id": 1}))
 
+    def test_agent_work_channel_matches_swift_uuid_uppercase_rendering(self):
+        self.assertEqual(
+            momo_adapter.agent_channel(
+                "ca761232-ed42-11ce-bacd-00aa0057b223",
+                "0f8fad5b-d9cb-469f-a165-70867728950e",
+            ),
+            "agentwork:wsCA761232-ED42-11CE-BACD-00AA0057B223."
+            "0F8FAD5B-D9CB-469F-A165-70867728950E",
+        )
+
     def test_handle_message_maps_platform_event_to_momo_rest_shapes(self):
         fixture = load_fixture("platform_adapter_event_mapping.json")
         event = fixture["unwrapped_adapter_event"]
@@ -177,6 +187,144 @@ class HermesAdapterContractTests(unittest.TestCase):
         asyncio.run(adapter.handle_message(event))
 
         self.assertEqual(adapter.gateway_posts, fixture["expected_momo_callbacks"])
+
+    def test_gateway_tool_call_pauses_with_approval_request_callback(self):
+        class Runtime:
+            def run_momo_job(self, _payload):
+                return {
+                    "status": "approval_required",
+                    "tool_call": {
+                        "id": "call-release-1",
+                        "name": "create_github_issue",
+                        "arguments": {"title": "Release checklist"},
+                    },
+                    "title": "Create release issue",
+                    "summary": "Review the issue before Hermes creates it.",
+                    "is_reversible": False,
+                }
+
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.runtime = Runtime()
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertEqual(len(adapter.gateway_posts), 2)
+        self.assertEqual(adapter.gateway_posts[0]["body"]["status"], "running")
+        callback = adapter.gateway_posts[1]["body"]
+        self.assertEqual(callback["status"], "approval_request")
+        self.assertEqual(
+            callback["approval_request"]["tool_call"],
+            {
+                "call_id": "call-release-1",
+                "name": "create_github_issue",
+                "arguments": {"title": "Release checklist"},
+            },
+        )
+        self.assertNotIn("run-1", adapter._pending_gateway_results)
+
+    def test_gateway_malformed_approval_request_fails_closed(self):
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        with self.assertRaises(momo_adapter.MomoApprovalContractError):
+            adapter._normalize_gateway_result(
+                {
+                    "status": "approval_required",
+                    "tool_call": {"name": "create_github_issue", "arguments": {}},
+                },
+                {},
+            )
+
+    def test_gateway_approved_resume_uses_resume_runtime_and_completes(self):
+        class Runtime:
+            def __init__(self):
+                self.resume_calls = 0
+
+            def resume_momo_job(self, payload):
+                self.resume_calls += 1
+                self.approval_id = payload["resume_from_approval_id"]
+                return {"status": "succeeded", "body": "Issue created", "usage": {}}
+
+            def run_momo_job(self, _payload):
+                raise AssertionError("approved resume must not restart a fresh job")
+
+        runtime = Runtime()
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.runtime = runtime
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+                "resume_from_approval_id": "approval-1",
+                "approval_decision": {"status": "approved"},
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertEqual(runtime.resume_calls, 1)
+        self.assertEqual(runtime.approval_id, "approval-1")
+        self.assertEqual(adapter.gateway_posts[0]["body"]["status"], "running")
+        self.assertIn("resuming", adapter.gateway_posts[0]["body"]["detail"])
+        self.assertEqual(adapter.gateway_posts[1]["body"]["status"], "succeeded")
+
+    def test_gateway_rejected_resume_stops_without_provider_execution(self):
+        class Runtime:
+            def run_momo_job(self, _payload):
+                raise AssertionError("rejected approval must not execute provider work")
+
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.runtime = Runtime()
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+                "resume_from_approval_id": "approval-1",
+                "approval_decision": {"status": "rejected"},
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertEqual(len(adapter.gateway_posts), 1)
+        self.assertEqual(adapter.gateway_posts[0]["body"]["status"], "cancelled")
+        self.assertIn("provider execution stopped", adapter.gateway_posts[0]["body"]["detail"])
 
     def test_register_platform_accepts_gateway_like_registry(self):
         class Registry:
@@ -983,6 +1131,37 @@ class HermesAdapterContractTests(unittest.TestCase):
             asyncio.run(adapter.handle_message(event))
 
         self.assertFalse(getattr(adapter, "provider_called", False))
+
+    def test_agent_job_binding_canonicalizes_uuid_case(self):
+        workspace = "ca761232-ed42-11ce-bacd-00aa0057b223"
+        agent = "0f8fad5b-d9cb-469f-a165-70867728950e"
+
+        class BoundAdapter(CaptureAdapter):
+            async def _run_gateway_job(self, _payload):
+                self.provider_called = True
+                return {"status": "succeeded", "body": "done", "usage": {}}
+
+        adapter = BoundAdapter(
+            workspace_id=workspace,
+            agent_member_id=agent,
+            run_id="run-1",
+            final_text="unused",
+        )
+        event = {
+            "channel": momo_adapter.agent_channel(workspace, agent),
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": workspace.upper(),
+                "channel_id": "channel-1",
+                "agent_member_id": agent.upper(),
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertTrue(adapter.provider_called)
+        self.assertEqual(adapter.gateway_posts[-1]["body"]["status"], "succeeded")
 
     def test_realtime_reader_treats_job_as_wakeup_and_still_answers_ping(self):
         class FakeWebSocket:

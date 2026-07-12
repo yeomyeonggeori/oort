@@ -1582,10 +1582,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] [macos-ui] worktree clean gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md` (스냅샷 참조 6종은 정본 게이트 머신 재기록, 84 tests green). root post-merge macos-ui는 선재 `verify_macos_real_backend_ui.sh` dogfood 결합(→ MOMO-348 `#325`)으로 별도 추적. PR #323 merge (`881518b`).
 
 ### ☐ MOMO-349 수용기준 — Gateway 승인 왕복 `[swift/python/runtime-agent]` · 의존: MOMO-337, MOMO-338 (`#329`, ADR-0102)
-- [ ] gateway 콜백에 `approval_request` 이벤트: `approval` 생성 + run `awaiting_approval` 전이 (기존 상태머신 재사용, 스키마 변경 금지).
-- [ ] 사람 결정 시 기존 `resume_approval` outbox가 gateway에도 resume `agent.job`을 publish, 어댑터가 재개/중단 처리.
-- [ ] actor/run binding fail-closed, 단일 쓰기경로 불변, 승인 대기 run이 macOS 승인 인박스에 실데이터 노출.
-- [ ] 어댑터 tests + `verify_hermes_gateway_adapter.sh` 승인 왕복 시나리오(격리 DB 패턴) + clean/root `runtime-agent` gate + 정본 3종.
+- [x] gateway 콜백에 `approval_request` 이벤트: `approval` 생성 + run `awaiting_approval` 전이 (기존 상태머신 재사용, 스키마 변경 금지).
+- [x] 사람 결정 시 기존 `resume_approval` outbox가 gateway에도 resume `agent.job`을 publish, 어댑터가 재개/중단 처리.
+- [x] actor/run binding fail-closed, 단일 쓰기경로 불변, 승인 대기 run이 macOS 승인 인박스에 실데이터 노출.
+- [x] 어댑터 tests + `verify_hermes_gateway_adapter.sh` 승인/거부 왕복 시나리오(격리 DB 패턴) + 정본 3종 갱신.
+- [x] diff-scoped 보안/correctness 리뷰: approval-held/terminal late completion 409, reject cancellation ack 상태 결속, callback 크기 상한, UUID case 정규화 확인(Blocker 0).
+- [ ] worktree clean `runtime-agent` gate + root post-merge gate (오케스트레이터가 merge 전/후 수행).
 
 ### ☐ MOMO-350 수용기준 — Gateway status/partial 브로드캐스트 `[swift/python/runtime-agent]` · 의존: MOMO-349 (`#330`, ADR-0102)
 - [ ] `/gateway/events`가 `thinking`/`streaming` 델타를 수용해 `agent.status`/`agent.partial`로 `agent:` namespace 브로드캐스트.
