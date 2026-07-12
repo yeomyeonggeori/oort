@@ -1,20 +1,20 @@
 # Hermes Adapter Contract v0
 
-> Updated: 2026-06-26
-> Status: normative contract decision for MOMO-162. No production Hermes deployment in this ticket.
+> Updated: 2026-07-12
+> Status: normative contract, realigned by ADR-0102 Option C (Accepted). Implementation parity is tracked by MOMO-349/350/341/352.
 
 ## 1. Decision Summary
 
-momo supports two Hermes integration modes, but they are not equal product paths.
+momo supports two **official, role-separated execution paths**. The path says who owns the runtime; it does not move governance out of momo.
 
-| Mode | Product role | Default? | Owner of context/approval/cost/audit |
-|---|---|---:|---|
-| AgentWorker OpenAI-compatible SSE | momo creates an `agent_job`, builds the Context Packet projection, reserves budget, calls Hermes/Kim Intern through `/v1/chat/completions` SSE, and records messages/run/cost/audit in Postgres | Yes | momo |
-| Hermes platform adapter | Hermes gateway loads `adapters/hermes/momo_adapter.py` so a Hermes agent can see momo as a messaging platform through `connect`, `send`, and `handle_message` | No, optional ingress/interop | Split; adapter must write back only through momo REST |
+| Mode | Official product role | Runtime owner | Delivery |
+|---|---|---|---|
+| AgentWorker OpenAI-compatible SSE (`AGENT_GATEWAY_MODE=worker`) | **managed** agent path | momo | server creates `agent_job`; AgentWorker claims it and calls the provider through `/v1/chat/completions` SSE |
+| Hermes platform adapter (`AGENT_GATEWAY_MODE=gateway`) | **BYOA** (bring your own agent) path | user-owned Hermes/provider runtime | server publishes a private `agentwork:` wake-up; adapter re-reads the durable job and returns events/results through momo REST |
 
-The product default is **AgentWorker OpenAI-compatible SSE**. That path keeps momo as the agent host: Postgres remains the source of truth, Context Packet is built by momo, approval pause/resume is a protocol checkpoint, budget reserve/reconcile is done by momo, and audit stays in momo tables.
+Both paths keep momo as the governance host. Postgres remains the source of truth; the server owns the `agent_run` state machine, Context Packet projection, approval records and decisions, budget/usage ledger, audit log, message ordering, and transactional outbox. The runtime may report progress, proposed tool calls, results, and usage evidence, but it cannot commit those guarantees itself.
 
-The platform adapter remains useful for dogfood, interoperability, and a future Hermes-native operator experience. It is not the default execution path until it can prove the same Context Packet, approval, cost, audit, RLS, and outbox guarantees without moving ownership into Hermes.
+`AGENT_GATEWAY_MODE` selects the delivery role for a deployment. Its safe configuration default remains `worker`, but that default is not product-path precedence: gateway is the official BYOA path used by Hermes dogfood. Gateway parity rolls out through MOMO-349 (approval), MOMO-350 (status/partial), MOMO-341 (claim/lease), and MOMO-352 (two-path equivalence verifier); until each lands, the corresponding row below is a normative target rather than completed runtime evidence.
 
 Codex OAuth is outside the momo boundary. If Hermes/Kim Intern uses Codex OAuth,
 the provider owns authorization code exchange, access/refresh token storage,
@@ -24,23 +24,26 @@ Context Packet, Memory Plane, Capability Cache, diagnostics, and local gate
 evidence must not contain Codex OAuth access or refresh tokens. The detailed
 credential boundary is `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`.
 
-## 2. Non-Negotiable Controls
+## 2. Server-Owned Guarantee Matrix
 
-A Hermes integration is acceptable only if these controls stay under momo ownership.
+A runtime integration is acceptable only if every row stays under momo server ownership. The two paths may differ in transport, never in the authority that commits a guarantee.
 
-| Control | Product-default rule |
-|---|---|
-| Context Packet | momo assembles the bounded packet after workspace membership, channel membership, source grants, redaction, tool policy, and budget checks. Hermes receives only the packet projection, not raw DB/provider credentials. |
-| Approval | Write-like tool calls are proposals. AgentWorker evaluates Context Packet / Capability Cache tool grant metadata and pauses with `approval_request` before external side effects. |
-| Cost | AgentWorker reserves budget before the call, parses OpenAI-compatible `usage` from SSE or fallback response, reconciles `usage_ledger`, and releases reserve in `budget_window`. |
-| Audit | `agent_run`, `message`, `approval`, `usage_ledger`, and `audit_log` are written under the workspace boundary. Realtime delivery is still outbox -> relay -> Centrifugo. |
-| Ordering | User-visible messages enter through the normal REST/DB path and receive `message.seq`; no adapter may publish directly to Centrifugo. |
-| Tenancy | Runtime work is scoped by `workspace_id`; DB access uses RLS or worker BYPASSRLS only for controlled background consumption. |
-| Codex OAuth | Hermes/Kim Intern provider owns Codex OAuth token storage/refresh. momo receives only bounded context and a provider API key; Codex OAuth tokens are never stored in momo. |
+| Guarantee | Server-owned rule shared by worker and gateway | Path-specific transport |
+|---|---|---|
+| Identity / tenancy | `member.kind='agent'`, `workspace_id`, channel membership, token scope, and actor/run binding are checked before work or writes | worker uses the run-bound server/worker identity; gateway uses the same agent's scoped `agent_bearer` |
+| Context Packet | server assembles a bounded projection after grants, redaction, tool policy, and budget checks; raw DB/provider credentials are excluded | worker reads the job; gateway receives the same projection from the durable pending job |
+| Run lifecycle | `agent_run` is the only run state machine and server transactions authorize each transition | worker claims rows; gateway reports events through `POST .../gateway/events` |
+| Approval | write/spend/admin tool calls are proposals; server creates `approval`, moves the run to `awaiting_approval`, records the human decision, then emits `resume_approval`/resume work | worker pauses locally; gateway reports `approval_request` and resumes from a new private job (MOMO-349) |
+| Cost | budget authority and `usage_ledger` reserve/reconcile stay in momo; provider/runtime usage is evidence, not authority | worker parses SSE usage; gateway submits bounded usage with completion |
+| Audit | server writes `audit_log` with workspace, actor, run, and `via_token_id` provenance | both paths call/execute only through server-authorized transitions |
+| Ordering / durability | user-visible output receives `message.seq` in the same transaction as message/outbox writes; Postgres is SoT and Centrifugo is transport only | worker and gateway both finish through REST/PG/outbox; neither publishes client-visible state directly |
+| Progress | server records/validates progress and publishes observable `agent.status` / `agent.partial` only to `agent:` | worker forwards SSE deltas; gateway posts bounded status/partial events (MOMO-350) |
+| Recovery | durable outbox rows are the work source; retries remain idempotent | worker claim retry; gateway realtime wake-up plus actor-bound pending recovery, with lease/takeover from MOMO-341 |
+| Provider credential | provider OAuth/API keys stay inside the runtime selected by the operator (ADR-0004) | managed deployment configures provider access for AgentWorker; BYOA keeps it entirely inside user-owned Hermes |
 
 ## 3. Mode A: AgentWorker OpenAI-Compatible SSE
 
-This is the canonical path for user-visible agent runs.
+This is the official **managed** path.
 
 1. Server creates or claims an `agent_run` and enqueues `outbox(kind='agent_job')`.
 2. AgentWorker claims the job with SKIP LOCKED.
@@ -48,7 +51,7 @@ This is the canonical path for user-visible agent runs.
 4. CostAccounting reserves budget before calling the runtime.
 5. `HermesTransport` sends `POST /v1/chat/completions` with `stream=true` and `stream_options.include_usage=true`.
 6. SSE chunks map to `AgentEvent.textDelta`, `AgentEvent.toolCall`, and `AgentEvent.usage`.
-7. Text deltas publish `agent.partial` after Postgres/outbox rules; final text becomes a normal momo message.
+7. Text deltas become server-governed `agent.partial`; final text becomes a normal momo message through Postgres/outbox.
 8. Tool calls pass through approval policy before execution.
 9. Usage reconciles cost and writes the ledger.
 
@@ -60,15 +63,15 @@ pass Codex OAuth token env vars to momo processes or verifier scripts.
 
 ## 4. Mode B: Hermes Platform Adapter
 
-This path lets the Hermes gateway treat momo as one messaging platform.
+This is the official **BYOA** path. Hermes treats momo as one messaging platform while momo keeps run governance.
 
 Adapter contract:
 
-- `connect()` authenticates with a per-agent bearer, fetches a Centrifugo token,
-  and subscribes only to the private `agentwork:` stream. Observable `agent:`
-  status/partial remains a separate client surface.
+- `connect()` authenticates with a per-agent bearer through `POST /v1/auth/realtime-token`, fetches a Centrifugo token, and subscribes only to the private `agentwork:` stream. Observable `agent:` status/partial remains a separate client surface.
+- An `agentwork:` publication is a wake-up, not trusted execution input. On connect, reconnect, or a wake-up, the adapter reads `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending` with the same bearer and bounded pagination.
 - `send(channel, blocks)` writes through REST `POST /messages` with `client_msg_id` idempotency.
-- `handle_message(evt)` acts only on `mention` and `dm.signal`, ignores self-authored events, derives an idempotent trigger key, invokes the target agent, and reflects final output with `send()`.
+- For a server-created job, the adapter reports status/tool proposals/partial output through `POST .../gateway/events` and final output/usage through `POST .../gateway/complete`. The server commits all user-visible state.
+- Legacy `handle_message(evt)` interop still acts only on `mention` and `dm.signal`, ignores self-authored events, derives an idempotent trigger key, and writes through REST.
 
 Adapter hard boundaries:
 
@@ -78,18 +81,31 @@ Adapter hard boundaries:
 - It must not bypass momo approval/cost/audit decisions for user-visible work.
 - It must not forward Codex OAuth tokens into momo REST requests, message props,
   audit payloads, diagnostics, or adapter evidence.
+- It authenticates realtime-token, pending recovery, callbacks, and message writes with the same scoped `agent_bearer`; token actor must equal the job/run agent.
 
 The fixture `fixtures/hermes-adapter-contract-v0/platform_adapter_event_mapping.json` fixes the minimum event mapping for this path.
 
-## 5. When To Use Which Mode
+## 5. Path Selection And Migration
 
 | Situation | Use | Reason |
 |---|---|---|
-| Normal momo mention, slash command, message action, scheduled run, or MCP-originated agent run | AgentWorker SSE | momo owns Context Packet, approval, cost, and audit end to end. |
-| Testing Hermes as a multi-platform gateway that can receive momo events | Platform adapter | Validates adapter interop without changing the product execution owner. |
-| External Hermes deployment wants to post into momo as an agent member | Platform adapter, REST writes only | Keeps `member.kind='agent'` and `message.seq` semantics. |
-| Tool execution with write/spend/admin risk | AgentWorker SSE | Approval pause/resume and same-run audit are momo protocol, not gateway convention. |
-| Broad retrieval from workspace memory or external sources | AgentWorker SSE | Context Packet and Memory Plane permission snapshots must be built by momo. |
+| momo operates the runtime/provider for a hosted or server-side agent | AgentWorker SSE (`worker`) | managed execution; no user-owned gateway process is required |
+| A user brings a Hermes runtime/provider account | Platform adapter (`gateway`) | BYOA execution; provider credentials stay in the user's runtime |
+| Tool execution with write/spend/admin risk | Either official path | the same server approval state machine is mandatory; path choice cannot bypass it |
+| Broad workspace/source retrieval | Either official path | the server builds the same bounded Context Packet and permission snapshot |
+| External agent writes a message | Gateway REST write | preserves `member.kind='agent'`, `client_msg_id`, `message.seq`, RLS, audit, and outbox semantics |
+
+### 5.1 SD-5 surface (retroactively approved by ADR-0102)
+
+- `POST /v1/auth/realtime-token`: scoped connection-token exchange for agent realtime access.
+- `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending`: actor-bound durable recovery endpoint.
+- `AGENT_GATEWAY_MODE=worker|gateway`: selects managed or BYOA delivery without changing the guarantee owner.
+
+### 5.2 Agent identity and legacy secret removal
+
+Both paths converge on `token.kind='agent_bearer'` (ADR-0101). Gateway uses the four v0 scopes `agent:jobs:read`, `agent:runs:callback`, `messages:write`, and `realtime:subscribe`; callback and pending paths additionally enforce actor/target binding.
+
+`X-Momo-Agent-Gateway-Secret` / `AGENT_GATEWAY_SECRET` is migration-only and disabled unless `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1`. Normal dogfood and new deployments must keep the flag at `0`. After MOMO-349/350/341 land and MOMO-352 passes the clean/root equivalence gate, a dedicated security cleanup removes the header, both env keys, and the legacy-only regression case; removal is required before M7.
 
 ## 6. Fixture Index
 
@@ -97,8 +113,8 @@ Fixtures live in `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/
 
 | Fixture | Covers |
 |---|---|
-| `agentworker_openai_sse_input.json` | Canonical AgentWorker request into Hermes/Kim Intern OpenAI-compatible SSE, including Context Packet, approval, cost, and audit controls. |
-| `platform_adapter_event_mapping.json` | Optional platform adapter mention event mapping into momo REST invoke/send concepts. |
+| `agentworker_openai_sse_input.json` | Managed AgentWorker request into Hermes/Kim Intern OpenAI-compatible SSE, including Context Packet, approval, cost, and audit controls. |
+| `platform_adapter_event_mapping.json` | BYOA platform adapter mention event mapping into momo REST invoke/send concepts. |
 
 ## 7. Lightweight Contract Test And Smoke
 
@@ -111,7 +127,7 @@ Fixtures live in `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/
 - `adapters/hermes/tests/smoke_momo_adapter.py` can run the same fixture as a repo-local smoke and capture REST calls without network;
 - `register_platform()` can register the adapter with a gateway-like registry.
 
-`scripts/local_gate.sh --profile docs` runs `py_compile`, the unittest, and the standalone smoke script so fixture drift fails before PR handoff. Runtime-unverified remains: loading `plugin.yaml` inside a live Hermes gateway and running the platform adapter against live momo + Centrifugo + Postgres. MOMO-004 already verified the AgentWorker SSE path with the repo-local OpenAI-compatible mock; external Hermes staging should re-run that path before release.
+`scripts/local_gate.sh --profile docs` runs `py_compile`, the unittest, and the standalone smoke script so fixture drift fails before PR handoff. These static checks do not prove the Option C parity rows. Runtime evidence for gateway approval/status/lease and two-path equivalence belongs to MOMO-349/350/341/352. Loading `plugin.yaml` inside a live Hermes gateway with a real provider remains operator-credentialed runtime evidence.
 
 ## 8. External Code Policy
 
@@ -119,7 +135,8 @@ No Mattermost, Hermes, OpenClaw, or other external implementation code is copied
 
 ## 9. Follow-Ups
 
-- Add live Hermes gateway adapter smoke once a Hermes test instance is available; current repo-local smoke proves mapping only, not plugin load/e2e.
+- Complete MOMO-349/350/341, then keep MOMO-352's equivalence verifier as the regression gate for the server-owned matrix.
+- Remove the legacy gateway shared-secret surface after that equivalence gate, no later than M7 entry.
 - Keep platform adapter manifests versioned against the Hermes SDK when the exact production plugin schema is confirmed.
 - Ensure future inbound MCP or Google Workspace writes enter through the same Context Packet -> approval -> audit path.
 - Keep Codex OAuth provider links provider-owned unless a future security review

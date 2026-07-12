@@ -1405,7 +1405,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### MOMO-162 수용기준 `[spec/python]`
 - [x] GitHub #99를 `scripts/goal_claim.sh 99`로 claim하고 별도 branch/worktree에서 진행한다.
 - [x] `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`에 두 Hermes integration mode를 정본화한다.
-- [x] product default를 AgentWorker OpenAI-compatible SSE로 결정하고, 판단 기준을 momo-owned Context Packet / approval / cost / audit로 고정한다.
+- [x] 당시 product default를 AgentWorker OpenAI-compatible SSE로 결정하고, 판단 기준을 momo-owned Context Packet / approval / cost / audit로 고정한다. 경로 우열은 ADR-0102 Option C가 gateway=BYOA / worker=managed 두 공식 경로로 supersede했으며 서버 소유 판단 기준은 유지한다.
 - [x] `research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/`에 OpenAI-compatible SSE input fixture와 platform adapter event mapping fixture를 추가한다.
 - [x] `adapters/hermes/tests/test_momo_adapter_contract.py`로 Hermes SDK 없이 payload/mapping contract를 검증한다.
 - [x] 외부 구현 코드는 복사하지 않고 wire shape/decision만 문서화한다.
@@ -1600,6 +1600,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☐ MOMO-351 수용기준 — 이중 경로 문서 재정렬 `[docs]` · 의존 없음 (`#331`, ADR-0102)
 - [ ] adapter-contract-v0 "기본 경로 아님" 문구 → 이중 경로 계약으로 교체. L4 §6·README·overview 다이어그램 재작성.
 - [ ] SD-5 API 표면 소급 승인 명시 + legacy gateway 시크릿 폐기 일정 문서화 + `docs` gate PASS.
+> Worker #331 handoff: 계약/다이어그램/ADR-0101 연동/SD-5 소급 승인 문구를 반영했다. acceptance와 gate 체크박스는 오케스트레이터의 merge 전 `docs` evidence까지 미체크로 유지한다.
 
 ### ☐ MOMO-353 수용기준 — 로컬 게이트 drift-guard `[tooling]` · 의존 없음 (`#334`)
 - [ ] `ensure_runtime_env.sh`가 실행 중 Centrifugo running-config를 repo config와 대조 (불일치 시 안내/opt-in 재시작).

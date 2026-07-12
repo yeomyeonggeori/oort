@@ -75,6 +75,7 @@
 | [`docs/adr/0005-macos-alpha-update-channel-v0.md`](adr/0005-macos-alpha-update-channel-v0.md) | macOS alpha update channel ADR: Sparkle 2 우선, manual fallback, SwiftPM placeholder surface, secret boundary | M3/M4 준비 |
 | [`docs/adr/0100-decision-governance.md`](adr/0100-decision-governance.md) | **결정 거버넌스 정본(Accepted)**: 결정은 ADR·증거는 STATUS·계획은 ROADMAP, ADR 없는 경계 변경 머지 금지, 소급 결정(SD-1~5) 배정표 | 전반 |
 | [`docs/adr/0101-agent-identity-credentials.md`](adr/0101-agent-identity-credentials.md) | **에이전트 신원 ADR(Accepted — Option A)**: 공유 시크릿 → per-agent `agent_bearer` + Phase 2 delegation. 구현: MOMO-337~339 | M1/보안 |
+| [`docs/adr/0102-agent-execution-path.md`](adr/0102-agent-execution-path.md) | **에이전트 실행 경로 ADR(Accepted — Option C)**: gateway=BYOA / worker=managed 이중 경로 + 서버 소유 보장 매트릭스 + SD-5 소급 승인 | M1/에이전트 |
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
 | [`docs/planning/README.md`](planning/README.md) | **기획 레이어 운영 정본**: 제품 오너/planner/momo-main/worker 역할, 병렬 planning claim, ADR→티켓→핸드오프 체인, 구현 병렬 최대 5, 이탈 환류 | 전반 |
@@ -148,7 +149,7 @@
 | [`research/11-agent-runtime/fixtures/inbound-mcp-server-v0/`](../research/11-agent-runtime/fixtures/inbound-mcp-server-v0/) | Inbound MCP Server v0 JSON fixtures(tools/resources/prompts discovery, approval-safe tool-call proposal) |
 | [`research/11-agent-runtime/10-approval-decision-server-contract-v0.md`](../research/11-agent-runtime/10-approval-decision-server-contract-v0.md) | Approval Decision Server Contract v0 정본 스펙(approve/reject/expire/resume API·DB·event·worker/macOS 연결) |
 | [`research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/`](../research/11-agent-runtime/fixtures/approval-decision-server-contract-v0/) | Approval Decision Server Contract v0 JSON fixtures(approve/reject request/response, expiry result, resume job payload, decided event) |
-| [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../research/11-agent-runtime/11-hermes-adapter-contract-v0.md) | Hermes Adapter Contract v0 정본 스펙(AgentWorker SSE product default, platform adapter optional ingress/interop) |
+| [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../research/11-agent-runtime/11-hermes-adapter-contract-v0.md) | Hermes Adapter Contract v0 정본 스펙(ADR-0102 gateway=BYOA / worker=managed 이중 경로 + 서버 소유 보장 매트릭스) |
 | [`research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/`](../research/11-agent-runtime/fixtures/hermes-adapter-contract-v0/) | Hermes Adapter Contract v0 JSON fixtures(OpenAI-compatible SSE input, platform adapter event mapping) |
 | [`research/11-agent-runtime/12-google-workspace-connector-v0.md`](../research/11-agent-runtime/12-google-workspace-connector-v0.md) | Google Workspace Connector v0 정본 스펙(per-user OAuth, Drive/Gmail/Calendar read-mostly sync, Context Packet/Memory/Capability projection, approval-gated writes) |
 | [`research/11-agent-runtime/fixtures/google-workspace-connector-v0/`](../research/11-agent-runtime/fixtures/google-workspace-connector-v0/) | Google Workspace Connector v0 JSON fixtures(Drive source ref, Gmail thread ref, Calendar availability projection) |

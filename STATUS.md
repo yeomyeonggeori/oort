@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-351 이중 실행 경로 문서 재정렬 (2026-07-12)
+
+- ADR-0102를 근거로 adapter contract·L4 §6·README·architecture를 gateway=BYOA / worker=managed 이중 경로와 서버 소유 보장 매트릭스로 정렬하고, SD-5 API 표면 및 ADR-0101 bearer/legacy 폐기 연결을 문서화했다. 코드·shell·schema 변경 없음.
+- 변경 Markdown 11종의 상대 링크·코드펜스·필수 앵커 검사 PASS, `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS (`local-gate-docs-20260712T053631Z-pid49234-ns1783834591549328000-wt0ded8bfeb542-r86afa3415f59.md`).
+- runtime/DB/Docker 기동 검증은 worker 금지 범위로 실행하지 않았다. clean docs gate와 acceptance 체크박스 확정은 오케스트레이터 merge 전 대기한다.
+
 ## 0. Repo Bootstrap Hardening (2026-06-24)
 
 - Centrifugo/server 계약을 `/v1/centrifugo/subscribe` + `ch:ws<workspaceUUID>.<channelUUID>` / exact-channel observable `agent:ws<workspaceUUID>.<channelUUID>.<agentMemberUUID>` / private `agentwork:ws<workspaceUUID>.<agentMemberUUID>`로 정렬하고, legacy GitHub bootstrap은 guard 처리.
@@ -765,7 +771,7 @@
 
 ## 0ad. MOMO-162 Hermes Adapter Contract Verification (2026-06-26)
 
-- Hermes integration mode를 두 경로로 고정했다: product default는 momo AgentWorker가 Context Packet / approval / cost / audit를 소유하고 Hermes/Kim Intern을 OpenAI-compatible SSE로 호출하는 경로이며, `adapters/hermes/momo_adapter.py` platform adapter는 optional ingress/interop 경로다.
+- 당시 Hermes integration mode를 AgentWorker product default + platform adapter optional ingress/interop로 고정했다. 이 경로 우열 결정은 2026-07-12 ADR-0102 Option C가 gateway=BYOA / worker=managed 두 공식 경로로 supersede했고, 서버 소유 보장 매트릭스는 유지·확장됐다.
 - 새 정본: `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`. JSON fixture 2종: `agentworker_openai_sse_input.json`, `platform_adapter_event_mapping.json`. Hermes SDK 없이 도는 `adapters/hermes/tests/test_momo_adapter_contract.py` lightweight contract test를 추가했다.
 - Swift-facing contract는 변경하지 않았다. 실제 Hermes gateway plugin load/live adapter e2e는 여전히 `runtime-unverified`; MOMO-004의 repo-local OpenAI-compatible mock 기반 AgentWorker SSE 검증은 유지된다.
 

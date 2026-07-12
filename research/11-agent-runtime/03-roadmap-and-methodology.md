@@ -71,8 +71,8 @@ An integration is not accepted until all four planes are specified. "The agent c
 
 ## 4. Architectural Defaults
 
-- The product default is momo AgentWorker calling Hermes/Kim Intern, not Hermes owning momo.
-- Hermes platform adapter remains a compatibility path and dogfood path.
+- ADR-0102 Option C defines two official, role-separated paths: AgentWorker = momo-owned managed runtime; Hermes platform adapter = user-owned BYOA runtime.
+- Path selection never transfers Context Packet, approval, cost, audit, ordering, or outbox authority out of momo; the server-owned guarantee matrix is shared.
 - `Context Packet` is the only way broad context enters an agent runtime.
 - `Memory Plane` stores typed, sourced memory only.
 - `Capability Cache` is required before broad plugin/MCP tool discovery. Its normative spec is `research/11-agent-runtime/06-capability-cache-v0.md`.
