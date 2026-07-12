@@ -1708,6 +1708,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] `scripts/momo hermes-gateway-init` 안내가 env template → pairing invite → scoped credential 발급 → env 기록 순서를 강제한다.
 - [ ] 기존 dogfood의 고정 김인턴/Hermes seed는 DB owner + exact identity guard + `--yes`가 필요한 사용자 opt-in 명령으로만 soft-retire한다. 자동/destructive migration은 추가하지 않는다.
 - [ ] runtime-agent와 macos-ui verifier가 `MOMO_AGENT_SEED_MODE=none`, marker/OID-owned DB, 자체 agent/channel fixture, per-run channel·대문자 `CENT_CHANNEL`, exit 96/source 보존 경계를 유지함을 DB 비접속 contract test로 고정한다.
+  - 리뷰 보강: context verifier도 human(…101)/Hermes(…103)와 두 채널·membership을 자체 시드하며, 고정 seed ID 참조 전수 점검 및 contract 회귀 검사를 추가했다. runtime 체크박스는 오케스트레이터 재검증 전까지 미체크 유지한다.
 - [ ] `schema_v0.sql` 무변경. 수정/new shell `bash -n`, Python contract test, Swift build/test PASS.
 - [ ] clean/root `runtime-agent` + `macos-ui` PASS — worker는 DB/Docker/verifier/local gate 금지로 미체크 유지; 오케스트레이터가 merge 전에 실행한다 (`runtime-unverified`).
 

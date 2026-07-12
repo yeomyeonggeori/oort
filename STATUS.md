@@ -8,6 +8,7 @@
 - `scripts/migrate.sh` 기본값을 `MOMO_AGENT_SEED_MODE=none`으로 고정하고, `002_seed.sql`의 김인턴 행과 `006_local_hermes_agent_seed.sql` 전체를 demo/e2e 명시 opt-in으로 제한했다. local-alpha는 caller env와 무관하게 none을 강제하며 fresh bootstrap은 human + 기본 채널, agent 0으로 시작한다. `schema_v0.sql`은 변경하지 않았다.
 - `scripts/momo hermes-gateway-init`을 pre-pairing template → 앱 초대 → credential 1회 발급 → env 기록 순서로 재작성했다. 기존 고정 김인턴/Hermes는 `scripts/momo cleanup-seeded-agents --yes`에서만 exact identity/DB-owner guard 후 membership·work·credential을 중단하고 handle을 해제한다; 신규 destructive migration은 없다.
 - runtime-agent/macOS verifier migration은 agent seed none을 명시하고 기존 marker/OID-owned DB·자체 fixture·per-run uppercase transport channel·exit 96/source 보존 계약을 Python 정적 테스트로 고정했다. shell `bash -n`, Python contract, `git diff --check`, 5개 Swift 패키지 `swift build --disable-sandbox` PASS; Core 18/Server 61/Relay 1/AgentWorker 29/macOS 비스냅샷 78 tests PASS. 변경하지 않은 기존 macOS image snapshot suite는 sandbox `NSImage` signal 5로 중단되어 reference PNG를 재기록하지 않았다. DB/Docker/verifier/local gate는 지시상 미실행이며 clean/root `runtime-agent` + `macos-ui`는 오케스트레이터 merge 전 대기(`runtime-unverified`).
+- 리뷰 게이트에서 context verifier가 seed-none DB의 고정 human/Hermes FK를 자체 생성하지 않는 계획 이탈이 확인됐다. workspace·human(…101)·agent(…103)·두 채널/seq·membership을 verifier-owned fixture로 보강하고 정적 계약에 고정했다. 다른 seed-none verifier의 고정 seed ID 참조도 전수 점검했으며, DB/Docker/verifier 재실행은 오케스트레이터 대기(`runtime-unverified`).
 
 ## 0-1. MOMO-356 Gateway Operational Notice Suppression (2026-07-13)
 

@@ -375,11 +375,81 @@ MOCK_HERMES_REQUEST_DUMP="$DUMP_FILE" \
 MOCK_PID=$!
 wait_http "http://127.0.0.1:${HERMES_PORT}/health" "mock hermes"
 
-echo "[agent-context] seeding channel history + off-topic cross-channel message"
+echo "[agent-context] seeding isolated workspace/member/channel fixtures + context history"
 psql_run <<SQL
 BEGIN;
 SET LOCAL row_security = off;
 SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+
+-- This verifier migrates with MOMO_AGENT_SEED_MODE=none, so it must own every
+-- member/channel FK used below rather than relying on demo migration fixtures.
+INSERT INTO workspace (id, slug, name)
+VALUES ('$WORKSPACE_ID', 'agent-context-verifier',
+        'Agent Context Verifier Workspace')
+ON CONFLICT (id) DO UPDATE
+  SET deleted_at = NULL,
+      name = EXCLUDED.name;
+
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES
+  ('$HUMAN_ID', '$WORKSPACE_ID', 'human', 'active',
+   'Agent Context Human', 'demo'),
+  ('$AGENT_ID', '$WORKSPACE_ID', 'agent', 'active',
+   'Agent Context Hermes', 'hermes')
+ON CONFLICT (id) DO UPDATE
+  SET status = EXCLUDED.status,
+      display_name = EXCLUDED.display_name,
+      handle = EXCLUDED.handle,
+      deleted_at = NULL;
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$HUMAN_ID', '$WORKSPACE_ID', 'demo@momo.local', true,
+        momo_password_hash('dev-password'), 'UTC')
+ON CONFLICT (member_id) DO UPDATE
+  SET email = EXCLUDED.email,
+      email_verified = true,
+      password_hash = EXCLUDED.password_hash,
+      tz = EXCLUDED.tz;
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
+                   owner_human_id, max_concurrent_runs, max_run_steps)
+VALUES ('$AGENT_ID', '$WORKSPACE_ID', 'hermes-agent', '$HERMES_BASE_URL',
+        'Agent context verifier fixture', '$HUMAN_ID', 1, 12)
+ON CONFLICT (member_id) DO UPDATE
+  SET model = EXCLUDED.model,
+      base_url = EXCLUDED.base_url,
+      system_prompt = EXCLUDED.system_prompt,
+      owner_human_id = EXCLUDED.owner_human_id,
+      max_concurrent_runs = EXCLUDED.max_concurrent_runs,
+      max_run_steps = EXCLUDED.max_run_steps;
+
+INSERT INTO channel (id, workspace_id, kind, name, topic, created_by, archived_at)
+VALUES
+  ('$TARGET_CHANNEL', '$WORKSPACE_ID', 'public', 'agent-lab',
+   'Agent context verifier target channel', '$HUMAN_ID', NULL),
+  ('$OTHER_CHANNEL', '$WORKSPACE_ID', 'public', 'general',
+   'Agent context verifier cross-channel fixture', '$HUMAN_ID', NULL)
+ON CONFLICT (id) DO UPDATE
+  SET archived_at = NULL,
+      topic = EXCLUDED.topic,
+      updated_at = now();
+
+INSERT INTO channel_seq (channel_id, workspace_id, last_seq)
+VALUES
+  ('$TARGET_CHANNEL', '$WORKSPACE_ID', 0),
+  ('$OTHER_CHANNEL', '$WORKSPACE_ID', 0)
+ON CONFLICT (channel_id) DO NOTHING;
+
+INSERT INTO membership (id, workspace_id, channel_id, member_id, role, left_at)
+VALUES
+  ('00000000-0000-7000-8000-000000000301', '$WORKSPACE_ID',
+   '$OTHER_CHANNEL', '$HUMAN_ID', 'owner', NULL),
+  ('00000000-0000-7000-8000-000000000303', '$WORKSPACE_ID',
+   '$TARGET_CHANNEL', '$HUMAN_ID', 'owner', NULL),
+  ('00000000-0000-7000-8000-000000000306', '$WORKSPACE_ID',
+   '$TARGET_CHANNEL', '$AGENT_ID', 'member', NULL)
+ON CONFLICT (channel_id, member_id)
+DO UPDATE SET role = EXCLUDED.role, left_at = NULL;
 
 -- Clear only this verifier's prior CTX302 fixtures so counts are deterministic.
 -- Do not clear the whole workspace agent_job queue: local dogfood may have
