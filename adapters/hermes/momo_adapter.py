@@ -375,6 +375,10 @@ class MomoAdapter(BasePlatformAdapter):
     _pending_page_size = 100
     _max_pending_pages = 10
     _max_pending_recovery_attempts = 3
+    _gateway_progress_flush_bytes = 512
+    _gateway_progress_max_delta_bytes = 8_192
+    _gateway_progress_max_events = 240
+    _gateway_progress_flush_interval_s = 0.25
 
     def __init__(
         self,
@@ -1336,10 +1340,22 @@ class MomoAdapter(BasePlatformAdapter):
             self._finish_trigger(trigger_key, handled=handled)
 
     async def _report_gateway_event(
-        self, workspace_id: str, run_id: str, status: str, detail: str
+        self,
+        workspace_id: str,
+        run_id: str,
+        status: str,
+        detail: str,
+        *,
+        text_delta: Optional[str] = None,
+        event_id: Optional[str] = None,
     ) -> None:
         path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
-        await self._post(path, {"status": status, "detail": detail})
+        body: dict[str, Any] = {"status": status, "detail": detail}
+        if text_delta is not None:
+            body["text_delta"] = text_delta
+        if event_id is not None:
+            body["event_id"] = event_id
+        await self._post(path, body)
 
     async def _report_gateway_approval_request(
         self,
@@ -1372,12 +1388,30 @@ class MomoAdapter(BasePlatformAdapter):
         if (
             payload.get("resume_from_approval_id")
             and self.runtime is not None
+            and hasattr(self.runtime, "resume_momo_job_stream")
+        ):
+            stream = self.runtime.resume_momo_job_stream(payload)
+            return await self._consume_gateway_stream(stream, payload)
+
+        if (
+            payload.get("resume_from_approval_id")
+            and self.runtime is not None
             and hasattr(self.runtime, "resume_momo_job")
         ):
             result = self.runtime.resume_momo_job(payload)
             if inspect.isawaitable(result):
                 result = await result
+            if hasattr(result, "__aiter__"):
+                return await self._consume_gateway_stream(result, payload)
             return self._normalize_gateway_result(result, payload)
+
+        if self.runtime is not None and hasattr(self.runtime, "stream_momo_job"):
+            stream = self.runtime.stream_momo_job(payload)
+            return await self._consume_gateway_stream(stream, payload)
+
+        if self.runtime is not None and hasattr(self.runtime, "stream_agent_job"):
+            stream = self.runtime.stream_agent_job(payload)
+            return await self._consume_gateway_stream(stream, payload)
 
         handler = getattr(self, "_message_handler", None)
         if callable(handler):
@@ -1386,6 +1420,8 @@ class MomoAdapter(BasePlatformAdapter):
                 result = handler(event)
                 if inspect.isawaitable(result):
                     result = await result
+                if hasattr(result, "__aiter__"):
+                    return await self._consume_gateway_stream(result, payload)
                 return self._normalize_gateway_result(result, payload)
 
         if self.runtime is None:
@@ -1395,12 +1431,16 @@ class MomoAdapter(BasePlatformAdapter):
             result = self.runtime.run_momo_job(payload)
             if inspect.isawaitable(result):
                 result = await result
+            if hasattr(result, "__aiter__"):
+                return await self._consume_gateway_stream(result, payload)
             return self._normalize_gateway_result(result, payload)
 
         if hasattr(self.runtime, "run_agent_job"):
             result = self.runtime.run_agent_job(payload)
             if inspect.isawaitable(result):
                 result = await result
+            if hasattr(result, "__aiter__"):
+                return await self._consume_gateway_stream(result, payload)
             return self._normalize_gateway_result(result, payload)
 
         if hasattr(self.runtime, "chat"):
@@ -1411,6 +1451,131 @@ class MomoAdapter(BasePlatformAdapter):
             return self._normalize_gateway_result(result, payload)
 
         raise RuntimeError("Hermes runtime does not expose a momo-compatible job method")
+
+    async def _consume_gateway_stream(
+        self, stream: Any, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Forward a bounded/sampleable provider stream through momo callbacks."""
+        if inspect.isawaitable(stream):
+            stream = await stream
+        workspace_id = str(payload.get("workspace_id") or payload.get("workspaceId") or "")
+        run_id = str(payload.get("run_id") or payload.get("runId") or "")
+        if not workspace_id or not run_id:
+            raise RuntimeError("streaming gateway job is missing workspace_id/run_id")
+
+        await self._report_gateway_event(
+            workspace_id,
+            run_id,
+            "thinking",
+            "provider stream opened",
+            event_id=str(uuid.uuid4()),
+        )
+        full_text: list[str] = []
+        buffered: list[str] = []
+        buffered_bytes = 0
+        sent_events = 1
+        last_flush = asyncio.get_running_loop().time()
+        terminal: Optional[Mapping[str, Any]] = None
+
+        async def flush() -> None:
+            nonlocal buffered, buffered_bytes, sent_events, last_flush
+            if not buffered:
+                return
+            text = "".join(buffered)
+            buffered = []
+            buffered_bytes = 0
+            if sent_events >= self._gateway_progress_max_events:
+                return
+            for chunk in self._bounded_gateway_delta_chunks(text):
+                if sent_events >= self._gateway_progress_max_events:
+                    break
+                await self._report_gateway_event(
+                    workspace_id,
+                    run_id,
+                    "streaming",
+                    "provider text delta",
+                    text_delta=chunk,
+                    event_id=str(uuid.uuid4()),
+                )
+                sent_events += 1
+            last_flush = asyncio.get_running_loop().time()
+
+        async for raw_event in self._aiter(stream):
+            if not isinstance(raw_event, Mapping):
+                raw_event = {"type": "text.delta", "delta": str(raw_event)}
+            delta = self._gateway_text_delta(raw_event)
+            if delta:
+                full_text.append(delta)
+                buffered.append(delta)
+                buffered_bytes += len(delta.encode("utf-8"))
+                elapsed = asyncio.get_running_loop().time() - last_flush
+                if (
+                    buffered_bytes >= self._gateway_progress_flush_bytes
+                    or elapsed >= self._gateway_progress_flush_interval_s
+                ):
+                    await flush()
+            if self._is_gateway_terminal_event(raw_event):
+                terminal = raw_event
+
+        await flush()
+        result: dict[str, Any] = dict(terminal or {})
+        if not result.get("body") and not result.get("text") and not result.get("content"):
+            result["body"] = "".join(full_text)
+        if not result.get("status"):
+            terminal_type = str(result.get("type") or "").lower()
+            result["status"] = (
+                "failed" if terminal_type == "error" or result.get("error") else "succeeded"
+            )
+        return self._normalize_gateway_result(result, payload)
+
+    @classmethod
+    def _bounded_gateway_delta_chunks(cls, text: str) -> list[str]:
+        chunks: list[str] = []
+        current: list[str] = []
+        current_bytes = 0
+        for character in text:
+            character_bytes = len(character.encode("utf-8"))
+            if current and current_bytes + character_bytes > cls._gateway_progress_max_delta_bytes:
+                chunks.append("".join(current))
+                current = []
+                current_bytes = 0
+            current.append(character)
+            current_bytes += character_bytes
+        if current:
+            chunks.append("".join(current))
+        return chunks
+
+    @staticmethod
+    def _gateway_text_delta(event: Mapping[str, Any]) -> str:
+        event_type = str(event.get("type") or "").lower()
+        payload = event.get("payload")
+        payload = payload if isinstance(payload, Mapping) else {}
+        if event_type in {"agent.partial", "text.delta", "textdelta", "content.delta"}:
+            return str(
+                event.get("delta")
+                or event.get("text_delta")
+                or event.get("text")
+                or payload.get("text_delta")
+                or payload.get("delta")
+                or ""
+            )
+        choices = event.get("choices")
+        if isinstance(choices, Sequence) and choices and isinstance(choices[0], Mapping):
+            delta = choices[0].get("delta")
+            if isinstance(delta, Mapping):
+                return str(delta.get("content") or "")
+        return ""
+
+    @staticmethod
+    def _is_gateway_terminal_event(event: Mapping[str, Any]) -> bool:
+        event_type = str(event.get("type") or "").lower()
+        status = str(event.get("status") or "").lower()
+        return event_type in {"finished", "done", "error"} or status in {
+            "succeeded",
+            "failed",
+            "cancelled",
+            "timed_out",
+        }
 
     @staticmethod
     def _payload_to_hermes_message_event(payload: Mapping[str, Any]) -> Any:

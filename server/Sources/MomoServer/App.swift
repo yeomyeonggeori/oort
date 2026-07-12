@@ -73,6 +73,9 @@ enum AppBuilder {
                 tokenStore: tokenStore,
                 legacyGatewayConfig: config.agentGateway
             ))
+            .add(middleware: MemberRateLimitMiddleware(
+                limiter: rateLimiter, config: config.rateLimit, db: db, logger: logger
+            ))
         AgentGatewayRoutes(db: db, config: config.agentGateway).add(to: gatewayAuthed)
 
         // Protected routes (require valid access token) — mounted in a group that

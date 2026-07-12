@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-350 Gateway Status/Partial Broadcast (2026-07-12)
+
+- actor/run-bound `/gateway/events`가 bounded `thinking`/`streaming` callback을 받아 macOS wire shape의 `agent.status`/`agent.partial`을 observable `agent:` outbox에 기록한다. gateway bearer는 기존 sliding-window per-member rate limit을 공유하고 progress에는 별도 run당 240 events/minute 하드캡, detail 2 KiB, text delta 8 KiB 상한을 둔다.
+- Hermes adapter는 provider stream을 512-byte/250ms 단위로 샘플링해 callback하고, macOS REST backend는 exact workspace/channel/agent `agent:` subscription을 기존 `AgentPartialView` state에 합친다. `agentwork:` private job namespace와 progress는 계속 분리된다.
+- 검증: server build + 54 tests PASS, adapter contract 49 tests PASS, macOS 비스냅샷 78 tests PASS(그중 gateway progress/실렌더 상태 타깃 3), adapter py_compile + verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/clean-root `runtime-agent`는 worker에서 실행하지 않았으며 오케스트레이터 수행 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-351 이중 실행 경로 문서 재정렬 (2026-07-12)
 
 - ADR-0102를 근거로 adapter contract·L4 §6·README·architecture를 gateway=BYOA / worker=managed 이중 경로와 서버 소유 보장 매트릭스로 정렬하고, SD-5 API 표면 및 ADR-0101 bearer/legacy 폐기 연결을 문서화했다. 코드·shell·schema 변경 없음.

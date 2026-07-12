@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337/349 Hermes gateway path
+# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337/349/350 Hermes gateway path
 #
 # Verifies the product direction where Hermes treats momo as a messaging
 # platform, while momo keeps the execution ledger SoT:
 #   REST @hermes mention -> agent_run + outbox(agent_job, method=gateway)
-#   -> per-agent bearer pending/status/approval/complete REST -> durable timeline message
+#   -> per-agent bearer pending/status/partial/approval/complete REST -> durable timeline message
 #   + usage_ledger + audit_log.via_token_id. The legacy shared secret is tested
 #   only after an explicit migration-flag restart.
 set -eu
@@ -82,6 +82,7 @@ HUMAN_MEMBER_ID=00000000-0000-7000-8000-000000000101
 AGENT_ID=00000000-0000-7000-8000-000000000103
 OTHER_AGENT_ID=00000000-0000-7337-8000-000000000104
 CHANNEL_ID=$(python3 -c 'import sys, uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, sys.argv[1] + ":agent-lab-channel"))' "$VERIFIER_DB_MARKER")
+CENT_CHANNEL=$(python3 -c 'import sys; print("agent:ws" + sys.argv[1].upper() + "." + sys.argv[2].upper() + "." + sys.argv[3].upper())' "$WORKSPACE_ID" "$CHANNEL_ID" "$AGENT_ID")
 CLIENT_MSG_ID=00000000-0000-7000-8000-000000325001
 BODY='@hermes MOMO-325 gateway native platform smoke'
 FINAL_BODY='Hermes gateway mock completed MOMO-325 through momo REST.'
@@ -435,6 +436,20 @@ post_gateway_event() {
   run_id=$2
   api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
     '{"status":"running","detail":"mock gateway accepted agent.job"}' >/dev/null
+}
+
+post_gateway_thinking() {
+  token=$1
+  run_id=$2
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
+    '{"event_id":"00000000-0000-7350-8000-000000350001","status":"thinking","detail":"reading gateway context"}' >/dev/null
+}
+
+post_gateway_streaming() {
+  token=$1
+  run_id=$2
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" "$token" \
+    '{"event_id":"00000000-0000-7350-8000-000000350002","status":"streaming","detail":"provider text delta","text_delta":"MOMO-350 gateway streaming preview"}' >/dev/null
 }
 
 post_gateway_approval_request() {
@@ -876,10 +891,24 @@ if [ "$OTHER_RUN_ID" = "" ]; then
 fi
 CROSS_AGENT_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"running"}')
 assert_equals "403" "$CROSS_AGENT_CODE" "agent bearer cannot callback another agent run"
+CROSS_PARTIAL_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"streaming","text_delta":"forged delta"}')
+assert_equals "403" "$CROSS_PARTIAL_CODE" "agent bearer cannot stream into another agent run"
 CROSS_APPROVAL_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${OTHER_RUN_ID}/gateway/events" "$AGENT_TOKEN" '{"status":"approval_request","approval_request":{"tool_call":{"call_id":"cross-agent","name":"forbidden_tool","arguments":{}}}}')
 assert_equals "403" "$CROSS_APPROVAL_CODE" "approval callback preserves run actor binding"
 
 post_gateway_event "$AGENT_TOKEN" "$RUN_ID"
+post_gateway_thinking "$AGENT_TOKEN" "$RUN_ID"
+post_gateway_streaming "$AGENT_TOKEN" "$RUN_ID"
+post_gateway_streaming "$AGENT_TOKEN" "$RUN_ID"
+OVERSIZED_EVENT_BODY=$(python3 -c 'import json; print(json.dumps({"status":"streaming","text_delta":"x" * 8193}))')
+OVERSIZED_DELTA_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${RUN_ID}/gateway/events" "$AGENT_TOKEN" "$OVERSIZED_EVENT_BODY")
+assert_equals "400" "$OVERSIZED_DELTA_CODE" "gateway streaming delta size cap"
+STATUS_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->>'channel'='${CENT_CHANNEL}' AND payload->'data'->>'type'='agent.status' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') AND payload->'data'->'payload'->>'phase' IN ('thinking','streaming') AND payload->'data'->'payload'->>'run_status'='running' AND payload->'data'->'payload'->>'detail' IN ('reading gateway context','provider text delta')")
+assert_equals "2" "$STATUS_BROADCAST_COUNT" "thinking/streaming status uses observable agent namespace"
+PARTIAL_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->>'channel'='${CENT_CHANNEL}' AND payload->'data'->>'type'='agent.partial' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}') AND lower(payload->'data'->'payload'->>'channel_id')=lower('${CHANNEL_ID}') AND payload->'data'->'payload'->>'text_delta'='MOMO-350 gateway streaming preview'")
+assert_equals "1" "$PARTIAL_BROADCAST_COUNT" "gateway text delta broadcasts idempotently as agent.partial"
+PRIVATE_PROGRESS_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND payload->'data'->>'type' IN ('agent.status','agent.partial') AND payload->>'channel' LIKE 'agentwork:%' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}')")
+assert_equals "0" "$PRIVATE_PROGRESS_COUNT" "observable progress never enters private agentwork namespace"
 COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$RUN_ID")
 FINAL_SEQ=$(printf '%s' "$COMPLETE_JSON" | jq -r '.seq')
 if [ "$FINAL_SEQ" = "" ] || [ "$FINAL_SEQ" = "null" ]; then
@@ -901,9 +930,9 @@ USAGE_COUNT=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE workspace_id=
 assert_equals "1" "$USAGE_COUNT" "usage ledger row"
 
 AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${RUN_ID}' AND action IN ('agent.gateway.status','agent.gateway.completed')")
-assert_equals "2" "$AUDIT_COUNT" "gateway audit rows"
+assert_equals "4" "$AUDIT_COUNT" "gateway audit rows"
 AUDIT_VIA_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${RUN_ID}' AND action IN ('agent.gateway.status','agent.gateway.completed') AND via_token_id='${AGENT_TOKEN_ID}'")
-assert_equals "2" "$AUDIT_VIA_COUNT" "gateway audit rows via agent credential"
+assert_equals "4" "$AUDIT_VIA_COUNT" "gateway audit rows via agent credential"
 
 FINAL_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('${RUN_ID}')")
 assert_equals "1" "$FINAL_BROADCAST_COUNT" "durable final message broadcast idempotency"

@@ -396,6 +396,72 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(AgentGatewayRoutes.isApprovalHeldRunStatus("queued"))
     }
 
+    func testAgentGatewayProgressEventsDecodeWithBoundedStreamingDelta() throws {
+        let eventID = UUID(uuidString: "00000000-0000-7350-8000-000000350001")!
+        let thinking = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"event_id":"\#(eventID.uuidString)","status":"thinking","detail":"reading context"}"#.utf8)
+        ).validatedProgress(status: "thinking")
+        XCTAssertEqual(thinking.eventID, eventID)
+        XCTAssertEqual(thinking.detail, "reading context")
+        XCTAssertNil(thinking.textDelta)
+
+        let streaming = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"event_id":"\#(eventID.uuidString)","status":"streaming","text_delta":"안녕"}"#.utf8)
+        ).validatedProgress(status: "streaming")
+        XCTAssertEqual(streaming.textDelta, "안녕")
+    }
+
+    func testAgentGatewayProgressEventsFailClosedOnShapeAndSize() throws {
+        let missingDelta = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"status":"streaming"}"#.utf8)
+        )
+        XCTAssertThrowsError(try missingDelta.validatedProgress(status: "streaming"))
+
+        let misplacedDelta = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"status":"thinking","text_delta":"forged"}"#.utf8)
+        )
+        XCTAssertThrowsError(try misplacedDelta.validatedProgress(status: "thinking"))
+
+        let oversized = String(repeating: "x", count: AgentGatewayEventRequest.maximumTextDeltaBytes + 1)
+        let data = try JSONSerialization.data(withJSONObject: [
+            "status": "streaming",
+            "text_delta": oversized,
+        ])
+        let request = try JSONDecoder().decode(AgentGatewayEventRequest.self, from: data)
+        XCTAssertThrowsError(try request.validatedProgress(status: "streaming"))
+
+        let unknown = try JSONDecoder().decode(
+            AgentGatewayEventRequest.self,
+            from: Data(#"{"status":"forged"}"#.utf8)
+        )
+        XCTAssertThrowsError(try unknown.validatedProgress(status: "forged"))
+    }
+
+    func testAgentGatewayProgressRateCapCannotBeDisabledByGeneralRateConfig() async {
+        let limiter = SlidingWindowRateLimiter()
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        for _ in 0..<AgentGatewayRoutes.maximumProgressEventsPerWindow {
+            let verdict = await limiter.check(
+                key: "gateway-progress:workspace:run",
+                limit: AgentGatewayRoutes.maximumProgressEventsPerWindow,
+                windowSeconds: AgentGatewayRoutes.progressRateWindowSeconds,
+                now: now
+            )
+            XCTAssertTrue(verdict.allowed)
+        }
+        let rejected = await limiter.check(
+            key: "gateway-progress:workspace:run",
+            limit: AgentGatewayRoutes.maximumProgressEventsPerWindow,
+            windowSeconds: AgentGatewayRoutes.progressRateWindowSeconds,
+            now: now
+        )
+        XCTAssertFalse(rejected.allowed)
+    }
+
     func testAgentGatewayApprovalRequestDecodesAndBuildsWorkerCompatiblePayload() throws {
         let json = """
         {

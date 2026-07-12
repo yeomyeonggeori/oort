@@ -8,6 +8,13 @@ public protocol RealtimeConnectionTokenProvider: Sendable {
     func realtimeConnectionToken() async throws -> String
 }
 
+public protocol AgentRealtimeEnvelopeSubscriptionTransport: Sendable {
+    func envelopes(
+        agent: MemberID,
+        channel: ChannelID
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error>
+}
+
 public actor MomoServerRealtimeTokenProvider: RealtimeConnectionTokenProvider {
     private let baseURL: URL
     private let session: URLSession
@@ -49,7 +56,7 @@ public actor MomoServerRealtimeTokenProvider: RealtimeConnectionTokenProvider {
 
 // MARK: - SwiftCentrifuge transport
 
-public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelopeSubscriptionTransport, RealtimeStatusReportingEnvelopeSubscriptionTransport {
+public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelopeSubscriptionTransport, RealtimeStatusReportingEnvelopeSubscriptionTransport, AgentRealtimeEnvelopeSubscriptionTransport {
     public let endpoint: URL
     public let workspace: WorkspaceID
 
@@ -77,6 +84,33 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
         statusHandler: @escaping RealtimeStatusHandler
     ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
         let channelName = Self.channelName(workspace: workspace, channel: channel)
+        return try await envelopes(
+            named: channelName,
+            logicalChannel: channel,
+            statusHandler: statusHandler
+        )
+    }
+
+    public func envelopes(
+        agent: MemberID,
+        channel: ChannelID
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
+        try await envelopes(
+            named: Self.agentChannelName(
+                workspace: workspace,
+                channel: channel,
+                agent: agent
+            ),
+            logicalChannel: channel,
+            statusHandler: { _ in }
+        )
+    }
+
+    private func envelopes(
+        named channelName: String,
+        logicalChannel channel: ChannelID,
+        statusHandler: @escaping RealtimeStatusHandler
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
         let tokenProvider = self.tokenProvider
         let endpoint = endpoint.absoluteString
         let debug = debug
@@ -136,6 +170,14 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
 
     public static func channelName(workspace: WorkspaceID, channel: ChannelID) -> String {
         "ch:ws\(workspace.description).\(channel.description)"
+    }
+
+    public static func agentChannelName(
+        workspace: WorkspaceID,
+        channel: ChannelID,
+        agent: MemberID
+    ) -> String {
+        "agent:ws\(workspace.description).\(channel.description).\(agent.description)"
     }
 
     public static func decodePublicationData(_ data: Data) throws -> RealtimeEnvelope {
