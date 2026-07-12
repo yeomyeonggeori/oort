@@ -70,7 +70,7 @@ Adapter contract:
 - `connect()` authenticates with a per-agent bearer through `POST /v1/auth/realtime-token`, fetches a Centrifugo token, and subscribes only to the private `agentwork:` stream. Observable `agent:` status/partial remains a separate client surface.
 - An `agentwork:` publication is a wake-up, not trusted execution input. On connect, reconnect, or a wake-up, the adapter claims one row at a time through `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending`; the response carries an opaque job lease capability.
 - The adapter renews the lease while provider work and callbacks are in flight. `events`/`complete`, renew, and release bind the exact job id + lease id + bearer actor; an expired/non-owner capability fails closed, and an expired pending row can be taken over.
-- `send(channel, blocks)` writes through REST `POST /messages` with `client_msg_id` idempotency.
+- `send(channel, blocks)` writes through REST `POST /messages` only for an explicit momo `run_id`, with `client_msg_id` idempotency. Unbound Hermes lifecycle/setup/command notices are local-log-only; the native gateway final response is committed by `/gateway/complete`.
 - For a server-created job, the adapter reports status/tool proposals/partial output through `POST .../gateway/events` and final output/usage through `POST .../gateway/complete`. The server commits all user-visible state.
 - Legacy `handle_message(evt)` interop still acts only on `mention` and `dm.signal`, ignores self-authored events, derives an idempotent trigger key, and writes through REST.
 

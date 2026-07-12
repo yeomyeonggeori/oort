@@ -25,6 +25,12 @@ optional_env:
   - name: MOMO_AGENT_HANDLE
     label: Agent handle
     description: Mention handle, usually hermes.
+  - name: MOMO_HOME_CHANNEL
+    label: Home channel ID
+    description: Channel UUID configured at gateway startup for scheduled and cross-platform delivery.
+  - name: MOMO_HOME_CHANNEL_NAME
+    label: Home channel name
+    description: Display name for the preconfigured momo home channel.
   - name: MOMO_AGENT_ALLOW_INSECURE_HTTP
     label: Allow private-network plaintext
     description: Set to 1 only when http/ws is required on a trusted non-loopback private network. Defaults to fail-closed.

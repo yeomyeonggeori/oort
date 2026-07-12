@@ -77,6 +77,8 @@ MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
 MOMO_AGENT_HANDLE=hermes
 MOMO_AGENT_TOKEN=<one-time-issued scoped agent bearer>
+MOMO_HOME_CHANNEL=00000000-0000-7000-8000-000000000202
+MOMO_HOME_CHANNEL_NAME=agent-lab
 # Non-loopback http/ws is rejected unless a trusted private deployment sets:
 # MOMO_AGENT_ALLOW_INSECURE_HTTP=1
 ```
@@ -84,6 +86,8 @@ MOMO_AGENT_TOKEN=<one-time-issued scoped agent bearer>
 The adapter does not accept a human email/password and does not mint its own
 credential. The raw agent token is returned once by momo pairing, stored only in
 the chmod-600 env file, and can be rotated or revoked by a human admin.
+The helper also configures the Hermes home target before startup; Hermes
+lifecycle/setup notices remain adapter-local and are not durable momo messages.
 
 The `agentwork:` work stream is a Centrifugo subscription, not a durable write path.
 It still goes through MomoServer's subscribe proxy. Dev, local-alpha, and prod

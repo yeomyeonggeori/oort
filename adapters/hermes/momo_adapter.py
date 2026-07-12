@@ -9,15 +9,19 @@ What this adapter does (the three BasePlatformAdapter primitives, §6.3):
                     bearer (`MOMO_AGENT_TOKEN`) → realtime-token exchange →
                     subscribe the agent's private `agentwork:` Centrifugo stream.
 
-  send(channel, …)  REST POST .../messages with a client_msg_id for idempotency
-                    (§3.1 — the server's UPDATE channel_seq + INSERT message +
-                    INSERT outbox single tx dedups on
-                    (channel_id, author_member_id, client_msg_id)).
+  send(channel, …)  REST POST .../messages only for a momo run-bound final agent
+                    response. Hermes lifecycle/setup/command notices have no
+                    momo run id, so they stay in local logs instead of becoming
+                    durable timeline messages. Run-bound writes use a
+                    client_msg_id for idempotency (§3.1 — the server's UPDATE
+                    channel_seq + INSERT message + INSERT outbox single tx
+                    dedups on (channel_id, author_member_id, client_msg_id)).
 
-  handle_message()  a mention / DM signal arrives on the realtime stream →
-                    invoke the agent (POST .../agents/{id}/invoke) → stream the
-                    agent.partial / agent.status deltas back and reflect them into
-                    the channel via send().
+  handle_message()  an agent.job / mention / DM signal arrives on the realtime
+                    stream → invoke the agent → stream agent.partial /
+                    agent.status deltas back → commit the native gateway final
+                    through /gateway/complete (legacy mention final uses the
+                    run-bound send() path).
 
 Write path (L4 §1.2 / §8.1): this adapter NEVER publishes to Centrifugo directly.
 All writes go REST → PG commit → outbox → relay publishes. The adapter only
@@ -1078,19 +1082,31 @@ class MomoAdapter(BasePlatformAdapter):
         run_id: Optional[str] = None,
         msg_type: str = "text",
         props: Optional[Mapping[str, str]] = None,
-    ) -> dict[str, Any]:
-        """REST POST .../messages with an idempotent client_msg_id (L4 §3.1).
+    ) -> Any:
+        """Write one run-bound agent response with an idempotent key (L4 §3.1).
 
         `channel` is a momo channel UUID (the server's path id). `blocks` is the
         agent's rendered output; we flatten it to a body string for the v0 text
         message type (richer block types map onto message.props later).
 
+        Hermes also uses every platform adapter's generic ``send`` primitive for
+        its own session-reset, home-channel, slash-command, model/provider, and
+        other operational notices. Those calls have no momo ``run_id`` and must
+        not enter the timeline ledger. Treat them as successfully handled, log
+        a body-free suppression event locally, and skip the REST write. The normal
+        gateway path commits its final response through ``/gateway/complete``;
+        the legacy mention path below supplies ``run_id`` explicitly.
+
         Idempotency: a stable client_msg_id means a retried send dedups on the
         server's (channel_id, author_member_id, client_msg_id) unique constraint,
         returning the prior seq (exactly-once effect, L4 §3.1).
         """
-        cmid = client_msg_id or str(uuid.uuid4())
+        if not run_id:
+            log.info("suppressed unbound Hermes platform send")
+            return self._suppressed_send_result()
+
         body = self._blocks_to_body(blocks)
+        cmid = client_msg_id or str(uuid.uuid4())
         path = (
             f"/v1/workspaces/{self.cfg.workspace_id}"
             f"/channels/{channel}/messages"
@@ -1115,6 +1131,20 @@ class MomoAdapter(BasePlatformAdapter):
             payload["runId"] = run_id
         result = await self._post(path, payload)
         return self._send_result(result, cmid)
+
+    @staticmethod
+    def _suppressed_send_result() -> Any:
+        raw = {
+            "suppressed": True,
+            "reason": "momo durable messages require an agent run id",
+        }
+        try:
+            return SendResult(success=True, message_id=None, raw_response=raw)
+        except TypeError:  # pragma: no cover - SDK shape drift
+            try:
+                return SendResult(True, None, None, raw)
+            except Exception:
+                return raw
 
     @staticmethod
     def _send_result(result: Mapping[str, Any], client_msg_id: str) -> Any:
@@ -1155,6 +1185,7 @@ class MomoAdapter(BasePlatformAdapter):
         env/default fallback instead of failing platform construction.
         """
         is_home_channel = chat_id in {
+            os.environ.get("MOMO_HOME_CHANNEL", ""),
             os.environ.get("MOMO_HOME_CHANNEL_ID", ""),
             os.environ.get("MOMO_DEFAULT_CHANNEL_ID", ""),
         }
@@ -2090,6 +2121,8 @@ REQUIRED_ENV = (
 OPTIONAL_ENV = (
     "MOMO_CENTRIFUGO_WS_URL",
     "MOMO_AGENT_HANDLE",
+    "MOMO_HOME_CHANNEL",
+    "MOMO_HOME_CHANNEL_NAME",
     "MOMO_AGENT_ALLOW_INSECURE_HTTP",
 )
 
@@ -2152,7 +2185,8 @@ def env_enablement(env: Mapping[str, str]) -> Optional[dict[str, Any]]:
         return None
     return {
         "home_channel": {
-            "chat_id": env.get("MOMO_HOME_CHANNEL_ID")
+            "chat_id": env.get("MOMO_HOME_CHANNEL")
+            or env.get("MOMO_HOME_CHANNEL_ID")
             or env.get("MOMO_DEFAULT_CHANNEL_ID")
             or env["MOMO_AGENT_MEMBER_ID"],
             "name": env.get("MOMO_HOME_CHANNEL_NAME", "momo"),
@@ -2162,6 +2196,8 @@ def env_enablement(env: Mapping[str, str]) -> Optional[dict[str, Any]]:
         "MOMO_WORKSPACE_ID": env["MOMO_WORKSPACE_ID"],
         "MOMO_AGENT_MEMBER_ID": env["MOMO_AGENT_MEMBER_ID"],
         "MOMO_AGENT_HANDLE": env.get("MOMO_AGENT_HANDLE", "hermes"),
+        "MOMO_HOME_CHANNEL": env.get("MOMO_HOME_CHANNEL", ""),
+        "MOMO_HOME_CHANNEL_NAME": env.get("MOMO_HOME_CHANNEL_NAME", "momo"),
         "MOMO_AGENT_TOKEN": env["MOMO_AGENT_TOKEN"],
         "MOMO_AGENT_ALLOW_INSECURE_HTTP": env.get(
             "MOMO_AGENT_ALLOW_INSECURE_HTTP", "0"
