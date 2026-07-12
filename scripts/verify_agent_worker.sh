@@ -268,7 +268,7 @@ SQL
   ENV_FILE=/dev/null DATABASE_URL= \
     PGHOST="$PGHOST" PGPORT="$PGPORT" PGDATABASE="$PGDATABASE" \
     PGUSER="$PGUSER" PGPASSWORD="$PGPASSWORD" \
-    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+    MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh" >/dev/null
 }
 
 provision_verifier_roles() {

@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-355 Dogfood Agent Seed Opt-in (2026-07-13)
+
+- `scripts/migrate.sh` 기본값을 `MOMO_AGENT_SEED_MODE=none`으로 고정하고, `002_seed.sql`의 김인턴 행과 `006_local_hermes_agent_seed.sql` 전체를 demo/e2e 명시 opt-in으로 제한했다. local-alpha는 caller env와 무관하게 none을 강제하며 fresh bootstrap은 human + 기본 채널, agent 0으로 시작한다. `schema_v0.sql`은 변경하지 않았다.
+- `scripts/momo hermes-gateway-init`을 pre-pairing template → 앱 초대 → credential 1회 발급 → env 기록 순서로 재작성했다. 기존 고정 김인턴/Hermes는 `scripts/momo cleanup-seeded-agents --yes`에서만 exact identity/DB-owner guard 후 membership·work·credential을 중단하고 handle을 해제한다; 신규 destructive migration은 없다.
+- runtime-agent/macOS verifier migration은 agent seed none을 명시하고 기존 marker/OID-owned DB·자체 fixture·per-run uppercase transport channel·exit 96/source 보존 계약을 Python 정적 테스트로 고정했다. shell `bash -n`, Python contract, `git diff --check`, 5개 Swift 패키지 `swift build --disable-sandbox` PASS; Core 18/Server 61/Relay 1/AgentWorker 29/macOS 비스냅샷 78 tests PASS. 변경하지 않은 기존 macOS image snapshot suite는 sandbox `NSImage` signal 5로 중단되어 reference PNG를 재기록하지 않았다. DB/Docker/verifier/local gate는 지시상 미실행이며 clean/root `runtime-agent` + `macos-ui`는 오케스트레이터 merge 전 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-356 Gateway Operational Notice Suppression (2026-07-13)
 
 - Hermes platform `send()`는 명시적 momo `run_id`가 있는 실제 에이전트 최종 응답만 REST durable message로 허용한다. session reset, home-channel, `/resume`·`/sethome`, model/provider 등 run-unbound 운영 공지는 성공 처리 후 본문을 남기지 않는 로컬 이벤트 로그로만 기록한다. native gateway 최종 응답은 기존 `/gateway/complete` server-owned commit을 유지한다.

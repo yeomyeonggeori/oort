@@ -191,6 +191,7 @@
 | `MOMO-346` (`#322`) | Hermes bridge/gateway verifier isolated DB boundary | tooling/runtime-agent | MOMO-345 |
 | `MOMO-347` (`#324`) | Pairing popover credential embedding hardening | swift/macos-ui | MOMO-339 |
 | `MOMO-348` (`#325`) | macos-ui real backend verifier isolated DB boundary | tooling/macos-ui | MOMO-346 |
+| `MOMO-355` (`#342`) | Dogfood agent seed opt-in + pairing-only roster policy | sql/tooling/docs | MOMO-339, MOMO-348, MOMO-352 |
 | `MOMO-227` | Kim Intern runtime config + health/status visibility v0 | swift/docs/host-runtime | MOMO-220, MOMO-221, MOMO-215, MOMO-219 |
 | `MOMO-230` | External Kim Intern/Hermes provider smoke gate v0 | runtime/docs | MOMO-227, MOMO-220, MOMO-215 |
 | `MOMO-234` | Hermes Codex OAuth provider boundary v0 | docs/tooling | MOMO-230, MOMO-227 |
@@ -228,6 +229,7 @@
 | `MOMO-351` (`#331`) | 이중 경로 스펙/다이어그램/계약 재정렬 + SD-5 소급 — ADR-0102 | docs | 없음 (병렬) |
 | `MOMO-353` (`#334`) | 로컬 게이트 drift-guard (config drift 검출 + 잔류 프로세스 정리) | tooling | 없음 (병렬) |
 | `MOMO-356` (`#343`) | Hermes gateway 운영 공지의 durable timeline 유출 차단 | python/runtime-agent/docs | MOMO-338 |
+| `MOMO-355` (`#342`) | persistent/local-alpha agent seed 제거; demo/e2e opt-in + pairing onboarding | sql/tooling/docs | MOMO-339, MOMO-348, MOMO-352 |
 
 ### Local Solo Hermes Dogfood Active Chain
 
@@ -1700,6 +1702,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - worktree: bootstrap 회귀 + 단독 verifier + clean full gate PASS (`local-gate-macos-ui-20260711T185500Z-…-rff8c71d8f960.md`)
   - root post-merge full gate PASS (`local-gate-macos-ui-20260711T190121Z-…-r0e6956276818.md`, source digest 보존) — **verifier 격리 캐스케이드(MOMO-342→348) 전 프로파일 종결 (2026-07-12)**. PR #328 merge (`444ee59`).
   - 검수 노트: 1차 worker 실행이 API 무응답으로 행(CPU 0, 2.5h) → kill 후 재스폰으로 10분 완주. 1차 root gate는 이전 실패 게이트 런의 잔류 MomoServer(26560) 점유로 fail-fast → 정리 후 PASS. 잔류 프로세스 자동 정리는 drift-guard 티켓 제안에 병합 예정.
+
+### ☐ MOMO-355 수용기준 — Dogfood agent seed opt-in + pairing-only roster `[sql/tooling/docs]` · 의존: MOMO-339, MOMO-348, MOMO-352 (`#342`)
+- [ ] persistent dogfood/local-alpha의 기본 migration은 demo human + 기본 채널만 만들고 agent는 0이다. `002_seed.sql`/`006_local_hermes_agent_seed.sql` agent 행은 demo/e2e 명시 opt-in에서만 적용된다.
+- [ ] `scripts/momo hermes-gateway-init` 안내가 env template → pairing invite → scoped credential 발급 → env 기록 순서를 강제한다.
+- [ ] 기존 dogfood의 고정 김인턴/Hermes seed는 DB owner + exact identity guard + `--yes`가 필요한 사용자 opt-in 명령으로만 soft-retire한다. 자동/destructive migration은 추가하지 않는다.
+- [ ] runtime-agent와 macos-ui verifier가 `MOMO_AGENT_SEED_MODE=none`, marker/OID-owned DB, 자체 agent/channel fixture, per-run channel·대문자 `CENT_CHANNEL`, exit 96/source 보존 경계를 유지함을 DB 비접속 contract test로 고정한다.
+- [ ] `schema_v0.sql` 무변경. 수정/new shell `bash -n`, Python contract test, Swift build/test PASS.
+- [ ] clean/root `runtime-agent` + `macos-ui` PASS — worker는 DB/Docker/verifier/local gate 금지로 미체크 유지; 오케스트레이터가 merge 전에 실행한다 (`runtime-unverified`).
 
 ---
 

@@ -32,6 +32,21 @@
 # =============================================================================
 set -eu
 
+# Agent identities are product data, not persistent/local-alpha bootstrap data.
+# Only deterministic demo/e2e runners may opt into the legacy agent fixtures.
+case "${MOMO_AGENT_SEED_MODE:-none}" in
+  none)
+    MOMO_AGENT_SEED_ENABLED=0
+    ;;
+  demo|e2e)
+    MOMO_AGENT_SEED_ENABLED=1
+    ;;
+  *)
+    echo "[migrate] MOMO_AGENT_SEED_MODE must be one of: none, demo, e2e" >&2
+    exit 2
+    ;;
+esac
+
 # --- 경로 해석: 스크립트 위치 기준으로 repo 루트/Migrations 디렉터리 고정 ----------
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
@@ -78,7 +93,7 @@ else
 fi
 
 # psql 공통 플래그: 에러 시 즉시 중단, 자동커밋 OFF(파일 단위 tx), 조용히.
-PSQL_FLAGS="-v ON_ERROR_STOP=1 --no-psqlrc --quiet"
+PSQL_FLAGS="-v ON_ERROR_STOP=1 --set=MOMO_AGENT_SEED_ENABLED=${MOMO_AGENT_SEED_ENABLED} --no-psqlrc --quiet"
 
 # --- 마이그레이션 디렉터리 확인 --------------------------------------------------
 if [ ! -d "$MIGRATIONS_DIR" ]; then
@@ -96,6 +111,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 SQL
 
 echo "[migrate] 대상 디렉터리: $MIGRATIONS_DIR"
+echo "[migrate] agent seed mode: ${MOMO_AGENT_SEED_MODE:-none} (enabled=${MOMO_AGENT_SEED_ENABLED})"
 
 # --- 번호순으로 .sql 적용 (LANG=C 로 안정적 정렬) -------------------------------
 # run_pass <label>: apply/verify 두 패스가 완전히 같은 판정 루프를 공유한다.

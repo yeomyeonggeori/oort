@@ -1,13 +1,18 @@
 -- =============================================================================
 -- 006_local_hermes_agent_seed.sql — Local Hermes Agent Bridge v0 seed
 --
--- Adds a first-class Hermes agent member for local dogfood. The older Kim Intern
--- seed remains for backwards-compatible fixtures, but `@hermes` is the default
--- local bridge alias used by MOMO-256 verifiers and the macOS dogfood shell.
+-- Adds a deterministic first-class Hermes agent only for demo/e2e fixtures.
+-- Persistent dogfood/local-alpha must invite Hermes through pairing instead.
 -- =============================================================================
+
+\if :{?MOMO_AGENT_SEED_ENABLED}
+\else
+  \set MOMO_AGENT_SEED_ENABLED 0
+\endif
 
 SET LOCAL app.workspace_id = '00000000-0000-7000-8000-000000000001';
 
+\if :MOMO_AGENT_SEED_ENABLED
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('00000000-0000-7000-8000-000000000103',
         '00000000-0000-7000-8000-000000000001',
@@ -50,3 +55,4 @@ VALUES ('00000000-0000-7000-8000-000000000306',
 ON CONFLICT (channel_id, member_id) DO UPDATE
   SET left_at = NULL,
       role = EXCLUDED.role;
+\endif

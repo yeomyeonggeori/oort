@@ -145,10 +145,9 @@ credentialed smoke. `http://127.0.0.1:<port>/v1` and
 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`; staging/prod/internal-host
 still reject loopback. In the credentialed path, `/v1/agent-runtime/status`
 must report `available` with no `degradedReason`; failures keep a redacted
-category/reason in evidence. The same verifier also proves the internal alpha
-invite precondition:
-Hermes must be an active `member.kind='agent'` with handle `hermes` and an
-active membership in seeded `#agent-lab` before the mention is sent.
+category/reason in evidence. The same verifier creates its own isolated Hermes
+member/channel fixture and proves the invite precondition there. It does not
+depend on or mutate persistent dogfood roster data.
 
 Codex OAuth tokens are intentionally not part of this profile. If Hermes/Kim
 Intern uses Codex OAuth, configure authorization code exchange, access/refresh

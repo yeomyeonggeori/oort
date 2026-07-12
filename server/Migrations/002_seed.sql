@@ -3,10 +3,11 @@
 -- MOMO-001 runtime-verified: PG18 + scripts/migrate.sh(psql) applies this
 -- seed after 001_init.sql and skips it on an idempotent re-run.
 --
--- 시드 내용 (티켓 T03 수용기준):
---   workspace 1 · human 1 · agent 1(김인턴, model=hermes-agent, base_url placeholder)
---   채널 #general + #agent-lab · membership(전원 양 채널) · channel_seq 0행(채널당)
---   model_pricing 글로벌 1행(workspace_id NULL).
+-- 기본 시드 내용 (티켓 T03 수용기준):
+--   workspace 1 · human 1 · 채널 #general + #agent-lab · human membership
+--   channel_seq 0행(채널당) · model_pricing 1행.
+-- demo/e2e opt-in(MOMO_AGENT_SEED_MODE=demo|e2e)에서만 김인턴 agent와
+-- 양 채널 membership을 추가한다. persistent/local-alpha 기본값은 agent 0이다.
 --
 -- 정합 메모(schema_v0.sql = 001_init.sql 기준):
 --   * PK 기본값은 uuidv7()지만, 시드는 FK 배선/멱등 재실행을 위해 고정 UUID를 명시한다.
@@ -21,6 +22,13 @@
 --
 -- 멱등성: 고정 UUID + ON CONFLICT DO NOTHING. 재실행해도 중복/오류 없음.
 -- =============================================================================
+
+-- scripts/migrate.sh가 항상 이 psql 변수를 전달한다. 파일을 psql로 직접
+-- 적용하는 경우에도 안전한 기본값은 agent seed 비활성이다.
+\if :{?MOMO_AGENT_SEED_ENABLED}
+\else
+  \set MOMO_AGENT_SEED_ENABLED 0
+\endif
 
 -- 데모 워크스페이스 컨텍스트(RLS) — 이 tx 동안 모든 테넌트 INSERT 가 통과하도록.
 SET LOCAL app.workspace_id = '00000000-0000-7000-8000-000000000001';
@@ -41,11 +49,13 @@ VALUES ('00000000-0000-7000-8000-000000000101',
 ON CONFLICT (id) DO NOTHING;
 
 -- 에이전트 멤버(김인턴) — 사람과 동일한 member 테이블의 1급 멤버.
+\if :MOMO_AGENT_SEED_ENABLED
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('00000000-0000-7000-8000-000000000102',
         '00000000-0000-7000-8000-000000000001',
         'agent', 'active', '김인턴', 'kim-intern')
 ON CONFLICT (id) DO NOTHING;
+\endif
 
 -- ---- 3) human 프로필(1:1 공유 PK) -------------------------------------------
 INSERT INTO human (member_id, workspace_id, email, email_verified, tz)
@@ -58,6 +68,7 @@ ON CONFLICT (member_id) DO NOTHING;
 -- model=hermes-agent, base_url 은 placeholder(.env HERMES_BASE_URL 와 정합).
 -- bearer 시크릿은 여기 저장 안 함 → token(kind='agent_bearer') 에 보관(스펙 §2 주석).
 -- v0 루프 안전: max_concurrent_runs=1, max_run_steps 는 §3.3 G3 권고(12)로 오버라이드.
+\if :MOMO_AGENT_SEED_ENABLED
 INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt,
                    owner_human_id, max_concurrent_runs, max_run_steps)
 VALUES ('00000000-0000-7000-8000-000000000102',
@@ -68,6 +79,7 @@ VALUES ('00000000-0000-7000-8000-000000000102',
         '00000000-0000-7000-8000-000000000101',     -- owner = 데모 사용자
         1, 12)
 ON CONFLICT (member_id) DO NOTHING;
+\endif
 
 -- ---- 5) channels (#general, #agent-lab — 둘 다 public) -----------------------
 INSERT INTO channel (id, workspace_id, kind, name, topic, created_by)
@@ -105,12 +117,14 @@ VALUES ('00000000-0000-7000-8000-000000000301',
         '00000000-0000-7000-8000-000000000101', 'owner')
 ON CONFLICT (channel_id, member_id) DO NOTHING;
 
+\if :MOMO_AGENT_SEED_ENABLED
 INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
 VALUES ('00000000-0000-7000-8000-000000000302',
         '00000000-0000-7000-8000-000000000001',
         '00000000-0000-7000-8000-000000000201',
         '00000000-0000-7000-8000-000000000102', 'member')
 ON CONFLICT (channel_id, member_id) DO NOTHING;
+\endif
 
 -- #agent-lab: 사람=owner, 김인턴=member (데모 D/B/C 무대)
 INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
@@ -120,12 +134,14 @@ VALUES ('00000000-0000-7000-8000-000000000303',
         '00000000-0000-7000-8000-000000000101', 'owner')
 ON CONFLICT (channel_id, member_id) DO NOTHING;
 
+\if :MOMO_AGENT_SEED_ENABLED
 INSERT INTO membership (id, workspace_id, channel_id, member_id, role)
 VALUES ('00000000-0000-7000-8000-000000000304',
         '00000000-0000-7000-8000-000000000001',
         '00000000-0000-7000-8000-000000000202',
         '00000000-0000-7000-8000-000000000102', 'member')
 ON CONFLICT (channel_id, member_id) DO NOTHING;
+\endif
 
 -- ---- 8) model_pricing 글로벌 1행 (workspace_id NULL = 전 테넌트 기본가) --------
 -- 경험 B(비용 호흡)의 reserve→reconcile micro_usd 계산 근거. 단가는 데모용 예시값.
