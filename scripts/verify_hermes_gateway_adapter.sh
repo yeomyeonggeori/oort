@@ -54,6 +54,21 @@ else
   exit 1
 fi
 
+# 어댑터는 dataclass(slots=True) 등 Python 3.10+ 문법을 쓴다. 일부 실행 환경에서
+# python3가 시스템 3.9로 해석되는 사례가 있어(2026-07-13 gate) 명시적으로 3.10+를 찾는다.
+PYTHON_BIN=""
+for candidate in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.12; do
+  bin=$(command -v "$candidate" 2>/dev/null) || continue
+  if "$bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    PYTHON_BIN="$bin"
+    break
+  fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+  echo "[hermes-gateway] Python >= 3.10 not found; the momo adapter requires it." >&2
+  exit 1
+fi
+
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
 POSTGRES_USER=${POSTGRES_USER:-momo}
@@ -867,7 +882,7 @@ PYTHONPATH="$REPO_ROOT/adapters/hermes" \
   MOMO_AGENT_MEMBER_ID="$AGENT_ID" \
   MOMO_AGENT_TOKEN="$AGENT_TOKEN" \
   MOMO_VERIFIER_CHANNEL_ID="$CHANNEL_ID" \
-  python3 <<'PY'
+  "$PYTHON_BIN" <<'PY'
 import asyncio
 import json
 import os
