@@ -140,6 +140,8 @@ configure_verifier_identity() {
   RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343904
   RESUME_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343924
   RESUME_APPROVAL_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343925
+  EQUIV_CLIENT_MSG_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}34394b
+  EQUIV_DECISION_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}34394c
   TRIP_RUN_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343914
   BUDGET_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343905
   TRIP_BUDGET_ID=00000000-0000-7000-8000-${FIXTURE_NAMESPACE}343915
@@ -465,6 +467,7 @@ start_server() {
     exec env \
       DATABASE_URL="postgres://${VERIFIER_APP_ROLE}:${VERIFIER_APP_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
       PORT="$PORT" \
+      AGENT_GATEWAY_MODE=worker \
       "$SERVER_BIN"
   ) >"$SERVER_LOG" 2>&1 &
   SERVER_PID=$!
@@ -502,6 +505,31 @@ start_relay() {
       "$RELAY_BIN"
   ) >"$RELAY_LOG" 2>&1 &
   RELAY_PID=$!
+}
+
+start_worker() {
+  if [ "${WORKER_PID:-}" != "" ] && kill -0 "$WORKER_PID" 2>/dev/null; then
+    return 0
+  fi
+  echo "[agent-worker] starting AgentWorker"
+  (
+    exec env \
+      RELAY_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+      CENT_API_URL="$CENT_API_URL" \
+      CENT_API_KEY="$CENT_API_KEY" \
+      HERMES_BASE_URL="$HERMES_BASE_URL" \
+      HERMES_API_KEY="$HERMES_API_KEY" \
+      WORKER_POLL_INTERVAL_MS="$WORKER_POLL_INTERVAL_MS" \
+      MAX_DEPTH="$GUARD_MAX_DEPTH" \
+      MAX_CONSECUTIVE_AUTO="$GUARD_MAX_CONSECUTIVE_AUTO" \
+      "$WORKER_BIN"
+  ) >>"$WORKER_LOG" 2>&1 &
+  WORKER_PID=$!
+}
+
+stop_worker() {
+  momo_cleanup_tracked_pids "agent-worker verifier restart" "$WORKER_PID"
+  WORKER_PID=
 }
 
 verify_cost_projection_endpoint() {
@@ -928,7 +956,7 @@ SELECT ar.id
    AND trigger_message.channel_id = '$CHANNEL_ID'
    AND trigger_message.author_member_id = '$HUMAN_ID'
    AND trigger_message.client_msg_id IN (
-     '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
+     '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$EQUIV_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
      '$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
      '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID'
    )
@@ -949,7 +977,7 @@ SELECT id FROM message
    AND channel_id = '$CHANNEL_ID'
    AND author_member_id IN ('$HUMAN_ID', '$AGENT_ID', '$HERMES_AGENT_ID')
    AND client_msg_id IN (
-     '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
+     '$CLIENT_MSG_ID', '$NON_MEMBER_CLIENT_MSG_ID', '$EQUIV_CLIENT_MSG_ID', '$TRIP_CLIENT_MSG_ID',
      '$GUARD_DEPTH_CLIENT_MSG_ID', '$GUARD_STEP_CLIENT_MSG_ID',
      '$GUARD_G1_CLIENT_MSG_ID', '$GUARD_G2_CLIENT_MSG_ID', '$GUARD_G2_RESET_CLIENT_MSG_ID'
    )
@@ -980,8 +1008,18 @@ DELETE FROM outbox
      OR lower(payload->'data'->'payload'->>'id') IN (SELECT lower(id::text) FROM _momo_agent_worker_fixture_messages)
      OR lower(payload->>'resume_from_approval_id') = lower('$RESUME_APPROVAL_ID')
    );
+DELETE FROM approval_decision
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND approval_id IN (
+     SELECT id FROM approval
+      WHERE run_id IN (SELECT id FROM _momo_agent_worker_fixture_runs)
+   );
 DELETE FROM approval
- WHERE workspace_id = '$WORKSPACE_ID' AND id = '$RESUME_APPROVAL_ID';
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND (
+     id = '$RESUME_APPROVAL_ID'
+     OR run_id IN (SELECT id FROM _momo_agent_worker_fixture_runs)
+   );
 DELETE FROM budget_window
  WHERE workspace_id = '$WORKSPACE_ID' AND budget_id IN ('$BUDGET_ID', '$TRIP_BUDGET_ID');
 DELETE FROM budget
@@ -1169,20 +1207,8 @@ fi
 
 echo "[agent-worker] REST @$AGENT_HANDLE mention routing verified: message=$MESSAGE_ID seq=$MESSAGE_SEQ run=$RUN_ID duplicate_jobs=$JOB_COUNT non_member_noop=ok"
 
-echo "[agent-worker] starting AgentWorker"
-(
-  exec env \
-    RELAY_DATABASE_URL="postgres://${VERIFIER_WORKER_ROLE}:${VERIFIER_WORKER_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
-    CENT_API_URL="$CENT_API_URL" \
-    CENT_API_KEY="$CENT_API_KEY" \
-    HERMES_BASE_URL="$HERMES_BASE_URL" \
-    HERMES_API_KEY="$HERMES_API_KEY" \
-    WORKER_POLL_INTERVAL_MS="$WORKER_POLL_INTERVAL_MS" \
-    MAX_DEPTH="$GUARD_MAX_DEPTH" \
-    MAX_CONSECUTIVE_AUTO="$GUARD_MAX_CONSECUTIVE_AUTO" \
-    "$WORKER_BIN"
-) >"$WORKER_LOG" 2>&1 &
-WORKER_PID=$!
+: >"$WORKER_LOG"
+start_worker
 
 echo "[agent-worker] polling success path"
 SUCCESS_OK=0
@@ -1377,6 +1403,159 @@ if [ "$RESUME_OK" != "1" ]; then
 fi
 
 echo "[agent-worker] approved resume path verified: final tool_result/message.new + audit + resume job done"
+
+echo "[agent-worker] running MOMO-352 trigger -> approval -> human decision -> resume scenario"
+stop_worker
+EQUIV_BODY="@$AGENT_HANDLE MOMO-352 approval equivalence smoke"
+EQUIV_SEND_PAYLOAD=$(jq -cn --arg client "$EQUIV_CLIENT_MSG_ID" --arg body "$EQUIV_BODY" \
+  '{clientMsgId:$client,type:"text",body:$body}')
+EQUIV_SEND_JSON=$(curl -fsS \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$EQUIV_SEND_PAYLOAD" \
+  "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/$CHANNEL_ID/messages")
+EQUIV_MESSAGE_ID=$(printf '%s' "$EQUIV_SEND_JSON" | jq -r '.id')
+EQUIV_RUN_ID=$(psql_scalar "SELECT upper(id::text) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$EQUIV_MESSAGE_ID' AND agent_member_id='$AGENT_ID';")
+EQUIV_QUEUED=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$EQUIV_RUN_ID' AND status='queued';")
+if [ "$EQUIV_RUN_ID" = "" ] || [ "$EQUIV_QUEUED" != "1" ]; then
+  echo "[agent-worker] MOMO-352 trigger did not create a queued run" >&2
+  exit 1
+fi
+
+# The production mention projection intentionally grants the read-only search
+# tool without approval. This fixture narrows only its own pending job to the
+# deterministic momo.mock.echo tool and marks that grant approval-required so
+# AgentWorker's real pause machinery creates the approval checkpoint.
+psql_run >/dev/null <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+WITH grant_fixture AS (
+  SELECT jsonb_build_array(jsonb_build_object(
+    'tool_name', 'momo.mock.echo',
+    'provider', 'momo',
+    'grant', 'write',
+    'risk', 'write',
+    'approval_policy', 'always',
+    'capability_version', 'mock-tool@0.1.0',
+    'policy_version', 'capability-policy@2026-07-12'
+  )) AS grants
+)
+UPDATE outbox
+   SET payload = jsonb_set(
+                   jsonb_set(payload, '{tool_grants}', grant_fixture.grants, true),
+                   '{context_packet_projection,tool_grants}', grant_fixture.grants, true
+                 )
+  FROM grant_fixture
+ WHERE workspace_id = '$WORKSPACE_ID'
+   AND kind = 'agent_job'
+   AND status = 'pending'
+   AND lower(payload->>'run_id') = lower('$EQUIV_RUN_ID');
+COMMIT;
+SQL
+
+start_worker
+EQUIV_PAUSED=0
+deadline=$(($(date +%s) + 60))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  EQUIV_APPROVAL_ID=$(psql_scalar "SELECT upper(id::text) FROM approval WHERE workspace_id='$WORKSPACE_ID' AND run_id='$EQUIV_RUN_ID' AND status='pending' LIMIT 1;")
+  EQUIV_AWAITING=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$EQUIV_RUN_ID' AND status='awaiting_approval';")
+  EQUIV_REQUEST_MSG=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$EQUIV_RUN_ID' AND type='approval_request' AND props->>'call_id'='call_momo_352_echo';")
+  EQUIV_REQUEST_AUDIT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$EQUIV_RUN_ID' AND action='approval.requested';")
+  EQUIV_INITIAL_JOB_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND lower(payload->>'run_id')=lower('$EQUIV_RUN_ID') AND method='publish' AND status='done';")
+  EQUIV_REQUEST_BROADCAST=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('$EQUIV_RUN_ID') AND payload->'data'->'payload'->>'type'='approval_request' AND last_error IS NULL;")
+  if [ "$EQUIV_APPROVAL_ID" != "" ] && [ "$EQUIV_AWAITING" = "1" ] \
+    && [ "$EQUIV_REQUEST_MSG" = "1" ] && [ "$EQUIV_REQUEST_AUDIT" = "1" ] \
+    && [ "$EQUIV_INITIAL_JOB_DONE" = "1" ] && [ "$EQUIV_REQUEST_BROADCAST" = "1" ]; then
+    EQUIV_PAUSED=1
+    break
+  fi
+  sleep 1
+done
+if [ "$EQUIV_PAUSED" != "1" ]; then
+  echo "[agent-worker] MOMO-352 approval checkpoint did not verify" >&2
+  tail -160 "$WORKER_LOG" >&2 || true
+  exit 1
+fi
+
+stop_worker
+EQUIV_DECISION_JSON=$(curl -fsS \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"approval_id\":\"$EQUIV_APPROVAL_ID\",\"approve\":true,\"reason\":\"MOMO-352 worker equivalence verifier\",\"client_decision_id\":\"$EQUIV_DECISION_ID\"}" \
+  "$BASE_URL/v1/workspaces/$WORKSPACE_ID/approvals/$EQUIV_APPROVAL_ID/decision")
+if [ "$(printf '%s' "$EQUIV_DECISION_JSON" | jq -r '.status')" != "approved" ]; then
+  echo "[agent-worker] MOMO-352 human approval decision failed" >&2
+  printf '%s\n' "$EQUIV_DECISION_JSON" >&2
+  exit 1
+fi
+EQUIV_DECISION_RECORDED=$(psql_scalar "SELECT count(*) FROM approval_decision WHERE workspace_id='$WORKSPACE_ID' AND approval_id='$EQUIV_APPROVAL_ID' AND client_decision_id='$EQUIV_DECISION_ID' AND approve=true AND status='approved';")
+EQUIV_REQUEUED=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$EQUIV_RUN_ID' AND status='queued';")
+EQUIV_RESUME_PENDING=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND method='resume_approval' AND lower(payload->>'run_id')=lower('$EQUIV_RUN_ID') AND lower(payload->>'resume_from_approval_id')=lower('$EQUIV_APPROVAL_ID') AND status='pending';")
+if [ "$EQUIV_DECISION_RECORDED" != "1" ] || [ "$EQUIV_REQUEUED" != "1" ] \
+  || [ "$EQUIV_RESUME_PENDING" != "1" ]; then
+  echo "[agent-worker] MOMO-352 approval decision did not enqueue exact resume" >&2
+  exit 1
+fi
+
+start_worker
+EQUIV_FINAL=0
+deadline=$(($(date +%s) + 60))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  EQUIV_SUCCEEDED=$(psql_scalar "SELECT count(*) FROM agent_run WHERE id='$EQUIV_RUN_ID' AND status='succeeded' AND output->>'ok'='true';")
+  EQUIV_RESUME_DONE=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='agent_job' AND method='resume_approval' AND lower(payload->>'run_id')=lower('$EQUIV_RUN_ID') AND lower(payload->>'resume_from_approval_id')=lower('$EQUIV_APPROVAL_ID') AND status='done' AND last_error IS NULL;")
+  EQUIV_RESULT_MSG=$(psql_scalar "SELECT count(*) FROM message WHERE run_id='$EQUIV_RUN_ID' AND type='tool_result' AND lower(props->>'approval_id')=lower('$EQUIV_APPROVAL_ID') AND props->>'call_id'='call_momo_352_echo' AND props->>'is_error'='false';")
+  EQUIV_AUDITS=$(psql_scalar "SELECT count(*) FROM audit_log WHERE run_id='$EQUIV_RUN_ID' AND action IN ('approval.requested','approval.approved','approval.resume','tool.executed');")
+  EQUIV_FINAL_BROADCAST=$(psql_scalar "SELECT count(*) FROM outbox WHERE kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('$EQUIV_RUN_ID') AND payload->'data'->'payload'->>'type'='tool_result' AND status IN ('pending','processing','done') AND last_error IS NULL;")
+  EQUIV_CHANNEL_HISTORY=$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"channel\":\"$CENT_CHANNEL\",\"limit\":100,\"reverse\":true}" \
+    "$CENT_API_URL/history" 2>/dev/null || printf '{}')
+  EQUIV_FINAL_LIVE=$(printf '%s' "$EQUIV_CHANNEL_HISTORY" | jq -r --arg run "$EQUIV_RUN_ID" '
+    [.result.publications[]?.data
+      | select(.type == "message.new")
+      | select(((.payload.run_id // .payload.runId // "") | ascii_downcase) == ($run | ascii_downcase))
+      | select(.payload.type == "tool_result")
+      | select(.seq == .payload.seq)
+    ] | length
+  ')
+  if [ "$EQUIV_SUCCEEDED" = "1" ] && [ "$EQUIV_RESUME_DONE" = "1" ] \
+    && [ "$EQUIV_RESULT_MSG" = "1" ] && [ "$EQUIV_AUDITS" = "4" ] \
+    && [ "$EQUIV_FINAL_BROADCAST" = "1" ] && [ "$EQUIV_FINAL_LIVE" != "0" ]; then
+    EQUIV_FINAL=1
+    break
+  fi
+  sleep 1
+done
+if [ "$EQUIV_FINAL" != "1" ]; then
+  echo "[agent-worker] MOMO-352 approved resume finalization did not verify" >&2
+  tail -160 "$WORKER_LOG" >&2 || true
+  exit 1
+fi
+
+EQUIV_STATUS_HISTORY=$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"channel\":\"$AGENT_CHANNEL\",\"limit\":100,\"reverse\":true}" \
+  "$CENT_API_URL/history")
+EQUIV_RUNNING_STATUSES=$(printf '%s' "$EQUIV_STATUS_HISTORY" | jq -r --arg run "$EQUIV_RUN_ID" '
+  [.result.publications[]?.data
+    | select(.type == "agent.status")
+    | select(((.payload.run_id // "") | ascii_downcase) == ($run | ascii_downcase))
+    | select(.payload.run_status == "running")
+  ] | length
+')
+EQUIV_AWAITING_STATUSES=$(printf '%s' "$EQUIV_STATUS_HISTORY" | jq -r --arg run "$EQUIV_RUN_ID" '
+  [.result.publications[]?.data
+    | select(.type == "agent.status")
+    | select(((.payload.run_id // "") | ascii_downcase) == ($run | ascii_downcase))
+    | select(.payload.run_status == "awaiting_approval")
+  ] | length
+')
+if [ "$EQUIV_RUNNING_STATUSES" -lt 2 ] || [ "$EQUIV_AWAITING_STATUSES" -lt 1 ]; then
+  echo "[agent-worker] MOMO-352 realtime status transitions were incomplete" >&2
+  exit 1
+fi
+echo "[agent-worker] MOMO-352 equivalence scenario verified: queued -> running -> awaiting_approval -> queued -> running -> succeeded"
 
 echo "[agent-worker] seeding low-limit circuit-breaker fixture"
 psql_run <<SQL
@@ -1703,4 +1882,28 @@ COMMIT;
 SQL
 
 echo "[agent-worker] loop-guard trip scenarios verified: a2a_depth(hop-depth) G3(step) G1(concurrency) G2(consecutive-auto)"
+if [ "${AGENT_WORKER_EQUIVALENCE_EVIDENCE_FILE:-}" != "" ]; then
+  EQUIV_USAGE_LEDGER=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE run_id='$RUN_ID';")
+  [ "$EQUIV_USAGE_LEDGER" = "1" ] || { echo "[agent-worker] MOMO-352 usage guarantee disappeared" >&2; exit 1; }
+  umask 077
+  jq -n \
+    --arg channel "$CENT_CHANNEL" \
+    --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    {
+      schema: "momo.agent_path_equivalence.v1",
+      scenario: "trigger-approval-resume-final",
+      run_status_sequence: ["queued", "running", "awaiting_approval", "queued", "running", "succeeded"],
+      approval: {created: true, decision: "approved", resumed: true},
+      ledgers: {usage_ledger: true, audit_log: true},
+      final_message: {durable: true, realtime_publication: true},
+      observational: {
+        path: "worker",
+        completed_at: $completed_at,
+        provider_metadata: "openai-compatible-sse",
+        lease_model: "worker-skip-locked",
+        cent_channel: $channel
+      }
+    }' >"$AGENT_WORKER_EQUIVALENCE_EVIDENCE_FILE"
+  echo "[agent-worker] MOMO-352 evidence: $AGENT_WORKER_EQUIVALENCE_EVIDENCE_FILE"
+fi
 echo "[agent-worker] logs: worker=$WORKER_LOG mock=$MOCK_LOG server=$SERVER_LOG cost_projection=$COST_PROJECTION_JSON"

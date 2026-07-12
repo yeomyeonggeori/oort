@@ -33,6 +33,7 @@ MOCK_TOOL_ARGS = {
     "query": "MOMO-201 live tool-call fixture",
     "limit": 2,
 }
+EQUIVALENCE_TOOL_ARGS = {"message": "MOMO-352 approved hello"}
 
 
 class MockHermesHandler(BaseHTTPRequestHandler):
@@ -135,17 +136,18 @@ class MockHermesHandler(BaseHTTPRequestHandler):
     def _tool_call_chunk(
         self, request: dict[str, Any], *, arguments_prefix: bool
     ) -> dict[str, Any]:
-        args = json.dumps(MOCK_TOOL_ARGS, ensure_ascii=False, separators=(",", ":"))
+        tool_id, tool_name, tool_args = self._tool_fixture(request)
+        args = json.dumps(tool_args, ensure_ascii=False, separators=(",", ":"))
         delta: dict[str, Any]
         if arguments_prefix:
             delta = {
                 "tool_calls": [
                     {
                         "index": 0,
-                        "id": "call_momo_201_search",
+                        "id": tool_id,
                         "type": "function",
                         "function": {
-                            "name": "github.search_issues",
+                            "name": tool_name,
                             "arguments": args[:32],
                         },
                     }
@@ -178,6 +180,19 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             ],
         }
 
+    def _tool_fixture(
+        self, request: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any]]:
+        messages = request.get("messages") or []
+        combined = "\n".join(
+            str(message.get("content") or "")
+            for message in messages
+            if isinstance(message, dict)
+        )
+        if "MOMO-352" in combined:
+            return "call_momo_352_echo", "momo.mock.echo", EQUIVALENCE_TOOL_ARGS
+        return "call_momo_201_search", "github.search_issues", MOCK_TOOL_ARGS
+
     def _usage_chunk(self, request: dict[str, Any]) -> dict[str, Any]:
         return {
             "id": "chatcmpl-momo-004-mock",
@@ -201,6 +216,7 @@ class MockHermesHandler(BaseHTTPRequestHandler):
         }
 
     def _non_stream_response(self, request: dict[str, Any]) -> dict[str, Any]:
+        tool_id, tool_name, tool_args = self._tool_fixture(request)
         return {
             "id": "chatcmpl-momo-004-mock",
             "object": "chat.completion",
@@ -214,12 +230,12 @@ class MockHermesHandler(BaseHTTPRequestHandler):
                         "content": MOCK_TEXT,
                         "tool_calls": [
                             {
-                                "id": "call_momo_201_search",
+                                "id": tool_id,
                                 "type": "function",
                                 "function": {
-                                    "name": "github.search_issues",
+                                    "name": tool_name,
                                     "arguments": json.dumps(
-                                        MOCK_TOOL_ARGS,
+                                        tool_args,
                                         ensure_ascii=False,
                                         separators=(",", ":"),
                                     ),
