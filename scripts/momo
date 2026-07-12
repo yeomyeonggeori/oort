@@ -715,7 +715,7 @@ RUBY
 }
 
 hermes_gateway_init() {
-  local env_file env_dir agent_token
+  local env_file env_dir agent_token home_channel default_channel
   env_file="$(gateway_env_file)"
   env_dir="$(dirname "$env_file")"
   reject_repo_provider_env "$env_file" || return 1
@@ -736,6 +736,21 @@ hermes_gateway_init() {
       warn "MOMO_AGENT_TOKEN is missing or still a placeholder."
       warn "Issue one agent credential from pairing and replace only that value."
     fi
+    home_channel="$(provider_env_value "$env_file" MOMO_HOME_CHANNEL)"
+    if is_placeholder_value "$home_channel"; then
+      default_channel="$(provider_env_value "$env_file" MOMO_DEFAULT_CHANNEL_ID)"
+      if ! is_placeholder_value "$default_channel" \
+        && ! grep -Eq '^[[:space:]]*MOMO_HOME_CHANNEL=' "$env_file"; then
+        {
+          printf '\n# Hermes operational delivery target, configured before gateway startup.\n'
+          printf 'MOMO_HOME_CHANNEL=%s\n' "$default_channel"
+          if ! grep -Eq '^[[:space:]]*MOMO_HOME_CHANNEL_NAME=' "$env_file"; then
+            printf 'MOMO_HOME_CHANNEL_NAME=agent-lab\n'
+          fi
+        } >>"$env_file"
+        info "configured MOMO_HOME_CHANNEL from the existing default channel"
+      fi
+    fi
   else
     umask 077
     cat >"$env_file" <<EOF
@@ -749,6 +764,8 @@ MOMO_AGENT_HANDLE=hermes
 # Paste the one-time-issued credential from momo's agent pairing surface.
 MOMO_AGENT_TOKEN=replace-with-one-time-agent-token
 MOMO_DEFAULT_CHANNEL_ID=00000000-0000-7000-8000-000000000202
+MOMO_HOME_CHANNEL=00000000-0000-7000-8000-000000000202
+MOMO_HOME_CHANNEL_NAME=agent-lab
 EOF
     chmod 600 "$env_file"
     info "created Hermes gateway env: $env_file"
@@ -766,6 +783,10 @@ To run momo in gateway mode:
 Then issue a scoped credential from momo pairing and replace only
 MOMO_AGENT_TOKEN in the env file. The adapter does not log in as a human and
 does not mint or refresh its own credential.
+
+The generated env also sets MOMO_HOME_CHANNEL before startup. Change that UUID
+and MOMO_HOME_CHANNEL_NAME in the env file if Hermes should use another channel;
+gateway lifecycle/setup notices are never posted into the momo timeline.
 
 Load the momo-facing env in a subshell so the agent bearer does not remain in
 your parent shell, then replace that subshell with Hermes:

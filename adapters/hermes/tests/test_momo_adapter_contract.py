@@ -167,6 +167,84 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertEqual(adapter.posts[1], expected["final_message_send"])
         self.assertEqual(adapter.assert_run_id, run_id)
 
+    def test_unbound_hermes_operational_notices_are_log_only(self):
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        notices = [
+            (
+                "◐ Session automatically reset (inactive for 24h). "
+                "Use /resume to browse and restore a previous session.\n\n"
+                "◆ Model: `hermes-agent`\n"
+                "◆ Provider: openrouter\n"
+                "◆ Context: 128K tokens (detected)"
+            ),
+            (
+                "📬 No home channel is set for Momo. "
+                "Type /sethome to make this chat your home channel."
+            ),
+            "Session restored by /resume.",
+            "Home channel updated by /sethome.",
+        ]
+
+        async def exercise():
+            return [
+                await adapter.send(
+                    "channel-1",
+                    notice,
+                    metadata={"notify": True},
+                )
+                for notice in notices
+            ]
+
+        with self.assertLogs("momo.adapter", level="INFO") as captured:
+            results = asyncio.run(exercise())
+
+        self.assertEqual(adapter.posts, [])
+        self.assertEqual(len(captured.output), len(notices))
+        self.assertTrue(all(result.success for result in results))
+        self.assertTrue(all(result.message_id is None for result in results))
+        self.assertTrue(
+            all(result.raw_response["suppressed"] is True for result in results)
+        )
+
+    def test_run_bound_agent_response_is_the_only_direct_durable_send(self):
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+
+        result = asyncio.run(
+            adapter.send(
+                "channel-1",
+                "Actual agent response",
+                client_msg_id="run-1:final",
+                run_id="run-1",
+            )
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(
+            adapter.posts,
+            [
+                {
+                    "method": "POST",
+                    "path": "/v1/workspaces/workspace-1/channels/channel-1/messages",
+                    "body": {
+                        "clientMsgId": "run-1:final",
+                        "type": "text",
+                        "body": "Actual agent response",
+                        "runId": "run-1",
+                    },
+                }
+            ],
+        )
+
     def test_repo_local_smoke_harness_captures_rest_mapping(self):
         summary = asyncio.run(smoke_momo_adapter.run_smoke())
 
@@ -542,9 +620,9 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertEqual(info["topic"], "Hermes local smoke")
 
     def test_get_chat_info_falls_back_before_login(self):
-        old_home_id = os.environ.get("MOMO_HOME_CHANNEL_ID")
+        old_home_id = os.environ.get("MOMO_HOME_CHANNEL")
         old_home_name = os.environ.get("MOMO_HOME_CHANNEL_NAME")
-        os.environ["MOMO_HOME_CHANNEL_ID"] = "channel-1"
+        os.environ["MOMO_HOME_CHANNEL"] = "channel-1"
         os.environ["MOMO_HOME_CHANNEL_NAME"] = "general"
         try:
             adapter = CaptureAdapter(
@@ -557,9 +635,9 @@ class HermesAdapterContractTests(unittest.TestCase):
             info = asyncio.run(adapter.get_chat_info("channel-1"))
         finally:
             if old_home_id is None:
-                os.environ.pop("MOMO_HOME_CHANNEL_ID", None)
+                os.environ.pop("MOMO_HOME_CHANNEL", None)
             else:
-                os.environ["MOMO_HOME_CHANNEL_ID"] = old_home_id
+                os.environ["MOMO_HOME_CHANNEL"] = old_home_id
             if old_home_name is None:
                 os.environ.pop("MOMO_HOME_CHANNEL_NAME", None)
             else:
@@ -577,6 +655,8 @@ class HermesAdapterContractTests(unittest.TestCase):
                 "MOMO_WORKSPACE_ID": "workspace",
                 "MOMO_AGENT_MEMBER_ID": "agent",
                 "MOMO_AGENT_TOKEN": "momo-agent-token",
+                "MOMO_HOME_CHANNEL": "channel-1",
+                "MOMO_HOME_CHANNEL_NAME": "agent-lab",
                 "OPENAI_API_KEY": "must-not-be-consumed",
             }
         )
@@ -584,6 +664,8 @@ class HermesAdapterContractTests(unittest.TestCase):
         self.assertIsNotNone(enabled)
         self.assertEqual(enabled["MOMO_AGENT_MEMBER_ID"], "agent")
         self.assertEqual(enabled["MOMO_AGENT_TOKEN"], "momo-agent-token")
+        self.assertEqual(enabled["home_channel"]["chat_id"], "channel-1")
+        self.assertEqual(enabled["home_channel"]["name"], "agent-lab")
         self.assertNotIn("OPENAI_API_KEY", enabled)
         self.assertNotIn("MOMO_AGENT_GATEWAY_SECRET", enabled)
         self.assertNotIn("MOMO_AGENT_EMAIL", enabled)

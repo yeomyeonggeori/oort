@@ -227,6 +227,7 @@
 | `MOMO-352` (`#332`) | 이중 경로 동등성 verifier — ADR-0102 보장 매트릭스 게이트 | tooling/runtime-agent | MOMO-349, MOMO-350, MOMO-341 |
 | `MOMO-351` (`#331`) | 이중 경로 스펙/다이어그램/계약 재정렬 + SD-5 소급 — ADR-0102 | docs | 없음 (병렬) |
 | `MOMO-353` (`#334`) | 로컬 게이트 drift-guard (config drift 검출 + 잔류 프로세스 정리) | tooling | 없음 (병렬) |
+| `MOMO-356` (`#343`) | Hermes gateway 운영 공지의 durable timeline 유출 차단 | python/runtime-agent/docs | MOMO-338 |
 
 ### Local Solo Hermes Dogfood Active Chain
 
@@ -1617,6 +1618,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - worker 구현: compose 생성 시 repo config SHA-256 fingerprint를 고정하고 pre/post-start guard가 실행 컨테이너 fingerprint를 비교한다. drift는 fail-closed하며 `MOMO_CENTRIFUGO_AUTO_RECREATE=1`만 Centrifugo를 강제 재생성한다.
   - worker 구현: gate marker 디렉터리(uid/repo/run/pid-start 검증)+상속 env+repo command를 모두 만족한 프로세스만 stale pre-clean/EXIT/final cleanup 대상으로 삼는다. active 다른 gate와 unmarked dogfood/user process는 남기고 충돌로 처리한다.
   - worker 정적 evidence: 수정·신규 shell `bash -n`, `shellcheck`, `git diff --check`, `make -n up`, `scripts/tests/test_local_gate_drift_guard.sh` PASS(fake Docker + 합성 PID/command/env/listener; 실제 Docker/DB 미접속). clean/root runtime gate 체크는 오케스트레이터 evidence 전까지 미체크 유지.
+
+### ☐ MOMO-356 수용기준 — Gateway 운영 공지 durable 유출 차단 `[python/runtime-agent/docs]` · 의존: MOMO-338 (`#343`)
+
+- [x] [python] Hermes 범용 `send()`는 명시적 momo `run_id`가 있는 실제 에이전트 최종 응답만 REST message로 쓰고, session lifecycle/home channel/slash-command/model-provider 등 run-unbound 운영 공지는 성공 처리+본문 비포함 로컬 로그로 제한한다. native gateway final은 기존 `/gateway/complete`가 commit한다.
+- [x] [python/docs] `MOMO_HOME_CHANNEL`/`MOMO_HOME_CHANNEL_NAME`을 plugin optional env와 adapter enablement에 연결하고, `scripts/momo hermes-gateway-init`이 신규 env 및 기존 default-channel env를 gateway 기동 전에 보강한다. `/tmp` 신규·legacy env 양쪽 mode 600/정식 키 생성 PASS.
+- [x] [python] adapter contract가 `notify=true`인 reset·home·`/resume`·`/sethome` 공지도 REST 호출 0건임과 run-bound 응답만 durable send임을 고정한다. 전체 54 tests + smoke + py_compile PASS.
+- [x] [tooling] `verify_hermes_gateway_adapter.sh`가 기존 marker/OID-owned DB, per-run channel UUID, 대문자 `CENT_CHANNEL`, source digest EXIT trap, exit 96 rollback 경계를 유지하며 실제 adapter 호출 전후 agent message count 불변을 검사한다. 수정 shell `bash -n`/`chmod +x` PASS.
+- [ ] [runtime-agent] worktree clean gate + root post-merge gate PASS — worker의 Docker/compose/verifier/DB/`local_gate.sh` 실행 금지에 따라 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
+- [x] [scope] `schema_v0.sql` 무변경, UI·스냅샷 변경 없음. reference PNG 재기록 대상 없음.
 
 ### ☑ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-350 (ADR-0102 배치 합류, `#333`)
 > MOMO-338 성능 리뷰 후속. 현재 pending endpoint는 actor-bound read지만 lease/claim이 없어 동일 agent의 gateway 인스턴스가 겹치면 provider turn과 비용이 중복될 수 있다.

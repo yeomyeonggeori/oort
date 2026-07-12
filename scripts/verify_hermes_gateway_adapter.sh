@@ -54,6 +54,21 @@ else
   exit 1
 fi
 
+# 어댑터는 dataclass(slots=True) 등 Python 3.10+ 문법을 쓴다. 일부 실행 환경에서
+# python3가 시스템 3.9로 해석되는 사례가 있어(2026-07-13 gate) 명시적으로 3.10+를 찾는다.
+PYTHON_BIN=""
+for candidate in python3 /opt/homebrew/bin/python3 /usr/local/bin/python3 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3.12; do
+  bin=$(command -v "$candidate" 2>/dev/null) || continue
+  if "$bin" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    PYTHON_BIN="$bin"
+    break
+  fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+  echo "[hermes-gateway] Python >= 3.10 not found; the momo adapter requires it." >&2
+  exit 1
+fi
+
 POSTGRES_HOST=${POSTGRES_HOST:-localhost}
 POSTGRES_PORT=${POSTGRES_PORT:-5432}
 POSTGRES_USER=${POSTGRES_USER:-momo}
@@ -853,6 +868,74 @@ if ! grep -Eiq '^pragma:[[:space:]]*no-cache' "$CREDENTIAL_HEADERS"; then
   echo "[hermes-gateway] assertion failed: one-time credential response must be no-cache" >&2
   exit 1
 fi
+
+# Hermes calls a platform adapter's generic send() for session lifecycle,
+# home-channel setup, slash-command, and model/provider notices. momo accepts
+# only run-bound agent responses as durable messages; exercise the real adapter
+# against this run's isolated server and assert those sends do not change the
+# per-run channel ledger. The HTTP override makes a regression write for real,
+# so the DB count assertion below catches it without relying on a mock.
+OPERATIONAL_MESSAGE_COUNT_BEFORE=$(psql_scalar "SELECT count(*) FROM message WHERE workspace_id='${WORKSPACE_ID}' AND channel_id='${CHANNEL_ID}' AND author_member_id='${AGENT_ID}'")
+PYTHONPATH="$REPO_ROOT/adapters/hermes" \
+  MOMO_API_URL="$BASE_URL" \
+  MOMO_WORKSPACE_ID="$WORKSPACE_ID" \
+  MOMO_AGENT_MEMBER_ID="$AGENT_ID" \
+  MOMO_AGENT_TOKEN="$AGENT_TOKEN" \
+  MOMO_VERIFIER_CHANNEL_ID="$CHANNEL_ID" \
+  "$PYTHON_BIN" <<'PY'
+import asyncio
+import json
+import os
+import urllib.request
+
+from momo_adapter import MomoAdapter, MomoConfig
+
+
+class VerifierAdapter(MomoAdapter):
+    async def _post(self, path, body):
+        request = urllib.request.Request(
+            self.cfg.api_base_url + path,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Accept": "application/json",
+                "Authorization": "Bearer " + self.cfg.agent_token,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read())
+
+
+async def verify():
+    adapter = VerifierAdapter(MomoConfig())
+    notices = (
+        "◐ Session automatically reset (inactive for 24h). Use /resume.\n\n"
+        "◆ Model: `hermes-agent`\n◆ Provider: openrouter\n"
+        "◆ Context: 128K tokens (detected)",
+        "📬 No home channel is set for Momo. Type /sethome to configure it.",
+        "Session restored by /resume.",
+        "Home channel updated by /sethome.",
+    )
+    for notice in notices:
+        result = await adapter.send(
+            os.environ["MOMO_VERIFIER_CHANNEL_ID"],
+            notice,
+            metadata={"notify": True},
+        )
+        if not getattr(result, "success", False):
+            raise AssertionError("operational notice suppression reported failure")
+        if getattr(result, "message_id", None) is not None:
+            raise AssertionError("operational notice received a durable message id")
+        raw = getattr(result, "raw_response", None)
+        if not isinstance(raw, dict) or raw.get("suppressed") is not True:
+            raise AssertionError("operational notice was not explicitly suppressed")
+
+
+asyncio.run(verify())
+PY
+OPERATIONAL_MESSAGE_COUNT_AFTER=$(psql_scalar "SELECT count(*) FROM message WHERE workspace_id='${WORKSPACE_ID}' AND channel_id='${CHANNEL_ID}' AND author_member_id='${AGENT_ID}'")
+assert_equals "$OPERATIONAL_MESSAGE_COUNT_BEFORE" "$OPERATIONAL_MESSAGE_COUNT_AFTER" "Hermes operational notices never become durable messages"
 
 REALTIME_JSON=$(fetch_realtime_token "$AGENT_TOKEN")
 REALTIME_MEMBER=$(printf '%s' "$REALTIME_JSON" | jq -r '.memberId')

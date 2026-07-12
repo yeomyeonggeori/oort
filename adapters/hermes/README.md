@@ -34,14 +34,21 @@ in [`research/11-agent-runtime/11-hermes-adapter-contract-v0.md`](../../research
 | Primitive | Behavior |
 |---|---|
 | `connect()` | Use `MOMO_AGENT_TOKEN` for realtime-token exchange, subscribe only to the agent's private `agentwork:` stream, then atomically claim one durable pending job with a bounded lease. |
-| `send(channel, blocks)` | REST `POST .../messages` with a `client_msg_id` for **idempotency** (§3.1 — server dedups on `(channel_id, author_member_id, client_msg_id)` in the single `channel_seq`-bump + message + outbox tx). |
-| `handle_message(evt)` | A `mention` / `dm.signal` arrives on the realtime stream → `invoke` the agent → stream `agent.partial` / `agent.status` deltas and reflect the final 1급 message into the channel via `send()`. |
+| `send(channel, blocks)` | A momo `run_id` is required before REST `POST .../messages`. Run-bound agent output uses a `client_msg_id` for **idempotency**; unbound Hermes lifecycle/setup/command notices are handled as local-log-only and never enter the timeline ledger. |
+| `handle_message(evt)` | An `agent.job` is completed through server-owned `/gateway/complete`; legacy `mention` / `dm.signal` interop supplies its momo `run_id` to `send()`. Both paths keep the final agent response linked to a run. |
 
 ### Write-path invariant (§1.2 / §8.1)
 
 The adapter **never** publishes to Centrifugo directly. It only *reads* the
 realtime stream and *writes* via REST. Every state change is
 `REST → PG commit → outbox → relay publishes`.
+
+Hermes also calls platform `send()` for session reset, home-channel setup,
+`/resume`/`/sethome` hints and model/provider diagnostics. momo deliberately
+suppresses every such unbound call: only an explicit momo `run_id` may use the
+direct message endpoint, while the native gateway path commits its final agent
+response through `/gateway/complete`. Configure `MOMO_HOME_CHANNEL` and
+`MOMO_HOME_CHANNEL_NAME` before gateway startup when a home target is needed.
 
 ### Loop safety (§3.4)
 
@@ -93,6 +100,8 @@ The adapter is env-driven (see `PLUGIN.yaml` `requires_env`/`optional_env`):
 | `MOMO_WORKSPACE_ID` | target workspace UUID (tenant). |
 | `MOMO_AGENT_MEMBER_ID` | the agent's `member.id` (`kind='agent'`). |
 | `MOMO_AGENT_HANDLE` | agent display handle for logs/UI hints (default `hermes`). |
+| `MOMO_HOME_CHANNEL` | home channel UUID loaded at gateway startup. `scripts/momo hermes-gateway-init` sets this instead of asking through a timeline message. |
+| `MOMO_HOME_CHANNEL_NAME` | display name for the configured home channel (default `agent-lab` in the local setup). |
 | `MOMO_AGENT_TOKEN` | scoped per-agent momo bearer used for realtime, pending recovery, callbacks, and message writes. It is not a provider token. |
 | `MOMO_AGENT_ALLOW_INSECURE_HTTP` | optional explicit opt-in for trusted non-loopback private networks. Without it, non-loopback API/WS endpoints require `https`/`wss`. |
 

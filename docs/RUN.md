@@ -996,8 +996,11 @@ pip install -r adapters/hermes/requirements.txt
 ```
 
 env(`MOMO_API_URL`, `MOMO_CENTRIFUGO_WS_URL`, `MOMO_WORKSPACE_ID`,
-`MOMO_AGENT_MEMBER_ID`, `MOMO_AGENT_TOKEN` 등)는
+`MOMO_AGENT_MEMBER_ID`, `MOMO_AGENT_TOKEN`, `MOMO_HOME_CHANNEL` 등)는
 `adapters/hermes/README.md` 및 `plugin.yaml`의 `spec.env` 참고.
+`scripts/momo hermes-gateway-init`은 홈 채널 UUID/이름도 기동 전에 기록한다.
+세션 reset, 홈 설정, `/resume`·`/sethome` 힌트, model/provider 진단은
+어댑터 로컬 로그로만 처리하며 momo timeline의 durable message로 쓰지 않는다.
 
 > **`runtime-unverified (hermes 게이트웨이 필요)`** — 게이트웨이/실행 momo 스택 없이는
 > end-to-end 미검증. `py_compile` 정적 점검만 수행됨.
