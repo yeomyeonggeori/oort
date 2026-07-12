@@ -45,39 +45,36 @@ Slack은 대화를 남기고, Paca는 작업판을 남기고, OpenHands는 코�
 
 ---
 
-## 아키텍처 요약 (스펙 §1.1)
+## 아키텍처 요약 (스펙 §1.1, §6 · ADR-0102)
 
 ```
-        ┌──────────────────────────────────────────────────────────┐
-        │  Swift Clients (shared core: ChatBackend / AgentTransport) │
-        │     macOS app          iOS app                            │
-        └───────┬───────────────────────┬──────────────────────────┘
-   WS subscribe │ (connection JWT)       │ REST: send/login (Bearer)
-                ▼                         ▼
-          ┌───────────┐            ┌────────────────────────────────┐
-          │ Centrifugo │◀─publish──│ Hummingbird 2 API (stateless)   │
-          │   v6       │  (relay)  │ REST + JWT발급 + Centrifugo      │
-          │ transport  │           │ publish + subscribe proxy +      │
-          │   only     │──events──▶│ agent orchestrator               │
-          └───────────┘            └───────┬────────────────────────┘
-                ▲                           │ tx: INSERT message
-                │ POST /api/publish         │   + bump channel_seq
-                │ (version=seq,             │   + INSERT outbox
-                │  idempotency_key)         ▼
-          ┌─────┴───────┐          ┌──────────────────────────────┐
-          │ Outbox Relay │◀─claim──│ PostgreSQL 18  SOURCE OF TRUTH│
-          │ SKIP LOCKED  │ (FOR    │ msg / seq / hlc / outbox /    │
-          │ BYPASSRLS    │  UPDATE │ ledger / budget               │
-          └─────┬───────┘  SKIP    └──────────────────────────────┘
-                │ agent_job → dispatch     ▲ tx: write msg + cost ledger
-                ▼                           │
-          ┌──────────────────────┐         │
-          │ Agent Workers (N)     │─────────┘
-          │ turn serialize /      │
-          │ loop guard /          │   OpenAI-compat call + SSE
-          │ cost breaker          │──────────────▶ hermes gateway
-          └──────────────────────┘                (tool_calls, deltas)
+ Swift clients ──REST──▶ MomoServer ──single tx──▶ PostgreSQL 18 (SoT)
+      ▲              JWT / run state / Context       │ message.seq
+      │              approval / usage / audit        │ outbox
+      │                                               ▼
+      └──── Centrifugo (transport only) ◀────── OutboxRelay
+                     ▲                    broadcast / private job wake-up
+                     │
+      ┌──────────────┴─────────────────────────────────────────────┐
+      │                                                            │
+ managed path (`AGENT_GATEWAY_MODE=worker`)        BYOA path (`gateway`)
+ AgentWorker claims durable job                    user-owned Hermes adapter
+      │ OpenAI-compatible SSE                      │ agentwork: wake-up
+      ▼                                             │ pending REST re-read
+ Hermes/provider                                    └─events/complete REST─▶ Server
+      └─SSE─▶ AgentWorker ──governed state/outbox writes───────────▶ Postgres
 ```
+
+두 경로는 모두 공식이다: **worker = momo 소유 managed runtime**, **gateway = 사용자 소유 BYOA runtime**. 경로는 전달 방식만 다르고 보장 주체는 같다.
+
+| 서버 소유 보장 | 두 경로의 공통 계약 |
+|---|---|
+| 신원·컨텍스트 | agent member/`agent_bearer` 결속 + 서버가 권한 검사 후 Context Packet 생성 |
+| 실행·승인 | 하나의 `agent_run` 상태머신 + `approval`/human decision/resume outbox |
+| 비용·감사 | budget/`usage_ledger`/`audit_log`는 서버만 커밋 |
+| 순서·내구성 | REST → Postgres `message.seq` + outbox → relay; runtime의 Centrifugo 직접 publish 금지 |
+
+SD-5에서 핫픽스로 생긴 agent realtime-token, actor-bound pending recovery, `AGENT_GATEWAY_MODE`는 [ADR-0102](docs/adr/0102-agent-execution-path.md)가 Option C의 공식 API 표면으로 소급 승인한다. gateway 승인/status/lease 동등성의 구현·검증 단계는 MOMO-349/350/341/352가 추적한다.
 
 **핵심 불변식 (day-1 강제):**
 1. **Postgres = SoT, Centrifugo = 전송계층(DB 아님).**

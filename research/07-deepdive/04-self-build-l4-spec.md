@@ -511,49 +511,60 @@ public enum AgentEvent: Sendable {
 }
 ```
 
-### 6.2 Agent Worker — hermes 어댑터 시퀀스
+### 6.2 역할 분리 이중 실행 경로 (ADR-0102 Option C)
+
+에이전트 유형에 따라 두 경로가 모두 공식이다. `worker`는 momo가 runtime을 소유하는 **managed** 경로, `gateway`는 사용자가 Hermes/provider runtime을 소유하는 **BYOA** 경로다. `AGENT_GATEWAY_MODE=worker|gateway`는 전달 방식만 고르며, `agent_run`·Context Packet·approval·usage/audit·message/outbox의 권위는 항상 MomoServer/Postgres에 있다.
 
 ```mermaid
-sequenceDiagram
-  participant R as Outbox Relay
-  participant W as Agent Worker
-  participant PG as Postgres
-  participant H as hermes gateway
-  participant C as Centrifugo
-
-  R->>W: dispatch agent_job (partition=agent_member_id)
-  W->>PG: claim run (FOR UPDATE SKIP LOCKED) + 게이트 검사(G1~G6)
-  W->>PG: budget reserve (UPDATE budget_window ... RETURNING) → 트립이면 abort
-  W->>C: publish agent.status=thinking (agent:)
-  W->>H: POST /v1/chat/completions (stream=true, stream_options.include_usage=true, Bearer)
-  loop SSE deltas
-    H-->>W: text delta / tool_calls
-    W->>C: publish agent.partial (1급 스트리밍 렌더)
-  end
-  alt tool_call (부수효과)
-    W->>PG: INSERT approval (status=pending), run → awaiting_approval
-    W->>C: publish approval.requested
-    Note over W: 사람 승인 대기 (timeout=30m → abort)
-  end
-  H-->>W: final chunk (usage)  %% 마지막 청크에만 usage
-  W->>PG: tx: INSERT message(seq) + usage_ledger + budget reconcile + outbox(broadcast)
-  W->>C: publish agent.status=done
+flowchart LR
+  T["REST trigger<br/>mention / command / MCP / schedule"] --> S["MomoServer<br/>agent_run + Context Packet + budget gate"]
+  S --> P[("Postgres SoT<br/>agent_job outbox")]
+  P -->|"mode=worker<br/>claim"| W["AgentWorker<br/>managed"]
+  W -->|"OpenAI-compatible SSE"| HP["Hermes/provider"]
+  P -->|"mode=gateway<br/>relay → private agentwork: wake-up"| G["Hermes gateway adapter<br/>BYOA"]
+  G -->|"agent_bearer<br/>pending REST re-read"| S
+  W -->|"momo-owned state transitions<br/>approval / usage / outbox"| P
+  G -->|"events / tool proposals / usage"| S
+  S -->|"server state machine<br/>approval + usage/audit"| P
+  P -->|"outbox → relay"| C["Centrifugo<br/>agent: progress + channel message"]
 ```
 
-### 6.3 BasePlatformAdapter (김인턴 플러그인 1급 멤버화)
+**managed worker 시퀀스:** AgentWorker가 `FOR UPDATE SKIP LOCKED`로 job을 claim하고 G1~G6·budget reserve를 통과한 뒤 `/v1/chat/completions` SSE를 호출한다. delta/tool_call/usage는 서버 소유 상태머신에 투영되고, 최종 응답은 `message.seq` + `usage_ledger` + budget reconcile + outbox를 같은 쓰기 경계에서 커밋한다.
+
+**BYOA gateway 시퀀스:** OutboxRelay가 private `agentwork:`에 wake-up을 publish한다. 어댑터는 같은 agent의 `agent_bearer`로 pending endpoint를 재조회한 뒤 사용자 소유 runtime을 호출하고, `/gateway/events`와 `/gateway/complete`로 제안·진행·결과만 반환한다. realtime payload 자체는 실행 입력으로 신뢰하지 않는다.
+
+### 6.3 서버 소유 보장 매트릭스
+
+| 보장 | 단일 서버 계약 | managed worker 전달 | BYOA gateway 전달 |
+|---|---|---|---|
+| 신원/테넌시 | agent member, workspace/channel, token scope, actor/run binding | 서버가 run과 worker job을 결속 | `agent_bearer`로 realtime-token·pending·callback·message write |
+| Context Packet | 권한·redaction·tool policy·budget 검사 후 서버가 bounded projection 생성 | job claim으로 읽음 | durable pending job으로 같은 projection 재조회 |
+| 승인 | `approval` + `agent_run.awaiting_approval` + human decision + resume outbox | worker pause/resume | `approval_request` callback + resume `agent.job` (MOMO-349) |
+| 비용/감사 | budget/`usage_ledger`/`audit_log`는 서버가 기록 | SSE usage를 증거로 제출 | completion usage를 증거로 제출 |
+| 상태/부분 응답 | `agent.status`/`agent.partial`을 서버가 `agent:`에 publish | SSE delta 투영 | bounded gateway event 투영 (MOMO-350) |
+| 순서/내구성 | Postgres SoT, `message.seq`, tx outbox, REST 쓰기만 허용 | 동일 | 동일; pending claim/lease는 MOMO-341 |
+
+이 매트릭스의 동등성은 동일한 trigger→approval→resume→final 시나리오를 두 경로로 실행하는 MOMO-352 verifier가 증명한다. 구현 전인 gateway 셀은 규범 계약이며 완료 증거로 읽지 않는다.
+
+### 6.4 BasePlatformAdapter (Hermes BYOA 플러그인)
 
 ```python
-# 김인턴 hermes 플러그인 어댑터 — 양방향 connect/send + handle_message
+# Hermes BYOA 플러그인 — agent_bearer + durable job recovery + REST callbacks
 class MomoAdapter(BasePlatformAdapter):
-    async def connect(self):            # momo REST 인증 → realtime-token → agent: 채널 구독
+    async def connect(self):            # agent_bearer → realtime-token → private agentwork: 구독
+        ...
+    async def recover_pending(self):     # GET .../gateway/jobs/pending (actor-bound)
+        ...
+    async def report_event(self, run, event): # POST .../gateway/events
+        ...
+    async def complete(self, run, result):   # POST .../gateway/complete
         ...
     async def send(self, channel, blocks):   # REST POST messages (client_msg_id 멱등)
         ...
-    async def handle_message(self, evt):     # 멘션/DM 수신 → invoke → 스트림 응답
-        ...
 ```
-- **SSE fallback (검증됨/추정):** text+tool_call 혼재 시 일부 게이트웨이가 tool_calls SSE delta 누락 가능 → 어댑터에 **non-stream fallback 경로 필수**.
-- **presence/감사:** 에이전트는 `agent:` 채널 presence로 working 표시. 모든 부수효과는 `audit_log`(actor=agent, via_token, run_id).
+- **신원 수렴(ADR-0101):** 두 경로 모두 `agent_bearer`에 결속한다. gateway의 `MOMO_ALLOW_LEGACY_GATEWAY_SECRET`는 기본 `0`인 이관 회귀 경로뿐이며, MOMO-352 동등성 PASS 뒤 별도 change에서 물리 제거(늦어도 M7 전).
+- **SSE fallback (검증됨/추정):** managed provider 호출에서 text+tool_call 혼재 시 일부 게이트웨이가 tool_calls SSE delta를 누락할 수 있으므로 non-stream fallback을 유지한다.
+- **presence/감사:** observable progress는 `agent:`, private work는 `agentwork:`로 분리한다. 모든 부수효과는 `audit_log`(actor=agent, via_token, run_id)에 남는다.
 
 ---
 

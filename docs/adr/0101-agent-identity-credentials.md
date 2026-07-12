@@ -2,7 +2,7 @@
 
 > Status: Accepted — Option A (성재 승인, 2026-07-10)
 > Date: 2026-07-10
-> Related: ADR-0100, ADR-0004(provider 자격증명 경계 — 본 ADR과 직교, 그대로 유지), 2026-07-09 진단 §5
+> Related: ADR-0100, ADR-0102(두 공식 실행 경로의 bearer 수렴과 legacy 폐기 게이트), ADR-0004(provider 자격증명 경계 — 본 ADR과 직교, 그대로 유지), 2026-07-09 진단 §5
 
 ## Context
 
@@ -36,7 +36,7 @@ Slack의 봇은 **앱 단위 bot token(`xoxb-`)** — 워크스페이스별 발�
   realtime payload는 실행 입력이 아니라 wake-up으로만 취급하고, Hermes는 같은
   bearer로 pending REST를 다시 조회한 뒤에만 provider를 실행한다.
 - **Phase 2 (같은 ADR 범위, 후속 티켓)**: `delegation` 토큰 — 승인(approval) 통과 시 해당 run 한정으로 "사람 X를 대신해" 토큰을 단기 발급, `audit_log.via_token_id`로 추적. "Who-as-Whom" 시그니처 경험의 기반.
-- 마이그레이션: `AGENT_GATEWAY_SECRET`는 deprecation 기간 동안 병행 수용(env flag) 후 제거.
+- 마이그레이션: `AGENT_GATEWAY_SECRET`는 `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1`인 명시적 이관 회귀검증에서만 병행 수용한다. 기본값과 정상 운영은 `0`/bearer-only다. MOMO-349/350/341 반영 후 MOMO-352 동등성 verifier가 clean/root `runtime-agent`에서 PASS하면 호환 창을 닫고, 별도 보안 정리 change에서 legacy header·두 env 키·전용 회귀 케이스를 물리 제거한다(늦어도 M7 진입 전). 세부 게이트는 ADR-0102를 따른다.
 
 **장점**: 스키마 그대로 사용(마이그레이션 불필요), Slack 동급+α 도달, 실버그 2종 해소, agent-native 신뢰 기반 완성. **단점**: 서버 인증 미들웨어·어댑터·페어링 위저드 3면 수술 — 티켓 2~3장 규모.
 
@@ -50,7 +50,7 @@ Slack의 봇은 **앱 단위 bot token(`xoxb-`)** — 워크스페이스별 발�
 
 ## Decision
 
-**Option A 채택** (성재, 2026-07-10). Phase 1: `agent_bearer`를 에이전트의 유일한 인증 경로로 승격(페어링 발급, 스코프 검사, 회전/폐기, 오퍼레이터 로그인 우회 제거, `AGENT_GATEWAY_SECRET` deprecation 병행기). Phase 2: 승인 연동 `delegation` 토큰 + `audit_log.via_token_id` 추적. 구현 티켓: MOMO-337(서버) / MOMO-338(어댑터) / MOMO-339(클라 페어링) — `BUILD_TICKETS.md` 참조.
+**Option A 채택** (성재, 2026-07-10). Phase 1: `agent_bearer`를 에이전트의 유일한 공식 인증 경로로 승격(페어링 발급, 스코프 검사, 회전/폐기, 오퍼레이터 로그인 우회 제거, legacy secret의 한시적 이관 회귀검증). ADR-0102의 managed worker와 BYOA gateway 모두 이 신원으로 수렴한다. Phase 2: 승인 연동 `delegation` 토큰 + `audit_log.via_token_id` 추적. 구현 티켓: MOMO-337(서버) / MOMO-338(어댑터) / MOMO-339(클라 페어링) — `BUILD_TICKETS.md` 참조.
 
 ## Consequences (Option A 기준)
 
@@ -61,6 +61,6 @@ Slack의 봇은 **앱 단위 bot token(`xoxb-`)** — 워크스페이스별 발�
 ## References
 
 - `server/Migrations/001_init.sql` (token, audit_log 테이블)
-- `server/Sources/MomoServer/Routes/AgentGatewayRoutes.swift` (현행 공유 시크릿 검증)
-- `adapters/hermes/momo_adapter.py` (오퍼레이터 로그인 + 미사용 refreshToken)
+- `server/Sources/MomoServer/Routes/AgentGatewayRoutes.swift` (bearer actor/run binding + opt-in legacy 이관 경계)
+- `adapters/hermes/momo_adapter.py` (`MOMO_AGENT_TOKEN` bearer 단일 경로)
 - Slack: OAuth & bot token 모델 (api.slack.com/authentication) — 스코프·회전·폐기의 업계 기본선

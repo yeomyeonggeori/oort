@@ -2,7 +2,7 @@
 
 > Status: **Accepted** (2026-07-12, 성재 — Option C "역할 분리 이중 경로 + 보장 매트릭스")
 > Date: 2026-07-10 (Proposed) → 2026-07-12 (Accepted)
-> Related: ADR-0100 (SD-2/SD-5 소급), ADR-0101(에이전트 신원 — 두 경로 모두 agent_bearer로 수렴), ADR-0004
+> Related: ADR-0100 (SD-2/SD-5 소급), ADR-0101(에이전트 신원 — 두 경로 모두 `agent_bearer`로 수렴), ADR-0004
 
 ## Context
 
@@ -50,6 +50,28 @@ Slack의 대응물은 "앱을 어디서 실행하느냐"다: 초기에는 외부
 
 **Option C 채택** (2026-07-12, 성재). 두 경로를 에이전트 유형별 공식 경로로 정본화하고(gateway=BYOA, worker=managed), 승인·비용·감사 보장은 서버 기계장치로 통일한다.
 
+### SD-5 API 표면 소급 승인
+
+ADR-0100이 SD-5로 분류한 다음 표면을 Option C의 공식 계약으로 **소급 승인**한다. 이 표면들은 새 제3의 실행 경로가 아니라 gateway(BYOA)가 서버 소유 보장에 접속하는 경계다.
+
+| 표면 | 승인된 역할 | 서버 강제 조건 |
+|---|---|---|
+| `POST /v1/auth/realtime-token` | agent가 observable `agent:` progress와 private `agentwork:` job stream에 접속할 단기 Centrifugo connection JWT 발급 | `agent_bearer` + `realtime:subscribe`; connection JWT의 `meta.token_id`를 exact credential에 결속 |
+| `GET /v1/workspaces/:ws/agents/:agent/gateway/jobs/pending` | realtime 유실·재연결 때 durable `agent_job`을 bounded recovery | `agent_bearer` + `agent:jobs:read`; token actor와 path agent 일치; DB의 pending/available job만 반환 |
+| `AGENT_GATEWAY_MODE=worker\|gateway` | 배포가 managed worker 또는 BYOA gateway 전달 방식을 선택 | 실행 위치만 선택하며 `agent_run`·approval·usage/audit·message/outbox의 서버 소유권은 바꾸지 않음 |
+
+gateway 콜백 `POST .../gateway/events`와 `POST .../gateway/complete`도 같은 `agent_bearer`의 `agent:runs:callback` scope와 actor/run binding을 통과해야 한다. 모든 사용자 가시 쓰기는 REST → Postgres transaction → outbox → relay를 유지한다.
+
+### ADR-0101 연동과 legacy secret 폐기 일정
+
+두 공식 경로의 momo 신원은 `token.kind='agent_bearer'`로 수렴한다. worker는 서버가 run의 agent identity를 결속하고, gateway는 같은 agent의 bearer로 realtime-token·pending recovery·callback·message write를 수행한다. provider OAuth/API key는 어느 경로에서도 이 토큰으로 대체하거나 momo에 유입하지 않는다(ADR-0004).
+
+`X-Momo-Agent-Gateway-Secret` / `AGENT_GATEWAY_SECRET`는 공식 인증 경로가 아니다. 폐기 일정은 날짜가 아니라 검증 게이트에 결속한다.
+
+1. **현재~동등성 게이트:** `MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0`이 기본이며 dogfood·정상 운영은 `agent_bearer`만 사용한다. legacy secret은 이관 회귀검증에만 명시적으로 `1`로 열 수 있다.
+2. **호환 창 종료:** MOMO-349/350/341이 반영되고 MOMO-352의 두 경로 동등성 verifier가 clean/root `runtime-agent`에서 PASS하면 호환 창을 닫는다.
+3. **물리 제거:** 위 PASS 직후 별도 보안 정리 change에서 legacy header, `AGENT_GATEWAY_SECRET`, `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` 및 전용 회귀 케이스를 제거한다. 최종 시한은 M7 진입 전이며, 제거 전까지 신규 배포·문서·어댑터가 legacy secret에 의존해서는 안 된다.
+
 파생 티켓 (같은 배치, 핸드오프 패킷 `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md`):
 - **MOMO-349** gateway 승인 왕복 (approval_request 콜백 → awaiting_approval → resume publish)
 - **MOMO-350** gateway status/partial 브로드캐스트 (`/gateway/events` → `agent.status`/`agent.partial`)
@@ -63,6 +85,7 @@ Slack의 대응물은 "앱을 어디서 실행하느냐"다: 초기에는 외부
 - "에이전트가 일하는 과정이 보인다"(스트리밍/상태)가 gateway에서도 성립 — ADR-0104(존재감)의 전제.
 - 계약 문서 모순 해소 + 스펙이 코드 현실과 재정렬.
 - worker 경로는 managed 에이전트 로드맵(호스팅판)까지 유지 부담을 안고 감 — 동등성 verifier가 없으면 다시 드리프트하므로 ④가 필수 티켓.
+- `AGENT_GATEWAY_MODE`의 기본값이 `worker`인 것은 안전한 배포 기본값일 뿐 product-path 우열을 뜻하지 않는다. 에이전트 유형에 따라 두 값 모두 공식이다.
 
 ## References
 
