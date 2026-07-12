@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-12 · 기준선: **ADR-0102 Accepted (Option C)** + verifier 격리 캐스케이드 종결 (root 전 프로파일 green) · 통합 책임: `momo-main`
+> 기준일: 2026-07-12 · 기준선: **ADR-0102 배치 전체 종결** (349/350/341/352/351/353 merge, root full gate green + 동등성 verifier 상시화) · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer), **ADR-0102(실행 경로 — Option C 이중 경로 + 서버 보장 매트릭스, 2026-07-12)** 전부 Accepted. 다음 결정 큐는 ADR-0103(로드맵 정렬)부터.
-- 현재 구현 체인: **ADR-0102 배치 진행 — 349/351/353 랜딩 완료** (2026-07-12, root runtime-agent gate green 유지). **승인 왕복이 gateway 실트래픽 경로에 랜딩** — dogfood에서 @hermes의 승인 필요 tool-call이 인박스에 뜨고 사람 결정으로 재개된다. 다음 ready: MOMO-350(`#330`, 의존 충족) → 341(`#333`) → 352(`#332`). 패킷: `handoffs/2026-07-12-adr-0102-execution-path.md`.
+- 현재 구현 체인: **ADR-0102 배치 전체 종결 (2026-07-12)** — 승인 왕복(349)·실행 과정 가시화(350)·중복 실행 방지(341)·동등성 verifier(352)·문서 정본화(351)·drift-guard(353) 전부 merge. root runtime-agent full gate에 동등성 검증이 상시 포함된다. **legacy gateway secret 호환 창 종료 조건 충족** — 물리 제거는 별도 보안 정리 티켓(성재 승인 대기, M7 전). ready 구현 goal 없음.
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -43,7 +43,7 @@
 | **ADR-0102 실행 경로** | `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md` | MOMO-349 `#329` | `done` (PR #337, `b5b39df`) — 승인 왕복 실트래픽 랜딩 | 1 완료 |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-350 `#330` | `done` (PR #338, `f079279`) — 실행 과정 가시화 랜딩 | 2 완료 |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-341 `#333` | `done` (PR #339, `6fcb870`) — 중복 실행 방지 랜딩 | 3 완료 |
-| ADR-0102 실행 경로 | 같은 패킷 | MOMO-352 `#332` | `in-progress` — **배치 마지막, 동등성 게이트** | 4 |
+| ADR-0102 실행 경로 | 같은 패킷 (Status `done`) | MOMO-352 `#332` | `done` (PR #340, `bb76152`) — 호환 창 종료 조건 충족 | 4 완료 — **배치 종결** |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-351 `#331` (docs) | `done` (PR #335, `ebb3a52`) | 병렬 완료 |
 | 독립 tooling | issue `#334` 본문 | MOMO-353 `#334` (drift-guard) | `done` (PR #336, `8337ae2`) — 실전 자가 실증 | 병렬 완료 |
 
@@ -60,13 +60,11 @@
 
 ## 4. 다음 체크포인트
 
-1. ~~ADR-0102 결정~~ — **Accepted (Option C, 2026-07-12)**. 파생 배치 발급 완료 — 착수는 성재 트리거 ("349부터 spawn해줘").
-2. MOMO-349(gateway 승인 왕복)가 배치의 1번이자 최고 가치 — 승인 인박스가 실트래픽에서 처음 동작한다.
-3. ~~drift-guard 제안~~ — MOMO-353 `#334`로 발급됨 (배치와 병렬 가능).
+1. ~~ADR-0102 배치 (349/350/341/352/351/353)~~ — **2026-07-12 전체 종결**. 승인 인박스·실행 가시화·중복 방지·동등성 게이트가 실트래픽 경로에 랜딩.
+2. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한).
+3. 다음 기획 결정 순번: **ADR-0103 (로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood)**.
 4. design-review 잔여 Medium 2는 보류 확정 (성재 2026-07-12) — BUILD_TICKETS 기록 유지.
-5. 다음 기획 결정 순번: ADR-0103 (로드맵 정렬).
-4. Hermes gateway 중복 실행 방지 claim/lease + takeover는 MOMO-341 — 착수 대기.
-5. ADR-0102 결정을 완료해 AgentWorker SSE와 Hermes Gateway의 제품 기본 경로를 정본화한다.
+5. dogfood에서 새 기능 실사용 확인 권장: @hermes 승인 필요 tool-call → 인박스 → 승인/거부 → 재개 (349), 실행 중 상태/부분응답 (350).
 
 ## 5. 이 문서 갱신 규칙
 

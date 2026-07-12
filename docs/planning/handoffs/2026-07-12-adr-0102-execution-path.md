@@ -1,6 +1,6 @@
 # HANDOFF: ADR-0102 실행 경로 정본화 — 이중 경로 + 보장 매트릭스 배치
 
-> Status: `active` — 5 goal 전부 ready
+> Status: `done` — 5 goal 전부 merge (2026-07-12): 351(#335 `ebb3a52`) · 353(#334→PR #336 `8337ae2`) · 349(#337 `b5b39df`) · 350(#338 `f079279`) · 341(#339 `6fcb870`) · 352(#340 `bb76152`). root runtime-agent full gate green(동등성 verifier 포함) — **legacy secret 호환 창 종료 조건 충족**. 후속: legacy 물리 제거 보안 정리 티켓(성재 승인 대기, M7 전 시한).
 > Planning ID: `ADR-0102` · Planner owner: Fable · Integrator: `momo-main`
 > 발급: 2026-07-12 · 기준 커밋: `c6af6fc` · Supersedes: 없음
 > 근거 ADR: **ADR-0102 (Accepted 2026-07-12, Option C)** · 대상 goal: MOMO-349/350/341/352 + MOMO-351(docs)

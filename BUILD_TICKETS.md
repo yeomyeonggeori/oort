@@ -1596,10 +1596,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] macOS exact `agent:` 구독 → 기존 `AgentPartialView` 렌더(비스냅샷 78 tests) + gateway verifier status/partial·위조·크기·namespace 시나리오.
   - 오케스트레이터 검수: outbox 발행·상한·채널 케이스 확인, worktree clean gate full PASS(`…20260712T065703Z-…-re580a53c4cc4.md`), PR #338 merge(`f079279`), root post-merge gate PASS(`…20260712T070419Z-…-r52b8ed1d9f21.md`).
 
-### ☐ MOMO-352 수용기준 — 이중 경로 동등성 verifier `[tooling/runtime-agent]` · 의존: MOMO-349, MOMO-350, MOMO-341 (`#332`, ADR-0102)
+### ☑ MOMO-352 수용기준 — 이중 경로 동등성 verifier `[tooling/runtime-agent]` · 의존: MOMO-349, MOMO-350, MOMO-341 (`#332`, ADR-0102)
 - [x] 신규 `verify_agent_path_equivalence.sh` — 격리 DB 패턴(per-run 채널 UUID, CENT_CHANNEL 대문자, digest, exit 96) 준수.
 - [x] 동일 시나리오(트리거→승인→resume→최종)를 worker/gateway 2회 실행, run 전이·approval·usage/audit·durable message 동등성 비교 (허용 차이는 allowlist).
-- [ ] `runtime-agent` profile 배선 + clean/root gate + 정본 3종.
+- [x] `runtime-agent` profile 배선 + clean/root gate + 정본 3종.
+  - 오케스트레이터 검수: 동등성 verifier 단독 실행 PASS(`run_states=queued,running,awaiting_approval,queued,running,succeeded` 완전 일치), clean gate full PASS(`…20260712T090633Z-…-r1362178cb8be.md`), PR #340 merge(`bb76152`), **root post-merge full gate PASS(`…20260712T091339Z-…-r1ec97b3c1d2b.md`) — ADR-0102 legacy secret 호환 창 종료 조건 충족 (물리 제거는 별도 보안 정리 티켓, M7 전)**.
   - worker 구현: 양 정본 verifier를 fresh marker/OID-owned DB로 실행하고 source digest EXIT trap, worker/gateway pre-marker exit 96 exact-OID rollback, per-run 대문자 channel identity를 한 종결 verifier에서 강제한다.
   - 비교 계약: `queued→running→awaiting_approval→queued→running→succeeded`, approval 생성/승인/resume, usage/audit 존재, durable message/realtime publication을 완전 일치 비교한다. allowlist는 timing/provider metadata/lease/path-channel identity뿐이다.
   - 정적 evidence: 신규/수정 shell `bash -n`, `git diff --check` PASS. Docker/DB/verifier/local gate는 worker 금지 범위로 미실행(`runtime-unverified`); clean/root `runtime-agent`와 이 체크박스 확정은 오케스트레이터 대기.
