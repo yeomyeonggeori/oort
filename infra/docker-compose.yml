@@ -46,6 +46,10 @@ services:
     # 공식 설정으로 읽는다.
     command: centrifugo --config=/centrifugo/centrifugo.json
     environment:
+      # MOMO-353: immutable-at-create fingerprint of the repo config actually
+      # selected for this process. ensure_runtime_env.sh compares this marker
+      # with the current file because bind-mount changes do not reload Centrifugo.
+      MOMO_CENTRIFUGO_CONFIG_SHA256: ${MOMO_CENTRIFUGO_CONFIG_SHA256:-missing}
       CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${CENT_TOKEN_HMAC}
       CENTRIFUGO_HTTP_API_KEY: ${CENT_API_KEY}
       # MOMO-300: subscribe proxy 콜백에 공유 시크릿 헤더 주입(env가 파일값을

@@ -69,7 +69,13 @@ up: ## 인프라 기동 (PostgreSQL 18 + Centrifugo v6)
 	@# --wait: postgres/centrifugo 모두 compose healthcheck가 정의되어 있어
 	@# healthy(=연결 수락 가능)까지 대기한다(MOMO-316). 폴링 루프 불필요.
 	@if [ -f "$(COMPOSE_FILE)" ]; then \
-		$(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" up -d --wait; \
+		if command -v shasum >/dev/null 2>&1; then \
+			config_sha="$$(shasum -a 256 infra/centrifugo.json | awk '{ print $$1 }')"; \
+		else \
+			config_sha="$$(sha256sum infra/centrifugo.json | awk '{ print $$1 }')"; \
+		fi; \
+		test -n "$$config_sha" || { echo "failed to fingerprint infra/centrifugo.json" >&2; exit 1; }; \
+		MOMO_CENTRIFUGO_CONFIG_SHA256="$$config_sha" $(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" up -d --wait; \
 	else \
 		echo "up: $(COMPOSE_FILE) 없음 (후속 티켓 T02에서 추가). runtime-unverified (no docker/psql)."; \
 	fi

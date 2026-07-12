@@ -1606,6 +1606,9 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] `ensure_runtime_env.sh`가 실행 중 Centrifugo running-config를 repo config와 대조 (불일치 시 안내/opt-in 재시작).
 - [ ] 게이트 pre-clean이 이전 게이트 런 잔류 verifier 프로세스를 소유권 증명 기반으로 자동 정리 (dogfood/사용자 프로세스 절대 비접촉 + 오탐 방지 검증).
 - [ ] 실패 경로 포함 게이트 종료 시 reaping 보강 + clean/root gate + 정본 3종.
+  - worker 구현: compose 생성 시 repo config SHA-256 fingerprint를 고정하고 pre/post-start guard가 실행 컨테이너 fingerprint를 비교한다. drift는 fail-closed하며 `MOMO_CENTRIFUGO_AUTO_RECREATE=1`만 Centrifugo를 강제 재생성한다.
+  - worker 구현: gate marker 디렉터리(uid/repo/run/pid-start 검증)+상속 env+repo command를 모두 만족한 프로세스만 stale pre-clean/EXIT/final cleanup 대상으로 삼는다. active 다른 gate와 unmarked dogfood/user process는 남기고 충돌로 처리한다.
+  - worker 정적 evidence: 수정·신규 shell `bash -n`, `shellcheck`, `git diff --check`, `make -n up`, `scripts/tests/test_local_gate_drift_guard.sh` PASS(fake Docker + 합성 PID/command/env/listener; 실제 Docker/DB 미접속). clean/root runtime gate 체크는 오케스트레이터 evidence 전까지 미체크 유지.
 
 ### ☐ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-350 (ADR-0102 배치 합류, `#333`)
 > MOMO-338 성능 리뷰 후속. 현재 pending endpoint는 actor-bound read지만 lease/claim이 없어 동일 agent의 gateway 인스턴스가 겹치면 provider turn과 비용이 중복될 수 있다.
