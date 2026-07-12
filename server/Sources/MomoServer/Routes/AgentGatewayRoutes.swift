@@ -12,8 +12,22 @@ import PostgresNIO
 /// commits user-visible output through the same Postgres/outbox path as every
 /// other message.
 struct AgentGatewayRoutes: Sendable {
+    static let progressRateWindowSeconds = 60
+    static let maximumProgressEventsPerWindow = 240
+
     let db: Database
     let config: AgentGatewayConfig
+    private let progressLimiter: SlidingWindowRateLimiter
+
+    init(
+        db: Database,
+        config: AgentGatewayConfig,
+        progressLimiter: SlidingWindowRateLimiter = SlidingWindowRateLimiter()
+    ) {
+        self.db = db
+        self.config = config
+        self.progressLimiter = progressLimiter
+    }
 
     static let gatewaySecretHeader = HTTPField.Name("X-Momo-Agent-Gateway-Secret")!
 
@@ -118,10 +132,39 @@ struct AgentGatewayRoutes: Sendable {
             return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
         }
 
+        let progress = try dto.validatedProgress(status: normalizedStatus)
+        if normalizedStatus == "thinking" || normalizedStatus == "streaming" {
+            let verdict = await progressLimiter.check(
+                key: "gateway-progress:\(workspaceID.uuidString):\(runID.uuidString)",
+                limit: Self.maximumProgressEventsPerWindow,
+                windowSeconds: Self.progressRateWindowSeconds
+            )
+            guard verdict.allowed else {
+                throw HTTPError(.tooManyRequests, message: "gateway progress rate limit exceeded")
+            }
+        }
+
         let accepted = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             guard let run = try await Self.lockGatewayRun(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, runID: runID)
             else { return false }
+            let existingEvent = try await conn.query(
+                """
+                SELECT 1
+                  FROM audit_log
+                 WHERE workspace_id = \(workspaceID)
+                   AND run_id = \(runID)
+                   AND action = 'agent.gateway.status'
+                   AND target_type = 'agent_run'
+                   AND target_id = \(runID)
+                   AND detail->>'event_id' = \(progress.eventID.uuidString)
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            if !existingEvent.isEmpty {
+                return true
+            }
             if Self.isApprovalHeldRunStatus(run.status) {
                 throw HTTPError(
                     .conflict,
@@ -137,7 +180,9 @@ struct AgentGatewayRoutes: Sendable {
                     message: "gateway cancellation acknowledgement has no rejected run"
                 )
             }
-            if normalizedStatus == "running" || normalizedStatus == "thinking" {
+            if normalizedStatus == "running" || normalizedStatus == "thinking"
+                || normalizedStatus == "streaming"
+            {
                 _ = try await conn.query(
                     """
                     UPDATE agent_run
@@ -157,7 +202,9 @@ struct AgentGatewayRoutes: Sendable {
             let detail = Self.jsonString([
                 "schema": "momo.agent_gateway.event.v0",
                 "status": normalizedStatus,
-                "detail": dto.detail as Any,
+                "detail": progress.detail as Any,
+                "event_id": progress.eventID.uuidString,
+                "text_delta_bytes": progress.textDelta?.utf8.count as Any,
                 "run_id": runID.uuidString,
                 "agent_member_id": run.agentMemberID.uuidString,
                 "source": "hermes_gateway",
@@ -182,7 +229,8 @@ struct AgentGatewayRoutes: Sendable {
                 agentMemberID: run.agentMemberID,
                 runID: runID,
                 status: normalizedStatus,
-                detail: dto.detail
+                detail: progress.detail,
+                eventID: progress.eventID
             )
             _ = try await conn.query(
                 """
@@ -194,6 +242,26 @@ struct AgentGatewayRoutes: Sendable {
                 """,
                 logger: db.logger
             )
+            if let textDelta = progress.textDelta {
+                let partialPayload = Self.agentPartialBroadcastPayload(
+                    workspaceID: workspaceID,
+                    channelID: run.channelID,
+                    agentMemberID: run.agentMemberID,
+                    runID: runID,
+                    textDelta: textDelta,
+                    eventID: progress.eventID
+                )
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(partialPayload)::jsonb, \(run.agentMemberID))
+                    """,
+                    logger: db.logger
+                )
+            }
             if normalizedStatus == "cancelled" {
                 _ = try await conn.query(
                     """
@@ -1074,28 +1142,69 @@ struct AgentGatewayRoutes: Sendable {
         agentMemberID: UUID,
         runID: UUID,
         status: String,
-        detail: String?
+        detail: String?,
+        eventID: UUID
     ) -> String {
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
         let centChannel = "agent:ws\(workspaceID.uuidString).\(channelID.uuidString).\(agentMemberID.uuidString)"
+        let projection = agentStatusProjection(status)
         return jsonString([
             "channel": centChannel,
             "data": [
                 "type": "agent.status",
                 "v": 1,
                 "ts": hlcTs,
-                "seq": hlcTs,
                 "payload": [
                     "run_id": runID.uuidString,
                     "agent_member_id": agentMemberID.uuidString,
-                    "status": status,
+                    "channel_id": channelID.uuidString,
+                    "phase": projection.phase,
+                    "run_status": projection.runStatus,
                     "detail": detail as Any,
                     "source": "hermes_gateway",
                 ],
             ],
-            "version": hlcTs,
-            "idempotency_key": "\(centChannel):status:\(runID.uuidString):\(status):\(hlcTs)",
+            "idempotency_key": "\(centChannel):gateway:\(eventID.uuidString):status",
         ])
+    }
+
+    private static func agentPartialBroadcastPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        agentMemberID: UUID,
+        runID: UUID,
+        textDelta: String,
+        eventID: UUID
+    ) -> String {
+        let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
+        let centChannel = "agent:ws\(workspaceID.uuidString).\(channelID.uuidString).\(agentMemberID.uuidString)"
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "agent.partial",
+                "v": 1,
+                "ts": hlcTs,
+                "payload": [
+                    "run_id": runID.uuidString,
+                    "agent_member_id": agentMemberID.uuidString,
+                    "channel_id": channelID.uuidString,
+                    "text_delta": textDelta,
+                    "source": "hermes_gateway",
+                ],
+            ],
+            "idempotency_key": "\(centChannel):gateway:\(eventID.uuidString):partial",
+        ])
+    }
+
+    private static func agentStatusProjection(_ status: String) -> (phase: String, runStatus: String) {
+        switch status {
+        case "streaming":
+            return ("streaming", "running")
+        case "cancelled":
+            return ("error", "cancelled")
+        default:
+            return ("thinking", "running")
+        }
     }
 
     private static func timelineBroadcastPayload(
@@ -1185,15 +1294,60 @@ struct AgentGatewayRoutes: Sendable {
 }
 
 struct AgentGatewayEventRequest: Decodable {
+    static let maximumDetailBytes = 2_048
+    static let maximumTextDeltaBytes = 8_192
+
+    let eventID: UUID?
     let status: String?
     let detail: String?
+    let textDelta: String?
     let approvalRequest: AgentGatewayApprovalRequest?
 
     private enum CodingKeys: String, CodingKey {
+        case eventID = "event_id"
         case status
         case detail
+        case textDelta = "text_delta"
         case approvalRequest = "approval_request"
     }
+
+    func validatedProgress(status: String) throws -> AgentGatewayProgressEvent {
+        guard ["running", "thinking", "streaming", "cancelled"].contains(status) else {
+            throw HTTPError(.badRequest, message: "unknown gateway event status")
+        }
+        let detail = try Self.bounded(detail, field: "detail", limit: Self.maximumDetailBytes)
+        let delta = try Self.bounded(
+            textDelta,
+            field: "text_delta",
+            limit: Self.maximumTextDeltaBytes
+        )
+        if status == "streaming" {
+            guard let delta, !delta.isEmpty else {
+                throw HTTPError(.badRequest, message: "streaming event requires text_delta")
+            }
+        } else if delta != nil {
+            throw HTTPError(.badRequest, message: "text_delta is only valid for streaming events")
+        }
+        return AgentGatewayProgressEvent(
+            eventID: eventID ?? UUID(),
+            detail: detail,
+            textDelta: delta
+        )
+    }
+
+    private static func bounded(_ raw: String?, field: String, limit: Int) throws -> String? {
+        guard let raw else { return nil }
+        guard raw.utf8.count <= limit else {
+            throw HTTPError(.badRequest, message: "\(field) is too large")
+        }
+        return raw
+    }
+}
+
+struct AgentGatewayProgressEvent: Equatable, Sendable {
+    let eventID: UUID
+    let detail: String?
+    let textDelta: String?
 }
 
 struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {

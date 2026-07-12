@@ -263,6 +263,11 @@ final class MomoMacTests: XCTestCase {
                     phase: .thinking,
                     runStatus: .running
                 )),
+                .agentPartial(AgentPartial(
+                    runId: run,
+                    channelId: channel,
+                    textDelta: "gateway streaming preview"
+                )),
             ]
         )
         let viewModel = ChatViewModel(chat: statusOnlyBackend, agentTransport: FailingDecisionAgentTransport())
@@ -271,6 +276,11 @@ final class MomoMacTests: XCTestCase {
         await viewModel.selectChannel(channel)
         try await Task.sleep(for: .milliseconds(30))
         XCTAssertTrue(viewModel.isAgentWorking(try XCTUnwrap(viewModel.member(agent))))
+        XCTAssertEqual(
+            viewModel.partials[run]?.textDelta,
+            "gateway streaming preview",
+            "AgentPartialView source state must receive the gateway delta"
+        )
 
         let final = Message(
             id: MessageID(),
@@ -2087,6 +2097,65 @@ final class MomoMacTests: XCTestCase {
             SwiftCentrifugeRealtimeSubscriptionTransport.channelName(workspace: .demo, channel: .demoGeneral),
             "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000201"
         )
+        XCTAssertEqual(
+            SwiftCentrifugeRealtimeSubscriptionTransport.agentChannelName(
+                workspace: .demo,
+                channel: .demoAgentLab,
+                agent: .demoAgent
+            ),
+            "agent:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000202.00000000-0000-7000-8000-000000000102"
+        )
+    }
+
+    func testRESTBackendMapsGatewayAgentNamespaceProgressIntoRealtimeEvents() async throws {
+        let run = RunID(uuidString: "00000000-0000-7350-8000-000000350001")!
+        let transport = FixtureAgentRealtimeTransport(envelopes: [
+            RealtimeEnvelope(
+                type: "agent.status",
+                ts: 1,
+                payload: [
+                    "run_id": .string(run.description),
+                    "agent_member_id": .string(MemberID.demoAgent.description),
+                    "channel_id": .string(ChannelID.demoAgentLab.description),
+                    "phase": "thinking",
+                    "run_status": "running",
+                ]
+            ),
+            RealtimeEnvelope(
+                type: "agent.partial",
+                ts: 2,
+                payload: [
+                    "run_id": .string(run.description),
+                    "agent_member_id": .string(MemberID.demoAgent.description),
+                    "channel_id": .string(ChannelID.demoAgentLab.description),
+                    "text_delta": "gateway delta",
+                ]
+            ),
+        ])
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            )
+        )
+        try await backend.connect(workspace: .demo, accessToken: "token-123")
+        await backend.setAgentRealtimeTransport(transport)
+
+        let stream = try await backend.subscribe(channel: .demoAgentLab)
+        var events: [RealtimeEvent] = []
+        for await event in stream {
+            events.append(event)
+        }
+
+        XCTAssertEqual(events.count, 2)
+        guard case .agentStatus(let status) = events[0] else {
+            return XCTFail("gateway status must reach the existing realtime model")
+        }
+        XCTAssertEqual(status.phase, .thinking)
+        guard case .agentPartial(let partial) = events[1] else {
+            return XCTFail("gateway partial must reach the existing streaming renderer state")
+        }
+        XCTAssertEqual(partial.textDelta, "gateway delta")
     }
 
     func testSwiftCentrifugeTransportDecodesPublicationDataAsRealtimeEnvelope() throws {
@@ -3133,6 +3202,26 @@ private actor FailingDecisionAgentTransport: AgentTransport {
     }
 
     func cancelRun(_ id: RunID) async throws {}
+}
+
+private struct FixtureAgentRealtimeTransport: AgentRealtimeEnvelopeSubscriptionTransport {
+    let storedEnvelopes: [RealtimeEnvelope]
+
+    init(envelopes: [RealtimeEnvelope]) {
+        storedEnvelopes = envelopes
+    }
+
+    func envelopes(
+        agent: MemberID,
+        channel: ChannelID
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
+        AsyncThrowingStream { continuation in
+            for envelope in storedEnvelopes {
+                continuation.yield(envelope)
+            }
+            continuation.finish()
+        }
+    }
 }
 
 private actor FixtureRealtimeChatBackend: ChatBackend {

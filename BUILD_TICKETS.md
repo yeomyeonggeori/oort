@@ -1594,6 +1594,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] `/gateway/events`가 `thinking`/`streaming` 델타를 수용해 `agent.status`/`agent.partial`로 `agent:` namespace 브로드캐스트.
 - [ ] actor/run binding + 서버측 rate/size 상한. 어댑터가 provider 델타를 전달(버퍼링 허용).
 - [ ] macOS 클라 실렌더 증명 + gateway verifier 시나리오 + clean/root gate + 정본 3종.
+> Worker #330 handoff: server/outbox·adapter sampling·macOS exact `agent:` subscription과 verifier 시나리오를 구현했다. server 54 tests, adapter 49 tests, macOS 비스냅샷 78 tests(실렌더 타깃 포함) 및 정적 검증은 PASS. acceptance/runtime gate 체크박스는 오케스트레이터의 격리 DB verifier + clean/root `runtime-agent` evidence 전까지 미체크 유지한다.
 
 ### ☐ MOMO-352 수용기준 — 이중 경로 동등성 verifier `[tooling/runtime-agent]` · 의존: MOMO-349, MOMO-350, MOMO-341 (`#332`, ADR-0102)
 - [ ] 신규 `verify_agent_path_equivalence.sh` — 격리 DB 패턴(per-run 채널 UUID, CENT_CHANNEL 대문자, digest, exit 96) 준수.

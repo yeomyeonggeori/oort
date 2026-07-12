@@ -13,12 +13,14 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
 
     private let session: URLSession
     private var realtimeDriver: (any RealtimeSubscriptionDriver)?
+    private var agentRealtimeTransport: (any AgentRealtimeEnvelopeSubscriptionTransport)?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var workspace: WorkspaceID?
     private var accessToken: String?
     private var authenticatedMember: Member?
     private var cachedChannels: [Channel]?
+    private var cachedMembers: [Member]?
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
     private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
@@ -65,6 +67,12 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         self.realtimeDriver = realtimeDriver
     }
 
+    public func setAgentRealtimeTransport(
+        _ transport: (any AgentRealtimeEnvelopeSubscriptionTransport)?
+    ) {
+        agentRealtimeTransport = transport
+    }
+
     public func requireAccessToken() throws -> String {
         guard let accessToken, !accessToken.isEmpty else { throw BackendError.notConnected }
         return accessToken
@@ -75,6 +83,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         accessToken = nil
         authenticatedMember = nil
         cachedChannels = nil
+        cachedMembers = nil
         lastKnownSeqByChannel = [:]
         realtimeStatusByChannel = [:]
         for continuations in realtimeStatusStreams.values {
@@ -109,29 +118,49 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
 
     public func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
         guard accessToken != nil else { throw BackendError.notConnected }
-        guard let realtimeDriver else {
+        var streams: [AsyncStream<RealtimeEvent>] = []
+        if let realtimeDriver {
+            emitRealtimeStatus(RealtimeConnectionStatus(
+                channelId: channel,
+                connection: .connecting,
+                subscription: .subscribing,
+                canRetry: false,
+                message: "Subscribing to channel realtime."
+            ))
+            let startingSeq = lastKnownSeqByChannel[channel] ?? 0
+            streams.append(try await realtimeDriver.subscribe(
+                channel: channel,
+                startingAfter: startingSeq,
+                backfill: { [weak self] after, limit in
+                    guard let self else { return [] }
+                    return try await self.history(channel: channel, after: after, limit: limit)
+                }
+            ))
+        }
+
+        if let agentRealtimeTransport {
+            let members = cachedMembers ?? config.members
+            let agents = members.filter {
+                $0.kind == .agent && ($0.channelIds.isEmpty || $0.channelIds.contains(channel))
+            }
+            for agent in agents {
+                if let stream = try? await Self.agentRealtimeEvents(
+                    transport: agentRealtimeTransport,
+                    agent: agent.id,
+                    channel: channel
+                ) {
+                    streams.append(stream)
+                }
+            }
+        }
+
+        guard !streams.isEmpty else {
             emitRealtimeStatus(.restFallback(channel: channel))
             return AsyncStream { continuation in
                 continuation.finish()
             }
         }
-
-        emitRealtimeStatus(RealtimeConnectionStatus(
-            channelId: channel,
-            connection: .connecting,
-            subscription: .subscribing,
-            canRetry: false,
-            message: "Subscribing to channel realtime."
-        ))
-        let startingSeq = lastKnownSeqByChannel[channel] ?? 0
-        return try await realtimeDriver.subscribe(
-            channel: channel,
-            startingAfter: startingSeq,
-            backfill: { [weak self] after, limit in
-                guard let self else { return [] }
-                return try await self.history(channel: channel, after: after, limit: limit)
-            }
-        )
+        return Self.mergeRealtimeStreams(streams)
     }
 
     public func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
@@ -198,6 +227,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
             if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
                 all.insert(authenticatedMember, at: 0)
             }
+            cachedMembers = all
             return all
         } catch BackendError.problem(let status, _, _) where status == 404 && !config.members.isEmpty {
             // Older mocks and offline demo configs predate the roster endpoint.
@@ -207,6 +237,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
             all.insert(authenticatedMember, at: 0)
         }
+        cachedMembers = all
         return all
     }
 
@@ -376,7 +407,38 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
     // MARK: AgentTransport compatibility
 
     public func observe(agent: MemberID, channel: ChannelID) async throws -> AsyncStream<AgentEvent> {
-        AsyncStream { continuation in continuation.finish() }
+        guard let agentRealtimeTransport else {
+            return AsyncStream { continuation in continuation.finish() }
+        }
+        let events = try await Self.agentRealtimeEvents(
+            transport: agentRealtimeTransport,
+            agent: agent,
+            channel: channel
+        )
+        return AsyncStream { continuation in
+            let task = Task {
+                for await event in events {
+                    switch event {
+                    case .agentStatus(let status):
+                        continuation.yield(.status(status.runId, status.runStatus))
+                    case .agentPartial(let partial):
+                        if let delta = partial.textDelta {
+                            continuation.yield(.textDelta(partial.runId, delta))
+                        } else if let name = partial.toolCallName {
+                            continuation.yield(.toolCall(
+                                partial.runId,
+                                name: name,
+                                args: partial.toolCallArgs ?? .object([:])
+                            ))
+                        }
+                    default:
+                        continue
+                    }
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     public func invoke(
@@ -501,6 +563,59 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
 
     private func unregisterRealtimeStatus(channel: ChannelID, token: UUID) {
         realtimeStatusStreams[channel]?[token] = nil
+    }
+
+    private static func agentRealtimeEvents(
+        transport: any AgentRealtimeEnvelopeSubscriptionTransport,
+        agent: MemberID,
+        channel: ChannelID
+    ) async throws -> AsyncStream<RealtimeEvent> {
+        let envelopes = try await transport.envelopes(agent: agent, channel: channel)
+        return AsyncStream { continuation in
+            let task = Task {
+                do {
+                    for try await envelope in envelopes {
+                        switch try envelope.decodeEvent() {
+                        case .agentStatus(let status) where status.agentMemberId == agent
+                            && status.channelId == channel:
+                            continuation.yield(.agentStatus(status))
+                        case .agentPartial(let partial)
+                            where partial.channelId == channel
+                            && envelope.payload["agent_member_id"]?.stringValue?.lowercased()
+                                == agent.description.lowercased():
+                            continuation.yield(.agentPartial(partial))
+                        default:
+                            continue
+                        }
+                    }
+                } catch {
+                    // Durable final messages still arrive on ch:/REST history.
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private static func mergeRealtimeStreams(
+        _ streams: [AsyncStream<RealtimeEvent>]
+    ) -> AsyncStream<RealtimeEvent> {
+        AsyncStream { continuation in
+            let task = Task {
+                await withTaskGroup(of: Void.self) { group in
+                    for stream in streams {
+                        group.addTask {
+                            for await event in stream {
+                                continuation.yield(event)
+                            }
+                        }
+                    }
+                    await group.waitForAll()
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 }
 

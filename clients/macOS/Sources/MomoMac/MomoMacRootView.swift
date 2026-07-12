@@ -430,6 +430,7 @@ public enum MomoMacDemo {
                 tokenProvider: tokenProvider
             )
             await backend.setRealtimeDriver(DefaultRealtimeSubscriptionDriver(transport: transport))
+            await backend.setAgentRealtimeTransport(transport)
         }
         let vm = ChatViewModel(chat: backend, agentTransport: backend)
         await vm.bootstrap(workspace: config.workspace, accessToken: config.accessToken ?? "")

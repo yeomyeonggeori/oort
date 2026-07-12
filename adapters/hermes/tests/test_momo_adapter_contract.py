@@ -188,6 +188,88 @@ class HermesAdapterContractTests(unittest.TestCase):
 
         self.assertEqual(adapter.gateway_posts, fixture["expected_momo_callbacks"])
 
+    def test_gateway_provider_stream_forwards_bounded_status_and_partial_events(self):
+        class Runtime:
+            async def stream_momo_job(self, _payload):
+                yield {"type": "text.delta", "delta": "안녕, "}
+                yield {
+                    "object": "chat.completion.chunk",
+                    "choices": [{"delta": {"content": "gateway"}}],
+                }
+                yield {
+                    "type": "finished",
+                    "status": "succeeded",
+                    "body": "안녕, gateway",
+                    "usage": {},
+                }
+
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.runtime = Runtime()
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        callbacks = [call["body"] for call in adapter.gateway_posts]
+        self.assertEqual(callbacks[0]["status"], "running")
+        self.assertEqual(callbacks[1]["status"], "thinking")
+        self.assertIn("event_id", callbacks[1])
+        partials = [body for body in callbacks if body["status"] == "streaming"]
+        self.assertEqual("".join(body["text_delta"] for body in partials), "안녕, gateway")
+        self.assertTrue(all(len(body["text_delta"].encode("utf-8")) <= 8192 for body in partials))
+        self.assertEqual(callbacks[-1]["status"], "succeeded")
+        self.assertEqual(callbacks[-1]["body"], "안녕, gateway")
+
+    def test_gateway_delta_chunking_preserves_unicode_and_server_size_contract(self):
+        text = "가" * 6000
+        chunks = momo_adapter.MomoAdapter._bounded_gateway_delta_chunks(text)
+
+        self.assertEqual("".join(chunks), text)
+        self.assertGreater(len(chunks), 1)
+        self.assertTrue(all(len(chunk.encode("utf-8")) <= 8192 for chunk in chunks))
+
+    def test_gateway_provider_stream_error_completes_as_failed(self):
+        class Runtime:
+            async def stream_momo_job(self, _payload):
+                yield {"type": "error", "error": "provider stream failed"}
+
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.runtime = Runtime()
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        completion = adapter.gateway_posts[-1]["body"]
+        self.assertEqual(completion["status"], "failed")
+        self.assertEqual(completion["error"], "provider stream failed")
+
     def test_gateway_tool_call_pauses_with_approval_request_callback(self):
         class Runtime:
             def run_momo_job(self, _payload):
