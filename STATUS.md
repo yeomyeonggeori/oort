@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-352 Agent Path Equivalence Verifier (2026-07-12)
+
+- 신규 `scripts/verify_agent_path_equivalence.sh`가 worker(managed)와 gateway(BYOA)의 정본 verifier를 각각 fresh marker/OID-owned DB와 per-run 대문자 transport channel에서 실행하고, trigger→approval→resume→final의 run 상태·approval·usage/audit·durable message·realtime publication 보장 manifest를 비교한다. 허용 차이는 timing/provider metadata/gateway lease/path-channel identity로 코드 안에 한정했다.
+- 양 경로의 pre-marker COMMENT 실패 exit 96 exact-OID rollback과 source dogfood DB digest EXIT trap을 동등성 verifier 자체가 강제한다. `verify_hermes_gateway_adapter.sh`에는 부모 verifier가 per-run marker/channel을 결속할 수 있는 검증 전용 marker UUID override만 추가했으며 `schema_v0.sql`은 변경하지 않았다.
+- 검증: 신규/수정 shell `bash -n` + `git diff --check` PASS. 지시된 worker 경계에 따라 Docker/DB/verifier/`local_gate.sh`는 실행하지 않았고, clean/root `runtime-agent`와 실제 두 경로 비교는 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-341 Gateway Pending Durable Claim/Lease (2026-07-12)
 
 - 신규 `008_gateway_job_lease.sql`이 gateway `agent_job` outbox row에 단일 owner/acquired/expiry를 멱등 추가한다. actor-bound pending recovery는 tenant transaction의 `FOR UPDATE SKIP LOCKED`로 원자 claim하며, 만료된 pending row만 새 lease로 takeover한다. `schema_v0.sql`은 변경하지 않았다.

@@ -62,7 +62,12 @@ SOURCE_POSTGRES_DB=${POSTGRES_DB:-momo}
 SOURCE_DATABASE_URL=${DATABASE_URL:-}
 POSTGRES_DB=${HERMES_GATEWAY_VERIFIER_DB:-momo_hermes_gateway_verify_${POSTGRES_PORT}_$$}
 VERIFIER_DB_MARKER_PREFIX=momo:hermes-gateway-verifier:v1:
-VERIFIER_DB_MARKER=${VERIFIER_DB_MARKER_PREFIX}$(python3 -c 'import uuid; print(uuid.uuid4())')
+VERIFIER_MARKER_UUID=${HERMES_GATEWAY_VERIFIER_TEST_MARKER_UUID:-$(python3 -c 'import uuid; print(uuid.uuid4())')}
+if ! [[ "$VERIFIER_MARKER_UUID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]; then
+  echo "[hermes-gateway] invalid verifier marker UUID" >&2
+  exit 1
+fi
+VERIFIER_DB_MARKER=${VERIFIER_DB_MARKER_PREFIX}${VERIFIER_MARKER_UUID}
 VERIFIER_DB_CREATED_OID=
 VERIFIER_DB_OWNED=0
 SOURCE_DIGEST_ARMED=0
@@ -991,9 +996,13 @@ if [ "$APPROVAL_RUN_ID" = "" ]; then
   printf '%s\n' "$APPROVAL_SEND_JSON" >&2
   exit 1
 fi
+APPROVAL_QUEUED_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
+assert_equals "queued" "$APPROVAL_QUEUED_STATUS" "gateway approval run starts queued"
 APPROVAL_INITIAL_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
 set_current_claim "$APPROVAL_INITIAL_PENDING_JSON" "$APPROVAL_RUN_ID"
 post_gateway_event "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
+APPROVAL_RUNNING_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
+assert_equals "running" "$APPROVAL_RUNNING_STATUS" "gateway approval run enters running"
 post_gateway_approval_request "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
 post_gateway_approval_request "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
 
@@ -1035,12 +1044,24 @@ assert_equals "1" "$APPROVAL_PENDING_COUNT" "adapter recovery can fetch approved
 set_current_claim "$APPROVAL_PENDING_JSON" "$APPROVAL_RUN_ID"
 
 post_gateway_event "$AGENT_TOKEN" "$APPROVAL_RUN_ID"
+APPROVAL_RESUMED_RUNNING_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
+assert_equals "running" "$APPROVAL_RESUMED_RUNNING_STATUS" "approved gateway resume re-enters running"
 APPROVAL_COMPLETE_JSON=$(post_gateway_complete "$AGENT_TOKEN" "$APPROVAL_RUN_ID" "$APPROVAL_FINAL_BODY")
 APPROVAL_FINAL_SEQ=$(printf '%s' "$APPROVAL_COMPLETE_JSON" | jq -r '.seq')
 APPROVAL_FINAL_STATUS=$(psql_scalar "SELECT status FROM agent_run WHERE id='${APPROVAL_RUN_ID}'")
 assert_equals "succeeded" "$APPROVAL_FINAL_STATUS" "approved gateway resume completes same run"
 APPROVAL_RESUME_DONE=$(psql_scalar "SELECT status FROM outbox WHERE kind='agent_job' AND method='gateway' AND lower(payload->>'run_id')=lower('${APPROVAL_RUN_ID}') AND lower(payload->>'resume_from_approval_id')=lower('${APPROVAL_ID}') LIMIT 1")
 assert_equals "done" "$APPROVAL_RESUME_DONE" "approved resume gateway job settled"
+APPROVAL_DECISION_COUNT=$(psql_scalar "SELECT count(*) FROM approval_decision WHERE workspace_id='${WORKSPACE_ID}' AND approval_id='${APPROVAL_ID}' AND client_decision_id='${APPROVAL_DECISION_ID}' AND approve=true AND status='approved'")
+assert_equals "1" "$APPROVAL_DECISION_COUNT" "approved decision ledger row"
+APPROVAL_USAGE_COUNT=$(psql_scalar "SELECT count(*) FROM usage_ledger WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND agent_member_id='${AGENT_ID}'")
+assert_equals "1" "$APPROVAL_USAGE_COUNT" "approved run usage ledger row"
+APPROVAL_AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND action IN ('approval.requested','approval.approved','agent.gateway.status','agent.gateway.completed')")
+assert_between "4" "$APPROVAL_AUDIT_COUNT" "8" "approved run audit trail"
+APPROVAL_FINAL_MESSAGE_COUNT=$(psql_scalar "SELECT count(*) FROM message WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${APPROVAL_RUN_ID}' AND author_member_id='${AGENT_ID}' AND body='${APPROVAL_FINAL_BODY}'")
+assert_equals "1" "$APPROVAL_FINAL_MESSAGE_COUNT" "approved run durable final message"
+APPROVAL_FINAL_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('${APPROVAL_RUN_ID}') AND payload->'data'->'payload'->>'body'='${APPROVAL_FINAL_BODY}' AND (payload->>'version')::bigint=(payload->'data'->>'seq')::bigint AND last_error IS NULL")
+assert_equals "1" "$APPROVAL_FINAL_BROADCAST_COUNT" "approved run realtime publication outbox"
 
 REJECTION_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$REJECTION_CLIENT_MSG_ID" "$REJECTION_BODY")
 REJECTION_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${REJECTION_CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
@@ -1126,6 +1147,29 @@ set_current_claim "$LEGACY_PENDING_JSON" "$OTHER_RUN_ID"
 post_legacy_gateway_event "$OTHER_RUN_ID"
 LEGACY_AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${OTHER_RUN_ID}' AND action='agent.gateway.status' AND via_token_id IS NULL")
 assert_equals "1" "$LEGACY_AUDIT_COUNT" "legacy flag migration case has no bearer provenance"
+
+if [ "${HERMES_GATEWAY_EQUIVALENCE_EVIDENCE_FILE:-}" != "" ]; then
+  umask 077
+  jq -n \
+    --arg channel "$CENT_CHANNEL" \
+    --arg completed_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '
+    {
+      schema: "momo.agent_path_equivalence.v1",
+      scenario: "trigger-approval-resume-final",
+      run_status_sequence: ["queued", "running", "awaiting_approval", "queued", "running", "succeeded"],
+      approval: {created: true, decision: "approved", resumed: true},
+      ledgers: {usage_ledger: true, audit_log: true},
+      final_message: {durable: true, realtime_publication: true},
+      observational: {
+        path: "gateway",
+        completed_at: $completed_at,
+        provider_metadata: "byoa-callback",
+        lease_model: "gateway-bounded-lease",
+        cent_channel: $channel
+      }
+    }' >"$HERMES_GATEWAY_EQUIVALENCE_EVIDENCE_FILE"
+  echo "[hermes-gateway] MOMO-352 evidence: $HERMES_GATEWAY_EQUIVALENCE_EVIDENCE_FILE"
+fi
 
 logout_human_session
 stop_server
