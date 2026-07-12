@@ -1614,13 +1614,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - worker 구현: gate marker 디렉터리(uid/repo/run/pid-start 검증)+상속 env+repo command를 모두 만족한 프로세스만 stale pre-clean/EXIT/final cleanup 대상으로 삼는다. active 다른 gate와 unmarked dogfood/user process는 남기고 충돌로 처리한다.
   - worker 정적 evidence: 수정·신규 shell `bash -n`, `shellcheck`, `git diff --check`, `make -n up`, `scripts/tests/test_local_gate_drift_guard.sh` PASS(fake Docker + 합성 PID/command/env/listener; 실제 Docker/DB 미접속). clean/root runtime gate 체크는 오케스트레이터 evidence 전까지 미체크 유지.
 
-### ☐ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-350 (ADR-0102 배치 합류, `#333`)
+### ☑ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-350 (ADR-0102 배치 합류, `#333`)
 > MOMO-338 성능 리뷰 후속. 현재 pending endpoint는 actor-bound read지만 lease/claim이 없어 동일 agent의 gateway 인스턴스가 겹치면 provider turn과 비용이 중복될 수 있다.
-- [ ] [swift/sql] pending job에 단일 owner lease와 만료/takeover 계약을 추가한다. `schema_v0.sql`은 수정하지 않고 신규 migration을 사용한다.
-- [ ] [swift] claim은 `FOR UPDATE SKIP LOCKED` 또는 동등한 원자 경로이며, lease owner가 아닌 callback/renew/release는 fail-closed한다.
-- [ ] [runtime] 두 gateway consumer가 같은 agent를 동시에 claim해도 provider execution은 한 번만 시작된다.
-- [ ] [runtime] consumer crash 후 lease expiry/takeover로 job이 영구 pending에 남지 않는다.
-- [ ] [security] bearer actor binding, Postgres SoT, REST-only callback, provider credential boundary를 유지한다.
+- [x] [swift/sql] `008_gateway_job_lease.sql` — outbox에 owner/acquired/expiry 멱등 추가 + shape 제약 + claim partial index. `schema_v0.sql` 무변경.
+- [x] [swift] `FOR UPDATE SKIP LOCKED` 원자 claim, non-owner callback/renew/release fail-closed(트랜잭션 밖 명시적 409, actor mismatch 403).
+- [x] [runtime] 동시 consumer 단일 provider execution + crash 후 expiry/takeover — verifier 시나리오 + 시나리오별 서버 단위 테스트(61 tests)로 이중 고정.
+- [x] [security] bearer actor binding·Postgres SoT·REST-only callback·ADR-0004 경계 유지.
+  - 오케스트레이터 검수: 게이트가 회귀 2건(approval-held 409가 lease preflight에 가려 500 / 트랜잭션 내 lease 거부가 500으로 래핑)을 검출 → resume 반려 2회로 수정·단위 테스트 고정. 3차 clean gate full PASS(`…20260712T080649Z-…-r42cd141c4758.md`), PR #339 merge(`6fcb870`), root post-merge gate PASS(`…20260712T081127Z-…-reb7c3a4b3e61.md`).
   - worker 구현: `008_gateway_job_lease.sql`이 기존 outbox에 owner/acquired/expiry를 멱등 추가하고, actor-bound pending GET이 tenant transaction의 `FOR UPDATE SKIP LOCKED` CTE로 단일 row capability를 발급한다. `schema_v0.sql` 변경 없음.
   - worker 구현: event/complete/renew/release는 exact outbox id+lease UUID+run+agent를 결속하며 lease 부재·non-owner·expired·takeover 뒤 stale owner를 transaction 밖의 명시적 409로 닫는다. Hermes adapter는 realtime을 wake-up으로만 쓰고 serial claim(limit=1) 후 provider 실행과 lease renew를 함께 감독하며 renew 상실 시 provider task를 취소한다.
   - worker 정적 evidence: server build, server 61 tests(approval-held pre-lease 409 + 동시 consumer 단일 claim + crash expiry/takeover + stale owner event/complete/renew/release 409 + expiry reclaim 포함), adapter contract 52 tests, py_compile, verifier `bash -n`/실행권한 PASS. 격리 DB 동시 claim·expiry takeover verifier와 clean/root `runtime-agent` 재검증 전이라 체크박스를 미체크 유지(`runtime-unverified`).

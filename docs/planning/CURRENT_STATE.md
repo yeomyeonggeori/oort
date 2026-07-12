@@ -42,8 +42,8 @@
 | verifier 격리 체인 | issue `#325` 본문 | MOMO-348 `#325` | `done` (PR #328, main `444ee59`) — 캐스케이드 전 프로파일 종결 | 완료 |
 | **ADR-0102 실행 경로** | `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md` | MOMO-349 `#329` | `done` (PR #337, `b5b39df`) — 승인 왕복 실트래픽 랜딩 | 1 완료 |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-350 `#330` | `done` (PR #338, `f079279`) — 실행 과정 가시화 랜딩 | 2 완료 |
-| ADR-0102 실행 경로 | 같은 패킷 | MOMO-341 `#333` | `in-progress` (goal-333 spawn) | 3 |
-| ADR-0102 실행 경로 | 같은 패킷 | MOMO-352 `#332` | `ready` (350+341 후) | 4 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-341 `#333` | `done` (PR #339, `6fcb870`) — 중복 실행 방지 랜딩 | 3 완료 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-352 `#332` | `in-progress` — **배치 마지막, 동등성 게이트** | 4 |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-351 `#331` (docs) | `done` (PR #335, `ebb3a52`) | 병렬 완료 |
 | 독립 tooling | issue `#334` 본문 | MOMO-353 `#334` (drift-guard) | `done` (PR #336, `8337ae2`) — 실전 자가 실증 | 병렬 완료 |
 
