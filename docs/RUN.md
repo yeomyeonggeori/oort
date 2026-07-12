@@ -18,7 +18,7 @@
 [`research/07-deepdive/05-agent-native-experiences.md`](../research/07-deepdive/05-agent-native-experiences.md) 참고.
 
 팀원이 내부 alpha를 바로 따라 할 때는 [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md)를 먼저 본다.
-그 문서는 local tools/env/gate 순서, `MomoMacDevApp` 실행, seeded 계정/채널/김인턴 assumptions,
+그 문서는 local tools/env/gate 순서, `MomoMacDevApp` 실행, seeded 사람/채널과 agent pairing assumptions,
 초대/자가가입, diagnostics bundle, bug report template, known limitations를 한 흐름으로 묶은 실행 런북이다.
 AWS에서 1주일짜리 팀 테스트 host를 띄우는 경우에는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)를
 같이 본다. 해당 문서는 EC2/Lightsail topology, 비용 추정, 보안그룹, DNS/TLS,
@@ -286,9 +286,9 @@ token/API key env var가 momo smoke process에 있으면 credential-boundary 오
 `runtime-unverified(external provider credentials)` evidence를 남기고 종료한다. 반대로
 `external-hermes`를 명시했는데 URL이 non-loopback `http://`이거나, local opt-in 없는
 localhost/mock/placeholder key면 fail-fast한다. credentials가 유효하면 OpenAI-compatible SSE preflight, local
-MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, Kim Intern
-active agent member + `#agent-lab` channel membership precondition, `@김인턴` 1왕복까지
-시도한다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
+MomoServer/AgentWorker/OutboxRelay boot, `/v1/agent-runtime/status` redaction, verifier-owned
+격리 agent + channel fixture, `@hermes` 1왕복까지 시도한다. persistent dogfood roster에는
+접근하지 않는다. API key는 stdout/evidence/log redacted artifact에 출력하지 않는다.
 
 #### 2.1.2 Hermes gateway native platform mode
 
@@ -297,10 +297,18 @@ messaging platform으로 인식하는 native adapter path를 추가한다. 이 �
 write는 **momo REST -> Postgres -> outbox**로만 들어오며, adapter는 DB/Centrifugo에 직접 쓰지
 않는다.
 
+Dogfood 온보딩 순서는 고정이다. 에이전트는 migration/local-alpha 시드로 생기지 않는다.
+
+1. `scripts/momo hermes-gateway-init`으로 secret 없는 pre-pairing env 템플릿을 만든다.
+2. momo 앱의 **Members + → 에이전트 초대**에서 Hermes pairing을 완료하고 채널에 초대한다.
+3. pairing surface에서 scoped credential을 1회 발급한다.
+4. 발급 원문과 paired member/channel ID를 `~/.momo/hermes-gateway.env`에 기록한다.
+5. `scripts/momo hermes-gateway-install-plugin` 후 `scripts/momo hermes-gateway-status`로 확인한다.
+
 ```sh
 scripts/momo hermes-gateway-init
-scripts/momo hermes-gateway-status
 scripts/momo hermes-gateway-install-plugin
+scripts/momo hermes-gateway-status
 scripts/momo hermes-gateway-smoke
 scripts/momo hermes-gateway-smoke --real
 ```
@@ -349,6 +357,16 @@ token은 이 파일에 들어가지 않고 Hermes/provider runtime 내부에만 
 plugin install, provider-login marker, momo server 상태를 분리해서 evidence로 남기며,
 사용자가 Hermes 내부에서 provider OAuth/login을 끝낸 뒤에는 다음처럼 실제 1왕복까지 시도한다.
 
+2026-07-12 이전 dogfood DB에서 deterministic 김인턴/Hermes가 이미 시드됐다면 자동 삭제하지
+않는다. Hermes/AgentWorker를 먼저 중지하고 DB owner URL을 명시한 뒤 아래 opt-in 명령으로 두
+역사적 고정 ID만 retire하고 새로 pairing한다. 이 명령은 `--yes` 없이는 DB에 연결하지 않고,
+신원 불일치 시 transaction을 중단한다.
+
+```sh
+DATABASE_URL='postgres://<owner>@<host>/<dogfood-db>' \
+  scripts/momo cleanup-seeded-agents --yes
+```
+
 ```sh
 AGENT_GATEWAY_MODE=gateway \
 MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 \
@@ -360,7 +378,7 @@ scripts/momo start
 MOMO_HERMES_PROVIDER_READY=1 scripts/momo hermes-gateway-smoke --real --trigger
 ```
 
-macOS dogfood 앱에서는 Hermes가 서버/fixture에 존재해도 처음부터 roster에 보이지 않는다.
+macOS dogfood 앱에서는 초대 전 Hermes member 자체가 존재하지 않으며 roster에도 보이지 않는다.
 멤버 섹션의 `+` 버튼에서 **에이전트 초대**를 선택하고 `@hermes` alias, 표시 이름, endpoint
 label, model label, permission scope, avatar를 확인한다. 앱은 pairing manifest와 invite code를
 생성하고 copy/export affordance를 제공한다. manifest에는 momo-facing connection metadata와
@@ -582,17 +600,20 @@ diagnostics directory/archive path가 포함된다.
 
 ## 4. 마이그레이션 — `make migrate`
 
-스키마 + 데모 시드를 **번호순**으로 적용한다(`server/Migrations/*.sql`).
+스키마 + bootstrap 시드를 **번호순**으로 적용한다(`server/Migrations/*.sql`).
 
 ```sh
 export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo   # .env와 동일 값
 make migrate                                                   # = sh scripts/migrate.sh
 ```
 
-- 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(데모 시드), `003_onboarding.sql`(M2 invite_code + redemption audit, schema_v0.sql 미수정).
+- 적용 대상(현재): `001_init.sql`(정본 스키마 + 보강 — outbox/cost/APNs), `002_seed.sql`(workspace/human/basic channels; agent는 opt-in), `003_onboarding.sql`(M2 invite_code + redemption audit, schema_v0.sql 미수정), `006_local_hermes_agent_seed.sql`(agent demo/e2e opt-in).
 - `scripts/migrate.sh`는 `schema_migrations` 테이블로 적용 이력을 추적 → **멱등 재실행 안전**
   (이미 적용된 버전은 SKIP). 각 파일은 `--single-transaction`으로 원자 적용.
 - 연결: `DATABASE_URL` 우선, 없으면 표준 `PG*` 환경변수(`PGHOST`/`PGUSER`/…) 폴백.
+- 기본 `MOMO_AGENT_SEED_MODE=none`: persistent dogfood/local-alpha에는 사람과 기본 채널만
+  생기며 agent는 0이다. deterministic demo/e2e 전용 러너만
+  `MOMO_AGENT_SEED_MODE=demo|e2e`를 명시한다. 이 opt-in을 일반 dogfood DB에 사용하지 않는다.
 
 `psql`이 없으면 스크립트는 **실패하지 않고** 안내(적용 대상 목록)만 출력하고 0으로 종료한다
 (CI/로컬 친화). 즉 `make migrate` 자체는 psql 부재 환경에서도 깨지지 않는다.
@@ -950,7 +971,8 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh -
 - 기본 smoke/dev app은 인메모리만 쓰므로 DB/Centrifugo/hermes **런타임 의존이 없다**.
   `MOMO_SERVER_BASE_URL`이 있으면 `MomoMacDevApp`은 MomoServer REST 모드로 전환해
   `/v1/auth/login`, `GET/POST /v1/workspaces/{ws}/channels/{ch}/messages`를 사용한다.
-  기본값은 `server/Migrations/002_seed.sql`의 demo workspace/channel/member fixture다.
+  기본값은 `server/Migrations/002_seed.sql`의 demo workspace/human/channel fixture다. agent는
+  pairing invite 전에는 존재하지 않는다.
 - REST dev mode 환경변수:
   `MOMO_SERVER_BASE_URL`(필수), `MOMO_ACCESS_TOKEN`(선택, 없으면 `/v1/auth/login`),
   `MOMO_LOGIN_EMAIL`/`MOMO_LOGIN_PASSWORD`(내부 alpha seed는 `demo@momo.local`/`dev-password`;

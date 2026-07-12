@@ -82,9 +82,9 @@ set -a; . ./.env.worktree; set +a
 curl -fsS "http://127.0.0.1:${PORT:-8080}/health"
 ```
 
-## 3. Seeded Alpha Assumptions
+## 3. Local Alpha Bootstrap Assumptions
 
-`server/Migrations/002_seed.sql` creates the deterministic demo world:
+`server/Migrations/002_seed.sql` creates the deterministic human/bootstrap world by default:
 
 | Object | Value |
 |---|---|
@@ -94,34 +94,40 @@ curl -fsS "http://127.0.0.1:${PORT:-8080}/health"
 | Human owner | `데모 사용자` / handle `demo` |
 | Login email | `demo@momo.local` |
 | Login password | `dev-password` |
-| Agent member | `김인턴` / handle `kim-intern` |
-| Agent model | `hermes-agent` |
 | Channels | `#general`, `#agent-lab` |
 | `#general` id | `00000000-0000-7000-8000-000000000201` |
 | `#agent-lab` id | `00000000-0000-7000-8000-000000000202` |
 
-Both the demo user and Kim Intern are active members of both seeded channels. First message seq in each seeded channel starts at `1` after the first send.
+The demo user is an active member of both seeded channels. Fresh persistent/local-alpha has
+zero agent members; first message seq in each seeded channel starts at `1` after the first send.
+Only deterministic demo/e2e runners may set `MOMO_AGENT_SEED_MODE=demo|e2e`.
 
-Kim Intern internal alpha contract:
+Hermes internal alpha contract after pairing:
 
 | Check | Expected |
 |---|---|
-| Workspace invitation | `member.kind='agent'`, `member.status='active'`, display name `김인턴`, handle `kim-intern` |
-| Agent profile | `agent.member_id` = Kim Intern member id, model `hermes-agent`, owner = seeded demo user |
-| Channel invitation | active `membership` in `#agent-lab`; `#general` is also seeded for broad smoke |
+| Workspace invitation | pairing creates `member.kind='agent'`, `member.status='active'`, display name/handle chosen by the operator |
+| Agent profile | pairing creates the agent profile owned by the human operator |
+| Channel invitation | pairing adds active membership only to the explicitly invited channel |
 | Status visibility | macOS sidebar Local AI chip or `GET /v1/agent-runtime/status` shows `Mock`, `Available`, or `Degraded` with redacted endpoint/key details |
 | Send path | only REST `POST /messages` creates the mention; clients do not publish directly to Centrifugo |
 
-If a later workspace seed omits Kim Intern from `#agent-lab`, an owner/admin must add the existing agent member through the channel membership API before the `@김인턴` smoke:
+Create the agent through the app pairing wizard before the `@hermes` smoke. Do not substitute a
+human `/v1/join` invite or hard-code the historical `...102`/`...103` seed identities. The pairing
+wizard creates the agent, channel invitation, and scoped credential in that order.
 
 ```bash
-curl -fsS -X POST "$BASE_URL/v1/workspaces/$WORKSPACE_ID/channels/00000000-0000-7000-8000-000000000202/members" \
-  -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"memberId":"00000000-0000-7000-8000-000000000102","role":"member"}'
+scripts/momo hermes-gateway-init
+# App: Members + -> Invite Agent -> pair Hermes -> invite to #agent-lab
+# Pairing: issue credential once, then update ~/.momo/hermes-gateway.env
 ```
 
-This is a channel invite/activation path for an existing agent member, not a human `/v1/join` invite code. Do not create a new human member for Kim Intern.
+For a pre-MOMO-355 dogfood DB, retire only the historical fixed seed identities with explicit
+operator consent before pairing:
+
+```bash
+DATABASE_URL='postgres://<owner>@<host>/<dogfood-db>' scripts/momo cleanup-seeded-agents --yes
+```
 
 There is no fixed raw invite code in seed data. Create a fresh one through the authenticated invite API and copy the returned `code` immediately.
 
@@ -234,22 +240,24 @@ make down
 4. Expected: joined user can log in, sees public channels, and cannot escalate to owner/platform admin through a public invite.
 5. If the code is lost, revoke that invite and create a new one; only masked previews are durable.
 
-### C. Kim Intern
+### C. Invited Hermes
 
-1. Confirm Kim Intern is invited: select `#agent-lab`, verify the Members list includes `김인턴` with the `AGENT` badge, or call `/v1/workspaces/$WORKSPACE_ID/members?kind=agent` and check `channelIds` includes `00000000-0000-7000-8000-000000000202`.
-2. Confirm provider connectivity: check the sidebar Kim Intern chip or `curl -fsS "$BASE_URL/v1/agent-runtime/status" | jq .`.
-3. For local mock smoke, ensure mock Hermes and AgentWorker are running, then send `@김인턴 상태 알려줘` or `@kim-intern summarize this channel` in `#agent-lab`.
-4. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
-5. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
-6. For real-provider smoke, put only Hermes-facing credentials in an out-of-repo provider env file. Use [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) as the env contract.
-7. Default no-secret gate:
+1. Before pairing, confirm the agent roster and mention candidates are empty.
+2. Run `scripts/momo hermes-gateway-init`, complete **Members + → Invite Agent**, issue the scoped credential, and update the env file.
+3. Confirm the invited Hermes appears in `#agent-lab` with the `AGENT` badge.
+4. Confirm provider connectivity with `scripts/momo hermes-gateway-status` or `curl -fsS "$BASE_URL/v1/agent-runtime/status" | jq .`.
+5. For local mock smoke, ensure mock Hermes and AgentWorker are running, then send `@hermes 상태 알려줘` in `#agent-lab`.
+6. Expected: an `agent_run`/`agent_job` is created, `agent.status` or `agent.partial` progress may appear, and final durable output returns as a channel timeline message.
+7. Ordering authority remains the final channel `message.seq`; `agent:` events are progress only.
+8. For real-provider smoke, put only Hermes-facing credentials in an out-of-repo provider env file. Use [`docs/external-agent-provider/README.md`](external-agent-provider/README.md) as the env contract.
+9. Default no-secret gate:
 
    ```bash
    scripts/local_gate.sh --profile external-agent-provider
    ```
 
    It must PASS as an explicit `runtime-unverified(external provider credentials)` skip.
-8. Credentialed external runtime gate:
+10. Credentialed external runtime gate:
 
    ```bash
    EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
@@ -266,8 +274,8 @@ make down
      --secret-env "$HOME/.momo/external-agent.env"
    ```
 
-   With credentials, evidence includes the Kim Intern invite precondition, `/v1/agent-runtime/status` readiness, and one `channel message -> agent run -> external runtime call -> durable agent response` roundtrip.
-9. Check the sidebar Kim Intern chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted `degradedReason`/diagnostic hint.
+   With credentials, evidence includes the isolated Hermes fixture invite precondition, `/v1/agent-runtime/status` readiness, and one `channel message -> agent run -> external runtime call -> durable agent response` roundtrip.
+11. Check the sidebar Hermes chip before filing bugs: `Mock` is expected for repo-local mock Hermes, `Available` indicates a configured external path, and `Degraded` should include a redacted `degradedReason`/diagnostic hint.
 
 ### D. Diagnostics
 

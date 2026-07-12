@@ -673,7 +673,9 @@ run_cmd docker-ps docker compose --env-file "$ENV_FILE" \
   -f "$REPO_ROOT/infra/docker-compose.yml" \
   -f "$COMPOSE_OVERRIDE" ps
 
-run_cmd migrate sh "$REPO_ROOT/scripts/migrate.sh"
+# Persistent local-alpha starts with people/channels only. Agents appear after
+# the pairing invite; ignore a caller's demo/e2e seed opt-in at this boundary.
+run_cmd migrate env MOMO_AGENT_SEED_MODE=none sh "$REPO_ROOT/scripts/migrate.sh"
 run_cmd verify-rls sh "$REPO_ROOT/scripts/verify_rls.sh"
 
 if [ "$HERMES_MODE" = "mock" ]; then

@@ -3,7 +3,7 @@
 # scripts/verify_external_agent_provider.sh — external agent provider/runtime gate
 #
 # Opt-in credentialed smoke for an external OpenAI-compatible agent runtime
-# using Hermes as the seeded agent member. With no external credentials it
+# using its own isolated Hermes agent fixture. With no external credentials it
 # exits successfully with explicit
 # runtime-unverified evidence so default local/mock gates stay deterministic.
 #
@@ -302,7 +302,7 @@ SQL
   ENV_FILE=/dev/null DATABASE_URL= \
     PGHOST="$POSTGRES_HOST" PGPORT="$POSTGRES_PORT" PGDATABASE="$POSTGRES_DB" \
     PGUSER="$POSTGRES_USER" PGPASSWORD="$POSTGRES_PASSWORD" \
-    "$REPO_ROOT/scripts/migrate.sh" >/dev/null
+    MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh" >/dev/null
 
   PGPASSWORD="$POSTGRES_PASSWORD" "$PSQL_BIN" \
     -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d postgres \
@@ -437,7 +437,7 @@ write_evidence() {
     fi
     if [ "${RESULT:-}" = "SKIP" ]; then
       echo "- Skip reason: ${SKIP_REASON:-external provider credentials are not configured}"
-      echo "- Internal alpha invite precondition: expected seeded/admin contract is Hermes as active agent member \`hermes\` in \`#agent-lab\`; runtime DB evidence is not run without external credentials."
+      echo "- Invite precondition: the credentialed verifier self-seeds isolated Hermes/#agent-lab fixtures; runtime DB evidence is not run without external credentials."
       echo "- Coverage: default local/internal-alpha mock gates remain deterministic; Codex/OpenAI credentials remain provider-owned and unobserved by momo."
       echo "- Not covered: real external runtime side effect remains \`runtime-unverified(external provider credentials)\`."
     elif [ "${RESULT:-}" = "PASS" ]; then

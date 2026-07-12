@@ -96,6 +96,7 @@ services:
     working_dir: /workspace
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-momo}:${POSTGRES_PASSWORD:-change-me-postgres}@postgres:5432/${POSTGRES_DB:-momo}
+      MOMO_AGENT_SEED_MODE: e2e
     command: ["sh", "-lc", "sh scripts/migrate.sh"]
     volumes:
       - *source-mount

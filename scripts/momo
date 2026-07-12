@@ -34,13 +34,15 @@ Commands:
   hermes-init Create ~/.momo/local-hermes-provider.env from the safe template.
   hermes-smoke Run the credentialed Hermes provider smoke wrapper.
   hermes-gateway-init
-              Create ~/.momo/hermes-gateway.env for Hermes platform adapter pairing.
+              Create the pre-pairing ~/.momo/hermes-gateway.env template.
   hermes-gateway-status
               Show momo-facing Hermes gateway adapter status.
   hermes-gateway-install-plugin
               Link/copy adapters/hermes into the local Hermes plugin directory.
   hermes-gateway-smoke
               Run mock smoke, or pass --real [--trigger] for real Hermes evidence.
+  cleanup-seeded-agents
+              Retire historical dogfood seed agents; requires explicit --yes.
   stop        Stop the app and the local alpha stack when it can be identified.
   stop-app    Stop the macOS app only.
   stop-stack  Stop the local alpha stack only.
@@ -715,7 +717,7 @@ RUBY
 }
 
 hermes_gateway_init() {
-  local env_file env_dir agent_token home_channel default_channel
+  local env_file env_dir agent_token home_channel default_channel agent_member_id
   env_file="$(gateway_env_file)"
   env_dir="$(dirname "$env_file")"
   reject_repo_provider_env "$env_file" || return 1
@@ -751,6 +753,13 @@ hermes_gateway_init() {
         info "configured MOMO_HOME_CHANNEL from the existing default channel"
       fi
     fi
+    agent_member_id="$(provider_env_value "$env_file" MOMO_AGENT_MEMBER_ID)"
+    case "$agent_member_id" in
+      00000000-0000-7000-8000-000000000102|00000000-0000-7000-8000-000000000103)
+        warn "This env still points at a historical seed agent."
+        warn "Run scripts/momo cleanup-seeded-agents --yes, pair Hermes, then replace the member/channel IDs."
+        ;;
+    esac
   else
     umask 077
     cat >"$env_file" <<EOF
@@ -759,13 +768,14 @@ hermes_gateway_init() {
 MOMO_API_URL=${BASE_URL}
 MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:${CENT_PORT}/connection/websocket
 MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
-MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
+MOMO_AGENT_MEMBER_ID=replace-with-paired-agent-member-id
 MOMO_AGENT_HANDLE=hermes
 # Paste the one-time-issued credential from momo's agent pairing surface.
 MOMO_AGENT_TOKEN=replace-with-one-time-agent-token
-MOMO_DEFAULT_CHANNEL_ID=00000000-0000-7000-8000-000000000202
-MOMO_HOME_CHANNEL=00000000-0000-7000-8000-000000000202
-MOMO_HOME_CHANNEL_NAME=agent-lab
+MOMO_DEFAULT_CHANNEL_ID=replace-with-invited-channel-id
+# Hermes operational delivery target; set after pairing to the invited channel.
+MOMO_HOME_CHANNEL=replace-with-invited-channel-id
+MOMO_HOME_CHANNEL_NAME=replace-with-invited-channel-name
 EOF
     chmod 600 "$env_file"
     info "created Hermes gateway env: $env_file"
@@ -777,12 +787,16 @@ EOF
   plugin:  $REPO_ROOT/adapters/hermes
   target:  $(hermes_plugin_dir)
 
-To run momo in gateway mode:
+1. Start momo in gateway mode (fresh local-alpha has no agent members):
   AGENT_GATEWAY_MODE=gateway MOMO_ALLOW_LEGACY_GATEWAY_SECRET=0 scripts/momo up
 
-Then issue a scoped credential from momo pairing and replace only
-MOMO_AGENT_TOKEN in the env file. The adapter does not log in as a human and
-does not mint or refresh its own credential.
+2. In the app, Members + -> Invite Agent, complete the Hermes pairing invite,
+   and add it to the intended channel. Only then does Hermes appear in roster
+   and mention candidates.
+
+3. Issue the scoped per-agent credential from pairing. Copy the one-time token,
+   paired member ID, and invited channel ID into the env file. The adapter does
+   not log in as a human and does not mint or refresh its own credential.
 
 The generated env also sets MOMO_HOME_CHANNEL before startup. Change that UUID
 and MOMO_HOME_CHANNEL_NAME in the env file if Hermes should use another channel;
@@ -886,6 +900,12 @@ hermes_gateway_status() {
   else
     echo "  agent token: configured (redacted)"
   fi
+  if is_placeholder_value "$(provider_env_value "$env_file" MOMO_AGENT_MEMBER_ID)"; then
+    echo "  pairing: incomplete"
+    echo "  next: Members + -> Invite Agent, pair Hermes, then update member/channel IDs"
+  else
+    echo "  pairing: member id configured"
+  fi
   if health_check; then
     echo "  momo server: reachable at $BASE_URL"
   else
@@ -954,6 +974,10 @@ case "$command" in
   hermes-gateway-real-smoke)
     shift || true
     hermes_gateway_real_smoke "$@"
+    ;;
+  cleanup-seeded-agents)
+    shift || true
+    "$REPO_ROOT/scripts/cleanup_dogfood_seed_agents.sh" "$@"
     ;;
   stop)
     stop_app
