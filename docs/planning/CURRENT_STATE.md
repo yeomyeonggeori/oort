@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer), **ADR-0102(실행 경로 — Option C 이중 경로 + 서버 보장 매트릭스, 2026-07-12)** 전부 Accepted. 다음 결정 큐는 ADR-0103(로드맵 정렬)부터.
-- 현재 구현 체인: ADR-0101 Phase 1 + verifier 격리 체인 완료 (root 전 프로파일 green). **새 배치: ADR-0102 파생 6 goal ready** — 패킷 `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md`. 순서: 349(#329)→350(#330)→341(#333)→352(#332), 병렬: 351(#331 docs)·353(#334 drift-guard). 핵심 성과물: **승인 UX가 실트래픽(gateway)에서 처음 동작**.
+- 현재 구현 체인: **ADR-0102 배치 진행 — 349/351/353 랜딩 완료** (2026-07-12, root runtime-agent gate green 유지). **승인 왕복이 gateway 실트래픽 경로에 랜딩** — dogfood에서 @hermes의 승인 필요 tool-call이 인박스에 뜨고 사람 결정으로 재개된다. 다음 ready: MOMO-350(`#330`, 의존 충족) → 341(`#333`) → 352(`#332`). 패킷: `handoffs/2026-07-12-adr-0102-execution-path.md`.
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -40,12 +40,12 @@
 | verifier 격리 체인 | issue 본문이 패킷 역할 (`#318` 패턴 승계) | MOMO-346 `#322` | `done` (PR #326, main `beceaa1`) — 캐스케이드 종결 | 완료 |
 | MOMO-339 후속 | issue `#324` 본문 (design review High/Medium) | MOMO-347 `#324` | `done` (PR #327, main `51db851`) | 완료 |
 | verifier 격리 체인 | issue `#325` 본문 | MOMO-348 `#325` | `done` (PR #328, main `444ee59`) — 캐스케이드 전 프로파일 종결 | 완료 |
-| **ADR-0102 실행 경로** | `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md` | MOMO-349 `#329` | `ready` | 1 |
-| ADR-0102 실행 경로 | 같은 패킷 | MOMO-350 `#330` | `ready` (349 후) | 2 |
+| **ADR-0102 실행 경로** | `docs/planning/handoffs/2026-07-12-adr-0102-execution-path.md` | MOMO-349 `#329` | `done` (PR #337, `b5b39df`) — 승인 왕복 실트래픽 랜딩 | 1 완료 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-350 `#330` | `ready` — **의존 충족, 다음 spawn 대상** | 2 |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-341 `#333` | `ready` (350 후) | 3 |
-| ADR-0102 실행 경로 | 같은 패킷 | MOMO-352 `#332` | `ready` (349+350+341 후) | 4 |
-| ADR-0102 실행 경로 | 같은 패킷 | MOMO-351 `#331` (docs) | `ready` | 병렬 |
-| 독립 tooling | issue `#334` 본문 | MOMO-353 `#334` (drift-guard) | `ready` | 병렬 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-352 `#332` | `ready` (350+341 후) | 4 |
+| ADR-0102 실행 경로 | 같은 패킷 | MOMO-351 `#331` (docs) | `done` (PR #335, `ebb3a52`) | 병렬 완료 |
+| 독립 tooling | issue `#334` 본문 | MOMO-353 `#334` (drift-guard) | `done` (PR #336, `8337ae2`) — 실전 자가 실증 | 병렬 완료 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 

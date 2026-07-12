@@ -1581,13 +1581,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] [manual] design-review 에이전트 리포트 Blocker 0 (AGENTS.md §5 macOS UI 규칙) — fresh-context 재판정 PASS (High 2·Medium 4 → MOMO-347 `#324`).
 - [x] [macos-ui] worktree clean gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md` (스냅샷 참조 6종은 정본 게이트 머신 재기록, 84 tests green). root post-merge macos-ui는 선재 `verify_macos_real_backend_ui.sh` dogfood 결합(→ MOMO-348 `#325`)으로 별도 추적. PR #323 merge (`881518b`).
 
-### ☐ MOMO-349 수용기준 — Gateway 승인 왕복 `[swift/python/runtime-agent]` · 의존: MOMO-337, MOMO-338 (`#329`, ADR-0102)
+### ☑ MOMO-349 수용기준 — Gateway 승인 왕복 `[swift/python/runtime-agent]` · 의존: MOMO-337, MOMO-338 (`#329`, ADR-0102)
 - [x] gateway 콜백에 `approval_request` 이벤트: `approval` 생성 + run `awaiting_approval` 전이 (기존 상태머신 재사용, 스키마 변경 금지).
 - [x] 사람 결정 시 기존 `resume_approval` outbox가 gateway에도 resume `agent.job`을 publish, 어댑터가 재개/중단 처리.
 - [x] actor/run binding fail-closed, 단일 쓰기경로 불변, 승인 대기 run이 macOS 승인 인박스에 실데이터 노출.
 - [x] 어댑터 tests + `verify_hermes_gateway_adapter.sh` 승인/거부 왕복 시나리오(격리 DB 패턴) + 정본 3종 갱신.
 - [x] diff-scoped 보안/correctness 리뷰: approval-held/terminal late completion 409, reject cancellation ack 상태 결속, callback 크기 상한, UUID case 정규화 확인(Blocker 0).
-- [ ] worktree clean `runtime-agent` gate + root post-merge gate (오케스트레이터가 merge 전/후 수행).
+- [x] worktree clean `runtime-agent` gate + root post-merge gate.
+  - 오케스트레이터 재검증: 보안 리뷰(actor↔run binding `requireRunActorBinding` 상속 확인) + 어댑터 46 tests 재실행 OK. main 위 rebase(1c7e766) 후 worktree clean gate full PASS(`local-gate-runtime-agent-20260712T060222Z-…-rc85f176c30ed.md`), PR #337 merge(`b5b39df`), root post-merge full gate PASS(`local-gate-runtime-agent-20260712T061006Z-…-r00cd892de0ef.md`, digest 3중 보존). **승인 왕복이 gateway(BYOA) 실트래픽 경로에 랜딩.**
 
 ### ☐ MOMO-350 수용기준 — Gateway status/partial 브로드캐스트 `[swift/python/runtime-agent]` · 의존: MOMO-349 (`#330`, ADR-0102)
 - [ ] `/gateway/events`가 `thinking`/`streaming` 델타를 수용해 `agent.status`/`agent.partial`로 `agent:` namespace 브로드캐스트.
@@ -1599,15 +1600,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 동일 시나리오(트리거→승인→resume→최종)를 worker/gateway 2회 실행, run 전이·approval·usage/audit·durable message 동등성 비교 (허용 차이는 allowlist).
 - [ ] `runtime-agent` profile 배선 + clean/root gate + 정본 3종.
 
-### ☐ MOMO-351 수용기준 — 이중 경로 문서 재정렬 `[docs]` · 의존 없음 (`#331`, ADR-0102)
-- [ ] adapter-contract-v0 "기본 경로 아님" 문구 → 이중 경로 계약으로 교체. L4 §6·README·overview 다이어그램 재작성.
-- [ ] SD-5 API 표면 소급 승인 명시 + legacy gateway 시크릿 폐기 일정 문서화 + `docs` gate PASS.
+### ☑ MOMO-351 수용기준 — 이중 경로 문서 재정렬 `[docs]` · 의존 없음 (`#331`, ADR-0102)
+- [x] adapter-contract-v0 "기본 경로 아님" 문구 → 이중 경로 계약으로 교체. L4 §6·README·overview 다이어그램 재작성 (미구현 행은 normative target으로 정직 마킹).
+- [x] SD-5 API 표면 소급 승인 명시 + legacy gateway 시크릿 폐기 일정(동등성 게이트 결속) 문서화. 오케스트레이터 clean `docs` gate PASS, PR #335 merge (`ebb3a52`).
 > Worker #331 handoff: 계약/다이어그램/ADR-0101 연동/SD-5 소급 승인 문구를 반영했다. acceptance와 gate 체크박스는 오케스트레이터의 merge 전 `docs` evidence까지 미체크로 유지한다.
 
-### ☐ MOMO-353 수용기준 — 로컬 게이트 drift-guard `[tooling]` · 의존 없음 (`#334`)
-- [ ] `ensure_runtime_env.sh`가 실행 중 Centrifugo running-config를 repo config와 대조 (불일치 시 안내/opt-in 재시작).
-- [ ] 게이트 pre-clean이 이전 게이트 런 잔류 verifier 프로세스를 소유권 증명 기반으로 자동 정리 (dogfood/사용자 프로세스 절대 비접촉 + 오탐 방지 검증).
-- [ ] 실패 경로 포함 게이트 종료 시 reaping 보강 + clean/root gate + 정본 3종.
+### ☑ MOMO-353 수용기준 — 로컬 게이트 drift-guard `[tooling]` · 의존 없음 (`#334`)
+- [x] `ensure_runtime_env.sh`가 실행 중 Centrifugo 컨테이너의 config fingerprint(생성 시 고정 SHA-256)를 repo config와 대조 — 불일치 시 fail-closed 안내 / `MOMO_CENTRIFUGO_AUTO_RECREATE=1` opt-in 재생성.
+- [x] 게이트 pre-clean이 gate-run ownership marker(uid/repo/run_id/상속 env)를 증명한 프로세스만 정리 — 합성 dogfood(28180)/사용자 프로세스 비접촉 격리 테스트를 오케스트레이터가 재실행 PASS.
+- [x] 실패 경로 포함 EXIT reaping 보강. worktree clean gate PASS(`…20260712T054632Z-…-rcce46bc6339b.md`), PR #336 merge(`8337ae2`), root post-merge gate PASS(`…20260712T055710Z-…-r4f5c23a240f1.md`) — momo_main 컨테이너 fingerprint 이관은 opt-in 재생성으로 1회 수행. drift guard가 배치 내 worktree 2곳의 구세대 컨테이너를 실전 감지·이관하며 자가 실증.
   - worker 구현: compose 생성 시 repo config SHA-256 fingerprint를 고정하고 pre/post-start guard가 실행 컨테이너 fingerprint를 비교한다. drift는 fail-closed하며 `MOMO_CENTRIFUGO_AUTO_RECREATE=1`만 Centrifugo를 강제 재생성한다.
   - worker 구현: gate marker 디렉터리(uid/repo/run/pid-start 검증)+상속 env+repo command를 모두 만족한 프로세스만 stale pre-clean/EXIT/final cleanup 대상으로 삼는다. active 다른 gate와 unmarked dogfood/user process는 남기고 충돌로 처리한다.
   - worker 정적 evidence: 수정·신규 shell `bash -n`, `shellcheck`, `git diff --check`, `make -n up`, `scripts/tests/test_local_gate_drift_guard.sh` PASS(fake Docker + 합성 PID/command/env/listener; 실제 Docker/DB 미접속). clean/root runtime gate 체크는 오케스트레이터 evidence 전까지 미체크 유지.
