@@ -642,11 +642,6 @@ struct AgentGatewayRoutes: Sendable {
             runID: runID
         )
         let dto = try await request.decode(as: AgentGatewayCompleteRequest.self, context: context)
-        let lease = try dto.validatedLease()
-        let completionStatus = try Self.normalizedCompletionStatus(
-            dto.status,
-            error: dto.error
-        )
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
 
         let result = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
@@ -655,6 +650,10 @@ struct AgentGatewayRoutes: Sendable {
             else {
                 return CompletionResult.notFound
             }
+            if Self.completionPreLeaseDisposition(for: run.status) == .approvalHeld {
+                return CompletionResult.approvalHeld(status: run.status)
+            }
+            let lease = try dto.validatedLease()
             try await Self.requireGatewayLease(
                 conn: conn,
                 logger: db.logger,
@@ -681,10 +680,11 @@ struct AgentGatewayRoutes: Sendable {
             if Self.isTerminalRunStatus(run.status) {
                 return CompletionResult.terminal(status: run.status)
             }
-            if Self.isApprovalHeldRunStatus(run.status) {
-                return CompletionResult.approvalHeld(status: run.status)
-            }
 
+            let completionStatus = try Self.normalizedCompletionStatus(
+                dto.status,
+                error: dto.error
+            )
             let safeError = Self.sanitizedGatewayError(dto.error, gatewaySecret: config.secret)
             let body = Self.timelineBody(
                 dto: dto,
@@ -879,6 +879,11 @@ struct AgentGatewayRoutes: Sendable {
         case completed(messageID: UUID, seq: Int64, status: String)
     }
 
+    enum CompletionPreLeaseDisposition: Equatable {
+        case approvalHeld
+        case requireLease
+    }
+
     private struct ExistingFinalMessage {
         let messageID: UUID
         let seq: Int64
@@ -1007,6 +1012,12 @@ struct AgentGatewayRoutes: Sendable {
 
     static func isApprovalHeldRunStatus(_ status: String) -> Bool {
         status == "awaiting_approval" || status == "paused"
+    }
+
+    static func completionPreLeaseDisposition(
+        for runStatus: String
+    ) -> CompletionPreLeaseDisposition {
+        isApprovalHeldRunStatus(runStatus) ? .approvalHeld : .requireLease
     }
 
     private static func existingFinalMessage(

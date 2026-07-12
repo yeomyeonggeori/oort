@@ -410,6 +410,24 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(AgentGatewayRoutes.isApprovalHeldRunStatus("queued"))
     }
 
+    func testAgentGatewayCompletionRejectsApprovalHeldRunBeforeLeaseValidation() {
+        XCTAssertEqual(
+            AgentGatewayRoutes.completionPreLeaseDisposition(for: "awaiting_approval"),
+            .approvalHeld
+        )
+        XCTAssertEqual(
+            AgentGatewayRoutes.completionPreLeaseDisposition(for: "paused"),
+            .approvalHeld
+        )
+        for status in ["queued", "running", "succeeded", "failed", "cancelled", "timed_out"] {
+            XCTAssertEqual(
+                AgentGatewayRoutes.completionPreLeaseDisposition(for: status),
+                .requireLease,
+                "\(status) must retain exact-owner lease validation"
+            )
+        }
+    }
+
     func testAgentGatewayProgressEventsDecodeWithBoundedStreamingDelta() throws {
         let eventID = UUID(uuidString: "00000000-0000-7350-8000-000000350001")!
         let thinking = try JSONDecoder().decode(
