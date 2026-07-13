@@ -53,6 +53,17 @@ public struct TypingActivity: Identifiable, Sendable, Equatable {
     }
 }
 
+public enum AgentWorkSurfaceError: Sendable, Equatable, CaseIterable {
+    case channelRequired
+    case unsupportedServer
+    case activeAgentRequired
+    case titleRequired
+    case briefRequired
+    case creationFailed
+    case historyFailed
+    case detailFailed
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -117,9 +128,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var workRunLoadingChannels: Set<ChannelID> = []
     @Published public private(set) var workRunDetailLoadingIds: Set<RunID> = []
     @Published public private(set) var isCreatingWorkRun = false
-    @Published public private(set) var workCreationError: String?
-    @Published public private(set) var workHistoryErrorsByChannel: [ChannelID: String] = [:]
-    @Published public private(set) var workDetailErrorsById: [RunID: String] = [:]
+    @Published public private(set) var workCreationError: AgentWorkSurfaceError?
+    @Published public private(set) var workHistoryErrorsByChannel: [ChannelID: AgentWorkSurfaceError] = [:]
+    @Published public private(set) var workDetailErrorsById: [RunID: AgentWorkSurfaceError] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -521,11 +532,11 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public var selectedWorkHistoryError: String? {
+    public var selectedWorkHistoryError: AgentWorkSurfaceError? {
         selectedChannelId.flatMap { workHistoryErrorsByChannel[$0] }
     }
 
-    public func workDetailError(for id: RunID) -> String? {
+    public func workDetailError(for id: RunID) -> AgentWorkSurfaceError? {
         workDetailErrorsById[id]
     }
 
@@ -550,33 +561,34 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func effectiveWorkStatus(for run: AgentWorkRun) -> RunStatus {
-        agentStatuses[run.id]?.runStatus ?? run.status
+        guard !run.status.isTerminal else { return run.status }
+        return agentStatuses[run.id]?.runStatus ?? run.status
     }
 
     @discardableResult
     public func startWork(agent: MemberID, title: String, brief: String) async -> RunID? {
         guard !isCreatingWorkRun else { return nil }
         guard let channel = selectedChannelId else {
-            workCreationError = "Select a channel before starting Work."
+            workCreationError = .channelRequired
             return nil
         }
         guard let workRunBackend else {
-            workCreationError = "Work is unavailable on this server. Connect to a server that supports Work."
+            workCreationError = .unsupportedServer
             return nil
         }
         guard workTargetAgents.contains(where: { $0.id == agent }) else {
-            workCreationError = "Choose an active agent already invited to this channel."
+            workCreationError = .activeAgentRequired
             return nil
         }
 
         let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedBrief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedTitle.isEmpty else {
-            workCreationError = "Add a title before starting Work."
+            workCreationError = .titleRequired
             return nil
         }
         guard !normalizedBrief.isEmpty else {
-            workCreationError = "Describe the work before starting it."
+            workCreationError = .briefRequired
             return nil
         }
 
@@ -593,7 +605,7 @@ public final class ChatViewModel: ObservableObject {
             workCreationError = nil
             return run.id
         } catch {
-            workCreationError = "Work could not start. Review the request and try again. \(error.localizedDescription)"
+            workCreationError = .creationFailed
             return nil
         }
     }
@@ -611,7 +623,7 @@ public final class ChatViewModel: ObservableObject {
             upsertWorkRun(try await workRunBackend.workRun(id: id))
             workDetailErrorsById[id] = nil
         } catch {
-            workDetailErrorsById[id] = "Work details could not refresh. Try again. \(error.localizedDescription)"
+            workDetailErrorsById[id] = .detailFailed
         }
     }
 
@@ -1341,7 +1353,7 @@ public final class ChatViewModel: ObservableObject {
             workRunsByChannel[channel] = runs
             workHistoryErrorsByChannel[channel] = nil
         } catch {
-            workHistoryErrorsByChannel[channel] = "Work history could not load. Try again. \(error.localizedDescription)"
+            workHistoryErrorsByChannel[channel] = .historyFailed
         }
     }
 
@@ -1357,6 +1369,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func updateWorkRunStatus(_ status: AgentStatus) {
         guard var run = workRun(status.runId) else { return }
+        guard !run.status.isTerminal else { return }
         run.status = status.runStatus
         run.updatedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
         if status.runStatus.isTerminal, run.finishedAtMs == nil {

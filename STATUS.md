@@ -23,9 +23,9 @@
 
 ## 0-1. MOMO-364 Work v0 macOS Surface (2026-07-13)
 
-- MomoCore에 MOMO-362 `agent_run` Work projection을 추가하고 macOS REST/인메모리 backend와 ViewModel을 연결했다. `/work` 및 컴포저 버튼으로 시작하며, 채널 타임라인의 접힌 partial 로그·공용 승인 컨트롤·diff/exit/PR 결과 카드와 우측 전체 transcript 상세 pane을 제공한다. MOMO-359 메시지 그루핑과 MOMO-365 사이드바·스위처·capability 배지 파일 경계는 유지했다.
-- 검증: Core/macOS `swift build --disable-sandbox` PASS, Core 20 tests PASS, macOS 비스냅샷 102 tests PASS, MOMO-364 light/dark snapshot 2 tests compile 후 정본 재기록 대기 skip, 변경 파일 design pre-flight PASS. 전체 macOS test는 기존 `AgentCredentialSnapshotTests` headless `NSImage` fatal로 중단되어 비스냅샷과 신규 snapshot을 분리 검증했다.
-- 지시대로 DB/Docker/verifier/`local_gate.sh`/실 codex 실행은 하지 않았다. 실제 MOMO-362 서버 및 codex-workbench 왕복과 신규 light/dark 정본 PNG 재기록은 오케스트레이터 대기(`runtime-unverified`).
+- MomoCore에 MOMO-362 `agent_run` Work projection을 추가하고 macOS REST/인메모리 backend와 ViewModel을 연결했다. `/work` 및 컴포저 버튼으로 시작하며, 채널 타임라인의 접힌 partial 로그·공용 승인 컨트롤·diff/exit/PR 결과 카드와 우측 전체 transcript 상세 pane을 제공한다. 리뷰 반영으로 durable terminal 상태 우선, 이중언어 오류, cancelled 중립 결과, Esc draft 복원, ⇧⌘W 도움말을 고정했다. MOMO-359 메시지 그루핑과 MOMO-365 사이드바·스위처·capability 배지 파일 경계는 유지했다.
+- 검증: Core/macOS `swift build --disable-sandbox` PASS, Core 20 tests PASS, macOS 비스냅샷 106 tests PASS, MOMO-364 light/dark snapshot 2 tests compile 후 정본 재기록 대기 skip, 변경 파일 design pre-flight PASS. 전체 macOS test는 기존 `AgentCredentialSnapshotTests` headless `NSImage` fatal로 중단되어 비스냅샷과 신규 snapshot을 분리 검증했다.
+- 지시대로 DB/Docker/verifier/`local_gate.sh`/실 codex 실행은 하지 않았다. 실제 MOMO-362 서버 및 codex-workbench 왕복과 신규 Work·keyboard-help 정본 PNG 재기록은 오케스트레이터 대기(`runtime-unverified`).
 
 ## 0-1. MOMO-362 Work v0 Run Contract + Approval Tiers (2026-07-13)
 

@@ -105,6 +105,7 @@ public enum MomoTheme {
         public static let font = Font.caption2.weight(.semibold)
         public static let identityBackground = MomoTheme.agentAccent.opacity(0.18)
         public static let capabilityBackground = MomoTheme.agentAccent.opacity(0.12)
+    }
 
     public enum Work {
         public static let composerWidth: CGFloat = 420

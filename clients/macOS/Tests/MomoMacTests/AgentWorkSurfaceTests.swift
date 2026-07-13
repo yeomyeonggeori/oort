@@ -6,12 +6,78 @@ import MomoCore
 final class AgentWorkSurfaceTests: XCTestCase {
     func testWorkCommandRecognizesOnlyExactCommandBoundary() {
         XCTAssertEqual(AgentWorkCommandParser.parse("/work")?.brief, "")
-        XCTAssertEqual(
-            AgentWorkCommandParser.parse("  /work   macOS 빌드 오류를 수정해줘  ")?.brief,
-            "macOS 빌드 오류를 수정해줘"
-        )
+        let draft = "  /work   macOS 빌드 오류를 수정해줘  "
+        XCTAssertEqual(AgentWorkCommandParser.parse(draft)?.brief, "macOS 빌드 오류를 수정해줘")
+        XCTAssertEqual(AgentWorkCommandParser.parse(draft)?.draftToRestore, draft)
         XCTAssertNil(AgentWorkCommandParser.parse("/worker should stay a message"))
         XCTAssertNil(AgentWorkCommandParser.parse("please /work later"))
+    }
+
+    func testDurableTerminalWorkStatusWinsOverHydratedApprovalSidecar() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let channel = try XCTUnwrap(seed.channels.first)
+        try await backend.connect(workspace: seed.workspace, accessToken: "token")
+        let history = try await backend.history(channel: channel.id, after: nil, limit: 200)
+        let approvalMessage = try XCTUnwrap(history.first { $0.type == .approvalRequest })
+        let runId = try XCTUnwrap(approvalMessage.runId)
+        let run = AgentWorkRun(
+            id: runId,
+            workspaceId: seed.workspace,
+            agentMemberId: approvalMessage.authorMemberId,
+            channelId: channel.id,
+            status: .succeeded,
+            input: AgentWorkInput(
+                title: "승인 완료 후 Work",
+                brief: "재방문해도 완료 상태를 유지하세요."
+            ),
+            output: .object(["summary": .string("승인 후 실행을 완료했습니다.")]),
+            finishedAtMs: 1_783_910_460_000,
+            createdAtMs: 1_783_910_400_000,
+            updatedAtMs: 1_783_910_460_000
+        )
+        await backend.seedDemoWorkRun(run)
+        let viewModel = ChatViewModel(backend: backend)
+
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "token")
+        await viewModel.selectChannel(channel.id)
+
+        let loadedRun = try XCTUnwrap(viewModel.workRun(runId))
+        XCTAssertEqual(viewModel.agentStatuses[runId]?.runStatus, .awaitingApproval)
+        XCTAssertEqual(viewModel.effectiveWorkStatus(for: loadedRun), .succeeded)
+
+        try await Task.sleep(for: .milliseconds(50))
+        let runAfterReplay = try XCTUnwrap(viewModel.workRun(runId))
+        XCTAssertEqual(runAfterReplay.status, .succeeded)
+        XCTAssertEqual(viewModel.effectiveWorkStatus(for: runAfterReplay), .succeeded)
+    }
+
+    func testWorkErrorsUseBilingualCopy() {
+        let korean = MomoWorkspaceCopy(language: .korean)
+        let english = MomoWorkspaceCopy(language: .english)
+
+        for error in AgentWorkSurfaceError.allCases {
+            XCTAssertFalse(korean.workError(error).isEmpty)
+            XCTAssertFalse(english.workError(error).isEmpty)
+            XCTAssertNotEqual(korean.workError(error), english.workError(error))
+        }
+        XCTAssertEqual(korean.workError(.historyFailed), "Work 기록을 불러오지 못했습니다. 다시 불러오세요.")
+        XCTAssertEqual(english.workError(.detailFailed), "Work details could not load. Refresh the details and try again.")
+    }
+
+    func testCancelledWorkResultUsesNeutralPresentation() {
+        XCTAssertEqual(AgentWorkResultPresentation.tone(for: .cancelled), .neutral)
+        XCTAssertEqual(AgentWorkResultPresentation.tone(for: .succeeded), .success)
+        XCTAssertEqual(AgentWorkResultPresentation.tone(for: .failed), .failure)
+    }
+
+    func testKeyboardHelpIncludesStartWorkShortcut() {
+        let copy = MomoWorkspaceCopy(language: .korean)
+        XCTAssertTrue(
+            MomoKeyboardShortcutCatalog.items(copy: copy).contains {
+                $0.key == "⇧⌘W" && $0.label == copy.startWork
+            }
+        )
     }
 
     func testWorkResultParsesDiffExitLinkAndTranscript() throws {

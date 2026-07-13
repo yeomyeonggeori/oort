@@ -18,6 +18,7 @@ public struct MessageListView: View {
     @State private var isPinnedToTimelineBottom = true
     @State private var isWorkComposerPresented = false
     @State private var initialWorkBrief = ""
+    @State private var workCommandDraftToRestore: String?
     @State private var workComposerSessionId = UUID()
 
     public init(
@@ -333,7 +334,7 @@ public struct MessageListView: View {
                             HStack(alignment: .top, spacing: 8) {
                                 Image(systemName: "exclamationmark.triangle")
                                     .foregroundStyle(MomoTheme.irreversibleRed)
-                                Text(error)
+                                Text(copy.workError(error))
                                     .font(.caption)
                                     .fixedSize(horizontal: false, vertical: true)
                                 Spacer(minLength: 8)
@@ -516,10 +517,17 @@ public struct MessageListView: View {
                         initialBrief: initialWorkBrief,
                         onStarted: { _ in
                             initialWorkBrief = ""
+                            workCommandDraftToRestore = nil
                             isWorkComposerPresented = false
                         },
                         onCancel: {
+                            if let draft = workCommandDraftToRestore {
+                                viewModel.composerDraft = draft
+                                viewModel.composerDraftDidChange(draft)
+                                isComposerFocused = true
+                            }
                             initialWorkBrief = ""
+                            workCommandDraftToRestore = nil
                             isWorkComposerPresented = false
                         }
                     )
@@ -623,6 +631,7 @@ public struct MessageListView: View {
         let body = viewModel.composerDraft
         if let command = AgentWorkCommandParser.parse(body) {
             initialWorkBrief = command.brief
+            workCommandDraftToRestore = command.draftToRestore
             workComposerSessionId = UUID()
             viewModel.clearWorkCreationError()
             viewModel.composerDraft = ""
@@ -636,6 +645,7 @@ public struct MessageListView: View {
 
     private func presentWorkComposer() {
         initialWorkBrief = ""
+        workCommandDraftToRestore = nil
         workComposerSessionId = UUID()
         viewModel.clearWorkCreationError()
         isWorkComposerPresented = true

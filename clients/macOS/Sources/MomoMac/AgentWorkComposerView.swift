@@ -88,7 +88,7 @@ struct AgentWorkComposerView: View {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
                         .foregroundStyle(MomoTheme.irreversibleRed)
-                    Text(error)
+                    Text(copy.workError(error))
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 8)

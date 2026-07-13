@@ -275,7 +275,10 @@ struct AgentWorkRunDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Label(copy.workUnavailableTitle, systemImage: "exclamationmark.triangle")
                 .font(.body.weight(.semibold))
-            Text(viewModel.workDetailError(for: runId) ?? copy.workUnavailableBody)
+            Text(
+                viewModel.workDetailError(for: runId).map(copy.workError)
+                    ?? copy.workUnavailableBody
+            )
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Button {
@@ -386,6 +389,9 @@ private struct AgentWorkResultSection: View {
     }
 
     private var fallbackSummary: String {
+        if status == .cancelled {
+            return copy.workCancelledWithoutSummary
+        }
         if let error, !error.isEmpty {
             return error
         }
@@ -393,11 +399,25 @@ private struct AgentWorkResultSection: View {
     }
 
     private var resultColor: Color {
-        status == .succeeded ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed
+        switch AgentWorkResultPresentation.tone(for: status) {
+        case .success:
+            return MomoTheme.reversibleGreen
+        case .neutral:
+            return .secondary
+        case .failure:
+            return MomoTheme.irreversibleRed
+        }
     }
 
     private var resultIcon: String {
-        status == .succeeded ? "checkmark.circle" : "exclamationmark.triangle"
+        switch AgentWorkResultPresentation.tone(for: status) {
+        case .success:
+            return "checkmark.circle"
+        case .neutral:
+            return "minus.circle"
+        case .failure:
+            return "exclamationmark.triangle"
+        }
     }
 }
 

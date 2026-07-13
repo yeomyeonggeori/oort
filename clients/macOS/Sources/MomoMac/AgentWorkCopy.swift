@@ -246,6 +246,13 @@ extension MomoWorkspaceCopy {
         }
     }
 
+    var workCancelledWithoutSummary: String {
+        switch language {
+        case .korean: return "Work가 취소되었습니다. 남아 있는 실행 기록을 확인하세요."
+        case .english: return "Work was cancelled. Review any execution details that were recorded."
+        }
+    }
+
     var workDiffSummary: String {
         switch language {
         case .korean: return "변경 요약"
@@ -299,6 +306,43 @@ extension MomoWorkspaceCopy {
         switch language {
         case .korean: return "변경 파일 \(count)개"
         case .english: return count == 1 ? "1 changed file" : "\(count) changed files"
+        }
+    }
+
+    func workError(_ error: AgentWorkSurfaceError) -> String {
+        switch (language, error) {
+        case (.korean, .channelRequired):
+            return "Work를 시작할 채널을 먼저 선택하세요."
+        case (.korean, .unsupportedServer):
+            return "이 서버에서는 Work를 시작할 수 없습니다. Work를 지원하는 서버에 연결하세요."
+        case (.korean, .activeAgentRequired):
+            return "이 채널에 초대된 활성 에이전트를 선택하세요."
+        case (.korean, .titleRequired):
+            return "Work 제목을 입력하세요."
+        case (.korean, .briefRequired):
+            return "에이전트가 수행할 업무를 설명하세요."
+        case (.korean, .creationFailed):
+            return "Work를 시작하지 못했습니다. 요청을 확인하고 다시 시도하세요."
+        case (.korean, .historyFailed):
+            return "Work 기록을 불러오지 못했습니다. 다시 불러오세요."
+        case (.korean, .detailFailed):
+            return "Work 상세를 불러오지 못했습니다. 다시 새로고침하세요."
+        case (.english, .channelRequired):
+            return "Select a channel before starting Work."
+        case (.english, .unsupportedServer):
+            return "Work is unavailable on this server. Connect to a server that supports Work."
+        case (.english, .activeAgentRequired):
+            return "Choose an active agent already invited to this channel."
+        case (.english, .titleRequired):
+            return "Add a title before starting Work."
+        case (.english, .briefRequired):
+            return "Describe the work for the agent."
+        case (.english, .creationFailed):
+            return "Work could not start. Review the request and try again."
+        case (.english, .historyFailed):
+            return "Work history could not load. Try loading it again."
+        case (.english, .detailFailed):
+            return "Work details could not load. Refresh the details and try again."
         }
     }
 

@@ -3,6 +3,7 @@ import MomoCore
 
 struct AgentWorkCommand: Equatable {
     let brief: String
+    let draftToRestore: String
 }
 
 enum AgentWorkCommandParser {
@@ -13,7 +14,26 @@ enum AgentWorkCommandParser {
         }
         let brief = String(normalized.dropFirst("/work".count))
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        return AgentWorkCommand(brief: brief)
+        return AgentWorkCommand(brief: brief, draftToRestore: draft)
+    }
+}
+
+enum AgentWorkResultTone: Equatable {
+    case success
+    case neutral
+    case failure
+}
+
+enum AgentWorkResultPresentation {
+    static func tone(for status: RunStatus) -> AgentWorkResultTone {
+        switch status {
+        case .succeeded:
+            return .success
+        case .failed, .timedOut:
+            return .failure
+        case .queued, .running, .awaitingApproval, .paused, .cancelled:
+            return .neutral
+        }
     }
 }
 

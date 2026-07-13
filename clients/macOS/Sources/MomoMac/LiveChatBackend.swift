@@ -362,6 +362,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
                         channels: channels)
     }
 
+    func seedDemoWorkRun(_ run: AgentWorkRun) {
+        workRunsById[run.id] = run
+    }
+
     // MARK: OnboardingInviteBackend
 
     public func currentInviteJoinState() async -> InviteJoinState {

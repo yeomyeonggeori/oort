@@ -1,21 +1,34 @@
 import SwiftUI
 import MomoCore
 
+struct MomoKeyboardShortcutItem: Identifiable, Equatable {
+    var id: String { key }
+    let key: String
+    let label: String
+}
+
+enum MomoKeyboardShortcutCatalog {
+    static func items(copy: MomoWorkspaceCopy) -> [MomoKeyboardShortcutItem] {
+        [
+            MomoKeyboardShortcutItem(key: "⌘K", label: copy.quickSwitcherOpen),
+            MomoKeyboardShortcutItem(key: "⇧⌘W", label: copy.startWork),
+            MomoKeyboardShortcutItem(key: "⌘1…⌘9", label: copy.quickSwitcherChannelShortcuts),
+            MomoKeyboardShortcutItem(key: "⌘[", label: copy.quickSwitcherHistoryBack),
+            MomoKeyboardShortcutItem(key: "⌘]", label: copy.quickSwitcherHistoryForward),
+            MomoKeyboardShortcutItem(key: "⌘/", label: copy.quickSwitcherShortcutHelp),
+            MomoKeyboardShortcutItem(key: "↑ / ↓", label: copy.quickSwitcherMoveSelection),
+            MomoKeyboardShortcutItem(key: "↩", label: copy.quickSwitcherOpenResult),
+            MomoKeyboardShortcutItem(key: "esc", label: copy.quickSwitcherClose),
+        ]
+    }
+}
+
 struct MomoKeyboardShortcutsView: View {
     var copy: MomoWorkspaceCopy
     @Environment(\.dismiss) private var dismiss
 
-    private var shortcuts: [(String, String)] {
-        [
-            ("⌘K", copy.quickSwitcherOpen),
-            ("⌘1…⌘9", copy.quickSwitcherChannelShortcuts),
-            ("⌘[", copy.quickSwitcherHistoryBack),
-            ("⌘]", copy.quickSwitcherHistoryForward),
-            ("⌘/", copy.quickSwitcherShortcutHelp),
-            ("↑ / ↓", copy.quickSwitcherMoveSelection),
-            ("↩", copy.quickSwitcherOpenResult),
-            ("esc", copy.quickSwitcherClose),
-        ]
+    private var shortcuts: [MomoKeyboardShortcutItem] {
+        MomoKeyboardShortcutCatalog.items(copy: copy)
     }
 
     var body: some View {
@@ -46,13 +59,13 @@ struct MomoKeyboardShortcutsView: View {
             // sheet previews deterministic across SwiftPM and Xcode hosts.
             ScrollView {
                 LazyVStack(spacing: MomoTheme.QuickSwitcher.standardSpacing) {
-                    ForEach(shortcuts, id: \.0) { shortcut in
+                    ForEach(shortcuts) { shortcut in
                         // LabeledContent collapses to its intrinsic width in this
                         // scroll surface, so an HStack preserves the two-column scan.
                         HStack(spacing: MomoTheme.QuickSwitcher.standardSpacing) {
-                            Text(shortcut.1)
+                            Text(shortcut.label)
                             Spacer()
-                            Text(shortcut.0)
+                            Text(shortcut.key)
                                 .font(.body.monospaced())
                                 .foregroundStyle(.secondary)
                         }
