@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-13 · 기준선: **Phase 0 (dogfood 무결성: 354/355/356) 배치 종결** — invite-gated roster SoT + seed opt-in + gateway 공지 유출 차단, root full gate green · 통합 책임: `momo-main`
+> 기준일: 2026-07-13 · 기준선: **UI Wave 1(357/358/359) + Phase A(360/361) 배치 종결** — Slack급 셸·타임라인·Cmd+K + GHCR 발행/배포 번들, ADR-0109·0111 Accepted, Work v0(362..365)·Wave 2(366/367) 발급 · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -53,7 +53,9 @@
 | Phase 0 dogfood 무결성 | issue `#341` 본문 | MOMO-354 `#341` (roster SoT) | `done` (PR #346, `9ca9c93`) — **배치 종결** | 3 완료 |
 | **UI Wave 1** | `2026-07-13-ui-wave1.md` | MOMO-357 `#347` (셸·사이드바) | `done` (PR #355, `94e9244`) — 리뷰 반려 1회(접근성 High) | 3 완료 |
 | UI Wave 1 | 같은 패킷 | MOMO-359 `#348` (타임라인 그루핑) | `done` (PR #354, `6b75260`) — 리뷰 반려 1회(Blocker: 복사 칩 상시 노출) | 4 완료 |
-| UI Wave 1 | 같은 패킷 | MOMO-358 `#351` (Cmd+K 스위처) | `spawned` (2026-07-13, 357 랜딩 후) | 진행 중 |
+| UI Wave 1 | 같은 패킷 | MOMO-358 `#351` (Cmd+K 스위처) | `done` (PR #356, `5ac5fa9`) — 리뷰 반려 1회(⌘서수 술어) — **W1 종결** | 5 완료 |
+| **Agent Work Surface v0** | `2026-07-13-agent-work-surface.md` | MOMO-362..365 | `issuing` (2026-07-13, ADR-0111 파생) — 362·366 선행 스폰 | 진행 중 |
+| **UI Wave 2 unread** | `2026-07-13-ui-wave2-unread.md` | MOMO-366/367 | `issuing` (2026-07-13, ADR-0109 파생) | 진행 중 |
 | **Phase A AWS** | `2026-07-13-phase-a-aws.md` | MOMO-360 `#349` (이미지 발행 워크플로) | `done` (PR #352, `6980e64`) | 1 완료 |
 | Phase A AWS | 같은 패킷 | MOMO-361 `#350` (배포 번들+runbook) | `done` (PR #353, `1c044e6`) | 2 완료 |
 | Agent Work Surface | ADR-0111 파생 배치 표 | MOMO-362..365 | `unlocked` (ADR-0111 Accepted) — 현행 배치 랜딩 후 발급·스폰 | UI W1+Phase A 후 |

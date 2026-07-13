@@ -235,6 +235,12 @@
 | `MOMO-359` | UI W1: 메시지 타임라인 밀도·그루핑 | swift/macos-ui | MOMO-354 |
 | `MOMO-360` | Phase A: GHCR 이미지 발행 워크플로 + pull&up 배포 계약 | infra/tooling | 없음 (병렬) |
 | `MOMO-361` | Phase A: 배포 번들 패커 + 10인 알파 운영 runbook | docs/tooling | 없음 (병렬) |
+| `MOMO-362` | Work v0: work run 계약 + 승인 티어 서버 가드 (ADR-0111, 패킷 2026-07-13-agent-work-surface) | swift/runtime-agent | 없음 (선행) |
+| `MOMO-363` | Work v0: codex-workbench gateway adapter | python/runtime-agent | MOMO-362 |
+| `MOMO-364` | Work v0: Work 표면 UI (컴포저/카드/상세 페인) | swift/macos-ui | MOMO-362 |
+| `MOMO-365` | Work v0: capability 배지 + Work 대상 선택 UX | swift/macos-ui | MOMO-362 |
+| `MOMO-366` | Wave 2: read-state 서버 계약 (ADR-0109, 패킷 2026-07-13-ui-wave2-unread) | swift/runtime-agent | 없음 (선행) |
+| `MOMO-367` | Wave 2: unread 배지 + 키보드 순회 UI | swift/macos-ui | MOMO-366 |
 
 ### Local Solo Hermes Dogfood Active Chain
 
@@ -1741,11 +1747,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: fresh design-review PASS(Blocker 0/High 1/Medium 3) → High(멤버 mutation 비마우스 경로)+gear hit-test+고아 PNG 2장 반려 수정, 정본 스냅샷 재기록 후 육안 확인(헤더/채널/DM/멤버/AGENT 배지/유틸리티 강등), 104 tests 0 fail, clean `macos-ui` gate PASS(스택 fingerprint recreate + verifier api 포트 점유 해소 후), PR #355 squash merge(`94e9244`). Theme.swift는 354의 adaptive `onAccent`/`subtleBorder`와 union 해소. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
   - 이월 기록(후속 후보): profilePresenceBadge '나' 추정 휴리스틱, `subtlePanelBorder` 비적응형 white(라이트 모드 비가시), radius 스케일 전역 통합, min-width/대비/타입 변형 스냅샷.
 
-### ☐ MOMO-358 수용기준 — UI W1 Cmd+K 퀵 스위처 `[swift/macos-ui]` · 의존: MOMO-357 (랜딩 후 스폰)
-- [ ] `Cmd+K` 오버레이: 채널/멤버 fuzzy 검색, ↑↓/Enter/Esc, 최근 채널 우선. 첫 프레임 지연 체감 0(P11, Raycast 문법).
-- [ ] `Cmd+1..9` 채널 바로가기, `Cmd+[`/`Cmd+]` 히스토리 이동, `Cmd+/` 단축키 도움말 표면.
-- [ ] 후보는 roster SoT 술어(멘션 후보와 동일)만 — 미초대 멤버 비노출.
-- [ ] light/dark 스냅샷 + 키보드 이벤트 단위 테스트 green, design-review Blocker 0.
+### ☑ MOMO-358 수용기준 — UI W1 Cmd+K 퀵 스위처 `[swift/macos-ui]` · 의존: MOMO-357 (랜딩 후 스폰)
+- [x] `Cmd+K` 오버레이: 채널/멤버 fuzzy 검색, ↑↓/Enter/Esc, 최근 채널 우선. 첫 프레임 지연 체감 0(P11, Raycast 문법).
+- [x] `Cmd+1..9` 채널 바로가기, `Cmd+[`/`Cmd+]` 히스토리 이동, `Cmd+/` 단축키 도움말 표면.
+- [x] 후보는 roster SoT 술어(멘션 후보와 동일)만 — 미초대 멤버 비노출.
+- [x] light/dark 스냅샷 + 키보드 이벤트 단위 테스트 green, design-review Blocker 0.
+  - 오케스트레이터 종결: fresh design-review PASS(Blocker 0/High 1/Medium 2) → High(⌘1..9 서수 술어가 사이드바 표시 술어와 분리)+Cmd+K 토글 부재 반려 수정(`b261aea`, 공용 ordered source 공유), 스위처 정본 스냅샷 4종 재기록·육안 확인(검색 필드/⌘서수 힌트/AGENT 배지/단축키 푸터), 113 tests 0 fail, clean `macos-ui` gate PASS, PR #356 squash merge(`5ac5fa9`) — **UI Wave 1 종결 (2026-07-13)**.
+  - 이월 기록(후속 후보): AGENT 배지 공용 컴포넌트 추출(4중복), 패널 radius 14 분화, SF Symbol 렌더링 혼용, 에러 원문 덤프 노출, 스위처 viewport 높이.
 
 ### ☑ MOMO-359 수용기준 — UI W1 메시지 타임라인 밀도·그루핑 `[swift/macos-ui]` · 의존: MOMO-354 (패킷 `2026-07-13-ui-wave1.md`)
 - [x] 연속 작성자 그루핑(간격 임계 이내 compact 행, 아바타/이름 1회) — `message.seq` 순서 권위 불변, 그루핑은 표시 계층에서만.
@@ -1769,6 +1777,40 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `docs/runbooks/internal-alpha-onboarding.md` — 채널 2+ 생성, invite 코드 발급(기존 REST), 앱 안내, Hermes 사용 규칙(승인 왕복) 1페이지.
 - [x] non-goal 명시: 무중단 배포/split 토폴로지/iOS. AWS API 호출 없음.
   - 오케스트레이터 종결: 합성 fixture 테스트+실 repo 번들 생성(allowlist 7파일 일치) 직접 재검증, clean `runtime-agent` gate PASS(콜드 빌드 타임아웃 1회 후 재실행), PR #353 squash merge(`1c044e6`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
+
+### ☐ MOMO-362 수용기준 — Work v0 work run 계약 + 승인 티어 서버 가드 `[swift/runtime-agent]` (ADR-0111 D1·D3, 패킷 `2026-07-13-agent-work-surface.md`)
+- [ ] `agent_run.input`의 `{type:"work", title, brief, repo?, branch?}` shape를 run 생성/트리거 경로에서 검증 — 위반은 트랜잭션 밖 4xx, 비-work run 무영향. `schema_v0.sql`·신규 migration 없음.
+- [ ] gateway 승인 요청에 `tier`(read_only|workspace_write|network_write) 수용·approval metadata 전달, `danger` 상당은 400 fail-closed.
+- [ ] work run 목록/상세 REST(기존 run 조회 확장, actor binding 유지) + 서버 단위 테스트(shape·tier·403/400 경계).
+- [ ] 349/350/341 경로 회귀 없음 — 동등성 verifier 계약 비파괴. clean/root `runtime-agent` PASS는 오케스트레이터.
+
+### ☐ MOMO-363 수용기준 — Work v0 codex-workbench gateway adapter `[python/runtime-agent]` · 의존: MOMO-362
+- [ ] `adapters/codex-workbench/` — hermes adapter 패턴 승계, work run claim→`codex exec` headless(세션 id 보존, 후속 지시 `resume`), ADR-0004(자격증명 어댑터 호스트에만).
+- [ ] sandbox→승인 티어 매핑: read-only 즉시, workspace-write는 실행 전 승인 왕복, danger 경로 부재.
+- [ ] transcript=status/partial 스트림, 최종=구조화 결과 카드(diff 요약/exit/링크), 운영 공지 durable 유출 금지(MOMO-356 계약).
+- [ ] mock codex 기반 DB 비접속 계약 테스트 + `bash -n`/py_compile PASS. 실 codex 왕복은 오케스트레이터 라이브 검증.
+
+### ☐ MOMO-364 수용기준 — Work v0 Work 표면 UI `[swift/macos-ui]` · 의존: MOMO-362 (365와 병렬)
+- [ ] `/work` 커맨드+컴포저 버튼(대상 에이전트 선택·title/brief), 타임라인 work 카드(상태 칩/접힌 로그 테일/인라인 승인/결과 요약), 상세 페인.
+- [ ] partial 스트림·승인 카드 기존 컴포넌트 재사용, 359 그루핑과 비충돌, P8(노이즈 억제) 준수.
+- [ ] light/dark 스냅샷(상태 칩·로그 테일·승인·결과 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
+
+### ☐ MOMO-365 수용기준 — Work v0 capability 배지·대상 선택 `[swift/macos-ui]` · 의존: MOMO-362 (364와 병렬)
+- [ ] `agent.config.capabilities` roster/상세 표면화(read-through, 새 스키마 없음), 사이드바·Cmd+K·멘션 후보에 배지.
+- [ ] Work 대상 후보 = 선택 채널 초대된 active 에이전트 중 capability 보유자만(354 술어 재사용), 자동 라우팅 없음.
+- [ ] 후보 필터 단위 테스트 + 스냅샷 + design-review Blocker 0.
+
+### ☐ MOMO-366 수용기준 — Wave 2 read-state 서버 계약 `[swift/runtime-agent]` (ADR-0109 D2·D3, 패킷 `2026-07-13-ui-wave2-unread.md`)
+- [ ] 벌크 `GET /v1/workspaces/:ws/read-state`(자기 것만, 본문 비포함, 행 부재=0) + `PUT .../channels/:ch/read-state`(GREATEST 단조·idempotent·타인 403·트랜잭션 밖 4xx).
+- [ ] outbox `read_state` 이벤트 → 같은 멤버 개인 채널로만 relay. Centrifugo 전송전용 불변.
+- [ ] ADR-0109 검증 계약 1~5항 서버 단위 테스트 전부 green. `schema_v0.sql` 불변(필요 시 신규 numbered migration).
+- [ ] clean/root `runtime-agent` PASS는 오케스트레이터.
+
+### ☐ MOMO-367 수용기준 — Wave 2 unread 배지 + 키보드 순회 `[swift/macos-ui]` · 의존: MOMO-366
+- [ ] 부팅 1-call 점등, 사이드바 unread 굵기+mention 숫자 배지(357 행 문법 내), realtime `read_state` 이벤트 동기화.
+- [ ] 뷰포트 기준 mark-read(debounce ≈1s), own-send 하단 추적 예외 확정 구현(359 이월), 서버 커서=진실.
+- [ ] `Cmd+Shift+↑↓` unread 순회(358 단축키와 비충돌, `Cmd+/` 도움말 갱신).
+- [ ] light/dark 스냅샷(배지 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
 
 ---
 
