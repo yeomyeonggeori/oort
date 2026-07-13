@@ -79,7 +79,9 @@ fi
 pass "api/relay/worker/migrate/mock-hermes remain image-based with local image fallback tags for smoke"
 
 section "Caddy and public/private network boundary"
+# shellcheck disable=SC2016 # Caddy placeholders are intentionally literal.
 grep -Fq '{$API_DOMAIN}' "$CADDYFILE" || fail "Caddyfile missing API_DOMAIN"
+# shellcheck disable=SC2016 # Caddy placeholders are intentionally literal.
 grep -Fq '{$REALTIME_DOMAIN}' "$CADDYFILE" || fail "Caddyfile missing REALTIME_DOMAIN"
 grep -Fq 'reverse_proxy api:8080' "$CADDYFILE" || fail "Caddyfile must proxy API to api:8080"
 grep -Fq 'reverse_proxy centrifugo:8000' "$CADDYFILE" || fail "Caddyfile must proxy realtime to centrifugo:8000"
@@ -127,7 +129,7 @@ pass "relay and worker are enabled as single-node services"
 section "env template and secret guard"
 scripts/prod_env_preflight.sh --env-file "$SMOKE_ENV" --mode internal-smoke
 for key in \
-  COMPOSE_PROJECT_NAME API_DOMAIN REALTIME_DOMAIN MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
+  COMPOSE_PROJECT_NAME API_DOMAIN REALTIME_DOMAIN MOMO_IMAGE_TAG MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
   MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL REDIS_PASSWORD CENT_TOKEN_HMAC CENT_API_KEY JWT_HMAC HERMES_BASE_URL HERMES_API_KEY; do
   grep -Eq "^${key}=" "$SMOKE_ENV" || fail "internal smoke env missing key: $key"
 done

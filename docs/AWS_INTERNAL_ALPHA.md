@@ -218,6 +218,8 @@ The alpha host must not need a source checkout.
 1. Build API/relay/worker/migrate images on a builder machine or CI.
 2. Push immutable tags or digests to GHCR/ECR, for example
    `ghcr.io/dawn-kim-official/momo-server:sha-<gitsha>`.
+   The manual-only `publish-images` workflow publishes API, relay, worker, and
+   migrate for `linux/arm64` under one `MOMO_IMAGE_TAG=sha-<40-char-gitsha>`.
 3. Copy only a deploy bundle to the host: compose files, Caddyfile,
    Centrifugo config, env template, and operator runbook.
 4. Run preflight:
@@ -234,9 +236,11 @@ docker compose -f infra/prod/docker-compose.prod.yml pull
 docker compose -f infra/prod/docker-compose.prod.yml up -d --no-build
 ```
 
-Rollback is the same command with previous image digests. Database migrations
-must remain forward-compatible for the alpha window; otherwise restore a new DB
-volume from snapshot/PITR.
+Rollback is the same command after restoring the previous `MOMO_IMAGE_TAG`
+derived refs, or the four previous per-image digests. The one-shot migrate image
+runs before API/relay/worker, so database migrations must remain
+forward-compatible for the alpha window; otherwise restore a new DB volume from
+snapshot/PITR.
 
 ## 8. Preflight Evidence
 

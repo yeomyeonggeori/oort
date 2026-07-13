@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# Source-checkout-free migration image for the internal host-runtime smoke.
+# Source-checkout-free migration image for internal smoke and pinned host deploys.
 
 FROM postgres:18
 WORKDIR /workspace

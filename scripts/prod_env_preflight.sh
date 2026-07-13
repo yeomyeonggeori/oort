@@ -166,12 +166,39 @@ assert_not_latest_or_smoke_image() {
   value="$(get_var "$key")"
   [ "$value" != "" ] || return 0
   case "$value" in
-    *:internal-smoke|*:internal-smoke-*|*:latest|momo-api:*|momo-outbox-relay:*|momo-agent-worker:*)
+    *:internal-smoke|*:internal-smoke-*|*:latest|momo-api:*|momo-outbox-relay:*|momo-agent-worker:*|momo-migrate:*)
       fail "$key must be a pinned registry image for staging/prod/internal-host: $value"
       return 0
       ;;
   esac
   pass "$key is a pinned non-local registry image"
+}
+
+assert_release_tag() {
+  local key="$1"
+  local value
+  value="$(get_var "$key")"
+  if printf '%s\n' "$value" | grep -Eq '^sha-[0-9a-f]{40}$'; then
+    pass "$key is an immutable 40-character git SHA tag"
+  else
+    fail "$key must be 'sha-<40 lowercase hex git SHA>' (got '${value:-<empty>}')"
+  fi
+}
+
+assert_image_matches_release() {
+  local key="$1"
+  local value
+  local tag
+  value="$(get_var "$key")"
+  tag="$(get_var MOMO_IMAGE_TAG)"
+  if printf '%s\n' "$value" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+    pass "$key uses a per-image digest override"
+    return 0
+  fi
+  case "$value" in
+    *:"$tag") pass "$key uses MOMO_IMAGE_TAG" ;;
+    *) fail "$key must use MOMO_IMAGE_TAG or a per-image @sha256 digest (got '$value')" ;;
+  esac
 }
 
 assert_exact() {
@@ -321,7 +348,11 @@ assert_required_literal() {
   local expected="$2"
   local value
   value="$(get_var "$key")"
-  [ "$value" = "$expected" ] && pass "$key is explicitly required" || fail "$key must be '$expected'"
+  if [ "$value" = "$expected" ]; then
+    pass "$key is explicitly required"
+  else
+    fail "$key must be '$expected'"
+  fi
 }
 
 write_evidence() {
@@ -425,7 +456,7 @@ esac
 if [ "$runtime_mode" = "strict" ]; then
   require_vars \
     COMPOSE_PROJECT_NAME MOMO_ENV PUBLIC_BASE_URL API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL CADDY_EMAIL ACME_EMAIL HTTP_PORT HTTPS_PORT \
-    MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
+    MOMO_IMAGE_TAG MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
     POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD DATABASE_URL RELAY_DATABASE_URL \
     REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS CENT_TOKEN_HMAC CENT_API_KEY CENT_PROXY_SECRET JWT_HMAC \
     AGENT_PROVIDER_MODE AGENT_MODEL HERMES_BASE_URL HERMES_API_KEY \
@@ -434,7 +465,7 @@ if [ "$runtime_mode" = "strict" ]; then
     PGBACKREST_STANZA_CHECK_REQUIRED PGBACKREST_FULL_BACKUP_REQUIRED PGBACKREST_PITR_REHEARSAL_REQUIRED
 
   for key in \
-    API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL ACME_EMAIL MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
+    API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL ACME_EMAIL MOMO_IMAGE_TAG MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
     PUBLIC_BASE_URL CADDY_EMAIL \
     POSTGRES_PASSWORD DATABASE_URL RELAY_DATABASE_URL REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS \
     CENT_TOKEN_HMAC CENT_API_KEY CENT_PROXY_SECRET JWT_HMAC HERMES_BASE_URL HERMES_API_KEY SECRET_SOURCE \
@@ -453,6 +484,12 @@ if [ "$runtime_mode" = "strict" ]; then
   assert_not_latest_or_smoke_image MOMO_API_IMAGE
   assert_not_latest_or_smoke_image MOMO_RELAY_IMAGE
   assert_not_latest_or_smoke_image MOMO_WORKER_IMAGE
+  assert_not_latest_or_smoke_image MOMO_MIGRATE_IMAGE
+  assert_release_tag MOMO_IMAGE_TAG
+  assert_image_matches_release MOMO_API_IMAGE
+  assert_image_matches_release MOMO_RELAY_IMAGE
+  assert_image_matches_release MOMO_WORKER_IMAGE
+  assert_image_matches_release MOMO_MIGRATE_IMAGE
 
   assert_exact AGENT_PROVIDER_MODE external-hermes
   assert_http_url HERMES_BASE_URL
@@ -473,7 +510,7 @@ if [ "$runtime_mode" = "strict" ]; then
 elif [ "$runtime_mode" = "internal-smoke" ]; then
   require_vars \
     COMPOSE_PROJECT_NAME MOMO_ENV API_DOMAIN REALTIME_DOMAIN MOMO_CENTRIFUGO_WS_URL ACME_EMAIL HTTP_PORT HTTPS_PORT \
-    MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
+    MOMO_IMAGE_TAG MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE MOMO_MOCK_HERMES_IMAGE \
     POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD MIGRATE_DATABASE_URL MOMO_APP_DATABASE_URL \
     DATABASE_URL RELAY_DATABASE_URL WORKER_DATABASE_URL MOMO_BOOTSTRAP_RUNTIME_ROLES \
     REDIS_PASSWORD CENTRIFUGO_REDIS_ADDRESS CENT_TOKEN_HMAC CENT_API_KEY CENT_PROXY_SECRET JWT_HMAC \
@@ -488,6 +525,7 @@ elif [ "$runtime_mode" = "internal-smoke" ]; then
   assert_exact REALTIME_DOMAIN rt.localhost
   assert_exact MOMO_CENTRIFUGO_WS_URL wss://rt.localhost/connection/websocket
   assert_exact POSTGRES_PASSWORD change-me-postgres
+  assert_contains MOMO_IMAGE_TAG internal-smoke
   assert_exact REDIS_PASSWORD change-me-redis
   assert_exact CENT_TOKEN_HMAC change-me-cent-token-hmac
   assert_exact CENT_API_KEY change-me-cent-api-key

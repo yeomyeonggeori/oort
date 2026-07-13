@@ -3,6 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-360 GHCR Image Publication + Pull-and-Up Contract (2026-07-13)
+
+- 수동 `workflow_dispatch` 전용 GHCR workflow가 api/relay/worker/migrate 4종을 `linux/arm64`, `sha-<gitsha>`로 발행하며, prod compose는 동일 release tag 또는 per-image digest로 고정된 migrate-first pull&up/rollback 계약을 사용한다.
+- actionlint, shell syntax/shellcheck, Python preflight 정적 계약, YAML 구문 검사와 `git diff --check`는 PASS. 지시상 Docker/AWS API/image build·push/compose config/verifier/local gate는 미실행(`runtime-unverified`). `schema_v0.sql`은 변경하지 않았다.
+
 ## 0-1. MOMO-354 Real-Server Roster SoT + Invite-Gated Visibility (2026-07-13)
 
 - macOS REST backend의 demo member/channel fixture fallback과 이름 기반 agent 숨김을 제거하고, 서버 `/roster`의 active `channelIds`를 멤버 사이드바·멘션 후보·메시지 작성자·agent realtime 구독의 공통 권위로 사용한다. offline demo fixture는 `LiveChatBackend`에만 남는다.
