@@ -55,7 +55,8 @@
         "history_size": 50,
         "history_ttl": "168h",
         "history_meta_ttl": "192h",
-        "force_recovery": true
+        "force_recovery": true,
+        "allow_user_limited_channels": true
       }
     ],
     "proxy": {

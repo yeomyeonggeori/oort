@@ -330,8 +330,9 @@ GET  /v1/workspaces/{workspace}/agents/{agent}/credentials
 POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
 ```
 
-기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:write`,
-`realtime:subscribe`다. agent bearer는 이 네 서버 surface 외의 human/admin API에
+기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:read`,
+`messages:write`, `realtime:subscribe`다. agent bearer는 이 scope allowlist에 연결된
+서버 surface 외의 human/admin API에
 사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
 `agentwork:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
 target agent가 정확히 같을 때만 subscribe가 허용된다. 같은 채널 membership만으로

@@ -11,6 +11,7 @@ struct AgentCredentialRoutes: Sendable {
     static let defaultScopes = [
         "agent:jobs:read",
         "agent:runs:callback",
+        "messages:read",
         "messages:write",
         "realtime:subscribe",
     ]

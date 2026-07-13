@@ -731,8 +731,10 @@ struct AgentGatewayRoutes: Sendable {
 
             let messageID: UUID
             let seq: Int64
+            let didInsert: Bool
             if let first = rows.first {
                 (messageID, seq) = try first.decode((UUID, Int64).self)
+                didInsert = true
             } else {
                 let existing = try await conn.query(
                     """
@@ -749,6 +751,20 @@ struct AgentGatewayRoutes: Sendable {
                     throw HTTPError(.conflict, message: "gateway final message idempotency conflict")
                 }
                 (messageID, seq) = try row.decode((UUID, Int64).self)
+                didInsert = false
+            }
+
+            if didInsert, messageType == "text" {
+                _ = try await ReadStateMentions.record(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    channelID: run.channelID,
+                    messageID: messageID,
+                    messageSeq: seq,
+                    authorMemberID: run.agentMemberID,
+                    body: body
+                )
             }
 
             let outboxPayload = Self.timelineBroadcastPayload(

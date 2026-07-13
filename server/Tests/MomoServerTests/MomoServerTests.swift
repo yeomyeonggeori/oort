@@ -295,6 +295,20 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(
             AuthMiddleware.requiredAgentScope(
                 method: "GET",
+                path: "/v1/workspaces/ws/read-state"
+            ),
+            "messages:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "PUT",
+                path: "/v1/workspaces/ws/channels/ch/read-state"
+            ),
+            "messages:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "GET",
                 path: "/v1/workspaces/ws/agents/agent/gateway/jobs/pending"
             ),
             "agent:jobs:read"
@@ -1427,6 +1441,158 @@ final class MomoServerTests: XCTestCase {
             displayName: "김인턴",
             memberID: agentID
         ))
+    }
+
+    func testReadStateBulkProjectionTracksHeadAndMissingCursor() throws {
+        XCTAssertEqual(ReadStateRoutes.unreadCount(latest: 7, lastRead: 0), 7)
+        XCTAssertEqual(ReadStateRoutes.unreadCount(latest: 7, lastRead: 2), 5)
+        XCTAssertEqual(
+            ReadStateRoutes.unreadCount(latest: 8, lastRead: 2),
+            6,
+            "an appended message must increase the server-computed unread count"
+        )
+        XCTAssertEqual(ReadStateRoutes.unreadCount(latest: 7, lastRead: 9), 0)
+
+        let state = ReadStateDTO(
+            channelId: "00000000-0000-7000-8000-000000000202",
+            lastReadSeq: 0,
+            latestSeq: 7,
+            unreadCount: 7,
+            mentionCount: 0
+        )
+        let data = try JSONEncoder().encode(ReadStateListResponseDTO(readStates: [state]))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let states = try XCTUnwrap(object["read_states"] as? [[String: Any]])
+        XCTAssertEqual(states.count, 1)
+        XCTAssertEqual(states[0]["channel_id"] as? String, state.channelId)
+        XCTAssertEqual(states[0]["last_read_seq"] as? Int, 0)
+        XCTAssertEqual(states[0]["latest_seq"] as? Int, 7)
+        XCTAssertEqual(states[0]["unread_count"] as? Int, 7)
+        XCTAssertNil(states[0]["body"], "bulk read-state must not carry message bodies")
+    }
+
+    func testReadStateMarkReadIsMonotonicIdempotentAndHeadBounded() {
+        XCTAssertEqual(ReadStateRoutes.effectiveCursor(current: 4, requested: 8, latest: 8), 8)
+        XCTAssertEqual(
+            ReadStateRoutes.effectiveCursor(current: 8, requested: 4, latest: 8),
+            8,
+            "a lower retry must be a no-op"
+        )
+        XCTAssertEqual(
+            ReadStateRoutes.effectiveCursor(current: 8, requested: 8, latest: 8),
+            8,
+            "an equal retry must be idempotent"
+        )
+        XCTAssertEqual(
+            ReadStateRoutes.effectiveCursor(current: 8, requested: 99, latest: 10),
+            10,
+            "a client must not advance beyond the authoritative channel head"
+        )
+    }
+
+    func testReadStateMentionIDsAreServerOwnedArrayProps() throws {
+        let mentioned = UUID(uuidString: "00000000-0000-7000-8000-000000000104")!
+        let spoofed = MessageRoutes.encodeProps([
+            "mention_member_ids": mentioned.uuidString,
+            "client_key": "preserved",
+        ])
+        let spoofedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(spoofed.utf8)) as? [String: Any]
+        )
+        XCTAssertNil(spoofedObject["mention_member_ids"])
+        XCTAssertEqual(spoofedObject["client_key"] as? String, "preserved")
+
+        let parsed = MessageRoutes.encodeProps(
+            ["mention_member_ids": "foreign"],
+            mentionMemberIDs: [mentioned]
+        )
+        let parsedObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(parsed.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(parsedObject["mention_member_ids"] as? [String], [mentioned.uuidString])
+    }
+
+    func testReadStateActorBindingIgnoresForeignMemberBodyAndPublishesPersonally() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let actorID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let foreignID = UUID(uuidString: "00000000-0000-7000-8000-000000000104")!
+        let channelID = "00000000-0000-7000-8000-000000000202"
+        let injectedBody = Data(
+            "{\"last_read_seq\":9,\"member_id\":\"\(foreignID.uuidString)\"}".utf8
+        )
+        let request = try JSONDecoder().decode(UpdateReadStateRequestDTO.self, from: injectedBody)
+        XCTAssertEqual(request.lastReadSeq, 9)
+        XCTAssertEqual(ReadStateRoutes.channelMembershipError().status, .forbidden)
+
+        let state = ReadStateDTO(
+            channelId: channelID,
+            lastReadSeq: request.lastReadSeq,
+            latestSeq: 11,
+            unreadCount: 2,
+            mentionCount: 1
+        )
+        let raw = ReadStateRoutes.broadcastPayload(
+            workspaceID: workspaceID,
+            memberID: actorID,
+            state: state,
+            timestampMs: 1_783_917_600_000
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(
+            object["channel"] as? String,
+            "user:read-state#\(actorID.uuidString)"
+        )
+        XCTAssertNil(object["version"], "personal read-state events are not message-seq streams")
+        let data = try XCTUnwrap(object["data"] as? [String: Any])
+        XCTAssertEqual(data["type"] as? String, "read_state")
+        let payload = try XCTUnwrap(data["payload"] as? [String: Any])
+        XCTAssertEqual(payload["member_id"] as? String, actorID.uuidString)
+        XCTAssertEqual(payload["channel_id"] as? String, channelID)
+        XCTAssertEqual(payload["last_read_seq"] as? Int, 9)
+        XCTAssertFalse(raw.contains(foreignID.uuidString))
+    }
+
+    func testReadStateRLSAndUserLimitedChannelStaticContracts() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let serverRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/001_init.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("'read_state'"))
+        XCTAssertTrue(migration.contains("ALTER TABLE %I FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("current_setting('app.workspace_id', true)::uuid"))
+
+        let routeSource = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/ReadStateRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routeSource.contains("withTenantConnection"))
+        XCTAssertTrue(routeSource.contains("withTenantTransaction"))
+        XCTAssertTrue(routeSource.contains("FOR UPDATE OF ms"))
+        XCTAssertTrue(routeSource.contains("jsonb_typeof(props->'mention_member_ids') = 'array'"))
+        XCTAssertFalse(routeSource.contains("withPlatformReadConnection"))
+
+        let repoRoot = serverRoot.deletingLastPathComponent()
+        for relativePath in ["infra/centrifugo.json", "infra/prod/centrifugo.prod.json"] {
+            let data = try Data(contentsOf: repoRoot.appendingPathComponent(relativePath))
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: data) as? [String: Any]
+            )
+            let channel = try XCTUnwrap(object["channel"] as? [String: Any])
+            let namespaces = try XCTUnwrap(channel["namespaces"] as? [[String: Any]])
+            let user = try XCTUnwrap(namespaces.first { $0["name"] as? String == "user" })
+            XCTAssertEqual(user["allow_user_limited_channels"] as? Bool, true)
+        }
     }
 
     func testCostSnapshotDTOEncodesSnakeCaseProjectionContract() throws {

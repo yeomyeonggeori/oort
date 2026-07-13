@@ -134,6 +134,42 @@ struct MessagePage: ResponseEncodable {
     let nextBefore: Int64?
 }
 
+// ---- Read state ----
+
+/// PUT .../read-state request. The actor member id intentionally does not exist
+/// in this shape; the authenticated principal is the only cursor owner.
+struct UpdateReadStateRequestDTO: Decodable, Sendable {
+    let lastReadSeq: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case lastReadSeq = "last_read_seq"
+    }
+}
+
+struct ReadStateDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let channelId: String
+    let lastReadSeq: Int64
+    let latestSeq: Int64
+    let unreadCount: Int64
+    let mentionCount: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case channelId = "channel_id"
+        case lastReadSeq = "last_read_seq"
+        case latestSeq = "latest_seq"
+        case unreadCount = "unread_count"
+        case mentionCount = "mention_count"
+    }
+}
+
+struct ReadStateListResponseDTO: ResponseEncodable, Codable, Sendable {
+    let readStates: [ReadStateDTO]
+
+    private enum CodingKeys: String, CodingKey {
+        case readStates = "read_states"
+    }
+}
+
 // ---- Workspace roster ----
 
 /// Workspace member roster entry for client/agent surfaces.
