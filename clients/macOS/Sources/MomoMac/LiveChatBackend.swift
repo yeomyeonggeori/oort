@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var connected = false
@@ -28,6 +28,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
     private var seqByChannel: [ChannelID: Int64] = [:]
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
     private var approvalsById: [ApprovalID: Approval] = [:]
+    private var workRunsById: [RunID: AgentWorkRun] = [:]
+    private var workRunIdsByClientId: [UUID: RunID] = [:]
     private var inviteJoinState: InviteJoinState = .idle
     private var credentialsByAgent: [MemberID: [MomoAgentCredential]] = [:]
 
@@ -54,6 +56,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         demoCostSnapshotsByChannel = [:]
         replayedDemoDeltaChannels = []
         approvalsById = [:]
+        workRunsById = [:]
+        workRunIdsByClientId = [:]
         credentialsByAgent = [:]
 
         var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
@@ -442,6 +446,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         realtimeStatusStreams = [:]
         realtimeStatusByChannel = [:]
         credentialsByAgent = [:]
+        workRunsById = [:]
+        workRunIdsByClientId = [:]
     }
 
     public func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
@@ -501,6 +507,76 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
         channels.filter { $0.workspaceId == workspace }
+    }
+
+    // MARK: AgentWorkRunBackend
+
+    public func createWorkRun(
+        agent: MemberID,
+        channel: ChannelID,
+        input: AgentWorkInput,
+        clientRunId: UUID
+    ) async throws -> AgentWorkRun {
+        guard connected, let workspace else { throw BackendError.notConnected }
+        guard members.contains(where: {
+            $0.id == agent
+                && $0.workspaceId == workspace
+                && $0.isAgent
+                && $0.status == .active
+                && $0.channelIds.contains(channel)
+        }) else {
+            throw BackendError.problem(
+                status: 404,
+                title: "active channel agent not found",
+                detail: nil
+            )
+        }
+        if let existingId = workRunIdsByClientId[clientRunId],
+           let existing = workRunsById[existingId] {
+            guard existing.channelId == channel,
+                  existing.agentMemberId == agent,
+                  existing.input == input else {
+                throw BackendError.problem(
+                    status: 409,
+                    title: "client_run_id idempotency conflict",
+                    detail: nil
+                )
+            }
+            return existing
+        }
+
+        let timestamp = nowMs()
+        let run = AgentWorkRun(
+            id: RunID(),
+            workspaceId: workspace,
+            agentMemberId: agent,
+            channelId: channel,
+            status: .queued,
+            input: input,
+            createdAtMs: timestamp,
+            updatedAtMs: timestamp
+        )
+        workRunsById[run.id] = run
+        workRunIdsByClientId[clientRunId] = run.id
+        return run
+    }
+
+    public func workRuns(channel: ChannelID, limit: Int = 50) async throws -> [AgentWorkRun] {
+        guard connected else { throw BackendError.notConnected }
+        return Array(
+            workRunsById.values
+                .filter { $0.channelId == channel }
+                .sorted { ($0.createdAtMs, $0.id.description) > ($1.createdAtMs, $1.id.description) }
+                .prefix(min(max(limit, 1), 200))
+        )
+    }
+
+    public func workRun(id: RunID) async throws -> AgentWorkRun {
+        guard connected else { throw BackendError.notConnected }
+        guard let run = workRunsById[id] else {
+            throw BackendError.problem(status: 404, title: "work run not found", detail: nil)
+        }
+        return run
     }
 
     public func createChannel(

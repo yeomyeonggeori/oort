@@ -21,6 +21,7 @@ public struct MomoMacRootView: View {
     @State private var showDetailPane = false
     @State private var detailPane: MomoMacDetailPane = .alpha
     @State private var selectedProfileMemberID: MemberID?
+    @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
@@ -172,7 +173,13 @@ public struct MomoMacRootView: View {
     }
 
     private var messageTimeline: some View {
-        MessageListView(viewModel: viewModel)
+        MessageListView(
+            viewModel: viewModel,
+            onOpenWorkDetail: { runId in
+                selectedWorkRunID = runId
+                openDetailPane(.work)
+            }
+        )
             .frame(minWidth: 0)
     }
 
@@ -181,7 +188,7 @@ public struct MomoMacRootView: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: detailPane.systemImage)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(detailPane == .alpha ? MomoTheme.humanAccent : MomoTheme.costAmber)
+                    .foregroundStyle(detailPane.tint)
                     .frame(width: 32, height: 32)
                     .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
@@ -239,6 +246,20 @@ public struct MomoMacRootView: View {
                 AlphaCommandCenterView(viewModel: viewModel)
             case .approvals:
                 ApprovalInboxView(viewModel: viewModel)
+            case .work:
+                if let selectedWorkRunID {
+                    AgentWorkRunDetailView(
+                        viewModel: viewModel,
+                        runId: selectedWorkRunID,
+                        copy: copy
+                    )
+                } else {
+                    Text(copy.workTranscriptEmpty)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(16)
+                }
             case .profile:
                 MomoProfileSettingsSurface(copy: copy, summary: sessionChrome?.summary)
             case .memberProfile:
@@ -369,6 +390,7 @@ private enum MomoInspectorPresentation {
 private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
     case alpha
     case approvals
+    case work
     case profile
     case memberProfile
     case settings
@@ -384,7 +406,7 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return .approvals
         case .approvals:
             return .alpha
-        case .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
+        case .work, .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
             return nil
         }
     }
@@ -395,6 +417,8 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.commandCenter
         case .approvals:
             return copy.approvals
+        case .work:
+            return copy.workDetailTitle
         case .profile:
             return copy.profile
         case .memberProfile:
@@ -416,6 +440,8 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return copy.commandCenterInspectorSubtitle
         case .approvals:
             return copy.approvalsInspectorSubtitle
+        case .work:
+            return copy.workDetailSubtitle
         case .profile:
             return copy.profileSettingsSubtitle
         case .memberProfile:
@@ -437,6 +463,8 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return "list.bullet.clipboard"
         case .approvals:
             return "checkmark.seal"
+        case .work:
+            return "hammer"
         case .profile:
             return "person.crop.circle"
         case .memberProfile:
@@ -449,6 +477,19 @@ private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
             return "tray.and.arrow.down"
         case .updates:
             return "arrow.down.circle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .alpha:
+            return MomoTheme.humanAccent
+        case .work:
+            return MomoTheme.agentAccent
+        case .approvals:
+            return MomoTheme.costAmber
+        case .profile, .memberProfile, .settings, .workspaceSettings, .downloads, .updates:
+            return .secondary
         }
     }
 }

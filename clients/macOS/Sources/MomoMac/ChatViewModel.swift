@@ -76,6 +76,7 @@ public final class ChatViewModel: ObservableObject {
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
     private let agentTransport: any AgentTransport
+    private let workRunBackend: (any AgentWorkRunBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -110,6 +111,15 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var typingStates: [ChannelID: [MemberID: TypingActivity]] = [:]
     @Published public var composerDraft: String = ""
     @Published public private(set) var mentionNotice: String?
+
+    // Work v0 is an optional projection over the existing agent_run contract.
+    @Published public private(set) var workRunsByChannel: [ChannelID: [AgentWorkRun]] = [:]
+    @Published public private(set) var workRunLoadingChannels: Set<ChannelID> = []
+    @Published public private(set) var workRunDetailLoadingIds: Set<RunID> = []
+    @Published public private(set) var isCreatingWorkRun = false
+    @Published public private(set) var workCreationError: String?
+    @Published public private(set) var workHistoryErrorsByChannel: [ChannelID: String] = [:]
+    @Published public private(set) var workDetailErrorsById: [RunID: String] = [:]
 
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
@@ -149,6 +159,7 @@ public final class ChatViewModel: ObservableObject {
     ) {
         self.chat = chat
         self.agentTransport = agentTransport
+        self.workRunBackend = chat as? any AgentWorkRunBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -223,6 +234,13 @@ public final class ChatViewModel: ObservableObject {
         typingStopTasks = [:]
         composerDraft = ""
         mentionNotice = nil
+        workRunsByChannel = [:]
+        workRunLoadingChannels = []
+        workRunDetailLoadingIds = []
+        isCreatingWorkRun = false
+        workCreationError = nil
+        workHistoryErrorsByChannel = [:]
+        workDetailErrorsById = [:]
         approvals = [:]
         approvalDecisionsInFlight = []
         channelCreateInFlight = false
@@ -355,6 +373,8 @@ public final class ChatViewModel: ObservableObject {
         guard selectedChannelId == id else { return }
         await refreshCostSnapshots(channel: id)
         guard selectedChannelId == id else { return }
+        await loadWorkRuns(channel: id)
+        guard selectedChannelId == id else { return }
         subscribe(channel: id)
         await refreshLocalContextCopilotPreview()
     }
@@ -478,6 +498,125 @@ public final class ChatViewModel: ObservableObject {
 
     public func clearConnectionError() {
         connectionError = nil
+    }
+
+    // MARK: Work v0
+
+    public var isWorkSurfaceAvailable: Bool {
+        workRunBackend != nil
+    }
+
+    public var workTargetAgents: [Member] {
+        activeMembers()
+            .filter(\.isAgent)
+            .sorted {
+                $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+            }
+    }
+
+    public var visibleWorkRuns: [AgentWorkRun] {
+        guard let channel = selectedChannelId else { return [] }
+        return (workRunsByChannel[channel] ?? []).sorted {
+            ($0.createdAtMs, $0.id.description) < ($1.createdAtMs, $1.id.description)
+        }
+    }
+
+    public var selectedWorkHistoryError: String? {
+        selectedChannelId.flatMap { workHistoryErrorsByChannel[$0] }
+    }
+
+    public func workDetailError(for id: RunID) -> String? {
+        workDetailErrorsById[id]
+    }
+
+    public func workRun(_ id: RunID) -> AgentWorkRun? {
+        workRunsByChannel.values.lazy
+            .flatMap { $0 }
+            .first { $0.id == id }
+    }
+
+    public func workMessages(for id: RunID) -> [Message] {
+        messagesByChannel.values.lazy
+            .flatMap { $0 }
+            .filter { $0.runId == id }
+            .sorted(by: Self.seqOrder)
+    }
+
+    public func workApproval(for id: RunID) -> ApprovalEvent? {
+        approvals.values
+            .filter { $0.runId == id }
+            .sorted { $0.approvalId.description > $1.approvalId.description }
+            .first
+    }
+
+    public func effectiveWorkStatus(for run: AgentWorkRun) -> RunStatus {
+        agentStatuses[run.id]?.runStatus ?? run.status
+    }
+
+    @discardableResult
+    public func startWork(agent: MemberID, title: String, brief: String) async -> RunID? {
+        guard !isCreatingWorkRun else { return nil }
+        guard let channel = selectedChannelId else {
+            workCreationError = "Select a channel before starting Work."
+            return nil
+        }
+        guard let workRunBackend else {
+            workCreationError = "Work is unavailable on this server. Connect to a server that supports Work."
+            return nil
+        }
+        guard workTargetAgents.contains(where: { $0.id == agent }) else {
+            workCreationError = "Choose an active agent already invited to this channel."
+            return nil
+        }
+
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBrief = brief.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty else {
+            workCreationError = "Add a title before starting Work."
+            return nil
+        }
+        guard !normalizedBrief.isEmpty else {
+            workCreationError = "Describe the work before starting it."
+            return nil
+        }
+
+        isCreatingWorkRun = true
+        defer { isCreatingWorkRun = false }
+        do {
+            let run = try await workRunBackend.createWorkRun(
+                agent: agent,
+                channel: channel,
+                input: AgentWorkInput(title: normalizedTitle, brief: normalizedBrief),
+                clientRunId: UUID()
+            )
+            upsertWorkRun(run)
+            workCreationError = nil
+            return run.id
+        } catch {
+            workCreationError = "Work could not start. Review the request and try again. \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    public func retryWorkRuns() async {
+        guard let channel = selectedChannelId else { return }
+        await loadWorkRuns(channel: channel)
+    }
+
+    public func refreshWorkRun(_ id: RunID) async {
+        guard let workRunBackend, !workRunDetailLoadingIds.contains(id) else { return }
+        workRunDetailLoadingIds.insert(id)
+        defer { workRunDetailLoadingIds.remove(id) }
+        do {
+            upsertWorkRun(try await workRunBackend.workRun(id: id))
+            workDetailErrorsById[id] = nil
+        } catch {
+            workDetailErrorsById[id] = "Work details could not refresh. Try again. \(error.localizedDescription)"
+        }
+    }
+
+    public func clearWorkCreationError() {
+        workCreationError = nil
     }
 
     // MARK: Sending
@@ -808,6 +947,7 @@ public final class ChatViewModel: ObservableObject {
             }
         case .agentStatus(let status):
             agentStatuses[status.runId] = status
+            updateWorkRunStatus(status)
             mergeCostSnapshot(from: status)
             reconcileAgentWorking(from: status)
         case .agentPartial(let partial):
@@ -1173,7 +1313,12 @@ public final class ChatViewModel: ObservableObject {
         guard let selectedChannelId else { return [] }
         return members
             .filter { member in
-                member.isAgent && isMember(member.id, in: selectedChannelId) && isAgentWorking(member, in: selectedChannelId)
+                member.isAgent
+                    && isMember(member.id, in: selectedChannelId)
+                    && isAgentWorking(member, in: selectedChannelId)
+                    && !visibleWorkRuns.contains {
+                        $0.agentMemberId == member.id && !effectiveWorkStatus(for: $0).isTerminal
+                    }
             }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
@@ -1185,6 +1330,39 @@ public final class ChatViewModel: ObservableObject {
 
     public func costSnapshot(for runId: RunID) -> CostSnapshot? {
         costSnapshots[runId]
+    }
+
+    private func loadWorkRuns(channel: ChannelID) async {
+        guard let workRunBackend else { return }
+        workRunLoadingChannels.insert(channel)
+        defer { workRunLoadingChannels.remove(channel) }
+        do {
+            let runs = try await workRunBackend.workRuns(channel: channel, limit: 50)
+            workRunsByChannel[channel] = runs
+            workHistoryErrorsByChannel[channel] = nil
+        } catch {
+            workHistoryErrorsByChannel[channel] = "Work history could not load. Try again. \(error.localizedDescription)"
+        }
+    }
+
+    private func upsertWorkRun(_ run: AgentWorkRun) {
+        var runs = workRunsByChannel[run.channelId] ?? []
+        if let index = runs.firstIndex(where: { $0.id == run.id }) {
+            runs[index] = run
+        } else {
+            runs.append(run)
+        }
+        workRunsByChannel[run.channelId] = runs
+    }
+
+    private func updateWorkRunStatus(_ status: AgentStatus) {
+        guard var run = workRun(status.runId) else { return }
+        run.status = status.runStatus
+        run.updatedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
+        if status.runStatus.isTerminal, run.finishedAtMs == nil {
+            run.finishedAtMs = run.updatedAtMs
+        }
+        upsertWorkRun(run)
     }
 
     private func refreshCostSnapshots(channel: ChannelID) async {

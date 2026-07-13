@@ -65,6 +65,41 @@ final class MomoCoreTests: XCTestCase {
         """.utf8)
         let legacyMember = try JSONDecoder.momo.decode(Member.self, from: legacyWire)
         XCTAssertEqual(legacyMember.capabilities, [])
+
+    func testAgentWorkRunDecodesMOMO362Projection() throws {
+        let wire = Data("""
+        {
+          "id":"00000000-0000-7000-8000-000000000364",
+          "workspaceId":"00000000-0000-7000-8000-000000000001",
+          "agentMemberId":"00000000-0000-7000-8000-000000000103",
+          "channelId":"00000000-0000-7000-8000-000000000202",
+          "triggerMessageId":null,
+          "parentRunId":null,
+          "status":"awaiting_approval",
+          "stepCount":3,
+          "maxSteps":50,
+          "depth":0,
+          "input":{"type":"work","title":"Ship Work UI","brief":"Build and test the macOS surface."},
+          "output":{"diff_summary":"3 Swift files changed","exit_code":0},
+          "error":null,
+          "startedAtMs":1783910401000,
+          "finishedAtMs":null,
+          "createdAtMs":1783910400000,
+          "updatedAtMs":1783910402000
+        }
+        """.utf8)
+
+        let run = try JSONDecoder.momo.decode(AgentWorkRun.self, from: wire)
+
+        XCTAssertEqual(run.status, .awaitingApproval)
+        XCTAssertEqual(run.input.title, "Ship Work UI")
+        XCTAssertEqual(run.output?["exit_code"]?.intValue, 0)
+        XCTAssertEqual(run.stepCount, 3)
+    }
+
+    func testAgentWorkInputRejectsNonWorkType() {
+        let wire = Data(#"{"type":"chat","title":"No","brief":"Wrong contract"}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder.momo.decode(AgentWorkInput.self, from: wire))
     }
 
     // MARK: - Enum wire mapping (must match schema_v0.sql ENUM text)

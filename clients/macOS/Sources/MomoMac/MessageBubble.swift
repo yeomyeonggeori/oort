@@ -302,37 +302,13 @@ public struct MessageBubble: View {
     @ViewBuilder
     private var approvalActions: some View {
         let status = approvalStatus ?? approvalStatusFromProps ?? .pending
-        if status == .pending, let approvalId, let onApprovalDecision {
-            HStack(spacing: 8) {
-                Button {
-                    onApprovalDecision(approvalId, true)
-                } label: {
-                    Label("Approve", systemImage: "checkmark.circle.fill")
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button {
-                    onApprovalDecision(approvalId, false)
-                } label: {
-                    Label("Reject", systemImage: "xmark.circle")
-                }
-                .buttonStyle(.bordered)
-
-                if isApprovalDecisionInFlight {
-                    ProgressView()
-                        .controlSize(.small)
-                        .help("Decision is being recorded")
-                }
-            }
-            .controlSize(.small)
-            .disabled(isApprovalDecisionInFlight)
-            .padding(.top, 4)
-        } else if status != .pending {
-            Label(decidedLabel(for: status), systemImage: decidedIcon(for: status))
-                .font(.caption.bold())
-                .foregroundStyle(status == .approved ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
-                .padding(.top, 4)
-        }
+        ApprovalDecisionControls(
+            approvalId: approvalId,
+            status: status,
+            isInFlight: isApprovalDecisionInFlight,
+            copy: timelineCopy,
+            onDecision: onApprovalDecision
+        )
     }
 
     private var artifactCard: some View {
@@ -408,35 +384,6 @@ public struct MessageBubble: View {
         return ApprovalStatus(rawValue: raw)
     }
 
-    private func decidedLabel(for status: ApprovalStatus) -> String {
-        switch status {
-        case .approved:
-            return "Approved"
-        case .rejected:
-            return "Rejected"
-        case .expired:
-            return "Expired"
-        case .cancelled:
-            return "Cancelled"
-        case .pending:
-            return "Pending"
-        }
-    }
-
-    private func decidedIcon(for status: ApprovalStatus) -> String {
-        switch status {
-        case .approved:
-            return "checkmark.circle.fill"
-        case .rejected:
-            return "xmark.circle.fill"
-        case .expired:
-            return "clock.badge.exclamationmark"
-        case .cancelled:
-            return "minus.circle.fill"
-        case .pending:
-            return "hourglass"
-        }
-    }
 }
 
 enum MessageBubbleGroupingStyle {

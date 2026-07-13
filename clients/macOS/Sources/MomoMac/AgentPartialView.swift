@@ -30,8 +30,7 @@ public struct AgentPartialView: View {
                 // A subtle streaming caret cue is concatenated as Text before any
                 // view modifier so the `+` stays a Text concatenation.
                 if let text = partial.textDelta, !text.isEmpty {
-                    (Text(text) + Text(" ▌").foregroundColor(MomoTheme.agentAccent))
-                        .textSelection(.enabled)
+                    AgentTranscriptText(text: text, isStreaming: true, style: .message)
                 }
                 // In-progress tool_call (experience D: live tool-call card).
                 if let toolName = partial.toolCallName {
@@ -52,7 +51,7 @@ public struct AgentPartialView: View {
     private var avatar: some View {
         Circle()
             .fill(MomoTheme.agentAccent.opacity(0.2))
-            .frame(width: 28, height: 28)
+            .frame(width: MomoTheme.messageAvatarSize, height: MomoTheme.messageAvatarSize)
             .overlay(
                 Image(systemName: "sparkles")
                     .font(.caption)
@@ -71,8 +70,9 @@ public struct AgentPartialView: View {
     private var phaseChip: some View {
         let phase = status?.phase ?? .streaming
         Text(phase.rawValue)
-            .font(.system(size: 9, weight: .semibold))
-            .padding(.horizontal, 5).padding(.vertical, 1)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 4)
+            .padding(.vertical, 4)
             .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
             .foregroundStyle(MomoTheme.agentAccent)
     }
@@ -95,5 +95,44 @@ public struct AgentPartialView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MomoTheme.agentAccent.opacity(0.06),
                     in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner))
+    }
+}
+
+/// Shared text renderer for live partials and Work transcript surfaces. Keeping
+/// the streaming caret here prevents Work cards from inventing a second partial
+/// stream visual language.
+struct AgentTranscriptText: View {
+    enum Style {
+        case message
+        case transcript
+    }
+
+    let text: String
+    var isStreaming = false
+    var lineLimit: Int?
+    var style: Style = .transcript
+
+    var body: some View {
+        Group {
+            switch style {
+            case .message:
+                renderedText
+                    .font(.body)
+            case .transcript:
+                renderedText
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .lineLimit(lineLimit)
+        .textSelection(.enabled)
+        .accessibilityLabel(text)
+    }
+
+    private var renderedText: Text {
+        if isStreaming {
+            return Text(text) + Text(" ▌").foregroundColor(MomoTheme.agentAccent)
+        }
+        return Text(text)
     }
 }

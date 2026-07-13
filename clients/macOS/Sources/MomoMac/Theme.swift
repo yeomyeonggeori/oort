@@ -105,6 +105,18 @@ public enum MomoTheme {
         public static let font = Font.caption2.weight(.semibold)
         public static let identityBackground = MomoTheme.agentAccent.opacity(0.18)
         public static let capabilityBackground = MomoTheme.agentAccent.opacity(0.12)
+
+    public enum Work {
+        public static let composerWidth: CGFloat = 420
+        public static let briefMinimumHeight: CGFloat = 120
+        public static let cardMaximumWidth: CGFloat = 720
+        public static let transcriptMinimumHeight: CGFloat = 240
+        public static let statusIconSize: CGFloat = 24
+
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
     }
 }
 

@@ -3140,6 +3140,102 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
+    func testRESTBackendWorkRunCreateListAndDetailContracts() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let agent = MemberID.demoAgent
+        let run = RunID(uuidString: "00000000-0000-7000-8000-000000000364")!
+        let clientRunId = UUID(uuidString: "00000000-0000-7000-8000-000000003364")!
+        let requestCount = SynchronizedCounter()
+        let responseJSON = """
+        {
+          "id":"\(run.description)",
+          "workspaceId":"\(workspace.description)",
+          "agentMemberId":"\(agent.description)",
+          "channelId":"\(channel.description)",
+          "triggerMessageId":null,
+          "parentRunId":null,
+          "status":"queued",
+          "stepCount":0,
+          "maxSteps":50,
+          "depth":0,
+          "input":{"type":"work","title":"Work surface","brief":"Build the macOS Work surface."},
+          "output":null,
+          "error":null,
+          "startedAtMs":null,
+          "finishedAtMs":null,
+          "createdAtMs":1783910400000,
+          "updatedAtMs":1783910400000
+        }
+        """
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer work-token")
+            switch requestCount.increment() {
+            case 1:
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/agent-runs"
+                )
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try XCTUnwrap(
+                    JSONSerialization.jsonObject(with: data) as? [String: Any]
+                )
+                XCTAssertEqual(body["agentMemberId"] as? String, agent.description)
+                XCTAssertEqual(body["clientRunId"] as? String, clientRunId.uuidString)
+                let input = try XCTUnwrap(body["input"] as? [String: Any])
+                XCTAssertEqual(input["type"] as? String, "work")
+                XCTAssertEqual(input["title"] as? String, "Work surface")
+                return MockHTTPResponse(statusCode: 201, json: responseJSON)
+            case 2:
+                XCTAssertEqual(request.httpMethod, "GET")
+                let components = try XCTUnwrap(
+                    request.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+                )
+                XCTAssertTrue(components.queryItems?.contains(URLQueryItem(name: "type", value: "work")) == true)
+                XCTAssertTrue(components.queryItems?.contains(URLQueryItem(name: "limit", value: "25")) == true)
+                return MockHTTPResponse(json: #"{"runs":[]}"#)
+            case 3:
+                XCTAssertEqual(request.httpMethod, "GET")
+                XCTAssertEqual(
+                    request.url?.path,
+                    "/v1/workspaces/\(workspace.description)/agent-runs/\(run.description)"
+                )
+                return MockHTTPResponse(json: responseJSON)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected request"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "work-token"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "work-token")
+
+        let created = try await backend.createWorkRun(
+            agent: agent,
+            channel: channel,
+            input: AgentWorkInput(
+                title: "Work surface",
+                brief: "Build the macOS Work surface."
+            ),
+            clientRunId: clientRunId
+        )
+        let listed = try await backend.workRuns(channel: channel, limit: 25)
+        let detailed = try await backend.workRun(id: run)
+
+        XCTAssertEqual(created.id, run)
+        XCTAssertTrue(listed.isEmpty)
+        XCTAssertEqual(detailed.id, run)
+        XCTAssertEqual(requestCount.current(), 3)
+    }
+
     @MainActor
     func testViewModelClearSessionSensitiveStateResetsVisibleWorkspaceState() async throws {
         let backend = LiveChatBackend()
@@ -3733,6 +3829,10 @@ private final class SynchronizedCounter: @unchecked Sendable {
             value += 1
             return value
         }
+    }
+
+    func current() -> Int {
+        lock.withLock { value }
     }
 }
 
