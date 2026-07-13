@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-366 Wave 2 Read-State Server Contract (2026-07-13)
+
+- actor-bound bulk GET과 단조 증가 PUT read-state API를 추가했다. unread는 channel head와 cursor의 차이로 계산하고, text message 저장 시점의 stable member ID mention을 `message.props`와 `read_state.mention_count`에 같은 트랜잭션으로 반영한다.
+- cursor가 실제 전진할 때만 transactional outbox에 exact actor용 `user:read-state#<member-id>` 이벤트를 기록하며, Centrifugo `user` namespace는 user-limited channel을 허용한다. `schema_v0.sql`은 변경하지 않았다.
+- 검증: 5개 Swift 패키지 build, Core 18·Server 68·Relay 2·AgentWorker 29·macOS 비스냅샷 94 tests, JSON/shell/whitespace 정적 검사 PASS. macOS 전체 snapshot suite는 기존 host-dependent `SnapshotTesting/NSImage.swift` signal 5로 중단됐다. 지시된 경계에 따라 DB/Docker/verifier/`local_gate.sh`는 미실행이며 clean/root runtime-agent delivery 검증은 오케스트레이터 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-362 Work v0 Run Contract + Approval Tiers (2026-07-13)
 
 - `agent_run.input`의 정확한 Work v0 shape를 트랜잭션 전에 검증하고, active human/channel-agent 결속·멱등·동시성 한도를 지키는 Work 생성 및 channel 목록/상세 REST를 기존 gateway outbox 경로에 추가했다. `schema_v0.sql`과 migration은 변경하지 않았다.

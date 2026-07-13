@@ -95,7 +95,7 @@ struct MessageRoutes: Sendable {
                        \(propsJSON)::jsonb, \(dto.clientMsgId), \(dto.runId)
                 FROM bumped b
                 ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING
-                RETURNING id, seq, hlc_ts, hlc_count, created_at
+                RETURNING id, seq, hlc_ts, hlc_count, created_at, props::text
                 """,
                 logger: db.logger
             ).collect()
@@ -110,7 +110,7 @@ struct MessageRoutes: Sendable {
                 // the prior seq (exactly-once effect, L4 §3.1).
                 let existing = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, created_at
+                    SELECT id, seq, hlc_ts, hlc_count, created_at, props::text
                       FROM message
                      WHERE channel_id = \(channelID)
                        AND author_member_id = \(principal.memberID)
@@ -123,9 +123,28 @@ struct MessageRoutes: Sendable {
                 didInsert = false
             }
 
-            let (id, seq, ts, count, createdAt) =
-                try row.decode((UUID, Int64, Int64, Int, Date).self)
-            let responseProps = Self.decodeProps(propsJSON)
+            let (id, seq, ts, count, createdAt, rowPropsJSON) =
+                try row.decode((UUID, Int64, Int64, Int, Date, String).self)
+            var responsePropsJSON = rowPropsJSON
+            if didInsert, type == "text" {
+                let mentionMemberIDs = try await ReadStateMentions.record(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    messageID: id,
+                    messageSeq: seq,
+                    authorMemberID: principal.memberID,
+                    body: body
+                )
+                if !mentionMemberIDs.isEmpty {
+                    responsePropsJSON = Self.encodeProps(
+                        dto.props,
+                        mentionMemberIDs: mentionMemberIDs
+                    )
+                }
+            }
+            let responseProps = Self.decodeProps(responsePropsJSON)
 
             // ---- outbox INSERT in the SAME tx (L4 §8.1: transactional outbox) ----
             // partition_key = channel_id → per-channel ordering for the relay.
@@ -636,51 +655,12 @@ struct MessageRoutes: Sendable {
         displayName: String,
         memberID: UUID
     ) -> Bool {
-        let trimmedHandle = handle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let id = memberID.uuidString.lowercased()
-
-        if !trimmedHandle.isEmpty,
-           containsMentionToken(text, marker: "@\(trimmedHandle)", caseInsensitive: true)
-            || containsMentionToken(text, marker: "<@\(trimmedHandle)>", caseInsensitive: true)
-        {
-            return true
-        }
-        if !trimmedName.isEmpty,
-           containsMentionToken(text, marker: "@\(trimmedName)", caseInsensitive: false)
-            || containsMentionToken(text, marker: "<@\(trimmedName)>", caseInsensitive: false)
-        {
-            return true
-        }
-        return containsMentionToken(text, marker: "<@\(id)>", caseInsensitive: true)
-            || containsMentionToken(text, marker: "@\(id)", caseInsensitive: true)
-    }
-
-    private static func containsMentionToken(
-        _ text: String,
-        marker: String,
-        caseInsensitive: Bool
-    ) -> Bool {
-        let haystack = caseInsensitive ? text.lowercased() : text
-        let needle = caseInsensitive ? marker.lowercased() : marker
-        guard !needle.isEmpty else { return false }
-
-        var searchStart = haystack.startIndex
-        while let range = haystack.range(of: needle, range: searchStart..<haystack.endIndex) {
-            if range.upperBound == haystack.endIndex
-                || isMentionBoundary(haystack[range.upperBound])
-            {
-                return true
-            }
-            searchStart = range.upperBound
-        }
-        return false
-    }
-
-    private static func isMentionBoundary(_ char: Character) -> Bool {
-        char.unicodeScalars.allSatisfy { scalar in
-            !(CharacterSet.alphanumerics.contains(scalar) || scalar == "_" || scalar == "-")
-        }
+        ReadStateMentions.containsMention(
+            text,
+            handle: handle,
+            displayName: displayName,
+            memberID: memberID
+        )
     }
 
     private static func enqueueMentionJob(
@@ -1120,9 +1100,19 @@ struct MessageRoutes: Sendable {
     }
 
     /// Serialize the optional flat props map to a JSON object string for `::jsonb`.
-    private static func encodeProps(_ props: [String: String]?) -> String {
-        guard let props, !props.isEmpty,
-              let data = try? JSONSerialization.data(withJSONObject: props),
+    static func encodeProps(
+        _ props: [String: String]?,
+        mentionMemberIDs: [UUID] = []
+    ) -> String {
+        var object: [String: Any] = props ?? [:]
+        // This key is a server-owned save-time parsing result. Never persist a
+        // client-supplied value, including legacy string-shaped props.
+        object.removeValue(forKey: "mention_member_ids")
+        if !mentionMemberIDs.isEmpty {
+            object["mention_member_ids"] = mentionMemberIDs.map(\.uuidString)
+        }
+        guard !object.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: object),
               let str = String(data: data, encoding: .utf8)
         else { return "{}" }
         return str

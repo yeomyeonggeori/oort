@@ -5,7 +5,7 @@ import Hummingbird
 /// Authenticates requests bearing an App JWT or per-agent bearer credential.
 ///
 /// Agent bearer routes are allowlisted here and each route requires one of the
-/// four ADR-0101 v0 scopes. A valid credential cannot be used to reach another
+/// allowlisted ADR-0101/0109 scopes. A valid credential cannot reach another
 /// protected human/admin surface merely because it has a bearer shape.
 ///
 /// MOMO-300: beyond signature/exp, every access token is checked against the
@@ -129,6 +129,23 @@ struct AuthMiddleware: RouterMiddleware {
            segments[5] == "messages"
         {
             return "messages:write"
+        }
+        if method == "GET",
+           segments.count == 4,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "read-state"
+        {
+            return "messages:read"
+        }
+        if method == "PUT",
+           segments.count == 6,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "channels",
+           segments[5] == "read-state"
+        {
+            return "messages:read"
         }
         if method == "GET",
            segments.count == 8,

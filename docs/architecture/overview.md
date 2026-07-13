@@ -49,6 +49,12 @@ macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 
 에이전트는 사이드바·멘션 후보·agent realtime 구독에 나타나지 않는다. offline demo
 fixture는 `LiveChatBackend`에만 존재한다.
 
+read-state는 Postgres `read_state`가 유일한 권위다(ADR-0109). 클라이언트는 bulk GET으로
+자신의 channel cursor/head/unread/mention projection을 읽고, actor-bound PUT으로 cursor를
+단조 증가시킨다. cursor 전진 알림은 같은 트랜잭션의 outbox를 거쳐 exact actor의
+`user:read-state#<member-id>` user-limited channel로 전송되며 Centrifugo는 계속
+전송계층일 뿐 read-state를 보관하거나 판정하지 않는다.
+
 로그인과 invite join 응답은 `realtimeWebSocketUrl`을 함께 반환한다. 앱은 이 서버 소유
 주소로 centrifuge-swift transport를 구성하고 앱 환경의 `MOMO_CENTRIFUGO_WS_URL`은
 이전 서버/개발용 fallback으로만 사용한다. REST API와 realtime 공개 도메인은 계속
