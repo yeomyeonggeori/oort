@@ -76,6 +76,34 @@ final class MessageTimelineLayoutTests: XCTestCase {
         )
     }
 
+    func testStreamingCursorArtifactIsRemovedBeforeRendering() {
+        XCTAssertEqual(
+            AgentTranscriptText.removingCursorArtifact(from: "검토 중입니다. ▍"),
+            "검토 중입니다."
+        )
+        XCTAssertEqual(
+            AgentTranscriptText.removingCursorArtifact(from: "Review in progress. ▌  "),
+            "Review in progress."
+        )
+    }
+
+    func testTimelineDayUsesSelectedKoreanLocale() {
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp(
+            year: 2026,
+            month: 7,
+            day: 13,
+            hour: 9
+        )) / 1_000)
+
+        let korean = MomoWorkspaceCopy(language: .korean).timelineDay(date)
+        let english = MomoWorkspaceCopy(language: .english).timelineDay(date)
+
+        XCTAssertTrue(korean.contains("7월"))
+        XCTAssertTrue(korean.contains("월요일"))
+        XCTAssertFalse(korean.localizedCaseInsensitiveContains("Monday"))
+        XCTAssertTrue(english.localizedCaseInsensitiveContains("Monday"))
+    }
+
     private var calendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

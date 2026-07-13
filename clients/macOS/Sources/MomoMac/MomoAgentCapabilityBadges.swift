@@ -26,6 +26,10 @@ struct MomoAgentBadgeGroup: View {
         max(0, normalizedCapabilities.count - visibleCapabilities.count)
     }
 
+    private var remainingCapabilities: [String] {
+        Array(normalizedCapabilities.dropFirst(visibleCapabilities.count))
+    }
+
     var body: some View {
         HStack(spacing: MomoTheme.AgentBadge.spacing) {
             if showsAgentIdentity {
@@ -38,7 +42,11 @@ struct MomoAgentBadgeGroup: View {
             }
 
             if remainingCount > 0 {
-                badge("+\(remainingCount)", background: MomoTheme.AgentBadge.capabilityBackground)
+                badge(
+                    "+\(remainingCount)",
+                    background: MomoTheme.AgentBadge.capabilityBackground,
+                    helpText: remainingCapabilities.joined(separator: ", ")
+                )
                     .monospacedDigit()
             }
         }
@@ -46,7 +54,7 @@ struct MomoAgentBadgeGroup: View {
         .accessibilityElement(children: .combine)
     }
 
-    private func badge(_ label: String, background: Color) -> some View {
+    private func badge(_ label: String, background: Color, helpText: String? = nil) -> some View {
         Text(label)
             .font(MomoTheme.AgentBadge.font)
             .lineLimit(1)
@@ -54,6 +62,7 @@ struct MomoAgentBadgeGroup: View {
             .padding(.horizontal, MomoTheme.AgentBadge.horizontalPadding)
             .background(background, in: Capsule())
             .foregroundStyle(MomoTheme.agentAccent)
-            .help(label)
+            .help(helpText ?? label)
+            .accessibilityLabel(helpText ?? label)
     }
 }

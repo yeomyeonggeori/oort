@@ -18,6 +18,7 @@ struct MomoSessionChrome {
 
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showDetailPane = false
     @State private var detailPane: MomoMacDetailPane = .alpha
     @State private var selectedProfileMemberID: MemberID?
@@ -28,7 +29,6 @@ public struct MomoMacRootView: View {
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     private let sessionChrome: MomoSessionChrome?
-    private static let layoutAnimation = Animation.timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.24)
     private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
     private static let inspectorWidth: CGFloat = 440
 
@@ -71,7 +71,7 @@ public struct MomoMacRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
         .preferredColorScheme(appearance.colorScheme)
         .focusedSceneValue(\.momoMacCommandActions, commandActions)
         .overlay {
@@ -131,12 +131,11 @@ public struct MomoMacRootView: View {
                 detailPaneView(copy: copy, presentation: .overlay)
                     .frame(width: overlayInspectorWidth(for: availableDetailWidth))
                     .padding(.trailing, 12)
-                    .padding(.vertical, 10)
-                    .shadow(color: MomoTheme.floatingPanelShadow, radius: 24, x: -12, y: 0)
+                    .padding(.vertical, 8)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .animation(Self.layoutAnimation, value: showDetailPane)
+        .animation(layoutAnimation, value: showDetailPane)
     }
 
     private func sidebar(copy: MomoWorkspaceCopy) -> some View {
@@ -178,6 +177,9 @@ public struct MomoMacRootView: View {
             onOpenWorkDetail: { runId in
                 selectedWorkRunID = runId
                 openDetailPane(.work)
+            },
+            onRequestLogin: {
+                sessionChrome?.switchSession()
             }
         )
             .frame(minWidth: 0)
@@ -291,37 +293,37 @@ public struct MomoMacRootView: View {
             }
         }
         .frame(width: presentation == .attached ? Self.inspectorWidth : nil)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: presentation.cornerRadius, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: presentation.cornerRadius, style: .continuous)
-                .stroke(
-                    presentation == .overlay ? MomoTheme.subtlePanelBorder : .clear,
-                    lineWidth: 1
-                )
-        }
+        .momoSurface(
+            presentation == .overlay ? .card : .panel,
+            cornerRadius: presentation.cornerRadius
+        )
     }
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
-        withAnimation(Self.layoutAnimation) {
+        withAnimation(layoutAnimation) {
             detailPane = pane
             showDetailPane = true
         }
     }
 
     private func toggleDetailPane() {
-        withAnimation(Self.layoutAnimation) {
+        withAnimation(layoutAnimation) {
             showDetailPane.toggle()
         }
     }
 
     private func closeDetailPane() {
-        withAnimation(Self.layoutAnimation) {
+        withAnimation(layoutAnimation) {
             showDetailPane = false
         }
     }
 
     private func overlayInspectorWidth(for detailWidth: CGFloat) -> CGFloat {
         min(Self.inspectorWidth, max(340, detailWidth - 28))
+    }
+
+    private var layoutAnimation: Animation? {
+        reduceMotion ? nil : MomoTheme.Motion.stateChange
     }
 
     private var language: MomoUILanguage {
@@ -391,7 +393,7 @@ private enum MomoInspectorPresentation {
         case .attached:
             return 0
         case .overlay:
-            return 18
+            return MomoTheme.cornerLarge
         }
     }
 }

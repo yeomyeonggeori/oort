@@ -24,6 +24,7 @@ public struct MessageBubble: View {
     public let onApprovalDecision: ((ApprovalID, Bool) -> Void)?
     private let groupingStyle: MessageBubbleGroupingStyle
     private let timelineCopy: MomoWorkspaceCopy
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     @FocusState private var isCopyActionFocused: Bool
 
@@ -94,6 +95,7 @@ public struct MessageBubble: View {
         .padding(.vertical, groupingStyle == .compact ? 0 : 4)
         .padding(.horizontal, 4)
         .background(isHovered ? Color.primary.opacity(0.04) : .clear)
+        .animation(reduceMotion ? nil : MomoTheme.Motion.hover, value: isHovered)
         .contentShape(Rectangle())
         .overlay(alignment: .topTrailing) {
             copyAction
@@ -134,7 +136,7 @@ public struct MessageBubble: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text(author?.displayName ?? "unknown")
-                .font(.body.weight(.semibold))
+                .font(MomoTheme.Typography.emphasizedRow)
             if isAgent {
                 Text("AGENT")
                     .font(.caption2.weight(.bold))
@@ -167,11 +169,11 @@ public struct MessageBubble: View {
     private var timelineTimestamp: some View {
         if message.isPendingAck {
             Text(timelineCopy.messageSending)
-                .font(.caption)
+                .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
         } else if let date = timestampDate {
             Text(date, format: .dateTime.hour().minute())
-                .font(.caption)
+                .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
         }
@@ -341,6 +343,7 @@ public struct MessageBubble: View {
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(tint.opacity(0.06), in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner))
+        .momoSurface(.card)
         .overlay(
             RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner)
                 .strokeBorder(tint.opacity(0.25), lineWidth: 1)

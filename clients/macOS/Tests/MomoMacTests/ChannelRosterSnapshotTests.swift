@@ -263,7 +263,7 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             let unreadImage = try await render(scheme, showsUnread: true)
             try writeDesignReviewArtifact(
                 unreadImage,
-                named: "momo-367-sidebar-unread-\(scheme == .dark ? "dark" : "light").png"
+                named: "momo-369-sidebar-unread-\(scheme == .dark ? "dark" : "light").png"
             )
             XCTAssertGreaterThan(
                 try mentionBadgePixelCount(in: unreadImage),

@@ -151,6 +151,32 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
         }
     }
 
+    private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
+        guard let directory = ProcessInfo.processInfo.environment["MOMO_DESIGN_REVIEW_ARTIFACT_DIR"] else {
+            return
+        }
+        let outputDirectory = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        guard let tiff = image.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiff),
+              let png = representation.representation(using: .png, properties: [:])
+        else {
+            throw XCTSkip("Rendered Work surface image could not be encoded as PNG")
+        }
+        try png.write(to: outputDirectory.appendingPathComponent(name), options: .atomic)
+    }
+
+    func testWorkSurfaceRasterWritesDesignReviewArtifacts() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let image = try render(scheme)
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-369-work-\(scheme == .dark ? "dark" : "light").png"
+            )
+            XCTAssertEqual(image.size, size)
+        }
+    }
+
     func testWorkSurfaceLightSnapshot() throws {
         try requireCanonicalReference(
             testName: #function.replacingOccurrences(of: "()", with: ""),

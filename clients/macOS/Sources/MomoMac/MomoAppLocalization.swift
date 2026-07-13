@@ -894,10 +894,87 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var recoverableError: String {
+    var messageLoadFailedTitle: String {
         switch language {
-        case .korean: return "복구 가능한 오류"
-        case .english: return "Recoverable error"
+        case .korean: return "메시지를 불러오지 못했습니다"
+        case .english: return "Messages could not be loaded"
+        }
+    }
+
+    var messageLoadFailedDetail: String {
+        switch language {
+        case .korean: return "서버 연결을 확인하고 다시 시도하세요."
+        case .english: return "Check the server connection and try again."
+        }
+    }
+
+    var messageSendFailedTitle: String {
+        switch language {
+        case .korean: return "메시지를 보내지 못했습니다"
+        case .english: return "Message was not sent"
+        }
+    }
+
+    var messageSendFailedDetail: String {
+        switch language {
+        case .korean: return "내용은 보존되었습니다. 다시 보내기를 눌러 재시도하세요."
+        case .english: return "Your message is preserved. Choose Send again to retry."
+        }
+    }
+
+    func agentCallSendFailedTitle(_ agentName: String) -> String {
+        switch language {
+        case .korean: return "\(agentName) 호출을 보내지 못했습니다"
+        case .english: return "The call to \(agentName) was not sent"
+        }
+    }
+
+    var agentCallSendFailedDetail: String {
+        switch language {
+        case .korean: return "에이전트가 아직 호출되지 않았습니다. 다시 보내기를 눌러 재시도하세요."
+        case .english: return "The agent has not been called yet. Choose Send again to retry."
+        }
+    }
+
+    var sendAgain: String {
+        switch language {
+        case .korean: return "다시 보내기"
+        case .english: return "Send again"
+        }
+    }
+
+    var actionFailedTitle: String {
+        switch language {
+        case .korean: return "작업을 완료하지 못했습니다"
+        case .english: return "The action could not be completed"
+        }
+    }
+
+    var actionFailedDetail: String {
+        switch language {
+        case .korean: return "잠시 후 해당 작업을 다시 시도하세요."
+        case .english: return "Try that action again in a moment."
+        }
+    }
+
+    var sessionExpiredTitle: String {
+        switch language {
+        case .korean: return "로그인이 만료되었습니다"
+        case .english: return "Your session expired"
+        }
+    }
+
+    var sessionExpiredDetail: String {
+        switch language {
+        case .korean: return "계속하려면 다시 로그인하세요."
+        case .english: return "Sign in again to continue."
+        }
+    }
+
+    var signInAgain: String {
+        switch language {
+        case .korean: return "다시 로그인"
+        case .english: return "Sign in again"
         }
     }
 
@@ -1329,8 +1406,8 @@ struct MomoWorkspaceCopy {
 
     var restFallback: String {
         switch language {
-        case .korean: return "REST 폴백"
-        case .english: return "REST fallback"
+        case .korean: return "최근 메시지 모드"
+        case .english: return "Recent messages"
         }
     }
 
@@ -1350,15 +1427,15 @@ struct MomoWorkspaceCopy {
 
     var offlineRestFallback: String {
         switch language {
-        case .korean: return "오프라인 - REST 폴백"
-        case .english: return "Offline - REST fallback"
+        case .korean: return "오프라인 · 최근 메시지"
+        case .english: return "Offline · recent messages"
         }
     }
 
     var liveErrorRestFallback: String {
         switch language {
-        case .korean: return "실시간 오류 - REST 폴백"
-        case .english: return "Live error - REST fallback"
+        case .korean: return "실시간 지연 · 최근 메시지"
+        case .english: return "Live delayed · recent messages"
         }
     }
 
@@ -1720,6 +1797,13 @@ struct MomoWorkspaceCopy {
         case .english:
             return "\(channelName), \(unreadCount) unread messages, \(mentionCount) mentions"
         }
+    }
+
+    func timelineDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: language == .korean ? "ko_KR" : "en_US")
+        formatter.setLocalizedDateFormatFromTemplate("MMMMdEEEE")
+        return formatter.string(from: date)
     }
 
     private func agentCredentialDate(_ milliseconds: Int64) -> String {

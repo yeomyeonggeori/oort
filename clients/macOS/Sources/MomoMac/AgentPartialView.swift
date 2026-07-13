@@ -60,8 +60,8 @@ public struct AgentPartialView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 6) {
-            Text(author?.displayName ?? "agent").font(.subheadline.bold())
+        HStack(spacing: 8) {
+            Text(author?.displayName ?? "agent").font(MomoTheme.Typography.emphasizedRow)
             phaseChip
         }
     }
@@ -95,6 +95,7 @@ public struct AgentPartialView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MomoTheme.agentAccent.opacity(0.06),
                     in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner))
+        .momoSurface(.card)
     }
 }
 
@@ -112,6 +113,24 @@ struct AgentTranscriptText: View {
     var lineLimit: Int?
     var style: Style = .transcript
 
+    nonisolated static func removingCursorArtifact(from text: String) -> String {
+        var cleaned = text
+        while cleaned.last?.isWhitespace == true {
+            cleaned.removeLast()
+        }
+        while cleaned.last == "▍" || cleaned.last == "▌" {
+            cleaned.removeLast()
+            while cleaned.last?.isWhitespace == true {
+                cleaned.removeLast()
+            }
+        }
+        return cleaned
+    }
+
+    private var displayText: String {
+        Self.removingCursorArtifact(from: text)
+    }
+
     var body: some View {
         Group {
             switch style {
@@ -126,13 +145,13 @@ struct AgentTranscriptText: View {
         }
         .lineLimit(lineLimit)
         .textSelection(.enabled)
-        .accessibilityLabel(text)
+        .accessibilityLabel(displayText)
     }
 
     private var renderedText: Text {
         if isStreaming {
-            return Text(text) + Text(" ▌").foregroundColor(MomoTheme.agentAccent)
+            return Text(displayText) + Text(" |").foregroundColor(MomoTheme.agentAccent)
         }
-        return Text(text)
+        return Text(displayText)
     }
 }

@@ -21,14 +21,15 @@ public enum MomoTheme {
     public static let irreversibleRed = Color(red: 0.90, green: 0.27, blue: 0.30)
     /// Foreground placed on an accent-filled control or avatar.
     public static let onAccent = Color(nsColor: .selectedMenuItemTextColor)
-    /// Adaptive separator used for subtle borders on raised surfaces.
+    /// Adaptive separator used outside the elevation system.
     public static let subtleBorder = Color(nsColor: .separatorColor)
-    /// Modal scrim and floating-panel chrome.
+    /// Modal scrim. Raised-surface shadows and borders come from `Surface`.
     public static let modalScrim = Color.black.opacity(0.18)
-    public static let floatingPanelShadow = Color.black.opacity(0.28)
-    public static let subtlePanelBorder = Color.white.opacity(0.14)
 
-    public static let bubbleCorner: CGFloat = 12
+    public static let cornerSmall: CGFloat = 6
+    public static let cornerMedium: CGFloat = 10
+    public static let cornerLarge: CGFloat = 14
+    public static let bubbleCorner = cornerMedium
     public static let gutter: CGFloat = 12
     public static let messageAvatarSize: CGFloat = 28
     public static let mentionAutocompleteWidth: CGFloat = 300
@@ -60,6 +61,104 @@ public enum MomoTheme {
         public static let focusBorder = MomoTheme.humanAccent
     }
 
+    /// Three calm elevation levels shared by the shell. Primitive scheme colors
+    /// stay inside Theme; views consume the complete fill/border/shadow set.
+    public enum Surface {
+        public enum Level: Sendable {
+            case background
+            case panel
+            case card
+        }
+
+        /// Bounded surfaces clip to their shape. Window chrome surfaces extend
+        /// only their fill through the safe area so titlebars never reveal the
+        /// system background between shell columns.
+        public enum Extent: Sendable {
+            case bounded
+            case windowChrome
+        }
+
+        public struct Style {
+            public let fill: Color
+            public let border: Color
+            public let shadow: Color
+            public let shadowRadius: CGFloat
+            public let shadowY: CGFloat
+        }
+
+        public static let borderWidth: CGFloat = 1
+
+        public static func style(_ level: Level, colorScheme: ColorScheme) -> Style {
+            switch (level, colorScheme) {
+            case (.background, .dark):
+                return Style(
+                    fill: Color(red: 0.065, green: 0.067, blue: 0.075),
+                    border: .clear,
+                    shadow: .clear,
+                    shadowRadius: 0,
+                    shadowY: 0
+                )
+            case (.background, _):
+                return Style(
+                    fill: Color(red: 0.935, green: 0.938, blue: 0.945),
+                    border: .clear,
+                    shadow: .clear,
+                    shadowRadius: 0,
+                    shadowY: 0
+                )
+            case (.panel, .dark):
+                return Style(
+                    fill: Color(red: 0.085, green: 0.088, blue: 0.098),
+                    border: Color.white.opacity(0.07),
+                    shadow: Color.black.opacity(0.12),
+                    shadowRadius: 4,
+                    shadowY: 1
+                )
+            case (.panel, _):
+                return Style(
+                    fill: Color(red: 0.965, green: 0.968, blue: 0.974),
+                    border: Color.black.opacity(0.07),
+                    shadow: Color.black.opacity(0.05),
+                    shadowRadius: 4,
+                    shadowY: 1
+                )
+            case (.card, .dark):
+                return Style(
+                    fill: Color(red: 0.115, green: 0.118, blue: 0.132),
+                    border: Color.white.opacity(0.11),
+                    shadow: Color.black.opacity(0.22),
+                    shadowRadius: 8,
+                    shadowY: 2
+                )
+            case (.card, _):
+                return Style(
+                    fill: Color(red: 0.992, green: 0.993, blue: 0.996),
+                    border: Color.black.opacity(0.10),
+                    shadow: Color.black.opacity(0.08),
+                    shadowRadius: 8,
+                    shadowY: 2
+                )
+            }
+        }
+    }
+
+    /// Semantic text rhythm: title -> section -> row -> supporting metadata.
+    public enum Typography {
+        public static let screenTitle = Font.title3.weight(.semibold)
+        public static let sectionHeader = Font.subheadline.weight(.semibold)
+        public static let row = Font.body
+        public static let emphasizedRow = Font.body.weight(.semibold)
+        public static let supporting = Font.caption
+        public static let metadata = Font.caption2
+    }
+
+    public enum Motion {
+        public static let hoverDuration = 0.12
+        public static let stateChangeDuration = 0.16
+        public static let hover = Animation.easeOut(duration: hoverDuration)
+        public static let stateChange = Animation.easeOut(duration: stateChangeDuration)
+    }
+
     /// Component tokens for the primary macOS sidebar. Values live here so
     /// channel, DM, member, and utility rows share one density contract.
     public enum Sidebar {
@@ -84,14 +183,14 @@ public enum MomoTheme {
         public static let standardSpacing: CGFloat = 8
         public static let contentSpacing: CGFloat = 12
 
-        public static let rowCornerRadius: CGFloat = 6
+        public static let rowCornerRadius = MomoTheme.cornerSmall
 
-        public static let workspaceFont = Font.body.weight(.semibold)
-        public static let workspaceDetailFont = Font.caption
-        public static let sectionHeaderFont = Font.subheadline.weight(.semibold)
-        public static let rowFont = Font.body
-        public static let selectedRowFont = Font.body.weight(.semibold)
-        public static let rowDetailFont = Font.caption
+        public static let workspaceFont = MomoTheme.Typography.emphasizedRow
+        public static let workspaceDetailFont = MomoTheme.Typography.supporting
+        public static let sectionHeaderFont = MomoTheme.Typography.sectionHeader
+        public static let rowFont = MomoTheme.Typography.row
+        public static let selectedRowFont = MomoTheme.Typography.emphasizedRow
+        public static let rowDetailFont = MomoTheme.Typography.supporting
         public static let badgeFont = Font.caption2.weight(.semibold)
 
         public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
@@ -110,8 +209,8 @@ public enum MomoTheme {
         public static let shortcutsHeight: CGFloat = 440
         public static let rowMinimumHeight: CGFloat = 44
         public static let iconSize: CGFloat = 24
-        public static let panelCornerRadius: CGFloat = 14
-        public static let rowCornerRadius: CGFloat = 6
+        public static let panelCornerRadius = MomoTheme.cornerLarge
+        public static let rowCornerRadius = MomoTheme.cornerSmall
 
         public static let edgeInset: CGFloat = 16
         public static let sectionSpacing: CGFloat = 16
@@ -142,6 +241,62 @@ public enum MomoTheme {
         public static let standardSpacing: CGFloat = 8
         public static let contentSpacing: CGFloat = 12
         public static let sectionSpacing: CGFloat = 16
+    }
+}
+
+public extension View {
+    /// Applies a complete elevation token set. The custom modifier is needed
+    /// because SwiftUI has no native semantic background/panel/card level API.
+    func momoSurface(
+        _ level: MomoTheme.Surface.Level,
+        cornerRadius: CGFloat = MomoTheme.cornerMedium,
+        extent: MomoTheme.Surface.Extent = .bounded
+    ) -> some View {
+        modifier(MomoSurfaceModifier(level: level, cornerRadius: cornerRadius, extent: extent))
+    }
+}
+
+private struct MomoSurfaceModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let level: MomoTheme.Surface.Level
+    let cornerRadius: CGFloat
+    let extent: MomoTheme.Surface.Extent
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let style = MomoTheme.Surface.style(level, colorScheme: colorScheme)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        switch extent {
+        case .bounded:
+            surfaceChrome(
+                content.background(style.fill, in: shape),
+                style: style,
+                shape: shape
+            )
+        case .windowChrome:
+            surfaceChrome(
+                content.background(style.fill.ignoresSafeArea()),
+                style: style,
+                shape: shape
+            )
+        }
+    }
+
+    private func surfaceChrome<SurfaceContent: View>(
+        _ content: SurfaceContent,
+        style: MomoTheme.Surface.Style,
+        shape: RoundedRectangle
+    ) -> some View {
+        content
+            .overlay {
+                shape.stroke(style.border, lineWidth: MomoTheme.Surface.borderWidth)
+            }
+            .shadow(
+                color: style.shadow,
+                radius: style.shadowRadius,
+                x: 0,
+                y: style.shadowY
+            )
     }
 }
 

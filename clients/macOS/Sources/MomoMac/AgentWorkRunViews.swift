@@ -66,6 +66,7 @@ struct AgentWorkRunCard: View {
             MomoTheme.agentAccent.opacity(0.05),
             in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
         )
+        .momoSurface(.card)
         .overlay {
             RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
                 .stroke(MomoTheme.agentAccent.opacity(0.20), lineWidth: 1)
@@ -85,10 +86,10 @@ struct AgentWorkRunCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(run.input.title)
-                    .font(.body.weight(.semibold))
+                    .font(MomoTheme.Typography.emphasizedRow)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(agent.map { "\($0.displayName)  @\($0.handle)" } ?? copy.agent)
-                    .font(.caption)
+                    .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
             }
 
@@ -105,7 +106,7 @@ struct AgentWorkRunCard: View {
                 if reduceMotion {
                     isLogExpanded.toggle()
                 } else {
-                    withAnimation(.snappy) {
+                    withAnimation(MomoTheme.Motion.stateChange) {
                         isLogExpanded.toggle()
                     }
                 }
@@ -113,10 +114,10 @@ struct AgentWorkRunCard: View {
                 HStack(spacing: 4) {
                     Image(systemName: isLogExpanded ? "chevron.down" : "chevron.right")
                     Text(copy.workLiveLog)
-                        .font(.caption.weight(.semibold))
+                        .font(MomoTheme.Typography.supporting.weight(.semibold))
                     Spacer()
                     Text(isLogExpanded ? copy.collapseWorkLog : copy.expandWorkLog)
-                        .font(.caption)
+                        .font(MomoTheme.Typography.supporting)
                         .foregroundStyle(.secondary)
                 }
                 .contentShape(Rectangle())
@@ -131,7 +132,7 @@ struct AgentWorkRunCard: View {
             )
         }
         .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner))
+        .momoSurface(.panel)
     }
 
     private var runErrorText: String? {
@@ -177,7 +178,7 @@ struct AgentWorkRunDetailView: View {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(run.input.title)
-                            .font(.title3.weight(.semibold))
+                            .font(MomoTheme.Typography.screenTitle)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(run.input.brief)
                             .font(.callout)
@@ -228,7 +229,7 @@ struct AgentWorkRunDetailView: View {
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text(copy.workTranscript)
-                        .font(.headline)
+                        .font(MomoTheme.Typography.sectionHeader)
                     if result.transcript.isEmpty {
                         Text(copy.workTranscriptEmpty)
                             .font(.callout)
@@ -334,6 +335,7 @@ private struct AgentWorkApprovalSection: View {
             MomoTheme.costAmber.opacity(0.07),
             in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner)
         )
+        .momoSurface(.panel)
     }
 }
 
@@ -386,6 +388,7 @@ private struct AgentWorkResultSection: View {
             resultColor.opacity(0.06),
             in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner)
         )
+        .momoSurface(.panel)
     }
 
     private var fallbackSummary: String {

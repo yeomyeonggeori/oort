@@ -10,6 +10,7 @@ import MomoCore
 
 public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isCreatingChannel = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
@@ -105,11 +106,8 @@ public struct ChannelListView: View {
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: MomoTheme.Sidebar.sectionSpacing) {
-                        if let error = viewModel.connectionError {
-                            connectionErrorRow(error, copy: copy)
-                        }
-                        if let error = viewModel.readStateSyncError {
-                            readStateErrorRow(error, copy: copy)
+                        if viewModel.readStateSyncError != nil {
+                            readStateErrorRow(copy: copy)
                         }
 
                         channelsSection(copy: copy)
@@ -149,7 +147,7 @@ public struct ChannelListView: View {
                     .zIndex(2)
             }
         }
-        .background(MomoSidebarGlassBackground())
+        .momoSurface(.panel, cornerRadius: 0, extent: .windowChrome)
         .animation(sidebarPanelAnimation, value: showProfilePanel)
         .onAppear {
             refreshHermesEndpointDraftIfNeeded()
@@ -249,34 +247,7 @@ public struct ChannelListView: View {
             .foregroundStyle(.secondary)
     }
 
-    private func connectionErrorRow(_ error: String, copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
-            Label(copy.recoverableError, systemImage: "exclamationmark.triangle.fill")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(MomoTheme.irreversibleRed)
-            Text(error)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
-            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
-                Button {
-                    Task { await viewModel.retrySelectedChannelLoad() }
-                } label: {
-                    Label(copy.retry, systemImage: "arrow.clockwise")
-                }
-                .controlSize(.small)
-                Button {
-                    viewModel.clearConnectionError()
-                } label: {
-                    Label(copy.dismiss, systemImage: "xmark.circle")
-                }
-                .controlSize(.small)
-            }
-        }
-        .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
-    }
-
-    private func readStateErrorRow(_ error: String, copy: MomoWorkspaceCopy) -> some View {
+    private func readStateErrorRow(copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
             Label(copy.unreadSyncUnavailable, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout.weight(.semibold))
@@ -297,7 +268,6 @@ public struct ChannelListView: View {
             }
         }
         .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
-        .help(error)
     }
 
     private func channelsSection(copy: MomoWorkspaceCopy) -> some View {
@@ -345,7 +315,7 @@ public struct ChannelListView: View {
                 actionTitle: copy.inviteMembers,
                 systemImage: "plus"
             ) {
-                withAnimation(.easeInOut(duration: 0.16)) {
+                withAnimation(sidebarPanelAnimation) {
                     inviteMode = .human
                     showMemberInvite = true
                 }
@@ -388,6 +358,7 @@ public struct ChannelListView: View {
             width: MomoTheme.Sidebar.utilityPopoverWidth
         )
         .frame(maxHeight: MomoTheme.Sidebar.utilityPopoverMaximumHeight)
+        .momoSurface(.card, cornerRadius: MomoTheme.cornerLarge)
     }
 
     @ViewBuilder
@@ -816,7 +787,7 @@ public struct ChannelListView: View {
                 InviteAdminPopover(context: context)
             }
         }
-        .animation(.timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18), value: showMemberInvite)
+        .animation(sidebarPanelAnimation, value: showMemberInvite)
     }
 
     private func profilePanel(copy: MomoWorkspaceCopy) -> some View {
@@ -879,12 +850,7 @@ public struct ChannelListView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(MomoTheme.subtlePanelBorder, lineWidth: 1)
-        }
-        .shadow(color: MomoTheme.floatingPanelShadow, radius: 22, x: 0, y: 12)
+        .momoSurface(.card, cornerRadius: MomoTheme.cornerLarge)
     }
 
     private func profileAction(
@@ -1279,7 +1245,7 @@ public struct ChannelListView: View {
 
         do {
             let reveal = try await viewModel.issueAgentCredential(for: agent.id)
-            withAnimation(.easeInOut(duration: 0.16)) {
+            withAnimation(sidebarPanelAnimation) {
                 showMemberInvite = false
             }
             agentCredentialReveal = reveal
@@ -1381,8 +1347,8 @@ public struct ChannelListView: View {
         MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
     }
 
-    private var sidebarPanelAnimation: Animation {
-        .timingCurve(0.22, 0.0, 0.0, 1.0, duration: 0.18)
+    private var sidebarPanelAnimation: Animation? {
+        reduceMotion ? nil : MomoTheme.Motion.stateChange
     }
 
     private func isDogfoodHermesAgent(_ member: Member) -> Bool {
@@ -1778,7 +1744,7 @@ private struct MomoSidebarLogoMark: View {
         .frame(width: size, height: size)
         .overlay {
             RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                .stroke(MomoTheme.subtlePanelBorder, lineWidth: 1)
+                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
         }
     }
 
@@ -1845,14 +1811,6 @@ private struct MomoProfileAvatar: View {
     private var avatarImage: NSImage? {
         guard !imagePath.isEmpty else { return nil }
         return MomoAvatarImageCache.image(atPath: imagePath)
-    }
-}
-
-private struct MomoSidebarGlassBackground: View {
-    var body: some View {
-        Rectangle()
-            .fill(.thinMaterial)
-            .ignoresSafeArea()
     }
 }
 

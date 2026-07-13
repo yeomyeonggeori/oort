@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import AppKit
 import MomoCore
 @testable import MomoMac
 
@@ -80,6 +81,26 @@ final class MomoMacTests: XCTestCase {
     func testSidebarWidthTokensHaveStableResizeOrder() {
         XCTAssertLessThan(MomoTheme.Sidebar.minimumWidth, MomoTheme.Sidebar.idealWidth)
         XCTAssertLessThan(MomoTheme.Sidebar.idealWidth, MomoTheme.Sidebar.maximumWidth)
+    }
+
+    @MainActor
+    func testSurfaceElevationHasThreeOrderedLevelsInBothSchemes() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let background = try brightness(MomoTheme.Surface.style(.background, colorScheme: scheme).fill)
+            let panel = try brightness(MomoTheme.Surface.style(.panel, colorScheme: scheme).fill)
+            let cardStyle = MomoTheme.Surface.style(.card, colorScheme: scheme)
+            let card = try brightness(cardStyle.fill)
+
+            XCTAssertLessThan(background, panel)
+            XCTAssertLessThan(panel, card)
+            XCTAssertGreaterThan(cardStyle.shadowRadius, 0)
+        }
+    }
+
+    @MainActor
+    private func brightness(_ color: Color) throws -> CGFloat {
+        let converted = try XCTUnwrap(NSColor(color).usingColorSpace(.deviceRGB))
+        return (converted.redComponent + converted.greenComponent + converted.blueComponent) / 3
     }
 
     func testSidebarMembershipMutationCopyIsLocalizedAndVerbFirst() {
@@ -1420,6 +1441,7 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(snapshot.statuses.first { $0.area == .invites }?.health, .degraded)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .degraded)
         XCTAssertGreaterThanOrEqual(snapshot.attentionCount, 5)
+        XCTAssertFalse(snapshot.statuses.contains { $0.detail.contains("db offline") })
         XCTAssertTrue(snapshot.statuses.first { $0.area == .realtime }?.recovery?.contains("Retry") == true)
         XCTAssertTrue(snapshot.statuses.first { $0.area == .invites }?.recovery?.contains("fresh code") == true)
         XCTAssertTrue(snapshot.capabilities.first { $0.id == "agent-runtime" }?.isAvailable == false)
@@ -2477,6 +2499,7 @@ final class MomoMacTests: XCTestCase {
 
         await viewModel.createChannel(kind: .publicChannel, name: "ops-lab")
         XCTAssertTrue(viewModel.connectionError?.contains("channel name already exists") == true)
+        XCTAssertEqual(viewModel.connectionIssue, .actionFailed)
     }
 
     @MainActor
@@ -2530,6 +2553,7 @@ final class MomoMacTests: XCTestCase {
 
         XCTAssertTrue(viewModel.channels.isEmpty)
         XCTAssertTrue(viewModel.connectionError?.contains("channels unavailable") == true)
+        XCTAssertEqual(viewModel.connectionIssue, .loadFailed)
     }
 
     func testRESTBackendMapsUnauthorizedResponseToProblemError() async throws {
@@ -2557,6 +2581,71 @@ final class MomoMacTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    @MainActor
+    func testViewModelClassifiesUnauthorizedAsExpiredSession() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(
+                statusCode: 401,
+                json: #"{"title":"internal auth dump","detail":"expired-token-should-not-render"}"#
+            )
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "expired-token"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+
+        await viewModel.bootstrap(workspace: .demo, accessToken: "expired-token")
+
+        XCTAssertEqual(viewModel.connectionIssue, .authenticationExpired)
+        XCTAssertNotNil(viewModel.connectionError, "diagnostic detail remains available outside user chrome")
+        XCTAssertEqual(MomoWorkspaceCopy(language: .korean).sessionExpiredDetail, "계속하려면 다시 로그인하세요.")
+        let commandCenter = viewModel.alphaCommandCenterSnapshot()
+        XCTAssertFalse(commandCenter.statuses.contains { $0.detail.contains("internal auth dump") })
+        XCTAssertFalse(commandCenter.statuses.contains { $0.detail.contains("expired-token-should-not-render") })
+    }
+
+    @MainActor
+    func testFailedAgentMentionUsesSendRecoveryAndRetriesSameIdempotencyKey() async throws {
+        let liveBackend = LiveChatBackend()
+        let seed = await liveBackend.seedDemo()
+        let backend = RetryOnceSendChatBackend(base: liveBackend)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: liveBackend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        await viewModel.selectChannel(channel)
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+
+        await viewModel.send(body: "@\(agent.handle) summarize this", to: channel)
+
+        XCTAssertEqual(viewModel.connectionIssue, .sendFailed)
+        XCTAssertEqual(viewModel.failedMentionedAgentName, agent.displayName)
+        XCTAssertNil(viewModel.mentionNotice)
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).agentCallSendFailedTitle(agent.displayName),
+            "\(agent.displayName) 호출을 보내지 못했습니다"
+        )
+        let firstAttempts = await backend.attemptedClientMessageIDs()
+        XCTAssertEqual(firstAttempts.count, 1)
+
+        await viewModel.retryFailedSend()
+
+        XCTAssertNil(viewModel.connectionIssue)
+        XCTAssertNil(viewModel.connectionError)
+        XCTAssertNil(viewModel.failedMentionedAgentName)
+        let allAttempts = await backend.attemptedClientMessageIDs()
+        XCTAssertEqual(allAttempts.count, 2)
+        XCTAssertEqual(allAttempts[0], allAttempts[1], "retry must preserve the send idempotency key")
+        let matchingMessages = viewModel.visibleMessages.filter { $0.clientMsgId == allAttempts[0] }
+        XCTAssertEqual(matchingMessages.count, 1)
+        XCTAssertNotNil(matchingMessages.first?.seq)
     }
 
     func testRESTBackendSubscribeUsesRealtimeDriverStartingAfterKnownHistorySeq() async throws {
@@ -3766,6 +3855,81 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(controller.form.password, "")
         XCTAssertFalse(controller.form.savePassword)
         XCTAssertTrue(controller.sessionNotice?.contains("Logged out") == true)
+    }
+}
+
+private actor RetryOnceSendChatBackend: ChatBackend {
+    private let base: LiveChatBackend
+    private var shouldFailNextSend = true
+    private var clientMessageIDs: [UUID] = []
+
+    init(base: LiveChatBackend) {
+        self.base = base
+    }
+
+    func attemptedClientMessageIDs() -> [UUID] {
+        clientMessageIDs
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        clientMessageIDs.append(clientMsgId)
+        if shouldFailNextSend {
+            shouldFailNextSend = false
+            throw BackendError.realtime("fixture send failure")
+        }
+        return try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        try await base.history(channel: channel, after: seq, limit: limit)
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
     }
 }
 
