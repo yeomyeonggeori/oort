@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-12 · 기준선: **ADR-0102 배치 전체 종결** (349/350/341/352/351/353 merge, root full gate green + 동등성 verifier 상시화) · 통합 책임: `momo-main`
+> 기준일: 2026-07-13 · 기준선: **Phase 0 (dogfood 무결성: 354/355/356) 배치 종결** — invite-gated roster SoT + seed opt-in + gateway 공지 유출 차단, root full gate green · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer), **ADR-0102(실행 경로 — Option C 이중 경로 + 서버 보장 매트릭스, 2026-07-12)** 전부 Accepted. 다음 결정 큐는 ADR-0103(로드맵 정렬)부터.
-- 현재 구현 체인: **ADR-0102 배치 전체 종결 (2026-07-12)** — 승인 왕복(349)·실행 과정 가시화(350)·중복 실행 방지(341)·동등성 verifier(352)·문서 정본화(351)·drift-guard(353) 전부 merge. root runtime-agent full gate에 동등성 검증이 상시 포함된다. **legacy gateway secret 호환 창 종료 조건 충족** — 물리 제거는 별도 보안 정리 티켓(성재 승인 대기, M7 전). ready 구현 goal 없음.
+- 현재 구현 체인: **Phase 0 dogfood 무결성 배치 종결 (2026-07-13)** — real-server roster SoT+invite-gated visibility(MOMO-354), agent seed opt-in+pairing-only(MOMO-355), gateway 운영 공지 durable 유출 차단(MOMO-356) 전부 merge, root runtime-agent+macos-ui full gate green. 직전 배치 **ADR-0102 전체 종결 (2026-07-12)** — 승인 왕복(349)·가시화(350)·중복 방지(341)·동등성 verifier(352)·문서(351)·drift-guard(353). **legacy gateway secret 호환 창 종료 조건 충족** — 물리 제거는 별도 보안 정리 티켓(성재 승인 대기, M7 전). 다음 예고: 내부 팀 테스트 준비 — UI 고도화 Wave 1(+ADR-0109 unread 기안)과 Phase A(AWS 단일 EC2 실배포) 티켓 발급.
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -46,6 +46,9 @@
 | ADR-0102 실행 경로 | 같은 패킷 (Status `done`) | MOMO-352 `#332` | `done` (PR #340, `bb76152`) — 호환 창 종료 조건 충족 | 4 완료 — **배치 종결** |
 | ADR-0102 실행 경로 | 같은 패킷 | MOMO-351 `#331` (docs) | `done` (PR #335, `ebb3a52`) | 병렬 완료 |
 | 독립 tooling | issue `#334` 본문 | MOMO-353 `#334` (drift-guard) | `done` (PR #336, `8337ae2`) — 실전 자가 실증 | 병렬 완료 |
+| **Phase 0 dogfood 무결성** | issue `#343` 본문 | MOMO-356 `#343` (adapter 공지 유출 차단) | `done` (PR #344, `0a4bf37`) | 1 완료 |
+| Phase 0 dogfood 무결성 | issue `#342` 본문 | MOMO-355 `#342` (seed opt-in) | `done` (PR #345, `ac00ef3`) | 2 완료 |
+| Phase 0 dogfood 무결성 | issue `#341` 본문 | MOMO-354 `#341` (roster SoT) | `done` (PR #346, `9ca9c93`) — **배치 종결** | 3 완료 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
@@ -60,11 +63,12 @@
 
 ## 4. 다음 체크포인트
 
-1. ~~ADR-0102 배치 (349/350/341/352/351/353)~~ — **2026-07-12 전체 종결**. 승인 인박스·실행 가시화·중복 방지·동등성 게이트가 실트래픽 경로에 랜딩.
-2. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한).
-3. 다음 기획 결정 순번: **ADR-0103 (로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood)**.
-4. design-review 잔여 Medium 2는 보류 확정 (성재 2026-07-12) — BUILD_TICKETS 기록 유지.
-5. dogfood에서 새 기능 실사용 확인 권장: @hermes 승인 필요 tool-call → 인박스 → 승인/거부 → 재개 (349), 실행 중 상태/부분응답 (350).
+1. ~~Phase 0 dogfood 무결성 (354/355/356)~~ — **2026-07-13 배치 종결**. 성재 육안 검증 대기: 김인턴 미노출·Hermes 멤버 표시·CLI 공지 무유출.
+2. **내부 팀 테스트(10인) 준비 트랙** — ① UI 고도화 Wave 1(셸/사이드바/Cmd+K) + ADR-0109(unread/read-state) 기안 ② Phase A(AWS 단일 EC2 실배포 + GH Actions pull&up + 앱 배포 `#226`) 티켓 발급. 성재 선택: 호스팅=단일 EC2(t4g.large), UI는 내부 테스트 전 선공개.
+3. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한). agent 신규 pairing 표면 티켓(103 은퇴 후 재생성 경로)도 함께 검토.
+4. 다음 기획 결정 순번: **ADR-0103 (로드맵 정렬)** — 실질 방향은 확정(내부 팀 알파), 문서 정본화 필요. 이후 ADR-0109를 UI Wave 2 전제로 선기안.
+5. MOMO-354 design-review Medium 5건 이월 (BUILD_TICKETS 기록) — presence 하드코딩·비활성 author 표시·subscribe 순서 의존·에러 카피·데모 서사. 성재 판단 대기.
+6. dogfood 실사용 확인 권장: @hermes 승인 왕복(349), 실행 중 상태/부분응답(350).
 
 ## 5. 이 문서 갱신 규칙
 

@@ -1621,13 +1621,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - worker 구현: gate marker 디렉터리(uid/repo/run/pid-start 검증)+상속 env+repo command를 모두 만족한 프로세스만 stale pre-clean/EXIT/final cleanup 대상으로 삼는다. active 다른 gate와 unmarked dogfood/user process는 남기고 충돌로 처리한다.
   - worker 정적 evidence: 수정·신규 shell `bash -n`, `shellcheck`, `git diff --check`, `make -n up`, `scripts/tests/test_local_gate_drift_guard.sh` PASS(fake Docker + 합성 PID/command/env/listener; 실제 Docker/DB 미접속). clean/root runtime gate 체크는 오케스트레이터 evidence 전까지 미체크 유지.
 
-### ☐ MOMO-356 수용기준 — Gateway 운영 공지 durable 유출 차단 `[python/runtime-agent/docs]` · 의존: MOMO-338 (`#343`)
+### ☑ MOMO-356 수용기준 — Gateway 운영 공지 durable 유출 차단 `[python/runtime-agent/docs]` · 의존: MOMO-338 (`#343`)
 
 - [x] [python] Hermes 범용 `send()`는 명시적 momo `run_id`가 있는 실제 에이전트 최종 응답만 REST message로 쓰고, session lifecycle/home channel/slash-command/model-provider 등 run-unbound 운영 공지는 성공 처리+본문 비포함 로컬 로그로 제한한다. native gateway final은 기존 `/gateway/complete`가 commit한다.
 - [x] [python/docs] `MOMO_HOME_CHANNEL`/`MOMO_HOME_CHANNEL_NAME`을 plugin optional env와 adapter enablement에 연결하고, `scripts/momo hermes-gateway-init`이 신규 env 및 기존 default-channel env를 gateway 기동 전에 보강한다. `/tmp` 신규·legacy env 양쪽 mode 600/정식 키 생성 PASS.
 - [x] [python] adapter contract가 `notify=true`인 reset·home·`/resume`·`/sethome` 공지도 REST 호출 0건임과 run-bound 응답만 durable send임을 고정한다. 전체 54 tests + smoke + py_compile PASS.
 - [x] [tooling] `verify_hermes_gateway_adapter.sh`가 기존 marker/OID-owned DB, per-run channel UUID, 대문자 `CENT_CHANNEL`, source digest EXIT trap, exit 96 rollback 경계를 유지하며 실제 adapter 호출 전후 agent message count 불변을 검사한다. 수정 shell `bash -n`/`chmod +x` PASS.
-- [ ] [runtime-agent] worktree clean gate + root post-merge gate PASS — worker의 Docker/compose/verifier/DB/`local_gate.sh` 실행 금지에 따라 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
+- [x] [runtime-agent] worktree clean gate + root post-merge gate PASS.
+  - 오케스트레이터 검수: 신규 adapter 경계 assertion이 system python3(3.9)로 떨어져 `dataclass(slots=True)` TypeError — `PYTHON_BIN` ≥3.10 해석 체인(PSQL_BIN 패턴 승계)을 오케스트레이터가 직접 수정 후 clean gate PASS. PR #344 merge(`0a4bf37`), Phase 0 종결 시 root `runtime-agent` full gate PASS(`local-gate-runtime-agent-20260712T170955Z-…-rfc58973d57b9.md`).
 - [x] [scope] `schema_v0.sql` 무변경, UI·스냅샷 변경 없음. reference PNG 재기록 대상 없음.
 
 ### ☑ MOMO-341 수용기준 — Gateway pending durable claim/lease `[swift/runtime-agent]` · 의존: MOMO-350 (ADR-0102 배치 합류, `#333`)
@@ -1703,23 +1704,27 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - root post-merge full gate PASS (`local-gate-macos-ui-20260711T190121Z-…-r0e6956276818.md`, source digest 보존) — **verifier 격리 캐스케이드(MOMO-342→348) 전 프로파일 종결 (2026-07-12)**. PR #328 merge (`444ee59`).
   - 검수 노트: 1차 worker 실행이 API 무응답으로 행(CPU 0, 2.5h) → kill 후 재스폰으로 10분 완주. 1차 root gate는 이전 실패 게이트 런의 잔류 MomoServer(26560) 점유로 fail-fast → 정리 후 PASS. 잔류 프로세스 자동 정리는 drift-guard 티켓 제안에 병합 예정.
 
-### ☐ MOMO-355 수용기준 — Dogfood agent seed opt-in + pairing-only roster `[sql/tooling/docs]` · 의존: MOMO-339, MOMO-348, MOMO-352 (`#342`)
-- [ ] persistent dogfood/local-alpha의 기본 migration은 demo human + 기본 채널만 만들고 agent는 0이다. `002_seed.sql`/`006_local_hermes_agent_seed.sql` agent 행은 demo/e2e 명시 opt-in에서만 적용된다.
-- [ ] `scripts/momo hermes-gateway-init` 안내가 env template → pairing invite → scoped credential 발급 → env 기록 순서를 강제한다.
-- [ ] 기존 dogfood의 고정 김인턴/Hermes seed는 DB owner + exact identity guard + `--yes`가 필요한 사용자 opt-in 명령으로만 soft-retire한다. 자동/destructive migration은 추가하지 않는다.
-- [ ] runtime-agent와 macos-ui verifier가 `MOMO_AGENT_SEED_MODE=none`, marker/OID-owned DB, 자체 agent/channel fixture, per-run channel·대문자 `CENT_CHANNEL`, exit 96/source 보존 경계를 유지함을 DB 비접속 contract test로 고정한다.
-  - 리뷰 보강: context verifier도 human(…101)/Hermes(…103)와 두 채널·membership을 자체 시드하며, 고정 seed ID 참조 전수 점검 및 contract 회귀 검사를 추가했다. runtime 체크박스는 오케스트레이터 재검증 전까지 미체크 유지한다.
-- [ ] `schema_v0.sql` 무변경. 수정/new shell `bash -n`, Python contract test, Swift build/test PASS.
-- [ ] clean/root `runtime-agent` + `macos-ui` PASS — worker는 DB/Docker/verifier/local gate 금지로 미체크 유지; 오케스트레이터가 merge 전에 실행한다 (`runtime-unverified`).
-### ☐ MOMO-354 수용기준 — real-server roster SoT + invite-gated visibility `[swift/macos-ui]` · Issue #341
-- [ ] real-server 연결은 `/v1/workspaces/:ws/roster`의 active member/channel membership를 사용하고 REST backend에서 demo fixture로 fallback하지 않는다.
-- [ ] 선택 채널의 active human/agent만 사이드바에 표시하며 agent는 `AGENT` 배지를 유지한다. 이름 기반 dogfood 숨김 예외는 없다.
-- [ ] 멘션 후보와 agent realtime 구독은 선택 채널 active membership로 동일하게 제한하고, 메시지 작성자 표시도 roster member identity를 사용한다.
-- [ ] login/join의 `realtimeWebSocketUrl`을 앱이 우선 사용하고 앱 env는 이전 서버 fallback으로만 남긴다 (ADR-0110).
-- [ ] server/macOS 단위 테스트 + light/dark roster snapshot 정본 재기록 + design-review Blocker 0 + clean/root `macos-ui` gate evidence.
+### ☑ MOMO-355 수용기준 — Dogfood agent seed opt-in + pairing-only roster `[sql/tooling/docs]` · 의존: MOMO-339, MOMO-348, MOMO-352 (`#342`)
+- [x] persistent dogfood/local-alpha의 기본 migration은 demo human + 기본 채널만 만들고 agent는 0이다. `002_seed.sql`/`006_local_hermes_agent_seed.sql` agent 행은 demo/e2e 명시 opt-in에서만 적용된다.
+- [x] `scripts/momo hermes-gateway-init` 안내가 env template → pairing invite → scoped credential 발급 → env 기록 순서를 강제한다.
+- [x] 기존 dogfood의 고정 김인턴/Hermes seed는 DB owner + exact identity guard + `--yes`가 필요한 사용자 opt-in 명령으로만 soft-retire한다. 자동/destructive migration은 추가하지 않는다.
+- [x] runtime-agent와 macos-ui verifier가 `MOMO_AGENT_SEED_MODE=none`, marker/OID-owned DB, 자체 agent/channel fixture, per-run channel·대문자 `CENT_CHANNEL`, exit 96/source 보존 경계를 유지함을 DB 비접속 contract test로 고정한다.
+  - 리뷰 보강: context verifier도 human(…101)/Hermes(…103)와 두 채널·membership을 자체 시드하며, 고정 seed ID 참조 전수 점검 및 contract 회귀 검사를 추가했다.
+  - 오케스트레이터 검수: 1차 clean gate에서 context verifier가 seed mode=none 하에 member 103 부재 FK violation — 344 빈티지 verifier만 자체 시드 미적용이던 회귀를 resume 반려로 수정(`1726344`) 후 clean gate PASS.
+- [x] `schema_v0.sql` 무변경. 수정/new shell `bash -n`, Python contract test, Swift build/test PASS.
+- [x] clean/root `runtime-agent` + `macos-ui` PASS — PR #345 merge(`ac00ef3`), Phase 0 종결 시 root full gate PASS(`local-gate-runtime-agent-20260712T170955Z-…-rfc58973d57b9.md`, `local-gate-macos-ui-20260712T171443Z-…-r88f66c1ce253.md`).
+  - 라이브 dogfood 노트: `cleanup-seeded-agents --yes`는 102(김인턴)·103(Hermes)을 함께 은퇴시키는데, 앱 pairing 표면(`inviteDogfoodAgent`)은 기존 hermes 멤버 재사용+credential 발급이라 103 은퇴 후 재생성 product 경로가 아직 없다. 라이브 반영은 REST 채널 멤버십 제거(product 경로, 가역)로 김인턴만 invite-gated 처리하고, full retire는 agent 신규 pairing 표면(후속 티켓) 이후로 보류.
+### ☑ MOMO-354 수용기준 — real-server roster SoT + invite-gated visibility `[swift/macos-ui]` · Issue #341
+- [x] real-server 연결은 `/v1/workspaces/:ws/roster`의 active member/channel membership를 사용하고 REST backend에서 demo fixture로 fallback하지 않는다.
+- [x] 선택 채널의 active human/agent만 사이드바에 표시하며 agent는 `AGENT` 배지를 유지한다. 이름 기반 dogfood 숨김 예외는 없다.
+- [x] 멘션 후보와 agent realtime 구독은 선택 채널 active membership로 동일하게 제한하고, 메시지 작성자 표시도 roster member identity를 사용한다.
+- [x] login/join의 `realtimeWebSocketUrl`을 앱이 우선 사용하고 앱 env는 이전 서버 fallback으로만 남긴다 (ADR-0110).
+- [x] server/macOS 단위 테스트 + light/dark roster snapshot 정본 재기록 + design-review Blocker 0 + clean/root `macos-ui` gate evidence.
   - worker evidence: server 63 tests, macOS 비스냅샷 79 tests, 신규 snapshot 2종 compile+reference-wait skip, Python no-DB contract, 수정 shell `bash -n`/실행권한 PASS, design-review PASS(Blocker 0/High 0/Medium 1).
-  - review fix evidence: server-SoT 로컬 프로필 편집 UI/상태 이중 차단, `NSHostingView` 2x roster 캡처 + light/dark `AGENT` accent pixel assertion PASS. macOS 비스냅샷 79 tests와 roster snapshot 3 tests(2 skip/1 pixel PASS), static contract/design pre-flight, fresh design-review PASS(Blocker 0/High 0/Medium 0/Low 0). 정본 PNG는 오케스트레이터 재기록 대기.
-  - 오케스트레이터 대기: 신규 PNG 2종 정본 머신 재기록, Docker/DB/verifier, clean/root `macos-ui`; gate 체크박스는 미체크 유지한다.
+  - 오케스트레이터 fresh design-review(초판): PASS(Blocker 0)이나 High 2건 — server-SoT 프로필 편집기 무음 유실(P2), `ImageRenderer`+`ScrollView{LazyVStack}` 한계로 roster 스냅샷이 빈 이미지 — 를 이 PR 내 수정으로 반려.
+  - review fix evidence: server-SoT 로컬 프로필 편집 UI/상태 이중 차단(`cc1fcf1`), `NSHostingView` 2x roster 캡처 + light/dark `AGENT` accent pixel assertion PASS. fresh design-review 재판정 PASS(Blocker 0/High 0/Medium 0/Low 0).
+  - 오케스트레이터 종결: 정본 PNG 2종 재기록(`6f00f05`, `MOMO_RECORD_SNAPSHOTS=1`) 후 멤버 행+`AGENT` 배지 픽셀 포함 육안 확인, 91 tests 0 fail/0 skip, worktree clean `macos-ui` gate PASS, PR #346 squash merge(`9ca9c93`), root post-merge full gate PASS(위 355 evidence와 동일 런) — **Phase 0 (354/355/356) 배치 종결 (2026-07-13)**.
+  - design-review Medium 이월 기록(후속 후보, 성재 판단 대기): ① real-server presence 점이 `.online` 하드코딩 장식(ADR-0104 전까지 숨김/중립 권고) ② 비활성 멤버의 과거 메시지 author "unknown" 렌더(비활성 포함 조회 또는 payload 표시명 fallback) ③ `subscribe`/`presence`가 roster 로드 순서에 무음 의존(`cachedMembers ?? []`) ④ 신규 에러 카피에 다음 행동 부재 ⑤ 데모 시드 Hermes 노출 vs 페어링 카드 서사 불일치.
 
 ---
 
