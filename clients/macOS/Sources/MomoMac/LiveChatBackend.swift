@@ -46,7 +46,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
 
     /// Seed the in-memory store with a demo workspace so the UI has content offline.
     /// Returns the seeded workspace + first channel for convenience.
-    public func seedDemo() -> DemoSeed {
+    public func seedDemo(capabilitiesByHandle: [String: [String]] = [:]) -> DemoSeed {
         let ws = WorkspaceID()
         workspace = ws
         inviteJoinState = .idle
@@ -59,9 +59,13 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, OnboardingInviteBacke
         var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
         var researcher = Member(id: MemberID(), workspaceId: ws, kind: .agent,
-                                displayName: "Hermes", handle: "hermes", presence: .working)
+                                displayName: "Hermes", handle: "hermes",
+                                capabilities: capabilitiesByHandle["hermes"] ?? [],
+                                presence: .working)
         var builder = Member(id: MemberID(), workspaceId: ws, kind: .agent,
-                             displayName: "빌드봇", handle: "buildbot", presence: .online)
+                             displayName: "빌드봇", handle: "buildbot",
+                             capabilities: capabilitiesByHandle["buildbot"] ?? [],
+                             presence: .online)
 
         let general = Channel(id: ChannelID(), workspaceId: ws, kind: .publicChannel,
                               name: "general", topic: "팀 일반 채널", createdBy: human.id)

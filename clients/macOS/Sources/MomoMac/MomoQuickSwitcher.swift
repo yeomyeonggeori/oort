@@ -266,11 +266,10 @@ struct MomoQuickSwitcherView: View {
                 }
 
                 if case .member(let isAgent) = item.kind, isAgent {
-                    Text("AGENT")
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, MomoTheme.QuickSwitcher.compactSpacing)
-                        .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
-                        .foregroundStyle(MomoTheme.agentAccent)
+                    MomoAgentBadgeGroup(
+                        capabilities: item.capabilities,
+                        maximumCapabilities: 2
+                    )
                 }
 
                 Spacer(minLength: MomoTheme.QuickSwitcher.standardSpacing)

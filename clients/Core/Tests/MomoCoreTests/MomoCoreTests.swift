@@ -39,6 +39,34 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(json["nested"]?["c"]?.doubleValue, 3.5)
     }
 
+    func testMemberCapabilitiesNormalizeForDisplayAndMatching() throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .agent,
+            displayName: "Hermes",
+            handle: "hermes",
+            capabilities: [" Code ", "TERMINAL", "code", "  "]
+        )
+
+        XCTAssertEqual(member.normalizedCapabilities, ["code", "terminal"])
+        XCTAssertTrue(member.hasCapability(" CODE "))
+        XCTAssertFalse(member.hasCapability("docs"))
+
+        let legacyWire = Data("""
+        {
+          "id": "\(member.id.description)",
+          "workspace_id": "\(workspace.description)",
+          "kind": "agent",
+          "display_name": "Legacy Agent",
+          "handle": "legacy"
+        }
+        """.utf8)
+        let legacyMember = try JSONDecoder.momo.decode(Member.self, from: legacyWire)
+        XCTAssertEqual(legacyMember.capabilities, [])
+    }
+
     // MARK: - Enum wire mapping (must match schema_v0.sql ENUM text)
 
     func testMessageTypeWireValues() throws {

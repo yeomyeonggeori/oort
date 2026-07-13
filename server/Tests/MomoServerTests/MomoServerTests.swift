@@ -1087,6 +1087,7 @@ final class MomoServerTests: XCTestCase {
             "ownerHumanId": "00000000-0000-7000-8000-000000000101",
             "maxConcurrentRuns": 1,
             "maxRunSteps": 12,
+            "capabilities": ["code", "terminal"],
             "createdAtMs": 1782463260000,
             "updatedAtMs": 1782463260000
           }
@@ -1099,7 +1100,9 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(members[0].email, "demo@momo.local")
         XCTAssertNil(members[0].agentModel)
         XCTAssertEqual(members[1].agentModel, "hermes-agent")
+        XCTAssertEqual(members[1].capabilities, ["code", "terminal"])
         XCTAssertNil(members[1].email)
+        XCTAssertEqual(members[0].capabilities, [], "legacy human roster rows default safely")
     }
 
     func testChannelLimitIsBoundedForV0() {

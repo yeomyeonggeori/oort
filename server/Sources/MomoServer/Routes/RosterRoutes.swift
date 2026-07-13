@@ -104,6 +104,20 @@ struct RosterRoutes: Sendable {
                              'role', r.role,
                              'channelCount', COALESCE(cc.channel_count, 0),
                              'channelIds', COALESCE(ch.channel_ids, ARRAY[]::uuid[]),
+                             'capabilities', COALESCE((
+                               SELECT jsonb_agg(
+                                        capability.value #>> '{}'
+                                        ORDER BY capability.ordinality
+                                      )
+                                 FROM jsonb_array_elements(
+                                   CASE
+                                     WHEN jsonb_typeof(a.config->'capabilities') = 'array'
+                                       THEN a.config->'capabilities'
+                                     ELSE '[]'::jsonb
+                                   END
+                                 ) WITH ORDINALITY AS capability(value, ordinality)
+                                WHERE jsonb_typeof(capability.value) = 'string'
+                             ), '[]'::jsonb),
                              'email', h.email,
                              'timeZone', h.tz,
                              'agentModel', a.model,
@@ -171,6 +185,20 @@ struct RosterRoutes: Sendable {
                              'role', r.role,
                              'channelCount', COALESCE(cc.channel_count, 0),
                              'channelIds', COALESCE(ch.channel_ids, ARRAY[]::uuid[]),
+                             'capabilities', COALESCE((
+                               SELECT jsonb_agg(
+                                        capability.value #>> '{}'
+                                        ORDER BY capability.ordinality
+                                      )
+                                 FROM jsonb_array_elements(
+                                   CASE
+                                     WHEN jsonb_typeof(a.config->'capabilities') = 'array'
+                                       THEN a.config->'capabilities'
+                                     ELSE '[]'::jsonb
+                                   END
+                                 ) WITH ORDINALITY AS capability(value, ordinality)
+                                WHERE jsonb_typeof(capability.value) = 'string'
+                             ), '[]'::jsonb),
                              'email', h.email,
                              'timeZone', h.tz,
                              'agentModel', a.model,

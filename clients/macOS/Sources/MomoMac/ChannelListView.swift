@@ -542,15 +542,27 @@ public struct ChannelListView: View {
                 imagePath: avatarPath(for: member),
                 size: MomoTheme.Sidebar.avatarSize
             )
-            Text(member.displayName)
-                .font(MomoTheme.Sidebar.rowFont)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
+                HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
+                    Text(member.displayName)
+                        .font(MomoTheme.Sidebar.rowFont)
+                        .lineLimit(1)
+                    if member.isAgent {
+                        MomoAgentBadgeGroup(
+                            capabilities: [],
+                            maximumCapabilities: 0
+                        )
+                    }
+                }
+                if member.isAgent, !member.normalizedCapabilities.isEmpty {
+                    MomoAgentBadgeGroup(
+                        capabilities: member.normalizedCapabilities,
+                        maximumCapabilities: 1,
+                        showsAgentIdentity: false
+                    )
+                }
+            }
             if member.isAgent {
-                Text("AGENT")
-                    .font(MomoTheme.Sidebar.badgeFont)
-                    .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
-                    .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
-                    .foregroundStyle(MomoTheme.agentAccent)
                 if viewModel.isAgentWorking(member) {
                     Label(copy.presenceWorking, systemImage: "ellipsis.bubble.fill")
                         .labelStyle(.iconOnly)

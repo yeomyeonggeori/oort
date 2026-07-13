@@ -175,7 +175,8 @@ struct ReadStateListResponseDTO: ResponseEncodable, Codable, Sendable {
 /// Workspace member roster entry for client/agent surfaces.
 ///
 /// Human-only and agent-only fields are intentionally sparse. The tenant roster
-/// exposes identity and routing metadata, not agent secrets or execution config.
+/// exposes identity and routing metadata plus the public capability projection,
+/// not agent secrets or the rest of the execution config.
 struct RosterMemberDTO: ResponseEncodable, Decodable {
     let id: String
     let workspaceId: String
@@ -187,6 +188,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
     let role: String?
     let channelCount: Int
     let channelIds: [String]
+    let capabilities: [String]
     let email: String?
     let timeZone: String?
     let agentModel: String?
@@ -207,6 +209,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
         case role
         case channelCount
         case channelIds
+        case capabilities
         case email
         case timeZone
         case agentModel
@@ -229,6 +232,7 @@ struct RosterMemberDTO: ResponseEncodable, Decodable {
         self.role = try c.decodeIfPresent(String.self, forKey: .role)
         self.channelCount = try c.decode(Int.self, forKey: .channelCount)
         self.channelIds = try c.decodeIfPresent([String].self, forKey: .channelIds) ?? []
+        self.capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities) ?? []
         self.email = try c.decodeIfPresent(String.self, forKey: .email)
         self.timeZone = try c.decodeIfPresent(String.self, forKey: .timeZone)
         self.agentModel = try c.decodeIfPresent(String.self, forKey: .agentModel)

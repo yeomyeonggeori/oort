@@ -6,7 +6,10 @@ import MomoCore
 final class MomoQuickSwitcherTests: XCTestCase {
     func testQuickSwitcherUsesOnlyActiveMembersInSelectedChannel() async throws {
         let backend = LiveChatBackend()
-        let seed = await backend.seedDemo()
+        let seed = await backend.seedDemo(capabilitiesByHandle: [
+            "hermes": ["code", "terminal"],
+            "buildbot": ["code"],
+        ])
         let viewModel = ChatViewModel(backend: backend)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "test")
         let general = try XCTUnwrap(seed.channels.first)
@@ -24,6 +27,12 @@ final class MomoQuickSwitcherTests: XCTestCase {
         let uninvitedBuilder = try XCTUnwrap(seed.agents.first { $0.handle == "buildbot" })
         XCTAssertTrue(visibleMemberIDs.contains(hermes.id))
         XCTAssertFalse(visibleMemberIDs.contains(uninvitedBuilder.id))
+        let hermesItem = try XCTUnwrap(
+            viewModel.quickSwitcherSections(query: "")
+                .flatMap(\.items)
+                .first { $0.destination == .member(hermes.id) }
+        )
+        XCTAssertEqual(hermesItem.capabilities, ["code", "terminal"])
 
         await viewModel.removeMember(hermes.id, from: general.id)
         let afterRemoval = viewModel.quickSwitcherSections(query: "hermes").flatMap(\.items)

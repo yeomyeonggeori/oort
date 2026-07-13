@@ -10,9 +10,12 @@ import MomoCore
 // them so host-dependent PNGs never become worker-authored baselines.
 @MainActor
 final class ChannelRosterSnapshotTests: XCTestCase {
-    private func fixtureSidebar(_ scheme: ColorScheme) async throws -> some View {
+    private func fixtureSidebar(
+        _ scheme: ColorScheme,
+        capabilitiesByHandle: [String: [String]] = [:]
+    ) async throws -> some View {
         let backend = LiveChatBackend()
-        let seed = await backend.seedDemo()
+        let seed = await backend.seedDemo(capabilitiesByHandle: capabilitiesByHandle)
         let viewModel = ChatViewModel(backend: backend)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot")
         let general = try XCTUnwrap(seed.channels.first, "Demo roster fixture must include #general")
@@ -30,9 +33,17 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             .defaultAppStorage(defaults)
     }
 
-    private func render(_ scheme: ColorScheme) async throws -> NSImage {
+    private func render(
+        _ scheme: ColorScheme,
+        capabilitiesByHandle: [String: [String]] = [:]
+    ) async throws -> NSImage {
         let size = CGSize(width: 340, height: 720)
-        let hostingView = NSHostingView(rootView: try await fixtureSidebar(scheme))
+        let hostingView = NSHostingView(
+            rootView: try await fixtureSidebar(
+                scheme,
+                capabilitiesByHandle: capabilitiesByHandle
+            )
+        )
         hostingView.frame = CGRect(origin: .zero, size: size)
         hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         hostingView.layoutSubtreeIfNeeded()
@@ -92,7 +103,8 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            throw XCTSkip("Canonical MOMO-357 snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
+            let ticket = testName.contains("Capability") ? "MOMO-365" : "MOMO-357"
+            throw XCTSkip("Canonical \(ticket) snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
 
@@ -124,6 +136,53 @@ final class ChannelRosterSnapshotTests: XCTestCase {
                 try agentAccentPixelCount(in: image),
                 100,
                 "Roster raster must include Hermes member-row and AGENT badge accent pixels in \(scheme) mode"
+            )
+        }
+    }
+
+    func testCapabilitySidebarLightSnapshot() async throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "light"
+        )
+        let image = try await render(
+            .light,
+            capabilitiesByHandle: ["hermes": ["code", "terminal", "docs"]]
+        )
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light"
+        )
+    }
+
+    func testCapabilitySidebarDarkSnapshot() async throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "dark"
+        )
+        let image = try await render(
+            .dark,
+            capabilitiesByHandle: ["hermes": ["code", "terminal", "docs"]]
+        )
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark"
+        )
+    }
+
+    func testCapabilitySidebarRasterAddsBadgeAccentPixels() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let baseline = try await render(scheme)
+            let capabilityRaster = try await render(
+                scheme,
+                capabilitiesByHandle: ["hermes": ["code", "terminal", "docs"]]
+            )
+            XCTAssertGreaterThan(
+                try agentAccentPixelCount(in: capabilityRaster),
+                try agentAccentPixelCount(in: baseline) + 20,
+                "Capability chips must remain visible in the sidebar under \(scheme) mode"
             )
         }
     }
