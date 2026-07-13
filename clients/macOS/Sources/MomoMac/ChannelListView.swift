@@ -277,27 +277,24 @@ public struct ChannelListView: View {
     }
 
     private func readStateErrorRow(_ error: String, copy: MomoWorkspaceCopy) -> some View {
-        HStack(alignment: .top, spacing: MomoTheme.Sidebar.standardSpacing) {
-            Image(systemName: "exclamationmark.triangle.fill")
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
+            Label(copy.unreadSyncUnavailable, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(MomoTheme.irreversibleRed)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
-                Text(copy.unreadSyncUnavailable)
-                    .font(.callout.weight(.semibold))
-                Text(copy.unreadSyncUnavailableDetail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Text(copy.unreadSyncUnavailableDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                Button {
+                    Task { await viewModel.retryReadStateSync() }
+                } label: {
+                    Label(copy.retry, systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityLabel(copy.retry)
             }
-            Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
-            Button {
-                Task { await viewModel.retryReadStateSync() }
-            } label: {
-                Image(systemName: "arrow.clockwise")
-            }
-            .buttonStyle(.plain)
-            .help(copy.retry)
-            .momoQuickTooltip(copy.retry)
         }
         .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
         .help(error)

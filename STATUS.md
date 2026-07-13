@@ -3,11 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
-## 0-1. MOMO-367 Wave 2 Unread UI + Keyboard Navigation (2026-07-13)
+## MOMO-367 Wave 2 Unread UI + Keyboard Navigation (2026-07-13)
 
 - macOS 부팅 벌크 read-state 점등과 개인 realtime 동기화, 로컬 unread/mention 즉시 추정 후 서버 재동기화, 뷰포트 debounce mark-read 재시도와 own-send 하단 추적을 구현했다. 사이드바에는 unread 굵기·mention 숫자 배지·동기화 오류 복구 UI를 추가했다.
-- `Cmd+Shift+↑↓`는 357 사이드바 정렬의 다른 unread 채널을 순환하며 destination이 없으면 비활성화된다. `Cmd+/` 도움말·VoiceOver 합성 레이블·light/dark 배지 픽셀 검증을 갱신했고 design-review는 Blocker/High 0이다. `schema_v0.sql`은 변경하지 않았다.
-- 검증: Core/macOS `swift build --disable-sandbox` PASS, Core 20·macOS 비스냅샷 102 tests·light/dark 배지 raster 1 test PASS, diff 정적 검사 PASS. 전체 snapshot suite는 기존 host-dependent `SnapshotTesting/NSImage.swift` signal 5로 중단됐고 신규 정본 PNG 재기록 및 DB/Docker/verifier/`local_gate.sh`는 지시된 경계에 따라 오케스트레이터 대기(`runtime-unverified`).
+- `Option+Shift+↑↓`는 357 사이드바 정렬의 다른 unread 채널을 순환하며 destination이 없으면 비활성화된다. 초기 리뷰 High 1(`Cmd+Shift+↑↓`의 macOS 텍스트 선택 충돌)은 planner 승인 Slack 문법으로 해소했고, fresh 재검토는 Blocker/High/Medium 0이다. 에러 행·VoiceOver·light/dark 배지 픽셀 검증을 갱신했으며 `schema_v0.sql`은 변경하지 않았다.
+- 검증: Core/macOS `swift build --disable-sandbox` PASS, Core 20·macOS 비스냅샷 103 tests·light/dark 배지 raster PASS, unread 단축키 snapshot 2종은 신규 정본 대기로 정상 skip, diff 정적 검사 PASS. 전체 snapshot suite는 기존 host-dependent `SnapshotTesting/NSImage.swift` signal 5로 중단됐고 신규 정본 PNG 재기록 및 DB/Docker/verifier/`local_gate.sh`는 지시된 경계에 따라 오케스트레이터 대기(`runtime-unverified`).
 
 ## 0-1. MOMO-365 Work Capability Badges + Target Filter (2026-07-13)
 

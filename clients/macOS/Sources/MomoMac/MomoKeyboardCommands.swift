@@ -31,7 +31,6 @@ enum MomoKeyboardShortcutCatalog {
         ]
     }
 }
-
 struct MomoKeyboardShortcutsView: View {
     var copy: MomoWorkspaceCopy
     @Environment(\.dismiss) private var dismiss

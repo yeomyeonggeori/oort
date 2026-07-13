@@ -83,6 +83,8 @@ public enum AgentWorkSurfaceError: Sendable, Equatable, CaseIterable {
 
 @MainActor
 public final class ChatViewModel: ObservableObject {
+    private static let maximumMarkReadFailures = 5
+
     private struct AgentCredentialRefresh {
         let id: UUID
         let task: Task<[MomoAgentCredential], Error>
@@ -166,6 +168,7 @@ public final class ChatViewModel: ObservableObject {
     private var readStateRefreshTask: Task<Void, Never>?
     private var markReadTasks: [ChannelID: Task<Void, Never>] = [:]
     private var pendingReadSequences: [ChannelID: Int64] = [:]
+    private var markReadFailureCounts: [ChannelID: Int] = [:]
     private var channelNavigationHistory: [ChannelID] = []
     private var channelNavigationIndex: Int?
     private var authenticatedMemberId: MemberID?
@@ -245,6 +248,7 @@ public final class ChatViewModel: ObservableObject {
         readStateRefreshTask = nil
         markReadTasks = [:]
         pendingReadSequences = [:]
+        markReadFailureCounts = [:]
         realtimeStatusSubscription = nil
         if let resettable = chat as? any MomoSessionSensitiveStateClearing {
             await resettable.clearSessionSensitiveState()
@@ -537,8 +541,17 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func retryReadStateSync() async {
+        markReadFailureCounts = [:]
         await refreshReadStates()
         subscribeReadStateUpdates()
+        let pending = pendingReadSequences
+        for (channel, sequence) in pending {
+            if (readStatesByChannel[channel]?.lastReadSeq ?? 0) >= sequence {
+                pendingReadSequences[channel] = nil
+            } else {
+                scheduleMarkRead(channel: channel, sequence: sequence, delay: .zero)
+            }
+        }
     }
 
     private func refreshReadStates(workspace: WorkspaceID) async {
@@ -609,17 +622,30 @@ public final class ChatViewModel: ObservableObject {
         sequence: Int64,
         immediately: Bool
     ) {
+        scheduleMarkRead(
+            channel: channel,
+            sequence: sequence,
+            delay: immediately ? .zero : readStateDebounce
+        )
+    }
+
+    private func scheduleMarkRead(
+        channel: ChannelID,
+        sequence: Int64,
+        delay: Duration
+    ) {
         guard readStateBackend != nil else { return }
         pendingReadSequences[channel] = max(pendingReadSequences[channel] ?? 0, sequence)
+        guard (markReadFailureCounts[channel] ?? 0) < Self.maximumMarkReadFailures else {
+            return
+        }
         markReadTasks[channel]?.cancel()
         markReadTasks[channel] = Task { [weak self] in
             guard let self else { return }
-            if !immediately {
-                do {
-                    try await Task.sleep(for: self.readStateDebounce)
-                } catch {
-                    return
-                }
+            do {
+                try await Task.sleep(for: delay)
+            } catch {
+                return
             }
             await self.flushPendingReadState(channel: channel)
         }
@@ -631,6 +657,7 @@ public final class ChatViewModel: ObservableObject {
         do {
             let state = try await readStateBackend.markRead(channel: channel, through: sequence)
             readStatesByChannel[channel] = state
+            markReadFailureCounts[channel] = nil
             readStateSyncError = nil
             if (pendingReadSequences[channel] ?? 0) <= state.lastReadSeq {
                 pendingReadSequences[channel] = nil
@@ -639,7 +666,15 @@ public final class ChatViewModel: ObservableObject {
             }
         } catch {
             readStateSyncError = String(describing: error)
-            scheduleMarkRead(channel: channel, sequence: sequence, immediately: false)
+            let failures = (markReadFailureCounts[channel] ?? 0) + 1
+            markReadFailureCounts[channel] = failures
+            guard failures < Self.maximumMarkReadFailures else { return }
+            let multiplier = 1 << (failures - 1)
+            scheduleMarkRead(
+                channel: channel,
+                sequence: sequence,
+                delay: readStateDebounce * multiplier
+            )
         }
     }
 

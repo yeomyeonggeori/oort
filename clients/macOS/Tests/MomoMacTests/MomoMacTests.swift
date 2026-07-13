@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 import MomoCore
 @testable import MomoMac
 
@@ -149,6 +150,10 @@ final class MomoMacTests: XCTestCase {
             ),
             "general"
         )
+        XCTAssertEqual(MomoUnreadKeyboardShortcut.helpGlyphs, "⌥⇧↑ / ⌥⇧↓")
+        XCTAssertTrue(MomoUnreadKeyboardShortcut.modifiers.contains(.option))
+        XCTAssertTrue(MomoUnreadKeyboardShortcut.modifiers.contains(.shift))
+        XCTAssertFalse(MomoUnreadKeyboardShortcut.modifiers.contains(.command))
     }
 
     // MARK: in-memory backend round-trip (proves ChatBackend conformance)
@@ -349,6 +354,72 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.lastReadSeq, 3)
         XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.unreadCount, 0)
         XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.mentionCount, 0)
+    }
+
+    @MainActor
+    func testViewportMarkReadStopsAfterFiveFailuresAndManualRetryResumes() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "성재",
+            handle: "seongjae"
+        )
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "release"
+        )
+        let message = Message(
+            id: MessageID(),
+            channelId: channel.id,
+            seq: 3,
+            hlcTs: 3,
+            authorMemberId: MemberID(),
+            body: "읽음 상태 재시도 상한을 확인합니다."
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [channel.id: [message]],
+            events: [],
+            readStates: [ChannelReadState(
+                channelId: channel.id,
+                lastReadSeq: 0,
+                latestSeq: 3,
+                unreadCount: 3,
+                mentionCount: 0
+            )],
+            markReadFailures: 5
+        )
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: LiveChatBackend(),
+            readStateDebounce: .milliseconds(1)
+        )
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel.id)
+
+        viewModel.messageDidRender(message)
+        try await Task.sleep(for: .milliseconds(80))
+
+        let cappedAttemptCount = await backend.markReadAttemptCount()
+        XCTAssertEqual(cappedAttemptCount, 5)
+        XCTAssertNotNil(viewModel.readStateSyncError)
+        try await Task.sleep(for: .milliseconds(30))
+        let stableAttemptCount = await backend.markReadAttemptCount()
+        XCTAssertEqual(stableAttemptCount, 5, "retry loop must stop at the cap")
+
+        await viewModel.retryReadStateSync()
+        try await Task.sleep(for: .milliseconds(20))
+
+        let resumedAttemptCount = await backend.markReadAttemptCount()
+        XCTAssertEqual(resumedAttemptCount, 6)
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.lastReadSeq, 3)
+        XCTAssertNil(viewModel.readStateSyncError)
     }
 
     @MainActor
