@@ -247,7 +247,7 @@ class CodexWorkbenchContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("danger", serialized)
         self.assertNotIn("yolo", serialized)
         self.assertNotIn(TOKEN, serialized)
-        self.assertIn("--ask-for-approval never", serialized)
+        self.assertIn("-c approval_policy=never", serialized)
         self.assertIn("resume", argv)
 
     def test_state_files_are_private_and_never_store_agent_token(self):
