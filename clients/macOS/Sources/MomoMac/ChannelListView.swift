@@ -205,6 +205,8 @@ public struct ChannelListView: View {
             }
             .buttonStyle(.plain)
             .opacity(isWorkspaceHeaderHovered ? 1 : 0)
+            .allowsHitTesting(isWorkspaceHeaderHovered)
+            .accessibilityHidden(!isWorkspaceHeaderHovered)
             .help(copy.serverSettings)
             .momoQuickTooltip(copy.serverSettings)
         }
@@ -472,7 +474,11 @@ public struct ChannelListView: View {
 
     @ViewBuilder
     private func memberRow(_ member: Member) -> some View {
+        let copy = MomoWorkspaceCopy(language: language)
+        let inChannel = viewModel.isMember(member.id)
+        let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
         memberRowContent(member)
+            .focusable()
             .contextMenu {
                 if member.isAgent {
                     Button {
@@ -494,12 +500,33 @@ public struct ChannelListView: View {
                     openMemberProfile?(member.id)
                 } label: {
                     if viewModel.allowsLocalProfileEditing {
-                        Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
+                        Label(copy.editProfile, systemImage: "person.text.rectangle")
                     } else {
-                        Label(MomoWorkspaceCopy(language: language).serverManagedProfileNote, systemImage: "lock")
+                        Label(copy.serverManagedProfileNote, systemImage: "lock")
                     }
                 }
                 .disabled(!viewModel.allowsLocalProfileEditing)
+
+                if viewModel.selectedChannelId != nil {
+                    Divider()
+                    Button(role: inChannel ? .destructive : nil) {
+                        performMemberMutation(member, isMember: inChannel)
+                    } label: {
+                        Label(
+                            inChannel ? copy.removeFromChannel : copy.addToChannel,
+                            systemImage: inChannel ? "minus.circle" : "plus.circle"
+                        )
+                    }
+                    .disabled(isWorking)
+                }
+            }
+            .accessibilityActions {
+                if viewModel.selectedChannelId != nil {
+                    Button(inChannel ? copy.removeFromChannel : copy.addToChannel) {
+                        performMemberMutation(member, isMember: inChannel)
+                    }
+                    .disabled(isWorking)
+                }
             }
     }
 
@@ -646,16 +673,11 @@ public struct ChannelListView: View {
     }
 
     private func memberMutationButton(_ member: Member, isVisible: Bool) -> some View {
+        let copy = MomoWorkspaceCopy(language: language)
         let inChannel = viewModel.isMember(member.id)
         let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
         return Button {
-            Task {
-                if inChannel {
-                    await viewModel.removeMember(member.id)
-                } else {
-                    await viewModel.addMember(member.id)
-                }
-            }
+            performMemberMutation(member, isMember: inChannel)
         } label: {
             Image(systemName: inChannel ? "minus" : "plus")
                 .frame(
@@ -673,8 +695,18 @@ public struct ChannelListView: View {
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
         .accessibilityHidden(!isVisible)
-        .help(inChannel ? "Remove" : "Add")
-        .momoQuickTooltip(inChannel ? "Remove" : "Add")
+        .help(inChannel ? copy.removeFromChannel : copy.addToChannel)
+        .momoQuickTooltip(inChannel ? copy.removeFromChannel : copy.addToChannel)
+    }
+
+    private func performMemberMutation(_ member: Member, isMember: Bool) {
+        Task {
+            if isMember {
+                await viewModel.removeMember(member.id)
+            } else {
+                await viewModel.addMember(member.id)
+            }
+        }
     }
 
     private func profileFooter(copy: MomoWorkspaceCopy) -> some View {

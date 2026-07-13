@@ -291,6 +291,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var addToChannel: String {
+        switch language {
+        case .korean: return "채널에 추가"
+        case .english: return "Add to channel"
+        }
+    }
+
+    var removeFromChannel: String {
+        switch language {
+        case .korean: return "채널에서 제거"
+        case .english: return "Remove from channel"
+        }
+    }
+
     var agents: String {
         switch language {
         case .korean: return "에이전트"

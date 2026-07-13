@@ -70,6 +70,16 @@ final class MomoMacTests: XCTestCase {
         XCTAssertLessThan(MomoTheme.Sidebar.idealWidth, MomoTheme.Sidebar.maximumWidth)
     }
 
+    func testSidebarMembershipMutationCopyIsLocalizedAndVerbFirst() {
+        let korean = MomoWorkspaceCopy(language: .korean)
+        XCTAssertEqual(korean.addToChannel, "채널에 추가")
+        XCTAssertEqual(korean.removeFromChannel, "채널에서 제거")
+
+        let english = MomoWorkspaceCopy(language: .english)
+        XCTAssertEqual(english.addToChannel, "Add to channel")
+        XCTAssertEqual(english.removeFromChannel, "Remove from channel")
+    }
+
     // MARK: in-memory backend round-trip (proves ChatBackend conformance)
 
     func testBackendSeedAndHistory() async throws {
