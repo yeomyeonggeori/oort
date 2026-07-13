@@ -1819,23 +1819,27 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: fresh design-review PASS(High 1=스펙 원인 — ⇧⌘↑↓가 macOS 텍스트 선택 충돌 → planner 결정으로 ⌥⇧↑↓ 전환, 정본 3곳 갱신 `d9f4e68`)+Medium 5 반려 수정(백오프 5회 상한·에러 행 문법 수렴 등), 364와의 7파일 실충돌 rebase는 worker 위임(전 패키지 검증), unread 배지+도움말 정본 재기록·육안 확인(⇧⌘W와 ⌥⇧↑↓ 공존), clean `macos-ui` gate PASS, PR #368 merge(`fd8eabe`) — **Work v0+Wave 2 배치 종결 (2026-07-13)**. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
   - 이월 기록: 메시지 폭주 시 벌크 refresh 부하, VO 복수형, mention 캡슐 대비, 신규 채널 레이스.
 
-### ☐ MOMO-368 수용기준 — 온보딩/로그인 화면 Raycast급 재구성 `[swift/macos-ui]` (성재 발제 2026-07-13, 대형 화면 스크린샷 피드백)
+### ☑ MOMO-368 수용기준 — 온보딩/로그인 화면 Raycast급 재구성 `[swift/macos-ui]` (성재 발제 2026-07-13, 대형 화면 스크린샷 피드백)
 > 현재 문제(대형 창 기준): hero 텍스트와 로그인 카드가 중심 우측으로 쏠려 좌측 거대 공백, 1/2/3 단계 인디케이터가 디버그 노트처럼 노출, CTA 3개(로컬 알파 시작/초대로 참여(disabled)/로그인)가 위계 없이 경쟁, 필드 밀도·포커스 문법 미정비, 배경 그라데이션이 탁함.
-- [ ] 대형 창(≥1600pt)에서 **중앙 정렬 max-width 구성**: 압축된 hero(로고+가치 한 줄+capability 칩)와 로그인 카드가 하나의 수직 리듬으로 중앙 배치, 좌우 공백 균형. 좁은 창에서도 성립(반응형 단일 컬럼).
-- [ ] 로그인 카드 정비: 필드 높이/간격 토큰화, 포커스 ring 상태, **primary CTA 1개**(입력 상태 기반 — 자격 미입력 시 "데모 열기" primary, 입력 시 "로그인" primary) + 나머지 secondary/tertiary, disabled 사유 노출(초대 코드), Keychain 토글은 보조 밀도로.
-- [ ] 1/2/3 단계 인디케이터 제거 또는 카드 내부 subtle 진행 표시로 격하. 에러/로딩/오프라인 상태 카피는 다음 행동 포함.
-- [ ] 배경: Theme 토큰 기반 정제된 다크 그라데이션(양 스킴 대응), 장식 모션은 reduceMotion 가드 하 ≤0.16s.
-- [ ] Enter 제출·Tab 순서·Esc 키보드 문법(P11), light/dark 스냅샷(대형/기본 폭 2변형 권장) + design-review Blocker 0. 표면: `MomoServerSession.swift`/`OnboardingInviteView.swift` 계열, 랜딩된 357..367과 회귀 없음.
+- [x] 대형 창(≥1600pt)에서 **중앙 정렬 max-width 구성**: 압축된 hero(로고+가치 한 줄+capability 칩)와 로그인 카드가 하나의 수직 리듬으로 중앙 배치, 좌우 공백 균형. 좁은 창에서도 성립(반응형 단일 컬럼).
+- [x] 로그인 카드 정비: 필드 높이/간격 토큰화, 포커스 ring 상태, **primary CTA 1개**(입력 상태 기반 — 자격 미입력 시 "데모 열기" primary, 입력 시 "로그인" primary) + 나머지 secondary/tertiary, disabled 사유 노출(초대 코드), Keychain 토글은 보조 밀도로.
+- [x] 1/2/3 단계 인디케이터 제거 또는 카드 내부 subtle 진행 표시로 격하. 에러/로딩/오프라인 상태 카피는 다음 행동 포함.
+- [x] 배경: Theme 토큰 기반 정제된 다크 그라데이션(양 스킴 대응), 장식 모션은 reduceMotion 가드 하 ≤0.16s.
+- [x] Enter 제출·Tab 순서·Esc 키보드 문법(P11), light/dark 스냅샷(대형/기본 폭 2변형 권장) + design-review Blocker 0. 표면: `MomoServerSession.swift`/`OnboardingInviteView.swift` 계열, 랜딩된 357..367과 회귀 없음.
+  - 오케스트레이터 종결: fresh design-review PASS(High 1 — 비활성 창 primary CTA `onAccent` 강제 판독 불가 / Medium 3 — md5 동일 가짜 접근성 변형·Enter 미실효·fake translucency) 반려 수정 후, 정본 4종(980/1600pt×양 스킴) 재기록·육안 확인(중앙 수직 리듬·primary 1개·인디케이터 소멸), 156 tests 0 fail, clean `macos-ui` gate PASS, PR #371 squash merge(`9d539b4`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T121827Z-…-r889716974054.md`, `local-gate-macos-ui-20260713T122901Z-…-ra21dc96dd0cd.md`)
+  - 이월 기록: 비밀번호 placeholder 중복, isPreviewFocused prop, hero 칩 영어, OnboardingInviteView 영어 단일, sessionNotice 영어.
 
-### ☐ MOMO-369 수용기준 — 앱 셸 시각 폴리시 W3: 표면 위계·타이포 리듬·상태 배너 문법 `[swift/macos-ui]` (성재 발제 2026-07-13, "Raycast급 세련미" 스크린샷 피드백)
+### ☑ MOMO-369 수용기준 — 앱 셸 시각 폴리시 W3: 표면 위계·타이포 리듬·상태 배너 문법 `[swift/macos-ui]` (성재 발제 2026-07-13, "Raycast급 세련미" 스크린샷 피드백)
 > 진단: W1/W2는 구조·밀도·기능이었고 폴리시 레이어 부재로 "평평한 다크 앱" 인상. 401 토큰 만료가 빨간 에러 2개+Swift 에러 덤프로 노출되어 화면을 지배, 스트리밍 커서 아티팩트("▍" 잔류), day divider가 한국어 UI에서 영어 날짜.
-- [ ] **표면 위계 3층 토큰**(배경/패널/카드 elevation — 색·보더·그림자 세트, 양 스킴)을 Theme에 정의하고 사이드바·타임라인·work/승인 카드·팝오버에 일괄 적용. 평면 인상 제거가 목표.
-- [ ] **타이포 리듬 정비**: 섹션 헤더/행/보조 텍스트의 크기·무게·색 대비 스케일 통일(semantic 스타일 유지), 행간·여백 정율.
-- [ ] **상태 배너 문법 통일**: 401/세션 만료는 "다시 로그인" primary 액션이 있는 단일 배너로(에러 원문·`String(describing:)` 덤프 사용자 노출 금지 — 기존 Medium 이월 해소), 실시간 REST 폴백은 subtle 상태 칩으로 격하. 카피는 다음 행동 포함.
-- [ ] 스트리밍 partial 말미 커서 아티팩트 정리, day divider 날짜 로케일(ko 환경 한국어 표기), 멘션 행 이중 신호(365 이월 Medium ①)·+N 툴팁 전체 목록(이월 ②) 해소.
-- [ ] 모션: reduceMotion 가드 하에 카드 등장/hover 전이 ≤0.16s, 과장 금지.
-- [ ] light/dark 스냅샷(사이드바+타임라인+카드 표면 위계가 픽셀로 확인 가능해야) + design-review Blocker 0. 랜딩된 354..368과 회귀 없음. 온보딩(MOMO-368 in-flight) 파일 무접촉.
+- [x] **표면 위계 3층 토큰**(배경/패널/카드 elevation — 색·보더·그림자 세트, 양 스킴)을 Theme에 정의하고 사이드바·타임라인·work/승인 카드·팝오버에 일괄 적용. 평면 인상 제거가 목표.
+- [x] **타이포 리듬 정비**: 섹션 헤더/행/보조 텍스트의 크기·무게·색 대비 스케일 통일(semantic 스타일 유지), 행간·여백 정율.
+- [x] **상태 배너 문법 통일**: 401/세션 만료는 "다시 로그인" primary 액션이 있는 단일 배너로(에러 원문·`String(describing:)` 덤프 사용자 노출 금지 — 기존 Medium 이월 해소), 실시간 REST 폴백은 subtle 상태 칩으로 격하. 카피는 다음 행동 포함.
+- [x] 스트리밍 partial 말미 커서 아티팩트 정리, day divider 날짜 로케일(ko 환경 한국어 표기), 멘션 행 이중 신호(365 이월 Medium ①)·+N 툴팁 전체 목록(이월 ②) 해소.
+- [x] 모션: reduceMotion 가드 하에 카드 등장/hover 전이 ≤0.16s, 과장 금지.
+- [x] light/dark 스냅샷(사이드바+타임라인+카드 표면 위계가 픽셀로 확인 가능해야) + design-review Blocker 0. 랜딩된 354..368과 회귀 없음. 온보딩(MOMO-368 in-flight) 파일 무접촉.
 - 후속 기록(이 티켓 밖): adapter 실패 body 구조화(CLI usage 원문의 durable 유출 — python 몫), 세션 자동 refresh 토큰(서버 계약 필요).
+  - 오케스트레이터 종결: fresh design-review FAIL(Blocker=정본 미재기록[오케스트레이터 몫]/High 2 — momoSurface safe-area bleed 소실로 타이틀바 seam 위험·send/멘션 실패가 load 배너로 뭉개짐) → High 2건 반려 수정(`9b49edd` bleed 복원+send/load 문법 분리), 정본 4개 스위트 12종 재기록(사이드바 스위트는 정본 삭제 후 재기록 — record가 기존 파일 비덮어씀)·육안 확인(3층 위계 픽셀 실재), 162 tests 0 fail, clean `macos-ui` gate PASS, PR #372 squash merge(`84db101`) — **온보딩+W3 UI 트랙 종결 (2026-07-13)**. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T121827Z-…-r889716974054.md`, `local-gate-macos-ui-20260713T122901Z-…-ra21dc96dd0cd.md`)
+  - 이월 기록: increased-contrast 팔레트 적응, 승인 인박스 행-카드 그림자 누적, 진단 팝오버 이중 크롬, sessionChrome nil 재로그인 no-op, DateFormatter 캐시, panel 토큰 의미 분화, adapter 실패 body 구조화(python).
 
 ---
 
