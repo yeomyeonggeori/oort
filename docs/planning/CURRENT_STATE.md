@@ -18,10 +18,12 @@
 
 | Planning ID | 주제 | Planner owner | 상태 | 결정권자 | 다음 행동 |
 |---|---|---|---|---|---|
-| `ADR-0102` | AgentWorker SSE vs Hermes Gateway 정본화 | Fable | **`accepted`** (2026-07-12, Option C) | 성재 ✓ | 파생 배치 실행 (패킷 2026-07-12) |
-| `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` — **다음 결정 순번** | 성재 | claim 후 기안 |
+| `ADR-0102` | AgentWorker SSE vs Hermes Gateway 정본화 | Fable | **`accepted`** (2026-07-12, Option C) | 성재 ✓ | 파생 배치 실행 완료 (2026-07-12 종결) |
+| `ADR-0109` | unread/read-state 서버 계약 (UX P7) | Fable | **`proposed`** (2026-07-13 기안) | 성재 | 성재 판정 → Accepted 시 UI Wave 2 해금 |
+| `ADR-0111` | Agent Work Surface — 메신저 내 업무·터미널·코드 실행 (성재 발제) | Fable | **`proposed`** (2026-07-13 기안, Option A=BYOA 권장) | 성재 | 성재 판정 → Accepted 시 MOMO-362..365 발급 |
+| `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | claim 후 기안 (실질 방향은 내부 팀 알파로 확정됨 — 문서화) |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |
-| `ADR-0105..0109` | 검색·정체성·CI·서버 스택·메신저 기본기 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |
+| `ADR-0105..0108` | 검색·정체성·CI·서버 스택 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |
 
 ### 병렬 기획 claim 규칙
 
@@ -49,6 +51,12 @@
 | **Phase 0 dogfood 무결성** | issue `#343` 본문 | MOMO-356 `#343` (adapter 공지 유출 차단) | `done` (PR #344, `0a4bf37`) | 1 완료 |
 | Phase 0 dogfood 무결성 | issue `#342` 본문 | MOMO-355 `#342` (seed opt-in) | `done` (PR #345, `ac00ef3`) | 2 완료 |
 | Phase 0 dogfood 무결성 | issue `#341` 본문 | MOMO-354 `#341` (roster SoT) | `done` (PR #346, `9ca9c93`) — **배치 종결** | 3 완료 |
+| **UI Wave 1** | `2026-07-13-ui-wave1.md` | MOMO-357 `#347` (셸·사이드바) | `spawned` (2026-07-13) | 랜딩 후 358 스폰 |
+| UI Wave 1 | 같은 패킷 | MOMO-359 `#348` (타임라인 그루핑) | `spawned` (2026-07-13) | 병렬 |
+| UI Wave 1 | 같은 패킷 | MOMO-358 `#351` (Cmd+K 스위처) | `queued` — 357 랜딩 대기 | 후속 |
+| **Phase A AWS** | `2026-07-13-phase-a-aws.md` | MOMO-360 `#349` (이미지 발행 워크플로) | `spawned` (2026-07-13) | 병렬 |
+| Phase A AWS | 같은 패킷 | MOMO-361 `#350` (배포 번들+runbook) | `spawned` (2026-07-13) | 병렬 |
+| Agent Work Surface | ADR-0111 파생 배치 표 | MOMO-362..365 | `reserved` — **ADR-0111 Accepted 전 발급 금지** | UI W1+Phase A 후 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
@@ -66,7 +74,7 @@
 1. ~~Phase 0 dogfood 무결성 (354/355/356)~~ — **2026-07-13 배치 종결**. 성재 육안 검증 대기: 김인턴 미노출·Hermes 멤버 표시·CLI 공지 무유출.
 2. **내부 팀 테스트(10인) 준비 트랙** — ① UI 고도화 Wave 1(셸/사이드바/Cmd+K) + ADR-0109(unread/read-state) 기안 ② Phase A(AWS 단일 EC2 실배포 + GH Actions pull&up + 앱 배포 `#226`) 티켓 발급. 성재 선택: 호스팅=단일 EC2(t4g.large), UI는 내부 테스트 전 선공개.
 3. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한). agent 신규 pairing 표면 티켓(103 은퇴 후 재생성 경로)도 함께 검토.
-4. 다음 기획 결정 순번: **ADR-0103 (로드맵 정렬)** — 실질 방향은 확정(내부 팀 알파), 문서 정본화 필요. 이후 ADR-0109를 UI Wave 2 전제로 선기안.
+4. 성재 결정 대기 2건: **ADR-0109**(unread 계약 — Wave 2 해금), **ADR-0111**(Agent Work Surface, 성재 발제 — MOMO-362..365 해금). ADR-0103(로드맵 정렬)은 실질 확정, 문서 정본화 대기.
 5. MOMO-354 design-review Medium 5건 이월 (BUILD_TICKETS 기록) — presence 하드코딩·비활성 author 표시·subscribe 순서 의존·에러 카피·데모 서사. 성재 판단 대기.
 6. dogfood 실사용 확인 권장: @hermes 승인 왕복(349), 실행 중 상태/부분응답(350).
 

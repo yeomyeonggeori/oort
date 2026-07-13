@@ -254,6 +254,14 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - 파일 업로드는 자체 오브젝트 스토리지 대신 **Google Drive workspace archive 모드**로 확정(MinIO OSS 중단, internal-consent 검증 면제) — EP-GWORKSPACE(MOMO-122/123) 확장이며 스펙 정정 3건은 MOMO-323.
 - UI 작업은 `.claude/skills/momo-design-taste/` skill + design-review 에이전트 리포트(Blocker 0)를 PR evidence로 포함한다(사람 리뷰는 High 이하 판정만).
 
+### 1.4 Agent Work Surface overlay (ADR-0111 · 2026-07-13 성재 발제)
+
+메신저 안에서 에이전트에게 실제 업무(터미널·코드 작업)를 시키고 실행 전 과정이 채널 타임라인에 원장으로 남는 표면. §1.2의 "execution ledger" 포지셔닝의 첫 사용자 체감 구현이다. 정본: `docs/adr/0111-agent-work-surface.md` (**Proposed** — Accepted 전 구현 티켓 발급 금지).
+
+- 핵심 결정(제안): Work=`agent_run` 확장(새 실행 개체 금지) · 실행은 항상 에이전트 호스트(BYOA gateway, momo 서버는 코드 실행 안 함, ADR-0004 유지) · codex sandbox 정책→승인 티어 매핑(349 재사용) · 특화 라우팅 v0=초대된 에이전트 중 capability 배지 명시 선택 · 코드 특화 레퍼런스=Apache-2.0 codex CLI 기반 `codex-workbench` adapter(codex-fleet 검증 계약 승격).
+- 파생 배치(Accepted 시): MOMO-362(work run 계약) → 363(codex-workbench adapter), 364(Work UI)·365(capability 배지) 병렬. 착수는 UI W1+Phase A 랜딩 후 — 10인 내부 테스트의 킬러 데모 후보.
+- 신규 인프라·스키마 변경 0으로 시작(agent_run input convention + `agent.config.capabilities`). 후속 결정 예약: managed 실행 노드, 자동 라우팅, momo-plugin-github 합류.
+
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 
 | 항목 | 비용 | 비고 |
