@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -16,6 +16,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
     private var realtimeDriver: (any RealtimeSubscriptionDriver)?
     private var hasExplicitRealtimeDriver: Bool
     private var agentRealtimeTransport: (any AgentRealtimeEnvelopeSubscriptionTransport)?
+    private var readStateRealtimeTransport: (any ReadStateRealtimeEnvelopeSubscriptionTransport)?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var workspace: WorkspaceID?
@@ -83,9 +84,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         agentRealtimeTransport = transport
     }
 
+    public func setReadStateRealtimeTransport(
+        _ transport: (any ReadStateRealtimeEnvelopeSubscriptionTransport)?
+    ) {
+        readStateRealtimeTransport = transport
+    }
+
     public func requireAccessToken() throws -> String {
         guard let accessToken, !accessToken.isEmpty else { throw BackendError.notConnected }
         return accessToken
+    }
+
+    func authenticatedMemberID() async -> MemberID? {
+        authenticatedMember?.id ?? accessToken.flatMap(Self.memberIDFromJWT)
     }
 
     public func clearSessionSensitiveState() async {
@@ -95,6 +106,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         cachedChannels = nil
         cachedMembers = nil
         lastKnownSeqByChannel = [:]
+        readStateRealtimeTransport = nil
         realtimeStatusByChannel = [:]
         for continuations in realtimeStatusStreams.values {
             for continuation in continuations.values {
@@ -293,6 +305,67 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
             queryItems: [],
             response: AgentWorkRun.self
         )
+    }
+
+    // MARK: Read state (ADR-0109)
+
+    public func readStates(workspace: WorkspaceID) async throws -> [ChannelReadState] {
+        let states = try await get(
+            "/v1/workspaces/\(workspace.description)/read-state",
+            queryItems: [],
+            response: ReadStateListResponseDTO.self
+        ).readStates
+        for state in states {
+            lastKnownSeqByChannel[state.channelId] = max(
+                lastKnownSeqByChannel[state.channelId] ?? 0,
+                state.latestSeq
+            )
+        }
+        return states
+    }
+
+    public func markRead(
+        channel: ChannelID,
+        through sequence: Int64
+    ) async throws -> ChannelReadState {
+        guard let workspace else { throw BackendError.notConnected }
+        return try await put(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/read-state",
+            body: UpdateReadStateRequestDTO(lastReadSeq: sequence),
+            response: ChannelReadState.self
+        )
+    }
+
+    public func subscribeReadStates(member: MemberID) async throws -> AsyncThrowingStream<ChannelReadState, Error> {
+        guard let workspace else { throw BackendError.notConnected }
+        guard let readStateRealtimeTransport else {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: BackendError.realtime("Read-state realtime is unavailable."))
+            }
+        }
+        let envelopes = try await readStateRealtimeTransport.readStateEnvelopes(member: member)
+        return AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    for try await envelope in envelopes {
+                        guard envelope.type == "read_state",
+                              envelope.payload["workspace_id"]?.stringValue?.lowercased()
+                                == workspace.description.lowercased(),
+                              envelope.payload["member_id"]?.stringValue?.lowercased()
+                                == member.description.lowercased()
+                        else {
+                            continue
+                        }
+                        let data = try JSONEncoder.momo.encode(envelope.payload)
+                        continuation.yield(try JSONDecoder.momo.decode(ChannelReadState.self, from: data))
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
     }
 
     public func createChannel(
@@ -541,6 +614,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         return try await execute(request, response: response)
     }
 
+    private func put<RequestBody: Encodable, ResponseBody: Decodable>(
+        _ path: String,
+        body: RequestBody,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        try authorize(&request)
+        return try await execute(request, response: response)
+    }
+
     private func delete<ResponseBody: Decodable>(
         _ path: String,
         authorized: Bool,
@@ -632,6 +718,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         )
         realtimeDriver = DefaultRealtimeSubscriptionDriver(transport: transport)
         agentRealtimeTransport = transport
+        readStateRealtimeTransport = transport
     }
 
     private static func agentRealtimeEvents(
@@ -685,6 +772,25 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
             }
             continuation.onTermination = { _ in task.cancel() }
         }
+    }
+
+    private static func memberIDFromJWT(_ token: String) -> MemberID? {
+        let segments = token.split(separator: ".", omittingEmptySubsequences: false)
+        guard segments.count == 3 else { return nil }
+        var payload = String(segments[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = payload.count % 4
+        if remainder != 0 {
+            payload += String(repeating: "=", count: 4 - remainder)
+        }
+        guard let data = Data(base64Encoded: payload),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let subject = object["sub"] as? String
+        else {
+            return nil
+        }
+        return MemberID(subject)
     }
 }
 
@@ -897,6 +1003,22 @@ private struct MemberDTO: Decodable {
 
 private struct WorkspaceRosterResponse: Decodable {
     let members: [MemberDTO]
+}
+
+private struct ReadStateListResponseDTO: Decodable {
+    let readStates: [ChannelReadState]
+
+    private enum CodingKeys: String, CodingKey {
+        case readStates = "read_states"
+    }
+}
+
+private struct UpdateReadStateRequestDTO: Encodable {
+    let lastReadSeq: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case lastReadSeq = "last_read_seq"
+    }
 }
 
 private struct SendMessageRequest: Encodable {

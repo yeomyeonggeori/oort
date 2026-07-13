@@ -6,6 +6,10 @@ public protocol MomoSessionSensitiveStateClearing: Sendable {
     func clearSessionSensitiveState() async
 }
 
+protocol AuthenticatedMemberIDProvidingBackend: Sendable {
+    func authenticatedMemberID() async -> MemberID?
+}
+
 /// Marker for backends whose member identity and channel scope must remain
 /// server-owned. Local demo profile hints are never merged into these rosters.
 public protocol ServerRosterSourceOfTruth: Sendable {}
@@ -86,11 +90,13 @@ public final class ChatViewModel: ObservableObject {
 
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
+    private let readStateBackend: (any ReadStateBackend)?
     private let agentTransport: any AgentTransport
     private let workRunBackend: (any AgentWorkRunBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
+    private let readStateDebounce: Duration
     public let usesServerRosterSourceOfTruth: Bool
 
     public var allowsLocalProfileEditing: Bool {
@@ -103,6 +109,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var channels: [Channel] = []
     @Published public var selectedChannelId: ChannelID?
     @Published public private(set) var recentChannelIds: [ChannelID] = []
+    @Published public private(set) var readStatesByChannel: [ChannelID: ChannelReadState] = [:]
+    @Published public private(set) var readStateSyncError: String?
 
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
@@ -152,10 +160,16 @@ public final class ChatViewModel: ObservableObject {
 
     @Published public private(set) var connectionError: String?
 
-    private var channelSubscription: Task<Void, Never>?
+    private var channelSubscriptions: [ChannelID: Task<Void, Never>] = [:]
     private var realtimeStatusSubscription: Task<Void, Never>?
+    private var readStateSubscription: Task<Void, Never>?
+    private var readStateRefreshTask: Task<Void, Never>?
+    private var markReadTasks: [ChannelID: Task<Void, Never>] = [:]
+    private var pendingReadSequences: [ChannelID: Int64] = [:]
     private var channelNavigationHistory: [ChannelID] = []
     private var channelNavigationIndex: Int?
+    private var authenticatedMemberId: MemberID?
+    private var activeTimelineChannelId: ChannelID?
     private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
     private var localTypingChannels: Set<ChannelID> = []
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
@@ -166,9 +180,11 @@ public final class ChatViewModel: ObservableObject {
         agentTransport: any AgentTransport,
         onboarding: (any OnboardingInviteBackend)? = nil,
         foundationModelsCapability: FoundationModelsCapabilityState = FoundationModelsCapabilityProbe().currentState(),
-        localContextCopilot: LocalContextCopilotService = LocalContextCopilotService()
+        localContextCopilot: LocalContextCopilotService = LocalContextCopilotService(),
+        readStateDebounce: Duration = .seconds(1)
     ) {
         self.chat = chat
+        self.readStateBackend = chat as? any ReadStateBackend
         self.agentTransport = agentTransport
         self.workRunBackend = chat as? any AgentWorkRunBackend
         self.onboarding = onboarding
@@ -176,6 +192,7 @@ public final class ChatViewModel: ObservableObject {
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
         self.foundationModelsCapability = foundationModelsCapability
         self.localContextCopilot = localContextCopilot
+        self.readStateDebounce = readStateDebounce
     }
 
     /// Convenience initializer when one object conforms to both contracts.
@@ -194,7 +211,11 @@ public final class ChatViewModel: ObservableObject {
             self.members = usesServerRosterSourceOfTruth
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
+            let memberProvider = chat as? any AuthenticatedMemberIDProvidingBackend
+            authenticatedMemberId = await memberProvider?.authenticatedMemberID()
+                ?? self.members.first { $0.kind == .human && $0.status == .active }?.id
             self.channels = try await chat.channels(workspace: workspace)
+            await refreshReadStates(workspace: workspace)
             await refreshAgentRuntimeStatus()
             await loadPendingApprovals(workspace: workspace)
             if selectedChannelId == nil {
@@ -203,6 +224,10 @@ public final class ChatViewModel: ObservableObject {
             if let selectedChannelId {
                 recordChannelSelection(selectedChannelId)
             }
+            subscribeReadStateUpdates()
+            for channel in channels {
+                subscribe(channel: channel.id)
+            }
             self.connectionError = nil
         } catch {
             self.connectionError = String(describing: error)
@@ -210,9 +235,16 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func clearSessionSensitiveState() async {
-        channelSubscription?.cancel()
+        channelSubscriptions.values.forEach { $0.cancel() }
+        readStateSubscription?.cancel()
+        readStateRefreshTask?.cancel()
+        markReadTasks.values.forEach { $0.cancel() }
         realtimeStatusSubscription?.cancel()
-        channelSubscription = nil
+        channelSubscriptions = [:]
+        readStateSubscription = nil
+        readStateRefreshTask = nil
+        markReadTasks = [:]
+        pendingReadSequences = [:]
         realtimeStatusSubscription = nil
         if let resettable = chat as? any MomoSessionSensitiveStateClearing {
             await resettable.clearSessionSensitiveState()
@@ -225,8 +257,12 @@ public final class ChatViewModel: ObservableObject {
         channels = []
         selectedChannelId = nil
         recentChannelIds = []
+        readStatesByChannel = [:]
+        readStateSyncError = nil
         channelNavigationHistory = []
         channelNavigationIndex = nil
+        authenticatedMemberId = nil
+        activeTimelineChannelId = nil
         messagesByChannel = [:]
         historyLoadingChannels = []
         partials = [:]
@@ -283,6 +319,10 @@ public final class ChatViewModel: ObservableObject {
     /// Inject channels (stub seeding path; real backend fetches them over REST).
     public func setChannels(_ channels: [Channel]) {
         self.channels = channels
+        for channel in channels {
+            ensureReadStateExists(channel: channel.id)
+            subscribe(channel: channel.id)
+        }
         if selectedChannelId == nil {
             selectedChannelId = channels.first?.id
         }
@@ -313,6 +353,8 @@ public final class ChatViewModel: ObservableObject {
                 channels.append(result.channel)
                 channels.sort(by: Self.channelOrder)
             }
+            ensureReadStateExists(channel: result.channel.id)
+            subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
             connectionError = nil
             await selectChannel(result.channel.id)
@@ -378,14 +420,52 @@ public final class ChatViewModel: ObservableObject {
         return true
     }
 
+    public var canNavigateUnreadChannels: Bool {
+        let ordered = sidebarChannelOrder.orderedChannels.map(\.id)
+        let unread = Set(ordered.filter { readStatesByChannel[$0]?.hasUnread == true })
+        return MomoUnreadNavigation.destination(
+            from: selectedChannelId,
+            orderedChannels: ordered,
+            unreadChannels: unread,
+            direction: .next
+        ) != nil
+    }
+
+    @discardableResult
+    public func navigateToPreviousUnreadChannel() async -> Bool {
+        await navigateUnreadChannel(direction: .previous)
+    }
+
+    @discardableResult
+    public func navigateToNextUnreadChannel() async -> Bool {
+        await navigateUnreadChannel(direction: .next)
+    }
+
+    private func navigateUnreadChannel(direction: MomoUnreadNavigationDirection) async -> Bool {
+        let ordered = sidebarChannelOrder.orderedChannels.map(\.id)
+        let unread = Set(ordered.filter { readStatesByChannel[$0]?.hasUnread == true })
+        guard let destination = MomoUnreadNavigation.destination(
+            from: selectedChannelId,
+            orderedChannels: ordered,
+            unreadChannels: unread,
+            direction: direction
+        ) else {
+            return false
+        }
+        await selectChannel(destination)
+        return true
+    }
+
     private func activateChannel(_ id: ChannelID) async {
         selectedChannelId = id
+        activeTimelineChannelId = id
         await loadHistory(channel: id)
         guard selectedChannelId == id else { return }
         await refreshCostSnapshots(channel: id)
         guard selectedChannelId == id else { return }
         await loadWorkRuns(channel: id)
         guard selectedChannelId == id else { return }
+        subscribeRealtimeStatus(channel: id)
         subscribe(channel: id)
         await refreshLocalContextCopilotPreview()
     }
@@ -449,11 +529,155 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: Read state (ADR-0109)
+
+    public func refreshReadStates() async {
+        guard let workspaceId else { return }
+        await refreshReadStates(workspace: workspaceId)
+    }
+
+    public func retryReadStateSync() async {
+        await refreshReadStates()
+        subscribeReadStateUpdates()
+    }
+
+    private func refreshReadStates(workspace: WorkspaceID) async {
+        guard let readStateBackend else {
+            for channel in channels {
+                ensureReadStateExists(channel: channel.id)
+            }
+            return
+        }
+        do {
+            let states = try await readStateBackend.readStates(workspace: workspace)
+            var authoritative = Dictionary(uniqueKeysWithValues: states.map { ($0.channelId, $0) })
+            for channel in channels where authoritative[channel.id] == nil {
+                authoritative[channel.id] = Self.emptyReadState(channel: channel.id)
+            }
+            readStatesByChannel = authoritative
+            readStateSyncError = nil
+        } catch {
+            readStateSyncError = String(describing: error)
+        }
+    }
+
+    private func subscribeReadStateUpdates() {
+        readStateSubscription?.cancel()
+        guard let readStateBackend, let member = authenticatedMemberId ?? currentHumanMember?.id else { return }
+        readStateSubscription = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let states = try await readStateBackend.subscribeReadStates(member: member)
+                for try await state in states {
+                    guard self.channels.contains(where: { $0.id == state.channelId }) else { continue }
+                    self.readStatesByChannel[state.channelId] = state
+                    self.readStateSyncError = nil
+                }
+            } catch {
+                self.readStateSyncError = String(describing: error)
+            }
+        }
+    }
+
+    private func ensureReadStateExists(channel: ChannelID) {
+        if readStatesByChannel[channel] == nil {
+            readStatesByChannel[channel] = Self.emptyReadState(channel: channel)
+        }
+    }
+
+    private static func emptyReadState(channel: ChannelID) -> ChannelReadState {
+        ChannelReadState(
+            channelId: channel,
+            lastReadSeq: 0,
+            latestSeq: 0,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+
+    public func messageDidRender(_ message: Message) {
+        guard message.channelId == selectedChannelId, let sequence = message.seq else { return }
+        scheduleMarkRead(channel: message.channelId, sequence: sequence, immediately: false)
+    }
+
+    public func isCurrentMemberMessage(_ message: Message) -> Bool {
+        currentHumanMember?.id == message.authorMemberId
+    }
+
+    private func scheduleMarkRead(
+        channel: ChannelID,
+        sequence: Int64,
+        immediately: Bool
+    ) {
+        guard readStateBackend != nil else { return }
+        pendingReadSequences[channel] = max(pendingReadSequences[channel] ?? 0, sequence)
+        markReadTasks[channel]?.cancel()
+        markReadTasks[channel] = Task { [weak self] in
+            guard let self else { return }
+            if !immediately {
+                do {
+                    try await Task.sleep(for: self.readStateDebounce)
+                } catch {
+                    return
+                }
+            }
+            await self.flushPendingReadState(channel: channel)
+        }
+    }
+
+    private func flushPendingReadState(channel: ChannelID) async {
+        guard let readStateBackend, let sequence = pendingReadSequences[channel] else { return }
+        markReadTasks[channel] = nil
+        do {
+            let state = try await readStateBackend.markRead(channel: channel, through: sequence)
+            readStatesByChannel[channel] = state
+            readStateSyncError = nil
+            if (pendingReadSequences[channel] ?? 0) <= state.lastReadSeq {
+                pendingReadSequences[channel] = nil
+            } else if let pending = pendingReadSequences[channel] {
+                scheduleMarkRead(channel: channel, sequence: pending, immediately: true)
+            }
+        } catch {
+            readStateSyncError = String(describing: error)
+            scheduleMarkRead(channel: channel, sequence: sequence, immediately: false)
+        }
+    }
+
+    private func noteIncomingMessageForUnread(_ message: Message) {
+        guard let sequence = message.seq else { return }
+        if isCurrentMemberMessage(message) {
+            scheduleMarkRead(channel: message.channelId, sequence: sequence, immediately: true)
+            return
+        }
+        ensureReadStateExists(channel: message.channelId)
+        let mentionsCurrentMember = currentHumanMember.map { member in
+            message.props["mention_member_ids"]?.arrayValue?.contains { value in
+                value.stringValue?.lowercased() == member.id.description.lowercased()
+            } == true
+        } ?? false
+        readStatesByChannel[message.channelId] = readStatesByChannel[message.channelId]?.receivingMessage(
+            sequence: sequence,
+            mentionsCurrentMember: mentionsCurrentMember
+        )
+        scheduleReadStateRefresh()
+    }
+
+    private func scheduleReadStateRefresh() {
+        guard readStateBackend != nil else { return }
+        readStateRefreshTask?.cancel()
+        readStateRefreshTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            await self?.refreshReadStates()
+        }
+    }
+
     private func subscribe(channel: ChannelID) {
-        channelSubscription?.cancel()
-        realtimeStatusSubscription?.cancel()
-        subscribeRealtimeStatus(channel: channel)
-        channelSubscription = Task { [weak self] in
+        guard channelSubscriptions[channel] == nil else { return }
+        channelSubscriptions[channel] = Task { [weak self] in
             guard let self else { return }
             do {
                 let events = try await self.chat.subscribe(channel: channel)
@@ -467,6 +691,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func subscribeRealtimeStatus(channel: ChannelID) {
+        realtimeStatusSubscription?.cancel()
         guard let statusProvider = chat as? any RealtimeStatusProvidingBackend else {
             realtimeStatuses[channel] = .restFallback(channel: channel)
             return
@@ -495,7 +720,10 @@ public final class ChatViewModel: ObservableObject {
         if let statusProvider = chat as? any RealtimeStatusProvidingBackend {
             await statusProvider.retryRealtime(channel: channel)
         }
+        channelSubscriptions[channel]?.cancel()
+        channelSubscriptions[channel] = nil
         subscribe(channel: channel)
+        subscribeRealtimeStatus(channel: channel)
     }
 
     public func retrySelectedChannelLoad() async {
@@ -668,6 +896,9 @@ public final class ChatViewModel: ObservableObject {
             // Reconcile (the stub already emits the real message via subscribe, but the
             // returned ack is authoritative — upsert by id).
             upsert(acked, channel: channel)
+            if let sequence = acked.seq {
+                scheduleMarkRead(channel: channel, sequence: sequence, immediately: true)
+            }
             if let mentionedAgent {
                 await refreshAfterMentionSend(channel: channel, agent: mentionedAgent, triggerSeq: acked.seq)
             }
@@ -949,8 +1180,14 @@ public final class ChatViewModel: ObservableObject {
 
     private func apply(_ event: RealtimeEvent, channel: ChannelID) {
         switch event {
-        case .message(let m), .messageEdited(let m):
-            upsert(m, channel: channel)
+        case .message(let message):
+            guard message.channelId == channel else { return }
+            if upsert(message, channel: channel) {
+                noteIncomingMessageForUnread(message)
+            }
+        case .messageEdited(let message):
+            guard message.channelId == channel else { return }
+            upsert(message, channel: channel)
         case .messageDeleted(let id):
             if var msgs = messagesByChannel[channel],
                let idx = msgs.firstIndex(where: { $0.id == id }) {
@@ -958,15 +1195,19 @@ public final class ChatViewModel: ObservableObject {
                 messagesByChannel[channel] = msgs
             }
         case .agentStatus(let status):
+            guard status.channelId == channel, activeTimelineChannelId == channel else { return }
             agentStatuses[status.runId] = status
             updateWorkRunStatus(status)
             mergeCostSnapshot(from: status)
             reconcileAgentWorking(from: status)
         case .agentPartial(let partial):
+            guard partial.channelId == channel, activeTimelineChannelId == channel else { return }
             coalesce(partial)
         case .approval(let ev):
+            guard ev.channelId == channel, activeTimelineChannelId == channel else { return }
             approvals[ev.approvalId] = ev
         case .typing(let delta):
+            guard delta.channelId == channel, activeTimelineChannelId == channel else { return }
             applyTyping(delta)
         case .reaction, .presence:
             // Rendered elsewhere / not material to the v0 demo surfaces.
@@ -974,10 +1215,12 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func upsert(_ message: Message, channel: ChannelID) {
+    @discardableResult
+    private func upsert(_ message: Message, channel: ChannelID) -> Bool {
         var msgs = messagesByChannel[channel] ?? []
-        if let idx = msgs.firstIndex(where: { $0.id == message.id })
-            ?? (message.clientMsgId.flatMap { cid in msgs.firstIndex(where: { $0.clientMsgId == cid }) }) {
+        let existingIndex = msgs.firstIndex(where: { $0.id == message.id })
+            ?? (message.clientMsgId.flatMap { cid in msgs.firstIndex(where: { $0.clientMsgId == cid }) })
+        if let idx = existingIndex {
             msgs[idx] = message
         } else {
             msgs.append(message)
@@ -986,6 +1229,7 @@ public final class ChatViewModel: ObservableObject {
         hydrateSidecars(from: message)
         reconcileFinalMessage(message)
         reconcileAgentWorking(from: message)
+        return existingIndex == nil
     }
 
     private func hydrateSidecars(from message: Message) {
@@ -1437,7 +1681,11 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private var currentHumanMember: Member? {
-        members.first { $0.kind == .human && $0.status == .active }
+        if let authenticatedMemberId,
+           let authenticated = members.first(where: { $0.id == authenticatedMemberId }) {
+            return authenticated
+        }
+        return members.first { $0.kind == .human && $0.status == .active }
     }
 
     private func startLocalTyping(channel: ChannelID) {

@@ -901,6 +901,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var unreadSyncUnavailable: String {
+        switch language {
+        case .korean: return "읽지 않음 상태를 확인할 수 없음"
+        case .english: return "Unread status unavailable"
+        }
+    }
+
+    var unreadSyncUnavailableDetail: String {
+        switch language {
+        case .korean: return "표시된 배지가 최신이 아닐 수 있습니다."
+        case .english: return "Shown badges may be out of date."
+        }
+    }
+
     var newChannel: String {
         switch language {
         case .korean: return "새 채널"
@@ -1691,6 +1705,20 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "자격증명 요청을 완료하지 못했습니다. 서버 연결을 확인하고 다시 시도하세요."
         case .english: return "The credential request could not be completed. Check the server connection and try again."
+        }
+    }
+
+    func channelUnreadAccessibilityLabel(
+        channelName: String,
+        unreadCount: Int64,
+        mentionCount: Int
+    ) -> String {
+        guard unreadCount > 0 || mentionCount > 0 else { return channelName }
+        switch language {
+        case .korean:
+            return "\(channelName), 읽지 않은 메시지 \(unreadCount)개, 멘션 \(mentionCount)개"
+        case .english:
+            return "\(channelName), \(unreadCount) unread messages, \(mentionCount) mentions"
         }
     }
 

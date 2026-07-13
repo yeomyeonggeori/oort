@@ -380,7 +380,10 @@ public struct MessageListView: View {
                     scrollToTimelineBottom(proxy)
                 }
                 .onChange(of: viewModel.visibleMessages.last?.id) { _, _ in
-                    followNewTimelineContentIfNeeded(proxy)
+                    let forceForOwnSend = viewModel.visibleMessages.last.map(
+                        viewModel.isCurrentMemberMessage
+                    ) ?? false
+                    followNewTimelineContentIfNeeded(proxy, force: forceForOwnSend)
                 }
                 .onChange(of: livePartials) { _, _ in
                     followNewTimelineContentIfNeeded(proxy)
@@ -419,6 +422,9 @@ public struct MessageListView: View {
             .padding(.top, item.startsGroup ? 8 : 0)
         }
         .id(item.id)
+        .onAppear {
+            viewModel.messageDidRender(item.message)
+        }
     }
 
     private func workTimelineItem(
@@ -469,8 +475,14 @@ public struct MessageListView: View {
             .id(TimelineCoordinateSpace.bottomID)
     }
 
-    private func followNewTimelineContentIfNeeded(_ proxy: ScrollViewProxy) {
-        guard MessageTimelineScrollPolicy.shouldFollowNewContent(wasAtBottom: isPinnedToTimelineBottom) else {
+    private func followNewTimelineContentIfNeeded(
+        _ proxy: ScrollViewProxy,
+        force: Bool = false
+    ) {
+        guard MessageTimelineScrollPolicy.shouldFollowNewContent(
+            wasAtBottom: isPinnedToTimelineBottom,
+            isOwnSend: force
+        ) else {
             return
         }
         scrollToTimelineBottom(proxy)

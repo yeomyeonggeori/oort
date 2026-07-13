@@ -67,6 +67,13 @@ final class MessageTimelineLayoutTests: XCTestCase {
     func testScrollPolicyFollowsOnlyWhenAlreadyAtBottom() {
         XCTAssertTrue(MessageTimelineScrollPolicy.shouldFollowNewContent(wasAtBottom: true))
         XCTAssertFalse(MessageTimelineScrollPolicy.shouldFollowNewContent(wasAtBottom: false))
+        XCTAssertTrue(
+            MessageTimelineScrollPolicy.shouldFollowNewContent(
+                wasAtBottom: false,
+                isOwnSend: true
+            ),
+            "own sends must always remain visible even after reading older history"
+        )
     }
 
     private var calendar: Calendar {

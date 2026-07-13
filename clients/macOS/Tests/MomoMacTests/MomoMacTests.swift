@@ -91,6 +91,66 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(english.removeFromChannel, "Remove from channel")
     }
 
+    func testUnreadNavigationWrapsInCanonicalSidebarOrder() {
+        let first = ChannelID()
+        let second = ChannelID()
+        let third = ChannelID()
+        let ordered = [first, second, third]
+        let unread: Set<ChannelID> = [first, third]
+
+        XCTAssertEqual(
+            MomoUnreadNavigation.destination(
+                from: first,
+                orderedChannels: ordered,
+                unreadChannels: unread,
+                direction: .next
+            ),
+            third
+        )
+        XCTAssertEqual(
+            MomoUnreadNavigation.destination(
+                from: first,
+                orderedChannels: ordered,
+                unreadChannels: unread,
+                direction: .previous
+            ),
+            third
+        )
+        XCTAssertEqual(
+            MomoUnreadNavigation.destination(
+                from: third,
+                orderedChannels: ordered,
+                unreadChannels: unread,
+                direction: .next
+            ),
+            first
+        )
+    }
+
+    func testUnreadNavigationDoesNotReselectOnlyUnreadChannel() {
+        let selected = ChannelID()
+        XCTAssertNil(
+            MomoUnreadNavigation.destination(
+                from: selected,
+                orderedChannels: [selected],
+                unreadChannels: [selected],
+                direction: .next
+            )
+        )
+        XCTAssertEqual(MomoUnreadBadge.label(mentionCount: 4), "4")
+        XCTAssertEqual(MomoUnreadBadge.label(mentionCount: 100), "99+")
+        XCTAssertNil(MomoUnreadBadge.label(mentionCount: 0))
+        let copy = MomoWorkspaceCopy(language: .english)
+        XCTAssertEqual(
+            copy.channelUnreadAccessibilityLabel(
+                channelName: "general",
+                unreadCount: 0,
+                mentionCount: 0
+            ),
+            "general"
+        )
+    }
+
     // MARK: in-memory backend round-trip (proves ChatBackend conformance)
 
     func testBackendSeedAndHistory() async throws {
@@ -147,6 +207,206 @@ final class MomoMacTests: XCTestCase {
         let first = try await backend.sendOptimistic(draft, clientMsgId: cid)
         let second = try await backend.sendOptimistic(draft, clientMsgId: cid)
         XCTAssertEqual(first.id, second.id, "same clientMsgId must dedupe (L4 §3.1)")
+    }
+
+    @MainActor
+    func testBootstrapLoadsReadStateOnceAndAppliesPersonalRealtimeUpdate() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "성재",
+            handle: "seongjae"
+        )
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "ship-room"
+        )
+        let initial = ChannelReadState(
+            channelId: channel.id,
+            lastReadSeq: 4,
+            latestSeq: 9,
+            unreadCount: 5,
+            mentionCount: 2
+        )
+        let crossDevice = ChannelReadState(
+            channelId: channel.id,
+            lastReadSeq: 8,
+            latestSeq: 9,
+            unreadCount: 1,
+            mentionCount: 0
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [:],
+            events: [],
+            readStates: [initial],
+            readStateEvents: [crossDevice]
+        )
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: LiveChatBackend(),
+            readStateDebounce: .milliseconds(5)
+        )
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        try await Task.sleep(for: .milliseconds(30))
+
+        let readStateFetchCount = await backend.readStateFetchCount()
+        XCTAssertEqual(readStateFetchCount, 1, "boot must use one bulk read-state call")
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id], crossDevice)
+    }
+
+    @MainActor
+    func testReadStateRealtimeFailureSurfacesSyncError() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "성재",
+            handle: "seongjae"
+        )
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "ship-room"
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [:],
+            events: [],
+            readStateSubscriptionFails: true
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: LiveChatBackend())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertNotNil(viewModel.readStateSyncError)
+    }
+
+    @MainActor
+    func testViewportMarkReadDebouncesAndRetriesWithoutCursorRegression() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "성재",
+            handle: "seongjae"
+        )
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "launch"
+        )
+        let message = Message(
+            id: MessageID(),
+            channelId: channel.id,
+            seq: 3,
+            hlcTs: 3,
+            authorMemberId: MemberID(),
+            body: "배포 준비 상태를 확인했습니다."
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [channel.id: [message]],
+            events: [],
+            readStates: [ChannelReadState(
+                channelId: channel.id,
+                lastReadSeq: 0,
+                latestSeq: 3,
+                unreadCount: 3,
+                mentionCount: 1
+            )],
+            markReadFailures: 1
+        )
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: LiveChatBackend(),
+            readStateDebounce: .milliseconds(5)
+        )
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await viewModel.selectChannel(channel.id)
+
+        viewModel.messageDidRender(message)
+        try await Task.sleep(for: .milliseconds(50))
+
+        let markReadAttemptCount = await backend.markReadAttemptCount()
+        XCTAssertEqual(markReadAttemptCount, 2)
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.lastReadSeq, 3)
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.unreadCount, 0)
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.mentionCount, 0)
+    }
+
+    @MainActor
+    func testIncomingMessageLocallyIncrementsUnreadThenSchedulesServerResync() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "성재",
+            handle: "seongjae"
+        )
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "release"
+        )
+        let incoming = Message(
+            id: MessageID(),
+            channelId: channel.id,
+            seq: 4,
+            hlcTs: 4,
+            authorMemberId: MemberID(),
+            body: "Release candidate is ready.",
+            props: [
+                "mention_member_ids": .array([.string(member.id.description)]),
+            ]
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [:],
+            events: [.message(incoming)],
+            readStates: [ChannelReadState(
+                channelId: channel.id,
+                lastReadSeq: 3,
+                latestSeq: 3,
+                unreadCount: 0,
+                mentionCount: 0
+            )]
+        )
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: LiveChatBackend(),
+            readStateDebounce: .milliseconds(5)
+        )
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        try await Task.sleep(for: .milliseconds(30))
+
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.unreadCount, 1)
+        XCTAssertEqual(viewModel.readStatesByChannel[channel.id]?.mentionCount, 1)
+
+        try await Task.sleep(for: .milliseconds(280))
+        let readStateFetchCount = await backend.readStateFetchCount()
+        XCTAssertEqual(readStateFetchCount, 2, "incoming events must trigger an authoritative bulk resync")
     }
 
     func testLiveChatBackendMentionFallbackRespondsToHermesAlias() async throws {
@@ -1406,6 +1666,139 @@ final class MomoMacTests: XCTestCase {
     }
 
     // MARK: MomoServer REST ChatBackend v0
+
+    func testRESTBackendBulkReadStateAndMarkReadUseADR0109Contract() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/read-state"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(json: """
+                {"read_states":[{
+                  "channel_id":"\(channel.description)",
+                  "last_read_seq":4,
+                  "latest_seq":9,
+                  "unread_count":5,
+                  "mention_count":2
+                }]}
+                """)
+            case ("PUT", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/read-state"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["last_read_seq"] as? Int, 9)
+                XCTAssertNil(body?["member_id"], "actor identity must come only from the bearer")
+                return MockHTTPResponse(json: """
+                {
+                  "channel_id":"\(channel.description)",
+                  "last_read_seq":9,
+                  "latest_seq":9,
+                  "unread_count":0,
+                  "mention_count":0
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let realtimeDriver = RecordingRealtimeSubscriptionDriver(events: [])
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace,
+                defaultChannel: channel
+            ),
+            session: session,
+            realtimeDriver: realtimeDriver
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let states = try await backend.readStates(workspace: workspace)
+        XCTAssertEqual(states.map(\.unreadCount), [5])
+        XCTAssertEqual(states.map(\.mentionCount), [2])
+        _ = try await backend.subscribe(channel: channel)
+        let startingSeqs = await realtimeDriver.startingSeqs()
+        XCTAssertEqual(startingSeqs, [9], "bulk channel heads must seed background realtime cursors")
+
+        let marked = try await backend.markRead(channel: channel, through: 9)
+        XCTAssertEqual(marked.lastReadSeq, 9)
+        XCTAssertEqual(marked.unreadCount, 0)
+        XCTAssertEqual(marked.mentionCount, 0)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["GET", "PUT"])
+    }
+
+    func testRESTBackendFiltersPersonalReadStateRealtimeEnvelope() async throws {
+        let workspace = WorkspaceID.demo
+        let member = MemberID.demoHuman
+        let channel = ChannelID.demoGeneral
+        let payload = Data(#"{"sub":"\#(member.description)"}"#.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        let accessToken = "e30.\(payload).signature"
+        let matching = RealtimeEnvelope(
+            type: "read_state",
+            ts: 1_800_000_000_000,
+            payload: [
+                "workspace_id": .string(workspace.description),
+                "member_id": .string(member.description),
+                "channel_id": .string(channel.description),
+                "last_read_seq": .int(8),
+                "latest_seq": .int(10),
+                "unread_count": .int(2),
+                "mention_count": .int(1),
+            ]
+        )
+        let foreign = RealtimeEnvelope(
+            type: "read_state",
+            ts: matching.ts,
+            payload: [
+                "workspace_id": .string(workspace.description),
+                "member_id": .string(MemberID().description),
+                "channel_id": .string(channel.description),
+                "last_read_seq": .int(10),
+                "latest_seq": .int(10),
+                "unread_count": .int(0),
+                "mention_count": .int(0),
+            ]
+        )
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: accessToken,
+                workspace: workspace
+            )
+        )
+        try await backend.connect(workspace: workspace, accessToken: accessToken)
+        let authenticatedMemberID = await backend.authenticatedMemberID()
+        XCTAssertEqual(authenticatedMemberID, member)
+        await backend.setReadStateRealtimeTransport(
+            FixtureReadStateRealtimeTransport(envelopes: [foreign, matching])
+        )
+
+        let stream = try await backend.subscribeReadStates(member: member)
+        var states: [ChannelReadState] = []
+        for try await state in stream {
+            states.append(state)
+        }
+
+        XCTAssertEqual(states.count, 1)
+        XCTAssertEqual(states.first?.channelId, channel)
+        XCTAssertEqual(states.first?.unreadCount, 2)
+        XCTAssertEqual(
+            SwiftCentrifugeRealtimeSubscriptionTransport.readStateChannelName(member: member),
+            "user:read-state#\(member.description)"
+        )
+    }
 
     func testRESTBackendLoginHistoryAndSendUseMomoServerMessageEndpoints() async throws {
         await MockHTTPURLProtocol.reset()
@@ -3670,12 +4063,33 @@ private struct FixtureAgentRealtimeTransport: AgentRealtimeEnvelopeSubscriptionT
     }
 }
 
-private actor FixtureRealtimeChatBackend: ChatBackend {
+private struct FixtureReadStateRealtimeTransport: ReadStateRealtimeEnvelopeSubscriptionTransport {
+    let envelopes: [RealtimeEnvelope]
+
+    func readStateEnvelopes(
+        member: MemberID
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
+        AsyncThrowingStream { continuation in
+            for envelope in envelopes {
+                continuation.yield(envelope)
+            }
+            continuation.finish()
+        }
+    }
+}
+
+private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
     private let workspace: WorkspaceID
     private let storedMembers: [Member]
     private let storedChannels: [Channel]
     private let storedHistory: [ChannelID: [Message]]
     private let storedEvents: [RealtimeEvent]
+    private var storedReadStates: [ChannelID: ChannelReadState]
+    private let storedReadStateEvents: [ChannelReadState]
+    private let readStateSubscriptionFails: Bool
+    private var remainingMarkReadFailures: Int
+    private var readStateFetches = 0
+    private var markReadAttempts = 0
     private var storedTypingCalls: [(channel: ChannelID, isTyping: Bool)] = []
 
     init(
@@ -3683,13 +4097,21 @@ private actor FixtureRealtimeChatBackend: ChatBackend {
         members: [Member],
         channels: [Channel],
         history: [ChannelID: [Message]],
-        events: [RealtimeEvent]
+        events: [RealtimeEvent],
+        readStates: [ChannelReadState] = [],
+        readStateEvents: [ChannelReadState] = [],
+        markReadFailures: Int = 0,
+        readStateSubscriptionFails: Bool = false
     ) {
         self.workspace = workspace
         self.storedMembers = members
         self.storedChannels = channels
         self.storedHistory = history
         self.storedEvents = events
+        self.storedReadStates = Dictionary(uniqueKeysWithValues: readStates.map { ($0.channelId, $0) })
+        self.storedReadStateEvents = readStateEvents
+        self.readStateSubscriptionFails = readStateSubscriptionFails
+        self.remainingMarkReadFailures = markReadFailures
     }
 
     func connect(workspace: WorkspaceID, accessToken: String) async throws {}
@@ -3727,6 +4149,62 @@ private actor FixtureRealtimeChatBackend: ChatBackend {
 
     func channels(workspace: WorkspaceID) async throws -> [Channel] {
         storedChannels.filter { $0.workspaceId == workspace }
+    }
+
+    func readStates(workspace: WorkspaceID) async throws -> [ChannelReadState] {
+        readStateFetches += 1
+        return storedReadStates.values.sorted { $0.channelId.description < $1.channelId.description }
+    }
+
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        markReadAttempts += 1
+        if remainingMarkReadFailures > 0 {
+            remainingMarkReadFailures -= 1
+            throw BackendError.realtime("fixture mark-read failure")
+        }
+        let current = storedReadStates[channel] ?? ChannelReadState(
+            channelId: channel,
+            lastReadSeq: 0,
+            latestSeq: sequence,
+            unreadCount: sequence,
+            mentionCount: 0
+        )
+        let effective = min(current.latestSeq, max(current.lastReadSeq, sequence))
+        let updated = ChannelReadState(
+            channelId: channel,
+            lastReadSeq: effective,
+            latestSeq: current.latestSeq,
+            unreadCount: max(0, current.latestSeq - effective),
+            mentionCount: effective == current.latestSeq ? 0 : current.mentionCount
+        )
+        storedReadStates[channel] = updated
+        return updated
+    }
+
+    func subscribeReadStates(member: MemberID) async throws -> AsyncThrowingStream<ChannelReadState, Error> {
+        let events = storedReadStateEvents
+        let fails = readStateSubscriptionFails
+        return AsyncThrowingStream { continuation in
+            Task {
+                if fails {
+                    continuation.finish(throwing: BackendError.realtime("fixture read-state failure"))
+                    return
+                }
+                for event in events {
+                    continuation.yield(event)
+                    try? await Task.sleep(for: .milliseconds(5))
+                }
+                continuation.finish()
+            }
+        }
+    }
+
+    func readStateFetchCount() -> Int {
+        readStateFetches
+    }
+
+    func markReadAttemptCount() -> Int {
+        markReadAttempts
     }
 
     func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] { [] }

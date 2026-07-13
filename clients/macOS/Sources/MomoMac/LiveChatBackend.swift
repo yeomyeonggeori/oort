@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var connected = false
@@ -27,6 +27,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
     private var messagesByChannel: [ChannelID: [Message]] = [:]
     private var seqByChannel: [ChannelID: Int64] = [:]
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
+    private var readCursorsByMember: [MemberID: [ChannelID: Int64]] = [:]
     private var approvalsById: [ApprovalID: Approval] = [:]
     private var workRunsById: [RunID: AgentWorkRun] = [:]
     private var workRunIdsByClientId: [UUID: RunID] = [:]
@@ -41,6 +42,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
     private var replayedDemoDeltaChannels: Set<ChannelID> = []
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
     private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
+    private var readStateStreams: [MemberID: [UUID: AsyncThrowingStream<ChannelReadState, Error>.Continuation]] = [:]
 
     public init() {}
 
@@ -59,6 +61,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         workRunsById = [:]
         workRunIdsByClientId = [:]
         credentialsByAgent = [:]
+        readCursorsByMember = [:]
 
         var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
                            displayName: "상준", handle: "sangjun", presence: .online)
@@ -89,8 +92,16 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         // A few seed messages incl. first-class agent protocol cards.
         _ = appendServerMessage(channel: general.id, author: human.id, type: .text,
                                 body: "안녕하세요 팀!")
-        _ = appendServerMessage(channel: general.id, author: researcher.id, type: .text,
-                                body: "Hermes joined the workspace.", runId: RunID())
+        _ = appendServerMessage(
+            channel: general.id,
+            author: researcher.id,
+            type: .text,
+            body: "Hermes joined the workspace.",
+            props: .object([
+                "mention_member_ids": .array([.string(human.id.description)]),
+            ]),
+            runId: RunID()
+        )
         let toolRun = RunID()
         _ = appendServerMessage(
             channel: pg18.id, author: researcher.id, type: .toolCall,
@@ -427,6 +438,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         self.connected = true
     }
 
+    func authenticatedMemberID() async -> MemberID? {
+        members.first { $0.kind == .human && $0.status == .active }?.id
+    }
+
     public func clearSessionSensitiveState() async {
         workspace = nil
         connected = false
@@ -445,10 +460,16 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
                 continuation.finish()
             }
         }
+        for continuations in readStateStreams.values {
+            for continuation in continuations.values {
+                continuation.finish()
+            }
+        }
         channelStreams = [:]
         agentStreams = [:]
         realtimeStatusStreams = [:]
         realtimeStatusByChannel = [:]
+        readStateStreams = [:]
         credentialsByAgent = [:]
         workRunsById = [:]
         workRunIdsByClientId = [:]
@@ -581,6 +602,48 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             throw BackendError.problem(status: 404, title: "work run not found", detail: nil)
         }
         return run
+    }
+
+    // MARK: ReadStateBackend
+
+    public func readStates(workspace: WorkspaceID) async throws -> [ChannelReadState] {
+        guard connected, self.workspace == workspace else { throw BackendError.notConnected }
+        guard let member = members.first(where: { $0.kind == .human && $0.status == .active }) else {
+            return []
+        }
+        return channels
+            .filter { $0.workspaceId == workspace && !$0.isArchived }
+            .map { readState(channel: $0.id, member: member.id) }
+    }
+
+    public func markRead(
+        channel: ChannelID,
+        through sequence: Int64
+    ) async throws -> ChannelReadState {
+        guard connected,
+              let member = members.first(where: { $0.kind == .human && $0.status == .active }),
+              channels.contains(where: { $0.id == channel && !$0.isArchived })
+        else {
+            throw BackendError.notConnected
+        }
+        let latest = seqByChannel[channel] ?? 0
+        let current = readCursorsByMember[member.id]?[channel] ?? 0
+        let effective = min(latest, max(current, sequence))
+        readCursorsByMember[member.id, default: [:]][channel] = effective
+        let state = readState(channel: channel, member: member.id)
+        emitReadState(state, member: member.id)
+        return state
+    }
+
+    public func subscribeReadStates(member: MemberID) async throws -> AsyncThrowingStream<ChannelReadState, Error> {
+        guard connected else { throw BackendError.notConnected }
+        let token = UUID()
+        return AsyncThrowingStream { continuation in
+            Task { await self.registerReadState(member: member, token: token, continuation: continuation) }
+            continuation.onTermination = { _ in
+                Task { await self.unregisterReadState(member: member, token: token) }
+            }
+        }
     }
 
     public func createChannel(
@@ -931,6 +994,35 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         for cont in (agentStreams[channel] ?? [:]).values { cont.yield(event) }
     }
 
+    private func readState(channel: ChannelID, member: MemberID) -> ChannelReadState {
+        let lastReadSeq = readCursorsByMember[member]?[channel] ?? 0
+        let latestSeq = seqByChannel[channel] ?? 0
+        let mentionCount = (messagesByChannel[channel] ?? []).reduce(into: 0) { count, message in
+            guard (message.seq ?? 0) > lastReadSeq,
+                  messageMentions(message, member: member) else { return }
+            count += 1
+        }
+        return ChannelReadState(
+            channelId: channel,
+            lastReadSeq: lastReadSeq,
+            latestSeq: latestSeq,
+            unreadCount: max(0, latestSeq - lastReadSeq),
+            mentionCount: mentionCount
+        )
+    }
+
+    private func messageMentions(_ message: Message, member: MemberID) -> Bool {
+        message.props["mention_member_ids"]?.arrayValue?.contains { value in
+            value.stringValue?.lowercased() == member.description.lowercased()
+        } == true
+    }
+
+    private func emitReadState(_ state: ChannelReadState, member: MemberID) {
+        for continuation in (readStateStreams[member] ?? [:]).values {
+            continuation.yield(state)
+        }
+    }
+
     private func markApprovalRequestMessage(with receipt: ApprovalDecisionReceipt, in channel: ChannelID) {
         guard var messages = messagesByChannel[channel] else {
             return
@@ -1060,6 +1152,16 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
     }
     private func unregisterRealtimeStatus(channel: ChannelID, token: UUID) async {
         realtimeStatusStreams[channel]?[token] = nil
+    }
+    private func registerReadState(
+        member: MemberID,
+        token: UUID,
+        continuation: AsyncThrowingStream<ChannelReadState, Error>.Continuation
+    ) async {
+        readStateStreams[member, default: [:]][token] = continuation
+    }
+    private func unregisterReadState(member: MemberID, token: UUID) async {
+        readStateStreams[member]?[token] = nil
     }
     private func emitRealtimeStatus(_ status: RealtimeConnectionStatus) {
         realtimeStatusByChannel[status.channelId] = status

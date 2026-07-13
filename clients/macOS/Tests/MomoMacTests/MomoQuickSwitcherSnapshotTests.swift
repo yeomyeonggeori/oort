@@ -5,7 +5,7 @@ import SnapshotTesting
 import MomoCore
 @testable import MomoMac
 
-// Canonical MOMO-358 references are intentionally recorded by the orchestrator
+// Canonical MOMO-358/367 references are intentionally recorded by the orchestrator
 // so the worker does not author host-dependent light/dark PNG baselines.
 @MainActor
 final class MomoQuickSwitcherSnapshotTests: XCTestCase {
@@ -110,7 +110,7 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
         )
     }
 
-    func testKeyboardShortcutsLightSnapshot() throws {
+    func testUnreadKeyboardShortcutsLightSnapshot() throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
         assertSnapshot(
             of: try render(shortcutsFixture(.light), size: shortcutsSize, scheme: .light),
@@ -119,7 +119,7 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
         )
     }
 
-    func testKeyboardShortcutsDarkSnapshot() throws {
+    func testUnreadKeyboardShortcutsDarkSnapshot() throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
         assertSnapshot(
             of: try render(shortcutsFixture(.dark), size: shortcutsSize, scheme: .dark),
