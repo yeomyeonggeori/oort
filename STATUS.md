@@ -3,6 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-361 Phase A Deploy Bundle + Operator Runbooks (2026-07-13)
+
+- source checkout·populated `.env`를 고정 allowlist에서 배제하고 symlink/실 secret template을 fail-closed하는 deploy bundle packer와 합성 fixture 회귀 테스트를 추가했다. AWS provision→두 preflight→bundle 반입→pull/migrate/up→verify→digest rollback 및 10인 invite/Hermes 승인 운영 절차를 runbook 두 개로 고정했다.
+- 검증: 신규 shell `bash -n`/shellcheck, 합성 fixture bundle test, 실제 repo allowlist archive 검사 PASS. 지시된 범위에 따라 Docker/DB/verifier/`local_gate.sh`/AWS API와 실제 host deploy는 미실행(`runtime-unverified(aws-host)`).
+
 ## 0-1. MOMO-360 GHCR Image Publication + Pull-and-Up Contract (2026-07-13)
 
 - 수동 `workflow_dispatch` 전용 GHCR workflow가 api/relay/worker/migrate 4종을 `linux/arm64`, `sha-<gitsha>`로 발행하며, prod compose는 동일 release tag 또는 per-image digest로 고정된 migrate-first pull&up/rollback 계약을 사용한다.
