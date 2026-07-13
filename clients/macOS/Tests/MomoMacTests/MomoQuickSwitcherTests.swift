@@ -87,6 +87,20 @@ final class MomoQuickSwitcherTests: XCTestCase {
         XCTAssertEqual(state.handle(.cancel, items: items), .dismiss)
     }
 
+    func testQuickSwitcherPresentationTogglesAndDismisses() {
+        var state = MomoQuickSwitcherPresentationState()
+        XCTAssertFalse(state.isPresented)
+
+        state.toggle()
+        XCTAssertTrue(state.isPresented)
+        state.toggle()
+        XCTAssertFalse(state.isPresented, "pressing Cmd+K again closes the switcher")
+
+        state.toggle()
+        state.dismiss()
+        XCTAssertFalse(state.isPresented)
+    }
+
     func testChannelNumberAndHistoryNavigation() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -101,7 +115,13 @@ final class MomoQuickSwitcherTests: XCTestCase {
             name: "archived",
             archivedAtMs: 1
         )
-        viewModel.setChannels([archived] + seed.channels)
+        let directMessage = Channel(
+            id: ChannelID(),
+            workspaceId: seed.workspace,
+            kind: .dm,
+            name: "Launch DM"
+        )
+        viewModel.setChannels([directMessage, archived] + seed.channels)
 
         await viewModel.selectChannel(general.id)
         await viewModel.selectChannel(pg18.id)
@@ -121,6 +141,7 @@ final class MomoQuickSwitcherTests: XCTestCase {
             .flatMap(\.items)
             .first { $0.shortcutNumber == 1 }
         XCTAssertEqual(firstNumberedResult?.destination, .channel(general.id))
+        XCTAssertEqual(viewModel.sidebarChannelOrder.orderedChannels.last?.id, directMessage.id)
         XCTAssertFalse(viewModel.quickSwitcherSections(query: "archived").flatMap(\.items).contains {
             $0.destination == .channel(archived.id)
         })

@@ -6,8 +6,8 @@
 ## 0-1. MOMO-358 UI W1 Quick Switcher + Keyboard Navigation (2026-07-13)
 
 - macOS 앱에 즉시 포커스되는 `Cmd+K` 퀵 스위처를 추가해 최근 채널 우선 fuzzy 검색과 현재 채널의 active roster 멤버 검색을 제공한다. 채널 선택은 타임라인으로, 멤버 선택은 프로필로 이동하며 invited active membership만 노출한다.
-- `Cmd+1...9`는 화면에 표시되는 non-archived 채널 순서와 동일한 대상을 열고, `Cmd+[`/`Cmd+]` 채널 히스토리와 `Cmd+/` 단축키 도움말을 두 앱 host의 scene commands에 연결했다. 화살표/Enter/Esc와 VoiceOver 선택 포커스도 지원한다.
-- 검증: macOS `swift build --disable-sandbox` PASS, 비스냅샷 93 tests PASS, quick switcher/help light·dark snapshot 4 tests compile+reference-wait skip, 변경 파일 design pre-flight PASS, fresh static design-review PASS(Blocker/High/Medium/Nitpick 0). 신규 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
+- `Cmd+1...9`는 공용 사이드바 정책이 만든 non-archived 일반 채널→DM 표시 순서를 그대로 열고, `Cmd+K` 재입력은 스위처를 닫는다. `Cmd+[`/`Cmd+]` 채널 히스토리와 `Cmd+/` 단축키 도움말을 두 앱 host의 scene commands에 연결했으며 화살표/Enter/Esc와 VoiceOver 선택 포커스도 지원한다.
+- 검증: macOS `swift build --disable-sandbox` PASS, 비스냅샷 94 tests PASS, quick switcher/help light·dark snapshot 4 tests compile+reference-wait skip, 변경 파일 design pre-flight PASS, fresh static design-review PASS(Blocker/High/Medium/Nitpick 0). 신규 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
 
 ## 0-1. MOMO-357 UI W1 App Shell + Sidebar (2026-07-13)
 

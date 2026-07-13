@@ -1,6 +1,18 @@
 import SwiftUI
 import MomoCore
 
+struct MomoQuickSwitcherPresentationState: Equatable {
+    private(set) var isPresented = false
+
+    mutating func toggle() {
+        isPresented.toggle()
+    }
+
+    mutating func dismiss() {
+        isPresented = false
+    }
+}
+
 enum MomoQuickSwitcherKeyEvent {
     case moveUp
     case moveDown

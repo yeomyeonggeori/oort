@@ -170,11 +170,11 @@ public struct ChannelListView: View {
     }
 
     private var standardChannels: [Channel] {
-        MomoSidebarPolicy.standardChannels(from: viewModel.channels)
+        viewModel.sidebarChannelOrder.standardChannels
     }
 
     private var directMessageChannels: [Channel] {
-        MomoSidebarPolicy.directMessages(from: viewModel.channels)
+        viewModel.sidebarChannelOrder.directMessages
     }
 
     private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
@@ -1473,23 +1473,6 @@ public struct ChannelListView: View {
         .frame(minHeight: MomoTheme.Sidebar.rowMinimumHeight)
     }
 
-}
-
-enum MomoSidebarPolicy {
-    static func standardChannels(from channels: [Channel]) -> [Channel] {
-        channels.filter { $0.kind != .dm }
-    }
-
-    static func directMessages(from channels: [Channel]) -> [Channel] {
-        channels.filter { $0.kind == .dm }
-    }
-
-    static func showsRosterPresence(
-        usesServerRosterSourceOfTruth: Bool,
-        isActivelyWorking: Bool
-    ) -> Bool {
-        isActivelyWorking || !usesServerRosterSourceOfTruth
-    }
 }
 
 private enum MomoSidebarUtility {

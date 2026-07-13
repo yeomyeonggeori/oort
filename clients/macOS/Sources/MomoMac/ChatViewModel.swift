@@ -316,10 +316,9 @@ public final class ChatViewModel: ObservableObject {
         return channelNavigationIndex < channelNavigationHistory.index(before: channelNavigationHistory.endIndex)
     }
 
-    /// The ordered channel collection shared by quick-switcher badges and Cmd+1...9.
-    /// Archived channels stay out of both the visible result list and keyboard targets.
-    public var quickSwitcherChannels: [Channel] {
-        channels.filter { !$0.isArchived }
+    /// The canonical sidebar display order shared by visible sections and navigation commands.
+    var sidebarChannelOrder: MomoSidebarChannelOrder {
+        MomoSidebarPolicy.channelOrder(from: channels)
     }
 
     public func navigateChannelHistoryBackward() async {
@@ -342,7 +341,7 @@ public final class ChatViewModel: ObservableObject {
 
     @discardableResult
     public func selectChannel(shortcutNumber: Int) async -> Bool {
-        let shortcutChannels = quickSwitcherChannels
+        let shortcutChannels = sidebarChannelOrder.orderedChannels
         guard (1...9).contains(shortcutNumber), shortcutChannels.indices.contains(shortcutNumber - 1) else {
             return false
         }

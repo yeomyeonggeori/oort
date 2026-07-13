@@ -53,17 +53,16 @@ struct MomoQuickSwitcherSection: Identifiable, Hashable {
 
 enum MomoQuickSwitcherSearch {
     static func sections(
-        channels: [Channel],
+        orderedChannels: [Channel],
         members: [Member],
         recentChannelIds: [ChannelID],
         query: String
     ) -> [MomoQuickSwitcherSection] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let recentRanks = Dictionary(uniqueKeysWithValues: recentChannelIds.enumerated().map { ($1, $0) })
-        let activeChannels = channels.filter { !$0.isArchived }
-        let channelNumbers = Dictionary(uniqueKeysWithValues: activeChannels.prefix(9).enumerated().map { ($1.id, $0 + 1) })
+        let channelNumbers = Dictionary(uniqueKeysWithValues: orderedChannels.prefix(9).enumerated().map { ($1.id, $0 + 1) })
 
-        let channelItems = activeChannels.compactMap { channel -> MomoQuickSwitcherItem? in
+        let channelItems = orderedChannels.compactMap { channel -> MomoQuickSwitcherItem? in
             let title = channel.name ?? "DM"
             guard let score = fuzzyScore(
                 query: trimmedQuery,
@@ -182,7 +181,7 @@ enum MomoQuickSwitcherSearch {
 extension ChatViewModel {
     func quickSwitcherSections(query: String) -> [MomoQuickSwitcherSection] {
         MomoQuickSwitcherSearch.sections(
-            channels: quickSwitcherChannels,
+            orderedChannels: sidebarChannelOrder.orderedChannels,
             members: activeMembers(),
             recentChannelIds: recentChannelIds,
             query: query

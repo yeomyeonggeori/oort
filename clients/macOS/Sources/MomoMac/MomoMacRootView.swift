@@ -22,7 +22,7 @@ public struct MomoMacRootView: View {
     @State private var detailPane: MomoMacDetailPane = .alpha
     @State private var selectedProfileMemberID: MemberID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
-    @State private var showQuickSwitcher = false
+    @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
@@ -74,13 +74,13 @@ public struct MomoMacRootView: View {
         .preferredColorScheme(appearance.colorScheme)
         .focusedSceneValue(\.momoMacCommandActions, commandActions)
         .overlay {
-            if showQuickSwitcher {
+            if quickSwitcherPresentation.isPresented {
                 ZStack {
                     MomoTheme.modalScrim
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            showQuickSwitcher = false
+                            quickSwitcherPresentation.dismiss()
                         }
 
                     MomoQuickSwitcherView(
@@ -88,7 +88,7 @@ public struct MomoMacRootView: View {
                         copy: copy,
                         activate: activateQuickSwitcherDestination,
                         dismiss: {
-                            showQuickSwitcher = false
+                            quickSwitcherPresentation.dismiss()
                         }
                     )
                     .padding(MomoTheme.QuickSwitcher.edgeInset)
@@ -314,34 +314,34 @@ public struct MomoMacRootView: View {
     private var commandActions: MomoMacCommandActions {
         MomoMacCommandActions(
             language: language,
-            channelCount: viewModel.quickSwitcherChannels.count,
+            channelCount: viewModel.sidebarChannelOrder.orderedChannels.count,
             canNavigateBackward: viewModel.canNavigateChannelHistoryBackward,
             canNavigateForward: viewModel.canNavigateChannelHistoryForward,
             presentQuickSwitcher: {
                 showKeyboardShortcuts = false
-                showQuickSwitcher = true
+                quickSwitcherPresentation.toggle()
             },
             selectChannel: { number in
-                showQuickSwitcher = false
+                quickSwitcherPresentation.dismiss()
                 Task { await viewModel.selectChannel(shortcutNumber: number) }
             },
             navigateBackward: {
-                showQuickSwitcher = false
+                quickSwitcherPresentation.dismiss()
                 Task { await viewModel.navigateChannelHistoryBackward() }
             },
             navigateForward: {
-                showQuickSwitcher = false
+                quickSwitcherPresentation.dismiss()
                 Task { await viewModel.navigateChannelHistoryForward() }
             },
             presentShortcutHelp: {
-                showQuickSwitcher = false
+                quickSwitcherPresentation.dismiss()
                 showKeyboardShortcuts = true
             }
         )
     }
 
     private func activateQuickSwitcherDestination(_ destination: MomoQuickSwitcherDestination) {
-        showQuickSwitcher = false
+        quickSwitcherPresentation.dismiss()
         switch destination {
         case .channel(let id):
             Task { await viewModel.selectChannel(id) }
