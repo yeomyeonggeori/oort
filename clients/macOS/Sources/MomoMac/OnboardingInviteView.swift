@@ -2,46 +2,50 @@ import SwiftUI
 
 public struct OnboardingInviteView: View {
     @ObservedObject var viewModel: ChatViewModel
-    @State private var inviteCode = "MOMO-012"
+    @State private var inviteCode = ""
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: MomoTheme.Onboarding.standardSpacing) {
+            HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
                 TextField("Invite code", text: $inviteCode)
                     .textFieldStyle(.roundedBorder)
                     .disabled(viewModel.inviteJoinState.isWorking)
                     .onSubmit(submit)
 
                 Button(action: submit) {
-                    Image(systemName: "arrow.right.circle.fill")
+                    Label("Join workspace", systemImage: "person.badge.plus")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.borderedProminent)
                 .disabled(inviteCode.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                           || viewModel.inviteJoinState.isWorking)
-                .help("Join workspace")
             }
 
             statusRow
         }
         .padding(.vertical, 4)
+        .tint(MomoTheme.humanAccent)
     }
 
     @ViewBuilder
     private var statusRow: some View {
         switch viewModel.inviteJoinState {
         case .idle:
-            Label("Ready for dev invite", systemImage: "person.badge.plus")
+            Label("Enter an invite code to join a workspace.", systemImage: "ticket")
                 .foregroundStyle(.secondary)
         case .validating(let code):
-            Label("Checking \(code)", systemImage: "clock")
-                .foregroundStyle(MomoTheme.costAmber)
+            HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Checking \(code)")
+            }
+            .foregroundStyle(.secondary)
         case .joined(let joined):
             Label {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
                     Text("Joined \(joined.workspace.name)")
                     Text("\(joined.role) · \(joined.defaultChannelNames.joined(separator: ", "))")
                         .foregroundStyle(.secondary)
@@ -52,11 +56,10 @@ public struct OnboardingInviteView: View {
             .foregroundStyle(MomoTheme.reversibleGreen)
         case .failed(let failure):
             Label {
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
                     Text(failure.reason)
-                    if let hint = failure.recoveryHint {
-                        Text(hint).foregroundStyle(.secondary)
-                    }
+                    Text(failure.recoveryHint ?? "Check the invite code and try joining again.")
+                        .foregroundStyle(.secondary)
                 }
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")

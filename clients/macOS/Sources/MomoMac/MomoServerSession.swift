@@ -66,6 +66,20 @@ public struct MomoServerSessionForm: Equatable, Sendable {
         inviteCode.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    var onboardingPrimaryAction: MomoSessionPrimaryAction {
+        hasCredentialInput ? .signIn : .demo
+    }
+
+    var canJoinWithInvite: Bool {
+        hasCredentialInput && !trimmedInviteCode.isEmpty
+    }
+
+    private var hasCredentialInput: Bool {
+        !baseURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !email.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !password.isEmpty
+    }
+
     public func validatedBaseURL() throws -> URL {
         let trimmed = baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), url.scheme != nil, url.host != nil else {
@@ -90,6 +104,17 @@ public struct MomoServerSessionForm: Equatable, Sendable {
     }
 }
 
+enum MomoSessionPrimaryAction: Equatable {
+    case demo
+    case signIn
+}
+
+enum MomoSessionFailureKind: Equatable {
+    case offline
+    case authentication
+    case other
+}
+
 public enum MomoServerSessionError: LocalizedError, Equatable, Sendable {
     case validation(String)
     case missingWorkspace(String)
@@ -103,6 +128,17 @@ public enum MomoServerSessionError: LocalizedError, Equatable, Sendable {
             return message
         case .problem(_, let title, let detail):
             return [title, detail].compactMap { $0 }.joined(separator: ": ")
+        }
+    }
+
+    var onboardingFailureKind: MomoSessionFailureKind {
+        switch self {
+        case .transport:
+            return .offline
+        case .problem(let status, _, _) where status == 401 || status == 403:
+            return .authentication
+        case .validation, .missingWorkspace, .problem, .decoding:
+            return .other
         }
     }
 }
@@ -630,6 +666,7 @@ public final class MomoServerSessionController: ObservableObject {
     @Published public var form: MomoServerSessionForm
     @Published public private(set) var phase: Phase = .choosing
     @Published public private(set) var sessionNotice: String?
+    @Published private(set) var sessionFailureKind: MomoSessionFailureKind?
 
     private let store: MomoServerSessionStore
     private let client: MomoServerSessionClient
@@ -650,6 +687,7 @@ public final class MomoServerSessionController: ObservableObject {
         guard let config = MomoServerRESTChatBackendConfig.fromEnvironment() else {
             return
         }
+        sessionFailureKind = nil
         phase = .connecting("Connecting to \(config.baseURL.absoluteString)")
         if config.accessToken == nil {
             await establishEnvironmentLoginSession(config: config)
@@ -658,6 +696,7 @@ public final class MomoServerSessionController: ObservableObject {
 
         let viewModel = await MomoMacDemo.makeRESTViewModel(config: config)
         if let error = viewModel.connectionError {
+            sessionFailureKind = .offline
             phase = .failed(error)
             return
         }
@@ -677,6 +716,7 @@ public final class MomoServerSessionController: ObservableObject {
     }
 
     public func openDemo() async {
+        sessionFailureKind = nil
         phase = .connecting("Opening demo workspace")
         let viewModel = await MomoMacDemo.makeViewModel()
         sessionNotice = nil
@@ -704,6 +744,7 @@ public final class MomoServerSessionController: ObservableObject {
 
     public func resetToChooser() async {
         await clearActiveSessionState()
+        sessionFailureKind = nil
         phase = .choosing
         sessionNotice = "Choose a server or account. Previous realtime state was cleared."
     }
@@ -712,6 +753,7 @@ public final class MomoServerSessionController: ObservableObject {
         await clearActiveSessionState()
         form = store.load()
         form.password = ""
+        sessionFailureKind = nil
         phase = .choosing
         sessionNotice = "Choose another server or account. Previous token, realtime subscription, and channel cache were cleared."
     }
@@ -722,11 +764,13 @@ public final class MomoServerSessionController: ObservableObject {
         form.password = ""
         store.clearSessionSensitiveState(email: email)
         form.savePassword = false
+        sessionFailureKind = nil
         phase = .choosing
         sessionNotice = "Logged out. Access token, saved password, realtime subscription, and session cache were cleared."
     }
 
     private func establishRealSession(useInvite: Bool) async {
+        sessionFailureKind = nil
         phase = .connecting(useInvite ? "Joining workspace" : "Signing in")
         do {
             store.save(form)
@@ -734,6 +778,7 @@ public final class MomoServerSessionController: ObservableObject {
             let viewModel = await makeViewModel(session: session, password: form.password)
             form.password = ""
             if let error = viewModel.connectionError {
+                sessionFailureKind = .offline
                 phase = .failed(error)
                 return
             }
@@ -755,7 +800,7 @@ public final class MomoServerSessionController: ObservableObject {
                 accessToken: session.accessToken
             ))
         } catch {
-            phase = .failed(error.localizedDescription)
+            presentFailure(error)
         }
     }
 
@@ -768,6 +813,7 @@ public final class MomoServerSessionController: ObservableObject {
             ), workspace: config.workspace)
             let viewModel = await makeViewModel(session: session, password: config.login.password)
             if let error = viewModel.connectionError {
+                sessionFailureKind = .offline
                 phase = .failed(error)
                 return
             }
@@ -789,8 +835,13 @@ public final class MomoServerSessionController: ObservableObject {
                 accessToken: session.accessToken
             ))
         } catch {
-            phase = .failed(error.localizedDescription)
+            presentFailure(error)
         }
+    }
+
+    private func presentFailure(_ error: Error) {
+        sessionFailureKind = (error as? MomoServerSessionError)?.onboardingFailureKind ?? .other
+        phase = .failed(error.localizedDescription)
     }
 
     private func makeViewModel(session: MomoServerSession, password: String) async -> ChatViewModel {
@@ -853,7 +904,11 @@ public struct MomoMacSessionRootView: View {
                     )
                 )
             case .failed(let message):
-                MomoServerSessionChooser(controller: controller, errorMessage: message)
+                MomoServerSessionChooser(
+                    controller: controller,
+                    errorMessage: message,
+                    failureKind: controller.sessionFailureKind
+                )
             }
         }
         .task {
@@ -862,10 +917,20 @@ public struct MomoMacSessionRootView: View {
     }
 }
 
-private struct MomoServerSessionChooser: View {
+enum MomoSessionField: Hashable {
+    case serverURL
+    case email
+    case password
+    case inviteCode
+}
+
+struct MomoServerSessionChooser: View {
     @ObservedObject var controller: MomoServerSessionController
     var errorMessage: String?
+    var failureKind: MomoSessionFailureKind?
+    var initialFocus: MomoSessionField?
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    @FocusState private var focusedField: MomoSessionField?
 
     var body: some View {
         let copy = MomoSessionCopy(language: language)
@@ -873,163 +938,200 @@ private struct MomoServerSessionChooser: View {
         ZStack(alignment: .topTrailing) {
             MomoLaunchBackdrop()
 
-            HStack(spacing: 34) {
-                VStack(alignment: .leading, spacing: 22) {
-                    Spacer(minLength: 30)
-
-                    VStack(alignment: .leading, spacing: 14) {
-                        MomoMarkView()
-                        Text(copy.heroTitle)
-                            .font(.system(size: 46, weight: .bold, design: .rounded))
-                            .lineLimit(3)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(copy.heroSubtitle)
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
-                            .lineSpacing(4)
-                            .fixedSize(horizontal: false, vertical: true)
+            GeometryReader { geometry in
+                ScrollView {
+                    VStack(spacing: MomoTheme.Onboarding.blockSpacing) {
+                        launchHero(copy: copy)
+                        sessionCard(copy: copy)
                     }
-
-                    HStack(spacing: 8) {
-                        MomoLaunchStatusPill(icon: "server.rack", title: copy.serverPill)
-                        MomoLaunchStatusPill(icon: "person.2.wave.2", title: copy.agentPill)
-                        MomoLaunchStatusPill(icon: "lock.shield", title: copy.localPill)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        MomoLaunchStep(index: 1, title: copy.stepLanguage, isActive: true)
-                        MomoLaunchStep(index: 2, title: copy.stepConnect, isActive: true)
-                        MomoLaunchStep(index: 3, title: copy.stepDogfood, isActive: false)
-                    }
-                    .padding(.top, 8)
-
-                    Spacer(minLength: 20)
+                    .frame(maxWidth: MomoTheme.Onboarding.contentMaximumWidth)
+                    .padding(.horizontal, MomoTheme.Onboarding.edgeInset)
+                    .padding(.vertical, MomoTheme.Onboarding.edgeInset)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: geometry.size.height,
+                        alignment: .center
+                    )
                 }
-                .frame(maxWidth: 430, maxHeight: .infinity, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(copy.cardTitle)
-                                .font(.title2.bold())
-                            Text(copy.cardSubtitle)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button {
-                            Task { await controller.openDemo() }
-                        } label: {
-                            Label(copy.openDemo, systemImage: "sparkles")
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                    }
-
-                    Divider()
-
-                    if let notice = controller.sessionNotice {
-                        MomoLaunchNotice(
-                            title: notice,
-                            detail: copy.noticeDetail,
-                            systemImage: "checkmark.circle.fill",
-                            tint: MomoTheme.reversibleGreen
-                        )
-                    }
-
-                    if let errorMessage {
-                        MomoLaunchNotice(
-                            title: errorMessage,
-                            detail: copy.errorRecovery,
-                            systemImage: "exclamationmark.triangle.fill",
-                            tint: MomoTheme.irreversibleRed
-                        )
-                    }
-
-                    VStack(spacing: 12) {
-                        MomoLaunchTextField(
-                            title: copy.serverURL,
-                            placeholder: "http://127.0.0.1:28180",
-                            text: $controller.form.baseURLString,
-                            systemImage: "network"
-                        )
-                        MomoLaunchTextField(
-                            title: copy.email,
-                            placeholder: "demo@momo.local",
-                            text: $controller.form.email,
-                            systemImage: "envelope"
-                        )
-                        MomoLaunchSecureField(
-                            title: copy.password,
-                            placeholder: copy.passwordPlaceholder,
-                            text: $controller.form.password,
-                            systemImage: "key"
-                        )
-                        MomoLaunchTextField(
-                            title: copy.inviteCode,
-                            placeholder: copy.optional,
-                            text: $controller.form.inviteCode,
-                            systemImage: "ticket"
-                        )
-                    }
-
-                    Toggle(isOn: $controller.form.savePassword) {
-                        Text(copy.savePassword)
-                    }
-                    .toggleStyle(.checkbox)
-
-                    HStack(spacing: 12) {
-                        Button {
-                            Task { await startLocalAlpha() }
-                        } label: {
-                            Label(copy.useLocalAlpha, systemImage: "bolt.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-
-                        Spacer()
-
-                        Button {
-                            Task { await controller.joinAndConnect() }
-                        } label: {
-                            Label(copy.joinWithInvite, systemImage: "person.badge.plus")
-                        }
-                        .disabled(controller.form.trimmedInviteCode.isEmpty)
-                        .controlSize(.large)
-
-                        Button {
-                            Task { await controller.connectRealServer() }
-                        } label: {
-                            Label(copy.signIn, systemImage: "arrow.right.circle.fill")
-                        }
-                        .buttonStyle(.bordered)
-                        .keyboardShortcut(.defaultAction)
-                        .controlSize(.large)
-                    }
-
-                    Text(copy.storageNote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(24)
-                .frame(width: 500)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(.white.opacity(0.10), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(0.22), radius: 26, x: 0, y: 18)
             }
-            .padding(.horizontal, 56)
-            .padding(.vertical, 58)
 
             languageMenu(copy: copy)
-                .padding(.top, 36)
-                .padding(.trailing, 44)
+                .padding(MomoTheme.Onboarding.blockSpacing)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .tint(MomoTheme.humanAccent)
+        .onExitCommand {
+            focusedField = nil
+        }
         .onAppear {
             prepareLocalAlphaDefaults()
+            focusedField = initialFocus
+        }
+    }
+
+    private func launchHero(copy: MomoSessionCopy) -> some View {
+        VStack(spacing: MomoTheme.Onboarding.sectionSpacing) {
+            MomoMarkView()
+            Text(copy.heroTitle)
+                .font(.title.bold())
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
+                MomoLaunchStatusPill(icon: "server.rack", title: copy.serverPill)
+                MomoLaunchStatusPill(icon: "person.2.wave.2", title: copy.agentPill)
+                MomoLaunchStatusPill(icon: "lock.shield", title: copy.localPill)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func sessionCard(copy: MomoSessionCopy) -> some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Onboarding.sectionSpacing) {
+            VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
+                Text(copy.cardTitle)
+                    .font(.title2.bold())
+                Text(copy.cardSubtitle)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let notice = controller.sessionNotice {
+                MomoLaunchNotice(
+                    title: notice,
+                    detail: copy.noticeDetail,
+                    systemImage: "checkmark.circle.fill",
+                    tint: MomoTheme.reversibleGreen
+                )
+            }
+
+            if let errorMessage {
+                MomoLaunchNotice(
+                    title: failureTitle(copy: copy, fallback: errorMessage),
+                    detail: failureRecovery(copy: copy),
+                    systemImage: "exclamationmark.triangle.fill",
+                    tint: MomoTheme.irreversibleRed
+                )
+
+                if failureKind == .offline {
+                    Button {
+                        Task { await controller.openDemo() }
+                    } label: {
+                        Label(copy.openOfflineDemo, systemImage: "play")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(MomoTheme.humanAccent)
+                }
+            }
+
+            VStack(spacing: MomoTheme.Onboarding.contentSpacing) {
+                MomoLaunchTextField(
+                    title: copy.serverURL,
+                    placeholder: "http://127.0.0.1:28180",
+                    text: $controller.form.baseURLString,
+                    systemImage: "network",
+                    field: .serverURL,
+                    focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
+                    isPreviewFocused: initialFocus == .serverURL
+                )
+                MomoLaunchTextField(
+                    title: copy.email,
+                    placeholder: "demo@momo.local",
+                    text: $controller.form.email,
+                    systemImage: "envelope",
+                    field: .email,
+                    focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
+                    isPreviewFocused: initialFocus == .email
+                )
+                MomoLaunchSecureField(
+                    title: copy.password,
+                    placeholder: copy.passwordPlaceholder,
+                    text: $controller.form.password,
+                    systemImage: "key",
+                    field: .password,
+                    focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
+                    isPreviewFocused: initialFocus == .password
+                )
+                MomoLaunchTextField(
+                    title: copy.inviteCode,
+                    placeholder: copy.optional,
+                    text: $controller.form.inviteCode,
+                    systemImage: "ticket",
+                    field: .inviteCode,
+                    focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
+                    isPreviewFocused: initialFocus == .inviteCode
+                )
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: MomoTheme.Onboarding.contentSpacing) {
+                Button {
+                    useLocalAlphaPreset()
+                    focusedField = .password
+                } label: {
+                    Label(copy.useLocalAlpha, systemImage: "bolt")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Toggle(isOn: $controller.form.savePassword) {
+                    Text(copy.savePassword)
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.small)
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: MomoTheme.Onboarding.standardSpacing) {
+                HStack(spacing: MomoTheme.Onboarding.contentSpacing) {
+                    Spacer()
+
+                    Button {
+                        Task { await controller.joinAndConnect() }
+                    } label: {
+                        Label(copy.joinWithInvite, systemImage: "person.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!controller.form.canJoinWithInvite)
+                    .controlSize(.large)
+
+                    Button {
+                        Task { await performPrimaryAction() }
+                    } label: {
+                        Label(primaryActionTitle(copy: copy), systemImage: primaryActionIcon)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.large)
+                }
+
+                Text(actionGuidance(copy: copy))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(copy.storageNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(MomoTheme.Onboarding.blockSpacing)
+        .frame(maxWidth: .infinity)
+        .background(
+            .regularMaterial,
+            in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
         }
     }
 
@@ -1047,21 +1149,21 @@ private struct MomoServerSessionChooser: View {
                 }
             }
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
                 Image(systemName: "globe")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.callout.weight(.semibold))
                 Text(language.displayName)
                     .font(.callout.weight(.semibold))
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.caption.weight(.bold))
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 13)
-            .padding(.vertical, 8)
+            .padding(.horizontal, MomoTheme.Onboarding.contentSpacing)
+            .padding(.vertical, MomoTheme.Onboarding.standardSpacing)
             .background(.regularMaterial, in: Capsule())
             .overlay {
                 Capsule()
-                    .stroke(.white.opacity(0.12), lineWidth: 1)
+                    .stroke(MomoTheme.subtleBorder, lineWidth: 1)
             }
         }
         .menuStyle(.borderlessButton)
@@ -1075,9 +1177,59 @@ private struct MomoServerSessionChooser: View {
         controller.form.inviteCode = ""
     }
 
-    private func startLocalAlpha() async {
-        useLocalAlphaPreset()
-        await controller.connectRealServer()
+    private func performPrimaryAction() async {
+        switch controller.form.onboardingPrimaryAction {
+        case .demo:
+            await controller.openDemo()
+        case .signIn:
+            await controller.connectRealServer()
+        }
+    }
+
+    private func submitPrimaryAction() {
+        Task { await performPrimaryAction() }
+    }
+
+    private func primaryActionTitle(copy: MomoSessionCopy) -> String {
+        switch controller.form.onboardingPrimaryAction {
+        case .demo: return copy.openDemo
+        case .signIn: return copy.signIn
+        }
+    }
+
+    private var primaryActionIcon: String {
+        switch controller.form.onboardingPrimaryAction {
+        case .demo: return "play.fill"
+        case .signIn: return "arrow.right.circle.fill"
+        }
+    }
+
+    private func actionGuidance(copy: MomoSessionCopy) -> String {
+        var guidance = controller.form.onboardingPrimaryAction == .demo
+            ? copy.demoActionDetail
+            : copy.signInActionDetail
+        if controller.form.trimmedInviteCode.isEmpty {
+            guidance += " " + copy.inviteDisabledReason
+        } else if !controller.form.canJoinWithInvite {
+            guidance += " " + copy.credentialsDisabledReason
+        }
+        return guidance
+    }
+
+    private func failureTitle(copy: MomoSessionCopy, fallback: String) -> String {
+        switch failureKind {
+        case .offline: return copy.offlineTitle
+        case .authentication: return copy.authenticationTitle
+        case .other, nil: return fallback
+        }
+    }
+
+    private func failureRecovery(copy: MomoSessionCopy) -> String {
+        switch failureKind {
+        case .offline: return copy.offlineRecovery
+        case .authentication: return copy.authenticationRecovery
+        case .other, nil: return copy.errorRecovery
+        }
     }
 
     private func prepareLocalAlphaDefaults() {
@@ -1089,9 +1241,6 @@ private struct MomoServerSessionChooser: View {
         guard isLocalAlpha else { return }
         if baseURL == "http://127.0.0.1:8080" {
             controller.form.baseURLString = "http://127.0.0.1:28180"
-        }
-        if controller.form.password.isEmpty {
-            controller.form.password = "dev-password"
         }
     }
 }
@@ -1105,11 +1254,11 @@ private struct MomoLaunchLoadingView: View {
 
         ZStack {
             MomoLaunchBackdrop()
-            VStack(spacing: 20) {
+            VStack(spacing: MomoTheme.Onboarding.blockSpacing) {
                 MomoMarkView()
-                VStack(spacing: 8) {
+                VStack(spacing: MomoTheme.Onboarding.standardSpacing) {
                     Text(copy.loadingTitle)
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .font(.title2.bold())
                     Text(localizedMessage(copy: copy))
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -1117,20 +1266,23 @@ private struct MomoLaunchLoadingView: View {
                 }
                 ProgressView()
                     .controlSize(.large)
-                HStack(spacing: 8) {
+                HStack(spacing: MomoTheme.Onboarding.standardSpacing) {
                     MomoLaunchStatusPill(icon: "checkmark.circle", title: copy.loadingServer)
                     MomoLaunchStatusPill(icon: "ellipsis.message", title: copy.loadingTimeline)
                     MomoLaunchStatusPill(icon: "sparkles", title: copy.loadingAgents)
                 }
             }
-            .padding(34)
-            .frame(width: 460)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .padding(MomoTheme.Onboarding.edgeInset)
+            .frame(maxWidth: MomoTheme.Onboarding.contentMaximumWidth)
+            .background(
+                .regularMaterial,
+                in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+            )
             .overlay {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(.white.opacity(0.10), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+                    .stroke(MomoTheme.subtleBorder, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.22), radius: 28, x: 0, y: 18)
+            .padding(.horizontal, MomoTheme.Onboarding.edgeInset)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -1158,49 +1310,34 @@ private struct MomoLaunchLoadingView: View {
 
 private struct MomoLaunchBackdrop: View {
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(Color(nsColor: .windowBackgroundColor))
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            MomoTheme.humanAccent.opacity(0.20),
-                            Color.clear,
-                            MomoTheme.reversibleGreen.opacity(0.10)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            VStack(spacing: 0) {
-                ForEach(0..<12, id: \.self) { _ in
-                    Divider().opacity(0.055)
-                    Spacer()
-                }
-            }
-            .blendMode(.plusLighter)
-        }
+        LinearGradient(
+            colors: [
+                MomoTheme.Onboarding.backdropTop,
+                MomoTheme.Onboarding.backdropMiddle,
+                MomoTheme.Onboarding.backdropBottom,
+            ],
+            startPoint: .top,
+            endPoint: .bottomTrailing
+        )
         .ignoresSafeArea()
     }
 }
 
 private struct MomoMarkView: View {
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: MomoTheme.Onboarding.contentSpacing) {
             ZStack {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
                     .fill(.regularMaterial)
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(.white.opacity(0.12), lineWidth: 1)
+                RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+                    .stroke(MomoTheme.subtleBorder, lineWidth: 1)
                 Text("m")
-                    .font(.system(size: 23, weight: .black, design: .rounded))
+                    .font(.title2.weight(.bold))
                     .foregroundStyle(.primary)
             }
-            .frame(width: 42, height: 42)
-            .shadow(color: MomoTheme.humanAccent.opacity(0.22), radius: 16, x: 0, y: 8)
+            .frame(width: MomoTheme.Onboarding.markSize, height: MomoTheme.Onboarding.markSize)
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
                 Text("momo")
                     .font(.title3.bold())
                 Text("local alpha")
@@ -1220,31 +1357,12 @@ private struct MomoLaunchStatusPill: View {
             .font(.caption.weight(.semibold))
             .lineLimit(1)
             .labelStyle(.titleAndIcon)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, MomoTheme.Onboarding.contentSpacing)
+            .padding(.vertical, MomoTheme.Onboarding.compactSpacing)
             .background(.thinMaterial, in: Capsule())
             .overlay {
-                Capsule().stroke(.white.opacity(0.10), lineWidth: 1)
+                Capsule().stroke(MomoTheme.subtleBorder, lineWidth: 1)
             }
-    }
-}
-
-private struct MomoLaunchStep: View {
-    var index: Int
-    var title: String
-    var isActive: Bool
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Text("\(index)")
-                .font(.caption.bold())
-                .foregroundStyle(isActive ? .white : .secondary)
-                .frame(width: 22, height: 22)
-                .background(isActive ? MomoTheme.humanAccent : Color.secondary.opacity(0.16), in: Circle())
-            Text(title)
-                .font(.callout.weight(.medium))
-                .foregroundStyle(isActive ? .primary : .secondary)
-        }
     }
 }
 
@@ -1255,11 +1373,10 @@ private struct MomoLaunchNotice: View {
     var tint: Color
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: MomoTheme.Onboarding.contentSpacing) {
             Image(systemName: systemImage)
                 .foregroundStyle(tint)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
                 Text(title)
                     .font(.callout.weight(.semibold))
                     .textSelection(.enabled)
@@ -1269,8 +1386,11 @@ private struct MomoLaunchNotice: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(10)
-        .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(MomoTheme.Onboarding.contentSpacing)
+        .background(
+            tint.opacity(0.10),
+            in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+        )
     }
 }
 
@@ -1279,11 +1399,22 @@ private struct MomoLaunchTextField: View {
     var placeholder: String
     @Binding var text: String
     var systemImage: String
+    var field: MomoSessionField
+    var focusedField: FocusState<MomoSessionField?>.Binding
+    var onSubmit: () -> Void
+    var isPreviewFocused = false
 
     var body: some View {
-        MomoLaunchFieldFrame(title: title, systemImage: systemImage) {
+        MomoLaunchFieldFrame(
+            title: title,
+            systemImage: systemImage,
+            isFocused: focusedField.wrappedValue == field || isPreviewFocused
+        ) {
             TextField(placeholder, text: $text)
                 .textFieldStyle(.plain)
+                .focused(focusedField, equals: field)
+                .accessibilityLabel(title)
+                .onSubmit(onSubmit)
         }
     }
 }
@@ -1293,11 +1424,22 @@ private struct MomoLaunchSecureField: View {
     var placeholder: String
     @Binding var text: String
     var systemImage: String
+    var field: MomoSessionField
+    var focusedField: FocusState<MomoSessionField?>.Binding
+    var onSubmit: () -> Void
+    var isPreviewFocused = false
 
     var body: some View {
-        MomoLaunchFieldFrame(title: title, systemImage: systemImage) {
+        MomoLaunchFieldFrame(
+            title: title,
+            systemImage: systemImage,
+            isFocused: focusedField.wrappedValue == field || isPreviewFocused
+        ) {
             SecureField(placeholder, text: $text)
                 .textFieldStyle(.plain)
+                .focused(focusedField, equals: field)
+                .accessibilityLabel(title)
+                .onSubmit(onSubmit)
         }
     }
 }
@@ -1305,20 +1447,27 @@ private struct MomoLaunchSecureField: View {
 private struct MomoLaunchFieldFrame<Content: View>: View {
     var title: String
     var systemImage: String
+    var isFocused: Bool
     var content: Content
 
-    init(title: String, systemImage: String, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        systemImage: String,
+        isFocused: Bool,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.systemImage = systemImage
+        self.isFocused = isFocused
         self.content = content()
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Native fields cannot share one titled icon frame and 2 pt focus ring, so only their chrome is wrapped.
+        HStack(spacing: MomoTheme.Onboarding.contentSpacing) {
             Image(systemName: systemImage)
-                .foregroundStyle(.secondary)
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 4) {
+                .foregroundStyle(isFocused ? MomoTheme.Onboarding.focusBorder : .secondary)
+            VStack(alignment: .leading, spacing: MomoTheme.Onboarding.compactSpacing) {
                 Text(title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -1326,12 +1475,18 @@ private struct MomoLaunchFieldFrame<Content: View>: View {
                     .font(.body.weight(.medium))
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .padding(.horizontal, MomoTheme.Onboarding.contentSpacing)
+        .frame(minHeight: MomoTheme.Onboarding.fieldMinimumHeight)
+        .background(
+            MomoTheme.Onboarding.fieldBackground,
+            in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+        )
         .overlay {
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .stroke(.white.opacity(0.09), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+                .stroke(
+                    isFocused ? MomoTheme.Onboarding.focusBorder : MomoTheme.Onboarding.fieldBorder,
+                    lineWidth: isFocused ? 2 : 1
+                )
         }
     }
 }
@@ -1339,24 +1494,10 @@ private struct MomoLaunchFieldFrame<Content: View>: View {
 private struct MomoSessionCopy {
     var language: MomoUILanguage
 
-    var languageLabel: String {
-        switch language {
-        case .korean: return "언어"
-        case .english: return "Language"
-        }
-    }
-
     var heroTitle: String {
         switch language {
-        case .korean: return "사람과 에이전트가 함께 일하는 메신저."
-        case .english: return "A messenger where people and agents work together."
-        }
-    }
-
-    var heroSubtitle: String {
-        switch language {
-        case .korean: return "채널, 승인, 비용, 실행 기록을 한 타임라인에서 확인하세요."
-        case .english: return "Channels, approvals, cost, and execution history in one timeline."
+        case .korean: return "사람과 에이전트가 한 팀으로 일하는 곳"
+        case .english: return "Where people and agents work as one team"
         }
     }
 
@@ -1378,27 +1519,6 @@ private struct MomoSessionCopy {
         switch language {
         case .korean: return "Self-hosted"
         case .english: return "Self-hosted"
-        }
-    }
-
-    var stepLanguage: String {
-        switch language {
-        case .korean: return "언어 선택"
-        case .english: return "Choose language"
-        }
-    }
-
-    var stepConnect: String {
-        switch language {
-        case .korean: return "로컬 서버 연결"
-        case .english: return "Connect local server"
-        }
-    }
-
-    var stepDogfood: String {
-        switch language {
-        case .korean: return "채널에서 테스트 시작"
-        case .english: return "Start channel dogfood"
         }
     }
 
@@ -1488,8 +1608,8 @@ private struct MomoSessionCopy {
 
     var useLocalAlpha: String {
         switch language {
-        case .korean: return "로컬 알파로 시작"
-        case .english: return "Start Local Alpha"
+        case .korean: return "로컬 알파 정보 채우기"
+        case .english: return "Fill Local Alpha Details"
         }
     }
 
@@ -1504,6 +1624,69 @@ private struct MomoSessionCopy {
         switch language {
         case .korean: return "초대로 참여"
         case .english: return "Join with Invite"
+        }
+    }
+
+    var demoActionDetail: String {
+        switch language {
+        case .korean: return "자격 정보를 입력하기 전에는 서버 없이 데모를 둘러봅니다."
+        case .english: return "Until credentials are entered, open the demo without a server."
+        }
+    }
+
+    var signInActionDetail: String {
+        switch language {
+        case .korean: return "Enter를 누르면 입력한 서버와 계정으로 로그인합니다."
+        case .english: return "Press Enter to sign in with the server and account above."
+        }
+    }
+
+    var inviteDisabledReason: String {
+        switch language {
+        case .korean: return "초대 코드를 입력하면 새 워크스페이스에 참여할 수 있습니다."
+        case .english: return "Enter an invite code to join a new workspace."
+        }
+    }
+
+    var credentialsDisabledReason: String {
+        switch language {
+        case .korean: return "참여하려면 서버 URL, 이메일, 비밀번호를 모두 입력하세요."
+        case .english: return "Enter a server URL, email, and password before joining."
+        }
+    }
+
+    var offlineTitle: String {
+        switch language {
+        case .korean: return "서버에 연결할 수 없습니다"
+        case .english: return "Could not reach the server"
+        }
+    }
+
+    var offlineRecovery: String {
+        switch language {
+        case .korean: return "네트워크와 서버 주소를 확인해 다시 로그인하거나, 서버 없이 데모를 둘러보세요."
+        case .english: return "Check the network and server address, then sign in again or explore the demo without a server."
+        }
+    }
+
+    var authenticationTitle: String {
+        switch language {
+        case .korean: return "로그인 정보를 확인하세요"
+        case .english: return "Check your sign-in details"
+        }
+    }
+
+    var authenticationRecovery: String {
+        switch language {
+        case .korean: return "이메일과 비밀번호를 확인한 뒤 다시 로그인하세요."
+        case .english: return "Check the email and password, then sign in again."
+        }
+    }
+
+    var openOfflineDemo: String {
+        switch language {
+        case .korean: return "서버 없이 데모 열기"
+        case .english: return "Open Demo Without Server"
         }
     }
 

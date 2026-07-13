@@ -38,6 +38,28 @@ public enum MomoTheme {
     public static let memberInvitePopoverWidth: CGFloat = 340
     public static let memberInvitePopoverMaximumHeight: CGFloat = 640
 
+    /// First-run and server-session entry. A single width contract keeps the
+    /// hero and authentication surface centered from compact to wide windows.
+    public enum Onboarding {
+        public static let contentMaximumWidth: CGFloat = 560
+        public static let fieldMinimumHeight: CGFloat = 48
+        public static let markSize: CGFloat = 40
+
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let blockSpacing: CGFloat = 24
+        public static let edgeInset: CGFloat = 32
+
+        public static let backdropTop = Color(nsColor: .windowBackgroundColor)
+        public static let backdropMiddle = Color(nsColor: .windowBackgroundColor)
+        public static let backdropBottom = MomoTheme.humanAccent.opacity(0.05)
+        public static let fieldBackground = Color(nsColor: .controlBackgroundColor)
+        public static let fieldBorder = MomoTheme.subtleBorder
+        public static let focusBorder = MomoTheme.humanAccent
+    }
+
     /// Component tokens for the primary macOS sidebar. Values live here so
     /// channel, DM, member, and utility rows share one density contract.
     public enum Sidebar {
