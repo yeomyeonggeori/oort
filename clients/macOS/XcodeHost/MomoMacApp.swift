@@ -11,6 +11,7 @@ struct MomoMacApp: App {
         .defaultSize(width: 1180, height: 760)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            SidebarCommands()
         }
     }
 }

@@ -15,6 +15,10 @@ public struct ChannelListView: View {
     @State private var showInvites = false
     @State private var showProfilePanel = false
     @State private var showMemberInvite = false
+    @State private var hoveredChannelID: ChannelID?
+    @State private var hoveredMemberID: MemberID?
+    @State private var isWorkspaceHeaderHovered = false
+    @State private var hoveredUtility: MomoSidebarUtility?
     @State private var newChannelName = ""
     @State private var newChannelTopic = ""
     @State private var newChannelKind: ChannelKind = .publicChannel
@@ -96,30 +100,33 @@ public struct ChannelListView: View {
             VStack(spacing: 0) {
                 sidebarHeader(copy: copy)
 
+                Divider()
+                    .opacity(0.35)
+
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 18) {
+                    LazyVStack(alignment: .leading, spacing: MomoTheme.Sidebar.sectionSpacing) {
                         if let error = viewModel.connectionError {
                             connectionErrorRow(error, copy: copy)
                         }
 
-                        workQueueSection(copy: copy)
                         channelsSection(copy: copy)
+                        directMessagesSection(copy: copy)
                         membersSection(copy: copy)
-                        developerToolsSection(copy: copy)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.top, 4)
-                    .padding(.bottom, 14)
+                    .padding(MomoTheme.Sidebar.edgeInset)
                 }
                 .scrollIndicators(.hidden)
 
+                Divider()
+                    .opacity(0.35)
+                utilityFooter(copy: copy)
                 Divider()
                     .opacity(0.35)
                 profileFooter(copy: copy)
             }
 
             if showProfilePanel {
-                Color.black.opacity(0.001)
+                Color.primary.opacity(0.001)
                     .ignoresSafeArea()
                     .onTapGesture {
                         withAnimation(sidebarPanelAnimation) {
@@ -130,7 +137,7 @@ public struct ChannelListView: View {
 
                 profilePanel(copy: copy)
                     .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
                     .padding(.bottom, 76)
                     .transition(.asymmetric(
                         insertion: .move(edge: .bottom).combined(with: .opacity),
@@ -162,58 +169,51 @@ public struct ChannelListView: View {
         viewModel.activeMembers()
     }
 
-    private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 11) {
-                MomoSidebarLogoMark(text: serverIconText, imagePath: serverIconPath)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(serverDisplayName)
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(sessionChrome?.summary.mode.title ?? copy.workspace)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button {
-                    openWorkspaceSettings?()
-                } label: {
-                    Image(systemName: "server.rack")
-                        .font(.caption.weight(.semibold))
-                        .frame(width: 30, height: 30)
-                        .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .help(copy.serverSettings)
-                .momoQuickTooltip(copy.serverSettings)
-            }
+    private var standardChannels: [Channel] {
+        MomoSidebarPolicy.standardChannels(from: viewModel.channels)
+    }
 
-            if let selected = viewModel.selectedChannel {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(channelTitle(selected))
-                        .font(.system(size: 20, weight: .semibold))
-                        .lineLimit(1)
-                    if let topic = selected.topic, !topic.isEmpty {
-                            Text(topic)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    } else {
-                        Text(copy.readyToChat)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-            } else {
-                Text(copy.selectChannel)
-                    .font(.callout)
+    private var directMessageChannels: [Channel] {
+        MomoSidebarPolicy.directMessages(from: viewModel.channels)
+    }
+
+    private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
+        HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+            MomoSidebarLogoMark(
+                text: serverIconText,
+                imagePath: serverIconPath,
+                size: MomoTheme.Sidebar.logoSize
+            )
+            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
+                Text(serverDisplayName)
+                    .font(MomoTheme.Sidebar.workspaceFont)
+                    .lineLimit(1)
+                Text(sessionChrome?.summary.memberDisplayName ?? profileDisplayName)
+                    .font(MomoTheme.Sidebar.workspaceDetailFont)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
+            Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+            Button {
+                openWorkspaceSettings?()
+            } label: {
+                Image(systemName: "gearshape")
+                    .frame(
+                        width: MomoTheme.Sidebar.actionSize,
+                        height: MomoTheme.Sidebar.actionSize
+                    )
+            }
+            .buttonStyle(.plain)
+            .opacity(isWorkspaceHeaderHovered ? 1 : 0)
+            .allowsHitTesting(isWorkspaceHeaderHovered)
+            .accessibilityHidden(!isWorkspaceHeaderHovered)
+            .help(copy.serverSettings)
+            .momoQuickTooltip(copy.serverSettings)
         }
-        .padding(.top, 22)
-        .padding(.horizontal, 18)
-        .padding(.bottom, 16)
+        .padding(.horizontal, MomoTheme.Sidebar.contentSpacing)
+        .frame(minHeight: MomoTheme.Sidebar.headerMinimumHeight)
+        .contentShape(Rectangle())
+        .onHover { isWorkspaceHeaderHovered = $0 }
     }
 
     private func sidebarSectionHeader(
@@ -224,15 +224,15 @@ public struct ChannelListView: View {
     ) -> some View {
         HStack {
             Text(title)
-                .font(.system(size: 13, weight: .bold))
+                .font(MomoTheme.Sidebar.sectionHeaderFont)
                 .foregroundStyle(.secondary)
-                .textCase(.uppercase)
             Spacer()
             Button(action: action) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 17, weight: .bold))
-                    .frame(width: 32, height: 32)
-                    .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .frame(
+                        width: MomoTheme.Sidebar.actionSize,
+                        height: MomoTheme.Sidebar.actionSize
+                    )
             }
             .buttonStyle(.plain)
             .help(actionTitle)
@@ -242,20 +242,20 @@ public struct ChannelListView: View {
 
     private func sidebarPlainHeader(_ title: String) -> some View {
         Text(title)
-            .font(.system(size: 13, weight: .semibold))
+            .font(MomoTheme.Sidebar.sectionHeaderFont)
             .foregroundStyle(.secondary)
     }
 
     private func connectionErrorRow(_ error: String, copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
             Label(copy.recoverableError, systemImage: "exclamationmark.triangle.fill")
                 .font(.callout.weight(.semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(MomoTheme.irreversibleRed)
             Text(error)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(3)
-            HStack(spacing: 8) {
+            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
                 Button {
                     Task { await viewModel.retrySelectedChannelLoad() }
                 } label: {
@@ -270,27 +270,11 @@ public struct ChannelListView: View {
                 .controlSize(.small)
             }
         }
-        .padding(.vertical, 6)
-    }
-
-    private func workQueueSection(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sidebarPlainHeader(copy.workQueue)
-            sidebarActionRow(
-                title: copy.agentApprovalInbox,
-                subtitle: approvalSummary(copy: copy),
-                systemImage: "checkmark.seal",
-                tint: MomoTheme.costAmber,
-                badge: viewModel.pendingApprovals.isEmpty ? nil : "\(viewModel.pendingApprovals.count)",
-                isQuiet: viewModel.pendingApprovals.isEmpty
-            ) {
-                openApprovals?()
-            }
-        }
+        .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
     }
 
     private func channelsSection(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
             sidebarSectionHeader(
                 title: copy.channels,
                 actionTitle: isCreatingChannel ? copy.cancel : copy.newChannel,
@@ -303,10 +287,24 @@ public struct ChannelListView: View {
                 channelCreateForm(copy: copy)
             }
 
-            if viewModel.channels.isEmpty {
+            if standardChannels.isEmpty {
                 sidebarEmptyRow(copy.noChannels, systemImage: "tray")
             } else {
-                ForEach(viewModel.channels) { channel in
+                ForEach(standardChannels) { channel in
+                    channelRow(channel)
+                }
+            }
+        }
+    }
+
+    private func directMessagesSection(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
+            sidebarPlainHeader(copy.directMessages)
+
+            if directMessageChannels.isEmpty {
+                sidebarEmptyRow(copy.noDirectMessages, systemImage: "bubble.left.and.bubble.right")
+            } else {
+                ForEach(directMessageChannels) { channel in
                     channelRow(channel)
                 }
             }
@@ -314,7 +312,7 @@ public struct ChannelListView: View {
     }
 
     private func membersSection(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
             sidebarSectionHeader(
                 title: copy.members,
                 actionTitle: copy.inviteMembers,
@@ -336,123 +334,151 @@ public struct ChannelListView: View {
         }
     }
 
-    private func developerToolsSection(copy: MomoWorkspaceCopy) -> some View {
-        DisclosureGroup(isExpanded: $showDiagnostics) {
-            VStack(alignment: .leading, spacing: 10) {
-                OnboardingInviteView(viewModel: viewModel)
-                    .padding(10)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                KimInternAvailabilityView(status: viewModel.agentRuntimeStatus) {
-                    Task { await viewModel.refreshAgentRuntimeStatus() }
-                }
-                .padding(10)
-                .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                FoundationModelsCapabilityView(state: viewModel.foundationModelsCapability)
-                    .padding(10)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                LocalContextCopilotView(viewModel: viewModel)
-                    .padding(10)
-                    .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-            .padding(.top, 8)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "wrench.and.screwdriver")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 22, height: 22)
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 2) {
+    private func developerToolsPopover(copy: MomoWorkspaceCopy) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.sectionSpacing) {
+                VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
                     Text(copy.developerTools)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.headline)
                     Text(copy.developerToolsSubtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
+                Divider()
+                OnboardingInviteView(viewModel: viewModel)
+                Divider()
+                KimInternAvailabilityView(status: viewModel.agentRuntimeStatus) {
+                    Task { await viewModel.refreshAgentRuntimeStatus() }
+                }
+                Divider()
+                FoundationModelsCapabilityView(state: viewModel.foundationModelsCapability)
+                Divider()
+                LocalContextCopilotView(viewModel: viewModel)
             }
-            .padding(.vertical, 6)
+            .padding(MomoTheme.Sidebar.sectionSpacing)
         }
+        .frame(
+            width: MomoTheme.Sidebar.utilityPopoverWidth
+        )
+        .frame(maxHeight: MomoTheme.Sidebar.utilityPopoverMaximumHeight)
     }
 
     @ViewBuilder
+    // List cannot host the inline create form and stable hover-action columns
+    // without changing the existing selection model, so this remains a flat custom row.
     private func channelRow(_ channel: Channel) -> some View {
         Button {
             Task { await viewModel.selectChannel(channel.id) }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
                 Image(systemName: channelIcon(channel.kind))
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(isSelected(channel) ? MomoTheme.humanAccent : .secondary)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(channel.name ?? "DM")
-                        .font(.system(size: 16, weight: isSelected(channel) ? .semibold : .medium))
-                        .lineLimit(1)
-                    if let topic = channel.topic, !topic.isEmpty {
-                        Text(topic)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 8)
+                    .foregroundStyle(isSelected(channel) ? .primary : .secondary)
+                    .frame(width: MomoTheme.Sidebar.avatarSize)
+                Text(channel.name ?? "DM")
+                    .font(isSelected(channel) ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
+                    .lineLimit(1)
+                Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, channel.topic?.isEmpty == false ? 8 : 10)
-            .frame(minHeight: channel.topic?.isEmpty == false ? 52 : 42)
+            .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
+            .padding(.vertical, MomoTheme.Sidebar.rowVerticalPadding)
+            .frame(minHeight: MomoTheme.Sidebar.rowMinimumHeight)
             .contentShape(Rectangle())
             .background(
-                isSelected(channel) ? Color.primary.opacity(0.13) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                channelRowBackground(channel),
+                in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
             )
         }
         .buttonStyle(.plain)
+        .onHover { isHovering in
+            hoveredChannelID = isHovering ? channel.id : nil
+        }
     }
 
-    private func sidebarActionRow(
+    private func channelRowBackground(_ channel: Channel) -> Color {
+        if isSelected(channel) {
+            return MomoTheme.Sidebar.selectionBackground
+        }
+        if hoveredChannelID == channel.id {
+            return MomoTheme.Sidebar.hoverBackground
+        }
+        return .clear
+    }
+
+    private func utilityFooter(copy: MomoWorkspaceCopy) -> some View {
+        HStack(spacing: MomoTheme.Sidebar.itemSpacing) {
+            utilityButton(
+                utility: .approvals,
+                title: copy.approvals,
+                systemImage: "checkmark.seal",
+                badge: viewModel.pendingApprovals.isEmpty ? nil : "\(viewModel.pendingApprovals.count)"
+            ) {
+                openApprovals?()
+            }
+
+            utilityButton(
+                utility: .developerTools,
+                title: copy.developerTools,
+                systemImage: "wrench.and.screwdriver",
+                badge: nil
+            ) {
+                showDiagnostics.toggle()
+            }
+            .popover(isPresented: $showDiagnostics, arrowEdge: .bottom) {
+                developerToolsPopover(copy: copy)
+            }
+        }
+        .padding(.horizontal, MomoTheme.Sidebar.edgeInset)
+        .frame(minHeight: MomoTheme.Sidebar.footerMinimumHeight)
+    }
+
+    // The utility strip is pinned below the scrolling roster, which a toolbar
+    // item cannot express inside a resizable NavigationSplitView column.
+    private func utilityButton(
+        utility: MomoSidebarUtility,
         title: String,
-        subtitle: String,
         systemImage: String,
-        tint: Color,
         badge: String? = nil,
-        isQuiet: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            HStack {
+            HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(isQuiet ? .secondary : tint)
-                    .frame(width: 24)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                    Text(subtitle)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: 8)
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(MomoTheme.Sidebar.rowDetailFont)
+                    .lineLimit(1)
+                Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
                 if let badge {
                     Text(badge)
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .foregroundStyle(.white)
+                        .font(MomoTheme.Sidebar.badgeFont)
+                        .monospacedDigit()
+                        .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
+                        .foregroundStyle(MomoTheme.onAccent)
                         .background(MomoTheme.irreversibleRed, in: Capsule())
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .frame(minHeight: 54)
-            .background(.primary.opacity(isQuiet ? 0.030 : 0.065), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
+            .frame(maxWidth: .infinity, minHeight: MomoTheme.Sidebar.rowMinimumHeight)
+            .background(
+                hoveredUtility == utility
+                    ? MomoTheme.Sidebar.hoverBackground
+                    : MomoTheme.Sidebar.utilityBackground,
+                in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
+            )
         }
         .buttonStyle(.plain)
+        .onHover { isHovering in
+            hoveredUtility = isHovering ? utility : nil
+        }
     }
 
     @ViewBuilder
     private func memberRow(_ member: Member) -> some View {
+        let copy = MomoWorkspaceCopy(language: language)
+        let inChannel = viewModel.isMember(member.id)
+        let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
         memberRowContent(member)
+            .focusable()
             .contextMenu {
                 if member.isAgent {
                     Button {
@@ -474,88 +500,113 @@ public struct ChannelListView: View {
                     openMemberProfile?(member.id)
                 } label: {
                     if viewModel.allowsLocalProfileEditing {
-                        Label(MomoWorkspaceCopy(language: language).editProfile, systemImage: "person.text.rectangle")
+                        Label(copy.editProfile, systemImage: "person.text.rectangle")
                     } else {
-                        Label(MomoWorkspaceCopy(language: language).serverManagedProfileNote, systemImage: "lock")
+                        Label(copy.serverManagedProfileNote, systemImage: "lock")
                     }
                 }
                 .disabled(!viewModel.allowsLocalProfileEditing)
+
+                if viewModel.selectedChannelId != nil {
+                    Divider()
+                    Button(role: inChannel ? .destructive : nil) {
+                        performMemberMutation(member, isMember: inChannel)
+                    } label: {
+                        Label(
+                            inChannel ? copy.removeFromChannel : copy.addToChannel,
+                            systemImage: inChannel ? "minus.circle" : "plus.circle"
+                        )
+                    }
+                    .disabled(isWorking)
+                }
+            }
+            .accessibilityActions {
+                if viewModel.selectedChannelId != nil {
+                    Button(inChannel ? copy.removeFromChannel : copy.addToChannel) {
+                        performMemberMutation(member, isMember: inChannel)
+                    }
+                    .disabled(isWorking)
+                }
             }
     }
 
     private func memberRowContent(_ member: Member) -> some View {
+        // A custom row keeps agent identity and contextual actions aligned while
+        // preserving the roster SoT's existing member-level context menu.
         let copy = MomoWorkspaceCopy(language: language)
-        return HStack(spacing: 10) {
+        let isHovering = hoveredMemberID == member.id
+        return HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
             MomoProfileAvatar(
                 initials: memberInitials(member),
                 status: presenceBadge(for: member),
                 imagePath: avatarPath(for: member),
-                size: 28
+                size: MomoTheme.Sidebar.avatarSize
             )
             Text(member.displayName)
-                .font(.system(size: 16, weight: .semibold))
+                .font(MomoTheme.Sidebar.rowFont)
                 .lineLimit(1)
             if member.isAgent {
-                Image(systemName: "at")
-                    .font(.caption)
-                    .foregroundStyle(MomoTheme.agentAccent)
                 Text("AGENT")
-                    .font(.system(size: 8, weight: .bold))
-                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .font(MomoTheme.Sidebar.badgeFont)
+                    .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
                     .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
                     .foregroundStyle(MomoTheme.agentAccent)
                 if viewModel.isAgentWorking(member) {
                     Label(copy.presenceWorking, systemImage: "ellipsis.bubble.fill")
                         .labelStyle(.iconOnly)
                         .font(.caption2.weight(.bold))
-                        .frame(width: 20, height: 20)
+                        .frame(
+                            width: MomoTheme.Sidebar.actionSize,
+                            height: MomoTheme.Sidebar.actionSize
+                        )
                         .background(MomoTheme.costAmber.opacity(0.18), in: Circle())
                         .foregroundStyle(MomoTheme.costAmber)
                         .help(copy.agentWorkingTitle(member.displayName))
                         .momoQuickTooltip(copy.agentWorkingTitle(member.displayName))
                 }
             }
-            Spacer()
+            Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
             if member.isAgent {
-                Button {
+                memberHoverAction(
+                    systemImage: "at",
+                    tint: MomoTheme.agentAccent,
+                    isVisible: isHovering,
+                    isDisabled: !viewModel.canInsertMention(for: member),
+                    helpText: viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)"
+                ) {
                     viewModel.insertMention(for: member)
-                } label: {
-                    Image(systemName: "at")
-                        .font(.caption.weight(.bold))
-                        .frame(width: 28, height: 28)
-                        .foregroundStyle(MomoTheme.agentAccent)
-                        .background(MomoTheme.agentAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.canInsertMention(for: member))
-                .help(viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)")
-                .momoQuickTooltip(viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)")
             }
-            Button {
-                openMemberProfile?(member.id)
-            } label: {
-                Image(systemName: "person.text.rectangle")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 28, height: 28)
-                    .foregroundStyle(.secondary)
-                    .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            if viewModel.allowsLocalProfileEditing {
+                memberHoverAction(
+                    systemImage: "person.text.rectangle",
+                    tint: .secondary,
+                    isVisible: isHovering,
+                    isDisabled: false,
+                    helpText: copy.editProfile
+                ) {
+                    openMemberProfile?(member.id)
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(!viewModel.allowsLocalProfileEditing)
-            .help(viewModel.allowsLocalProfileEditing ? copy.editProfile : copy.serverManagedProfileNote)
-            .momoQuickTooltip(viewModel.allowsLocalProfileEditing ? copy.editProfile : copy.serverManagedProfileNote)
             if viewModel.selectedChannelId != nil {
-                memberMutationButton(member)
+                memberMutationButton(member, isVisible: isHovering)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .frame(minHeight: 42)
-        .background(.primary.opacity(member.isAgent ? 0.055 : 0.0), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
+        .padding(.vertical, MomoTheme.Sidebar.rowVerticalPadding)
+        .frame(minHeight: MomoTheme.Sidebar.rowMinimumHeight)
+        .contentShape(Rectangle())
+        .background(
+            isHovering ? MomoTheme.Sidebar.hoverBackground : .clear,
+            in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
+        )
+        .onHover { hovering in
+            hoveredMemberID = hovering ? member.id : nil
+        }
     }
 
     private func channelCreateForm(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
             Picker("Kind", selection: $newChannelKind) {
                 Label(copy.publicChannel, systemImage: "number").tag(ChannelKind.publicChannel)
                 Label(copy.privateChannel, systemImage: "lock").tag(ChannelKind.privateChannel)
@@ -589,31 +640,73 @@ public struct ChannelListView: View {
                 .disabled(viewModel.channelCreateInFlight || newChannelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, MomoTheme.Sidebar.compactSpacing)
     }
 
-    private func memberMutationButton(_ member: Member) -> some View {
+    private func memberHoverAction(
+        systemImage: String,
+        tint: Color,
+        isVisible: Bool,
+        isDisabled: Bool,
+        helpText: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .frame(
+                    width: MomoTheme.Sidebar.actionSize,
+                    height: MomoTheme.Sidebar.actionSize
+                )
+                .foregroundStyle(tint)
+                .background(
+                    MomoTheme.Sidebar.utilityBackground,
+                    in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
+        .accessibilityHidden(!isVisible)
+        .help(helpText)
+        .momoQuickTooltip(helpText)
+    }
+
+    private func memberMutationButton(_ member: Member, isVisible: Bool) -> some View {
+        let copy = MomoWorkspaceCopy(language: language)
         let inChannel = viewModel.isMember(member.id)
         let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
         return Button {
-            Task {
-                if inChannel {
-                    await viewModel.removeMember(member.id)
-                } else {
-                    await viewModel.addMember(member.id)
-                }
-            }
+            performMemberMutation(member, isMember: inChannel)
         } label: {
             Image(systemName: inChannel ? "minus" : "plus")
-                .font(.system(size: 13, weight: .bold))
-                .frame(width: 28, height: 28)
+                .frame(
+                    width: MomoTheme.Sidebar.actionSize,
+                    height: MomoTheme.Sidebar.actionSize
+                )
                 .foregroundStyle(inChannel ? .secondary : MomoTheme.humanAccent)
-                .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(
+                    MomoTheme.Sidebar.utilityBackground,
+                    in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
+                )
         }
         .buttonStyle(.plain)
         .disabled(isWorking)
-        .help(inChannel ? "Remove" : "Add")
-        .momoQuickTooltip(inChannel ? "Remove" : "Add")
+        .opacity(isVisible ? 1 : 0)
+        .allowsHitTesting(isVisible)
+        .accessibilityHidden(!isVisible)
+        .help(inChannel ? copy.removeFromChannel : copy.addToChannel)
+        .momoQuickTooltip(inChannel ? copy.removeFromChannel : copy.addToChannel)
+    }
+
+    private func performMemberMutation(_ member: Member, isMember: Bool) {
+        Task {
+            if isMember {
+                await viewModel.removeMember(member.id)
+            } else {
+                await viewModel.addMember(member.id)
+            }
+        }
     }
 
     private func profileFooter(copy: MomoWorkspaceCopy) -> some View {
@@ -622,15 +715,20 @@ public struct ChannelListView: View {
                 showProfilePanel.toggle()
             }
         } label: {
-            HStack(spacing: 10) {
-                MomoProfileAvatar(initials: profileInitials, status: .online, imagePath: profileAvatarPath)
+            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                MomoProfileAvatar(
+                    initials: profileInitials,
+                    status: profilePresenceBadge,
+                    imagePath: profileAvatarPath,
+                    size: MomoTheme.Sidebar.avatarSize
+                )
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
                     Text(profileDisplayName)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(MomoTheme.Sidebar.workspaceFont)
                         .lineLimit(1)
                     Text(profileDetail)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(MomoTheme.Sidebar.workspaceDetailFont)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -638,16 +736,18 @@ public struct ChannelListView: View {
                 Spacer()
 
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                     .rotationEffect(.degrees(showProfilePanel ? 180 : 0))
             }
             .contentShape(Rectangle())
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(.primary.opacity(0.075), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
+            .frame(minHeight: MomoTheme.Sidebar.footerMinimumHeight)
+            .background(
+                showProfilePanel ? MomoTheme.Sidebar.hoverBackground : .clear,
+                in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
+            )
+            .padding(.horizontal, MomoTheme.Sidebar.edgeInset)
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showMemberInvite, arrowEdge: .bottom) {
@@ -665,10 +765,10 @@ public struct ChannelListView: View {
     private func profilePanel(copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
-                MomoProfileAvatar(initials: profileInitials, status: .online, imagePath: profileAvatarPath, size: 42)
+                MomoProfileAvatar(initials: profileInitials, status: profilePresenceBadge, imagePath: profileAvatarPath, size: 42)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(profileDisplayName)
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.headline)
                     Text(profileDetail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -725,9 +825,9 @@ public struct ChannelListView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
+                .stroke(MomoTheme.subtlePanelBorder, lineWidth: 1)
         }
-        .shadow(color: .black.opacity(0.26), radius: 22, x: 0, y: 12)
+        .shadow(color: MomoTheme.floatingPanelShadow, radius: 22, x: 0, y: 12)
     }
 
     private func profileAction(
@@ -741,10 +841,10 @@ public struct ChannelListView: View {
         Button(role: role, action: action) {
             HStack(spacing: 10) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .frame(width: 22)
                 Text(title)
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.body)
                 Spacer()
             }
             .padding(.horizontal, 10)
@@ -766,16 +866,16 @@ public struct ChannelListView: View {
             HStack(spacing: 5) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.system(size: 10, weight: .bold))
+                        .font(.caption2.weight(.bold))
                 }
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .lineLimit(1)
             }
             .padding(.horizontal, 7)
             .frame(height: 26)
             .background(selected ? MomoTheme.humanAccent : Color.primary.opacity(0.08), in: Capsule())
-            .foregroundStyle(selected ? .white : .primary)
+            .foregroundStyle(selected ? MomoTheme.onAccent : .primary)
         }
         .buttonStyle(.plain)
     }
@@ -840,7 +940,7 @@ public struct ChannelListView: View {
                     HStack(spacing: 12) {
                         MomoProfileAvatar(
                             initials: hermesInitials,
-                            status: hermesInvited ? .online : .away,
+                            status: nil,
                             imagePath: hermesAvatarPath,
                             size: 38
                         )
@@ -1196,6 +1296,15 @@ public struct ChannelListView: View {
         return String(first).uppercased()
     }
 
+    private var profilePresenceBadge: MomoPresenceBadge? {
+        guard !viewModel.usesServerRosterSourceOfTruth,
+              let member = viewModel.members.first(where: { !$0.isAgent })
+        else {
+            return nil
+        }
+        return presenceBadge(for: member)
+    }
+
     private func channelIcon(_ kind: ChannelKind) -> String {
         switch kind {
         case .publicChannel:
@@ -1209,11 +1318,6 @@ public struct ChannelListView: View {
 
     private func isSelected(_ channel: Channel) -> Bool {
         viewModel.selectedChannelId == channel.id
-    }
-
-    private func approvalSummary(copy: MomoWorkspaceCopy) -> String {
-        let count = viewModel.pendingApprovals.count
-        return count == 0 ? copy.agentApprovalInboxSubtitle : "\(count) \(copy.pendingApprovals)"
     }
 
     private var currentAppearance: MomoAppearancePreference {
@@ -1327,16 +1431,21 @@ public struct ChannelListView: View {
         return String(first).uppercased()
     }
 
-    private func presenceBadge(for member: Member) -> MomoPresenceBadge {
-        if viewModel.isAgentWorking(member) {
+    private func presenceBadge(for member: Member) -> MomoPresenceBadge? {
+        let isActivelyWorking = viewModel.isAgentWorking(member)
+        guard MomoSidebarPolicy.showsRosterPresence(
+            usesServerRosterSourceOfTruth: viewModel.usesServerRosterSourceOfTruth,
+            isActivelyWorking: isActivelyWorking
+        ) else {
+            return nil
+        }
+        if isActivelyWorking {
             return .working
         }
         if member.status != .active {
             return .error
         }
-        let presence = viewModel.usesServerRosterSourceOfTruth
-            ? member.presence
-            : MomoLocalProfileStore.presence(for: member) ?? member.presence
+        let presence = MomoLocalProfileStore.presence(for: member) ?? member.presence
         switch presence {
         case .online:
             return .online
@@ -1350,27 +1459,42 @@ public struct ChannelListView: View {
     }
 
     private func sidebarEmptyRow(_ title: String, systemImage: String) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
             Image(systemName: systemImage)
-                .frame(width: 24)
+                .frame(width: MomoTheme.Sidebar.avatarSize)
                 .foregroundStyle(.secondary)
             Text(title)
-                .font(.callout)
+                .font(MomoTheme.Sidebar.rowDetailFont)
                 .foregroundStyle(.secondary)
             Spacer()
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
+        .padding(.vertical, MomoTheme.Sidebar.rowVerticalPadding)
+        .frame(minHeight: MomoTheme.Sidebar.rowMinimumHeight)
     }
 
-    private func channelTitle(_ channel: Channel) -> String {
-        switch channel.kind {
-        case .dm:
-            return "DM"
-        case .publicChannel, .privateChannel:
-            return channel.name ?? "channel"
-        }
+}
+
+enum MomoSidebarPolicy {
+    static func standardChannels(from channels: [Channel]) -> [Channel] {
+        channels.filter { $0.kind != .dm }
     }
+
+    static func directMessages(from channels: [Channel]) -> [Channel] {
+        channels.filter { $0.kind == .dm }
+    }
+
+    static func showsRosterPresence(
+        usesServerRosterSourceOfTruth: Bool,
+        isActivelyWorking: Bool
+    ) -> Bool {
+        isActivelyWorking || !usesServerRosterSourceOfTruth
+    }
+}
+
+private enum MomoSidebarUtility {
+    case approvals
+    case developerTools
 }
 
 private enum MomoInviteMode: String, CaseIterable, Identifiable {
@@ -1397,14 +1521,14 @@ private struct MomoDownloadsSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
                 Image(systemName: "tray.and.arrow.down")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(MomoTheme.humanAccent)
                     .frame(width: 34, height: 34)
                     .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(copy.downloads)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.title3.weight(.semibold))
                     Text(copy.downloadsSubtitle)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -1416,7 +1540,7 @@ private struct MomoDownloadsSheet: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.caption.weight(.bold))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
@@ -1466,7 +1590,7 @@ private struct MomoServerSettingsDraftSheet: View {
                 MomoSidebarLogoMark(text: iconText, imagePath: iconPath, size: 40)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(copy.serverSettings)
-                        .font(.system(size: 19, weight: .semibold))
+                        .font(.title3.weight(.semibold))
                     Text(copy.serverSettingsSubtitle)
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -1476,7 +1600,7 @@ private struct MomoServerSettingsDraftSheet: View {
                     dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.caption.weight(.bold))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
@@ -1605,23 +1729,16 @@ private struct MomoSidebarLogoMark: View {
                     .clipShape(RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
             } else {
                 Text(visibleText)
-                    .font(.system(size: size * 0.50, weight: .heavy, design: .rounded))
-                    .foregroundStyle(.white)
+                    .font(.title3.weight(.heavy))
+                    .foregroundStyle(MomoTheme.onAccent)
                     .frame(width: size, height: size)
-                    .background(
-                        LinearGradient(
-                            colors: [MomoTheme.agentAccent, MomoTheme.costAmber],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                    )
+                    .background(MomoTheme.humanAccent, in: RoundedRectangle(cornerRadius: size * 0.30, style: .continuous))
             }
         }
         .frame(width: size, height: size)
         .overlay {
             RoundedRectangle(cornerRadius: size * 0.30, style: .continuous)
-                .stroke(.white.opacity(0.16), lineWidth: 1)
+                .stroke(MomoTheme.subtlePanelBorder, lineWidth: 1)
         }
     }
 
@@ -1653,7 +1770,7 @@ private enum MomoPresenceBadge {
 
 private struct MomoProfileAvatar: View {
     let initials: String
-    let status: MomoPresenceBadge
+    let status: MomoPresenceBadge?
     var imagePath: String = ""
     var size: CGFloat = 34
 
@@ -1667,19 +1784,21 @@ private struct MomoProfileAvatar: View {
                     .clipShape(Circle())
             } else {
                 Text(initials)
-                    .font(.system(size: size * 0.36, weight: .bold))
-                    .foregroundStyle(.white)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(MomoTheme.onAccent)
                     .frame(width: size, height: size)
                     .background(MomoTheme.agentAccent, in: Circle())
             }
-            Circle()
-                .fill(status.color)
-                .frame(width: size * 0.24, height: size * 0.24)
-                .overlay {
-                    Circle()
-                        .stroke(.regularMaterial, lineWidth: 2)
-                }
-                .offset(x: 1, y: 1)
+            if let status {
+                Circle()
+                    .fill(status.color)
+                    .frame(width: size * 0.24, height: size * 0.24)
+                    .overlay {
+                        Circle()
+                            .stroke(.regularMaterial, lineWidth: 2)
+                    }
+                    .offset(x: 1, y: 1)
+            }
         }
     }
 
@@ -1691,28 +1810,9 @@ private struct MomoProfileAvatar: View {
 
 private struct MomoSidebarGlassBackground: View {
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.thinMaterial)
-            LinearGradient(
-                colors: [
-                    MomoTheme.humanAccent.opacity(0.12),
-                    MomoTheme.reversibleGreen.opacity(0.10),
-                    Color.clear,
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            Rectangle()
-                .fill(Color.black.opacity(0.025))
-            HStack {
-                Spacer()
-                Rectangle()
-                    .fill(.white.opacity(0.08))
-                    .frame(width: 1)
-            }
-        }
-        .ignoresSafeArea()
+        Rectangle()
+            .fill(.thinMaterial)
+            .ignoresSafeArea()
     }
 }
 
@@ -1731,7 +1831,7 @@ private struct KimInternAvailabilityView: View {
                         .font(.caption.weight(.semibold))
                         .lineLimit(1)
                     Text(status.availability.label)
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(tint.opacity(0.16), in: Capsule())

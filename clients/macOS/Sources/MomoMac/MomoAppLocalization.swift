@@ -270,6 +270,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var directMessages: String {
+        switch language {
+        case .korean: return "다이렉트 메시지"
+        case .english: return "Direct messages"
+        }
+    }
+
     var approvals: String {
         switch language {
         case .korean: return "승인"
@@ -281,6 +288,20 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "멤버"
         case .english: return "Members"
+        }
+    }
+
+    var addToChannel: String {
+        switch language {
+        case .korean: return "채널에 추가"
+        case .english: return "Add to channel"
+        }
+    }
+
+    var removeFromChannel: String {
+        switch language {
+        case .korean: return "채널에서 제거"
+        case .english: return "Remove from channel"
         }
     }
 
@@ -847,8 +868,15 @@ struct MomoWorkspaceCopy {
 
     var noChannels: String {
         switch language {
-        case .korean: return "사용 가능한 채널이 없습니다"
-        case .english: return "No channels available"
+        case .korean: return "채널을 만들어 시작하세요"
+        case .english: return "Create a channel to get started"
+        }
+    }
+
+    var noDirectMessages: String {
+        switch language {
+        case .korean: return "대화가 시작되면 여기에 표시됩니다"
+        case .english: return "Conversations appear here when they start"
         }
     }
 

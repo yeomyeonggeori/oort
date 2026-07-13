@@ -5,9 +5,9 @@ import SnapshotTesting
 import MomoCore
 @testable import MomoMac
 
-// References are intentionally absent in the worker patch for MOMO-354. The
-// canonical macOS gate machine records them; until then these tests compile and
-// skip instead of creating host-dependent PNGs in a worker sandbox.
+// MOMO-357 changes the full sidebar hierarchy. New canonical references are
+// intentionally absent in the worker patch; the macOS gate machine records
+// them so host-dependent PNGs never become worker-authored baselines.
 @MainActor
 final class ChannelRosterSnapshotTests: XCTestCase {
     private func fixtureSidebar(_ scheme: ColorScheme) async throws -> some View {
@@ -92,11 +92,11 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            throw XCTSkip("Canonical MOMO-354 snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
+            throw XCTSkip("Canonical MOMO-357 snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
 
-    func testChannelRosterLightSnapshot() async throws {
+    func testSidebarShellLightSnapshot() async throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
         let image = try await render(.light)
         assertSnapshot(
@@ -106,7 +106,7 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         )
     }
 
-    func testChannelRosterDarkSnapshot() async throws {
+    func testSidebarShellDarkSnapshot() async throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
         let image = try await render(.dark)
         assertSnapshot(
