@@ -120,6 +120,41 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var timelineEmptyTitle: String {
+        switch language {
+        case .korean: return "첫 메시지를 보내보세요"
+        case .english: return "Send the first message"
+        }
+    }
+
+    var timelineEmptyAction: String {
+        switch language {
+        case .korean: return "메시지 작성하기"
+        case .english: return "Write a message"
+        }
+    }
+
+    var timelineLoading: String {
+        switch language {
+        case .korean: return "메시지 기록 불러오는 중"
+        case .english: return "Loading message history"
+        }
+    }
+
+    var messageSending: String {
+        switch language {
+        case .korean: return "전송 중"
+        case .english: return "Sending"
+        }
+    }
+
+    var copyMessage: String {
+        switch language {
+        case .korean: return "메시지 복사"
+        case .english: return "Copy message"
+        }
+    }
+
     var mentionAutocompleteTitle: String {
         switch language {
         case .korean: return "멘션할 멤버"

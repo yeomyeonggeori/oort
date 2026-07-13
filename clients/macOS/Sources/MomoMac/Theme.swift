@@ -19,9 +19,15 @@ public enum MomoTheme {
     public static let reversibleGreen = Color(red: 0.22, green: 0.72, blue: 0.42)
     /// Irreversible / danger (experience C red badge).
     public static let irreversibleRed = Color(red: 0.90, green: 0.27, blue: 0.30)
+    /// Foreground placed on an accent-filled control or avatar.
+    public static let onAccent = Color(nsColor: .selectedMenuItemTextColor)
+    /// Adaptive separator used for subtle borders on raised surfaces.
+    public static let subtleBorder = Color(nsColor: .separatorColor)
 
     public static let bubbleCorner: CGFloat = 12
     public static let gutter: CGFloat = 12
+    public static let messageAvatarSize: CGFloat = 28
+    public static let mentionAutocompleteWidth: CGFloat = 300
     public static let credentialRevealMinimumWidth: CGFloat = 320
     public static let credentialRevealIdealWidth: CGFloat = 480
     public static let credentialRevealMaximumWidth: CGFloat = 640

@@ -93,6 +93,7 @@ public final class ChatViewModel: ObservableObject {
 
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
+    @Published private(set) var historyLoadingChannels: Set<ChannelID> = []
 
     // Live agent state for the selected channel.
     /// In-flight `agent.partial` buffers, keyed by run, for AgentPartialView (L4 §5.2).
@@ -196,6 +197,7 @@ public final class ChatViewModel: ObservableObject {
         channels = []
         selectedChannelId = nil
         messagesByChannel = [:]
+        historyLoadingChannels = []
         partials = [:]
         agentStatuses = [:]
         costSnapshots = [:]
@@ -294,6 +296,8 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func loadHistory(channel: ChannelID) async {
+        historyLoadingChannels.insert(channel)
+        defer { historyLoadingChannels.remove(channel) }
         do {
             let history = try await chat.history(channel: channel, after: nil, limit: 200)
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
@@ -941,6 +945,11 @@ public final class ChatViewModel: ObservableObject {
     public var visibleMessages: [Message] {
         guard let id = selectedChannelId else { return [] }
         return messagesByChannel[id] ?? []
+    }
+
+    var isSelectedChannelHistoryLoading: Bool {
+        guard let id = selectedChannelId else { return false }
+        return historyLoadingChannels.contains(id)
     }
 
     public var selectedRealtimeStatus: RealtimeConnectionStatus? {
