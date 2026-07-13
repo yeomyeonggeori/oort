@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
+public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -252,6 +252,47 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, MomoAgentCr
         let channels = try response.channels.map { try $0.channel() }
         cachedChannels = channels
         return channels
+    }
+
+    public func createWorkRun(
+        agent: MemberID,
+        channel: ChannelID,
+        input: AgentWorkInput,
+        clientRunId: UUID
+    ) async throws -> AgentWorkRun {
+        guard let workspace else { throw BackendError.notConnected }
+        return try await post(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/agent-runs",
+            body: CreateAgentWorkRunRequest(
+                agentMemberId: agent,
+                clientRunId: clientRunId,
+                input: input
+            ),
+            authorized: true,
+            response: AgentWorkRun.self
+        )
+    }
+
+    public func workRuns(channel: ChannelID, limit: Int = 50) async throws -> [AgentWorkRun] {
+        guard let workspace else { throw BackendError.notConnected }
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/agent-runs",
+            queryItems: [
+                URLQueryItem(name: "type", value: "work"),
+                URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
+            ],
+            response: AgentWorkRunPage.self
+        )
+        return page.runs
+    }
+
+    public func workRun(id: RunID) async throws -> AgentWorkRun {
+        guard let workspace else { throw BackendError.notConnected }
+        return try await get(
+            "/v1/workspaces/\(workspace.description)/agent-runs/\(id.description)",
+            queryItems: [],
+            response: AgentWorkRun.self
+        )
     }
 
     public func createChannel(

@@ -10,14 +10,23 @@ import MomoCore
 
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
+    private let onOpenWorkDetail: (RunID) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
     @FocusState private var isComposerFocused: Bool
     @State private var isPinnedToTimelineBottom = true
+    @State private var isWorkComposerPresented = false
+    @State private var initialWorkBrief = ""
+    @State private var workCommandDraftToRestore: String?
+    @State private var workComposerSessionId = UUID()
 
-    public init(viewModel: ChatViewModel) {
+    public init(
+        viewModel: ChatViewModel,
+        onOpenWorkDetail: @escaping (RunID) -> Void = { _ in }
+    ) {
         self.viewModel = viewModel
+        self.onOpenWorkDetail = onOpenWorkDetail
     }
 
     public var body: some View {
@@ -277,13 +286,16 @@ public struct MessageListView: View {
     // MARK: Timeline (seq order)
 
     private func timeline(copy: MomoWorkspaceCopy) -> some View {
-        let items = MessageTimelineLayout.items(messages: viewModel.visibleMessages)
+        let entries = AgentWorkTimelinePolicy.entries(
+            messages: viewModel.visibleMessages,
+            runs: viewModel.visibleWorkRuns
+        )
         return GeometryReader { viewport in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         if viewModel.selectedChannelId != nil,
-                           items.isEmpty,
+                           entries.isEmpty,
                            livePartials.isEmpty,
                            viewModel.visibleWorkingAgents.isEmpty {
                             if viewModel.isSelectedChannelHistoryLoading {
@@ -295,25 +307,47 @@ public struct MessageListView: View {
                             }
                         }
 
-                        ForEach(items) { item in
-                            if item.startsDay, let day = item.day {
-                                TimelineDayDivider(day: day)
+                        ForEach(entries) { entry in
+                            switch entry {
+                            case .message(let item):
+                                messageTimelineItem(item, copy: copy)
+                            case .work(let runId, let day, let startsDay):
+                                if let run = viewModel.workRun(runId) {
+                                    workTimelineItem(
+                                        run,
+                                        day: day,
+                                        startsDay: startsDay,
+                                        copy: copy
+                                    )
+                                }
                             }
+                        }
 
-                            MessageBubble(
-                                message: item.message,
-                                author: viewModel.member(item.message.authorMemberId),
-                                cost: costSnapshot(for: item.message),
-                                approvalStatus: viewModel.approvalStatus(for: item.message),
-                                isApprovalDecisionInFlight: viewModel.isApprovalDecisionInFlight(for: item.message),
-                                onApprovalDecision: { approvalId, approve in
-                                    Task { await viewModel.decideApproval(approvalId, approve: approve) }
-                                },
-                                groupingStyle: item.startsGroup ? .groupStart : .compact,
-                                timelineCopy: copy
-                            )
-                            .padding(.top, item.startsGroup ? 8 : 0)
-                            .id(item.id)
+                        if let channel = viewModel.selectedChannelId,
+                           viewModel.workRunLoadingChannels.contains(channel) {
+                            Label(copy.workHistoryLoading, systemImage: "clock")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 8)
+                        } else if let error = viewModel.selectedWorkHistoryError,
+                                  viewModel.isWorkSurfaceAvailable {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(MomoTheme.irreversibleRed)
+                                Text(copy.workError(error))
+                                    .font(.caption)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 8)
+                                Button {
+                                    Task { await viewModel.retryWorkRuns() }
+                                } label: {
+                                    Label(copy.retryWorkHistory, systemImage: "arrow.clockwise")
+                                        .labelStyle(.iconOnly)
+                                }
+                                .buttonStyle(.borderless)
+                                .help(copy.retryWorkHistory)
+                            }
+                            .padding(.vertical, 8)
                         }
 
                         // Live agent partial/status cards remain first-class rows below durable seq-ordered messages.
@@ -351,11 +385,74 @@ public struct MessageListView: View {
                 .onChange(of: livePartials) { _, _ in
                     followNewTimelineContentIfNeeded(proxy)
                 }
+                .onChange(of: viewModel.visibleWorkRuns) { _, _ in
+                    followNewTimelineContentIfNeeded(proxy)
+                }
                 .onChange(of: viewModel.visibleWorkingAgents.map(\.id)) { _, _ in
                     followNewTimelineContentIfNeeded(proxy)
                 }
             }
         }
+    }
+
+    private func messageTimelineItem(
+        _ item: MessageTimelineItem,
+        copy: MomoWorkspaceCopy
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if item.startsDay, let day = item.day {
+                TimelineDayDivider(day: day)
+            }
+
+            MessageBubble(
+                message: item.message,
+                author: viewModel.member(item.message.authorMemberId),
+                cost: costSnapshot(for: item.message),
+                approvalStatus: viewModel.approvalStatus(for: item.message),
+                isApprovalDecisionInFlight: viewModel.isApprovalDecisionInFlight(for: item.message),
+                onApprovalDecision: { approvalId, approve in
+                    Task { await viewModel.decideApproval(approvalId, approve: approve) }
+                },
+                groupingStyle: item.startsGroup ? .groupStart : .compact,
+                timelineCopy: copy
+            )
+            .padding(.top, item.startsGroup ? 8 : 0)
+        }
+        .id(item.id)
+    }
+
+    private func workTimelineItem(
+        _ run: AgentWorkRun,
+        day: Date?,
+        startsDay: Bool,
+        copy: MomoWorkspaceCopy
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if startsDay, let day {
+                TimelineDayDivider(day: day)
+            }
+
+            AgentWorkRunCard(
+                run: run,
+                agent: viewModel.member(run.agentMemberId),
+                status: viewModel.effectiveWorkStatus(for: run),
+                partial: viewModel.partials[run.id],
+                approval: viewModel.workApproval(for: run.id),
+                messages: viewModel.workMessages(for: run.id),
+                isApprovalInFlight: viewModel.workApproval(for: run.id).map {
+                    viewModel.approvalDecisionsInFlight.contains($0.approvalId)
+                } ?? false,
+                copy: copy,
+                onApprovalDecision: { approvalId, approve in
+                    Task { await viewModel.decideApproval(approvalId, approve: approve) }
+                },
+                onOpenDetail: {
+                    onOpenWorkDetail(run.id)
+                }
+            )
+            .padding(.top, 8)
+        }
+        .id("work-\(run.id.description)")
     }
 
     private var timelineBottomSentinel: some View {
@@ -403,6 +500,40 @@ public struct MessageListView: View {
             }
 
             HStack(spacing: 8) {
+                Button {
+                    presentWorkComposer()
+                } label: {
+                    Label(copy.startWork, systemImage: "hammer")
+                        .labelStyle(.iconOnly)
+                }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .disabled(viewModel.selectedChannelId == nil)
+                .help("\(copy.startWork)  ⇧⌘W")
+                .accessibilityLabel(copy.startWork)
+                .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
+                    AgentWorkComposerView(
+                        viewModel: viewModel,
+                        copy: copy,
+                        initialBrief: initialWorkBrief,
+                        onStarted: { _ in
+                            initialWorkBrief = ""
+                            workCommandDraftToRestore = nil
+                            isWorkComposerPresented = false
+                        },
+                        onCancel: {
+                            if let draft = workCommandDraftToRestore {
+                                viewModel.composerDraft = draft
+                                viewModel.composerDraftDidChange(draft)
+                                isComposerFocused = true
+                            }
+                            initialWorkBrief = ""
+                            workCommandDraftToRestore = nil
+                            isWorkComposerPresented = false
+                        }
+                    )
+                    .id(workComposerSessionId)
+                }
+
                 TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
@@ -498,8 +629,26 @@ public struct MessageListView: View {
     private func submit() {
         guard let channel = viewModel.selectedChannelId else { return }
         let body = viewModel.composerDraft
+        if let command = AgentWorkCommandParser.parse(body) {
+            initialWorkBrief = command.brief
+            workCommandDraftToRestore = command.draftToRestore
+            workComposerSessionId = UUID()
+            viewModel.clearWorkCreationError()
+            viewModel.composerDraft = ""
+            viewModel.composerDraftDidChange("")
+            isWorkComposerPresented = true
+            return
+        }
         viewModel.composerDraft = ""
         Task { await viewModel.send(body: body, to: channel) }
+    }
+
+    private func presentWorkComposer() {
+        initialWorkBrief = ""
+        workCommandDraftToRestore = nil
+        workComposerSessionId = UUID()
+        viewModel.clearWorkCreationError()
+        isWorkComposerPresented = true
     }
 
     // MARK: Derived
@@ -507,8 +656,9 @@ public struct MessageListView: View {
     /// Partials whose channel matches the selected channel.
     private var livePartials: [AgentPartial] {
         guard let id = viewModel.selectedChannelId else { return [] }
+        let workRunIds = Set(viewModel.visibleWorkRuns.map(\.id))
         return viewModel.partials.values
-            .filter { $0.channelId == id }
+            .filter { $0.channelId == id && !workRunIds.contains($0.runId) }
             .sorted { $0.runId.description < $1.runId.description }
     }
 
