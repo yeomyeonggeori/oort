@@ -1827,6 +1827,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 배경: Theme 토큰 기반 정제된 다크 그라데이션(양 스킴 대응), 장식 모션은 reduceMotion 가드 하 ≤0.16s.
 - [ ] Enter 제출·Tab 순서·Esc 키보드 문법(P11), light/dark 스냅샷(대형/기본 폭 2변형 권장) + design-review Blocker 0. 표면: `MomoServerSession.swift`/`OnboardingInviteView.swift` 계열, 랜딩된 357..367과 회귀 없음.
 
+### ☐ MOMO-369 수용기준 — 앱 셸 시각 폴리시 W3: 표면 위계·타이포 리듬·상태 배너 문법 `[swift/macos-ui]` (성재 발제 2026-07-13, "Raycast급 세련미" 스크린샷 피드백)
+> 진단: W1/W2는 구조·밀도·기능이었고 폴리시 레이어 부재로 "평평한 다크 앱" 인상. 401 토큰 만료가 빨간 에러 2개+Swift 에러 덤프로 노출되어 화면을 지배, 스트리밍 커서 아티팩트("▍" 잔류), day divider가 한국어 UI에서 영어 날짜.
+- [ ] **표면 위계 3층 토큰**(배경/패널/카드 elevation — 색·보더·그림자 세트, 양 스킴)을 Theme에 정의하고 사이드바·타임라인·work/승인 카드·팝오버에 일괄 적용. 평면 인상 제거가 목표.
+- [ ] **타이포 리듬 정비**: 섹션 헤더/행/보조 텍스트의 크기·무게·색 대비 스케일 통일(semantic 스타일 유지), 행간·여백 정율.
+- [ ] **상태 배너 문법 통일**: 401/세션 만료는 "다시 로그인" primary 액션이 있는 단일 배너로(에러 원문·`String(describing:)` 덤프 사용자 노출 금지 — 기존 Medium 이월 해소), 실시간 REST 폴백은 subtle 상태 칩으로 격하. 카피는 다음 행동 포함.
+- [ ] 스트리밍 partial 말미 커서 아티팩트 정리, day divider 날짜 로케일(ko 환경 한국어 표기), 멘션 행 이중 신호(365 이월 Medium ①)·+N 툴팁 전체 목록(이월 ②) 해소.
+- [ ] 모션: reduceMotion 가드 하에 카드 등장/hover 전이 ≤0.16s, 과장 금지.
+- [ ] light/dark 스냅샷(사이드바+타임라인+카드 표면 위계가 픽셀로 확인 가능해야) + design-review Blocker 0. 랜딩된 354..368과 회귀 없음. 온보딩(MOMO-368 in-flight) 파일 무접촉.
+- 후속 기록(이 티켓 밖): adapter 실패 body 구조화(CLI usage 원문의 durable 유출 — python 몫), 세션 자동 refresh 토큰(서버 계약 필요).
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.
