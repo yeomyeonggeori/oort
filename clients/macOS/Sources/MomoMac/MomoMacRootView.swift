@@ -22,6 +22,8 @@ public struct MomoMacRootView: View {
     @State private var detailPane: MomoMacDetailPane = .alpha
     @State private var selectedProfileMemberID: MemberID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
+    @State private var showKeyboardShortcuts = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     private let sessionChrome: MomoSessionChrome?
@@ -70,6 +72,33 @@ public struct MomoMacRootView: View {
         .navigationSplitViewStyle(.balanced)
         .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(appearance.colorScheme)
+        .focusedSceneValue(\.momoMacCommandActions, commandActions)
+        .overlay {
+            if quickSwitcherPresentation.isPresented {
+                ZStack {
+                    MomoTheme.modalScrim
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            quickSwitcherPresentation.dismiss()
+                        }
+
+                    MomoQuickSwitcherView(
+                        viewModel: viewModel,
+                        copy: copy,
+                        activate: activateQuickSwitcherDestination,
+                        dismiss: {
+                            quickSwitcherPresentation.dismiss()
+                        }
+                    )
+                    .padding(MomoTheme.QuickSwitcher.edgeInset)
+                }
+                .accessibilityAddTraits(.isModal)
+            }
+        }
+        .sheet(isPresented: $showKeyboardShortcuts) {
+            MomoKeyboardShortcutsView(copy: copy)
+        }
     }
 
     private func detailLayout(
@@ -280,6 +309,46 @@ public struct MomoMacRootView: View {
 
     private var appearance: MomoAppearancePreference {
         MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
+    }
+
+    private var commandActions: MomoMacCommandActions {
+        MomoMacCommandActions(
+            language: language,
+            channelCount: viewModel.sidebarChannelOrder.orderedChannels.count,
+            canNavigateBackward: viewModel.canNavigateChannelHistoryBackward,
+            canNavigateForward: viewModel.canNavigateChannelHistoryForward,
+            presentQuickSwitcher: {
+                showKeyboardShortcuts = false
+                quickSwitcherPresentation.toggle()
+            },
+            selectChannel: { number in
+                quickSwitcherPresentation.dismiss()
+                Task { await viewModel.selectChannel(shortcutNumber: number) }
+            },
+            navigateBackward: {
+                quickSwitcherPresentation.dismiss()
+                Task { await viewModel.navigateChannelHistoryBackward() }
+            },
+            navigateForward: {
+                quickSwitcherPresentation.dismiss()
+                Task { await viewModel.navigateChannelHistoryForward() }
+            },
+            presentShortcutHelp: {
+                quickSwitcherPresentation.dismiss()
+                showKeyboardShortcuts = true
+            }
+        )
+    }
+
+    private func activateQuickSwitcherDestination(_ destination: MomoQuickSwitcherDestination) {
+        quickSwitcherPresentation.dismiss()
+        switch destination {
+        case .channel(let id):
+            Task { await viewModel.selectChannel(id) }
+        case .member(let id):
+            selectedProfileMemberID = id
+            openDetailPane(.memberProfile)
+        }
     }
 }
 

@@ -76,6 +76,26 @@ public enum MomoTheme {
         public static let hoverBackground = Color.primary.opacity(0.06)
         public static let utilityBackground = Color.primary.opacity(0.045)
     }
+
+    public enum QuickSwitcher {
+        public static let panelWidth: CGFloat = 560
+        public static let resultsMinimumHeight: CGFloat = 280
+        public static let resultsMaximumHeight: CGFloat = 360
+        public static let sectionHeaderHeight: CGFloat = 24
+        public static let shortcutsWidth: CGFloat = 480
+        public static let shortcutsHeight: CGFloat = 440
+        public static let rowMinimumHeight: CGFloat = 44
+        public static let iconSize: CGFloat = 24
+        public static let panelCornerRadius: CGFloat = 14
+        public static let rowCornerRadius: CGFloat = 6
+
+        public static let edgeInset: CGFloat = 16
+        public static let sectionSpacing: CGFloat = 16
+        public static let standardSpacing: CGFloat = 8
+        public static let compactSpacing: CGFloat = 4
+        public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
+        public static let hoverBackground = Color.primary.opacity(0.06)
+    }
 }
 
 // MARK: - micro_usd formatting (display only; never accounting math — L4 §8.5)

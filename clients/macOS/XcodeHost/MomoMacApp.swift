@@ -12,6 +12,7 @@ struct MomoMacApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             SidebarCommands()
+            MomoMacCommands()
         }
     }
 }

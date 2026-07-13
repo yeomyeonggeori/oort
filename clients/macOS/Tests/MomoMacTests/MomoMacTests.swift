@@ -34,14 +34,25 @@ final class MomoMacTests: XCTestCase {
 
     func testSidebarSeparatesDirectMessagesFromChannels() {
         let workspace = WorkspaceID()
-        let channels = [
-            Channel(id: ChannelID(), workspaceId: workspace, kind: .publicChannel, name: "general"),
-            Channel(id: ChannelID(), workspaceId: workspace, kind: .privateChannel, name: "launch"),
-            Channel(id: ChannelID(), workspaceId: workspace, kind: .dm),
-        ]
+        let general = Channel(id: ChannelID(), workspaceId: workspace, kind: .publicChannel, name: "general")
+        let launch = Channel(id: ChannelID(), workspaceId: workspace, kind: .privateChannel, name: "launch")
+        let directMessage = Channel(id: ChannelID(), workspaceId: workspace, kind: .dm)
+        let archived = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            name: "archive",
+            archivedAtMs: 1
+        )
+        let channelOrder = MomoSidebarPolicy.channelOrder(from: [directMessage, archived, general, launch])
 
-        XCTAssertEqual(MomoSidebarPolicy.standardChannels(from: channels).map(\.kind), [.publicChannel, .privateChannel])
-        XCTAssertEqual(MomoSidebarPolicy.directMessages(from: channels).map(\.kind), [.dm])
+        XCTAssertEqual(channelOrder.standardChannels.map(\.id), [general.id, launch.id])
+        XCTAssertEqual(channelOrder.directMessages.map(\.id), [directMessage.id])
+        XCTAssertEqual(
+            channelOrder.orderedChannels.map(\.id),
+            [general.id, launch.id, directMessage.id]
+        )
+        XCTAssertFalse(channelOrder.orderedChannels.contains { $0.id == archived.id })
     }
 
     func testServerRosterPresenceRemainsHiddenUntilRealtimePresenceExists() {
