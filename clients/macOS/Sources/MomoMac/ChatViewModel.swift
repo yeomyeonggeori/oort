@@ -90,6 +90,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var members: [Member] = []
     @Published public private(set) var channels: [Channel] = []
     @Published public var selectedChannelId: ChannelID?
+    @Published public private(set) var recentChannelIds: [ChannelID] = []
 
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
@@ -132,6 +133,8 @@ public final class ChatViewModel: ObservableObject {
 
     private var channelSubscription: Task<Void, Never>?
     private var realtimeStatusSubscription: Task<Void, Never>?
+    private var channelNavigationHistory: [ChannelID] = []
+    private var channelNavigationIndex: Int?
     private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
     private var localTypingChannels: Set<ChannelID> = []
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
@@ -175,6 +178,9 @@ public final class ChatViewModel: ObservableObject {
             if selectedChannelId == nil {
                 self.selectedChannelId = channels.first?.id
             }
+            if let selectedChannelId {
+                recordChannelSelection(selectedChannelId)
+            }
             self.connectionError = nil
         } catch {
             self.connectionError = String(describing: error)
@@ -196,6 +202,9 @@ public final class ChatViewModel: ObservableObject {
         members = []
         channels = []
         selectedChannelId = nil
+        recentChannelIds = []
+        channelNavigationHistory = []
+        channelNavigationIndex = nil
         messagesByChannel = [:]
         historyLoadingChannels = []
         partials = [:]
@@ -245,7 +254,12 @@ public final class ChatViewModel: ObservableObject {
     /// Inject channels (stub seeding path; real backend fetches them over REST).
     public func setChannels(_ channels: [Channel]) {
         self.channels = channels
-        if selectedChannelId == nil { selectedChannelId = channels.first?.id }
+        if selectedChannelId == nil {
+            selectedChannelId = channels.first?.id
+        }
+        if let selectedChannelId {
+            recordChannelSelection(selectedChannelId)
+        }
     }
 
     public func createChannel(kind: ChannelKind, name: String, topic: String? = nil) async {
@@ -288,11 +302,94 @@ public final class ChatViewModel: ObservableObject {
 
     /// Select a channel: load history + (re)subscribe to its realtime stream.
     public func selectChannel(_ id: ChannelID) async {
+        recordChannelSelection(id)
+        await activateChannel(id)
+    }
+
+    public var canNavigateChannelHistoryBackward: Bool {
+        guard let channelNavigationIndex else { return false }
+        return channelNavigationIndex > channelNavigationHistory.startIndex
+    }
+
+    public var canNavigateChannelHistoryForward: Bool {
+        guard let channelNavigationIndex else { return false }
+        return channelNavigationIndex < channelNavigationHistory.index(before: channelNavigationHistory.endIndex)
+    }
+
+    /// The ordered channel collection shared by quick-switcher badges and Cmd+1...9.
+    /// Archived channels stay out of both the visible result list and keyboard targets.
+    public var quickSwitcherChannels: [Channel] {
+        channels.filter { !$0.isArchived }
+    }
+
+    public func navigateChannelHistoryBackward() async {
+        guard canNavigateChannelHistoryBackward, let channelNavigationIndex else { return }
+        let destinationIndex = self.channelNavigationHistory.index(before: channelNavigationIndex)
+        self.channelNavigationIndex = destinationIndex
+        let id = channelNavigationHistory[destinationIndex]
+        recordRecentChannel(id)
+        await activateChannel(id)
+    }
+
+    public func navigateChannelHistoryForward() async {
+        guard canNavigateChannelHistoryForward, let channelNavigationIndex else { return }
+        let destinationIndex = self.channelNavigationHistory.index(after: channelNavigationIndex)
+        self.channelNavigationIndex = destinationIndex
+        let id = channelNavigationHistory[destinationIndex]
+        recordRecentChannel(id)
+        await activateChannel(id)
+    }
+
+    @discardableResult
+    public func selectChannel(shortcutNumber: Int) async -> Bool {
+        let shortcutChannels = quickSwitcherChannels
+        guard (1...9).contains(shortcutNumber), shortcutChannels.indices.contains(shortcutNumber - 1) else {
+            return false
+        }
+        await selectChannel(shortcutChannels[shortcutNumber - 1].id)
+        return true
+    }
+
+    private func activateChannel(_ id: ChannelID) async {
         selectedChannelId = id
         await loadHistory(channel: id)
+        guard selectedChannelId == id else { return }
         await refreshCostSnapshots(channel: id)
+        guard selectedChannelId == id else { return }
         subscribe(channel: id)
         await refreshLocalContextCopilotPreview()
+    }
+
+    private func recordChannelSelection(_ id: ChannelID) {
+        recordRecentChannel(id)
+
+        if channelNavigationHistory.isEmpty {
+            channelNavigationHistory = [id]
+            channelNavigationIndex = channelNavigationHistory.startIndex
+            return
+        }
+
+        if let channelNavigationIndex,
+           channelNavigationHistory[channelNavigationIndex] == id {
+            return
+        }
+
+        if let channelNavigationIndex,
+           channelNavigationIndex < channelNavigationHistory.index(before: channelNavigationHistory.endIndex) {
+            channelNavigationHistory.removeSubrange(
+                channelNavigationHistory.index(after: channelNavigationIndex)..<channelNavigationHistory.endIndex
+            )
+        }
+        channelNavigationHistory.append(id)
+        channelNavigationIndex = channelNavigationHistory.index(before: channelNavigationHistory.endIndex)
+    }
+
+    private func recordRecentChannel(_ id: ChannelID) {
+        recentChannelIds.removeAll { $0 == id }
+        recentChannelIds.insert(id, at: recentChannelIds.startIndex)
+        if recentChannelIds.count > 9 {
+            recentChannelIds.removeLast(recentChannelIds.count - 9)
+        }
     }
 
     private func loadHistory(channel: ChannelID) async {

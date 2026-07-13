@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-358 UI W1 Quick Switcher + Keyboard Navigation (2026-07-13)
+
+- macOS 앱에 즉시 포커스되는 `Cmd+K` 퀵 스위처를 추가해 최근 채널 우선 fuzzy 검색과 현재 채널의 active roster 멤버 검색을 제공한다. 채널 선택은 타임라인으로, 멤버 선택은 프로필로 이동하며 invited active membership만 노출한다.
+- `Cmd+1...9`는 화면에 표시되는 non-archived 채널 순서와 동일한 대상을 열고, `Cmd+[`/`Cmd+]` 채널 히스토리와 `Cmd+/` 단축키 도움말을 두 앱 host의 scene commands에 연결했다. 화살표/Enter/Esc와 VoiceOver 선택 포커스도 지원한다.
+- 검증: macOS `swift build --disable-sandbox` PASS, 비스냅샷 93 tests PASS, quick switcher/help light·dark snapshot 4 tests compile+reference-wait skip, 변경 파일 design pre-flight PASS, fresh static design-review PASS(Blocker/High/Medium/Nitpick 0). 신규 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-357 UI W1 App Shell + Sidebar (2026-07-13)
 
 - macOS 앱 셸을 `NavigationSplitView`와 min/ideal/max Theme 폭 토큰으로 전환하고, 사이드바 주 계층을 워크스페이스/채널/DM/멤버로 재구성했다. 승인함과 개발 도구는 하단 유틸리티로 내렸고 멤버 액션은 hover/context menu에서만 노출한다.
