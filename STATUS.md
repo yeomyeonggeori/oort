@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-359 Message Timeline Density + Grouping (2026-07-13)
+
+- macOS 타임라인은 기존 `message.seq` 입력 순서를 바꾸지 않는 표시 전용 5분 작성자 그룹과 day divider를 사용하며, 그룹 첫 행만 아바타·이름·상시 타임스탬프를 표시하고 compact 행은 hover 타임스탬프를 표시한다.
+- 새 내용은 사용자가 이미 하단에 있을 때만 따라가고 위를 읽는 중에는 위치를 유지한다. hover/키보드 포커스 액션은 실제 pasteboard 복사만 제공하며 AGENT 배지와 status/partial 카드는 독립 행으로 유지한다.
+- 검증: macOS build, 비스냅샷 85 tests, 신규 timeline snapshot 3 tests(light/dark 정본 대기 2 skip + 양 모드 agent/status raster 1 PASS), 변경 표면 design pre-flight PASS. 기존 전체 image snapshot suite는 sandbox `NSImage` signal 5로 중단됐고 정본 PNG·clean `macos-ui`·런타임은 오케스트레이터 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-361 Phase A Deploy Bundle + Operator Runbooks (2026-07-13)
 
 - source checkout·populated `.env`를 고정 allowlist에서 배제하고 symlink/실 secret template을 fail-closed하는 deploy bundle packer와 합성 fixture 회귀 테스트를 추가했다. AWS provision→두 preflight→bundle 반입→pull/migrate/up→verify→digest rollback 및 10인 invite/Hermes 승인 운영 절차를 runbook 두 개로 고정했다.

@@ -3,15 +3,18 @@ import MomoCore
 
 // MARK: - MessageListView  (seq-ordered)
 //
-// The channel timeline. Ordering authority is Message.seq (L4 §1.2 #3) — the
+// The channel timeline. Ordering authority is Message.seq (L4 §1.2 #3): the
 // ViewModel keeps messages seq-sorted, this view just renders them oldest→newest
 // and pins live agent partials at the bottom (AgentPartialView). Includes a small
 // composer wired to optimistic send.
 
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
+    @FocusState private var isComposerFocused: Bool
+    @State private var isPinnedToTimelineBottom = true
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -24,7 +27,7 @@ public struct MessageListView: View {
             header(copy: copy)
             if showQuickStart {
                 quickStartCard(copy: copy)
-                    .padding(.horizontal, 14)
+                    .padding(.horizontal, 16)
                     .padding(.bottom, 12)
             }
             if let status = viewModel.selectedRealtimeStatus {
@@ -45,7 +48,7 @@ public struct MessageListView: View {
         }
     }
 
-    // MARK: Header (cost chip — experience B social signal)
+    // MARK: Header (cost chip, experience B social signal)
 
     private var language: MomoUILanguage {
         MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
@@ -58,7 +61,7 @@ public struct MessageListView: View {
                 Image(systemName: channel.kind == .dm ? "person.2.fill" : "number")
                     .foregroundStyle(.secondary)
                 Text(channel.name ?? "DM")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.title3.weight(.semibold))
                 if let topic = channel.topic {
                     Text(topic)
                         .font(.callout)
@@ -78,24 +81,24 @@ public struct MessageListView: View {
                     .foregroundStyle(MomoTheme.costAmber)
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 15)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
     }
 
     private func quickStartCard(copy: MomoWorkspaceCopy) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        HStack(alignment: .top, spacing: 16) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
                     .fill(MomoTheme.agentAccent.opacity(0.18))
                 Image(systemName: "sparkles")
                     .foregroundStyle(MomoTheme.agentAccent)
-                    .font(.system(size: 17, weight: .bold))
+                    .font(.body.weight(.bold))
             }
-            .frame(width: 36, height: 36)
+            .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(copy.quickStartTitle)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.body.weight(.semibold))
                 Text(copy.quickStartSubtitle)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -137,11 +140,11 @@ public struct MessageListView: View {
             .foregroundStyle(.secondary)
             .help(copy.dismissGuide)
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
         }
     }
 
@@ -149,7 +152,7 @@ public struct MessageListView: View {
         HStack(spacing: 8) {
             Image(systemName: statusIcon(status))
                 .foregroundStyle(statusColor(status))
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(statusTitle(status, copy: copy))
                     .font(.caption.weight(.semibold))
                 if let message = status.message, !message.isEmpty, !status.isLive {
@@ -171,15 +174,15 @@ public struct MessageListView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .background(statusColor(status).opacity(0.08))
     }
 
     private func connectionBanner(_ error: String, copy: MomoWorkspaceCopy) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 1) {
+                .foregroundStyle(MomoTheme.costAmber)
+            VStack(alignment: .leading, spacing: 4) {
                 Text(copy.recoverableError)
                     .font(.caption.weight(.semibold))
                 Text(error)
@@ -204,8 +207,8 @@ public struct MessageListView: View {
             .help(copy.dismiss)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.orange.opacity(0.08))
+        .padding(.vertical, 4)
+        .background(MomoTheme.costAmber.opacity(0.08))
     }
 
     private func mentionNoticeBanner(_ notice: String) -> some View {
@@ -219,7 +222,7 @@ public struct MessageListView: View {
             Spacer()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.vertical, 4)
         .background(MomoTheme.agentAccent.opacity(0.08))
     }
 
@@ -258,68 +261,130 @@ public struct MessageListView: View {
     }
 
     private func statusColor(_ status: RealtimeConnectionStatus) -> Color {
-        if status.isLive { return .green }
+        if status.isLive { return MomoTheme.reversibleGreen }
         switch status.connection {
         case .connecting, .reconnecting:
-            return .blue
+            return MomoTheme.agentAccent
         case .error:
-            return .orange
+            return MomoTheme.costAmber
         case .offline, .disabled:
             return .secondary
         case .connected:
-            return status.subscription == .error ? .orange : .blue
+            return status.subscription == .error ? MomoTheme.costAmber : MomoTheme.agentAccent
         }
     }
 
     // MARK: Timeline (seq order)
 
     private func timeline(copy: MomoWorkspaceCopy) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(viewModel.visibleMessages) { message in
-                        MessageBubble(
-                            message: message,
-                            author: viewModel.member(message.authorMemberId),
-                            cost: costSnapshot(for: message),
-                            approvalStatus: viewModel.approvalStatus(for: message),
-                            isApprovalDecisionInFlight: viewModel.isApprovalDecisionInFlight(for: message),
-                            onApprovalDecision: { approvalId, approve in
-                                Task { await viewModel.decideApproval(approvalId, approve: approve) }
+        let items = MessageTimelineLayout.items(messages: viewModel.visibleMessages)
+        return GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if viewModel.selectedChannelId != nil,
+                           items.isEmpty,
+                           livePartials.isEmpty,
+                           viewModel.visibleWorkingAgents.isEmpty {
+                            if viewModel.isSelectedChannelHistoryLoading {
+                                TimelineLoadingState(copy: copy)
+                            } else {
+                                TimelineEmptyState(copy: copy) {
+                                    isComposerFocused = true
+                                }
                             }
-                        )
-                        .id(message.id)
-                    }
+                        }
 
-                    // Live agent partials for the selected channel, pinned at the bottom.
-                    ForEach(livePartials, id: \.runId) { partial in
-                        AgentPartialView(
-                            partial: partial,
-                            author: partialAuthor(for: partial),
-                            status: viewModel.agentStatuses[partial.runId]
-                        )
-                    }
+                        ForEach(items) { item in
+                            if item.startsDay, let day = item.day {
+                                TimelineDayDivider(day: day)
+                            }
 
-                    ForEach(viewModel.visibleWorkingAgents) { agent in
-                        AgentWorkingTimelineRow(agent: agent, copy: copy)
-                            .id("working-\(agent.id.description)")
-                    }
+                            MessageBubble(
+                                message: item.message,
+                                author: viewModel.member(item.message.authorMemberId),
+                                cost: costSnapshot(for: item.message),
+                                approvalStatus: viewModel.approvalStatus(for: item.message),
+                                isApprovalDecisionInFlight: viewModel.isApprovalDecisionInFlight(for: item.message),
+                                onApprovalDecision: { approvalId, approve in
+                                    Task { await viewModel.decideApproval(approvalId, approve: approve) }
+                                },
+                                groupingStyle: item.startsGroup ? .groupStart : .compact,
+                                timelineCopy: copy
+                            )
+                            .padding(.top, item.startsGroup ? 8 : 0)
+                            .id(item.id)
+                        }
 
-                    Color.clear
-                        .frame(height: 1)
-                        .id("timeline-bottom")
+                        // Live agent partial/status cards remain first-class rows below durable seq-ordered messages.
+                        ForEach(livePartials, id: \.runId) { partial in
+                            AgentPartialView(
+                                partial: partial,
+                                author: partialAuthor(for: partial),
+                                status: viewModel.agentStatuses[partial.runId]
+                            )
+                            .padding(.top, 8)
+                        }
+
+                        ForEach(viewModel.visibleWorkingAgents) { agent in
+                            AgentWorkingTimelineRow(agent: agent, copy: copy)
+                                .padding(.top, 8)
+                                .id("working-\(agent.id.description)")
+                        }
+
+                        timelineBottomSentinel
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-            .onChange(of: viewModel.visibleMessages.count) { _, _ in
-                if let last = viewModel.visibleMessages.last {
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                .coordinateSpace(name: TimelineCoordinateSpace.name)
+                .onPreferenceChange(TimelineBottomPreferenceKey.self) { bottom in
+                    isPinnedToTimelineBottom = bottom <= viewport.size.height + 32
+                }
+                .onChange(of: viewModel.selectedChannelId) { _, _ in
+                    isPinnedToTimelineBottom = true
+                    scrollToTimelineBottom(proxy)
+                }
+                .onChange(of: viewModel.visibleMessages.last?.id) { _, _ in
+                    followNewTimelineContentIfNeeded(proxy)
+                }
+                .onChange(of: livePartials) { _, _ in
+                    followNewTimelineContentIfNeeded(proxy)
+                }
+                .onChange(of: viewModel.visibleWorkingAgents.map(\.id)) { _, _ in
+                    followNewTimelineContentIfNeeded(proxy)
                 }
             }
-            .onChange(of: viewModel.visibleWorkingAgents.map(\.id)) { _, ids in
-                guard !ids.isEmpty else { return }
-                withAnimation { proxy.scrollTo("timeline-bottom", anchor: .bottom) }
+        }
+    }
+
+    private var timelineBottomSentinel: some View {
+        Color.clear
+            .frame(height: 4)
+            .background {
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: TimelineBottomPreferenceKey.self,
+                        value: geometry.frame(in: .named(TimelineCoordinateSpace.name)).maxY
+                    )
+                }
+            }
+            .id(TimelineCoordinateSpace.bottomID)
+    }
+
+    private func followNewTimelineContentIfNeeded(_ proxy: ScrollViewProxy) {
+        guard MessageTimelineScrollPolicy.shouldFollowNewContent(wasAtBottom: isPinnedToTimelineBottom) else {
+            return
+        }
+        scrollToTimelineBottom(proxy)
+    }
+
+    private func scrollToTimelineBottom(_ proxy: ScrollViewProxy) {
+        if reduceMotion {
+            proxy.scrollTo(TimelineCoordinateSpace.bottomID, anchor: .bottom)
+        } else {
+            withAnimation(.snappy) {
+                proxy.scrollTo(TimelineCoordinateSpace.bottomID, anchor: .bottom)
             }
         }
     }
@@ -342,6 +407,7 @@ public struct MessageListView: View {
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...5)
                     .font(.body)
+                    .focused($isComposerFocused)
                     .onSubmit(submit)
                     .onChange(of: viewModel.composerDraft) { _, draft in
                         viewModel.composerDraftDidChange(draft)
@@ -353,12 +419,12 @@ public struct MessageListView: View {
                           || viewModel.selectedChannelId == nil)
             }
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 12)
     }
 
     private func typingIndicator(copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: 7) {
+        HStack(spacing: 8) {
             Image(systemName: "ellipsis.bubble.fill")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(MomoTheme.humanAccent)
@@ -368,8 +434,8 @@ public struct MessageListView: View {
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
         .background(MomoTheme.humanAccent.opacity(0.08), in: Capsule())
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -384,9 +450,9 @@ public struct MessageListView: View {
                 Button {
                     viewModel.completeMentionAutocomplete(with: member)
                 } label: {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         MentionCandidateAvatar(member: member, isWorking: viewModel.isAgentWorking(member))
-                        VStack(alignment: .leading, spacing: 1) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(member.displayName)
                                 .font(.callout.weight(.semibold))
                             Text("@\(member.handle) · \(member.isAgent ? copy.agent : copy.human)")
@@ -397,25 +463,24 @@ public struct MessageListView: View {
                         if member.isAgent {
                             Text("AGENT")
                                 .font(.caption2.weight(.bold))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 2)
+                                .padding(.horizontal, 4)
                                 .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
                                 .foregroundStyle(MomoTheme.agentAccent)
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(6)
-        .frame(width: 300, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(8)
+        .frame(width: MomoTheme.mentionAutocompleteWidth, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(.white.opacity(0.10), lineWidth: 1)
+            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
+                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
         }
     }
 
@@ -459,22 +524,83 @@ public struct MessageListView: View {
     }
 }
 
+private enum TimelineCoordinateSpace {
+    static let name = "momo-message-timeline"
+    static let bottomID = "timeline-bottom"
+}
+
+private struct TimelineBottomPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = .greatestFiniteMagnitude
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+struct TimelineDayDivider: View {
+    let day: Date
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Divider adopts vertical orientation inside HStack; a 1pt semantic rule keeps the day separator horizontal.
+            Color.secondary.opacity(0.20)
+                .frame(height: 1)
+            Text(day, format: .dateTime.weekday(.wide).month().day())
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .fixedSize()
+            Color.secondary.opacity(0.20)
+                .frame(height: 1)
+        }
+        .padding(.vertical, 16)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct TimelineEmptyState: View {
+    let copy: MomoWorkspaceCopy
+    let focusComposer: () -> Void
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(copy.timelineEmptyTitle)
+                .font(.body.weight(.semibold))
+            Button(copy.timelineEmptyAction, action: focusComposer)
+                .buttonStyle(.link)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 32)
+    }
+}
+
+private struct TimelineLoadingState: View {
+    let copy: MomoWorkspaceCopy
+
+    var body: some View {
+        Label(copy.timelineLoading, systemImage: "clock")
+            .font(.body)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 32)
+    }
+}
+
 private struct MomoGuideStepPill: View {
     var index: Int
     var title: String
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Text("\(index)")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.white)
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(MomoTheme.onAccent)
                 .frame(width: 16, height: 16)
                 .background(MomoTheme.humanAccent, in: Circle())
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .lineLimit(1)
         }
-        .padding(.horizontal, 7)
+        .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .background(.thinMaterial, in: Capsule())
     }
@@ -485,10 +611,10 @@ private struct AgentWorkingTimelineRow: View {
     var copy: MomoWorkspaceCopy
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             ProgressView()
                 .controlSize(.small)
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(copy.agentWorkingTitle(agent.displayName))
                     .font(.callout.weight(.semibold))
                 Text(copy.agentWorkingSubtitle)
@@ -498,10 +624,10 @@ private struct AgentWorkingTimelineRow: View {
             Spacer()
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(MomoTheme.agentAccent.opacity(0.09), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(.vertical, 8)
+        .background(MomoTheme.agentAccent.opacity(0.09), in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
                 .stroke(MomoTheme.agentAccent.opacity(0.16), lineWidth: 1)
         }
     }
@@ -522,13 +648,13 @@ private struct MentionCandidateAvatar: View {
         ZStack(alignment: .bottomTrailing) {
             Text(initials)
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 28, height: 28)
+                .foregroundStyle(MomoTheme.onAccent)
+                .frame(width: MomoTheme.messageAvatarSize, height: MomoTheme.messageAvatarSize)
                 .background(member.isAgent ? MomoTheme.agentAccent : MomoTheme.humanAccent, in: Circle())
             Circle()
-                .fill(isWorking ? MomoTheme.costAmber : .green)
+                .fill(isWorking ? MomoTheme.costAmber : .secondary)
                 .frame(width: 8, height: 8)
-                .overlay(Circle().stroke(.black.opacity(0.35), lineWidth: 1))
+                .overlay(Circle().stroke(MomoTheme.subtleBorder, lineWidth: 1))
         }
     }
 }

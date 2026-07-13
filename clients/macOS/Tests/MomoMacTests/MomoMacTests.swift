@@ -627,6 +627,32 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoadingAgentCredentials(for: agent))
     }
 
+    @MainActor
+    func testChannelHistoryLoadingStateCoversAwaitedHistoryRequest() async {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let member = MemberID()
+        let backend = ControlledCredentialRefreshBackend(agent: member)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+        viewModel.setChannels([
+            Channel(
+                id: channel,
+                workspaceId: workspace,
+                kind: .publicChannel,
+                name: "release-room",
+                createdBy: member
+            ),
+        ])
+
+        let selection = Task { await viewModel.selectChannel(channel) }
+        await backend.waitForHistoryCallCount(1)
+
+        XCTAssertTrue(viewModel.isSelectedChannelHistoryLoading)
+        await backend.releaseNextHistoryCall()
+        await selection.value
+        XCTAssertFalse(viewModel.isSelectedChannelHistoryLoading)
+    }
+
     func testAgentPairingEndpointPolicyFailsClosedForNonLoopbackHTTP() {
         let blocked = MomoAgentPairingSecurity.endpointPolicy(
             "http://192.168.0.2:28188/v1",
@@ -3070,6 +3096,9 @@ private actor ControlledCredentialRefreshBackend: ChatBackend, AgentTransport, M
     private var listCallWaiters: [CallWaiter] = []
     private var issueCallWaiters: [CallWaiter] = []
     private var listCallReleases: [CheckedContinuation<Void, Never>] = []
+    private var historyCalls = 0
+    private var historyCallWaiters: [CallWaiter] = []
+    private var historyCallReleases: [CheckedContinuation<Void, Never>] = []
 
     init(agent: MemberID) {
         self.agent = agent
@@ -3089,8 +3118,19 @@ private actor ControlledCredentialRefreshBackend: ChatBackend, AgentTransport, M
         }
     }
 
+    func waitForHistoryCallCount(_ target: Int) async {
+        guard historyCalls < target else { return }
+        await withCheckedContinuation { continuation in
+            historyCallWaiters.append(CallWaiter(target: target, continuation: continuation))
+        }
+    }
+
     func releaseNextListCall() {
         listCallReleases.removeFirst().resume()
+    }
+
+    func releaseNextHistoryCall() {
+        historyCallReleases.removeFirst().resume()
     }
 
     func listCallCount() -> Int {
@@ -3165,7 +3205,14 @@ private actor ControlledCredentialRefreshBackend: ChatBackend, AgentTransport, M
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
         AsyncStream { $0.finish() }
     }
-    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] { [] }
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        historyCalls += 1
+        resumeSatisfiedWaiters(&historyCallWaiters, count: historyCalls)
+        await withCheckedContinuation { continuation in
+            historyCallReleases.append(continuation)
+        }
+        return []
+    }
     func presence(channel: ChannelID) async throws -> [PresenceEntry] { [] }
     func members(workspace: WorkspaceID) async throws -> [Member] { [] }
     func channels(workspace: WorkspaceID) async throws -> [Channel] { [] }
