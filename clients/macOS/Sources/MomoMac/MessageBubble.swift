@@ -204,11 +204,11 @@ public struct MessageBubble: View {
             .buttonStyle(.borderless)
             .controlSize(.small)
             .focused($isCopyActionFocused)
-            .opacity(isHovered || isCopyActionFocused ? 1 : 0)
             .help(timelineCopy.copyMessage)
             .accessibilityLabel(timelineCopy.copyMessage)
             .padding(4)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner))
+            .opacity(isHovered || isCopyActionFocused ? 1 : 0)
         }
     }
 
