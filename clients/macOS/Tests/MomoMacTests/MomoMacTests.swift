@@ -154,6 +154,15 @@ final class MomoMacTests: XCTestCase {
         XCTAssertTrue(MomoUnreadKeyboardShortcut.modifiers.contains(.option))
         XCTAssertTrue(MomoUnreadKeyboardShortcut.modifiers.contains(.shift))
         XCTAssertFalse(MomoUnreadKeyboardShortcut.modifiers.contains(.command))
+
+        let shortcutItems = MomoKeyboardShortcutCatalog.items(copy: copy)
+        XCTAssertTrue(shortcutItems.contains { $0.key == "⇧⌘W" && $0.label == copy.startWork })
+        XCTAssertTrue(
+            shortcutItems.contains {
+                $0.key == MomoUnreadKeyboardShortcut.helpGlyphs
+                    && $0.label == copy.unreadChannelNavigation
+            }
+        )
     }
 
     // MARK: in-memory backend round-trip (proves ChatBackend conformance)

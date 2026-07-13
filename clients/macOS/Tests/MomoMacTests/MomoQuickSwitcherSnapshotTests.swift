@@ -83,7 +83,14 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            let ticket = testName.contains("Capability") ? "MOMO-365" : "MOMO-358"
+            let ticket: String
+            if testName.contains("Capability") {
+                ticket = "MOMO-365"
+            } else if testName.contains("Unread") {
+                ticket = "MOMO-367"
+            } else {
+                ticket = "MOMO-358"
+            }
             throw XCTSkip("Canonical \(ticket) snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
