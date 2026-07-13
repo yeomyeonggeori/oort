@@ -1731,12 +1731,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: 정본 PNG 2종 재기록(`6f00f05`, `MOMO_RECORD_SNAPSHOTS=1`) 후 멤버 행+`AGENT` 배지 픽셀 포함 육안 확인, 91 tests 0 fail/0 skip, worktree clean `macos-ui` gate PASS, PR #346 squash merge(`9ca9c93`), root post-merge full gate PASS(위 355 evidence와 동일 런) — **Phase 0 (354/355/356) 배치 종결 (2026-07-13)**.
   - design-review Medium 이월 기록(후속 후보, 성재 판단 대기): ① real-server presence 점이 `.online` 하드코딩 장식(ADR-0104 전까지 숨김/중립 권고) ② 비활성 멤버의 과거 메시지 author "unknown" 렌더(비활성 포함 조회 또는 payload 표시명 fallback) ③ `subscribe`/`presence`가 roster 로드 순서에 무음 의존(`cachedMembers ?? []`) ④ 신규 에러 카피에 다음 행동 부재 ⑤ 데모 시드 Hermes 노출 vs 페어링 카드 서사 불일치.
 
-### ☐ MOMO-357 수용기준 — UI W1 앱 셸·사이드바 Slack급 정비 `[swift/macos-ui]` · 의존: MOMO-354 (패킷 `2026-07-13-ui-wave1.md`)
-- [ ] 사이드바 섹션 계층 재정비: 워크스페이스 헤더 / 채널 / DM 자리 / 멤버, "개발 도구"·"에이전트 승인함"은 하단 유틸리티/메뉴로 강등. 데이터는 전부 기존 roster SoT 술어 — 새 REST/스키마 없음.
-- [ ] 행 문법 통일: 높이·패딩·타이포 Theme 토큰화, 액션은 hover 시에만 노출, 선택 상태 대비 강화, 사이드바 접기/최소 폭 정책.
-- [ ] real-server 세션 presence 점 하드코딩 `.online` 장식 제거(숨김 또는 중립) — MOMO-354 design-review Medium ① 해소, ADR-0104 전까지.
-- [ ] light/dark 스냅샷(NSHostingView 패턴) + 비스냅샷 테스트 green. 신규/변경 PNG는 오케스트레이터 정본 재기록 대기 명시.
-- [ ] momo-design-taste pre-flight 0 hit(토큰 밖 색/폰트/장식 status/카피 규칙), fresh design-review Blocker 0. `MessageListView`/`MessageBubble`은 수정하지 않는다(MOMO-359 경계).
+### ☑ MOMO-357 수용기준 — UI W1 앱 셸·사이드바 Slack급 정비 `[swift/macos-ui]` · 의존: MOMO-354 (패킷 `2026-07-13-ui-wave1.md`)
+- [x] 사이드바 섹션 계층 재정비: 워크스페이스 헤더 / 채널 / DM 자리 / 멤버, "개발 도구"·"에이전트 승인함"은 하단 유틸리티/메뉴로 강등. 데이터는 전부 기존 roster SoT 술어 — 새 REST/스키마 없음.
+- [x] 행 문법 통일: 높이·패딩·타이포 Theme 토큰화, 액션은 hover 시에만 노출, 선택 상태 대비 강화, 사이드바 접기/최소 폭 정책.
+- [x] real-server 세션 presence 점 하드코딩 `.online` 장식 제거(숨김 또는 중립) — MOMO-354 design-review Medium ① 해소, ADR-0104 전까지.
+- [x] light/dark 스냅샷(NSHostingView 패턴) + 비스냅샷 테스트 green. 신규/변경 PNG는 오케스트레이터 정본 재기록 대기 명시.
+- [x] momo-design-taste pre-flight 0 hit(토큰 밖 색/폰트/장식 status/카피 규칙), fresh design-review Blocker 0. `MessageListView`/`MessageBubble`은 수정하지 않는다(MOMO-359 경계).
+
+  - 오케스트레이터 종결: fresh design-review PASS(Blocker 0/High 1/Medium 3) → High(멤버 mutation 비마우스 경로)+gear hit-test+고아 PNG 2장 반려 수정, 정본 스냅샷 재기록 후 육안 확인(헤더/채널/DM/멤버/AGENT 배지/유틸리티 강등), 104 tests 0 fail, clean `macos-ui` gate PASS(스택 fingerprint recreate + verifier api 포트 점유 해소 후), PR #355 squash merge(`94e9244`). Theme.swift는 354의 adaptive `onAccent`/`subtleBorder`와 union 해소. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
+  - 이월 기록(후속 후보): profilePresenceBadge '나' 추정 휴리스틱, `subtlePanelBorder` 비적응형 white(라이트 모드 비가시), radius 스케일 전역 통합, min-width/대비/타입 변형 스냅샷.
 
 ### ☐ MOMO-358 수용기준 — UI W1 Cmd+K 퀵 스위처 `[swift/macos-ui]` · 의존: MOMO-357 (랜딩 후 스폰)
 - [ ] `Cmd+K` 오버레이: 채널/멤버 fuzzy 검색, ↑↓/Enter/Esc, 최근 채널 우선. 첫 프레임 지연 체감 0(P11, Raycast 문법).
@@ -1744,24 +1747,28 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 후보는 roster SoT 술어(멘션 후보와 동일)만 — 미초대 멤버 비노출.
 - [ ] light/dark 스냅샷 + 키보드 이벤트 단위 테스트 green, design-review Blocker 0.
 
-### ☐ MOMO-359 수용기준 — UI W1 메시지 타임라인 밀도·그루핑 `[swift/macos-ui]` · 의존: MOMO-354 (패킷 `2026-07-13-ui-wave1.md`)
-- [ ] 연속 작성자 그루핑(간격 임계 이내 compact 행, 아바타/이름 1회) — `message.seq` 순서 권위 불변, 그루핑은 표시 계층에서만.
-- [ ] day divider + 스크롤 정책(하단 고정 vs 위치 유지) 명시 구현.
-- [ ] hover 액션 바는 실기능만(복사 등) — 자리만 있는 버튼 금지. 타임스탬프는 그룹 첫 행 상시+compact 행 hover.
-- [ ] 에이전트 메시지 문법(AGENT 배지, MOMO-350 status/partial 카드)과 그루핑 비충돌 스냅샷 고정.
-- [ ] light/dark 스냅샷 + 비스냅샷 테스트 green, design-review Blocker 0. `ChannelListView`는 수정하지 않는다(MOMO-357 경계).
+### ☑ MOMO-359 수용기준 — UI W1 메시지 타임라인 밀도·그루핑 `[swift/macos-ui]` · 의존: MOMO-354 (패킷 `2026-07-13-ui-wave1.md`)
+- [x] 연속 작성자 그루핑(간격 임계 이내 compact 행, 아바타/이름 1회) — `message.seq` 순서 권위 불변, 그루핑은 표시 계층에서만.
+- [x] day divider + 스크롤 정책(하단 고정 vs 위치 유지) 명시 구현.
+- [x] hover 액션 바는 실기능만(복사 등) — 자리만 있는 버튼 금지. 타임스탬프는 그룹 첫 행 상시+compact 행 hover.
+- [x] 에이전트 메시지 문법(AGENT 배지, MOMO-350 status/partial 카드)과 그루핑 비충돌 스냅샷 고정.
+- [x] light/dark 스냅샷 + 비스냅샷 테스트 green, design-review Blocker 0. `ChannelListView`는 수정하지 않는다(MOMO-357 경계).
+  - 오케스트레이터 종결: fresh design-review FAIL(Blocker 1 — 복사 material 칩이 `.opacity` 밖이라 rest 상태 상시 노출) → 반려 수정(`ef21b52`) 후 timeline+bubble 정본 재기록·육안 확인(blob 소멸, day divider·그루핑·AGENT 카드 정상), 100 tests 0 fail, clean `macos-ui` gate PASS, PR #354 squash merge(`6b75260`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
+  - 이월 기록(후속 후보): own-send 하단 추적 예외(Wave 2에서 결정), agent+cost ring hover 겹침 라이브 확인, 로딩 clock→ProgressView, divider 연도 표기.
 
-### ☐ MOMO-360 수용기준 — Phase A GHCR 이미지 발행 워크플로 `[infra/tooling]` (패킷 `2026-07-13-phase-a-aws.md`)
-- [ ] `.github/workflows/publish-images.yml` — workflow_dispatch 전용(자동 트리거 금지), api/relay/worker/migrate 4종을 linux/arm64 buildx로 `ghcr.io/dawn-kim-official/momo-*:sha-<gitsha>` 불변 태그 push.
-- [ ] `docker-compose.prod.yml` 이미지 태그 env 주입 계약(`MOMO_IMAGE_TAG`류) 확인/보강 + 롤백=이전 digest 재실행 문서화, env example에 태그 키 추가.
-- [ ] 정적 검증만: workflow YAML 검증, `docker compose config` dry-run PASS. 이미지 실빌드/push/로컬 Docker 실행 금지.
-- [ ] `aws_internal_alpha_preflight.sh` evidence 계약 비파괴.
+### ☑ MOMO-360 수용기준 — Phase A GHCR 이미지 발행 워크플로 `[infra/tooling]` (패킷 `2026-07-13-phase-a-aws.md`)
+- [x] `.github/workflows/publish-images.yml` — workflow_dispatch 전용(자동 트리거 금지), api/relay/worker/migrate 4종을 linux/arm64 buildx로 `ghcr.io/dawn-kim-official/momo-*:sha-<gitsha>` 불변 태그 push.
+- [x] `docker-compose.prod.yml` 이미지 태그 env 주입 계약(`MOMO_IMAGE_TAG`류) 확인/보강 + 롤백=이전 digest 재실행 문서화, env example에 태그 키 추가.
+- [x] 정적 검증만: workflow YAML 검증, `docker compose config` dry-run PASS. 이미지 실빌드/push/로컬 Docker 실행 금지.
+- [x] `aws_internal_alpha_preflight.sh` evidence 계약 비파괴.
+  - 오케스트레이터 종결: 정적 계약(test_publish_images_contract.py)+preflight 2종(aws recommended PASS, internal-smoke PASS, secrets 템플릿은 main과 동일한 의도적 placeholder FAIL)+actionlint 직접 재검증, clean `runtime-agent` gate PASS, PR #352 squash merge(`6980e64`). 계획 이탈 승인: migrate는 기존 전용 Dockerfile 재사용. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
 
-### ☐ MOMO-361 수용기준 — Phase A 배포 번들 패커 + 운영 runbook `[docs/tooling]` (패킷 `2026-07-13-phase-a-aws.md`)
-- [ ] `scripts/make_deploy_bundle.sh` — compose/Caddy/centrifugo/env template/runbook만 패키징, 소스 체크아웃·secrets 실값 포함 시 fail-closed. `bash -n`+shellcheck+합성 fixture 테스트 PASS.
-- [ ] `docs/runbooks/aws-internal-alpha-deploy.md` — provision→preflight 2종→bundle 반입→pull&up→verify→롤백을 커맨드 단위로, `AWS_READY` 게이트 표 확인 단계 포함.
-- [ ] `docs/runbooks/internal-alpha-onboarding.md` — 채널 2+ 생성, invite 코드 발급(기존 REST), 앱 안내, Hermes 사용 규칙(승인 왕복) 1페이지.
-- [ ] non-goal 명시: 무중단 배포/split 토폴로지/iOS. AWS API 호출 없음.
+### ☑ MOMO-361 수용기준 — Phase A 배포 번들 패커 + 운영 runbook `[docs/tooling]` (패킷 `2026-07-13-phase-a-aws.md`)
+- [x] `scripts/make_deploy_bundle.sh` — compose/Caddy/centrifugo/env template/runbook만 패키징, 소스 체크아웃·secrets 실값 포함 시 fail-closed. `bash -n`+shellcheck+합성 fixture 테스트 PASS.
+- [x] `docs/runbooks/aws-internal-alpha-deploy.md` — provision→preflight 2종→bundle 반입→pull&up→verify→롤백을 커맨드 단위로, `AWS_READY` 게이트 표 확인 단계 포함.
+- [x] `docs/runbooks/internal-alpha-onboarding.md` — 채널 2+ 생성, invite 코드 발급(기존 REST), 앱 안내, Hermes 사용 규칙(승인 왕복) 1페이지.
+- [x] non-goal 명시: 무중단 배포/split 토폴로지/iOS. AWS API 호출 없음.
+  - 오케스트레이터 종결: 합성 fixture 테스트+실 repo 번들 생성(allowlist 7파일 일치) 직접 재검증, clean `runtime-agent` gate PASS(콜드 빌드 타임아웃 1회 후 재실행), PR #353 squash merge(`1c044e6`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
 
 ---
 

@@ -51,11 +51,11 @@
 | **Phase 0 dogfood 무결성** | issue `#343` 본문 | MOMO-356 `#343` (adapter 공지 유출 차단) | `done` (PR #344, `0a4bf37`) | 1 완료 |
 | Phase 0 dogfood 무결성 | issue `#342` 본문 | MOMO-355 `#342` (seed opt-in) | `done` (PR #345, `ac00ef3`) | 2 완료 |
 | Phase 0 dogfood 무결성 | issue `#341` 본문 | MOMO-354 `#341` (roster SoT) | `done` (PR #346, `9ca9c93`) — **배치 종결** | 3 완료 |
-| **UI Wave 1** | `2026-07-13-ui-wave1.md` | MOMO-357 `#347` (셸·사이드바) | `spawned` (2026-07-13) | 랜딩 후 358 스폰 |
-| UI Wave 1 | 같은 패킷 | MOMO-359 `#348` (타임라인 그루핑) | `spawned` (2026-07-13) | 병렬 |
-| UI Wave 1 | 같은 패킷 | MOMO-358 `#351` (Cmd+K 스위처) | `queued` — 357 랜딩 대기 | 후속 |
-| **Phase A AWS** | `2026-07-13-phase-a-aws.md` | MOMO-360 `#349` (이미지 발행 워크플로) | `spawned` (2026-07-13) | 병렬 |
-| Phase A AWS | 같은 패킷 | MOMO-361 `#350` (배포 번들+runbook) | `spawned` (2026-07-13) | 병렬 |
+| **UI Wave 1** | `2026-07-13-ui-wave1.md` | MOMO-357 `#347` (셸·사이드바) | `done` (PR #355, `94e9244`) — 리뷰 반려 1회(접근성 High) | 3 완료 |
+| UI Wave 1 | 같은 패킷 | MOMO-359 `#348` (타임라인 그루핑) | `done` (PR #354, `6b75260`) — 리뷰 반려 1회(Blocker: 복사 칩 상시 노출) | 4 완료 |
+| UI Wave 1 | 같은 패킷 | MOMO-358 `#351` (Cmd+K 스위처) | `spawned` (2026-07-13, 357 랜딩 후) | 진행 중 |
+| **Phase A AWS** | `2026-07-13-phase-a-aws.md` | MOMO-360 `#349` (이미지 발행 워크플로) | `done` (PR #352, `6980e64`) | 1 완료 |
+| Phase A AWS | 같은 패킷 | MOMO-361 `#350` (배포 번들+runbook) | `done` (PR #353, `1c044e6`) | 2 완료 |
 | Agent Work Surface | ADR-0111 파생 배치 표 | MOMO-362..365 | `unlocked` (ADR-0111 Accepted) — 현행 배치 랜딩 후 발급·스폰 | UI W1+Phase A 후 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
