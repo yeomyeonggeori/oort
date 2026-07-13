@@ -17,6 +17,7 @@ struct MomoQuickSwitcherItem: Identifiable, Hashable {
     var kind: Kind
     var title: String
     var subtitle: String?
+    var capabilities: [String] = []
     var shortcutNumber: Int?
     var isRecent: Bool
     var score: Int
@@ -96,6 +97,7 @@ enum MomoQuickSwitcherSearch {
                 kind: .member(isAgent: member.isAgent),
                 title: member.displayName,
                 subtitle: "@\(member.handle)",
+                capabilities: member.normalizedCapabilities,
                 shortcutNumber: nil,
                 isRecent: false,
                 score: score

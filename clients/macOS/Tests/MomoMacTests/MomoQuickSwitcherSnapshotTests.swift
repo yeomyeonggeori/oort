@@ -12,9 +12,12 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
     private let switcherSize = CGSize(width: 640, height: 600)
     private let shortcutsSize = CGSize(width: 520, height: 480)
 
-    private func switcherFixture(_ scheme: ColorScheme) async throws -> some View {
+    private func switcherFixture(
+        _ scheme: ColorScheme,
+        capabilitiesByHandle: [String: [String]] = [:]
+    ) async throws -> some View {
         let backend = LiveChatBackend()
-        let seed = await backend.seedDemo()
+        let seed = await backend.seedDemo(capabilitiesByHandle: capabilitiesByHandle)
         let viewModel = ChatViewModel(backend: backend)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot")
         let featureChannel = try XCTUnwrap(seed.channels.first { $0.name == "feature-pg18" })
@@ -80,7 +83,8 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            throw XCTSkip("Canonical MOMO-358 snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
+            let ticket = testName.contains("Capability") ? "MOMO-365" : "MOMO-358"
+            throw XCTSkip("Canonical \(ticket) snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
 
@@ -119,6 +123,46 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
         assertSnapshot(
             of: try render(shortcutsFixture(.dark), size: shortcutsSize, scheme: .dark),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark"
+        )
+    }
+
+    func testCapabilityQuickSwitcherLightSnapshot() async throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "light"
+        )
+        let fixture = try await switcherFixture(
+            .light,
+            capabilitiesByHandle: [
+                "hermes": ["code", "terminal", "docs"],
+                "buildbot": ["code", "terminal"],
+            ]
+        )
+        let image = try render(fixture, size: switcherSize, scheme: .light)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light"
+        )
+    }
+
+    func testCapabilityQuickSwitcherDarkSnapshot() async throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "dark"
+        )
+        let fixture = try await switcherFixture(
+            .dark,
+            capabilitiesByHandle: [
+                "hermes": ["code", "terminal", "docs"],
+                "buildbot": ["code", "terminal"],
+            ]
+        )
+        let image = try render(fixture, size: switcherSize, scheme: .dark)
+        assertSnapshot(
+            of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: "dark"
         )

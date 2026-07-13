@@ -96,6 +96,16 @@ public enum MomoTheme {
         public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
         public static let hoverBackground = Color.primary.opacity(0.06)
     }
+
+    /// Shared visual grammar for AGENT identity and capability metadata.
+    public enum AgentBadge {
+        public static let spacing: CGFloat = 4
+        public static let horizontalPadding: CGFloat = 4
+        public static let maximumCapabilityWidth: CGFloat = 80
+        public static let font = Font.caption2.weight(.semibold)
+        public static let identityBackground = MomoTheme.agentAccent.opacity(0.18)
+        public static let capabilityBackground = MomoTheme.agentAccent.opacity(0.12)
+    }
 }
 
 // MARK: - micro_usd formatting (display only; never accounting math — L4 §8.5)

@@ -831,6 +831,7 @@ private struct MemberDTO: Decodable {
     let handle: String
     let avatarUrl: String?
     let channelIds: [String]?
+    let capabilities: [String]?
 
     func member() throws -> Member {
         guard let memberID = MemberID(uuidString: id),
@@ -847,6 +848,7 @@ private struct MemberDTO: Decodable {
             handle: handle,
             avatarURL: avatarUrl.flatMap(URL.init(string:)),
             channelIds: (channelIds ?? []).compactMap { ChannelID(uuidString: $0) },
+            capabilities: capabilities ?? [],
             presence: .online
         )
     }

@@ -455,18 +455,20 @@ public struct MessageListView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(member.displayName)
                                 .font(.callout.weight(.semibold))
-                            Text("@\(member.handle) · \(member.isAgent ? copy.agent : copy.human)")
-                                .font(.caption.weight(.medium))
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: MomoTheme.AgentBadge.spacing) {
+                                Text("@\(member.handle) · \(member.isAgent ? copy.agent : copy.human)")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                if member.isAgent {
+                                    MomoAgentBadgeGroup(
+                                        capabilities: member.normalizedCapabilities,
+                                        maximumCapabilities: 1
+                                    )
+                                }
+                            }
                         }
                         Spacer()
-                        if member.isAgent {
-                            Text("AGENT")
-                                .font(.caption2.weight(.bold))
-                                .padding(.horizontal, 4)
-                                .background(MomoTheme.agentAccent.opacity(0.18), in: Capsule())
-                                .foregroundStyle(MomoTheme.agentAccent)
-                        }
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

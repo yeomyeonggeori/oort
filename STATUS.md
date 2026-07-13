@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-365 Work Capability Badges + Target Filter (2026-07-13)
+
+- roster가 `agent.config.capabilities` 문자열 배열만 read-through하고 MomoCore `Member`에 보존한다. 공용 AGENT/capability 배지를 사이드바·Cmd+K·멘션 후보·멤버 상세에 적용했으며 `schema_v0.sql`과 migration은 변경하지 않았다.
+- Work 후보는 MOMO-354의 선택 채널 active roster를 재사용해 capability 보유 에이전트만 명시 선택용으로 반환한다. 자동 라우팅과 MOMO-364의 Work 카드/컴포저는 추가하지 않았다.
+- 검증: Core/Server/macOS `swift build --disable-sandbox` PASS, Core 19·Server 68·macOS 비스냅샷 95 tests PASS, capability light/dark 래스터와 fresh static design-review PASS(Blocker/High/Medium 0). 신규 sidebar/Cmd+K light·dark 정본 PNG 4건 재기록과 DB/Docker/verifier/`local_gate.sh`/실 codex 실행은 오케스트레이터 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-363 Work v0 Codex Workbench Gateway Adapter (2026-07-13)
 
 - `adapters/codex-workbench/`가 scoped agent bearer로 Work job을 claim하고 host Codex `exec`/`resume`을 감싼다. read-only는 즉시 실행하며 workspace-write는 read-only 계획 세션 ID를 mode-0600 host state에 보존한 뒤 MOMO-362 승인 전에는 workspace-write로 실행하지 않고, network/danger 경로는 제공하지 않는다.

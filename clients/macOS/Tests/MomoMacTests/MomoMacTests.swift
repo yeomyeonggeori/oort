@@ -278,6 +278,57 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkAgentCandidatesRequireActiveChannelInviteAndCapability() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo(capabilitiesByHandle: [
+            "hermes": [" Code ", "terminal", "code"],
+            "buildbot": ["code"],
+        ])
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let general = try XCTUnwrap(seed.channels.first { $0.name == "general" })
+        await viewModel.selectChannel(general.id)
+
+        let hermes = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+        let uninvitedBuilder = try XCTUnwrap(seed.agents.first { $0.handle == "buildbot" })
+        XCTAssertEqual(viewModel.workAgentCandidates(requiring: "CODE").map(\.id), [hermes.id])
+        XCTAssertFalse(viewModel.workAgentCandidates().contains { $0.id == uninvitedBuilder.id })
+        XCTAssertEqual(viewModel.workAgentCandidates(requiring: "docs"), [])
+        XCTAssertEqual(viewModel.workAgentCandidates(requiring: "   "), [])
+
+        await viewModel.removeMember(hermes.id, from: general.id)
+        XCTAssertEqual(viewModel.workAgentCandidates(requiring: "code"), [])
+
+        let suspended = Member(
+            id: MemberID(),
+            workspaceId: seed.workspace,
+            kind: .agent,
+            status: .suspended,
+            displayName: "배포 도우미",
+            handle: "deploy-helper",
+            channelIds: [general.id],
+            capabilities: ["code"]
+        )
+        let humanWithCapability = Member(
+            id: MemberID(),
+            workspaceId: seed.workspace,
+            kind: .human,
+            displayName: "민지",
+            handle: "minji",
+            channelIds: [general.id],
+            capabilities: ["code"]
+        )
+        XCTAssertEqual(
+            MomoWorkAgentCandidateFilter.candidates(
+                from: [suspended, humanWithCapability],
+                in: general.id,
+                requiredCapability: "code"
+            ),
+            []
+        )
+    }
+
+    @MainActor
     func testManualAgentMentionRequiresChannelMembership() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -1569,6 +1620,7 @@ final class MomoMacTests: XCTestCase {
                       "status": "active",
                       "displayName": "Hermes",
                       "handle": "hermes",
+                      "capabilities": ["code", "terminal"],
                       "channelIds": ["\(channel.description)"]
                     },
                     {
@@ -1578,6 +1630,7 @@ final class MomoMacTests: XCTestCase {
                       "status": "active",
                       "displayName": "김인턴",
                       "handle": "kim-intern",
+                      "capabilities": ["code"],
                       "channelIds": ["\(ChannelID.demoAgentLab.description)"]
                     }
                   ]
@@ -1642,6 +1695,9 @@ final class MomoMacTests: XCTestCase {
         viewModel.composerDraft = "@"
         XCTAssertTrue(viewModel.mentionAutocompleteCandidates().contains { $0.id == invitedAgent })
         XCTAssertFalse(viewModel.mentionAutocompleteCandidates().contains { $0.id == uninvitedAgent })
+        XCTAssertEqual(viewModel.member(invitedAgent)?.normalizedCapabilities, ["code", "terminal"])
+        XCTAssertEqual(viewModel.workAgentCandidates(requiring: "terminal").map(\.id), [invitedAgent])
+        XCTAssertFalse(viewModel.workAgentCandidates(requiring: "code").contains { $0.id == uninvitedAgent })
         let message = try XCTUnwrap(viewModel.visibleMessages.first)
         XCTAssertEqual(viewModel.member(message.authorMemberId)?.displayName, "Hermes")
 

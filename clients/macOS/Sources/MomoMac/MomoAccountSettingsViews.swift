@@ -270,6 +270,13 @@ struct MomoMemberProfileSettingsSurface: View {
                             (copy.status, localizedPresence),
                         ])
 
+                        if member.isAgent, !member.normalizedCapabilities.isEmpty {
+                            MomoAgentBadgeGroup(
+                                capabilities: member.normalizedCapabilities,
+                                maximumCapabilities: 3
+                            )
+                        }
+
                         HStack(spacing: 8) {
                             Button {
                                 chooseProfileImage()

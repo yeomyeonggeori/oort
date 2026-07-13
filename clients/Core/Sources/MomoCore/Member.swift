@@ -15,6 +15,9 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
     /// Active channel memberships from roster projections. Login payloads may
     /// omit this and default to an empty list.
     public var channelIds: [ChannelID]
+    /// Public routing hints read through from `agent.config.capabilities`.
+    /// Humans and legacy roster payloads use an empty list.
+    public var capabilities: [String]
     /// Realtime presence (not persisted on `member`; merged from Centrifugo).
     public var presence: Presence
 
@@ -27,6 +30,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         handle: String,
         avatarURL: URL? = nil,
         channelIds: [ChannelID] = [],
+        capabilities: [String] = [],
         presence: Presence = .offline
     ) {
         self.id = id
@@ -37,10 +41,35 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         self.handle = handle
         self.avatarURL = avatarURL
         self.channelIds = channelIds
+        self.capabilities = capabilities
         self.presence = presence
     }
 
     public var isAgent: Bool { kind == .agent }
+
+    /// Stable, display-ready capability identifiers. Matching is deliberately
+    /// case-insensitive while the raw read-through array remains available.
+    public var normalizedCapabilities: [String] {
+        var seen = Set<String>()
+        return capabilities.compactMap { capability in
+            guard let normalized = Self.normalizedCapability(capability),
+                  seen.insert(normalized).inserted
+            else { return nil }
+            return normalized
+        }
+    }
+
+    public func hasCapability(_ capability: String) -> Bool {
+        guard let normalized = Self.normalizedCapability(capability) else { return false }
+        return normalizedCapabilities.contains(normalized)
+    }
+
+    public static func normalizedCapability(_ capability: String) -> String? {
+        let normalized = capability
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -51,6 +80,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         case handle
         case avatarURL = "avatar_url"
         case channelIds = "channel_ids"
+        case capabilities
         case presence
     }
 
@@ -65,6 +95,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         self.handle = try c.decode(String.self, forKey: .handle)
         self.avatarURL = try c.decodeIfPresent(URL.self, forKey: .avatarURL)
         self.channelIds = try c.decodeIfPresent([ChannelID].self, forKey: .channelIds) ?? []
+        self.capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities) ?? []
         self.presence = try c.decodeIfPresent(Presence.self, forKey: .presence) ?? .offline
     }
 }
