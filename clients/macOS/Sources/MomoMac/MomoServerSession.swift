@@ -1033,6 +1033,7 @@ struct MomoServerSessionChooser: View {
                     systemImage: "network",
                     field: .serverURL,
                     focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
                     isPreviewFocused: initialFocus == .serverURL
                 )
                 MomoLaunchTextField(
@@ -1042,6 +1043,7 @@ struct MomoServerSessionChooser: View {
                     systemImage: "envelope",
                     field: .email,
                     focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
                     isPreviewFocused: initialFocus == .email
                 )
                 MomoLaunchSecureField(
@@ -1051,6 +1053,7 @@ struct MomoServerSessionChooser: View {
                     systemImage: "key",
                     field: .password,
                     focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
                     isPreviewFocused: initialFocus == .password
                 )
                 MomoLaunchTextField(
@@ -1060,6 +1063,7 @@ struct MomoServerSessionChooser: View {
                     systemImage: "ticket",
                     field: .inviteCode,
                     focusedField: $focusedField,
+                    onSubmit: submitPrimaryAction,
                     isPreviewFocused: initialFocus == .inviteCode
                 )
             }
@@ -1102,7 +1106,6 @@ struct MomoServerSessionChooser: View {
                         Task { await performPrimaryAction() }
                     } label: {
                         Label(primaryActionTitle(copy: copy), systemImage: primaryActionIcon)
-                            .foregroundStyle(MomoTheme.onAccent)
                     }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
@@ -1181,6 +1184,10 @@ struct MomoServerSessionChooser: View {
         case .signIn:
             await controller.connectRealServer()
         }
+    }
+
+    private func submitPrimaryAction() {
+        Task { await performPrimaryAction() }
     }
 
     private func primaryActionTitle(copy: MomoSessionCopy) -> String {
@@ -1394,6 +1401,7 @@ private struct MomoLaunchTextField: View {
     var systemImage: String
     var field: MomoSessionField
     var focusedField: FocusState<MomoSessionField?>.Binding
+    var onSubmit: () -> Void
     var isPreviewFocused = false
 
     var body: some View {
@@ -1406,6 +1414,7 @@ private struct MomoLaunchTextField: View {
                 .textFieldStyle(.plain)
                 .focused(focusedField, equals: field)
                 .accessibilityLabel(title)
+                .onSubmit(onSubmit)
         }
     }
 }
@@ -1417,6 +1426,7 @@ private struct MomoLaunchSecureField: View {
     var systemImage: String
     var field: MomoSessionField
     var focusedField: FocusState<MomoSessionField?>.Binding
+    var onSubmit: () -> Void
     var isPreviewFocused = false
 
     var body: some View {
@@ -1429,6 +1439,7 @@ private struct MomoLaunchSecureField: View {
                 .textFieldStyle(.plain)
                 .focused(focusedField, equals: field)
                 .accessibilityLabel(title)
+                .onSubmit(onSubmit)
         }
     }
 }

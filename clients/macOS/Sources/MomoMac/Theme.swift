@@ -55,7 +55,7 @@ public enum MomoTheme {
         public static let backdropTop = Color(nsColor: .windowBackgroundColor)
         public static let backdropMiddle = Color(nsColor: .windowBackgroundColor)
         public static let backdropBottom = MomoTheme.humanAccent.opacity(0.05)
-        public static let fieldBackground = Color(nsColor: .controlBackgroundColor).opacity(0.72)
+        public static let fieldBackground = Color(nsColor: .controlBackgroundColor)
         public static let fieldBorder = MomoTheme.subtleBorder
         public static let focusBorder = MomoTheme.humanAccent
     }

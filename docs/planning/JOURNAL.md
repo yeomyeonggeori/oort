@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-13 (Codex worker) · MOMO-368 fresh design-review 반려 반영
+- High 1: primary 라벨의 `onAccent` 강제를 제거해 비활성 창 표현을 시스템 `borderedProminent`에 위임했다.
+- Medium 3: 실효 없는 접근성 변형 2종 산출을 제거하고, 네 필드 Enter를 현재 primary에 연결했으며, 필드 배경을 불투명 semantic 색으로 교체했다.
+- 참고 기록(수정하지 않음): 비밀번호 placeholder 중복, `isPreviewFocused`, 영어 hero 칩, 영어 단일 `OnboardingInviteView`, 기존 영어 `sessionNotice`.
+- 계획 이탈 없음. 5패키지 build, Core 23/server 73/relay 2/worker 29/macOS 비이미지 122 tests, snapshot 5(1 PASS+4 skip), fresh review 전 등급 0 PASS; 정본 PNG 4건은 오케스트레이터 재기록 대기(`runtime-unverified`).
+
 ## 2026-07-13 (Codex worker) · MOMO-368 온보딩/로그인 재구성
 - 560pt 중앙 단일 구성, 입력 상태 기반 데모/로그인 primary 1개, 낮은 위계의 초대·Keychain·로컬 알파 채우기, Tab/Enter/Esc 및 오류·오프라인 복구를 구현했다.
 - 계획 이탈: 없음. 최초 디자인 리뷰 Blocker 1(커스텀 field chrome 설명 부재)과 High 2(오프라인 복구·accent 불일치)는 네이티브 편집 동작 유지 설명, transport/auth 분류+직접 데모, 공용 tint로 해소했다.

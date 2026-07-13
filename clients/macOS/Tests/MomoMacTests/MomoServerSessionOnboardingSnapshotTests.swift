@@ -14,7 +14,6 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
 
     private func fixture(
         scheme: ColorScheme,
-        dynamicTypeSize: DynamicTypeSize = .large,
         form: MomoServerSessionForm? = nil,
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
@@ -44,15 +43,12 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             initialFocus: initialFocus
         )
             .environment(\.colorScheme, scheme)
-            .environment(\.dynamicTypeSize, dynamicTypeSize)
             .defaultAppStorage(defaults)
     }
 
     private func render(
         size: CGSize,
         scheme: ColorScheme,
-        contrast: ColorSchemeContrast = .standard,
-        dynamicTypeSize: DynamicTypeSize = .large,
         form: MomoServerSessionForm? = nil,
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
@@ -61,7 +57,6 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         let hostingView = NSHostingView(
             rootView: fixture(
                 scheme: scheme,
-                dynamicTypeSize: dynamicTypeSize,
                 form: form,
                 errorMessage: errorMessage,
                 failureKind: failureKind,
@@ -69,19 +64,7 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             )
             .frame(width: size.width, height: size.height)
         )
-        let appearanceName: NSAppearance.Name
-        switch (scheme, contrast) {
-        case (.dark, .increased):
-            appearanceName = .accessibilityHighContrastDarkAqua
-        case (.light, .increased):
-            appearanceName = .accessibilityHighContrastAqua
-        case (.dark, .standard):
-            appearanceName = .darkAqua
-        case (.light, .standard):
-            appearanceName = .aqua
-        @unknown default:
-            appearanceName = scheme == .dark ? .darkAqua : .aqua
-        }
+        let appearanceName: NSAppearance.Name = scheme == .dark ? .darkAqua : .aqua
         let appearance = NSAppearance(named: appearanceName)
         let window = NSWindow(
             contentRect: CGRect(origin: .zero, size: size),
@@ -188,8 +171,6 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             name: String,
             size: CGSize,
             scheme: ColorScheme,
-            contrast: ColorSchemeContrast,
-            dynamicTypeSize: DynamicTypeSize,
             form: MomoServerSessionForm?,
             errorMessage: String?,
             failureKind: MomoSessionFailureKind?,
@@ -207,22 +188,18 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             inviteCode: "MOMO-368"
         )
         let variants: [Variant] = [
-            ("onboarding-default-light.png", defaultSize, .light, .standard, .large, nil, nil, nil, nil),
-            ("onboarding-default-dark.png", defaultSize, .dark, .standard, .large, nil, nil, nil, nil),
-            ("onboarding-large-light.png", largeSize, .light, .standard, .large, nil, nil, nil, nil),
-            ("onboarding-large-dark.png", largeSize, .dark, .standard, .large, nil, nil, nil, nil),
-            ("onboarding-compact-light.png", compactSize, .light, .standard, .large, nil, nil, nil, nil),
-            ("onboarding-increased-contrast.png", defaultSize, .dark, .increased, .large, nil, nil, nil, nil),
-            ("onboarding-large-type.png", defaultSize, .light, .standard, .accessibility1, nil, nil, nil, nil),
-            ("onboarding-focused-field.png", defaultSize, .light, .standard, .large, nil, nil, nil, .serverURL),
-            ("onboarding-sign-in.png", defaultSize, .light, .standard, .large, credentials, nil, nil, nil),
-            ("onboarding-invite-enabled.png", defaultSize, .dark, .standard, .large, invite, nil, nil, nil),
+            ("onboarding-default-light.png", defaultSize, .light, nil, nil, nil, nil),
+            ("onboarding-default-dark.png", defaultSize, .dark, nil, nil, nil, nil),
+            ("onboarding-large-light.png", largeSize, .light, nil, nil, nil, nil),
+            ("onboarding-large-dark.png", largeSize, .dark, nil, nil, nil, nil),
+            ("onboarding-compact-light.png", compactSize, .light, nil, nil, nil, nil),
+            ("onboarding-focused-field.png", defaultSize, .light, nil, nil, nil, .serverURL),
+            ("onboarding-sign-in.png", defaultSize, .light, credentials, nil, nil, nil),
+            ("onboarding-invite-enabled.png", defaultSize, .dark, invite, nil, nil, nil),
             (
                 "onboarding-offline.png",
                 defaultSize,
                 .light,
-                .standard,
-                .large,
                 credentials,
                 "The Internet connection appears to be offline.",
                 .offline,
@@ -234,8 +211,6 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             let image = try render(
                 size: variant.size,
                 scheme: variant.scheme,
-                contrast: variant.contrast,
-                dynamicTypeSize: variant.dynamicTypeSize,
                 form: variant.form,
                 errorMessage: variant.errorMessage,
                 failureKind: variant.failureKind,

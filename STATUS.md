@@ -6,8 +6,8 @@
 ## MOMO-368 Onboarding/Login Raycast Redesign (2026-07-13)
 
 - macOS 온보딩을 560pt 중앙 max-width의 압축 hero+단일 로그인 카드로 재구성하고 1/2/3 디버그 단계를 제거했다. 자격 정보 완성 전에는 데모, 완성 후에는 로그인이 유일한 primary이며 초대 참여·Keychain·로컬 알파 채우기는 낮은 위계로 정렬했다.
-- 네이티브 입력 동작을 유지한 focus ring과 Tab/Enter/Esc 경로, 고정 accent, transport/auth 분류 및 서버 없이 데모를 여는 오프라인 복구, 빈 초대 초기 상태를 추가했다. default/large/compact/light/dark/high-contrast/focus/sign-in/invite/offline 등 11종 검토용 래스터를 생성했으며 정본 light/dark PNG 4건은 오케스트레이터 재기록 대기다.
-- Core·server·OutboxRelay·AgentWorker·macOS 5개 `swift build --disable-sandbox`와 Core 23·server 73·relay 2·worker 29·macOS 비이미지 122 tests가 PASS했다. 온보딩 snapshot 클래스는 검토용 래스터 PASS+정본 4건 정상 skip이고 fresh design-review도 PASS(Blocker 0/High 0/Medium 1)했다. 필터 없는 macOS 전체 test는 main 기지선인 `AgentCredentialSnapshotTests` headless `NSImage` signal 5를 재현했다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행(`runtime-unverified`).
+- 네이티브 입력 동작을 유지한 focus ring과 Tab/Enter/Esc 경로, 고정 accent, transport/auth 분류 및 서버 없이 데모를 여는 오프라인 복구를 추가했다. 리뷰 반영으로 primary 라벨을 시스템 비활성 표현에 위임하고 네 필드 Enter를 현재 primary에 연결했으며, 필드는 불투명 semantic 배경을 쓴다. 실효 없는 high-contrast/large-type 산출은 제거해 default/large/compact/light/dark/focus/sign-in/invite/offline 9종 검토용 래스터만 남겼다. 정본 light/dark PNG 4건은 오케스트레이터 재기록 대기다.
+- Core·server·OutboxRelay·AgentWorker·macOS 5개 `swift build --disable-sandbox`와 Core 23·server 73·relay 2·worker 29·macOS 비이미지 122 tests가 PASS했다. 온보딩 snapshot 클래스는 검토용 래스터 PASS+정본 4건 정상 skip이고 review-fix fresh design-review도 PASS(Blocker/High/Medium/Nitpick 0)했다. 필터 없는 macOS 전체 test는 main 기지선인 `AgentCredentialSnapshotTests` headless `NSImage` signal 5를 재현했다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행(`runtime-unverified`).
 
 ## MOMO-367 Wave 2 Unread UI + Keyboard Navigation (2026-07-13)
 
