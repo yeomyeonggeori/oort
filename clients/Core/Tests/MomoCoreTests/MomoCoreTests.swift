@@ -65,6 +65,7 @@ final class MomoCoreTests: XCTestCase {
         """.utf8)
         let legacyMember = try JSONDecoder.momo.decode(Member.self, from: legacyWire)
         XCTAssertEqual(legacyMember.capabilities, [])
+    }
 
     func testAgentWorkRunDecodesMOMO362Projection() throws {
         let wire = Data("""
