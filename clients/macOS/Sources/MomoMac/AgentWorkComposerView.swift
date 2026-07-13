@@ -39,6 +39,7 @@ struct AgentWorkComposerView: View {
         }
         .padding(16)
         .frame(width: MomoTheme.Work.composerWidth)
+        .momoSurface(.card, cornerRadius: MomoTheme.cornerLarge)
         .onAppear {
             selectedAgentId = selectedAgentId ?? agents.first?.id
         }
@@ -65,9 +66,9 @@ struct AgentWorkComposerView: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(copy.workComposerTitle)
-                    .font(.headline)
+                    .font(MomoTheme.Typography.sectionHeader)
                 Text(copy.workComposerSubtitle)
-                    .font(.caption)
+                    .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

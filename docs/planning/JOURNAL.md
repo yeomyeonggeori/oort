@@ -17,6 +17,11 @@
 - 5개 Swift 패키지 build와 Core 23/server 73/relay 2/worker 29/macOS 비이미지 122 tests, fresh design-review(Blocker 0/High 0/Medium 1) PASS; 기존 headless image snapshot signal 5는 재현됐다.
 - 신규 정본 light/dark PNG 4건 재기록과 clean/root `macos-ui`는 오케스트레이터 대기다. DB/Docker/verifier/`local_gate.sh`는 미실행(`runtime-unverified`).
 
+## 2026-07-13 (Codex worker) · MOMO-369 앱 셸 시각 폴리시 W3
+- 양 스킴 3층 표면·타이포·motion 토큰을 앱 셸/타임라인/Work·승인/팝오버에 적용하고, 401 단일 재로그인 배너·subtle REST 칩·커서/날짜/멘션/capability 이월을 해소했다. 온보딩·스키마·정본 PNG는 무접촉이다.
+- 계획 이탈: 사전 생성된 worktree/branch와 `status:ready` 부재로 `goal_claim.sh`를 재실행하지 않고 assignee/`status:in-progress`를 수동 반영했다. 제품 수용기준 이탈은 없으며 repo-wide pre-flight의 기존 fixed-font hit는 변경 파일 밖이다.
+- 5패키지 build, Core/Server/Relay/Worker 127 tests, macOS 비이미지 120 tests와 W3 raster 5 tests PASS; fresh review는 raw Command Center 진단 High를 수정한 뒤 Blocker/High 0, Medium 1이다. 전체 macOS는 기존 headless NSImage signal 5, 정본 재기록과 금지된 DB/Docker/verifier/gate는 오케스트레이터 대기(`runtime-unverified`).
+
 ## 2026-07-13 (momo-main/Fable) · Work v0 + Wave 2 배치 종결 (362..367) + 라이브 반영
 - merge 순서: 362 `2d5b2ad` → 366 `69facce` → 363 `44f8d35` → 365 `f5aba9f` → 364 `adf159f`(High 반려: 종결 run ephemeral 가림) → 367 `fd8eabe`(스펙 변경 ⌥⇧↑↓ `d9f4e68` + 364와 7파일 rebase는 worker 위임). root full gate 2종 green(`…075706Z…-ra6804669e978`, `…080432Z…-r6738c50ddf08`).
 - 교훈: rebase union 해소 후 전 패키지 빌드 검증 필수(Theme/Core brace 유실 2건 수기 수리 전례), 실충돌 다수 rebase는 맥락 가진 worker에 위임이 정확.

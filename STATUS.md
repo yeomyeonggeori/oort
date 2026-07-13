@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-369 App Shell Visual Polish W3 (2026-07-13)
+
+- Theme에 양 스킴 background/panel/card 표면 세트와 타이포·radius·≤0.16s motion 토큰을 추가하고 사이드바·타임라인·Work/승인 카드·팝오버에 적용했다. 401은 원문 없는 단일 `다시 로그인` 배너, realtime REST fallback은 헤더 칩으로 정리했다.
+- partial 블록 커서 제거, 선택 언어 기반 day divider, 멘션 행의 AGENT 이중 신호 제거, `+N` 전체 capability 도움말을 구현했다. 온보딩 파일과 `schema_v0.sql`, 기존 정본 PNG는 변경하지 않았다.
+- 5개 Swift package build, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 120 tests 및 변경 표면 raster 5 tests가 PASS했고 fresh design-review는 Blocker/High 0, Medium 1이다. 필터 없는 macOS suite는 기존 headless `SnapshotTesting/NSImage.swift` signal 5로 중단됐고, W3 light/dark 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 지시대로 오케스트레이터 대기(`runtime-unverified`).
+
 ## MOMO-368 Onboarding/Login Raycast Redesign (2026-07-13)
 
 - macOS 온보딩을 560pt 중앙 max-width의 압축 hero+단일 로그인 카드로 재구성하고 1/2/3 디버그 단계를 제거했다. 자격 정보 완성 전에는 데모, 완성 후에는 로그인이 유일한 primary이며 초대 참여·Keychain·로컬 알파 채우기는 낮은 위계로 정렬했다.

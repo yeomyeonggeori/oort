@@ -1,5 +1,6 @@
 import XCTest
 import SwiftUI
+import AppKit
 import MomoCore
 @testable import MomoMac
 
@@ -80,6 +81,26 @@ final class MomoMacTests: XCTestCase {
     func testSidebarWidthTokensHaveStableResizeOrder() {
         XCTAssertLessThan(MomoTheme.Sidebar.minimumWidth, MomoTheme.Sidebar.idealWidth)
         XCTAssertLessThan(MomoTheme.Sidebar.idealWidth, MomoTheme.Sidebar.maximumWidth)
+    }
+
+    @MainActor
+    func testSurfaceElevationHasThreeOrderedLevelsInBothSchemes() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let background = try brightness(MomoTheme.Surface.style(.background, colorScheme: scheme).fill)
+            let panel = try brightness(MomoTheme.Surface.style(.panel, colorScheme: scheme).fill)
+            let cardStyle = MomoTheme.Surface.style(.card, colorScheme: scheme)
+            let card = try brightness(cardStyle.fill)
+
+            XCTAssertLessThan(background, panel)
+            XCTAssertLessThan(panel, card)
+            XCTAssertGreaterThan(cardStyle.shadowRadius, 0)
+        }
+    }
+
+    @MainActor
+    private func brightness(_ color: Color) throws -> CGFloat {
+        let converted = try XCTUnwrap(NSColor(color).usingColorSpace(.deviceRGB))
+        return (converted.redComponent + converted.greenComponent + converted.blueComponent) / 3
     }
 
     func testSidebarMembershipMutationCopyIsLocalizedAndVerbFirst() {
@@ -1420,6 +1441,7 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(snapshot.statuses.first { $0.area == .invites }?.health, .degraded)
         XCTAssertEqual(snapshot.statuses.first { $0.area == .updates }?.health, .degraded)
         XCTAssertGreaterThanOrEqual(snapshot.attentionCount, 5)
+        XCTAssertFalse(snapshot.statuses.contains { $0.detail.contains("db offline") })
         XCTAssertTrue(snapshot.statuses.first { $0.area == .realtime }?.recovery?.contains("Retry") == true)
         XCTAssertTrue(snapshot.statuses.first { $0.area == .invites }?.recovery?.contains("fresh code") == true)
         XCTAssertTrue(snapshot.capabilities.first { $0.id == "agent-runtime" }?.isAvailable == false)
@@ -2557,6 +2579,35 @@ final class MomoMacTests: XCTestCase {
         } catch {
             XCTFail("unexpected error: \(error)")
         }
+    }
+
+    @MainActor
+    func testViewModelClassifiesUnauthorizedAsExpiredSession() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(
+                statusCode: 401,
+                json: #"{"title":"internal auth dump","detail":"expired-token-should-not-render"}"#
+            )
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "expired-token"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+
+        await viewModel.bootstrap(workspace: .demo, accessToken: "expired-token")
+
+        XCTAssertEqual(viewModel.connectionIssue, .authenticationExpired)
+        XCTAssertNotNil(viewModel.connectionError, "diagnostic detail remains available outside user chrome")
+        XCTAssertEqual(MomoWorkspaceCopy(language: .korean).sessionExpiredDetail, "계속하려면 다시 로그인하세요.")
+        let commandCenter = viewModel.alphaCommandCenterSnapshot()
+        XCTAssertFalse(commandCenter.statuses.contains { $0.detail.contains("internal auth dump") })
+        XCTAssertFalse(commandCenter.statuses.contains { $0.detail.contains("expired-token-should-not-render") })
     }
 
     func testRESTBackendSubscribeUsesRealtimeDriverStartingAfterKnownHistorySeq() async throws {

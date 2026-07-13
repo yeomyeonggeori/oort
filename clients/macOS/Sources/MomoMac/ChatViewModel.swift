@@ -68,6 +68,11 @@ public enum AgentWorkSurfaceError: Sendable, Equatable, CaseIterable {
     case detailFailed
 }
 
+public enum MomoConnectionIssue: Sendable, Equatable {
+    case authenticationExpired
+    case recoverable
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -160,7 +165,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var localContextCopilotPreview: LocalContextCopilotPreview?
     @Published public private(set) var isLocalContextCopilotRefreshing = false
 
+    /// Diagnostic text remains available to developer surfaces and tests, but
+    /// user-facing chrome renders only the typed, redacted issue grammar.
     @Published public private(set) var connectionError: String?
+    @Published public private(set) var connectionIssue: MomoConnectionIssue?
 
     private var channelSubscriptions: [ChannelID: Task<Void, Never>] = [:]
     private var realtimeStatusSubscription: Task<Void, Never>?
@@ -231,9 +239,9 @@ public final class ChatViewModel: ObservableObject {
             for channel in channels {
                 subscribe(channel: channel.id)
             }
-            self.connectionError = nil
+            clearConnectionErrorState(force: true)
         } catch {
-            self.connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -299,7 +307,7 @@ public final class ChatViewModel: ObservableObject {
         inviteJoinState = .idle
         localContextCopilotPreview = nil
         isLocalContextCopilotRefreshing = false
-        connectionError = nil
+        clearConnectionErrorState(force: true)
         pendingFallbackMentionRuns = [:]
     }
 
@@ -339,7 +347,7 @@ public final class ChatViewModel: ObservableObject {
         guard let workspaceId, !channelCreateInFlight else { return }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            connectionError = "Channel name is required."
+            reportConnectionError("Channel name is required.")
             return
         }
         let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -360,10 +368,10 @@ public final class ChatViewModel: ObservableObject {
             ensureReadStateExists(channel: result.channel.id)
             subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
-            connectionError = nil
+            clearConnectionErrorState()
             await selectChannel(result.channel.id)
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -518,7 +526,7 @@ public final class ChatViewModel: ObservableObject {
                 reconcileAgentWorking(from: message)
             }
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -529,7 +537,7 @@ public final class ChatViewModel: ObservableObject {
                 uniqueKeysWithValues: pending.map { ($0.id, $0.eventProjection) }
             )
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -720,7 +728,7 @@ public final class ChatViewModel: ObservableObject {
                     self.apply(event, channel: channel)
                 }
             } catch {
-                self.connectionError = String(describing: error)
+                self.reportConnectionError(error)
             }
         }
     }
@@ -763,15 +771,15 @@ public final class ChatViewModel: ObservableObject {
 
     public func retrySelectedChannelLoad() async {
         guard let channel = selectedChannelId else {
-            connectionError = nil
+            clearConnectionErrorState()
             return
         }
-        connectionError = nil
+        clearConnectionErrorState()
         await selectChannel(channel)
     }
 
     public func clearConnectionError() {
-        connectionError = nil
+        clearConnectionErrorState(force: true)
     }
 
     // MARK: Work v0
@@ -938,10 +946,10 @@ public final class ChatViewModel: ObservableObject {
                 await refreshAfterMentionSend(channel: channel, agent: mentionedAgent, triggerSeq: acked.seq)
             }
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
             if let mentionedAgent {
                 clearAgentWorking(mentionedAgent.id, channel: channel)
-                mentionNotice = "\(mentionedAgent.displayName) request failed: \(error)"
+                mentionNotice = nil
             }
         }
     }
@@ -1172,9 +1180,9 @@ public final class ChatViewModel: ObservableObject {
                 let membership = try await chat.addMember(agent.id, to: channel, role: .member)
                 apply(membership)
                 agent.channelIds = member(agent.id)?.channelIds ?? agent.channelIds
-                connectionError = nil
+                clearConnectionErrorState()
             } catch {
-                connectionError = "Hermes invite failed: \(error)"
+                reportConnectionError(error)
                 throw error
             }
         }
@@ -1462,7 +1470,7 @@ public final class ChatViewModel: ObservableObject {
                 approvals[id] = ev
             }
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -1663,9 +1671,9 @@ public final class ChatViewModel: ObservableObject {
             for snapshot in snapshots {
                 costSnapshots[snapshot.runId] = snapshot
             }
-            connectionError = nil
+            clearConnectionErrorState()
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -1833,7 +1841,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func mutateMember(_ member: MemberID, channel: ChannelID?, adding: Bool) async {
         guard let channel = channel ?? selectedChannelId else {
-            connectionError = "Select a channel first."
+            reportConnectionError("Select a channel first.")
             return
         }
         guard !channelMemberMutationIds.contains(member) else { return }
@@ -1845,9 +1853,9 @@ public final class ChatViewModel: ObservableObject {
                 ? try await chat.addMember(member, to: channel, role: .member)
                 : try await chat.removeMember(member, from: channel)
             apply(membership)
-            connectionError = nil
+            clearConnectionErrorState()
         } catch {
-            connectionError = String(describing: error)
+            reportConnectionError(error)
         }
     }
 
@@ -1878,6 +1886,30 @@ public final class ChatViewModel: ObservableObject {
             }
             return copy
         }
+    }
+
+    private func reportConnectionError(_ error: any Error) {
+        connectionError = String(describing: error)
+        if let backendError = error as? BackendError,
+           case .problem(let status, _, _) = backendError,
+           status == 401 {
+            connectionIssue = .authenticationExpired
+        } else if connectionIssue != .authenticationExpired {
+            connectionIssue = .recoverable
+        }
+    }
+
+    private func reportConnectionError(_ diagnostic: String) {
+        connectionError = diagnostic
+        if connectionIssue != .authenticationExpired {
+            connectionIssue = .recoverable
+        }
+    }
+
+    private func clearConnectionErrorState(force: Bool = false) {
+        guard force || connectionIssue != .authenticationExpired else { return }
+        connectionError = nil
+        connectionIssue = nil
     }
 
     nonisolated private static func microUSD(from value: JSON?) -> Int64? {

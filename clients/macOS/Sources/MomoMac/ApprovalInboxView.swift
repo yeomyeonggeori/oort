@@ -43,18 +43,19 @@ public struct ApprovalInboxView: View {
                 List(pending, id: \.approvalId) { approval in
                     row(approval)
                 }
-                .listStyle(.inset)
+                .listStyle(.plain)
             }
         }
+        .momoSurface(.panel, cornerRadius: 0)
     }
 
     private var header: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(copy.approvals) (\(pending.count))")
-                    .font(.headline)
+                    .font(MomoTheme.Typography.screenTitle)
                 Text(copy.agentApprovalInboxSubtitle)
-                    .font(.caption)
+                    .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -78,7 +79,7 @@ public struct ApprovalInboxView: View {
             riskBadge(approval.isReversible)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(agentName(approval.requestedBy)).font(.subheadline.bold())
+                    Text(agentName(approval.requestedBy)).font(MomoTheme.Typography.emphasizedRow)
                     if let subject = approval.onBehalfOf {
                         Text("· \(delegationLabel(subject))")
                             .font(.caption).foregroundStyle(.secondary)
@@ -87,7 +88,7 @@ public struct ApprovalInboxView: View {
                 Text(approval.actionType).font(.callout.monospaced())
                 if let cost = approval.estimatedMicroUSD {
                     Text(copy.estimatedCost(CostFormat.usd(cost)))
-                        .font(.caption).foregroundStyle(MomoTheme.costAmber)
+                        .font(MomoTheme.Typography.supporting).foregroundStyle(MomoTheme.costAmber)
                 }
             }
             Spacer()
@@ -102,7 +103,11 @@ public struct ApprovalInboxView: View {
             }
             .disabled(isInFlight)
         }
-        .padding(.vertical, 4)
+        .padding(12)
+        .momoSurface(.card)
+        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
 
     @ViewBuilder

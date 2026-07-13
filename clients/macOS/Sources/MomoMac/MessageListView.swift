@@ -11,6 +11,7 @@ import MomoCore
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
     private let onOpenWorkDetail: (RunID) -> Void
+    private let onRequestLogin: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
@@ -23,10 +24,12 @@ public struct MessageListView: View {
 
     public init(
         viewModel: ChatViewModel,
-        onOpenWorkDetail: @escaping (RunID) -> Void = { _ in }
+        onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
+        onRequestLogin: @escaping () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
+        self.onRequestLogin = onRequestLogin
     }
 
     public var body: some View {
@@ -39,11 +42,8 @@ public struct MessageListView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 12)
             }
-            if let status = viewModel.selectedRealtimeStatus {
-                realtimeStatusBanner(status, copy: copy)
-                Divider()
-            } else if let error = viewModel.connectionError {
-                connectionBanner(error, copy: copy)
+            if let issue = viewModel.connectionIssue {
+                connectionBanner(issue, copy: copy)
                 Divider()
             }
             if let notice = viewModel.mentionNotice {
@@ -55,6 +55,7 @@ public struct MessageListView: View {
             Divider()
             composer(copy: copy)
         }
+        .momoSurface(.background, cornerRadius: 0)
     }
 
     // MARK: Header (cost chip, experience B social signal)
@@ -70,10 +71,10 @@ public struct MessageListView: View {
                 Image(systemName: channel.kind == .dm ? "person.2.fill" : "number")
                     .foregroundStyle(.secondary)
                 Text(channel.name ?? "DM")
-                    .font(.title3.weight(.semibold))
+                    .font(MomoTheme.Typography.screenTitle)
                 if let topic = channel.topic {
                     Text(topic)
-                        .font(.callout)
+                        .font(MomoTheme.Typography.supporting)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
@@ -83,6 +84,9 @@ public struct MessageListView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if let status = viewModel.selectedRealtimeStatus, !status.isLive {
+                realtimeStatusChip(status, copy: copy)
+            }
             // Social cost chip (experience B): today's live spend.
             if viewModel.liveSpentMicroUSD > 0 {
                 Label(CostFormat.usdCompact(viewModel.liveSpentMicroUSD), systemImage: "dollarsign.circle")
@@ -91,7 +95,8 @@ public struct MessageListView: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 16)
+        .padding(.vertical, 12)
+        .momoSurface(.panel, cornerRadius: 0)
     }
 
     private func quickStartCard(copy: MomoWorkspaceCopy) -> some View {
@@ -107,9 +112,9 @@ public struct MessageListView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(copy.quickStartTitle)
-                    .font(.body.weight(.semibold))
+                    .font(MomoTheme.Typography.emphasizedRow)
                 Text(copy.quickStartSubtitle)
-                    .font(.callout)
+                    .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -150,74 +155,75 @@ public struct MessageListView: View {
             .help(copy.dismissGuide)
         }
         .padding(16)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
-                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
+        .momoSurface(.card)
+    }
+
+    @ViewBuilder
+    private func realtimeStatusChip(_ status: RealtimeConnectionStatus, copy: MomoWorkspaceCopy) -> some View {
+        let label = Label(statusTitle(status, copy: copy), systemImage: statusIcon(status))
+            .font(MomoTheme.Typography.metadata.weight(.semibold))
+            .foregroundStyle(statusColor(status))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(statusColor(status).opacity(0.08), in: Capsule())
+            .fixedSize()
+
+        if status.canRetry {
+            Button {
+                Task { await viewModel.retryRealtime() }
+            } label: {
+                label
+            }
+            .buttonStyle(.plain)
+            .help(copy.retry)
+            .accessibilityLabel("\(statusTitle(status, copy: copy)), \(copy.retry)")
+        } else {
+            label
         }
     }
 
-    private func realtimeStatusBanner(_ status: RealtimeConnectionStatus, copy: MomoWorkspaceCopy) -> some View {
+    private func connectionBanner(_ issue: MomoConnectionIssue, copy: MomoWorkspaceCopy) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: statusIcon(status))
-                .foregroundStyle(statusColor(status))
+            Image(systemName: issue == .authenticationExpired ? "person.crop.circle.badge.exclamationmark" : "wifi.exclamationmark")
+                .foregroundStyle(issue == .authenticationExpired ? MomoTheme.irreversibleRed : MomoTheme.costAmber)
             VStack(alignment: .leading, spacing: 4) {
-                Text(statusTitle(status, copy: copy))
-                    .font(.caption.weight(.semibold))
-                if let message = status.message, !message.isEmpty, !status.isLive {
-                    Text(message)
-                        .font(.caption2)
-                        .lineLimit(1)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            if status.canRetry {
-                Button {
-                    Task { await viewModel.retryRealtime() }
-                } label: {
-                    Label(copy.retry, systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(statusColor(status).opacity(0.08))
-    }
-
-    private func connectionBanner(_ error: String, copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "wifi.exclamationmark")
-                .foregroundStyle(MomoTheme.costAmber)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(copy.recoverableError)
-                    .font(.caption.weight(.semibold))
-                Text(error)
-                    .font(.caption2)
-                    .lineLimit(2)
+                Text(issue == .authenticationExpired ? copy.sessionExpiredTitle : copy.recoverableError)
+                    .font(MomoTheme.Typography.sectionHeader)
+                Text(issue == .authenticationExpired ? copy.sessionExpiredDetail : copy.recoverableErrorDetail)
+                    .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                Task { await viewModel.retrySelectedChannelLoad() }
-            } label: {
-                Label(copy.retry, systemImage: "arrow.clockwise")
+            if issue == .authenticationExpired {
+                Button(copy.signInAgain) {
+                    viewModel.clearConnectionError()
+                    onRequestLogin()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else {
+                Button {
+                    Task { await viewModel.retrySelectedChannelLoad() }
+                } label: {
+                    Label(copy.retry, systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button {
+                    viewModel.clearConnectionError()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help(copy.dismiss)
             }
-            .buttonStyle(.borderless)
-            .font(.caption)
-            Button {
-                viewModel.clearConnectionError()
-            } label: {
-                Image(systemName: "xmark.circle")
-            }
-            .buttonStyle(.borderless)
-            .help(copy.dismiss)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(MomoTheme.costAmber.opacity(0.08))
+        .padding(.vertical, 8)
+        .background(
+            (issue == .authenticationExpired ? MomoTheme.irreversibleRed : MomoTheme.costAmber).opacity(0.06)
+        )
+        .momoSurface(.panel, cornerRadius: 0)
     }
 
     private func mentionNoticeBanner(_ notice: String) -> some View {
@@ -251,7 +257,7 @@ public struct MessageListView: View {
         case (.error, _, .restHistory), (_, .error, .restHistory):
             return copy.liveErrorRestFallback
         default:
-            return "Realtime \(status.connection.rawValue)"
+            return copy.connectingLive
         }
     }
 
@@ -404,7 +410,7 @@ public struct MessageListView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if item.startsDay, let day = item.day {
-                TimelineDayDivider(day: day)
+                TimelineDayDivider(day: day, copy: copy)
             }
 
             MessageBubble(
@@ -435,7 +441,7 @@ public struct MessageListView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             if startsDay, let day {
-                TimelineDayDivider(day: day)
+                TimelineDayDivider(day: day, copy: copy)
             }
 
             AgentWorkRunCard(
@@ -492,7 +498,7 @@ public struct MessageListView: View {
         if reduceMotion {
             proxy.scrollTo(TimelineCoordinateSpace.bottomID, anchor: .bottom)
         } else {
-            withAnimation(.snappy) {
+            withAnimation(MomoTheme.Motion.stateChange) {
                 proxy.scrollTo(TimelineCoordinateSpace.bottomID, anchor: .bottom)
             }
         }
@@ -586,7 +592,7 @@ public struct MessageListView: View {
     private func mentionAutocomplete(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(copy.mentionAutocompleteTitle)
-                .font(.caption.weight(.semibold))
+                .font(MomoTheme.Typography.supporting.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
             ForEach(candidates) { member in
@@ -597,10 +603,10 @@ public struct MessageListView: View {
                         MentionCandidateAvatar(member: member, isWorking: viewModel.isAgentWorking(member))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(member.displayName)
-                                .font(.callout.weight(.semibold))
+                                .font(MomoTheme.Typography.emphasizedRow)
                             HStack(spacing: MomoTheme.AgentBadge.spacing) {
-                                Text("@\(member.handle) · \(member.isAgent ? copy.agent : copy.human)")
-                                    .font(.caption.weight(.medium))
+                                Text(member.isAgent ? "@\(member.handle)" : "@\(member.handle) · \(copy.human)")
+                                    .font(MomoTheme.Typography.supporting)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
                                 if member.isAgent {
@@ -622,11 +628,7 @@ public struct MessageListView: View {
         }
         .padding(8)
         .frame(width: MomoTheme.mentionAutocompleteWidth, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner, style: .continuous)
-                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
-        }
+        .momoSurface(.card)
     }
 
     private var preferredAgent: Member? {
@@ -703,14 +705,15 @@ private struct TimelineBottomPreferenceKey: PreferenceKey {
 
 struct TimelineDayDivider: View {
     let day: Date
+    let copy: MomoWorkspaceCopy
 
     var body: some View {
         HStack(spacing: 8) {
             // Divider adopts vertical orientation inside HStack; a 1pt semantic rule keeps the day separator horizontal.
             Color.secondary.opacity(0.20)
                 .frame(height: 1)
-            Text(day, format: .dateTime.weekday(.wide).month().day())
-                .font(.caption.weight(.semibold))
+            Text(copy.timelineDay(day))
+                .font(MomoTheme.Typography.supporting.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .fixedSize()
             Color.secondary.opacity(0.20)

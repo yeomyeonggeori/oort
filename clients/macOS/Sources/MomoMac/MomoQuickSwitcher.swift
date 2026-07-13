@@ -109,21 +109,7 @@ struct MomoQuickSwitcherView: View {
             footer
         }
         .frame(width: MomoTheme.QuickSwitcher.panelWidth)
-        .background(
-            .regularMaterial,
-            in: RoundedRectangle(
-                cornerRadius: MomoTheme.QuickSwitcher.panelCornerRadius,
-                style: .continuous
-            )
-        )
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: MomoTheme.QuickSwitcher.panelCornerRadius,
-                style: .continuous
-            )
-            .stroke(MomoTheme.subtleBorder, lineWidth: 1)
-        }
-        .shadow(color: MomoTheme.floatingPanelShadow, radius: 24, y: 12)
+        .momoSurface(.card, cornerRadius: MomoTheme.QuickSwitcher.panelCornerRadius)
         .onAppear {
             keyboardState.reset(items: items)
             searchIsFocused = true
@@ -306,11 +292,11 @@ struct MomoQuickSwitcherView: View {
     @ViewBuilder
     private var footer: some View {
         VStack(spacing: MomoTheme.QuickSwitcher.compactSpacing) {
-            if let connectionError = viewModel.connectionError {
+            if viewModel.connectionIssue == .recoverable {
                 HStack(spacing: MomoTheme.QuickSwitcher.standardSpacing) {
                     Label(copy.quickSwitcherSearchError, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(MomoTheme.irreversibleRed)
-                    Text(connectionError)
+                    Text(copy.recoverableErrorDetail)
                         .lineLimit(1)
                         .foregroundStyle(.secondary)
                     Spacer()

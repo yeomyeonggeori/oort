@@ -71,7 +71,10 @@ final class MessageTimelineSnapshotTests: XCTestCase {
         )
 
         return VStack(alignment: .leading, spacing: 0) {
-            TimelineDayDivider(day: Date(timeIntervalSince1970: Double(morning) / 1_000))
+            TimelineDayDivider(
+                day: Date(timeIntervalSince1970: Double(morning) / 1_000),
+                copy: MomoWorkspaceCopy(language: .korean)
+            )
             MessageBubble(
                 message: first,
                 author: human,
@@ -168,6 +171,21 @@ final class MessageTimelineSnapshotTests: XCTestCase {
         return count
     }
 
+    private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
+        guard let directory = ProcessInfo.processInfo.environment["MOMO_DESIGN_REVIEW_ARTIFACT_DIR"] else {
+            return
+        }
+        let outputDirectory = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        guard let tiff = image.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiff),
+              let png = representation.representation(using: .png, properties: [:])
+        else {
+            throw XCTSkip("Rendered timeline image could not be encoded as PNG")
+        }
+        try png.write(to: outputDirectory.appendingPathComponent(name), options: .atomic)
+    }
+
     func testMessageTimelineLightSnapshot() throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
         assertSnapshot(
@@ -189,6 +207,10 @@ final class MessageTimelineSnapshotTests: XCTestCase {
     func testGroupedTimelineRasterKeepsAgentStatusAccent() throws {
         for scheme in [ColorScheme.light, .dark] {
             let image = try render(scheme)
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-369-timeline-\(scheme == .dark ? "dark" : "light").png"
+            )
             XCTAssertEqual(image.size, size)
             XCTAssertGreaterThan(
                 try agentAccentPixelCount(in: image),

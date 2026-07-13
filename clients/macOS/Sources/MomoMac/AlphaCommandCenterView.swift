@@ -256,11 +256,11 @@ public struct AlphaCommandCenterSnapshot: Sendable, Hashable {
         channelCount: Int,
         connectionError: String?
     ) -> AlphaCommandCenterStatus {
-        if let connectionError {
+        if connectionError != nil {
             return AlphaCommandCenterStatus(
                 area: .server,
                 health: workspaceId == nil ? .blocked : .degraded,
-                detail: "Recoverable error: \(short(connectionError))",
+                detail: "Connection needs attention. Raw diagnostics are available only in collected logs.",
                 recovery: "Retry the selected channel or switch sessions after checking MomoServer."
             )
         }
