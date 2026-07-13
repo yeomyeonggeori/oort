@@ -21,6 +21,7 @@ public struct MomoMacRootView: View {
     @State private var showDetailPane = false
     @State private var detailPane: MomoMacDetailPane = .alpha
     @State private var selectedProfileMemberID: MemberID?
+    @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     private let sessionChrome: MomoSessionChrome?
@@ -49,30 +50,26 @@ public struct MomoMacRootView: View {
     public var body: some View {
         let copy = MomoWorkspaceCopy(language: language)
 
-        GeometryReader { geometry in
-            let useAttachedInspector = geometry.size.width >= Self.attachedInspectorMinimumWindowWidth
-            let sidebarWidth = sidebarWidth(for: geometry.size.width)
-            let detailWidth = max(0, geometry.size.width - sidebarWidth - 1)
-
-            HStack(spacing: 0) {
-                sidebar(copy: copy)
-                    .frame(width: sidebarWidth)
-                    .layoutPriority(2)
-
-                Divider()
-                    .opacity(0.5)
-
+        NavigationSplitView(columnVisibility: $splitViewVisibility) {
+            sidebar(copy: copy)
+                .navigationSplitViewColumnWidth(
+                    min: MomoTheme.Sidebar.minimumWidth,
+                    ideal: MomoTheme.Sidebar.idealWidth,
+                    max: MomoTheme.Sidebar.maximumWidth
+                )
+        } detail: {
+            GeometryReader { geometry in
                 detailLayout(
                     copy: copy,
-                    availableDetailWidth: detailWidth,
-                    useAttachedInspector: useAttachedInspector
+                    availableDetailWidth: geometry.size.width,
+                    useAttachedInspector: geometry.size.width >= Self.attachedInspectorMinimumWindowWidth
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .layoutPriority(1)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
-            .preferredColorScheme(appearance.colorScheme)
         }
+        .navigationSplitViewStyle(.balanced)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .preferredColorScheme(appearance.colorScheme)
     }
 
     private func detailLayout(
@@ -94,7 +91,7 @@ public struct MomoMacRootView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if showDetailPane && !useAttachedInspector {
-                Color.black.opacity(0.18)
+                MomoTheme.modalScrim
                     .ignoresSafeArea()
                     .transition(.opacity)
                     .onTapGesture {
@@ -105,7 +102,7 @@ public struct MomoMacRootView: View {
                     .frame(width: overlayInspectorWidth(for: availableDetailWidth))
                     .padding(.trailing, 12)
                     .padding(.vertical, 10)
-                    .shadow(color: .black.opacity(0.28), radius: 24, x: -12, y: 0)
+                    .shadow(color: MomoTheme.floatingPanelShadow, radius: 24, x: -12, y: 0)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -154,14 +151,14 @@ public struct MomoMacRootView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: detailPane.systemImage)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.body.weight(.semibold))
                     .foregroundStyle(detailPane == .alpha ? MomoTheme.humanAccent : MomoTheme.costAmber)
                     .frame(width: 32, height: 32)
                     .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(detailPane.title(copy: copy))
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.headline)
                     Text(detailPane.subtitle(copy: copy))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -175,7 +172,7 @@ public struct MomoMacRootView: View {
                 } label: {
                     Label(copy.closeDetailPane, systemImage: "xmark")
                         .labelStyle(.titleAndIcon)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.caption.weight(.semibold))
                         .padding(.horizontal, 10)
                         .frame(height: 28)
                         .background(.primary.opacity(0.08), in: Capsule())
@@ -247,7 +244,10 @@ public struct MomoMacRootView: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: presentation.cornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: presentation.cornerRadius, style: .continuous)
-                .stroke(.white.opacity(presentation == .overlay ? 0.14 : 0.0), lineWidth: 1)
+                .stroke(
+                    presentation == .overlay ? MomoTheme.subtlePanelBorder : .clear,
+                    lineWidth: 1
+                )
         }
     }
 
@@ -268,10 +268,6 @@ public struct MomoMacRootView: View {
         withAnimation(Self.layoutAnimation) {
             showDetailPane = false
         }
-    }
-
-    private func sidebarWidth(for windowWidth: CGFloat) -> CGFloat {
-        min(328, max(300, windowWidth * 0.28))
     }
 
     private func overlayInspectorWidth(for detailWidth: CGFloat) -> CGFloat {

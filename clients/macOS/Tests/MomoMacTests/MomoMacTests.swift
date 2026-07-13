@@ -30,6 +30,46 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(CostFormat.usdCompact(3_100_000), "$3.10")
     }
 
+    // MARK: sidebar shell policy (MOMO-357)
+
+    func testSidebarSeparatesDirectMessagesFromChannels() {
+        let workspace = WorkspaceID()
+        let channels = [
+            Channel(id: ChannelID(), workspaceId: workspace, kind: .publicChannel, name: "general"),
+            Channel(id: ChannelID(), workspaceId: workspace, kind: .privateChannel, name: "launch"),
+            Channel(id: ChannelID(), workspaceId: workspace, kind: .dm),
+        ]
+
+        XCTAssertEqual(MomoSidebarPolicy.standardChannels(from: channels).map(\.kind), [.publicChannel, .privateChannel])
+        XCTAssertEqual(MomoSidebarPolicy.directMessages(from: channels).map(\.kind), [.dm])
+    }
+
+    func testServerRosterPresenceRemainsHiddenUntilRealtimePresenceExists() {
+        XCTAssertFalse(
+            MomoSidebarPolicy.showsRosterPresence(
+                usesServerRosterSourceOfTruth: true,
+                isActivelyWorking: false
+            )
+        )
+        XCTAssertTrue(
+            MomoSidebarPolicy.showsRosterPresence(
+                usesServerRosterSourceOfTruth: true,
+                isActivelyWorking: true
+            )
+        )
+        XCTAssertTrue(
+            MomoSidebarPolicy.showsRosterPresence(
+                usesServerRosterSourceOfTruth: false,
+                isActivelyWorking: false
+            )
+        )
+    }
+
+    func testSidebarWidthTokensHaveStableResizeOrder() {
+        XCTAssertLessThan(MomoTheme.Sidebar.minimumWidth, MomoTheme.Sidebar.idealWidth)
+        XCTAssertLessThan(MomoTheme.Sidebar.idealWidth, MomoTheme.Sidebar.maximumWidth)
+    }
+
     // MARK: in-memory backend round-trip (proves ChatBackend conformance)
 
     func testBackendSeedAndHistory() async throws {

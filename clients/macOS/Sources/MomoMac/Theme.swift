@@ -23,6 +23,10 @@ public enum MomoTheme {
     public static let onAccent = Color(nsColor: .selectedMenuItemTextColor)
     /// Adaptive separator used for subtle borders on raised surfaces.
     public static let subtleBorder = Color(nsColor: .separatorColor)
+    /// Modal scrim and floating-panel chrome.
+    public static let modalScrim = Color.black.opacity(0.18)
+    public static let floatingPanelShadow = Color.black.opacity(0.28)
+    public static let subtlePanelBorder = Color.white.opacity(0.14)
 
     public static let bubbleCorner: CGFloat = 12
     public static let gutter: CGFloat = 12
@@ -33,6 +37,45 @@ public enum MomoTheme {
     public static let credentialRevealMaximumWidth: CGFloat = 640
     public static let memberInvitePopoverWidth: CGFloat = 340
     public static let memberInvitePopoverMaximumHeight: CGFloat = 640
+
+    /// Component tokens for the primary macOS sidebar. Values live here so
+    /// channel, DM, member, and utility rows share one density contract.
+    public enum Sidebar {
+        public static let minimumWidth: CGFloat = 240
+        public static let idealWidth: CGFloat = 280
+        public static let maximumWidth: CGFloat = 360
+        public static let headerMinimumHeight: CGFloat = 52
+        public static let rowMinimumHeight: CGFloat = 32
+        public static let footerMinimumHeight: CGFloat = 44
+        public static let avatarSize: CGFloat = 24
+        public static let logoSize: CGFloat = 28
+        public static let actionSize: CGFloat = 24
+        public static let utilityPopoverWidth: CGFloat = 360
+        public static let utilityPopoverMaximumHeight: CGFloat = 560
+
+        public static let edgeInset: CGFloat = 8
+        public static let rowHorizontalPadding: CGFloat = 8
+        public static let rowVerticalPadding: CGFloat = 4
+        public static let sectionSpacing: CGFloat = 16
+        public static let itemSpacing: CGFloat = 4
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+
+        public static let rowCornerRadius: CGFloat = 6
+
+        public static let workspaceFont = Font.body.weight(.semibold)
+        public static let workspaceDetailFont = Font.caption
+        public static let sectionHeaderFont = Font.subheadline.weight(.semibold)
+        public static let rowFont = Font.body
+        public static let selectedRowFont = Font.body.weight(.semibold)
+        public static let rowDetailFont = Font.caption
+        public static let badgeFont = Font.caption2.weight(.semibold)
+
+        public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
+        public static let hoverBackground = Color.primary.opacity(0.06)
+        public static let utilityBackground = Color.primary.opacity(0.045)
+    }
 }
 
 // MARK: - micro_usd formatting (display only; never accounting math — L4 §8.5)

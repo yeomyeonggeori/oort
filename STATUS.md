@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-357 UI W1 App Shell + Sidebar (2026-07-13)
+
+- macOS 앱 셸을 `NavigationSplitView`와 min/ideal/max Theme 폭 토큰으로 전환하고, 사이드바 주 계층을 워크스페이스/채널/DM/멤버로 재구성했다. 승인함과 개발 도구는 하단 유틸리티로 내렸고 멤버 액션은 hover/context menu에서만 노출한다.
+- 기존 roster SoT만 사용하며 real-server roster의 합성 `.online` 점은 숨기고 실제 agent working 상태만 유지한다. 새 REST/스키마는 없고 `MessageListView`/`MessageBubble`은 변경하지 않았다.
+- 검증: macOS `swift build --disable-sandbox` PASS, 비스냅샷 82 tests PASS, light/dark sidebar snapshot 2종 compile+reference-wait skip, light/dark raster agent-badge test PASS, fresh static design-review PASS(Blocker/High/Medium 0). 전체 snapshot suite는 기존 host-dependent `SnapshotTesting/NSImage.swift` signal 5로 중단됐고 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-359 Message Timeline Density + Grouping (2026-07-13)
 
 - macOS 타임라인은 기존 `message.seq` 입력 순서를 바꾸지 않는 표시 전용 5분 작성자 그룹과 day divider를 사용하며, 그룹 첫 행만 아바타·이름·상시 타임스탬프를 표시하고 compact 행은 hover 타임스탬프를 표시한다.
