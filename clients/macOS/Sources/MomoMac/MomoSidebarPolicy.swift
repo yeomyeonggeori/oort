@@ -27,3 +27,49 @@ enum MomoSidebarPolicy {
         isActivelyWorking || !usesServerRosterSourceOfTruth
     }
 }
+
+enum MomoUnreadNavigationDirection {
+    case previous
+    case next
+}
+
+enum MomoUnreadNavigation {
+    static func destination(
+        from selected: ChannelID?,
+        orderedChannels: [ChannelID],
+        unreadChannels: Set<ChannelID>,
+        direction: MomoUnreadNavigationDirection
+    ) -> ChannelID? {
+        guard !orderedChannels.isEmpty, !unreadChannels.isEmpty else { return nil }
+        guard let selected, let selectedIndex = orderedChannels.firstIndex(of: selected) else {
+            switch direction {
+            case .next:
+                return orderedChannels.first { unreadChannels.contains($0) }
+            case .previous:
+                return orderedChannels.reversed().first { unreadChannels.contains($0) }
+            }
+        }
+
+        for offset in 1..<orderedChannels.count {
+            let index: Int
+            switch direction {
+            case .next:
+                index = (selectedIndex + offset) % orderedChannels.count
+            case .previous:
+                index = (selectedIndex - offset + orderedChannels.count) % orderedChannels.count
+            }
+            let candidate = orderedChannels[index]
+            if unreadChannels.contains(candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+}
+
+enum MomoUnreadBadge {
+    static func label(mentionCount: Int) -> String? {
+        guard mentionCount > 0 else { return nil }
+        return mentionCount > 99 ? "99+" : String(mentionCount)
+    }
+}

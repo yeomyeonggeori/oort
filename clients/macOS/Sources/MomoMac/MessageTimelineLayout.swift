@@ -72,8 +72,9 @@ enum MessageTimelineLayout {
 }
 
 enum MessageTimelineScrollPolicy {
-    /// Follow new content only when the reader was already at the bottom.
-    static func shouldFollowNewContent(wasAtBottom: Bool) -> Bool {
-        wasAtBottom
+    /// Follow new content when the reader was already at the bottom. An own
+    /// send always follows so the local composer action never lands offscreen.
+    static func shouldFollowNewContent(wasAtBottom: Bool, isOwnSend: Bool = false) -> Bool {
+        wasAtBottom || isOwnSend
     }
 }

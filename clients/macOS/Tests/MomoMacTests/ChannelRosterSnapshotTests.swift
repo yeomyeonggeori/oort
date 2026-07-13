@@ -5,19 +5,26 @@ import SnapshotTesting
 import MomoCore
 @testable import MomoMac
 
-// MOMO-357 changes the full sidebar hierarchy. New canonical references are
+// MOMO-357/365/367 change the sidebar hierarchy, capability badges, and unread state. New canonical references are
 // intentionally absent in the worker patch; the macOS gate machine records
 // them so host-dependent PNGs never become worker-authored baselines.
 @MainActor
 final class ChannelRosterSnapshotTests: XCTestCase {
     private func fixtureSidebar(
         _ scheme: ColorScheme,
-        capabilitiesByHandle: [String: [String]] = [:]
+        capabilitiesByHandle: [String: [String]] = [:],
+        showsUnread: Bool = false
     ) async throws -> some View {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo(capabilitiesByHandle: capabilitiesByHandle)
         let viewModel = ChatViewModel(backend: backend)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot")
+        if !showsUnread {
+            for state in try await backend.readStates(workspace: seed.workspace) {
+                _ = try await backend.markRead(channel: state.channelId, through: state.latestSeq)
+            }
+            await viewModel.refreshReadStates()
+        }
         let general = try XCTUnwrap(seed.channels.first, "Demo roster fixture must include #general")
         await viewModel.selectChannel(general.id)
 
@@ -35,13 +42,15 @@ final class ChannelRosterSnapshotTests: XCTestCase {
 
     private func render(
         _ scheme: ColorScheme,
-        capabilitiesByHandle: [String: [String]] = [:]
+        capabilitiesByHandle: [String: [String]] = [:],
+        showsUnread: Bool = false
     ) async throws -> NSImage {
         let size = CGSize(width: 340, height: 720)
         let hostingView = NSHostingView(
             rootView: try await fixtureSidebar(
                 scheme,
-                capabilitiesByHandle: capabilitiesByHandle
+                capabilitiesByHandle: capabilitiesByHandle,
+                showsUnread: showsUnread
             )
         )
         hostingView.frame = CGRect(origin: .zero, size: size)
@@ -96,6 +105,45 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         return count
     }
 
+    private func mentionBadgePixelCount(in image: NSImage) throws -> Int {
+        guard let tiff = image.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiff)
+        else {
+            throw XCTSkip("Rendered roster image has no readable bitmap")
+        }
+
+        var count = 0
+        for y in 0..<representation.pixelsHigh {
+            for x in 0..<representation.pixelsWide {
+                guard let color = representation.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+                if color.redComponent > 0.70,
+                   color.greenComponent < 0.48,
+                   color.blueComponent < 0.50,
+                   color.redComponent - color.greenComponent > 0.30 {
+                    count += 1
+                }
+            }
+        }
+        return count
+    }
+
+    private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
+        guard let directory = ProcessInfo.processInfo.environment["MOMO_DESIGN_REVIEW_ARTIFACT_DIR"] else {
+            return
+        }
+        let outputDirectory = URL(fileURLWithPath: directory, isDirectory: true)
+        try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+        guard let tiff = image.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiff),
+              let png = representation.representation(using: .png, properties: [:])
+        else {
+            throw XCTSkip("Rendered roster image could not be encoded as PNG")
+        }
+        try png.write(to: outputDirectory.appendingPathComponent(name), options: .atomic)
+    }
+
     private func requireCanonicalReference(testName: String, named: String) throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let reference = testDirectory
@@ -103,7 +151,9 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            let ticket = testName.contains("Capability") ? "MOMO-365" : "MOMO-357"
+            let ticket = testName.contains("Capability")
+                ? "MOMO-365"
+                : (testName.contains("Unread") ? "MOMO-367" : "MOMO-357")
             throw XCTSkip("Canonical \(ticket) snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
@@ -121,6 +171,26 @@ final class ChannelRosterSnapshotTests: XCTestCase {
     func testSidebarShellDarkSnapshot() async throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
         let image = try await render(.dark)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark"
+        )
+    }
+
+    func testSidebarUnreadLightSnapshot() async throws {
+        try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
+        let image = try await render(.light, showsUnread: true)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light"
+        )
+    }
+
+    func testSidebarUnreadDarkSnapshot() async throws {
+        try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
+        let image = try await render(.dark, showsUnread: true)
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
@@ -183,6 +253,22 @@ final class ChannelRosterSnapshotTests: XCTestCase {
                 try agentAccentPixelCount(in: capabilityRaster),
                 try agentAccentPixelCount(in: baseline) + 20,
                 "Capability chips must remain visible in the sidebar under \(scheme) mode"
+            )
+        }
+    }
+
+    func testSidebarUnreadRasterContainsMentionBadgePixels() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let readImage = try await render(scheme)
+            let unreadImage = try await render(scheme, showsUnread: true)
+            try writeDesignReviewArtifact(
+                unreadImage,
+                named: "momo-367-sidebar-unread-\(scheme == .dark ? "dark" : "light").png"
+            )
+            XCTAssertGreaterThan(
+                try mentionBadgePixelCount(in: unreadImage),
+                try mentionBadgePixelCount(in: readImage) + 40,
+                "Unread roster must add visible mention badge pixels in \(scheme) mode"
             )
         }
     }

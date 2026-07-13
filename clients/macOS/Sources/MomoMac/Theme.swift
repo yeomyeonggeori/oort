@@ -75,6 +75,8 @@ public enum MomoTheme {
         public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
         public static let hoverBackground = Color.primary.opacity(0.06)
         public static let utilityBackground = Color.primary.opacity(0.045)
+        public static let mentionBadgeBackground = MomoTheme.irreversibleRed
+        public static let mentionBadgeForeground = MomoTheme.onAccent
     }
 
     public enum QuickSwitcher {

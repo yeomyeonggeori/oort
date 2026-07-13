@@ -3,105 +3,111 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
-## 0-1. MOMO-365 Work Capability Badges + Target Filter (2026-07-13)
+## MOMO-367 Wave 2 Unread UI + Keyboard Navigation (2026-07-13)
+
+- macOS 부팅 벌크 read-state 점등과 개인 realtime 동기화, 로컬 unread/mention 즉시 추정 후 서버 재동기화, 뷰포트 debounce mark-read 재시도와 own-send 하단 추적을 구현했다. 사이드바에는 unread 굵기·mention 숫자 배지·동기화 오류 복구 UI를 추가했다.
+- `⌥⇧↑↓`는 357 사이드바 정렬의 다른 unread 채널을 순환하며 destination이 없으면 비활성화된다. 초기 리뷰 High 1(`⇧⌘↑↓`의 macOS 텍스트 선택 충돌)은 planner 승인 Slack 문법으로 해소했고, fresh 재검토는 Blocker/High/Medium 0이다. 에러 행·VoiceOver·light/dark 배지 픽셀 검증을 갱신했으며 `schema_v0.sql`은 변경하지 않았다.
+- `origin/main`의 MOMO-364와 union rebase 후 Core·server·OutboxRelay·AgentWorker·macOS 5개 `swift build --disable-sandbox` 및 Core 23 tests, macOS 비이미지 116 tests가 PASS했다. MOMO-367 관련 snapshot 15 tests는 기존 정본 11 PASS+신규 정본 4 정상 skip이며 재기록은 오케스트레이터 대기다. 필터 없는 macOS 전체 test는 main에도 기록된 `AgentCredentialSnapshotTests`의 headless 1x `NSImage`와 2x 정본 불일치로 `SnapshotTesting/NSImage.swift` signal 5 중단; DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행(`runtime-unverified`).
+
+## MOMO-365 Work Capability Badges + Target Filter (2026-07-13)
 
 - roster가 `agent.config.capabilities` 문자열 배열만 read-through하고 MomoCore `Member`에 보존한다. 공용 AGENT/capability 배지를 사이드바·Cmd+K·멘션 후보·멤버 상세에 적용했으며 `schema_v0.sql`과 migration은 변경하지 않았다.
 - Work 후보는 MOMO-354의 선택 채널 active roster를 재사용해 capability 보유 에이전트만 명시 선택용으로 반환한다. 자동 라우팅과 MOMO-364의 Work 카드/컴포저는 추가하지 않았다.
 - 검증: Core/Server/macOS `swift build --disable-sandbox` PASS, Core 19·Server 68·macOS 비스냅샷 95 tests PASS, capability light/dark 래스터와 fresh static design-review PASS(Blocker/High/Medium 0). 신규 sidebar/Cmd+K light·dark 정본 PNG 4건 재기록과 DB/Docker/verifier/`local_gate.sh`/실 codex 실행은 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-363 Work v0 Codex Workbench Gateway Adapter (2026-07-13)
+## MOMO-363 Work v0 Codex Workbench Gateway Adapter (2026-07-13)
 
 - `adapters/codex-workbench/`가 scoped agent bearer로 Work job을 claim하고 host Codex `exec`/`resume`을 감싼다. read-only는 즉시 실행하며 workspace-write는 read-only 계획 세션 ID를 mode-0600 host state에 보존한 뒤 MOMO-362 승인 전에는 workspace-write로 실행하지 않고, network/danger 경로는 제공하지 않는다.
 - Codex JSONL은 bounded gateway status/partial로만 전달하고 최종 completion은 diff·변경 파일 수·exit·PR 링크 자리의 `momo.agent_work.result.v0` 카드다. 운영 공지 durable send 및 Codex/provider 자격증명 momo 유입 경로는 없다.
 - 검증: repo-local mock Codex 기반 DB 비접속 Python 계약 테스트, py_compile, launcher `bash -n`, `git diff --check` 대상. 실 Codex·DB/Docker/verifier/`local_gate.sh`·clean/root `runtime-agent`는 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-366 Wave 2 Read-State Server Contract (2026-07-13)
+## MOMO-366 Wave 2 Read-State Server Contract (2026-07-13)
 
 - actor-bound bulk GET과 단조 증가 PUT read-state API를 추가했다. unread는 channel head와 cursor의 차이로 계산하고, text message 저장 시점의 stable member ID mention을 `message.props`와 `read_state.mention_count`에 같은 트랜잭션으로 반영한다.
 - cursor가 실제 전진할 때만 transactional outbox에 exact actor용 `user:read-state#<member-id>` 이벤트를 기록하며, Centrifugo `user` namespace는 user-limited channel을 허용한다. `schema_v0.sql`은 변경하지 않았다.
 - 검증: 5개 Swift 패키지 build, Core 18·Server 68·Relay 2·AgentWorker 29·macOS 비스냅샷 94 tests, JSON/shell/whitespace 정적 검사 PASS. macOS 전체 snapshot suite는 기존 host-dependent `SnapshotTesting/NSImage.swift` signal 5로 중단됐다. 지시된 경계에 따라 DB/Docker/verifier/`local_gate.sh`는 미실행이며 clean/root runtime-agent delivery 검증은 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-364 Work v0 macOS Surface (2026-07-13)
+## MOMO-364 Work v0 macOS Surface (2026-07-13)
 
 - MomoCore에 MOMO-362 `agent_run` Work projection을 추가하고 macOS REST/인메모리 backend와 ViewModel을 연결했다. `/work` 및 컴포저 버튼으로 시작하며, 채널 타임라인의 접힌 partial 로그·공용 승인 컨트롤·diff/exit/PR 결과 카드와 우측 전체 transcript 상세 pane을 제공한다. 리뷰 반영으로 durable terminal 상태 우선, 이중언어 오류, cancelled 중립 결과, Esc draft 복원, ⇧⌘W 도움말을 고정했다. MOMO-359 메시지 그루핑과 MOMO-365 사이드바·스위처·capability 배지 파일 경계는 유지했다.
 - 검증: Core/macOS `swift build --disable-sandbox` PASS, Core 20 tests PASS, macOS 비스냅샷 106 tests PASS, MOMO-364 light/dark snapshot 2 tests compile 후 정본 재기록 대기 skip, 변경 파일 design pre-flight PASS. 전체 macOS test는 기존 `AgentCredentialSnapshotTests` headless `NSImage` fatal로 중단되어 비스냅샷과 신규 snapshot을 분리 검증했다.
 - 지시대로 DB/Docker/verifier/`local_gate.sh`/실 codex 실행은 하지 않았다. 실제 MOMO-362 서버 및 codex-workbench 왕복과 신규 Work·keyboard-help 정본 PNG 재기록은 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-362 Work v0 Run Contract + Approval Tiers (2026-07-13)
+## MOMO-362 Work v0 Run Contract + Approval Tiers (2026-07-13)
 
 - `agent_run.input`의 정확한 Work v0 shape를 트랜잭션 전에 검증하고, active human/channel-agent 결속·멱등·동시성 한도를 지키는 Work 생성 및 channel 목록/상세 REST를 기존 gateway outbox 경로에 추가했다. `schema_v0.sql`과 migration은 변경하지 않았다.
 - gateway 승인 요청은 `read_only|workspace_write|network_write` tier를 approval payload/card metadata에 보존하며, legacy MOMO-349 요청은 보수적 `workspace_write`로 유지하고 danger 상당은 400으로 닫는다. callback actor binding과 agent bearer allowlist는 유지했다.
 - 검증: server `swift build --disable-sandbox` PASS, 68 tests PASS. 지시된 DB/Docker/verifier/`local_gate.sh` 및 clean/root `runtime-agent`는 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-358 UI W1 Quick Switcher + Keyboard Navigation (2026-07-13)
+## MOMO-358 UI W1 Quick Switcher + Keyboard Navigation (2026-07-13)
 
 - macOS 앱에 즉시 포커스되는 `Cmd+K` 퀵 스위처를 추가해 최근 채널 우선 fuzzy 검색과 현재 채널의 active roster 멤버 검색을 제공한다. 채널 선택은 타임라인으로, 멤버 선택은 프로필로 이동하며 invited active membership만 노출한다.
 - `Cmd+1...9`는 공용 사이드바 정책이 만든 non-archived 일반 채널→DM 표시 순서를 그대로 열고, `Cmd+K` 재입력은 스위처를 닫는다. `Cmd+[`/`Cmd+]` 채널 히스토리와 `Cmd+/` 단축키 도움말을 두 앱 host의 scene commands에 연결했으며 화살표/Enter/Esc와 VoiceOver 선택 포커스도 지원한다.
 - 검증: macOS `swift build --disable-sandbox` PASS, 비스냅샷 94 tests PASS, quick switcher/help light·dark snapshot 4 tests compile+reference-wait skip, 변경 파일 design pre-flight PASS, fresh static design-review PASS(Blocker/High/Medium/Nitpick 0). 신규 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-357 UI W1 App Shell + Sidebar (2026-07-13)
+## MOMO-357 UI W1 App Shell + Sidebar (2026-07-13)
 
 - macOS 앱 셸을 `NavigationSplitView`와 min/ideal/max Theme 폭 토큰으로 전환하고, 사이드바 주 계층을 워크스페이스/채널/DM/멤버로 재구성했다. 승인함과 개발 도구는 하단 유틸리티로 내렸고 멤버 액션은 hover/context menu에서만 노출한다.
 - 기존 roster SoT만 사용하며 real-server roster의 합성 `.online` 점은 숨기고 실제 agent working 상태만 유지한다. 새 REST/스키마는 없고 `MessageListView`/`MessageBubble`은 변경하지 않았다.
 - fresh review 반영: 멤버 add/remove를 context menu와 VoiceOver 비마우스 경로로 복원하고, workspace gear의 비가시 hit-test/accessibility를 차단했으며, 개명 전 고아 snapshot PNG 2장을 제거했다.
 - 검증: macOS `swift build --disable-sandbox` PASS, 비스냅샷 83 tests PASS, light/dark sidebar snapshot 2종 compile+reference-wait skip, light/dark raster agent-badge test PASS, fresh static design-review PASS(Blocker/High/Medium 0). 전체 snapshot suite는 기존 host-dependent `SnapshotTesting/NSImage.swift` signal 5로 중단됐고 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-359 Message Timeline Density + Grouping (2026-07-13)
+## MOMO-359 Message Timeline Density + Grouping (2026-07-13)
 
 - macOS 타임라인은 기존 `message.seq` 입력 순서를 바꾸지 않는 표시 전용 5분 작성자 그룹과 day divider를 사용하며, 그룹 첫 행만 아바타·이름·상시 타임스탬프를 표시하고 compact 행은 hover 타임스탬프를 표시한다.
 - 새 내용은 사용자가 이미 하단에 있을 때만 따라가고 위를 읽는 중에는 위치를 유지한다. hover/키보드 포커스 액션은 실제 pasteboard 복사만 제공하며 AGENT 배지와 status/partial 카드는 독립 행으로 유지한다.
 - 검증: macOS build, 비스냅샷 85 tests, 신규 timeline snapshot 3 tests(light/dark 정본 대기 2 skip + 양 모드 agent/status raster 1 PASS), 변경 표면 design pre-flight PASS. hover 복사 칩의 material까지 전체 opacity 범위에 포함했다. 기존 전체 image snapshot suite는 sandbox `NSImage` signal 5로 중단됐고 `MessageBubbleSnapshotTests`·`MessageTimelineSnapshotTests` light/dark 정본 재기록, clean `macos-ui`·런타임은 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-361 Phase A Deploy Bundle + Operator Runbooks (2026-07-13)
+## MOMO-361 Phase A Deploy Bundle + Operator Runbooks (2026-07-13)
 
 - source checkout·populated `.env`를 고정 allowlist에서 배제하고 symlink/실 secret template을 fail-closed하는 deploy bundle packer와 합성 fixture 회귀 테스트를 추가했다. AWS provision→두 preflight→bundle 반입→pull/migrate/up→verify→digest rollback 및 10인 invite/Hermes 승인 운영 절차를 runbook 두 개로 고정했다.
 - 검증: 신규 shell `bash -n`/shellcheck, 합성 fixture bundle test, 실제 repo allowlist archive 검사 PASS. 지시된 범위에 따라 Docker/DB/verifier/`local_gate.sh`/AWS API와 실제 host deploy는 미실행(`runtime-unverified(aws-host)`).
 
-## 0-1. MOMO-360 GHCR Image Publication + Pull-and-Up Contract (2026-07-13)
+## MOMO-360 GHCR Image Publication + Pull-and-Up Contract (2026-07-13)
 
 - 수동 `workflow_dispatch` 전용 GHCR workflow가 api/relay/worker/migrate 4종을 `linux/arm64`, `sha-<gitsha>`로 발행하며, prod compose는 동일 release tag 또는 per-image digest로 고정된 migrate-first pull&up/rollback 계약을 사용한다.
 - actionlint, shell syntax/shellcheck, Python preflight 정적 계약, YAML 구문 검사와 `git diff --check`는 PASS. 지시상 Docker/AWS API/image build·push/compose config/verifier/local gate는 미실행(`runtime-unverified`). `schema_v0.sql`은 변경하지 않았다.
 
-## 0-1. MOMO-354 Real-Server Roster SoT + Invite-Gated Visibility (2026-07-13)
+## MOMO-354 Real-Server Roster SoT + Invite-Gated Visibility (2026-07-13)
 
 - macOS REST backend의 demo member/channel fixture fallback과 이름 기반 agent 숨김을 제거하고, 서버 `/roster`의 active `channelIds`를 멤버 사이드바·멘션 후보·메시지 작성자·agent realtime 구독의 공통 권위로 사용한다. offline demo fixture는 `LiveChatBackend`에만 남는다.
 - login/join 응답의 `realtimeWebSocketUrl`을 서버가 광고하고 앱은 이를 환경값보다 우선해 SwiftCentrifuge transport를 구성한다. API 계약은 Accepted ADR-0110에 기록했고 prod/e2e env를 정렬했다.
 - 검증: server build + 63 tests PASS, macOS build + 비스냅샷 79 tests PASS, 신규 roster light/dark snapshot 2종은 정본 PNG 부재로 명시적 skip, Python no-network/no-DB contract + 수정 shell `bash -n`/실행권한 PASS, design-review PASS(Blocker 0/High 0/Medium 1). 지시된 경계에 따라 Docker/DB/verifier/`local_gate.sh`는 미실행이며 clean `macos-ui`와 snapshot 재기록은 오케스트레이터 대기(`runtime-unverified`).
 - fresh-context 반려 High 2건 수정: server-SoT 세션의 로컬 프로필 편집 진입점과 `applyLocalProfile`을 동일 경계로 차단하고 안내 카피를 추가했다. roster snapshot은 `NSHostingView` 2x 래스터로 교체하고 light/dark 모두 Hermes `AGENT` accent 픽셀 100개 초과를 강제한다. macOS 비스냅샷 79 tests + roster snapshot 3 tests(정본 대기 2 skip, pixel 보장 1 PASS), static contract/design pre-flight PASS, fresh design-review PASS(Blocker 0/High 0/Medium 0/Low 0). 정본 PNG 재기록은 오케스트레이터 대기.
 
-## 0-1. MOMO-355 Dogfood Agent Seed Opt-in (2026-07-13)
+## MOMO-355 Dogfood Agent Seed Opt-in (2026-07-13)
 
 - `scripts/migrate.sh` 기본값을 `MOMO_AGENT_SEED_MODE=none`으로 고정하고, `002_seed.sql`의 김인턴 행과 `006_local_hermes_agent_seed.sql` 전체를 demo/e2e 명시 opt-in으로 제한했다. local-alpha는 caller env와 무관하게 none을 강제하며 fresh bootstrap은 human + 기본 채널, agent 0으로 시작한다. `schema_v0.sql`은 변경하지 않았다.
 - `scripts/momo hermes-gateway-init`을 pre-pairing template → 앱 초대 → credential 1회 발급 → env 기록 순서로 재작성했다. 기존 고정 김인턴/Hermes는 `scripts/momo cleanup-seeded-agents --yes`에서만 exact identity/DB-owner guard 후 membership·work·credential을 중단하고 handle을 해제한다; 신규 destructive migration은 없다.
 - runtime-agent/macOS verifier migration은 agent seed none을 명시하고 기존 marker/OID-owned DB·자체 fixture·per-run uppercase transport channel·exit 96/source 보존 계약을 Python 정적 테스트로 고정했다. shell `bash -n`, Python contract, `git diff --check`, 5개 Swift 패키지 `swift build --disable-sandbox` PASS; Core 18/Server 61/Relay 1/AgentWorker 29/macOS 비스냅샷 78 tests PASS. 변경하지 않은 기존 macOS image snapshot suite는 sandbox `NSImage` signal 5로 중단되어 reference PNG를 재기록하지 않았다. DB/Docker/verifier/local gate는 지시상 미실행이며 clean/root `runtime-agent` + `macos-ui`는 오케스트레이터 merge 전 대기(`runtime-unverified`).
 - 리뷰 게이트에서 context verifier가 seed-none DB의 고정 human/Hermes FK를 자체 생성하지 않는 계획 이탈이 확인됐다. workspace·human(…101)·agent(…103)·두 채널/seq·membership을 verifier-owned fixture로 보강하고 정적 계약에 고정했다. 다른 seed-none verifier의 고정 seed ID 참조도 전수 점검했으며, DB/Docker/verifier 재실행은 오케스트레이터 대기(`runtime-unverified`).
 
-## 0-1. MOMO-356 Gateway Operational Notice Suppression (2026-07-13)
+## MOMO-356 Gateway Operational Notice Suppression (2026-07-13)
 
 - Hermes platform `send()`는 명시적 momo `run_id`가 있는 실제 에이전트 최종 응답만 REST durable message로 허용한다. session reset, home-channel, `/resume`·`/sethome`, model/provider 등 run-unbound 운영 공지는 성공 처리 후 본문을 남기지 않는 로컬 이벤트 로그로만 기록한다. native gateway 최종 응답은 기존 `/gateway/complete` server-owned commit을 유지한다.
 - `scripts/momo hermes-gateway-init`이 Hermes 정식 `MOMO_HOME_CHANNEL`/이름을 새 env에 기록하고 기존 env의 `MOMO_DEFAULT_CHANNEL_ID`에서 보강해, 홈 채널 요구를 gateway 기동 전에 해결한다. verifier에는 fresh marker/OID DB·per-run channel·대문자 transport·source digest·exit 96 경계를 유지한 채 운영 공지 전후 agent message count 불변 assertion을 추가했다. `schema_v0.sql`과 UI/스냅샷은 변경하지 않았다.
 - 검증: adapter contract 54 tests, smoke, py_compile, 실제 Hermes SDK `SendResult` 호환, 신규·기존 임시 env의 home-channel init, 수정 shell `bash -n`/실행권한, `git diff --check` PASS. 지시된 worker 경계에 따라 Docker/DB/verifier/`local_gate.sh`는 실행하지 않았고 clean/root `runtime-agent`는 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-352 Agent Path Equivalence Verifier (2026-07-12)
+## MOMO-352 Agent Path Equivalence Verifier (2026-07-12)
 
 - 신규 `scripts/verify_agent_path_equivalence.sh`가 worker(managed)와 gateway(BYOA)의 정본 verifier를 각각 fresh marker/OID-owned DB와 per-run 대문자 transport channel에서 실행하고, trigger→approval→resume→final의 run 상태·approval·usage/audit·durable message·realtime publication 보장 manifest를 비교한다. 허용 차이는 timing/provider metadata/gateway lease/path-channel identity로 코드 안에 한정했다.
 - 양 경로의 pre-marker COMMENT 실패 exit 96 exact-OID rollback과 source dogfood DB digest EXIT trap을 동등성 verifier 자체가 강제한다. `verify_hermes_gateway_adapter.sh`에는 부모 verifier가 per-run marker/channel을 결속할 수 있는 검증 전용 marker UUID override만 추가했으며 `schema_v0.sql`은 변경하지 않았다.
 - 검증: 신규/수정 shell `bash -n` + `git diff --check` PASS. 지시된 worker 경계에 따라 Docker/DB/verifier/`local_gate.sh`는 실행하지 않았고, clean/root `runtime-agent`와 실제 두 경로 비교는 오케스트레이터 merge 전 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-341 Gateway Pending Durable Claim/Lease (2026-07-12)
+## MOMO-341 Gateway Pending Durable Claim/Lease (2026-07-12)
 
 - 신규 `008_gateway_job_lease.sql`이 gateway `agent_job` outbox row에 단일 owner/acquired/expiry를 멱등 추가한다. actor-bound pending recovery는 tenant transaction의 `FOR UPDATE SKIP LOCKED`로 원자 claim하며, 만료된 pending row만 새 lease로 takeover한다. `schema_v0.sql`은 변경하지 않았다.
 - events/complete/renew/release는 exact job+lease+run+agent 결속을 강제하고 lease 부재·non-owner·expired·takeover 뒤 stale owner를 명시적 409로 닫는다. transaction closure의 예상 가능한 lease 거부는 결과값으로 반환한 뒤 transaction 밖에서 409로 매핑해 PostgresNIO error wrapping이 500으로 새지 않게 했다. Hermes adapter는 realtime을 wake-up으로 유지하고 한 row씩 claim해 provider 실행 중 lease를 renew하며, renew 상실 시 provider task를 취소한다. provider credential은 계속 사용자 Hermes 내부에만 있다.
 - 리뷰 반영: approval callback이 job을 정산한 `awaiting_approval` run의 late complete는 lease DTO/DB 검증보다 human-decision guard를 먼저 적용해 항상 409로 닫는다. queued/running/terminal callback의 exact-owner lease 검증은 유지한다.
 - 검증: server build + 61 tests PASS(approval-held pre-lease 409, 동시 consumer 단일 claim, crash expiry/takeover, stale owner event/complete/renew/release 409, expiry reclaim 단위 회귀 포함), adapter contract 52 tests PASS, adapter py_compile + verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/clean-root `runtime-agent` 재검증은 worker 금지 범위로 실행하지 않았으며 오케스트레이터 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-350 Gateway Status/Partial Broadcast (2026-07-12)
+## MOMO-350 Gateway Status/Partial Broadcast (2026-07-12)
 
 - actor/run-bound `/gateway/events`가 bounded `thinking`/`streaming` callback을 받아 macOS wire shape의 `agent.status`/`agent.partial`을 observable `agent:` outbox에 기록한다. gateway bearer는 기존 sliding-window per-member rate limit을 공유하고 progress에는 별도 run당 240 events/minute 하드캡, detail 2 KiB, text delta 8 KiB 상한을 둔다.
 - Hermes adapter는 provider stream을 512-byte/250ms 단위로 샘플링해 callback하고, macOS REST backend는 exact workspace/channel/agent `agent:` subscription을 기존 `AgentPartialView` state에 합친다. `agentwork:` private job namespace와 progress는 계속 분리된다.
 - 검증: server build + 54 tests PASS, adapter contract 49 tests PASS, macOS 비스냅샷 78 tests PASS(그중 gateway progress/실렌더 상태 타깃 3), adapter py_compile + verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/clean-root `runtime-agent`는 worker에서 실행하지 않았으며 오케스트레이터 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-351 이중 실행 경로 문서 재정렬 (2026-07-12)
+## MOMO-351 이중 실행 경로 문서 재정렬 (2026-07-12)
 
 - ADR-0102를 근거로 adapter contract·L4 §6·README·architecture를 gateway=BYOA / worker=managed 이중 경로와 서버 소유 보장 매트릭스로 정렬하고, SD-5 API 표면 및 ADR-0101 bearer/legacy 폐기 연결을 문서화했다. 코드·shell·schema 변경 없음.
 - 변경 Markdown 11종의 상대 링크·코드펜스·필수 앵커 검사 PASS, `LOCAL_GATE_ALLOW_DIRTY=1 scripts/local_gate.sh --profile docs` PASS (`local-gate-docs-20260712T053631Z-pid49234-ns1783834591549328000-wt0ded8bfeb542-r86afa3415f59.md`).
@@ -113,24 +119,24 @@
 - `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build` 및 `make test` 모두 5개 Swift 패키지 green. `adapters/hermes/momo_adapter.py` py_compile, JSON/shell syntax, GitHub bootstrap dry-run 통과.
 - MOMO-001 이전에는 런타임 e2e가 미검증이었으나, 현재는 아래 Runtime Gate에서 compose/migrate/server health/seq gapless, relay→Centrifugo publish 왕복, RLS 테넌트 격리, AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile까지 검증됨.
 
-## 0-1. MOMO-349 Gateway Approval Roundtrip (2026-07-12)
+## MOMO-349 Gateway Approval Roundtrip (2026-07-12)
 
 - agent bearer actor/run binding 뒤 `approval_request` callback을 받아 기존 `approval`/`agent_run.awaiting_approval`/`approval_request` message/audit/outbox 상태머신을 한 tenant transaction에서 기록한다. callback 재시도는 같은 `tool_call.call_id`의 pending approval을 재사용하며 초기 gateway job을 정산한다.
 - human approve/reject는 원 run의 gateway delivery를 DB에서 판별해 private `agentwork:` resume `agent.job`을 만든다. 어댑터는 approved payload를 `resume_momo_job`(지원 시)으로 재개하고 rejected payload는 provider를 호출하지 않은 채 cancellation ack로 정산한다. 승인 대기·거부 후 late `/gateway/complete`는 409로 막아 human 결정을 우회/되살리지 못하게 했다.
 - macOS 기존 승인 인박스가 읽는 `/approvals?status=pending` projection과 durable timeline message를 그대로 재사용한다. diff 보안/correctness 리뷰에서 callback JSON 크기 상한, terminal/held 상태 결속, reject ack 결속, Swift UUID 대문자 채널 정규화를 확인했다(Blocker 0). 검증: server build + 51 tests PASS, adapter contract 46 tests PASS, 수정 verifier `bash -n`/실행권한 PASS. DB/Docker/verifier/`runtime-agent`는 worker에서 실행하지 않았으며 clean/root gate evidence는 오케스트레이터가 merge 전 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-353 Local Gate Drift Guard (2026-07-12)
+## MOMO-353 Local Gate Drift Guard (2026-07-12)
 
 - `make up`이 repo `infra/centrifugo.json` SHA-256을 컨테이너 생성 시 fingerprint로 고정하고, `ensure_runtime_env.sh`가 실행 컨테이너와 현재 repo fingerprint를 대조해 drift를 fail-closed하거나 `MOMO_CENTRIFUGO_AUTO_RECREATE=1` opt-in으로 Centrifugo 서비스만 재생성한다.
 - local gate는 run별 marker를 자식 verifier에 상속하고 유효 marker+repo command를 함께 증명한 프로세스만 pre-clean/EXIT reaping한다. unmarked dogfood MomoServer(합성 28180 포트)와 사용자 프로세스를 kill set에서 배제하는 격리 테스트 PASS; Docker running-config 및 clean/root runtime gate는 오케스트레이터 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-347 Pairing Popover Credential Embedding Hardening (2026-07-11)
+## MOMO-347 Pairing Popover Credential Embedding Hardening (2026-07-11)
 
 - 340pt pairing popover를 최대 640pt 높이의 `ScrollView`로 제한하고 24pt inset(유효 폭 약 292pt)에서 자격증명 행이 좁은 헤더/메타데이터 레이아웃으로 전환되게 했다. popover의 material/accent/GroupBox 3중 카드는 flat 자격증명 섹션으로 줄였다.
 - 폐기 피드백은 대상 credential 행에 귀속하고, 발급/폐기 직후 refresh는 기존 in-flight 조회를 합친 뒤 mutation 이후 최신 조회를 한 번 더 수행한다. 명목상 large-type 스냅샷은 기존 PNG 바이트를 보존한 채 constrained-window 검증으로 정직화하고 신규 290pt 스냅샷을 추가했다.
 - 검증: macOS `swift build --disable-sandbox` PASS, snapshot suite 제외 77 tests PASS, 신규 290pt snapshot PASS, refresh 경합/manifest secret 비포함/issue-rotate-revoke 타깃 3 tests PASS, fresh-context design-review **PASS Blocker 0/High 0**. 기존 snapshot 참조 재기록과 `macos-ui` gate는 오케스트레이터 정본 머신에서 merge 전 수행 대기.
 
-## 0-1. MOMO-339 macOS Agent Credential Pairing UI (2026-07-11)
+## MOMO-339 macOS Agent Credential Pairing UI (2026-07-11)
 
 - 페어링 초대 완료를 per-agent bearer 발급 API에 연결하고, 원문을 transient one-time reveal sheet에서만 표시한다. 프로필과 페어링 패널은 configured/active/expiring/revoked 메타데이터, 24시간 grace 회전, 확인 후 폐기, 401 복구 안내를 공유한다.
 - 매니페스트는 env 위치와 `MOMO_AGENT_TOKEN` 키 이름만 포함하며 bearer 원문은 계속 제외한다. 앱은 `~/.momo/hermes-gateway.env`를 직접 쓰지 않고 mode 600 확인과 gateway 재시작을 안내한다.
@@ -138,13 +144,13 @@
 - 2026-07-11 오케스트레이터 검수: worker 샌드박스에서 기록된 스냅샷 참조 6종이 정본 게이트 머신에서 전부 불일치 → 재기록(레이아웃 동일, 렌더링 환경 교정) 후 84 tests green(worker 환경의 MessageBubble signal 5는 재현 안 됨). fresh-context design-review 재판정 **PASS Blocker 0** (High 2·Medium 4는 MOMO-347 `#324`로 후속). main 위 rebase 후 PR #323 merge (`881518b`).
 - worktree clean `macos-ui` gate full PASS: `local-gate-macos-ui-20260711T133015Z-…-r5dda86359a9b.md`. root post-merge `macos-ui`는 선재하던 `verify_macos_real_backend_ui.sh`의 dogfood 결합(hermes 멤버십 drift로 mention→agent_job count=0 + shared DB mutation)에서 중단 → MOMO-348 `#325` 발급 (MOMO-346 후속, macos-ui 프로파일 격리).
 
-## 0-1. MOMO-348 macOS Real-Backend Verifier DB 격리 (2026-07-12)
+## MOMO-348 macOS Real-Backend Verifier DB 격리 (2026-07-12)
 
 - `verify_macos_real_backend_ui.sh`를 매 실행 unique marker/OID-owned migrated DB로 분리하고 marker-bound app(NOBYPASSRLS)·worker/relay(BYPASSRLS) role, per-run #agent-lab UUID, demo/Hermes·approval/cost fixture를 자체 seed한다.
 - source dogfood DB의 로그인/초대/채널/멤버십/메시지/agent queue 관련 digest를 EXIT trap에서 성공·실패 전후 비교하고, exact OID+marker DB와 marker-bound role만 fail-closed 정리한다. pre-marker COMMENT 실패(exit 96) rollback 회귀를 `macos-ui`에 추가했다.
 - worker 검증은 DB/Docker/verifier 접속 없이 수정·신규 shell의 `bash -n` PASS. fresh login/invite/join/member/send/mention→agent_job/history와 clean/root `macos-ui` evidence는 오케스트레이터가 merge 전 수행 대기(`runtime-unverified`).
 
-## 0-1. MOMO-342 AgentWorker Persistent DB Fixture Hardening (2026-07-11)
+## MOMO-342 AgentWorker Persistent DB Fixture Hardening (2026-07-11)
 
 - MOMO-338 merge 후 root main의 오래 유지된 DB에서 사용자가 제거한 Hermes channel membership 때문에 `verify_agent_worker.sh`의 positive mention route가 run 없이 끝나는 main gate 간섭을 확인했다. 제품 runtime 회귀가 아니라 migration seed가 영구히 유지된다고 가정한 verifier 결함이었다.
 - verifier runtime 전체를 source DB와 물리적으로 분리된 migration DB 및 deterministic 전용 workspace/human/channel/agent/member/membership/budget으로 분리했다. DB와 app/relay/worker role은 generation marker 소유권을 fail-closed 검증하고, source/system/unmarked DB는 거부한다. server/relay/worker가 모두 같은 `POSTGRES_HOST`의 verifier DB와 marker-bound role만 바라보므로 전역 claim consumer도 user-owned queue를 가져갈 수 없다.
@@ -420,7 +426,7 @@
 - `scripts/momo hermes-gateway-init/status`와 real smoke는 chmod-600 env의 token configured 여부만 표시하고 legacy keys를 private backup 후 active env에서 제거한다. 실행 안내는 env를 subshell에만 로드하며 verifier도 credential을 process argv에 싣지 않고 종료 시 세션/테스트 credential을 폐기한다. provider OAuth는 계속 Hermes 내부 소유다.
 - 검증: adapter contract 40 tests PASS(실시간 payload wake-only + recovery 단일 provider worker + full-page completion barrier + terminal 401/4xx unblock + reconnect/shutdown race + provider token redaction 포함), server 49 tests PASS(server-side implicit-error/conflicting-status fail-closed 포함). `scripts/verify_agent_live_channel.sh`는 exact-channel progress, private `agentwork:` WebSocket/OutboxRelay, revoked exact credential JWT deny, cross-channel run deny를 검증하고, `scripts/verify_hermes_gateway_adapter.sh`는 actor-bound REST/callback/rotation/revoke path를 검증한다. 동일 agent gateway 다중 인스턴스의 durable claim/lease는 MOMO-341 후속이다.
 
-## 0-1. MOMO-179 Realtime Client Subscription Contract (2026-06-29)
+## MOMO-179 Realtime Client Subscription Contract (2026-06-29)
 
 - `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`와 fixtures를 추가해 connection token source, channel derivation, subscribe authorization, event envelope, `message.seq` replay/gap-fill, reconnect/resubscribe, agent namespace boundary를 고정했다.
 - `message.new` server broadcast payload와 AgentWorker `agent.status`/`agent.partial` progress payload를 MomoCore snake_case decode 계약에 맞췄다. MOMO-192에서 `/v1/auth/realtime-token` endpoint가 추가됐고, MOMO-193에서 Core/macOS replay driver seam이 추가됐다. 실제 SwiftCentrifuge adapter/live e2e는 후속이다.

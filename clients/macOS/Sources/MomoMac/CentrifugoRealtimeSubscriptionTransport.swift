@@ -15,6 +15,12 @@ public protocol AgentRealtimeEnvelopeSubscriptionTransport: Sendable {
     ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error>
 }
 
+public protocol ReadStateRealtimeEnvelopeSubscriptionTransport: Sendable {
+    func readStateEnvelopes(
+        member: MemberID
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error>
+}
+
 public actor MomoServerRealtimeTokenProvider: RealtimeConnectionTokenProvider {
     private let baseURL: URL
     private let session: URLSession
@@ -56,7 +62,7 @@ public actor MomoServerRealtimeTokenProvider: RealtimeConnectionTokenProvider {
 
 // MARK: - SwiftCentrifuge transport
 
-public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelopeSubscriptionTransport, RealtimeStatusReportingEnvelopeSubscriptionTransport, AgentRealtimeEnvelopeSubscriptionTransport {
+public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelopeSubscriptionTransport, RealtimeStatusReportingEnvelopeSubscriptionTransport, AgentRealtimeEnvelopeSubscriptionTransport, ReadStateRealtimeEnvelopeSubscriptionTransport {
     public let endpoint: URL
     public let workspace: WorkspaceID
 
@@ -102,6 +108,18 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
                 agent: agent
             ),
             logicalChannel: channel,
+            statusHandler: { _ in }
+        )
+    }
+
+    public func readStateEnvelopes(
+        member: MemberID
+    ) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
+        // The status callback is intentionally ignored for the personal stream;
+        // channel-level status continues to drive the existing offline banner.
+        try await envelopes(
+            named: Self.readStateChannelName(member: member),
+            logicalChannel: ChannelID(member.rawValue),
             statusHandler: { _ in }
         )
     }
@@ -178,6 +196,10 @@ public final class SwiftCentrifugeRealtimeSubscriptionTransport: RealtimeEnvelop
         agent: MemberID
     ) -> String {
         "agent:ws\(workspace.description).\(channel.description).\(agent.description)"
+    }
+
+    public static func readStateChannelName(member: MemberID) -> String {
+        "user:read-state#\(member.description)"
     }
 
     public static func decodePublicationData(_ data: Data) throws -> RealtimeEnvelope {

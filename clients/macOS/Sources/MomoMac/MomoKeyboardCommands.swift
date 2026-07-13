@@ -1,6 +1,11 @@
 import SwiftUI
 import MomoCore
 
+enum MomoUnreadKeyboardShortcut {
+    static let modifiers: EventModifiers = [.option, .shift]
+    static let helpGlyphs = "⌥⇧↑ / ⌥⇧↓"
+}
+
 struct MomoKeyboardShortcutItem: Identifiable, Equatable {
     var id: String { key }
     let key: String
@@ -13,6 +18,10 @@ enum MomoKeyboardShortcutCatalog {
             MomoKeyboardShortcutItem(key: "⌘K", label: copy.quickSwitcherOpen),
             MomoKeyboardShortcutItem(key: "⇧⌘W", label: copy.startWork),
             MomoKeyboardShortcutItem(key: "⌘1…⌘9", label: copy.quickSwitcherChannelShortcuts),
+            MomoKeyboardShortcutItem(
+                key: MomoUnreadKeyboardShortcut.helpGlyphs,
+                label: copy.unreadChannelNavigation
+            ),
             MomoKeyboardShortcutItem(key: "⌘[", label: copy.quickSwitcherHistoryBack),
             MomoKeyboardShortcutItem(key: "⌘]", label: copy.quickSwitcherHistoryForward),
             MomoKeyboardShortcutItem(key: "⌘/", label: copy.quickSwitcherShortcutHelp),
@@ -22,7 +31,6 @@ enum MomoKeyboardShortcutCatalog {
         ]
     }
 }
-
 struct MomoKeyboardShortcutsView: View {
     var copy: MomoWorkspaceCopy
     @Environment(\.dismiss) private var dismiss
@@ -91,10 +99,13 @@ public struct MomoMacCommandActions {
     var channelCount: Int
     var canNavigateBackward: Bool
     var canNavigateForward: Bool
+    var canNavigateUnreadChannels: Bool
     var presentQuickSwitcher: () -> Void
     var selectChannel: (Int) -> Void
     var navigateBackward: () -> Void
     var navigateForward: () -> Void
+    var navigateToPreviousUnread: () -> Void
+    var navigateToNextUnread: () -> Void
     var presentShortcutHelp: () -> Void
 
     public init(
@@ -102,20 +113,26 @@ public struct MomoMacCommandActions {
         channelCount: Int,
         canNavigateBackward: Bool,
         canNavigateForward: Bool,
+        canNavigateUnreadChannels: Bool,
         presentQuickSwitcher: @escaping () -> Void,
         selectChannel: @escaping (Int) -> Void,
         navigateBackward: @escaping () -> Void,
         navigateForward: @escaping () -> Void,
+        navigateToPreviousUnread: @escaping () -> Void,
+        navigateToNextUnread: @escaping () -> Void,
         presentShortcutHelp: @escaping () -> Void
     ) {
         self.language = language
         self.channelCount = channelCount
         self.canNavigateBackward = canNavigateBackward
         self.canNavigateForward = canNavigateForward
+        self.canNavigateUnreadChannels = canNavigateUnreadChannels
         self.presentQuickSwitcher = presentQuickSwitcher
         self.selectChannel = selectChannel
         self.navigateBackward = navigateBackward
         self.navigateForward = navigateForward
+        self.navigateToPreviousUnread = navigateToPreviousUnread
+        self.navigateToNextUnread = navigateToNextUnread
         self.presentShortcutHelp = presentShortcutHelp
     }
 }
@@ -153,6 +170,20 @@ public struct MomoMacCommands: Commands {
                 .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
                 .disabled(actions == nil || number > (actions?.channelCount ?? 0))
             }
+
+            Divider()
+
+            Button(copy.unreadChannelPrevious) {
+                actions?.navigateToPreviousUnread()
+            }
+            .keyboardShortcut(.upArrow, modifiers: MomoUnreadKeyboardShortcut.modifiers)
+            .disabled(actions?.canNavigateUnreadChannels != true)
+
+            Button(copy.unreadChannelNext) {
+                actions?.navigateToNextUnread()
+            }
+            .keyboardShortcut(.downArrow, modifiers: MomoUnreadKeyboardShortcut.modifiers)
+            .disabled(actions?.canNavigateUnreadChannels != true)
 
             Divider()
 
@@ -258,6 +289,18 @@ extension MomoWorkspaceCopy {
 
     var quickSwitcherHistoryForward: String {
         language == .korean ? "다음 채널로 이동" : "Go to next channel"
+    }
+
+    var unreadChannelNavigation: String {
+        language == .korean ? "읽지 않은 채널 순회" : "Move through unread channels"
+    }
+
+    var unreadChannelPrevious: String {
+        language == .korean ? "이전 읽지 않은 채널로 이동" : "Go to previous unread channel"
+    }
+
+    var unreadChannelNext: String {
+        language == .korean ? "다음 읽지 않은 채널로 이동" : "Go to next unread channel"
     }
 
     var quickSwitcherShortcutHelp: String {

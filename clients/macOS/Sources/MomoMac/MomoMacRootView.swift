@@ -338,6 +338,7 @@ public struct MomoMacRootView: View {
             channelCount: viewModel.sidebarChannelOrder.orderedChannels.count,
             canNavigateBackward: viewModel.canNavigateChannelHistoryBackward,
             canNavigateForward: viewModel.canNavigateChannelHistoryForward,
+            canNavigateUnreadChannels: viewModel.canNavigateUnreadChannels,
             presentQuickSwitcher: {
                 showKeyboardShortcuts = false
                 quickSwitcherPresentation.toggle()
@@ -353,6 +354,14 @@ public struct MomoMacRootView: View {
             navigateForward: {
                 quickSwitcherPresentation.dismiss()
                 Task { await viewModel.navigateChannelHistoryForward() }
+            },
+            navigateToPreviousUnread: {
+                quickSwitcherPresentation.dismiss()
+                Task { await viewModel.navigateToPreviousUnreadChannel() }
+            },
+            navigateToNextUnread: {
+                quickSwitcherPresentation.dismiss()
+                Task { await viewModel.navigateToNextUnreadChannel() }
             },
             presentShortcutHelp: {
                 quickSwitcherPresentation.dismiss()

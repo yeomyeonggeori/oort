@@ -108,6 +108,9 @@ public struct ChannelListView: View {
                         if let error = viewModel.connectionError {
                             connectionErrorRow(error, copy: copy)
                         }
+                        if let error = viewModel.readStateSyncError {
+                            readStateErrorRow(error, copy: copy)
+                        }
 
                         channelsSection(copy: copy)
                         directMessagesSection(copy: copy)
@@ -273,6 +276,30 @@ public struct ChannelListView: View {
         .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
     }
 
+    private func readStateErrorRow(_ error: String, copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
+            Label(copy.unreadSyncUnavailable, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(MomoTheme.irreversibleRed)
+            Text(copy.unreadSyncUnavailableDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                Button {
+                    Task { await viewModel.retryReadStateSync() }
+                } label: {
+                    Label(copy.retry, systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityLabel(copy.retry)
+            }
+        }
+        .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
+        .help(error)
+    }
+
     private func channelsSection(copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
             sidebarSectionHeader(
@@ -367,6 +394,10 @@ public struct ChannelListView: View {
     // List cannot host the inline create form and stable hover-action columns
     // without changing the existing selection model, so this remains a flat custom row.
     private func channelRow(_ channel: Channel) -> some View {
+        let copy = MomoWorkspaceCopy(language: language)
+        let readState = viewModel.readStatesByChannel[channel.id]
+        let showsUnreadWeight = isSelected(channel) || readState?.hasUnread == true
+        let mentionLabel = MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
         Button {
             Task { await viewModel.selectChannel(channel.id) }
         } label: {
@@ -375,9 +406,18 @@ public struct ChannelListView: View {
                     .foregroundStyle(isSelected(channel) ? .primary : .secondary)
                     .frame(width: MomoTheme.Sidebar.avatarSize)
                 Text(channel.name ?? "DM")
-                    .font(isSelected(channel) ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
+                    .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
                     .lineLimit(1)
                 Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+                if let mentionLabel {
+                    Text(mentionLabel)
+                        .font(MomoTheme.Sidebar.badgeFont)
+                        .monospacedDigit()
+                        .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
+                        .foregroundStyle(MomoTheme.Sidebar.mentionBadgeForeground)
+                        .background(MomoTheme.Sidebar.mentionBadgeBackground, in: Capsule())
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
             .padding(.vertical, MomoTheme.Sidebar.rowVerticalPadding)
@@ -389,6 +429,11 @@ public struct ChannelListView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(copy.channelUnreadAccessibilityLabel(
+            channelName: channel.name ?? "DM",
+            unreadCount: readState?.unreadCount ?? 0,
+            mentionCount: readState?.mentionCount ?? 0
+        ))
         .onHover { isHovering in
             hoveredChannelID = isHovering ? channel.id : nil
         }

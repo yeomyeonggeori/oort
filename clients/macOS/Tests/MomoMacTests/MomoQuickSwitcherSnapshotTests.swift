@@ -5,7 +5,7 @@ import SnapshotTesting
 import MomoCore
 @testable import MomoMac
 
-// Canonical MOMO-358 references are intentionally recorded by the orchestrator
+// Canonical MOMO-358/367 references are intentionally recorded by the orchestrator
 // so the worker does not author host-dependent light/dark PNG baselines.
 @MainActor
 final class MomoQuickSwitcherSnapshotTests: XCTestCase {
@@ -83,7 +83,14 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            let ticket = testName.contains("Capability") ? "MOMO-365" : "MOMO-358"
+            let ticket: String
+            if testName.contains("Capability") {
+                ticket = "MOMO-365"
+            } else if testName.contains("Unread") {
+                ticket = "MOMO-367"
+            } else {
+                ticket = "MOMO-358"
+            }
             throw XCTSkip("Canonical \(ticket) snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
@@ -110,7 +117,7 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
         )
     }
 
-    func testKeyboardShortcutsLightSnapshot() throws {
+    func testUnreadKeyboardShortcutsLightSnapshot() throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
         assertSnapshot(
             of: try render(shortcutsFixture(.light), size: shortcutsSize, scheme: .light),
@@ -119,7 +126,7 @@ final class MomoQuickSwitcherSnapshotTests: XCTestCase {
         )
     }
 
-    func testKeyboardShortcutsDarkSnapshot() throws {
+    func testUnreadKeyboardShortcutsDarkSnapshot() throws {
         try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
         assertSnapshot(
             of: try render(shortcutsFixture(.dark), size: shortcutsSize, scheme: .dark),

@@ -345,6 +345,53 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertNil(item?["reservedMicroUSD"])
     }
 
+    // MARK: - Read state (ADR-0109)
+
+    func testChannelReadStateDecodesServerSnakeCaseProjection() throws {
+        let channel = ChannelID()
+        let data = Data("""
+        {
+          "channel_id": "\(channel.description)",
+          "last_read_seq": 7,
+          "latest_seq": 12,
+          "unread_count": 5,
+          "mention_count": 2
+        }
+        """.utf8)
+
+        let state = try JSONDecoder.momo.decode(ChannelReadState.self, from: data)
+
+        XCTAssertEqual(state.channelId, channel)
+        XCTAssertEqual(state.lastReadSeq, 7)
+        XCTAssertEqual(state.latestSeq, 12)
+        XCTAssertEqual(state.unreadCount, 5)
+        XCTAssertEqual(state.mentionCount, 2)
+        XCTAssertTrue(state.hasUnread)
+        XCTAssertTrue(state.hasMentions)
+    }
+
+    func testChannelReadStateIncomingEstimateIsMonotonicAndMentionAware() {
+        let channel = ChannelID()
+        let state = ChannelReadState(
+            channelId: channel,
+            lastReadSeq: 7,
+            latestSeq: 9,
+            unreadCount: 2,
+            mentionCount: 1
+        )
+
+        XCTAssertEqual(
+            state.receivingMessage(sequence: 9, mentionsCurrentMember: true),
+            state,
+            "duplicate realtime delivery must not increment unread or mentions"
+        )
+        let updated = state.receivingMessage(sequence: 10, mentionsCurrentMember: true)
+        XCTAssertEqual(updated.latestSeq, 10)
+        XCTAssertEqual(updated.unreadCount, 3)
+        XCTAssertEqual(updated.mentionCount, 2)
+        XCTAssertEqual(updated.lastReadSeq, 7)
+    }
+
     // MARK: - DraftMessage
 
     func testDraftMessageEncodesSnakeCase() throws {
