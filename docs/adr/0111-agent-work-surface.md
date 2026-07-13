@@ -1,6 +1,6 @@
 # ADR-0111: Agent Work Surface — 메신저 안의 업무·터미널·코드 실행
 
-- Status: **Proposed** (기안 2026-07-13, Fable / 결정권자: 성재)
+- Status: **Accepted** (2026-07-13, 성재 — **Option A: BYOA 실행** 확정. 착수는 UI W1+Phase A 랜딩 후, MOMO-362..365는 그 시점에 발급)
 - 관련: ADR-0102(실행 경로 이중화 — gateway=BYOA), ADR-0004(provider 자격증명 비유입), ADR-0101(per-agent bearer), MOMO-349(승인 왕복)·350(status/partial 스트림)·341(lease), ROADMAP §1.2(Agentic Work OS: "채널 타임라인을 context/approval/cost/audit execution ledger로"), `research/12-agentic-work-os/`(plugin manifest·positioning)
 - 제안자 맥락: 성재 제안(2026-07-13) — "메신저 안에서 Codex/Claude처럼 업무(Work)·터미널·코드 작업을, 초대한 에이전트 중 특화 에이전트의 도움으로. Codex 오픈소스 접근 권한을 설계에 적극 포함."
 

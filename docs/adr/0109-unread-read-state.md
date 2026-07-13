@@ -1,6 +1,6 @@
 # ADR-0109: Unread/read-state — 서버 단일 진실과 경량 점등 계약
 
-- Status: **Proposed** (기안 2026-07-13, Fable / 결정권자: 성재)
+- Status: **Accepted** (2026-07-13, 성재 — UI Wave 2(unread 배지·순회) 해금. 구현 티켓은 Wave 1 랜딩 후 발급)
 - 관련: UX 바이블 P6(부팅 최소 페이로드)·P7(unread가 곧 제품)·P8(알림 예산)·P11(키보드 순회), ADR-0110(roster/realtime 세션 발견), `schema_v0.sql` `read_state`
 - 소비처: UI 고도화 Wave 2 (unread 배지·순회 UI). Wave 1(셸/스위처/타임라인)은 이 ADR에 의존하지 않는다.
 
