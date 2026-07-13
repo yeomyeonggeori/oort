@@ -1819,6 +1819,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: fresh design-review PASS(High 1=스펙 원인 — ⇧⌘↑↓가 macOS 텍스트 선택 충돌 → planner 결정으로 ⌥⇧↑↓ 전환, 정본 3곳 갱신 `d9f4e68`)+Medium 5 반려 수정(백오프 5회 상한·에러 행 문법 수렴 등), 364와의 7파일 실충돌 rebase는 worker 위임(전 패키지 검증), unread 배지+도움말 정본 재기록·육안 확인(⇧⌘W와 ⌥⇧↑↓ 공존), clean `macos-ui` gate PASS, PR #368 merge(`fd8eabe`) — **Work v0+Wave 2 배치 종결 (2026-07-13)**. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
   - 이월 기록: 메시지 폭주 시 벌크 refresh 부하, VO 복수형, mention 캡슐 대비, 신규 채널 레이스.
 
+### ☐ MOMO-368 수용기준 — 온보딩/로그인 화면 Raycast급 재구성 `[swift/macos-ui]` (성재 발제 2026-07-13, 대형 화면 스크린샷 피드백)
+> 현재 문제(대형 창 기준): hero 텍스트와 로그인 카드가 중심 우측으로 쏠려 좌측 거대 공백, 1/2/3 단계 인디케이터가 디버그 노트처럼 노출, CTA 3개(로컬 알파 시작/초대로 참여(disabled)/로그인)가 위계 없이 경쟁, 필드 밀도·포커스 문법 미정비, 배경 그라데이션이 탁함.
+- [ ] 대형 창(≥1600pt)에서 **중앙 정렬 max-width 구성**: 압축된 hero(로고+가치 한 줄+capability 칩)와 로그인 카드가 하나의 수직 리듬으로 중앙 배치, 좌우 공백 균형. 좁은 창에서도 성립(반응형 단일 컬럼).
+- [ ] 로그인 카드 정비: 필드 높이/간격 토큰화, 포커스 ring 상태, **primary CTA 1개**(입력 상태 기반 — 자격 미입력 시 "데모 열기" primary, 입력 시 "로그인" primary) + 나머지 secondary/tertiary, disabled 사유 노출(초대 코드), Keychain 토글은 보조 밀도로.
+- [ ] 1/2/3 단계 인디케이터 제거 또는 카드 내부 subtle 진행 표시로 격하. 에러/로딩/오프라인 상태 카피는 다음 행동 포함.
+- [ ] 배경: Theme 토큰 기반 정제된 다크 그라데이션(양 스킴 대응), 장식 모션은 reduceMotion 가드 하 ≤0.16s.
+- [ ] Enter 제출·Tab 순서·Esc 키보드 문법(P11), light/dark 스냅샷(대형/기본 폭 2변형 권장) + design-review Blocker 0. 표면: `MomoServerSession.swift`/`OnboardingInviteView.swift` 계열, 랜딩된 357..367과 회귀 없음.
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.
