@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## 0-1. MOMO-362 Work v0 Run Contract + Approval Tiers (2026-07-13)
+
+- `agent_run.input`의 정확한 Work v0 shape를 트랜잭션 전에 검증하고, active human/channel-agent 결속·멱등·동시성 한도를 지키는 Work 생성 및 channel 목록/상세 REST를 기존 gateway outbox 경로에 추가했다. `schema_v0.sql`과 migration은 변경하지 않았다.
+- gateway 승인 요청은 `read_only|workspace_write|network_write` tier를 approval payload/card metadata에 보존하며, legacy MOMO-349 요청은 보수적 `workspace_write`로 유지하고 danger 상당은 400으로 닫는다. callback actor binding과 agent bearer allowlist는 유지했다.
+- 검증: server `swift build --disable-sandbox` PASS, 68 tests PASS. 지시된 DB/Docker/verifier/`local_gate.sh` 및 clean/root `runtime-agent`는 오케스트레이터 대기(`runtime-unverified`).
+
 ## 0-1. MOMO-358 UI W1 Quick Switcher + Keyboard Navigation (2026-07-13)
 
 - macOS 앱에 즉시 포커스되는 `Cmd+K` 퀵 스위처를 추가해 최근 채널 우선 fuzzy 검색과 현재 채널의 active roster 멤버 검색을 제공한다. 채널 선택은 타임라인으로, 멤버 선택은 프로필로 이동하며 invited active membership만 노출한다.

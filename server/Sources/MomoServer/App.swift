@@ -94,6 +94,7 @@ enum AppBuilder {
             ))
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
+        AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)

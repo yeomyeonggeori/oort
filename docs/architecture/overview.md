@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-13 (ADR-0110) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-13 (ADR-0110·0111) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -18,7 +18,7 @@
 flowchart LR
     subgraph clients [클라이언트]
         MAC["macOS 앱 (SwiftUI)<br/>MomoCore 계약 + centrifuge-swift"]
-        HG["Hermes 게이트웨이 (사용자 소유)<br/>adapters/hermes plugin"]
+        HG["BYOA 게이트웨이 (사용자 소유)<br/>Hermes · codex-workbench"]
     end
     subgraph server [MomoServer — Hummingbird 2]
         API["REST /v1/*<br/>agent_run · Context Packet<br/>approval · usage/audit 보장"]
@@ -53,6 +53,21 @@ fixture는 `LiveChatBackend`에만 존재한다.
 주소로 centrifuge-swift transport를 구성하고 앱 환경의 `MOMO_CENTRIFUGO_WS_URL`은
 이전 서버/개발용 fallback으로만 사용한다. REST API와 realtime 공개 도메인은 계속
 분리할 수 있으며(ADR-0002), 클라이언트는 API URL에서 realtime 주소를 추론하지 않는다.
+
+### Work v0 run 표면
+
+ADR-0111의 Work는 새 실행 개체가 아니라 기존 `agent_run`이다. active human channel
+member는 `POST /v1/workspaces/:ws/channels/:ch/agent-runs`에 target agent,
+`clientRunId`, `{type:"work",title,brief,repo?,branch?}` input을 보내며, 서버는 shape를
+트랜잭션 전에 검증한다. 한 tenant transaction이 run, gateway `agent_job`, private
+`agentwork:` wake-up outbox, audit을 함께 기록한다. 실행은 항상 target agent의 BYOA
+호스트에서 이루어지고 provider·repo 자격증명은 momo에 들어오지 않는다.
+
+같은 channel route의 GET은 Work run 목록, `GET /v1/workspaces/:ws/agent-runs/:run`은
+상세 projection을 제공한다. 사람의 두 읽기 경로는 active channel membership를 요구하고,
+agent bearer에는 공개되지 않는다. gateway callback은 계속 bearer actor의 자기 run에만
+결속된다. approval callback은 `read_only|workspace_write|network_write` tier를 approval
+payload와 timeline card metadata에 보존하며 danger 상당 값은 400으로 fail-closed한다.
 
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 

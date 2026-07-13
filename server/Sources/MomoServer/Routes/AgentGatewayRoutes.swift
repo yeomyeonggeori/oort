@@ -956,9 +956,24 @@ struct AgentGatewayRoutes: Sendable {
             return try rows.first?.decode(UUID.self)
         }
         guard let targetAgentID else { return }
-        guard targetAgentID == principal.memberID else {
-            throw HTTPError(.forbidden, message: "agent bearer actor does not match run agent")
+        guard Self.runActorBindingAllows(
+            principalMemberID: principal.memberID,
+            runAgentMemberID: targetAgentID
+        ) else {
+            try Self.rejectRunActorBinding()
         }
+    }
+
+    static func runActorBindingAllows(
+        principalMemberID: UUID?,
+        runAgentMemberID: UUID?
+    ) -> Bool {
+        guard let principalMemberID, let runAgentMemberID else { return true }
+        return principalMemberID == runAgentMemberID
+    }
+
+    static func rejectRunActorBinding() throws -> Never {
+        throw HTTPError(.forbidden, message: "agent bearer actor does not match run agent")
     }
 
     private static func lockGatewayRun(
@@ -1362,6 +1377,7 @@ struct AgentGatewayRoutes: Sendable {
         var payload: [String: Any] = [
             "run_id": runID.uuidString,
             "action_type": request.actionType,
+            "tier": request.tier.rawValue,
             "tool_call": toolCall,
             "resume_model": "gateway_resume_agent_job",
             "source": "hermes_gateway",
@@ -1386,6 +1402,7 @@ struct AgentGatewayRoutes: Sendable {
             "run_id": runID.uuidString,
             "channel_id": channelID.uuidString,
             "action_type": request.actionType,
+            "tier": request.tier.rawValue,
             "call_id": request.toolCall.callId,
             "tool_name": request.toolCall.name,
             "title": request.title ?? "Approve \(request.toolCall.name)",
@@ -1658,6 +1675,7 @@ struct AgentGatewayProgressEvent: Equatable, Sendable {
 
 struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
     let actionType: String
+    let tier: AgentGatewayApprovalTier
     let title: String?
     let summary: String?
     let toolCall: AgentGatewayApprovalToolCall
@@ -1666,6 +1684,7 @@ struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case actionType = "action_type"
+        case tier
         case title
         case summary
         case toolCall = "tool_call"
@@ -1677,6 +1696,9 @@ struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         actionType = try container.decodeIfPresent(String.self, forKey: .actionType)
             ?? "tool_call"
+        tier = try AgentGatewayApprovalTier.validated(
+            container.decodeIfPresent(String.self, forKey: .tier)
+        )
         title = try container.decodeIfPresent(String.self, forKey: .title)
         summary = try container.decodeIfPresent(String.self, forKey: .summary)
         toolCall = try container.decode(AgentGatewayApprovalToolCall.self, forKey: .toolCall)
@@ -1686,6 +1708,7 @@ struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
 
     private init(
         actionType: String,
+        tier: AgentGatewayApprovalTier,
         title: String?,
         summary: String?,
         toolCall: AgentGatewayApprovalToolCall,
@@ -1693,6 +1716,7 @@ struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
         isReversible: Bool?
     ) {
         self.actionType = actionType
+        self.tier = tier
         self.title = title
         self.summary = summary
         self.toolCall = toolCall
@@ -1709,6 +1733,7 @@ struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
         }
         return AgentGatewayApprovalRequest(
             actionType: actionType,
+            tier: tier,
             title: title,
             summary: summary,
             toolCall: try toolCall.validated(),
@@ -1733,6 +1758,31 @@ struct AgentGatewayApprovalRequest: Decodable, Equatable, Sendable {
               !value.isEmpty
         else { return nil }
         return String(value.prefix(limit))
+    }
+}
+
+enum AgentGatewayApprovalTier: String, Codable, Equatable, Sendable {
+    case readOnly = "read_only"
+    case workspaceWrite = "workspace_write"
+    case networkWrite = "network_write"
+
+    /// Missing tier is the conservative legacy bridge for MOMO-349 Hermes
+    /// callbacks. It still requires approval; new work adapters send it explicitly.
+    static func validated(_ raw: String?) throws -> AgentGatewayApprovalTier {
+        guard let raw else { return .workspaceWrite }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch value {
+        case AgentGatewayApprovalTier.readOnly.rawValue:
+            return .readOnly
+        case AgentGatewayApprovalTier.workspaceWrite.rawValue:
+            return .workspaceWrite
+        case AgentGatewayApprovalTier.networkWrite.rawValue:
+            return .networkWrite
+        case "danger", "danger_full_access", "danger-full-access", "full_access", "full-access":
+            throw HTTPError(.badRequest, message: "danger approval tier is not allowed")
+        default:
+            throw HTTPError(.badRequest, message: "unknown approval tier")
+        }
     }
 }
 

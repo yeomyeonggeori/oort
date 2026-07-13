@@ -330,6 +330,14 @@ final class MomoServerTests: XCTestCase {
         ))
         XCTAssertNil(AuthMiddleware.requiredAgentScope(
             method: "POST",
+            path: "/v1/workspaces/ws/channels/ch/agent-runs"
+        ))
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "GET",
+            path: "/v1/workspaces/ws/agent-runs/run"
+        ))
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "POST",
             path: "/v1/admin/messages"
         ))
     }
@@ -670,10 +678,166 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(rejected.allowed)
     }
 
+    func testWorkRunInputValidatesExactShapeAndLeavesNonWorkInputsUntouched() throws {
+        let input = JSONValue.object([
+            "type": .string("work"),
+            "title": .string("  Prepare release  "),
+            "brief": .string("  Build, test, and open a PR.  "),
+            "repo": .string("  Dawn-kim-official/momo  "),
+            "branch": .string("  feat/work-surface  "),
+        ])
+        let work = try WorkRunInput.require(input)
+
+        XCTAssertEqual(work.title, "Prepare release")
+        XCTAssertEqual(work.brief, "Build, test, and open a PR.")
+        XCTAssertEqual(work.repo, "Dawn-kim-official/momo")
+        XCTAssertEqual(work.branch, "feat/work-surface")
+        XCTAssertEqual(
+            work.jsonValue.objectValue?["type"]?.stringValue,
+            "work"
+        )
+        XCTAssertNil(try WorkRunInput.validateIfWork(.object([
+            "surface": .string("mention"),
+            "prompt": .string("existing non-work input"),
+        ])))
+        XCTAssertNil(try WorkRunInput.validateIfWork(.object([
+            "type": .string("chat"),
+            "prompt": .string("another convention"),
+        ])))
+    }
+
+    func testWorkRunInputShapeFailuresAreBadRequests() throws {
+        let invalidInputs: [JSONValue] = [
+            .object(["type": .string("work"), "brief": .string("missing title")]),
+            .object([
+                "type": .string("work"),
+                "title": .string("Title"),
+                "brief": .string("   "),
+            ]),
+            .object([
+                "type": .string("work"),
+                "title": .string("Title"),
+                "brief": .string("Brief"),
+                "repo": .bool(true),
+            ]),
+            .object([
+                "type": .string("work"),
+                "title": .string("Title"),
+                "brief": .string("Brief"),
+                "command": .string("rm -rf /"),
+            ]),
+            .array([]),
+        ]
+
+        for input in invalidInputs {
+            XCTAssertThrowsError(try WorkRunInput.require(input)) { error in
+                XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+            }
+        }
+    }
+
+    func testCreateWorkRunRequestAcceptsCamelAndSnakeCaseBindings() throws {
+        let camel = try JSONDecoder().decode(
+            CreateAgentRunRequest.self,
+            from: Data("""
+            {
+              "agentMemberId": "00000000-0000-7000-8000-000000000103",
+              "clientRunId": "00000000-0000-7000-8000-000000000362",
+              "input": {"type":"work","title":"Title","brief":"Brief"}
+            }
+            """.utf8)
+        )
+        let snake = try JSONDecoder().decode(
+            CreateAgentRunRequest.self,
+            from: Data("""
+            {
+              "agent_member_id": "00000000-0000-7000-8000-000000000103",
+              "client_run_id": "00000000-0000-7000-8000-000000000362",
+              "input": {"type":"work","title":"Title","brief":"Brief"}
+            }
+            """.utf8)
+        )
+
+        XCTAssertEqual(camel.agentMemberId, snake.agentMemberId)
+        XCTAssertEqual(camel.clientRunId, snake.clientRunId)
+        XCTAssertEqual(camel.input, snake.input)
+    }
+
+    func testApprovalTierAcceptsV0TiersAndRejectsDangerAs400() throws {
+        XCTAssertEqual(try AgentGatewayApprovalTier.validated("read_only"), .readOnly)
+        XCTAssertEqual(
+            try AgentGatewayApprovalTier.validated("workspace_write"),
+            .workspaceWrite
+        )
+        XCTAssertEqual(
+            try AgentGatewayApprovalTier.validated("network_write"),
+            .networkWrite
+        )
+        XCTAssertEqual(
+            try AgentGatewayApprovalTier.validated(nil),
+            .workspaceWrite,
+            "MOMO-349 callbacks without tier remain approval-gated"
+        )
+
+        for denied in ["danger", "danger_full_access", "danger-full-access", "root"] {
+            XCTAssertThrowsError(try AgentGatewayApprovalTier.validated(denied)) { error in
+                XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+            }
+        }
+
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            AgentGatewayApprovalRequest.self,
+            from: Data("""
+            {
+              "tier": "danger_full_access",
+              "tool_call": {"call_id":"call-danger","name":"shell","arguments":{}}
+            }
+            """.utf8)
+        )) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+    }
+
+    func testAgentRunReadAndGatewayCallbackRemainActorBound() throws {
+        let first = UUID(uuidString: "00000000-0000-7000-8000-000000000103")!
+        let second = UUID(uuidString: "00000000-0000-7000-8000-000000000104")!
+
+        XCTAssertTrue(AgentGatewayRoutes.runActorBindingAllows(
+            principalMemberID: first,
+            runAgentMemberID: first
+        ))
+        XCTAssertFalse(AgentGatewayRoutes.runActorBindingAllows(
+            principalMemberID: first,
+            runAgentMemberID: second
+        ))
+        XCTAssertThrowsError(try AgentGatewayRoutes.rejectRunActorBinding()) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .forbidden)
+        }
+        XCTAssertTrue(AgentRunRoutes.canReadRun(
+            principalKind: .human,
+            principalMemberID: first,
+            runAgentMemberID: second,
+            hasChannelMembership: true
+        ))
+        XCTAssertFalse(AgentRunRoutes.canReadRun(
+            principalKind: .agent,
+            principalMemberID: first,
+            runAgentMemberID: second,
+            hasChannelMembership: true
+        ))
+        XCTAssertFalse(AgentRunRoutes.canReadRun(
+            principalKind: .human,
+            principalMemberID: first,
+            runAgentMemberID: second,
+            hasChannelMembership: false
+        ))
+    }
+
     func testAgentGatewayApprovalRequestDecodesAndBuildsWorkerCompatiblePayload() throws {
         let json = """
         {
           "action_type": "tool_call",
+          "tier": "network_write",
           "title": "Create release issue",
           "summary": "Review the issue before Hermes creates it.",
           "tool_call": {
@@ -703,6 +867,8 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(object["run_id"] as? String, runID.uuidString)
         XCTAssertEqual(object["resume_model"] as? String, "gateway_resume_agent_job")
         XCTAssertEqual(object["source"] as? String, "hermes_gateway")
+        XCTAssertEqual(object["tier"] as? String, "network_write")
+        XCTAssertEqual(request.tier, .networkWrite)
         XCTAssertEqual(object["estimated_micro_usd"] as? Int, 1200)
         XCTAssertEqual(object["is_reversible"] as? Bool, false)
         XCTAssertEqual(toolCall["call_id"] as? String, "call-release-1")
