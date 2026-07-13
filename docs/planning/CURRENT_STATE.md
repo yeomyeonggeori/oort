@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-13 · 기준선: **UI Wave 1(357/358/359) + Phase A(360/361) 배치 종결** — Slack급 셸·타임라인·Cmd+K + GHCR 발행/배포 번들, ADR-0109·0111 Accepted, Work v0(362..365)·Wave 2(366/367) 발급 · 통합 책임: `momo-main`
+> 기준일: 2026-07-13 · 기준선: **Work v0(362..365) + Wave 2 unread(366/367) 배치 종결** — 메신저 내 Work(승인 티어·codex-workbench·Work 카드·capability 배지) + unread 배지/⌥⇧↑↓ 순회 전부 랜딩, root full gate green. 라이브 반영 완료(서버 재기동·Centrifugo 패치·앱 재빌드) · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -54,8 +54,8 @@
 | **UI Wave 1** | `2026-07-13-ui-wave1.md` | MOMO-357 `#347` (셸·사이드바) | `done` (PR #355, `94e9244`) — 리뷰 반려 1회(접근성 High) | 3 완료 |
 | UI Wave 1 | 같은 패킷 | MOMO-359 `#348` (타임라인 그루핑) | `done` (PR #354, `6b75260`) — 리뷰 반려 1회(Blocker: 복사 칩 상시 노출) | 4 완료 |
 | UI Wave 1 | 같은 패킷 | MOMO-358 `#351` (Cmd+K 스위처) | `done` (PR #356, `5ac5fa9`) — 리뷰 반려 1회(⌘서수 술어) — **W1 종결** | 5 완료 |
-| **Agent Work Surface v0** | `2026-07-13-agent-work-surface.md` | MOMO-362..365 | `issuing` (2026-07-13, ADR-0111 파생) — 362·366 선행 스폰 | 진행 중 |
-| **UI Wave 2 unread** | `2026-07-13-ui-wave2-unread.md` | MOMO-366/367 | `issuing` (2026-07-13, ADR-0109 파생) | 진행 중 |
+| **Agent Work Surface v0** | `2026-07-13-agent-work-surface.md` | MOMO-362 `#357` → 363 `#358` → 364 `#359` · 365 `#360` | `done` (PR #363/`2d5b2ad` · #365/`44f8d35` · #367/`adf159f` · #366/`f5aba9f`) — **배치 종결** | 완료 |
+| **UI Wave 2 unread** | `2026-07-13-ui-wave2-unread.md` | MOMO-366 `#361` → 367 `#362` | `done` (PR #364/`69facce` · #368/`fd8eabe`, ⌥⇧↑↓ 스펙 변경 `d9f4e68`) — **배치 종결** | 완료 |
 | **Phase A AWS** | `2026-07-13-phase-a-aws.md` | MOMO-360 `#349` (이미지 발행 워크플로) | `done` (PR #352, `6980e64`) | 1 완료 |
 | Phase A AWS | 같은 패킷 | MOMO-361 `#350` (배포 번들+runbook) | `done` (PR #353, `1c044e6`) | 2 완료 |
 | Agent Work Surface | ADR-0111 파생 배치 표 | MOMO-362..365 | `unlocked` (ADR-0111 Accepted) — 현행 배치 랜딩 후 발급·스폰 | UI W1+Phase A 후 |
@@ -73,8 +73,9 @@
 
 ## 4. 다음 체크포인트
 
-1. ~~Phase 0 dogfood 무결성 (354/355/356)~~ — **2026-07-13 배치 종결**. 성재 육안 검증 대기: 김인턴 미노출·Hermes 멤버 표시·CLI 공지 무유출.
-2. **내부 팀 테스트(10인) 준비 트랙** — ① UI 고도화 Wave 1(셸/사이드바/Cmd+K) + ADR-0109(unread/read-state) 기안 ② Phase A(AWS 단일 EC2 실배포 + GH Actions pull&up + 앱 배포 `#226`) 티켓 발급. 성재 선택: 호스팅=단일 EC2(t4g.large), UI는 내부 테스트 전 선공개.
+1. ~~Phase 0 / UI W1 / Phase A / Work v0 / Wave 2~~ — **2026-07-13 5개 배치 전부 종결** (354..367, 14 티켓). 라이브 dogfood는 최신 main으로 반영 완료.
+2. **성재 육안 검증 대기**: 새 UI 전반(사이드바·타임라인·Cmd+K·unread 배지·⌥⇧↑↓) + Work 데모. Work 데모는 codex 에이전트 시드 1회 필요(성재 opt-in — scratchpad `seed-codex-agent.sql`, 실행 후 오케스트레이터가 credential 발급·adapter 기동).
+3. **Phase A 운영 단계**: GHCR publish 1회 → EC2 provision → `docs/runbooks/aws-internal-alpha-deploy.md` 절차 — AWS 리소스 생성은 성재 결정.
 3. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한). agent 신규 pairing 표면 티켓(103 은퇴 후 재생성 경로)도 함께 검토.
 4. ~~ADR-0109/0111 판정~~ — **2026-07-13 둘 다 Accepted** (0111=Option A BYOA). 랜딩 큐 확정: 현행 5 goal → Work 배치(362..365) + Wave 2(unread). ADR-0103(로드맵 정렬)은 실질 확정, 문서 정본화 대기.
 5. MOMO-354 design-review Medium 5건 이월 (BUILD_TICKETS 기록) — presence 하드코딩·비활성 author 표시·subscribe 순서 의존·에러 카피·데모 서사. 성재 판단 대기.

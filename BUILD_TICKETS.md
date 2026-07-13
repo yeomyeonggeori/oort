@@ -1778,39 +1778,46 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] non-goal 명시: 무중단 배포/split 토폴로지/iOS. AWS API 호출 없음.
   - 오케스트레이터 종결: 합성 fixture 테스트+실 repo 번들 생성(allowlist 7파일 일치) 직접 재검증, clean `runtime-agent` gate PASS(콜드 빌드 타임아웃 1회 후 재실행), PR #353 squash merge(`1c044e6`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T041003Z-…-r65024c71dbcb.md`, `local-gate-macos-ui-20260713T041531Z-…-r4794a4a53bee.md`)
 
-### ☐ MOMO-362 수용기준 — Work v0 work run 계약 + 승인 티어 서버 가드 `[swift/runtime-agent]` (ADR-0111 D1·D3, 패킷 `2026-07-13-agent-work-surface.md`)
-- [ ] `agent_run.input`의 `{type:"work", title, brief, repo?, branch?}` shape를 run 생성/트리거 경로에서 검증 — 위반은 트랜잭션 밖 4xx, 비-work run 무영향. `schema_v0.sql`·신규 migration 없음.
-- [ ] gateway 승인 요청에 `tier`(read_only|workspace_write|network_write) 수용·approval metadata 전달, `danger` 상당은 400 fail-closed.
-- [ ] work run 목록/상세 REST(기존 run 조회 확장, actor binding 유지) + 서버 단위 테스트(shape·tier·403/400 경계).
-- [ ] 349/350/341 경로 회귀 없음 — 동등성 verifier 계약 비파괴. clean/root `runtime-agent` PASS는 오케스트레이터.
+### ☑ MOMO-362 수용기준 — Work v0 work run 계약 + 승인 티어 서버 가드 `[swift/runtime-agent]` (ADR-0111 D1·D3, 패킷 `2026-07-13-agent-work-surface.md`)
+- [x] `agent_run.input`의 `{type:"work", title, brief, repo?, branch?}` shape를 run 생성/트리거 경로에서 검증 — 위반은 트랜잭션 밖 4xx, 비-work run 무영향. `schema_v0.sql`·신규 migration 없음.
+- [x] gateway 승인 요청에 `tier`(read_only|workspace_write|network_write) 수용·approval metadata 전달, `danger` 상당은 400 fail-closed.
+- [x] work run 목록/상세 REST(기존 run 조회 확장, actor binding 유지) + 서버 단위 테스트(shape·tier·403/400 경계).
+- [x] 349/350/341 경로 회귀 없음 — 동등성 verifier 계약 비파괴. clean/root `runtime-agent` PASS는 오케스트레이터.
+  - 오케스트레이터 종결: 검수(트랜잭션 밖 4xx·tier fail-closed·invite-gating 술어·actor 스코프) 후 clean `runtime-agent` gate PASS, PR #363 merge(`2d5b2ad`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
 
-### ☐ MOMO-363 수용기준 — Work v0 codex-workbench gateway adapter `[python/runtime-agent]` · 의존: MOMO-362
-- [ ] `adapters/codex-workbench/` — hermes adapter 패턴 승계, work run claim→`codex exec` headless(세션 id 보존, 후속 지시 `resume`), ADR-0004(자격증명 어댑터 호스트에만).
-- [ ] sandbox→승인 티어 매핑: read-only 즉시, workspace-write는 실행 전 승인 왕복, danger 경로 부재.
-- [ ] transcript=status/partial 스트림, 최종=구조화 결과 카드(diff 요약/exit/링크), 운영 공지 durable 유출 금지(MOMO-356 계약).
-- [ ] mock codex 기반 DB 비접속 계약 테스트 + `bash -n`/py_compile PASS. 실 codex 왕복은 오케스트레이터 라이브 검증.
+### ☑ MOMO-363 수용기준 — Work v0 codex-workbench gateway adapter `[python/runtime-agent]` · 의존: MOMO-362
+- [x] `adapters/codex-workbench/` — hermes adapter 패턴 승계, work run claim→`codex exec` headless(세션 id 보존, 후속 지시 `resume`), ADR-0004(자격증명 어댑터 호스트에만).
+- [x] sandbox→승인 티어 매핑: read-only 즉시, workspace-write는 실행 전 승인 왕복, danger 경로 부재.
+- [x] transcript=status/partial 스트림, 최종=구조화 결과 카드(diff 요약/exit/링크), 운영 공지 durable 유출 금지(MOMO-356 계약).
+- [x] mock codex 기반 DB 비접속 계약 테스트 + `bash -n`/py_compile PASS. 실 codex 왕복은 오케스트레이터 라이브 검증.
+  - 오케스트레이터 종결: 검수(danger 경로 부재·plan→승인→resume 2단계·ADR-0004 경계·356 공지 계약) + mock 계약 테스트 직접 재검증, clean `runtime-agent` gate PASS, PR #365 merge(`44f8d35`). 실 codex 왕복 라이브 검증은 운영 단계(성재 seed 후). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
 
-### ☐ MOMO-364 수용기준 — Work v0 Work 표면 UI `[swift/macos-ui]` · 의존: MOMO-362 (365와 병렬)
-- [ ] `/work` 커맨드+컴포저 버튼(대상 에이전트 선택·title/brief), 타임라인 work 카드(상태 칩/접힌 로그 테일/인라인 승인/결과 요약), 상세 페인.
-- [ ] partial 스트림·승인 카드 기존 컴포넌트 재사용, 359 그루핑과 비충돌, P8(노이즈 억제) 준수.
-- [ ] light/dark 스냅샷(상태 칩·로그 테일·승인·결과 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
+### ☑ MOMO-364 수용기준 — Work v0 Work 표면 UI `[swift/macos-ui]` · 의존: MOMO-362 (365와 병렬)
+- [x] `/work` 커맨드+컴포저 버튼(대상 에이전트 선택·title/brief), 타임라인 work 카드(상태 칩/접힌 로그 테일/인라인 승인/결과 요약), 상세 페인.
+- [x] partial 스트림·승인 카드 기존 컴포넌트 재사용, 359 그루핑과 비충돌, P8(노이즈 억제) 준수.
+- [x] light/dark 스냅샷(상태 칩·로그 테일·승인·결과 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
+  - 오케스트레이터 종결: fresh design-review PASS(High 1 — 재로드 후 종결 run이 ephemeral 상태에 가려 '승인 대기' 표시)+Medium 4 반려 수정, 365와 rebase union(Theme·Core 테스트 brace 유실 2건 오케스트레이터 직접 수리 — 교훈: union 후 전 패키지 빌드 검증), work surface+도움말 정본 재기록·육안 확인(승인 카드/결과 카드 픽셀), clean `macos-ui` gate PASS, PR #367 merge(`adf159f`). root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
 
-### ☐ MOMO-365 수용기준 — Work v0 capability 배지·대상 선택 `[swift/macos-ui]` · 의존: MOMO-362 (364와 병렬)
-- [ ] `agent.config.capabilities` roster/상세 표면화(read-through, 새 스키마 없음), 사이드바·Cmd+K·멘션 후보에 배지.
-- [ ] Work 대상 후보 = 선택 채널 초대된 active 에이전트 중 capability 보유자만(354 술어 재사용), 자동 라우팅 없음.
-- [ ] 후보 필터 단위 테스트 + 스냅샷 + design-review Blocker 0.
+### ☑ MOMO-365 수용기준 — Work v0 capability 배지·대상 선택 `[swift/macos-ui]` · 의존: MOMO-362 (364와 병렬)
+- [x] `agent.config.capabilities` roster/상세 표면화(read-through, 새 스키마 없음), 사이드바·Cmd+K·멘션 후보에 배지.
+- [x] Work 대상 후보 = 선택 채널 초대된 active 에이전트 중 capability 보유자만(354 술어 재사용), 자동 라우팅 없음.
+- [x] 후보 필터 단위 테스트 + 스냅샷 + design-review Blocker 0.
+  - 오케스트레이터 종결: fresh design-review PASS(Blocker 0/High 0/Medium 3 — 멘션 행 이중 신호·+N 발견성·SQL 중복 이월), 정본 4종 재기록·육안 확인(code/+N 칩), clean `macos-ui` gate PASS, PR #366 merge(`f5aba9f`). 358 이월이던 AGENT 배지 공용 컴포넌트화 이행됨.
 
-### ☐ MOMO-366 수용기준 — Wave 2 read-state 서버 계약 `[swift/runtime-agent]` (ADR-0109 D2·D3, 패킷 `2026-07-13-ui-wave2-unread.md`)
-- [ ] 벌크 `GET /v1/workspaces/:ws/read-state`(자기 것만, 본문 비포함, 행 부재=0) + `PUT .../channels/:ch/read-state`(GREATEST 단조·idempotent·타인 403·트랜잭션 밖 4xx).
-- [ ] outbox `read_state` 이벤트 → 같은 멤버 개인 채널로만 relay. Centrifugo 전송전용 불변.
-- [ ] ADR-0109 검증 계약 1~5항 서버 단위 테스트 전부 green. `schema_v0.sql` 불변(필요 시 신규 numbered migration).
-- [ ] clean/root `runtime-agent` PASS는 오케스트레이터.
+### ☑ MOMO-366 수용기준 — Wave 2 read-state 서버 계약 `[swift/runtime-agent]` (ADR-0109 D2·D3, 패킷 `2026-07-13-ui-wave2-unread.md`)
+- [x] 벌크 `GET /v1/workspaces/:ws/read-state`(자기 것만, 본문 비포함, 행 부재=0) + `PUT .../channels/:ch/read-state`(GREATEST 단조·idempotent·타인 403·트랜잭션 밖 4xx).
+- [x] outbox `read_state` 이벤트 → 같은 멤버 개인 채널로만 relay. Centrifugo 전송전용 불변.
+- [x] ADR-0109 검증 계약 1~5항 서버 단위 테스트 전부 green. `schema_v0.sql` 불변(필요 시 신규 numbered migration).
+- [x] clean/root `runtime-agent` PASS는 오케스트레이터.
+  - 오케스트레이터 종결: 검수(단조 가드+head 상한·개인 채널 한정 발행·mention 저장 시점 파싱) 후 clean `runtime-agent` gate PASS, PR #364 merge(`69facce`). Centrifugo user 네임스페이스 `allow_user_limited_channels` 변경 — root·dogfood 라이브 모두 recreate/패치 완료. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
 
-### ☐ MOMO-367 수용기준 — Wave 2 unread 배지 + 키보드 순회 `[swift/macos-ui]` · 의존: MOMO-366
-- [ ] 부팅 1-call 점등, 사이드바 unread 굵기+mention 숫자 배지(357 행 문법 내), realtime `read_state` 이벤트 동기화.
-- [ ] 뷰포트 기준 mark-read(debounce ≈1s), own-send 하단 추적 예외 확정 구현(359 이월), 서버 커서=진실.
-- [ ] `⌥⇧↑↓` unread 순회(스펙 변경 2026-07-13: ⇧⌘↑↓는 macOS 텍스트 선택 표준을 가로채 composer draft를 뺏음 — design-review High → Slack 문법 ⌥⇧↑↓로 결정. 358 단축키·시스템 편집과 비충돌, `Cmd+/` 도움말 갱신).
-- [ ] light/dark 스냅샷(배지 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
+### ☑ MOMO-367 수용기준 — Wave 2 unread 배지 + 키보드 순회 `[swift/macos-ui]` · 의존: MOMO-366
+- [x] 부팅 1-call 점등, 사이드바 unread 굵기+mention 숫자 배지(357 행 문법 내), realtime `read_state` 이벤트 동기화.
+- [x] 뷰포트 기준 mark-read(debounce ≈1s), own-send 하단 추적 예외 확정 구현(359 이월), 서버 커서=진실.
+- [x] `⌥⇧↑↓` unread 순회(스펙 변경 2026-07-13: ⇧⌘↑↓는 macOS 텍스트 선택 표준을 가로채 composer draft를 뺏음 — design-review High → Slack 문법 ⌥⇧↑↓로 결정. 358 단축키·시스템 편집과 비충돌, `Cmd+/` 도움말 갱신).
+- [x] light/dark 스냅샷(배지 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
+  - 오케스트레이터 종결: fresh design-review PASS(High 1=스펙 원인 — ⇧⌘↑↓가 macOS 텍스트 선택 충돌 → planner 결정으로 ⌥⇧↑↓ 전환, 정본 3곳 갱신 `d9f4e68`)+Medium 5 반려 수정(백오프 5회 상한·에러 행 문법 수렴 등), 364와의 7파일 실충돌 rebase는 worker 위임(전 패키지 검증), unread 배지+도움말 정본 재기록·육안 확인(⇧⌘W와 ⌥⇧↑↓ 공존), clean `macos-ui` gate PASS, PR #368 merge(`fd8eabe`) — **Work v0+Wave 2 배치 종결 (2026-07-13)**. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T075706Z-…-ra6804669e978.md`, `local-gate-macos-ui-20260713T080432Z-…-r6738c50ddf08.md`)
+  - 이월 기록: 메시지 폭주 시 벌크 refresh 부하, VO 복수형, mention 캡슐 대비, 신규 채널 레이스.
 
 ---
 
