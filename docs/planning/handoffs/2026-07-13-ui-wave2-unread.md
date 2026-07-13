@@ -17,7 +17,7 @@
 1. 부팅 시 벌크 read-state 1-call 점등, 사이드바 채널 행에 unread 굵기 + mention 숫자 배지(Slack 문법, 357 행 문법 안에서).
 2. 뷰포트 렌더 기준 mark-read(debounce ≈1s), 실패 시 재시도 — 서버 커서가 진실(D1/D4), 로컬은 표시 최적화.
 3. realtime `read_state` 이벤트 수신 시 배지 동기화(다른 디바이스 반영), 신규 메시지 수신 시 unread 증분은 로컬 계산+서버 재동기화.
-4. 키보드 순회: `Cmd+Shift+↑↓` unread 채널 이동(P11) — Cmd+K 스위처(358)와 단축키 충돌 금지, `Cmd+/` 도움말에 추가.
+4. 키보드 순회: `⌥⇧↑↓` unread 채널 이동(P11, 스펙 변경 2026-07-13: ⇧⌘↑↓는 composer 텍스트 선택과 충돌 — Slack 문법 채택) — Cmd+K 스위처(358)와 단축키 충돌 금지, `Cmd+/` 도움말에 추가.
 5. 359의 own-send 하단 추적 예외를 이 티켓에서 확정 구현(자기 발화는 항상 최신으로 스크롤+read 처리).
 6. light/dark 스냅샷(배지 픽셀 포함), momo-design-taste 준수.
 

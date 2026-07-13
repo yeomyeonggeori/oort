@@ -1809,7 +1809,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☐ MOMO-367 수용기준 — Wave 2 unread 배지 + 키보드 순회 `[swift/macos-ui]` · 의존: MOMO-366
 - [ ] 부팅 1-call 점등, 사이드바 unread 굵기+mention 숫자 배지(357 행 문법 내), realtime `read_state` 이벤트 동기화.
 - [ ] 뷰포트 기준 mark-read(debounce ≈1s), own-send 하단 추적 예외 확정 구현(359 이월), 서버 커서=진실.
-- [ ] `Cmd+Shift+↑↓` unread 순회(358 단축키와 비충돌, `Cmd+/` 도움말 갱신).
+- [ ] `⌥⇧↑↓` unread 순회(스펙 변경 2026-07-13: ⇧⌘↑↓는 macOS 텍스트 선택 표준을 가로채 composer draft를 뺏음 — design-review High → Slack 문법 ⌥⇧↑↓로 결정. 358 단축키·시스템 편집과 비충돌, `Cmd+/` 도움말 갱신).
 - [ ] light/dark 스냅샷(배지 픽셀) + design-review Blocker 0. 정본 PNG는 오케스트레이터 재기록.
 
 ---

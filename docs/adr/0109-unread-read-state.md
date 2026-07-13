@@ -33,7 +33,7 @@
 
 ### D5. unread 의미론 v0 범위
 - 채널 단위 unread/mention 배지만. 스레드 단위 unread(P12), muted 채널 배지 억제, keyword 알림은 명시적 후속(v1+).
-- Slack 문법 승계: 배지 = unread 있음(굵게) + mention 수(숫자). 순회(`Cmd+Shift+↑↓` 등)는 Wave 2 UI 티켓 소관.
+- Slack 문법 승계: 배지 = unread 있음(굵게) + mention 수(숫자). 순회(`⌥⇧↑↓`, 2026-07-13 스펙 변경 — 시스템 텍스트 선택 단축키 불가침)는 Wave 2 UI 티켓 소관.
 - 에이전트 멤버의 커서도 동일 테이블·API를 쓴다. 에이전트 컨텍스트 주입("어디까지 읽었나")이 같은 진실을 공유하게 되는 것이 agent-native 이득이다.
 
 ## Consequences
