@@ -237,6 +237,33 @@ assert_image_pinned() {
   esac
 }
 
+assert_release_tag() {
+  local key="$1"
+  local value
+  value="$(get_var "$key")"
+  if printf '%s\n' "$value" | grep -Eq '^sha-[0-9a-f]{40}$'; then
+    pass "$key is an immutable 40-character git SHA tag"
+  else
+    fail "$key must be 'sha-<40 lowercase hex git SHA>' (got '${value:-<empty>}')"
+  fi
+}
+
+assert_image_matches_release() {
+  local key="$1"
+  local value
+  local tag
+  value="$(get_var "$key")"
+  tag="$(get_var MOMO_IMAGE_TAG)"
+  if printf '%s\n' "$value" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+    pass "$key uses a per-image digest override"
+    return 0
+  fi
+  case "$value" in
+    *:"$tag") pass "$key uses MOMO_IMAGE_TAG" ;;
+    *) fail "$key must use MOMO_IMAGE_TAG or a per-image @sha256 digest (got '$value')" ;;
+  esac
+}
+
 assert_placement() {
   local key="$1"
   local expected="$2"
@@ -342,7 +369,7 @@ esac
 require_vars \
   AWS_ALPHA_PROVIDER AWS_REGION AWS_ALPHA_TOPOLOGY AWS_ALPHA_DURATION_DAYS \
   AWS_ALPHA_DOMAIN_ROOT API_DOMAIN REALTIME_DOMAIN TLS_MODE ACME_EMAIL \
-  IMAGE_DEPLOY_MODE SOURCE_CHECKOUT_ON_HOST MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE \
+  IMAGE_DEPLOY_MODE SOURCE_CHECKOUT_ON_HOST MOMO_IMAGE_TAG MOMO_API_IMAGE MOMO_RELAY_IMAGE MOMO_WORKER_IMAGE MOMO_MIGRATE_IMAGE \
   CADDY_PLACEMENT API_PLACEMENT RELAY_PLACEMENT WORKER_PLACEMENT CENTRIFUGO_PLACEMENT REDIS_PLACEMENT POSTGRES_PLACEMENT \
   SECURITY_GROUP_SSH_CIDRS SECURITY_GROUP_HTTP_CIDRS SECURITY_GROUP_HTTPS_CIDRS \
   EXPOSE_POSTGRES EXPOSE_REDIS EXPOSE_CENTRIFUGO EXPOSE_API_DIRECT \
@@ -379,9 +406,15 @@ assert_exact EXPOSE_API_DIRECT 0
 
 assert_exact IMAGE_DEPLOY_MODE registry-pinned
 assert_exact SOURCE_CHECKOUT_ON_HOST 0
+assert_release_tag MOMO_IMAGE_TAG
 assert_image_pinned MOMO_API_IMAGE
 assert_image_pinned MOMO_RELAY_IMAGE
 assert_image_pinned MOMO_WORKER_IMAGE
+assert_image_pinned MOMO_MIGRATE_IMAGE
+assert_image_matches_release MOMO_API_IMAGE
+assert_image_matches_release MOMO_RELAY_IMAGE
+assert_image_matches_release MOMO_WORKER_IMAGE
+assert_image_matches_release MOMO_MIGRATE_IMAGE
 
 assert_exact DB_RESTORE_REHEARSAL_REQUIRED 1
 assert_exact ROLLBACK_STRATEGY previous-image+snapshot-restore

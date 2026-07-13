@@ -4,6 +4,12 @@
 
 name: ${COMPOSE_PROJECT_NAME:-momo-prod}
 
+# Shared immutable tag emitted by publish-images.yml. The full per-service image
+# refs below are derived from this value in env files, but may be replaced by
+# distinct @sha256 digests for a verified deploy or rollback.
+x-momo-image-release:
+  tag: ${MOMO_IMAGE_TAG:?set MOMO_IMAGE_TAG}
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -124,6 +130,8 @@ services:
         condition: service_healthy
       centrifugo:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - private
 
@@ -143,6 +151,8 @@ services:
         condition: service_healthy
       centrifugo:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks:
       - private
 
@@ -168,6 +178,25 @@ services:
       postgres:
         condition: service_healthy
       centrifugo:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+
+  # One-shot, source-checkout-free migration. `pull && up --no-build` runs this
+  # pinned image before api/relay/worker. Roll back by restoring the previous
+  # per-image digests (or previous MOMO_IMAGE_TAG-derived refs) and rerunning the
+  # same compose command; migrations must remain forward-compatible.
+  migrate:
+    image: ${MOMO_MIGRATE_IMAGE:?set MOMO_MIGRATE_IMAGE}
+    restart: "no"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      MOMO_BOOTSTRAP_RUNTIME_ROLES: "0"
+      MOMO_AGENT_SEED_MODE: none
+    depends_on:
+      postgres:
         condition: service_healthy
     networks:
       - private

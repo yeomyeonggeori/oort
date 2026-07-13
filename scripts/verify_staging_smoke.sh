@@ -60,7 +60,9 @@ grep -Fq 'CENT_API_URL: http://centrifugo:8000/api' "$COMPOSE_FILE" || fail "api
 pass "prod compose has expected staging/prod services and internal routing"
 
 echo "==> Caddyfile validation"
+# shellcheck disable=SC2016 # Caddy placeholders are intentionally literal.
 grep -Fq '{$API_DOMAIN}' "$CADDYFILE" || fail "Caddyfile missing API_DOMAIN site"
+# shellcheck disable=SC2016 # Caddy placeholders are intentionally literal.
 grep -Fq '{$REALTIME_DOMAIN}' "$CADDYFILE" || fail "Caddyfile missing REALTIME_DOMAIN site"
 grep -Fq 'reverse_proxy api:8080' "$CADDYFILE" || fail "Caddyfile must proxy API to api:8080"
 grep -Fq 'reverse_proxy centrifugo:8000' "$CADDYFILE" || fail "Caddyfile must proxy realtime to centrifugo:8000"
@@ -143,9 +145,11 @@ CADDY_EMAIL=ops@momo-alpha.dev
 ACME_EMAIL=ops@momo-alpha.dev
 HTTP_PORT=80
 HTTPS_PORT=443
-MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:20260701-1f83728
-MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay:20260701-1f83728
-MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker:20260701-1f83728
+MOMO_IMAGE_TAG=sha-0123456789abcdef0123456789abcdef01234567
+MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:${MOMO_IMAGE_TAG}
+MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay:${MOMO_IMAGE_TAG}
+MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker:${MOMO_IMAGE_TAG}
+MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate:${MOMO_IMAGE_TAG}
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=postgres_20260701_operator_generated_shape
