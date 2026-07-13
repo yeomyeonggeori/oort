@@ -894,17 +894,66 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var recoverableError: String {
+    var messageLoadFailedTitle: String {
         switch language {
         case .korean: return "메시지를 불러오지 못했습니다"
         case .english: return "Messages could not be loaded"
         }
     }
 
-    var recoverableErrorDetail: String {
+    var messageLoadFailedDetail: String {
         switch language {
         case .korean: return "서버 연결을 확인하고 다시 시도하세요."
         case .english: return "Check the server connection and try again."
+        }
+    }
+
+    var messageSendFailedTitle: String {
+        switch language {
+        case .korean: return "메시지를 보내지 못했습니다"
+        case .english: return "Message was not sent"
+        }
+    }
+
+    var messageSendFailedDetail: String {
+        switch language {
+        case .korean: return "내용은 보존되었습니다. 다시 보내기를 눌러 재시도하세요."
+        case .english: return "Your message is preserved. Choose Send again to retry."
+        }
+    }
+
+    func agentCallSendFailedTitle(_ agentName: String) -> String {
+        switch language {
+        case .korean: return "\(agentName) 호출을 보내지 못했습니다"
+        case .english: return "The call to \(agentName) was not sent"
+        }
+    }
+
+    var agentCallSendFailedDetail: String {
+        switch language {
+        case .korean: return "에이전트가 아직 호출되지 않았습니다. 다시 보내기를 눌러 재시도하세요."
+        case .english: return "The agent has not been called yet. Choose Send again to retry."
+        }
+    }
+
+    var sendAgain: String {
+        switch language {
+        case .korean: return "다시 보내기"
+        case .english: return "Send again"
+        }
+    }
+
+    var actionFailedTitle: String {
+        switch language {
+        case .korean: return "작업을 완료하지 못했습니다"
+        case .english: return "The action could not be completed"
+        }
+    }
+
+    var actionFailedDetail: String {
+        switch language {
+        case .korean: return "잠시 후 해당 작업을 다시 시도하세요."
+        case .english: return "Try that action again in a moment."
         }
     }
 

@@ -2499,6 +2499,7 @@ final class MomoMacTests: XCTestCase {
 
         await viewModel.createChannel(kind: .publicChannel, name: "ops-lab")
         XCTAssertTrue(viewModel.connectionError?.contains("channel name already exists") == true)
+        XCTAssertEqual(viewModel.connectionIssue, .actionFailed)
     }
 
     @MainActor
@@ -2552,6 +2553,7 @@ final class MomoMacTests: XCTestCase {
 
         XCTAssertTrue(viewModel.channels.isEmpty)
         XCTAssertTrue(viewModel.connectionError?.contains("channels unavailable") == true)
+        XCTAssertEqual(viewModel.connectionIssue, .loadFailed)
     }
 
     func testRESTBackendMapsUnauthorizedResponseToProblemError() async throws {
@@ -2608,6 +2610,42 @@ final class MomoMacTests: XCTestCase {
         let commandCenter = viewModel.alphaCommandCenterSnapshot()
         XCTAssertFalse(commandCenter.statuses.contains { $0.detail.contains("internal auth dump") })
         XCTAssertFalse(commandCenter.statuses.contains { $0.detail.contains("expired-token-should-not-render") })
+    }
+
+    @MainActor
+    func testFailedAgentMentionUsesSendRecoveryAndRetriesSameIdempotencyKey() async throws {
+        let liveBackend = LiveChatBackend()
+        let seed = await liveBackend.seedDemo()
+        let backend = RetryOnceSendChatBackend(base: liveBackend)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: liveBackend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+        let channel = seed.channels[0].id
+        await viewModel.selectChannel(channel)
+        let agent = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+
+        await viewModel.send(body: "@\(agent.handle) summarize this", to: channel)
+
+        XCTAssertEqual(viewModel.connectionIssue, .sendFailed)
+        XCTAssertEqual(viewModel.failedMentionedAgentName, agent.displayName)
+        XCTAssertNil(viewModel.mentionNotice)
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).agentCallSendFailedTitle(agent.displayName),
+            "\(agent.displayName) 호출을 보내지 못했습니다"
+        )
+        let firstAttempts = await backend.attemptedClientMessageIDs()
+        XCTAssertEqual(firstAttempts.count, 1)
+
+        await viewModel.retryFailedSend()
+
+        XCTAssertNil(viewModel.connectionIssue)
+        XCTAssertNil(viewModel.connectionError)
+        XCTAssertNil(viewModel.failedMentionedAgentName)
+        let allAttempts = await backend.attemptedClientMessageIDs()
+        XCTAssertEqual(allAttempts.count, 2)
+        XCTAssertEqual(allAttempts[0], allAttempts[1], "retry must preserve the send idempotency key")
+        let matchingMessages = viewModel.visibleMessages.filter { $0.clientMsgId == allAttempts[0] }
+        XCTAssertEqual(matchingMessages.count, 1)
+        XCTAssertNotNil(matchingMessages.first?.seq)
     }
 
     func testRESTBackendSubscribeUsesRealtimeDriverStartingAfterKnownHistorySeq() async throws {
@@ -3817,6 +3855,81 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(controller.form.password, "")
         XCTAssertFalse(controller.form.savePassword)
         XCTAssertTrue(controller.sessionNotice?.contains("Logged out") == true)
+    }
+}
+
+private actor RetryOnceSendChatBackend: ChatBackend {
+    private let base: LiveChatBackend
+    private var shouldFailNextSend = true
+    private var clientMessageIDs: [UUID] = []
+
+    init(base: LiveChatBackend) {
+        self.base = base
+    }
+
+    func attemptedClientMessageIDs() -> [UUID] {
+        clientMessageIDs
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        clientMessageIDs.append(clientMsgId)
+        if shouldFailNextSend {
+            shouldFailNextSend = false
+            throw BackendError.realtime("fixture send failure")
+        }
+        return try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        try await base.history(channel: channel, after: seq, limit: limit)
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
     }
 }
 

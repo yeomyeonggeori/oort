@@ -70,6 +70,14 @@ public enum MomoTheme {
             case card
         }
 
+        /// Bounded surfaces clip to their shape. Window chrome surfaces extend
+        /// only their fill through the safe area so titlebars never reveal the
+        /// system background between shell columns.
+        public enum Extent: Sendable {
+            case bounded
+            case windowChrome
+        }
+
         public struct Style {
             public let fill: Color
             public let border: Color
@@ -241,9 +249,10 @@ public extension View {
     /// because SwiftUI has no native semantic background/panel/card level API.
     func momoSurface(
         _ level: MomoTheme.Surface.Level,
-        cornerRadius: CGFloat = MomoTheme.cornerMedium
+        cornerRadius: CGFloat = MomoTheme.cornerMedium,
+        extent: MomoTheme.Surface.Extent = .bounded
     ) -> some View {
-        modifier(MomoSurfaceModifier(level: level, cornerRadius: cornerRadius))
+        modifier(MomoSurfaceModifier(level: level, cornerRadius: cornerRadius, extent: extent))
     }
 }
 
@@ -251,12 +260,34 @@ private struct MomoSurfaceModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
     let level: MomoTheme.Surface.Level
     let cornerRadius: CGFloat
+    let extent: MomoTheme.Surface.Extent
 
+    @ViewBuilder
     func body(content: Content) -> some View {
         let style = MomoTheme.Surface.style(level, colorScheme: colorScheme)
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        switch extent {
+        case .bounded:
+            surfaceChrome(
+                content.background(style.fill, in: shape),
+                style: style,
+                shape: shape
+            )
+        case .windowChrome:
+            surfaceChrome(
+                content.background(style.fill.ignoresSafeArea()),
+                style: style,
+                shape: shape
+            )
+        }
+    }
+
+    private func surfaceChrome<SurfaceContent: View>(
+        _ content: SurfaceContent,
+        style: MomoTheme.Surface.Style,
+        shape: RoundedRectangle
+    ) -> some View {
         content
-            .background(style.fill, in: shape)
             .overlay {
                 shape.stroke(style.border, lineWidth: MomoTheme.Surface.borderWidth)
             }

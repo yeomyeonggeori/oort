@@ -70,7 +70,9 @@ public enum AgentWorkSurfaceError: Sendable, Equatable, CaseIterable {
 
 public enum MomoConnectionIssue: Sendable, Equatable {
     case authenticationExpired
-    case recoverable
+    case loadFailed
+    case sendFailed
+    case actionFailed
 }
 
 // MARK: - ChatViewModel
@@ -89,6 +91,12 @@ public enum MomoConnectionIssue: Sendable, Equatable {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     private static let maximumMarkReadFailures = 5
+
+    private struct PendingMessageSend: Sendable {
+        let draft: DraftMessage
+        let clientMsgId: UUID
+        let mentionedAgent: Member?
+    }
 
     private struct AgentCredentialRefresh {
         let id: UUID
@@ -185,6 +193,13 @@ public final class ChatViewModel: ObservableObject {
     private var localTypingChannels: Set<ChannelID> = []
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
     private var agentCredentialRefreshes: [MemberID: AgentCredentialRefresh] = [:]
+    private var failedMessageSend: PendingMessageSend?
+
+    /// Redacted user-facing context for a failed agent mention. Raw transport
+    /// diagnostics remain isolated in `connectionError`.
+    public var failedMentionedAgentName: String? {
+        failedMessageSend?.mentionedAgent?.displayName
+    }
 
     public init(
         chat: any ChatBackend,
@@ -293,6 +308,7 @@ public final class ChatViewModel: ObservableObject {
         typingStopTasks = [:]
         composerDraft = ""
         mentionNotice = nil
+        failedMessageSend = nil
         workRunsByChannel = [:]
         workRunLoadingChannels = []
         workRunDetailLoadingIds = []
@@ -347,7 +363,7 @@ public final class ChatViewModel: ObservableObject {
         guard let workspaceId, !channelCreateInFlight else { return }
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedName.isEmpty else {
-            reportConnectionError("Channel name is required.")
+            reportConnectionError("Channel name is required.", as: .actionFailed)
             return
         }
         let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -371,7 +387,7 @@ public final class ChatViewModel: ObservableObject {
             clearConnectionErrorState()
             await selectChannel(result.channel.id)
         } catch {
-            reportConnectionError(error)
+            reportConnectionError(error, as: .actionFailed)
         }
     }
 
@@ -924,6 +940,26 @@ public final class ChatViewModel: ObservableObject {
         let mentionedAgent = mentionedAgent(in: trimmed, channel: channel)
         let optimistic = optimisticMessage(body: trimmed, channel: channel, clientMsgId: clientMsgId)
         upsert(optimistic, channel: channel)
+        await performSend(PendingMessageSend(
+            draft: draft,
+            clientMsgId: clientMsgId,
+            mentionedAgent: mentionedAgent
+        ))
+    }
+
+    /// Retries the exact failed request, including its `clientMsgId`, so a lost
+    /// acknowledgement cannot create a duplicate durable message.
+    public func retryFailedSend() async {
+        guard let failedMessageSend else {
+            clearConnectionErrorState(force: true)
+            return
+        }
+        await performSend(failedMessageSend)
+    }
+
+    private func performSend(_ pending: PendingMessageSend) async {
+        let channel = pending.draft.channelId
+        let mentionedAgent = pending.mentionedAgent
         if let mentionedAgent {
             markAgentWorking(
                 mentionedAgent,
@@ -935,10 +971,12 @@ public final class ChatViewModel: ObservableObject {
             showFallbackMentionProgress(agent: mentionedAgent, channel: channel)
         }
         do {
-            let acked = try await chat.sendOptimistic(draft, clientMsgId: clientMsgId)
+            let acked = try await chat.sendOptimistic(pending.draft, clientMsgId: pending.clientMsgId)
             // Reconcile (the stub already emits the real message via subscribe, but the
             // returned ack is authoritative — upsert by id).
             upsert(acked, channel: channel)
+            failedMessageSend = nil
+            clearConnectionErrorState(force: true)
             if let sequence = acked.seq {
                 scheduleMarkRead(channel: channel, sequence: sequence, immediately: true)
             }
@@ -946,9 +984,11 @@ public final class ChatViewModel: ObservableObject {
                 await refreshAfterMentionSend(channel: channel, agent: mentionedAgent, triggerSeq: acked.seq)
             }
         } catch {
-            reportConnectionError(error)
+            failedMessageSend = pending
+            reportConnectionError(error, as: .sendFailed)
             if let mentionedAgent {
                 clearAgentWorking(mentionedAgent.id, channel: channel)
+                discardFallbackMentionProgress(channel: channel)
                 mentionNotice = nil
             }
         }
@@ -1182,7 +1222,7 @@ public final class ChatViewModel: ObservableObject {
                 agent.channelIds = member(agent.id)?.channelIds ?? agent.channelIds
                 clearConnectionErrorState()
             } catch {
-                reportConnectionError(error)
+                reportConnectionError(error, as: .actionFailed)
                 throw error
             }
         }
@@ -1389,6 +1429,14 @@ public final class ChatViewModel: ObservableObject {
         pendingFallbackMentionRuns[channel] = nil
     }
 
+    private func discardFallbackMentionProgress(channel: ChannelID) {
+        guard let runs = pendingFallbackMentionRuns.removeValue(forKey: channel) else { return }
+        for run in runs {
+            partials[run] = nil
+            agentStatuses[run] = nil
+        }
+    }
+
     private func markAgentWorking(_ agent: Member, channel: ChannelID, message: String) {
         guard agent.isAgent else { return }
         agentWorkingStates[agent.id] = AgentWorkingState(
@@ -1470,7 +1518,7 @@ public final class ChatViewModel: ObservableObject {
                 approvals[id] = ev
             }
         } catch {
-            reportConnectionError(error)
+            reportConnectionError(error, as: .actionFailed)
         }
     }
 
@@ -1841,7 +1889,7 @@ public final class ChatViewModel: ObservableObject {
 
     private func mutateMember(_ member: MemberID, channel: ChannelID?, adding: Bool) async {
         guard let channel = channel ?? selectedChannelId else {
-            reportConnectionError("Select a channel first.")
+            reportConnectionError("Select a channel first.", as: .actionFailed)
             return
         }
         guard !channelMemberMutationIds.contains(member) else { return }
@@ -1855,7 +1903,7 @@ public final class ChatViewModel: ObservableObject {
             apply(membership)
             clearConnectionErrorState()
         } catch {
-            reportConnectionError(error)
+            reportConnectionError(error, as: .actionFailed)
         }
     }
 
@@ -1888,28 +1936,41 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func reportConnectionError(_ error: any Error) {
+    private func reportConnectionError(
+        _ error: any Error,
+        as issue: MomoConnectionIssue = .loadFailed
+    ) {
         connectionError = String(describing: error)
         if let backendError = error as? BackendError,
            case .problem(let status, _, _) = backendError,
            status == 401 {
             connectionIssue = .authenticationExpired
-        } else if connectionIssue != .authenticationExpired {
-            connectionIssue = .recoverable
+        } else {
+            reportConnectionIssue(issue)
         }
     }
 
-    private func reportConnectionError(_ diagnostic: String) {
+    private func reportConnectionError(
+        _ diagnostic: String,
+        as issue: MomoConnectionIssue = .loadFailed
+    ) {
         connectionError = diagnostic
-        if connectionIssue != .authenticationExpired {
-            connectionIssue = .recoverable
-        }
+        reportConnectionIssue(issue)
+    }
+
+    private func reportConnectionIssue(_ issue: MomoConnectionIssue) {
+        guard connectionIssue != .authenticationExpired else { return }
+        guard connectionIssue != .sendFailed || issue == .sendFailed else { return }
+        connectionIssue = issue
     }
 
     private func clearConnectionErrorState(force: Bool = false) {
-        guard force || connectionIssue != .authenticationExpired else { return }
+        guard force || (connectionIssue != .authenticationExpired && connectionIssue != .sendFailed) else { return }
         connectionError = nil
         connectionIssue = nil
+        if force {
+            failedMessageSend = nil
+        }
     }
 
     nonisolated private static func microUSD(from value: JSON?) -> Int64? {

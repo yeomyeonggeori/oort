@@ -147,7 +147,7 @@ public struct ChannelListView: View {
                     .zIndex(2)
             }
         }
-        .momoSurface(.panel, cornerRadius: 0)
+        .momoSurface(.panel, cornerRadius: 0, extent: .windowChrome)
         .animation(sidebarPanelAnimation, value: showProfilePanel)
         .onAppear {
             refreshHermesEndpointDraftIfNeeded()

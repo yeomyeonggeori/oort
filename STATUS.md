@@ -7,7 +7,7 @@
 
 - Theme에 양 스킴 background/panel/card 표면 세트와 타이포·radius·≤0.16s motion 토큰을 추가하고 사이드바·타임라인·Work/승인 카드·팝오버에 적용했다. 401은 원문 없는 단일 `다시 로그인` 배너, realtime REST fallback은 헤더 칩으로 정리했다.
 - partial 블록 커서 제거, 선택 언어 기반 day divider, 멘션 행의 AGENT 이중 신호 제거, `+N` 전체 capability 도움말을 구현했다. 온보딩 파일과 `schema_v0.sql`, 기존 정본 PNG는 변경하지 않았다.
-- 5개 Swift package build, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 120 tests 및 변경 표면 raster 5 tests가 PASS했고 fresh design-review는 Blocker/High 0, Medium 1이다. 필터 없는 macOS suite는 기존 headless `SnapshotTesting/NSImage.swift` signal 5로 중단됐고, W3 light/dark 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 지시대로 오케스트레이터 대기(`runtime-unverified`).
+- fresh review High 2건을 반영해 루트·사이드바·타임라인 fill의 safe-area bleed를 복원하고, 인증/불러오기/보내기/작업 오류 문법과 동일 `clientMsgId` send 재시도·에이전트 멘션 실패 신호를 분리했다. MOMO-368을 union rebase한 뒤 5개 Swift package build, Core 23·Server 73·Relay 2·Worker 29·macOS 기능 127 tests 및 비정본 raster 6(W3 5+온보딩 1) tests가 PASS했고 fresh design-review는 Blocker/High/Medium/Nitpick 0이다. 필터 없는 macOS suite는 기존 headless `SnapshotTesting/NSImage.swift` signal 5로 중단됐고, W3 light/dark 정본 PNG 재기록과 DB/Docker/verifier/`local_gate.sh`는 지시대로 오케스트레이터 대기(`runtime-unverified`).
 
 ## MOMO-368 Onboarding/Login Raycast Redesign (2026-07-13)
 

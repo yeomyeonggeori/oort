@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-13 (Codex worker) · MOMO-369 fresh design-review High 2 수정
+- `.windowChrome` 표면 범위로 루트·사이드바·타임라인 fill의 safe-area bleed를 복원하고 bounded 카드·팝오버 chrome 순서는 유지했다. 오류 상태는 인증/불러오기/보내기/작업으로 분리했으며, send 재시도는 실패 요청의 `clientMsgId`와 에이전트 멘션 대상을 보존한다.
+- 계획 이탈 없음. MOMO-368을 union rebase하되 온보딩 PR diff와 정본 PNG는 0건으로 유지했고, 5패키지 build, Core 23·Server 73·Relay 2·Worker 29·macOS 기능 127+비정본 래스터 6 tests와 fresh review(Blocker/High/Medium/Nitpick 0)가 PASS했다. 필터 없는 macOS suite의 기존 headless canonical signal 5는 오케스트레이터 재기록 대기다.
+- 수정 금지 후속 기록: increased-contrast 팔레트, 승인 인박스 행/카드 그림자 누적, 진단 팝오버 이중 chrome, `sessionChrome == nil` 재로그인 no-op, DateFormatter 캐시, panel 토큰 의미 분화.
+
 ## 2026-07-13 (Codex worker) · MOMO-368 fresh design-review 반려 반영
 - High 1: primary 라벨의 `onAccent` 강제를 제거해 비활성 창 표현을 시스템 `borderedProminent`에 위임했다.
 - Medium 3: 실효 없는 접근성 변형 2종 산출을 제거하고, 네 필드 Enter를 현재 primary에 연결했으며, 필드 배경을 불투명 semantic 색으로 교체했다.

@@ -292,11 +292,11 @@ struct MomoQuickSwitcherView: View {
     @ViewBuilder
     private var footer: some View {
         VStack(spacing: MomoTheme.QuickSwitcher.compactSpacing) {
-            if viewModel.connectionIssue == .recoverable {
+            if viewModel.connectionIssue == .loadFailed {
                 HStack(spacing: MomoTheme.QuickSwitcher.standardSpacing) {
                     Label(copy.quickSwitcherSearchError, systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(MomoTheme.irreversibleRed)
-                    Text(copy.recoverableErrorDetail)
+                    Text(copy.messageLoadFailedDetail)
                         .lineLimit(1)
                         .foregroundStyle(.secondary)
                     Spacer()

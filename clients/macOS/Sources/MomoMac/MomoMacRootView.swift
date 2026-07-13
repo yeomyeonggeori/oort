@@ -71,7 +71,7 @@ public struct MomoMacRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
-        .momoSurface(.background, cornerRadius: 0)
+        .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
         .preferredColorScheme(appearance.colorScheme)
         .focusedSceneValue(\.momoMacCommandActions, commandActions)
         .overlay {

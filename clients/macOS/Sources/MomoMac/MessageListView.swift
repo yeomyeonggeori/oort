@@ -55,7 +55,7 @@ public struct MessageListView: View {
             Divider()
             composer(copy: copy)
         }
-        .momoSurface(.background, cornerRadius: 0)
+        .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
     }
 
     // MARK: Header (cost chip, experience B social signal)
@@ -183,25 +183,27 @@ public struct MessageListView: View {
     }
 
     private func connectionBanner(_ issue: MomoConnectionIssue, copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: issue == .authenticationExpired ? "person.crop.circle.badge.exclamationmark" : "wifi.exclamationmark")
-                .foregroundStyle(issue == .authenticationExpired ? MomoTheme.irreversibleRed : MomoTheme.costAmber)
+        let tint = connectionBannerTint(issue)
+        return HStack(spacing: 8) {
+            Image(systemName: connectionBannerIcon(issue))
+                .foregroundStyle(tint)
             VStack(alignment: .leading, spacing: 4) {
-                Text(issue == .authenticationExpired ? copy.sessionExpiredTitle : copy.recoverableError)
+                Text(connectionBannerTitle(issue, copy: copy))
                     .font(MomoTheme.Typography.sectionHeader)
-                Text(issue == .authenticationExpired ? copy.sessionExpiredDetail : copy.recoverableErrorDetail)
+                Text(connectionBannerDetail(issue, copy: copy))
                     .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if issue == .authenticationExpired {
+            switch issue {
+            case .authenticationExpired:
                 Button(copy.signInAgain) {
                     viewModel.clearConnectionError()
                     onRequestLogin()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-            } else {
+            case .loadFailed:
                 Button {
                     Task { await viewModel.retrySelectedChannelLoad() }
                 } label: {
@@ -216,14 +218,79 @@ public struct MessageListView: View {
                 }
                 .buttonStyle(.borderless)
                 .help(copy.dismiss)
+            case .sendFailed:
+                Button(copy.sendAgain) {
+                    Task { await viewModel.retryFailedSend() }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                Button {
+                    viewModel.clearConnectionError()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help(copy.dismiss)
+            case .actionFailed:
+                Button(copy.dismiss) {
+                    viewModel.clearConnectionError()
+                }
+                .controlSize(.small)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(
-            (issue == .authenticationExpired ? MomoTheme.irreversibleRed : MomoTheme.costAmber).opacity(0.06)
-        )
+        .background(tint.opacity(0.06))
         .momoSurface(.panel, cornerRadius: 0)
+    }
+
+    private func connectionBannerIcon(_ issue: MomoConnectionIssue) -> String {
+        switch issue {
+        case .authenticationExpired: return "person.crop.circle.badge.exclamationmark"
+        case .loadFailed: return "wifi.exclamationmark"
+        case .sendFailed: return "paperplane.fill"
+        case .actionFailed: return "exclamationmark.triangle"
+        }
+    }
+
+    private func connectionBannerTint(_ issue: MomoConnectionIssue) -> Color {
+        switch issue {
+        case .authenticationExpired, .sendFailed:
+            return MomoTheme.irreversibleRed
+        case .loadFailed, .actionFailed:
+            return MomoTheme.costAmber
+        }
+    }
+
+    private func connectionBannerTitle(_ issue: MomoConnectionIssue, copy: MomoWorkspaceCopy) -> String {
+        switch issue {
+        case .authenticationExpired:
+            return copy.sessionExpiredTitle
+        case .loadFailed:
+            return copy.messageLoadFailedTitle
+        case .sendFailed:
+            if let agentName = viewModel.failedMentionedAgentName {
+                return copy.agentCallSendFailedTitle(agentName)
+            }
+            return copy.messageSendFailedTitle
+        case .actionFailed:
+            return copy.actionFailedTitle
+        }
+    }
+
+    private func connectionBannerDetail(_ issue: MomoConnectionIssue, copy: MomoWorkspaceCopy) -> String {
+        switch issue {
+        case .authenticationExpired:
+            return copy.sessionExpiredDetail
+        case .loadFailed:
+            return copy.messageLoadFailedDetail
+        case .sendFailed:
+            return viewModel.failedMentionedAgentName == nil
+                ? copy.messageSendFailedDetail
+                : copy.agentCallSendFailedDetail
+        case .actionFailed:
+            return copy.actionFailedDetail
+        }
     }
 
     private func mentionNoticeBanner(_ notice: String) -> some View {
