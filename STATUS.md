@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-388 Auth-Hardening Realtime Credential Binding Verifier (2026-07-15)
+
+- 레거시 verifier가 멤버·채널만 담은 subscribe callback을 보내 최신 fail-closed credential liveness 계약과 어긋나던 원인을 확인했다. 서버의 credential liveness, RLS, 스키마 계약은 변경하지 않았다.
+- verifier는 로그인 access token으로 `POST /v1/auth/realtime-token`을 호출하고, 발급된 connection JWT의 검증된 `meta`(`momo.realtime.credential.v1` + `token_id`)를 Centrifugo `include_connection_meta` 형식 그대로 전달한다. active exact binding만 허용하며 누락·임의·다른 멤버 binding과 logout/revoke 이후 binding은 모두 거부한다. 실패 진단에서도 auth response body를 출력하지 않고 임시 파일을 정리한다.
+- standalone verifier와 dirty `runtime-db` 29/29 local gate PASS(`local-gate-runtime-db-20260714T202518Z-pid37326-ns1784060718812203000-wtea4b43f89980-r46bf5a74adfb.md`). 최종 clean commit 기준 `runtime-db`·`docs` evidence는 PR에 첨부한다.
+
 ## MOMO-382 Workspace-first UX + Superapp Shell Planning (2026-07-15)
 
 - 2026-07-14 실창 QA 12건과 PLN-20260714-02를 대조해 workspace/server → channel/DM → timeline → governed Work 위계를 정본화했다. UX builder는 MOMO-383 → 384/385 → 386으로 분할했다.

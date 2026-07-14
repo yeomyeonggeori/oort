@@ -1907,6 +1907,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 두 workspace 격리, 첫 페이지 밖 오래된 message, modifier parsing, DM/channel 결과를 runtime 검증.
 - [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
 
+### ☑ MOMO-388 수용기준 — Auth-hardening verifier realtime credential binding drift `[tooling/runtime-db/docs]` · Issue #388
+- [x] 로그인 access token으로 `POST /v1/auth/realtime-token`을 호출하고, connection JWT payload에서 검증한 `meta`를 Centrifugo `include_connection_meta` callback 형식으로 전달.
+- [x] active exact credential binding 허용, `meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 fail-closed 403 검증.
+- [x] raw access/refresh/connection JWT/shared secret을 stdout evidence에 출력하지 않고, auth 실패 응답 body 비노출·임시 파일 정리.
+- [x] 서버 credential liveness·RLS·`schema_v0.sql` 무변경. standalone verifier와 dirty `runtime-db` 29/29 PASS(`local-gate-runtime-db-20260714T202518Z-pid37326-ns1784060718812203000-wtea4b43f89980-r46bf5a74adfb.md`); final clean `runtime-db`·`docs` evidence는 PR 기록.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

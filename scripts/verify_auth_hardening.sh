@@ -8,7 +8,8 @@
 #   1. Centrifugo subscribe proxy shared-secret auth:
 #        - callback without X-Centrifugo-Proxy-Secret        -> HTTP 401
 #        - callback with a wrong secret                      -> HTTP 401
-#        - callback with the right secret + member           -> allow
+#        - connection JWT meta binds the exact credential    -> allow
+#        - missing/arbitrary/mismatched credential binding   -> deny
 #   2. Token revocation:
 #        - login persists access/refresh rows in `token`
 #        - POST /v1/auth/logout revokes them (idempotent) + audit_log row
@@ -48,6 +49,7 @@ need() {
 
 need curl
 need jq
+need python3
 need swift
 
 if command -v psql >/dev/null 2>&1; then
@@ -115,6 +117,7 @@ cleanup() {
     fi
     sleep 1
   done
+  rm -rf "$TMP_DIR"
 }
 trap cleanup EXIT INT TERM
 
@@ -159,7 +162,7 @@ expect_status() {
   local label="$2"
   if [ "$RESPONSE_STATUS" != "$expected" ]; then
     echo "[auth-hardening] FAIL $label: expected HTTP $expected, got $RESPONSE_STATUS" >&2
-    echo "$RESPONSE_BODY" >&2
+    echo "[auth-hardening] response body withheld because auth responses may contain credentials" >&2
     echo "[auth-hardening] server log: $SERVER_LOG" >&2
     tail -80 "$SERVER_LOG" >&2 || true
     exit 1
@@ -172,7 +175,7 @@ expect_jq() {
   set -- "${@:1:$(($# - 1))}"
   if ! printf '%s' "$RESPONSE_BODY" | jq -e "$@" >/dev/null; then
     echo "[auth-hardening] FAIL $label" >&2
-    echo "$RESPONSE_BODY" >&2
+    echo "[auth-hardening] response body withheld because auth responses may contain credentials" >&2
     exit 1
   fi
   echo "[auth-hardening] PASS $label" >&2
@@ -321,7 +324,53 @@ login_json() {
   printf '%s' "$RESPONSE_BODY"
 }
 
+realtime_connection_meta() {
+  # The JWT comes directly from the authenticated realtime-token response.
+  # Decode only its payload and emit only the signed connection metadata that
+  # Centrifugo forwards when include_connection_meta=true. Never print the JWT.
+  printf '%s' "$1" | python3 -c '
+import base64
+import binascii
+import json
+import sys
+import uuid
+
+try:
+    token = sys.stdin.read().strip()
+    parts = token.split(".")
+    if len(parts) != 3 or not parts[1]:
+        raise ValueError
+    payload = parts[1] + "=" * (-len(parts[1]) % 4)
+    decoded = json.loads(base64.b64decode(
+        payload.encode("ascii"), altchars=b"-_", validate=True
+    ))
+    meta = decoded.get("meta")
+    if not isinstance(meta, dict):
+        raise ValueError
+    if meta.get("schema") != "momo.realtime.credential.v1":
+        raise ValueError
+    token_id = meta.get("token_id")
+    if not isinstance(token_id, str):
+        raise ValueError
+    uuid.UUID(token_id)
+except (UnicodeError, ValueError, TypeError, json.JSONDecodeError, binascii.Error):
+    raise SystemExit("invalid realtime credential metadata")
+
+print(json.dumps(meta, separators=(",", ":"), sort_keys=True))
+'
+}
+
 subscribe_proxy_body() {
+  local member_id="$1"
+  local connection_meta="$2"
+  jq -cn \
+    --arg user "$member_id" \
+    --arg channel "ch:ws${DEMO_WORKSPACE_ID}.${DEMO_CHANNEL_ID}" \
+    --argjson meta "$connection_meta" \
+    '{client:"auth-hardening-verifier",user:$user,channel:$channel,meta:$meta}'
+}
+
+subscribe_proxy_body_without_meta() {
   local member_id="$1"
   jq -cn \
     --arg user "$member_id" \
@@ -339,7 +388,39 @@ LOGIN1="$(login_json)"
 ACCESS1="$(printf '%s' "$LOGIN1" | jq -r '.accessToken')"
 REFRESH1="$(printf '%s' "$LOGIN1" | jq -r '.refreshToken')"
 MEMBER_ID="$(printf '%s' "$LOGIN1" | jq -r '.member.id')"
-PROXY_BODY="$(subscribe_proxy_body "$MEMBER_ID")"
+
+api POST /v1/auth/realtime-token '{}' "$ACCESS1"
+expect_status 200 "active access token mints realtime connection token"
+REALTIME_TOKEN_RESPONSE="$RESPONSE_BODY"
+if ! printf '%s' "$REALTIME_TOKEN_RESPONSE" | jq -e \
+  --arg workspace "$DEMO_WORKSPACE_ID" \
+  --arg member "$MEMBER_ID" \
+  '.tokenType == "centrifugo.connection.jwt"
+   and .workspaceId == $workspace
+   and .memberId == $member
+   and (.token | type == "string" and length > 0)' >/dev/null; then
+  echo "[auth-hardening] FAIL realtime-token response contract is invalid" >&2
+  exit 1
+fi
+REALTIME_CONNECTION_TOKEN="$(printf '%s' "$REALTIME_TOKEN_RESPONSE" | jq -er '.token')"
+if ! CONNECTION_META="$(realtime_connection_meta "$REALTIME_CONNECTION_TOKEN" 2>/dev/null)"; then
+  echo "[auth-hardening] FAIL realtime connection JWT metadata is invalid" >&2
+  exit 1
+fi
+echo "[auth-hardening] PASS realtime connection JWT carries validated credential metadata" >&2
+
+PROXY_BODY="$(subscribe_proxy_body "$MEMBER_ID" "$CONNECTION_META")"
+PROXY_BODY_WITHOUT_META="$(subscribe_proxy_body_without_meta "$MEMBER_ID")"
+ARBITRARY_META="$(printf '%s' "$CONNECTION_META" | jq -c \
+  '.token_id = "00000000-0000-7000-8000-000000388999"')"
+ARBITRARY_PROXY_BODY="$(subscribe_proxy_body "$MEMBER_ID" "$ARBITRARY_META")"
+MISMATCH_MEMBER_ID="00000000-0000-7000-8000-000000000101"
+MISMATCH_PROXY_BODY="$(subscribe_proxy_body "$MISMATCH_MEMBER_ID" "$CONNECTION_META")"
+
+# Do not retain the raw connection JWT or the response that carried it after
+# deriving the bounded proxy metadata fixture.
+unset REALTIME_CONNECTION_TOKEN REALTIME_TOKEN_RESPONSE
+RESPONSE_BODY=""
 
 api POST /v1/centrifugo/subscribe "$PROXY_BODY"
 expect_status 401 "subscribe proxy without shared secret rejected"
@@ -350,6 +431,18 @@ expect_status 401 "subscribe proxy with wrong shared secret rejected"
 api POST /v1/centrifugo/subscribe "$PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
 expect_status 200 "subscribe proxy with correct shared secret accepted"
 expect_jq '.result != null and .error == null' "authorized member subscribe allowed"
+
+api POST /v1/centrifugo/subscribe "$PROXY_BODY_WITHOUT_META" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
+expect_status 200 "subscribe proxy answers for missing credential binding"
+expect_jq '.error.code == 403' "missing credential binding denied"
+
+api POST /v1/centrifugo/subscribe "$ARBITRARY_PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
+expect_status 200 "subscribe proxy answers for arbitrary credential binding"
+expect_jq '.error.code == 403' "arbitrary credential binding denied"
+
+api POST /v1/centrifugo/subscribe "$MISMATCH_PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
+expect_status 200 "subscribe proxy answers for mismatched credential binding"
+expect_jq '.error.code == 403' "credential binding for another member denied"
 
 # --------------------------------------------------------------------------
 # 2. Token persistence + logout revocation + revoked-token 401
@@ -525,4 +618,4 @@ api GET /health
 expect_status 200 "/health is excluded from rate limiting"
 
 echo "[auth-hardening] MOMO-300 auth hardening gate PASS"
-echo "[auth-hardening] evidence: proxy-secret 401/allow, revoked-token 401, logout idempotent + audit, refresh rotation replay 401, member 429 + Retry-After + audit"
+echo "[auth-hardening] evidence: proxy-secret 401, exact realtime credential allow, missing/arbitrary/mismatched/revoked credential deny, revoked-token 401, logout idempotent + audit, refresh rotation replay 401, member 429 + Retry-After + audit"
