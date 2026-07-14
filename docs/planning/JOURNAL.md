@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-14 (momo-main/Fable) · ADR-0112 Wave A 종결 (370/371/372)
+- merge: 370 `6f4090c`(Blocker 반려: dev 밀도 보존+조사 비문+비용 누출) → 371 `c9ed890`(High 4 반려 — 리뷰 A/B 프로브가 죽은 닫기 버튼의 실증 원인=타이틀바 밴드 규명, 본문 15pt) → 372 `e254cc6`(Blocker 반려: 빈 캡처+DM 검색·정렬·배지, 멤버 수→디렉터리 훅 통합). root full gate green(`…062029Z…`, `…062619Z…`).
+- D6 SLA rubric이 첫 판부터 유효: 빈 스냅샷·리터럴 DM·크롬 원인 오기가 전부 리뷰에서 잡힘. canonical 재기록 총 21종(fixture 변경분은 삭제 후 기록).
+- 다음: 라이브 앱 재빌드→성재 육안(기본 모드/헤더/디렉터리·DM) → 판정 후 Wave B(373..375: 호출 옵션·승인 프리셋·⌃` 드로어)/C(376..378: 대시보드·온보딩 여정·런치 WOW) 발급.
+
 ## 2026-07-14 (Codex worker) · MOMO-372 MOMO-371 최종 rebase
 - `origin/main@c9ed890` 위로 직접 rebase하고 ChannelList/QuickSwitcher 충돌에서 371 로컬 rename·topic·인콘텐츠 헤더 제거와 372 DM 상대 이름·숫자 배지·디렉터리 진입점을 함께 보존했다. 문서 기록도 양쪽을 유지했다.
 - 채널 헤더 `멤버 N명`의 optional action은 production root의 `MemberDirectoryView` sheet fallback으로 연결하고, 외부 주입 action 우선 계약과 회귀 테스트를 추가했다.
