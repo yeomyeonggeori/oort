@@ -15,10 +15,13 @@ CREATE POLICY ws_isolation ON workspace
   USING (id = current_setting('app.workspace_id', true)::uuid)
   WITH CHECK (id = current_setting('app.workspace_id', true)::uuid);
 
-CREATE SCHEMA IF NOT EXISTS momo_join_private;
+-- Exact creation is deliberate. A pre-existing schema or function means the
+-- trusted owner/definition boundary has drifted, so the migration must abort
+-- transactionally instead of adopting or replacing that object.
+CREATE SCHEMA momo_join_private;
 REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC;
 
-CREATE OR REPLACE FUNCTION momo_join_private.invite_workspace_id(raw_code text)
+CREATE FUNCTION momo_join_private.invite_workspace_id(raw_code text)
 RETURNS uuid
 LANGUAGE sql
 STABLE

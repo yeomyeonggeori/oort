@@ -449,6 +449,29 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceSettingsProjectionIgnoresUnrelatedStreamingStateChanges() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "token")
+        let projection = MomoWorkspaceSettingsProjection(viewModel: viewModel)
+        let initialUpdates = projection.observableUpdateCount
+
+        viewModel.setChannels(Array(viewModel.channels.reversed()))
+        for _ in 0..<10 { await Task.yield() }
+        XCTAssertEqual(
+            projection.observableUpdateCount,
+            initialUpdates,
+            "channel/streaming publications must not invalidate the workspace form"
+        )
+
+        let updated = await projection.updateWorkspaceName("Projection Workspace")
+        XCTAssertTrue(updated)
+        XCTAssertGreaterThan(projection.observableUpdateCount, initialUpdates)
+        XCTAssertEqual(projection.workspace?.name, "Projection Workspace")
+    }
+
+    @MainActor
     func testStaleWorkspaceRefreshCannotOverwriteNewerRename() async throws {
         let defaultsSuite = "momo-workspace-race-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
@@ -542,6 +565,33 @@ final class MomoMacTests: XCTestCase {
         XCTAssertTrue(viewModel.approvals.isEmpty)
         XCTAssertNil(viewModel.selectedChannelId)
         XCTAssertNil(viewModel.connectionError)
+    }
+
+    @MainActor
+    func testBootstrapStartsChannelsWhileWorkspaceIdentityIsBlocked() async throws {
+        let defaultsSuite = "momo-bootstrap-parallel-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "parallel.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await backend.blockNextWorkspaceRead()
+
+        let bootstrap = Task { @MainActor in
+            await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        }
+        await backend.waitForWorkspaceReadCount(1)
+        await backend.waitForChannelsReadCount(1)
+        await backend.releaseNextWorkspaceRead()
+        await bootstrap.value
+
+        XCTAssertEqual(viewModel.workspace?.id, seed.workspace)
+        XCTAssertFalse(viewModel.channels.isEmpty)
     }
 
     @MainActor
@@ -817,6 +867,74 @@ final class MomoMacTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(20))
 
         XCTAssertNotNil(viewModel.readStateSyncError)
+    }
+
+    @MainActor
+    func testRealtimeNormalTerminationAllowsResubscribe() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(), workspaceId: workspace, kind: .human,
+            displayName: "Human", handle: "human"
+        )
+        let channel = Channel(
+            id: ChannelID(), workspaceId: workspace,
+            kind: .publicChannel, name: "general"
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [:],
+            events: []
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: LiveChatBackend())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await waitForSubscriptionCleanup(viewModel)
+        XCTAssertEqual(viewModel.activeChannelSubscriptionCount, 0)
+        await viewModel.retryRealtime()
+        for _ in 0..<20 { await Task.yield() }
+
+        let normalCount = await backend.subscriptionCount(channel: channel.id)
+        XCTAssertEqual(normalCount, 2)
+    }
+
+    @MainActor
+    func testRealtimeSubscribeErrorAllowsResubscribe() async throws {
+        let workspace = WorkspaceID()
+        let member = Member(
+            id: MemberID(), workspaceId: workspace, kind: .human,
+            displayName: "Human", handle: "human"
+        )
+        let channel = Channel(
+            id: ChannelID(), workspaceId: workspace,
+            kind: .publicChannel, name: "general"
+        )
+        let backend = FixtureRealtimeChatBackend(
+            workspace: workspace,
+            members: [member],
+            channels: [channel],
+            history: [:],
+            events: [],
+            firstRealtimeSubscriptionFails: true
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: LiveChatBackend())
+
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token")
+        await waitForSubscriptionCleanup(viewModel)
+        XCTAssertEqual(viewModel.activeChannelSubscriptionCount, 0)
+        await viewModel.retryRealtime()
+        for _ in 0..<20 { await Task.yield() }
+
+        let errorCount = await backend.subscriptionCount(channel: channel.id)
+        XCTAssertEqual(errorCount, 2)
+    }
+
+    @MainActor
+    private func waitForSubscriptionCleanup(_ viewModel: ChatViewModel) async {
+        for _ in 0..<100 where viewModel.activeChannelSubscriptionCount != 0 {
+            await Task.yield()
+        }
     }
 
     @MainActor
@@ -4496,6 +4614,108 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
+    func testRESTBackendDelayedLoginCannotRestoreSessionAfterClear() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let controller = BlockingLoginController(responses: [
+            workspace.description: Self.loginResponse(
+                token: "late-token",
+                workspace: workspace,
+                member: .demoHuman
+            ),
+        ])
+        await MockHTTPURLProtocol.setHandler { request in
+            try controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        let login = Task { try await backend.connect(workspace: workspace, accessToken: "") }
+        await controller.waitForArrival(workspace: workspace)
+        await backend.clearSessionSensitiveState()
+        controller.release(workspace: workspace)
+
+        do {
+            try await login.value
+            XCTFail("invalidated login should cancel")
+        } catch is CancellationError {
+            // Expected: clear invalidates every post-await session write.
+        }
+        do {
+            _ = try await backend.requireAccessToken()
+            XCTFail("cleared backend should not retain the late token")
+        } catch BackendError.notConnected {
+            // Expected.
+        }
+    }
+
+    func testRESTBackendOverlappingConnectKeepsNewestSession() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let memberB = MemberID(uuidString: "00000000-0000-7000-8000-000000000111")!
+        let controller = BlockingLoginController(responses: [
+            workspaceA.description: Self.loginResponse(
+                token: "token-a",
+                workspace: workspaceA,
+                member: .demoHuman
+            ),
+            workspaceB.description: Self.loginResponse(
+                token: "token-b",
+                workspace: workspaceB,
+                member: memberB
+            ),
+        ])
+        await MockHTTPURLProtocol.setHandler { request in
+            try controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        let connectA = Task { try await backend.connect(workspace: workspaceA, accessToken: "") }
+        await controller.waitForArrival(workspace: workspaceA)
+        let connectB = Task { try await backend.connect(workspace: workspaceB, accessToken: "") }
+        await controller.waitForArrival(workspace: workspaceB)
+        controller.release(workspace: workspaceB)
+        try await connectB.value
+        controller.release(workspace: workspaceA)
+
+        do {
+            try await connectA.value
+            XCTFail("older connect should be invalidated")
+        } catch is CancellationError {
+            // Expected: connect B owns the current generation.
+        }
+        let currentToken = try await backend.requireAccessToken()
+        let currentMember = await backend.authenticatedMemberID()
+        XCTAssertEqual(currentToken, "token-b")
+        XCTAssertEqual(currentMember, memberB)
+    }
+
+    private static func loginResponse(
+        token: String,
+        workspace: WorkspaceID,
+        member: MemberID
+    ) -> MockHTTPResponse {
+        MockHTTPResponse(json: """
+        {
+          "accessToken": "\(token)",
+          "refreshToken": "refresh-\(token)",
+          "member": {
+            "id": "\(member.description)",
+            "workspaceId": "\(workspace.description)",
+            "kind": "human",
+            "displayName": "Race Tester",
+            "handle": "race-tester"
+          }
+        }
+        """)
+    }
+
     func testRESTBackendWorkRunCreateListAndDetailContracts() async throws {
         await MockHTTPURLProtocol.reset()
         let workspace = WorkspaceID.demo
@@ -5413,6 +5633,8 @@ private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
     private var storedReadStates: [ChannelID: ChannelReadState]
     private let storedReadStateEvents: [ChannelReadState]
     private let readStateSubscriptionFails: Bool
+    private let firstRealtimeSubscriptionFails: Bool
+    private var realtimeSubscriptionCounts: [ChannelID: Int] = [:]
     private var remainingMarkReadFailures: Int
     private var readStateFetches = 0
     private var markReadAttempts = 0
@@ -5427,7 +5649,8 @@ private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
         readStates: [ChannelReadState] = [],
         readStateEvents: [ChannelReadState] = [],
         markReadFailures: Int = 0,
-        readStateSubscriptionFails: Bool = false
+        readStateSubscriptionFails: Bool = false,
+        firstRealtimeSubscriptionFails: Bool = false
     ) {
         self.workspace = workspace
         self.storedMembers = members
@@ -5437,6 +5660,7 @@ private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
         self.storedReadStates = Dictionary(uniqueKeysWithValues: readStates.map { ($0.channelId, $0) })
         self.storedReadStateEvents = readStateEvents
         self.readStateSubscriptionFails = readStateSubscriptionFails
+        self.firstRealtimeSubscriptionFails = firstRealtimeSubscriptionFails
         self.remainingMarkReadFailures = markReadFailures
     }
 
@@ -5447,6 +5671,10 @@ private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
     }
 
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        realtimeSubscriptionCounts[channel, default: 0] += 1
+        if firstRealtimeSubscriptionFails, realtimeSubscriptionCounts[channel] == 1 {
+            throw BackendError.realtime("fixture subscribe failure")
+        }
         let events = storedEvents
         return AsyncStream { continuation in
             Task {
@@ -5457,6 +5685,10 @@ private actor FixtureRealtimeChatBackend: ChatBackend, ReadStateBackend {
                 continuation.finish()
             }
         }
+    }
+
+    func subscriptionCount(channel: ChannelID) -> Int {
+        realtimeSubscriptionCounts[channel, default: 0]
     }
 
     func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
@@ -5617,10 +5849,12 @@ private extension Array where Element == RealtimeEvent {
 private struct MockHTTPResponse {
     let statusCode: Int
     let json: String
+    let releaseGate: DispatchSemaphore?
 
-    init(statusCode: Int = 200, json: String) {
+    init(statusCode: Int = 200, json: String, releaseGate: DispatchSemaphore? = nil) {
         self.statusCode = statusCode
         self.json = json
+        self.releaseGate = releaseGate
     }
 }
 
@@ -5637,6 +5871,61 @@ private final class SynchronizedCounter: @unchecked Sendable {
 
     func current() -> Int {
         lock.withLock { value }
+    }
+}
+
+private final class BlockingLoginController: @unchecked Sendable {
+    private let lock = NSLock()
+    private let responses: [String: MockHTTPResponse]
+    private var arrivals: Set<String> = []
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+    private var releases: [String: DispatchSemaphore] = [:]
+
+    init(responses: [String: MockHTTPResponse]) {
+        self.responses = responses
+        self.releases = responses.reduce(into: [:]) { result, pair in
+            result[pair.key] = DispatchSemaphore(value: 0)
+        }
+    }
+
+    func response(for request: URLRequest) throws -> MockHTTPResponse {
+        guard request.url?.path == "/v1/auth/login",
+              let data = request.momoBodyData,
+              let body = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let workspace = body["workspace"] as? String,
+              let response = responses[workspace],
+              let release = lock.withLock({ releases[workspace] })
+        else {
+            return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected login"}"#)
+        }
+
+        let continuations: [CheckedContinuation<Void, Never>] = lock.withLock {
+            arrivals.insert(workspace)
+            return waiters.removeValue(forKey: workspace) ?? []
+        }
+        continuations.forEach { $0.resume() }
+        return MockHTTPResponse(
+            statusCode: response.statusCode,
+            json: response.json,
+            releaseGate: release
+        )
+    }
+
+    func waitForArrival(workspace: WorkspaceID) async {
+        let key = workspace.description
+        if lock.withLock({ arrivals.contains(key) }) { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                if arrivals.contains(key) { return true }
+                waiters[key, default: []].append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func release(workspace: WorkspaceID) {
+        lock.withLock { releases[workspace.description] }?.signal()
     }
 }
 
@@ -5684,16 +5973,26 @@ private final class MockHTTPURLProtocol: URLProtocol, @unchecked Sendable {
 
         do {
             let mocked = try currentHandler(request)
-            let data = Data(mocked.json.utf8)
-            let response = HTTPURLResponse(
-                url: request.url!,
-                statusCode: mocked.statusCode,
-                httpVersion: "HTTP/1.1",
-                headerFields: ["Content-Type": "application/json"]
-            )!
-            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            client?.urlProtocol(self, didLoad: data)
-            client?.urlProtocolDidFinishLoading(self)
+            let deliver: @Sendable () -> Void = { [self] in
+                let data = Data(mocked.json.utf8)
+                let response = HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: mocked.statusCode,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"]
+                )!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            }
+            if let releaseGate = mocked.releaseGate {
+                DispatchQueue.global().async {
+                    releaseGate.wait()
+                    deliver()
+                }
+            } else {
+                deliver()
+            }
         } catch {
             client?.urlProtocol(self, didFailWithError: error)
         }

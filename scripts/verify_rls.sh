@@ -302,12 +302,14 @@ RESET ROLE;
 DO $$
 DECLARE
   function_owner text;
+  function_owner_oid oid;
+  app_oid oid;
   function_source text;
   is_security_definer boolean;
   function_config text[];
 BEGIN
-  SELECT owner.rolname, p.prosrc, p.prosecdef, p.proconfig
-    INTO function_owner, function_source, is_security_definer, function_config
+  SELECT owner.rolname, owner.oid, p.prosrc, p.prosecdef, p.proconfig
+    INTO function_owner, function_owner_oid, function_source, is_security_definer, function_config
     FROM pg_proc p
     JOIN pg_namespace n ON n.oid = p.pronamespace
     JOIN pg_roles owner ON owner.oid = p.proowner
@@ -326,6 +328,7 @@ BEGIN
   IF function_source ~* '(execute|format[[:space:]]*\()' THEN
     RAISE EXCEPTION 'invite lookup must use static SQL';
   END IF;
+  SELECT oid INTO app_oid FROM pg_roles WHERE rolname = 'momo_app';
   IF EXISTS (
     SELECT 1
       FROM pg_proc p,
@@ -335,6 +338,30 @@ BEGIN
        AND acl.privilege_type = 'EXECUTE'
   ) THEN
     RAISE EXCEPTION 'PUBLIC must not execute invite lookup';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+      FROM pg_proc p,
+           aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl
+     WHERE p.oid = 'momo_join_private.invite_workspace_id(text)'::regprocedure
+       AND (
+         acl.privilege_type <> 'EXECUTE'
+         OR acl.grantee NOT IN (function_owner_oid, app_oid)
+       )
+  ) THEN
+    RAISE EXCEPTION 'invite lookup ACL contains a non-allowlisted grant';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+      FROM pg_namespace n,
+           aclexplode(COALESCE(n.nspacl, acldefault('n', n.nspowner))) acl
+     WHERE n.nspname = 'momo_join_private'
+       AND (
+         acl.grantee NOT IN (n.nspowner, app_oid)
+         OR (acl.grantee = app_oid AND acl.privilege_type <> 'USAGE')
+       )
+  ) THEN
+    RAISE EXCEPTION 'private schema ACL contains a non-allowlisted grant';
   END IF;
   IF NOT has_schema_privilege('momo_app', 'momo_join_private', 'USAGE')
      OR NOT has_function_privilege('momo_app', 'momo_join_private.invite_workspace_id(text)', 'EXECUTE') THEN

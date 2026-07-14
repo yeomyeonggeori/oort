@@ -60,10 +60,12 @@ invite-hash→active workspace UUID 함수로 해소하고, invite 상태 조회
 UUID의 tenant context로 돌아간다. 일반 identity 경로에는 BYPASSRLS가 없고 기존
 platform-admin 전역 조회는 별도 read-only BYPASS connection에만 남는다. 401/403/404는
 server-origin + member + workspace 범위의 해당 클라이언트 캐시까지 삭제하며,
-transient 5xx/transport 실패에만 마지막 이름을 표시한다. production은 migration 뒤
-runtime role을 만들 수 있으므로 `infra/e2e/bootstrap_roles.sql`이 private schema/function을
-app에만 grant하고 relay/worker를 명시적으로 deny한다. ephemeral PG18 fresh-order gate가
-roles absent → migrate → bootstrap → app allow/relay·worker deny 순서를 검증한다.
+transient 5xx/transport 실패에만 마지막 이름을 표시한다. privileged private schema/function은
+migration 009가 정확히 생성하므로 pre-existing object drift에서 transaction이 fail-closed 된다.
+내부 smoke는 roles absent → migrate → test-only bootstrap 순서를 허용하지만, production의
+`MOMO_BOOTSTRAP_RUNTIME_ROLES=0`은 secret manager/IaC가 app(NOBYPASSRLS)과
+relay/worker(BYPASSRLS)를 먼저 안전하게 provision해야 하며 누락·속성 불일치 시 migration 전에
+실패한다. ephemeral PG18 gate는 두 순서와 app-only exact ACL을 모두 검증한다.
 bootstrap/refresh/conflict
 reload/subscription 응답은 session+workspace generation이 바뀌면 상태와 오류 모두
 폐기한다.

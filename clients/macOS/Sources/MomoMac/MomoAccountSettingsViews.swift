@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import UniformTypeIdentifiers
 import MomoCore
 
@@ -173,9 +174,76 @@ struct MomoWorkspaceNameDraft: Equatable {
     }
 }
 
+@MainActor
+final class MomoWorkspaceSettingsProjection: ObservableObject {
+    private struct Snapshot: Equatable {
+        let workspace: Workspace?
+        let canManageWorkspace: Bool
+        let updateInFlight: Bool
+        let updateIssue: WorkspaceNameUpdateIssue?
+    }
+
+    private weak var viewModel: ChatViewModel?
+    private var cancellable: AnyCancellable?
+    private var refreshScheduled = false
+    private var snapshot: Snapshot
+    private(set) var observableUpdateCount = 0
+
+    init(viewModel: ChatViewModel) {
+        self.viewModel = viewModel
+        self.snapshot = Self.snapshot(from: viewModel)
+        cancellable = viewModel.objectWillChange.sink { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.scheduleRefresh()
+            }
+        }
+    }
+
+    var workspace: Workspace? { snapshot.workspace }
+    var canManageWorkspace: Bool { snapshot.canManageWorkspace }
+    var workspaceNameUpdateInFlight: Bool { snapshot.updateInFlight }
+    var workspaceNameUpdateIssue: WorkspaceNameUpdateIssue? { snapshot.updateIssue }
+
+    func updateWorkspaceName(_ name: String) async -> Bool {
+        guard let viewModel else { return false }
+        let result = await viewModel.updateWorkspaceName(name)
+        refreshIfNeeded()
+        return result
+    }
+
+    private func scheduleRefresh() {
+        guard !refreshScheduled else { return }
+        refreshScheduled = true
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self else { return }
+            self.refreshScheduled = false
+            self.refreshIfNeeded()
+        }
+    }
+
+    private func refreshIfNeeded() {
+        guard let viewModel else { return }
+        let next = Self.snapshot(from: viewModel)
+        guard next != snapshot else { return }
+        objectWillChange.send()
+        snapshot = next
+        observableUpdateCount += 1
+    }
+
+    private static func snapshot(from viewModel: ChatViewModel) -> Snapshot {
+        Snapshot(
+            workspace: viewModel.workspace,
+            canManageWorkspace: viewModel.canManageWorkspace,
+            updateInFlight: viewModel.workspaceNameUpdateInFlight,
+            updateIssue: viewModel.workspaceNameUpdateIssue
+        )
+    }
+}
+
 struct MomoWorkspaceSettingsSurface: View {
     let copy: MomoWorkspaceCopy
-    @ObservedObject var viewModel: ChatViewModel
+    @StateObject private var projection: MomoWorkspaceSettingsProjection
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
     @AppStorage("momo.server.iconPath") private var serverIconPath = ""
@@ -194,7 +262,9 @@ struct MomoWorkspaceSettingsSurface: View {
 
     init(copy: MomoWorkspaceCopy, viewModel: ChatViewModel) {
         self.copy = copy
-        self.viewModel = viewModel
+        _projection = StateObject(
+            wrappedValue: MomoWorkspaceSettingsProjection(viewModel: viewModel)
+        )
         _serverDisplayName = State(
             initialValue: viewModel.workspace?.name ?? copy.workspaceLabel
         )
@@ -216,10 +286,10 @@ struct MomoWorkspaceSettingsSurface: View {
                             TextField(copy.serverName, text: $serverDisplayName)
                                 .textFieldStyle(.roundedBorder)
                                 .font(MomoTheme.Typography.row)
-                                .disabled(!viewModel.canManageWorkspace || viewModel.workspaceNameUpdateInFlight)
+                                .disabled(!projection.canManageWorkspace || projection.workspaceNameUpdateInFlight)
                         }
 
-                        if viewModel.canManageWorkspace {
+                        if projection.canManageWorkspace {
                             Text(copy.workspaceNameLimit(workspaceNameDraft.characterCount))
                                 .font(MomoTheme.Typography.supporting)
                                 .foregroundStyle(workspaceNameIsValid ? Color.secondary : MomoTheme.irreversibleRed)
@@ -234,7 +304,7 @@ struct MomoWorkspaceSettingsSurface: View {
                                 Task { await saveWorkspaceName() }
                             } label: {
                                 HStack(spacing: 8) {
-                                    if viewModel.workspaceNameUpdateInFlight {
+                                    if projection.workspaceNameUpdateInFlight {
                                         ProgressView()
                                             .controlSize(.small)
                                             .accessibilityHidden(true)
@@ -246,8 +316,8 @@ struct MomoWorkspaceSettingsSurface: View {
                             }
                             .accessibilityLabel(copy.saveWorkspaceName)
                             .disabled(
-                                !viewModel.canManageWorkspace
-                                    || viewModel.workspaceNameUpdateInFlight
+                                !projection.canManageWorkspace
+                                    || projection.workspaceNameUpdateInFlight
                                     || !workspaceNameIsValid
                             )
 
@@ -299,12 +369,12 @@ struct MomoWorkspaceSettingsSurface: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
-        .onChange(of: viewModel.workspace?.name) { _, value in
+        .onChange(of: projection.workspace?.name) { _, value in
             guard let value, !value.isEmpty else { return }
             serverDisplayName = value
         }
         .onChange(of: serverDisplayName) { _, value in
-            let persisted = viewModel.workspace.map { MomoWorkspaceNameDraft($0.name).normalized }
+            let persisted = projection.workspace.map { MomoWorkspaceNameDraft($0.name).normalized }
             guard MomoWorkspaceNameDraft(value).normalized != persisted else { return }
             saveNotice = nil
         }
@@ -322,12 +392,12 @@ struct MomoWorkspaceSettingsSurface: View {
 
     @MainActor
     private func saveWorkspaceName() async {
-        let saved = await viewModel.updateWorkspaceName(workspaceNameDraft.normalized)
-        if saved, let name = viewModel.workspace?.name {
+        let saved = await projection.updateWorkspaceName(workspaceNameDraft.normalized)
+        if saved, let name = projection.workspace?.name {
             serverDisplayName = name
             saveNotice = copy.workspaceNameSaved
         } else {
-            saveNotice = copy.workspaceNameUpdateMessage(viewModel.workspaceNameUpdateIssue)
+            saveNotice = copy.workspaceNameUpdateMessage(projection.workspaceNameUpdateIssue)
         }
     }
 }

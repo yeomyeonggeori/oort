@@ -34,7 +34,7 @@ struct MomoWorkspaceIdentityRecoveryButton: View {
         Button(action: retry) {
             Label(presentation.label, systemImage: "arrow.clockwise.circle")
                 .font(MomoTheme.Typography.supporting)
-                .foregroundStyle(MomoTheme.costAmber)
+                .foregroundStyle(.primary)
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
         }

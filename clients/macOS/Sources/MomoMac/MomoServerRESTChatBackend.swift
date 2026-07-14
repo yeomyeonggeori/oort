@@ -22,6 +22,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     private var workspace: WorkspaceID?
     private var accessToken: String?
     private var authenticatedMember: Member?
+    private var connectionGeneration: UInt64 = 0
     private var cachedChannels: [Channel]?
     private var cachedMembers: [Member]?
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
@@ -44,7 +45,9 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     public func connect(workspace: WorkspaceID, accessToken: String) async throws {
-        self.workspace = workspace
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
+        resetSessionState(workspace: workspace)
         if !accessToken.isEmpty {
             self.accessToken = accessToken
             try configureRealtime(config.centrifugoWebSocketURL?.absoluteString)
@@ -66,8 +69,15 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             authorized: false,
             response: LoginResponse.self
         )
+        guard connectionGeneration == generation, self.workspace == workspace else {
+            throw CancellationError()
+        }
+        let member = try login.member.member()
+        guard connectionGeneration == generation, self.workspace == workspace else {
+            throw CancellationError()
+        }
         self.accessToken = login.accessToken
-        self.authenticatedMember = try login.member.member()
+        self.authenticatedMember = member
         try configureRealtime(
             login.realtimeWebSocketUrl ?? config.centrifugoWebSocketURL?.absoluteString
         )
@@ -104,7 +114,12 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     public func clearSessionSensitiveState() async {
-        workspace = nil
+        connectionGeneration &+= 1
+        resetSessionState(workspace: nil)
+    }
+
+    private func resetSessionState(workspace: WorkspaceID?) {
+        self.workspace = workspace
         accessToken = nil
         authenticatedMember = nil
         cachedChannels = nil

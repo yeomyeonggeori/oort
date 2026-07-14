@@ -54,7 +54,9 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(migration.contains("SET search_path = pg_catalog"))
         XCTAssertTrue(migration.contains("w.deleted_at IS NULL"))
         XCTAssertTrue(migration.contains("public.digest(raw_code, 'sha256')"))
-        XCTAssertTrue(migration.contains("CREATE SCHEMA IF NOT EXISTS momo_join_private"))
+        XCTAssertTrue(migration.contains("CREATE SCHEMA momo_join_private"))
+        XCTAssertFalse(migration.contains("CREATE SCHEMA IF NOT EXISTS momo_join_private"))
+        XCTAssertFalse(migration.contains("CREATE OR REPLACE FUNCTION momo_join_private"))
         XCTAssertTrue(migration.contains("REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC"))
         XCTAssertTrue(migration.contains("REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text) FROM PUBLIC"))
         XCTAssertTrue(migration.contains("GRANT USAGE ON SCHEMA momo_join_private TO momo_app"))
@@ -82,6 +84,32 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(joinSource.contains("withTenantConnection(\n            workspaceID: workspaceID"))
         XCTAssertFalse(joinSource.contains("SELECT id\n                  FROM workspace"))
         XCTAssertFalse(joinSource.contains("for workspaceID in workspaceIDs"))
+
+        let productionMigrate = try String(
+            contentsOf: serverRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("infra/prod/docker/internal-smoke-migrate.sh"),
+            encoding: .utf8
+        )
+        let preflight = try XCTUnwrap(productionMigrate.range(of: "role_contract=$(psql"))
+        let migrate = try XCTUnwrap(productionMigrate.range(of: "sh scripts/migrate.sh"))
+        XCTAssertLessThan(preflight.lowerBound, migrate.lowerBound)
+        XCTAssertTrue(productionMigrate.contains("MOMO_BOOTSTRAP_RUNTIME_ROLES must be exactly 0 or 1"))
+        XCTAssertTrue(productionMigrate.contains("refusing to migrate"))
+    }
+
+    func testWorkspaceReadConsolidatesMembershipAndIdentityQuery() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/MomoServer/Routes/WorkspaceRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("readWorkspaceForActiveMember"))
+        XCTAssertTrue(source.contains("'workspaceExists', EXISTS"))
+        XCTAssertTrue(source.contains("AND EXISTS (\n                            SELECT 1\n                              FROM membership AS ms"))
     }
 
     func testJoinIdentityValidationNormalizesInputs() throws {

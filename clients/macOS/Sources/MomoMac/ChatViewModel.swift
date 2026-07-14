@@ -205,8 +205,11 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var connectionIssue: MomoConnectionIssue?
 
     private var channelSubscriptions: [ChannelID: Task<Void, Never>] = [:]
+    private var channelSubscriptionTokens: [ChannelID: UUID] = [:]
     private var realtimeStatusSubscription: Task<Void, Never>?
+    private var realtimeStatusSubscriptionToken: UUID?
     private var readStateSubscription: Task<Void, Never>?
+    private var readStateSubscriptionToken: UUID?
     private var readStateRefreshTask: Task<Void, Never>?
     private var markReadTasks: [ChannelID: Task<Void, Never>] = [:]
     private var pendingReadSequences: [ChannelID: Int64] = [:]
@@ -224,6 +227,8 @@ public final class ChatViewModel: ObservableObject {
     private var workspaceIdentitySessionGeneration: UInt64 = 0
     private var workspaceIdentityLoadGeneration: UInt64 = 0
     private var workspaceNameUpdateGeneration: UInt64 = 0
+
+    var activeChannelSubscriptionCount: Int { channelSubscriptions.count }
 
     /// Redacted user-facing context for a failed agent mention. Raw transport
     /// diagnostics remain isolated in `connectionError`.
@@ -277,10 +282,13 @@ public final class ChatViewModel: ObservableObject {
         let identitySessionGeneration = workspaceIdentitySessionGeneration
         channelSubscriptions.values.forEach { $0.cancel() }
         channelSubscriptions = [:]
+        channelSubscriptionTokens = [:]
         readStateSubscription?.cancel()
         readStateSubscription = nil
+        readStateSubscriptionToken = nil
         realtimeStatusSubscription?.cancel()
         realtimeStatusSubscription = nil
+        realtimeStatusSubscriptionToken = nil
         do {
             try await chat.connect(workspace: workspace, accessToken: accessToken)
             guard workspaceIdentitySessionGeneration == identitySessionGeneration else { return }
@@ -309,11 +317,15 @@ public final class ChatViewModel: ObservableObject {
             } else {
                 workspaceIdentityCacheScope = nil
             }
-            await loadWorkspaceIdentity(workspace, sessionGeneration: identitySessionGeneration)
+            async let workspaceIdentityLoad: Void = loadWorkspaceIdentity(
+                workspace,
+                sessionGeneration: identitySessionGeneration
+            )
+            let loadedChannels = try await chat.channels(workspace: workspace)
             guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
                 return
             }
-            let loadedChannels = try await chat.channels(workspace: workspace)
+            await workspaceIdentityLoad
             guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
                 return
             }
@@ -413,12 +425,15 @@ public final class ChatViewModel: ObservableObject {
         markReadTasks.values.forEach { $0.cancel() }
         realtimeStatusSubscription?.cancel()
         channelSubscriptions = [:]
+        channelSubscriptionTokens = [:]
         readStateSubscription = nil
+        readStateSubscriptionToken = nil
         readStateRefreshTask = nil
         markReadTasks = [:]
         pendingReadSequences = [:]
         markReadFailureCounts = [:]
         realtimeStatusSubscription = nil
+        realtimeStatusSubscriptionToken = nil
         if let resettable = chat as? any MomoSessionSensitiveStateClearing {
             await resettable.clearSessionSensitiveState()
         }
@@ -1063,8 +1078,11 @@ public final class ChatViewModel: ObservableObject {
         guard let readStateBackend, let member = authenticatedMemberId ?? currentHumanMember?.id else { return }
         let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
         let capturedWorkspaceID = workspaceID ?? self.workspaceId
+        let subscriptionToken = UUID()
+        readStateSubscriptionToken = subscriptionToken
         readStateSubscription = Task { [weak self] in
             guard let self else { return }
+            defer { self.finishReadStateSubscription(token: subscriptionToken) }
             do {
                 let states = try await readStateBackend.subscribeReadStates(member: member)
                 guard self.isSessionCurrent(
@@ -1222,8 +1240,13 @@ public final class ChatViewModel: ObservableObject {
         guard channelSubscriptions[channel] == nil else { return }
         let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
         let capturedWorkspaceID = workspaceID ?? self.workspaceId
+        let subscriptionToken = UUID()
+        channelSubscriptionTokens[channel] = subscriptionToken
         channelSubscriptions[channel] = Task { [weak self] in
             guard let self else { return }
+            defer {
+                self.finishChannelSubscription(channel: channel, token: subscriptionToken)
+            }
             do {
                 let events = try await self.chat.subscribe(channel: channel)
                 guard self.isSessionCurrent(
@@ -1254,14 +1277,19 @@ public final class ChatViewModel: ObservableObject {
     ) {
         realtimeStatusSubscription?.cancel()
         guard let statusProvider = chat as? any RealtimeStatusProvidingBackend else {
+            realtimeStatusSubscription = nil
+            realtimeStatusSubscriptionToken = nil
             realtimeStatuses[channel] = .restFallback(channel: channel)
             return
         }
         let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
         let capturedWorkspaceID = workspaceID ?? self.workspaceId
+        let subscriptionToken = UUID()
+        realtimeStatusSubscriptionToken = subscriptionToken
 
         realtimeStatusSubscription = Task { [weak self] in
             guard let self else { return }
+            defer { self.finishRealtimeStatusSubscription(token: subscriptionToken) }
             let statuses = await statusProvider.realtimeStatus(channel: channel)
             guard self.isSessionCurrent(
                 capturedSessionGeneration,
@@ -1293,8 +1321,27 @@ public final class ChatViewModel: ObservableObject {
         }
         channelSubscriptions[channel]?.cancel()
         channelSubscriptions[channel] = nil
+        channelSubscriptionTokens[channel] = nil
         subscribe(channel: channel)
         subscribeRealtimeStatus(channel: channel)
+    }
+
+    private func finishChannelSubscription(channel: ChannelID, token: UUID) {
+        guard channelSubscriptionTokens[channel] == token else { return }
+        channelSubscriptionTokens[channel] = nil
+        channelSubscriptions[channel] = nil
+    }
+
+    private func finishReadStateSubscription(token: UUID) {
+        guard readStateSubscriptionToken == token else { return }
+        readStateSubscriptionToken = nil
+        readStateSubscription = nil
+    }
+
+    private func finishRealtimeStatusSubscription(token: UUID) {
+        guard realtimeStatusSubscriptionToken == token else { return }
+        realtimeStatusSubscriptionToken = nil
+        realtimeStatusSubscription = nil
     }
 
     public func retrySelectedChannelLoad() async {

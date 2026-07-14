@@ -37,23 +37,12 @@ struct WorkspaceRoutes: Sendable {
         let result: ReadResult = try await db.withTenantConnection(
             workspaceID: workspaceID
         ) { conn in
-            guard try await Self.activeWorkspaceRole(
+            try await Self.readWorkspaceForActiveMember(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                memberID: principal.memberID,
-                lockAuthorization: false
-            ) != nil else {
-                return .notMember
-            }
-            guard let workspace = try await Self.fetchWorkspace(
-                conn: conn,
-                logger: db.logger,
-                workspaceID: workspaceID
-            ) else {
-                return .notFound
-            }
-            return .found(workspace)
+                memberID: principal.memberID
+            )
         }
 
         let workspace: WorkspaceDTO
@@ -187,27 +176,61 @@ struct WorkspaceRoutes: Sendable {
         return value
     }
 
-    private static func fetchWorkspace(
+    private static func readWorkspaceForActiveMember(
         conn: PostgresConnection,
         logger: Logger,
-        workspaceID: UUID
-    ) async throws -> WorkspaceDTO? {
+        workspaceID: UUID,
+        memberID: UUID
+    ) async throws -> ReadResult {
         let rows = try await conn.query(
             """
             SELECT jsonb_build_object(
-                     'id', id,
-                     'slug', slug,
-                     'name', name,
-                     'updatedAtMs', floor(extract(epoch from updated_at) * 1000)::bigint
+                     'workspaceExists', EXISTS (
+                       SELECT 1
+                         FROM workspace AS existing
+                        WHERE existing.id = \(workspaceID)
+                          AND existing.deleted_at IS NULL
+                     ),
+                     'workspace', (
+                       SELECT jsonb_build_object(
+                                'id', w.id,
+                                'slug', w.slug,
+                                'name', w.name,
+                                'updatedAtMs', floor(extract(epoch from w.updated_at) * 1000)::bigint
+                              )
+                         FROM workspace AS w
+                        WHERE w.id = \(workspaceID)
+                          AND w.deleted_at IS NULL
+                          AND EXISTS (
+                            SELECT 1
+                              FROM membership AS ms
+                              JOIN member AS m
+                                ON m.id = ms.member_id
+                               AND m.workspace_id = ms.workspace_id
+                             WHERE ms.workspace_id = w.id
+                               AND ms.member_id = \(memberID)
+                               AND ms.left_at IS NULL
+                               AND m.status = 'active'
+                               AND m.deleted_at IS NULL
+                          )
+                     )
                    )::text
-              FROM workspace
-             WHERE id = \(workspaceID)
-               AND deleted_at IS NULL
             """,
             logger: logger
         ).collect()
-        guard let row = rows.first else { return nil }
-        return try decodeWorkspace(row.decode(String.self))
+        guard let row = rows.first else { return .notFound }
+        let json = try row.decode(String.self)
+        guard let data = json.data(using: .utf8) else {
+            throw HTTPError(.internalServerError, message: "workspace JSON encoding failed")
+        }
+        let envelope: WorkspaceReadEnvelope
+        do {
+            envelope = try JSONDecoder().decode(WorkspaceReadEnvelope.self, from: data)
+        } catch {
+            throw HTTPError(.internalServerError, message: "workspace JSON decoding failed")
+        }
+        if let workspace = envelope.workspace { return .found(workspace) }
+        return envelope.workspaceExists ? .notMember : .notFound
     }
 
     private static func activeWorkspaceRole(
@@ -279,4 +302,9 @@ struct WorkspaceRoutes: Sendable {
             throw HTTPError(.internalServerError, message: "workspace JSON decoding failed")
         }
     }
+}
+
+private struct WorkspaceReadEnvelope: Decodable {
+    let workspaceExists: Bool
+    let workspace: WorkspaceDTO?
 }

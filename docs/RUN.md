@@ -132,6 +132,21 @@ SwiftPM-staged `.app`이며, 서명/공증/배포용 패키징은 M4 범위다.
 있어 커밋되지 않는다. **하나의 `.env`가 docker-compose · 마이그레이션 러너 · 서버 · relay ·
 worker를 모두 구동**한다(키 이름이 전 컴포넌트에서 일치).
 
+### 2.0 Production runtime role provisioning
+
+Production compose는 `MOMO_BOOTSTRAP_RUNTIME_ROLES=0`으로 test bootstrap을 끈다. 이 모드에서는
+배포용 DB 관리자와 별개로 다음 세 역할을 Terraform/CloudFormation 또는 DB 운영 자동화로
+**migration 전에** 만들어야 한다.
+
+- `momo_app`: `LOGIN`, `NOSUPERUSER`, `NOBYPASSRLS`, `NOCREATEDB`, `NOCREATEROLE`, `NOREPLICATION`
+- `momo_relay`, `momo_worker`: `LOGIN`, `NOSUPERUSER`, `BYPASSRLS`, `NOCREATEDB`, `NOCREATEROLE`, `NOREPLICATION`
+
+각 비밀번호는 운영 secret manager에서 독립 생성·회전하고 runtime connection URL에 주입한다.
+`infra/e2e/bootstrap_roles.sql`의 `momo_*_dev_pw`는 격리된 verifier 전용이며 운영 provision에
+복사하거나 재사용하면 안 된다. migrate job은 위 역할의 존재와 RLS 속성을 먼저 검사하고,
+누락되거나 잘못된 경우 어떤 migration도 시작하기 전에 종료한다. 역할이 준비된 뒤 migration 009가
+locked join 함수의 `momo_app` 전용 USAGE/EXECUTE를 부여하며 relay/worker에는 부여하지 않는다.
+
 ```sh
 cp infra/.env.example .env
 # 시크릿은 직접 생성 권장:  openssl rand -hex 32
