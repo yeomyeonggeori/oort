@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (momo-main/GPT 5.6) · Fable 인수 감사 + UX/엔진 두 트랙 고정
+- main/origin `b5e572b`, 열린 PR 0을 확인하고 Fable의 ADR-0112 Wave A(370..372)+MOMO-379 실창 크롬 핫픽스 랜딩을 코드/BUILD_TICKETS/저널과 대조했다.
+- 다음 UX는 373..378이 ADR 후보로만 존재하고 BUILD_TICKETS 계약·handoff·Issue가 아직 없으며, 최신 앱 육안 QA와 멤버 행 절단 판정이 선행이다.
+- 엔진은 Work/승인/bearer/status/비용·감사는 구현됐고, Context Broker·MCP는 부분, GWS·plugin runtime은 스펙, webhook은 placeholder임을 CURRENT_STATE에 고정했다.
+- 다음: `momo-main`은 UX 수동 QA(`PLN-20260714-01`), 별도 engine planner는 슈퍼앱 builder chain(`PLN-20260714-02`)을 제안하고 성재 승인 후에만 공용 정본/Issue로 통합한다.
+
 ## 2026-07-14 (momo-main/Fable) · MOMO-379 크롬 핫픽스 2차 랜딩 — 실측 반증→재수정 사이클
 - 성재 스크린샷 3결함(타이틀 중복·패널 침범·배지 겹침) → 1차 수정은 리뷰 실창 AX 실측이 no-op 반증(SwiftUI가 SplitView 칼럼 safe area를 0으로 보고) → `contentLayoutRect` 기반 재수정 → 2차 실측 리뷰 PASS(3케이스 AX 확증). PR #380 merge(`cef7430`), root `macos-ui` green.
 - 교훈 확립: 창 크롬 클래스는 스냅샷·코드 논증으로 부족 — 실창 AX 실측이 리뷰 필수 단계(D6). harness도 프로덕션 창 구성이어야 정본에 증거 능력이 생긴다.
