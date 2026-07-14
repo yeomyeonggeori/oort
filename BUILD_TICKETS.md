@@ -1877,6 +1877,41 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: 1차 수정(safeAreaInsets 기반)이 리뷰 실창 AX 실측으로 **런타임 no-op 반증**(NavigationSplitView 칼럼 safe area=0) → `NSWindow.contentLayoutRect` 기반 재수정 + harness 프로덕션 창 구성(fullSizeContentView+unified toolbar) 교체 → 2차 실측 리뷰 PASS(3케이스 AX 좌표: 사이드바 y72/헤더 y64 가시·AXPress 동작/패널 y136/타이틀 중복 0/dead control 0). canonical 3종 기록(프로덕션 기하 육안 확인), 206 tests 0 fail, clean+root `macos-ui` PASS(`local-gate-macos-ui-20260714T092306Z-pid99890-ns1784020986266307000-wt9a510db2fbf3-r569e0bf3e9f3.md`), PR #380 merge(`cef7430`).
   - 이월(별도 티켓 후보): 사이드바 멤버 행 이름 절단("H…" — 기존 결함, layoutPriority), harness 빈 툴바 밴드 높이 미세 불일치.
 
+### ☐ MOMO-383 수용기준 — Workspace-first navigation `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-382
+- [ ] toolbar의 떠 있는 workspace capsule을 제거하고 sidebar 최상단에 icon/name/status를 channel/DM보다 상위 컨텍스트로 표시.
+- [ ] workspace primary menu에서 설정/rename 진입, workspace ID 복사, 멤버 초대 제공.
+- [ ] owner/admin 전용 workspace name read/update REST와 macOS binding을 추가해 재로그인·다른 client에서도 이름 유지. 일반 member write 거부, RLS/tenant 격리, audit metadata 검증.
+- [ ] workspace icon/invite policy는 이 goal에서 local draft를 서버 영속 설정으로 과장하지 않고 후속 API 범위로 남김.
+- [ ] 표준/좁은/전체화면에서 traffic light, sidebar, channel header가 겹치지 않고 기존 MOMO-379 AX 기하 유지.
+- [ ] fake multi-workspace rail과 `Add workspace` affordance는 ADR-0117 전 금지.
+- [ ] light/dark 실창 evidence + design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
+
+### ☐ MOMO-384 수용기준 — Native channel creation sheet + tooltip presenter `[swift/macos-ui]` · 의존: MOMO-383
+- [ ] channel `+`가 sidebar inline form이 아니라 native sheet를 열고 public/private, name, topic, validation/loading/error를 제공.
+- [ ] quick tooltip을 row-local overlay가 아닌 window-level presenter 또는 system `.help` fallback으로 바꿔 sibling pane/inspector clipping 제거.
+- [ ] keyboard submit/cancel, VoiceOver label, narrow window, tooltip cross-pane 실창 evidence.
+- [ ] design-review Blocker 0 + `swift`/`macos-ui` local gate PASS.
+
+### ☐ MOMO-385 수용기준 — Member inspector + one-click DM `[swift/runtime-db/macos-ui]` · 의존: MOMO-383
+- [ ] active non-self person/agent member row primary click이 기존 idempotent DM REST를 호출하고 해당 DM으로 이동.
+- [ ] DM 생성 즉시 sidebar DM section에 나타나며 첫 메시지 이후에도 같은 channel identity/read-state를 유지.
+- [ ] member directory를 대화 컨텍스트를 보존하는 right inspector 중심으로 정리하고 search/filter/profile/DM action 유지.
+- [ ] self/inactive/error 상태를 명확히 처리하고 two members + one agent fixture에서 idempotency/RLS 검증.
+- [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
+
+### ☐ MOMO-386 수용기준 — Workspace search v0 `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-384, MOMO-385
+- [ ] workspace-scoped RLS server search endpoint 구현. tenant token만 허용하고 BYPASSRLS 금지.
+- [ ] `pg_trgm` 기반 message/member/mention 검색과 `from:`/`in:`/`@handle` modifier 지원; 결과에 identity/channel/timestamp/excerpt/source message ID 포함.
+- [ ] macOS global search surface에서 결과를 선택하면 원문 message context로 jump.
+- [ ] 현재 channel별 recent 200 client scan을 제품 경로에서 제거.
+- [ ] 두 workspace 격리, 첫 페이지 밖 오래된 message, modifier parsing, DM/channel 결과를 runtime 검증.
+- [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
+
+### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
+- [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
+- [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
+- [ ] momo 서버는 user-owned execution host의 process/provider credential을 보관하거나 proxy하지 않음.
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.

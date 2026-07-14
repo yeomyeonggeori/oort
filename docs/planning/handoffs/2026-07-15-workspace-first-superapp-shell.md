@@ -1,0 +1,51 @@
+# PLN-20260715-01 Workspace-first UX + Superapp Shell Handoff
+
+## 1. 목적
+
+2026-07-14 실창 QA를 ADR-0112 후속 실행 계약으로 전환하고, UX와 engine worker가 같은 파일을 건드리지 않도록 다음 goal의 경계를 고정한다.
+
+## 2. 정본 읽기 순서
+
+1. `docs/planning/CURRENT_STATE.md`
+2. `docs/adr/0112-product-surface-realignment.md`
+3. `docs/adr/0111-agent-work-surface.md`
+4. `docs/planning/proposals/2026-07-15-workspace-first-superapp-shell.md`
+5. `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md`
+6. 해당 GitHub Issue 본문
+
+## 3. UX buildable queue
+
+| ID | 범위 | 선행 | 기본 gate | 상태 |
+|---|---|---|---|---|
+| MOMO-383 | workspace-first sidebar/header/menu + persisted workspace name | MOMO-382 | swift + runtime-db + macos-ui + design-review | first ready |
+| MOMO-384 | native channel creation sheet + tooltip presenter | MOMO-383 | swift + macos-ui + design-review | blocked |
+| MOMO-385 | member inspector + one-click DM | MOMO-383 | swift + runtime-db + macos-ui | blocked |
+| MOMO-386 | RLS workspace search + macOS results/jump | MOMO-384, MOMO-385 | runtime-db + swift + macos-ui | blocked |
+| MOMO-375 | Work transcript/activity drawer | ADR-0114 surface decision | swift + macos-ui | planned |
+
+## 4. Engine planning queue
+
+| ADR | owner surface | 결과 | UX lock |
+|---|---|---|---|
+| ADR-0113 | `docs/adr/0113-*`, `research/14-superapp-engine/` | credential/capability/action trust decision draft | `clients/macOS/**` 금지 |
+| ADR-0116 | `docs/adr/0116-*`, `research/14-superapp-engine/` | memory/context retention draft | `clients/macOS/**` 금지 |
+| ADR-0114 | `docs/adr/0114-*`, Work research | app-server/interactive host draft | `clients/macOS/**` 금지 |
+| ADR-0115 | `docs/adr/0115-*`, webhook research | signed ingress draft | `clients/macOS/**` 금지 |
+
+ADR draft는 구현/Accepted 판정이 아니다. 성재가 option과 trust boundary를 승인한 뒤에만 numeric builder issue를 ready로 바꾼다.
+
+## 5. 구현 함정
+
+- workspace name/icon은 현재 `@AppStorage` local draft다. MOMO-383은 `workspace.name`만 owner/admin REST로 영속화하고 icon/invite policy는 후속 범위로 명시한다.
+- `MomoServerRESTChatBackend.search`의 최근 200개 client scan을 제품 검색으로 확장하지 않는다.
+- custom tooltip의 `.overlay`에 zIndex만 올리는 수정은 pane clip을 넘지 못한다. window-level presentation 또는 system help로 구조를 바꾼다.
+- member primary click은 self/inactive/failed 상태를 처리하고, DM creation은 기존 idempotent server route를 사용한다.
+- raw PTY를 `Process`로 macOS 앱 안에 바로 추가하지 않는다. ADR-0114가 host, sandbox, cwd, credential, approval identity를 결정한다.
+- multi-workspace UI는 session/token persistence 결정 전 fake rail을 만들지 않는다.
+
+## 6. Review evidence
+
+- Workspace issue: owner/admin rename, ordinary member denial, cross-client reload, Light/Dark, 1280-wide, narrow window, real window screenshot/AX check.
+- DM issue: two members + one agent fixture, self/inactive disabled, idempotent open, channel navigation.
+- Search issue: two workspaces RLS isolation, old message beyond first page, modifier parsing, jump target.
+- Engine ADR: security + architecture independent review. Credential/token custody와 BYPASSRLS 변화는 explicit option matrix가 필요하다.

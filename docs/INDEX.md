@@ -84,6 +84,8 @@
 | [`docs/planning/DEVIATION_LOG.md`](planning/DEVIATION_LOG.md) | 계획 이탈 로그 — PR 이탈 보고 → 오케스트레이터 기록 → 기획 판정 → 로드맵 환류 | 전반 |
 | [`docs/planning/JOURNAL.md`](planning/JOURNAL.md) | 기획 세션 저널(newest-first, 기존 항목 불변) — Fable↔GPT 5.6 세션 간 이어달리기 | 전반 |
 | [`docs/planning/handoffs/`](planning/handoffs/) | 발급된 핸드오프 패킷 (첫 패킷: 2026-07-10 ADR-0101 agent identity 배치) | 전반 |
+| [`docs/planning/proposals/2026-07-15-workspace-first-superapp-shell.md`](planning/proposals/2026-07-15-workspace-first-superapp-shell.md) | 2026-07-14 실창 QA를 workspace-first messenger와 governed Work Console 경계로 분할한 실행 제안 | M3/슈퍼앱 |
+| [`docs/planning/handoffs/2026-07-15-workspace-first-superapp-shell.md`](planning/handoffs/2026-07-15-workspace-first-superapp-shell.md) | MOMO-383~386 UX buildable queue와 ADR-0113~0116 engine planning lock/handoff | M3/슈퍼앱 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 
