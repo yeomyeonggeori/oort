@@ -102,7 +102,8 @@ cleanup() {
   done
   psql_run -c "BEGIN; SET LOCAL row_security = off; UPDATE member SET status = 'active', deleted_at = NULL, updated_at = clock_timestamp() WHERE id = '00000000-0000-7000-8000-000000000196'; COMMIT;" >/dev/null 2>&1 || true
   if [ "$WORKSPACE_RENAMED" = "1" ] && [ "$ORIGINAL_WORKSPACE_NAME" != "" ]; then
-    psql_run -v restore_workspace_name="$ORIGINAL_WORKSPACE_NAME" -c "BEGIN; SET LOCAL row_security = off; UPDATE workspace SET name = :'restore_workspace_name', updated_at = clock_timestamp() WHERE id = '$DEMO_WORKSPACE_ID'; COMMIT;" >/dev/null 2>&1 || true
+    printf '%s\n' "BEGIN; SET LOCAL row_security = off; UPDATE workspace SET name = :'restore_workspace_name', updated_at = clock_timestamp() WHERE id = '$DEMO_WORKSPACE_ID'; COMMIT;" \
+      | psql_run -v restore_workspace_name="$ORIGINAL_WORKSPACE_NAME" >/dev/null 2>&1 || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -151,15 +152,18 @@ expect_jq() {
 }
 
 sql_scalar() {
-  psql_run -c "$1" | grep -E '^[0-9]+$' | tail -n 1
+  local sql="$1"
+  shift
+  printf '%s\n' "$sql" | psql_run "$@" | grep -E '^[0-9]+$' | tail -n 1
 }
 
 assert_sql_equals() {
   local expected="$1"
   local sql="$2"
   local label="$3"
+  shift 3
   local got
-  got="$(sql_scalar "$sql")"
+  got="$(sql_scalar "$sql" "$@")"
   if [ "$got" != "$expected" ]; then
     echo "[channel-management] FAIL $label: expected $expected, got $got" >&2
     exit 1
@@ -333,7 +337,7 @@ expect_status 200 "owner reads workspace identity"
 expect_jq '.workspace.id == "'"$DEMO_WORKSPACE_ID"'" and (.workspace.name | length) > 0' "workspace identity response is durable"
 ORIGINAL_WORKSPACE_NAME="$(printf '%s' "$RESPONSE_BODY" | jq -r '.workspace.name')"
 ORIGINAL_WORKSPACE_UPDATED_AT_MS="$(printf '%s' "$RESPONSE_BODY" | jq -r '.workspace.updatedAtMs')"
-RENAMED_WORKSPACE_NAME="MOMO Runtime ${RUN_SAFE}"
+RENAMED_WORKSPACE_NAME="MOMO Runtime's ${RUN_SAFE}"
 
 api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
   "$(jq -cn --arg name "$RENAMED_WORKSPACE_NAME" --argjson expected "$ORIGINAL_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
@@ -386,7 +390,7 @@ api GET "/v1/workspaces/$WORKSPACE_B" "" "$B_OWNER_TOKEN"
 expect_status 200 "workspace B owner reads own workspace identity"
 expect_jq '.workspace.id == "'"$WORKSPACE_B"'"' "workspace B identity remains tenant scoped"
 
-assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE workspace_id = '$DEMO_WORKSPACE_ID' AND actor_member_id = '00000000-0000-7000-8000-000000000196' AND action = 'workspace.name.updated' AND target_type = 'workspace' AND target_id = '$DEMO_WORKSPACE_ID' AND via_token_id IS NOT NULL AND detail->>'schema' = 'momo.workspace.name.updated.v1' AND detail->>'previous_name' = '$ORIGINAL_WORKSPACE_NAME' AND detail->>'new_name' = '$RENAMED_WORKSPACE_NAME' AND detail->>'changed' = 'true'; COMMIT;" "workspace rename audit metadata persisted"
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE workspace_id = '$DEMO_WORKSPACE_ID' AND actor_member_id = '00000000-0000-7000-8000-000000000196' AND action = 'workspace.name.updated' AND target_type = 'workspace' AND target_id = '$DEMO_WORKSPACE_ID' AND via_token_id IS NOT NULL AND detail->>'schema' = 'momo.workspace.name.updated.v1' AND detail->>'previous_name' = :'original_workspace_name' AND detail->>'new_name' = :'renamed_workspace_name' AND detail->>'changed' = 'true'; COMMIT;" "workspace rename audit metadata persisted" -v original_workspace_name="$ORIGINAL_WORKSPACE_NAME" -v renamed_workspace_name="$RENAMED_WORKSPACE_NAME"
 assert_sql_equals 0 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE action = 'workspace.name.updated' AND detail->>'new_name' IN ('member must not rename', 'suspended admin must not rename', 'deleted admin must not rename', 'stale rename must fail'); COMMIT;" "denied and stale renames create no audit row"
 
 api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
@@ -394,6 +398,9 @@ api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
   "$OWNER_TOKEN"
 expect_status 200 "owner restores workspace identity fixture"
 WORKSPACE_RENAMED=0
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID" "" "$OWNER_TOKEN"
+expect_status 200 "owner reloads restored workspace identity"
+expect_jq --arg expected "$ORIGINAL_WORKSPACE_NAME" '.workspace.name == $expected' "apostrophe workspace name is safely restored"
 
 api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/channels" \
   "$(jq -cn --arg name "$OWNER_CHANNEL_NAME" '{kind:"public",name:$name,topic:"MOMO-214 runtime channel"}')" \

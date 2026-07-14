@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var workspaceProfile: Workspace?
@@ -465,10 +465,6 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
 
     func authenticatedMemberID() async -> MemberID? {
         members.first { $0.kind == .human && $0.status == .active }?.id
-    }
-
-    func workspaceIdentityCacheServerScope() async -> String {
-        "momo-live-demo"
     }
 
     public func clearSessionSensitiveState() async {

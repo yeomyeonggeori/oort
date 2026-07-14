@@ -398,6 +398,141 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(decoded.updatedAtMs, 0)
     }
 
+    @MainActor
+    func testStaleWorkspaceRefreshCannotOverwriteNewerRename() async throws {
+        let defaultsSuite = "momo-workspace-race-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "race.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        let initial = try XCTUnwrap(viewModel.workspace)
+        await backend.blockNextWorkspaceRead()
+
+        let refresh = Task { @MainActor in
+            await viewModel.refreshWorkspaceIdentity()
+        }
+        await backend.waitForWorkspaceReadCount(2)
+        let didRename = await viewModel.updateWorkspaceName("Newest Workspace")
+        XCTAssertTrue(didRename)
+        let renamed = try XCTUnwrap(viewModel.workspace)
+        XCTAssertGreaterThan(renamed.updatedAtMs, initial.updatedAtMs)
+
+        await backend.releaseNextWorkspaceRead()
+        await refresh.value
+
+        XCTAssertEqual(viewModel.workspace?.name, "Newest Workspace")
+        XCTAssertEqual(viewModel.workspace?.updatedAtMs, renamed.updatedAtMs)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+    }
+
+    @MainActor
+    func testClearedSessionRejectsLateWorkspaceRefresh() async throws {
+        let defaultsSuite = "momo-workspace-session-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "session.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        await backend.blockNextWorkspaceRead()
+
+        let refresh = Task { @MainActor in
+            await viewModel.refreshWorkspaceIdentity()
+        }
+        await backend.waitForWorkspaceReadCount(2)
+        await viewModel.clearSessionSensitiveState()
+        await backend.releaseNextWorkspaceRead()
+        await refresh.value
+
+        XCTAssertNil(viewModel.workspaceId)
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+    }
+
+    @MainActor
+    func testUnknownWorkspaceReadErrorDoesNotUsePersistentCache() async throws {
+        let defaultsSuite = "momo-workspace-unknown-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "unknown.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        XCTAssertTrue(defaults.dictionaryRepresentation().keys.contains { key in
+            key.hasPrefix("momo.workspace.identity.")
+        })
+        await backend.failNextWorkspaceRead(with: .unknown)
+
+        await viewModel.refreshWorkspaceIdentity()
+
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+        XCTAssertNotNil(viewModel.workspaceNameUpdateError)
+    }
+
+    @MainActor
+    func testCancelledWorkspaceRefreshPreservesCurrentIdentityWithoutCacheFallback() async throws {
+        let defaultsSuite = "momo-workspace-cancel-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "cancel.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        let initial = try XCTUnwrap(viewModel.workspace)
+        await backend.failNextWorkspaceRead(with: .cancellation)
+
+        await viewModel.refreshWorkspaceIdentity()
+
+        XCTAssertEqual(viewModel.workspace, initial)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+        XCTAssertNil(viewModel.workspaceNameUpdateError)
+    }
+
+    @MainActor
+    func testRepeatedLiveDemoBootstrapDoesNotCreateWorkspaceIdentityDefaults() async throws {
+        let defaultsSuite = "momo-workspace-demo-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: backend,
+            workspaceIdentityDefaults: defaults
+        )
+
+        for _ in 0..<3 {
+            await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        }
+
+        XCTAssertFalse(defaults.dictionaryRepresentation().keys.contains { key in
+            key.hasPrefix("momo.workspace.identity.")
+        })
+    }
+
     func testDemoAgentProtocolCardsCarryContextMemoryCapabilityMetadata() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -2031,6 +2166,33 @@ final class MomoMacTests: XCTestCase {
 
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["GET", "PATCH"])
+    }
+
+    func testRESTBackendWorkspaceReadPreservesCancellation() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        await MockHTTPURLProtocol.setHandler { _ in
+            throw URLError(.cancelled)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        do {
+            _ = try await backend.workspace(id: workspace)
+            XCTFail("cancelled request should throw CancellationError")
+        } catch is CancellationError {
+            // Expected: cancellation remains control flow, not a realtime transport failure.
+        } catch {
+            XCTFail("expected CancellationError, got \(error)")
+        }
+        await MockHTTPURLProtocol.reset()
     }
 
     @MainActor
@@ -4487,6 +4649,164 @@ private actor WorkspaceAuthenticationFailureBackend: ChatBackend, WorkspaceBacke
 
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         try await base.decideApproval(request)
+    }
+}
+
+private enum ControlledWorkspaceReadFailure: Sendable {
+    case unknown
+    case cancellation
+}
+
+private struct UnknownWorkspaceReadError: Error, Sendable {}
+
+private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend, WorkspaceIdentityCacheScopeProviding {
+    private struct ReadWaiter {
+        let target: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private let base: LiveChatBackend
+    private let cacheScope: String
+    private var shouldBlockNextRead = false
+    private var nextReadFailure: ControlledWorkspaceReadFailure?
+    private var workspaceReadCount = 0
+    private var readWaiters: [ReadWaiter] = []
+    private var blockedReadReleases: [CheckedContinuation<Void, Never>] = []
+
+    init(base: LiveChatBackend, cacheScope: String) {
+        self.base = base
+        self.cacheScope = cacheScope
+    }
+
+    func blockNextWorkspaceRead() {
+        shouldBlockNextRead = true
+    }
+
+    func failNextWorkspaceRead(with failure: ControlledWorkspaceReadFailure) {
+        nextReadFailure = failure
+    }
+
+    func waitForWorkspaceReadCount(_ target: Int) async {
+        guard workspaceReadCount < target else { return }
+        await withCheckedContinuation { continuation in
+            readWaiters.append(ReadWaiter(target: target, continuation: continuation))
+        }
+    }
+
+    func releaseNextWorkspaceRead() {
+        guard !blockedReadReleases.isEmpty else { return }
+        blockedReadReleases.removeFirst().resume()
+    }
+
+    func workspaceIdentityCacheServerScope() async -> String {
+        cacheScope
+    }
+
+    func workspace(id: WorkspaceID) async throws -> Workspace {
+        if let failure = nextReadFailure {
+            nextReadFailure = nil
+            recordWorkspaceRead()
+            switch failure {
+            case .unknown:
+                throw UnknownWorkspaceReadError()
+            case .cancellation:
+                throw CancellationError()
+            }
+        }
+
+        let shouldBlock = shouldBlockNextRead
+        shouldBlockNextRead = false
+        let snapshot = try await base.workspace(id: id)
+        if shouldBlock {
+            await withCheckedContinuation { continuation in
+                blockedReadReleases.append(continuation)
+                recordWorkspaceRead()
+            }
+        } else {
+            recordWorkspaceRead()
+        }
+        return snapshot
+    }
+
+    func updateWorkspaceName(
+        workspace: WorkspaceID,
+        name: String,
+        expectedUpdatedAtMs: Int64
+    ) async throws -> Workspace {
+        try await base.updateWorkspaceName(
+            workspace: workspace,
+            name: name,
+            expectedUpdatedAtMs: expectedUpdatedAtMs
+        )
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        try await base.history(channel: channel, after: seq, limit: limit)
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
+    }
+
+    private func recordWorkspaceRead() {
+        workspaceReadCount += 1
+        var pending: [ReadWaiter] = []
+        for waiter in readWaiters {
+            if workspaceReadCount >= waiter.target {
+                waiter.continuation.resume()
+            } else {
+                pending.append(waiter)
+            }
+        }
+        readWaiters = pending
     }
 }
 

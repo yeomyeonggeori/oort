@@ -53,13 +53,13 @@ momo의 기본 셸은 **workspace/server → channel/DM → timeline** 위계를
 - workspace icon과 invite policy의 서버 영속화는 이 goal에서 가짜로 만들지 않고 후속 settings API 범위로 명시한다.
 - multi-workspace는 아직 가짜 server rail을 만들지 않고 `Add workspace...` disabled/planned affordance도 노출하지 않는다.
 
-#### MOMO-384 Native channel creation + tooltip layer
+#### MOMO-384 (`#390`) Native channel creation + tooltip layer
 
 - channel `+`는 native sheet를 연다.
 - public/private, name, topic, validation, loading/error를 sheet 안에서 제공.
 - tooltip을 row-local overlay가 아닌 window-level presenter 또는 system help fallback으로 바꿔 pane clipping을 없앤다.
 
-#### MOMO-385 Member inspector + one-click DM
+#### MOMO-385 (`#391`) Member inspector + one-click DM
 
 - active non-self member row의 primary click은 idempotent DM open 후 DM channel로 이동한다.
 - 첫 메시지 전/후 DM visibility 정책을 명시한다. 생성 즉시 DM section에 표시하고, unread/read-state는 기존 계약을 사용한다.
@@ -67,7 +67,7 @@ momo의 기본 셸은 **workspace/server → channel/DM → timeline** 위계를
 
 ### 4.2 Full-stack lane
 
-#### MOMO-386 Workspace search v0
+#### MOMO-386 (`#392`) Workspace search v0
 
 - server endpoint: workspace-scoped, RLS-protected `pg_trgm` query. BYPASSRLS 금지.
 - results: message, sender/agent identity, channel/DM, timestamp, matched excerpt.
