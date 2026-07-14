@@ -17,7 +17,7 @@
 
 | ID | 범위 | 선행 | 기본 gate | 상태 |
 |---|---|---|---|---|
-| MOMO-383 | workspace-first sidebar/header/menu + persisted workspace name | MOMO-382 | swift + runtime-db + macos-ui + design-review | first ready |
+| MOMO-383 | workspace-first sidebar/header/menu + persisted workspace name | MOMO-382 | swift + runtime-db + macos-ui + design-review | in review — `#387` |
 | MOMO-384 | native channel creation sheet + tooltip presenter | MOMO-383 | swift + macos-ui + design-review | blocked |
 | MOMO-385 | member inspector + one-click DM | MOMO-383 | swift + runtime-db + macos-ui | blocked |
 | MOMO-386 | RLS workspace search + macOS results/jump | MOMO-384, MOMO-385 | runtime-db + swift + macos-ui | blocked |
@@ -49,3 +49,11 @@ ADR draft는 구현/Accepted 판정이 아니다. 성재가 option과 trust boun
 - DM issue: two members + one agent fixture, self/inactive disabled, idempotent open, channel navigation.
 - Search issue: two workspaces RLS isolation, old message beyond first page, modifier parsing, jump target.
 - Engine ADR: security + architecture independent review. Credential/token custody와 BYPASSRLS 변화는 explicit option matrix가 필요하다.
+
+## 7. MOMO-383 checkpoint (2026-07-15)
+
+- 구현: sidebar 최상단 workspace identity/native popover, toolbar capsule 제거, ADR-0118 active-member read + owner/admin durable rename REST, local-only icon/policy 경계, audit metadata.
+- 리뷰 반려 수정: server+member+workspace cache scope, 401/403/404 cache 비노출, cached-name 경고/재시도, 409 conflict reload, 구 cache Codable 호환, 구체적 validation/permission/connection copy, verifier fixture 복원.
+- 검증됨: 두 client durable read, ordinary member/cross-workspace 403, audit/restore, 전체 Swift 345 tests, 표준 1180x760·좁은 900x650·fullscreen 실창 기하, design Blocker 0.
+- merge 전 대기: final rereview, clean `runtime-db`/`swift`/`macos-ui`.
+- 후속: merge 직후 MOMO-384와 MOMO-385가 ready, 둘 다 merge된 뒤 MOMO-386이 ready다.

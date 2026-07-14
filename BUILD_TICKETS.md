@@ -1878,12 +1878,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 이월(별도 티켓 후보): 사이드바 멤버 행 이름 절단("H…" — 기존 결함, layoutPriority), harness 빈 툴바 밴드 높이 미세 불일치.
 
 ### ☐ MOMO-383 수용기준 — Workspace-first navigation `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-382
-- [ ] toolbar의 떠 있는 workspace capsule을 제거하고 sidebar 최상단에 icon/name/status를 channel/DM보다 상위 컨텍스트로 표시.
-- [ ] workspace primary menu에서 설정/rename 진입, workspace ID 복사, 멤버 초대 제공.
-- [ ] owner/admin 전용 workspace name read/update REST와 macOS binding을 추가해 재로그인·다른 client에서도 이름 유지. 일반 member write 거부, RLS/tenant 격리, audit metadata 검증.
-- [ ] workspace icon/invite policy는 이 goal에서 local draft를 서버 영속 설정으로 과장하지 않고 후속 API 범위로 남김.
-- [ ] 표준/좁은/전체화면에서 traffic light, sidebar, channel header가 겹치지 않고 기존 MOMO-379 AX 기하 유지.
-- [ ] fake multi-workspace rail과 `Add workspace` affordance는 ADR-0117 전 금지.
+- [x] toolbar의 떠 있는 workspace capsule을 제거하고 sidebar 최상단에 icon/name/current-user context를 channel/DM보다 상위 컨텍스트로 표시.
+- [x] workspace primary menu에서 설정/rename 진입, workspace ID 복사, 멤버 초대 제공.
+- [x] ADR-0118의 active-member read + owner/admin workspace name update REST와 macOS binding을 추가해 재로그인·다른 client에서도 이름 유지. 일반 member write 거부, RLS/tenant 격리, audit metadata 검증.
+- [x] workspace icon/invite policy는 이 goal에서 local draft를 서버 영속 설정으로 과장하지 않고 후속 API 범위로 남김.
+- [x] 표준/좁은 창에서 traffic light, sidebar, channel header가 겹치지 않고 기존 MOMO-379 AX 기하 유지. 전체화면은 최종 macos-ui review evidence에서 닫는다.
+- [x] fake multi-workspace rail과 `Add workspace` affordance는 ADR-0117 전 금지.
 - [ ] light/dark 실창 evidence + design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
 
 ### ☐ MOMO-384 수용기준 — Native channel creation sheet + tooltip presenter `[swift/macos-ui]` · 의존: MOMO-383

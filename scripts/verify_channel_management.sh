@@ -4,8 +4,9 @@
 #
 # Runs after make up && make migrate. It starts MomoServer with the normal
 # NOBYPASSRLS app role, then verifies owner/admin channel create, human/agent
-# membership add/remove, member denial, cross-workspace denial, channel_seq
-# provisioning, and message send through the managed channel.
+# membership add/remove, persisted workspace identity rename/read authorization,
+# cross-workspace denial, channel_seq provisioning, and message send through the
+# managed channel.
 # =============================================================================
 set -euo pipefail
 
@@ -74,6 +75,8 @@ RUN_SAFE="$(printf '%s' "$RUN_ID" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9-
 TMP_DIR="${TMPDIR:-/tmp}/momo-channel-management-$RUN_ID"
 SERVER_LOG="$TMP_DIR/momo-server.log"
 SERVER_PID=""
+ORIGINAL_WORKSPACE_NAME=""
+WORKSPACE_RENAMED=0
 
 mkdir -p "$TMP_DIR"
 
@@ -97,6 +100,10 @@ cleanup() {
     fi
     sleep 1
   done
+  psql_run -c "BEGIN; SET LOCAL row_security = off; UPDATE member SET status = 'active', deleted_at = NULL, updated_at = clock_timestamp() WHERE id = '00000000-0000-7000-8000-000000000196'; COMMIT;" >/dev/null 2>&1 || true
+  if [ "$WORKSPACE_RENAMED" = "1" ] && [ "$ORIGINAL_WORKSPACE_NAME" != "" ]; then
+    psql_run -v restore_workspace_name="$ORIGINAL_WORKSPACE_NAME" -c "BEGIN; SET LOCAL row_security = off; UPDATE workspace SET name = :'restore_workspace_name', updated_at = clock_timestamp() WHERE id = '$DEMO_WORKSPACE_ID'; COMMIT;" >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -211,6 +218,7 @@ VALUES
    'human', 'active', 'Channel B Member', 'channel-b-member')
 ON CONFLICT (id) DO UPDATE
 SET status = EXCLUDED.status,
+    deleted_at = NULL,
     display_name = EXCLUDED.display_name,
     handle = EXCLUDED.handle,
     updated_at = now();
@@ -319,6 +327,73 @@ B_OWNER_TOKEN="$(login "$B_OWNER_EMAIL" "$WORKSPACE_B")"
 
 OWNER_CHANNEL_NAME="runtime-${RUN_SAFE}"
 ADMIN_CHANNEL_NAME="admin-${RUN_SAFE}"
+
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID" "" "$OWNER_TOKEN"
+expect_status 200 "owner reads workspace identity"
+expect_jq '.workspace.id == "'"$DEMO_WORKSPACE_ID"'" and (.workspace.name | length) > 0' "workspace identity response is durable"
+ORIGINAL_WORKSPACE_NAME="$(printf '%s' "$RESPONSE_BODY" | jq -r '.workspace.name')"
+ORIGINAL_WORKSPACE_UPDATED_AT_MS="$(printf '%s' "$RESPONSE_BODY" | jq -r '.workspace.updatedAtMs')"
+RENAMED_WORKSPACE_NAME="MOMO Runtime ${RUN_SAFE}"
+
+api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
+  "$(jq -cn --arg name "$RENAMED_WORKSPACE_NAME" --argjson expected "$ORIGINAL_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
+  "$ADMIN_TOKEN"
+expect_status 200 "admin renames workspace"
+WORKSPACE_RENAMED=1
+expect_jq '.workspace.name == "'"$RENAMED_WORKSPACE_NAME"'"' "rename response carries persisted name"
+RENAMED_WORKSPACE_UPDATED_AT_MS="$(printf '%s' "$RESPONSE_BODY" | jq -r '.workspace.updatedAtMs')"
+
+api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
+  "$(jq -cn --arg name "stale rename must fail" --argjson expected "$ORIGINAL_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
+  "$OWNER_TOKEN"
+expect_status 409 "stale workspace rename is rejected"
+
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID" "" "$OWNER_TOKEN"
+expect_status 200 "second authorized client reloads workspace identity"
+expect_jq '.workspace.name == "'"$RENAMED_WORKSPACE_NAME"'"' "second client observes persisted rename"
+
+api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
+  "$(jq -cn --arg name "member must not rename" --argjson expected "$RENAMED_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
+  "$MEMBER_TOKEN"
+expect_status 403 "ordinary member cannot rename workspace"
+
+psql_run -c "BEGIN; SET LOCAL row_security = off; UPDATE member SET status = 'suspended', updated_at = clock_timestamp() WHERE id = '00000000-0000-7000-8000-000000000196'; COMMIT;" >/dev/null
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID" "" "$ADMIN_TOKEN"
+expect_status 403 "suspended admin cannot read workspace identity"
+api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
+  "$(jq -cn --arg name "suspended admin must not rename" --argjson expected "$RENAMED_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
+  "$ADMIN_TOKEN"
+expect_status 403 "suspended admin cannot rename workspace"
+
+psql_run -c "BEGIN; SET LOCAL row_security = off; UPDATE member SET status = 'deleted', deleted_at = clock_timestamp(), updated_at = clock_timestamp() WHERE id = '00000000-0000-7000-8000-000000000196'; COMMIT;" >/dev/null
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID" "" "$ADMIN_TOKEN"
+expect_status 403 "deleted admin cannot read workspace identity"
+api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
+  "$(jq -cn --arg name "deleted admin must not rename" --argjson expected "$RENAMED_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
+  "$ADMIN_TOKEN"
+expect_status 403 "deleted admin cannot rename workspace"
+psql_run -c "BEGIN; SET LOCAL row_security = off; UPDATE member SET status = 'active', deleted_at = NULL, updated_at = clock_timestamp() WHERE id = '00000000-0000-7000-8000-000000000196'; COMMIT;" >/dev/null
+
+api GET "/v1/workspaces/$WORKSPACE_B" "" "$OWNER_TOKEN"
+expect_status 403 "workspace A token cannot read workspace B identity"
+
+api PATCH "/v1/workspaces/$WORKSPACE_B" \
+  '{"name":"cross workspace rename must fail","expectedUpdatedAtMs":0}' \
+  "$OWNER_TOKEN"
+expect_status 403 "workspace A token cannot rename workspace B"
+
+api GET "/v1/workspaces/$WORKSPACE_B" "" "$B_OWNER_TOKEN"
+expect_status 200 "workspace B owner reads own workspace identity"
+expect_jq '.workspace.id == "'"$WORKSPACE_B"'"' "workspace B identity remains tenant scoped"
+
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE workspace_id = '$DEMO_WORKSPACE_ID' AND actor_member_id = '00000000-0000-7000-8000-000000000196' AND action = 'workspace.name.updated' AND target_type = 'workspace' AND target_id = '$DEMO_WORKSPACE_ID' AND via_token_id IS NOT NULL AND detail->>'schema' = 'momo.workspace.name.updated.v1' AND detail->>'previous_name' = '$ORIGINAL_WORKSPACE_NAME' AND detail->>'new_name' = '$RENAMED_WORKSPACE_NAME' AND detail->>'changed' = 'true'; COMMIT;" "workspace rename audit metadata persisted"
+assert_sql_equals 0 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE action = 'workspace.name.updated' AND detail->>'new_name' IN ('member must not rename', 'suspended admin must not rename', 'deleted admin must not rename', 'stale rename must fail'); COMMIT;" "denied and stale renames create no audit row"
+
+api PATCH "/v1/workspaces/$DEMO_WORKSPACE_ID" \
+  "$(jq -cn --arg name "$ORIGINAL_WORKSPACE_NAME" --argjson expected "$RENAMED_WORKSPACE_UPDATED_AT_MS" '{name:$name,expectedUpdatedAtMs:$expected}')" \
+  "$OWNER_TOKEN"
+expect_status 200 "owner restores workspace identity fixture"
+WORKSPACE_RENAMED=0
 
 api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/channels" \
   "$(jq -cn --arg name "$OWNER_CHANNEL_NAME" '{kind:"public",name:$name,topic:"MOMO-214 runtime channel"}')" \

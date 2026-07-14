@@ -10,6 +10,10 @@ protocol AuthenticatedMemberIDProvidingBackend: Sendable {
     func authenticatedMemberID() async -> MemberID?
 }
 
+protocol WorkspaceIdentityCacheScopeProviding: Sendable {
+    func workspaceIdentityCacheServerScope() async -> String
+}
+
 /// Marker for backends whose member identity and channel scope must remain
 /// server-owned. Local demo profile hints are never merged into these rosters.
 public protocol ServerRosterSourceOfTruth: Sendable {}
@@ -75,6 +79,16 @@ public enum MomoConnectionIssue: Sendable, Equatable {
     case actionFailed
 }
 
+public enum WorkspaceNameUpdateIssue: Sendable, Equatable {
+    case unavailable
+    case invalidName
+    case reloadRequired
+    case conflict
+    case authenticationExpired
+    case forbidden
+    case connection
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -91,6 +105,7 @@ public enum MomoConnectionIssue: Sendable, Equatable {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     private static let maximumMarkReadFailures = 5
+    private static let workspaceCachePrefix = "momo.workspace.identity."
 
     private struct PendingMessageSend: Sendable {
         let draft: DraftMessage
@@ -105,6 +120,7 @@ public final class ChatViewModel: ObservableObject {
 
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
+    private let workspaceBackend: (any WorkspaceBackend)?
     private let readStateBackend: (any ReadStateBackend)?
     private let agentTransport: any AgentTransport
     private let workRunBackend: (any AgentWorkRunBackend)?
@@ -120,6 +136,11 @@ public final class ChatViewModel: ObservableObject {
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
+    @Published public private(set) var workspace: Workspace?
+    @Published public private(set) var workspaceIdentityUsesCache = false
+    @Published public private(set) var workspaceNameUpdateInFlight = false
+    @Published public private(set) var workspaceNameUpdateError: String?
+    @Published public private(set) var workspaceNameUpdateIssue: WorkspaceNameUpdateIssue?
     @Published public private(set) var members: [Member] = []
     @Published public private(set) var channels: [Channel] = []
     @Published public var selectedChannelId: ChannelID?
@@ -198,11 +219,21 @@ public final class ChatViewModel: ObservableObject {
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
     private var agentCredentialRefreshes: [MemberID: AgentCredentialRefresh] = [:]
     private var failedMessageSend: PendingMessageSend?
+    private var workspaceIdentityCacheScope: String?
 
     /// Redacted user-facing context for a failed agent mention. Raw transport
     /// diagnostics remain isolated in `connectionError`.
     public var failedMentionedAgentName: String? {
         failedMessageSend?.mentionedAgent?.displayName
+    }
+
+    public var authenticatedMember: Member? {
+        guard let authenticatedMemberId else { return nil }
+        return members.first { $0.id == authenticatedMemberId }
+    }
+
+    public var canManageWorkspace: Bool {
+        authenticatedMember?.workspaceRole == .owner || authenticatedMember?.workspaceRole == .admin
     }
 
     public init(
@@ -214,6 +245,7 @@ public final class ChatViewModel: ObservableObject {
         readStateDebounce: Duration = .seconds(1)
     ) {
         self.chat = chat
+        self.workspaceBackend = chat as? any WorkspaceBackend
         self.readStateBackend = chat as? any ReadStateBackend
         self.agentTransport = agentTransport
         self.workRunBackend = chat as? any AgentWorkRunBackend
@@ -244,6 +276,14 @@ public final class ChatViewModel: ObservableObject {
             let memberProvider = chat as? any AuthenticatedMemberIDProvidingBackend
             authenticatedMemberId = await memberProvider?.authenticatedMemberID()
                 ?? self.members.first { $0.kind == .human && $0.status == .active }?.id
+            if let serverScope = await (chat as? any WorkspaceIdentityCacheScopeProviding)?
+                .workspaceIdentityCacheServerScope(),
+               let authenticatedMemberId {
+                workspaceIdentityCacheScope = "\(serverScope)|\(authenticatedMemberId.description)"
+            } else {
+                workspaceIdentityCacheScope = nil
+            }
+            await loadWorkspaceIdentity(workspace)
             self.channels = try await chat.channels(workspace: workspace)
             await refreshReadStates(workspace: workspace)
             await refreshAgentRuntimeStatus()
@@ -284,6 +324,11 @@ public final class ChatViewModel: ObservableObject {
             await resettable.clearSessionSensitiveState()
         }
         workspaceId = nil
+        workspace = nil
+        workspaceNameUpdateInFlight = false
+        workspaceNameUpdateError = nil
+        workspaceNameUpdateIssue = nil
+        workspaceIdentityUsesCache = false
         members = []
         channels = []
         selectedChannelId = nil
@@ -293,6 +338,7 @@ public final class ChatViewModel: ObservableObject {
         channelNavigationHistory = []
         channelNavigationIndex = nil
         authenticatedMemberId = nil
+        workspaceIdentityCacheScope = nil
         activeTimelineChannelId = nil
         messagesByChannel = [:]
         historyLoadingChannels = []
@@ -333,6 +379,129 @@ public final class ChatViewModel: ObservableObject {
         isLocalContextCopilotRefreshing = false
         clearConnectionErrorState(force: true)
         pendingFallbackMentionRuns = [:]
+    }
+
+    public func updateWorkspaceName(_ name: String) async -> Bool {
+        guard let workspaceId, let workspaceBackend, !workspaceNameUpdateInFlight else {
+            workspaceNameUpdateError = "Workspace settings are unavailable."
+            workspaceNameUpdateIssue = .unavailable
+            return false
+        }
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...80).contains(normalized.count),
+              !normalized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            workspaceNameUpdateError = "Workspace name must be 1-80 supported characters."
+            workspaceNameUpdateIssue = .invalidName
+            return false
+        }
+        guard let expectedUpdatedAtMs = workspace?.updatedAtMs else {
+            workspaceNameUpdateError = "Reload workspace settings and try again."
+            workspaceNameUpdateIssue = .reloadRequired
+            return false
+        }
+
+        workspaceNameUpdateInFlight = true
+        workspaceNameUpdateError = nil
+        workspaceNameUpdateIssue = nil
+        defer { workspaceNameUpdateInFlight = false }
+        do {
+            workspace = try await workspaceBackend.updateWorkspaceName(
+                workspace: workspaceId,
+                name: normalized,
+                expectedUpdatedAtMs: expectedUpdatedAtMs
+            )
+            cacheWorkspaceIdentity(workspace)
+            workspaceIdentityUsesCache = false
+            clearConnectionErrorState()
+            return true
+        } catch {
+            let issue = workspaceUpdateIssue(for: error)
+            if issue == .conflict {
+                await loadWorkspaceIdentity(workspaceId)
+            }
+            workspaceNameUpdateError = String(describing: error)
+            workspaceNameUpdateIssue = issue
+            reportConnectionError(error, as: .actionFailed)
+            return false
+        }
+    }
+
+    public func refreshWorkspaceIdentity() async {
+        guard let workspaceId else { return }
+        await loadWorkspaceIdentity(workspaceId)
+    }
+
+    private func loadWorkspaceIdentity(_ workspaceID: WorkspaceID) async {
+        guard let workspaceBackend else {
+            workspace = cachedWorkspaceIdentity(workspaceID)
+                ?? Workspace(id: workspaceID, slug: workspaceID.description, name: "momo")
+            workspaceIdentityUsesCache = true
+            return
+        }
+        do {
+            let loaded = try await workspaceBackend.workspace(id: workspaceID)
+            workspace = loaded
+            cacheWorkspaceIdentity(loaded)
+            workspaceIdentityUsesCache = false
+            workspaceNameUpdateError = nil
+        } catch {
+            if canUseWorkspaceIdentityCache(for: error),
+               let cached = cachedWorkspaceIdentity(workspaceID) {
+                workspace = cached
+                workspaceIdentityUsesCache = true
+                workspaceNameUpdateError = "Workspace identity is temporarily unavailable. Using the last saved name."
+            } else {
+                workspace = nil
+                workspaceIdentityUsesCache = false
+                workspaceNameUpdateError = "Workspace identity is unavailable."
+            }
+        }
+    }
+
+    private func workspaceUpdateIssue(for error: Error) -> WorkspaceNameUpdateIssue {
+        guard let backendError = error as? BackendError else { return .unavailable }
+        switch backendError {
+        case .problem(status: 409, title: _, detail: _):
+            return .conflict
+        case .problem(status: 401, title: _, detail: _):
+            return .authenticationExpired
+        case .problem(status: 403, title: _, detail: _):
+            return .forbidden
+        case .notConnected, .realtime, .timedOut:
+            return .connection
+        case .problem, .decoding, .budgetExceeded:
+            return .unavailable
+        }
+    }
+
+    private func cacheWorkspaceIdentity(_ workspace: Workspace?) {
+        guard let workspace, let key = workspaceIdentityCacheKey(workspace.id) else { return }
+        guard let data = try? JSONEncoder().encode(workspace) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func cachedWorkspaceIdentity(_ workspaceID: WorkspaceID) -> Workspace? {
+        guard let key = workspaceIdentityCacheKey(workspaceID) else { return nil }
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(Workspace.self, from: data)
+    }
+
+    private func workspaceIdentityCacheKey(_ workspaceID: WorkspaceID) -> String? {
+        guard let workspaceIdentityCacheScope else { return nil }
+        let encodedScope = Data(workspaceIdentityCacheScope.utf8).base64EncodedString()
+        return Self.workspaceCachePrefix + encodedScope + "." + workspaceID.description
+    }
+
+    private func canUseWorkspaceIdentityCache(for error: Error) -> Bool {
+        guard let backendError = error as? BackendError else { return true }
+        switch backendError {
+        case .problem(status: let status, title: _, detail: _):
+            return status >= 500
+        case .realtime, .timedOut:
+            return true
+        case .notConnected, .decoding, .budgetExceeded:
+            return false
+        }
     }
 
     public func refreshAgentRuntimeStatus() async {

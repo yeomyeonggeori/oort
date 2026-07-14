@@ -22,6 +22,21 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try InviteRoutes.validatedMaxUses(10_001))
     }
 
+    func testWorkspaceNameValidationNormalizesHumanReadableNames() throws {
+        XCTAssertEqual(try WorkspaceRoutes.normalizedName("  momo team  "), "momo team")
+        XCTAssertEqual(try WorkspaceRoutes.normalizedName("  모모 작업실\n"), "모모 작업실")
+        XCTAssertEqual(
+            try WorkspaceRoutes.normalizedName(String(repeating: "a", count: 80)),
+            String(repeating: "a", count: 80)
+        )
+    }
+
+    func testWorkspaceNameValidationRejectsEmptyLongAndControlInput() {
+        XCTAssertThrowsError(try WorkspaceRoutes.normalizedName("  \n"))
+        XCTAssertThrowsError(try WorkspaceRoutes.normalizedName(String(repeating: "a", count: 81)))
+        XCTAssertThrowsError(try WorkspaceRoutes.normalizedName("momo\u{0000}team"))
+    }
+
     func testJoinIdentityValidationNormalizesInputs() throws {
         XCTAssertEqual(try JoinRoutes.normalizedEmail("  USER@Example.COM  "), "user@example.com")
         XCTAssertEqual(try JoinRoutes.normalizedDisplayName("  New Human  "), "New Human")

@@ -96,6 +96,7 @@ enum AppBuilder {
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
+        WorkspaceRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         DMRoutes(db: db).add(to: authed)

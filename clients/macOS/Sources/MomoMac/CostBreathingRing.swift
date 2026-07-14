@@ -70,7 +70,7 @@ public struct CostBreathingRing: View {
             .frame(width: 34, height: 34)
 
             Text(label)
-                .font(.system(size: 9))
+                .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }

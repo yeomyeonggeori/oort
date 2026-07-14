@@ -305,6 +305,99 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(seqs, Array(1...Int64(seqs.count)))
     }
 
+    func testLiveBackendWorkspaceNameRoundTripPersistsForConnectedClient() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        try await backend.connect(workspace: seed.workspace, accessToken: "local-token")
+
+        let initial = try await backend.workspace(id: seed.workspace)
+        XCTAssertEqual(initial.name, "momo")
+        let updated = try await backend.updateWorkspaceName(
+            workspace: seed.workspace,
+            name: "  모모 작업실  ",
+            expectedUpdatedAtMs: initial.updatedAtMs
+        )
+        XCTAssertEqual(updated.name, "모모 작업실")
+        let reloaded = try await backend.workspace(id: seed.workspace)
+        XCTAssertEqual(reloaded.name, "모모 작업실")
+        do {
+            _ = try await backend.updateWorkspaceName(
+                workspace: seed.workspace,
+                name: "stale name",
+                expectedUpdatedAtMs: initial.updatedAtMs
+            )
+            XCTFail("stale workspace update should fail")
+        } catch {
+            // Expected conflict.
+        }
+        do {
+            _ = try await backend.updateWorkspaceName(
+                workspace: seed.workspace,
+                name: String(repeating: "a", count: 81),
+                expectedUpdatedAtMs: reloaded.updatedAtMs
+            )
+            XCTFail("invalid workspace name should fail")
+        } catch {
+            // Expected validation failure.
+        }
+    }
+
+    @MainActor
+    func testWorkspaceRenameConflictReloadsBeforeRetry() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        let initial = try XCTUnwrap(viewModel.workspace)
+
+        _ = try await backend.updateWorkspaceName(
+            workspace: seed.workspace,
+            name: "Changed elsewhere",
+            expectedUpdatedAtMs: initial.updatedAtMs
+        )
+
+        let firstAttempt = await viewModel.updateWorkspaceName("My workspace")
+        XCTAssertFalse(firstAttempt)
+        XCTAssertEqual(viewModel.workspaceNameUpdateIssue, .conflict)
+        XCTAssertEqual(viewModel.workspace?.name, "Changed elsewhere")
+        let secondAttempt = await viewModel.updateWorkspaceName("My workspace")
+        XCTAssertTrue(secondAttempt)
+        XCTAssertEqual(viewModel.workspace?.name, "My workspace")
+    }
+
+    @MainActor
+    func testWorkspaceRenameAuthenticationFailureRequiresSignInInsteadOfAdminAccess() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = WorkspaceAuthenticationFailureBackend(base: base)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "expired-token")
+
+        let saved = await viewModel.updateWorkspaceName("Must not save")
+
+        XCTAssertFalse(saved)
+        XCTAssertEqual(viewModel.workspaceNameUpdateIssue, .authenticationExpired)
+        XCTAssertEqual(viewModel.connectionIssue, .authenticationExpired)
+        XCTAssertTrue(
+            MomoWorkspaceCopy(language: .english)
+                .workspaceNameUpdateMessage(viewModel.workspaceNameUpdateIssue)
+                .contains("Sign in again")
+        )
+        XCTAssertTrue(
+            MomoWorkspaceCopy(language: .english)
+                .workspaceNameUpdateMessage(.forbidden)
+                .contains("owner or admin")
+        )
+    }
+
+    func testWorkspaceDecodesLegacyCacheWithoutUpdatedTimestamp() throws {
+        let workspace = WorkspaceID.demo
+        let data = Data(#"{"id":"\#(workspace.description)","slug":"legacy","name":"Legacy Workspace"}"#.utf8)
+        let decoded = try JSONDecoder().decode(Workspace.self, from: data)
+        XCTAssertEqual(decoded.name, "Legacy Workspace")
+        XCTAssertEqual(decoded.updatedAtMs, 0)
+    }
+
     func testDemoAgentProtocolCardsCarryContextMemoryCapabilityMetadata() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -1882,6 +1975,191 @@ final class MomoMacTests: XCTestCase {
 
     // MARK: MomoServer REST ChatBackend v0
 
+    func testRESTBackendWorkspaceReadAndRenameUseAuthenticatedContract() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)"):
+                return MockHTTPResponse(json: """
+                {"workspace":{
+                  "id":"\(workspace.description)",
+                  "slug":"momo-demo",
+                  "name":"momo",
+                  "updatedAtMs":1800000000000
+                }}
+                """)
+            case ("PATCH", "/v1/workspaces/\(workspace.description)"):
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["name"] as? String, "모모 작업실")
+                XCTAssertEqual(body?["expectedUpdatedAtMs"] as? Int64, 1_800_000_000_000)
+                return MockHTTPResponse(json: """
+                {"workspace":{
+                  "id":"\(workspace.description)",
+                  "slug":"momo-demo",
+                  "name":"모모 작업실",
+                  "updatedAtMs":1800000001000
+                }}
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let initial = try await backend.workspace(id: workspace)
+        XCTAssertEqual(initial.name, "momo")
+        let updated = try await backend.updateWorkspaceName(
+            workspace: workspace,
+            name: "모모 작업실",
+            expectedUpdatedAtMs: initial.updatedAtMs
+        )
+        XCTAssertEqual(updated.name, "모모 작업실")
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["GET", "PATCH"])
+    }
+
+    @MainActor
+    func testBootstrapKeepsRosterAndChannelsWhenWorkspaceIdentityUsesCacheFallback() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let cacheScope = "https://momo.test|\(MemberID.demoHuman.description)"
+        let encodedScope = Data(cacheScope.utf8).base64EncodedString()
+        let cacheKey = "momo.workspace.identity.\(encodedScope).\(workspace.description)"
+        let cached = Workspace(
+            id: workspace,
+            slug: "momo-demo",
+            name: "Cached Workspace",
+            updatedAtMs: 1_800_000_000_000
+        )
+        UserDefaults.standard.set(try JSONEncoder().encode(cached), forKey: cacheKey)
+        defer { UserDefaults.standard.removeObject(forKey: cacheKey) }
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)"):
+                return MockHTTPResponse(statusCode: 503, json: #"{"title":"temporarily unavailable"}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
+                return MockHTTPResponse(json: """
+                {"members":[{
+                  "id":"\(MemberID.demoHuman.description)",
+                  "workspaceId":"\(workspace.description)",
+                  "kind":"human",
+                  "status":"active",
+                  "displayName":"Demo User",
+                  "handle":"demo",
+                  "channelIds":["\(channel.description)"]
+                }]}
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                return MockHTTPResponse(json: """
+                {"channels":[{
+                  "id":"\(channel.description)",
+                  "workspaceId":"\(workspace.description)",
+                  "kind":"public",
+                  "name":"general",
+                  "topic":"dogfood",
+                  "dmKey":null,
+                  "createdBy":"\(MemberID.demoHuman.description)",
+                  "archivedAtMs":null
+                }]}
+                """)
+            case ("GET", "/v1/agent-runtime/status"):
+                return MockHTTPResponse(json: """
+                {"schema":"momo.agent_runtime.status.v0","agentHandle":"hermes","displayName":"Hermes","mode":"gateway","availability":"available","model":"hermes-agent","endpointLabel":"gateway","keyConfigured":true,"diagnostics":[]}
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/approvals"):
+                return MockHTTPResponse(json: #"{"approvals":[]}"#)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace,
+                defaultChannel: channel
+            ),
+            session: session
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token-123")
+
+        XCTAssertEqual(viewModel.workspace?.name, "Cached Workspace")
+        XCTAssertEqual(viewModel.members.map(\.id), [.demoHuman])
+        XCTAssertEqual(viewModel.channels.map(\.id), [channel])
+        XCTAssertEqual(viewModel.selectedChannelId, channel)
+        XCTAssertNotNil(viewModel.workspaceNameUpdateError)
+        XCTAssertTrue(viewModel.workspaceIdentityUsesCache)
+    }
+
+    @MainActor
+    func testBootstrapDoesNotExposeCachedWorkspaceIdentityAfterForbiddenResponse() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let cacheScope = "https://momo.test|\(MemberID.demoHuman.description)"
+        let encodedScope = Data(cacheScope.utf8).base64EncodedString()
+        let cacheKey = "momo.workspace.identity.\(encodedScope).\(workspace.description)"
+        let cached = Workspace(id: workspace, slug: "private", name: "Must Not Leak", updatedAtMs: 7)
+        UserDefaults.standard.set(try JSONEncoder().encode(cached), forKey: cacheKey)
+        defer { UserDefaults.standard.removeObject(forKey: cacheKey) }
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
+                return MockHTTPResponse(json: """
+                {"members":[{"id":"\(MemberID.demoHuman.description)","workspaceId":"\(workspace.description)","kind":"human","status":"active","displayName":"Demo User","handle":"demo","channelIds":["\(channel.description)"]}]}
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)"):
+                return MockHTTPResponse(statusCode: 403, json: #"{"title":"forbidden"}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels"):
+                return MockHTTPResponse(json: #"{"channels":[]}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/read-state"):
+                return MockHTTPResponse(json: #"{"read_states":[]}"#)
+            case ("GET", "/v1/agent-runtime/status"):
+                return MockHTTPResponse(json: #"{"schema":"momo.agent_runtime.status.v0","agentHandle":"hermes","displayName":"Hermes","mode":"gateway","availability":"available","model":"hermes-agent","endpointLabel":"gateway","keyConfigured":true,"diagnostics":[]}"#)
+            case ("GET", "/v1/workspaces/\(workspace.description)/approvals"):
+                return MockHTTPResponse(json: #"{"approvals":[]}"#)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace,
+                defaultChannel: channel
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: backend)
+        await viewModel.bootstrap(workspace: workspace, accessToken: "token-123")
+
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+    }
+
     func testRESTBackendBulkReadStateAndMarkReadUseADR0109Contract() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -2208,6 +2486,15 @@ final class MomoMacTests: XCTestCase {
 
         await MockHTTPURLProtocol.setHandler { request in
             switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/workspaces/\(workspace.description)"):
+                return MockHTTPResponse(json: """
+                {"workspace":{
+                  "id":"\(workspace.description)",
+                  "slug":"momo-demo",
+                  "name":"momo",
+                  "updatedAtMs":1800000000000
+                }}
+                """)
             case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
                 return MockHTTPResponse(json: """
                 {
@@ -2708,6 +2995,15 @@ final class MomoMacTests: XCTestCase {
                     "handle": "demo"
                   }
                 }
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)"):
+                return MockHTTPResponse(json: """
+                {"workspace":{
+                  "id":"\(workspace.description)",
+                  "slug":"momo-demo",
+                  "name":"momo",
+                  "updatedAtMs":1800000000000
+                }}
                 """)
             case ("GET", "/v1/workspaces/\(workspace.description)/roster"):
                 return MockHTTPResponse(json: """
@@ -4067,6 +4363,82 @@ private actor RetryOnceSendChatBackend: ChatBackend {
             throw BackendError.realtime("fixture send failure")
         }
         return try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        try await base.history(channel: channel, after: seq, limit: limit)
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
+    }
+}
+
+private actor WorkspaceAuthenticationFailureBackend: ChatBackend, WorkspaceBackend {
+    private let base: LiveChatBackend
+
+    init(base: LiveChatBackend) {
+        self.base = base
+    }
+
+    func workspace(id: WorkspaceID) async throws -> Workspace {
+        try await base.workspace(id: id)
+    }
+
+    func updateWorkspaceName(
+        workspace: WorkspaceID,
+        name: String,
+        expectedUpdatedAtMs: Int64
+    ) async throws -> Workspace {
+        throw BackendError.problem(status: 401, title: "unauthorized", detail: "expired")
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
     }
 
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {

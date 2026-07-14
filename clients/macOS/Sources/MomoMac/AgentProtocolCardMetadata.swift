@@ -168,10 +168,10 @@ private struct AgentProtocolBadgeView: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: badge.systemImage)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .frame(width: 12)
             Text(badge.title.uppercased())
-                .font(.system(size: 8, weight: .bold))
+                .font(.caption2.weight(.bold))
             Text(badge.detail)
                 .font(.caption2)
                 .lineLimit(1)

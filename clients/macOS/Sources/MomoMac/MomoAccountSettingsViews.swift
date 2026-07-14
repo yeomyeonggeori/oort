@@ -160,11 +160,30 @@ struct MomoAppSettingsSurface: View {
 
 struct MomoWorkspaceSettingsSurface: View {
     let copy: MomoWorkspaceCopy
-    @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
+    @ObservedObject var viewModel: ChatViewModel
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
     @AppStorage("momo.server.iconPath") private var serverIconPath = ""
     @AppStorage("momo.server.agentInviteRequiresApproval") private var agentInviteRequiresApproval = true
     @AppStorage("momo.server.memberInvitePolicy") private var memberInvitePolicy = "admins"
+    @State private var serverDisplayName: String
+    @State private var saveNotice: String?
+
+    private var normalizedWorkspaceName: String {
+        serverDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var workspaceNameIsValid: Bool {
+        (1...80).contains(normalizedWorkspaceName.count)
+            && !normalizedWorkspaceName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+
+    init(copy: MomoWorkspaceCopy, viewModel: ChatViewModel) {
+        self.copy = copy
+        self.viewModel = viewModel
+        _serverDisplayName = State(
+            initialValue: viewModel.workspace?.name ?? copy.workspaceLabel
+        )
+    }
 
     var body: some View {
         MomoSettingsScrollView {
@@ -182,6 +201,46 @@ struct MomoWorkspaceSettingsSurface: View {
                             TextField(copy.serverName, text: $serverDisplayName)
                                 .textFieldStyle(.roundedBorder)
                                 .font(MomoTheme.Typography.row)
+                                .disabled(!viewModel.canManageWorkspace || viewModel.workspaceNameUpdateInFlight)
+                        }
+
+                        if viewModel.canManageWorkspace {
+                            Text(copy.workspaceNameLimit(serverDisplayName.count))
+                                .font(MomoTheme.Typography.supporting)
+                                .foregroundStyle(workspaceNameIsValid ? Color.secondary : MomoTheme.irreversibleRed)
+                        } else {
+                            Label(copy.workspaceEditingRequiresAdmin, systemImage: "lock")
+                                .font(MomoTheme.Typography.supporting)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        HStack(spacing: 8) {
+                            Button {
+                                Task { await saveWorkspaceName() }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    if viewModel.workspaceNameUpdateInFlight {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .accessibilityHidden(true)
+                                    } else {
+                                        Image(systemName: "checkmark")
+                                    }
+                                    Text(copy.saveWorkspaceName)
+                                }
+                            }
+                            .accessibilityLabel(copy.saveWorkspaceName)
+                            .disabled(
+                                !viewModel.canManageWorkspace
+                                    || viewModel.workspaceNameUpdateInFlight
+                                    || !workspaceNameIsValid
+                            )
+
+                            if let saveNotice {
+                                Text(saveNotice)
+                                    .font(MomoTheme.Typography.supporting)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         HStack(spacing: 8) {
@@ -217,10 +276,19 @@ struct MomoWorkspaceSettingsSurface: View {
                     .font(MomoTheme.Typography.row.weight(.medium))
             }
 
-            Label(copy.serverSettingsLocalDraftNote, systemImage: "info.circle")
+            Label(copy.workspaceSettingsPersistenceNote, systemImage: "info.circle")
                 .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
+        }
+        .onChange(of: viewModel.workspace?.name) { _, value in
+            guard let value, !value.isEmpty else { return }
+            serverDisplayName = value
+        }
+        .onChange(of: serverDisplayName) { _, value in
+            let persisted = viewModel.workspace?.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard value.trimmingCharacters(in: .whitespacesAndNewlines) != persisted else { return }
+            saveNotice = nil
         }
     }
 
@@ -231,6 +299,17 @@ struct MomoWorkspaceSettingsSurface: View {
             if serverIconText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 serverIconText = "m"
             }
+        }
+    }
+
+    @MainActor
+    private func saveWorkspaceName() async {
+        let saved = await viewModel.updateWorkspaceName(serverDisplayName)
+        if saved, let name = viewModel.workspace?.name {
+            serverDisplayName = name
+            saveNotice = copy.workspaceNameSaved
+        } else {
+            saveNotice = copy.workspaceNameUpdateMessage(viewModel.workspaceNameUpdateIssue)
         }
     }
 }

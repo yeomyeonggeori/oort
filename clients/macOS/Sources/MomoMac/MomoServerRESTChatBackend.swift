@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -97,6 +97,10 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
 
     func authenticatedMemberID() async -> MemberID? {
         authenticatedMember?.id ?? accessToken.flatMap(Self.memberIDFromJWT)
+    }
+
+    func workspaceIdentityCacheServerScope() async -> String {
+        config.baseURL.absoluteString
     }
 
     public func clearSessionSensitiveState() async {
@@ -264,6 +268,29 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         let channels = try response.channels.map { try $0.channel() }
         cachedChannels = channels
         return channels
+    }
+
+    public func workspace(id: WorkspaceID) async throws -> Workspace {
+        try await get(
+            "/v1/workspaces/\(id.description)",
+            queryItems: [],
+            response: WorkspaceResponseDTO.self
+        ).workspace.workspace
+    }
+
+    public func updateWorkspaceName(
+        workspace: WorkspaceID,
+        name: String,
+        expectedUpdatedAtMs: Int64
+    ) async throws -> Workspace {
+        try await patch(
+            "/v1/workspaces/\(workspace.description)",
+            body: UpdateWorkspaceRequestDTO(
+                name: name,
+                expectedUpdatedAtMs: expectedUpdatedAtMs
+            ),
+            response: WorkspaceResponseDTO.self
+        ).workspace.workspace
     }
 
     public func openDirectMessage(
@@ -640,6 +667,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
     ) async throws -> ResponseBody {
         var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
         request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        try authorize(&request)
+        return try await execute(request, response: response)
+    }
+
+    private func patch<RequestBody: Encodable, ResponseBody: Decodable>(
+        _ path: String,
+        body: RequestBody,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(body)
         try authorize(&request)
@@ -1057,6 +1097,26 @@ private struct MessagePage: Decodable {
 
 private struct WorkspaceChannelsResponse: Decodable {
     let channels: [ChannelDTO]
+}
+
+private struct UpdateWorkspaceRequestDTO: Encodable {
+    let name: String
+    let expectedUpdatedAtMs: Int64
+}
+
+private struct WorkspaceResponseDTO: Decodable {
+    let workspace: WorkspaceDTO
+}
+
+private struct WorkspaceDTO: Decodable {
+    let id: WorkspaceID
+    let slug: String
+    let name: String
+    let updatedAtMs: Int64
+
+    var workspace: Workspace {
+        Workspace(id: id, slug: slug, name: name, updatedAtMs: updatedAtMs)
+    }
 }
 
 private struct ChannelDTO: Decodable {

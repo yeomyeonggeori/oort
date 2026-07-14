@@ -1151,29 +1151,125 @@ struct MomoWorkspaceCopy {
 
     var workspaceAppearance: String {
         switch language {
-        case .korean: return "워크스페이스 표시"
-        case .english: return "Workspace display"
+        case .korean: return "워크스페이스 프로필"
+        case .english: return "Workspace profile"
         }
     }
 
     var serverSettings: String {
         switch language {
-        case .korean: return "서버 설정"
-        case .english: return "Server settings"
+        case .korean: return "워크스페이스 설정"
+        case .english: return "Workspace settings"
+        }
+    }
+
+    var workspaceLabel: String {
+        switch language {
+        case .korean: return "워크스페이스"
+        case .english: return "Workspace"
+        }
+    }
+
+    func workspaceSignedInAs(_ displayName: String) -> String {
+        switch language {
+        case .korean: return "현재 사용자 · \(displayName)"
+        case .english: return "Current user · \(displayName)"
+        }
+    }
+
+    var workspaceMenu: String {
+        switch language {
+        case .korean: return "워크스페이스 메뉴"
+        case .english: return "Workspace menu"
+        }
+    }
+
+    var copyWorkspaceID: String {
+        switch language {
+        case .korean: return "워크스페이스 ID 복사"
+        case .english: return "Copy workspace ID"
         }
     }
 
     var serverSettingsSubtitle: String {
         switch language {
-        case .korean: return "이름, 아이콘, 초대 권한 초안을 관리합니다."
-        case .english: return "Manage the name, icon, and invite policy draft."
+        case .korean: return "워크스페이스 이름과 이 Mac의 표시 설정을 관리합니다."
+        case .english: return "Manage the workspace name and display settings on this Mac."
+        }
+    }
+
+    var saveWorkspaceName: String {
+        switch language {
+        case .korean: return "이름 저장"
+        case .english: return "Save name"
+        }
+    }
+
+    var workspaceNameSaved: String {
+        switch language {
+        case .korean: return "워크스페이스에 저장됨"
+        case .english: return "Saved to workspace"
+        }
+    }
+
+    var workspaceNameSaveFailed: String {
+        switch language {
+        case .korean: return "이름을 저장하지 못했습니다. 권한과 연결을 확인하세요."
+        case .english: return "Could not save the name. Check your access and connection."
+        }
+    }
+
+    var workspaceCachedRetry: String {
+        switch language {
+        case .korean: return "저장된 이름 · 다시 확인"
+        case .english: return "Saved name · Retry"
+        }
+    }
+
+    var workspaceCachedHelp: String {
+        switch language {
+        case .korean: return "서버에서 워크스페이스 이름을 불러오지 못했습니다. 클릭하여 다시 시도합니다."
+        case .english: return "The workspace name could not be refreshed. Click to retry."
+        }
+    }
+
+    var workspaceEditingRequiresAdmin: String {
+        switch language {
+        case .korean: return "소유자 또는 관리자만 워크스페이스 이름을 변경할 수 있습니다."
+        case .english: return "Only owners and admins can change the workspace name."
+        }
+    }
+
+    func workspaceNameLimit(_ count: Int) -> String {
+        switch language {
+        case .korean: return "1-80자 · 현재 \(count)자"
+        case .english: return "1-80 characters · \(count) entered"
+        }
+    }
+
+    func workspaceNameUpdateMessage(_ issue: WorkspaceNameUpdateIssue?) -> String {
+        switch (language, issue) {
+        case (.korean, .invalidName): return "이름은 제어 문자를 제외한 1-80자로 입력하세요."
+        case (.english, .invalidName): return "Use 1-80 characters without control characters."
+        case (.korean, .conflict): return "다른 곳에서 이름이 변경되었습니다. 최신 이름을 확인한 뒤 다시 시도하세요."
+        case (.english, .conflict): return "The name changed elsewhere. Refresh it, then try again."
+        case (.korean, .authenticationExpired): return "로그인이 만료되었습니다. 다시 로그인한 뒤 이름 변경을 시도하세요."
+        case (.english, .authenticationExpired): return "Your session expired. Sign in again before renaming the workspace."
+        case (.korean, .forbidden): return "이름을 변경할 권한이 없습니다. 소유자 또는 관리자에게 요청하세요."
+        case (.english, .forbidden): return "You do not have permission to rename this workspace. Ask an owner or admin."
+        case (.korean, .connection): return "서버에 연결할 수 없습니다. 연결을 확인한 뒤 다시 시도하세요."
+        case (.english, .connection): return "Could not reach the server. Check your connection and try again."
+        case (.korean, .reloadRequired): return "최신 워크스페이스 정보를 다시 불러온 뒤 시도하세요."
+        case (.english, .reloadRequired): return "Refresh the workspace information, then try again."
+        case (.korean, .unavailable), (.korean, nil): return workspaceNameSaveFailed
+        case (.english, .unavailable), (.english, nil): return workspaceNameSaveFailed
         }
     }
 
     var serverName: String {
         switch language {
-        case .korean: return "서버명"
-        case .english: return "Server name"
+        case .korean: return "워크스페이스 이름"
+        case .english: return "Workspace name"
         }
     }
 
@@ -1186,8 +1282,8 @@ struct MomoWorkspaceCopy {
 
     var serverIconImage: String {
         switch language {
-        case .korean: return "서버 아이콘"
-        case .english: return "Server icon"
+        case .korean: return "워크스페이스 아이콘"
+        case .english: return "Workspace icon"
         }
     }
 
@@ -1242,8 +1338,15 @@ struct MomoWorkspaceCopy {
 
     var serverSettingsLocalDraftNote: String {
         switch language {
-        case .korean: return "현재 dogfood 앱에서는 표시/정책 초안으로 저장됩니다. 서버 영속 설정 API는 후속 goal에서 연결합니다."
-        case .english: return "For this dogfood app, these are saved as local display/policy drafts. Server persistence follows in a later goal."
+        case .korean: return "아이콘과 초대 설정은 현재 이 Mac에만 저장됩니다."
+        case .english: return "The icon and invite settings are currently saved only on this Mac."
+        }
+    }
+
+    var workspaceSettingsPersistenceNote: String {
+        switch language {
+        case .korean: return "워크스페이스 이름은 모든 멤버에게 적용됩니다. 아이콘과 초대 설정은 현재 이 Mac에만 저장됩니다."
+        case .english: return "The workspace name applies to every member. The icon and invite settings are currently saved only on this Mac."
         }
     }
 

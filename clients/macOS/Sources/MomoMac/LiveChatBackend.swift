@@ -18,9 +18,10 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
+    private var workspaceProfile: Workspace?
     private var connected = false
     private var members: [Member] = []
     private var channels: [Channel] = []
@@ -56,6 +57,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
     ) -> DemoSeed {
         let ws = WorkspaceID()
         workspace = ws
+        workspaceProfile = Workspace(id: ws, slug: "momo-demo", name: "momo")
         inviteJoinState = .idle
         demoRealtimeByChannel = [:]
         demoCostSnapshotsByChannel = [:]
@@ -465,8 +467,13 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         members.first { $0.kind == .human && $0.status == .active }?.id
     }
 
+    func workspaceIdentityCacheServerScope() async -> String {
+        "momo-live-demo"
+    }
+
     public func clearSessionSensitiveState() async {
         workspace = nil
+        workspaceProfile = nil
         connected = false
         for continuations in channelStreams.values {
             for continuation in continuations.values {
@@ -555,6 +562,37 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
         channels.filter { $0.workspaceId == workspace }
+    }
+
+    public func workspace(id: WorkspaceID) async throws -> Workspace {
+        guard connected, workspace == id else { throw BackendError.notConnected }
+        if let workspaceProfile, workspaceProfile.id == id {
+            return workspaceProfile
+        }
+        let profile = Workspace(id: id, slug: "momo-demo", name: "momo")
+        workspaceProfile = profile
+        return profile
+    }
+
+    public func updateWorkspaceName(
+        workspace: WorkspaceID,
+        name: String,
+        expectedUpdatedAtMs: Int64
+    ) async throws -> Workspace {
+        guard connected, self.workspace == workspace else { throw BackendError.notConnected }
+        var profile = workspaceProfile ?? Workspace(id: workspace, slug: "momo-demo", name: "momo")
+        guard profile.updatedAtMs == expectedUpdatedAtMs else {
+            throw BackendError.problem(status: 409, title: "workspace changed", detail: "Reload and try again.")
+        }
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...80).contains(normalized.count),
+              !normalized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw BackendError.problem(status: 400, title: "invalid workspace name", detail: nil)
+        }
+        profile.name = normalized
+        profile.updatedAtMs += 1
+        workspaceProfile = profile
+        return profile
     }
 
     public func openDirectMessage(

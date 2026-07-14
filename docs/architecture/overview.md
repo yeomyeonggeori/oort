@@ -49,6 +49,13 @@ macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 
 에이전트는 사이드바·멘션 후보·agent realtime 구독에 나타나지 않는다. offline demo
 fixture는 `LiveChatBackend`에만 존재한다.
 
+workspace shared identity는 ADR-0118을 따른다. active member는 tenant-scoped
+`GET /v1/workspaces/:ws`로 이름과 갱신 버전을 읽고, owner/admin만
+`PATCH /v1/workspaces/:ws`로 이름을 변경한다. PATCH는 `expectedUpdatedAtMs`로
+lost update를 막고 성공 audit을 같은 transaction에 기록한다. 401/403/404에서는
+클라이언트 캐시를 표시하지 않으며, transient 5xx/transport 실패에만
+server-origin + member + workspace 범위의 마지막 이름을 표시한다.
+
 direct message는 ADR-0112의 "하나의 타임라인, 두 개의 밀도" 원칙에 따라 일반 채널과
 같은 timeline/read-state 경로를 사용한다. `GET /v1/workspaces/:ws/dms`는 active DM과
 참여자를, 같은 경로의 `POST {memberId}`는 정렬한 두 member ID의 SHA-256 `dm_key`로
