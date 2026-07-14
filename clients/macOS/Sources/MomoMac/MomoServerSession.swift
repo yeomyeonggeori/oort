@@ -877,9 +877,14 @@ public final class MomoServerSessionController: ObservableObject {
 
 public struct MomoMacSessionRootView: View {
     @StateObject private var controller: MomoServerSessionController
+    private let onOpenMemberDirectory: MomoMemberDirectoryHook?
 
-    public init(controller: @autoclosure @escaping () -> MomoServerSessionController = MomoServerSessionController()) {
+    public init(
+        controller: @autoclosure @escaping () -> MomoServerSessionController = MomoServerSessionController(),
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
+    ) {
         _controller = StateObject(wrappedValue: controller())
+        self.onOpenMemberDirectory = onOpenMemberDirectory
     }
 
     public var body: some View {
@@ -901,7 +906,8 @@ public struct MomoMacSessionRootView: View {
                         logout: {
                             Task { await controller.logout() }
                         }
-                    )
+                    ),
+                    onOpenMemberDirectory: onOpenMemberDirectory
                 )
             case .failed(let message):
                 MomoServerSessionChooser(

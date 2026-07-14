@@ -20,6 +20,7 @@ public struct ChannelListView: View {
     @State private var hoveredMemberID: MemberID?
     @State private var isWorkspaceHeaderHovered = false
     @State private var hoveredUtility: MomoSidebarUtility?
+    @State private var channelPresentationRevision = 0
     @State private var newChannelName = ""
     @State private var newChannelTopic = ""
     @State private var newChannelKind: ChannelKind = .publicChannel
@@ -168,6 +169,9 @@ public struct ChannelListView: View {
             if !isEnabled {
                 showDiagnostics = false
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
+            channelPresentationRevision &+= 1
         }
         .sheet(item: $agentCredentialReveal) { reveal in
             MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
@@ -388,7 +392,7 @@ public struct ChannelListView: View {
                 Image(systemName: channelIcon(channel.kind))
                     .foregroundStyle(isSelected(channel) ? .primary : .secondary)
                     .frame(width: MomoTheme.Sidebar.avatarSize)
-                Text(channel.name ?? "DM")
+                Text(channelDisplayName(channel))
                     .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
                     .lineLimit(1)
                 Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
@@ -413,13 +417,18 @@ public struct ChannelListView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(copy.channelUnreadAccessibilityLabel(
-            channelName: channel.name ?? "DM",
+            channelName: channelDisplayName(channel),
             unreadCount: readState?.unreadCount ?? 0,
             mentionCount: readState?.mentionCount ?? 0
         ))
         .onHover { isHovering in
             hoveredChannelID = isHovering ? channel.id : nil
         }
+    }
+
+    private func channelDisplayName(_ channel: Channel) -> String {
+        _ = channelPresentationRevision
+        return MomoLocalChannelPresentationStore.displayName(for: channel)
     }
 
     private func channelRowBackground(_ channel: Channel) -> Color {

@@ -648,6 +648,8 @@ struct MomoChannelPresentation: Equatable {
 }
 
 enum MomoLocalChannelPresentationStore {
+    static let didChangeNotification = Notification.Name("momo.channelPresentation.didChange")
+
     static func presentation(for channel: Channel) -> MomoChannelPresentation {
         guard channel.kind != .dm else {
             return MomoChannelPresentation(channel: channel)
@@ -676,6 +678,11 @@ enum MomoLocalChannelPresentationStore {
         } else {
             defaults.removeObject(forKey: topicKey(channel.id))
         }
+        NotificationCenter.default.post(name: didChangeNotification, object: channel.id.description)
+    }
+
+    static func displayName(for channel: Channel) -> String {
+        presentation(for: channel).name
     }
 
     private static func nameKey(_ channel: ChannelID) -> String {
@@ -785,11 +792,11 @@ struct MomoChannelSettingsSheet: View {
     private var generalSettings: some View {
         Form {
             Section(copy.channelIdentity) {
-                TextField(copy.channelNamePlaceholder, text: $channelName)
+                TextField(copy.channelNamePlaceholder, text: channelNameBinding)
                     .momoTypography(.row)
                     .disabled(channel.kind == .dm)
 
-                TextField(copy.channelTopicPlaceholder, text: $channelTopic, axis: .vertical)
+                TextField(copy.channelTopicPlaceholder, text: channelTopicBinding, axis: .vertical)
                     .momoTypography(.row)
                     .lineLimit(2...4)
                     .disabled(channel.kind == .dm)
@@ -819,7 +826,6 @@ struct MomoChannelSettingsSheet: View {
                         savePresentation()
                     }
                     .buttonStyle(.borderedProminent)
-                    .foregroundStyle(MomoTheme.onAccent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(channel.kind == .dm || draftPresentation.normalized == nil)
                 }
@@ -900,6 +906,26 @@ struct MomoChannelSettingsSheet: View {
 
     private var draftPresentation: MomoChannelPresentation {
         MomoChannelPresentation(name: channelName, topic: channelTopic)
+    }
+
+    private var channelNameBinding: Binding<String> {
+        Binding(
+            get: { channelName },
+            set: { newValue in
+                channelName = newValue
+                savedLocally = false
+            }
+        )
+    }
+
+    private var channelTopicBinding: Binding<String> {
+        Binding(
+            get: { channelTopic },
+            set: { newValue in
+                channelTopic = newValue
+                savedLocally = false
+            }
+        )
     }
 
     private var activeWorkspaceMembers: [Member] {

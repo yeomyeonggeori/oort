@@ -19,6 +19,17 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertEqual(state.pane, .memberProfile)
     }
 
+    func testDetailPaneRedirectPreservesClosedPresentation() {
+        var state = MomoDetailPanePresentationState()
+
+        state.present(.alpha)
+        state.close()
+        state.redirect(to: .approvals)
+
+        XCTAssertFalse(state.isPresented)
+        XCTAssertEqual(state.pane, .approvals)
+    }
+
     func testChannelPresentationNormalizesNameAndOptionalTopic() throws {
         let presentation = try XCTUnwrap(
             MomoChannelPresentation(name: "  design-system  ", topic: "  하나의 타임라인, two densities  ").normalized
@@ -50,5 +61,41 @@ final class MomoChannelChromeTests: XCTestCase {
         hook()
 
         XCTAssertEqual(invocationCount, 1)
+    }
+
+    func testLocalChannelPresentationDrivesSharedDisplayResolvers() throws {
+        let channelID = ChannelID()
+        let channel = Channel(
+            id: channelID,
+            workspaceId: WorkspaceID(),
+            kind: .publicChannel,
+            name: "canonical-name",
+            topic: "Canonical topic"
+        )
+        let nameKey = "momo.channel.\(channelID.description).displayName"
+        let topicKey = "momo.channel.\(channelID.description).topic"
+        defer {
+            UserDefaults.standard.removeObject(forKey: nameKey)
+            UserDefaults.standard.removeObject(forKey: topicKey)
+        }
+
+        MomoLocalChannelPresentationStore.save(
+            MomoChannelPresentation(name: "renamed-channel", topic: "Local topic"),
+            for: channel
+        )
+
+        XCTAssertEqual(MomoLocalChannelPresentationStore.displayName(for: channel), "renamed-channel")
+        let item = try XCTUnwrap(
+            MomoQuickSwitcherSearch.sections(
+                orderedChannels: [channel],
+                members: [],
+                recentChannelIds: [],
+                query: "renamed"
+            )
+            .flatMap(\.items)
+            .first
+        )
+        XCTAssertEqual(item.title, "#renamed-channel")
+        XCTAssertEqual(item.subtitle, "Local topic")
     }
 }

@@ -78,6 +78,7 @@ struct MomoChannelHeaderView: View {
                     Text(topic)
                         .momoTypography(.supporting)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

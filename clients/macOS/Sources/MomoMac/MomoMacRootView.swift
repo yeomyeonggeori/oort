@@ -125,7 +125,7 @@ public struct MomoMacRootView: View {
         }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
-                detailPanePresentation.present(.approvals)
+                detailPanePresentation.redirect(to: .approvals)
             }
         }
     }
@@ -482,6 +482,10 @@ struct MomoDetailPanePresentationState: Equatable {
     mutating func present(_ pane: MomoMacDetailPane) {
         self.pane = pane
         isPresented = true
+    }
+
+    mutating func redirect(to pane: MomoMacDetailPane) {
+        self.pane = pane
     }
 
     mutating func close() {

@@ -155,16 +155,18 @@ public enum MomoTheme {
             case metadataEmphasized
             case toolbarTitle
             case toolbarSupporting
+            case messageBody
         }
 
         public static let screenTitle = Font.title2.weight(.semibold)
         public static let sectionHeader = Font.headline
-        public static let row = Font.body
-        public static let emphasizedRow = Font.body.weight(.semibold)
+        public static let row = Font.title3
+        public static let emphasizedRow = Font.title3.weight(.semibold)
         public static let supporting = Font.subheadline
         public static let metadata = Font.caption
         public static let toolbarTitle = Font.headline
         public static let toolbarSupporting = Font.subheadline
+        public static let messageBody = Font.title3
 
         static func font(for role: Role, dynamicTypeSize: DynamicTypeSize) -> Font {
             let usesExpandedRole = dynamicTypeSize > .large
@@ -174,9 +176,9 @@ public enum MomoTheme {
             case (.sectionHeader, false): return sectionHeader
             case (.sectionHeader, true): return .title3.weight(.semibold)
             case (.row, false): return row
-            case (.row, true): return .title3
+            case (.row, true): return .title2
             case (.emphasizedRow, false): return emphasizedRow
-            case (.emphasizedRow, true): return .title3.weight(.semibold)
+            case (.emphasizedRow, true): return .title2.weight(.semibold)
             case (.supporting, false): return supporting
             case (.supporting, true): return .body
             case (.supportingEmphasized, false): return supporting.weight(.medium)
@@ -189,6 +191,8 @@ public enum MomoTheme {
             case (.toolbarTitle, true): return .title2.weight(.semibold)
             case (.toolbarSupporting, false): return toolbarSupporting
             case (.toolbarSupporting, true): return .body
+            case (.messageBody, false): return messageBody
+            case (.messageBody, true): return .title2
             }
         }
     }

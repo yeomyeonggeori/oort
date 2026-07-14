@@ -6,8 +6,8 @@
 ## MOMO-371 Channel Header + macOS Chrome (2026-07-14)
 
 - 채널명·주제·멤버 수·설정 진입점을 한 헤더로 묶고, 이름/주제·멤버 관리·연동 placeholder 시트와 MOMO-372가 주입할 멤버 디렉터리 훅을 추가했다. 서버 채널 수정 계약이 없어 이름/주제는 이 Mac의 표시값으로만 저장하며 앱 안에서 동기화 범위를 명시한다.
-- 중복 사이드바 헤더를 표준 unified toolbar의 워크스페이스 identity로 옮겨 타이틀바 크롬과 정렬했고, 상세 패널 열림/닫힘을 단일 상태로 고정했다. 표면 stroke는 hit-test를 가로채지 않으며 Theme semantic typography는 macOS text size와 increased contrast를 명시적으로 따른다.
-- 5개 Swift package `swift build --disable-sandbox`, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 130 tests, MOMO-371 6 tests(정본 대기 2 skip), 비정본 light/dark/increased-contrast/large-type raster 및 fresh design-review(Blocker/High/Medium/Nitpick 0)가 PASS했다. 무필터 macOS suite는 기존 headless `NSImage` signal 5를 재현했다. 정본 light/dark PNG 재기록과 실창 titlebar/fullscreen/닫기 hit-test, DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
+- 런타임 A/B 프로브로 죽은 상세 닫기 버튼의 원인이 구버전 타이틀바 밴드의 콘텐츠 침범임을 확인했다. 중복 사이드바 헤더를 표준 unified toolbar의 워크스페이스 identity로 옮겨 이 침범을 제거하고, 상세 패널 열림/닫힘을 단일 상태로 고정했다. surface stroke의 `allowsHitTesting(false)`는 원인 수정이 아닌 무해한 방어로 유지한다.
+- Theme의 15pt급 row/message body와 Dynamic Type/increased contrast 대응, 프로덕션 session root까지의 optional MOMO-372 훅, 공용 로컬 채널 표시값을 헤더·사이드바·퀵스위처에 적용했다. `origin/main@6f4090c` rebase에서 새 헤더의 `showsCosts`와 Alpha Command Center 개발자 gate를 보존하고, 개발자 모드를 끌 때 닫힌 상세 패널이 다시 열리지 않도록 pane redirect를 분리했다. 5개 Swift package build, Core 23·macOS 기능 135·실행 가능 snapshot 39 tests(신규 정본 대기 2 skip), 비정본 light/dark/contrast/large-type 래스터와 fresh design-review(Blocker/High/Medium/Nitpick 0)가 PASS했다. 무필터 macOS suite와 별도 MessageBubble canonical은 기존 headless `NSImage` signal 5를 재현했으며, 정본 light/dark PNG 재기록과 실창 titlebar/fullscreen/click 검증은 오케스트레이터 대기(`runtime-unverified`). DB/Docker/verifier/`local_gate.sh`는 미실행했다.
 
 ## MOMO-370 Dual-density Developer Mode (2026-07-14)
 

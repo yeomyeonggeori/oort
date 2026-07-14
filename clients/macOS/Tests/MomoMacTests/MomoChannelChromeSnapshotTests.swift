@@ -69,14 +69,11 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
         increasedContrast: Bool = false,
         dynamicTypeSize: DynamicTypeSize = .large
     ) async throws -> NSImage {
-        let hostingView = NSHostingView(
-            rootView: try await fixture(
-                scheme,
-                contrast: increasedContrast ? .increased : .standard,
-                dynamicTypeSize: dynamicTypeSize
-            )
+        let rootView = try await fixture(
+            scheme,
+            contrast: increasedContrast ? .increased : .standard,
+            dynamicTypeSize: dynamicTypeSize
         )
-        hostingView.frame = CGRect(origin: .zero, size: size)
         // Accessibility appearances produce corrupt offscreen glyph masks on
         // some CI hosts. The fixture injects the same contrast state through
         // the app's headless-only environment seam instead.
@@ -84,7 +81,28 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
         case .dark: .darkAqua
         default: .aqua
         }
-        hostingView.appearance = NSAppearance(named: appearanceName)
+        let hostingView = NSHostingView(rootView: rootView)
+        let appearance = NSAppearance(named: appearanceName)
+        hostingView.appearance = appearance
+        hostingView.frame = CGRect(origin: .zero, size: size)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        window.orderBack(nil)
+        window.makeKey()
+        defer { window.close() }
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        // Native default buttons can still be between appearance frames after
+        // an offscreen host switches from Aqua to Dark Aqua. Let AppKit settle,
+        // then redraw so design-review evidence never captures that transient.
+        try await Task.sleep(for: .milliseconds(100))
         hostingView.layoutSubtreeIfNeeded()
         hostingView.displayIfNeeded()
 
