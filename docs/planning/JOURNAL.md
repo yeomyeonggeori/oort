@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (momo-main/GPT 5.6) · MOMO-380 식별자·보안 경계 재정정
+- 아래 `MOMO-380`은 GitHub Issue `#381` / PR `#382`의 제품 티켓 ID다. 로컬 기록 부재로 혼동될 수 있어 이 항목으로 식별자를 명시한다.
+- upstream Codex/OpenAI 자격증명 비유입과 허용되는 Hermes-facing bearer를 분리하고, GWS token 저장은 Accepted ADR 전 연구 스펙으로 낮췄다.
+- engine planner는 BUILD_TICKETS 정본을 직접 수정하지 않고 proposal 안에 변경안을 남기며, 완료된 ADR-0109 Wave 2의 stale 다음 행동도 제거했다.
+- 다음: docs gate와 의미 재리뷰가 green이면 PR #382를 merge하고 root main을 최신화한다.
+
 ## 2026-07-14 (momo-main/GPT 5.6) · MOMO-380 의미 리뷰 반영
 - 독립 리뷰가 provider 자격증명 경계 과잉 일반화와 Work 실런타임 검증 과장을 지적해, Codex/OpenAI 실행 토큰과 GWS connector 토큰 경계를 분리했다.
 - Work는 코드·mock 검증 완료/실 Codex 승인 왕복 `runtime-unverified`로 정정하고, 완료된 362..365 중복 발급 행을 제거했다.

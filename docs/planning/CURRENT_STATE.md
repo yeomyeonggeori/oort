@@ -19,14 +19,14 @@
 | 트랙 | 주 실행 위치 | 목적 | 현재 경계 | 다음 체크포인트 |
 |---|---|---|---|---|
 | **UX/UI + 메신저 기능** | `momo-main` | 성재의 실창 수동 QA와 요청을 재현하고 Slack 기본기와 Codex급 상호작용을 사용자 체감 기준으로 다듬는다. | 한 번에 하나의 UX 결함/웨이브를 main이 오케스트레이션한다. 창 크롬 결함은 스냅샷만으로 닫지 않고 실창 AX 측정을 필수로 한다. | 최신 앱에서 MOMO-379 육안 재확인 → 멤버 행 이름 절단 후보 판정 → ADR-0112 Wave B/C 티켓화 여부 결정 |
-| **슈퍼앱 엔진** | 별도 planning ID + planning branch/worktree | Work·문서·Google Workspace·plugin/webhook·MCP·승인 실행을 채널 원장 위에서 자동화한다. | engine planner는 구현 worker가 아니다. 공용 정본을 직접 고치지 않고 자기 branch의 audit/ADR/BUILD_TICKETS/handoff 제안만 만든다. `momo-main`이 성재 승인 뒤 순차 통합한다. | 구현·스펙 상태 감사를 바탕으로 builder chain 제안. 공개 API/보안/DB 경계 변경은 Accepted ADR 선행 |
+| **슈퍼앱 엔진** | 별도 planning ID + planning branch/worktree | Work·문서·Google Workspace·plugin/webhook·MCP·승인 실행을 채널 원장 위에서 자동화한다. | engine planner는 구현 worker가 아니다. 공용 정본을 직접 고치지 않고 자기 branch의 audit/ADR/research/proposal/handoff만 만든다. `BUILD_TICKETS.md` 변경안은 proposal 안에 제안하고, `momo-main`이 성재 승인 뒤 정본에 적용한다. | 구현·스펙 상태 감사를 바탕으로 builder chain 제안. 공개 API/보안/DB 경계 변경은 Accepted ADR 선행 |
 
 엔진 준비도(2026-07-14 코드/정본 대조):
 
 - **코드 랜딩·repo-local mock 검증됨:** Work v0(`agent_run` + codex-workbench BYOA), 승인 pause/resume·결정·재개, per-agent bearer, status/partial, 비용·감사 원장.
 - **런타임 미검증:** 실제 Codex와 momo 사이의 Work 실행 및 승인/resume 왕복은 아직 `runtime-unverified`다.
 - **부분 구현:** 채널 히스토리 컨텍스트 조립 v1은 있으나 Context Broker/Context Packet의 권한·source·memory 실조립은 미완; inbound MCP는 skeleton/spec-to-code bridge 수준이다.
-- **스펙만 정본화:** Google Workspace connector/enterprise consent(momo 소유 connector의 refresh token은 암호화 저장), Plugin Manifest/catalog/repo split, Memory Plane/Capability Cache의 전체 런타임 저장·무효화.
+- **스펙만 정본화:** Google Workspace connector/enterprise consent(연구 스펙은 momo connector의 refresh token 암호화 저장을 제안하며, 구현 전 보안 경계 ADR 승인 필요), Plugin Manifest/catalog/repo split, Memory Plane/Capability Cache의 전체 런타임 저장·무효화.
 - **자리만 있음:** 채널 설정의 웹훅/연동 탭은 placeholder이며 실제 발급·서명·회전·수신 경로는 아직 없다.
 
 ## 1. 활성 기획 레인
@@ -34,7 +34,7 @@
 | Planning ID | 주제 | Planner owner | 상태 | 결정권자 | 다음 행동 |
 |---|---|---|---|---|---|
 | `ADR-0102` | AgentWorker SSE vs Hermes Gateway 정본화 | Fable | **`accepted`** (2026-07-12, Option C) | 성재 ✓ | 파생 배치 실행 완료 (2026-07-12 종결) |
-| `ADR-0109` | unread/read-state 서버 계약 (UX P7) | Fable | **`accepted`** (2026-07-13) | 성재 ✓ | Wave 1 랜딩 후 Wave 2 티켓 발급 |
+| `ADR-0109` | unread/read-state 서버 계약 (UX P7) | Fable | **`accepted`** (2026-07-13) | 성재 ✓ | Wave 2(MOMO-366/367)까지 랜딩 완료 — 후속 없음 |
 | `ADR-0111` | Agent Work Surface — 메신저 내 업무·터미널·코드 실행 (성재 발제) | Fable | **`accepted`** (2026-07-13, Option A=BYOA) | 성재 ✓ | 배치 종결 (2026-07-13) |
 | `ADR-0112` | 제품 표면 재정렬 — 듀얼 모드·Slack 기본기·Codex급 상호작용 (성재 발제) | Fable | **`accepted`** (2026-07-14) | 성재 ✓ | Wave A+379 종결; B/C는 육안 QA 후 발급 |
 | `PLN-20260714-01` | UX/UI 수동 QA + ADR-0112 Wave B/C 실행 순서 | `momo-main` | `waiting-owner` | 성재 | 최신 앱에서 MOMO-379 육안 확인과 새 UX 피드백을 받은 뒤 B/C 계약·handoff를 발급할지 판정 |
@@ -87,8 +87,8 @@
 - Postgres가 SoT이고 Centrifugo는 transport only다.
 - 모든 user-visible write는 REST → Postgres transaction → outbox → relay 경로를 지난다.
 - 에이전트는 `member.kind='agent'`인 1급 멤버다.
-- Codex/OpenAI 같은 **모델 실행 provider**의 OAuth/token은 momo에 들어오지 않는다.
-- Google Workspace는 별도 connector 경계다. 사용자 동의로 발급한 offline sync refresh token은 momo connector가 암호화 저장·폐기하고, agent prompt나 외부 provider에는 전달하지 않는다.
+- upstream Codex/OpenAI의 OAuth access/refresh token과 API key는 momo에 들어오지 않는다.
+- momo runtime은 Hermes-facing bearer를 runtime secret으로 사용할 수 있다. upstream provider 자격증명과 혼동하지 않는다.
 - 공개 API, 보안 경계, DB 계약, 제품 방향, 기술스택 변경은 Accepted ADR 없이 구현 티켓으로 만들지 않는다.
 - 로드맵/ADR의 최종 승인자는 성재다.
 
