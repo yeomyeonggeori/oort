@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (momo-main/Fable) · 성재 실사용 종합 피드백 → ADR-0112 기안·Accept + Wave A 스폰
+- 성재 판정 "최악의 경험" — 실행 원장 과노출(비개발자 공포), 메신저 기본기 부재(디렉터리/DM/헤더), Codex 문법 부재(호출 옵션·승인 프리셋·⌃` 드로어), 첫인상 밋밋, 디테일 결함(타이틀바 겹침·죽은 닫기 버튼). ADR-0112로 성문화: **"하나의 타임라인, 두 개의 밀도"** — 기본=Slack, 개발자 토글=Codex 앱. 같은 날 Accept.
+- 파생 MOMO-370..378 3웨이브. Wave A(370 듀얼 모드/371 헤더·크롬 결함/372 디렉터리·DM) 즉시 스폰, B/C는 A 랜딩 후. design-review rubric에 D6 디테일 SLA(죽은 컨트롤·크롬 겹침·잘린 텍스트=무조건 Blocker) 추가.
+- 별건 처리: 에이전트 대시보드(D5)·온보딩 여정(D4)은 Wave C. swift-lsp 플러그인 검증 병용 예정.
+- 다음: Wave A 랜딩 사이클 → 성재 육안 → B/C.
+
 ## 2026-07-13 (Codex worker) · MOMO-369 fresh design-review High 2 수정
 - `.windowChrome` 표면 범위로 루트·사이드바·타임라인 fill의 safe-area bleed를 복원하고 bounded 카드·팝오버 chrome 순서는 유지했다. 오류 상태는 인증/불러오기/보내기/작업으로 분리했으며, send 재시도는 실패 요청의 `clientMsgId`와 에이전트 멘션 대상을 보존한다.
 - 계획 이탈 없음. MOMO-368을 union rebase하되 온보딩 PR diff와 정본 PNG는 0건으로 유지했고, 5패키지 build, Core 23·Server 73·Relay 2·Worker 29·macOS 기능 127+비정본 래스터 6 tests와 fresh review(Blocker/High/Medium/Nitpick 0)가 PASS했다. 필터 없는 macOS suite의 기존 headless canonical signal 5는 오케스트레이터 재기록 대기다.

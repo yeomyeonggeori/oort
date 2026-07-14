@@ -39,3 +39,11 @@ Verdict: PASS / FAIL(blockers: N)
 
 A change with zero Blockers and ≤2 High findings may proceed to human review;
 otherwise it returns to the implementer with this report.
+
+**Detail SLA (ADR-0112 D6) — the following are always [Blocker], never lower:**
+- A visible control that does not respond to click/keyboard (dead button, unreachable close).
+- Window-chrome integration defects: content overlapping the macOS titlebar/traffic lights,
+  broken toolbar seams, controls hidden under system chrome.
+- Clipped, overlapping, or truncated user-facing text at default window sizes.
+- Reviewers must attempt interaction checks (hit-test reasoning from code + any runtime
+  evidence available) — "snapshot looks fine" does not clear this class.

@@ -1,6 +1,6 @@
 # ADR-0112: 제품 표면 재정렬 — "비개발자에겐 Slack, 개발자에겐 Codex 앱"
 
-- Status: **Proposed** (기안 2026-07-14, Fable / 결정권자: 성재 — 성재의 종합 피드백 발제)
+- Status: **Accepted** (2026-07-14, 성재 — Wave A 즉시 착수, B/C는 A 랜딩 후 순차)
 - 관련: ux-bible P1~P15(특히 P2·P5·P7·P12), ADR-0111(Work), ADR-0109(unread), MOMO-354..369 랜딩분
 - 발단: 성재 실사용 판정 "최악의 경험" (2026-07-14, 스크린샷 6장) — 세부 지적 전체가 이 ADR의 Context다.
 

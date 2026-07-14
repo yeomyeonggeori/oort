@@ -1841,6 +1841,29 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: fresh design-review FAIL(Blocker=정본 미재기록[오케스트레이터 몫]/High 2 — momoSurface safe-area bleed 소실로 타이틀바 seam 위험·send/멘션 실패가 load 배너로 뭉개짐) → High 2건 반려 수정(`9b49edd` bleed 복원+send/load 문법 분리), 정본 4개 스위트 12종 재기록(사이드바 스위트는 정본 삭제 후 재기록 — record가 기존 파일 비덮어씀)·육안 확인(3층 위계 픽셀 실재), 162 tests 0 fail, clean `macos-ui` gate PASS, PR #372 squash merge(`84db101`) — **온보딩+W3 UI 트랙 종결 (2026-07-13)**. root post-merge full gate PASS(`local-gate-runtime-agent-20260713T121827Z-…-r889716974054.md`, `local-gate-macos-ui-20260713T122901Z-…-ra21dc96dd0cd.md`)
   - 이월 기록: increased-contrast 팔레트 적응, 승인 인박스 행-카드 그림자 누적, 진단 팝오버 이중 크롬, sessionChrome nil 재로그인 no-op, DateFormatter 캐시, panel 토큰 의미 분화, adapter 실패 body 구조화(python).
 
+### ☐ MOMO-370 수용기준 — ADR-0112 Wave A: 개발자 모드 토글 + 메시지 이중 밀도 `[swift/macos-ui]`
+> ADR-0112 D1. 성재 진단: tool_call JSON·프로토콜 칩·비용 링이 대화를 침범, 비개발자는 지레 겁먹음(데모 fixture 포함).
+- [ ] 설정에 **개발자 모드 토글**(기본 off, Discord 문법). off: 에이전트 메시지=요약 1줄+접힌 카드(펼치면 사람 언어 요약 수준), 프로토콜 칩(CONTEXT/GITHUB/DECISION/ARTIFACT_REF 등)·tool JSON·Context Copilot·개발 도구 팝오버·로컬 알파 채우기·로그아웃 상세 공지 전부 숨김. on: 현재 밀도.
+- [ ] **비용 표시 별도 토글**(dev 모드 내): off 시 비용 링/금액 비노출. 헤더 누적 비용도 동일 게이트.
+- [ ] 승인 카드 기본 모드: "누가 무엇을 하려는지 한 문장 + 승인/거부"만(티어·tool 상세는 dev에서).
+- [ ] 데모 모드 콘텐츠 재큐레이션: 기본 모드 문법에 맞는 사람 언어 대화(P5) — 프로토콜 쇼케이스는 dev 토글 켠 상태에서만 의미 있게.
+- [ ] 두 밀도 각각 light/dark 스냅샷, 기존 canonical 재기록 대상 명시, design-review(D6 강화 rubric) Blocker 0.
+
+### ☐ MOMO-371 수용기준 — ADR-0112 Wave A: 채널 헤더 재구성 + 창 크롬·디테일 결함 `[swift/macos-ui]`
+> ADR-0112 D2·D6. 성재 진단: 헤더에 멤버 수/설정 없음, momo 로고가 macOS 타이틀바·트래픽라이트와 겹침, 상세 패널 닫기 버튼 무반응, 텍스트 스케일이 묘하게 작음.
+- [ ] 채널 헤더: 채널명/주제 + **멤버 수(클릭=멤버 목록)** + 채널 설정 진입점(이름/주제/멤버 관리 시트) + "연동" 자리(웹훅 URL 발급 placeholder 탭 — 서버 확장은 후속 명시).
+- [ ] **타이틀바 겹침 해소**: 사이드바 워크스페이스 헤더/로고가 트래픽라이트와 충돌하지 않게 툴바 통합 또는 상단 인셋 — 표준 창 크기·풀스크린 모두.
+- [ ] **상세 패널 닫기 버튼 동작 수정**(현재 무반응) + 패널 열림/닫힘 상태 일관성.
+- [ ] 텍스트 스케일 상향 조정: 본문/헤더/보조의 실측 크기를 Slack 데스크톱 급으로(현재 "묘하게 작음" 해소), Dynamic Type 존중.
+- [ ] light/dark 스냅샷 + 실창 검증 노트(D6: 닫기 버튼 hit-test 확인 방법 명시) + design-review Blocker 0. MOMO-370과 파일 경계: 메시지 카드/설정 토글은 370 몫.
+
+### ☐ MOMO-372 수용기준 — ADR-0112 Wave A: 멤버 디렉터리 + DM `[swift/server/macos-ui]`
+> ADR-0112 D2. 성재 진단: 전체 멤버를 한곳에서 볼 수 없고, 멤버에서 DM을 시작할 수 없음.
+- [ ] 서버: **DM 채널 생성/조회 REST** — 기존 `dm` 채널 kind 사용, 같은 두 멤버 조합 idempotent(중복 생성 방지), 멤버십 자동 부여, RLS·단일 쓰기 경로 불변. `schema_v0.sql` 무변경(필요 시 신규 numbered migration).
+- [ ] 앱: **멤버 디렉터리 표면**(사이드바 멤버 + 또는 헤더 멤버 수에서 진입) — 전체 멤버 검색/사람·에이전트 구분/프로필 카드, 여기서 "DM 보내기".
+- [ ] 사이드바 DM 섹션에 실 DM 목록(unread 배지 연동 — 기존 read-state 재사용), 멤버 행 context menu에 "DM 보내기".
+- [ ] 서버 단위 테스트(idempotent 생성·권한·RLS) + 앱 스냅샷/필터 테스트 + design-review Blocker 0. 370/371과 파일 경계 준수.
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.
