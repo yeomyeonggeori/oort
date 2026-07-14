@@ -14,11 +14,29 @@ public struct AgentPartialView: View {
     public let author: Member?
     /// Live run status (drives the phase chip: thinking/streaming/…).
     public let status: AgentStatus?
+    private let presentation: MomoDeveloperModePresentation
+    private let copy: MomoWorkspaceCopy
 
     public init(partial: AgentPartial, author: Member?, status: AgentStatus? = nil) {
         self.partial = partial
         self.author = author
         self.status = status
+        self.presentation = .standard
+        self.copy = MomoWorkspaceCopy(language: .preferredDefault)
+    }
+
+    init(
+        partial: AgentPartial,
+        author: Member?,
+        status: AgentStatus? = nil,
+        presentation: MomoDeveloperModePresentation,
+        copy: MomoWorkspaceCopy
+    ) {
+        self.partial = partial
+        self.author = author
+        self.status = status
+        self.presentation = presentation
+        self.copy = copy
     }
 
     public var body: some View {
@@ -31,19 +49,28 @@ public struct AgentPartialView: View {
                 // view modifier so the `+` stays a Text concatenation.
                 if let text = partial.textDelta, !text.isEmpty {
                     AgentTranscriptText(text: text, isStreaming: true, style: .message)
+                } else if !presentation.showsDeveloperDetails {
+                    Label(
+                        copy.agentWorkingTitle(author?.displayName ?? copy.agent),
+                        systemImage: "ellipsis.bubble"
+                    )
+                    .font(.body)
+                    .foregroundStyle(.secondary)
                 }
                 // In-progress tool_call (experience D: live tool-call card).
-                if let toolName = partial.toolCallName {
+                if presentation.showsDeveloperDetails, let toolName = partial.toolCallName {
                     liveToolCallCard(name: toolName)
                 }
             }
             Spacer(minLength: 0)
-            CostBreathingRing(
-                reservedMicroUSD: status?.reservedMicroUSD,
-                spentMicroUSD: partial.spentMicroUSD ?? status?.spentMicroUSD,
-                isReconciled: false,
-                wasEstimated: false
-            )
+            if presentation.showsCosts {
+                CostBreathingRing(
+                    reservedMicroUSD: status?.reservedMicroUSD,
+                    spentMicroUSD: partial.spentMicroUSD ?? status?.spentMicroUSD,
+                    isReconciled: false,
+                    wasEstimated: false
+                )
+            }
         }
         .padding(.vertical, 4)
     }
@@ -62,7 +89,9 @@ public struct AgentPartialView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text(author?.displayName ?? "agent").font(MomoTheme.Typography.emphasizedRow)
-            phaseChip
+            if presentation.showsDeveloperDetails {
+                phaseChip
+            }
         }
     }
 

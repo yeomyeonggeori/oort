@@ -20,7 +20,7 @@ public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showDetailPane = false
-    @State private var detailPane: MomoMacDetailPane = .alpha
+    @State private var detailPane: MomoMacDetailPane = .approvals
     @State private var selectedProfileMemberID: MemberID?
     @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
@@ -28,6 +28,7 @@ public struct MomoMacRootView: View {
     @State private var showKeyboardShortcuts = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     private let sessionChrome: MomoSessionChrome?
     private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
     private static let inspectorWidth: CGFloat = 440
@@ -100,6 +101,11 @@ public struct MomoMacRootView: View {
         .sheet(isPresented: $showKeyboardShortcuts) {
             MomoKeyboardShortcutsView(copy: copy)
         }
+        .onChange(of: developerMode) { _, isEnabled in
+            if !isEnabled, detailPane == .alpha {
+                detailPane = .approvals
+            }
+        }
     }
 
     private func detailLayout(
@@ -143,7 +149,9 @@ public struct MomoMacRootView: View {
             viewModel: viewModel,
             sessionChrome: sessionChrome,
             openCommandCenter: {
-                openDetailPane(.alpha)
+                if developerMode {
+                    openDetailPane(.alpha)
+                }
             },
             openApprovals: {
                 openDetailPane(.approvals)
@@ -186,18 +194,20 @@ public struct MomoMacRootView: View {
     }
 
     private func detailPaneView(copy: MomoWorkspaceCopy, presentation: MomoInspectorPresentation) -> some View {
-        VStack(spacing: 0) {
+        let visibleDetailPane = detailPane == .alpha && !developerMode ? MomoMacDetailPane.approvals : detailPane
+
+        return VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
-                Image(systemName: detailPane.systemImage)
+                Image(systemName: visibleDetailPane.systemImage)
                     .font(.body.weight(.semibold))
-                    .foregroundStyle(detailPane.tint)
+                    .foregroundStyle(visibleDetailPane.tint)
                     .frame(width: 32, height: 32)
                     .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(detailPane.title(copy: copy))
+                    Text(visibleDetailPane.title(copy: copy))
                         .font(.headline)
-                    Text(detailPane.subtitle(copy: copy))
+                    Text(visibleDetailPane.subtitle(copy: copy))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -224,7 +234,8 @@ public struct MomoMacRootView: View {
             .padding(.top, 12)
             .padding(.bottom, 8)
 
-            if let relatedPane = detailPane.relatedOperationalPane {
+            if let relatedPane = visibleDetailPane.relatedOperationalPane,
+               relatedPane != .alpha || developerMode {
                 HStack {
                     Button {
                         openDetailPane(relatedPane)
@@ -243,7 +254,7 @@ public struct MomoMacRootView: View {
 
             Divider()
 
-            switch detailPane {
+            switch visibleDetailPane {
             case .alpha:
                 AlphaCommandCenterView(viewModel: viewModel)
             case .approvals:
@@ -300,6 +311,7 @@ public struct MomoMacRootView: View {
     }
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
+        guard pane != .alpha || developerMode else { return }
         withAnimation(layoutAnimation) {
             detailPane = pane
             showDetailPane = true

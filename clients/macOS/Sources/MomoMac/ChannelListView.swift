@@ -31,6 +31,7 @@ public struct ChannelListView: View {
     @State private var hermesInvited = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
     @AppStorage("momo.server.iconPath") private var serverIconPath = ""
@@ -156,6 +157,11 @@ public struct ChannelListView: View {
         }
         .onChange(of: hermesInviteScopeKey) { _, _ in
             refreshHermesInviteState()
+        }
+        .onChange(of: developerMode) { _, isEnabled in
+            if !isEnabled {
+                showDiagnostics = false
+            }
         }
         .sheet(item: $agentCredentialReveal) { reveal in
             MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
@@ -431,16 +437,18 @@ public struct ChannelListView: View {
                 openApprovals?()
             }
 
-            utilityButton(
-                utility: .developerTools,
-                title: copy.developerTools,
-                systemImage: "wrench.and.screwdriver",
-                badge: nil
-            ) {
-                showDiagnostics.toggle()
-            }
-            .popover(isPresented: $showDiagnostics, arrowEdge: .bottom) {
-                developerToolsPopover(copy: copy)
+            if developerMode {
+                utilityButton(
+                    utility: .developerTools,
+                    title: copy.developerTools,
+                    systemImage: "wrench.and.screwdriver",
+                    badge: nil
+                ) {
+                    showDiagnostics.toggle()
+                }
+                .popover(isPresented: $showDiagnostics, arrowEdge: .bottom) {
+                    developerToolsPopover(copy: copy)
+                }
             }
         }
         .padding(.horizontal, MomoTheme.Sidebar.edgeInset)
@@ -785,6 +793,8 @@ public struct ChannelListView: View {
         .popover(isPresented: $showInvites) {
             if let context = sessionChrome?.inviteAdminContext {
                 InviteAdminPopover(context: context)
+            } else {
+                inviteGuidancePopover(copy: copy)
             }
         }
         .animation(sidebarPanelAnimation, value: showMemberInvite)
@@ -948,8 +958,10 @@ public struct ChannelListView: View {
                         showMemberInvite = false
                         if sessionChrome?.inviteAdminContext != nil {
                             showInvites = true
+                        } else if developerMode, let openCommandCenter {
+                            openCommandCenter()
                         } else {
-                            openCommandCenter?()
+                            showInvites = true
                         }
                     } label: {
                         Label(copy.openInviteCodes, systemImage: "key.horizontal")
@@ -1053,6 +1065,25 @@ public struct ChannelListView: View {
                 }
             }
         }
+    }
+
+    private func inviteGuidancePopover(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(copy.inviteGuidanceTitle, systemImage: "person.crop.circle.badge.questionmark")
+                .font(.headline)
+            Text(copy.inviteGuidanceBody)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let switchSession = sessionChrome?.switchSession {
+                Button(copy.switchSession) {
+                    showInvites = false
+                    switchSession()
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: MomoTheme.memberInvitePopoverWidth, alignment: .leading)
     }
 
     private var hermesInitials: String {

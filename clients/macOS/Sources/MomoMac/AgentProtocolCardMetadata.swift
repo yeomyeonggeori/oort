@@ -9,9 +9,10 @@ import MomoCore
 
 struct AgentProtocolMetadataStrip: View {
     let props: JSON
+    let showsCosts: Bool
 
     var body: some View {
-        let badges = Self.badges(from: props)
+        let badges = Self.badges(from: props, showsCosts: showsCosts)
         if !badges.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(Array(badges.prefix(7))) { badge in
@@ -22,7 +23,7 @@ struct AgentProtocolMetadataStrip: View {
         }
     }
 
-    private static func badges(from props: JSON) -> [AgentProtocolBadge] {
+    private static func badges(from props: JSON, showsCosts: Bool) -> [AgentProtocolBadge] {
         guard let object = props.objectValue else { return [] }
         var badges: [AgentProtocolBadge] = []
 
@@ -66,7 +67,7 @@ struct AgentProtocolMetadataStrip: View {
             ))
         }
 
-        if let cost = costSummary(from: object) {
+        if showsCosts, let cost = costSummary(from: object) {
             badges.append(AgentProtocolBadge(
                 id: "cost",
                 title: "cost",

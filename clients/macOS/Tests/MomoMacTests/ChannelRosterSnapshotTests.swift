@@ -13,7 +13,8 @@ final class ChannelRosterSnapshotTests: XCTestCase {
     private func fixtureSidebar(
         _ scheme: ColorScheme,
         capabilitiesByHandle: [String: [String]] = [:],
-        showsUnread: Bool = false
+        showsUnread: Bool = false,
+        developerMode: Bool = true
     ) async throws -> some View {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo(capabilitiesByHandle: capabilitiesByHandle)
@@ -34,6 +35,7 @@ final class ChannelRosterSnapshotTests: XCTestCase {
 
         let defaults = UserDefaults(suiteName: "momo.snapshot.channel-roster")!
         defaults.removePersistentDomain(forName: "momo.snapshot.channel-roster")
+        defaults.set(developerMode, forKey: MomoDeveloperModePresentation.developerModeKey)
         return ChannelListView(viewModel: viewModel)
             .frame(width: 340, height: 720)
             .environment(\.colorScheme, scheme)
@@ -43,14 +45,16 @@ final class ChannelRosterSnapshotTests: XCTestCase {
     private func render(
         _ scheme: ColorScheme,
         capabilitiesByHandle: [String: [String]] = [:],
-        showsUnread: Bool = false
+        showsUnread: Bool = false,
+        developerMode: Bool = true
     ) async throws -> NSImage {
         let size = CGSize(width: 340, height: 720)
         let hostingView = NSHostingView(
             rootView: try await fixtureSidebar(
                 scheme,
                 capabilitiesByHandle: capabilitiesByHandle,
-                showsUnread: showsUnread
+                showsUnread: showsUnread,
+                developerMode: developerMode
             )
         )
         hostingView.frame = CGRect(origin: .zero, size: size)
@@ -270,6 +274,17 @@ final class ChannelRosterSnapshotTests: XCTestCase {
                 try mentionBadgePixelCount(in: readImage) + 40,
                 "Unread roster must add visible mention badge pixels in \(scheme) mode"
             )
+        }
+    }
+
+    func testStandardSidebarRasterWritesDesignReviewArtifacts() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let image = try await render(scheme, developerMode: false)
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-370-sidebar-standard-\(scheme == .dark ? "dark" : "light").png"
+            )
+            XCTAssertEqual(image.size, CGSize(width: 340, height: 720))
         }
     }
 }

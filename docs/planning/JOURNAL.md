@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-07-14 (Codex worker) · MOMO-370 fresh D6 반려 수정
+- dev Work 카드는 기존 `input.brief`를 복원해 실행 로그/결과 중복과 canonical 회귀를 해소했고, 표준 모드 Alpha Command Center 직접 표면·승인 연관 버튼·초대 fallback을 dev gate 또는 초대 안내로 정리했다.
+- 마지막 한글 음절 종성 기반 이/가·을/를·은/는 헬퍼와 혼합 이름 테스트를 추가하고, 접힌 카드는 2줄·펼침은 전문+detail 무중복으로 바꿨다. 표준 ApprovalInbox 실데이터 raster도 추가했다.
+- 계획 이탈 없음. 참고-only 후속으로 `local alpha` 캡션, 설정 토글 캡션 위계, 무의미한 `agentActivitySummary` switch를 기록하며 이번 PR에서는 수정하지 않았다.
+- 5패키지 build, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 130 tests, 기존 Work canonical 2종과 검토 raster 13종 PASS; fresh review 6.5/7, 전 등급 0. 신규 dual-density 정본 4종 재기록과 기존 headless `NSImage` signal 5는 오케스트레이터 대기다.
+
+## 2026-07-14 (Codex worker) · MOMO-370 개발자 모드 + 메시지 이중 밀도
+- 기본 off 개발자 모드/별도 비용 토글과 standard/developer 타임라인·Work·승인·사이드바·온보딩 게이트를 구현하고, 데모를 사람 언어 대화와 양 밀도 fixture로 재큐레이션했다.
+- 계획 이탈: 오케스트레이터가 만든 worktree라 `goal_claim.sh` 대신 assignee/`status:in-progress`를 수동 반영했다. 수용기준의 전역 tool/비용/로컬 알파/세션 상세 숨김을 닫기 위해 의존 표면 `AgentPartialView`·metadata·`ApprovalInboxView`·`MomoServerSession`까지 수정했으며 371/372 소유 파일은 무접촉이다.
+- 5패키지 build, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 129 tests, 검토용 raster 18종, fresh review Blocker 0(55/70) PASS. 기존 headless snapshot signal 5와 실창 상호작용은 `runtime-unverified`다.
+- 다음: 오케스트레이터가 신규 timeline standard/developer light/dark 정본 4종을 재기록하고 clean 실창 검수를 수행한다. DB/Docker/verifier/`local_gate.sh`는 worker 지시대로 미실행했다.
+
 ## 2026-07-14 (momo-main/Fable) · 성재 실사용 종합 피드백 → ADR-0112 기안·Accept + Wave A 스폰
 - 성재 판정 "최악의 경험" — 실행 원장 과노출(비개발자 공포), 메신저 기본기 부재(디렉터리/DM/헤더), Codex 문법 부재(호출 옵션·승인 프리셋·⌃` 드로어), 첫인상 밋밋, 디테일 결함(타이틀바 겹침·죽은 닫기 버튼). ADR-0112로 성문화: **"하나의 타임라인, 두 개의 밀도"** — 기본=Slack, 개발자 토글=Codex 앱. 같은 날 Accept.
 - 파생 MOMO-370..378 3웨이브. Wave A(370 듀얼 모드/371 헤더·크롬 결함/372 디렉터리·DM) 즉시 스폰, B/C는 A 랜딩 후. design-review rubric에 D6 디테일 SLA(죽은 컨트롤·크롬 겹침·잘린 텍스트=무조건 Blocker) 추가.

@@ -10,8 +10,12 @@ import MomoCore
 @MainActor
 final class AgentWorkSurfaceSnapshotTests: XCTestCase {
     private let size = CGSize(width: 720, height: 680)
+    private let approvalInboxSize = CGSize(width: 440, height: 560)
 
-    private func fixture(_ scheme: ColorScheme) -> some View {
+    private func fixture(
+        _ scheme: ColorScheme,
+        presentation: MomoDeveloperModePresentation = .developer(showCosts: true)
+    ) -> some View {
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!
         let agent = Member(
@@ -86,6 +90,7 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
                     messages: [],
                     isApprovalInFlight: false,
                     copy: MomoWorkspaceCopy(language: .korean),
+                    presentation: presentation,
                     onApprovalDecision: { _, _ in },
                     onOpenDetail: {}
                 )
@@ -98,6 +103,7 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
                     messages: [],
                     isApprovalInFlight: false,
                     copy: MomoWorkspaceCopy(language: .korean),
+                    presentation: presentation,
                     onApprovalDecision: { _, _ in },
                     onOpenDetail: {}
                 )
@@ -110,8 +116,13 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
         .environment(\.locale, Locale(identifier: "ko_KR"))
     }
 
-    private func render(_ scheme: ColorScheme) throws -> NSImage {
-        let hostingView = NSHostingView(rootView: fixture(scheme))
+    private func render(
+        _ scheme: ColorScheme,
+        presentation: MomoDeveloperModePresentation = .developer(showCosts: true)
+    ) throws -> NSImage {
+        let hostingView = NSHostingView(
+            rootView: fixture(scheme, presentation: presentation)
+        )
         hostingView.frame = CGRect(origin: .zero, size: size)
         hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         hostingView.layoutSubtreeIfNeeded()
@@ -166,6 +177,64 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
         try png.write(to: outputDirectory.appendingPathComponent(name), options: .atomic)
     }
 
+    private func renderStandardApprovalInbox() async throws -> NSImage {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "approval-inbox-snapshot")
+        XCTAssertEqual(viewModel.pendingApprovals.count, 1)
+
+        let suiteName = "momo.snapshot.approval-inbox-standard"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(false, forKey: MomoDeveloperModePresentation.developerModeKey)
+        defaults.set(true, forKey: MomoDeveloperModePresentation.costDisplayKey)
+        defaults.set(MomoUILanguage.korean.rawValue, forKey: MomoUILanguage.appStorageKey)
+
+        let hostingView = NSHostingView(
+            rootView: ApprovalInboxView(viewModel: viewModel)
+                .frame(width: approvalInboxSize.width, height: approvalInboxSize.height)
+                .background(Color(nsColor: .textBackgroundColor))
+                .environment(\.colorScheme, .light)
+                .environment(\.locale, Locale(identifier: "ko_KR"))
+                .defaultAppStorage(defaults)
+        )
+        let appearance = NSAppearance(named: .aqua)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: approvalInboxSize),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        hostingView.frame = CGRect(origin: .zero, size: approvalInboxSize)
+        hostingView.appearance = appearance
+        window.contentView = hostingView
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(approvalInboxSize.width * 2),
+            pixelsHigh: Int(approvalInboxSize.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no standard approval inbox bitmap on this host")
+        }
+        representation.size = approvalInboxSize
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        let image = NSImage(size: approvalInboxSize)
+        image.addRepresentation(representation)
+        return image
+    }
+
     func testWorkSurfaceRasterWritesDesignReviewArtifacts() throws {
         for scheme in [ColorScheme.light, .dark] {
             let image = try render(scheme)
@@ -175,6 +244,32 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
             )
             XCTAssertEqual(image.size, size)
         }
+    }
+
+    func testDualDensityWorkSurfaceWritesDesignReviewArtifacts() throws {
+        let modes: [(String, MomoDeveloperModePresentation)] = [
+            ("standard", .standard),
+            ("developer", .developer(showCosts: true)),
+        ]
+        for (mode, presentation) in modes {
+            for scheme in [ColorScheme.light, .dark] {
+                let image = try render(scheme, presentation: presentation)
+                try writeDesignReviewArtifact(
+                    image,
+                    named: "momo-370-work-\(mode)-\(scheme == .dark ? "dark" : "light").png"
+                )
+                XCTAssertEqual(image.size, size)
+            }
+        }
+    }
+
+    func testApprovalInboxStandardRasterWritesDesignReviewArtifact() async throws {
+        let image = try await renderStandardApprovalInbox()
+        try writeDesignReviewArtifact(
+            image,
+            named: "momo-370-approval-inbox-standard-light.png"
+        )
+        XCTAssertEqual(image.size, approvalInboxSize)
     }
 
     func testWorkSurfaceLightSnapshot() throws {

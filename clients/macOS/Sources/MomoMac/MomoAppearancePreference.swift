@@ -42,3 +42,31 @@ enum MomoAppearancePreference: String, CaseIterable, Identifiable, Sendable {
         }
     }
 }
+
+struct MomoDeveloperModePresentation: Equatable, Sendable {
+    static let developerModeKey = "momo.ui.developerMode"
+    static let costDisplayKey = "momo.ui.showCosts"
+
+    let isDeveloperModeEnabled: Bool
+    let isCostDisplayEnabled: Bool
+
+    static let standard = MomoDeveloperModePresentation(
+        isDeveloperModeEnabled: false,
+        isCostDisplayEnabled: false
+    )
+
+    static func developer(showCosts: Bool) -> MomoDeveloperModePresentation {
+        MomoDeveloperModePresentation(
+            isDeveloperModeEnabled: true,
+            isCostDisplayEnabled: showCosts
+        )
+    }
+
+    var showsDeveloperDetails: Bool {
+        isDeveloperModeEnabled
+    }
+
+    var showsCosts: Bool {
+        isDeveloperModeEnabled && isCostDisplayEnabled
+    }
+}

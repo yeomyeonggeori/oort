@@ -89,14 +89,15 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             sentClientMsgIds[ch.id] = []
         }
 
-        // A few seed messages incl. first-class agent protocol cards.
+        // The first channel reads like a real team conversation in standard mode.
+        // Structured protocol fixtures remain available behind developer mode.
         _ = appendServerMessage(channel: general.id, author: human.id, type: .text,
-                                body: "안녕하세요 팀!")
+                                body: "오늘 3시 내부 알파 배포 전에 체크리스트만 한 번 더 맞춰볼게요.")
         _ = appendServerMessage(
             channel: general.id,
             author: researcher.id,
             type: .text,
-            body: "Hermes joined the workspace.",
+            body: "좋아요. 제가 migration, smoke evidence, 공지 초안을 확인하고 빠진 항목만 정리할게요.",
             props: .object([
                 "mention_member_ids": .array([.string(human.id.description)]),
             ]),
@@ -107,6 +108,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             channel: pg18.id, author: researcher.id, type: .toolCall,
             body: nil,
             props: .object([
+                "human_summary": .string("Hermes가 PG18 관련 이슈를 확인하고 있습니다."),
+                "human_detail": .string("배포 체크리스트에 반영할 최근 migration 검증 기록을 GitHub에서 찾습니다."),
                 "name": .string("github.search_issues"),
                 "arguments": .object([
                     "query": .string("repo:Dawn-kim-official/momo PG18 migration"),
@@ -165,6 +168,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             type: .toolResult,
             body: nil,
             props: .object([
+                "human_summary": .string("Hermes가 최근 검증 기록 2건을 찾았습니다."),
+                "human_detail": .string("migrate idempotency와 runtime gate가 모두 통과한 기록을 확인했습니다."),
                 "tool_name": .string("github.search_issues"),
                 "call_id": .string("call_pg18_search_001"),
                 "is_error": .bool(false),
@@ -215,6 +220,8 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             type: .artifact,
             body: nil,
             props: .object([
+                "human_summary": .string("Hermes가 PG18 배포 런북 초안을 첨부했습니다."),
+                "human_detail": .string("확인된 runtime gate를 인용한 migration 순서와 롤백 절차가 들어 있습니다."),
                 "artifact_id": .string("artifact_pg18_runbook_patch"),
                 "kind": .string("runbook_draft"),
                 "title": .string("PG18 migration runbook patch"),
@@ -258,8 +265,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
                 "approval_id": .string(approvalId.description),
                 "approval_status": .string(ApprovalStatus.pending.rawValue),
                 "action_type": .string("github.issue.create"),
-                "title": .string("Create rollout checklist issue"),
-                "summary": .string("Open a tracked GitHub issue before the agent writes to the repo."),
+                "title": .string("내부 알파 배포 체크리스트 이슈 만들기"),
+                "summary": .string("GitHub에 체크리스트 이슈를 만든 뒤 배포 준비 항목을 기록합니다."),
+                "human_summary": .string("Hermes가 GitHub에 내부 알파 배포 체크리스트 이슈를 만들려고 합니다."),
+                "human_detail": .string("승인하면 Dawn-kim-official/momo 저장소에 추적용 이슈 하나를 만듭니다."),
                 "requires_approval": .bool(true),
                 "context_packet": .object([
                     "packet_id": .string("10000000-0000-7000-8000-000000000171"),
@@ -310,7 +319,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             actionType: "github.issue.create",
             payload: .object([
                 "repo": .string("Dawn-kim-official/momo"),
-                "title": .string("Create rollout checklist issue"),
+                "title": .string("내부 알파 배포 체크리스트 이슈 만들기"),
                 "estimated_micro_usd": .int(820_000),
                 "is_reversible": .bool(true),
             ]),
@@ -331,7 +340,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             .agentPartial(AgentPartial(
                 runId: approvalRun,
                 channelId: general.id,
-                textDelta: "Drafted a GitHub issue create request; waiting for approval before writing.",
+                textDelta: "체크리스트 초안을 정리했습니다. GitHub 이슈를 만들기 전에 승인을 기다리고 있어요.",
                 toolCallName: "github.issue.create",
                 toolCallArgs: .object([
                     "repo": .string("Dawn-kim-official/momo"),
@@ -350,7 +359,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
                 status: .pending,
                 payload: .object([
                     "repo": .string("Dawn-kim-official/momo"),
-                    "title": .string("Create rollout checklist issue"),
+                    "title": .string("내부 알파 배포 체크리스트 이슈 만들기"),
                 ]),
                 estimatedMicroUSD: 820_000,
                 isReversible: true
@@ -1095,7 +1104,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         emit(.agentPartial(AgentPartial(
             runId: run,
             channelId: channel,
-            textDelta: "\(agent.displayName)이 mention을 확인하고 답변을 준비하고 있습니다.",
+            textDelta: "\(MomoKoreanParticle.attach(.subject, to: agent.displayName)) 요청을 읽고 답변을 준비하고 있습니다.",
             toolCallName: "momo.context.read",
             toolCallArgs: .object([
                 "trigger_message_id": .string(trigger.id.description),
@@ -1108,7 +1117,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
             channel: channel,
             author: agent.id,
             type: .text,
-            body: "\(agent.displayName) result: mention received through `@\(agent.handle)`. Request: \(prompt)",
+            body: "요청 확인했어요. \(prompt) 내용을 기준으로 팀이 바로 확인할 수 있게 정리할게요.",
             props: .object([
                 "trigger_message_id": .string(trigger.id.description),
                 "mention_handle": .string(agent.handle),
