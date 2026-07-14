@@ -30,7 +30,7 @@
 ### Option C — 외부 SaaS 연동(Codex cloud 등)으로 위임
 - 장점: 구현 최소. 단점: self-hosted trust boundary 포지셔닝(§1.2)과 정면 충돌, 자격증명 경계 복잡. **기각 권장.**
 
-## Decision (Proposed = Option A)
+## Decision (Accepted = Option A)
 
 ### D1. Work는 `agent_run`의 1급 사용례다 — 새 실행 개체를 만들지 않는다
 v0는 `agent_run.input`에 work 계약(`{type:"work", title, repo?, branch?, brief}`)을 싣는 convention + 서버 검증으로 시작한다. `schema_v0.sql` 불변, 필요 시 신규 numbered migration만. 타임라인이 원장: 시작 카드 → 진행(partial) → 승인 카드 → 결과 카드가 전부 채널 메시지/이벤트로 남는다.
@@ -62,7 +62,7 @@ hermes adapter 패턴을 승계한 `adapters/codex-workbench/`: momo run을 받�
 - (−) transcript가 타임라인에 쌓이면 노이즈 위험 — 카드 접기/상세 페인으로 UI에서 해결(파생 티켓), 정책은 P8(알림 예산) 준수.
 - 후속 결정 예약: managed 실행 노드(Option B 재검토), 자동 라우팅, momo-plugin-github(PR 표면)와의 합류, A2A/Agent Card 정렬.
 
-## 파생 배치 (Accepted 시 발급 — MOMO-362..365, 상세 수용기준은 발급 시 BUILD_TICKETS)
+## 파생 배치 (완료 — MOMO-362..365)
 
 | 티켓 | 내용 | 프로파일 | 의존 |
 |---|---|---|---|
@@ -71,4 +71,4 @@ hermes adapter 패턴을 승계한 `adapters/codex-workbench/`: momo run을 받�
 | `MOMO-364` | Work 표면 UI — 시작 컴포저·타임라인 work 카드(라이브 테일+인라인 승인)·상세 페인 | swift/macos-ui | MOMO-362, UI W1 |
 | `MOMO-365` | capability 배지·Work 대상 선택 UX (config.capabilities 표면화) | swift/macos-ui | MOMO-362 |
 
-착수 순서 권장: 현행 배치(UI W1 + Phase A) 랜딩 후. 362→363은 직렬, 364/365는 362 후 병렬.
+실행 결과: 362→363 직렬, 364/365 병렬 순서로 2026-07-13 main에 랜딩했다. 실제 interactive Codex app-server approval relay는 ADR-0114에서 별도 결정한다.

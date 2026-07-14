@@ -246,20 +246,20 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 |---|---|---|---|
 | **Phase 0** 게이트/도구 | MOMO-316(P0)·318 → 317 → 319 | M1 | diff 기반 `--auto` 프로파일 + compose `--wait` + BuildKit/worktree 빌드 캐시 + 디자인 pre-flight/스냅샷. 이후 전 PR의 게이트 비용을 낮추는 선행 투자 |
 | **Phase 1** P0 코어 | MOMO-300·301·302·303·304 | M1/M3 | 보안 3종(proxy 인증/revocation/rate limit), depth/round 스키마+루프가드 실쿼리, **컨텍스트 조립 v1**(단일 메시지 폐기), MomoDS 토큰 4층, 마크다운/편집/멘션 |
-| **Phase 2** P1 확장 | MOMO-305·306·307·308·309·310·320·321·323 | M2/M3 | 스레드/unread/알림, 검색(Cmd+K)/리액션, Context Broker 실조립, MCP JSON-RPC 실구현, BYOK provider_config, pgvector RAG+Memory Plane, **파일=Google Drive**(공유 드라이브+SA 멤버, `research/13-redesign/03`) |
+| **Phase 2** P1 확장 | MOMO-305·306·307·308·309·310·321·323 + engine foundation/GWS IDs pending ADR-0113~0116 | M2/M3 | 스레드/unread/알림, 검색(Cmd+K)/리액션, Context Broker 실조립, MCP JSON-RPC 실구현, BYOK provider_config, minimum Capability/Memory 이후 advanced pgvector RAG, **파일/출처=Google Drive**. MOMO-320은 완료된 env drift 전용이며 Drive ID로 재사용하지 않음 |
 | **Phase 3** P2 마감 | MOMO-311·312·313·314·315·319·322 | M3+ | FoundationModels 압축/트리아지, 음성 입력(SpeechTranscriber ko_KR), A2A Agent Card, reversibility 렌더(MOMO-091 선행 슬라이스), audit redaction/보존, 김인턴 위키 |
 
 로드맵 영향:
 - M3(데스크탑 v0 UX)의 실질 내용이 D/B/C 실데이터 + **MomoDS/코어 UX(303~306)**로 확장된다. Phase 1의 P0 4건(300/301/302/303)은 M3 본격 진입 전 게이트로 취급한다.
-- 파일 업로드는 자체 오브젝트 스토리지 대신 **Google Drive workspace archive 모드**로 확정(MinIO OSS 중단, internal-consent 검증 면제) — EP-GWORKSPACE(MOMO-122/123) 확장이며 스펙 정정 3건은 MOMO-323.
+- 파일/출처 저장은 자체 오브젝트 스토리지보다 Google Drive connector를 우선 검토한다. 다만 **workspace archive/shared-drive 경로는 ADR-0113/0116 결정 전 동결**하고, v0 권고는 per-user selected-file read/citation vertical이다. 기존 archive 초안은 새 ID를 받아야 하며 MOMO-320을 재사용하지 않는다.
 - UI 작업은 `.claude/skills/momo-design-taste/` skill + design-review 에이전트 리포트(Blocker 0)를 PR evidence로 포함한다(사람 리뷰는 High 이하 판정만).
 
 ### 1.4 Agent Work Surface overlay (ADR-0111 · 2026-07-13 성재 발제)
 
-메신저 안에서 에이전트에게 실제 업무(터미널·코드 작업)를 시키고 실행 전 과정이 채널 타임라인에 원장으로 남는 표면. §1.2의 "execution ledger" 포지셔닝의 첫 사용자 체감 구현이다. 정본: `docs/adr/0111-agent-work-surface.md` (**Proposed** — Accepted 전 구현 티켓 발급 금지).
+메신저 안에서 에이전트에게 실제 업무(터미널·코드 작업)를 시키고 실행 전 과정이 채널 타임라인에 원장으로 남는 표면. §1.2의 "execution ledger" 포지셔닝의 첫 사용자 체감 구현이다. 정본: `docs/adr/0111-agent-work-surface.md` (**Accepted**, 2026-07-13). 실제 Codex app-server interactive transport는 후속 ADR-0114에서 ADR-0102/0111 amendment로 결정한다.
 
-- 핵심 결정(제안): Work=`agent_run` 확장(새 실행 개체 금지) · 실행은 항상 에이전트 호스트(BYOA gateway, momo 서버는 코드 실행 안 함, ADR-0004 유지) · codex sandbox 정책→승인 티어 매핑(349 재사용) · 특화 라우팅 v0=초대된 에이전트 중 capability 배지 명시 선택 · 코드 특화 레퍼런스=Apache-2.0 codex CLI 기반 `codex-workbench` adapter(codex-fleet 검증 계약 승격).
-- 파생 배치(Accepted 시): MOMO-362(work run 계약) → 363(codex-workbench adapter), 364(Work UI)·365(capability 배지) 병렬. 착수는 UI W1+Phase A 랜딩 후 — 10인 내부 테스트의 킬러 데모 후보.
+- 핵심 결정(적용됨): Work=`agent_run` 확장(새 실행 개체 금지) · 실행은 항상 에이전트 호스트(BYOA gateway, momo 서버는 코드 실행 안 함, ADR-0004 유지) · codex sandbox 정책→승인 티어 매핑(349 재사용) · 특화 라우팅 v0=초대된 에이전트 중 capability 배지 명시 선택 · 코드 특화 레퍼런스=Apache-2.0 codex CLI 기반 `codex-workbench` adapter.
+- 파생 배치 완료: MOMO-362(work run 계약) → 363(codex-workbench adapter), 364(Work UI)·365(capability 배지)가 2026-07-13 main에 랜딩했다. 실제 interactive Codex app-server approval relay는 ADR-0114/E-WORK-1 후속이다.
 - 신규 인프라·스키마 변경 0으로 시작(agent_run input convention + `agent.config.capabilities`). 후속 결정 예약: managed 실행 노드, 자동 라우팅, momo-plugin-github 합류.
 
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)

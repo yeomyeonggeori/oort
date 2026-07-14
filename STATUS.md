@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-381 Superapp Engine Planning Integration (2026-07-14)
+
+- PLN-20260714-02 gap audit/proposal/handoff를 security·architecture 독립 리뷰 후 정리했다. ADR-0113~0116, Capability/Memory/Context/action executor, MCP/plugin/webhook, Codex app-server, GWS read/citation의 buildable dependency graph와 UX-owned file lock을 제안 상태로 고정했다.
+- 기존 MOMO-307/308/310/320/321/322 충돌을 정리했다. MOMO-308은 non-claimable umbrella로 전환해 auth/read/write-proposal 새 ID 3개로 분할하고, MOMO-320은 완료된 env drift guard 전용으로 유지한다. 오래된 handoff/research/INDEX 포인터에도 superseded 경고를 추가했다. 실제 Codex/GWS credentialed runtime은 여전히 `runtime-unverified`이며 Accepted ADR 전 구현 이슈를 ready로 올리지 않는다.
+- 최종 review diff 기준 dirty docs local gate PASS(`20260714T145941Z-pid33813-ns1784041181992158000-wtc32931bd803d-r05b2e1251fbd`). final clean commit과 main post-merge docs gate는 PR 검수 단계에서 다시 실행한다.
+
 ## MOMO-379 macOS Chrome Hotfix (2026-07-14)
 
 - SwiftPM/Xcode 두 host의 unified toolbar 기본 system title과 custom workspace identity가 함께 그려지던 중복은 공용 title-hidden scene style로 제거했다. 실창 AX 재검토에서 `NavigationSplitView` 각 칼럼의 `GeometryProxy.safeAreaInsets.top`이 0임을 확인해 그 경로를 폐기하고, hosting `NSWindow.contentLayoutRect`를 content-view 좌표로 변환한 실제 titlebar band를 루트 환경으로 전파해 sidebar와 detail 칼럼을 함께 내렸다.

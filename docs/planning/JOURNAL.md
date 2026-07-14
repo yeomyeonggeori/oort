@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (momo-main/GPT 5.6) · PLN-20260714-02 슈퍼앱 엔진 리뷰
+- engine planner의 gap audit/proposal/handoff를 인수해 security review High 7/Medium 2, architecture review High 6/Medium 3을 반영했다.
+- ADR-0113~0116을 예약하고 Memory/Capability, plugin/webhook, Codex bridge/real gate, GWS runtime/evidence/citation을 one-issue/one-PR 단위로 분할했다.
+- MOMO-307은 강화 유지하고 MOMO-308은 non-claimable MCP umbrella(SE-03A/B/C 새 ID)로 전환했다. MOMO-310 advanced RAG, MOMO-320 env drift 전용, MOMO-321/322 후속 동결로 충돌을 정리했다.
+- 다음: 성재가 ADR 권고를 승인하면 0113/0116부터 draft goal을 발급한다. engine PR은 기본적으로 macOS UX 잠금 파일을 건드리지 않는다.
+
 ## 2026-07-14 (momo-main/GPT 5.6) · MOMO-380 식별자·보안 경계 재정정
 - 아래 `MOMO-380`은 GitHub Issue `#381` / PR `#382`의 제품 티켓 ID다. 로컬 기록 부재로 혼동될 수 있어 이 항목으로 식별자를 명시한다.
 - upstream Codex/OpenAI 자격증명 비유입과 허용되는 Hermes-facing bearer를 분리하고, GWS token 저장은 Accepted ADR 전 연구 스펙으로 낮췄다.

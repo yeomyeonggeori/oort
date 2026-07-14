@@ -2,6 +2,7 @@
 
 > **목적:** 2026-07-06~07 Opus 세션이 재설계(MOMO-300~323)를 어디까지 진행했고, **Codex/GPT가 이제부터 무엇을 어떻게 이어받는지** 한 문서로 고정한다.
 > **정본 우선순위:** `AGENTS.md`(운영 계약) > `ROADMAP.md` > `docs/BACKLOG.md`(티켓) > 이 문서(실행 상태 스냅샷). 상태 뷰는 `research/13-redesign/00-execution-tracker.md`.
+> **2026-07-14 superseded notice:** 이 문서는 당시 실행 스냅샷으로만 보존한다. §2의 `MOMO-308/309 ready`, `MOMO-320=Drive` 안내는 폐기됐으며 picker 입력으로 사용하면 안 된다. 현재 착수 상태와 ID는 `docs/planning/CURRENT_STATE.md`, `research/13-redesign/00-execution-tracker.md`, `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md`가 우선한다.
 
 ---
 
@@ -32,9 +33,9 @@
 AGENTS.md §6 picker 기준. tracker(`research/13-redesign/00-execution-tracker.md`)가 상태 정본.
 
 1. **MOMO-303 · MomoDS v0** (P0, macos) — 토큰 4층(Primitive/Semantic/Component/Density) + ugly mode + 컴포넌트 7종 추출. **Phase 1의 마지막 P0이자 macOS UI 모든 후속(304~306, 312, 314)의 선행.** 게이트에 이미 design pre-flight(ratchet, MOMO-318)가 걸려 있어 신규 위반은 자동 차단됨 — 303은 baseline(81/1/0/0)을 **낮추는** 방향(하드코딩 회수)이 목표.
-2. **병렬 가능(표면 안 겹침):** MOMO-308(Inbound MCP JSON-RPC, backend) · MOMO-309(BYOK provider_config, backend+macos) — deps 충족(172/227 done).
+2. **역사적 제안(폐기):** 당시에는 MOMO-308/309 병렬 착수를 제안했으나 두 티켓 모두 보안 ADR 의존으로 다시 blocked됐다. MOMO-308은 non-claimable umbrella이며 MCP 구현은 새 분할 ID를 받아야 한다.
 3. **MOMO-317**(build-infra 브랜치 완료) · **MOMO-319**(게이트/verifier 하드닝) — 인프라 트랙, 언제든.
-4. 이후 Phase 2(305/306/307/310/320/321) → Phase 3(311~315/322). deps는 tracker 참조.
+4. 이후 Phase 2 후보는 tracker를 다시 확인한다. MOMO-320은 완료된 env drift guard 전용이며 Drive 작업 번호로 재사용하지 않는다.
 
 ## 3. Codex가 반드시 지킬 것 (이 세션에서 확립/실측)
 
@@ -47,7 +48,7 @@ AGENTS.md §6 picker 기준. tracker(`research/13-redesign/00-execution-tracker.
 
 - **MOMO-319** = 게이트/verifier 하드닝(누수 process-group kill + runtime-db 부분 병렬화 + 웜 볼륨 opt-in). 이 세션에서 302/300 게이트가 겪은 근본 인프라 이슈를 여기서 닫는다.
 - **317 host-runtime** = 메모리 여유 환경/CI에서 5이미지 빌드+스택 부팅 확인.
-- **실증(runtime-unverified):** SA `drive.file` changes.list 충분성(MOMO-320), Drive `fullText` 한국어(321), SpeechTranscriber 한국어 WER(312), macOS 26 실기기 FoundationModels/Speech(311/312) — 전부 tracker에 체크박스로.
+- **실증(runtime-unverified):** per-user selected-file/SA Drive read 경계(새 GWS ID 대기), Drive `fullText` 한국어(321 후보), SpeechTranscriber 한국어 WER(312), macOS 26 실기기 FoundationModels/Speech(311/312) — 전부 최신 tracker와 Accepted ADR을 먼저 확인한다.
 - **사람 전용:** MomoDS 시각 최종 승인, GCP/Internal-consent/SA 생성(323 런북), 음성 WER 샘플, credentialed provider smoke.
 
 ---

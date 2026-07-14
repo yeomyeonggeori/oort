@@ -1042,7 +1042,7 @@ M0(baseline)
 
 #### MOMO-307 · Context Broker 서버 서비스 (Context Packet v0 실조립)
 - **마일스톤:** M2 · **에픽:** EP-CONTEXT · **플랫폼:** backend · **추정:** L
-- **deps:** MOMO-302, MOMO-120
+- **deps:** MOMO-302, MOMO-120, ADR-0113/0116, capability+memory runtime IDs pending
 - **수용기준:**
   - [ ] [runtime] mention→agent_job 경로에서 Context Packet을 스텁이 아닌 실제로 조립: recent_messages(MOMO-302), 권한 스냅샷, source refs, tool_grants(하드코딩 mock 제거), budget, redaction policy
   - [ ] [runtime] fixture(`research/11-agent-runtime/fixtures/context-packet-v0/`)와 shape 정합 테스트
@@ -1050,19 +1050,19 @@ M0(baseline)
 - **라벨:** `type:feat`, `area:server`, `priority:p1`
 - **참조:** `research/10-local-ai-protocol-trust/01`, `research/13-redesign/01` P3·Track C-2
 
-#### MOMO-308 · Inbound MCP 실구현 (JSON-RPC) + scope 발급
+#### MOMO-308 · Inbound MCP 실구현 umbrella (non-claimable)
 - **마일스톤:** M2 · **에픽:** EP-AGENT-PROTOCOL · **플랫폼:** backend · **추정:** L
-- **deps:** MOMO-172
+- **deps:** MOMO-172, ADR-0113, MOMO-307, capability+governed-action runtime IDs pending · **상태:** blocked umbrella(이전 ready 취소, 직접 claim 금지)
+- **분할 계약:** 새 ID 3개로 `SE-03A(auth/session) → SE-03B(read tools) / SE-03C(post+action proposal)`를 발급한다. SE-03C는 governed external action executor도 선행한다.
 - **수용기준:**
-  - [ ] [runtime] MCP 표준 JSON-RPC 전송으로 교체(HTTP-shape 스텁 제거), 4개 도구(search_messages/fetch_thread/post_message/create_tool_call) 실동작 — post/create는 정본 쓰기경로(단일 tx) 재사용
-  - [ ] [runtime] `mcp.*` scope 발급 플로우(admin install/token provisioning) + RLS/멤버십 preflight 유지
-  - [ ] [runtime] 외부 MCP 클라이언트(예: Claude Code) 접속 smoke evidence(로컬)
+  - [ ] [runtime] SE-03A/B/C 세 child issue가 각각 merge되고 auth/read/write-proposal 경계가 통합 gate에서 정합
+  - [ ] [runtime] 외부 MCP 클라이언트 접속 smoke evidence와 cross-tenant/revoke/duplicate negative evidence
 - **라벨:** `type:feat`, `area:server`, `priority:p1`
 - **참조:** `research/11-agent-runtime/09`, `research/13-redesign/01` Track C-3
 
 #### MOMO-309 · BYOK: workspace provider_config + 봉투 암호화 + Settings UI
 - **마일스톤:** M2 · **에픽:** EP-SEC-CORE · **플랫폼:** backend+macos · **추정:** M
-- **deps:** MOMO-227
+- **deps:** MOMO-227, ADR-0113 + ADR-0004 credential-class reconciliation · **상태:** blocked(이전 ready 취소)
 - **수용기준:**
   - [ ] [sql] 신규 마이그레이션 `provider_config`(workspace 단위, agent 단위 override): base_url/model/암호화 key(age/KMS 봉투, 평문 컬럼 금지), RLS 등록
   - [ ] [runtime] AgentWorker가 글로벌 env 대신 workspace provider_config를 resolve(env는 fallback), key 회전 audit_log
@@ -1071,20 +1071,21 @@ M0(baseline)
 - **라벨:** `type:feat`, `area:server`, `area:macos`, `priority:p1`
 - **참조:** `research/13-redesign/01` Track C-6, ADR-0004
 
-#### MOMO-310 · RAG 파이프라인: pgvector + 임베딩 워커 + RRF 하이브리드 + Memory Plane v0 구현
+#### MOMO-310 · Advanced RAG 파이프라인: pgvector + 임베딩 워커 + RRF 하이브리드
 - **마일스톤:** M2 · **에픽:** EP-CONTEXT · **플랫폼:** backend · **추정:** L
-- **deps:** MOMO-302, MOMO-121
+- **deps:** MOMO-302, MOMO-121, minimum Memory runtime ID pending
 - **수용기준:**
   - [ ] [sql] pgvector ≥0.8.4 확장 + `halfvec` HNSW 인덱스 마이그레이션(workspace/channel 필터 컬럼 포함, RLS 등록)
   - [ ] [runtime] 임베딩 워커(서버측 단일 모델) — 메시지/문서 청크 인덱싱, 삭제 tombstone 반영
   - [ ] [runtime] RRF 하이브리드 검색 함수(vector+FTS+pg_trgm) + 한국어 쿼리 evidence, Context Broker(MOMO-307)가 retrieval 소비
-  - [ ] [runtime] Memory Plane v0 구현: typed memory 쓰기/조회 + retrieval-time 권한 체크(fixture 정합)
+  - [ ] [runtime] 선행 minimum Memory/SourceRef runtime을 소비하되 이 티켓은 embedding/index/RRF 품질과 삭제 tombstone projection에 집중
 - **라벨:** `type:feat`, `area:server`, `area:schema`, `priority:p1`
 - **참조:** `research/11-agent-runtime/05`, `research/13-redesign/01` Track D
 
-#### MOMO-320 · AttachmentStore + Google Drive workspace archive 모드 + resumable 업로드
+#### GWS-ARCHIVE-ID-PENDING · AttachmentStore + Google Drive workspace archive 모드 + resumable 업로드
+- **ID 주의:** `MOMO-320`은 완료된 local runtime env drift guard 전용이다. 이 후보는 ADR-0113/0116 Accepted 뒤 새 product ID를 배정한다.
 - **마일스톤:** M2/M3 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend+macos · **추정:** L
-- **deps:** MOMO-122, MOMO-323
+- **deps:** MOMO-122, MOMO-323, ADR-0113/0116, capability/plugin registry IDs pending
 - **수용기준:**
   - [ ] [swift] `AttachmentStore` 프로토콜(backend: drive | local-volume, v0=drive) + `file` 테이블 확장(drive_file_id/head_revision_id/web_view_link)
   - [ ] [runtime] workspace archive 모드: 공유 드라이브 프로비저닝 + SA `shared_drive_member`(Content Manager) — DWD 아님, MOMO-123 boundary 확장
@@ -1094,9 +1095,9 @@ M0(baseline)
 - **라벨:** `type:feat`, `area:server`, `area:macos`, `priority:p1`
 - **참조:** `research/13-redesign/03` §2~3
 
-#### MOMO-321 · Drive changes.list 폴러 + 추출/청크 인덱싱 → pgvector
+#### MOMO-321 · Drive changes.list 폴러 + 추출/청크 인덱싱 → pgvector (동결)
 - **마일스톤:** M2/M3 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend · **추정:** M
-- **deps:** MOMO-320, MOMO-310
+- **deps:** GWS archive 새 ID, MOMO-310 · **상태:** frozen(ADR-0113/0116 결정 대기)
 - **수용기준:**
   - [ ] [runtime] workspace당 changes.list 폴러(SA credential, driveId 필터, start_page_token cursor — MOMO-122 sync_state 재사용), 1~5분 주기
   - [ ] [runtime] files.export(>10MB는 exportLinks 우회)/files.get 추출 → 청크 → MOMO-310 파이프라인 인덱싱, 벡터 행에 permission snapshot version
@@ -1170,7 +1171,7 @@ M0(baseline)
 
 #### MOMO-322 · 김인턴 위키 v0: 위키 문서 규약 + propose-write 승인 플로우 + 인용 강제
 - **마일스톤:** M3 · **에픽:** EP-GWORKSPACE · **플랫폼:** backend · **추정:** M
-- **deps:** MOMO-321
+- **deps:** MOMO-321, governed external action executor ID pending
 - **수용기준:**
   - [ ] [infra] 위키 문서 규약(공유 드라이브 내 Google Docs, 인덱스 페이지 + 상호링크) 스펙
   - [ ] [runtime] 에이전트 위키 편집 = approval-gated `propose` write가 채널 타임라인 카드로 노출(기존 승인 경로 재사용)

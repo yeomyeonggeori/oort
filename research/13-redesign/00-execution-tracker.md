@@ -48,12 +48,12 @@
 |---|---|---|
 | MOMO-305 | 스레드 UI(에이전트 세션 경계) + unread + 로컬 알림 | `blocked(303,304)` |
 | MOMO-306 | 검색 라우트 + Cmd+K 팔레트 + 리액션 | `blocked(303)` |
-| MOMO-307 | Context Broker 실조립 (Context Packet v0) | `blocked(302,120)` |
-| MOMO-308 | Inbound MCP JSON-RPC 실구현 + scope 발급 | `blocked(172=done)` → `ready` |
-| MOMO-309 | BYOK provider_config + 봉투 암호화 + Settings UI | `blocked(227=done)` → `ready` |
-| MOMO-310 | pgvector RAG + RRF 하이브리드 + Memory Plane v0 구현 | `blocked(302,121)` |
-| MOMO-320 | AttachmentStore + Drive workspace archive + resumable 업로드 | `blocked(323)` |
-| MOMO-321 | Drive changes.list 폴러 + 추출/청크 인덱싱 | `blocked(320,310)` |
+| MOMO-307 | Context Broker 실조립 (Context Packet v0) | `blocked(ADR-0113/0116, capability+memory runtime ID pending)` |
+| MOMO-308 | Inbound MCP umbrella | `blocked/non-claimable` — 이전 ready 취소, SE-03A/B/C 새 ID 발급 대기 |
+| MOMO-309 | BYOK provider_config + 봉투 암호화 + Settings UI | `blocked(ADR-0113/ADR-0004 credential-class reconciliation)` — 이전 ready 취소 |
+| MOMO-310 | advanced pgvector RAG + RRF/embedding (minimum Memory runtime 제외) | `blocked(memory runtime ID pending)` |
+| GWS-ARCHIVE-ID-PENDING | AttachmentStore + Drive workspace archive + resumable 업로드 | `frozen(ADR-0113/0116)` — MOMO-320 재사용 금지 |
+| MOMO-321 | Drive changes.list 폴러 + 추출/청크 인덱싱 | `frozen(GWS archive new ID,310)` |
 | MOMO-323 | GWS 스펙 정정 3건 + Internal consent 런북 (문서만) | `done` (2026-07-06 머지, STATUS §0az) |
 
 ## Phase 3 — P2 마감 (M3+)
@@ -65,11 +65,11 @@
 | MOMO-313 | A2A Agent Card + agents/announce 초대 | `blocked(308)` |
 | MOMO-314 | reversibility_tier + 승인 라이프사이클 렌더 + 정책 2축 | `blocked(160=done,303)` |
 | MOMO-315 | audit redaction + 보존 TTL + 계정 삭제 | `blocked(300)` |
-| MOMO-322 | 김인턴 위키 v0 (propose-write 승인 + 인용 강제) | `blocked(321)` |
+| MOMO-322 | 김인턴 위키 v0 (propose-write 승인 + 인용 강제) | `blocked(321, governed action executor ID pending)` |
 
 ## 착수 전 실증 항목 (runtime-unverified 예약)
 
-- [ ] SA + `drive.file` scope + 공유 드라이브 멤버십으로 changes.list/다운로드 충분성 (부족 시 SA만 `drive.readonly`, MOMO-123 inventory 기록) — MOMO-320 착수 시
+- [ ] SA + `drive.file` scope + 공유 드라이브 멤버십으로 changes.list/다운로드 충분성 (부족 시 SA만 `drive.readonly`, MOMO-123 inventory 기록) — GWS archive 새 ID 배정 후
 - [ ] Drive API `fullText contains` 한국어 실측 — MOMO-321 안에서
 - [ ] SpeechTranscriber 한국어 WER 자체 평가 — MOMO-312 안에서 `[manual]`
 - [ ] macOS 26 실기기 FoundationModels/SpeechTranscriber 확인 — MOMO-311/312 `[manual]`
