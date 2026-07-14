@@ -545,6 +545,7 @@ public struct AlphaCommandCenterView: View {
     @ObservedObject var viewModel: ChatViewModel
     var updateStatus: MomoMacUpdateChannelStatus
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
 
     public init(
         viewModel: ChatViewModel,
@@ -558,16 +559,27 @@ public struct AlphaCommandCenterView: View {
         let snapshot = viewModel.alphaCommandCenterSnapshot(updateStatus: updateStatus)
         let copy = MomoWorkspaceCopy(language: language)
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                header(snapshot, copy: copy)
-                statusSection(snapshot.statuses, copy: copy)
-                checklistSection(snapshot.checklist, copy: copy)
-                capabilitySection(snapshot.capabilities, copy: copy)
-                limitationSection(snapshot.limitations, copy: copy)
+        Group {
+            if developerMode {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        header(snapshot, copy: copy)
+                        statusSection(snapshot.statuses, copy: copy)
+                        checklistSection(snapshot.checklist, copy: copy)
+                        capabilitySection(snapshot.capabilities, copy: copy)
+                        limitationSection(snapshot.limitations, copy: copy)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+            } else {
+                ContentUnavailableViewCompat(
+                    title: copy.developerMode,
+                    systemImage: "hammer",
+                    description: copy.developerModeSubtitle
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 

@@ -793,6 +793,8 @@ public struct ChannelListView: View {
         .popover(isPresented: $showInvites) {
             if let context = sessionChrome?.inviteAdminContext {
                 InviteAdminPopover(context: context)
+            } else {
+                inviteGuidancePopover(copy: copy)
             }
         }
         .animation(sidebarPanelAnimation, value: showMemberInvite)
@@ -956,8 +958,10 @@ public struct ChannelListView: View {
                         showMemberInvite = false
                         if sessionChrome?.inviteAdminContext != nil {
                             showInvites = true
+                        } else if developerMode, let openCommandCenter {
+                            openCommandCenter()
                         } else {
-                            openCommandCenter?()
+                            showInvites = true
                         }
                     } label: {
                         Label(copy.openInviteCodes, systemImage: "key.horizontal")
@@ -1061,6 +1065,25 @@ public struct ChannelListView: View {
                 }
             }
         }
+    }
+
+    private func inviteGuidancePopover(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(copy.inviteGuidanceTitle, systemImage: "person.crop.circle.badge.questionmark")
+                .font(.headline)
+            Text(copy.inviteGuidanceBody)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let switchSession = sessionChrome?.switchSession {
+                Button(copy.switchSession) {
+                    showInvites = false
+                    switchSession()
+                }
+            }
+        }
+        .padding(16)
+        .frame(width: MomoTheme.memberInvitePopoverWidth, alignment: .leading)
     }
 
     private var hermesInitials: String {

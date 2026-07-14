@@ -148,7 +148,10 @@ struct AgentWorkRunCard: View {
     }
 
     private var cardSummary: String {
-        result.summary
+        if presentation.showsDeveloperDetails {
+            return run.input.brief
+        }
+        return result.summary
             ?? partial?.textDelta
             ?? run.input.brief
     }

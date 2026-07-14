@@ -5,6 +5,43 @@ public extension MomoUILanguage {
     static let appStorageKey = "momo.ui.language"
 }
 
+enum MomoKoreanParticle {
+    enum Pair {
+        case subject
+        case object
+        case topic
+
+        fileprivate var particles: (withFinalConsonant: String, withoutFinalConsonant: String) {
+            switch self {
+            case .subject:
+                return ("이", "가")
+            case .object:
+                return ("을", "를")
+            case .topic:
+                return ("은", "는")
+            }
+        }
+    }
+
+    static func attach(_ pair: Pair, to word: String) -> String {
+        let particles = pair.particles
+        return word + (hasFinalConsonant(word)
+            ? particles.withFinalConsonant
+            : particles.withoutFinalConsonant)
+    }
+
+    private static func hasFinalConsonant(_ word: String) -> Bool {
+        let ignoredAtEnd = CharacterSet.whitespacesAndNewlines
+            .union(.punctuationCharacters)
+        guard let scalar = word.unicodeScalars.reversed().first(where: {
+            !ignoredAtEnd.contains($0)
+        }), (0xAC00...0xD7A3).contains(scalar.value) else {
+            return false
+        }
+        return (scalar.value - 0xAC00).isMultiple(of: 28) == false
+    }
+}
+
 struct MomoWorkspaceCopy {
     var language: MomoUILanguage
 
@@ -170,7 +207,7 @@ struct MomoWorkspaceCopy {
             if remainder > 0 {
                 return "\(visible) 외 \(remainder)명이 입력 중..."
             }
-            return "\(visible)이 입력 중..."
+            return "\(MomoKoreanParticle.attach(.subject, to: visible)) 입력 중..."
         case .english:
             if remainder > 0 {
                 return "\(visible) and \(remainder) more are typing..."
@@ -181,7 +218,7 @@ struct MomoWorkspaceCopy {
 
     func agentWorkingTitle(_ name: String) -> String {
         switch language {
-        case .korean: return "\(name)이 작업 중"
+        case .korean: return "\(MomoKoreanParticle.attach(.subject, to: name)) 작업 중"
         case .english: return "\(name) is working"
         }
     }
@@ -372,6 +409,20 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "초대 코드 관리"
         case .english: return "Manage invite codes"
+        }
+    }
+
+    var inviteGuidanceTitle: String {
+        switch language {
+        case .korean: return "초대 코드 안내"
+        case .english: return "Invite code guidance"
+        }
+    }
+
+    var inviteGuidanceBody: String {
+        switch language {
+        case .korean: return "이 세션에서는 초대 코드를 관리할 수 없습니다. 워크스페이스 관리자 계정으로 다시 로그인한 뒤 멤버 초대에서 코드를 만들고 공유하세요."
+        case .english: return "Invite codes are unavailable in this session. Sign in with a workspace admin account, then create and share a code from Invite members."
         }
     }
 
@@ -777,12 +828,12 @@ struct MomoWorkspaceCopy {
 
     func agentActivityFallback(_ type: MessageType, agentName: String) -> String {
         switch (language, type) {
-        case (.korean, .toolCall): return "\(agentName)가 작업을 시작했습니다."
-        case (.korean, .toolResult): return "\(agentName)가 작업을 마쳤습니다."
-        case (.korean, .diff): return "\(agentName)가 변경 내용을 준비했습니다."
-        case (.korean, .approvalRequest): return "\(agentName)가 작업 승인을 요청했습니다."
-        case (.korean, .artifact): return "\(agentName)가 결과물을 첨부했습니다."
-        case (.korean, .text), (.korean, .system): return "\(agentName)가 메시지를 남겼습니다."
+        case (.korean, .toolCall): return "\(MomoKoreanParticle.attach(.subject, to: agentName)) 작업을 시작했습니다."
+        case (.korean, .toolResult): return "\(MomoKoreanParticle.attach(.subject, to: agentName)) 작업을 마쳤습니다."
+        case (.korean, .diff): return "\(MomoKoreanParticle.attach(.subject, to: agentName)) 변경 내용을 준비했습니다."
+        case (.korean, .approvalRequest): return "\(MomoKoreanParticle.attach(.subject, to: agentName)) 작업 승인을 요청했습니다."
+        case (.korean, .artifact): return "\(MomoKoreanParticle.attach(.subject, to: agentName)) 결과물을 첨부했습니다."
+        case (.korean, .text), (.korean, .system): return "\(MomoKoreanParticle.attach(.subject, to: agentName)) 메시지를 남겼습니다."
         case (.english, .toolCall): return "\(agentName) started a task."
         case (.english, .toolResult): return "\(agentName) finished a task."
         case (.english, .diff): return "\(agentName) prepared a change."

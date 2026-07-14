@@ -1104,7 +1104,7 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         emit(.agentPartial(AgentPartial(
             runId: run,
             channelId: channel,
-            textDelta: "\(agent.displayName)가 요청을 읽고 답변을 준비하고 있습니다.",
+            textDelta: "\(MomoKoreanParticle.attach(.subject, to: agent.displayName)) 요청을 읽고 답변을 준비하고 있습니다.",
             toolCallName: "momo.context.read",
             toolCallArgs: .object([
                 "trigger_message_id": .string(trigger.id.description),

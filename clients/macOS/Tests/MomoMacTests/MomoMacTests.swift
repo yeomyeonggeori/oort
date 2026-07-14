@@ -57,6 +57,27 @@ final class MomoMacTests: XCTestCase {
         )
     }
 
+    func testKoreanParticlesFollowTheLastHangulSyllableBatchim() {
+        XCTAssertEqual(MomoKoreanParticle.attach(.subject, to: "빌드봇"), "빌드봇이")
+        XCTAssertEqual(MomoKoreanParticle.attach(.subject, to: "하루"), "하루가")
+        XCTAssertEqual(MomoKoreanParticle.attach(.object, to: "빌드봇"), "빌드봇을")
+        XCTAssertEqual(MomoKoreanParticle.attach(.object, to: "하루"), "하루를")
+        XCTAssertEqual(MomoKoreanParticle.attach(.topic, to: "빌드봇"), "빌드봇은")
+        XCTAssertEqual(MomoKoreanParticle.attach(.topic, to: "하루"), "하루는")
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).workApprovalSummary(agentName: "빌드봇", action: nil),
+            "빌드봇이 작업 승인을 요청했습니다."
+        )
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).agentWorkingTitle("하루"),
+            "하루가 작업 중"
+        )
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).typingIndicator(["빌드봇", "Hermes"]),
+            "빌드봇, Hermes가 입력 중..."
+        )
+    }
+
     // MARK: sidebar shell policy (MOMO-357)
 
     func testSidebarSeparatesDirectMessagesFromChannels() {

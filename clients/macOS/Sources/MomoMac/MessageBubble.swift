@@ -261,16 +261,18 @@ public struct MessageBubble: View {
             .momoSurface(.panel)
         } else {
             DisclosureGroup(isExpanded: $isBasicCardExpanded) {
-                Text(basicAgentDetail)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
+                if basicAgentDetail != basicAgentSummary {
+                    Text(basicAgentDetail)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
             } label: {
                 Label(basicAgentSummary, systemImage: basicAgentIcon)
                     .font(.body)
-                    .lineLimit(1)
-                    .help(basicAgentSummary)
+                    .lineLimit(isBasicCardExpanded ? nil : 2)
+                    .fixedSize(horizontal: false, vertical: isBasicCardExpanded)
             }
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
