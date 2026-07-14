@@ -272,9 +272,11 @@ struct TokenStore: Sendable {
         }
     }
 
-    /// Exact credential liveness for a Centrifugo connection JWT.  A token
+    /// Exact credential liveness for a Centrifugo connection JWT. A token
     /// minted from one bearer must not remain subscribable merely because a
-    /// rotated bearer for the same member is still active.
+    /// rotated bearer for the same member is still active. Human connections
+    /// bind only to an access row; a refresh row is never an authorization
+    /// credential even while it remains active for rotation.
     func hasActiveRealtimeCredential(
         tokenID: UUID,
         memberID: UUID,
@@ -296,7 +298,7 @@ struct TokenStore: Sendable {
                    AND t.revoked_at IS NULL
                    AND (t.expires_at IS NULL OR t.expires_at > now())
                    AND (
-                     (m.kind = 'human' AND t.kind = 'session')
+                     (m.kind = 'human' AND t.kind = 'session' AND t.label = 'access')
                      OR
                      (m.kind = 'agent' AND t.kind = 'agent_bearer'
                       AND 'realtime:subscribe' = ANY(t.scopes))

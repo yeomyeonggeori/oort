@@ -1908,10 +1908,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
 
 ### ☑ MOMO-388 수용기준 — Auth-hardening verifier realtime credential binding drift `[tooling/runtime-db/docs]` · Issue #388
-- [x] 로그인 access token으로 `POST /v1/auth/realtime-token`을 호출하고, connection JWT payload에서 검증한 `meta`를 Centrifugo `include_connection_meta` callback 형식으로 전달.
-- [x] active exact credential binding 허용, `meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 fail-closed 403 검증.
-- [x] raw access/refresh/connection JWT/shared secret을 stdout evidence에 출력하지 않고, auth 실패 응답 body 비노출·임시 파일 정리.
-- [x] 서버 credential liveness·RLS·`schema_v0.sql` 무변경. standalone verifier와 dirty `runtime-db` 29/29 PASS(`local-gate-runtime-db-20260714T202518Z-pid37326-ns1784060718812203000-wtea4b43f89980-r46bf5a74adfb.md`); final clean `runtime-db`·`docs` evidence는 PR 기록.
+- [x] 로그인 access/refresh token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest만 DB와 대조해 각 `token.id`를 확정. `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row ID와 같은지 UUID canonical 비교.
+- [x] active exact access-row binding만 허용. active refresh-row ID·`meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 `result == null && error.code == 403` 검증.
+- [x] synthetic JWT claim은 `sub`, optional `ws`, `exp`/optional `nbf`/`iat` sanity를 검사. 이 fixture는 server-minted callback binding 검증이며 Centrifugo websocket signature acceptance를 독립 증명하지 않음을 명시.
+- [x] raw access/refresh/connection JWT/shared secret을 stdout evidence에 출력하지 않고 auth/refresh 실패 body 비노출. `umask 077` 후 `mktemp -d`, exact-dir cleanup 적용.
+- [x] human realtime liveness를 `session` + `label='access'`로 강화해 refresh row 차단. RLS·`schema_v0.sql` 무변경. focused verifier PASS; review 반영 final clean `runtime-db`·`docs` evidence는 PR #393 기록.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

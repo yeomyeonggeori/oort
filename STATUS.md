@@ -5,9 +5,9 @@
 
 ## MOMO-388 Auth-Hardening Realtime Credential Binding Verifier (2026-07-15)
 
-- 레거시 verifier가 멤버·채널만 담은 subscribe callback을 보내 최신 fail-closed credential liveness 계약과 어긋나던 원인을 확인했다. 서버의 credential liveness, RLS, 스키마 계약은 변경하지 않았다.
-- verifier는 로그인 access token으로 `POST /v1/auth/realtime-token`을 호출하고, 발급된 connection JWT의 검증된 `meta`(`momo.realtime.credential.v1` + `token_id`)를 Centrifugo `include_connection_meta` 형식 그대로 전달한다. active exact binding만 허용하며 누락·임의·다른 멤버 binding과 logout/revoke 이후 binding은 모두 거부한다. 실패 진단에서도 auth response body를 출력하지 않고 임시 파일을 정리한다.
-- standalone verifier와 dirty `runtime-db` 29/29 local gate PASS(`local-gate-runtime-db-20260714T202518Z-pid37326-ns1784060718812203000-wtea4b43f89980-r46bf5a74adfb.md`). 최종 clean commit 기준 `runtime-db`·`docs` evidence는 PR에 첨부한다.
+- 레거시 verifier가 멤버·채널만 담은 callback을 보낸 drift에 더해, 1차 수정이 `meta.token_id`를 임의 active UUID로만 검증하고 human의 active refresh row도 realtime liveness로 인정하던 review gap을 닫았다. human realtime credential은 이제 `session` 중 `label='access'` row만 허용하며 RLS와 `schema_v0.sql`은 변경하지 않았다.
+- verifier의 token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest로 access·refresh row를 각각 찾은 뒤, `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row와 일치함을 증명한다. callback fixture는 active access만 허용하고 active refresh row·누락·임의·다른 멤버·logout/revoke binding은 모두 `result == null && error.code == 403`으로 거부한다.
+- JWT payload synthetic decode는 `sub`, optional `ws`, `exp`/optional `nbf`/`iat` 시간 경계를 확인하지만 Centrifugo websocket의 signature acceptance 자체를 독립 증명하지는 않는다. `umask 077`+`mktemp -d`, auth/refresh 실패 body 비노출, 안전한 cleanup을 적용했고 focused verifier PASS; review 반영 최종 clean `runtime-db`·`docs` evidence는 PR #393에 첨부한다.
 
 ## MOMO-382 Workspace-first UX + Superapp Shell Planning (2026-07-15)
 

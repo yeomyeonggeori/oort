@@ -9,7 +9,11 @@
 #        - callback without X-Centrifugo-Proxy-Secret        -> HTTP 401
 #        - callback with a wrong secret                      -> HTTP 401
 #        - connection JWT meta binds the exact credential    -> allow
-#        - missing/arbitrary/mismatched credential binding   -> deny
+#        - refresh/missing/arbitrary/mismatched binding      -> deny
+#
+# This verifier derives callback metadata from a server-minted connection JWT
+# and proves the server-side credential binding. It does not independently
+# prove that Centrifugo accepted the JWT signature at its websocket boundary.
 #   2. Token revocation:
 #        - login persists access/refresh rows in `token`
 #        - POST /v1/auth/logout revokes them (idempotent) + audit_log row
@@ -21,6 +25,7 @@
 #        - audit_log records rate_limit.exceeded (once per burst)
 # =============================================================================
 set -euo pipefail
+umask 077
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
@@ -99,12 +104,9 @@ CURL_CONNECT_TIMEOUT="${CURL_CONNECT_TIMEOUT:-5}"
 CURL_MAX_TIME="${CURL_MAX_TIME:-15}"
 HEALTH_CONNECT_TIMEOUT="${HEALTH_CONNECT_TIMEOUT:-3}"
 HEALTH_MAX_TIME="${HEALTH_MAX_TIME:-5}"
-RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$"
-TMP_DIR="${TMPDIR:-/tmp}/momo-auth-hardening-$RUN_ID"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-auth-hardening.XXXXXX")"
 SERVER_LOG="$TMP_DIR/momo-server.log"
 SERVER_PID=""
-
-mkdir -p "$TMP_DIR"
 
 cleanup() {
   if [ "${SERVER_PID:-}" != "" ] && kill -0 "$SERVER_PID" >/dev/null 2>&1; then
@@ -117,7 +119,7 @@ cleanup() {
     fi
     sleep 1
   done
-  rm -rf "$TMP_DIR"
+  rm -rf -- "$TMP_DIR"
 }
 trap cleanup EXIT INT TERM
 
@@ -325,17 +327,25 @@ login_json() {
 }
 
 realtime_connection_meta() {
+  local token="$1"
+  local expected_member_id="$2"
+  local expected_workspace_id="$3"
   # The JWT comes directly from the authenticated realtime-token response.
-  # Decode only its payload and emit only the signed connection metadata that
-  # Centrifugo forwards when include_connection_meta=true. Never print the JWT.
-  printf '%s' "$1" | python3 -c '
+  # Decode its payload to synthesize Centrifugo callback metadata, then verify
+  # the claims relevant to this fixture. Signature acceptance belongs to the
+  # real Centrifugo websocket boundary and is not claimed by this verifier.
+  # Never print the JWT.
+  printf '%s' "$token" | python3 -c '
 import base64
 import binascii
 import json
 import sys
+import time
 import uuid
 
 try:
+    expected_member_id = sys.argv[1]
+    expected_workspace_id = sys.argv[2]
     token = sys.stdin.read().strip()
     parts = token.split(".")
     if len(parts) != 3 or not parts[1]:
@@ -344,6 +354,31 @@ try:
     decoded = json.loads(base64.b64decode(
         payload.encode("ascii"), altchars=b"-_", validate=True
     ))
+    if decoded.get("sub") != expected_member_id:
+        raise ValueError
+    workspace_id = decoded.get("ws")
+    if workspace_id is not None and workspace_id != expected_workspace_id:
+        raise ValueError
+
+    now = time.time()
+    exp = decoded.get("exp")
+    if isinstance(exp, bool) or not isinstance(exp, (int, float)):
+        raise ValueError
+    if exp <= now - 5 or exp > now + 600:
+        raise ValueError
+    nbf = decoded.get("nbf")
+    if nbf is not None:
+        if isinstance(nbf, bool) or not isinstance(nbf, (int, float)):
+            raise ValueError
+        if nbf > now + 5 or nbf >= exp:
+            raise ValueError
+    iat = decoded.get("iat")
+    if iat is not None:
+        if isinstance(iat, bool) or not isinstance(iat, (int, float)):
+            raise ValueError
+        if iat > now + 5 or iat >= exp or exp - iat > 600:
+            raise ValueError
+
     meta = decoded.get("meta")
     if not isinstance(meta, dict):
         raise ValueError
@@ -352,12 +387,47 @@ try:
     token_id = meta.get("token_id")
     if not isinstance(token_id, str):
         raise ValueError
-    uuid.UUID(token_id)
+    parsed_token_id = uuid.UUID(token_id)
+    if str(parsed_token_id) != token_id.lower():
+        raise ValueError
 except (UnicodeError, ValueError, TypeError, json.JSONDecodeError, binascii.Error):
     raise SystemExit("invalid realtime credential metadata")
 
 print(json.dumps(meta, separators=(",", ":"), sort_keys=True))
-'
+' "$expected_member_id" "$expected_workspace_id"
+}
+
+session_token_id() {
+  local raw_token="$1"
+  local expected_label="$2"
+  local token_digest
+  local token_id
+
+  # Mirror TokenStore's digest(rawToken, 'sha256') contract locally. Only the
+  # digest crosses the psql boundary; the raw bearer is never put in argv, SQL,
+  # logs, or evidence.
+  token_digest="$(printf '%s' "$raw_token" | python3 -c \
+    'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())')"
+  token_id="$(psql_run <<SQL
+SELECT id::text
+  FROM token
+ WHERE workspace_id = '$DEMO_WORKSPACE_ID'
+   AND actor_member_id = '$MEMBER_ID'
+   AND kind = 'session'
+   AND label = '$expected_label'
+   AND token_hash = decode('$token_digest', 'hex')
+   AND revoked_at IS NULL
+   AND (expires_at IS NULL OR expires_at > now());
+SQL
+)"
+  unset token_digest
+
+  if ! printf '%s' "$token_id" | grep -Eq \
+    '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+    echo "[auth-hardening] FAIL could not resolve exact active $expected_label token row" >&2
+    exit 1
+  fi
+  printf '%s' "$token_id"
 }
 
 subscribe_proxy_body() {
@@ -388,6 +458,18 @@ LOGIN1="$(login_json)"
 ACCESS1="$(printf '%s' "$LOGIN1" | jq -r '.accessToken')"
 REFRESH1="$(printf '%s' "$LOGIN1" | jq -r '.refreshToken')"
 MEMBER_ID="$(printf '%s' "$LOGIN1" | jq -r '.member.id')"
+if ! printf '%s' "$MEMBER_ID" | grep -Eq \
+  '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+  echo "[auth-hardening] FAIL login response member id is not a UUID" >&2
+  exit 1
+fi
+ACCESS_TOKEN_ID="$(session_token_id "$ACCESS1" access)"
+REFRESH_TOKEN_ID="$(session_token_id "$REFRESH1" refresh)"
+if [ "$ACCESS_TOKEN_ID" = "$REFRESH_TOKEN_ID" ]; then
+  echo "[auth-hardening] FAIL access and refresh tokens resolved to the same DB row" >&2
+  exit 1
+fi
+echo "[auth-hardening] PASS access and refresh tokens resolve to distinct exact DB rows" >&2
 
 api POST /v1/auth/realtime-token '{}' "$ACCESS1"
 expect_status 200 "active access token mints realtime connection token"
@@ -403,17 +485,27 @@ if ! printf '%s' "$REALTIME_TOKEN_RESPONSE" | jq -e \
   exit 1
 fi
 REALTIME_CONNECTION_TOKEN="$(printf '%s' "$REALTIME_TOKEN_RESPONSE" | jq -er '.token')"
-if ! CONNECTION_META="$(realtime_connection_meta "$REALTIME_CONNECTION_TOKEN" 2>/dev/null)"; then
+if ! CONNECTION_META="$(realtime_connection_meta \
+  "$REALTIME_CONNECTION_TOKEN" "$MEMBER_ID" "$DEMO_WORKSPACE_ID" 2>/dev/null)"; then
   echo "[auth-hardening] FAIL realtime connection JWT metadata is invalid" >&2
   exit 1
 fi
-echo "[auth-hardening] PASS realtime connection JWT carries validated credential metadata" >&2
+CONNECTION_TOKEN_ID="$(printf '%s' "$CONNECTION_META" | jq -er '.token_id')"
+CONNECTION_TOKEN_ID_CANONICAL="$(printf '%s' "$CONNECTION_TOKEN_ID" | tr '[:upper:]' '[:lower:]')"
+if [ "$CONNECTION_TOKEN_ID_CANONICAL" != "$ACCESS_TOKEN_ID" ]; then
+  echo "[auth-hardening] FAIL realtime credential is not bound to the presented access-token row" >&2
+  exit 1
+fi
+echo "[auth-hardening] PASS server-minted callback metadata binds the exact access-token DB row" >&2
 
 PROXY_BODY="$(subscribe_proxy_body "$MEMBER_ID" "$CONNECTION_META")"
 PROXY_BODY_WITHOUT_META="$(subscribe_proxy_body_without_meta "$MEMBER_ID")"
 ARBITRARY_META="$(printf '%s' "$CONNECTION_META" | jq -c \
   '.token_id = "00000000-0000-7000-8000-000000388999"')"
 ARBITRARY_PROXY_BODY="$(subscribe_proxy_body "$MEMBER_ID" "$ARBITRARY_META")"
+REFRESH_META="$(printf '%s' "$CONNECTION_META" | jq -c \
+  --arg token_id "$REFRESH_TOKEN_ID" '.token_id = $token_id')"
+REFRESH_PROXY_BODY="$(subscribe_proxy_body "$MEMBER_ID" "$REFRESH_META")"
 MISMATCH_MEMBER_ID="00000000-0000-7000-8000-000000000101"
 MISMATCH_PROXY_BODY="$(subscribe_proxy_body "$MISMATCH_MEMBER_ID" "$CONNECTION_META")"
 
@@ -432,17 +524,21 @@ api POST /v1/centrifugo/subscribe "$PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $
 expect_status 200 "subscribe proxy with correct shared secret accepted"
 expect_jq '.result != null and .error == null' "authorized member subscribe allowed"
 
+api POST /v1/centrifugo/subscribe "$REFRESH_PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
+expect_status 200 "subscribe proxy answers for refresh-row credential binding"
+expect_jq '.result == null and .error.code == 403' "refresh-token row cannot authorize realtime subscribe"
+
 api POST /v1/centrifugo/subscribe "$PROXY_BODY_WITHOUT_META" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
 expect_status 200 "subscribe proxy answers for missing credential binding"
-expect_jq '.error.code == 403' "missing credential binding denied"
+expect_jq '.result == null and .error.code == 403' "missing credential binding denied"
 
 api POST /v1/centrifugo/subscribe "$ARBITRARY_PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
 expect_status 200 "subscribe proxy answers for arbitrary credential binding"
-expect_jq '.error.code == 403' "arbitrary credential binding denied"
+expect_jq '.result == null and .error.code == 403' "arbitrary credential binding denied"
 
 api POST /v1/centrifugo/subscribe "$MISMATCH_PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
 expect_status 200 "subscribe proxy answers for mismatched credential binding"
-expect_jq '.error.code == 403' "credential binding for another member denied"
+expect_jq '.result == null and .error.code == 403' "credential binding for another member denied"
 
 # --------------------------------------------------------------------------
 # 2. Token persistence + logout revocation + revoked-token 401
@@ -478,7 +574,7 @@ expect_jq '.alreadyRevoked == true' "repeated logout reports alreadyRevoked"
 
 api POST /v1/centrifugo/subscribe "$PROXY_BODY" "" "X-Centrifugo-Proxy-Secret: $PROXY_TEST_SECRET"
 expect_status 200 "subscribe proxy answers after logout"
-expect_jq '.error != null' "subscribe denied for member with no active session"
+expect_jq '.result == null and .error.code == 403' "revoked exact access-token binding denied"
 
 LOGOUT_AUDIT="$(psql_run <<SQL
 SELECT count(*) FROM audit_log
@@ -553,7 +649,7 @@ for i in $(seq 1 "$RACE_N"); do
     401) RACE_401=$((RACE_401 + 1)) ;;
     *)
       echo "[auth-hardening] FAIL concurrent refresh $i returned unexpected HTTP '${RACE_STATUS:-none}'" >&2
-      cat "$RACE_DIR/body-$i.json" >&2 || true
+      echo "[auth-hardening] response body withheld because refresh responses may contain credentials" >&2
       exit 1
       ;;
   esac
@@ -618,4 +714,4 @@ api GET /health
 expect_status 200 "/health is excluded from rate limiting"
 
 echo "[auth-hardening] MOMO-300 auth hardening gate PASS"
-echo "[auth-hardening] evidence: proxy-secret 401, exact realtime credential allow, missing/arbitrary/mismatched/revoked credential deny, revoked-token 401, logout idempotent + audit, refresh rotation replay 401, member 429 + Retry-After + audit"
+echo "[auth-hardening] evidence: proxy-secret 401, server-minted exact access-row binding allow, refresh/missing/arbitrary/mismatched/revoked binding deny, revoked-token 401, logout idempotent + audit, refresh rotation replay 401, member 429 + Retry-After + audit"
