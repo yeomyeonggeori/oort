@@ -3,6 +3,7 @@
 > 01 문서 Track B의 "파일 업로드가 숨은 최대 리스크(스토리지 백엔드 결정)"를 해소하는 설계.
 > **기존 정본과의 관계:** MOMO-122(`research/11-agent-runtime/12-google-workspace-connector-v0.md`, per-user OAuth·read-mostly·approval-gated writes)와 MOMO-123(enterprise admin/DWD overlay)을 **확장하며 모순되지 않는다.** 단 §5의 정정 1건 포함.
 > 결론 먼저: **자체 오브젝트 스토리지를 만들지 않는다.** workspace당 공유 드라이브 1개 + 서비스 계정 멤버십으로 Drive를 스토리지 계층으로 쓰고, RAG는 pgvector 파생 인덱스 + 김인턴 위키 2층으로 간다.
+> **2026-07-14 상태:** 아래 workspace archive/shared-drive 경로는 보안·retention ADR 전 역사적 제안으로 동결됐다. `MOMO-320` 번호는 완료된 env drift guard 전용이므로 재사용 금지다. 첫 권고 slice는 새 ID의 per-user selected-file read/citation이며 최신 계약은 `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md`를 따른다.
 
 ---
 
@@ -79,7 +80,7 @@ Karpathy의 LLM knowledge base 패턴 + DeepWiki/memory-bank 프랙티스 기반
 
 | 제안 | 내용 | 우선순위 |
 |---|---|---|
-| MOMO-320 | `AttachmentStore` 프로토콜 + workspace archive 모드(공유 드라이브 프로비저닝 + SA 멤버십) + resumable 업로드 클라 직송 | P1 (01 문서 MOMO-306의 파일 항목을 대체) |
+| GWS-ARCHIVE-ID-PENDING | `AttachmentStore` 프로토콜 + workspace archive 모드(공유 드라이브 프로비저닝 + SA 멤버십) + resumable 업로드 클라 직송. ADR-0113/0116 전 동결 | P1 후보. MOMO-320 재사용 금지 |
 | MOMO-321 | changes.list 폴러 + 추출/청크/임베딩 워커 + tombstone→Memory Plane 연결 | P1 (MOMO-310과 병합 가능) |
 | MOMO-322 | 김인턴 위키 v0: 위키 문서 규약 + propose-write 승인 플로우 + 인용 강제 | P2 |
 | MOMO-323 | 스펙 정정 3건(§5) + Internal consent 셋업 runbook(`docs/`) | P1 (문서만, 빠름) |

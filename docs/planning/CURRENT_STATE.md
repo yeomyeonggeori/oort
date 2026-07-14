@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-14 · 기준선: **ADR-0112 Wave A(370..372) + MOMO-379 창 크롬 핫픽스 종결** — 듀얼 밀도, 채널 헤더, 멤버 디렉터리/DM, macOS 창 크롬 실창 검증까지 main `b5e572b`에 랜딩. Work v0(362..365)·unread(366/367) 기반도 유지되며 root gate green · 통합 책임: `momo-main`
+> 기준일: 2026-07-14 · 기준선: **ADR-0112 Wave A(370..372) + MOMO-379 창 크롬 핫픽스 종결 + two-track planning baseline** — 듀얼 밀도, 채널 헤더, 멤버 디렉터리/DM, macOS 창 크롬 실창 검증과 Fable/Codex 기획 동기화 계약까지 main `348c79a`에 랜딩. Work v0(362..365)·unread(366/367) 기반도 유지되며 root gate green · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -19,7 +19,7 @@
 | 트랙 | 주 실행 위치 | 목적 | 현재 경계 | 다음 체크포인트 |
 |---|---|---|---|---|
 | **UX/UI + 메신저 기능** | `momo-main` | 성재의 실창 수동 QA와 요청을 재현하고 Slack 기본기와 Codex급 상호작용을 사용자 체감 기준으로 다듬는다. | 한 번에 하나의 UX 결함/웨이브를 main이 오케스트레이션한다. 창 크롬 결함은 스냅샷만으로 닫지 않고 실창 AX 측정을 필수로 한다. | 최신 앱에서 MOMO-379 육안 재확인 → 멤버 행 이름 절단 후보 판정 → ADR-0112 Wave B/C 티켓화 여부 결정 |
-| **슈퍼앱 엔진** | 별도 planning ID + planning branch/worktree | Work·문서·Google Workspace·plugin/webhook·MCP·승인 실행을 채널 원장 위에서 자동화한다. | engine planner는 구현 worker가 아니다. 공용 정본을 직접 고치지 않고 자기 branch의 audit/ADR/research/proposal/handoff만 만든다. `BUILD_TICKETS.md` 변경안은 proposal 안에 제안하고, `momo-main`이 성재 승인 뒤 정본에 적용한다. | 구현·스펙 상태 감사를 바탕으로 builder chain 제안. 공개 API/보안/DB 경계 변경은 Accepted ADR 선행 |
+| **슈퍼앱 엔진** | 별도 planning ID + planning branch/worktree | Work·문서·Google Workspace·plugin/webhook·MCP·승인 실행을 채널 원장 위에서 자동화한다. | engine planner는 구현 worker가 아니다. 공용 정본을 직접 고치지 않고 자기 branch의 audit/ADR/research/proposal/handoff만 만든다. `BUILD_TICKETS.md` 변경안은 proposal 안에 제안하고, `momo-main`이 성재 승인 뒤 정본에 적용한다. | PLN-20260714-02 감사·보안/아키텍처 리뷰 완료. ADR-0113~0116 owner 결정 후 foundation builder chain 발급 |
 
 엔진 준비도(2026-07-14 코드/정본 대조):
 
@@ -38,7 +38,7 @@
 | `ADR-0111` | Agent Work Surface — 메신저 내 업무·터미널·코드 실행 (성재 발제) | Fable | **`accepted`** (2026-07-13, Option A=BYOA) | 성재 ✓ | 배치 종결 (2026-07-13) |
 | `ADR-0112` | 제품 표면 재정렬 — 듀얼 모드·Slack 기본기·Codex급 상호작용 (성재 발제) | Fable | **`accepted`** (2026-07-14) | 성재 ✓ | Wave A+379 종결; B/C는 육안 QA 후 발급 |
 | `PLN-20260714-01` | UX/UI 수동 QA + ADR-0112 Wave B/C 실행 순서 | `momo-main` | `waiting-owner` | 성재 | 최신 앱에서 MOMO-379 육안 확인과 새 UX 피드백을 받은 뒤 B/C 계약·handoff를 발급할지 판정 |
-| `PLN-20260714-02` | 슈퍼앱 엔진 실행 로드맵(Work·MCP·GWS·plugin/webhook·approval) | unclaimed | `queued` | 성재 | engine planner claim → 자기 planning branch에 code/spec gap audit·ADR 후보·builder chain 제안 작성 |
+| `PLN-20260714-02` | 슈퍼앱 엔진 실행 로드맵(Work·MCP·GWS·plugin/webhook·approval) | engine planner + `momo-main` review | **`reviewed-waiting-owner`** | 성재 | proposal의 ADR-0113~0116 권고와 issue reconciliation 승인 → ADR draft goal부터 순차 발급 |
 | `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | 내부 팀 알파를 현재 실행 가정으로 검토하되, 확정 표기는 성재 승인과 ADR 정본화 이후로 제한 |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |
 | `ADR-0105..0108` | 검색·정체성·CI·서버 스택 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |
@@ -94,14 +94,15 @@
 
 ## 4. 다음 체크포인트
 
-1. ~~Phase 0 / UI W1 / Phase A / Work v0 / Wave 2 / ADR-0112 Wave A / MOMO-379~~ — **2026-07-14까지 종결**. canonical main은 `b5e572b`, 열린 PR은 2026-07-14 감사 시점에 0개다.
+1. ~~Phase 0 / UI W1 / Phase A / Work v0 / Wave 2 / ADR-0112 Wave A / MOMO-379~~ — **2026-07-14까지 종결**. canonical main은 two-track planning baseline `348c79a`이며, 열린 PR은 2026-07-14 감사 시점에 0개다.
 2. **성재 육안 검증 대기**: MOMO-379 최신 앱에서 타이틀 중복·패널 헤더 침범·트래픽라이트 겹침 재확인. 멤버 행 이름 절단은 별도 작은 UX hotfix 후보로 판정한다.
 3. **UX 다음 후보(아직 미발급):** ADR-0112 Wave B 373..375(호출 옵션·승인 프리셋·하단 드로어), Wave C 376..378(에이전트 대시보드·온보딩 여정·런치 WOW). 수동 QA 결과를 먼저 반영해 계약을 고정한다.
-4. **엔진 다음 단계(아직 구현 발급 전):** `PLN-20260714-02`를 engine planner가 claim한 뒤 Work/approval 기반 위에 Context Broker → inbound MCP → plugin/webhook → Google Workspace 순서와 보안 경계를 감사하고 builder chain을 제안한다.
-5. **Phase A 운영 단계**: GHCR publish 1회 → EC2 provision → `docs/runbooks/aws-internal-alpha-deploy.md` 절차 — AWS 리소스 생성은 성재 결정.
-6. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한). agent 신규 pairing 표면 티켓(103 은퇴 후 재생성 경로)도 함께 검토.
-7. MOMO-354 design-review Medium 5건 이월 (BUILD_TICKETS 기록) — presence 하드코딩·비활성 author 표시·subscribe 순서 의존·에러 카피·데모 서사. 성재 판단 대기.
-8. dogfood 실사용 확인 권장: @hermes 승인 왕복(349), 실행 중 상태/부분응답(350), 실제 Codex Work 실행 + 승인/resume 왕복.
+4. **엔진 다음 단계(아직 구현 발급 전):** `PLN-20260714-02` 감사와 독립 security/architecture review를 완료했다. 다음은 ADR-0113(credential/capability/action), ADR-0116(context/memory retention)을 먼저 승인하고 Capability/Memory/Context foundation을 여는 것이다. Codex Work는 별도 ADR-0114 → app-server bridge → `E-WORK-1`로 GWS와 독립 진행한다.
+5. **엔진 ID/잠금:** MOMO-307은 Context Broker로 강화 유지하고, MOMO-308은 `ready`를 취소한 non-claimable MCP umbrella다(SE-03A/B/C 새 ID 대기). MOMO-310은 advanced RAG, MOMO-320은 완료된 env drift 전용, MOMO-321/322는 후속 archive/wiki로 동결한다. engine PR은 기본적으로 `clients/macOS`를 수정하지 않는다.
+6. **Phase A 운영 단계**: GHCR publish 1회 → EC2 provision → `docs/runbooks/aws-internal-alpha-deploy.md` 절차 — AWS 리소스 생성은 성재 결정.
+7. **legacy gateway secret 물리 제거** — 보안 정리 티켓 발급은 성재 승인 대기 (호환 창 종료 조건 충족, M7 전 시한). agent 신규 pairing 표면 티켓(103 은퇴 후 재생성 경로)도 함께 검토.
+8. MOMO-354 design-review Medium 5건 이월 (BUILD_TICKETS 기록) — presence 하드코딩·비활성 author 표시·subscribe 순서 의존·에러 카피·데모 서사. 성재 판단 대기.
+9. dogfood 실사용 확인 권장: @hermes 승인 왕복(349), 실행 중 상태/부분응답(350), 실제 Codex Work 실행 + 승인/resume 왕복.
 
 ## 5. 이 문서 갱신 규칙
 
