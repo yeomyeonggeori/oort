@@ -176,6 +176,54 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         return image
     }
 
+    private func renderWorkspaceSettingsAccessibility() async throws -> NSImage {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot")
+        let suite = "momo.snapshot.workspace-settings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set(MomoUILanguage.english.rawValue, forKey: MomoUILanguage.appStorageKey)
+        let hostingView = NSHostingView(
+            rootView: ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                    .ignoresSafeArea()
+                MomoWorkspaceSettingsSurface(
+                    copy: MomoWorkspaceCopy(language: .english),
+                    viewModel: viewModel
+                )
+            }
+            .frame(width: settingsSize.width, height: settingsSize.height)
+            .environment(\.colorScheme, .light)
+            .environment(\.dynamicTypeSize, .accessibility1)
+            .defaultAppStorage(defaults)
+        )
+        let appearance = NSAppearance(named: .accessibilityHighContrastAqua)
+        hostingView.frame = CGRect(origin: .zero, size: settingsSize)
+        hostingView.appearance = appearance
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(settingsSize.width * 2),
+            pixelsHigh: Int(settingsSize.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no accessible workspace settings bitmap")
+        }
+        representation.size = settingsSize
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        let image = NSImage(size: settingsSize)
+        image.addRepresentation(representation)
+        return image
+    }
+
     private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
         guard let directory = ProcessInfo.processInfo.environment["MOMO_DESIGN_REVIEW_ARTIFACT_DIR"] else {
             return
@@ -316,5 +364,14 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 XCTAssertEqual(image.size, settingsSize)
             }
         }
+    }
+
+    func testWorkspaceSettingsWritesIncreasedContrastLargeTextRaster() async throws {
+        let image = try await renderWorkspaceSettingsAccessibility()
+        XCTAssertEqual(image.size, settingsSize)
+        try writeDesignReviewArtifact(
+            image,
+            named: "momo-383-workspace-settings-increased-contrast-large-text.png"
+        )
     }
 }

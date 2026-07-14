@@ -37,6 +37,40 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try WorkspaceRoutes.normalizedName("momo\u{0000}team"))
     }
 
+    func testWorkspaceRootRLSAndInviteDiscoveryStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/009_workspace_tenant_rls.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("ALTER TABLE workspace ENABLE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("ALTER TABLE workspace FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("USING (id = current_setting('app.workspace_id', true)::uuid)"))
+        XCTAssertTrue(migration.contains("WITH CHECK (id = current_setting('app.workspace_id', true)::uuid)"))
+        XCTAssertTrue(migration.contains("SECURITY DEFINER"))
+        XCTAssertTrue(migration.contains("SET search_path = pg_catalog"))
+        XCTAssertTrue(migration.contains("w.deleted_at IS NULL"))
+        XCTAssertTrue(migration.contains("public.digest(raw_code, 'sha256')"))
+        XCTAssertTrue(migration.contains("CREATE SCHEMA IF NOT EXISTS momo_join_private"))
+        XCTAssertTrue(migration.contains("REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC"))
+        XCTAssertTrue(migration.contains("REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text) FROM PUBLIC"))
+        XCTAssertTrue(migration.contains("GRANT USAGE ON SCHEMA momo_join_private TO momo_app"))
+        XCTAssertTrue(migration.contains("GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app"))
+        XCTAssertFalse(migration.contains("EXECUTE format"))
+
+        let joinSource = try String(
+            contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/JoinRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(joinSource.contains("SELECT momo_join_private.invite_workspace_id(\\(code))"))
+        XCTAssertTrue(joinSource.contains("withTenantConnection(\n            workspaceID: workspaceID"))
+        XCTAssertFalse(joinSource.contains("SELECT id\n                  FROM workspace"))
+        XCTAssertFalse(joinSource.contains("for workspaceID in workspaceIDs"))
+    }
+
     func testJoinIdentityValidationNormalizesInputs() throws {
         XCTAssertEqual(try JoinRoutes.normalizedEmail("  USER@Example.COM  "), "user@example.com")
         XCTAssertEqual(try JoinRoutes.normalizedDisplayName("  New Human  "), "New Human")

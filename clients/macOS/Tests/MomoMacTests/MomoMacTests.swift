@@ -399,6 +399,56 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
+    func testWorkspaceRecoveryPresentationCoversNoCacheFailureAndAccessibilityCopy() {
+        let english = MomoWorkspaceCopy(language: .english)
+        let recovery = MomoWorkspaceIdentityRecoveryPresentation(
+            workspace: nil,
+            usesCache: false,
+            error: "network unavailable",
+            copy: english
+        )
+
+        XCTAssertEqual(recovery?.label, "Workspace unavailable · Retry")
+        XCTAssertTrue(recovery?.help.contains("Shift-Command-R") == true)
+        XCTAssertEqual(
+            MomoWorkspaceIdentityRecoveryButton.accessibilityIdentifier,
+            "workspace-identity-retry"
+        )
+        XCTAssertNil(
+            MomoWorkspaceIdentityRecoveryPresentation(
+                workspace: nil,
+                usesCache: false,
+                error: nil,
+                copy: english
+            )
+        )
+        XCTAssertEqual(
+            MomoWorkspaceIdentityRecoveryPresentation(
+                workspace: nil,
+                usesCache: false,
+                error: "오류",
+                copy: MomoWorkspaceCopy(language: .korean)
+            )?.label,
+            "워크스페이스 오류 · 다시 시도"
+        )
+    }
+
+    func testWorkspaceNameDraftUsesOneNormalizedValueForCountAndValidation() {
+        let valid = MomoWorkspaceNameDraft("  Shared Workspace  \n")
+        XCTAssertEqual(valid.normalized, "Shared Workspace")
+        XCTAssertEqual(valid.characterCount, 16)
+        XCTAssertTrue(valid.isValid)
+
+        let whitespace = MomoWorkspaceNameDraft(" \n ")
+        XCTAssertEqual(whitespace.characterCount, 0)
+        XCTAssertFalse(whitespace.isValid)
+
+        let controlCharacter = MomoWorkspaceNameDraft("valid\u{0007}")
+        XCTAssertEqual(controlCharacter.characterCount, 6)
+        XCTAssertFalse(controlCharacter.isValid)
+    }
+
+    @MainActor
     func testStaleWorkspaceRefreshCannotOverwriteNewerRename() async throws {
         let defaultsSuite = "momo-workspace-race-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
@@ -457,6 +507,106 @@ final class MomoMacTests: XCTestCase {
         await refresh.value
 
         XCTAssertNil(viewModel.workspaceId)
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+    }
+
+    @MainActor
+    func testClearedSessionRejectsLateBootstrapChannelsAndDownstreamState() async throws {
+        let defaultsSuite = "momo-bootstrap-session-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "bootstrap.session.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await backend.blockNextChannelsRead()
+
+        let bootstrap = Task { @MainActor in
+            await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        }
+        await backend.waitForChannelsReadCount(1)
+        await viewModel.clearSessionSensitiveState()
+        await backend.releaseNextChannelsRead()
+        await bootstrap.value
+
+        XCTAssertNil(viewModel.workspaceId)
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertTrue(viewModel.members.isEmpty)
+        XCTAssertTrue(viewModel.channels.isEmpty)
+        XCTAssertTrue(viewModel.readStatesByChannel.isEmpty)
+        XCTAssertTrue(viewModel.approvals.isEmpty)
+        XCTAssertNil(viewModel.selectedChannelId)
+        XCTAssertNil(viewModel.connectionError)
+    }
+
+    @MainActor
+    func testConflictReloadAfterSessionClearDoesNotRestoreErrorState() async throws {
+        let defaultsSuite = "momo-conflict-session-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "conflict.session.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        await backend.failNextWorkspaceUpdateWithConflict()
+        await backend.blockNextWorkspaceRead()
+
+        let update = Task { @MainActor in
+            await viewModel.updateWorkspaceName("Conflicting Name")
+        }
+        await backend.waitForWorkspaceReadCount(2)
+        await viewModel.clearSessionSensitiveState()
+        await backend.releaseNextWorkspaceRead()
+        let didUpdate = await update.value
+        XCTAssertFalse(didUpdate)
+
+        XCTAssertNil(viewModel.workspaceId)
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertNil(viewModel.workspaceNameUpdateError)
+        XCTAssertNil(viewModel.workspaceNameUpdateIssue)
+        XCTAssertNil(viewModel.connectionError)
+        XCTAssertNil(viewModel.connectionIssue)
+    }
+
+    @MainActor
+    func testAuthoritativeWorkspaceDenialDeletesExactCacheBeforeLaterServerFailure() async throws {
+        let defaultsSuite = "momo-workspace-denial-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsSuite))
+        defer { defaults.removePersistentDomain(forName: defaultsSuite) }
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledWorkspaceIdentityBackend(base: base, cacheScope: "denial.test")
+        let viewModel = ChatViewModel(
+            chat: backend,
+            agentTransport: base,
+            workspaceIdentityDefaults: defaults
+        )
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        XCTAssertEqual(
+            defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("momo.workspace.identity.") }.count,
+            1
+        )
+
+        await backend.failNextWorkspaceRead(with: .backendStatus(403))
+        await viewModel.refreshWorkspaceIdentity()
+        XCTAssertNil(viewModel.workspace)
+        XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+        XCTAssertFalse(
+            defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix("momo.workspace.identity.") }
+        )
+
+        await backend.failNextWorkspaceRead(with: .backendStatus(503))
+        await viewModel.refreshWorkspaceIdentity()
         XCTAssertNil(viewModel.workspace)
         XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
     }
@@ -2320,6 +2470,7 @@ final class MomoMacTests: XCTestCase {
 
         XCTAssertNil(viewModel.workspace)
         XCTAssertFalse(viewModel.workspaceIdentityUsesCache)
+        XCTAssertNil(UserDefaults.standard.data(forKey: cacheKey))
     }
 
     func testRESTBackendBulkReadStateAndMarkReadUseADR0109Contract() async throws {
@@ -4655,6 +4806,7 @@ private actor WorkspaceAuthenticationFailureBackend: ChatBackend, WorkspaceBacke
 private enum ControlledWorkspaceReadFailure: Sendable {
     case unknown
     case cancellation
+    case backendStatus(Int)
 }
 
 private struct UnknownWorkspaceReadError: Error, Sendable {}
@@ -4672,6 +4824,11 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
     private var workspaceReadCount = 0
     private var readWaiters: [ReadWaiter] = []
     private var blockedReadReleases: [CheckedContinuation<Void, Never>] = []
+    private var shouldBlockNextChannelsRead = false
+    private var channelsReadCount = 0
+    private var channelsReadWaiters: [ReadWaiter] = []
+    private var blockedChannelsReadReleases: [CheckedContinuation<Void, Never>] = []
+    private var shouldFailNextWorkspaceUpdateWithConflict = false
 
     init(base: LiveChatBackend, cacheScope: String) {
         self.base = base
@@ -4686,6 +4843,14 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
         nextReadFailure = failure
     }
 
+    func blockNextChannelsRead() {
+        shouldBlockNextChannelsRead = true
+    }
+
+    func failNextWorkspaceUpdateWithConflict() {
+        shouldFailNextWorkspaceUpdateWithConflict = true
+    }
+
     func waitForWorkspaceReadCount(_ target: Int) async {
         guard workspaceReadCount < target else { return }
         await withCheckedContinuation { continuation in
@@ -4696,6 +4861,18 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
     func releaseNextWorkspaceRead() {
         guard !blockedReadReleases.isEmpty else { return }
         blockedReadReleases.removeFirst().resume()
+    }
+
+    func waitForChannelsReadCount(_ target: Int) async {
+        guard channelsReadCount < target else { return }
+        await withCheckedContinuation { continuation in
+            channelsReadWaiters.append(ReadWaiter(target: target, continuation: continuation))
+        }
+    }
+
+    func releaseNextChannelsRead() {
+        guard !blockedChannelsReadReleases.isEmpty else { return }
+        blockedChannelsReadReleases.removeFirst().resume()
     }
 
     func workspaceIdentityCacheServerScope() async -> String {
@@ -4711,6 +4888,8 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
                 throw UnknownWorkspaceReadError()
             case .cancellation:
                 throw CancellationError()
+            case .backendStatus(let status):
+                throw BackendError.problem(status: status, title: "controlled failure", detail: nil)
             }
         }
 
@@ -4733,7 +4912,11 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
         name: String,
         expectedUpdatedAtMs: Int64
     ) async throws -> Workspace {
-        try await base.updateWorkspaceName(
+        if shouldFailNextWorkspaceUpdateWithConflict {
+            shouldFailNextWorkspaceUpdateWithConflict = false
+            throw BackendError.problem(status: 409, title: "workspace changed", detail: nil)
+        }
+        return try await base.updateWorkspaceName(
             workspace: workspace,
             name: name,
             expectedUpdatedAtMs: expectedUpdatedAtMs
@@ -4765,7 +4948,17 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
     }
 
     func channels(workspace: WorkspaceID) async throws -> [Channel] {
-        try await base.channels(workspace: workspace)
+        let shouldBlock = shouldBlockNextChannelsRead
+        shouldBlockNextChannelsRead = false
+        let snapshot = try await base.channels(workspace: workspace)
+        channelsReadCount += 1
+        resumeSatisfiedWaiters(&channelsReadWaiters, count: channelsReadCount)
+        if shouldBlock {
+            await withCheckedContinuation { continuation in
+                blockedChannelsReadReleases.append(continuation)
+            }
+        }
+        return snapshot
     }
 
     func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
@@ -4807,6 +5000,18 @@ private actor ControlledWorkspaceIdentityBackend: ChatBackend, WorkspaceBackend,
             }
         }
         readWaiters = pending
+    }
+
+    private func resumeSatisfiedWaiters(_ waiters: inout [ReadWaiter], count: Int) {
+        var pending: [ReadWaiter] = []
+        for waiter in waiters {
+            if count >= waiter.target {
+                waiter.continuation.resume()
+            } else {
+                pending.append(waiter)
+            }
+        }
+        waiters = pending
     }
 }
 

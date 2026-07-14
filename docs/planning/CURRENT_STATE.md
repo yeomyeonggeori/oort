@@ -1,6 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
-> 기준일: 2026-07-15 · 기준선: **MOMO-381 슈퍼앱 엔진 기획 통합 + MOMO-383 workspace-first 구현 검수** — PLN-20260714-02 리뷰 결과와 MOMO-382 실행 분할이 main에 랜딩했고, 첫 builder MOMO-383은 ADR-0118 기반 durable workspace name/API/sidebar identity와 correctness review 4건, worker `swift`/`macos-ui` gate를 닫았다. #388 merge/rebase 뒤 momo-main `runtime-db` 최종 gate가 남았다. Work v0(362..365)·unread(366/367)·ADR-0112 Wave A+MOMO-379 기반은 유지된다 · 통합 책임: `momo-main`
+> 기준일: 2026-07-15 · 기준선: **MOMO-381 슈퍼앱 엔진 기획 통합 + MOMO-383 workspace-first 구현 검수** — PLN-20260714-02 리뷰 결과와 MOMO-382 실행 분할이 main에 랜딩했고, 첫 builder MOMO-383은 ADR-0118 기반 durable workspace name/API/sidebar identity, bootstrap/cache race 보강, workspace root RLS와 locked join lookup, no-cache recovery UX를 구현했다. worker full `runtime-db`와 launch 포함 `macos-ui` gate가 PASS했고 momo-main final rereview가 남았다. Work v0(362..365)·unread(366/367)·ADR-0112 Wave A+MOMO-379 기반은 유지된다 · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.
 
@@ -10,7 +10,7 @@
 - 기획 체계: 성재가 최종 결정권자이고, Fable과 GPT 5.6은 동등한 planner다. `momo-main`은 병렬 기획 결과를 순차 통합하는 유일한 sync authority다.
 - 구현 체계: Codex worker가 GitHub Issue 하나를 goal 하나로 claim하고 최대 5개까지 병렬 작업한다. worker는 PR handoff 후 멈춘다.
 - 현재 큰 결정: ADR-0100(거버넌스), ADR-0101(per-agent bearer), **ADR-0102(실행 경로 — Option C 이중 경로 + 서버 보장 매트릭스, 2026-07-12)** 전부 Accepted. 다음 결정 큐는 ADR-0103(로드맵 정렬)부터.
-- 현재 구현 체인: **workspace-first messenger shell** — ADR-0112 Wave A+MOMO-379로 듀얼 밀도, 채널 헤더, 멤버 디렉터리/DM, 창 크롬을 랜딩했다. MOMO-383은 toolbar capsule을 제거하고 sidebar workspace identity/menu와 ADR-0118의 active-member read/owner-admin rename을 구현했다. 캐시 tenant/account 격리, auth/cache fail-closed, request/session race guard, cancellation 보존과 전체 Swift 352 tests를 닫았고 #388 뒤 final runtime gate 대기다. merge 후 channel 생성 sheet/tooltip(MOMO-384 `#390`)과 one-click DM/member inspector(MOMO-385 `#391`)를 열고, 둘 뒤 RLS workspace 검색(MOMO-386 `#392`)을 진행한다. `Control+backtick` transcript drawer는 MOMO-375 후보이나 실제 command input은 ADR-0114 승인 전 구현하지 않는다.
+- 현재 구현 체인: **workspace-first messenger shell** — ADR-0112 Wave A+MOMO-379로 듀얼 밀도, 채널 헤더, 멤버 디렉터리/DM, 창 크롬을 랜딩했다. MOMO-383은 toolbar capsule을 제거하고 sidebar workspace identity/menu와 ADR-0118의 active-member read/owner-admin rename을 구현했다. 캐시 tenant/account 격리와 authoritative-denial 삭제, 모든 bootstrap await/409 reload의 generation guard, cancellation 보존, workspace root RLS/locked join lookup, no-cache retry UX를 전체 Swift 360 tests와 full runtime-db/macos-ui로 닫았다. merge 후 channel 생성 sheet/tooltip(MOMO-384 `#390`)과 one-click DM/member inspector(MOMO-385 `#391`)를 열고, 둘 뒤 RLS workspace 검색(MOMO-386 `#392`)을 진행한다. `Control+backtick` transcript drawer는 MOMO-375 후보이나 실제 command input은 ADR-0114 승인 전 구현하지 않는다.
 - 운영 노트(2026-07-11): compose 컨테이너는 repo config 변경을 자동 반영하지 않는다 — infra config를 바꾼 merge 뒤에는 momo_main Centrifugo 재시작 필요(MOMO-338 config drift로 root gate 107/102 오류 전례). drift guard 자동화 티켓은 성재 승인 대기 제안.
 - 이전 Hermes/local-dogfood dirty snapshot은 `codex/archive-local-solo-reconcile-20260710` / `eb09627`에 보존했다. canonical root `main`에는 정식 리뷰·PR을 통과한 변경만 반영한다.
 
@@ -81,7 +81,7 @@
 | ADR-0112 D6 hotfix | issue `#379`/PR `#380` | MOMO-379 창 크롬 정합 2차 | `done` (`cef7430`, planning baseline `b5e572b`) | 완료 |
 | 슈퍼앱 엔진 기획 통합 | `2026-07-14-pln-20260714-02-superapp-engine.md` | MOMO-381 `#383` | `done` (PR #384, main `011b630`) | 완료 — ADR draft queue 대기 |
 | Workspace-first UX planning | `2026-07-15-workspace-first-superapp-shell.md` | MOMO-382 `#385` | `done` (PR #386, main `6f89d3b`) | 실행 체인 정본화 완료 |
-| Workspace-first UX builders | 같은 패킷 | MOMO-383 `#387` → MOMO-384 `#390` / MOMO-385 `#391` → MOMO-386 `#392` | `in-progress` | 383 review fix·worker gates 완료, #388 뒤 final runtime-db/review 후 390/391 unblock |
+| Workspace-first UX builders | 같은 패킷 | MOMO-383 `#387` → MOMO-384 `#390` / MOMO-385 `#391` → MOMO-386 `#392` | `in-progress` | 383 review fix·full worker gates 완료, momo-main final rereview 후 390/391 unblock |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 

@@ -1884,9 +1884,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] workspace icon/invite policy는 이 goal에서 local draft를 서버 영속 설정으로 과장하지 않고 후속 API 범위로 남김.
 - [x] 표준/좁은 창에서 traffic light, sidebar, channel header가 겹치지 않고 기존 MOMO-379 AX 기하 유지. 전체화면은 최종 macos-ui review evidence에서 닫는다.
 - [x] fake multi-workspace rail과 `Add workspace` affordance는 ADR-0117 전 금지.
-- [x] stale GET/rename/session race를 generation+`updatedAtMs` guard로 차단하고 unknown error cache fallback default-deny, cancellation 보존, demo cache 비영속, apostrophe verifier 복원을 focused regression 6건으로 고정.
-- [x] light/dark 실창 evidence + design-review Blocker 0 + worker `swift`/`macos-ui` local gate PASS. 전체 Swift Core 24·Server 78·Relay 2·Worker 29·macOS 219 = 352 tests 0 failure.
-- [ ] #388 merge/rebase 뒤 momo-main clean `runtime-db` 최종 gate + PR #389 final rereview/merge.
+- [x] stale GET/rename/session race를 generation+`updatedAtMs` guard로 차단하고 bootstrap의 모든 await/subscription과 409 reload 뒤 session/workspace generation을 재검증. 401/403/404 exact persistent cache 삭제, unknown error fallback default-deny, cancellation 보존, demo cache 비영속, apostrophe verifier 복원을 회귀 테스트로 고정.
+- [x] migration 009로 workspace root `ENABLE/FORCE RLS` + exact tenant policy를 추가. join discovery는 locked `momo_join_private` schema의 fixed-search-path UUID-only 함수로 최소화하고 PUBLIC/worker/relay/platform 거부 및 broad public function grant 뒤 비재확장을 검증.
+- [x] no-cache sidebar error에도 localized retry, `⇧⌘R`, VoiceOver label/hint를 제공. settings spacing scale 준수와 trimmed name counter/validation/save 일치, increased-contrast/large-text raster 2종 PASS.
+- [x] design-review Blocker 0, full `runtime-db`와 launch 포함 `macos-ui` local gate PASS. 전체 Swift Core 24·Server 79·Relay 2·Worker 29·macOS 226 = 360 tests 0 failure.
+- [ ] PR #389 draft final rereview/merge는 momo-main만 수행.
 
 ### ☐ MOMO-384 (`#390`) 수용기준 — Native channel creation sheet + tooltip presenter `[swift/macos-ui]` · 의존: MOMO-383
 - [ ] channel `+`가 sidebar inline form이 아니라 native sheet를 열고 public/private, name, topic, validation/loading/error를 제공.

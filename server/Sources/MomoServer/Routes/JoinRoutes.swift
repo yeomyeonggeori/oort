@@ -6,10 +6,10 @@ import PostgresNIO
 /// Public invite self-signup.
 ///
 /// POST /v1/join is intentionally mounted outside AuthMiddleware: the caller only
-/// has a high-entropy invite code. To avoid a cross-tenant RLS bypass, preflight
-/// enumerates workspace ids and checks invite_code inside a tenant-scoped read
-/// for each workspace. The actual join writes are then performed in one
-/// `withTenantTransaction` under the matched workspace's SET LOCAL scope.
+/// has a high-entropy invite code. A fixed-search-path, EXECUTE-only database
+/// function maps that exact code hash to one workspace id without returning any
+/// tenant row. Every subsequent read and the actual join writes run under that
+/// workspace's SET LOCAL scope.
 struct JoinRoutes: Sendable {
     let db: Database
     let jwt: JWTService
@@ -178,55 +178,56 @@ struct JoinRoutes: Sendable {
     }
 
     private func findInvite(code: String) async throws -> InviteLookup {
-        let workspaceIDs: [UUID] = try await db.client.withConnection { conn in
+        let workspaceID: UUID? = try await db.client.withConnection { conn in
             let rows = try await conn.query(
                 """
-                SELECT id
-                  FROM workspace
-                 WHERE deleted_at IS NULL
-                 ORDER BY created_at ASC
+                SELECT momo_join_private.invite_workspace_id(\(code))
                 """,
                 logger: db.logger
             ).collect()
-            return try rows.map { try $0.decode(UUID.self) }
+            return try rows.first?.decode(UUID?.self)
+        }
+        guard let workspaceID else {
+            throw HTTPError(.notFound, message: "invite code is invalid")
         }
 
-        for workspaceID in workspaceIDs {
-            let lookup: InviteLookup? = try await db.withTenantConnection(
-                workspaceID: workspaceID
-            ) { conn in
-                let rows = try await conn.query(
-                    """
-                    SELECT i.id,
-                           i.workspace_id,
-                           i.role::text,
-                           CASE
-                             WHEN i.role::text = 'owner' THEN 'role_escalation'
-                             WHEN i.revoked_at IS NOT NULL THEN 'revoked'
-                             WHEN i.expires_at <= now() THEN 'expired'
-                             WHEN i.used_count >= i.max_uses THEN 'exhausted'
-                             ELSE 'valid'
-                           END AS status
-                      FROM invite_code i
-                     WHERE i.code_hash = momo_invite_code_hash(\(code))
-                     LIMIT 1
-                    """,
-                    logger: db.logger
-                ).collect()
-                guard let row = rows.first else { return nil }
-                let (inviteID, workspaceID, role, status) =
-                    try row.decode((UUID, UUID, String, String).self)
-                return InviteLookup(
-                    inviteID: inviteID,
-                    workspaceID: workspaceID,
-                    role: role,
-                    status: status
-                )
-            }
-            if let lookup { return lookup }
+        let lookup: InviteLookup? = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT i.id,
+                       i.workspace_id,
+                       i.role::text,
+                       CASE
+                         WHEN i.role::text = 'owner' THEN 'role_escalation'
+                         WHEN i.revoked_at IS NOT NULL THEN 'revoked'
+                         WHEN i.expires_at <= now() THEN 'expired'
+                         WHEN i.used_count >= i.max_uses THEN 'exhausted'
+                         ELSE 'valid'
+                       END AS status
+                  FROM invite_code i
+                 WHERE i.code_hash = momo_invite_code_hash(\(code))
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            let (inviteID, decodedWorkspaceID, role, status) =
+                try row.decode((UUID, UUID, String, String).self)
+            guard decodedWorkspaceID == workspaceID else { return nil }
+            return InviteLookup(
+                inviteID: inviteID,
+                workspaceID: decodedWorkspaceID,
+                role: role,
+                status: status
+            )
         }
 
-        throw HTTPError(.notFound, message: "invite code is invalid")
+        guard let lookup else {
+            throw HTTPError(.notFound, message: "invite code is invalid")
+        }
+        return lookup
     }
 
     private func assertNotDuplicateJoin(

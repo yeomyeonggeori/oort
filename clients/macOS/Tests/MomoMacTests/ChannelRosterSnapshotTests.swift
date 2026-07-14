@@ -181,6 +181,57 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         try png.write(to: outputDirectory.appendingPathComponent(name), options: .atomic)
     }
 
+    private func renderWorkspaceIdentityRecovery() throws -> NSImage {
+        let size = CGSize(width: 340, height: 112)
+        let copy = MomoWorkspaceCopy(language: .english)
+        let presentation = try XCTUnwrap(
+            MomoWorkspaceIdentityRecoveryPresentation(
+                workspace: nil,
+                usesCache: false,
+                error: "network unavailable",
+                copy: copy
+            )
+        )
+        let hostingView = NSHostingView(
+            rootView: ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                MomoWorkspaceIdentityRecoveryButton(
+                    presentation: presentation,
+                    retry: {}
+                )
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(width: size.width, height: size.height)
+            .environment(\.colorScheme, .light)
+            .environment(\.dynamicTypeSize, .accessibility2)
+        )
+        hostingView.frame = CGRect(origin: .zero, size: size)
+        hostingView.appearance = NSAppearance(named: .accessibilityHighContrastAqua)
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no workspace recovery bitmap on this host")
+        }
+        representation.size = size
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        return image
+    }
+
     private func requireCanonicalReference(testName: String, named: String) throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let reference = testDirectory
@@ -321,6 +372,29 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             )
             XCTAssertEqual(image.size, CGSize(width: 340, height: 720))
         }
+    }
+
+    func testNoCacheWorkspaceRecoveryRendersAtIncreasedContrastAndLargeText() throws {
+        let image = try renderWorkspaceIdentityRecovery()
+        XCTAssertEqual(image.size, CGSize(width: 340, height: 112))
+        let representation = try XCTUnwrap(
+            image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))
+        )
+        var distinctColors = Set<String>()
+        for y in stride(from: 0, to: representation.pixelsHigh, by: 8) {
+            for x in stride(from: 0, to: representation.pixelsWide, by: 8) {
+                if let color = representation.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) {
+                    distinctColors.insert(
+                        "\(Int(color.redComponent * 31))-\(Int(color.greenComponent * 31))-\(Int(color.blueComponent * 31))"
+                    )
+                }
+            }
+        }
+        XCTAssertGreaterThan(distinctColors.count, 8)
+        try writeDesignReviewArtifact(
+            image,
+            named: "momo-383-workspace-no-cache-retry-increased-contrast-large-text.png"
+        )
     }
 
     func testDirectMessageUnreadSidebarLightSnapshot() async throws {

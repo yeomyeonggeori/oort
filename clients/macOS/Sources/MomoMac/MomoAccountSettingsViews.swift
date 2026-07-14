@@ -158,9 +158,25 @@ struct MomoAppSettingsSurface: View {
     }
 }
 
+struct MomoWorkspaceNameDraft: Equatable {
+    let normalized: String
+
+    init(_ rawValue: String) {
+        normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var characterCount: Int { normalized.count }
+
+    var isValid: Bool {
+        (1...80).contains(characterCount)
+            && !normalized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+}
+
 struct MomoWorkspaceSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     @ObservedObject var viewModel: ChatViewModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
     @AppStorage("momo.server.iconPath") private var serverIconPath = ""
     @AppStorage("momo.server.agentInviteRequiresApproval") private var agentInviteRequiresApproval = true
@@ -168,13 +184,12 @@ struct MomoWorkspaceSettingsSurface: View {
     @State private var serverDisplayName: String
     @State private var saveNotice: String?
 
-    private var normalizedWorkspaceName: String {
-        serverDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var workspaceNameDraft: MomoWorkspaceNameDraft {
+        MomoWorkspaceNameDraft(serverDisplayName)
     }
 
     private var workspaceNameIsValid: Bool {
-        (1...80).contains(normalizedWorkspaceName.count)
-            && !normalizedWorkspaceName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        workspaceNameDraft.isValid
     }
 
     init(copy: MomoWorkspaceCopy, viewModel: ChatViewModel) {
@@ -205,7 +220,7 @@ struct MomoWorkspaceSettingsSurface: View {
                         }
 
                         if viewModel.canManageWorkspace {
-                            Text(copy.workspaceNameLimit(serverDisplayName.count))
+                            Text(copy.workspaceNameLimit(workspaceNameDraft.characterCount))
                                 .font(MomoTheme.Typography.supporting)
                                 .foregroundStyle(workspaceNameIsValid ? Color.secondary : MomoTheme.irreversibleRed)
                         } else {
@@ -218,7 +233,7 @@ struct MomoWorkspaceSettingsSurface: View {
                             Button {
                                 Task { await saveWorkspaceName() }
                             } label: {
-                                HStack(spacing: 6) {
+                                HStack(spacing: 8) {
                                     if viewModel.workspaceNameUpdateInFlight {
                                         ProgressView()
                                             .controlSize(.small)
@@ -269,7 +284,10 @@ struct MomoWorkspaceSettingsSurface: View {
                         Text(copy.invitePolicyLocked).tag("locked")
                     }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 180)
+                    .frame(
+                        minWidth: dynamicTypeSize.isAccessibilitySize ? 240 : nil,
+                        maxWidth: dynamicTypeSize.isAccessibilitySize ? 280 : 180
+                    )
                 }
 
                 Toggle(copy.agentInviteRequiresApproval, isOn: $agentInviteRequiresApproval)
@@ -286,8 +304,8 @@ struct MomoWorkspaceSettingsSurface: View {
             serverDisplayName = value
         }
         .onChange(of: serverDisplayName) { _, value in
-            let persisted = viewModel.workspace?.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard value.trimmingCharacters(in: .whitespacesAndNewlines) != persisted else { return }
+            let persisted = viewModel.workspace.map { MomoWorkspaceNameDraft($0.name).normalized }
+            guard MomoWorkspaceNameDraft(value).normalized != persisted else { return }
             saveNotice = nil
         }
     }
@@ -304,7 +322,7 @@ struct MomoWorkspaceSettingsSurface: View {
 
     @MainActor
     private func saveWorkspaceName() async {
-        let saved = await viewModel.updateWorkspaceName(serverDisplayName)
+        let saved = await viewModel.updateWorkspaceName(workspaceNameDraft.normalized)
         if saved, let name = viewModel.workspace?.name {
             serverDisplayName = name
             saveNotice = copy.workspaceNameSaved

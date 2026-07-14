@@ -1228,8 +1228,22 @@ struct MomoWorkspaceCopy {
 
     var workspaceCachedHelp: String {
         switch language {
-        case .korean: return "서버에서 워크스페이스 이름을 불러오지 못했습니다. 클릭하여 다시 시도합니다."
-        case .english: return "The workspace name could not be refreshed. Click to retry."
+        case .korean: return "서버에서 워크스페이스 이름을 불러오지 못했습니다. 클릭하거나 Shift-Command-R을 눌러 다시 시도합니다."
+        case .english: return "The workspace name could not be refreshed. Click or press Shift-Command-R to retry."
+        }
+    }
+
+    var workspaceUnavailableRetry: String {
+        switch language {
+        case .korean: return "워크스페이스 오류 · 다시 시도"
+        case .english: return "Workspace unavailable · Retry"
+        }
+    }
+
+    var workspaceUnavailableHelp: String {
+        switch language {
+        case .korean: return "워크스페이스 정보를 불러오지 못했습니다. 클릭하거나 Shift-Command-R을 눌러 다시 시도합니다."
+        case .english: return "Workspace information could not be loaded. Click or press Shift-Command-R to retry."
         }
     }
 

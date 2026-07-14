@@ -3,6 +3,50 @@ import AppKit
 import UniformTypeIdentifiers
 import MomoCore
 
+struct MomoWorkspaceIdentityRecoveryPresentation: Equatable {
+    let label: String
+    let help: String
+
+    init?(
+        workspace: Workspace?,
+        usesCache: Bool,
+        error: String?,
+        copy: MomoWorkspaceCopy
+    ) {
+        if usesCache {
+            label = copy.workspaceCachedRetry
+            help = copy.workspaceCachedHelp
+        } else {
+            guard workspace == nil, error != nil else { return nil }
+            label = copy.workspaceUnavailableRetry
+            help = copy.workspaceUnavailableHelp
+        }
+    }
+}
+
+struct MomoWorkspaceIdentityRecoveryButton: View {
+    static let accessibilityIdentifier = "workspace-identity-retry"
+
+    let presentation: MomoWorkspaceIdentityRecoveryPresentation
+    let retry: () -> Void
+
+    var body: some View {
+        Button(action: retry) {
+            Label(presentation.label, systemImage: "arrow.clockwise.circle")
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(MomoTheme.costAmber)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("r", modifiers: [.command, .shift])
+        .help(presentation.help)
+        .accessibilityLabel(presentation.label)
+        .accessibilityHint(presentation.help)
+        .accessibilityIdentifier(Self.accessibilityIdentifier)
+    }
+}
+
 // MARK: - ChannelListView
 //
 // Sidebar listing channels and the selected channel's first-class members.
@@ -252,18 +296,15 @@ public struct ChannelListView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityLabel("\(displayName), \(contextSubtitle), \(copy.workspaceMenu)")
 
-            if viewModel.workspaceIdentityUsesCache {
-                Button {
+            if let recovery = MomoWorkspaceIdentityRecoveryPresentation(
+                workspace: viewModel.workspace,
+                usesCache: viewModel.workspaceIdentityUsesCache,
+                error: viewModel.workspaceNameUpdateError,
+                copy: copy
+            ) {
+                MomoWorkspaceIdentityRecoveryButton(presentation: recovery) {
                     Task { await viewModel.refreshWorkspaceIdentity() }
-                } label: {
-                    Label(copy.workspaceCachedRetry, systemImage: "arrow.clockwise.circle")
-                        .font(MomoTheme.Typography.supporting)
-                        .foregroundStyle(MomoTheme.costAmber)
-                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .help(copy.workspaceCachedHelp)
-                .accessibilityHint(copy.workspaceCachedHelp)
             }
         }
         .padding(.horizontal, MomoTheme.Sidebar.contentSpacing)
