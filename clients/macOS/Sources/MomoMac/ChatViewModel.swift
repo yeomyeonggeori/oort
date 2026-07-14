@@ -10,6 +10,10 @@ protocol AuthenticatedMemberIDProvidingBackend: Sendable {
     func authenticatedMemberID() async -> MemberID?
 }
 
+protocol WorkspaceIdentityCacheScopeProviding: Sendable {
+    func workspaceIdentityCacheServerScope() async -> String
+}
+
 /// Marker for backends whose member identity and channel scope must remain
 /// server-owned. Local demo profile hints are never merged into these rosters.
 public protocol ServerRosterSourceOfTruth: Sendable {}
@@ -75,6 +79,16 @@ public enum MomoConnectionIssue: Sendable, Equatable {
     case actionFailed
 }
 
+public enum WorkspaceNameUpdateIssue: Sendable, Equatable {
+    case unavailable
+    case invalidName
+    case reloadRequired
+    case conflict
+    case authenticationExpired
+    case forbidden
+    case connection
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -91,6 +105,7 @@ public enum MomoConnectionIssue: Sendable, Equatable {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     private static let maximumMarkReadFailures = 5
+    private static let workspaceCachePrefix = "momo.workspace.identity."
 
     private struct PendingMessageSend: Sendable {
         let draft: DraftMessage
@@ -105,6 +120,7 @@ public final class ChatViewModel: ObservableObject {
 
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
+    private let workspaceBackend: (any WorkspaceBackend)?
     private let readStateBackend: (any ReadStateBackend)?
     private let agentTransport: any AgentTransport
     private let workRunBackend: (any AgentWorkRunBackend)?
@@ -112,6 +128,7 @@ public final class ChatViewModel: ObservableObject {
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
     private let readStateDebounce: Duration
+    private let workspaceIdentityDefaults: UserDefaults
     public let usesServerRosterSourceOfTruth: Bool
 
     public var allowsLocalProfileEditing: Bool {
@@ -120,6 +137,11 @@ public final class ChatViewModel: ObservableObject {
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
+    @Published public private(set) var workspace: Workspace?
+    @Published public private(set) var workspaceIdentityUsesCache = false
+    @Published public private(set) var workspaceNameUpdateInFlight = false
+    @Published public private(set) var workspaceNameUpdateError: String?
+    @Published public private(set) var workspaceNameUpdateIssue: WorkspaceNameUpdateIssue?
     @Published public private(set) var members: [Member] = []
     @Published public private(set) var channels: [Channel] = []
     @Published public var selectedChannelId: ChannelID?
@@ -183,8 +205,11 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var connectionIssue: MomoConnectionIssue?
 
     private var channelSubscriptions: [ChannelID: Task<Void, Never>] = [:]
+    private var channelSubscriptionTokens: [ChannelID: UUID] = [:]
     private var realtimeStatusSubscription: Task<Void, Never>?
+    private var realtimeStatusSubscriptionToken: UUID?
     private var readStateSubscription: Task<Void, Never>?
+    private var readStateSubscriptionToken: UUID?
     private var readStateRefreshTask: Task<Void, Never>?
     private var markReadTasks: [ChannelID: Task<Void, Never>] = [:]
     private var pendingReadSequences: [ChannelID: Int64] = [:]
@@ -198,11 +223,26 @@ public final class ChatViewModel: ObservableObject {
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
     private var agentCredentialRefreshes: [MemberID: AgentCredentialRefresh] = [:]
     private var failedMessageSend: PendingMessageSend?
+    private var workspaceIdentityCacheScope: String?
+    private var workspaceIdentitySessionGeneration: UInt64 = 0
+    private var workspaceIdentityLoadGeneration: UInt64 = 0
+    private var workspaceNameUpdateGeneration: UInt64 = 0
+
+    var activeChannelSubscriptionCount: Int { channelSubscriptions.count }
 
     /// Redacted user-facing context for a failed agent mention. Raw transport
     /// diagnostics remain isolated in `connectionError`.
     public var failedMentionedAgentName: String? {
         failedMessageSend?.mentionedAgent?.displayName
+    }
+
+    public var authenticatedMember: Member? {
+        guard let authenticatedMemberId else { return nil }
+        return members.first { $0.id == authenticatedMemberId }
+    }
+
+    public var canManageWorkspace: Bool {
+        authenticatedMember?.workspaceRole == .owner || authenticatedMember?.workspaceRole == .admin
     }
 
     public init(
@@ -211,9 +251,11 @@ public final class ChatViewModel: ObservableObject {
         onboarding: (any OnboardingInviteBackend)? = nil,
         foundationModelsCapability: FoundationModelsCapabilityState = FoundationModelsCapabilityProbe().currentState(),
         localContextCopilot: LocalContextCopilotService = LocalContextCopilotService(),
-        readStateDebounce: Duration = .seconds(1)
+        readStateDebounce: Duration = .seconds(1),
+        workspaceIdentityDefaults: UserDefaults = .standard
     ) {
         self.chat = chat
+        self.workspaceBackend = chat as? any WorkspaceBackend
         self.readStateBackend = chat as? any ReadStateBackend
         self.agentTransport = agentTransport
         self.workRunBackend = chat as? any AgentWorkRunBackend
@@ -223,6 +265,7 @@ public final class ChatViewModel: ObservableObject {
         self.foundationModelsCapability = foundationModelsCapability
         self.localContextCopilot = localContextCopilot
         self.readStateDebounce = readStateDebounce
+        self.workspaceIdentityDefaults = workspaceIdentityDefaults
     }
 
     /// Convenience initializer when one object conforms to both contracts.
@@ -234,49 +277,163 @@ public final class ChatViewModel: ObservableObject {
 
     /// Connect + load workspace roster/channels. Selects the first channel.
     public func bootstrap(workspace: WorkspaceID, accessToken: String) async {
+        workspaceIdentitySessionGeneration &+= 1
+        workspaceIdentityLoadGeneration &+= 1
+        let identitySessionGeneration = workspaceIdentitySessionGeneration
+        channelSubscriptions.values.forEach { $0.cancel() }
+        channelSubscriptions = [:]
+        channelSubscriptionTokens = [:]
+        readStateSubscription?.cancel()
+        readStateSubscription = nil
+        readStateSubscriptionToken = nil
+        realtimeStatusSubscription?.cancel()
+        realtimeStatusSubscription = nil
+        realtimeStatusSubscriptionToken = nil
         do {
             try await chat.connect(workspace: workspace, accessToken: accessToken)
+            guard workspaceIdentitySessionGeneration == identitySessionGeneration else { return }
             self.workspaceId = workspace
             let loadedMembers = try await chat.members(workspace: workspace)
+            guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                return
+            }
             self.members = usesServerRosterSourceOfTruth
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
             let memberProvider = chat as? any AuthenticatedMemberIDProvidingBackend
-            authenticatedMemberId = await memberProvider?.authenticatedMemberID()
+            let resolvedMemberID = await memberProvider?.authenticatedMemberID()
                 ?? self.members.first { $0.kind == .human && $0.status == .active }?.id
-            self.channels = try await chat.channels(workspace: workspace)
-            await refreshReadStates(workspace: workspace)
-            await refreshAgentRuntimeStatus()
-            await loadPendingApprovals(workspace: workspace)
-            if selectedChannelId == nil {
+            guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                return
+            }
+            authenticatedMemberId = resolvedMemberID
+            let serverScope = await (chat as? any WorkspaceIdentityCacheScopeProviding)?
+                .workspaceIdentityCacheServerScope()
+            guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                return
+            }
+            if let serverScope, let authenticatedMemberId {
+                workspaceIdentityCacheScope = "\(serverScope)|\(authenticatedMemberId.description)"
+            } else {
+                workspaceIdentityCacheScope = nil
+            }
+            async let workspaceIdentityLoad: Void = loadWorkspaceIdentity(
+                workspace,
+                sessionGeneration: identitySessionGeneration
+            )
+            let loadedChannels = try await chat.channels(workspace: workspace)
+            guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                return
+            }
+            await workspaceIdentityLoad
+            guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                return
+            }
+            self.channels = loadedChannels
+            if let readStateBackend {
+                do {
+                    let states = try await readStateBackend.readStates(workspace: workspace)
+                    guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                        return
+                    }
+                    var authoritative = Dictionary(uniqueKeysWithValues: states.map { ($0.channelId, $0) })
+                    for channel in loadedChannels where authoritative[channel.id] == nil {
+                        authoritative[channel.id] = Self.emptyReadState(channel: channel.id)
+                    }
+                    readStatesByChannel = authoritative
+                    readStateSyncError = nil
+                } catch {
+                    guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                        return
+                    }
+                    guard !Self.isCancellation(error) else { return }
+                    readStateSyncError = String(describing: error)
+                }
+            } else {
+                for channel in loadedChannels {
+                    ensureReadStateExists(channel: channel.id)
+                }
+            }
+            if let provider = chat as? any AgentRuntimeStatusProviding {
+                do {
+                    let status = try await provider.agentRuntimeStatus()
+                    guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                        return
+                    }
+                    agentRuntimeStatus = status
+                } catch {
+                    guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                        return
+                    }
+                    guard !Self.isCancellation(error) else { return }
+                    agentRuntimeStatus = AgentRuntimeStatus(
+                        availability: .degraded,
+                        endpointLabel: "status unavailable",
+                        diagnostics: [String(describing: error)]
+                    )
+                }
+            } else {
+                agentRuntimeStatus = .localMock
+            }
+            do {
+                let pending = try await chat.pendingApprovals(workspace: workspace, status: .pending)
+                guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                    return
+                }
+                approvals = Dictionary(
+                    uniqueKeysWithValues: pending.map { ($0.id, $0.eventProjection) }
+                )
+            } catch {
+                guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                    return
+                }
+                guard !Self.isCancellation(error) else { return }
+                reportConnectionError(error)
+            }
+            if !channels.contains(where: { $0.id == selectedChannelId }) {
                 self.selectedChannelId = channels.first?.id
             }
             if let selectedChannelId {
                 recordChannelSelection(selectedChannelId)
             }
-            subscribeReadStateUpdates()
+            subscribeReadStateUpdates(
+                sessionGeneration: identitySessionGeneration,
+                workspaceID: workspace
+            )
             for channel in channels {
-                subscribe(channel: channel.id)
+                subscribe(
+                    channel: channel.id,
+                    sessionGeneration: identitySessionGeneration,
+                    workspaceID: workspace
+                )
             }
             clearConnectionErrorState(force: true)
         } catch {
+            guard workspaceIdentitySessionGeneration == identitySessionGeneration else { return }
+            guard !Self.isCancellation(error) else { return }
             reportConnectionError(error)
         }
     }
 
     public func clearSessionSensitiveState() async {
+        workspaceIdentitySessionGeneration &+= 1
+        workspaceIdentityLoadGeneration &+= 1
+        workspaceNameUpdateGeneration &+= 1
         channelSubscriptions.values.forEach { $0.cancel() }
         readStateSubscription?.cancel()
         readStateRefreshTask?.cancel()
         markReadTasks.values.forEach { $0.cancel() }
         realtimeStatusSubscription?.cancel()
         channelSubscriptions = [:]
+        channelSubscriptionTokens = [:]
         readStateSubscription = nil
+        readStateSubscriptionToken = nil
         readStateRefreshTask = nil
         markReadTasks = [:]
         pendingReadSequences = [:]
         markReadFailureCounts = [:]
         realtimeStatusSubscription = nil
+        realtimeStatusSubscriptionToken = nil
         if let resettable = chat as? any MomoSessionSensitiveStateClearing {
             await resettable.clearSessionSensitiveState()
         }
@@ -284,6 +441,11 @@ public final class ChatViewModel: ObservableObject {
             await resettable.clearSessionSensitiveState()
         }
         workspaceId = nil
+        workspace = nil
+        workspaceNameUpdateInFlight = false
+        workspaceNameUpdateError = nil
+        workspaceNameUpdateIssue = nil
+        workspaceIdentityUsesCache = false
         members = []
         channels = []
         selectedChannelId = nil
@@ -293,6 +455,7 @@ public final class ChatViewModel: ObservableObject {
         channelNavigationHistory = []
         channelNavigationIndex = nil
         authenticatedMemberId = nil
+        workspaceIdentityCacheScope = nil
         activeTimelineChannelId = nil
         messagesByChannel = [:]
         historyLoadingChannels = []
@@ -333,6 +496,250 @@ public final class ChatViewModel: ObservableObject {
         isLocalContextCopilotRefreshing = false
         clearConnectionErrorState(force: true)
         pendingFallbackMentionRuns = [:]
+    }
+
+    public func updateWorkspaceName(_ name: String) async -> Bool {
+        guard let workspaceId, let workspaceBackend, !workspaceNameUpdateInFlight else {
+            workspaceNameUpdateError = "Workspace settings are unavailable."
+            workspaceNameUpdateIssue = .unavailable
+            return false
+        }
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...80).contains(normalized.count),
+              !normalized.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            workspaceNameUpdateError = "Workspace name must be 1-80 supported characters."
+            workspaceNameUpdateIssue = .invalidName
+            return false
+        }
+        guard let expectedUpdatedAtMs = workspace?.updatedAtMs else {
+            workspaceNameUpdateError = "Reload workspace settings and try again."
+            workspaceNameUpdateIssue = .reloadRequired
+            return false
+        }
+
+        let identitySessionGeneration = workspaceIdentitySessionGeneration
+        workspaceIdentityLoadGeneration &+= 1
+        workspaceNameUpdateGeneration &+= 1
+        let updateGeneration = workspaceNameUpdateGeneration
+        workspaceNameUpdateInFlight = true
+        workspaceNameUpdateError = nil
+        workspaceNameUpdateIssue = nil
+        defer {
+            if workspaceNameUpdateGeneration == updateGeneration {
+                workspaceNameUpdateInFlight = false
+            }
+        }
+        do {
+            let updated = try await workspaceBackend.updateWorkspaceName(
+                workspace: workspaceId,
+                name: normalized,
+                expectedUpdatedAtMs: expectedUpdatedAtMs
+            )
+            guard isWorkspaceIdentitySessionCurrent(
+                identitySessionGeneration,
+                workspaceID: workspaceId
+            ), workspaceNameUpdateGeneration == updateGeneration else {
+                return false
+            }
+            _ = applyWorkspaceIdentityIfNewer(
+                updated,
+                sessionGeneration: identitySessionGeneration,
+                usesCache: false
+            )
+            clearConnectionErrorState()
+            return true
+        } catch {
+            guard isWorkspaceIdentitySessionCurrent(
+                identitySessionGeneration,
+                workspaceID: workspaceId
+            ), workspaceNameUpdateGeneration == updateGeneration else {
+                return false
+            }
+            guard !Self.isCancellation(error) else { return false }
+            let issue = workspaceUpdateIssue(for: error)
+            if issue == .conflict {
+                await loadWorkspaceIdentity(
+                    workspaceId,
+                    sessionGeneration: identitySessionGeneration
+                )
+                guard isWorkspaceIdentitySessionCurrent(
+                    identitySessionGeneration,
+                    workspaceID: workspaceId
+                ), workspaceNameUpdateGeneration == updateGeneration else {
+                    return false
+                }
+            }
+            workspaceNameUpdateError = String(describing: error)
+            workspaceNameUpdateIssue = issue
+            reportConnectionError(error, as: .actionFailed)
+            return false
+        }
+    }
+
+    public func refreshWorkspaceIdentity() async {
+        guard let workspaceId else { return }
+        await loadWorkspaceIdentity(
+            workspaceId,
+            sessionGeneration: workspaceIdentitySessionGeneration
+        )
+    }
+
+    private func loadWorkspaceIdentity(
+        _ workspaceID: WorkspaceID,
+        sessionGeneration: UInt64
+    ) async {
+        guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceID) else {
+            return
+        }
+        workspaceIdentityLoadGeneration &+= 1
+        let loadGeneration = workspaceIdentityLoadGeneration
+        guard let workspaceBackend else {
+            workspace = cachedWorkspaceIdentity(workspaceID)
+                ?? Workspace(id: workspaceID, slug: workspaceID.description, name: "momo")
+            workspaceIdentityUsesCache = true
+            return
+        }
+        do {
+            let loaded = try await workspaceBackend.workspace(id: workspaceID)
+            guard isWorkspaceIdentityLoadCurrent(
+                loadGeneration,
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID
+            ) else { return }
+            _ = applyWorkspaceIdentityIfNewer(
+                loaded,
+                sessionGeneration: sessionGeneration,
+                usesCache: false
+            )
+        } catch {
+            guard isWorkspaceIdentityLoadCurrent(
+                loadGeneration,
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID
+            ) else { return }
+            guard !Self.isCancellation(error) else { return }
+            if isAuthoritativeWorkspaceIdentityDenial(error) {
+                removeCachedWorkspaceIdentity(workspaceID)
+            }
+            if canUseWorkspaceIdentityCache(for: error),
+               let cached = cachedWorkspaceIdentity(workspaceID) {
+                if applyWorkspaceIdentityIfNewer(
+                    cached,
+                    sessionGeneration: sessionGeneration,
+                    usesCache: true
+                ) {
+                    workspaceNameUpdateError = "Workspace identity is temporarily unavailable. Using the last saved name."
+                }
+            } else {
+                workspace = nil
+                workspaceIdentityUsesCache = false
+                workspaceNameUpdateError = "Workspace identity is unavailable."
+            }
+        }
+    }
+
+    private func isWorkspaceIdentitySessionCurrent(
+        _ sessionGeneration: UInt64,
+        workspaceID: WorkspaceID
+    ) -> Bool {
+        workspaceIdentitySessionGeneration == sessionGeneration && self.workspaceId == workspaceID
+    }
+
+    private func isWorkspaceIdentityLoadCurrent(
+        _ loadGeneration: UInt64,
+        sessionGeneration: UInt64,
+        workspaceID: WorkspaceID
+    ) -> Bool {
+        workspaceIdentityLoadGeneration == loadGeneration
+            && isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceID)
+    }
+
+    @discardableResult
+    private func applyWorkspaceIdentityIfNewer(
+        _ candidate: Workspace,
+        sessionGeneration: UInt64,
+        usesCache: Bool
+    ) -> Bool {
+        guard isWorkspaceIdentitySessionCurrent(
+            sessionGeneration,
+            workspaceID: candidate.id
+        ) else { return false }
+        if let current = workspace,
+           current.id == candidate.id,
+           current.updatedAtMs > candidate.updatedAtMs {
+            return false
+        }
+        workspace = candidate
+        workspaceIdentityUsesCache = usesCache
+        workspaceNameUpdateError = nil
+        if !usesCache {
+            cacheWorkspaceIdentity(candidate)
+        }
+        return true
+    }
+
+    private func workspaceUpdateIssue(for error: Error) -> WorkspaceNameUpdateIssue {
+        guard let backendError = error as? BackendError else { return .unavailable }
+        switch backendError {
+        case .problem(status: 409, title: _, detail: _):
+            return .conflict
+        case .problem(status: 401, title: _, detail: _):
+            return .authenticationExpired
+        case .problem(status: 403, title: _, detail: _):
+            return .forbidden
+        case .notConnected, .realtime, .timedOut:
+            return .connection
+        case .problem, .decoding, .budgetExceeded:
+            return .unavailable
+        }
+    }
+
+    private func cacheWorkspaceIdentity(_ workspace: Workspace?) {
+        guard let workspace, let key = workspaceIdentityCacheKey(workspace.id) else { return }
+        guard let data = try? JSONEncoder().encode(workspace) else { return }
+        workspaceIdentityDefaults.set(data, forKey: key)
+    }
+
+    private func cachedWorkspaceIdentity(_ workspaceID: WorkspaceID) -> Workspace? {
+        guard let key = workspaceIdentityCacheKey(workspaceID) else { return nil }
+        guard let data = workspaceIdentityDefaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(Workspace.self, from: data)
+    }
+
+    private func removeCachedWorkspaceIdentity(_ workspaceID: WorkspaceID) {
+        guard let key = workspaceIdentityCacheKey(workspaceID) else { return }
+        workspaceIdentityDefaults.removeObject(forKey: key)
+    }
+
+    private func workspaceIdentityCacheKey(_ workspaceID: WorkspaceID) -> String? {
+        guard let workspaceIdentityCacheScope else { return nil }
+        let encodedScope = Data(workspaceIdentityCacheScope.utf8).base64EncodedString()
+        return Self.workspaceCachePrefix + encodedScope + "." + workspaceID.description
+    }
+
+    private func canUseWorkspaceIdentityCache(for error: Error) -> Bool {
+        guard !Self.isCancellation(error) else { return false }
+        guard let backendError = error as? BackendError else { return false }
+        switch backendError {
+        case .problem(status: let status, title: _, detail: _):
+            return status >= 500
+        case .realtime, .timedOut:
+            return true
+        case .notConnected, .decoding, .budgetExceeded:
+            return false
+        }
+    }
+
+    private func isAuthoritativeWorkspaceIdentityDenial(_ error: Error) -> Bool {
+        guard let backendError = error as? BackendError else { return false }
+        guard case .problem(status: let status, title: _, detail: _) = backendError else { return false }
+        return status == 401 || status == 403 || status == 404
+    }
+
+    private static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError
+            || (error as? URLError)?.code == .cancelled
+            || withUnsafeCurrentTask { $0?.isCancelled ?? false }
     }
 
     public func refreshAgentRuntimeStatus() async {
@@ -663,22 +1070,48 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func subscribeReadStateUpdates() {
+    private func subscribeReadStateUpdates(
+        sessionGeneration: UInt64? = nil,
+        workspaceID: WorkspaceID? = nil
+    ) {
         readStateSubscription?.cancel()
         guard let readStateBackend, let member = authenticatedMemberId ?? currentHumanMember?.id else { return }
+        let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
+        let capturedWorkspaceID = workspaceID ?? self.workspaceId
+        let subscriptionToken = UUID()
+        readStateSubscriptionToken = subscriptionToken
         readStateSubscription = Task { [weak self] in
             guard let self else { return }
+            defer { self.finishReadStateSubscription(token: subscriptionToken) }
             do {
                 let states = try await readStateBackend.subscribeReadStates(member: member)
+                guard self.isSessionCurrent(
+                    capturedSessionGeneration,
+                    workspaceID: capturedWorkspaceID
+                ) else { return }
                 for try await state in states {
+                    guard self.isSessionCurrent(
+                        capturedSessionGeneration,
+                        workspaceID: capturedWorkspaceID
+                    ) else { return }
                     guard self.channels.contains(where: { $0.id == state.channelId }) else { continue }
                     self.readStatesByChannel[state.channelId] = state
                     self.readStateSyncError = nil
                 }
             } catch {
+                guard self.isSessionCurrent(
+                    capturedSessionGeneration,
+                    workspaceID: capturedWorkspaceID
+                ), !Self.isCancellation(error) else { return }
                 self.readStateSyncError = String(describing: error)
             }
         }
+    }
+
+    private func isSessionCurrent(_ sessionGeneration: UInt64, workspaceID: WorkspaceID?) -> Bool {
+        guard workspaceIdentitySessionGeneration == sessionGeneration else { return false }
+        guard let workspaceID else { return true }
+        return self.workspaceId == workspaceID
     }
 
     private func ensureReadStateExists(channel: ChannelID) {
@@ -799,32 +1232,74 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func subscribe(channel: ChannelID) {
+    private func subscribe(
+        channel: ChannelID,
+        sessionGeneration: UInt64? = nil,
+        workspaceID: WorkspaceID? = nil
+    ) {
         guard channelSubscriptions[channel] == nil else { return }
+        let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
+        let capturedWorkspaceID = workspaceID ?? self.workspaceId
+        let subscriptionToken = UUID()
+        channelSubscriptionTokens[channel] = subscriptionToken
         channelSubscriptions[channel] = Task { [weak self] in
             guard let self else { return }
+            defer {
+                self.finishChannelSubscription(channel: channel, token: subscriptionToken)
+            }
             do {
                 let events = try await self.chat.subscribe(channel: channel)
+                guard self.isSessionCurrent(
+                    capturedSessionGeneration,
+                    workspaceID: capturedWorkspaceID
+                ) else { return }
                 for await event in events {
+                    guard self.isSessionCurrent(
+                        capturedSessionGeneration,
+                        workspaceID: capturedWorkspaceID
+                    ) else { return }
                     self.apply(event, channel: channel)
                 }
             } catch {
+                guard self.isSessionCurrent(
+                    capturedSessionGeneration,
+                    workspaceID: capturedWorkspaceID
+                ), !Self.isCancellation(error) else { return }
                 self.reportConnectionError(error)
             }
         }
     }
 
-    private func subscribeRealtimeStatus(channel: ChannelID) {
+    private func subscribeRealtimeStatus(
+        channel: ChannelID,
+        sessionGeneration: UInt64? = nil,
+        workspaceID: WorkspaceID? = nil
+    ) {
         realtimeStatusSubscription?.cancel()
         guard let statusProvider = chat as? any RealtimeStatusProvidingBackend else {
+            realtimeStatusSubscription = nil
+            realtimeStatusSubscriptionToken = nil
             realtimeStatuses[channel] = .restFallback(channel: channel)
             return
         }
+        let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
+        let capturedWorkspaceID = workspaceID ?? self.workspaceId
+        let subscriptionToken = UUID()
+        realtimeStatusSubscriptionToken = subscriptionToken
 
         realtimeStatusSubscription = Task { [weak self] in
             guard let self else { return }
+            defer { self.finishRealtimeStatusSubscription(token: subscriptionToken) }
             let statuses = await statusProvider.realtimeStatus(channel: channel)
+            guard self.isSessionCurrent(
+                capturedSessionGeneration,
+                workspaceID: capturedWorkspaceID
+            ) else { return }
             for await status in statuses {
+                guard self.isSessionCurrent(
+                    capturedSessionGeneration,
+                    workspaceID: capturedWorkspaceID
+                ) else { return }
                 self.realtimeStatuses[status.channelId] = status
             }
         }
@@ -846,8 +1321,27 @@ public final class ChatViewModel: ObservableObject {
         }
         channelSubscriptions[channel]?.cancel()
         channelSubscriptions[channel] = nil
+        channelSubscriptionTokens[channel] = nil
         subscribe(channel: channel)
         subscribeRealtimeStatus(channel: channel)
+    }
+
+    private func finishChannelSubscription(channel: ChannelID, token: UUID) {
+        guard channelSubscriptionTokens[channel] == token else { return }
+        channelSubscriptionTokens[channel] = nil
+        channelSubscriptions[channel] = nil
+    }
+
+    private func finishReadStateSubscription(token: UUID) {
+        guard readStateSubscriptionToken == token else { return }
+        readStateSubscriptionToken = nil
+        readStateSubscription = nil
+    }
+
+    private func finishRealtimeStatusSubscription(token: UUID) {
+        guard realtimeStatusSubscriptionToken == token else { return }
+        realtimeStatusSubscriptionToken = nil
+        realtimeStatusSubscription = nil
     }
 
     public func retrySelectedChannelLoad() async {

@@ -22,6 +22,96 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try InviteRoutes.validatedMaxUses(10_001))
     }
 
+    func testWorkspaceNameValidationNormalizesHumanReadableNames() throws {
+        XCTAssertEqual(try WorkspaceRoutes.normalizedName("  momo team  "), "momo team")
+        XCTAssertEqual(try WorkspaceRoutes.normalizedName("  모모 작업실\n"), "모모 작업실")
+        XCTAssertEqual(
+            try WorkspaceRoutes.normalizedName(String(repeating: "a", count: 80)),
+            String(repeating: "a", count: 80)
+        )
+    }
+
+    func testWorkspaceNameValidationRejectsEmptyLongAndControlInput() {
+        XCTAssertThrowsError(try WorkspaceRoutes.normalizedName("  \n"))
+        XCTAssertThrowsError(try WorkspaceRoutes.normalizedName(String(repeating: "a", count: 81)))
+        XCTAssertThrowsError(try WorkspaceRoutes.normalizedName("momo\u{0000}team"))
+    }
+
+    func testWorkspaceRootRLSAndInviteDiscoveryStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/009_workspace_tenant_rls.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("ALTER TABLE workspace ENABLE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("ALTER TABLE workspace FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("USING (id = current_setting('app.workspace_id', true)::uuid)"))
+        XCTAssertTrue(migration.contains("WITH CHECK (id = current_setting('app.workspace_id', true)::uuid)"))
+        XCTAssertTrue(migration.contains("SECURITY DEFINER"))
+        XCTAssertTrue(migration.contains("SET search_path = pg_catalog"))
+        XCTAssertTrue(migration.contains("w.deleted_at IS NULL"))
+        XCTAssertTrue(migration.contains("public.digest(raw_code, 'sha256')"))
+        XCTAssertTrue(migration.contains("CREATE SCHEMA momo_join_private"))
+        XCTAssertFalse(migration.contains("CREATE SCHEMA IF NOT EXISTS momo_join_private"))
+        XCTAssertFalse(migration.contains("CREATE OR REPLACE FUNCTION momo_join_private"))
+        XCTAssertTrue(migration.contains("REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC"))
+        XCTAssertTrue(migration.contains("REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text) FROM PUBLIC"))
+        XCTAssertTrue(migration.contains("GRANT USAGE ON SCHEMA momo_join_private TO momo_app"))
+        XCTAssertTrue(migration.contains("GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app"))
+        XCTAssertFalse(migration.contains("EXECUTE format"))
+
+        let roleBootstrap = try String(
+            contentsOf: serverRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("infra/e2e/bootstrap_roles.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(roleBootstrap.contains("GRANT USAGE ON SCHEMA momo_join_private TO momo_app"))
+        XCTAssertTrue(roleBootstrap.contains("GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app"))
+        XCTAssertTrue(roleBootstrap.contains("REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC, momo_relay, momo_worker"))
+        XCTAssertTrue(roleBootstrap.contains(
+            "REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text)\n  FROM PUBLIC, momo_relay, momo_worker"
+        ))
+
+        let joinSource = try String(
+            contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/JoinRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(joinSource.contains("SELECT momo_join_private.invite_workspace_id(\\(code))"))
+        XCTAssertTrue(joinSource.contains("withTenantConnection(\n            workspaceID: workspaceID"))
+        XCTAssertFalse(joinSource.contains("SELECT id\n                  FROM workspace"))
+        XCTAssertFalse(joinSource.contains("for workspaceID in workspaceIDs"))
+
+        let productionMigrate = try String(
+            contentsOf: serverRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("infra/prod/docker/internal-smoke-migrate.sh"),
+            encoding: .utf8
+        )
+        let preflight = try XCTUnwrap(productionMigrate.range(of: "role_contract=$(psql"))
+        let migrate = try XCTUnwrap(productionMigrate.range(of: "sh scripts/migrate.sh"))
+        XCTAssertLessThan(preflight.lowerBound, migrate.lowerBound)
+        XCTAssertTrue(productionMigrate.contains("MOMO_BOOTSTRAP_RUNTIME_ROLES must be exactly 0 or 1"))
+        XCTAssertTrue(productionMigrate.contains("refusing to migrate"))
+    }
+
+    func testWorkspaceReadConsolidatesMembershipAndIdentityQuery() throws {
+        let source = try String(
+            contentsOf: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("Sources/MomoServer/Routes/WorkspaceRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("readWorkspaceForActiveMember"))
+        XCTAssertTrue(source.contains("'workspaceExists', EXISTS"))
+        XCTAssertTrue(source.contains("AND EXISTS (\n                            SELECT 1\n                              FROM membership AS ms"))
+    }
+
     func testJoinIdentityValidationNormalizesInputs() throws {
         XCTAssertEqual(try JoinRoutes.normalizedEmail("  USER@Example.COM  "), "user@example.com")
         XCTAssertEqual(try JoinRoutes.normalizedDisplayName("  New Human  "), "New Human")

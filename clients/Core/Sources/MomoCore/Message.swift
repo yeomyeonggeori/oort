@@ -1,6 +1,6 @@
 import Foundation
 
-/// A message — the central object. Mirrors the `message` table (schema_v0.sql:155).
+/// A message is the central object. Mirrors the `message` table (schema_v0.sql:155).
 ///
 /// Ordering authority is `(channelId, seq)`: a per-channel monotonic gapless BIGINT
 /// (L4 §1.2 #3, §3.1). HLC is stored decomposed (`hlcTs` physical ms + `hlcCount`
@@ -18,7 +18,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
     public var hlcTs: Int64
     /// Hybrid Logical Clock logical counter.
     public var hlcCount: Int32
-    /// Author — human OR agent, symmetric.
+    /// Author, human or agent, symmetric.
     public var authorMemberId: MemberID
     public var type: MessageType
     public var state: MessageState

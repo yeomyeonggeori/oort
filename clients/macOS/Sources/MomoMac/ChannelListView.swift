@@ -3,6 +3,50 @@ import AppKit
 import UniformTypeIdentifiers
 import MomoCore
 
+struct MomoWorkspaceIdentityRecoveryPresentation: Equatable {
+    let label: String
+    let help: String
+
+    init?(
+        workspace: Workspace?,
+        usesCache: Bool,
+        error: String?,
+        copy: MomoWorkspaceCopy
+    ) {
+        if usesCache {
+            label = copy.workspaceCachedRetry
+            help = copy.workspaceCachedHelp
+        } else {
+            guard workspace == nil, error != nil else { return nil }
+            label = copy.workspaceUnavailableRetry
+            help = copy.workspaceUnavailableHelp
+        }
+    }
+}
+
+struct MomoWorkspaceIdentityRecoveryButton: View {
+    static let accessibilityIdentifier = "workspace-identity-retry"
+
+    let presentation: MomoWorkspaceIdentityRecoveryPresentation
+    let retry: () -> Void
+
+    var body: some View {
+        Button(action: retry) {
+            Label(presentation.label, systemImage: "arrow.clockwise.circle")
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut("r", modifiers: [.command, .shift])
+        .help(presentation.help)
+        .accessibilityLabel(presentation.label)
+        .accessibilityHint(presentation.help)
+        .accessibilityIdentifier(Self.accessibilityIdentifier)
+    }
+}
+
 // MARK: - ChannelListView
 //
 // Sidebar listing channels and the selected channel's first-class members.
@@ -16,11 +60,11 @@ public struct ChannelListView: View {
     @State private var showDiagnostics = false
     @State private var showInvites = false
     @State private var showProfilePanel = false
+    @State private var showWorkspaceMenu = false
     @State private var showMemberInvite = false
     @State private var showMemberDirectory = false
     @State private var hoveredChannelID: ChannelID?
     @State private var hoveredMemberID: MemberID?
-    @State private var isWorkspaceHeaderHovered = false
     @State private var hoveredUtility: MomoSidebarUtility?
     @State private var channelPresentationRevision = 0
     @State private var newChannelName = ""
@@ -35,7 +79,6 @@ public struct ChannelListView: View {
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
-    @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
     @AppStorage("momo.server.iconText") private var serverIconText = "m"
     @AppStorage("momo.server.iconPath") private var serverIconPath = ""
     @AppStorage("momo.server.agentInviteRequiresApproval") private var agentInviteRequiresApproval = true
@@ -106,11 +149,10 @@ public struct ChannelListView: View {
         let copy = MomoWorkspaceCopy(language: language)
 
         GeometryReader { geometry in
-            // The workspace header lives in the window toolbar, so this custom
-            // scroll surface consumes the NSWindow content-layout band itself.
+            // Sidebar content always begins below the real NSWindow titlebar band.
+            // The workspace header is now sidebar-owned rather than toolbar-owned.
             let topInset = MomoWindowChromeLayout.sidebarTopInset(
-                windowChromeTopInset: windowChromeTopInset,
-                showsWorkspaceHeader: showsWorkspaceHeader
+                windowChromeTopInset: windowChromeTopInset
             )
 
             ZStack(alignment: .bottom) {
@@ -194,6 +236,11 @@ public struct ChannelListView: View {
         .sheet(isPresented: $showMemberDirectory) {
             MemberDirectoryView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showMemberInvite) {
+            memberInvitePopover(copy: copy)
+                .frame(width: MomoTheme.memberInvitePopoverWidth)
+                .padding(MomoTheme.Sidebar.contentSpacing)
+        }
     }
 
     private var language: MomoUILanguage {
@@ -213,42 +260,104 @@ public struct ChannelListView: View {
     }
 
     private func sidebarHeader(copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
-            MomoSidebarLogoMark(
-                text: serverIconText,
-                imagePath: serverIconPath,
-                size: MomoTheme.Sidebar.logoSize
-            )
-            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
-                Text(serverDisplayName)
-                    .font(MomoTheme.Sidebar.workspaceFont)
-                    .lineLimit(1)
-                Text(sessionChrome?.summary.memberDisplayName ?? profileDisplayName)
-                    .font(MomoTheme.Sidebar.workspaceDetailFont)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+        let displayName = workspaceDisplayName(copy: copy)
+        let contextSubtitle = workspaceContextSubtitle(copy: copy)
+
+        return VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
             Button {
-                openWorkspaceSettings?()
+                showWorkspaceMenu.toggle()
             } label: {
-                Image(systemName: "gearshape")
-                    .frame(
-                        width: MomoTheme.Sidebar.actionSize,
-                        height: MomoTheme.Sidebar.actionSize
+                HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                    MomoSidebarLogoMark(
+                        text: serverIconText,
+                        imagePath: serverIconPath,
+                        size: MomoTheme.Sidebar.logoSize
                     )
+                    VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
+                        Text(displayName)
+                            .font(MomoTheme.Sidebar.workspaceFont)
+                            .lineLimit(1)
+                            .help(displayName)
+                        Text(contextSubtitle)
+                            .font(MomoTheme.Sidebar.workspaceDetailFont)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    .layoutPriority(1)
+                    Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .opacity(isWorkspaceHeaderHovered ? 1 : 0)
-            .allowsHitTesting(isWorkspaceHeaderHovered)
-            .accessibilityHidden(!isWorkspaceHeaderHovered)
-            .help(copy.serverSettings)
-            .momoQuickTooltip(copy.serverSettings)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("\(displayName), \(contextSubtitle), \(copy.workspaceMenu)")
+
+            if let recovery = MomoWorkspaceIdentityRecoveryPresentation(
+                workspace: viewModel.workspace,
+                usesCache: viewModel.workspaceIdentityUsesCache,
+                error: viewModel.workspaceNameUpdateError,
+                copy: copy
+            ) {
+                MomoWorkspaceIdentityRecoveryButton(presentation: recovery) {
+                    Task { await viewModel.refreshWorkspaceIdentity() }
+                }
+            }
         }
         .padding(.horizontal, MomoTheme.Sidebar.contentSpacing)
-        .frame(minHeight: MomoTheme.Sidebar.headerMinimumHeight)
-        .contentShape(Rectangle())
-        .onHover { isWorkspaceHeaderHovered = $0 }
+        .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
+        .frame(maxWidth: .infinity, minHeight: MomoTheme.Sidebar.headerMinimumHeight, alignment: .leading)
+        .popover(isPresented: $showWorkspaceMenu, arrowEdge: .trailing) {
+            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
+                workspaceMenuButton(copy.serverSettings, systemImage: "gearshape") {
+                    showWorkspaceMenu = false
+                    openWorkspaceSettings?()
+                }
+                workspaceMenuButton(copy.inviteMembers, systemImage: "person.badge.plus") {
+                    showWorkspaceMenu = false
+                    showMemberInvite = true
+                }
+                Divider()
+                workspaceMenuButton(copy.copyWorkspaceID, systemImage: "doc.on.doc") {
+                    copyWorkspaceID()
+                    showWorkspaceMenu = false
+                }
+                .disabled(viewModel.workspaceId == nil)
+            }
+            .padding(MomoTheme.Sidebar.contentSpacing)
+        }
+    }
+
+    private func workspaceMenuButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func workspaceDisplayName(copy: MomoWorkspaceCopy) -> String {
+        let serverName = viewModel.workspace?.name.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return serverName.isEmpty ? copy.workspaceLabel : serverName
+    }
+
+    private func workspaceContextSubtitle(copy: MomoWorkspaceCopy) -> String {
+        guard let member = viewModel.authenticatedMember else { return copy.workspaceLabel }
+        return copy.workspaceSignedInAs(member.displayName)
+    }
+
+    private func copyWorkspaceID() {
+        guard let workspaceId = viewModel.workspaceId else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(workspaceId.description, forType: .string)
     }
 
     private func sidebarSectionHeader(
@@ -881,10 +990,6 @@ public struct ChannelListView: View {
             .padding(.horizontal, MomoTheme.Sidebar.edgeInset)
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showMemberInvite, arrowEdge: .bottom) {
-            memberInvitePopover(copy: copy)
-                .frame(width: MomoTheme.memberInvitePopoverWidth)
-        }
         .popover(isPresented: $showInvites) {
             if let context = sessionChrome?.inviteAdminContext {
                 InviteAdminPopover(context: context)

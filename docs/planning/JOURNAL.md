@@ -5,6 +5,48 @@
 
 ---
 
+## 2026-07-15 (Codex worker) · MOMO-383 delayed roster/channel cache P2
+- REST `members`/`channels`가 요청 시작 generation+workspace를 capture하고 reconnect 뒤 돌아온 이전 session 응답은 `CancellationError`로 폐기해 current cache를 건드리지 않게 했다.
+- delayed A roster/channel → connect B → B cache load → A release race 2건을 deterministic URLProtocol gate로 고정했다. 전체 Swift count는 Core 24·Server 80·Relay 2·Worker 29·macOS 234 = 369.
+- 이전 dirty-worktree gate evidence는 폐기한다. 새 final commit에서 dirty 허용 없이 runtime-db, 실제 launch macos-ui, docs를 실행하고 PR #389 handoff에 commit/evidence를 기록한다.
+- 다음: PR #389 draft 유지, merge/close 금지, clean gate 뒤 momo-main final rereview.
+
+## 2026-07-15 (Codex worker) · MOMO-383 final FAIL review actual fixes
+- REST connect generation으로 delayed login→clear·overlapping A/B를 차단하고, channel/read/status subscription exact-token cleanup과 workspace identity+channels 병렬 bootstrap을 추가했다.
+- workspace GET을 bounded one-query로 합치고 private migration drift exact-create/ACL, production external-role preflight, accessible retry color, narrow settings projection을 반영했다.
+- Core 24·Server 80·Relay 2·Worker 29·macOS 232 = 367 tests; `runtime-db` 30/30(`…r7f86c3c71502`)와 실제 launch `macos-ui` 20/20(`…rfd90ac91063d`) PASS.
+- 다음: PR #389 draft 유지, commit/push 후 momo-main final rereview. merge 금지; 후속 #390/#391/#392 유지.
+
+## 2026-07-15 (Codex worker) · MOMO-383 fresh-deploy role-order P1 fix
+- production migrate→role bootstrap 순서에서 migration 009의 conditional app grant가 건너뛰는 결함을 `bootstrap_roles.sql` app-only grant와 relay/worker explicit denial로 닫았다.
+- ephemeral PG18 verifier가 runtime role 0개 → migrate → 여전히 0개 → bootstrap → app exact invite lookup allow, relay/worker deny를 실제 실행한다.
+- static contract와 full `runtime-db` 30/30 PASS(`20260714T221124Z-…-r584776886194`), Swift 360 tests 유지.
+- 다음: PR #389 draft 유지, 추가 commit/push 뒤 momo-main final rereview/merge.
+
+## 2026-07-15 (Codex worker) · MOMO-383 final review fix 검증 완료
+- 모든 bootstrap await/subscription·409 reload generation guard, authoritative-denial persistent cache 삭제, workspace root FORCE RLS와 locked-schema invite lookup, no-cache retry/AX 및 normalized settings를 반영했다.
+- locked function은 app만 호출하고 PUBLIC/worker/relay/platform은 broad public function grant 뒤에도 거부됨을 `verify_rls.sh`와 실제 join smoke로 확인했다.
+- Core 24·Server 79·Relay 2·Worker 29·macOS 226 = 360 tests; full `runtime-db`와 launch 포함 `macos-ui`, design preflight PASS.
+- 다음: PR #389 draft 유지·momo-main final rereview/merge; 후속 MOMO-384 `#390`, MOMO-385 `#391`, MOMO-386 `#392`.
+
+## 2026-07-15 (Codex worker) · MOMO-383 correctness/performance review fix
+- stale workspace GET이 rename/new session을 덮지 못하도록 session/load generation + `updatedAtMs` guard를 추가하고, unknown error cache fallback은 default-deny, REST cancellation은 `CancellationError` 보존으로 고쳤다.
+- Live demo cache scope를 제거하고 isolated UserDefaults 반복 bootstrap, race/session/cancellation/default-deny 회귀 6건을 추가했다. verifier는 apostrophe 이름을 `psql -v` stdin binding으로 audit하고 복원 GET까지 확인한다.
+- `verify_channel_management.sh`, worker `swift`, `macos-ui` PASS. Core 24·Server 78·Relay 2·Worker 29·macOS 219 = 352 tests 0 failure.
+- 다음: PR #389 draft 유지. #388 merge/rebase 뒤 momo-main full `runtime-db` + final rereview; 후속은 MOMO-384 `#390`, MOMO-385 `#391`, MOMO-386 `#392`.
+
+## 2026-07-15 (momo-main/Codex) · MOMO-383 리뷰 반려 수정
+- security/design 독립 리뷰에서 ADR 부재, cache auth leak, stale conflict, 모호한 오류/권한 문구와 verifier 복원 결함을 찾아 실제 수정했다.
+- ADR-0118을 Accepted 결정으로 추가하고 cache를 server+member+workspace로 격리, 401/403/404 비노출, 409 자동 reload, 구 cache Codable 호환을 구현했다.
+- workspace 설정은 validation/권한/충돌/연결 copy와 cached-name 재시도를 제공하고, sidebar subtitle은 현재 사용자 문맥을 표시한다.
+- 전체 Swift Core 24·Server 78·Relay 2·Worker 29·macOS 212 = 345 tests 0 failure. 다음: final rereview → clean gates → PR/merge/root main.
+
+## 2026-07-15 (momo-main/Codex) · MOMO-383 workspace-first 구현 검수
+- toolbar workspace capsule을 sidebar 최상단 identity/native popover로 옮기고 owner/admin durable workspace rename API와 audit를 구현했다.
+- ordinary member/cross-workspace 403, 두 client 영속 read, audit/restore, 표준·좁은 실창 기하는 PASS했다.
+- icon/invite policy는 local draft, multi-workspace는 ADR-0117 전 금지, interactive Work command는 ADR-0114 전 금지 경계를 유지했다.
+- 다음: fresh code/design review와 clean 3-gate 후 merge; 그 뒤 MOMO-384/385를 unblock한다.
+
 ## 2026-07-15 (momo-main/Codex) · PLN-20260715-01 workspace-first superapp shell
 - 성재 실창 QA 12건을 workspace navigation, native channel sheet/tooltip, member inspector/one-click DM, RLS workspace search의 4개 builder로 분리했다.
 - `Control+backtick`는 transcript drawer(MOMO-375)와 interactive Work Console을 분리하고, 후자는 ADR-0114 승인 전 구현 금지로 고정했다.

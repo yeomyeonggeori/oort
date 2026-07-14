@@ -534,6 +534,24 @@ struct RedeemInviteResponse: ResponseEncodable {
     let redemptionId: String
 }
 
+// ---- Workspace identity ----
+
+struct UpdateWorkspaceRequest: Decodable {
+    let name: String
+    let expectedUpdatedAtMs: Int64
+}
+
+struct WorkspaceDTO: ResponseEncodable, Decodable {
+    let id: String
+    let slug: String
+    let name: String
+    let updatedAtMs: Int64
+}
+
+struct WorkspaceResponse: ResponseEncodable, Decodable {
+    let workspace: WorkspaceDTO
+}
+
 // ---- Public join ----
 
 /// POST /v1/join request body.

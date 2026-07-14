@@ -121,10 +121,24 @@ public struct Workspace: Identifiable, Codable, Sendable, Hashable {
     public let id: WorkspaceID
     public var slug: String
     public var name: String
+    public var updatedAtMs: Int64
 
-    public init(id: WorkspaceID, slug: String, name: String) {
+    public init(id: WorkspaceID, slug: String, name: String, updatedAtMs: Int64 = 0) {
         self.id = id
         self.slug = slug
         self.name = name
+        self.updatedAtMs = updatedAtMs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, slug, name, updatedAtMs
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(WorkspaceID.self, forKey: .id)
+        slug = try container.decode(String.self, forKey: .slug)
+        name = try container.decode(String.self, forKey: .name)
+        updatedAtMs = try container.decodeIfPresent(Int64.self, forKey: .updatedAtMs) ?? 0
     }
 }

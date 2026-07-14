@@ -47,20 +47,12 @@ final class MomoChannelChromeTests: XCTestCase {
         )
     }
 
-    func testToolbarOwnedSidebarConsumesTopSafeAreaOnlyWhenItsHeaderIsHidden() {
+    func testSidebarContentAlwaysBeginsBelowWindowChrome() {
         XCTAssertEqual(
             MomoWindowChromeLayout.sidebarTopInset(
-                windowChromeTopInset: 52,
-                showsWorkspaceHeader: false
+                windowChromeTopInset: 52
             ),
             52
-        )
-        XCTAssertEqual(
-            MomoWindowChromeLayout.sidebarTopInset(
-                windowChromeTopInset: 52,
-                showsWorkspaceHeader: true
-            ),
-            0
         )
     }
 

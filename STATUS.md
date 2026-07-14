@@ -3,6 +3,17 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-383 Workspace-first Navigation (2026-07-15)
+
+- toolbar의 떠 있는 workspace capsule을 제거하고 sidebar 최상단에 icon/name/member identity를 배치했다. native popover 메뉴에서 서버 설정, 멤버 초대, workspace ID 복사를 제공하며 표준 1180x760·좁은 900x650 실창에서 traffic light/channel header 겹침이 없음을 확인했다.
+- `GET/PATCH /v1/workspaces/{workspaceId}`와 macOS binding을 추가했다. read는 active member, rename은 owner/admin만 허용하고 일반 member/cross-workspace 요청은 403으로 닫는다. rename은 row lock 아래 durable update와 `workspace.name.updated` audit를 남기며 두 번째 client read로 영속성을 검증했다.
+- 공개 API와 권한 경계는 ADR-0118로 고정했다. 독립 security/design 리뷰 반려를 반영해 workspace cache를 server-origin+authenticated-member+workspace로 격리하고 401/403/404에서는 cache를 노출하지 않으며, transient 5xx/transport 실패만 명시적 "저장된 이름" 상태와 재시도를 제공한다. 409 lost-update 충돌은 최신 identity/version을 다시 읽어 다음 저장이 영구 stale에 빠지지 않는다.
+- 최종 correctness 리뷰를 반영해 `ChatViewModel.bootstrap`의 channels/read-state/runtime/approval/subscription await마다 session/workspace generation을 재검증하고, 409 reload도 재검증 뒤에만 오류를 기록한다. 401/403/404는 exact server+member+workspace의 memory/UserDefaults cache를 삭제해 이후 5xx가 stale identity를 되살리지 못하게 한다. unknown error fallback은 default-deny이고 REST cancellation은 `CancellationError`로 보존한다. demo backend는 persistent cache scope를 제공하지 않으며 verifier의 workspace 이름은 `psql -v` stdin binding으로 audit/cleanup하고 apostrophe rename 뒤 원래 fixture를 다시 GET해 확인한다.
+- migration 009는 workspace root에 `ENABLE/FORCE RLS`와 exact `app.workspace_id` policy를 추가했다. public join의 invite hash→workspace UUID lookup은 `momo_join_private` locked schema의 fixed-path `SECURITY DEFINER` 함수 하나로 제한한다. private object는 exact create라 preseed/drift 시 transaction이 실패하고 ACL은 owner+app만 허용한다. internal smoke의 roles absent→migrate→test bootstrap과 production의 externally provisioned roles→migrate 순서를 각각 isolated PG18에서 검증하며, production은 역할 누락/속성 drift를 migration 전에 거부한다.
+- 설정은 1-80자 validation, owner/admin 전용 이유, conflict/permission/connection별 한국어·영어 오류를 제공한다. no-cache load 실패도 sidebar에 keyboard(`⇧⌘R`)/VoiceOver 가능한 retry를 노출하고 semantic primary text로 고대비를 보장한다. settings는 streaming `ChatViewModel` 대신 좁은 projection만 관찰하며 counter/validation/save는 같은 trimmed 문자열을 사용한다. 전체 Swift 테스트는 Core 24·Server 80·Relay 2·Worker 29·macOS 234, 총 369건 0 failure로 통과했다.
+- workspace icon과 invite policy는 계속 이 Mac의 local display draft다. 다중 workspace rail은 ADR-0117 전 구현하지 않는다. 후속은 MOMO-384 `#390`, MOMO-385 `#391`, MOMO-386 `#392`다.
+- final review fix는 delayed login→clear·overlapping A/B connect뿐 아니라 delayed members/channels 응답도 connection generation+exact workspace guard로 폐기해 reconnect 뒤 cache를 덮지 못하게 했다. normal/error realtime resubscribe cleanup, guarded parallel bootstrap, one-query workspace membership read, narrow settings invalidation을 포함해 focused 신규 macOS 8 + server 1과 raster 2종이 PASS했다. 이전 dirty-worktree gate evidence는 폐기하며 final commit의 clean `runtime-db`/실제 launch `macos-ui`/docs evidence는 PR #389 handoff에 기록한다.
+
 ## MOMO-388 Auth-Hardening Realtime Credential Binding Verifier (2026-07-15)
 
 - 레거시 verifier가 멤버·채널만 담은 callback을 보낸 drift에 더해, 1차 수정이 `meta.token_id`를 임의 active UUID로만 검증하고 human의 active refresh row도 realtime liveness로 인정하던 review gap을 닫았다. human realtime credential은 이제 `session` 중 `label='access'` row만 허용하며 RLS와 `schema_v0.sql`은 변경하지 않았다.

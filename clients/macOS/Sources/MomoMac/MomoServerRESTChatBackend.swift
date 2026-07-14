@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -22,6 +22,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
     private var workspace: WorkspaceID?
     private var accessToken: String?
     private var authenticatedMember: Member?
+    private var connectionGeneration: UInt64 = 0
     private var cachedChannels: [Channel]?
     private var cachedMembers: [Member]?
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
@@ -44,7 +45,9 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
     }
 
     public func connect(workspace: WorkspaceID, accessToken: String) async throws {
-        self.workspace = workspace
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
+        resetSessionState(workspace: workspace)
         if !accessToken.isEmpty {
             self.accessToken = accessToken
             try configureRealtime(config.centrifugoWebSocketURL?.absoluteString)
@@ -66,8 +69,15 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
             authorized: false,
             response: LoginResponse.self
         )
+        guard connectionGeneration == generation, self.workspace == workspace else {
+            throw CancellationError()
+        }
+        let member = try login.member.member()
+        guard connectionGeneration == generation, self.workspace == workspace else {
+            throw CancellationError()
+        }
         self.accessToken = login.accessToken
-        self.authenticatedMember = try login.member.member()
+        self.authenticatedMember = member
         try configureRealtime(
             login.realtimeWebSocketUrl ?? config.centrifugoWebSocketURL?.absoluteString
         )
@@ -99,8 +109,17 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         authenticatedMember?.id ?? accessToken.flatMap(Self.memberIDFromJWT)
     }
 
+    func workspaceIdentityCacheServerScope() async -> String {
+        config.baseURL.absoluteString
+    }
+
     public func clearSessionSensitiveState() async {
-        workspace = nil
+        connectionGeneration &+= 1
+        resetSessionState(workspace: nil)
+    }
+
+    private func resetSessionState(workspace: WorkspaceID?) {
+        self.workspace = workspace
         accessToken = nil
         authenticatedMember = nil
         cachedChannels = nil
@@ -242,12 +261,22 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
     }
 
     public func members(workspace: WorkspaceID) async throws -> [Member] {
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              accessToken != nil
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
         let response = try await get(
             "/v1/workspaces/\(workspace.description)/roster",
             queryItems: [],
             response: WorkspaceRosterResponse.self
         )
         var all = try response.members.map { try $0.member() }
+        guard connectionGeneration == generation, self.workspace == sessionWorkspace else {
+            throw CancellationError()
+        }
         if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
             all.insert(authenticatedMember, at: 0)
         }
@@ -256,14 +285,47 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
     }
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              accessToken != nil
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
         let response = try await get(
             "/v1/workspaces/\(workspace.description)/channels",
             queryItems: [],
             response: WorkspaceChannelsResponse.self
         )
         let channels = try response.channels.map { try $0.channel() }
+        guard connectionGeneration == generation, self.workspace == sessionWorkspace else {
+            throw CancellationError()
+        }
         cachedChannels = channels
         return channels
+    }
+
+    public func workspace(id: WorkspaceID) async throws -> Workspace {
+        try await get(
+            "/v1/workspaces/\(id.description)",
+            queryItems: [],
+            response: WorkspaceResponseDTO.self
+        ).workspace.workspace
+    }
+
+    public func updateWorkspaceName(
+        workspace: WorkspaceID,
+        name: String,
+        expectedUpdatedAtMs: Int64
+    ) async throws -> Workspace {
+        try await patch(
+            "/v1/workspaces/\(workspace.description)",
+            body: UpdateWorkspaceRequestDTO(
+                name: name,
+                expectedUpdatedAtMs: expectedUpdatedAtMs
+            ),
+            response: WorkspaceResponseDTO.self
+        ).workspace.workspace
     }
 
     public func openDirectMessage(
@@ -646,6 +708,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         return try await execute(request, response: response)
     }
 
+    private func patch<RequestBody: Encodable, ResponseBody: Decodable>(
+        _ path: String,
+        body: RequestBody,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        try authorize(&request)
+        return try await execute(request, response: response)
+    }
+
     private func delete<ResponseBody: Decodable>(
         _ path: String,
         authorized: Bool,
@@ -680,6 +755,10 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
             }
         } catch let error as BackendError {
             throw error
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
         } catch {
             throw BackendError.realtime(error.localizedDescription)
         }
@@ -1057,6 +1136,26 @@ private struct MessagePage: Decodable {
 
 private struct WorkspaceChannelsResponse: Decodable {
     let channels: [ChannelDTO]
+}
+
+private struct UpdateWorkspaceRequestDTO: Encodable {
+    let name: String
+    let expectedUpdatedAtMs: Int64
+}
+
+private struct WorkspaceResponseDTO: Decodable {
+    let workspace: WorkspaceDTO
+}
+
+private struct WorkspaceDTO: Decodable {
+    let id: WorkspaceID
+    let slug: String
+    let name: String
+    let updatedAtMs: Int64
+
+    var workspace: Workspace {
+        Workspace(id: id, slug: slug, name: name, updatedAtMs: updatedAtMs)
+    }
 }
 
 private struct ChannelDTO: Decodable {

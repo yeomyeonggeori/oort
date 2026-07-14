@@ -114,7 +114,7 @@ public struct AgentStatus: Codable, Sendable, Hashable {
     }
 }
 
-/// `agent.partial` event — a streaming delta of a first-class message (L4 §5.2).
+/// `agent.partial` event: a streaming delta of a first-class message (L4 §5.2).
 /// The `messageId` lets the client coalesce deltas into a single growing bubble.
 public struct AgentPartial: Codable, Sendable, Hashable {
     public var runId: RunID

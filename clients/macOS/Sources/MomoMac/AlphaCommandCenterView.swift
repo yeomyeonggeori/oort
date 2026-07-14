@@ -678,7 +678,7 @@ public struct AlphaCommandCenterView: View {
                     Text(status.area.rawValue)
                         .font(.caption.weight(.semibold))
                     Text(status.health.rawValue)
-                        .font(.system(size: 9, weight: .bold))
+                        .font(.caption2.weight(.bold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)
                         .background(status.health.tint.opacity(0.16), in: Capsule())

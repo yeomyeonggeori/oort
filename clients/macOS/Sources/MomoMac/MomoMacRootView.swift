@@ -40,10 +40,6 @@ public struct MomoMacRootView: View {
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
-    @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
-    @AppStorage("momo.server.iconText") private var serverIconText = "m"
-    @AppStorage("momo.server.iconPath") private var serverIconPath = ""
-    @AppStorage("momo.profile.displayName") private var profileDisplayName = ""
     private let sessionChrome: MomoSessionChrome?
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
@@ -127,11 +123,6 @@ public struct MomoMacRootView: View {
                 windowChromeMetrics = metrics
             }
             .frame(width: 0, height: 0)
-        }
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                workspaceToolbarHeader(copy: copy)
-            }
         }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
         .preferredColorScheme(appearance.colorScheme)
@@ -270,7 +261,7 @@ public struct MomoMacRootView: View {
             openUpdates: {
                 openDetailPane(.updates)
             },
-            showsWorkspaceHeader: false
+            showsWorkspaceHeader: true
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -404,7 +395,7 @@ public struct MomoMacRootView: View {
             case .settings:
                 MomoAppSettingsSurface(copy: copy)
             case .workspaceSettings:
-                MomoWorkspaceSettingsSurface(copy: copy)
+                MomoWorkspaceSettingsSurface(copy: copy, viewModel: viewModel)
             case .downloads:
                 MomoDownloadsSettingsSurface(copy: copy)
             case .updates:
@@ -453,48 +444,6 @@ public struct MomoMacRootView: View {
 
     private var detailPane: MomoMacDetailPane {
         detailPanePresentation.pane
-    }
-
-    private func workspaceToolbarHeader(copy: MomoWorkspaceCopy) -> some View {
-        Button {
-            openDetailPane(.workspaceSettings)
-        } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
-                    workspaceToolbarLogo
-                    VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
-                        Text(serverDisplayName)
-                            .font(MomoTheme.Typography.toolbarTitle)
-                            .fixedSize()
-                        Text(workspaceMemberDisplayName)
-                            .font(MomoTheme.Typography.toolbarSupporting)
-                            .foregroundStyle(.secondary)
-                            .fixedSize()
-                    }
-                }
-
-                workspaceToolbarLogo
-            }
-        }
-        .buttonStyle(.plain)
-        .help("\(serverDisplayName), \(copy.serverSettings)")
-        .momoQuickTooltip(copy.serverSettings)
-        .accessibilityLabel("\(serverDisplayName), \(copy.serverSettings)")
-    }
-
-    private var workspaceToolbarLogo: some View {
-        MomoSidebarLogoMark(
-            text: serverIconText,
-            imagePath: serverIconPath,
-            size: MomoTheme.Sidebar.toolbarLogoSize
-        )
-    }
-
-    private var workspaceMemberDisplayName: String {
-        let sessionName = sessionChrome?.summary.memberDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !sessionName.isEmpty { return sessionName }
-        let profileName = profileDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return profileName.isEmpty ? "momo" : profileName
     }
 
     private var commandActions: MomoMacCommandActions {
@@ -556,8 +505,8 @@ enum MomoWindowChromeLayout {
         max(0, channelHeaderHeight)
     }
 
-    static func sidebarTopInset(windowChromeTopInset: CGFloat, showsWorkspaceHeader: Bool) -> CGFloat {
-        showsWorkspaceHeader ? 0 : contentTopInset(windowChromeTopInset: windowChromeTopInset)
+    static func sidebarTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
+        contentTopInset(windowChromeTopInset: windowChromeTopInset)
     }
 }
 

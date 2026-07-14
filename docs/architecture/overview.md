@@ -49,6 +49,27 @@ macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 
 에이전트는 사이드바·멘션 후보·agent realtime 구독에 나타나지 않는다. offline demo
 fixture는 `LiveChatBackend`에만 존재한다.
 
+workspace shared identity는 ADR-0118을 따른다. active member는 tenant-scoped
+`GET /v1/workspaces/:ws`로 이름과 갱신 버전을 읽고, owner/admin만
+`PATCH /v1/workspaces/:ws`로 이름을 변경한다. PATCH는 `expectedUpdatedAtMs`로
+lost update를 막고 성공 audit을 같은 transaction에 기록한다. tenant root인
+`workspace` 자체도 `id = app.workspace_id` ENABLE/FORCE RLS를 적용한다. 공개 join의
+chicken-and-egg만 locked `momo_join_private` schema의 fixed-search-path·static SQL·
+schema/function PUBLIC revoke·app-role USAGE+EXECUTE-only인 exact
+invite-hash→active workspace UUID 함수로 해소하고, invite 상태 조회부터는 그
+UUID의 tenant context로 돌아간다. 일반 identity 경로에는 BYPASSRLS가 없고 기존
+platform-admin 전역 조회는 별도 read-only BYPASS connection에만 남는다. 401/403/404는
+server-origin + member + workspace 범위의 해당 클라이언트 캐시까지 삭제하며,
+transient 5xx/transport 실패에만 마지막 이름을 표시한다. privileged private schema/function은
+migration 009가 정확히 생성하므로 pre-existing object drift에서 transaction이 fail-closed 된다.
+내부 smoke는 roles absent → migrate → test-only bootstrap 순서를 허용하지만, production의
+`MOMO_BOOTSTRAP_RUNTIME_ROLES=0`은 secret manager/IaC가 app(NOBYPASSRLS)과
+relay/worker(BYPASSRLS)를 먼저 안전하게 provision해야 하며 누락·속성 불일치 시 migration 전에
+실패한다. ephemeral PG18 gate는 두 순서와 app-only exact ACL을 모두 검증한다.
+bootstrap/refresh/conflict
+reload/subscription 응답은 session+workspace generation이 바뀌면 상태와 오류 모두
+폐기한다.
+
 direct message는 ADR-0112의 "하나의 타임라인, 두 개의 밀도" 원칙에 따라 일반 채널과
 같은 timeline/read-state 경로를 사용한다. `GET /v1/workspaces/:ws/dms`는 active DM과
 참여자를, 같은 경로의 `POST {memberId}`는 정렬한 두 member ID의 SHA-256 `dm_key`로
