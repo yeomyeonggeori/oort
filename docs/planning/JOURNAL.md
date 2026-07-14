@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (Codex worker) · MOMO-371 채널 헤더·macOS 크롬
+- 채널 identity/주제/멤버 수/설정과 이름·주제·멤버·연동 시트를 구성하고 MOMO-372 디렉터리 closure만 노출했다. 워크스페이스 identity는 unified toolbar로 옮기고 상세 패널은 단일 열림/닫힘 상태로 고정했다.
+- 계획 이탈: 사전 생성 worktree/branch와 `status:ready` 부재로 assignee/`status:in-progress`를 수동 반영했다. 서버 channel update 계약이 없어 이름/주제는 동기화 범위를 밝힌 Mac 로컬 표시값이며, webhook과 실제 디렉터리는 후속 계약/티켓 경계를 유지했다.
+- 5패키지 build, Core 23/Server 73/Relay 2/Worker 29/macOS 비이미지 130 tests와 MOMO-371 raster가 PASS했다. fresh design-review는 전 등급 0, 무필터 macOS는 기존 headless `NSImage` signal 5를 재현했다.
+- 정본 light/dark PNG와 실창 traffic-light/fullscreen/닫기 hit-test는 오케스트레이터 대기다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행(`runtime-unverified`).
+
 ## 2026-07-14 (Codex worker) · MOMO-370 fresh D6 반려 수정
 - dev Work 카드는 기존 `input.brief`를 복원해 실행 로그/결과 중복과 canonical 회귀를 해소했고, 표준 모드 Alpha Command Center 직접 표면·승인 연관 버튼·초대 fallback을 dev gate 또는 초대 안내로 정리했다.
 - 마지막 한글 음절 종성 기반 이/가·을/를·은/는 헬퍼와 혼합 이름 테스트를 추가하고, 접힌 카드는 2줄·펼침은 전문+detail 무중복으로 바꿨다. 표준 ApprovalInbox 실데이터 raster도 추가했다.

@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-371 Channel Header + macOS Chrome (2026-07-14)
+
+- 채널명·주제·멤버 수·설정 진입점을 한 헤더로 묶고, 이름/주제·멤버 관리·연동 placeholder 시트와 MOMO-372가 주입할 멤버 디렉터리 훅을 추가했다. 서버 채널 수정 계약이 없어 이름/주제는 이 Mac의 표시값으로만 저장하며 앱 안에서 동기화 범위를 명시한다.
+- 중복 사이드바 헤더를 표준 unified toolbar의 워크스페이스 identity로 옮겨 타이틀바 크롬과 정렬했고, 상세 패널 열림/닫힘을 단일 상태로 고정했다. 표면 stroke는 hit-test를 가로채지 않으며 Theme semantic typography는 macOS text size와 increased contrast를 명시적으로 따른다.
+- 5개 Swift package `swift build --disable-sandbox`, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 130 tests, MOMO-371 6 tests(정본 대기 2 skip), 비정본 light/dark/increased-contrast/large-type raster 및 fresh design-review(Blocker/High/Medium/Nitpick 0)가 PASS했다. 무필터 macOS suite는 기존 headless `NSImage` signal 5를 재현했다. 정본 light/dark PNG 재기록과 실창 titlebar/fullscreen/닫기 hit-test, DB/Docker/verifier/`local_gate.sh`는 오케스트레이터 대기(`runtime-unverified`).
+
 ## MOMO-370 Dual-density Developer Mode (2026-07-14)
 
 - 기본 off 개발자 모드와 그 안의 비용 표시 토글을 추가했다. 기본 타임라인·partial·Work·승인 인박스는 사람 언어 요약/승인 문장만 보이고 프로토콜·tool JSON·비용·진단 도구·Alpha Command Center·로컬 알파 채우기·세션 상세를 숨기며, 개발자 모드는 Work 지시문을 포함한 기존 밀도를 유지한다. 접힌 에이전트 카드는 2줄 뒤 펼침 시 전문+detail을 중복 없이 표시하고, 동적 이름 조사는 마지막 한글 음절 종성에 맞춘다.

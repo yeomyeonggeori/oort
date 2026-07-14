@@ -144,12 +144,53 @@ public enum MomoTheme {
 
     /// Semantic text rhythm: title -> section -> row -> supporting metadata.
     public enum Typography {
-        public static let screenTitle = Font.title3.weight(.semibold)
-        public static let sectionHeader = Font.subheadline.weight(.semibold)
+        public enum Role: Sendable {
+            case screenTitle
+            case sectionHeader
+            case row
+            case emphasizedRow
+            case supporting
+            case supportingEmphasized
+            case metadata
+            case metadataEmphasized
+            case toolbarTitle
+            case toolbarSupporting
+        }
+
+        public static let screenTitle = Font.title2.weight(.semibold)
+        public static let sectionHeader = Font.headline
         public static let row = Font.body
         public static let emphasizedRow = Font.body.weight(.semibold)
-        public static let supporting = Font.caption
-        public static let metadata = Font.caption2
+        public static let supporting = Font.subheadline
+        public static let metadata = Font.caption
+        public static let toolbarTitle = Font.headline
+        public static let toolbarSupporting = Font.subheadline
+
+        static func font(for role: Role, dynamicTypeSize: DynamicTypeSize) -> Font {
+            let usesExpandedRole = dynamicTypeSize > .large
+            switch (role, usesExpandedRole) {
+            case (.screenTitle, false): return screenTitle
+            case (.screenTitle, true): return .title.weight(.semibold)
+            case (.sectionHeader, false): return sectionHeader
+            case (.sectionHeader, true): return .title3.weight(.semibold)
+            case (.row, false): return row
+            case (.row, true): return .title3
+            case (.emphasizedRow, false): return emphasizedRow
+            case (.emphasizedRow, true): return .title3.weight(.semibold)
+            case (.supporting, false): return supporting
+            case (.supporting, true): return .body
+            case (.supportingEmphasized, false): return supporting.weight(.medium)
+            case (.supportingEmphasized, true): return .body.weight(.medium)
+            case (.metadata, false): return metadata
+            case (.metadata, true): return .callout
+            case (.metadataEmphasized, false): return metadata.weight(.semibold)
+            case (.metadataEmphasized, true): return .callout.weight(.semibold)
+            case (.toolbarTitle, false): return toolbarTitle
+            case (.toolbarTitle, true): return .title2.weight(.semibold)
+            case (.toolbarSupporting, false): return toolbarSupporting
+            case (.toolbarSupporting, true): return .body
+            }
+        }
     }
 
     public enum Motion {
@@ -170,6 +211,7 @@ public enum MomoTheme {
         public static let footerMinimumHeight: CGFloat = 44
         public static let avatarSize: CGFloat = 24
         public static let logoSize: CGFloat = 28
+        public static let toolbarLogoSize: CGFloat = 24
         public static let actionSize: CGFloat = 24
         public static let utilityPopoverWidth: CGFloat = 360
         public static let utilityPopoverMaximumHeight: CGFloat = 560
@@ -198,6 +240,20 @@ public enum MomoTheme {
         public static let utilityBackground = Color.primary.opacity(0.045)
         public static let mentionBadgeBackground = MomoTheme.irreversibleRed
         public static let mentionBadgeForeground = MomoTheme.onAccent
+    }
+
+    /// Channel identity and actions share one responsive header contract.
+    public enum ChannelHeader {
+        public static let iconSize: CGFloat = 24
+        public static let actionSize: CGFloat = 28
+        public static let minimumHeight: CGFloat = 64
+        public static let settingsSheetWidth: CGFloat = 640
+        public static let settingsSheetHeight: CGFloat = 520
+
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let edgeInset: CGFloat = 16
     }
 
     public enum QuickSwitcher {
@@ -254,10 +310,39 @@ public extension View {
     ) -> some View {
         modifier(MomoSurfaceModifier(level: level, cornerRadius: cornerRadius, extent: extent))
     }
+
+    /// Applies a semantic role and explicitly honors macOS per-app text sizing.
+    func momoTypography(_ role: MomoTheme.Typography.Role) -> some View {
+        modifier(MomoTypographyModifier(role: role))
+    }
+}
+
+private struct MomoTypographyModifier: ViewModifier {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    let role: MomoTheme.Typography.Role
+
+    func body(content: Content) -> some View {
+        content.font(MomoTheme.Typography.font(for: role, dynamicTypeSize: dynamicTypeSize))
+    }
+}
+
+private struct MomoColorSchemeContrastOverrideKey: EnvironmentKey {
+    static let defaultValue: ColorSchemeContrast? = nil
+}
+
+extension EnvironmentValues {
+    /// Headless snapshot hosts do not propagate accessibility appearances into
+    /// SwiftUI. Production leaves this nil and follows the system environment.
+    var momoColorSchemeContrastOverride: ColorSchemeContrast? {
+        get { self[MomoColorSchemeContrastOverrideKey.self] }
+        set { self[MomoColorSchemeContrastOverrideKey.self] = newValue }
+    }
 }
 
 private struct MomoSurfaceModifier: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var systemContrast
+    @Environment(\.momoColorSchemeContrastOverride) private var contrastOverride
     let level: MomoTheme.Surface.Level
     let cornerRadius: CGFloat
     let extent: MomoTheme.Surface.Extent
@@ -289,7 +374,13 @@ private struct MomoSurfaceModifier: ViewModifier {
     ) -> some View {
         content
             .overlay {
-                shape.stroke(style.border, lineWidth: MomoTheme.Surface.borderWidth)
+                shape.stroke(
+                    style.border,
+                    lineWidth: effectiveContrast == .increased
+                        ? MomoTheme.Surface.borderWidth * 2
+                        : MomoTheme.Surface.borderWidth
+                )
+                    .allowsHitTesting(false)
             }
             .shadow(
                 color: style.shadow,
@@ -297,6 +388,10 @@ private struct MomoSurfaceModifier: ViewModifier {
                 x: 0,
                 y: style.shadowY
             )
+    }
+
+    private var effectiveContrast: ColorSchemeContrast {
+        contrastOverride ?? systemContrast
     }
 }
 
