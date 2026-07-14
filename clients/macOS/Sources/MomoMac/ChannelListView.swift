@@ -263,16 +263,9 @@ public struct ChannelListView: View {
 
     private func membersSectionHeader(copy: MomoWorkspaceCopy) -> some View {
         HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
-            Button {
-                showMemberDirectory = true
-            } label: {
-                Text(copy.members)
-                    .font(MomoTheme.Sidebar.sectionHeaderFont)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .help(copy.browseMembers)
-            .momoQuickTooltip(copy.browseMembers)
+            Text(copy.members)
+                .font(MomoTheme.Sidebar.sectionHeaderFont)
+                .foregroundStyle(.secondary)
 
             Spacer()
 
@@ -426,7 +419,9 @@ public struct ChannelListView: View {
         let displayName = channelDisplayName(channel)
         let readState = viewModel.readStatesByChannel[channel.id]
         let showsUnreadWeight = isSelected(channel) || readState?.hasUnread == true
-        let mentionLabel = MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
+        let badgeLabel = channel.kind == .dm
+            ? MomoUnreadBadge.label(unreadCount: readState?.unreadCount ?? 0)
+            : MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
         Button {
             Task { await viewModel.selectChannel(channel.id) }
         } label: {
@@ -436,10 +431,12 @@ public struct ChannelListView: View {
                     .frame(width: MomoTheme.Sidebar.avatarSize)
                 Text(displayName)
                     .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(displayName)
                 Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
-                if let mentionLabel {
-                    Text(mentionLabel)
+                if let badgeLabel {
+                    Text(badgeLabel)
                         .font(MomoTheme.Sidebar.badgeFont)
                         .monospacedDigit()
                         .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
@@ -470,10 +467,11 @@ public struct ChannelListView: View {
 
     private func channelDisplayName(_ channel: Channel) -> String {
         _ = channelPresentationRevision
-        if let counterpart = viewModel.directMessageCounterpart(for: channel) {
-            return counterpart.displayName
-        }
-        return MomoLocalChannelPresentationStore.displayName(for: channel)
+        return MomoChannelDisplayPolicy.name(
+            for: channel,
+            members: viewModel.members,
+            currentMemberID: viewModel.currentNavigationMemberID
+        )
     }
 
     private func channelRowBackground(_ channel: Channel) -> Color {

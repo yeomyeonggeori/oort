@@ -56,6 +56,8 @@ enum MomoQuickSwitcherSearch {
     static func sections(
         orderedChannels: [Channel],
         members: [Member],
+        searchableMembers: [Member],
+        currentMemberID: MemberID?,
         recentChannelIds: [ChannelID],
         query: String
     ) -> [MomoQuickSwitcherSection] {
@@ -65,7 +67,11 @@ enum MomoQuickSwitcherSearch {
 
         let channelItems = orderedChannels.compactMap { channel -> MomoQuickSwitcherItem? in
             let presentation = MomoLocalChannelPresentationStore.presentation(for: channel)
-            let title = presentation.name
+            let title = MomoChannelDisplayPolicy.name(
+                for: channel,
+                members: members,
+                currentMemberID: currentMemberID
+            )
             guard let score = fuzzyScore(
                 query: trimmedQuery,
                 candidates: [title, presentation.topic, "#\(title)"]
@@ -85,10 +91,12 @@ enum MomoQuickSwitcherSearch {
             let rightRank = recentRank(for: rhs, ranks: recentRanks)
             if leftRank != rightRank { return leftRank < rightRank }
             if lhs.score != rhs.score { return lhs.score > rhs.score }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+            if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
+            return stableKey(for: lhs.destination) < stableKey(for: rhs.destination)
         }
 
-        let memberItems = members.compactMap { member -> MomoQuickSwitcherItem? in
+        let memberItems = searchableMembers.compactMap { member -> MomoQuickSwitcherItem? in
             guard let score = fuzzyScore(
                 query: trimmedQuery,
                 candidates: [member.displayName, member.handle, "@\(member.handle)"]
@@ -106,7 +114,9 @@ enum MomoQuickSwitcherSearch {
         }
         .sorted { lhs, rhs in
             if lhs.score != rhs.score { return lhs.score > rhs.score }
-            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+            if titleOrder != .orderedSame { return titleOrder == .orderedAscending }
+            return stableKey(for: lhs.destination) < stableKey(for: rhs.destination)
         }
 
         if trimmedQuery.isEmpty {
@@ -133,6 +143,13 @@ enum MomoQuickSwitcherSearch {
     ) -> Int {
         guard case .channel(let id) = item.destination else { return Int.max }
         return ranks[id] ?? Int.max
+    }
+
+    private static func stableKey(for destination: MomoQuickSwitcherDestination) -> String {
+        switch destination {
+        case .channel(let id): return "channel:\(id.description)"
+        case .member(let id): return "member:\(id.description)"
+        }
     }
 
     private static func fuzzyScore(query: String, candidates: [String?]) -> Int? {
@@ -185,7 +202,9 @@ extension ChatViewModel {
     func quickSwitcherSections(query: String) -> [MomoQuickSwitcherSection] {
         MomoQuickSwitcherSearch.sections(
             orderedChannels: sidebarChannelOrder.orderedChannels,
-            members: activeMembers(),
+            members: members,
+            searchableMembers: activeMembers(),
+            currentMemberID: currentNavigationMemberID,
             recentChannelIds: recentChannelIds,
             query: query
         )

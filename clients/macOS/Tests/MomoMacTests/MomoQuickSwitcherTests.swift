@@ -60,6 +60,53 @@ final class MomoQuickSwitcherTests: XCTestCase {
         XCTAssertEqual(fuzzyResults.first?.destination, .channel(pg18.id))
     }
 
+    func testDirectMessagesUseCounterpartNamesForSearchAndDeterministicOrdering() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo(displayNamesByHandle: [
+            "hermes": "Zulu Partner",
+            "buildbot": "Alpha Partner",
+        ])
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "test")
+        let hermes = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+        let buildbot = try XCTUnwrap(seed.agents.first { $0.handle == "buildbot" })
+
+        await viewModel.startDirectMessage(with: hermes.id)
+        await viewModel.startDirectMessage(with: buildbot.id)
+
+        let orderedDirectMessages = viewModel.sidebarChannelOrder.directMessages
+        XCTAssertEqual(
+            orderedDirectMessages.compactMap { viewModel.directMessageCounterpart(for: $0)?.displayName },
+            ["Alpha Partner", "Zulu Partner"]
+        )
+
+        let zuluMatches = viewModel.quickSwitcherSections(query: "zulu").flatMap(\.items)
+        XCTAssertEqual(
+            zuluMatches.compactMap { item -> String? in
+                guard case .channel(.dm) = item.kind else { return nil }
+                return item.title
+            },
+            ["Zulu Partner"]
+        )
+    }
+
+    func testDirectMessageOrderingFallsBackToChannelIDForEqualCounterpartNames() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo(displayNamesByHandle: [
+            "hermes": "Same Partner",
+            "buildbot": "Same Partner",
+        ])
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "test")
+
+        for agent in seed.agents {
+            await viewModel.startDirectMessage(with: agent.id)
+        }
+
+        let ids = viewModel.sidebarChannelOrder.directMessages.map { $0.id.description }
+        XCTAssertEqual(ids, ids.sorted())
+    }
+
     func testKeyboardReducerHandlesArrowsEnterAndEscape() {
         let firstChannel = ChannelID()
         let member = MemberID()

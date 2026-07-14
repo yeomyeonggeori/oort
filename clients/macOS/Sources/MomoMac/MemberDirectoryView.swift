@@ -42,6 +42,11 @@ enum MomoMemberDirectoryPolicy {
     }
 }
 
+enum MomoMemberDirectoryCapturePane: Equatable {
+    case list
+    case detail
+}
+
 /// Native workspace member directory: searchable roster on the left, calm
 /// profile details and the primary DM action on the right.
 public struct MemberDirectoryView: View {
@@ -52,52 +57,78 @@ public struct MemberDirectoryView: View {
     @State private var scope: MomoMemberDirectoryScope = .all
     @State private var selectedMemberID: MemberID?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    private let capturePane: MomoMemberDirectoryCapturePane?
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
+        capturePane = nil
     }
 
-    init(viewModel: ChatViewModel, initialSelection: MemberID?) {
+    init(
+        viewModel: ChatViewModel,
+        initialSelection: MemberID?,
+        capturePane: MomoMemberDirectoryCapturePane? = nil
+    ) {
         self.viewModel = viewModel
         _selectedMemberID = State(initialValue: initialSelection)
+        self.capturePane = capturePane
     }
 
     public var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            directoryList
-                .momoSurface(.panel, cornerRadius: 0)
-                .navigationSplitViewColumnWidth(
-                    min: MomoTheme.MemberDirectory.listMinimumWidth,
-                    ideal: MomoTheme.MemberDirectory.listIdealWidth,
-                    max: MomoTheme.MemberDirectory.listMaximumWidth
-                )
-        } detail: {
-            profileDetail
-                .momoSurface(.background, cornerRadius: 0)
-        }
-        .frame(
-            minWidth: MomoTheme.MemberDirectory.minimumWidth,
-            idealWidth: MomoTheme.MemberDirectory.idealWidth,
-            minHeight: MomoTheme.MemberDirectory.minimumHeight
-        )
-        .navigationTitle(copy.memberDirectory)
-        .momoSurface(.background, cornerRadius: 0)
-        .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button(copy.dismiss) {
-                    dismiss()
+        presentation
+            .navigationTitle(copy.memberDirectory)
+            .momoSurface(.background, cornerRadius: 0)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(copy.dismiss) {
+                        dismiss()
+                    }
+                    .keyboardShortcut(.cancelAction)
                 }
-                .keyboardShortcut(.cancelAction)
             }
-        }
-        .task {
-            if viewModel.members.isEmpty {
-                await viewModel.refreshMemberDirectory()
+            .task {
+                if viewModel.members.isEmpty {
+                    await viewModel.refreshMemberDirectory()
+                }
+                selectFirstVisibleMemberIfNeeded()
             }
-            selectFirstVisibleMemberIfNeeded()
-        }
-        .onChange(of: filteredMembers.map(\.id)) { _, _ in
-            selectFirstVisibleMemberIfNeeded()
+            .onChange(of: filteredMembers.map(\.id)) { _, _ in
+                selectFirstVisibleMemberIfNeeded()
+            }
+    }
+
+    @ViewBuilder
+    private var presentation: some View {
+        if capturePane == .list {
+            VStack(spacing: 0) {
+                captureToolbar(showsSearch: true)
+                directoryListContent
+            }
+            .momoSurface(.panel, cornerRadius: 0)
+        } else if capturePane == .detail {
+            VStack(spacing: 0) {
+                captureToolbar(showsSearch: false)
+                profileDetail
+            }
+            .momoSurface(.background, cornerRadius: 0)
+        } else {
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                directoryList
+                    .momoSurface(.panel, cornerRadius: 0)
+                    .navigationSplitViewColumnWidth(
+                        min: MomoTheme.MemberDirectory.listMinimumWidth,
+                        ideal: MomoTheme.MemberDirectory.listIdealWidth,
+                        max: MomoTheme.MemberDirectory.listMaximumWidth
+                    )
+            } detail: {
+                profileDetail
+                    .momoSurface(.background, cornerRadius: 0)
+            }
+            .frame(
+                minWidth: MomoTheme.MemberDirectory.minimumWidth,
+                idealWidth: MomoTheme.MemberDirectory.idealWidth,
+                minHeight: MomoTheme.MemberDirectory.minimumHeight
+            )
         }
     }
 
@@ -119,6 +150,12 @@ public struct MemberDirectoryView: View {
 
     @ViewBuilder
     private var directoryList: some View {
+        directoryListContent
+            .searchable(text: $query, prompt: copy.searchMembers)
+    }
+
+    @ViewBuilder
+    private var directoryListContent: some View {
         VStack(spacing: 0) {
             Picker(copy.memberType, selection: $scope) {
                 Text(copy.allMembers).tag(MomoMemberDirectoryScope.all)
@@ -188,7 +225,44 @@ public struct MemberDirectoryView: View {
                 .listStyle(.sidebar)
             }
         }
-        .searchable(text: $query, prompt: copy.searchMembers)
+    }
+
+    private func captureToolbar(showsSearch: Bool) -> some View {
+        // The system toolbar's vibrancy does not rasterize offscreen, so snapshot-only
+        // capture panes mirror its native Button/TextField bindings in a flat host.
+        HStack(spacing: MomoTheme.MemberDirectory.contentSpacing) {
+            Button(copy.dismiss) {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+
+            Spacer(minLength: MomoTheme.MemberDirectory.standardSpacing)
+
+            if showsSearch {
+                HStack(spacing: MomoTheme.MemberDirectory.standardSpacing) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField(copy.searchMembers, text: $query)
+                        .textFieldStyle(.plain)
+                        .accessibilityLabel(copy.searchMembers)
+                }
+                .padding(.horizontal, MomoTheme.MemberDirectory.contentSpacing)
+                .padding(.vertical, MomoTheme.MemberDirectory.standardSpacing)
+                .frame(maxWidth: MomoTheme.MemberDirectory.listIdealWidth)
+                .background(
+                    Color(nsColor: .controlBackgroundColor),
+                    in: RoundedRectangle(
+                        cornerRadius: MomoTheme.MemberDirectory.standardSpacing,
+                        style: .continuous
+                    )
+                )
+            }
+        }
+        .padding(.horizontal, MomoTheme.MemberDirectory.contentSpacing)
+        .frame(minHeight: MomoTheme.MemberDirectory.captureToolbarMinimumHeight)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .bottom) { Divider() }
     }
 
     private func directoryRow(_ member: Member) -> some View {
@@ -305,8 +379,12 @@ public struct MemberDirectoryView: View {
                                     .controlSize(.small)
                                 Text(copy.sendDirectMessage)
                             } else {
-                                Label(copy.sendDirectMessage, systemImage: "bubble.left")
-                                    .fixedSize(horizontal: true, vertical: true)
+                                HStack(spacing: MomoTheme.MemberDirectory.standardSpacing) {
+                                    Image(systemName: "bubble.left")
+                                    Text(copy.sendDirectMessage)
+                                }
+                                .foregroundStyle(Color(nsColor: .alternateSelectedControlTextColor))
+                                .fixedSize(horizontal: true, vertical: true)
                             }
                         }
                         .buttonStyle(.borderedProminent)

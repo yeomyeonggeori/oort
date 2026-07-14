@@ -14,23 +14,50 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         _ scheme: ColorScheme,
         capabilitiesByHandle: [String: [String]] = [:],
         showsUnread: Bool = false,
-        developerMode: Bool = true
+        developerMode: Bool = true,
+        showsUnreadDirectMessage: Bool = false
     ) async throws -> some View {
         let backend = LiveChatBackend()
-        let seed = await backend.seedDemo(capabilitiesByHandle: capabilitiesByHandle)
+        let seed = await backend.seedDemo(
+            capabilitiesByHandle: capabilitiesByHandle,
+            displayNamesByHandle: showsUnreadDirectMessage
+                ? ["hermes": "Hermes Direct Message Partner"]
+                : [:]
+        )
         let viewModel = ChatViewModel(backend: backend)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "snapshot")
-        if !showsUnread {
+        let general = try XCTUnwrap(seed.channels.first, "Demo roster fixture must include #general")
+
+        if showsUnreadDirectMessage {
+            let counterpart = try XCTUnwrap(seed.agents.first { $0.handle == "hermes" })
+            await viewModel.startDirectMessage(with: counterpart.id)
+            let directMessage = try XCTUnwrap(
+                viewModel.channels.first { $0.kind == .dm },
+                "DM roster fixture must create a direct-message channel"
+            )
+            await viewModel.selectChannel(general.id)
+            for state in try await backend.readStates(workspace: seed.workspace) {
+                _ = try await backend.markRead(channel: state.channelId, through: state.latestSeq)
+            }
+            for index in 1...7 {
+                await backend.seedDemoMessage(
+                    channel: directMessage.id,
+                    author: counterpart.id,
+                    body: "DM unread fixture \(index)"
+                )
+            }
+            await viewModel.refreshReadStates()
+            XCTAssertEqual(viewModel.readStatesByChannel[directMessage.id]?.unreadCount, 7)
+        } else if !showsUnread {
             for state in try await backend.readStates(workspace: seed.workspace) {
                 _ = try await backend.markRead(channel: state.channelId, through: state.latestSeq)
             }
             await viewModel.refreshReadStates()
         }
-        let general = try XCTUnwrap(seed.channels.first, "Demo roster fixture must include #general")
         await viewModel.selectChannel(general.id)
 
         let activeMembers = viewModel.activeMembers()
-        XCTAssertTrue(activeMembers.contains { $0.displayName == "Hermes" && $0.isAgent })
+        XCTAssertTrue(activeMembers.contains { $0.handle == "hermes" && $0.isAgent })
         XCTAssertFalse(activeMembers.contains { $0.displayName == "빌드봇" })
 
         let defaults = UserDefaults(suiteName: "momo.snapshot.channel-roster")!
@@ -50,7 +77,8 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         _ scheme: ColorScheme,
         capabilitiesByHandle: [String: [String]] = [:],
         showsUnread: Bool = false,
-        developerMode: Bool = true
+        developerMode: Bool = true,
+        showsUnreadDirectMessage: Bool = false
     ) async throws -> NSImage {
         let size = CGSize(width: 340, height: 720)
         let hostingView = NSHostingView(
@@ -58,7 +86,8 @@ final class ChannelRosterSnapshotTests: XCTestCase {
                 scheme,
                 capabilitiesByHandle: capabilitiesByHandle,
                 showsUnread: showsUnread,
-                developerMode: developerMode
+                developerMode: developerMode,
+                showsUnreadDirectMessage: showsUnreadDirectMessage
             )
         )
         hostingView.frame = CGRect(origin: .zero, size: size)
@@ -159,9 +188,11 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             .appendingPathComponent("\(testName).\(named).png")
         let isRecording = ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1"
         guard isRecording || FileManager.default.fileExists(atPath: reference.path) else {
-            let ticket = testName.contains("Capability")
-                ? "MOMO-365"
-                : (testName.contains("Unread") ? "MOMO-367" : "MOMO-357")
+            let ticket = testName.contains("DirectMessage")
+                ? "MOMO-372"
+                : (testName.contains("Capability")
+                    ? "MOMO-365"
+                    : (testName.contains("Unread") ? "MOMO-367" : "MOMO-357"))
             throw XCTSkip("Canonical \(ticket) snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)")
         }
     }
@@ -289,6 +320,51 @@ final class ChannelRosterSnapshotTests: XCTestCase {
                 named: "momo-370-sidebar-standard-\(scheme == .dark ? "dark" : "light").png"
             )
             XCTAssertEqual(image.size, CGSize(width: 340, height: 720))
+        }
+    }
+
+    func testDirectMessageUnreadSidebarLightSnapshot() async throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "light"
+        )
+        let image = try await render(.light, showsUnreadDirectMessage: true)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light"
+        )
+    }
+
+    func testDirectMessageUnreadSidebarDarkSnapshot() async throws {
+        try requireCanonicalReference(
+            testName: #function.replacingOccurrences(of: "()", with: ""),
+            named: "dark"
+        )
+        let image = try await render(.dark, showsUnreadDirectMessage: true)
+        assertSnapshot(
+            of: image,
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark"
+        )
+    }
+
+    func testDirectMessageUnreadRasterContainsCounterpartAndCountBadgePixels() async throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let baseline = try await render(scheme)
+            let directMessageRaster = try await render(
+                scheme,
+                showsUnreadDirectMessage: true
+            )
+            try writeDesignReviewArtifact(
+                directMessageRaster,
+                named: "momo-372-sidebar-dm-unread-\(scheme == .dark ? "dark" : "light").png"
+            )
+            XCTAssertGreaterThan(
+                try mentionBadgePixelCount(in: directMessageRaster),
+                try mentionBadgePixelCount(in: baseline) + 40,
+                "Unread DM roster must add a visible count badge in \(scheme) mode"
+            )
         }
     }
 }

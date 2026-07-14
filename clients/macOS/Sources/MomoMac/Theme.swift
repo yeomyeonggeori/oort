@@ -289,6 +289,7 @@ public enum MomoTheme {
         public static let listIdealWidth: CGFloat = 280
         public static let listMaximumWidth: CGFloat = 360
         public static let profileIconSize: CGFloat = 48
+        public static let captureToolbarMinimumHeight: CGFloat = 44
 
         public static let compactSpacing: CGFloat = 4
         public static let standardSpacing: CGFloat = 8

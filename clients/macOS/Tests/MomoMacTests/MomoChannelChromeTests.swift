@@ -89,6 +89,8 @@ final class MomoChannelChromeTests: XCTestCase {
             MomoQuickSwitcherSearch.sections(
                 orderedChannels: [channel],
                 members: [],
+                searchableMembers: [],
+                currentMemberID: nil,
                 recentChannelIds: [],
                 query: "renamed"
             )

@@ -387,7 +387,7 @@ public final class ChatViewModel: ObservableObject {
             )
             if !channels.contains(where: { $0.id == result.channel.id }) {
                 channels.append(result.channel)
-                channels.sort(by: Self.channelOrder)
+                sortChannels()
             }
             ensureReadStateExists(channel: result.channel.id)
             subscribe(channel: result.channel.id)
@@ -434,7 +434,7 @@ public final class ChatViewModel: ObservableObject {
                 channels[index] = channel
             } else {
                 channels.append(channel)
-                channels.sort(by: Self.channelOrder)
+                sortChannels()
             }
             for index in members.indices where channel.dmMemberIds.contains(members[index].id) {
                 if !members[index].channelIds.contains(channel.id) {
@@ -478,7 +478,11 @@ public final class ChatViewModel: ObservableObject {
 
     /// The canonical sidebar display order shared by visible sections and navigation commands.
     var sidebarChannelOrder: MomoSidebarChannelOrder {
-        MomoSidebarPolicy.channelOrder(from: channels)
+        MomoSidebarPolicy.channelOrder(
+            from: channels,
+            members: members,
+            currentMemberID: authenticatedMemberId
+        )
     }
 
     public func navigateChannelHistoryBackward() async {
@@ -1644,6 +1648,10 @@ public final class ChatViewModel: ObservableObject {
         authenticatedMemberId == id
     }
 
+    var currentNavigationMemberID: MemberID? {
+        authenticatedMemberId
+    }
+
     public func directMessageCounterpart(for channel: Channel) -> Member? {
         guard channel.kind == .dm else { return nil }
         let counterpartID = channel.dmMemberIds.first { $0 != authenticatedMemberId }
@@ -1944,7 +1952,12 @@ public final class ChatViewModel: ObservableObject {
         return a.id.description < b.id.description
     }
 
-    nonisolated private static func channelOrder(_ a: Channel, _ b: Channel) -> Bool {
+    nonisolated private static func channelOrder(
+        _ a: Channel,
+        _ b: Channel,
+        members: [Member],
+        currentMemberID: MemberID?
+    ) -> Bool {
         let kindRank: (ChannelKind) -> Int = { kind in
             switch kind {
             case .publicChannel: return 0
@@ -1955,7 +1968,30 @@ public final class ChatViewModel: ObservableObject {
         let lhs = kindRank(a.kind)
         let rhs = kindRank(b.kind)
         if lhs != rhs { return lhs < rhs }
-        return (a.name ?? "").localizedCaseInsensitiveCompare(b.name ?? "") == .orderedAscending
+        if a.kind == .dm {
+            return MomoChannelDisplayPolicy.isDirectMessageOrderedBefore(
+                a,
+                b,
+                members: members,
+                currentMemberID: currentMemberID
+            )
+        }
+        let nameOrder = (a.name ?? "").localizedCaseInsensitiveCompare(b.name ?? "")
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return a.id.description < b.id.description
+    }
+
+    private func sortChannels() {
+        let memberSnapshot = members
+        let currentMemberID = authenticatedMemberId
+        channels.sort {
+            Self.channelOrder(
+                $0,
+                $1,
+                members: memberSnapshot,
+                currentMemberID: currentMemberID
+            )
+        }
     }
 
     private func mutateMember(_ member: MemberID, channel: ChannelID?, adding: Bool) async {

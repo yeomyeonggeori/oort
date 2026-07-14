@@ -261,6 +261,9 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(MomoUnreadBadge.label(mentionCount: 4), "4")
         XCTAssertEqual(MomoUnreadBadge.label(mentionCount: 100), "99+")
         XCTAssertNil(MomoUnreadBadge.label(mentionCount: 0))
+        XCTAssertEqual(MomoUnreadBadge.label(unreadCount: 7), "7")
+        XCTAssertEqual(MomoUnreadBadge.label(unreadCount: 100), "99+")
+        XCTAssertNil(MomoUnreadBadge.label(unreadCount: 0))
         let copy = MomoWorkspaceCopy(language: .english)
         XCTAssertEqual(
             copy.channelUnreadAccessibilityLabel(

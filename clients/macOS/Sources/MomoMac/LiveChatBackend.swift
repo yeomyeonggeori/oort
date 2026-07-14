@@ -395,6 +395,11 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         workRunsById[run.id] = run
     }
 
+    @discardableResult
+    func seedDemoMessage(channel: ChannelID, author: MemberID, body: String) -> Message {
+        appendServerMessage(channel: channel, author: author, type: .text, body: body)
+    }
+
     // MARK: OnboardingInviteBackend
 
     public func currentInviteJoinState() async -> InviteJoinState {
