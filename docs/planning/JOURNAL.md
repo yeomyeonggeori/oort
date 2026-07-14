@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-07-14 (Codex worker) · MOMO-372 MOMO-371 최종 rebase
+- `origin/main@c9ed890` 위로 직접 rebase하고 ChannelList/QuickSwitcher 충돌에서 371 로컬 rename·topic·인콘텐츠 헤더 제거와 372 DM 상대 이름·숫자 배지·디렉터리 진입점을 함께 보존했다. 문서 기록도 양쪽을 유지했다.
+- 채널 헤더 `멤버 N명`의 optional action은 production root의 `MemberDirectoryView` sheet fallback으로 연결하고, 외부 주입 action 우선 계약과 회귀 테스트를 추가했다.
+- 5패키지 build, Core 전체 24·macOS non-snapshot 전체 143·371/372 비정본 raster 7 tests와 fresh D6 design-review(Blocker/High/Medium/Nitpick 0) PASS. 무필터 macOS 전체는 기존 canonical `AgentCredentialSnapshotTests` headless `NSImage` signal 5에서 중단돼 재기록 대상으로 남겼다.
+- 계획 이탈: 371/372가 서로 다른 뜻으로 추가한 `noWorkspaceMembers` 이름 충돌은 채널 추가 빈 상태와 directory 빈 상태를 별도 copy로 분리했다. PNG 변경 없이 정본 재기록은 오케스트레이터 대기이며 DB/Docker/verifier/`local_gate.sh`는 미실행(`runtime-unverified`).
+
+## 2026-07-14 (Codex worker) · MOMO-372 D6 리뷰 반려 반영
+- Blocker 1+High 3+Medium 3을 반영해 실제 검색/닫기/멤버 행 raster, ⌘K 상대 이름 검색, 표시 이름→ID DM 정렬, DM unread 숫자, 1줄 이름, 멤버 제목의 죽은 버튼 제거를 고정했다.
+- 계획 이탈: visible `NSWindow` host는 XCTest signal 11, hidden system toolbar는 dark vibrancy smear라 list/detail을 borderless window에서 분리하고 동일 바인딩의 snapshot-only native capture chrome으로 증거화했다. 신규 정본 6건+기존 ChannelRoster 6건은 오케스트레이터 재기록 대기이며 PNG 변경은 없다.
+- 5패키지 build, Core 24·Server 76·Relay 2·Worker 29·macOS 기능/비정본 raster 138 tests PASS. 무필터 macOS는 기존 headless `AgentCredentialSnapshotTests` `NSImage` signal 5를 재현했다.
+- fresh design-review PASS: Blocker/High/Medium/Nitpick 0. 검색·닫기·멤버 행과 DM 버튼 제목은 source-pixel raster assert로, DM 상대 이름+unread 수는 light/dark sidebar raster로 고정했다.
+- 수정 금지 기록: directory `.task` stale, 키보드 진입, raw `directMessageError`, in-flight 버튼 레이아웃. DB/Docker/verifier/`local_gate.sh`는 미실행(`runtime-unverified`).
+
+## 2026-07-14 (Codex worker) · MOMO-372 멤버 디렉터리 + DM
+- active workspace member 쌍을 정렬·해시해 멱등 생성하는 tenant DM REST와 Core/REST/in-memory 계약을 추가하고, roster 기반 macOS 멤버 디렉터리·프로필·DM 시작·사이드바 상대 이름/기존 unread 결합을 구현했다.
+- 계획 이탈 없음. `schema_v0.sql`, 채널 헤더, 메시지 카드와 기존 정본 PNG는 건드리지 않았다.
+- 5패키지 build, Core 24·Server 76·Relay 2·Worker 29·macOS 기능/비정본 래스터 134 tests와 fresh design-review 전 등급 0이 PASS했다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행이며 RLS·동시성 런타임은 `runtime-unverified`다.
+- 필터 없는 macOS suite의 기존 headless `AgentCredentialSnapshotTests` signal 5와 정본 light/dark PNG 재기록은 오케스트레이터 대기다.
+
 ## 2026-07-14 (Codex worker) · MOMO-371 MOMO-370 rebase
 - `origin/main@6f4090c` 위로 직접 rebase하고 MessageListView/MomoMacRootView 충돌에서 371 헤더·통합 toolbar와 370 `showsCosts`·Alpha 개발자 gate를 함께 보존했다. 문서 기록도 양쪽을 유지했다.
 - 개발자 모드 해제 시 닫힌 Alpha 상세가 재개방되지 않도록 presentation의 pane redirect를 분리하고 회귀 테스트를 추가했다. 비정본 renderer는 임시 NSWindow에서 native default action을 그려 light/dark 레이블 증거를 안정화했다.

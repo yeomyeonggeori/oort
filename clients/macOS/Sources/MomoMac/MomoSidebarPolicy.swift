@@ -12,11 +12,24 @@ struct MomoSidebarChannelOrder: Equatable {
 enum MomoSidebarPolicy {
     /// Canonical visible navigation order: standard channels first, then DMs.
     /// Sidebar sections, quick-switcher numbering, and Cmd+1...9 share this result.
-    static func channelOrder(from channels: [Channel]) -> MomoSidebarChannelOrder {
+    static func channelOrder(
+        from channels: [Channel],
+        members: [Member] = [],
+        currentMemberID: MemberID? = nil
+    ) -> MomoSidebarChannelOrder {
         let visibleChannels = channels.filter { !$0.isArchived }
         return MomoSidebarChannelOrder(
             standardChannels: visibleChannels.filter { $0.kind != .dm },
-            directMessages: visibleChannels.filter { $0.kind == .dm }
+            directMessages: visibleChannels
+                .filter { $0.kind == .dm }
+                .sorted {
+                    MomoChannelDisplayPolicy.isDirectMessageOrderedBefore(
+                        $0,
+                        $1,
+                        members: members,
+                        currentMemberID: currentMemberID
+                    )
+                }
         )
     }
 
@@ -25,6 +38,37 @@ enum MomoSidebarPolicy {
         isActivelyWorking: Bool
     ) -> Bool {
         isActivelyWorking || !usesServerRosterSourceOfTruth
+    }
+}
+
+enum MomoChannelDisplayPolicy {
+    static func name(
+        for channel: Channel,
+        members: [Member],
+        currentMemberID: MemberID?
+    ) -> String {
+        if channel.kind == .dm,
+           let currentMemberID,
+           let counterpartID = channel.dmMemberIds.first(where: { $0 != currentMemberID }),
+           let counterpart = members.first(where: { $0.id == counterpartID }) {
+            return counterpart.displayName
+        }
+        return MomoLocalChannelPresentationStore.displayName(for: channel)
+    }
+
+    static func isDirectMessageOrderedBefore(
+        _ lhs: Channel,
+        _ rhs: Channel,
+        members: [Member],
+        currentMemberID: MemberID?
+    ) -> Bool {
+        let lhsName = name(for: lhs, members: members, currentMemberID: currentMemberID)
+        let rhsName = name(for: rhs, members: members, currentMemberID: currentMemberID)
+        let nameOrder = lhsName.localizedCaseInsensitiveCompare(rhsName)
+        if nameOrder != .orderedSame {
+            return nameOrder == .orderedAscending
+        }
+        return lhs.id.description < rhs.id.description
     }
 }
 
@@ -71,5 +115,10 @@ enum MomoUnreadBadge {
     static func label(mentionCount: Int) -> String? {
         guard mentionCount > 0 else { return nil }
         return mentionCount > 99 ? "99+" : String(mentionCount)
+    }
+
+    static func label(unreadCount: Int64) -> String? {
+        guard unreadCount > 0 else { return nil }
+        return unreadCount > 99 ? "99+" : String(unreadCount)
     }
 }

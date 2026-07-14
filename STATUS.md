@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-372 Member Directory + DM (2026-07-14)
+
+- RLS tenant transaction 안에서 active 멤버 권한을 검사하고, 정렬한 두 member ID의 SHA-256 `dm_key`·partial unique index·pair advisory lock으로 동시 요청도 같은 1:1 DM에 수렴시키는 GET/POST REST를 추가했다. channel/channel_seq/두 membership을 함께 보장하며 archived DM은 재개한다. `schema_v0.sql`과 migration은 변경하지 않았다.
+- macOS는 roster 기반 네이티브 멤버 디렉터리(검색·사람/에이전트·프로필·복구 상태·DM), 사이드바/⌘K의 상대 이름·표시 이름→channel ID 결정적 DM 정렬, DM unread 숫자 배지, 멤버 context menu/VoiceOver DM 액션을 제공한다. 사이드바 이름은 1줄 tail truncation+전체 tooltip/a11y이며 멤버 제목의 보이지 않는 버튼을 제거했다. `origin/main@c9ed890` rebase 후 채널 헤더의 `멤버 N명` optional hook은 production root의 같은 디렉터리 sheet fallback에 연결된다. 메시지 카드/타임라인은 건드리지 않았다.
+- rebase 후 5개 Swift package build, Core 전체 24·macOS non-snapshot 전체 143·371/372 비정본 raster 7 tests가 PASS했고 fresh D6 design-review는 Blocker/High/Medium/Nitpick 0이다. 디렉터리 list/detail 분리 light/dark 4건과 DM unread 사이드바 2건은 신규 정본, 기존 ChannelRoster 6건은 무효화되어 모두 오케스트레이터 재기록 대기이며 worker PNG 변경은 0건이다. 필터 없는 macOS 전체 suite는 기존 canonical `AgentCredentialSnapshotTests`의 headless `NSImage` signal 5에서 중단돼 재기록 대상으로 남겼다. DB/Docker/verifier/`local_gate.sh` 및 실창 hit-test·resize는 지시대로 미실행(`runtime-unverified`).
+
 ## MOMO-371 Channel Header + macOS Chrome (2026-07-14)
 
 - 채널명·주제·멤버 수·설정 진입점을 한 헤더로 묶고, 이름/주제·멤버 관리·연동 placeholder 시트와 MOMO-372가 주입할 멤버 디렉터리 훅을 추가했다. 서버 채널 수정 계약이 없어 이름/주제는 이 Mac의 표시값으로만 저장하며 앱 안에서 동기화 범위를 명시한다.

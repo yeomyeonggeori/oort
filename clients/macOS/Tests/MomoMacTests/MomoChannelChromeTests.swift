@@ -63,6 +63,38 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertEqual(invocationCount, 1)
     }
 
+    func testMemberDirectoryNavigationUsesProductionSheetFallback() {
+        var presentationCount = 0
+        let action = MomoMemberDirectoryNavigation.action(
+            override: nil,
+            presentDirectory: {
+                presentationCount += 1
+            }
+        )
+
+        action()
+
+        XCTAssertEqual(presentationCount, 1)
+    }
+
+    func testMemberDirectoryNavigationPreservesInjectedOverride() {
+        var overrideCount = 0
+        var presentationCount = 0
+        let action = MomoMemberDirectoryNavigation.action(
+            override: {
+                overrideCount += 1
+            },
+            presentDirectory: {
+                presentationCount += 1
+            }
+        )
+
+        action()
+
+        XCTAssertEqual(overrideCount, 1)
+        XCTAssertEqual(presentationCount, 0)
+    }
+
     func testLocalChannelPresentationDrivesSharedDisplayResolvers() throws {
         let channelID = ChannelID()
         let channel = Channel(
@@ -85,10 +117,20 @@ final class MomoChannelChromeTests: XCTestCase {
         )
 
         XCTAssertEqual(MomoLocalChannelPresentationStore.displayName(for: channel), "renamed-channel")
+        XCTAssertEqual(
+            MomoChannelDisplayPolicy.name(
+                for: channel,
+                members: [],
+                currentMemberID: nil
+            ),
+            "renamed-channel"
+        )
         let item = try XCTUnwrap(
             MomoQuickSwitcherSearch.sections(
                 orderedChannels: [channel],
                 members: [],
+                searchableMembers: [],
+                currentMemberID: nil,
                 recentChannelIds: [],
                 query: "renamed"
             )

@@ -31,6 +31,10 @@ public protocol ChatBackend: Sendable {
     /// Channels visible to the authenticated workspace member.
     func channels(workspace: WorkspaceID) async throws -> [Channel]
 
+    /// Idempotently create or return the existing 1:1 DM with `member`.
+    /// The server owns membership creation and returns the canonical DM channel.
+    func openDirectMessage(workspace: WorkspaceID, with member: MemberID) async throws -> Channel
+
     /// Create a public/private channel. The server also adds the creator as owner.
     func createChannel(
         workspace: WorkspaceID,
@@ -71,6 +75,10 @@ public protocol ChatBackend: Sendable {
 }
 
 public extension ChatBackend {
+    func openDirectMessage(workspace: WorkspaceID, with member: MemberID) async throws -> Channel {
+        throw BackendError.problem(status: 501, title: "not implemented", detail: "direct messages are unavailable")
+    }
+
     func createChannel(
         workspace: WorkspaceID,
         kind: ChannelKind,

@@ -159,6 +159,61 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(english.removeFromChannel, "Remove from channel")
     }
 
+    func testMemberDirectoryFiltersNamesHandlesAndMemberKind() {
+        let workspace = WorkspaceID()
+        let people = [
+            Member(
+                id: MemberID(),
+                workspaceId: workspace,
+                kind: .human,
+                displayName: "곽성재 Product",
+                handle: "seongjae",
+                workspaceRole: .owner
+            ),
+            Member(
+                id: MemberID(),
+                workspaceId: workspace,
+                kind: .human,
+                displayName: "민지 Operations",
+                handle: "minji"
+            ),
+            Member(
+                id: MemberID(),
+                workspaceId: workspace,
+                kind: .agent,
+                displayName: "Hermes 코드 리뷰 에이전트",
+                handle: "hermes"
+            ),
+        ]
+
+        XCTAssertEqual(
+            MomoMemberDirectoryPolicy.filteredMembers(people, query: "", scope: .people).map(\.kind),
+            [.human, .human]
+        )
+        XCTAssertEqual(
+            MomoMemberDirectoryPolicy.filteredMembers(people, query: "HER", scope: .all).map(\.handle),
+            ["hermes"]
+        )
+        XCTAssertEqual(
+            MomoMemberDirectoryPolicy.filteredMembers(people, query: "민지", scope: .agents),
+            []
+        )
+    }
+
+    func testMemberDirectoryCopyUsesVerbFirstDMActions() {
+        let korean = MomoWorkspaceCopy(language: .korean)
+        XCTAssertEqual(korean.sendDirectMessage, "DM 보내기")
+        XCTAssertEqual(korean.newDirectMessage, "새 DM 시작")
+        XCTAssertEqual(korean.showAllMembers, "전체 멤버 보기")
+        XCTAssertEqual(korean.noDirectoryMembersDetail, "워크스페이스에 참여한 멤버가 여기에 표시됩니다")
+
+        let english = MomoWorkspaceCopy(language: .english)
+        XCTAssertEqual(english.sendDirectMessage, "Send a DM")
+        XCTAssertEqual(english.newDirectMessage, "Start a new DM")
+        XCTAssertEqual(english.showAllMembers, "Show all members")
+        XCTAssertEqual(english.noDirectoryMembersDetail, "Members appear here after they join the workspace")
+    }
+
     func testUnreadNavigationWrapsInCanonicalSidebarOrder() {
         let first = ChannelID()
         let second = ChannelID()
@@ -208,6 +263,9 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(MomoUnreadBadge.label(mentionCount: 4), "4")
         XCTAssertEqual(MomoUnreadBadge.label(mentionCount: 100), "99+")
         XCTAssertNil(MomoUnreadBadge.label(mentionCount: 0))
+        XCTAssertEqual(MomoUnreadBadge.label(unreadCount: 7), "7")
+        XCTAssertEqual(MomoUnreadBadge.label(unreadCount: 100), "99+")
+        XCTAssertNil(MomoUnreadBadge.label(unreadCount: 0))
         let copy = MomoWorkspaceCopy(language: .english)
         XCTAssertEqual(
             copy.channelUnreadAccessibilityLabel(
@@ -2455,6 +2513,78 @@ final class MomoMacTests: XCTestCase {
 
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "POST", "DELETE"])
+    }
+
+    func testRESTBackendOpensIdempotentDirectMessageWithParticipants() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let target = MemberID.demoAgent
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000372201")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/workspaces/\(workspace.description)/dms"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+                XCTAssertEqual(body?["memberId"] as? String, target.rawValue.uuidString)
+                return MockHTTPResponse(json: """
+                {
+                  "channel": {
+                    "id": "\(channel.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "dm",
+                    "name": null,
+                    "topic": null,
+                    "dmKey": "pair-hash",
+                    "memberIds": [
+                      "\(MemberID.demoHuman.description)",
+                      "\(target.description)"
+                    ],
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "archivedAtMs": null
+                  },
+                  "created": false
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let opened = try await backend.openDirectMessage(workspace: workspace, with: target)
+
+        XCTAssertEqual(opened.id, channel)
+        XCTAssertEqual(Set(opened.dmMemberIds), Set([MemberID.demoHuman, target]))
+    }
+
+    @MainActor
+    func testViewModelStartsOneIdempotentDirectMessageAndSelectsIt() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let target = try XCTUnwrap(seed.agents.first)
+
+        await viewModel.startDirectMessage(with: target.id)
+        let firstDM = try XCTUnwrap(viewModel.channels.first { $0.kind == .dm })
+        await viewModel.startDirectMessage(with: target.id)
+
+        XCTAssertEqual(viewModel.channels.filter { $0.kind == .dm }.count, 1)
+        XCTAssertEqual(viewModel.selectedChannelId, firstDM.id)
+        XCTAssertEqual(viewModel.directMessageCounterpart(for: firstDM)?.id, target.id)
+        XCTAssertTrue(viewModel.member(target.id)?.channelIds.contains(firstDM.id) == true)
+        XCTAssertNil(viewModel.directMessageError)
     }
 
     func testRESTBackendLoadsServerOwnedCostSnapshots() async throws {

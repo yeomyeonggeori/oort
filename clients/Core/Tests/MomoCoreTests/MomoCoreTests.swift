@@ -67,6 +67,33 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(legacyMember.capabilities, [])
     }
 
+    func testDirectMessageChannelDecodesParticipantsAndLegacyDefault() throws {
+        let participant = MemberID(uuidString: "00000000-0000-7000-8000-000000000103")!
+        let wire = Data("""
+        {
+          "id":"00000000-0000-7000-8000-000000000299",
+          "workspace_id":"00000000-0000-7000-8000-000000000001",
+          "kind":"dm",
+          "dm_key":"pair-hash",
+          "dm_member_ids":["\(participant.description)"]
+        }
+        """.utf8)
+        let channel = try JSONDecoder.momo.decode(Channel.self, from: wire)
+        XCTAssertEqual(channel.kind, .dm)
+        XCTAssertEqual(channel.dmMemberIds, [participant])
+
+        let legacyWire = Data("""
+        {
+          "id":"00000000-0000-7000-8000-000000000298",
+          "workspace_id":"00000000-0000-7000-8000-000000000001",
+          "kind":"dm",
+          "dm_key":"legacy-pair"
+        }
+        """.utf8)
+        let legacy = try JSONDecoder.momo.decode(Channel.self, from: legacyWire)
+        XCTAssertEqual(legacy.dmMemberIds, [])
+    }
+
     func testAgentWorkRunDecodesMOMO362Projection() throws {
         let wire = Data("""
         {

@@ -1149,6 +1149,76 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(response.channels.first?.archivedAtMs)
     }
 
+    func testDirectMessageParticipantKeyIsOrderIndependentAndRejectsSelf() throws {
+        let first = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let second = UUID(uuidString: "00000000-0000-7000-8000-000000000103")!
+
+        XCTAssertEqual(
+            DMRoutes.canonicalParticipantIDs(first, second),
+            DMRoutes.canonicalParticipantIDs(second, first)
+        )
+        XCTAssertNoThrow(try DMRoutes.validateTargetMember(actorID: first, targetID: second))
+        XCTAssertThrowsError(try DMRoutes.validateTargetMember(actorID: first, targetID: first)) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+    }
+
+    func testDirectMessageResponseCarriesCanonicalParticipantsAndCreatedState() throws {
+        let data = Data("""
+        {
+          "channel": {
+            "id": "00000000-0000-7000-8000-000000000299",
+            "workspaceId": "00000000-0000-7000-8000-000000000001",
+            "kind": "dm",
+            "name": null,
+            "topic": null,
+            "dmKey": "sha256-pair",
+            "memberIds": [
+              "00000000-0000-7000-8000-000000000101",
+              "00000000-0000-7000-8000-000000000103"
+            ],
+            "createdBy": "00000000-0000-7000-8000-000000000101",
+            "archivedAtMs": null
+          },
+          "created": false
+        }
+        """.utf8)
+
+        let response = try JSONDecoder().decode(OpenDirectMessageResponse.self, from: data)
+
+        XCTAssertEqual(response.channel.kind, "dm")
+        XCTAssertEqual(response.channel.memberIds?.count, 2)
+        XCTAssertFalse(response.created, "A repeated POST returns the existing DM")
+    }
+
+    func testDirectMessageRoutesKeepRLSPermissionAndSingleTransactionContracts() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let serverRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let routeSource = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/DMRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(routeSource.contains("withTenantConnection"))
+        XCTAssertTrue(routeSource.contains("withTenantTransaction"))
+        XCTAssertTrue(routeSource.contains("activeWorkspaceRole"))
+        XCTAssertTrue(routeSource.contains("m.workspace_id ="))
+        XCTAssertTrue(routeSource.contains("m.status = 'active'"))
+        XCTAssertTrue(routeSource.contains("pg_advisory_xact_lock"))
+        XCTAssertTrue(routeSource.contains("ON CONFLICT (workspace_id, dm_key) WHERE kind = 'dm'"))
+        XCTAssertTrue(routeSource.contains("ON CONFLICT (channel_id, member_id)"))
+        XCTAssertTrue(routeSource.contains("INSERT INTO channel_seq"))
+        XCTAssertTrue(routeSource.contains("SET archived_at = NULL"))
+        XCTAssertTrue(routeSource.contains("digest("))
+        XCTAssertFalse(routeSource.contains("withPlatformReadConnection"))
+        XCTAssertFalse(routeSource.contains("BYPASSRLS"))
+    }
+
     func testInboundMCPToolSurfaceMatchesMOMO163() {
         let names = InboundMCPToolRegistry.tools.map(\.name)
         XCTAssertEqual(

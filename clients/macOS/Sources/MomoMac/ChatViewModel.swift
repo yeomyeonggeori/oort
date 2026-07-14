@@ -160,6 +160,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     @Published public private(set) var channelCreateInFlight = false
     @Published public private(set) var channelMemberMutationIds: Set<MemberID> = []
+    @Published public private(set) var directMessageMutationIds: Set<MemberID> = []
+    @Published public private(set) var directMessageError: String?
+    @Published public private(set) var memberDirectoryIsRefreshing = false
+    @Published public private(set) var memberDirectoryError: String?
     @Published private(set) var agentCredentialsByMember: [MemberID: [MomoAgentCredential]] = [:]
     @Published private(set) var agentCredentialLoadingMembers: Set<MemberID> = []
 
@@ -320,6 +324,10 @@ public final class ChatViewModel: ObservableObject {
         approvalDecisionsInFlight = []
         channelCreateInFlight = false
         channelMemberMutationIds = []
+        directMessageMutationIds = []
+        directMessageError = nil
+        memberDirectoryIsRefreshing = false
+        memberDirectoryError = nil
         inviteJoinState = .idle
         localContextCopilotPreview = nil
         isLocalContextCopilotRefreshing = false
@@ -379,7 +387,7 @@ public final class ChatViewModel: ObservableObject {
             )
             if !channels.contains(where: { $0.id == result.channel.id }) {
                 channels.append(result.channel)
-                channels.sort(by: Self.channelOrder)
+                sortChannels()
             }
             ensureReadStateExists(channel: result.channel.id)
             subscribe(channel: result.channel.id)
@@ -387,6 +395,59 @@ public final class ChatViewModel: ObservableObject {
             clearConnectionErrorState()
             await selectChannel(result.channel.id)
         } catch {
+            reportConnectionError(error, as: .actionFailed)
+        }
+    }
+
+    public func refreshMemberDirectory() async {
+        guard let workspaceId, !memberDirectoryIsRefreshing else { return }
+        memberDirectoryIsRefreshing = true
+        memberDirectoryError = nil
+        defer { memberDirectoryIsRefreshing = false }
+
+        do {
+            let loadedMembers = try await chat.members(workspace: workspaceId)
+            members = usesServerRosterSourceOfTruth
+                ? loadedMembers
+                : applyLocalProfileHints(to: loadedMembers)
+            memberDirectoryError = nil
+            clearConnectionErrorState()
+        } catch {
+            memberDirectoryError = String(describing: error)
+            reportConnectionError(error)
+        }
+    }
+
+    public func startDirectMessage(with memberID: MemberID) async {
+        guard let workspaceId,
+              !isCurrentUser(memberID),
+              !directMessageMutationIds.contains(memberID)
+        else { return }
+
+        directMessageMutationIds.insert(memberID)
+        directMessageError = nil
+        defer { directMessageMutationIds.remove(memberID) }
+
+        do {
+            let channel = try await chat.openDirectMessage(workspace: workspaceId, with: memberID)
+            if let index = channels.firstIndex(where: { $0.id == channel.id }) {
+                channels[index] = channel
+            } else {
+                channels.append(channel)
+                sortChannels()
+            }
+            for index in members.indices where channel.dmMemberIds.contains(members[index].id) {
+                if !members[index].channelIds.contains(channel.id) {
+                    members[index].channelIds.append(channel.id)
+                }
+            }
+            ensureReadStateExists(channel: channel.id)
+            subscribe(channel: channel.id)
+            directMessageError = nil
+            clearConnectionErrorState()
+            await selectChannel(channel.id)
+        } catch {
+            directMessageError = String(describing: error)
             reportConnectionError(error, as: .actionFailed)
         }
     }
@@ -417,7 +478,11 @@ public final class ChatViewModel: ObservableObject {
 
     /// The canonical sidebar display order shared by visible sections and navigation commands.
     var sidebarChannelOrder: MomoSidebarChannelOrder {
-        MomoSidebarPolicy.channelOrder(from: channels)
+        MomoSidebarPolicy.channelOrder(
+            from: channels,
+            members: members,
+            currentMemberID: authenticatedMemberId
+        )
     }
 
     public func navigateChannelHistoryBackward() async {
@@ -1579,6 +1644,20 @@ public final class ChatViewModel: ObservableObject {
         members.first(where: { $0.id == id })
     }
 
+    public func isCurrentUser(_ id: MemberID) -> Bool {
+        authenticatedMemberId == id
+    }
+
+    var currentNavigationMemberID: MemberID? {
+        authenticatedMemberId
+    }
+
+    public func directMessageCounterpart(for channel: Channel) -> Member? {
+        guard channel.kind == .dm else { return nil }
+        let counterpartID = channel.dmMemberIds.first { $0 != authenticatedMemberId }
+        return counterpartID.flatMap(member)
+    }
+
     public func applyLocalProfile(
         member id: MemberID,
         displayName rawDisplayName: String,
@@ -1873,7 +1952,12 @@ public final class ChatViewModel: ObservableObject {
         return a.id.description < b.id.description
     }
 
-    nonisolated private static func channelOrder(_ a: Channel, _ b: Channel) -> Bool {
+    nonisolated private static func channelOrder(
+        _ a: Channel,
+        _ b: Channel,
+        members: [Member],
+        currentMemberID: MemberID?
+    ) -> Bool {
         let kindRank: (ChannelKind) -> Int = { kind in
             switch kind {
             case .publicChannel: return 0
@@ -1884,7 +1968,30 @@ public final class ChatViewModel: ObservableObject {
         let lhs = kindRank(a.kind)
         let rhs = kindRank(b.kind)
         if lhs != rhs { return lhs < rhs }
-        return (a.name ?? "").localizedCaseInsensitiveCompare(b.name ?? "") == .orderedAscending
+        if a.kind == .dm {
+            return MomoChannelDisplayPolicy.isDirectMessageOrderedBefore(
+                a,
+                b,
+                members: members,
+                currentMemberID: currentMemberID
+            )
+        }
+        let nameOrder = (a.name ?? "").localizedCaseInsensitiveCompare(b.name ?? "")
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return a.id.description < b.id.description
+    }
+
+    private func sortChannels() {
+        let memberSnapshot = members
+        let currentMemberID = authenticatedMemberId
+        channels.sort {
+            Self.channelOrder(
+                $0,
+                $1,
+                members: memberSnapshot,
+                currentMemberID: currentMemberID
+            )
+        }
     }
 
     private func mutateMember(_ member: MemberID, channel: ChannelID?, adding: Bool) async {

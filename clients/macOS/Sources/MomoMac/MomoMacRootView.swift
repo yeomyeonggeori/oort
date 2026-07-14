@@ -16,6 +16,15 @@ struct MomoSessionChrome {
     var logout: () -> Void
 }
 
+enum MomoMemberDirectoryNavigation {
+    static func action(
+        override: MomoMemberDirectoryHook?,
+        presentDirectory: @escaping MomoMemberDirectoryHook
+    ) -> MomoMemberDirectoryHook {
+        override ?? presentDirectory
+    }
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -25,6 +34,7 @@ public struct MomoMacRootView: View {
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
     @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
+    @State private var showMemberDirectory = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
@@ -123,6 +133,9 @@ public struct MomoMacRootView: View {
         .sheet(isPresented: $showKeyboardShortcuts) {
             MomoKeyboardShortcutsView(copy: copy)
         }
+        .sheet(isPresented: $showMemberDirectory) {
+            MemberDirectoryView(viewModel: viewModel)
+        }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
                 detailPanePresentation.redirect(to: .approvals)
@@ -212,9 +225,18 @@ public struct MomoMacRootView: View {
             onRequestLogin: {
                 sessionChrome?.switchSession()
             },
-            onOpenMemberDirectory: onOpenMemberDirectory
+            onOpenMemberDirectory: memberDirectoryAction
         )
             .frame(minWidth: 0)
+    }
+
+    private var memberDirectoryAction: MomoMemberDirectoryHook {
+        MomoMemberDirectoryNavigation.action(
+            override: onOpenMemberDirectory,
+            presentDirectory: {
+                showMemberDirectory = true
+            }
+        )
     }
 
     private func detailPaneView(copy: MomoWorkspaceCopy, presentation: MomoInspectorPresentation) -> some View {
