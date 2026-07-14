@@ -11,6 +11,7 @@ import MomoCore
 public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.momoWindowChromeTopInset) private var windowChromeTopInset
     @State private var isCreatingChannel = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
@@ -104,57 +105,70 @@ public struct ChannelListView: View {
     public var body: some View {
         let copy = MomoWorkspaceCopy(language: language)
 
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                if showsWorkspaceHeader {
-                    sidebarHeader(copy: copy)
+        GeometryReader { geometry in
+            // The workspace header lives in the window toolbar, so this custom
+            // scroll surface consumes the NSWindow content-layout band itself.
+            let topInset = MomoWindowChromeLayout.sidebarTopInset(
+                windowChromeTopInset: windowChromeTopInset,
+                showsWorkspaceHeader: showsWorkspaceHeader
+            )
+
+            ZStack(alignment: .bottom) {
+                VStack(spacing: 0) {
+                    if showsWorkspaceHeader {
+                        sidebarHeader(copy: copy)
+
+                        Divider()
+                            .opacity(0.35)
+                    }
+
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: MomoTheme.Sidebar.sectionSpacing) {
+                            if viewModel.readStateSyncError != nil {
+                                readStateErrorRow(copy: copy)
+                            }
+
+                            channelsSection(copy: copy)
+                            directMessagesSection(copy: copy)
+                            membersSection(copy: copy)
+                        }
+                        .padding(MomoTheme.Sidebar.edgeInset)
+                    }
+                    .scrollIndicators(.hidden)
 
                     Divider()
                         .opacity(0.35)
+                    utilityFooter(copy: copy)
+                    Divider()
+                        .opacity(0.35)
+                    profileFooter(copy: copy)
                 }
 
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: MomoTheme.Sidebar.sectionSpacing) {
-                        if viewModel.readStateSyncError != nil {
-                            readStateErrorRow(copy: copy)
+                if showProfilePanel {
+                    Color.primary.opacity(0.001)
+                        .onTapGesture {
+                            withAnimation(sidebarPanelAnimation) {
+                                showProfilePanel = false
+                            }
                         }
+                        .zIndex(1)
 
-                        channelsSection(copy: copy)
-                        directMessagesSection(copy: copy)
-                        membersSection(copy: copy)
-                    }
-                    .padding(MomoTheme.Sidebar.edgeInset)
+                    profilePanel(copy: copy)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
+                        .padding(.bottom, 76)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                            removal: .opacity
+                        ))
+                        .zIndex(2)
                 }
-                .scrollIndicators(.hidden)
-
-                Divider()
-                    .opacity(0.35)
-                utilityFooter(copy: copy)
-                Divider()
-                    .opacity(0.35)
-                profileFooter(copy: copy)
             }
-
-            if showProfilePanel {
-                Color.primary.opacity(0.001)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(sidebarPanelAnimation) {
-                            showProfilePanel = false
-                        }
-                    }
-                    .zIndex(1)
-
-                profilePanel(copy: copy)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
-                    .padding(.bottom, 76)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: .bottom).combined(with: .opacity),
-                        removal: .opacity
-                    ))
-                    .zIndex(2)
-            }
+            .frame(
+                width: geometry.size.width,
+                height: max(0, geometry.size.height - topInset)
+            )
+            .padding(.top, topInset)
         }
         .momoSurface(.panel, cornerRadius: 0, extent: .windowChrome)
         .animation(sidebarPanelAnimation, value: showProfilePanel)

@@ -3,6 +3,13 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-379 macOS Chrome Hotfix (2026-07-14)
+
+- SwiftPM/Xcode 두 host의 unified toolbar 기본 system title과 custom workspace identity가 함께 그려지던 중복은 공용 title-hidden scene style로 제거했다. 실창 AX 재검토에서 `NavigationSplitView` 각 칼럼의 `GeometryProxy.safeAreaInsets.top`이 0임을 확인해 그 경로를 폐기하고, hosting `NSWindow.contentLayoutRect`를 content-view 좌표로 변환한 실제 titlebar band를 루트 환경으로 전파해 sidebar와 detail 칼럼을 함께 내렸다.
+- 트래픽라이트를 덮은 빨간 요소는 하단 승인 배지가 아니라 toolbar로 이동한 workspace header의 물리 공간을 잃은 첫 채널 mention 배지였고, 채널 헤더의 멤버/설정도 같은 0 inset 때문에 toolbar 뒤 y=0에서 시작했다. overlay scrim/pane은 실제 band 아래의 보이는 채널 헤더 측정값에, attached inspector는 같은 헤더 높이의 연속 surface/divider에 앵커한다. 헤더 높이 상태는 추정 64pt 대신 측정 전 0에서 시작한다.
+- canonical harness는 production과 같은 full-size content view+unified toolbar+전체 root shell로 바꾸고, `momo/상준` fixture와 standard overlay light·narrow dark·attached dark를 기록 대상으로 삼았다. headless `cacheDisplay`는 NavigationSplitView material을 잘못 합성하므로 검토 artifact에만 허용하고 정본 기록은 WindowServer 합성본만 허용한다. 정본 3건은 오케스트레이터 재기록 대기이며 worker PNG 변경은 0건이다.
+- 5개 Swift package build, Core 24·Server 76·Relay 2·Worker 29 전체와 macOS non-snapshot 146, MOMO-379 기능 10+artifact 1 tests가 PASS했고 canonical 3건은 재기록 대기로 정상 skip했다. fresh D6는 구현 6/7(Blocker 0, High 1=실창 AX 증거 미완료)이다. 무필터 macOS suite는 기존 첫 `AgentCredentialSnapshotTests` headless `NSImage` signal 5를 재현했다. Computer Use의 custom dev app 접근 거부와 관리 shell의 WindowServer 부재로 worker 쪽 표준/좁은/attached 실창 AX 재측정은 완료하지 못해 `runtime-unverified`; 오케스트레이터 재측정이 필요하다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행했다.
+
 ## MOMO-372 Member Directory + DM (2026-07-14)
 
 - RLS tenant transaction 안에서 active 멤버 권한을 검사하고, 정렬한 두 member ID의 SHA-256 `dm_key`·partial unique index·pair advisory lock으로 동시 요청도 같은 1:1 DM에 수렴시키는 GET/POST REST를 추가했다. channel/channel_seq/두 membership을 함께 보장하며 archived DM은 재개한다. `schema_v0.sql`과 migration은 변경하지 않았다.

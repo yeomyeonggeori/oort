@@ -32,6 +32,8 @@ public struct MomoMacRootView: View {
     @State private var selectedProfileMemberID: MemberID?
     @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
+    @State private var channelHeaderHeight: CGFloat = 0
+    @State private var windowChromeMetrics = MomoWindowChromeMetrics.zero
     @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
     @State private var showMemberDirectory = false
@@ -71,11 +73,22 @@ public struct MomoMacRootView: View {
     init(
         existingViewModel viewModel: ChatViewModel,
         sessionChrome: MomoSessionChrome?,
-        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
+        initialDetailPane: MomoMacDetailPane? = nil,
+        initialSplitViewVisibility: NavigationSplitViewVisibility = .all
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        _splitViewVisibility = State(initialValue: initialSplitViewVisibility)
         self.sessionChrome = sessionChrome
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        if let initialDetailPane {
+            _detailPanePresentation = State(
+                initialValue: MomoDetailPanePresentationState(
+                    isPresented: true,
+                    pane: initialDetailPane
+                )
+            )
+        }
     }
 
     public var body: some View {
@@ -90,15 +103,31 @@ public struct MomoMacRootView: View {
                 )
         } detail: {
             GeometryReader { geometry in
+                let topInset = MomoWindowChromeLayout.contentTopInset(
+                    windowChromeTopInset: windowChromeMetrics.topInset
+                )
+
                 detailLayout(
                     copy: copy,
                     availableDetailWidth: geometry.size.width,
                     useAttachedInspector: geometry.size.width >= Self.attachedInspectorMinimumWindowWidth
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(
+                    width: geometry.size.width,
+                    height: max(0, geometry.size.height - topInset)
+                )
+                .padding(.top, topInset)
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .environment(\.momoWindowChromeTopInset, windowChromeMetrics.topInset)
+        .background {
+            MomoWindowChromeMetricsReader { metrics in
+                guard metrics != windowChromeMetrics else { return }
+                windowChromeMetrics = metrics
+            }
+            .frame(width: 0, height: 0)
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 workspaceToolbarHeader(copy: copy)
@@ -148,32 +177,63 @@ public struct MomoMacRootView: View {
         availableDetailWidth: CGFloat,
         useAttachedInspector: Bool
     ) -> some View {
-        ZStack(alignment: .trailing) {
+        let inspectorTopInset = MomoWindowChromeLayout.inspectorTopInset(
+            channelHeaderHeight: channelHeaderHeight
+        )
+
+        return ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
                 messageTimeline
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
                 if showDetailPane && useAttachedInspector {
                     Divider()
-                    detailPaneView(copy: copy, presentation: .attached)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+
+                    GeometryReader { inspectorGeometry in
+                        let paneHeight = max(0, inspectorGeometry.size.height - inspectorTopInset)
+                        VStack(spacing: 0) {
+                            Color.clear
+                                .frame(height: inspectorTopInset)
+                                .momoSurface(.panel, cornerRadius: 0)
+                                .overlay(alignment: .bottom) {
+                                    Divider()
+                                }
+
+                            detailPaneView(copy: copy, presentation: .attached)
+                                .frame(width: Self.inspectorWidth, height: paneHeight)
+                        }
+                    }
+                    .frame(width: Self.inspectorWidth)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if showDetailPane && !useAttachedInspector {
-                MomoTheme.modalScrim
-                    .ignoresSafeArea()
-                    .transition(.opacity)
-                    .onTapGesture {
-                        closeDetailPane()
-                    }
+                // This region intentionally starts below the measured channel
+                // header. The scrim must obey the same boundary as the drawer.
+                GeometryReader { inspectorGeometry in
+                    let regionHeight = max(0, inspectorGeometry.size.height - inspectorTopInset)
+                    ZStack(alignment: .trailing) {
+                        MomoTheme.modalScrim
+                            .transition(.opacity)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                closeDetailPane()
+                            }
 
-                detailPaneView(copy: copy, presentation: .overlay)
-                    .frame(width: overlayInspectorWidth(for: availableDetailWidth))
-                    .padding(.trailing, 12)
-                    .padding(.vertical, 8)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                        detailPaneView(copy: copy, presentation: .overlay)
+                            .frame(width: overlayInspectorWidth(for: availableDetailWidth))
+                            .padding(.trailing, 12)
+                            .padding(.vertical, 8)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                    .frame(width: inspectorGeometry.size.width, height: regionHeight)
+                    .position(
+                        x: inspectorGeometry.size.width / 2,
+                        y: inspectorTopInset + regionHeight / 2
+                    )
+                }
             }
         }
         .animation(layoutAnimation, value: showDetailPane)
@@ -225,7 +285,11 @@ public struct MomoMacRootView: View {
             onRequestLogin: {
                 sessionChrome?.switchSession()
             },
-            onOpenMemberDirectory: memberDirectoryAction
+            onOpenMemberDirectory: memberDirectoryAction,
+            onChannelHeaderHeightChange: { newHeight in
+                guard newHeight > 0, abs(channelHeaderHeight - newHeight) > 0.5 else { return }
+                channelHeaderHeight = newHeight
+            }
         )
             .frame(minWidth: 0)
     }
@@ -480,6 +544,20 @@ public struct MomoMacRootView: View {
             selectedProfileMemberID = id
             openDetailPane(.memberProfile)
         }
+    }
+}
+
+enum MomoWindowChromeLayout {
+    static func contentTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
+        max(0, windowChromeTopInset)
+    }
+
+    static func inspectorTopInset(channelHeaderHeight: CGFloat) -> CGFloat {
+        max(0, channelHeaderHeight)
+    }
+
+    static func sidebarTopInset(windowChromeTopInset: CGFloat, showsWorkspaceHeader: Bool) -> CGFloat {
+        showsWorkspaceHeader ? 0 : contentTopInset(windowChromeTopInset: windowChromeTopInset)
     }
 }
 
