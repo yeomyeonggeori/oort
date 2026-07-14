@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-379 macOS Chrome Hotfix (2026-07-14)
+
+- SwiftPM/Xcode 두 host의 unified toolbar 기본 system title과 custom workspace identity가 함께 그려지던 중복을 공용 title-hidden scene style로 제거했다. 상세 overlay는 root safe area를 무시하고 채널 헤더와 같은 y=0에서 시작하던 scrim/pane을 실제 safe area와 측정한 헤더 높이 아래로 제한했으며 attached inspector에도 같은 경계를 적용했다.
+- 트래픽라이트 뒤 빨간 요소는 하단 승인 배지가 아니라 toolbar로 이동한 workspace header의 물리 공간을 잃은 custom sidebar 첫 채널의 mention 배지였다. `showsWorkspaceHeader == false` 경로만 live top safe area를 소비하게 하고 profile scrim도 그 경계를 넘지 않게 했다.
+- 5개 Swift package build와 Core 24·Server 76·Relay 2·Worker 29·macOS non-snapshot 145 tests, MOMO-379 검토 raster가 PASS했고 fresh D6 design-review는 6/7(Blocker/High 0)이다. 신규 정본 overlay light/attached dark/sidebar traffic-light light 3건은 오케스트레이터 재기록 대기이며 worker PNG 변경은 0건이다. 무필터 macOS suite는 기존 `AgentCredentialSnapshotTests` headless `NSImage` signal 5, Xcode host build는 관리 sandbox의 nested `sandbox-exec`에서 중단됐다. 실 Dev/Xcode 앱 click·fullscreen은 `runtime-unverified`; DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행했다.
+
 ## MOMO-372 Member Directory + DM (2026-07-14)
 
 - RLS tenant transaction 안에서 active 멤버 권한을 검사하고, 정렬한 두 member ID의 SHA-256 `dm_key`·partial unique index·pair advisory lock으로 동시 요청도 같은 1:1 DM에 수렴시키는 GET/POST REST를 추가했다. channel/channel_seq/두 membership을 함께 보장하며 archived DM은 재개한다. `schema_v0.sql`과 migration은 변경하지 않았다.

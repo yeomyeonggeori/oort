@@ -13,6 +13,7 @@ public struct MessageListView: View {
     private let onOpenWorkDetail: (RunID) -> Void
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
+    private let onChannelHeaderHeightChange: (CGFloat) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
@@ -37,6 +38,21 @@ public struct MessageListView: View {
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.onChannelHeaderHeightChange = { _ in }
+    }
+
+    init(
+        viewModel: ChatViewModel,
+        onOpenWorkDetail: @escaping (RunID) -> Void,
+        onRequestLogin: @escaping () -> Void,
+        onOpenMemberDirectory: MomoMemberDirectoryHook?,
+        onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
+    ) {
+        self.viewModel = viewModel
+        self.onOpenWorkDetail = onOpenWorkDetail
+        self.onRequestLogin = onRequestLogin
+        self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
 
     public var body: some View {
@@ -44,6 +60,14 @@ public struct MessageListView: View {
 
         VStack(spacing: 0) {
             header(copy: copy)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.preference(
+                            key: MomoChannelHeaderHeightPreferenceKey.self,
+                            value: geometry.size.height
+                        )
+                    }
+                }
             if showQuickStart {
                 quickStartCard(copy: copy)
                     .padding(.horizontal, 16)
@@ -63,6 +87,9 @@ public struct MessageListView: View {
             composer(copy: copy)
         }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
+        .onPreferenceChange(MomoChannelHeaderHeightPreferenceKey.self) { height in
+            onChannelHeaderHeightChange(height)
+        }
         .sheet(isPresented: $showChannelSettings) {
             if let channel = viewModel.selectedChannel {
                 MomoChannelSettingsSheet(
@@ -713,6 +740,14 @@ public struct MessageListView: View {
             return nil
         }
         return viewModel.member(agent)
+    }
+}
+
+private struct MomoChannelHeaderHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

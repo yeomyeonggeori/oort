@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (Codex worker) · MOMO-379 창 크롬 핫픽스
+- 두 app host를 공용 title-hidden unified toolbar로 고정하고, overlay/attached inspector를 live safe area와 측정 채널 헤더 아래로 제한했다.
+- 계획 이탈: 의심된 승인 배지는 하단 고정 utility라 원인이 아니었고, 실제 빨간 겹침은 workspace header를 toolbar로 옮긴 뒤 top safe area를 잃은 첫 채널 mention 배지였다. 해당 sidebar 경로만 safe area를 소비한다.
+- 5패키지 build, Core 24·Server 76·Relay 2·Worker 29·macOS non-snapshot 145와 MOMO-379 raster, fresh D6 review 6/7(Blocker/High 0) PASS. 무필터 macOS의 기존 headless `NSImage` signal 5와 Xcode nested sandbox 실패는 재현했다.
+- 정본 3종은 오케스트레이터 재기록 대기, 실 Dev/Xcode click·fullscreen은 `runtime-unverified`. DB/Docker/verifier/`local_gate.sh`는 미실행했다.
+
 ## 2026-07-14 (momo-main/Fable) · ADR-0112 Wave A 종결 (370/371/372)
 - merge: 370 `6f4090c`(Blocker 반려: dev 밀도 보존+조사 비문+비용 누출) → 371 `c9ed890`(High 4 반려 — 리뷰 A/B 프로브가 죽은 닫기 버튼의 실증 원인=타이틀바 밴드 규명, 본문 15pt) → 372 `e254cc6`(Blocker 반려: 빈 캡처+DM 검색·정렬·배지, 멤버 수→디렉터리 훅 통합). root full gate green(`…062029Z…`, `…062619Z…`).
 - D6 SLA rubric이 첫 판부터 유효: 빈 스냅샷·리터럴 DM·크롬 원인 오기가 전부 리뷰에서 잡힘. canonical 재기록 총 21종(fixture 변경분은 삭제 후 기록).

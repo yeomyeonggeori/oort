@@ -30,6 +30,40 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertEqual(state.pane, .approvals)
     }
 
+    func testSafeDetailViewportAndInspectorRespectTheirTopBoundaries() {
+        XCTAssertEqual(MomoWindowChromeLayout.safeContentTopInset(52), 52)
+        XCTAssertEqual(MomoWindowChromeLayout.safeContentTopInset(-1), 0)
+        XCTAssertEqual(
+            MomoWindowChromeLayout.inspectorTopInset(
+                channelHeaderHeight: 84
+            ),
+            84
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLayout.inspectorTopInset(
+                channelHeaderHeight: -1
+            ),
+            0
+        )
+    }
+
+    func testToolbarOwnedSidebarConsumesTopSafeAreaOnlyWhenItsHeaderIsHidden() {
+        XCTAssertEqual(
+            MomoWindowChromeLayout.sidebarTopInset(
+                safeAreaTop: 52,
+                showsWorkspaceHeader: false
+            ),
+            52
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLayout.sidebarTopInset(
+                safeAreaTop: 52,
+                showsWorkspaceHeader: true
+            ),
+            0
+        )
+    }
+
     func testChannelPresentationNormalizesNameAndOptionalTopic() throws {
         let presentation = try XCTUnwrap(
             MomoChannelPresentation(name: "  design-system  ", topic: "  하나의 타임라인, two densities  ").normalized
