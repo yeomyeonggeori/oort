@@ -280,6 +280,23 @@ public enum MomoTheme {
         public static let hoverBackground = Color.primary.opacity(0.06)
     }
 
+    /// Native split-view dimensions and rhythm for the workspace member directory.
+    public enum MemberDirectory {
+        public static let minimumWidth: CGFloat = 640
+        public static let idealWidth: CGFloat = 760
+        public static let minimumHeight: CGFloat = 480
+        public static let listMinimumWidth: CGFloat = 240
+        public static let listIdealWidth: CGFloat = 280
+        public static let listMaximumWidth: CGFloat = 360
+        public static let profileIconSize: CGFloat = 48
+
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let edgeInset: CGFloat = 24
+    }
+
     /// Shared visual grammar for AGENT identity and capability metadata.
     public enum AgentBadge {
         public static let spacing: CGFloat = 4

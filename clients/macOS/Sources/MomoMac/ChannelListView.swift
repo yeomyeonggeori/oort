@@ -16,6 +16,7 @@ public struct ChannelListView: View {
     @State private var showInvites = false
     @State private var showProfilePanel = false
     @State private var showMemberInvite = false
+    @State private var showMemberDirectory = false
     @State private var hoveredChannelID: ChannelID?
     @State private var hoveredMemberID: MemberID?
     @State private var isWorkspaceHeaderHovered = false
@@ -176,6 +177,9 @@ public struct ChannelListView: View {
         .sheet(item: $agentCredentialReveal) { reveal in
             MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
         }
+        .sheet(isPresented: $showMemberDirectory) {
+            MemberDirectoryView(viewModel: viewModel)
+        }
     }
 
     private var language: MomoUILanguage {
@@ -257,10 +261,50 @@ public struct ChannelListView: View {
         }
     }
 
-    private func sidebarPlainHeader(_ title: String) -> some View {
-        Text(title)
-            .font(MomoTheme.Sidebar.sectionHeaderFont)
-            .foregroundStyle(.secondary)
+    private func membersSectionHeader(copy: MomoWorkspaceCopy) -> some View {
+        HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
+            Button {
+                showMemberDirectory = true
+            } label: {
+                Text(copy.members)
+                    .font(MomoTheme.Sidebar.sectionHeaderFont)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help(copy.browseMembers)
+            .momoQuickTooltip(copy.browseMembers)
+
+            Spacer()
+
+            Button {
+                showMemberDirectory = true
+            } label: {
+                Image(systemName: "person.2")
+                    .frame(
+                        width: MomoTheme.Sidebar.actionSize,
+                        height: MomoTheme.Sidebar.actionSize
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(copy.browseMembers)
+            .momoQuickTooltip(copy.browseMembers)
+
+            Button {
+                withAnimation(sidebarPanelAnimation) {
+                    inviteMode = .human
+                    showMemberInvite = true
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .frame(
+                        width: MomoTheme.Sidebar.actionSize,
+                        height: MomoTheme.Sidebar.actionSize
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(copy.inviteMembers)
+            .momoQuickTooltip(copy.inviteMembers)
+        }
     }
 
     private func readStateErrorRow(copy: MomoWorkspaceCopy) -> some View {
@@ -312,7 +356,13 @@ public struct ChannelListView: View {
 
     private func directMessagesSection(copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
-            sidebarPlainHeader(copy.directMessages)
+            sidebarSectionHeader(
+                title: copy.directMessages,
+                actionTitle: copy.newDirectMessage,
+                systemImage: "plus"
+            ) {
+                showMemberDirectory = true
+            }
 
             if directMessageChannels.isEmpty {
                 sidebarEmptyRow(copy.noDirectMessages, systemImage: "bubble.left.and.bubble.right")
@@ -326,16 +376,7 @@ public struct ChannelListView: View {
 
     private func membersSection(copy: MomoWorkspaceCopy) -> some View {
         VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
-            sidebarSectionHeader(
-                title: copy.members,
-                actionTitle: copy.inviteMembers,
-                systemImage: "plus"
-            ) {
-                withAnimation(sidebarPanelAnimation) {
-                    inviteMode = .human
-                    showMemberInvite = true
-                }
-            }
+            membersSectionHeader(copy: copy)
 
             if visibleChannelMembers.isEmpty {
                 sidebarEmptyRow(copy.noMembersInChannel, systemImage: "person.2")
@@ -382,6 +423,7 @@ public struct ChannelListView: View {
     // without changing the existing selection model, so this remains a flat custom row.
     private func channelRow(_ channel: Channel) -> some View {
         let copy = MomoWorkspaceCopy(language: language)
+        let displayName = channelDisplayName(channel)
         let readState = viewModel.readStatesByChannel[channel.id]
         let showsUnreadWeight = isSelected(channel) || readState?.hasUnread == true
         let mentionLabel = MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
@@ -392,9 +434,9 @@ public struct ChannelListView: View {
                 Image(systemName: channelIcon(channel.kind))
                     .foregroundStyle(isSelected(channel) ? .primary : .secondary)
                     .frame(width: MomoTheme.Sidebar.avatarSize)
-                Text(channelDisplayName(channel))
+                Text(displayName)
                     .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
-                    .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
                 if let mentionLabel {
                     Text(mentionLabel)
@@ -417,7 +459,7 @@ public struct ChannelListView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(copy.channelUnreadAccessibilityLabel(
-            channelName: channelDisplayName(channel),
+            channelName: displayName,
             unreadCount: readState?.unreadCount ?? 0,
             mentionCount: readState?.mentionCount ?? 0
         ))
@@ -428,6 +470,9 @@ public struct ChannelListView: View {
 
     private func channelDisplayName(_ channel: Channel) -> String {
         _ = channelPresentationRevision
+        if let counterpart = viewModel.directMessageCounterpart(for: channel) {
+            return counterpart.displayName
+        }
         return MomoLocalChannelPresentationStore.displayName(for: channel)
     }
 
@@ -519,7 +564,19 @@ public struct ChannelListView: View {
         memberRowContent(member)
             .focusable()
             .contextMenu {
+                Button {
+                    Task { await viewModel.startDirectMessage(with: member.id) }
+                } label: {
+                    Label(copy.sendDirectMessage, systemImage: "bubble.left")
+                }
+                .disabled(
+                    viewModel.isCurrentUser(member.id)
+                        || member.status != .active
+                        || viewModel.directMessageMutationIds.contains(member.id)
+                )
+
                 if member.isAgent {
+                    Divider()
                     Button {
                         viewModel.insertMention(for: member)
                     } label: {
@@ -560,6 +617,14 @@ public struct ChannelListView: View {
                 }
             }
             .accessibilityActions {
+                if !viewModel.isCurrentUser(member.id),
+                   member.status == .active,
+                   !viewModel.directMessageMutationIds.contains(member.id) {
+                    Button(copy.sendDirectMessage) {
+                        Task { await viewModel.startDirectMessage(with: member.id) }
+                    }
+                }
+
                 if viewModel.selectedChannelId != nil {
                     Button(inChannel ? copy.removeFromChannel : copy.addToChannel) {
                         performMemberMutation(member, isMember: inChannel)

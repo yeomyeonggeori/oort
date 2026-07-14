@@ -160,6 +160,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     @Published public private(set) var channelCreateInFlight = false
     @Published public private(set) var channelMemberMutationIds: Set<MemberID> = []
+    @Published public private(set) var directMessageMutationIds: Set<MemberID> = []
+    @Published public private(set) var directMessageError: String?
+    @Published public private(set) var memberDirectoryIsRefreshing = false
+    @Published public private(set) var memberDirectoryError: String?
     @Published private(set) var agentCredentialsByMember: [MemberID: [MomoAgentCredential]] = [:]
     @Published private(set) var agentCredentialLoadingMembers: Set<MemberID> = []
 
@@ -320,6 +324,10 @@ public final class ChatViewModel: ObservableObject {
         approvalDecisionsInFlight = []
         channelCreateInFlight = false
         channelMemberMutationIds = []
+        directMessageMutationIds = []
+        directMessageError = nil
+        memberDirectoryIsRefreshing = false
+        memberDirectoryError = nil
         inviteJoinState = .idle
         localContextCopilotPreview = nil
         isLocalContextCopilotRefreshing = false
@@ -387,6 +395,59 @@ public final class ChatViewModel: ObservableObject {
             clearConnectionErrorState()
             await selectChannel(result.channel.id)
         } catch {
+            reportConnectionError(error, as: .actionFailed)
+        }
+    }
+
+    public func refreshMemberDirectory() async {
+        guard let workspaceId, !memberDirectoryIsRefreshing else { return }
+        memberDirectoryIsRefreshing = true
+        memberDirectoryError = nil
+        defer { memberDirectoryIsRefreshing = false }
+
+        do {
+            let loadedMembers = try await chat.members(workspace: workspaceId)
+            members = usesServerRosterSourceOfTruth
+                ? loadedMembers
+                : applyLocalProfileHints(to: loadedMembers)
+            memberDirectoryError = nil
+            clearConnectionErrorState()
+        } catch {
+            memberDirectoryError = String(describing: error)
+            reportConnectionError(error)
+        }
+    }
+
+    public func startDirectMessage(with memberID: MemberID) async {
+        guard let workspaceId,
+              !isCurrentUser(memberID),
+              !directMessageMutationIds.contains(memberID)
+        else { return }
+
+        directMessageMutationIds.insert(memberID)
+        directMessageError = nil
+        defer { directMessageMutationIds.remove(memberID) }
+
+        do {
+            let channel = try await chat.openDirectMessage(workspace: workspaceId, with: memberID)
+            if let index = channels.firstIndex(where: { $0.id == channel.id }) {
+                channels[index] = channel
+            } else {
+                channels.append(channel)
+                channels.sort(by: Self.channelOrder)
+            }
+            for index in members.indices where channel.dmMemberIds.contains(members[index].id) {
+                if !members[index].channelIds.contains(channel.id) {
+                    members[index].channelIds.append(channel.id)
+                }
+            }
+            ensureReadStateExists(channel: channel.id)
+            subscribe(channel: channel.id)
+            directMessageError = nil
+            clearConnectionErrorState()
+            await selectChannel(channel.id)
+        } catch {
+            directMessageError = String(describing: error)
             reportConnectionError(error, as: .actionFailed)
         }
     }
@@ -1577,6 +1638,16 @@ public final class ChatViewModel: ObservableObject {
 
     public func member(_ id: MemberID) -> Member? {
         members.first(where: { $0.id == id })
+    }
+
+    public func isCurrentUser(_ id: MemberID) -> Bool {
+        authenticatedMemberId == id
+    }
+
+    public func directMessageCounterpart(for channel: Channel) -> Member? {
+        guard channel.kind == .dm else { return nil }
+        let counterpartID = channel.dmMemberIds.first { $0 != authenticatedMemberId }
+        return counterpartID.flatMap(member)
     }
 
     public func applyLocalProfile(

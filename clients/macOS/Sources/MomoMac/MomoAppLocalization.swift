@@ -447,6 +447,165 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var memberDirectory: String {
+        switch language {
+        case .korean: return "멤버 디렉터리"
+        case .english: return "Member directory"
+        }
+    }
+
+    var browseMembers: String {
+        switch language {
+        case .korean: return "전체 멤버 보기"
+        case .english: return "Browse all members"
+        }
+    }
+
+    var allMembers: String {
+        switch language {
+        case .korean: return "전체"
+        case .english: return "All"
+        }
+    }
+
+    var people: String {
+        switch language {
+        case .korean: return "사람"
+        case .english: return "People"
+        }
+    }
+
+    var searchMembers: String {
+        switch language {
+        case .korean: return "이름 또는 핸들 검색"
+        case .english: return "Search names or handles"
+        }
+    }
+
+    var noWorkspaceMembers: String {
+        switch language {
+        case .korean: return "표시할 멤버가 없습니다"
+        case .english: return "No members to show"
+        }
+    }
+
+    var noMemberSearchResults: String {
+        switch language {
+        case .korean: return "일치하는 멤버가 없습니다"
+        case .english: return "No matching members"
+        }
+    }
+
+    var clearMemberSearch: String {
+        switch language {
+        case .korean: return "검색 지우기"
+        case .english: return "Clear search"
+        }
+    }
+
+    var showAllMembers: String {
+        switch language {
+        case .korean: return "전체 멤버 보기"
+        case .english: return "Show all members"
+        }
+    }
+
+    var loadingMembers: String {
+        switch language {
+        case .korean: return "멤버 불러오는 중"
+        case .english: return "Loading members"
+        }
+    }
+
+    var memberLoadFailed: String {
+        switch language {
+        case .korean: return "멤버를 불러오지 못했습니다"
+        case .english: return "Members could not be loaded"
+        }
+    }
+
+    var memberDirectoryOffline: String {
+        switch language {
+        case .korean: return "오프라인 상태입니다. 저장된 멤버를 표시합니다."
+        case .english: return "You are offline. Showing saved members."
+        }
+    }
+
+    var sendDirectMessage: String {
+        switch language {
+        case .korean: return "DM 보내기"
+        case .english: return "Send a DM"
+        }
+    }
+
+    var newDirectMessage: String {
+        switch language {
+        case .korean: return "새 DM 시작"
+        case .english: return "Start a new DM"
+        }
+    }
+
+    var directMessageFailed: String {
+        switch language {
+        case .korean: return "DM을 시작하지 못했습니다. 연결을 확인하고 다시 시도하세요."
+        case .english: return "The DM could not be started. Check the connection and try again."
+        }
+    }
+
+    var memberType: String {
+        switch language {
+        case .korean: return "유형"
+        case .english: return "Type"
+        }
+    }
+
+    var memberRole: String {
+        switch language {
+        case .korean: return "역할"
+        case .english: return "Role"
+        }
+    }
+
+    var memberHandle: String {
+        switch language {
+        case .korean: return "핸들"
+        case .english: return "Handle"
+        }
+    }
+
+    var selectMemberProfile: String {
+        switch language {
+        case .korean: return "프로필을 볼 멤버를 선택하세요"
+        case .english: return "Select a member to view their profile"
+        }
+    }
+
+    func workspaceRoleTitle(_ role: MembershipRole?) -> String {
+        switch (language, role) {
+        case (.korean, .owner): return "소유자"
+        case (.korean, .admin): return "관리자"
+        case (.korean, .guest): return "게스트"
+        case (.korean, _): return "멤버"
+        case (.english, .owner): return "Owner"
+        case (.english, .admin): return "Admin"
+        case (.english, .guest): return "Guest"
+        case (.english, _): return "Member"
+        }
+    }
+
+    func memberStatusTitle(_ status: MemberStatus) -> String {
+        switch (language, status) {
+        case (.korean, .active): return "활성"
+        case (.korean, .invited): return "초대됨"
+        case (.korean, .suspended): return "정지됨"
+        case (.korean, .deleted): return "삭제됨"
+        case (.english, .active): return "Active"
+        case (.english, .invited): return "Invited"
+        case (.english, .suspended): return "Suspended"
+        case (.english, .deleted): return "Deleted"
+        }
+    }
+
     var addToChannel: String {
         switch language {
         case .korean: return "채널에 추가"

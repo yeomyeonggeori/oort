@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-372 Member Directory + DM (2026-07-14)
+
+- RLS tenant transaction 안에서 active 멤버 권한을 검사하고, 정렬한 두 member ID의 SHA-256 `dm_key`·partial unique index·pair advisory lock으로 동시 요청도 같은 1:1 DM에 수렴시키는 GET/POST REST를 추가했다. channel/channel_seq/두 membership을 함께 보장하며 archived DM은 재개한다. `schema_v0.sql`과 migration은 변경하지 않았다.
+- macOS는 roster 기반 네이티브 멤버 디렉터리(검색·사람/에이전트·프로필·복구 상태·DM), 사이드바의 상대 이름+기존 unread DM 목록, 멤버 context menu/VoiceOver DM 액션을 제공한다. 채널 헤더와 메시지 카드/타임라인은 건드리지 않았다.
+- 5개 Swift package build와 Core 24·Server 76·Relay 2·Worker 29·macOS 기능/비정본 래스터 134 tests가 PASS했고 fresh design-review는 Blocker/High/Medium/Nitpick 0이다. 필터 없는 macOS suite는 기존 headless `AgentCredentialSnapshotTests`의 `NSImage` signal 5를 재현했다. DB/Docker/verifier/`local_gate.sh` 및 실창 hit-test·resize는 지시대로 미실행(`runtime-unverified`); 신규 light/dark 정본 PNG 재기록은 오케스트레이터 대기다.
+
 ## MOMO-371 Channel Header + macOS Chrome (2026-07-14)
 
 - 채널명·주제·멤버 수·설정 진입점을 한 헤더로 묶고, 이름/주제·멤버 관리·연동 placeholder 시트와 MOMO-372가 주입할 멤버 디렉터리 훅을 추가했다. 서버 채널 수정 계약이 없어 이름/주제는 이 Mac의 표시값으로만 저장하며 앱 안에서 동기화 범위를 명시한다.

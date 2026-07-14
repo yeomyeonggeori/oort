@@ -266,6 +266,25 @@ public actor MomoServerRESTChatBackend: ChatBackend, AgentTransport, AgentWorkRu
         return channels
     }
 
+    public func openDirectMessage(
+        workspace: WorkspaceID,
+        with member: MemberID
+    ) async throws -> Channel {
+        let response = try await post(
+            "/v1/workspaces/\(workspace.description)/dms",
+            body: OpenDirectMessageRequestDTO(memberId: member.rawValue),
+            authorized: true,
+            response: OpenDirectMessageResponseDTO.self
+        )
+        let channel = try response.channel.channel()
+        if let index = cachedChannels?.firstIndex(where: { $0.id == channel.id }) {
+            cachedChannels?[index] = channel
+        } else {
+            cachedChannels = (cachedChannels ?? []) + [channel]
+        }
+        return channel
+    }
+
     public func createWorkRun(
         agent: MemberID,
         channel: ChannelID,
@@ -977,6 +996,7 @@ private struct MemberDTO: Decodable {
     let displayName: String
     let handle: String
     let avatarUrl: String?
+    let role: String?
     let channelIds: [String]?
     let capabilities: [String]?
 
@@ -994,6 +1014,7 @@ private struct MemberDTO: Decodable {
             displayName: displayName,
             handle: handle,
             avatarURL: avatarUrl.flatMap(URL.init(string:)),
+            workspaceRole: role.flatMap(MembershipRole.init(rawValue:)),
             channelIds: (channelIds ?? []).compactMap { ChannelID(uuidString: $0) },
             capabilities: capabilities ?? [],
             presence: .online
@@ -1045,6 +1066,7 @@ private struct ChannelDTO: Decodable {
     let name: String?
     let topic: String?
     let dmKey: String?
+    let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
 
@@ -1065,10 +1087,20 @@ private struct ChannelDTO: Decodable {
             name: name,
             topic: topic,
             dmKey: dmKey,
+            dmMemberIds: (memberIds ?? []).compactMap { MemberID(uuidString: $0) },
             createdBy: createdBy.flatMap { MemberID(uuidString: $0) },
             archivedAtMs: archivedAtMs
         )
     }
+}
+
+private struct OpenDirectMessageRequestDTO: Encodable {
+    let memberId: UUID
+}
+
+private struct OpenDirectMessageResponseDTO: Decodable {
+    let channel: ChannelDTO
+    let created: Bool
 }
 
 private struct CreateChannelRequest: Encodable {

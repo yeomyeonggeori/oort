@@ -12,6 +12,8 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
     /// `@handle`, unique per workspace (schema member_handle_uniq).
     public var handle: String
     public var avatarURL: URL?
+    /// Workspace-level role from the roster projection.
+    public var workspaceRole: MembershipRole?
     /// Active channel memberships from roster projections. Login payloads may
     /// omit this and default to an empty list.
     public var channelIds: [ChannelID]
@@ -29,6 +31,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         displayName: String,
         handle: String,
         avatarURL: URL? = nil,
+        workspaceRole: MembershipRole? = nil,
         channelIds: [ChannelID] = [],
         capabilities: [String] = [],
         presence: Presence = .offline
@@ -40,6 +43,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         self.displayName = displayName
         self.handle = handle
         self.avatarURL = avatarURL
+        self.workspaceRole = workspaceRole
         self.channelIds = channelIds
         self.capabilities = capabilities
         self.presence = presence
@@ -79,6 +83,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         case displayName = "display_name"
         case handle
         case avatarURL = "avatar_url"
+        case workspaceRole = "workspace_role"
         case channelIds = "channel_ids"
         case capabilities
         case presence
@@ -94,6 +99,7 @@ public struct Member: Identifiable, Codable, Sendable, Hashable {
         self.displayName = try c.decode(String.self, forKey: .displayName)
         self.handle = try c.decode(String.self, forKey: .handle)
         self.avatarURL = try c.decodeIfPresent(URL.self, forKey: .avatarURL)
+        self.workspaceRole = try c.decodeIfPresent(MembershipRole.self, forKey: .workspaceRole)
         self.channelIds = try c.decodeIfPresent([ChannelID].self, forKey: .channelIds) ?? []
         self.capabilities = try c.decodeIfPresent([String].self, forKey: .capabilities) ?? []
         self.presence = try c.decodeIfPresent(Presence.self, forKey: .presence) ?? .offline

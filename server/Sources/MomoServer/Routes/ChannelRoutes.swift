@@ -106,6 +106,7 @@ struct ChannelRoutes: Sendable {
                          'name', c.name,
                          'topic', c.topic,
                          'dmKey', c.dm_key,
+                         'memberIds', '[]'::jsonb,
                          'createdBy', c.created_by,
                          'archivedAtMs',
                            CASE WHEN c.archived_at IS NULL
@@ -411,6 +412,13 @@ struct ChannelRoutes: Sendable {
                          'name', c.name,
                          'topic', c.topic,
                          'dmKey', c.dm_key,
+                         'memberIds',
+                           CASE WHEN c.kind = 'dm' THEN (
+                             SELECT COALESCE(jsonb_agg(dm_ms.member_id ORDER BY dm_ms.member_id::text), '[]'::jsonb)
+                               FROM membership dm_ms
+                              WHERE dm_ms.channel_id = c.id
+                                AND dm_ms.left_at IS NULL
+                           ) ELSE '[]'::jsonb END,
                          'createdBy', c.created_by,
                          'archivedAtMs',
                            CASE WHEN c.archived_at IS NULL

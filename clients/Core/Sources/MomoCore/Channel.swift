@@ -10,6 +10,8 @@ public struct Channel: Identifiable, Codable, Sendable, Hashable {
     public var topic: String?
     /// Canonical hash of sorted member ids — guarantees one DM per pair/group.
     public var dmKey: String?
+    /// Active participant ids for a DM. Empty for public/private channels.
+    public var dmMemberIds: [MemberID]
     public var createdBy: MemberID?
     public var archivedAtMs: Int64?
 
@@ -20,6 +22,7 @@ public struct Channel: Identifiable, Codable, Sendable, Hashable {
         name: String? = nil,
         topic: String? = nil,
         dmKey: String? = nil,
+        dmMemberIds: [MemberID] = [],
         createdBy: MemberID? = nil,
         archivedAtMs: Int64? = nil
     ) {
@@ -29,6 +32,7 @@ public struct Channel: Identifiable, Codable, Sendable, Hashable {
         self.name = name
         self.topic = topic
         self.dmKey = dmKey
+        self.dmMemberIds = dmMemberIds
         self.createdBy = createdBy
         self.archivedAtMs = archivedAtMs
     }
@@ -42,8 +46,22 @@ public struct Channel: Identifiable, Codable, Sendable, Hashable {
         case name
         case topic
         case dmKey = "dm_key"
+        case dmMemberIds = "dm_member_ids"
         case createdBy = "created_by"
         case archivedAtMs = "archived_at_ms"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(ChannelID.self, forKey: .id)
+        self.workspaceId = try c.decode(WorkspaceID.self, forKey: .workspaceId)
+        self.kind = try c.decode(ChannelKind.self, forKey: .kind)
+        self.name = try c.decodeIfPresent(String.self, forKey: .name)
+        self.topic = try c.decodeIfPresent(String.self, forKey: .topic)
+        self.dmKey = try c.decodeIfPresent(String.self, forKey: .dmKey)
+        self.dmMemberIds = try c.decodeIfPresent([MemberID].self, forKey: .dmMemberIds) ?? []
+        self.createdBy = try c.decodeIfPresent(MemberID.self, forKey: .createdBy)
+        self.archivedAtMs = try c.decodeIfPresent(Int64.self, forKey: .archivedAtMs)
     }
 }
 

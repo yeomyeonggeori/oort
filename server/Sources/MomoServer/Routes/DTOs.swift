@@ -260,12 +260,35 @@ struct ChannelDTO: ResponseEncodable, Decodable {
     let name: String?
     let topic: String?
     let dmKey: String?
+    /// Active participants for DM channels. Empty for public/private channels.
+    let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
 }
 
 struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
     let channels: [ChannelDTO]
+}
+
+/// POST /v1/workspaces/{ws}/dms request body.
+struct OpenDirectMessageRequest: Decodable {
+    let memberId: UUID
+
+    private enum CodingKeys: String, CodingKey {
+        case memberId
+        case memberIdSnake = "member_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.memberId = try c.decodeIfPresent(UUID.self, forKey: .memberId)
+            ?? c.decode(UUID.self, forKey: .memberIdSnake)
+    }
+}
+
+struct OpenDirectMessageResponse: ResponseEncodable, Decodable {
+    let channel: ChannelDTO
+    let created: Bool
 }
 
 /// POST /v1/workspaces/{ws}/channels request body.

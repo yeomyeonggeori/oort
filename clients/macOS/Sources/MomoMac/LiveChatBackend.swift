@@ -50,7 +50,10 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
 
     /// Seed the in-memory store with a demo workspace so the UI has content offline.
     /// Returns the seeded workspace + first channel for convenience.
-    public func seedDemo(capabilitiesByHandle: [String: [String]] = [:]) -> DemoSeed {
+    public func seedDemo(
+        capabilitiesByHandle: [String: [String]] = [:],
+        displayNamesByHandle: [String: String] = [:]
+    ) -> DemoSeed {
         let ws = WorkspaceID()
         workspace = ws
         inviteJoinState = .idle
@@ -64,13 +67,19 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
         readCursorsByMember = [:]
 
         var human = Member(id: MemberID(), workspaceId: ws, kind: .human,
-                           displayName: "상준", handle: "sangjun", presence: .online)
+                           displayName: displayNamesByHandle["sangjun"] ?? "상준",
+                           handle: "sangjun", workspaceRole: .owner,
+                           presence: .online)
         var researcher = Member(id: MemberID(), workspaceId: ws, kind: .agent,
-                                displayName: "Hermes", handle: "hermes",
+                                displayName: displayNamesByHandle["hermes"] ?? "Hermes",
+                                handle: "hermes",
+                                workspaceRole: .member,
                                 capabilities: capabilitiesByHandle["hermes"] ?? [],
                                 presence: .working)
         var builder = Member(id: MemberID(), workspaceId: ws, kind: .agent,
-                             displayName: "빌드봇", handle: "buildbot",
+                             displayName: displayNamesByHandle["buildbot"] ?? "빌드봇",
+                             handle: "buildbot",
+                             workspaceRole: .member,
                              capabilities: capabilitiesByHandle["buildbot"] ?? [],
                              presence: .online)
 
@@ -541,6 +550,50 @@ public actor LiveChatBackend: ChatBackend, AgentTransport, AgentWorkRunBackend, 
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
         channels.filter { $0.workspaceId == workspace }
+    }
+
+    public func openDirectMessage(
+        workspace: WorkspaceID,
+        with member: MemberID
+    ) async throws -> Channel {
+        guard connected, self.workspace == workspace else { throw BackendError.notConnected }
+        guard let actor = members.first(where: { $0.kind == .human && $0.status == .active }) else {
+            throw BackendError.problem(status: 403, title: "active member required", detail: nil)
+        }
+        guard actor.id != member else {
+            throw BackendError.problem(status: 400, title: "direct message target must be another member", detail: nil)
+        }
+        guard members.contains(where: {
+            $0.id == member && $0.workspaceId == workspace && $0.status == .active
+        }) else {
+            throw BackendError.problem(status: 404, title: "active workspace member not found", detail: nil)
+        }
+
+        let participantIDs = [actor.id, member].sorted { $0.description < $1.description }
+        if let existing = channels.first(where: {
+            $0.kind == .dm && Set($0.dmMemberIds) == Set(participantIDs)
+        }) {
+            return existing
+        }
+
+        let channel = Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .dm,
+            dmKey: "demo:\(participantIDs.map(\.description).joined(separator: ":"))",
+            dmMemberIds: participantIDs,
+            createdBy: actor.id
+        )
+        channels.append(channel)
+        messagesByChannel[channel.id] = []
+        seqByChannel[channel.id] = 0
+        sentClientMsgIds[channel.id] = []
+        for index in members.indices where participantIDs.contains(members[index].id) {
+            if !members[index].channelIds.contains(channel.id) {
+                members[index].channelIds.append(channel.id)
+            }
+        }
+        return channel
     }
 
     // MARK: AgentWorkRunBackend
