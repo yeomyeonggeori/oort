@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-07-14 (Codex worker) · MOMO-371 MOMO-370 rebase
+- `origin/main@6f4090c` 위로 직접 rebase하고 MessageListView/MomoMacRootView 충돌에서 371 헤더·통합 toolbar와 370 `showsCosts`·Alpha 개발자 gate를 함께 보존했다. 문서 기록도 양쪽을 유지했다.
+- 개발자 모드 해제 시 닫힌 Alpha 상세가 재개방되지 않도록 presentation의 pane redirect를 분리하고 회귀 테스트를 추가했다. 비정본 renderer는 임시 NSWindow에서 native default action을 그려 light/dark 레이블 증거를 안정화했다.
+- 5패키지 build, Core 23, macOS 기능 135·실행 가능 snapshot 39(정본 대기 2 skip) PASS; fresh design-review는 Blocker/High/Medium/Nitpick 0이다. 무필터/MessageBubble canonical은 기존 headless `NSImage` signal 5를 재현했다.
+- 계획 이탈 없음. 정본 재기록·실창 검증은 오케스트레이터 대기이며 DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행했다(`runtime-unverified`).
+
+## 2026-07-14 (Codex worker) · MOMO-371 fresh review High 4/Medium 3 반영
+- 런타임 A/B로 죽은 닫기 버튼의 원인을 surface stroke가 아닌 구 타이틀바 밴드의 콘텐츠 침범으로 정정했다. unified toolbar 수정은 유지하고 `allowsHitTesting(false)`는 방어로만 기록한다.
+- 372용 optional directory 액션을 production session root까지 전달하고, 로컬 채널 표시값을 헤더·사이드바·퀵스위처가 공용 해석하며, row/message 본문을 15pt급 semantic role로 상향했다. 토픽 2줄, 프로덕션 sidebar snapshot, 저장 후 재편집 상태도 보정했다.
+- 수정 금지 후속 기록: 채널 설정 키보드 경로, 영어 placeholder 톤, AppStorage 키 상수화.
+- main의 MOMO-370 선랜딩 후 rebase·정본 재기록은 오케스트레이터 몫이다. DB/Docker/verifier/`local_gate.sh`는 미실행한다.
+
+## 2026-07-14 (Codex worker) · MOMO-371 채널 헤더·macOS 크롬
+- 채널 identity/주제/멤버 수/설정과 이름·주제·멤버·연동 시트를 구성하고 MOMO-372 디렉터리 closure만 노출했다. 워크스페이스 identity는 unified toolbar로 옮기고 상세 패널은 단일 열림/닫힘 상태로 고정했다.
+- 계획 이탈: 사전 생성 worktree/branch와 `status:ready` 부재로 assignee/`status:in-progress`를 수동 반영했다. 서버 channel update 계약이 없어 이름/주제는 동기화 범위를 밝힌 Mac 로컬 표시값이며, webhook과 실제 디렉터리는 후속 계약/티켓 경계를 유지했다.
+- 5패키지 build, Core 23/Server 73/Relay 2/Worker 29/macOS 비이미지 130 tests와 MOMO-371 raster가 PASS했다. fresh design-review는 전 등급 0, 무필터 macOS는 기존 headless `NSImage` signal 5를 재현했다.
+- 정본 light/dark PNG와 실창 traffic-light/fullscreen/닫기 hit-test는 오케스트레이터 대기다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행(`runtime-unverified`).
+
 ## 2026-07-14 (Codex worker) · MOMO-370 fresh D6 반려 수정
 - dev Work 카드는 기존 `input.brief`를 복원해 실행 로그/결과 중복과 canonical 회귀를 해소했고, 표준 모드 Alpha Command Center 직접 표면·승인 연관 버튼·초대 fallback을 dev gate 또는 초대 안내로 정리했다.
 - 마지막 한글 음절 종성 기반 이/가·을/를·은/는 헬퍼와 혼합 이름 테스트를 추가하고, 접힌 카드는 2줄·펼침은 전문+detail 무중복으로 바꿨다. 표준 ApprovalInbox 실데이터 raster도 추가했다.

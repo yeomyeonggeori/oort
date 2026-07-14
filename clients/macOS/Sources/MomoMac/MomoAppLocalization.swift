@@ -307,6 +307,125 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var channelSettings: String {
+        switch language {
+        case .korean: return "채널 설정"
+        case .english: return "Channel settings"
+        }
+    }
+
+    var channelSettingsSubtitle: String {
+        switch language {
+        case .korean: return "채널 표시, 멤버, 연동을 관리합니다."
+        case .english: return "Manage channel display, members, and integrations."
+        }
+    }
+
+    var channelIdentity: String {
+        switch language {
+        case .korean: return "이름과 주제"
+        case .english: return "Name and topic"
+        }
+    }
+
+    func channelMemberCount(_ count: Int) -> String {
+        switch language {
+        case .korean: return "멤버 \(count)명"
+        case .english: return count == 1 ? "1 member" : "\(count) members"
+        }
+    }
+
+    var openMemberDirectory: String {
+        switch language {
+        case .korean: return "멤버 목록 열기"
+        case .english: return "Open member directory"
+        }
+    }
+
+    var channelMemberManagement: String {
+        switch language {
+        case .korean: return "채널 멤버"
+        case .english: return "Channel members"
+        }
+    }
+
+    var channelMemberManagementSubtitle: String {
+        switch language {
+        case .korean: return "이 채널에서 대화할 멤버와 에이전트를 선택합니다."
+        case .english: return "Choose the people and agents who can participate in this channel."
+        }
+    }
+
+    var channelMembershipUnavailable: String {
+        switch language {
+        case .korean: return "멤버 변경을 완료하지 못했습니다. 연결을 확인하고 다시 선택하세요."
+        case .english: return "Member changes could not be completed. Check the connection and select again."
+        }
+    }
+
+    var noWorkspaceMembers: String {
+        switch language {
+        case .korean: return "추가할 워크스페이스 멤버가 없습니다."
+        case .english: return "There are no workspace members to add."
+        }
+    }
+
+    var integrations: String {
+        switch language {
+        case .korean: return "연동"
+        case .english: return "Integrations"
+        }
+    }
+
+    var webhooks: String {
+        switch language {
+        case .korean: return "웹훅"
+        case .english: return "Webhooks"
+        }
+    }
+
+    var inboundWebhook: String {
+        switch language {
+        case .korean: return "인바운드 웹훅"
+        case .english: return "Inbound webhook"
+        }
+    }
+
+    var webhookPlaceholderDetail: String {
+        switch language {
+        case .korean: return "이 워크스페이스에서는 아직 웹훅을 사용할 수 없습니다."
+        case .english: return "Webhooks are not available in this workspace yet."
+        }
+    }
+
+    var saveChannelSettings: String {
+        switch language {
+        case .korean: return "이 Mac에 저장"
+        case .english: return "Save on this Mac"
+        }
+    }
+
+    var channelLocalDraftNote: String {
+        switch language {
+        case .korean: return "이름과 주제는 이 Mac에서만 보입니다. 다른 기기에는 반영되지 않습니다."
+        case .english: return "Name and topic appear only on this Mac and are not synced to other devices."
+        }
+    }
+
+    var channelSettingsSavedLocally: String {
+        switch language {
+        case .korean: return "이 Mac에 채널 표시를 저장했습니다."
+        case .english: return "Channel display saved on this Mac."
+        }
+    }
+
+    var characterCount: String {
+        switch language {
+        case .korean: return "글자 수"
+        case .english: return "Characters"
+        }
+    }
+
     var directMessages: String {
         switch language {
         case .korean: return "다이렉트 메시지"

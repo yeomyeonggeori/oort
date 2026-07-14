@@ -36,7 +36,11 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         let defaults = UserDefaults(suiteName: "momo.snapshot.channel-roster")!
         defaults.removePersistentDomain(forName: "momo.snapshot.channel-roster")
         defaults.set(developerMode, forKey: MomoDeveloperModePresentation.developerModeKey)
-        return ChannelListView(viewModel: viewModel)
+        return ChannelListView(
+            viewModel: viewModel,
+            sessionChrome: nil,
+            showsWorkspaceHeader: false
+        )
             .frame(width: 340, height: 720)
             .environment(\.colorScheme, scheme)
             .defaultAppStorage(defaults)

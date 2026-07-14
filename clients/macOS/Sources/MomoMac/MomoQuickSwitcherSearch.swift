@@ -64,16 +64,17 @@ enum MomoQuickSwitcherSearch {
         let channelNumbers = Dictionary(uniqueKeysWithValues: orderedChannels.prefix(9).enumerated().map { ($1.id, $0 + 1) })
 
         let channelItems = orderedChannels.compactMap { channel -> MomoQuickSwitcherItem? in
-            let title = channel.name ?? "DM"
+            let presentation = MomoLocalChannelPresentationStore.presentation(for: channel)
+            let title = presentation.name
             guard let score = fuzzyScore(
                 query: trimmedQuery,
-                candidates: [title, channel.topic, "#\(title)"]
+                candidates: [title, presentation.topic, "#\(title)"]
             ) else { return nil }
             return MomoQuickSwitcherItem(
                 destination: .channel(channel.id),
                 kind: .channel(channel.kind),
                 title: channel.kind == .dm ? title : "#\(title)",
-                subtitle: channel.topic,
+                subtitle: presentation.topic,
                 shortcutNumber: channelNumbers[channel.id],
                 isRecent: recentRanks[channel.id] != nil,
                 score: score

@@ -12,6 +12,7 @@ public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
     private let onOpenWorkDetail: (RunID) -> Void
     private let onRequestLogin: () -> Void
+    private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
@@ -23,15 +24,19 @@ public struct MessageListView: View {
     @State private var initialWorkBrief = ""
     @State private var workCommandDraftToRestore: String?
     @State private var workComposerSessionId = UUID()
+    @State private var showChannelSettings = false
+    @State private var channelPresentationOverrides: [ChannelID: MomoChannelPresentation] = [:]
 
     public init(
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
-        onRequestLogin: @escaping () -> Void = {}
+        onRequestLogin: @escaping () -> Void = {},
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
+        self.onOpenMemberDirectory = onOpenMemberDirectory
     }
 
     public var body: some View {
@@ -58,47 +63,59 @@ public struct MessageListView: View {
             composer(copy: copy)
         }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
+        .sheet(isPresented: $showChannelSettings) {
+            if let channel = viewModel.selectedChannel {
+                MomoChannelSettingsSheet(
+                    copy: copy,
+                    channel: channel,
+                    presentation: channelPresentation(for: channel),
+                    viewModel: viewModel
+                ) { presentation in
+                    channelPresentationOverrides[channel.id] = presentation
+                }
+                .id(channel.id)
+            }
+        }
     }
 
-    // MARK: Header (cost chip, experience B social signal)
+    // MARK: Channel header
 
     private var language: MomoUILanguage {
         MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
     }
 
     private func header(copy: MomoWorkspaceCopy) -> some View {
-        HStack {
-            if let id = viewModel.selectedChannelId,
-               let channel = viewModel.channels.first(where: { $0.id == id }) {
-                Image(systemName: channel.kind == .dm ? "person.2.fill" : "number")
-                    .foregroundStyle(.secondary)
-                Text(channel.name ?? "DM")
-                    .font(MomoTheme.Typography.screenTitle)
-                if let topic = channel.topic {
-                    Text(topic)
-                        .font(MomoTheme.Typography.supporting)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
+        Group {
+            if let channel = viewModel.selectedChannel {
+                MomoChannelHeaderView(
+                    channel: channel,
+                    presentation: channelPresentation(for: channel),
+                    memberCount: viewModel.activeMembers(in: channel.id).count,
+                    realtimeStatus: viewModel.selectedRealtimeStatus,
+                    spentMicroUSD: viewModel.liveSpentMicroUSD,
+                    showsCosts: presentation.showsCosts,
+                    copy: copy,
+                    retryRealtime: viewModel.selectedRealtimeStatus?.canRetry == true ? {
+                        Task { await viewModel.retryRealtime() }
+                    } : nil,
+                    openMemberDirectory: onOpenMemberDirectory,
+                    openSettings: {
+                        showChannelSettings = true
+                    }
+                )
             } else {
                 Text(copy.selectChannel)
-                    .font(.callout)
+                    .font(MomoTheme.Typography.row)
                     .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let status = viewModel.selectedRealtimeStatus, !status.isLive {
-                realtimeStatusChip(status, copy: copy)
-            }
-            // Social cost chip (experience B): today's live spend.
-            if presentation.showsCosts, viewModel.liveSpentMicroUSD > 0 {
-                Label(CostFormat.usdCompact(viewModel.liveSpentMicroUSD), systemImage: "dollarsign.circle")
-                    .font(.caption)
-                    .foregroundStyle(MomoTheme.costAmber)
+                    .frame(maxWidth: .infinity, minHeight: MomoTheme.ChannelHeader.minimumHeight)
+                    .momoSurface(.panel, cornerRadius: 0)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .momoSurface(.panel, cornerRadius: 0)
+    }
+
+    private func channelPresentation(for channel: Channel) -> MomoChannelPresentation {
+        channelPresentationOverrides[channel.id]
+            ?? MomoLocalChannelPresentationStore.presentation(for: channel)
     }
 
     private func quickStartCard(copy: MomoWorkspaceCopy) -> some View {
@@ -158,30 +175,6 @@ public struct MessageListView: View {
         }
         .padding(16)
         .momoSurface(.card)
-    }
-
-    @ViewBuilder
-    private func realtimeStatusChip(_ status: RealtimeConnectionStatus, copy: MomoWorkspaceCopy) -> some View {
-        let label = Label(statusTitle(status, copy: copy), systemImage: statusIcon(status))
-            .font(MomoTheme.Typography.metadata.weight(.semibold))
-            .foregroundStyle(statusColor(status))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(statusColor(status).opacity(0.08), in: Capsule())
-            .fixedSize()
-
-        if status.canRetry {
-            Button {
-                Task { await viewModel.retryRealtime() }
-            } label: {
-                label
-            }
-            .buttonStyle(.plain)
-            .help(copy.retry)
-            .accessibilityLabel("\(statusTitle(status, copy: copy)), \(copy.retry)")
-        } else {
-            label
-        }
     }
 
     private func connectionBanner(_ issue: MomoConnectionIssue, copy: MomoWorkspaceCopy) -> some View {
@@ -308,54 +301,6 @@ public struct MessageListView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(MomoTheme.agentAccent.opacity(0.08))
-    }
-
-    private func statusTitle(_ status: RealtimeConnectionStatus, copy: MomoWorkspaceCopy) -> String {
-        if status.isLive {
-            return copy.live
-        }
-        switch (status.connection, status.subscription, status.fallback) {
-        case (.disabled, .disabled, .restHistory):
-            return copy.restFallback
-        case (.connecting, _, _), (.connected, .subscribing, _):
-            return copy.connectingLive
-        case (.reconnecting, _, _), (_, .recovering, _):
-            return copy.reconnecting
-        case (.offline, _, .restHistory), (_, .unsubscribed, .restHistory):
-            return copy.offlineRestFallback
-        case (.error, _, .restHistory), (_, .error, .restHistory):
-            return copy.liveErrorRestFallback
-        default:
-            return copy.connectingLive
-        }
-    }
-
-    private func statusIcon(_ status: RealtimeConnectionStatus) -> String {
-        if status.isLive { return "dot.radiowaves.left.and.right" }
-        switch status.connection {
-        case .connecting, .reconnecting:
-            return "arrow.triangle.2.circlepath"
-        case .offline, .disabled:
-            return "clock.arrow.circlepath"
-        case .error:
-            return "wifi.exclamationmark"
-        case .connected:
-            return status.subscription == .subscribed ? "dot.radiowaves.left.and.right" : "antenna.radiowaves.left.and.right"
-        }
-    }
-
-    private func statusColor(_ status: RealtimeConnectionStatus) -> Color {
-        if status.isLive { return MomoTheme.reversibleGreen }
-        switch status.connection {
-        case .connecting, .reconnecting:
-            return MomoTheme.agentAccent
-        case .error:
-            return MomoTheme.costAmber
-        case .offline, .disabled:
-            return .secondary
-        case .connected:
-            return status.subscription == .error ? MomoTheme.costAmber : MomoTheme.agentAccent
-        }
     }
 
     // MARK: Timeline (seq order)

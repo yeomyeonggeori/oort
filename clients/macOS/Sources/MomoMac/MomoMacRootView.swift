@@ -19,8 +19,7 @@ struct MomoSessionChrome {
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var showDetailPane = false
-    @State private var detailPane: MomoMacDetailPane = .approvals
+    @State private var detailPanePresentation = MomoDetailPanePresentationState()
     @State private var selectedProfileMemberID: MemberID?
     @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
@@ -29,26 +28,44 @@ public struct MomoMacRootView: View {
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @AppStorage("momo.server.displayName") private var serverDisplayName = "momo"
+    @AppStorage("momo.server.iconText") private var serverIconText = "m"
+    @AppStorage("momo.server.iconPath") private var serverIconPath = ""
+    @AppStorage("momo.profile.displayName") private var profileDisplayName = ""
     private let sessionChrome: MomoSessionChrome?
+    private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
     private static let inspectorWidth: CGFloat = 440
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
-    public init(viewModel: @autoclosure @escaping () -> ChatViewModel) {
+    public init(
+        viewModel: @autoclosure @escaping () -> ChatViewModel,
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel())
         self.sessionChrome = nil
+        self.onOpenMemberDirectory = onOpenMemberDirectory
     }
 
     /// Host an already-created ViewModel, used by async bootstraps such as the
     /// SwiftPM development app entrypoint.
-    public init(existingViewModel viewModel: ChatViewModel) {
+    public init(
+        existingViewModel viewModel: ChatViewModel,
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.sessionChrome = nil
+        self.onOpenMemberDirectory = onOpenMemberDirectory
     }
 
-    init(existingViewModel viewModel: ChatViewModel, sessionChrome: MomoSessionChrome?) {
+    init(
+        existingViewModel viewModel: ChatViewModel,
+        sessionChrome: MomoSessionChrome?,
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
         self.sessionChrome = sessionChrome
+        self.onOpenMemberDirectory = onOpenMemberDirectory
     }
 
     public var body: some View {
@@ -72,6 +89,11 @@ public struct MomoMacRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                workspaceToolbarHeader(copy: copy)
+            }
+        }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
         .preferredColorScheme(appearance.colorScheme)
         .focusedSceneValue(\.momoMacCommandActions, commandActions)
@@ -103,7 +125,7 @@ public struct MomoMacRootView: View {
         }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
-                detailPane = .approvals
+                detailPanePresentation.redirect(to: .approvals)
             }
         }
     }
@@ -174,7 +196,8 @@ public struct MomoMacRootView: View {
             },
             openUpdates: {
                 openDetailPane(.updates)
-            }
+            },
+            showsWorkspaceHeader: false
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -188,7 +211,8 @@ public struct MomoMacRootView: View {
             },
             onRequestLogin: {
                 sessionChrome?.switchSession()
-            }
+            },
+            onOpenMemberDirectory: onOpenMemberDirectory
         )
             .frame(minWidth: 0)
     }
@@ -204,7 +228,7 @@ public struct MomoMacRootView: View {
                     .frame(width: 32, height: 32)
                     .background(.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(visibleDetailPane.title(copy: copy))
                         .font(.headline)
                     Text(visibleDetailPane.subtitle(copy: copy))
@@ -220,17 +244,15 @@ public struct MomoMacRootView: View {
                 } label: {
                     Label(copy.closeDetailPane, systemImage: "xmark")
                         .labelStyle(.titleAndIcon)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(.primary.opacity(0.08), in: Capsule())
+                        .font(MomoTheme.Typography.supporting.weight(.semibold))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
                 .help(copy.closeDetailPane)
                 .momoQuickTooltip(copy.closeDetailPane)
                 .keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 8)
 
@@ -248,8 +270,8 @@ public struct MomoMacRootView: View {
                     .momoQuickTooltip(relatedPane.subtitle(copy: copy))
                     Spacer()
                 }
-                .padding(.horizontal, 14)
-                .padding(.bottom, 9)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 8)
             }
 
             Divider()
@@ -313,20 +335,13 @@ public struct MomoMacRootView: View {
     private func openDetailPane(_ pane: MomoMacDetailPane) {
         guard pane != .alpha || developerMode else { return }
         withAnimation(layoutAnimation) {
-            detailPane = pane
-            showDetailPane = true
-        }
-    }
-
-    private func toggleDetailPane() {
-        withAnimation(layoutAnimation) {
-            showDetailPane.toggle()
+            detailPanePresentation.present(pane)
         }
     }
 
     private func closeDetailPane() {
         withAnimation(layoutAnimation) {
-            showDetailPane = false
+            detailPanePresentation.close()
         }
     }
 
@@ -344,6 +359,56 @@ public struct MomoMacRootView: View {
 
     private var appearance: MomoAppearancePreference {
         MomoAppearancePreference(rawValue: appearanceRaw) ?? .system
+    }
+
+    private var showDetailPane: Bool {
+        detailPanePresentation.isPresented
+    }
+
+    private var detailPane: MomoMacDetailPane {
+        detailPanePresentation.pane
+    }
+
+    private func workspaceToolbarHeader(copy: MomoWorkspaceCopy) -> some View {
+        Button {
+            openDetailPane(.workspaceSettings)
+        } label: {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                    workspaceToolbarLogo
+                    VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
+                        Text(serverDisplayName)
+                            .font(MomoTheme.Typography.toolbarTitle)
+                            .fixedSize()
+                        Text(workspaceMemberDisplayName)
+                            .font(MomoTheme.Typography.toolbarSupporting)
+                            .foregroundStyle(.secondary)
+                            .fixedSize()
+                    }
+                }
+
+                workspaceToolbarLogo
+            }
+        }
+        .buttonStyle(.plain)
+        .help("\(serverDisplayName), \(copy.serverSettings)")
+        .momoQuickTooltip(copy.serverSettings)
+        .accessibilityLabel("\(serverDisplayName), \(copy.serverSettings)")
+    }
+
+    private var workspaceToolbarLogo: some View {
+        MomoSidebarLogoMark(
+            text: serverIconText,
+            imagePath: serverIconPath,
+            size: MomoTheme.Sidebar.toolbarLogoSize
+        )
+    }
+
+    private var workspaceMemberDisplayName: String {
+        let sessionName = sessionChrome?.summary.memberDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !sessionName.isEmpty { return sessionName }
+        let profileName = profileDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return profileName.isEmpty ? "momo" : profileName
     }
 
     private var commandActions: MomoMacCommandActions {
@@ -410,7 +475,25 @@ private enum MomoInspectorPresentation {
     }
 }
 
-private enum MomoMacDetailPane: String, CaseIterable, Identifiable {
+struct MomoDetailPanePresentationState: Equatable {
+    var isPresented = false
+    var pane: MomoMacDetailPane = .approvals
+
+    mutating func present(_ pane: MomoMacDetailPane) {
+        self.pane = pane
+        isPresented = true
+    }
+
+    mutating func redirect(to pane: MomoMacDetailPane) {
+        self.pane = pane
+    }
+
+    mutating func close() {
+        isPresented = false
+    }
+}
+
+enum MomoMacDetailPane: String, CaseIterable, Identifiable {
     case alpha
     case approvals
     case work

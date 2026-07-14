@@ -20,6 +20,7 @@ public struct ChannelListView: View {
     @State private var hoveredMemberID: MemberID?
     @State private var isWorkspaceHeaderHovered = false
     @State private var hoveredUtility: MomoSidebarUtility?
+    @State private var channelPresentationRevision = 0
     @State private var newChannelName = ""
     @State private var newChannelTopic = ""
     @State private var newChannelKind: ChannelKind = .publicChannel
@@ -57,6 +58,7 @@ public struct ChannelListView: View {
     private let openSettings: (() -> Void)?
     private let openDownloads: (() -> Void)?
     private let openUpdates: (() -> Void)?
+    private let showsWorkspaceHeader: Bool
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -69,6 +71,7 @@ public struct ChannelListView: View {
         self.openSettings = nil
         self.openDownloads = nil
         self.openUpdates = nil
+        self.showsWorkspaceHeader = true
     }
 
     init(
@@ -81,7 +84,8 @@ public struct ChannelListView: View {
         openWorkspaceSettings: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
         openDownloads: (() -> Void)? = nil,
-        openUpdates: (() -> Void)? = nil
+        openUpdates: (() -> Void)? = nil,
+        showsWorkspaceHeader: Bool = true
     ) {
         self.viewModel = viewModel
         self.sessionChrome = sessionChrome
@@ -93,6 +97,7 @@ public struct ChannelListView: View {
         self.openSettings = openSettings
         self.openDownloads = openDownloads
         self.openUpdates = openUpdates
+        self.showsWorkspaceHeader = showsWorkspaceHeader
     }
 
     public var body: some View {
@@ -100,10 +105,12 @@ public struct ChannelListView: View {
 
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
-                sidebarHeader(copy: copy)
+                if showsWorkspaceHeader {
+                    sidebarHeader(copy: copy)
 
-                Divider()
-                    .opacity(0.35)
+                    Divider()
+                        .opacity(0.35)
+                }
 
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: MomoTheme.Sidebar.sectionSpacing) {
@@ -162,6 +169,9 @@ public struct ChannelListView: View {
             if !isEnabled {
                 showDiagnostics = false
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
+            channelPresentationRevision &+= 1
         }
         .sheet(item: $agentCredentialReveal) { reveal in
             MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
@@ -382,7 +392,7 @@ public struct ChannelListView: View {
                 Image(systemName: channelIcon(channel.kind))
                     .foregroundStyle(isSelected(channel) ? .primary : .secondary)
                     .frame(width: MomoTheme.Sidebar.avatarSize)
-                Text(channel.name ?? "DM")
+                Text(channelDisplayName(channel))
                     .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
                     .lineLimit(1)
                 Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
@@ -407,13 +417,18 @@ public struct ChannelListView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(copy.channelUnreadAccessibilityLabel(
-            channelName: channel.name ?? "DM",
+            channelName: channelDisplayName(channel),
             unreadCount: readState?.unreadCount ?? 0,
             mentionCount: readState?.mentionCount ?? 0
         ))
         .onHover { isHovering in
             hoveredChannelID = isHovering ? channel.id : nil
         }
+    }
+
+    private func channelDisplayName(_ channel: Channel) -> String {
+        _ = channelPresentationRevision
+        return MomoLocalChannelPresentationStore.displayName(for: channel)
     }
 
     private func channelRowBackground(_ channel: Channel) -> Color {
@@ -1745,7 +1760,7 @@ private struct MomoServerSettingsDraftSheet: View {
     }
 }
 
-private struct MomoSidebarLogoMark: View {
+struct MomoSidebarLogoMark: View {
     var text: String = "m"
     var imagePath: String = ""
     var size: CGFloat = 30

@@ -222,7 +222,10 @@ public struct MessageBubble: View {
     @ViewBuilder
     private var content: some View {
         if message.isDeleted {
-            Text("(deleted)").italic().foregroundStyle(.secondary)
+            Text("(deleted)")
+                .momoTypography(.messageBody)
+                .italic()
+                .foregroundStyle(.secondary)
         } else if isAgent,
                   !presentation.showsDeveloperDetails,
                   message.type != .text,
@@ -232,6 +235,7 @@ public struct MessageBubble: View {
             switch message.type {
             case .text, .system:
                 Text(message.body ?? "")
+                    .momoTypography(.messageBody)
                     .textSelection(.enabled)
             case .toolCall:
                 toolCallCard

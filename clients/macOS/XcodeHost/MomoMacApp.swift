@@ -9,6 +9,7 @@ struct MomoMacApp: App {
                 .frame(minWidth: 980, minHeight: 620)
         }
         .defaultSize(width: 1180, height: 760)
+        .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(replacing: .newItem) {}
             SidebarCommands()

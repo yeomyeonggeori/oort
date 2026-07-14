@@ -26,7 +26,7 @@ struct MomoProfileSettingsSurface: View {
                         MomoSettingsLabeledField(title: copy.displayName) {
                             TextField(copy.displayName, text: displayNameBinding)
                                 .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 15))
+                                .font(MomoTheme.Typography.row)
                         }
 
                         HStack(spacing: 8) {
@@ -57,7 +57,7 @@ struct MomoProfileSettingsSurface: View {
             }
 
             Label(copy.profileLocalDraftNote, systemImage: "info.circle")
-                .font(.system(size: 13))
+                .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
@@ -181,7 +181,7 @@ struct MomoWorkspaceSettingsSurface: View {
                         MomoSettingsLabeledField(title: copy.serverName) {
                             TextField(copy.serverName, text: $serverDisplayName)
                                 .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 15))
+                                .font(MomoTheme.Typography.row)
                         }
 
                         HStack(spacing: 8) {
@@ -214,11 +214,11 @@ struct MomoWorkspaceSettingsSurface: View {
                 }
 
                 Toggle(copy.agentInviteRequiresApproval, isOn: $agentInviteRequiresApproval)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(MomoTheme.Typography.row.weight(.medium))
             }
 
             Label(copy.serverSettingsLocalDraftNote, systemImage: "info.circle")
-                .font(.system(size: 13))
+                .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
@@ -427,11 +427,11 @@ struct MomoDownloadsSettingsSurface: View {
     var body: some View {
         MomoSettingsScrollView {
             MomoSettingsSection(title: copy.downloadFolder, subtitle: copy.downloadFolderSubtitle) {
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     Image(systemName: "folder")
                         .foregroundStyle(MomoTheme.humanAccent)
                     Text(downloadsFolder.path)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(MomoTheme.Typography.row.weight(.medium))
                         .foregroundStyle(.primary)
                         .lineLimit(2)
                         .textSelection(.enabled)
@@ -457,7 +457,7 @@ struct MomoDownloadsSettingsSurface: View {
                 let rows = downloadHistoryRows
                 if rows.isEmpty {
                     Label(copy.noDownloadHistory, systemImage: "clock")
-                        .font(.system(size: 14))
+                        .font(MomoTheme.Typography.row)
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(rows) { row in
@@ -538,18 +538,18 @@ struct MomoUpdateStatusSurface: View {
     var body: some View {
         MomoSettingsScrollView {
             MomoSettingsSection(title: localizedUpdateTitle(status.state, copy: copy), subtitle: localizedUpdateDetail(status, copy: copy)) {
-                HStack(alignment: .center, spacing: 14) {
+                HStack(alignment: .center, spacing: 16) {
                     Image(systemName: status.state.systemImage)
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.title2.weight(.semibold))
                         .foregroundStyle(updateTint)
                         .frame(width: 44, height: 44)
                         .background(updateTint.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
 
                     VStack(alignment: .leading, spacing: 4) {
                         Text(localizedUpdateTitle(status.state, copy: copy))
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(MomoTheme.Typography.screenTitle)
                         Text(copy.updateChannelLabel(status.channel))
-                            .font(.system(size: 13, weight: .medium))
+                            .font(MomoTheme.Typography.supporting.weight(.medium))
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -565,7 +565,7 @@ struct MomoUpdateStatusSurface: View {
                 if let manifest = status.manifest, status.hasUpdate {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(manifest.summary)
-                            .font(.system(size: 14))
+                            .font(MomoTheme.Typography.row)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
 
@@ -589,7 +589,7 @@ struct MomoUpdateStatusSurface: View {
                 MomoSettingsSection(title: copy.diagnostics) {
                     ForEach(status.diagnostics, id: \.self) { diagnostic in
                         Label(diagnostic, systemImage: "exclamationmark.triangle")
-                            .font(.system(size: 13))
+                            .font(MomoTheme.Typography.supporting)
                             .foregroundStyle(MomoTheme.irreversibleRed)
                             .textSelection(.enabled)
                     }
@@ -612,6 +612,355 @@ struct MomoUpdateStatusSurface: View {
     }
 }
 
+// MARK: - Channel settings
+
+struct MomoChannelPresentation: Equatable {
+    static let maximumNameLength = 80
+    static let maximumTopicLength = 280
+
+    var name: String
+    var topic: String?
+
+    init(channel: Channel) {
+        name = channel.name ?? "DM"
+        topic = channel.topic
+    }
+
+    init(name: String, topic: String?) {
+        self.name = name
+        self.topic = topic
+    }
+
+    var normalized: MomoChannelPresentation? {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty, trimmedName.count <= Self.maximumNameLength else {
+            return nil
+        }
+        let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard trimmedTopic.count <= Self.maximumTopicLength else {
+            return nil
+        }
+        return MomoChannelPresentation(
+            name: trimmedName,
+            topic: trimmedTopic.isEmpty ? nil : trimmedTopic
+        )
+    }
+}
+
+enum MomoLocalChannelPresentationStore {
+    static let didChangeNotification = Notification.Name("momo.channelPresentation.didChange")
+
+    static func presentation(for channel: Channel) -> MomoChannelPresentation {
+        guard channel.kind != .dm else {
+            return MomoChannelPresentation(channel: channel)
+        }
+        let defaults = UserDefaults.standard
+        let storedName = defaults.string(forKey: nameKey(channel.id))
+        let storedTopic = defaults.string(forKey: topicKey(channel.id))
+        let resolvedName: String
+        if let storedName, !storedName.isEmpty {
+            resolvedName = storedName
+        } else {
+            resolvedName = channel.name ?? "channel"
+        }
+        return MomoChannelPresentation(
+            name: resolvedName,
+            topic: storedTopic ?? channel.topic
+        )
+    }
+
+    static func save(_ presentation: MomoChannelPresentation, for channel: Channel) {
+        guard channel.kind != .dm, let normalized = presentation.normalized else { return }
+        let defaults = UserDefaults.standard
+        defaults.set(normalized.name, forKey: nameKey(channel.id))
+        if let topic = normalized.topic {
+            defaults.set(topic, forKey: topicKey(channel.id))
+        } else {
+            defaults.removeObject(forKey: topicKey(channel.id))
+        }
+        NotificationCenter.default.post(name: didChangeNotification, object: channel.id.description)
+    }
+
+    static func displayName(for channel: Channel) -> String {
+        presentation(for: channel).name
+    }
+
+    private static func nameKey(_ channel: ChannelID) -> String {
+        "momo.channel.\(channel.description).displayName"
+    }
+
+    private static func topicKey(_ channel: ChannelID) -> String {
+        "momo.channel.\(channel.description).topic"
+    }
+}
+
+private enum MomoChannelSettingsTab: String, CaseIterable, Identifiable {
+    case general
+    case members
+    case integrations
+
+    var id: String { rawValue }
+}
+
+struct MomoChannelSettingsSheet: View {
+    let copy: MomoWorkspaceCopy
+    let channel: Channel
+    @ObservedObject var viewModel: ChatViewModel
+    let onSavePresentation: (MomoChannelPresentation) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedTab: MomoChannelSettingsTab = .general
+    @State private var channelName: String
+    @State private var channelTopic: String
+    @State private var savedLocally = false
+
+    init(
+        copy: MomoWorkspaceCopy,
+        channel: Channel,
+        presentation: MomoChannelPresentation,
+        viewModel: ChatViewModel,
+        onSavePresentation: @escaping (MomoChannelPresentation) -> Void
+    ) {
+        self.copy = copy
+        self.channel = channel
+        self.viewModel = viewModel
+        self.onSavePresentation = onSavePresentation
+        _channelName = State(initialValue: presentation.name)
+        _channelTopic = State(initialValue: presentation.topic ?? "")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: MomoTheme.ChannelHeader.contentSpacing) {
+                Image(systemName: channel.kind == .dm ? "person.2.fill" : "number")
+                    .momoTypography(.screenTitle)
+                    .foregroundStyle(.secondary)
+                    .frame(
+                        width: MomoTheme.ChannelHeader.actionSize,
+                        height: MomoTheme.ChannelHeader.actionSize
+                    )
+
+                VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.compactSpacing) {
+                    Text(copy.channelSettings)
+                        .momoTypography(.screenTitle)
+                    Text(copy.channelSettingsSubtitle)
+                        .momoTypography(.supporting)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: MomoTheme.ChannelHeader.standardSpacing)
+
+                Button(copy.dismiss) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(MomoTheme.ChannelHeader.edgeInset)
+
+            Divider()
+
+            VStack(spacing: MomoTheme.ChannelHeader.standardSpacing) {
+                Picker(copy.channelSettings, selection: $selectedTab) {
+                    Text(copy.general).tag(MomoChannelSettingsTab.general)
+                    Text(copy.members).tag(MomoChannelSettingsTab.members)
+                    Text(copy.integrations).tag(MomoChannelSettingsTab.integrations)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                Group {
+                    switch selectedTab {
+                    case .general:
+                        generalSettings
+                    case .members:
+                        memberSettings
+                    case .integrations:
+                        integrationSettings
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(MomoTheme.ChannelHeader.standardSpacing)
+        }
+        .frame(
+            width: MomoTheme.ChannelHeader.settingsSheetWidth,
+            height: MomoTheme.ChannelHeader.settingsSheetHeight
+        )
+    }
+
+    private var generalSettings: some View {
+        Form {
+            Section(copy.channelIdentity) {
+                TextField(copy.channelNamePlaceholder, text: channelNameBinding)
+                    .momoTypography(.row)
+                    .disabled(channel.kind == .dm)
+
+                TextField(copy.channelTopicPlaceholder, text: channelTopicBinding, axis: .vertical)
+                    .momoTypography(.row)
+                    .lineLimit(2...4)
+                    .disabled(channel.kind == .dm)
+
+                LabeledContent(copy.characterCount) {
+                    Text("\(channelTopic.count)/\(MomoChannelPresentation.maximumTopicLength)")
+                        .momoTypography(.metadata)
+                        .foregroundStyle(channelTopic.count > MomoChannelPresentation.maximumTopicLength ? MomoTheme.irreversibleRed : .secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            Section {
+                Label(copy.channelLocalDraftNote, systemImage: "info.circle")
+                    .momoTypography(.supporting)
+                    .foregroundStyle(.secondary)
+
+                if savedLocally {
+                    Label(copy.channelSettingsSavedLocally, systemImage: "checkmark.circle.fill")
+                        .momoTypography(.supportingEmphasized)
+                        .foregroundStyle(MomoTheme.reversibleGreen)
+                }
+
+                HStack {
+                    Spacer()
+                    Button(copy.saveChannelSettings) {
+                        savePresentation()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(channel.kind == .dm || draftPresentation.normalized == nil)
+                }
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var memberSettings: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.standardSpacing) {
+            VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.compactSpacing) {
+                Text(copy.channelMemberManagement)
+                    .momoTypography(.sectionHeader)
+                Text(copy.channelMemberManagementSubtitle)
+                    .momoTypography(.supporting)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, MomoTheme.ChannelHeader.standardSpacing)
+
+            if activeWorkspaceMembers.isEmpty {
+                Label(copy.noWorkspaceMembers, systemImage: "person.2.slash")
+                    .momoTypography(.row)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(activeWorkspaceMembers) { member in
+                    Toggle(isOn: membershipBinding(for: member)) {
+                        HStack(spacing: MomoTheme.ChannelHeader.standardSpacing) {
+                            Image(systemName: member.isAgent ? "cpu" : "person")
+                                .foregroundStyle(member.isAgent ? MomoTheme.agentAccent : .secondary)
+                                .frame(width: MomoTheme.ChannelHeader.iconSize)
+                            VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.compactSpacing) {
+                                Text(member.displayName)
+                                    .momoTypography(.emphasizedRow)
+                                Text("@\(member.handle)")
+                                    .momoTypography(.supporting)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if viewModel.channelMemberMutationIds.contains(member.id) {
+                                Spacer()
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                    .toggleStyle(.checkbox)
+                    .disabled(viewModel.channelMemberMutationIds.contains(member.id))
+                }
+                .listStyle(.inset)
+            }
+
+            if viewModel.connectionIssue != nil {
+                Label(copy.channelMembershipUnavailable, systemImage: "wifi.exclamationmark")
+                    .momoTypography(.supporting)
+                    .foregroundStyle(MomoTheme.costAmber)
+                    .padding(.horizontal, MomoTheme.ChannelHeader.standardSpacing)
+            }
+        }
+        .padding(.vertical, MomoTheme.ChannelHeader.standardSpacing)
+    }
+
+    private var integrationSettings: some View {
+        Form {
+            Section(copy.webhooks) {
+                LabeledContent(copy.inboundWebhook) {
+                    Text(copy.notConfigured)
+                        .foregroundStyle(.secondary)
+                }
+                Text(copy.webhookPlaceholderDetail)
+                    .momoTypography(.supporting)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var draftPresentation: MomoChannelPresentation {
+        MomoChannelPresentation(name: channelName, topic: channelTopic)
+    }
+
+    private var channelNameBinding: Binding<String> {
+        Binding(
+            get: { channelName },
+            set: { newValue in
+                channelName = newValue
+                savedLocally = false
+            }
+        )
+    }
+
+    private var channelTopicBinding: Binding<String> {
+        Binding(
+            get: { channelTopic },
+            set: { newValue in
+                channelTopic = newValue
+                savedLocally = false
+            }
+        )
+    }
+
+    private var activeWorkspaceMembers: [Member] {
+        viewModel.members
+            .filter { $0.status == .active }
+            .sorted { lhs, rhs in
+                lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending
+            }
+    }
+
+    private func membershipBinding(for member: Member) -> Binding<Bool> {
+        Binding(
+            get: { viewModel.isMember(member.id, in: channel.id) },
+            set: { shouldBeMember in
+                Task {
+                    if shouldBeMember {
+                        await viewModel.addMember(member.id, to: channel.id)
+                    } else {
+                        await viewModel.removeMember(member.id, from: channel.id)
+                    }
+                }
+            }
+        )
+    }
+
+    private func savePresentation() {
+        guard let normalized = draftPresentation.normalized else { return }
+        MomoLocalChannelPresentationStore.save(normalized, for: channel)
+        channelName = normalized.name
+        channelTopic = normalized.topic ?? ""
+        savedLocally = true
+        onSavePresentation(normalized)
+    }
+}
+
 // MARK: - Shared settings components
 
 private struct MomoSettingsScrollView<Content: View>: View {
@@ -626,7 +975,7 @@ private struct MomoSettingsScrollView<Content: View>: View {
             VStack(alignment: .leading, spacing: 16) {
                 content
             }
-            .padding(18)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
@@ -647,10 +996,10 @@ private struct MomoSettingsSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(MomoTheme.Typography.screenTitle)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(MomoTheme.Typography.supporting.weight(.medium))
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -659,7 +1008,7 @@ private struct MomoSettingsSection<Content: View>: View {
             VStack(alignment: .leading, spacing: 12) {
                 content
             }
-            .padding(14)
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
@@ -676,9 +1025,9 @@ private struct MomoSettingsLabeledField<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(MomoTheme.Typography.supporting.weight(.semibold))
                 .foregroundStyle(.secondary)
             content
         }
@@ -699,7 +1048,7 @@ private struct MomoSettingsControlRow<Content: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Label(title, systemImage: systemImage)
-                .font(.system(size: 14, weight: .medium))
+                .font(MomoTheme.Typography.row.weight(.medium))
             Spacer(minLength: 12)
             content
         }
@@ -710,14 +1059,14 @@ private struct MomoSettingsInfoGrid: View {
     let rows: [(String, String)]
 
     var body: some View {
-        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 9) {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
             ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                 GridRow {
                     Text(row.0)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(MomoTheme.Typography.supporting.weight(.semibold))
                         .foregroundStyle(.secondary)
                     Text(row.1)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(MomoTheme.Typography.supporting.weight(.medium))
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .lineLimit(3)
@@ -740,25 +1089,25 @@ private struct MomoDownloadHistoryRowView: View {
     let row: MomoDownloadHistoryRow
 
     var body: some View {
-        HStack(alignment: .top, spacing: 11) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: row.systemImage)
-                .font(.system(size: 15, weight: .semibold))
+                .font(MomoTheme.Typography.row.weight(.semibold))
                 .foregroundStyle(row.tint)
                 .frame(width: 24, height: 24)
 
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(row.title)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(MomoTheme.Typography.row.weight(.semibold))
                     Text(row.state)
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .font(MomoTheme.Typography.metadata.weight(.bold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
                         .foregroundStyle(row.tint)
                         .background(row.tint.opacity(0.13), in: Capsule())
                 }
                 Text(row.detail)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(MomoTheme.Typography.supporting.weight(.medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .textSelection(.enabled)
@@ -786,14 +1135,14 @@ private struct MomoSettingsAvatarMark: View {
                 .clipShape(Circle())
                 .overlay {
                     Circle()
-                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                        .stroke(MomoTheme.subtleBorder, lineWidth: 1)
                 }
         case .rounded:
             avatarContent
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
-                        .stroke(.white.opacity(0.16), lineWidth: 1)
+                        .stroke(MomoTheme.subtleBorder, lineWidth: 1)
                 }
         }
     }
@@ -807,16 +1156,10 @@ private struct MomoSettingsAvatarMark: View {
                 .frame(width: size, height: size)
         } else {
             Text(visibleText)
-                .font(.system(size: size * 0.42, weight: .heavy, design: .rounded))
-                .foregroundStyle(.white)
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(MomoTheme.onAccent)
                 .frame(width: size, height: size)
-                .background(
-                    LinearGradient(
-                        colors: [MomoTheme.agentAccent, MomoTheme.costAmber],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+                .background(MomoTheme.humanAccent)
         }
     }
 
