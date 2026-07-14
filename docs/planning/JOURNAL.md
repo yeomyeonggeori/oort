@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-15 (momo-main/Codex) · PLN-20260715-01 workspace-first superapp shell
+- 성재 실창 QA 12건을 workspace navigation, native channel sheet/tooltip, member inspector/one-click DM, RLS workspace search의 4개 builder로 분리했다.
+- `Control+backtick`는 transcript drawer(MOMO-375)와 interactive Work Console을 분리하고, 후자는 ADR-0114 승인 전 구현 금지로 고정했다.
+- multi-workspace는 ADR-0117 전 fake rail 금지, engine은 ADR-0113/0116 → 0114 → 0115의 planning-only queue로 분리했다.
+- 다음: MOMO-382 docs gate/review/merge 후 MOMO-383을 첫 UX goal로 발급한다.
+
 ## 2026-07-14 (momo-main/GPT 5.6) · PLN-20260714-02 슈퍼앱 엔진 리뷰
 - engine planner의 gap audit/proposal/handoff를 인수해 security review High 7/Medium 2, architecture review High 6/Medium 3을 반영했다.
 - ADR-0113~0116을 예약하고 Memory/Capability, plugin/webhook, Codex bridge/real gate, GWS runtime/evidence/citation을 one-issue/one-PR 단위로 분할했다.

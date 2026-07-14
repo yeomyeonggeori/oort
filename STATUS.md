@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-382 Workspace-first UX + Superapp Shell Planning (2026-07-15)
+
+- 2026-07-14 실창 QA 12건과 PLN-20260714-02를 대조해 workspace/server → channel/DM → timeline → governed Work 위계를 정본화했다. UX builder는 MOMO-383 → 384/385 → 386으로 분할했다.
+- 전체 검색은 현재 recent-200 client scan을 확장하지 않고 RLS server search로 교체하며, multi-workspace는 ADR-0117, interactive command console은 ADR-0114 선행으로 동결했다.
+- 엔진 다음 planning queue는 ADR-0113/0116 병렬 draft → ADR-0114 → ADR-0115다. ADR draft는 Accepted/구현 승인이 아니며 engine PR은 기본적으로 `clients/macOS/**`를 수정하지 않는다.
+
 ## MOMO-381 Superapp Engine Planning Integration (2026-07-14)
 
 - PLN-20260714-02 gap audit/proposal/handoff를 security·architecture 독립 리뷰 후 정리했다. ADR-0113~0116, Capability/Memory/Context/action executor, MCP/plugin/webhook, Codex app-server, GWS read/citation의 buildable dependency graph와 UX-owned file lock을 제안 상태로 고정했다.

@@ -262,6 +262,16 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - 파생 배치 완료: MOMO-362(work run 계약) → 363(codex-workbench adapter), 364(Work UI)·365(capability 배지)가 2026-07-13 main에 랜딩했다. 실제 interactive Codex app-server approval relay는 ADR-0114/E-WORK-1 후속이다.
 - 신규 인프라·스키마 변경 0으로 시작(agent_run input convention + `agent.config.capabilities`). 후속 결정 예약: managed 실행 노드, 자동 라우팅, momo-plugin-github 합류.
 
+### 1.5 Workspace-first Messenger + Superapp Shell overlay (PLN-20260715-01)
+
+2026-07-14 실창 QA와 PLN-20260714-02 엔진 감사를 합쳐, 제품 표면을 **workspace/server → channel/DM → timeline → governed Work** 순서로 읽히게 한다. 정본 proposal/handoff는 `docs/planning/proposals/2026-07-15-workspace-first-superapp-shell.md`와 `docs/planning/handoffs/2026-07-15-workspace-first-superapp-shell.md`다.
+
+- **UX 즉시 체인:** MOMO-383 workspace-first sidebar/header/menu + owner/admin workspace name persistence → MOMO-384 native channel creation sheet + window-level tooltip → MOMO-385 member inspector + one-click DM → MOMO-386 RLS workspace search + result jump.
+- **검색 계약:** 현재 앱의 channel별 최근 200개 client scan은 제품 검색이 아니다. MOMO-386에서 workspace-scoped server query, RLS, sender/channel/timestamp/excerpt, `from:`/`in:`/`@handle` modifier를 구현한다.
+- **다중 workspace:** Discord식 rail은 ADR-0117이 account/session/token/server identity persistence와 switch semantics를 결정한 뒤 구현한다. 결정 전 가짜 workspace rail은 만들지 않는다.
+- **Work Console:** MOMO-375는 transcript/activity drawer까지만 허용한다. `Control+backtick` command input, Codex/Claude/OpenCode process, cwd/repo/worktree, sandbox/approval relay는 ADR-0114 승인 뒤 새 builder로 분리한다. momo 서버는 command process나 upstream credential을 보관하지 않는다.
+- **엔진 병렬 planning:** ADR-0113 credential/capability/action trust + ADR-0116 context/memory retention을 먼저 draft하고, ADR-0114 interactive Work host, ADR-0115 signed webhook ingress를 잇는다. 각 engine PR은 기본적으로 `clients/macOS/**`를 잠근다.
+
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 
 | 항목 | 비용 | 비고 |
