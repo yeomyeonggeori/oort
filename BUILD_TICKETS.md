@@ -1868,12 +1868,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: fresh design-review FAIL(Blocker: 디렉터리 스냅샷 빈 캡처 / High 3: Cmd+K DM 리터럴 표기·정렬 tiebreak 부재·DM 행 픽셀 증거 0) → 반려 수정(리스트/디테일 분리 캡처·상대 이름 해석 공용화·결정적 정렬·DM unread 카운트 배지), 371 위 최종 rebase+**채널 헤더 멤버 수→디렉터리 훅 연결**(두 PR 통합 항목) worker 위임, 정본(디렉터리 4종+DM unread 2종+roster 6종) 재기록·육안(검색/세그먼트/AGENT 배지/DM 행 '7' 배지 실픽셀), 199 tests 0 fail, clean `runtime-agent`+`macos-ui` PASS, PR #377 merge(`e254cc6`) — **ADR-0112 Wave A 종결 (2026-07-14)**. root post-merge full gate PASS(`local-gate-runtime-agent-20260714T062029Z-…-rb83aa503ed69.md`, `local-gate-macos-ui-20260714T062619Z-…-rd69953d1cd91.md`)
   - 이월 기록: 디렉터리 .task 스테일, 키보드 진입 경로, directMessageError raw 잠재, 채널 설정 키보드 경로, AppStorage 키 상수화.
 
-### ☐ MOMO-379 수용기준 — 창 크롬 정합 핫픽스 2차 `[swift/macos-ui]` (성재 스크린샷 2026-07-14, MOMO-371 잔존 D6)
+### ☑ MOMO-379 수용기준 — 창 크롬 정합 핫픽스 2차 `[swift/macos-ui]` (성재 스크린샷 2026-07-14, MOMO-371 잔존 D6)
 > 진단(스크린샷): ① 툴바 워크스페이스 칩("momo 상준") 옆에 창 타이틀 "momo"가 중복 노출 ② 오버레이 상세 패널(승인)이 열릴 때 상단이 툴바/채널 헤더 뒤로 파고들어 내용이 가려짐(ignoresSafeArea 계열) ③ 좌상단에 빨간 배지가 트래픽라이트와 겹쳐 보임.
-- [ ] 창 타이틀 중복 제거 — unified 툴바에서 시스템 창 타이틀 비노출(navigationTitle 빈 값 또는 titleVisibility) — 워크스페이스 칩이 유일한 정체성 표기.
-- [ ] 오버레이 상세 패널이 툴바 safe area를 침범하지 않게 — 패널 상단이 항상 채널 헤더 아래에서 시작(overlay scrim 포함), attached 모드도 동일 확인.
-- [ ] 트래픽라이트와 겹치는 배지/요소 제거 — 좌상단 안전 영역 침범 요소 특정·수정.
-- [ ] 실창 검증 노트(표준 크기·좁은 창·풀스크린 3케이스) + light/dark 스냅샷 영향분 재기록 명시 + design-review(D6) Blocker 0.
+- [x] 창 타이틀 중복 제거 — unified 툴바에서 시스템 창 타이틀 비노출(navigationTitle 빈 값 또는 titleVisibility) — 워크스페이스 칩이 유일한 정체성 표기.
+- [x] 오버레이 상세 패널이 툴바 safe area를 침범하지 않게 — 패널 상단이 항상 채널 헤더 아래에서 시작(overlay scrim 포함), attached 모드도 동일 확인.
+- [x] 트래픽라이트와 겹치는 배지/요소 제거 — 좌상단 안전 영역 침범 요소 특정·수정.
+- [x] 실창 검증 노트(표준 크기·좁은 창·풀스크린 3케이스) + light/dark 스냅샷 영향분 재기록 명시 + design-review(D6) Blocker 0.
+  - 오케스트레이터 종결: 1차 수정(safeAreaInsets 기반)이 리뷰 실창 AX 실측으로 **런타임 no-op 반증**(NavigationSplitView 칼럼 safe area=0) → `NSWindow.contentLayoutRect` 기반 재수정 + harness 프로덕션 창 구성(fullSizeContentView+unified toolbar) 교체 → 2차 실측 리뷰 PASS(3케이스 AX 좌표: 사이드바 y72/헤더 y64 가시·AXPress 동작/패널 y136/타이틀 중복 0/dead control 0). canonical 3종 기록(프로덕션 기하 육안 확인), 206 tests 0 fail, clean+root `macos-ui` PASS(`local-gate-macos-ui-20260714T092306Z-pid99890-ns1784020986266307000-wt9a510db2fbf3-r569e0bf3e9f3.md`), PR #380 merge(`cef7430`).
+  - 이월(별도 티켓 후보): 사이드바 멤버 행 이름 절단("H…" — 기존 결함, layoutPriority), harness 빈 툴바 밴드 높이 미세 불일치.
 
 ---
 
