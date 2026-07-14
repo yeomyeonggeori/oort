@@ -11,6 +11,7 @@ import MomoCore
 public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.momoWindowChromeTopInset) private var windowChromeTopInset
     @State private var isCreatingChannel = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
@@ -105,11 +106,10 @@ public struct ChannelListView: View {
         let copy = MomoWorkspaceCopy(language: language)
 
         GeometryReader { geometry in
-            // MOMO-371 moved the workspace header into the unified toolbar.
-            // Without consuming this inset, the first channel's red mention
-            // badge can scroll beneath the traffic-light band.
+            // The workspace header lives in the window toolbar, so this custom
+            // scroll surface consumes the NSWindow content-layout band itself.
             let topInset = MomoWindowChromeLayout.sidebarTopInset(
-                safeAreaTop: geometry.safeAreaInsets.top,
+                windowChromeTopInset: windowChromeTopInset,
                 showsWorkspaceHeader: showsWorkspaceHeader
             )
 

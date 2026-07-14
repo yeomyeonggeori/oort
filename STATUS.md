@@ -5,9 +5,10 @@
 
 ## MOMO-379 macOS Chrome Hotfix (2026-07-14)
 
-- SwiftPM/Xcode 두 host의 unified toolbar 기본 system title과 custom workspace identity가 함께 그려지던 중복을 공용 title-hidden scene style로 제거했다. 상세 overlay는 root safe area를 무시하고 채널 헤더와 같은 y=0에서 시작하던 scrim/pane을 실제 safe area와 측정한 헤더 높이 아래로 제한했으며 attached inspector에도 같은 경계를 적용했다.
-- 트래픽라이트 뒤 빨간 요소는 하단 승인 배지가 아니라 toolbar로 이동한 workspace header의 물리 공간을 잃은 custom sidebar 첫 채널의 mention 배지였다. `showsWorkspaceHeader == false` 경로만 live top safe area를 소비하게 하고 profile scrim도 그 경계를 넘지 않게 했다.
-- 5개 Swift package build와 Core 24·Server 76·Relay 2·Worker 29·macOS non-snapshot 145 tests, MOMO-379 검토 raster가 PASS했고 fresh D6 design-review는 6/7(Blocker/High 0)이다. 신규 정본 overlay light/attached dark/sidebar traffic-light light 3건은 오케스트레이터 재기록 대기이며 worker PNG 변경은 0건이다. 무필터 macOS suite는 기존 `AgentCredentialSnapshotTests` headless `NSImage` signal 5, Xcode host build는 관리 sandbox의 nested `sandbox-exec`에서 중단됐다. 실 Dev/Xcode 앱 click·fullscreen은 `runtime-unverified`; DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행했다.
+- SwiftPM/Xcode 두 host의 unified toolbar 기본 system title과 custom workspace identity가 함께 그려지던 중복은 공용 title-hidden scene style로 제거했다. 실창 AX 재검토에서 `NavigationSplitView` 각 칼럼의 `GeometryProxy.safeAreaInsets.top`이 0임을 확인해 그 경로를 폐기하고, hosting `NSWindow.contentLayoutRect`를 content-view 좌표로 변환한 실제 titlebar band를 루트 환경으로 전파해 sidebar와 detail 칼럼을 함께 내렸다.
+- 트래픽라이트를 덮은 빨간 요소는 하단 승인 배지가 아니라 toolbar로 이동한 workspace header의 물리 공간을 잃은 첫 채널 mention 배지였고, 채널 헤더의 멤버/설정도 같은 0 inset 때문에 toolbar 뒤 y=0에서 시작했다. overlay scrim/pane은 실제 band 아래의 보이는 채널 헤더 측정값에, attached inspector는 같은 헤더 높이의 연속 surface/divider에 앵커한다. 헤더 높이 상태는 추정 64pt 대신 측정 전 0에서 시작한다.
+- canonical harness는 production과 같은 full-size content view+unified toolbar+전체 root shell로 바꾸고, `momo/상준` fixture와 standard overlay light·narrow dark·attached dark를 기록 대상으로 삼았다. headless `cacheDisplay`는 NavigationSplitView material을 잘못 합성하므로 검토 artifact에만 허용하고 정본 기록은 WindowServer 합성본만 허용한다. 정본 3건은 오케스트레이터 재기록 대기이며 worker PNG 변경은 0건이다.
+- 5개 Swift package build, Core 24·Server 76·Relay 2·Worker 29 전체와 macOS non-snapshot 146, MOMO-379 기능 10+artifact 1 tests가 PASS했고 canonical 3건은 재기록 대기로 정상 skip했다. fresh D6는 구현 6/7(Blocker 0, High 1=실창 AX 증거 미완료)이다. 무필터 macOS suite는 기존 첫 `AgentCredentialSnapshotTests` headless `NSImage` signal 5를 재현했다. Computer Use의 custom dev app 접근 거부와 관리 shell의 WindowServer 부재로 worker 쪽 표준/좁은/attached 실창 AX 재측정은 완료하지 못해 `runtime-unverified`; 오케스트레이터 재측정이 필요하다. DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행했다.
 
 ## MOMO-372 Member Directory + DM (2026-07-14)
 

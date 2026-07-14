@@ -31,8 +31,8 @@ final class MomoChannelChromeTests: XCTestCase {
     }
 
     func testSafeDetailViewportAndInspectorRespectTheirTopBoundaries() {
-        XCTAssertEqual(MomoWindowChromeLayout.safeContentTopInset(52), 52)
-        XCTAssertEqual(MomoWindowChromeLayout.safeContentTopInset(-1), 0)
+        XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: 52), 52)
+        XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: -1), 0)
         XCTAssertEqual(
             MomoWindowChromeLayout.inspectorTopInset(
                 channelHeaderHeight: 84
@@ -50,17 +50,44 @@ final class MomoChannelChromeTests: XCTestCase {
     func testToolbarOwnedSidebarConsumesTopSafeAreaOnlyWhenItsHeaderIsHidden() {
         XCTAssertEqual(
             MomoWindowChromeLayout.sidebarTopInset(
-                safeAreaTop: 52,
+                windowChromeTopInset: 52,
                 showsWorkspaceHeader: false
             ),
             52
         )
         XCTAssertEqual(
             MomoWindowChromeLayout.sidebarTopInset(
-                safeAreaTop: 52,
+                windowChromeTopInset: 52,
                 showsWorkspaceHeader: true
             ),
             0
+        )
+    }
+
+    func testWindowChromeMetricsMeasureContentLayoutBandInContentViewCoordinates() {
+        XCTAssertEqual(
+            MomoWindowChromeMetrics.measure(
+                contentViewBounds: CGRect(x: 0, y: 0, width: 1_180, height: 760),
+                contentLayoutRect: CGRect(x: 0, y: 0, width: 1_180, height: 694),
+                contentViewIsFlipped: false
+            ).topInset,
+            66
+        )
+        XCTAssertEqual(
+            MomoWindowChromeMetrics.measure(
+                contentViewBounds: CGRect(x: 0, y: 0, width: 1_180, height: 726),
+                contentLayoutRect: CGRect(x: 0, y: 0, width: 1_180, height: 726),
+                contentViewIsFlipped: false
+            ).topInset,
+            0
+        )
+        XCTAssertEqual(
+            MomoWindowChromeMetrics.measure(
+                contentViewBounds: CGRect(x: 0, y: 0, width: 1_180, height: 760),
+                contentLayoutRect: CGRect(x: 0, y: 52, width: 1_180, height: 708),
+                contentViewIsFlipped: true
+            ).topInset,
+            52
         )
     }
 

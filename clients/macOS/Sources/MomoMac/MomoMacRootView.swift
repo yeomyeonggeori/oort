@@ -25,19 +25,6 @@ enum MomoMemberDirectoryNavigation {
     }
 }
 
-enum MomoWindowChromeStyle {
-    static let showsSystemTitle = false
-}
-
-public extension Scene {
-    /// Keeps every macOS host on the same unified-toolbar title policy.
-    func momoWindowChromeStyle() -> some Scene {
-        windowToolbarStyle(
-            .unified(showsTitle: MomoWindowChromeStyle.showsSystemTitle)
-        )
-    }
-}
-
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,7 +32,8 @@ public struct MomoMacRootView: View {
     @State private var selectedProfileMemberID: MemberID?
     @State private var selectedWorkRunID: RunID?
     @State private var splitViewVisibility: NavigationSplitViewVisibility = .all
-    @State private var channelHeaderHeight = MomoTheme.ChannelHeader.minimumHeight
+    @State private var channelHeaderHeight: CGFloat = 0
+    @State private var windowChromeMetrics = MomoWindowChromeMetrics.zero
     @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
     @State private var showMemberDirectory = false
@@ -115,11 +103,8 @@ public struct MomoMacRootView: View {
                 )
         } detail: {
             GeometryReader { geometry in
-                // A unified toolbar can propose full window bounds to custom
-                // containers. Keep interactive content below its live safe area;
-                // window-chrome surface fills still bleed behind the titlebar.
-                let topInset = MomoWindowChromeLayout.safeContentTopInset(
-                    geometry.safeAreaInsets.top
+                let topInset = MomoWindowChromeLayout.contentTopInset(
+                    windowChromeTopInset: windowChromeMetrics.topInset
                 )
 
                 detailLayout(
@@ -135,6 +120,14 @@ public struct MomoMacRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .environment(\.momoWindowChromeTopInset, windowChromeMetrics.topInset)
+        .background {
+            MomoWindowChromeMetricsReader { metrics in
+                guard metrics != windowChromeMetrics else { return }
+                windowChromeMetrics = metrics
+            }
+            .frame(width: 0, height: 0)
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 workspaceToolbarHeader(copy: copy)
@@ -195,16 +188,20 @@ public struct MomoMacRootView: View {
 
                 if showDetailPane && useAttachedInspector {
                     Divider()
-                        .padding(.top, inspectorTopInset)
 
                     GeometryReader { inspectorGeometry in
                         let paneHeight = max(0, inspectorGeometry.size.height - inspectorTopInset)
-                        detailPaneView(copy: copy, presentation: .attached)
-                            .frame(width: Self.inspectorWidth, height: paneHeight)
-                            .position(
-                                x: Self.inspectorWidth / 2,
-                                y: inspectorTopInset + paneHeight / 2
-                            )
+                        VStack(spacing: 0) {
+                            Color.clear
+                                .frame(height: inspectorTopInset)
+                                .momoSurface(.panel, cornerRadius: 0)
+                                .overlay(alignment: .bottom) {
+                                    Divider()
+                                }
+
+                            detailPaneView(copy: copy, presentation: .attached)
+                                .frame(width: Self.inspectorWidth, height: paneHeight)
+                        }
                     }
                     .frame(width: Self.inspectorWidth)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -551,16 +548,16 @@ public struct MomoMacRootView: View {
 }
 
 enum MomoWindowChromeLayout {
-    static func safeContentTopInset(_ safeAreaTop: CGFloat) -> CGFloat {
-        max(0, safeAreaTop)
+    static func contentTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
+        max(0, windowChromeTopInset)
     }
 
     static func inspectorTopInset(channelHeaderHeight: CGFloat) -> CGFloat {
         max(0, channelHeaderHeight)
     }
 
-    static func sidebarTopInset(safeAreaTop: CGFloat, showsWorkspaceHeader: Bool) -> CGFloat {
-        showsWorkspaceHeader ? 0 : safeContentTopInset(safeAreaTop)
+    static func sidebarTopInset(windowChromeTopInset: CGFloat, showsWorkspaceHeader: Bool) -> CGFloat {
+        showsWorkspaceHeader ? 0 : contentTopInset(windowChromeTopInset: windowChromeTopInset)
     }
 }
 

@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (Codex worker) · MOMO-379 실창 AX 재반려 수정
+- 기존 safe-area 수정은 `NavigationSplitView` 칼럼에서 top=0인 no-op이었다. hosting `NSWindow.contentLayoutRect`를 flipped/non-flipped content 좌표로 읽어 sidebar/detail에 전파하고 overlay/attached를 보이는 채널 헤더에 앵커했다.
+- production full-size+unified 전체 root를 쓰고 WindowServer 합성본만 canonical 기록하도록 하네스를 교체했다. dark headless 흰 캡슐은 비정본 `cacheDisplay` 합성 결함으로 격리하고 fixture는 `momo/상준`으로 고쳤다.
+- 5패키지 build, Core 24·Server 76·Relay 2·Worker 29 전체, macOS non-snapshot 146와 MOMO-379 기능 10+artifact 1이 PASS(canonical 3 skip)했다. fresh D6는 구현 6/7(Blocker 0, High 1=실창 AX 증거)이다.
+- 계획 이탈: Computer Use가 custom dev app을 거부하고 관리 shell에는 WindowServer/AX trust가 없어 worker 표준/좁은/attached AX 실측은 `runtime-unverified`; 오케스트레이터 재측정이 필요하다. DB/Docker/verifier/gate는 미실행했다.
+
 ## 2026-07-14 (Codex worker) · MOMO-379 창 크롬 핫픽스
 - 두 app host를 공용 title-hidden unified toolbar로 고정하고, overlay/attached inspector를 live safe area와 측정 채널 헤더 아래로 제한했다.
 - 계획 이탈: 의심된 승인 배지는 하단 고정 utility라 원인이 아니었고, 실제 빨간 겹침은 workspace header를 toolbar로 옮긴 뒤 top safe area를 잃은 첫 채널 mention 배지였다. 해당 sidebar 경로만 safe area를 소비한다.

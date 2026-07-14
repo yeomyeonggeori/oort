@@ -30,10 +30,10 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         size: CGSize(width: 1_800, height: 900),
         scheme: .light
     )
-    private let sidebarLight = Scenario(
-        name: "sidebar-traffic-lights-light",
-        size: CGSize(width: 360, height: 720),
-        scheme: .light
+    private let attachedDark = Scenario(
+        name: "attached-dark",
+        size: CGSize(width: 1_800, height: 900),
+        scheme: .dark
     )
 
     private func rootView(for scenario: Scenario) async throws -> some View {
@@ -52,15 +52,13 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         defaults.set(false, forKey: MomoDeveloperModePresentation.developerModeKey)
         defaults.set(false, forKey: "momo.workspace.showQuickStart")
         defaults.set(MomoUILanguage.korean.rawValue, forKey: MomoUILanguage.appStorageKey)
+        defaults.set("상준", forKey: "momo.profile.displayName")
 
         return MomoMacRootView(
             existingViewModel: viewModel,
             sessionChrome: nil,
             initialDetailPane: .approvals,
-            // Headless NavigationSplitView frame caching does not rasterize its
-            // sidebar child reliably. Panel canonicals isolate the detail root;
-            // the full-size sidebar fixture below owns traffic-light coverage.
-            initialSplitViewVisibility: .detailOnly
+            initialSplitViewVisibility: .all
         )
         .frame(width: scenario.size.width, height: scenario.size.height)
         .environment(\.colorScheme, scenario.scheme)
@@ -68,58 +66,21 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         .defaultAppStorage(defaults)
     }
 
-    private func sidebarView(for scenario: Scenario) async throws -> some View {
-        let backend = LiveChatBackend()
-        let seed = await backend.seedDemo()
-        let viewModel = ChatViewModel(backend: backend)
-        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "window-chrome-sidebar-snapshot")
-        await viewModel.selectChannel(try XCTUnwrap(seed.channels.last).id)
-        XCTAssertEqual(viewModel.readStatesByChannel[seed.channels[0].id]?.mentionCount, 1)
-
-        let suiteName = "momo.snapshot.window-chrome.\(scenario.name).\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        defaults.set(false, forKey: MomoDeveloperModePresentation.developerModeKey)
-        defaults.set(MomoUILanguage.korean.rawValue, forKey: MomoUILanguage.appStorageKey)
-
-        return ChannelListView(
-            viewModel: viewModel,
-            sessionChrome: nil,
-            showsWorkspaceHeader: false
-        )
-        .frame(width: scenario.size.width, height: scenario.size.height)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                HStack(spacing: 8) {
-                    MomoSidebarLogoMark(text: "m", imagePath: "", size: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("momo").font(MomoTheme.Typography.toolbarTitle)
-                        Text("상준").font(MomoTheme.Typography.toolbarSupporting)
-                    }
-                }
-            }
-        }
-        .environment(\.colorScheme, scenario.scheme)
-        .environment(\.locale, Locale(identifier: "ko_KR"))
-        .defaultAppStorage(defaults)
-    }
-
-    private func render<Content: View>(
+    private func render(
         _ scenario: Scenario,
-        fullSizeContent: Bool = false,
-        capturesWindowFrame: Bool = true,
-        rootView: Content
+        requiresWindowServer: Bool = false
     ) async throws -> NSImage {
-        let hostingController = NSHostingController(rootView: rootView)
-        let hostingView = hostingController.view
         let appearance = NSAppearance(named: scenario.scheme == .dark ? .darkAqua : .aqua)
-        var styleMask: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable]
-        if fullSizeContent {
-            styleMask.insert(.fullSizeContentView)
-        }
+        let application = NSApplication.shared
+        let previousApplicationAppearance = application.appearance
+        application.appearance = appearance
+        defer { application.appearance = previousApplicationAppearance }
+
+        let hostingController = NSHostingController(rootView: try await rootView(for: scenario))
+        let hostingView = hostingController.view
         let window = NSWindow(
             contentRect: CGRect(origin: .zero, size: scenario.size),
-            styleMask: styleMask,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -131,20 +92,54 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         window.toolbar = NSToolbar(identifier: "momo.snapshot.window-chrome.\(scenario.name)")
         window.contentViewController = hostingController
         hostingView.appearance = appearance
-        window.orderBack(nil)
-        window.makeKey()
-        defer { window.close() }
+
+        let usesWindowServer = !NSScreen.screens.isEmpty
+        if usesWindowServer {
+            window.makeKeyAndOrderFront(nil)
+        } else if requiresWindowServer {
+            throw XCTSkip(
+                "Canonical MOMO-379 chrome requires a WindowServer compositor; headless cacheDisplay is not recordable"
+            )
+        }
+        hostingController.sizingOptions = []
+        // NSHostingController initially proposes the root's fitting size as
+        // content below the toolbar. Reassert the requested *window frame* so
+        // the canonical includes, rather than adds, the unified titlebar.
+        window.setFrame(
+            CGRect(origin: window.frame.origin, size: scenario.size),
+            display: false
+        )
+        defer {
+            window.close()
+        }
 
         window.layoutIfNeeded()
         hostingView.layoutSubtreeIfNeeded()
         hostingView.displayIfNeeded()
-        try await Task.sleep(for: .milliseconds(150))
+        try await Task.sleep(for: .milliseconds(300))
         window.layoutIfNeeded()
         hostingView.layoutSubtreeIfNeeded()
         hostingView.displayIfNeeded()
 
-        if !capturesWindowFrame {
-            return try renderView(hostingView, size: hostingView.bounds.size)
+        let contentLayoutRect = hostingView.convert(window.contentLayoutRect, from: nil)
+        let metrics = MomoWindowChromeMetrics.measure(
+            contentViewBounds: hostingView.bounds,
+            contentLayoutRect: contentLayoutRect,
+            contentViewIsFlipped: hostingView.isFlipped
+        )
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertGreaterThan(metrics.topInset, 0, "canonical host must reproduce the unified titlebar band")
+
+        if usesWindowServer {
+            guard let cgImage = CGWindowListCreateImage(
+                .null,
+                .optionIncludingWindow,
+                CGWindowID(window.windowNumber),
+                [.boundsIgnoreFraming, .bestResolution]
+            ) else {
+                throw XCTSkip("WindowServer could not capture the MOMO-379 production window")
+            }
+            return NSImage(cgImage: cgImage, size: scenario.size)
         }
 
         guard let frameView = window.contentView?.superview else {
@@ -177,24 +172,6 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         return image
     }
 
-    private func render(_ scenario: Scenario) async throws -> NSImage {
-        try await render(
-            scenario,
-            // AppKit's offscreen toolbar material does not honor dark appearance
-            // consistently; the dark artifact is a panel-geometry reference.
-            capturesWindowFrame: scenario.name != narrowDark.name,
-            rootView: rootView(for: scenario)
-        )
-    }
-
-    private func renderSidebar(_ scenario: Scenario) async throws -> NSImage {
-        try await render(
-            scenario,
-            fullSizeContent: true,
-            rootView: sidebarView(for: scenario)
-        )
-    }
-
     private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
         guard let directory = ProcessInfo.processInfo.environment["MOMO_DESIGN_REVIEW_ARTIFACT_DIR"] else {
             return
@@ -224,25 +201,22 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
     }
 
     func testWindowChromeRasterWritesDesignReviewArtifacts() async throws {
-        for scenario in [standardLight, narrowDark, attachedLight] {
+        let scenarios = if NSScreen.screens.isEmpty {
+            // cacheDisplay does not composite dark NavigationSplitView
+            // materials. Never emit those white-slab artifacts as evidence.
+            [standardLight, attachedLight]
+        } else {
+            [standardLight, narrowDark, attachedLight, attachedDark]
+        }
+        for scenario in scenarios {
             let image = try await render(scenario)
             try writeDesignReviewArtifact(
                 image,
                 named: "momo-379-window-chrome-\(scenario.name).png"
             )
             XCTAssertEqual(image.size.width, scenario.size.width)
-            if scenario.name == narrowDark.name {
-                XCTAssertEqual(image.size.height, scenario.size.height)
-            } else {
-                XCTAssertGreaterThan(image.size.height, scenario.size.height)
-            }
+            XCTAssertEqual(image.size.height, scenario.size.height)
         }
-        let sidebarImage = try await renderSidebar(sidebarLight)
-        try writeDesignReviewArtifact(
-            sidebarImage,
-            named: "momo-379-window-chrome-\(sidebarLight.name).png"
-        )
-        XCTAssertEqual(sidebarImage.size.width, sidebarLight.size.width)
     }
 
     func testWindowChromeOverlayLightSnapshot() async throws {
@@ -250,7 +224,7 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             testName: #function.replacingOccurrences(of: "()", with: ""),
             named: "light"
         )
-        let image = try await render(standardLight)
+        let image = try await render(standardLight, requiresWindowServer: true)
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
@@ -263,12 +237,7 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             testName: #function.replacingOccurrences(of: "()", with: ""),
             named: "dark"
         )
-        let attachedDark = Scenario(
-            name: "attached-dark",
-            size: attachedLight.size,
-            scheme: .dark
-        )
-        let image = try await render(attachedDark)
+        let image = try await render(attachedDark, requiresWindowServer: true)
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
@@ -276,16 +245,16 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         )
     }
 
-    func testWindowChromeSidebarTrafficLightsSnapshot() async throws {
+    func testWindowChromeNarrowDarkSnapshot() async throws {
         try requireCanonicalReference(
             testName: #function.replacingOccurrences(of: "()", with: ""),
-            named: "light"
+            named: "dark"
         )
-        let image = try await renderSidebar(sidebarLight)
+        let image = try await render(narrowDark, requiresWindowServer: true)
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "light"
+            named: "dark"
         )
     }
 }
