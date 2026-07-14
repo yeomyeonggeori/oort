@@ -24,8 +24,10 @@ public struct MessageBubble: View {
     public let onApprovalDecision: ((ApprovalID, Bool) -> Void)?
     private let groupingStyle: MessageBubbleGroupingStyle
     private let timelineCopy: MomoWorkspaceCopy
+    private let presentation: MomoDeveloperModePresentation
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
+    @State private var isBasicCardExpanded = false
     @FocusState private var isCopyActionFocused: Bool
 
     public init(
@@ -44,6 +46,7 @@ public struct MessageBubble: View {
         self.onApprovalDecision = onApprovalDecision
         self.groupingStyle = .standalone
         self.timelineCopy = MomoWorkspaceCopy(language: .preferredDefault)
+        self.presentation = .standard
     }
 
     init(
@@ -54,7 +57,8 @@ public struct MessageBubble: View {
         isApprovalDecisionInFlight: Bool = false,
         onApprovalDecision: ((ApprovalID, Bool) -> Void)? = nil,
         groupingStyle: MessageBubbleGroupingStyle,
-        timelineCopy: MomoWorkspaceCopy
+        timelineCopy: MomoWorkspaceCopy,
+        presentation: MomoDeveloperModePresentation = .standard
     ) {
         self.message = message
         self.author = author
@@ -64,6 +68,7 @@ public struct MessageBubble: View {
         self.onApprovalDecision = onApprovalDecision
         self.groupingStyle = groupingStyle
         self.timelineCopy = timelineCopy
+        self.presentation = presentation
     }
 
     private var isAgent: Bool { author?.isAgent ?? false }
@@ -82,7 +87,7 @@ public struct MessageBubble: View {
                 content
             }
             Spacer(minLength: 0)
-            if isAgent, let cost {
+            if isAgent, presentation.showsCosts, let cost {
                 CostBreathingRing(
                     reservedMicroUSD: cost.reservedMicroUSD,
                     spentMicroUSD: cost.spentMicroUSD,
@@ -99,7 +104,7 @@ public struct MessageBubble: View {
         .contentShape(Rectangle())
         .overlay(alignment: .topTrailing) {
             copyAction
-                .padding(.trailing, isAgent && cost != nil ? 32 : 0)
+                .padding(.trailing, isAgent && presentation.showsCosts && cost != nil ? 32 : 0)
         }
         .onHover { isHovered = $0 }
         .contextMenu {
@@ -218,6 +223,11 @@ public struct MessageBubble: View {
     private var content: some View {
         if message.isDeleted {
             Text("(deleted)").italic().foregroundStyle(.secondary)
+        } else if isAgent,
+                  !presentation.showsDeveloperDetails,
+                  message.type != .text,
+                  message.type != .system {
+            basicAgentContent
         } else {
             switch message.type {
             case .text, .system:
@@ -234,6 +244,37 @@ public struct MessageBubble: View {
             case .artifact:
                 artifactCard
             }
+        }
+    }
+
+    @ViewBuilder
+    private var basicAgentContent: some View {
+        if message.type == .approvalRequest {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(basicAgentSummary)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                approvalActions
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .momoSurface(.panel)
+        } else {
+            DisclosureGroup(isExpanded: $isBasicCardExpanded) {
+                Text(basicAgentDetail)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
+            } label: {
+                Label(basicAgentSummary, systemImage: basicAgentIcon)
+                    .font(.body)
+                    .lineLimit(1)
+                    .help(basicAgentSummary)
+            }
+            .padding(8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .momoSurface(.panel)
         }
     }
 
@@ -338,7 +379,10 @@ public struct MessageBubble: View {
                 Text(title).font(.caption.bold()).foregroundStyle(tint)
             }
             content()
-            AgentProtocolMetadataStrip(props: message.props)
+            AgentProtocolMetadataStrip(
+                props: message.props,
+                showsCosts: presentation.showsCosts
+            )
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -363,8 +407,49 @@ public struct MessageBubble: View {
         if let body = message.body, !body.isEmpty {
             return body
         }
+        if isAgent, !presentation.showsDeveloperDetails {
+            return basicAgentDetail
+        }
         guard message.props != .object([:]) else { return nil }
         return prettyJSON(message.props)
+    }
+
+    private var basicAgentSummary: String {
+        if let summary = message.props["human_summary"]?.stringValue,
+           !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return summary
+        }
+        let agentName = author?.displayName ?? timelineCopy.agent
+        if let summary = message.props["summary"]?.stringValue
+            ?? message.props["title"]?.stringValue,
+           !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return timelineCopy.agentActivitySummary(agentName: agentName, detail: summary)
+        }
+        return timelineCopy.agentActivityFallback(message.type, agentName: agentName)
+    }
+
+    private var basicAgentDetail: String {
+        if let detail = message.props["human_detail"]?.stringValue,
+           !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return detail
+        }
+        if let summary = message.props["summary"]?.stringValue
+            ?? message.props["title"]?.stringValue,
+           !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return summary
+        }
+        return basicAgentSummary
+    }
+
+    private var basicAgentIcon: String {
+        switch message.type {
+        case .toolCall: return "gearshape.2"
+        case .toolResult: return "checkmark.circle"
+        case .diff: return "doc.text.magnifyingglass"
+        case .approvalRequest: return "exclamationmark.shield"
+        case .artifact: return "paperclip"
+        case .text, .system: return "text.bubble"
+        }
     }
 
     private func copyMessage() {

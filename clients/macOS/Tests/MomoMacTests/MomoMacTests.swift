@@ -32,6 +32,31 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(CostFormat.usdCompact(3_100_000), "$3.10")
     }
 
+    func testDeveloperModeDefaultsToStandardAndGatesCostsSeparately() {
+        XCTAssertFalse(MomoDeveloperModePresentation.standard.showsDeveloperDetails)
+        XCTAssertFalse(MomoDeveloperModePresentation.standard.showsCosts)
+        XCTAssertTrue(MomoDeveloperModePresentation.developer(showCosts: false).showsDeveloperDetails)
+        XCTAssertFalse(MomoDeveloperModePresentation.developer(showCosts: false).showsCosts)
+        XCTAssertTrue(MomoDeveloperModePresentation.developer(showCosts: true).showsCosts)
+    }
+
+    func testApprovalSummaryQuotesArbitraryServerCopyAsOneSentence() {
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).workApprovalSummary(
+                agentName: "Hermes",
+                action: "GitHub에 체크리스트를 기록합니다."
+            ),
+            "Hermes가 ‘GitHub에 체크리스트를 기록합니다’ 작업의 승인을 요청했습니다."
+        )
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .english).workApprovalSummary(
+                agentName: "Hermes",
+                action: "Create a rollout checklist."
+            ),
+            "Hermes requested approval for ‘Create a rollout checklist’."
+        )
+    }
+
     // MARK: sidebar shell policy (MOMO-357)
 
     func testSidebarSeparatesDirectMessagesFromChannels() {
@@ -216,6 +241,14 @@ final class MomoMacTests: XCTestCase {
             XCTAssertNotNil(message.props["context_packet"], "\(type.rawValue) should cite Context Packet projection")
             XCTAssertGreaterThan(message.props["source_badges"]?.arrayValue?.count ?? 0, 0,
                                  "\(type.rawValue) should show at least one source badge")
+            XCTAssertFalse(
+                message.props["human_summary"]?.stringValue?.isEmpty ?? true,
+                "\(type.rawValue) should remain readable in standard mode"
+            )
+            XCTAssertFalse(
+                message.props["human_detail"]?.stringValue?.isEmpty ?? true,
+                "\(type.rawValue) should provide a human-language disclosure"
+            )
         }
 
         let toolCall = try XCTUnwrap(messages.first(where: { $0.type == .toolCall }))
@@ -530,7 +563,8 @@ final class MomoMacTests: XCTestCase {
         let finals = history.filter { message in
             message.authorMemberId == agent.id
                 && message.runId != nil
-                && (message.body?.contains("mention received") == true)
+                && message.props["mention_handle"]?.stringValue == "hermes"
+                && (message.body?.contains("요청 확인했어요") == true)
         }
         XCTAssertEqual(finals.count, 2)
         XCTAssertTrue(finals.allSatisfy { $0.props["mention_handle"]?.stringValue == "hermes" })

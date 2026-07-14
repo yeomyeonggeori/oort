@@ -11,17 +11,20 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
     private let defaultSize = CGSize(width: 980, height: 760)
     private let largeSize = CGSize(width: 1_600, height: 1_000)
     private let compactSize = CGSize(width: 700, height: 760)
+    private let settingsSize = CGSize(width: 680, height: 560)
 
     private func fixture(
         scheme: ColorScheme,
         form: MomoServerSessionForm? = nil,
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
-        initialFocus: MomoSessionField? = nil
+        initialFocus: MomoSessionField? = nil,
+        developerMode: Bool = true
     ) -> some View {
         let suite = "momo.snapshot.onboarding.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.set(MomoUILanguage.korean.rawValue, forKey: MomoUILanguage.appStorageKey)
+        defaults.set(developerMode, forKey: MomoDeveloperModePresentation.developerModeKey)
         let store = MomoServerSessionStore(
             defaults: defaults,
             keychain: MomoKeychainPasswordStore(service: suite),
@@ -52,7 +55,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         form: MomoServerSessionForm? = nil,
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
-        initialFocus: MomoSessionField? = nil
+        initialFocus: MomoSessionField? = nil,
+        developerMode: Bool = true
     ) throws -> NSImage {
         let hostingView = NSHostingView(
             rootView: fixture(
@@ -60,7 +64,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 form: form,
                 errorMessage: errorMessage,
                 failureKind: failureKind,
-                initialFocus: initialFocus
+                initialFocus: initialFocus,
+                developerMode: developerMode
             )
             .frame(width: size.width, height: size.height)
         )
@@ -113,6 +118,62 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 "Canonical MOMO-368 snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)"
             )
         }
+    }
+
+    private func renderSettings(
+        scheme: ColorScheme,
+        developerMode: Bool,
+        showCosts: Bool
+    ) throws -> NSImage {
+        let suite = "momo.snapshot.settings.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.set(MomoUILanguage.korean.rawValue, forKey: MomoUILanguage.appStorageKey)
+        defaults.set(developerMode, forKey: MomoDeveloperModePresentation.developerModeKey)
+        defaults.set(showCosts, forKey: MomoDeveloperModePresentation.costDisplayKey)
+        let hostingView = NSHostingView(
+            rootView: ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                    .ignoresSafeArea()
+                MomoAppSettingsSurface(copy: MomoWorkspaceCopy(language: .korean))
+            }
+                .frame(width: settingsSize.width, height: settingsSize.height)
+                .environment(\.colorScheme, scheme)
+                .defaultAppStorage(defaults)
+        )
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: settingsSize),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        hostingView.frame = CGRect(origin: .zero, size: settingsSize)
+        hostingView.appearance = appearance
+        window.contentView = hostingView
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(settingsSize.width * 2),
+            pixelsHigh: Int(settingsSize.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no settings bitmap on this host")
+        }
+        representation.size = settingsSize
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        let image = NSImage(size: settingsSize)
+        image.addRepresentation(representation)
+        return image
     }
 
     private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
@@ -218,6 +279,42 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             )
             XCTAssertEqual(image.size, variant.size)
             try writeDesignReviewArtifact(image, named: variant.name)
+        }
+    }
+
+    func testStandardOnboardingHidesLocalAlphaDetailsInDesignReviewRasters() throws {
+        for scheme in [ColorScheme.light, .dark] {
+            let image = try render(
+                size: defaultSize,
+                scheme: scheme,
+                developerMode: false
+            )
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-370-onboarding-standard-\(scheme == .dark ? "dark" : "light").png"
+            )
+            XCTAssertEqual(image.size, defaultSize)
+        }
+    }
+
+    func testDeveloperModeSettingsWriteDesignReviewRasters() throws {
+        let modes: [(String, Bool, Bool)] = [
+            ("standard", false, false),
+            ("developer", true, true),
+        ]
+        for (mode, developerMode, showCosts) in modes {
+            for scheme in [ColorScheme.light, .dark] {
+                let image = try renderSettings(
+                    scheme: scheme,
+                    developerMode: developerMode,
+                    showCosts: showCosts
+                )
+                try writeDesignReviewArtifact(
+                    image,
+                    named: "momo-370-settings-\(mode)-\(scheme == .dark ? "dark" : "light").png"
+                )
+                XCTAssertEqual(image.size, settingsSize)
+            }
         }
     }
 }

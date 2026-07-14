@@ -11,7 +11,10 @@ import MomoCore
 final class AgentWorkSurfaceSnapshotTests: XCTestCase {
     private let size = CGSize(width: 720, height: 680)
 
-    private func fixture(_ scheme: ColorScheme) -> some View {
+    private func fixture(
+        _ scheme: ColorScheme,
+        presentation: MomoDeveloperModePresentation = .developer(showCosts: true)
+    ) -> some View {
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!
         let agent = Member(
@@ -86,6 +89,7 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
                     messages: [],
                     isApprovalInFlight: false,
                     copy: MomoWorkspaceCopy(language: .korean),
+                    presentation: presentation,
                     onApprovalDecision: { _, _ in },
                     onOpenDetail: {}
                 )
@@ -98,6 +102,7 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
                     messages: [],
                     isApprovalInFlight: false,
                     copy: MomoWorkspaceCopy(language: .korean),
+                    presentation: presentation,
                     onApprovalDecision: { _, _ in },
                     onOpenDetail: {}
                 )
@@ -110,8 +115,13 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
         .environment(\.locale, Locale(identifier: "ko_KR"))
     }
 
-    private func render(_ scheme: ColorScheme) throws -> NSImage {
-        let hostingView = NSHostingView(rootView: fixture(scheme))
+    private func render(
+        _ scheme: ColorScheme,
+        presentation: MomoDeveloperModePresentation = .developer(showCosts: true)
+    ) throws -> NSImage {
+        let hostingView = NSHostingView(
+            rootView: fixture(scheme, presentation: presentation)
+        )
         hostingView.frame = CGRect(origin: .zero, size: size)
         hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         hostingView.layoutSubtreeIfNeeded()
@@ -174,6 +184,23 @@ final class AgentWorkSurfaceSnapshotTests: XCTestCase {
                 named: "momo-369-work-\(scheme == .dark ? "dark" : "light").png"
             )
             XCTAssertEqual(image.size, size)
+        }
+    }
+
+    func testDualDensityWorkSurfaceWritesDesignReviewArtifacts() throws {
+        let modes: [(String, MomoDeveloperModePresentation)] = [
+            ("standard", .standard),
+            ("developer", .developer(showCosts: true)),
+        ]
+        for (mode, presentation) in modes {
+            for scheme in [ColorScheme.light, .dark] {
+                let image = try render(scheme, presentation: presentation)
+                try writeDesignReviewArtifact(
+                    image,
+                    named: "momo-370-work-\(mode)-\(scheme == .dark ? "dark" : "light").png"
+                )
+                XCTAssertEqual(image.size, size)
+            }
         }
     }
 

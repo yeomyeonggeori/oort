@@ -18,6 +18,8 @@ import MomoCore
 public struct ApprovalInboxView: View {
     @ObservedObject var viewModel: ChatViewModel
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
@@ -60,13 +62,15 @@ public struct ApprovalInboxView: View {
                     .lineLimit(2)
             }
             Spacer()
-            // Batch action (experience C money-shot): approve only reversible ones.
-            Button {
-                Task { await approveAllReversible() }
-            } label: {
-                Label(copy.approveAllReversible, systemImage: "checkmark.circle")
+            if presentation.showsDeveloperDetails {
+                // Batch action (experience C money-shot): approve only reversible ones.
+                Button {
+                    Task { await approveAllReversible() }
+                } label: {
+                    Label(copy.approveAllReversible, systemImage: "checkmark.circle")
+                }
+                .disabled(!pending.contains { $0.isReversible == true })
             }
-            .disabled(!pending.contains { $0.isReversible == true })
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
@@ -75,20 +79,31 @@ public struct ApprovalInboxView: View {
     private func row(_ approval: ApprovalEvent) -> some View {
         let isInFlight = viewModel.approvalDecisionsInFlight.contains(approval.approvalId)
         HStack(alignment: .top, spacing: 10) {
-            // Reversibility risk badge.
-            riskBadge(approval.isReversible)
+            if presentation.showsDeveloperDetails {
+                riskBadge(approval.isReversible)
+            }
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(agentName(approval.requestedBy)).font(MomoTheme.Typography.emphasizedRow)
-                    if let subject = approval.onBehalfOf {
-                        Text("· \(delegationLabel(subject))")
-                            .font(.caption).foregroundStyle(.secondary)
+                if presentation.showsDeveloperDetails {
+                    HStack(spacing: 6) {
+                        Text(agentName(approval.requestedBy)).font(MomoTheme.Typography.emphasizedRow)
+                        if let subject = approval.onBehalfOf {
+                            Text("· \(delegationLabel(subject))")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
-                }
-                Text(approval.actionType).font(.callout.monospaced())
-                if let cost = approval.estimatedMicroUSD {
-                    Text(copy.estimatedCost(CostFormat.usd(cost)))
-                        .font(MomoTheme.Typography.supporting).foregroundStyle(MomoTheme.costAmber)
+                    Text(approval.actionType).font(.callout.monospaced())
+                    if presentation.showsCosts, let cost = approval.estimatedMicroUSD {
+                        Text(copy.estimatedCost(CostFormat.usd(cost)))
+                            .font(MomoTheme.Typography.supporting).foregroundStyle(MomoTheme.costAmber)
+                    }
+                } else {
+                    Text(copy.workApprovalSummary(
+                        agentName: agentName(approval.requestedBy),
+                        action: approval.payload["summary"]?.stringValue
+                            ?? approval.payload["title"]?.stringValue
+                    ))
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer()
@@ -134,6 +149,13 @@ public struct ApprovalInboxView: View {
 
     private func delegationLabel(_ subject: MemberID) -> String {
         copy.approvalDelegationLabel(viewModel.member(subject)?.displayName ?? "someone")
+    }
+
+    private var presentation: MomoDeveloperModePresentation {
+        MomoDeveloperModePresentation(
+            isDeveloperModeEnabled: developerMode,
+            isCostDisplayEnabled: showCosts
+        )
     }
 }
 

@@ -10,6 +10,7 @@ struct AgentWorkRunCard: View {
     let messages: [Message]
     let isApprovalInFlight: Bool
     let copy: MomoWorkspaceCopy
+    var presentation: MomoDeveloperModePresentation = .standard
     let onApprovalDecision: (ApprovalID, Bool) -> Void
     let onOpenDetail: () -> Void
 
@@ -24,12 +25,15 @@ struct AgentWorkRunCard: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            Text(run.input.brief)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
+            if presentation.showsDeveloperDetails || approval == nil {
+                Text(cardSummary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(presentation.showsDeveloperDetails ? 3 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
-            if result.tailText != nil {
+            if presentation.showsDeveloperDetails, result.tailText != nil {
                 logTail
             }
 
@@ -38,11 +42,13 @@ struct AgentWorkRunCard: View {
                     approval: approval,
                     isInFlight: isApprovalInFlight,
                     copy: copy,
+                    agentName: agent?.displayName ?? copy.agent,
+                    presentation: presentation,
                     onDecision: onApprovalDecision
                 )
             }
 
-            if result.hasResult || status.isTerminal {
+            if presentation.showsDeveloperDetails, result.hasResult || status.isTerminal {
                 AgentWorkResultSection(
                     result: result,
                     status: status,
@@ -140,12 +146,20 @@ struct AgentWorkRunCard: View {
             ?? run.error?["detail"]?.stringValue
             ?? run.error?.stringValue
     }
+
+    private var cardSummary: String {
+        result.summary
+            ?? partial?.textDelta
+            ?? run.input.brief
+    }
 }
 
 struct AgentWorkRunDetailView: View {
     @ObservedObject var viewModel: ChatViewModel
     let runId: RunID
     let copy: MomoWorkspaceCopy
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
 
     var body: some View {
         Group {
@@ -189,29 +203,38 @@ struct AgentWorkRunDetailView: View {
                     AgentWorkStatusChip(status: status, copy: copy)
                 }
 
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 8) {
-                        LabeledContent(copy.workAgent) {
-                            Text(viewModel.member(run.agentMemberId)?.displayName ?? copy.agent)
-                        }
-                        if let repo = run.input.repo {
-                            LabeledContent(copy.workRepository) {
-                                Text(repo).font(.callout.monospaced())
+                if presentation.showsDeveloperDetails {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 8) {
+                            LabeledContent(copy.workAgent) {
+                                Text(viewModel.member(run.agentMemberId)?.displayName ?? copy.agent)
                             }
-                        }
-                        if let branch = run.input.branch {
-                            LabeledContent(copy.workBranch) {
-                                Text(branch).font(.callout.monospaced())
+                            if let repo = run.input.repo {
+                                LabeledContent(copy.workRepository) {
+                                    Text(repo).font(.callout.monospaced())
+                                }
                             }
-                        }
-                        LabeledContent(copy.workCreatedAt) {
-                            Text(
-                                Date(timeIntervalSince1970: Double(run.createdAtMs) / 1_000),
-                                format: .dateTime.year().month().day().hour().minute()
-                            )
-                            .monospacedDigit()
+                            if let branch = run.input.branch {
+                                LabeledContent(copy.workBranch) {
+                                    Text(branch).font(.callout.monospaced())
+                                }
+                            }
+                            LabeledContent(copy.workCreatedAt) {
+                                Text(
+                                    Date(timeIntervalSince1970: Double(run.createdAtMs) / 1_000),
+                                    format: .dateTime.year().month().day().hour().minute()
+                                )
+                                .monospacedDigit()
+                            }
                         }
                     }
+                } else {
+                    Label(
+                        viewModel.member(run.agentMemberId)?.displayName ?? copy.agent,
+                        systemImage: "person.crop.circle"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 }
 
                 if approval != nil || status == .awaitingApproval {
@@ -221,41 +244,51 @@ struct AgentWorkRunDetailView: View {
                             viewModel.approvalDecisionsInFlight.contains($0.approvalId)
                         } ?? false,
                         copy: copy,
+                        agentName: viewModel.member(run.agentMemberId)?.displayName ?? copy.agent,
+                        presentation: presentation,
                         onDecision: { approvalId, approve in
                             Task { await viewModel.decideApproval(approvalId, approve: approve) }
                         }
                     )
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(copy.workTranscript)
-                        .font(MomoTheme.Typography.sectionHeader)
-                    if result.transcript.isEmpty {
-                        Text(copy.workTranscriptEmpty)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        AgentTranscriptText(
-                            text: result.transcript.joined(separator: "\n\n"),
-                            isStreaming: status == .running && partial != nil
-                        )
-                        .frame(
-                            minHeight: MomoTheme.Work.transcriptMinimumHeight,
-                            alignment: .topLeading
-                        )
+                if presentation.showsDeveloperDetails {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(copy.workTranscript)
+                            .font(MomoTheme.Typography.sectionHeader)
+                        if result.transcript.isEmpty {
+                            Text(copy.workTranscriptEmpty)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            AgentTranscriptText(
+                                text: result.transcript.joined(separator: "\n\n"),
+                                isStreaming: status == .running && partial != nil
+                            )
+                            .frame(
+                                minHeight: MomoTheme.Work.transcriptMinimumHeight,
+                                alignment: .topLeading
+                            )
+                        }
                     }
                 }
 
                 if result.hasResult || status.isTerminal {
-                    AgentWorkResultSection(
-                        result: result,
-                        status: status,
-                        error: run.error?["message"]?.stringValue
-                            ?? run.error?["detail"]?.stringValue
-                            ?? run.error?.stringValue,
-                        copy: copy,
-                        isCompact: false
-                    )
+                    if presentation.showsDeveloperDetails {
+                        AgentWorkResultSection(
+                            result: result,
+                            status: status,
+                            error: run.error?["message"]?.stringValue
+                                ?? run.error?["detail"]?.stringValue
+                                ?? run.error?.stringValue,
+                            copy: copy,
+                            isCompact: false
+                        )
+                    } else {
+                        Text(result.summary ?? run.input.brief)
+                            .font(.body)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 HStack {
@@ -291,25 +324,44 @@ struct AgentWorkRunDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(16)
     }
+
+    private var presentation: MomoDeveloperModePresentation {
+        MomoDeveloperModePresentation(
+            isDeveloperModeEnabled: developerMode,
+            isCostDisplayEnabled: showCosts
+        )
+    }
 }
 
 private struct AgentWorkApprovalSection: View {
     let approval: ApprovalEvent?
     let isInFlight: Bool
     let copy: MomoWorkspaceCopy
+    let agentName: String
+    let presentation: MomoDeveloperModePresentation
     let onDecision: (ApprovalID, Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label(copy.workApprovalTitle, systemImage: "exclamationmark.shield")
-                .font(.callout.weight(.semibold))
-                .foregroundStyle(MomoTheme.costAmber)
-            if let summary = approval?.payload["summary"]?.stringValue
-                ?? approval?.payload["title"]?.stringValue {
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            if presentation.showsDeveloperDetails {
+                Label(copy.workApprovalTitle, systemImage: "exclamationmark.shield")
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(MomoTheme.costAmber)
+                if let summary = approval?.payload["summary"]?.stringValue
+                    ?? approval?.payload["title"]?.stringValue {
+                    Text(summary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                Text(copy.workApprovalSummary(
+                    agentName: agentName,
+                    action: approval?.payload["summary"]?.stringValue
+                        ?? approval?.payload["title"]?.stringValue
+                ))
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
             }
             if let approval {
                 ApprovalDecisionControls(

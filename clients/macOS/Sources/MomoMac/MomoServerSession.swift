@@ -930,6 +930,7 @@ struct MomoServerSessionChooser: View {
     var failureKind: MomoSessionFailureKind?
     var initialFocus: MomoSessionField?
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @FocusState private var focusedField: MomoSessionField?
 
     var body: some View {
@@ -999,8 +1000,8 @@ struct MomoServerSessionChooser: View {
 
             if let notice = controller.sessionNotice {
                 MomoLaunchNotice(
-                    title: notice,
-                    detail: copy.noticeDetail,
+                    title: developerMode ? notice : copy.sessionChanged,
+                    detail: developerMode ? copy.noticeDetail : copy.sessionChangedDetail,
                     systemImage: "checkmark.circle.fill",
                     tint: MomoTheme.reversibleGreen
                 )
@@ -1069,14 +1070,16 @@ struct MomoServerSessionChooser: View {
             }
 
             HStack(alignment: .firstTextBaseline, spacing: MomoTheme.Onboarding.contentSpacing) {
-                Button {
-                    useLocalAlphaPreset()
-                    focusedField = .password
-                } label: {
-                    Label(copy.useLocalAlpha, systemImage: "bolt")
+                if developerMode {
+                    Button {
+                        useLocalAlphaPreset()
+                        focusedField = .password
+                    } label: {
+                        Label(copy.useLocalAlpha, systemImage: "bolt")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
 
                 Spacer()
 
@@ -1118,10 +1121,12 @@ struct MomoServerSessionChooser: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text(copy.storageNote)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if developerMode {
+                Text(copy.storageNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .padding(MomoTheme.Onboarding.blockSpacing)
         .frame(maxWidth: .infinity)
@@ -1547,6 +1552,20 @@ private struct MomoSessionCopy {
         switch language {
         case .korean: return "이전 세션 정보를 불러왔습니다. 바로 연결하거나 값을 바꿀 수 있습니다."
         case .english: return "Previous session details are loaded. Connect now or adjust them."
+        }
+    }
+
+    var sessionChanged: String {
+        switch language {
+        case .korean: return "세션을 정리했습니다"
+        case .english: return "Session cleared"
+        }
+    }
+
+    var sessionChangedDetail: String {
+        switch language {
+        case .korean: return "다른 계정으로 로그인하거나 데모를 열 수 있습니다."
+        case .english: return "Sign in with another account or open the demo."
         }
     }
 

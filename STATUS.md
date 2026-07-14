@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-370 Dual-density Developer Mode (2026-07-14)
+
+- 기본 off 개발자 모드와 그 안의 비용 표시 토글을 추가했다. 기본 타임라인·partial·Work·승인 인박스는 사람 언어 요약/승인 문장만 보이고 프로토콜·tool JSON·비용·진단 도구·로컬 알파 채우기·세션 상세를 숨기며, 개발자 모드는 기존 밀도를 유지한다. 데모 첫 채널도 실제 팀 대화와 양 밀도용 `human_summary`/`human_detail` fixture로 재큐레이션했다.
+- 371 채널 헤더/툴바/상세와 372 디렉터리/DM/server, `schema_v0.sql`, 기존 정본 PNG는 변경하지 않았다. 신규 timeline standard/developer light/dark 정본 PNG 4종은 오케스트레이터 재기록 대기다.
+- 5개 Swift package build, Core 23·Server 73·Relay 2·Worker 29·macOS 비이미지 129 tests 및 MOMO-370 검토용 raster 18종이 PASS했고 fresh design-review는 Blocker 0(D6 잘림/승인 카드 PASS, 55/70)이다. 무필터 macOS suite는 기존 headless `AgentCredentialSnapshotTests`의 `SnapshotTesting/NSImage.swift` signal 5로 중단됐으며 실창 Work detail/승인 인박스 상호작용과 DB/Docker/verifier/`local_gate.sh`는 지시대로 미실행(`runtime-unverified`).
+
 ## MOMO-369 App Shell Visual Polish W3 (2026-07-13)
 
 - Theme에 양 스킴 background/panel/card 표면 세트와 타이포·radius·≤0.16s motion 토큰을 추가하고 사이드바·타임라인·Work/승인 카드·팝오버에 적용했다. 401은 원문 없는 단일 `다시 로그인` 배너, realtime REST fallback은 헤더 칩으로 정리했다.

@@ -102,6 +102,8 @@ struct MomoAppSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
 
     var body: some View {
         MomoSettingsScrollView {
@@ -126,6 +128,26 @@ struct MomoAppSettingsSurface: View {
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .frame(maxWidth: 320)
+                }
+            }
+
+            MomoSettingsSection(title: copy.developerMode, subtitle: copy.developerModeSubtitle) {
+                Toggle(isOn: $developerMode) {
+                    Label(copy.developerMode, systemImage: "hammer")
+                        .font(.body)
+                }
+
+                if developerMode {
+                    Divider().opacity(0.5)
+                    Toggle(isOn: $showCosts) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(copy.showCosts, systemImage: "dollarsign.circle")
+                                .font(.body)
+                            Text(copy.showCostsSubtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
         }

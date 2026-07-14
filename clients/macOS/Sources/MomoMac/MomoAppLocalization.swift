@@ -735,8 +735,8 @@ struct MomoWorkspaceCopy {
 
     var settingsSubtitle: String {
         switch language {
-        case .korean: return "언어와 화면 모드를 관리합니다."
-        case .english: return "Manage language and appearance."
+        case .korean: return "언어, 화면 모드, 개발자 표시를 관리합니다."
+        case .english: return "Manage language, appearance, and developer visibility."
         }
     }
 
@@ -744,6 +744,58 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "일반"
         case .english: return "General"
+        }
+    }
+
+    var developerMode: String {
+        switch language {
+        case .korean: return "개발자 모드"
+        case .english: return "Developer mode"
+        }
+    }
+
+    var developerModeSubtitle: String {
+        switch language {
+        case .korean: return "실행 세부 정보, 프로토콜 메타데이터, 진단 도구를 표시합니다."
+        case .english: return "Show execution details, protocol metadata, and diagnostic tools."
+        }
+    }
+
+    var showCosts: String {
+        switch language {
+        case .korean: return "비용 표시"
+        case .english: return "Show costs"
+        }
+    }
+
+    var showCostsSubtitle: String {
+        switch language {
+        case .korean: return "메시지별 비용 링과 채널 누적 금액을 표시합니다."
+        case .english: return "Show per-message cost rings and the channel total."
+        }
+    }
+
+    func agentActivityFallback(_ type: MessageType, agentName: String) -> String {
+        switch (language, type) {
+        case (.korean, .toolCall): return "\(agentName)가 작업을 시작했습니다."
+        case (.korean, .toolResult): return "\(agentName)가 작업을 마쳤습니다."
+        case (.korean, .diff): return "\(agentName)가 변경 내용을 준비했습니다."
+        case (.korean, .approvalRequest): return "\(agentName)가 작업 승인을 요청했습니다."
+        case (.korean, .artifact): return "\(agentName)가 결과물을 첨부했습니다."
+        case (.korean, .text), (.korean, .system): return "\(agentName)가 메시지를 남겼습니다."
+        case (.english, .toolCall): return "\(agentName) started a task."
+        case (.english, .toolResult): return "\(agentName) finished a task."
+        case (.english, .diff): return "\(agentName) prepared a change."
+        case (.english, .approvalRequest): return "\(agentName) requested approval."
+        case (.english, .artifact): return "\(agentName) attached a result."
+        case (.english, .text), (.english, .system): return "\(agentName) posted a message."
+        }
+    }
+
+    func agentActivitySummary(agentName: String, detail: String) -> String {
+        switch language {
+        case .korean: return "\(agentName): \(detail)"
+        case .english: return "\(agentName): \(detail)"
         }
     }
 

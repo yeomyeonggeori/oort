@@ -15,6 +15,8 @@ public struct MessageListView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
+    @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
+    @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
     @FocusState private var isComposerFocused: Bool
     @State private var isPinnedToTimelineBottom = true
     @State private var isWorkComposerPresented = false
@@ -88,7 +90,7 @@ public struct MessageListView: View {
                 realtimeStatusChip(status, copy: copy)
             }
             // Social cost chip (experience B): today's live spend.
-            if viewModel.liveSpentMicroUSD > 0 {
+            if presentation.showsCosts, viewModel.liveSpentMicroUSD > 0 {
                 Label(CostFormat.usdCompact(viewModel.liveSpentMicroUSD), systemImage: "dollarsign.circle")
                     .font(.caption)
                     .foregroundStyle(MomoTheme.costAmber)
@@ -428,7 +430,9 @@ public struct MessageListView: View {
                             AgentPartialView(
                                 partial: partial,
                                 author: partialAuthor(for: partial),
-                                status: viewModel.agentStatuses[partial.runId]
+                                status: viewModel.agentStatuses[partial.runId],
+                                presentation: presentation,
+                                copy: copy
                             )
                             .padding(.top, 8)
                         }
@@ -490,7 +494,8 @@ public struct MessageListView: View {
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },
                 groupingStyle: item.startsGroup ? .groupStart : .compact,
-                timelineCopy: copy
+                timelineCopy: copy,
+                presentation: presentation
             )
             .padding(.top, item.startsGroup ? 8 : 0)
         }
@@ -522,6 +527,7 @@ public struct MessageListView: View {
                     viewModel.approvalDecisionsInFlight.contains($0.approvalId)
                 } ?? false,
                 copy: copy,
+                presentation: presentation,
                 onApprovalDecision: { approvalId, approve in
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },
@@ -745,8 +751,16 @@ public struct MessageListView: View {
 
     /// Read the server-owned CostSnapshot projection for the message's run.
     private func costSnapshot(for message: Message) -> CostSnapshot? {
+        guard presentation.showsCosts else { return nil }
         guard let runId = message.runId else { return nil }
         return viewModel.costSnapshot(for: runId)
+    }
+
+    private var presentation: MomoDeveloperModePresentation {
+        MomoDeveloperModePresentation(
+            isDeveloperModeEnabled: developerMode,
+            isCostDisplayEnabled: showCosts
+        )
     }
 
     private func partialAuthor(for partial: AgentPartial) -> Member? {

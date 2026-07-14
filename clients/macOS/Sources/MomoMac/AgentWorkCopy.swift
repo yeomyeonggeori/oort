@@ -1,3 +1,4 @@
+import Foundation
 import MomoCore
 
 extension MomoWorkspaceCopy {
@@ -285,6 +286,22 @@ extension MomoWorkspaceCopy {
         switch language {
         case .korean: return "결정 기록 중"
         case .english: return "Recording decision"
+        }
+    }
+
+    func workApprovalSummary(agentName: String, action: String?) -> String {
+        let trimmed = action?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".!?。！？")) ?? ""
+        switch language {
+        case .korean:
+            return trimmed.isEmpty
+                ? "\(agentName)가 작업 승인을 요청했습니다."
+                : "\(agentName)가 ‘\(trimmed)’ 작업의 승인을 요청했습니다."
+        case .english:
+            return trimmed.isEmpty
+                ? "\(agentName) requested approval for a task."
+                : "\(agentName) requested approval for ‘\(trimmed)’."
         }
     }
 
