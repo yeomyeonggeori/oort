@@ -256,6 +256,7 @@ public struct ChannelListView: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(actionTitle)
             .help(actionTitle)
             .momoQuickTooltip(actionTitle)
         }
@@ -279,6 +280,7 @@ public struct ChannelListView: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(copy.browseMembers)
             .help(copy.browseMembers)
             .momoQuickTooltip(copy.browseMembers)
 
@@ -295,6 +297,7 @@ public struct ChannelListView: View {
                     )
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(copy.inviteMembers)
             .help(copy.inviteMembers)
             .momoQuickTooltip(copy.inviteMembers)
         }

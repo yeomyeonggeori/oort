@@ -205,11 +205,13 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(korean.sendDirectMessage, "DM 보내기")
         XCTAssertEqual(korean.newDirectMessage, "새 DM 시작")
         XCTAssertEqual(korean.showAllMembers, "전체 멤버 보기")
+        XCTAssertEqual(korean.noDirectoryMembersDetail, "워크스페이스에 참여한 멤버가 여기에 표시됩니다")
 
         let english = MomoWorkspaceCopy(language: .english)
         XCTAssertEqual(english.sendDirectMessage, "Send a DM")
         XCTAssertEqual(english.newDirectMessage, "Start a new DM")
         XCTAssertEqual(english.showAllMembers, "Show all members")
+        XCTAssertEqual(english.noDirectoryMembersDetail, "Members appear here after they join the workspace")
     }
 
     func testUnreadNavigationWrapsInCanonicalSidebarOrder() {

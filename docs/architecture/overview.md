@@ -55,7 +55,8 @@ direct message는 ADR-0112의 "하나의 타임라인, 두 개의 밀도" 원칙
 기존 방을 재사용하거나 새 방을 만든다. 서버는 요청자·상대의 active workspace member
 권한을 확인하고, channel·channel_seq·두 membership을 한 tenant transaction에서
 보장한다. macOS 멤버 디렉터리는 roster를 사람/에이전트 구분과 검색의 권위로 쓰며,
-생성된 DM은 기존 사이드바 unread/read-state 표면에 즉시 합류한다.
+사이드바 진입점과 채널 헤더의 멤버 수 control은 production root의 같은 directory sheet로
+수렴한다. 생성된 DM은 기존 사이드바 unread/read-state 표면에 즉시 합류한다.
 
 read-state는 Postgres `read_state`가 유일한 권위다(ADR-0109). 클라이언트는 bulk GET으로
 자신의 channel cursor/head/unread/mention projection을 읽고, actor-bound PUT으로 cursor를

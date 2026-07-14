@@ -193,11 +193,11 @@ public struct MemberDirectoryView: View {
             } else if filteredMembers.isEmpty {
                 ContentUnavailableView {
                     Label(
-                        query.isEmpty ? copy.noWorkspaceMembers : copy.noMemberSearchResults,
+                        query.isEmpty ? copy.noDirectoryMembers : copy.noMemberSearchResults,
                         systemImage: query.isEmpty ? "person.2" : "magnifyingglass"
                     )
                 } description: {
-                    Text(query.isEmpty ? copy.browseMembers : query)
+                    Text(query.isEmpty ? copy.noDirectoryMembersDetail : query)
                 } actions: {
                     if !query.isEmpty {
                         Button(copy.clearMemberSearch) {
@@ -206,6 +206,10 @@ public struct MemberDirectoryView: View {
                     } else if scope != .all {
                         Button(copy.showAllMembers) {
                             scope = .all
+                        }
+                    } else {
+                        Button(copy.retry) {
+                            Task { await viewModel.refreshMemberDirectory() }
                         }
                     }
                 }

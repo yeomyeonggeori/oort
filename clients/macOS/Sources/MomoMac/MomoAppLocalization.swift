@@ -482,10 +482,17 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var noWorkspaceMembers: String {
+    var noDirectoryMembers: String {
         switch language {
         case .korean: return "표시할 멤버가 없습니다"
         case .english: return "No members to show"
+        }
+    }
+
+    var noDirectoryMembersDetail: String {
+        switch language {
+        case .korean: return "워크스페이스에 참여한 멤버가 여기에 표시됩니다"
+        case .english: return "Members appear here after they join the workspace"
         }
     }
 
