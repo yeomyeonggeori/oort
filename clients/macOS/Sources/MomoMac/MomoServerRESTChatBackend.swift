@@ -261,12 +261,22 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     public func members(workspace: WorkspaceID) async throws -> [Member] {
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              accessToken != nil
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
         let response = try await get(
             "/v1/workspaces/\(workspace.description)/roster",
             queryItems: [],
             response: WorkspaceRosterResponse.self
         )
         var all = try response.members.map { try $0.member() }
+        guard connectionGeneration == generation, self.workspace == sessionWorkspace else {
+            throw CancellationError()
+        }
         if let authenticatedMember, !all.contains(where: { $0.id == authenticatedMember.id }) {
             all.insert(authenticatedMember, at: 0)
         }
@@ -275,12 +285,22 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              accessToken != nil
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
         let response = try await get(
             "/v1/workspaces/\(workspace.description)/channels",
             queryItems: [],
             response: WorkspaceChannelsResponse.self
         )
         let channels = try response.channels.map { try $0.channel() }
+        guard connectionGeneration == generation, self.workspace == sessionWorkspace else {
+            throw CancellationError()
+        }
         cachedChannels = channels
         return channels
     }

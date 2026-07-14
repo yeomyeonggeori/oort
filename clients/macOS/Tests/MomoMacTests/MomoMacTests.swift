@@ -4696,6 +4696,134 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(currentMember, memberB)
     }
 
+    func testRESTBackendDelayedMembersCannotOverwriteReconnectedSessionCache() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let channelB = ChannelID(uuidString: "00000000-0000-7000-8000-000000000299")!
+        let memberB = MemberID(uuidString: "00000000-0000-7000-8000-000000000199")!
+        let rosterAPath = "/v1/workspaces/\(workspaceA.description)/roster"
+        let rosterBPath = "/v1/workspaces/\(workspaceB.description)/roster"
+        let controller = BlockingPathResponseController(
+            responses: [
+                rosterAPath: MockHTTPResponse(json: """
+                {"members":[{
+                  "id":"\(MemberID.demoAgent.description)",
+                  "workspaceId":"\(workspaceA.description)",
+                  "kind":"agent",
+                  "status":"active",
+                  "displayName":"Stale Agent",
+                  "handle":"stale-agent",
+                  "channelIds":["\(ChannelID.demoAgentLab.description)"]
+                }]}
+                """),
+                rosterBPath: MockHTTPResponse(json: """
+                {"members":[{
+                  "id":"\(memberB.description)",
+                  "workspaceId":"\(workspaceB.description)",
+                  "kind":"human",
+                  "status":"active",
+                  "displayName":"Current Member",
+                  "handle":"current-member",
+                  "channelIds":["\(channelB.description)"]
+                }]}
+                """),
+            ],
+            blockedPaths: [rosterAPath]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        try await backend.connect(workspace: workspaceA, accessToken: "token-a")
+        let staleMembers = Task { try await backend.members(workspace: workspaceA) }
+        await controller.waitForArrival(path: rosterAPath)
+        try await backend.connect(workspace: workspaceB, accessToken: "token-b")
+        let currentMembers = try await backend.members(workspace: workspaceB)
+        XCTAssertEqual(currentMembers.map(\.id), [memberB])
+        controller.release(path: rosterAPath)
+
+        do {
+            _ = try await staleMembers.value
+            XCTFail("members from an invalidated connection should cancel")
+        } catch is CancellationError {
+            // Expected: session A cannot publish data or mutate session B's cache.
+        }
+        let presence = try await backend.presence(channel: channelB)
+        XCTAssertEqual(presence.map(\.memberId), [memberB])
+    }
+
+    func testRESTBackendDelayedChannelsCannotOverwriteReconnectedSessionCache() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let channelA = ChannelID.demoGeneral
+        let channelB = ChannelID(uuidString: "00000000-0000-7000-8000-000000000299")!
+        let channelsAPath = "/v1/workspaces/\(workspaceA.description)/channels"
+        let channelsBPath = "/v1/workspaces/\(workspaceB.description)/channels"
+        let historyBPath = "/v1/workspaces/\(workspaceB.description)/channels/\(channelB.description)/messages"
+        let controller = BlockingPathResponseController(
+            responses: [
+                channelsAPath: MockHTTPResponse(json: """
+                {"channels":[{
+                  "id":"\(channelA.description)",
+                  "workspaceId":"\(workspaceA.description)",
+                  "kind":"public",
+                  "name":"stale",
+                  "topic":null,
+                  "dmKey":null,
+                  "createdBy":null,
+                  "archivedAtMs":null
+                }]}
+                """),
+                channelsBPath: MockHTTPResponse(json: """
+                {"channels":[{
+                  "id":"\(channelB.description)",
+                  "workspaceId":"\(workspaceB.description)",
+                  "kind":"public",
+                  "name":"current",
+                  "topic":null,
+                  "dmKey":null,
+                  "createdBy":null,
+                  "archivedAtMs":null
+                }]}
+                """),
+                historyBPath: MockHTTPResponse(json: #"{"messages":[]}"#),
+            ],
+            blockedPaths: [channelsAPath]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        try await backend.connect(workspace: workspaceA, accessToken: "token-a")
+        let staleChannels = Task { try await backend.channels(workspace: workspaceA) }
+        await controller.waitForArrival(path: channelsAPath)
+        try await backend.connect(workspace: workspaceB, accessToken: "token-b")
+        let currentChannels = try await backend.channels(workspace: workspaceB)
+        XCTAssertEqual(currentChannels.map(\.id), [channelB])
+        controller.release(path: channelsAPath)
+
+        do {
+            _ = try await staleChannels.value
+            XCTFail("channels from an invalidated connection should cancel")
+        } catch is CancellationError {
+            // Expected: session A cannot publish data or mutate session B's cache.
+        }
+        _ = try await backend.search(workspace: workspaceB, query: "needle")
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.filter { $0.url?.path == channelsBPath }.count, 1)
+        XCTAssertTrue(requests.contains { $0.url?.path == historyBPath })
+    }
+
     private static func loginResponse(
         token: String,
         workspace: WorkspaceID,
@@ -5926,6 +6054,53 @@ private final class BlockingLoginController: @unchecked Sendable {
 
     func release(workspace: WorkspaceID) {
         lock.withLock { releases[workspace.description] }?.signal()
+    }
+}
+
+private final class BlockingPathResponseController: @unchecked Sendable {
+    private let lock = NSLock()
+    private let responses: [String: MockHTTPResponse]
+    private var arrivals: Set<String> = []
+    private var waiters: [String: [CheckedContinuation<Void, Never>]] = [:]
+    private var releases: [String: DispatchSemaphore]
+
+    init(responses: [String: MockHTTPResponse], blockedPaths: Set<String>) {
+        self.responses = responses
+        self.releases = blockedPaths.reduce(into: [:]) { result, path in
+            result[path] = DispatchSemaphore(value: 0)
+        }
+    }
+
+    func response(for request: URLRequest) -> MockHTTPResponse {
+        guard let path = request.url?.path, let response = responses[path] else {
+            return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected request"}"#)
+        }
+        let state = lock.withLock { () -> ([CheckedContinuation<Void, Never>], DispatchSemaphore?) in
+            arrivals.insert(path)
+            return (waiters.removeValue(forKey: path) ?? [], releases[path])
+        }
+        state.0.forEach { $0.resume() }
+        return MockHTTPResponse(
+            statusCode: response.statusCode,
+            json: response.json,
+            releaseGate: state.1
+        )
+    }
+
+    func waitForArrival(path: String) async {
+        if lock.withLock({ arrivals.contains(path) }) { return }
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                if arrivals.contains(path) { return true }
+                waiters[path, default: []].append(continuation)
+                return false
+            }
+            if shouldResume { continuation.resume() }
+        }
+    }
+
+    func release(path: String) {
+        lock.withLock { releases[path] }?.signal()
     }
 }
 

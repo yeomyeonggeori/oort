@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-15 (Codex worker) · MOMO-383 delayed roster/channel cache P2
+- REST `members`/`channels`가 요청 시작 generation+workspace를 capture하고 reconnect 뒤 돌아온 이전 session 응답은 `CancellationError`로 폐기해 current cache를 건드리지 않게 했다.
+- delayed A roster/channel → connect B → B cache load → A release race 2건을 deterministic URLProtocol gate로 고정했다. 전체 Swift count는 Core 24·Server 80·Relay 2·Worker 29·macOS 234 = 369.
+- 이전 dirty-worktree gate evidence는 폐기한다. 새 final commit에서 dirty 허용 없이 runtime-db, 실제 launch macos-ui, docs를 실행하고 PR #389 handoff에 commit/evidence를 기록한다.
+- 다음: PR #389 draft 유지, merge/close 금지, clean gate 뒤 momo-main final rereview.
+
 ## 2026-07-15 (Codex worker) · MOMO-383 final FAIL review actual fixes
 - REST connect generation으로 delayed login→clear·overlapping A/B를 차단하고, channel/read/status subscription exact-token cleanup과 workspace identity+channels 병렬 bootstrap을 추가했다.
 - workspace GET을 bounded one-query로 합치고 private migration drift exact-create/ACL, production external-role preflight, accessible retry color, narrow settings projection을 반영했다.

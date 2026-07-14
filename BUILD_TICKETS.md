@@ -1888,7 +1888,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] migration 009로 workspace root `ENABLE/FORCE RLS` + exact tenant policy를 추가. join discovery는 locked `momo_join_private` schema의 fixed-search-path UUID-only 함수로 최소화하고 PUBLIC/worker/relay/platform 거부 및 broad public function grant 뒤 비재확장을 검증.
 - [x] private schema/function은 exact create로 pre-existing drift를 fail-closed하고 owner+app exact ACL을 검증. internal smoke의 roles absent→migrate→test bootstrap과 production의 secure external role preprovision→migrate를 isolated PG18에서 실행하며, production 역할 누락/속성 drift는 migration 전에 거부.
 - [x] no-cache sidebar error에도 localized retry, `⇧⌘R`, VoiceOver label/hint를 제공. settings spacing scale 준수와 trimmed name counter/validation/save 일치, increased-contrast/large-text raster 2종 PASS.
-- [x] connect/session generation, subscription exact-task cleanup, identity+channels parallel bootstrap, bounded one-query workspace read, narrow settings projection 회귀 포함. design-review Blocker 0, full `runtime-db`와 launch 포함 `macos-ui` local gate PASS. 전체 Swift Core 24·Server 80·Relay 2·Worker 29·macOS 232 = 367 tests 0 failure.
+- [x] connect/session generation과 delayed members/channels cache write 폐기, subscription exact-task cleanup, identity+channels parallel bootstrap, bounded one-query workspace read, narrow settings projection 회귀 포함. design-review Blocker 0, final clean commit에서 full `runtime-db`와 launch 포함 `macos-ui` local gate를 재실행. 전체 Swift Core 24·Server 80·Relay 2·Worker 29·macOS 234 = 369 tests 0 failure.
 - [ ] PR #389 draft final rereview/merge는 momo-main만 수행.
 
 ### ☐ MOMO-384 (`#390`) 수용기준 — Native channel creation sheet + tooltip presenter `[swift/macos-ui]` · 의존: MOMO-383
