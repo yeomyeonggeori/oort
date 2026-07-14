@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-14 (momo-main/GPT 5.6) · MOMO-380 의미 리뷰 반영
+- 독립 리뷰가 provider 자격증명 경계 과잉 일반화와 Work 실런타임 검증 과장을 지적해, Codex/OpenAI 실행 토큰과 GWS connector 토큰 경계를 분리했다.
+- Work는 코드·mock 검증 완료/실 Codex 승인 왕복 `runtime-unverified`로 정정하고, 완료된 362..365 중복 발급 행을 제거했다.
+- `PLN-01`은 `waiting-owner`, `PLN-02`는 `queued/unclaimed`로 고쳐 planner claim과 구현 worker 역할을 분리했다.
+- 다음: PR #382 재게이트·리뷰 후 merge; UX 육안 QA와 engine planning claim은 그 뒤 각각 진행한다.
+
 ## 2026-07-14 (momo-main/GPT 5.6) · Fable 인수 감사 + UX/엔진 두 트랙 고정
 - main/origin `b5e572b`, 열린 PR 0을 확인하고 Fable의 ADR-0112 Wave A(370..372)+MOMO-379 실창 크롬 핫픽스 랜딩을 코드/BUILD_TICKETS/저널과 대조했다.
 - 다음 UX는 373..378이 ADR 후보로만 존재하고 BUILD_TICKETS 계약·handoff·Issue가 아직 없으며, 최신 앱 육안 QA와 멤버 행 절단 판정이 선행이다.
