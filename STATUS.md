@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-388 Auth-Hardening Realtime Credential Binding Verifier (2026-07-15)
+
+- 레거시 verifier가 멤버·채널만 담은 callback을 보낸 drift에 더해, 1차 수정이 `meta.token_id`를 임의 active UUID로만 검증하고 human의 active refresh row도 realtime liveness로 인정하던 review gap을 닫았다. human realtime credential은 이제 `session` 중 `label='access'` row만 허용하며 RLS와 `schema_v0.sql`은 변경하지 않았다.
+- verifier의 token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest로 access·refresh row를 각각 찾은 뒤, `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row와 일치함을 증명한다. callback fixture는 active access만 허용하고 active refresh row·누락·임의·다른 멤버·logout/revoke binding은 모두 `result == null && error.code == 403`으로 거부한다.
+- JWT payload synthetic decode는 `sub`, optional `ws`, `exp`/optional `nbf`/`iat` 시간 경계를 확인하지만 Centrifugo websocket의 signature acceptance 자체를 독립 증명하지는 않는다. `umask 077`+`mktemp -d`, auth/refresh 실패 body 비노출, 안전한 cleanup을 적용했고 focused verifier PASS; review 반영 최종 clean `runtime-db`·`docs` evidence는 PR #393에 첨부한다.
+
 ## MOMO-382 Workspace-first UX + Superapp Shell Planning (2026-07-15)
 
 - 2026-07-14 실창 QA 12건과 PLN-20260714-02를 대조해 workspace/server → channel/DM → timeline → governed Work 위계를 정본화했다. UX builder는 MOMO-383 → 384/385 → 386으로 분할했다.
