@@ -1886,6 +1886,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] fake multi-workspace rail과 `Add workspace` affordance는 ADR-0117 전 금지.
 - [x] stale GET/rename/session race를 generation+`updatedAtMs` guard로 차단하고 bootstrap의 모든 await/subscription과 409 reload 뒤 session/workspace generation을 재검증. 401/403/404 exact persistent cache 삭제, unknown error fallback default-deny, cancellation 보존, demo cache 비영속, apostrophe verifier 복원을 회귀 테스트로 고정.
 - [x] migration 009로 workspace root `ENABLE/FORCE RLS` + exact tenant policy를 추가. join discovery는 locked `momo_join_private` schema의 fixed-search-path UUID-only 함수로 최소화하고 PUBLIC/worker/relay/platform 거부 및 broad public function grant 뒤 비재확장을 검증.
+- [x] production fresh 순서(migration→runtime role 생성)에서도 `bootstrap_roles.sql`이 app-only private schema/function grant와 relay/worker denial을 확정. isolated PG18의 roles absent→migrate→bootstrap→app allow/relay·worker deny verifier를 `runtime-db`에 연결.
 - [x] no-cache sidebar error에도 localized retry, `⇧⌘R`, VoiceOver label/hint를 제공. settings spacing scale 준수와 trimmed name counter/validation/save 일치, increased-contrast/large-text raster 2종 PASS.
 - [x] design-review Blocker 0, full `runtime-db`와 launch 포함 `macos-ui` local gate PASS. 전체 Swift Core 24·Server 79·Relay 2·Worker 29·macOS 226 = 360 tests 0 failure.
 - [ ] PR #389 draft final rereview/merge는 momo-main만 수행.

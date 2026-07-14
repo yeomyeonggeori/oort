@@ -61,6 +61,19 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(migration.contains("GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app"))
         XCTAssertFalse(migration.contains("EXECUTE format"))
 
+        let roleBootstrap = try String(
+            contentsOf: serverRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("infra/e2e/bootstrap_roles.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(roleBootstrap.contains("GRANT USAGE ON SCHEMA momo_join_private TO momo_app"))
+        XCTAssertTrue(roleBootstrap.contains("GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app"))
+        XCTAssertTrue(roleBootstrap.contains("REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC, momo_relay, momo_worker"))
+        XCTAssertTrue(roleBootstrap.contains(
+            "REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text)\n  FROM PUBLIC, momo_relay, momo_worker"
+        ))
+
         let joinSource = try String(
             contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/JoinRoutes.swift"),
             encoding: .utf8

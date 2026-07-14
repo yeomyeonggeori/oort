@@ -43,6 +43,15 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
 ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO momo_app, momo_relay, momo_worker;
 
+-- Migration 009 can run before these runtime roles exist (the production
+-- internal-smoke order). Reassert the locked join boundary after role creation:
+-- only the NOBYPASSRLS API role may resolve one invite code to its workspace.
+REVOKE ALL ON SCHEMA momo_join_private FROM PUBLIC, momo_relay, momo_worker;
+REVOKE ALL ON FUNCTION momo_join_private.invite_workspace_id(text)
+  FROM PUBLIC, momo_relay, momo_worker;
+GRANT USAGE ON SCHEMA momo_join_private TO momo_app;
+GRANT EXECUTE ON FUNCTION momo_join_private.invite_workspace_id(text) TO momo_app;
+
 DO $$
 BEGIN
   IF (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = 'momo_app') THEN
@@ -53,6 +62,28 @@ BEGIN
   END IF;
   IF NOT (SELECT rolbypassrls FROM pg_roles WHERE rolname = 'momo_worker') THEN
     RAISE EXCEPTION 'momo_worker must be BYPASSRLS';
+  END IF;
+  IF NOT has_schema_privilege('momo_app', 'momo_join_private', 'USAGE')
+     OR NOT has_function_privilege(
+       'momo_app',
+       'momo_join_private.invite_workspace_id(text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'momo_app must execute the locked invite lookup';
+  END IF;
+  IF has_schema_privilege('momo_relay', 'momo_join_private', 'USAGE')
+     OR has_schema_privilege('momo_worker', 'momo_join_private', 'USAGE')
+     OR has_function_privilege(
+       'momo_relay',
+       'momo_join_private.invite_workspace_id(text)',
+       'EXECUTE'
+     )
+     OR has_function_privilege(
+       'momo_worker',
+       'momo_join_private.invite_workspace_id(text)',
+       'EXECUTE'
+     ) THEN
+    RAISE EXCEPTION 'relay/worker must not execute the locked invite lookup';
   END IF;
 END
 $$;

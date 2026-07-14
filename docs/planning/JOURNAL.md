@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-15 (Codex worker) · MOMO-383 fresh-deploy role-order P1 fix
+- production migrate→role bootstrap 순서에서 migration 009의 conditional app grant가 건너뛰는 결함을 `bootstrap_roles.sql` app-only grant와 relay/worker explicit denial로 닫았다.
+- ephemeral PG18 verifier가 runtime role 0개 → migrate → 여전히 0개 → bootstrap → app exact invite lookup allow, relay/worker deny를 실제 실행한다.
+- static contract와 full `runtime-db` 30/30 PASS(`20260714T221124Z-…-r584776886194`), Swift 360 tests 유지.
+- 다음: PR #389 draft 유지, 추가 commit/push 뒤 momo-main final rereview/merge.
+
 ## 2026-07-15 (Codex worker) · MOMO-383 final review fix 검증 완료
 - 모든 bootstrap await/subscription·409 reload generation guard, authoritative-denial persistent cache 삭제, workspace root FORCE RLS와 locked-schema invite lookup, no-cache retry/AX 및 normalized settings를 반영했다.
 - locked function은 app만 호출하고 PUBLIC/worker/relay/platform은 broad public function grant 뒤에도 거부됨을 `verify_rls.sh`와 실제 join smoke로 확인했다.
