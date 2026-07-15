@@ -229,7 +229,7 @@ public enum MomoTheme {
         public static let minimumWidth: CGFloat = 240
         public static let idealWidth: CGFloat = 280
         public static let maximumWidth: CGFloat = 360
-        public static let headerMinimumHeight: CGFloat = 52
+        public static let headerMinimumHeight: CGFloat = 44
         public static let rowMinimumHeight: CGFloat = 32
         public static let footerMinimumHeight: CGFloat = 44
         public static let avatarSize: CGFloat = 24
@@ -336,6 +336,22 @@ public enum MomoTheme {
         public static let sectionSpacing: CGFloat = 16
         public static let edgeInset: CGFloat = 16
         public static let rowCornerRadius = MomoTheme.cornerSmall
+        public static let hoverBackground = Color.primary.opacity(0.06)
+    }
+
+    public enum Downloads {
+        public static let popoverWidth: CGFloat = 380
+        public static let popoverMaximumHeight: CGFloat = 520
+        public static let rowMinimumHeight: CGFloat = 48
+        public static let emptyStateMinimumHeight: CGFloat = 150
+        public static let historyMaximumHeight: CGFloat = 280
+        public static let rowCornerRadius = MomoTheme.cornerSmall
+
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let edgeInset: CGFloat = 16
         public static let hoverBackground = Color.primary.opacity(0.06)
     }
 

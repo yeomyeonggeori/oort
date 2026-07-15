@@ -348,6 +348,81 @@ final class MomoMacTests: XCTestCase {
         )
     }
 
+    func testMemberInspectorGroupsManagersAgentsAndPeopleByPresence() {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let owner = Member(
+            id: MemberID(), workspaceId: workspace, kind: .human,
+            displayName: "Owner", handle: "owner", workspaceRole: .owner,
+            channelIds: [channel], presence: .online
+        )
+        let agent = Member(
+            id: MemberID(), workspaceId: workspace, kind: .agent,
+            displayName: "Hermes", handle: "hermes", channelIds: [channel],
+            presence: .working
+        )
+        let online = Member(
+            id: MemberID(), workspaceId: workspace, kind: .human,
+            displayName: "Online", handle: "online", channelIds: [channel],
+            presence: .online
+        )
+        let away = Member(
+            id: MemberID(), workspaceId: workspace, kind: .human,
+            displayName: "Away", handle: "away", channelIds: [channel],
+            presence: .away
+        )
+        let offline = Member(
+            id: MemberID(), workspaceId: workspace, kind: .human,
+            displayName: "Offline", handle: "offline", channelIds: [channel]
+        )
+
+        let groups = MomoMemberInspectorPolicy.groups(
+            [offline, agent, owner, away, online],
+            audience: .channel,
+            channelID: channel,
+            query: "",
+            scope: .all
+        )
+
+        XCTAssertEqual(groups.managers.map(\.id), [owner.id])
+        XCTAssertEqual(groups.agents.map(\.id), [agent.id])
+        XCTAssertEqual(groups.online.map(\.id), [online.id])
+        XCTAssertEqual(groups.away.map(\.id), [away.id])
+        XCTAssertEqual(groups.offline.map(\.id), [offline.id])
+    }
+
+    func testDockUnreadBadgeAggregatesAndCapsWithoutOverflow() {
+        let first = ChannelID()
+        let second = ChannelID()
+        let states = [
+            first: ChannelReadState(
+                channelId: first, lastReadSeq: 0, latestSeq: 4,
+                unreadCount: 4, mentionCount: 0
+            ),
+            second: ChannelReadState(
+                channelId: second, lastReadSeq: 0, latestSeq: 120,
+                unreadCount: 120, mentionCount: 1
+            ),
+        ]
+
+        XCTAssertEqual(MomoDockUnreadBadgePolicy.totalUnread(states), 124)
+        XCTAssertNil(MomoDockUnreadBadgePolicy.label(totalUnread: 0))
+        XCTAssertEqual(MomoDockUnreadBadgePolicy.label(totalUnread: 9), "9")
+        XCTAssertEqual(MomoDockUnreadBadgePolicy.label(totalUnread: 124), "99+")
+
+        let overflowStates = [
+            first: ChannelReadState(
+                channelId: first, lastReadSeq: 0, latestSeq: 0,
+                unreadCount: Int64.max, mentionCount: 0
+            ),
+            second: ChannelReadState(
+                channelId: second, lastReadSeq: 0, latestSeq: 0,
+                unreadCount: 1, mentionCount: 0
+            ),
+        ]
+        XCTAssertEqual(MomoDockUnreadBadgePolicy.totalUnread(overflowStates), Int64.max)
+    }
+
     func testMemberInspectorUsesOverlayBeforeTimelineWouldBecomeTooNarrow() {
         XCTAssertFalse(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 759))
         XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 760))

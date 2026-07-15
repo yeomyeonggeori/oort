@@ -38,11 +38,8 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
                 showsCosts: true,
                 copy: MomoWorkspaceCopy(language: .korean),
                 retryRealtime: nil,
-                openMemberDirectory: {},
-                openDownloads: {}
+                openMemberDirectory: {}
             )
-
-            Divider()
 
             MomoChannelSettingsSheet(
                 copy: MomoWorkspaceCopy(language: .korean),

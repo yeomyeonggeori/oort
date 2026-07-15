@@ -1923,6 +1923,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] channel creation sheet, unread, DM, member inspector/roster 보존. bilingual copy, Reduce Motion 기존 root animation policy, light/dark real-window evidence 포함.
 - [ ] focused/full Swift tests, design preflight, `swift`/`macos-ui` local gate, fresh design-review Blocker 0를 PR evidence에 기록. worker는 PR 생성 뒤 `status:needs-review`까지만 전환하고 merge/close하지 않음.
 
+### ☑ MOMO-402 (`#417`) 수용기준 — macOS top chrome, member roster, Dock badge, downloads polish `[swift/macos-ui]`
+- [x] sidebar top gap·right rounding·shadow와 center double separator를 제거하고 left/center/right pane header를 unified toolbar 아래 독립 surface로 정렬.
+- [x] member inspector는 검색을 유지하면서 관리자·에이전트·온라인·자리 비움·오프라인 그룹으로 표시하고 기존 profile/DM 경로를 보존.
+- [x] channel unread 합계를 Dock badge `1...99+`로 표시하고 0/logout에서 clear.
+- [x] Downloads를 채널 선택과 무관한 app toolbar 우측 icon popover로 이동하고 security-scoped folder open/change, 영속 history, item-level open/Finder/delete를 제공. Updates는 profile menu에 유지.
+- [x] profile menu의 rise/move animation을 제거하고 footer button 위 약 16pt 간격으로 즉시 표시.
+- [x] build와 macOS 전체 294 tests 0 failure, 실행 앱과 standard/narrow/light/dark artifact에서 sidebar/header/roster/downloads/profile menu 상호작용 확인.
+- [ ] clean `macos-ui` gate와 fresh design-review Blocker 0를 PR evidence에 기록하고 momo-main review/merge 후 main gate 재검증.
+- [ ] 실제 채팅 첨부파일 download record 공급은 MOMO-394에서 구현. 이번 surface의 영속 store와 item action은 준비하되 가짜 history를 생성하지 않음.
+
 ### ☑ MOMO-388 수용기준 — Auth-hardening verifier realtime credential binding drift `[tooling/runtime-db/docs]` · Issue #388
 - [x] 로그인 access/refresh token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest만 DB와 대조해 각 `token.id`를 확정. `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row ID와 같은지 UUID canonical 비교.
 - [x] active exact access-row binding만 허용. active refresh-row ID·`meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 `result == null && error.code == 403` 검증.

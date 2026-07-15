@@ -31,7 +31,7 @@ final class MomoChannelChromeTests: XCTestCase {
     }
 
     func testSafeDetailViewportAndInspectorRespectTheirTopBoundaries() {
-        XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: 52), 52)
+        XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: 52), 0)
         XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: -1), 0)
         XCTAssertEqual(
             MomoWindowChromeLayout.inspectorTopInset(
@@ -47,12 +47,12 @@ final class MomoChannelChromeTests: XCTestCase {
         )
     }
 
-    func testSidebarContentAlwaysBeginsBelowWindowChrome() {
+    func testNativeSidebarDoesNotApplyWindowChromeInsetTwice() {
         XCTAssertEqual(
             MomoWindowChromeLayout.sidebarTopInset(
                 windowChromeTopInset: 52
             ),
-            52
+            0
         )
     }
 
@@ -133,7 +133,49 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertTrue(korean.workspaceSearchUnavailableDetail.contains("서버 메시지 검색이 없습니다"))
         XCTAssertTrue(english.workspaceSearchUnavailableDetail.contains("does not include server message search"))
         XCTAssertTrue(korean.downloadsScopeNote.contains("채팅 첨부파일"))
-        XCTAssertTrue(english.downloadsScopeNote.contains("does not download chat attachments"))
+        XCTAssertTrue(english.downloadsScopeNote.contains("attachment downloads will appear"))
+        XCTAssertTrue(korean.downloadsSubtitle.contains("지원 후 표시될"))
+        XCTAssertTrue(english.downloadsSubtitle.contains("will appear when file transfer is available"))
+    }
+
+    func testDownloadFolderUsesUserSelectedReadWriteSandboxEntitlement() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let entitlements = try String(
+            contentsOf: packageRoot.appendingPathComponent("XcodeHost/MomoMac.entitlements"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(entitlements.contains("com.apple.security.files.user-selected.read-write"))
+        XCTAssertTrue(entitlements.contains("com.apple.security.files.bookmarks.app-scope"))
+    }
+
+    func testDownloadHistoryStorePersistsCapsAndRemovesManagedRecords() throws {
+        let suiteName = "MomoChannelChromeTests.downloads.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let old = MomoDownloadHistoryRecord(
+            fileName: "old.txt",
+            filePath: "/tmp/momo/old.txt",
+            recordedAt: Date(timeIntervalSince1970: 1),
+            outcome: .completed
+        )
+        let recent = MomoDownloadHistoryRecord(
+            fileName: "recent.txt",
+            filePath: "/tmp/momo/recent.txt",
+            recordedAt: Date(timeIntervalSince1970: 2),
+            outcome: .failed
+        )
+
+        MomoDownloadHistoryStore.record(old, defaults: defaults)
+        MomoDownloadHistoryStore.record(recent, defaults: defaults)
+        XCTAssertEqual(MomoDownloadHistoryStore.load(defaults: defaults), [recent, old])
+
+        MomoDownloadHistoryStore.remove(recent.id, defaults: defaults)
+        XCTAssertEqual(MomoDownloadHistoryStore.load(defaults: defaults), [old])
     }
 
     func testChannelPresentationNormalizesNameAndOptionalTopic() throws {

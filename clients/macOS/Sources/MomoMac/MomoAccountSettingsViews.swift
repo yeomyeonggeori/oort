@@ -586,10 +586,128 @@ struct MomoEmptyProfileSelectionView: View {
     }
 }
 
+enum MomoDownloadsFolderAccess {
+    static let pathKey = "momo.downloads.folderPath"
+    private static let bookmarkKey = "momo.downloads.folderBookmark"
+
+    static func resolvedURL(storedPath: String) -> URL {
+        if let data = UserDefaults.standard.data(forKey: bookmarkKey) {
+            var isStale = false
+            if let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                if isStale {
+                    persist(url)
+                }
+                return url
+            }
+        }
+
+        if !storedPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return URL(fileURLWithPath: storedPath)
+        }
+        return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    @discardableResult
+    static func persist(_ url: URL) -> Bool {
+        guard let bookmark = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else {
+            return false
+        }
+        UserDefaults.standard.set(bookmark, forKey: bookmarkKey)
+        UserDefaults.standard.set(url.path, forKey: pathKey)
+        return true
+    }
+
+    @MainActor
+    static func open(_ url: URL) {
+        let didStartAccess = url.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccess {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    static func withAccess<T>(to folder: URL, _ operation: () throws -> T) rethrows -> T {
+        let didStartAccess = folder.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccess {
+                folder.stopAccessingSecurityScopedResource()
+            }
+        }
+        return try operation()
+    }
+}
+
+struct MomoDownloadHistoryRecord: Codable, Identifiable, Equatable {
+    enum Outcome: String, Codable {
+        case completed
+        case failed
+    }
+
+    let id: UUID
+    let fileName: String
+    let filePath: String
+    let recordedAt: Date
+    let outcome: Outcome
+
+    init(
+        id: UUID = UUID(),
+        fileName: String,
+        filePath: String,
+        recordedAt: Date = Date(),
+        outcome: Outcome
+    ) {
+        self.id = id
+        self.fileName = fileName
+        self.filePath = filePath
+        self.recordedAt = recordedAt
+        self.outcome = outcome
+    }
+}
+
+enum MomoDownloadHistoryStore {
+    static let storageKey = "momo.downloads.history.v0"
+    static let maximumRecordCount = 50
+
+    static func load(defaults: UserDefaults = .standard) -> [MomoDownloadHistoryRecord] {
+        guard let data = defaults.data(forKey: storageKey),
+              let records = try? JSONDecoder().decode([MomoDownloadHistoryRecord].self, from: data) else {
+            return []
+        }
+        return Array(records.sorted { $0.recordedAt > $1.recordedAt }.prefix(maximumRecordCount))
+    }
+
+    static func record(_ record: MomoDownloadHistoryRecord, defaults: UserDefaults = .standard) {
+        var records = load(defaults: defaults).filter { $0.id != record.id }
+        records.insert(record, at: 0)
+        save(Array(records.prefix(maximumRecordCount)), defaults: defaults)
+    }
+
+    static func remove(_ id: UUID, defaults: UserDefaults = .standard) {
+        save(load(defaults: defaults).filter { $0.id != id }, defaults: defaults)
+    }
+
+    private static func save(_ records: [MomoDownloadHistoryRecord], defaults: UserDefaults) {
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        defaults.set(data, forKey: storageKey)
+    }
+}
+
 struct MomoDownloadsSettingsSurface: View {
     let copy: MomoWorkspaceCopy
-    @AppStorage("momo.downloads.folderPath") private var downloadsFolderPath = ""
-    private let updateStatus = MomoMacUpdateChannelStatus.fromEnvironment()
+    @AppStorage(MomoDownloadsFolderAccess.pathKey) private var downloadsFolderPath = ""
+    @State private var downloadHistory = MomoDownloadHistoryStore.load()
 
     var body: some View {
         MomoSettingsScrollView {
@@ -626,14 +744,18 @@ struct MomoDownloadsSettingsSurface: View {
             }
 
             MomoSettingsSection(title: copy.downloadHistory, subtitle: copy.downloadsSubtitle) {
-                let rows = downloadHistoryRows
-                if rows.isEmpty {
+                if downloadHistory.isEmpty {
                     Label(copy.noDownloadHistory, systemImage: "clock")
                         .font(MomoTheme.Typography.row)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(rows) { row in
-                        MomoDownloadHistoryRowView(row: row)
+                    ForEach(downloadHistory) { record in
+                        MomoDownloadHistoryRowView(
+                            record: record,
+                            copy: copy,
+                            downloadsFolder: downloadsFolder,
+                            didDelete: reloadDownloadHistory
+                        )
                     }
                 }
             }
@@ -641,52 +763,12 @@ struct MomoDownloadsSettingsSurface: View {
     }
 
     private var downloadsFolder: URL {
-        if !downloadsFolderPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return URL(fileURLWithPath: downloadsFolderPath)
-        }
-        return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser
-    }
-
-    private var downloadHistoryRows: [MomoDownloadHistoryRow] {
-        var rows: [MomoDownloadHistoryRow] = [
-            MomoDownloadHistoryRow(
-                title: copy.updates,
-                detail: localizedUpdateDetail(updateStatus, copy: copy),
-                state: updateStatus.state == .failed ? copy.downloadCheckFailed : copy.downloadCheckSucceeded,
-                systemImage: updateStatus.state == .failed ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
-                tint: updateStatus.state == .failed ? MomoTheme.irreversibleRed : MomoTheme.reversibleGreen
-            )
-        ]
-
-        if let manifest = updateStatus.manifest, let downloadURL = manifest.downloadURL {
-            rows.append(
-                MomoDownloadHistoryRow(
-                    title: manifest.availableVersion.displayLabel,
-                    detail: downloadURL.absoluteString,
-                    state: updateStatus.canOpenDownload ? copy.downloadReady : copy.downloadUnavailable,
-                    systemImage: updateStatus.canOpenDownload ? "tray.and.arrow.down.fill" : "tray",
-                    tint: updateStatus.canOpenDownload ? MomoTheme.costAmber : .secondary
-                )
-            )
-        } else if updateStatus.state != .notConfigured {
-            rows.append(
-                MomoDownloadHistoryRow(
-                    title: copy.availableVersion,
-                    detail: copy.notAvailable,
-                    state: copy.downloadUnavailable,
-                    systemImage: "tray",
-                    tint: .secondary
-                )
-            )
-        }
-
-        return rows
+        MomoDownloadsFolderAccess.resolvedURL(storedPath: downloadsFolderPath)
     }
 
     @MainActor
     private func openDownloadsFolder() {
-        NSWorkspace.shared.open(downloadsFolder)
+        MomoDownloadsFolderAccess.open(downloadsFolder)
     }
 
     @MainActor
@@ -699,7 +781,132 @@ struct MomoDownloadsSettingsSurface: View {
         guard panel.runModal() == .OK, let url = panel.url else {
             return
         }
-        downloadsFolderPath = url.path
+        if MomoDownloadsFolderAccess.persist(url) {
+            downloadsFolderPath = url.path
+        }
+    }
+
+    private func reloadDownloadHistory() {
+        downloadHistory = MomoDownloadHistoryStore.load()
+    }
+}
+
+struct MomoDownloadsPopoverView: View {
+    let copy: MomoWorkspaceCopy
+    @AppStorage(MomoDownloadsFolderAccess.pathKey) private var downloadsFolderPath = ""
+    @State private var downloadHistory = MomoDownloadHistoryStore.load()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: MomoTheme.Downloads.standardSpacing) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(MomoTheme.humanAccent)
+                Text(copy.appDownloads)
+                    .font(MomoTheme.Typography.sectionHeader)
+                Spacer()
+            }
+            .padding(MomoTheme.Downloads.edgeInset)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: MomoTheme.Downloads.sectionSpacing) {
+                VStack(alignment: .leading, spacing: MomoTheme.Downloads.standardSpacing) {
+                    Text(copy.downloadFolder)
+                        .font(MomoTheme.Typography.supporting.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: MomoTheme.Downloads.standardSpacing) {
+                        Image(systemName: "folder")
+                            .foregroundStyle(MomoTheme.humanAccent)
+                        Text(downloadsFolder.lastPathComponent)
+                            .font(MomoTheme.Typography.row.weight(.medium))
+                            .lineLimit(1)
+                        Spacer()
+                        Button {
+                            openDownloadsFolder()
+                        } label: {
+                            Image(systemName: "arrow.up.forward.app")
+                        }
+                        .buttonStyle(.plain)
+                        .help(copy.openDownloadsFolder)
+                        .momoQuickTooltip(copy.openDownloadsFolder)
+                        .accessibilityLabel(copy.openDownloadsFolder)
+                        Button {
+                            chooseDownloadsFolder()
+                        } label: {
+                            Image(systemName: "ellipsis")
+                        }
+                        .buttonStyle(.plain)
+                        .help(copy.changeDownloadFolder)
+                        .momoQuickTooltip(copy.changeDownloadFolder)
+                        .accessibilityLabel(copy.changeDownloadFolder)
+                    }
+                    .padding(.horizontal, MomoTheme.Downloads.contentSpacing)
+                    .frame(minHeight: MomoTheme.Downloads.rowMinimumHeight)
+                    .background(
+                        MomoTheme.Downloads.hoverBackground,
+                        in: RoundedRectangle(cornerRadius: MomoTheme.Downloads.rowCornerRadius)
+                    )
+                }
+
+                VStack(alignment: .leading, spacing: MomoTheme.Downloads.standardSpacing) {
+                    Text(copy.downloadHistory)
+                        .font(MomoTheme.Typography.supporting.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    if downloadHistory.isEmpty {
+                        ContentUnavailableView {
+                            Label(copy.noDownloadHistory, systemImage: "tray")
+                        } description: {
+                            Text(copy.downloadsScopeNote)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: MomoTheme.Downloads.emptyStateMinimumHeight)
+                    } else {
+                        ScrollView {
+                            LazyVStack(spacing: MomoTheme.Downloads.compactSpacing) {
+                                ForEach(downloadHistory) { record in
+                                    MomoDownloadHistoryRowView(
+                                        record: record,
+                                        copy: copy,
+                                        downloadsFolder: downloadsFolder,
+                                        didDelete: reloadDownloadHistory
+                                    )
+                                }
+                            }
+                        }
+                        .frame(maxHeight: MomoTheme.Downloads.historyMaximumHeight)
+                    }
+                }
+            }
+            .padding(MomoTheme.Downloads.edgeInset)
+        }
+        .frame(width: MomoTheme.Downloads.popoverWidth)
+        .onAppear(perform: reloadDownloadHistory)
+    }
+
+    private var downloadsFolder: URL {
+        MomoDownloadsFolderAccess.resolvedURL(storedPath: downloadsFolderPath)
+    }
+
+    @MainActor
+    private func openDownloadsFolder() {
+        MomoDownloadsFolderAccess.open(downloadsFolder)
+    }
+
+    @MainActor
+    private func chooseDownloadsFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.title = copy.changeDownloadFolder
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        if MomoDownloadsFolderAccess.persist(url) {
+            downloadsFolderPath = url.path
+        }
+    }
+
+    private func reloadDownloadHistory() {
+        downloadHistory = MomoDownloadHistoryStore.load()
     }
 }
 
@@ -1262,44 +1469,106 @@ private struct MomoSettingsInfoGrid: View {
     }
 }
 
-private struct MomoDownloadHistoryRow: Identifiable {
-    let id = UUID()
-    let title: String
-    let detail: String
-    let state: String
-    let systemImage: String
-    let tint: Color
-}
-
 private struct MomoDownloadHistoryRowView: View {
-    let row: MomoDownloadHistoryRow
+    let record: MomoDownloadHistoryRecord
+    let copy: MomoWorkspaceCopy
+    let downloadsFolder: URL
+    let didDelete: () -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: row.systemImage)
+            Image(systemName: record.outcome == .completed ? "doc.fill" : "exclamationmark.triangle.fill")
                 .font(MomoTheme.Typography.row.weight(.semibold))
-                .foregroundStyle(row.tint)
+                .foregroundStyle(record.outcome == .completed ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
                 .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
-                    Text(row.title)
+                    Text(record.fileName)
                         .font(MomoTheme.Typography.row.weight(.semibold))
-                    Text(row.state)
+                        .lineLimit(1)
+                    Text(record.outcome == .completed ? copy.downloadCompleted : copy.downloadFailed)
                         .font(MomoTheme.Typography.metadata.weight(.bold))
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .foregroundStyle(row.tint)
-                        .background(row.tint.opacity(0.13), in: Capsule())
+                        .foregroundStyle(record.outcome == .completed ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
+                        .background(
+                            (record.outcome == .completed ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed).opacity(0.13),
+                            in: Capsule()
+                        )
                 }
-                Text(row.detail)
+                Text(record.recordedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(MomoTheme.Typography.supporting.weight(.medium))
                     .foregroundStyle(.secondary)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
+                    .lineLimit(1)
             }
             Spacer(minLength: 8)
+            Menu {
+                Button(copy.openDownload) {
+                    openRecord()
+                }
+                .disabled(managedFileURL.map { !FileManager.default.fileExists(atPath: $0.path) } ?? true)
+
+                Button(copy.showInFinder) {
+                    revealRecord()
+                }
+                .disabled(managedFileURL.map { !FileManager.default.fileExists(atPath: $0.path) } ?? true)
+
+                Divider()
+
+                Button(copy.deleteDownload, role: .destructive) {
+                    deleteRecord()
+                }
+                .disabled(managedFileURL == nil)
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: MomoTheme.ChannelHeader.actionSize, height: MomoTheme.ChannelHeader.actionSize)
+            }
+            .menuStyle(.borderlessButton)
+            .help(copy.downloadActions)
+            .accessibilityLabel(copy.downloadActions)
         }
+        .padding(.horizontal, MomoTheme.Downloads.contentSpacing)
+        .frame(minHeight: MomoTheme.Downloads.rowMinimumHeight)
+        .background(
+            MomoTheme.Downloads.hoverBackground,
+            in: RoundedRectangle(cornerRadius: MomoTheme.Downloads.rowCornerRadius)
+        )
+    }
+
+    @MainActor
+    private func openRecord() {
+        guard let fileURL = managedFileURL else { return }
+        _ = MomoDownloadsFolderAccess.withAccess(to: downloadsFolder) {
+            NSWorkspace.shared.open(fileURL)
+        }
+    }
+
+    @MainActor
+    private func revealRecord() {
+        guard let fileURL = managedFileURL else { return }
+        MomoDownloadsFolderAccess.withAccess(to: downloadsFolder) {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        }
+    }
+
+    private func deleteRecord() {
+        guard let fileURL = managedFileURL else { return }
+        let folderURL = downloadsFolder.standardizedFileURL
+
+        MomoDownloadsFolderAccess.withAccess(to: folderURL) {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+        MomoDownloadHistoryStore.remove(record.id)
+        didDelete()
+    }
+
+    private var managedFileURL: URL? {
+        let fileURL = URL(fileURLWithPath: record.filePath).standardizedFileURL
+        let folderURL = downloadsFolder.standardizedFileURL
+        let folderPrefix = folderURL.path.hasSuffix("/") ? folderURL.path : folderURL.path + "/"
+        guard fileURL.path.hasPrefix(folderPrefix) else { return nil }
+        return fileURL
     }
 }
 

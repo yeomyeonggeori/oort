@@ -5,6 +5,9 @@ import MomoCore
 public typealias MomoMemberDirectoryHook = () -> Void
 
 struct MomoChannelHeaderView: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var systemContrast
+    @Environment(\.momoColorSchemeContrastOverride) private var contrastOverride
     let channel: Channel
     let presentation: MomoChannelPresentation
     let memberCount: Int
@@ -14,12 +17,33 @@ struct MomoChannelHeaderView: View {
     let copy: MomoWorkspaceCopy
     let retryRealtime: (() -> Void)?
     let openMemberDirectory: MomoMemberDirectoryHook?
-    let openDownloads: (() -> Void)?
+
+    init(
+        channel: Channel,
+        presentation: MomoChannelPresentation,
+        memberCount: Int,
+        realtimeStatus: RealtimeConnectionStatus?,
+        spentMicroUSD: Int64,
+        showsCosts: Bool,
+        copy: MomoWorkspaceCopy,
+        retryRealtime: (() -> Void)?,
+        openMemberDirectory: MomoMemberDirectoryHook?
+    ) {
+        self.channel = channel
+        self.presentation = presentation
+        self.memberCount = memberCount
+        self.realtimeStatus = realtimeStatus
+        self.spentMicroUSD = spentMicroUSD
+        self.showsCosts = showsCosts
+        self.copy = copy
+        self.retryRealtime = retryRealtime
+        self.openMemberDirectory = openMemberDirectory
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: MomoTheme.ChannelHeader.contentSpacing) {
             channelIdentity
-                .layoutPriority(1)
+                .frame(minWidth: 0)
 
             Spacer(minLength: MomoTheme.ChannelHeader.standardSpacing)
 
@@ -37,28 +61,22 @@ struct MomoChannelHeaderView: View {
                 }
 
                 memberCountControl
-
-                if let openDownloads {
-                    Button(action: openDownloads) {
-                        Image(systemName: "tray.and.arrow.down")
-                            .frame(
-                                width: MomoTheme.ChannelHeader.iconSize,
-                                height: MomoTheme.ChannelHeader.iconSize
-                            )
-                    }
-                    .buttonStyle(.borderless)
-                    .help(copy.appDownloads)
-                    .momoQuickTooltip(copy.appDownloads)
-                    .accessibilityLabel(copy.appDownloads)
-                    .accessibilityHint(copy.downloadsScopeNote)
-                    .accessibilityIdentifier("app-downloads-entry")
-                }
             }
             .fixedSize(horizontal: true, vertical: false)
+            .layoutPriority(2)
         }
         .padding(.horizontal, MomoTheme.ChannelHeader.edgeInset)
         .frame(minHeight: MomoTheme.ChannelHeader.minimumHeight)
-        .momoSurface(.panel, cornerRadius: 0)
+        .background(MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MomoTheme.subtleBorder.opacity(effectiveContrast == .increased ? 1 : 0.65))
+                .frame(height: effectiveContrast == .increased ? 2 : 1)
+        }
+    }
+
+    private var effectiveContrast: ColorSchemeContrast {
+        contrastOverride ?? systemContrast
     }
 
     private var channelIdentity: some View {

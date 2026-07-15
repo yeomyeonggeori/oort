@@ -3,6 +3,13 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-402 macOS Top Chrome / Roster / Dock / Downloads Polish (2026-07-16)
+
+- `NavigationSplitView`가 이미 unified toolbar 아래에서 시작하는데 AppKit content inset을 다시 더하던 이중 보정과 pane별 border/rounding/shadow를 제거했다. 좌측 workspace row, 가운데 channel header, 우측 member inspector가 각각 독립된 한 줄 header로 정렬되고 경계에는 separator 하나만 남는다. profile menu는 이동 animation 없이 즉시 열리며 footer button 위 약 16pt 간격을 유지한다.
+- 우측 roster는 전체/사람/에이전트 탭 대신 관리자·에이전트·온라인·자리 비움·오프라인으로 그룹화하고 search/profile/DM 경로를 보존했다. 채널 unread 합계를 Dock badge에 `1...99+`로 표시하고 0 또는 logout에서 지운다.
+- Downloads는 채널 선택과 무관한 앱 상단 우측 icon popover로 이동했다. security-scoped bookmark를 사용하는 폴더 열기·변경, 최대 50건의 영속 이력, 항목별 열기·Finder 보기·삭제를 제공하고 Updates는 profile menu에 유지한다. MOMO-394가 실제 채팅 첨부파일 전송 기록을 공급하기 전에는 가짜 이력을 만들지 않는다.
+- macOS build와 전체 294 tests가 0 failure로 PASS했다. 표준·좁은·light/dark real-window artifact에서 flat sidebar, pane header 정렬, grouped roster와 영문 inspector header를 재검증했고 실행 앱에서 downloads popover와 animation 없는 profile menu 동작을 확인했다. 최종 clean `macos-ui`와 fresh design-review evidence는 PR에 기록한다.
+
 ## MOMO-392 Channel Chrome + Contextual Navigation Polish (2026-07-15)
 
 - 채널 헤더를 48pt 한 줄 이름 중심으로 압축하고 주제는 tooltip/VoiceOver 보조 설명으로 내렸다. 창은 `unifiedCompact` 단일 타이틀바와 `NSWindow.contentLayoutRect` 기반 inset을 유지하며, 좁은 창의 member inspector도 측정된 채널 헤더 아래에서만 시작한다. 표준 1180x760, 좁은 980x620, wide 1800x900 실창 캡처에서 traffic light/sidebar/header/inspector 겹침이 없음을 확인했다.

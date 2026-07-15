@@ -28,6 +28,7 @@ enum MomoMemberDirectoryNavigation {
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var quickTooltipPresenter = MomoQuickTooltipPresenter()
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var detailPanePresentation = MomoDetailPanePresentationState()
     @State private var selectedProfileMemberID: MemberID?
@@ -42,6 +43,7 @@ public struct MomoMacRootView: View {
     @State private var showMemberInspector = true
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
+    @State private var showDownloadsPopover = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
@@ -133,8 +135,16 @@ public struct MomoMacRootView: View {
                 windowChromeMetrics = metrics
             }
             .frame(width: 0, height: 0)
+
         }
-        .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
+        // NavigationSplitView clips the native sidebar to a rounded container
+        // below unified toolbar chrome. Matching the window underlay to the
+        // sidebar panel prevents the clip from reading as a gap or shadow;
+        // each detail surface paints its own semantic background above it.
+        .background(
+            MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
+                .ignoresSafeArea()
+        )
         .preferredColorScheme(appearance.colorScheme)
         .focusedSceneValue(\.momoMacCommandActions, commandActions)
         .toolbar {
@@ -181,6 +191,15 @@ public struct MomoMacRootView: View {
                 )
                 .id(request.id)
             }
+        }
+        .onAppear {
+            MomoDockUnreadBadgeController.apply(viewModel.readStatesByChannel)
+        }
+        .onChange(of: viewModel.readStatesByChannel) { _, states in
+            MomoDockUnreadBadgeController.apply(states)
+        }
+        .onDisappear {
+            MomoDockUnreadBadgeController.clear()
         }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
@@ -321,9 +340,6 @@ public struct MomoMacRootView: View {
             openSettings: {
                 openDetailPane(.settings)
             },
-            openDownloads: {
-                openDetailPane(.downloads)
-            },
             openUpdates: {
                 openDetailPane(.updates)
             },
@@ -354,9 +370,6 @@ public struct MomoMacRootView: View {
                 sessionChrome?.switchSession()
             },
             onOpenMemberDirectory: memberDirectoryAction,
-            onOpenDownloads: {
-                openDetailPane(.downloads)
-            },
             focusComposerRequest: composerFocusRequest,
             onChannelHeaderHeightChange: { newHeight in
                 guard newHeight > 0, abs(channelHeaderHeight - newHeight) > 0.5 else { return }
@@ -368,6 +381,23 @@ public struct MomoMacRootView: View {
 
     @ToolbarContentBuilder
     private func globalToolbar(copy: MomoWorkspaceCopy) -> some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                showDownloadsPopover.toggle()
+            } label: {
+                Label(copy.appDownloads, systemImage: "arrow.down.circle")
+                    .labelStyle(.iconOnly)
+            }
+            .help(copy.appDownloads)
+            .momoQuickTooltip(copy.appDownloads)
+            .accessibilityLabel(copy.appDownloads)
+            .accessibilityHint(copy.downloadsScopeNote)
+            .accessibilityIdentifier("app-downloads-entry")
+            .popover(isPresented: $showDownloadsPopover, arrowEdge: .top) {
+                MomoDownloadsPopoverView(copy: copy)
+            }
+        }
+
         ToolbarItem(placement: .automatic) {
             Button {
                 showWorkspaceSearchUnavailable.toggle()
@@ -383,6 +413,7 @@ public struct MomoMacRootView: View {
                 workspaceSearchUnavailableView(copy: copy)
             }
         }
+
     }
 
     private func workspaceSearchUnavailableView(copy: MomoWorkspaceCopy) -> some View {
@@ -673,7 +704,7 @@ public struct MomoMacRootView: View {
             },
             openDownloads: {
                 quickSwitcherPresentation.dismiss()
-                openDetailPane(.downloads)
+                showDownloadsPopover = true
             },
             selectChannel: { number in
                 quickSwitcherPresentation.dismiss()
@@ -737,7 +768,11 @@ struct MomoChannelSettingsRequest: Identifiable {
 
 enum MomoWindowChromeLayout {
     static func contentTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
-        max(0, windowChromeTopInset)
+        // NavigationSplitView's detail column follows the same native content
+        // layout guide as its sidebar. Reapplying the AppKit measurement here
+        // creates an empty strip and vertically desynchronizes inspectors.
+        _ = windowChromeTopInset
+        return 0
     }
 
     static func inspectorTopInset(channelHeaderHeight: CGFloat) -> CGFloat {
@@ -745,7 +780,11 @@ enum MomoWindowChromeLayout {
     }
 
     static func sidebarTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
-        contentTopInset(windowChromeTopInset: windowChromeTopInset)
+        // NavigationSplitView's native sidebar column already begins below the
+        // unified toolbar. Applying NSWindow.contentLayoutRect again creates a
+        // second empty titlebar band above the workspace identity.
+        _ = windowChromeTopInset
+        return 0
     }
 }
 
