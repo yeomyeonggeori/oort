@@ -332,13 +332,56 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         workspace: WorkspaceID,
         with member: MemberID
     ) async throws -> Channel {
-        let response = try await post(
-            "/v1/workspaces/\(workspace.description)/dms",
-            body: OpenDirectMessageRequestDTO(memberId: member.rawValue),
-            authorized: true,
-            response: OpenDirectMessageResponseDTO.self
-        )
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              let sessionAccessToken = accessToken,
+              !sessionAccessToken.isEmpty
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
+        guard let currentMemberID = authenticatedMember?.id ?? Self.memberIDFromJWT(sessionAccessToken) else {
+            throw BackendError.notConnected
+        }
+        guard member != currentMemberID else {
+            throw BackendError.decoding("direct message target must differ from current member")
+        }
+        let responseData: Data
+        do {
+            responseData = try await postData(
+                "/v1/workspaces/\(workspace.description)/dms",
+                body: OpenDirectMessageRequestDTO(memberId: member.rawValue),
+                authorized: true
+            )
+        } catch {
+            guard connectionGeneration == generation,
+                  self.workspace == sessionWorkspace,
+                  accessToken == sessionAccessToken
+            else {
+                throw CancellationError()
+            }
+            throw error
+        }
+        guard connectionGeneration == generation,
+              self.workspace == sessionWorkspace,
+              accessToken == sessionAccessToken
+        else {
+            throw CancellationError()
+        }
+        let response: OpenDirectMessageResponseDTO
+        do {
+            response = try decoder.decode(OpenDirectMessageResponseDTO.self, from: responseData)
+        } catch {
+            throw BackendError.decoding(String(describing: error))
+        }
+        let participantIDs = try response.channel.directMessageParticipantIDs()
         let channel = try response.channel.channel()
+        guard channel.workspaceId == sessionWorkspace,
+              channel.kind == .dm,
+              Set(participantIDs) == Set([currentMemberID, member])
+        else {
+            throw BackendError.decoding("direct message response scope mismatch")
+        }
         if let index = cachedChannels?.firstIndex(where: { $0.id == channel.id }) {
             cachedChannels?[index] = channel
         } else {
@@ -1232,6 +1275,22 @@ private struct ChannelDTO: Decodable {
     let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
+
+    func directMessageParticipantIDs() throws -> [MemberID] {
+        guard let memberIds, memberIds.count == 2 else {
+            throw BackendError.decoding("direct message response scope mismatch")
+        }
+        let participants = try memberIds.map { rawMemberID in
+            guard let memberID = MemberID(uuidString: rawMemberID) else {
+                throw BackendError.decoding("direct message response scope mismatch")
+            }
+            return memberID
+        }
+        guard Set(participants).count == 2 else {
+            throw BackendError.decoding("direct message response scope mismatch")
+        }
+        return participants
+    }
 
     func channel() throws -> Channel {
         guard let id = ChannelID(uuidString: id) else {

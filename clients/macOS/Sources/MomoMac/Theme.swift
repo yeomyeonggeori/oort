@@ -317,6 +317,27 @@ public enum MomoTheme {
         public static let edgeInset: CGFloat = 24
     }
 
+    /// Compact right-side roster and profile popover for the active conversation.
+    public enum MemberInspector {
+        public static let attachedWidth: CGFloat = 264
+        public static let overlayWidth: CGFloat = 320
+        public static let attachedMinimumDetailWidth: CGFloat = 760
+        public static let profileWidth: CGFloat = 320
+        public static let profileHeight: CGFloat = 320
+        public static let profileIconSize: CGFloat = 48
+        public static let avatarSize: CGFloat = 32
+        public static let presenceSize: CGFloat = 8
+        public static let rowMinimumHeight: CGFloat = 44
+
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let edgeInset: CGFloat = 16
+        public static let rowCornerRadius = MomoTheme.cornerSmall
+        public static let hoverBackground = Color.primary.opacity(0.06)
+    }
+
     /// Shared visual grammar for AGENT identity and capability metadata.
     public enum AgentBadge {
         public static let spacing: CGFloat = 4

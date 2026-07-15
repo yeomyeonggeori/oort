@@ -97,6 +97,12 @@ public enum WorkspaceNameUpdateIssue: Sendable, Equatable {
     case connection
 }
 
+public enum MomoDirectMessageOpenOutcome: Sendable, Equatable {
+    case opened(ChannelID)
+    case ignored
+    case failed
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -245,6 +251,8 @@ public final class ChatViewModel: ObservableObject {
     private var workspaceNameUpdateGeneration: UInt64 = 0
     private var channelCreateOperationGeneration: UInt64 = 0
     private var channelCreateSessionState: ChannelCreateSessionState = .disconnected
+    private var directMessageOperationTokens: [MemberID: UUID] = [:]
+    private var navigationIntentGeneration: UInt64 = 0
 
     var activeChannelSubscriptionCount: Int { channelSubscriptions.count }
 
@@ -442,6 +450,7 @@ public final class ChatViewModel: ObservableObject {
     public func clearSessionSensitiveState() async {
         invalidateChannelCreationForSessionChange()
         workspaceIdentitySessionGeneration &+= 1
+        navigationIntentGeneration &+= 1
         workspaceIdentityLoadGeneration &+= 1
         workspaceNameUpdateGeneration &+= 1
         channelSubscriptions.values.forEach { $0.cancel() }
@@ -512,6 +521,7 @@ public final class ChatViewModel: ObservableObject {
         approvalDecisionsInFlight = []
         channelMemberMutationIds = []
         directMessageMutationIds = []
+        directMessageOperationTokens = [:]
         directMessageError = nil
         memberDirectoryIsRefreshing = false
         memberDirectoryError = nil
@@ -861,10 +871,7 @@ public final class ChatViewModel: ObservableObject {
             subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
             messagesByChannel[result.channel.id] = messagesByChannel[result.channel.id] ?? []
-            recordChannelSelection(result.channel.id)
-            selectedChannelId = result.channel.id
-            activeTimelineChannelId = result.channel.id
-            subscribeRealtimeStatus(channel: result.channel.id)
+            await navigateAsUser(to: result.channel.id, history: .recordSelection)
             return true
         } catch {
             guard !Self.isCancellation(error), !Task.isCancelled,
@@ -962,18 +969,33 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func startDirectMessage(with memberID: MemberID) async {
+    @discardableResult
+    public func startDirectMessage(with memberID: MemberID) async -> MomoDirectMessageOpenOutcome {
         guard let workspaceId,
               !isCurrentUser(memberID),
+              member(memberID)?.status == .active,
               !directMessageMutationIds.contains(memberID)
-        else { return }
+        else { return .ignored }
 
+        let operationToken = UUID()
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let navigationIntent = beginNavigationIntent()
+        directMessageOperationTokens[memberID] = operationToken
         directMessageMutationIds.insert(memberID)
         directMessageError = nil
-        defer { directMessageMutationIds.remove(memberID) }
+        defer {
+            if directMessageOperationTokens[memberID] == operationToken {
+                directMessageOperationTokens.removeValue(forKey: memberID)
+                directMessageMutationIds.remove(memberID)
+            }
+        }
 
         do {
             let channel = try await chat.openDirectMessage(workspace: workspaceId, with: memberID)
+            try Task.checkCancellation()
+            guard directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId)
+            else { return .ignored }
             if let index = channels.firstIndex(where: { $0.id == channel.id }) {
                 channels[index] = channel
             } else {
@@ -987,12 +1009,30 @@ public final class ChatViewModel: ObservableObject {
             }
             ensureReadStateExists(channel: channel.id)
             subscribe(channel: channel.id)
+            guard !Task.isCancelled,
+                  navigationIntentGeneration == navigationIntent
+            else { return .ignored }
             directMessageError = nil
             clearConnectionErrorState()
-            await selectChannel(channel.id)
+            recordChannelSelection(channel.id)
+            guard !Task.isCancelled else { return .ignored }
+            await activateChannel(channel.id)
+            guard !Task.isCancelled,
+                  directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  navigationIntentGeneration == navigationIntent,
+                  selectedChannelId == channel.id
+            else { return .ignored }
+            return .opened(channel.id)
         } catch {
+            guard directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  navigationIntentGeneration == navigationIntent,
+                  !Self.isCancellation(error)
+            else { return .ignored }
             directMessageError = String(describing: error)
             reportConnectionError(error, as: .actionFailed)
+            return .failed
         }
     }
 
@@ -1006,8 +1046,33 @@ public final class ChatViewModel: ObservableObject {
 
     /// Select a channel: load history + (re)subscribe to its realtime stream.
     public func selectChannel(_ id: ChannelID) async {
-        recordChannelSelection(id)
+        await navigateAsUser(to: id, history: .recordSelection)
+    }
+
+    private enum UserNavigationHistoryMutation {
+        case recordSelection
+        case traverse(to: Int)
+    }
+
+    private func navigateAsUser(
+        to id: ChannelID,
+        history: UserNavigationHistoryMutation
+    ) async {
+        _ = beginNavigationIntent()
+        switch history {
+        case .recordSelection:
+            recordChannelSelection(id)
+        case .traverse(let destinationIndex):
+            channelNavigationIndex = destinationIndex
+            recordRecentChannel(id)
+        }
         await activateChannel(id)
+    }
+
+    @discardableResult
+    private func beginNavigationIntent() -> UInt64 {
+        navigationIntentGeneration &+= 1
+        return navigationIntentGeneration
     }
 
     public var canNavigateChannelHistoryBackward: Bool {
@@ -1032,19 +1097,15 @@ public final class ChatViewModel: ObservableObject {
     public func navigateChannelHistoryBackward() async {
         guard canNavigateChannelHistoryBackward, let channelNavigationIndex else { return }
         let destinationIndex = self.channelNavigationHistory.index(before: channelNavigationIndex)
-        self.channelNavigationIndex = destinationIndex
         let id = channelNavigationHistory[destinationIndex]
-        recordRecentChannel(id)
-        await activateChannel(id)
+        await navigateAsUser(to: id, history: .traverse(to: destinationIndex))
     }
 
     public func navigateChannelHistoryForward() async {
         guard canNavigateChannelHistoryForward, let channelNavigationIndex else { return }
         let destinationIndex = self.channelNavigationHistory.index(after: channelNavigationIndex)
-        self.channelNavigationIndex = destinationIndex
         let id = channelNavigationHistory[destinationIndex]
-        recordRecentChannel(id)
-        await activateChannel(id)
+        await navigateAsUser(to: id, history: .traverse(to: destinationIndex))
     }
 
     @discardableResult

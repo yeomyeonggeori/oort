@@ -13,27 +13,56 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         let name: String
         let size: CGSize
         let scheme: ColorScheme
+        let initialDetailPane: MomoMacDetailPane?
     }
 
     private let standardLight = Scenario(
         name: "standard-light",
         size: CGSize(width: 1_180, height: 760),
-        scheme: .light
+        scheme: .light,
+        initialDetailPane: .approvals
     )
     private let narrowDark = Scenario(
         name: "narrow-dark",
         size: CGSize(width: 980, height: 620),
-        scheme: .dark
+        scheme: .dark,
+        initialDetailPane: .approvals
     )
     private let attachedLight = Scenario(
         name: "attached-light",
         size: CGSize(width: 1_800, height: 900),
-        scheme: .light
+        scheme: .light,
+        initialDetailPane: .approvals
     )
     private let attachedDark = Scenario(
         name: "attached-dark",
         size: CGSize(width: 1_800, height: 900),
-        scheme: .dark
+        scheme: .dark,
+        initialDetailPane: .approvals
+    )
+    private let memberInspectorStandardLight = Scenario(
+        name: "member-inspector-standard-light",
+        size: CGSize(width: 1_180, height: 760),
+        scheme: .light,
+        initialDetailPane: nil
+    )
+    private let memberInspectorStandardDark = Scenario(
+        name: "member-inspector-standard-dark",
+        size: CGSize(width: 1_180, height: 760),
+        scheme: .dark,
+        initialDetailPane: nil
+    )
+    private let memberInspectorNarrowLight = Scenario(
+        name: "member-inspector-narrow-light",
+        size: CGSize(width: 980, height: 620),
+        scheme: .light,
+        initialDetailPane: nil
+    )
+    private let memberInspectorNarrowDark = Scenario(
+        name: "member-inspector-narrow-dark",
+        size: CGSize(width: 980, height: 620),
+        scheme: .dark,
+        initialDetailPane: nil
     )
 
     private func rootView(for scenario: Scenario) async throws -> some View {
@@ -57,7 +86,7 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         return MomoMacRootView(
             existingViewModel: viewModel,
             sessionChrome: nil,
-            initialDetailPane: .approvals,
+            initialDetailPane: scenario.initialDetailPane,
             initialSplitViewVisibility: .all
         )
         .frame(width: scenario.size.width, height: scenario.size.height)
@@ -213,6 +242,24 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             try writeDesignReviewArtifact(
                 image,
                 named: "momo-379-window-chrome-\(scenario.name).png"
+            )
+            XCTAssertEqual(image.size.width, scenario.size.width)
+            XCTAssertEqual(image.size.height, scenario.size.height)
+        }
+    }
+
+    func testMemberInspectorWritesStandardNarrowLightDarkRealWindowArtifacts() async throws {
+        let scenarios = [
+            memberInspectorStandardLight,
+            memberInspectorStandardDark,
+            memberInspectorNarrowLight,
+            memberInspectorNarrowDark,
+        ]
+        for scenario in scenarios {
+            let image = try await render(scenario, requiresWindowServer: true)
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-385-\(scenario.name).png"
             )
             XCTAssertEqual(image.size.width, scenario.size.width)
             XCTAssertEqual(image.size.height, scenario.size.height)

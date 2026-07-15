@@ -10,6 +10,12 @@
 - MOMO-390: `{$APP_DOMAIN}` site(SPA file_server+`/v1` proxy 같은 오리진+SPA CSP)가 랜딩했다. 미설정 하위호환은 sentinel `momo-app-domain-unset.localhost` fail-closed(전 경로 404, ACME 무발생 — 리뷰어 adapt/런타임 실측)로 보장하고, 기본 e2e 렌더는 byte-identical. `web_serving_smoke.sh` 전 항목 PASS.
 - 머지 후 리뷰 후속 반영: MOMO-391 수용기준에 `web_serving_smoke.sh` 게이트 포함(fail-closed 회귀 방어), drift 게이트 픽스처 비밀번호 랜덤화, CSP `img-src data:` 의도 주석, LOCAL_PR_GATE spec-first 문구. 선재 발견(staging smoke의 `agentwork` namespace 불일치 — main 기저 FAIL)은 DEVIATION_LOG `pending`.
 
+## MOMO-385 Member Inspector + Canonical DM Navigation (2026-07-15)
+
+- current-channel roster를 Discord식 right inspector로 옮기고 search/people/agent filter, avatar/presence/status/role/capability, copy/mention/context menu를 제공한다. 최신 screenshot 지시에 맞춰 member row는 compact native profile popover를 열고 그 안의 단일 DM action이 canonical DM을 선택한다. 표준 창은 264pt attached inspector, 좁은 창은 scrim 위 320pt overlay로 전환해 timeline과 겹치거나 폭을 밀지 않는다.
+- `ChatViewModel`은 self/inactive/in-flight를 차단하고 typed DM outcome과 global navigation intent generation으로 A/B 동시 open·직접 선택·history back/forward·channel create success 뒤 stale success/error가 최신 화면 의도나 readable error를 덮지 못하게 한다. user-driven channel selection은 공통 navigation 경로에서 intent를 무효화한다. stale success는 canonical channel cache까지만 허용하고, 취소를 무시하는 backend 응답도 post-await cache/navigation 전에 `Task` cancellation로 차단한다. REST 응답은 raw participant가 정확히 2개의 서로 다른 valid ID이며 Set이 exact current+target인지 검증하고, current member 미확정·self·추가·중복·invalid participant를 POST 전후에서 fail-closed한다. server는 transaction 내부 target miss를 결과값으로 반환해 cross-workspace member를 500이 아닌 RLS-safe 404로 변환한다.
+- narrow overlay는 timeline/composer를 hit-test와 AX tree에서 숨기고 search initial focus·close 뒤 composer focus 복귀를 실창 테스트로 검증한다. DM loading은 label/width를 유지하며 AX value만 `DM 여는 중`/`Opening DM`으로 보강한다. 캡처 하네스는 production `MomoMemberProfilePopoverView`를 직접 사용한다. DM focused 21건과 profile/focus 실창 3건, design preflight, standard/narrow light/dark+profile light/dark WindowServer 6건, fresh design review(Blocker 0/High 0/Medium 0)가 PASS했으며 final clean local gate 증거는 PR handoff에 기록한다.
+
 ## MOMO-384 Native Channel Creation + Window Tooltip (2026-07-15)
 
 - sidebar inline form을 public/private, name, topic을 받는 native SwiftUI sheet로 교체했다. server와 같은 trim+lowercase+regex validation, 첫 name focus, Esc/Return, localized retry/error를 제공하고 기존 REST create 경로 성공 시 sheet를 닫아 새 channel을 선택한다. local 실패는 bounded issue만 보관하며 raw error 문자열은 장기 `Published` state에 남기지 않는다. 401/not-connected는 sheet를 닫고 기존 전역 session-expired 로그인 복구 CTA로 전달한다.

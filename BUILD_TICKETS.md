@@ -1904,6 +1904,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] member directory를 대화 컨텍스트를 보존하는 right inspector 중심으로 정리하고 search/filter/profile/DM action 유지.
 - [ ] self/inactive/error 상태를 명확히 처리하고 two members + one agent fixture에서 idempotency/RLS 검증.
 - [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
+- 진행: PR #406 review fixes와 worker gates PASS, `status:needs-review`. 완료 체크와 merge 판정은 momo-main 담당.
 
 ### ☐ MOMO-386 (`#392`) 수용기준 — Workspace search v0 `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-384, MOMO-385
 - [ ] workspace-scoped RLS server search endpoint 구현. tenant token만 허용하고 BYPASSRLS 금지.

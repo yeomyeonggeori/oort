@@ -86,7 +86,7 @@
 | ADR-0112 D6 hotfix | issue `#379`/PR `#380` | MOMO-379 창 크롬 정합 2차 | `done` (`cef7430`, planning baseline `b5e572b`) | 완료 |
 | 슈퍼앱 엔진 기획 통합 | `2026-07-14-pln-20260714-02-superapp-engine.md` | MOMO-381 `#383` | `done` (PR #384, main `011b630`) | 완료 — ADR draft queue 대기 |
 | Workspace-first UX planning | `2026-07-15-workspace-first-superapp-shell.md` | MOMO-382 `#385` | `done` (PR #386, main `6f89d3b`) | 실행 체인 정본화 완료 |
-| Workspace-first UX builders | 같은 패킷 | MOMO-383 `#387` → MOMO-384 `#390` / MOMO-385 `#391` → MOMO-386 `#392` | `in-progress` | 383 review fix·full worker gates 완료, momo-main final rereview 후 390/391 unblock |
+| Workspace-first UX builders | 같은 패킷 | MOMO-383 `#387` → MOMO-384 `#390` / MOMO-385 `#391` → MOMO-386 `#392` | `in-progress` | 383/384 merged, 385 PR #406 final navigation/cancellation review fixes 완료 / needs-review handoff |
 | **ADR-0119 웹 첫 배치** | `2026-07-15-adr-0119-web-track.md` | MOMO-389 `#395` → MOMO-390 `#396` → MOMO-391 `#397` | 389 `done`(PR #404, `6fe746f`) · 390 `done`(PR #403, `5ecd645`) · **391 unblock→착수** | 오케스트레이션: Fable(엔진/인프라 트랙 겸임, Fable 구현+독립 리뷰 사이클) |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.

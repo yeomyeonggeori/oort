@@ -37,7 +37,9 @@ public struct MomoMacRootView: View {
     @State private var windowChromeMetrics = MomoWindowChromeMetrics.zero
     @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
-    @State private var showMemberDirectory = false
+    @State private var showMemberInspector = true
+    @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
+    @State private var composerFocusRequest: UInt64 = 0
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
@@ -107,7 +109,10 @@ public struct MomoMacRootView: View {
                 detailLayout(
                     copy: copy,
                     availableDetailWidth: geometry.size.width,
-                    useAttachedInspector: geometry.size.width >= Self.attachedInspectorMinimumWindowWidth
+                    useAttachedInspector: geometry.size.width >= Self.attachedInspectorMinimumWindowWidth,
+                    useAttachedMemberInspector: MomoMemberInspectorLayout.usesAttachedInspector(
+                        detailWidth: geometry.size.width
+                    )
                 )
                 .frame(
                     width: geometry.size.width,
@@ -159,9 +164,6 @@ public struct MomoMacRootView: View {
         .sheet(isPresented: $showKeyboardShortcuts) {
             MomoKeyboardShortcutsView(copy: copy)
         }
-        .sheet(isPresented: $showMemberDirectory) {
-            MemberDirectoryView(viewModel: viewModel)
-        }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
                 detailPanePresentation.redirect(to: .approvals)
@@ -172,16 +174,24 @@ public struct MomoMacRootView: View {
     private func detailLayout(
         copy: MomoWorkspaceCopy,
         availableDetailWidth: CGFloat,
-        useAttachedInspector: Bool
+        useAttachedInspector: Bool,
+        useAttachedMemberInspector: Bool
     ) -> some View {
         let inspectorTopInset = MomoWindowChromeLayout.inspectorTopInset(
             channelHeaderHeight: channelHeaderHeight
+        )
+        let showsMemberInspector = showMemberInspector && !showDetailPane
+        let blocksTimelineForMemberOverlay = MomoMemberInspectorLayout.blocksTimelineInteraction(
+            isPresented: showsMemberInspector,
+            usesAttachedInspector: useAttachedMemberInspector
         )
 
         return ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
                 messageTimeline
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(!blocksTimelineForMemberOverlay)
+                    .accessibilityHidden(blocksTimelineForMemberOverlay)
 
                 if showDetailPane && useAttachedInspector {
                     Divider()
@@ -202,6 +212,12 @@ public struct MomoMacRootView: View {
                     }
                     .frame(width: Self.inspectorWidth)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
+                } else if showsMemberInspector && useAttachedMemberInspector {
+                    Divider()
+
+                    memberInspectorView(copy: copy, isAttached: true)
+                        .frame(width: MomoTheme.MemberInspector.attachedWidth)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -231,9 +247,27 @@ public struct MomoMacRootView: View {
                         y: inspectorTopInset + regionHeight / 2
                     )
                 }
+            } else if showsMemberInspector && !useAttachedMemberInspector {
+                ZStack(alignment: .trailing) {
+                    MomoTheme.modalScrim
+                        .transition(.opacity)
+                        .contentShape(Rectangle())
+                        .accessibilityHidden(true)
+                        .onTapGesture {
+                            closeMemberInspector()
+                        }
+
+                    memberInspectorView(copy: copy, isAttached: false)
+                        .frame(width: memberInspectorOverlayWidth(for: availableDetailWidth))
+                        .padding(.trailing, MomoTheme.MemberInspector.standardSpacing)
+                        .padding(.vertical, MomoTheme.MemberInspector.standardSpacing)
+                        .accessibilityAddTraits(.isModal)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
             }
         }
         .animation(layoutAnimation, value: showDetailPane)
+        .animation(layoutAnimation, value: showMemberInspector)
     }
 
     private func sidebar(copy: MomoWorkspaceCopy) -> some View {
@@ -267,6 +301,9 @@ public struct MomoMacRootView: View {
             openUpdates: {
                 openDetailPane(.updates)
             },
+            openMemberDirectory: {
+                openWorkspaceMemberInspector()
+            },
             showsWorkspaceHeader: true
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -283,6 +320,7 @@ public struct MomoMacRootView: View {
                 sessionChrome?.switchSession()
             },
             onOpenMemberDirectory: memberDirectoryAction,
+            focusComposerRequest: composerFocusRequest,
             onChannelHeaderHeightChange: { newHeight in
                 guard newHeight > 0, abs(channelHeaderHeight - newHeight) > 0.5 else { return }
                 channelHeaderHeight = newHeight
@@ -295,9 +333,52 @@ public struct MomoMacRootView: View {
         MomoMemberDirectoryNavigation.action(
             override: onOpenMemberDirectory,
             presentDirectory: {
-                showMemberDirectory = true
+                openChannelMemberInspector()
             }
         )
+    }
+
+    private func memberInspectorView(copy: MomoWorkspaceCopy, isAttached: Bool) -> some View {
+        MomoChannelMemberInspectorView(
+            viewModel: viewModel,
+            audience: memberInspectorAudience,
+            copy: copy,
+            close: closeMemberInspector,
+            didOpenDirectMessage: {
+                memberInspectorAudience = .channel
+                if !isAttached {
+                    closeMemberInspector()
+                }
+            }
+        )
+    }
+
+    private func openChannelMemberInspector() {
+        withAnimation(layoutAnimation) {
+            if showMemberInspector, memberInspectorAudience == .channel, !showDetailPane {
+                showMemberInspector = false
+                composerFocusRequest &+= 1
+            } else {
+                detailPanePresentation.close()
+                memberInspectorAudience = .channel
+                showMemberInspector = true
+            }
+        }
+    }
+
+    private func openWorkspaceMemberInspector() {
+        withAnimation(layoutAnimation) {
+            detailPanePresentation.close()
+            memberInspectorAudience = .workspace
+            showMemberInspector = true
+        }
+    }
+
+    private func closeMemberInspector() {
+        withAnimation(layoutAnimation) {
+            showMemberInspector = false
+            composerFocusRequest &+= 1
+        }
     }
 
     private func detailPaneView(copy: MomoWorkspaceCopy, presentation: MomoInspectorPresentation) -> some View {
@@ -432,6 +513,13 @@ public struct MomoMacRootView: View {
         min(Self.inspectorWidth, max(340, detailWidth - 28))
     }
 
+    private func memberInspectorOverlayWidth(for detailWidth: CGFloat) -> CGFloat {
+        min(
+            MomoTheme.MemberInspector.overlayWidth,
+            max(MomoTheme.MemberDirectory.listIdealWidth, detailWidth - 24)
+        )
+    }
+
     private var layoutAnimation: Animation? {
         reduceMotion ? nil : MomoTheme.Motion.stateChange
     }
@@ -513,6 +601,19 @@ enum MomoWindowChromeLayout {
 
     static func sidebarTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
         contentTopInset(windowChromeTopInset: windowChromeTopInset)
+    }
+}
+
+enum MomoMemberInspectorLayout {
+    static func usesAttachedInspector(detailWidth: CGFloat) -> Bool {
+        detailWidth >= MomoTheme.MemberInspector.attachedMinimumDetailWidth
+    }
+
+    static func blocksTimelineInteraction(
+        isPresented: Bool,
+        usesAttachedInspector: Bool
+    ) -> Bool {
+        isPresented && !usesAttachedInspector
     }
 }
 
