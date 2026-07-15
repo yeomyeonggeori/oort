@@ -39,7 +39,7 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
                 copy: MomoWorkspaceCopy(language: .korean),
                 retryRealtime: nil,
                 openMemberDirectory: {},
-                openSettings: {}
+                openDownloads: {}
             )
 
             Divider()

@@ -44,6 +44,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
     private var realtimeStatusStreams: [ChannelID: [UUID: AsyncStream<RealtimeConnectionStatus>.Continuation]] = [:]
     private var readStateStreams: [MemberID: [UUID: AsyncThrowingStream<ChannelReadState, Error>.Continuation]] = [:]
+    private var demoSeedBaseTimestampMs: Int64?
 
     public init() {}
 
@@ -53,8 +54,11 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     /// Returns the seeded workspace + first channel for convenience.
     public func seedDemo(
         capabilitiesByHandle: [String: [String]] = [:],
-        displayNamesByHandle: [String: String] = [:]
+        displayNamesByHandle: [String: String] = [:],
+        baseTimestampMs: Int64? = nil
     ) -> DemoSeed {
+        demoSeedBaseTimestampMs = baseTimestampMs
+        defer { demoSeedBaseTimestampMs = nil }
         let ws = WorkspaceID()
         workspace = ws
         workspaceProfile = Workspace(id: ws, slug: "momo-demo", name: "momo")
@@ -796,9 +800,14 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         role: MembershipRole = .member
     ) async throws -> ChannelMembership {
         guard connected else { throw BackendError.notConnected }
-        guard let workspace = channels.first(where: { $0.id == channel })?.workspaceId else {
+        guard let targetChannel = channels.first(where: {
+            $0.id == channel
+                && !$0.isArchived
+                && ($0.kind == .publicChannel || $0.kind == .privateChannel)
+        }) else {
             throw BackendError.problem(status: 404, title: "channel or member not found", detail: "channel \(channel)")
         }
+        let workspace = targetChannel.workspaceId
         guard members.contains(where: { $0.id == member && $0.workspaceId == workspace && $0.status == .active }) else {
             throw BackendError.problem(status: 404, title: "channel or member not found", detail: "member \(member)")
         }
@@ -815,7 +824,11 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
 
     public func removeMember(_ member: MemberID, from channel: ChannelID) async throws -> ChannelMembership {
         guard connected else { throw BackendError.notConnected }
-        guard let workspace = channels.first(where: { $0.id == channel })?.workspaceId,
+        guard let workspace = channels.first(where: {
+            $0.id == channel
+                && !$0.isArchived
+                && ($0.kind == .publicChannel || $0.kind == .privateChannel)
+        })?.workspaceId,
               let stored = members.first(where: { $0.id == member && $0.channelIds.contains(channel) }) else {
             throw BackendError.problem(status: 404, title: "active channel membership not found", detail: nil)
         }
@@ -1076,12 +1089,14 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     ) -> Message {
         let next = (seqByChannel[channel] ?? 0) + 1
         seqByChannel[channel] = next
+        let timestamp = demoSeedBaseTimestampMs.map { $0 + (next * 60_000) }
+            ?? Int64(Date().timeIntervalSince1970 * 1000)
         let msg = Message(
             id: MessageID(), channelId: channel, seq: next,
-            hlcTs: Int64(Date().timeIntervalSince1970 * 1000), hlcCount: 0,
+            hlcTs: timestamp, hlcCount: 0,
             authorMemberId: author, type: type, state: .sent, body: body, props: props,
             rootId: rootId, replyToId: replyToId, runId: runId, clientMsgId: clientMsgId,
-            createdAtMs: Int64(Date().timeIntervalSince1970 * 1000))
+            createdAtMs: timestamp)
         messagesByChannel[channel, default: []].append(msg)
         emit(.message(msg), to: channel)
         return msg

@@ -37,6 +37,8 @@ public struct MomoMacRootView: View {
     @State private var windowChromeMetrics = MomoWindowChromeMetrics.zero
     @State private var quickSwitcherPresentation = MomoQuickSwitcherPresentationState()
     @State private var showKeyboardShortcuts = false
+    @State private var showWorkspaceSearchUnavailable = false
+    @State private var channelSettingsRequest: MomoChannelSettingsRequest?
     @State private var showMemberInspector = true
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
@@ -135,6 +137,9 @@ public struct MomoMacRootView: View {
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
         .preferredColorScheme(appearance.colorScheme)
         .focusedSceneValue(\.momoMacCommandActions, commandActions)
+        .toolbar {
+            globalToolbar(copy: copy)
+        }
         .overlay {
             if quickSwitcherPresentation.isPresented {
                 ZStack {
@@ -163,6 +168,19 @@ public struct MomoMacRootView: View {
         }
         .sheet(isPresented: $showKeyboardShortcuts) {
             MomoKeyboardShortcutsView(copy: copy)
+        }
+        .sheet(item: $channelSettingsRequest) { request in
+            if let channel = viewModel.channels.first(where: { $0.id == request.channelID }) {
+                MomoChannelSettingsSheet(
+                    copy: copy,
+                    channel: channel,
+                    presentation: MomoLocalChannelPresentationStore.presentation(for: channel),
+                    viewModel: viewModel,
+                    initialTab: request.initialTab,
+                    onSavePresentation: { _ in }
+                )
+                .id(request.id)
+            }
         }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
@@ -248,21 +266,29 @@ public struct MomoMacRootView: View {
                     )
                 }
             } else if showsMemberInspector && !useAttachedMemberInspector {
-                ZStack(alignment: .trailing) {
-                    MomoTheme.modalScrim
-                        .transition(.opacity)
-                        .contentShape(Rectangle())
-                        .accessibilityHidden(true)
-                        .onTapGesture {
-                            closeMemberInspector()
-                        }
+                GeometryReader { inspectorGeometry in
+                    let regionHeight = max(0, inspectorGeometry.size.height - inspectorTopInset)
+                    ZStack(alignment: .trailing) {
+                        MomoTheme.modalScrim
+                            .transition(.opacity)
+                            .contentShape(Rectangle())
+                            .accessibilityHidden(true)
+                            .onTapGesture {
+                                closeMemberInspector()
+                            }
 
-                    memberInspectorView(copy: copy, isAttached: false)
-                        .frame(width: memberInspectorOverlayWidth(for: availableDetailWidth))
-                        .padding(.trailing, MomoTheme.MemberInspector.standardSpacing)
-                        .padding(.vertical, MomoTheme.MemberInspector.standardSpacing)
-                        .accessibilityAddTraits(.isModal)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        memberInspectorView(copy: copy, isAttached: false)
+                            .frame(width: memberInspectorOverlayWidth(for: availableDetailWidth))
+                            .padding(.trailing, MomoTheme.MemberInspector.standardSpacing)
+                            .padding(.vertical, MomoTheme.MemberInspector.standardSpacing)
+                            .accessibilityAddTraits(.isModal)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                    }
+                    .frame(width: inspectorGeometry.size.width, height: regionHeight)
+                    .position(
+                        x: inspectorGeometry.size.width / 2,
+                        y: inspectorTopInset + regionHeight / 2
+                    )
                 }
             }
         }
@@ -304,6 +330,14 @@ public struct MomoMacRootView: View {
             openMemberDirectory: {
                 openWorkspaceMemberInspector()
             },
+            openChannelSettings: { channelID in
+                presentChannelSettings(channelID, initialTab: .general)
+            },
+            inviteToChannel: viewModel.canManageWorkspace
+                ? { channelID in
+                    presentChannelSettings(channelID, initialTab: .members)
+                }
+                : nil,
             showsWorkspaceHeader: true
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -320,6 +354,9 @@ public struct MomoMacRootView: View {
                 sessionChrome?.switchSession()
             },
             onOpenMemberDirectory: memberDirectoryAction,
+            onOpenDownloads: {
+                openDetailPane(.downloads)
+            },
             focusComposerRequest: composerFocusRequest,
             onChannelHeaderHeightChange: { newHeight in
                 guard newHeight > 0, abs(channelHeaderHeight - newHeight) > 0.5 else { return }
@@ -327,6 +364,46 @@ public struct MomoMacRootView: View {
             }
         )
             .frame(minWidth: 0)
+    }
+
+    @ToolbarContentBuilder
+    private func globalToolbar(copy: MomoWorkspaceCopy) -> some ToolbarContent {
+        ToolbarItem(placement: .automatic) {
+            Button {
+                showWorkspaceSearchUnavailable.toggle()
+            } label: {
+                Label(copy.workspaceSearch, systemImage: "magnifyingglass")
+                    .labelStyle(.iconOnly)
+            }
+            .help(copy.workspaceSearchUnavailableTitle)
+            .accessibilityLabel(copy.workspaceSearch)
+            .accessibilityHint(copy.workspaceSearchUnavailableDetail)
+            .accessibilityIdentifier("workspace-search-entry")
+            .popover(isPresented: $showWorkspaceSearchUnavailable, arrowEdge: .top) {
+                workspaceSearchUnavailableView(copy: copy)
+            }
+        }
+    }
+
+    private func workspaceSearchUnavailableView(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.contentSpacing) {
+            Label(copy.workspaceSearchUnavailableTitle, systemImage: "magnifyingglass")
+                .font(MomoTheme.Typography.sectionHeader)
+            Text(copy.workspaceSearchUnavailableDetail)
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                showWorkspaceSearchUnavailable = false
+                showKeyboardShortcuts = false
+                quickSwitcherPresentation.present()
+            } label: {
+                Label(copy.openQuickSwitcher, systemImage: "command")
+            }
+            .keyboardShortcut("k", modifiers: .command)
+        }
+        .padding(MomoTheme.ChannelHeader.edgeInset)
+        .frame(width: MomoTheme.ChannelHeader.searchUnavailableWidth, alignment: .leading)
     }
 
     private var memberDirectoryAction: MomoMemberDirectoryHook {
@@ -509,6 +586,23 @@ public struct MomoMacRootView: View {
         }
     }
 
+    private func presentChannelSettings(
+        _ channelID: ChannelID,
+        initialTab: MomoChannelSettingsTab
+    ) {
+        guard let channel = viewModel.channels.first(where: { $0.id == channelID }),
+              MomoChannelActionPolicy.canOpenSettings(in: channel),
+              initialTab != .members || MomoChannelActionPolicy.canManageMembers(
+                in: channel,
+                canManageWorkspace: viewModel.canManageWorkspace
+              )
+        else { return }
+        channelSettingsRequest = MomoChannelSettingsRequest(
+            channelID: channelID,
+            initialTab: initialTab
+        )
+    }
+
     private func overlayInspectorWidth(for detailWidth: CGFloat) -> CGFloat {
         min(Self.inspectorWidth, max(340, detailWidth - 28))
     }
@@ -540,6 +634,11 @@ public struct MomoMacRootView: View {
         detailPanePresentation.pane
     }
 
+    private var selectedChannel: Channel? {
+        guard let selectedChannelID = viewModel.selectedChannelId else { return nil }
+        return viewModel.channels.first(where: { $0.id == selectedChannelID })
+    }
+
     private var commandActions: MomoMacCommandActions {
         MomoMacCommandActions(
             language: language,
@@ -547,9 +646,34 @@ public struct MomoMacRootView: View {
             canNavigateBackward: viewModel.canNavigateChannelHistoryBackward,
             canNavigateForward: viewModel.canNavigateChannelHistoryForward,
             canNavigateUnreadChannels: viewModel.canNavigateUnreadChannels,
+            canOpenSelectedChannelSettings: selectedChannel.map {
+                MomoChannelActionPolicy.canOpenSettings(in: $0)
+            } ?? false,
+            canInviteToSelectedChannel: selectedChannel.map {
+                MomoChannelActionPolicy.canManageMembers(
+                    in: $0,
+                    canManageWorkspace: viewModel.canManageWorkspace
+                )
+            } ?? false,
             presentQuickSwitcher: {
                 showKeyboardShortcuts = false
                 quickSwitcherPresentation.toggle()
+            },
+            presentWorkspaceSearch: {
+                quickSwitcherPresentation.dismiss()
+                showWorkspaceSearchUnavailable = true
+            },
+            presentChannelSettings: {
+                guard let channelID = viewModel.selectedChannelId else { return }
+                presentChannelSettings(channelID, initialTab: .general)
+            },
+            inviteToChannel: {
+                guard let channelID = viewModel.selectedChannelId else { return }
+                presentChannelSettings(channelID, initialTab: .members)
+            },
+            openDownloads: {
+                quickSwitcherPresentation.dismiss()
+                openDetailPane(.downloads)
             },
             selectChannel: { number in
                 quickSwitcherPresentation.dismiss()
@@ -588,6 +712,27 @@ public struct MomoMacRootView: View {
             openDetailPane(.memberProfile)
         }
     }
+}
+
+enum MomoChannelActionPolicy {
+    static func canOpenSettings(in channel: Channel) -> Bool {
+        channel.kind != .dm
+    }
+
+    static func canManageMembers(
+        in channel: Channel,
+        canManageWorkspace: Bool = true
+    ) -> Bool {
+        canManageWorkspace
+            && !channel.isArchived
+            && (channel.kind == .publicChannel || channel.kind == .privateChannel)
+    }
+}
+
+struct MomoChannelSettingsRequest: Identifiable {
+    let id = UUID()
+    let channelID: ChannelID
+    let initialTab: MomoChannelSettingsTab
 }
 
 enum MomoWindowChromeLayout {

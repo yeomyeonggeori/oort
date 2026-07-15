@@ -16,6 +16,10 @@ enum MomoKeyboardShortcutCatalog {
     static func items(copy: MomoWorkspaceCopy) -> [MomoKeyboardShortcutItem] {
         [
             MomoKeyboardShortcutItem(key: "⌘K", label: copy.quickSwitcherOpen),
+            MomoKeyboardShortcutItem(key: "⌘F", label: copy.workspaceSearch),
+            MomoKeyboardShortcutItem(key: "⇧⌘I", label: copy.inviteToChannel),
+            MomoKeyboardShortcutItem(key: "⇧⌘,", label: copy.channelSettings),
+            MomoKeyboardShortcutItem(key: "⇧⌘D", label: copy.appDownloads),
             MomoKeyboardShortcutItem(key: "⇧⌘W", label: copy.startWork),
             MomoKeyboardShortcutItem(key: "⌘1…⌘9", label: copy.quickSwitcherChannelShortcuts),
             MomoKeyboardShortcutItem(
@@ -100,7 +104,13 @@ public struct MomoMacCommandActions {
     var canNavigateBackward: Bool
     var canNavigateForward: Bool
     var canNavigateUnreadChannels: Bool
+    var canOpenSelectedChannelSettings: Bool
+    var canInviteToSelectedChannel: Bool
     var presentQuickSwitcher: () -> Void
+    var presentWorkspaceSearch: () -> Void
+    var presentChannelSettings: () -> Void
+    var inviteToChannel: () -> Void
+    var openDownloads: () -> Void
     var selectChannel: (Int) -> Void
     var navigateBackward: () -> Void
     var navigateForward: () -> Void
@@ -114,7 +124,13 @@ public struct MomoMacCommandActions {
         canNavigateBackward: Bool,
         canNavigateForward: Bool,
         canNavigateUnreadChannels: Bool,
+        canOpenSelectedChannelSettings: Bool,
+        canInviteToSelectedChannel: Bool,
         presentQuickSwitcher: @escaping () -> Void,
+        presentWorkspaceSearch: @escaping () -> Void,
+        presentChannelSettings: @escaping () -> Void,
+        inviteToChannel: @escaping () -> Void,
+        openDownloads: @escaping () -> Void,
         selectChannel: @escaping (Int) -> Void,
         navigateBackward: @escaping () -> Void,
         navigateForward: @escaping () -> Void,
@@ -127,7 +143,13 @@ public struct MomoMacCommandActions {
         self.canNavigateBackward = canNavigateBackward
         self.canNavigateForward = canNavigateForward
         self.canNavigateUnreadChannels = canNavigateUnreadChannels
+        self.canOpenSelectedChannelSettings = canOpenSelectedChannelSettings
+        self.canInviteToSelectedChannel = canInviteToSelectedChannel
         self.presentQuickSwitcher = presentQuickSwitcher
+        self.presentWorkspaceSearch = presentWorkspaceSearch
+        self.presentChannelSettings = presentChannelSettings
+        self.inviteToChannel = inviteToChannel
+        self.openDownloads = openDownloads
         self.selectChannel = selectChannel
         self.navigateBackward = navigateBackward
         self.navigateForward = navigateForward
@@ -160,6 +182,32 @@ public struct MomoMacCommands: Commands {
             }
             .keyboardShortcut("k", modifiers: .command)
             .disabled(actions == nil)
+
+            Button(copy.workspaceSearch) {
+                actions?.presentWorkspaceSearch()
+            }
+            .keyboardShortcut("f", modifiers: .command)
+            .disabled(actions == nil)
+
+            Button(copy.appDownloads) {
+                actions?.openDownloads()
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(actions == nil)
+
+            Divider()
+
+            Button(copy.inviteToChannel) {
+                actions?.inviteToChannel()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .disabled(actions?.canInviteToSelectedChannel != true)
+
+            Button(copy.channelSettings) {
+                actions?.presentChannelSettings()
+            }
+            .keyboardShortcut(",", modifiers: [.command, .shift])
+            .disabled(actions?.canOpenSelectedChannelSettings != true)
 
             Divider()
 

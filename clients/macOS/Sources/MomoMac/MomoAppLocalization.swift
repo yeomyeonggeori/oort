@@ -314,6 +314,27 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var inviteToChannel: String {
+        switch language {
+        case .korean: return "채널에 멤버 추가"
+        case .english: return "Add members to channel"
+        }
+    }
+
+    var channelNotificationsPlanned: String {
+        switch language {
+        case .korean: return "채널 알림은 준비 중"
+        case .english: return "Channel notifications coming later"
+        }
+    }
+
+    var copyChannelID: String {
+        switch language {
+        case .korean: return "채널 ID 복사"
+        case .english: return "Copy channel ID"
+        }
+    }
+
     var channelSettingsSubtitle: String {
         switch language {
         case .korean: return "채널 표시, 멤버, 연동을 관리합니다."
@@ -339,6 +360,41 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "멤버 목록 열기"
         case .english: return "Open member directory"
+        }
+    }
+
+    var workspaceSearch: String {
+        switch language {
+        case .korean: return "워크스페이스 검색"
+        case .english: return "Workspace search"
+        }
+    }
+
+    var workspaceSearchUnavailableTitle: String {
+        switch language {
+        case .korean: return "워크스페이스 검색을 준비 중입니다"
+        case .english: return "Workspace search is coming later"
+        }
+    }
+
+    var workspaceSearchUnavailableDetail: String {
+        switch language {
+        case .korean: return "이 빌드에는 서버 메시지 검색이 없습니다. 퀵 스위처에서는 현재 채널과 멤버만 찾을 수 있습니다."
+        case .english: return "This build does not include server message search. Quick switcher only finds loaded channels and members."
+        }
+    }
+
+    var openQuickSwitcher: String {
+        switch language {
+        case .korean: return "퀵 스위처 열기"
+        case .english: return "Open quick switcher"
+        }
+    }
+
+    var appDownloads: String {
+        switch language {
+        case .korean: return "앱 다운로드와 업데이트"
+        case .english: return "App downloads and updates"
         }
     }
 
@@ -1805,8 +1861,15 @@ struct MomoWorkspaceCopy {
 
     var downloadsSubtitle: String {
         switch language {
-        case .korean: return "알파 빌드 다운로드와 로컬 다운로드 위치를 확인합니다."
-        case .english: return "Review alpha build downloads and local download locations."
+        case .korean: return "앱 업데이트 파일과 로컬 다운로드 위치를 확인합니다. 채팅 첨부파일 다운로드는 아직 지원하지 않습니다."
+        case .english: return "Review app update files and local download locations. Chat attachment downloads are not supported yet."
+        }
+    }
+
+    var downloadsScopeNote: String {
+        switch language {
+        case .korean: return "이 화면은 momo 앱 업데이트와 이 Mac의 다운로드 폴더만 다룹니다. 채팅 첨부파일은 다운로드하지 않습니다."
+        case .english: return "This view covers momo app updates and this Mac's download folder only. It does not download chat attachments."
         }
     }
 

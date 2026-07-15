@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-15 (Codex worker) · MOMO-392 channel chrome/context navigation
+- compact one-line header, unifiedCompact chrome/inset, header-right app Downloads, truthful search-unavailable, channel quick/context/keyboard/VoiceOver actions를 구현했다.
+- standard 1180x760, narrow 980x620, wide 1800x900 실창과 Downloads/search state, light/dark artifacts를 `/tmp/momo-398-design/`에 기록했다.
+- MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
+- 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
+
 ## 2026-07-15 (Fable, 엔진/인프라 트랙 momo-main 겸임) · 웹 첫 배치 3/3 종결 + 후속 발급
 - MOMO-391(PR #407) 독립 리뷰 Blocker/High 0·Medium 1(만료 access 로그아웃 revoke) → 수정 반영(b499d32, 스모크로 서버측 revoke 실증) → merge `63e7d51` → main `--profile web` 전체 게이트 PASS. 웹 첫 배치(389/390/391) 종결, STATUS/BUILD_TICKETS evidence 정본화.
 - 후속 발급: MOMO-398 `#408` prod Centrifugo allowed_origins(웹 W-4/W-5 선행 필수), MOMO-399 `#409` staging smoke namespace drift(DEVIATION_LOG 항목 `accepted` 판정).

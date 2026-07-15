@@ -3,6 +3,12 @@ import AppKit
 import UniformTypeIdentifiers
 import MomoCore
 
+enum MomoChannelRowActionVisibility {
+    static func isVisible(isSelected: Bool, isHovered: Bool) -> Bool {
+        isSelected || isHovered
+    }
+}
+
 struct MomoWorkspaceIdentityRecoveryPresentation: Equatable {
     let label: String
     let help: String
@@ -101,6 +107,8 @@ public struct ChannelListView: View {
     private let openDownloads: (() -> Void)?
     private let openUpdates: (() -> Void)?
     private let openMemberDirectory: (() -> Void)?
+    private let openChannelSettings: ((ChannelID) -> Void)?
+    private let inviteToChannel: ((ChannelID) -> Void)?
     private let showsWorkspaceHeader: Bool
 
     public init(viewModel: ChatViewModel) {
@@ -115,6 +123,8 @@ public struct ChannelListView: View {
         self.openDownloads = nil
         self.openUpdates = nil
         self.openMemberDirectory = nil
+        self.openChannelSettings = nil
+        self.inviteToChannel = nil
         self.showsWorkspaceHeader = true
     }
 
@@ -130,6 +140,8 @@ public struct ChannelListView: View {
         openDownloads: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
         openMemberDirectory: (() -> Void)? = nil,
+        openChannelSettings: ((ChannelID) -> Void)? = nil,
+        inviteToChannel: ((ChannelID) -> Void)? = nil,
         showsWorkspaceHeader: Bool = true
     ) {
         self.viewModel = viewModel
@@ -143,6 +155,8 @@ public struct ChannelListView: View {
         self.openDownloads = openDownloads
         self.openUpdates = openUpdates
         self.openMemberDirectory = openMemberDirectory
+        self.openChannelSettings = openChannelSettings
+        self.inviteToChannel = inviteToChannel
         self.showsWorkspaceHeader = showsWorkspaceHeader
     }
 
@@ -549,57 +563,186 @@ public struct ChannelListView: View {
     }
 
     @ViewBuilder
-    // List cannot host the inline create form and stable hover-action columns
-    // without changing the existing selection model, so this remains a flat custom row.
+    // List cannot preserve stable hover-action columns with this selection model,
+    // so the channel remains a flat custom row with native buttons and menus.
     private func channelRow(_ channel: Channel) -> some View {
         let copy = MomoWorkspaceCopy(language: language)
         let displayName = channelDisplayName(channel)
         let readState = viewModel.readStatesByChannel[channel.id]
         let showsUnreadWeight = isSelected(channel) || readState?.hasUnread == true
+        let showsQuickActions = MomoChannelRowActionVisibility.isVisible(
+            isSelected: isSelected(channel),
+            isHovered: hoveredChannelID == channel.id
+        )
+        let canInvite = MomoChannelActionPolicy.canManageMembers(
+            in: channel,
+            canManageWorkspace: viewModel.canManageWorkspace
+        ) && inviteToChannel != nil
+        let canOpenSettings = MomoChannelActionPolicy.canOpenSettings(in: channel)
+            && openChannelSettings != nil
         let badgeLabel = channel.kind == .dm
             ? MomoUnreadBadge.label(unreadCount: readState?.unreadCount ?? 0)
             : MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
-        Button {
-            Task { await viewModel.selectChannel(channel.id) }
-        } label: {
-            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
-                Image(systemName: channelIcon(channel.kind))
-                    .foregroundStyle(isSelected(channel) ? .primary : .secondary)
-                    .frame(width: MomoTheme.Sidebar.avatarSize)
-                Text(displayName)
-                    .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(displayName)
-                Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
-                if let badgeLabel {
-                    Text(badgeLabel)
-                        .font(MomoTheme.Sidebar.badgeFont)
-                        .monospacedDigit()
-                        .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
-                        .foregroundStyle(MomoTheme.Sidebar.mentionBadgeForeground)
-                        .background(MomoTheme.Sidebar.mentionBadgeBackground, in: Capsule())
-                        .accessibilityHidden(true)
+
+        HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
+            Button {
+                Task { await viewModel.selectChannel(channel.id) }
+            } label: {
+                HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                    Image(systemName: channelIcon(channel.kind))
+                        .foregroundStyle(isSelected(channel) ? .primary : .secondary)
+                        .frame(width: MomoTheme.Sidebar.avatarSize)
+                    Text(displayName)
+                        .font(showsUnreadWeight ? MomoTheme.Sidebar.selectedRowFont : MomoTheme.Sidebar.rowFont)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(displayName)
+                    Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+                    if let badgeLabel {
+                        Text(badgeLabel)
+                            .font(MomoTheme.Sidebar.badgeFont)
+                            .monospacedDigit()
+                            .padding(.horizontal, MomoTheme.Sidebar.compactSpacing)
+                            .foregroundStyle(MomoTheme.Sidebar.mentionBadgeForeground)
+                            .background(MomoTheme.Sidebar.mentionBadgeBackground, in: Capsule())
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(copy.channelUnreadAccessibilityLabel(
+                channelName: displayName,
+                unreadCount: readState?.unreadCount ?? 0,
+                mentionCount: readState?.mentionCount ?? 0
+            ))
+
+            if canInvite {
+                channelQuickAction(
+                    systemImage: "person.badge.plus",
+                    label: copy.inviteToChannel,
+                    isVisible: showsQuickActions
+                ) {
+                    inviteToChannel?(channel.id)
                 }
             }
-            .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
-            .padding(.vertical, MomoTheme.Sidebar.rowVerticalPadding)
-            .frame(minHeight: MomoTheme.Sidebar.rowMinimumHeight)
-            .contentShape(Rectangle())
-            .background(
-                channelRowBackground(channel),
-                in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
-            )
+
+            if canOpenSettings {
+                channelQuickAction(
+                    systemImage: "gearshape",
+                    label: copy.channelSettings,
+                    isVisible: showsQuickActions
+                ) {
+                    openChannelSettings?(channel.id)
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(copy.channelUnreadAccessibilityLabel(
-            channelName: displayName,
-            unreadCount: readState?.unreadCount ?? 0,
-            mentionCount: readState?.mentionCount ?? 0
-        ))
+        .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
+        .padding(.vertical, MomoTheme.Sidebar.rowVerticalPadding)
+        .frame(minHeight: MomoTheme.Sidebar.rowMinimumHeight)
+        .background(
+            channelRowBackground(channel),
+            in: RoundedRectangle(cornerRadius: MomoTheme.Sidebar.rowCornerRadius, style: .continuous)
+        )
+        .contentShape(Rectangle())
+        .contextMenu {
+            channelContextMenu(channel, copy: copy)
+        }
+        .accessibilityActions {
+            if canInvite {
+                Button(copy.inviteToChannel) {
+                    inviteToChannel?(channel.id)
+                }
+            }
+            if canOpenSettings {
+                Button(copy.channelSettings) {
+                    openChannelSettings?(channel.id)
+                }
+            }
+            Button(copy.copyChannelID) {
+                copyChannelID(channel.id)
+            }
+        }
         .onHover { isHovering in
             hoveredChannelID = isHovering ? channel.id : nil
         }
+    }
+
+    @ViewBuilder
+    private func channelContextMenu(_ channel: Channel, copy: MomoWorkspaceCopy) -> some View {
+        if MomoChannelActionPolicy.canManageMembers(
+            in: channel,
+            canManageWorkspace: viewModel.canManageWorkspace
+        ), inviteToChannel != nil {
+            Button {
+                inviteToChannel?(channel.id)
+            } label: {
+                Label(copy.inviteToChannel, systemImage: "person.badge.plus")
+            }
+        }
+
+        if MomoChannelActionPolicy.canOpenSettings(in: channel), openChannelSettings != nil {
+            Button {
+                openChannelSettings?(channel.id)
+            } label: {
+                Label(copy.channelSettings, systemImage: "gearshape")
+            }
+        }
+
+        Button {} label: {
+            Label(copy.channelNotificationsPlanned, systemImage: "bell.slash")
+        }
+        .disabled(true)
+
+        Divider()
+
+        Button {
+            copyChannelID(channel.id)
+        } label: {
+            Label(copy.copyChannelID, systemImage: "doc.on.doc")
+        }
+    }
+
+    private func channelQuickAction(
+        systemImage: String,
+        label: String,
+        isVisible: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Group {
+            if isVisible {
+                Button(action: action) {
+                    Image(systemName: systemImage)
+                        .frame(
+                            width: MomoTheme.Sidebar.actionSize,
+                            height: MomoTheme.Sidebar.actionSize
+                        )
+                        .background(
+                            MomoTheme.Sidebar.utilityBackground,
+                            in: RoundedRectangle(
+                                cornerRadius: MomoTheme.Sidebar.rowCornerRadius,
+                                style: .continuous
+                            )
+                        )
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(label)
+                .help(label)
+                .momoQuickTooltip(label)
+            } else {
+                Color.clear
+                    .frame(
+                        width: MomoTheme.Sidebar.actionSize,
+                        height: MomoTheme.Sidebar.actionSize
+                    )
+                    .accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func copyChannelID(_ channelID: ChannelID) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(channelID.description, forType: .string)
     }
 
     private func channelDisplayName(_ channel: Channel) -> String {

@@ -13,6 +13,7 @@ public struct MessageListView: View {
     private let onOpenWorkDetail: (RunID) -> Void
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
+    private let onOpenDownloads: (() -> Void)?
     private let focusComposerRequest: UInt64
     private let onChannelHeaderHeightChange: (CGFloat) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -26,20 +27,21 @@ public struct MessageListView: View {
     @State private var initialWorkBrief = ""
     @State private var workCommandDraftToRestore: String?
     @State private var workComposerSessionId = UUID()
-    @State private var showChannelSettings = false
-    @State private var channelPresentationOverrides: [ChannelID: MomoChannelPresentation] = [:]
+    @State private var channelPresentationRevision = 0
 
     public init(
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void = {},
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
+        onOpenDownloads: (() -> Void)? = nil,
         focusComposerRequest: UInt64 = 0
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.onOpenDownloads = onOpenDownloads
         self.focusComposerRequest = focusComposerRequest
         self.onChannelHeaderHeightChange = { _ in }
     }
@@ -49,6 +51,7 @@ public struct MessageListView: View {
         onOpenWorkDetail: @escaping (RunID) -> Void,
         onRequestLogin: @escaping () -> Void,
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
+        onOpenDownloads: (() -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
     ) {
@@ -56,6 +59,7 @@ public struct MessageListView: View {
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.onOpenDownloads = onOpenDownloads
         self.focusComposerRequest = focusComposerRequest
         self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
@@ -98,18 +102,8 @@ public struct MessageListView: View {
         .onChange(of: focusComposerRequest) { _, _ in
             isComposerFocused = true
         }
-        .sheet(isPresented: $showChannelSettings) {
-            if let channel = viewModel.selectedChannel {
-                MomoChannelSettingsSheet(
-                    copy: copy,
-                    channel: channel,
-                    presentation: channelPresentation(for: channel),
-                    viewModel: viewModel
-                ) { presentation in
-                    channelPresentationOverrides[channel.id] = presentation
-                }
-                .id(channel.id)
-            }
+        .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
+            channelPresentationRevision &+= 1
         }
     }
 
@@ -134,9 +128,7 @@ public struct MessageListView: View {
                         Task { await viewModel.retryRealtime() }
                     } : nil,
                     openMemberDirectory: onOpenMemberDirectory,
-                    openSettings: {
-                        showChannelSettings = true
-                    }
+                    openDownloads: onOpenDownloads
                 )
             } else {
                 Text(copy.selectChannel)
@@ -149,8 +141,8 @@ public struct MessageListView: View {
     }
 
     private func channelPresentation(for channel: Channel) -> MomoChannelPresentation {
-        channelPresentationOverrides[channel.id]
-            ?? MomoLocalChannelPresentationStore.presentation(for: channel)
+        _ = channelPresentationRevision
+        return MomoLocalChannelPresentationStore.presentation(for: channel)
     }
 
     private func quickStartCard(copy: MomoWorkspaceCopy) -> some View {

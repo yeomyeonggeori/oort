@@ -8,6 +8,10 @@ struct MomoQuickSwitcherPresentationState: Equatable {
         isPresented.toggle()
     }
 
+    mutating func present() {
+        isPresented = true
+    }
+
     mutating func dismiss() {
         isPresented = false
     }
