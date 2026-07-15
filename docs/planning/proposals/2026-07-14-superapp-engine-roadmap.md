@@ -49,6 +49,16 @@ ADR-0114 Codex runtime amendment
 
 **Work runtime critical path:** ADR-0114 → SE-05A → SE-05B. 이 경로는 GWS/webhook/Memory와 독립적으로 닫는다. Google Workspace connector를 `hosted_connector` plugin으로 수렴시키려면 SE-04A가 먼저다. 일정상 GWS를 core-internal adapter로 임시 구현해 critical path를 줄이는 우회는 권고하지 않는다. 나중에 credential/audit 경계를 다시 뜯게 된다.
 
+### 2.1 PLN-20260716-01 plugin productization overlay
+
+Codex/Hermes/MCP와 Google·GitHub·Notion 공식 표면을 다시 대조한 결과, 이 critical path는 유지한다. 다만 SE-04A 위에 다음 제품 계약을 명시한다.
+
+- plugin은 workflow/capability package이고 MCP는 가능한 runtime adapter 중 하나다.
+- lifecycle은 catalog / workspace install / member connection / channel enablement / actor grant / runtime health의 독립 projection으로 분리한다.
+- 에이전트는 catalog 전체가 아니라 Capability Cache에서 현재 grant·resource scope·health를 통과한 tool만 Context Packet `tool_grants`로 받는다.
+- 첫 제품 체감 vertical 후보로 Google Drive selected-file read/cite/upload/link를 제안한다. 기존 정본은 GitHub가 첫 생태계 증명 플러그인이며 first-party repo split도 GitHub부터 시작하는 GitHub-first 전략이다. ADR-0113과 제품 오너 승인 전에는 제품 vertical, 구현, repo split 어느 순서도 바꾸지 않는다.
+- 근거와 UX/API 요구는 `research/16-plugin-platform/00-plugin-ecosystem-research.md`, `research/16-plugin-platform/01-momo-plugin-platform-product-proposal.md`, Fable 정교화 계약은 `docs/planning/handoffs/2026-07-16-plugin-platform-fable.md`를 따른다.
+
 ### 2.2 기존 backlog와의 관계
 
 - `SE-01`은 기존 `MOMO-307`의 계약을 보강해 재사용한다. 기존 `MOMO-308`은 Inbound MCP umbrella로만 남기고 claim을 금지하며, `SE-03A/03B/03C`는 각각 새 숫자 ID를 받는다.
@@ -303,13 +313,18 @@ Manifest v0를 실제 install/grant/runtime registry로 만들고 Capability Cac
 
 plugin은 spec/fixture뿐이다. core DB registry first를 v0 권고로 두고, external signed catalog/index는 후속으로 분리한다. ADR-0113과 SE-02A가 선행한다.
 
+PLN-20260716-01은 이 runtime 위에 Plugin Center/온보딩/연결 UX가 요구하는 catalog/install/connection/channel/grant/health 독립 projection과 Drive-first product vertical 후보를 추가 제안한다. 기존 GitHub-first 구현·분리 전략이 정본이며, 성재 결정과 Accepted ADR 전에는 순서를 바꾸거나 구현을 승인하지 않는다.
+
 #### Acceptance
 
 - manifest validator가 protocol compatibility, SPDX/license, publisher/provenance, digest/signature, tools/scopes/risk/approval policy를 검증한다.
 - workspace install/grant/revoke record와 Capability Cache projection이 RLS/audit에 연결된다.
 - install/grant/revoke API는 workspace membership과 admin policy를 검증하고 raw credential/secret을 manifest/cache/message/audit에 저장하지 않는다.
+- connection owner/provider subject, represented actor, delegator/grantor와 token reference를 묶고 projection/approval/execution에서 authoritative grant/revoke 상태를 재검증한다.
+- capability/schema/provider scope가 넓어지는 update는 `update_pending`으로 멈추고 관리자 검토와 사용자 재동의 전 활성화하지 않는다.
 - unknown protocol/tool schema/risk/approval policy와 revoked install은 fail closed한다.
-- runtime gate가 cross-workspace install/grant/revoke, stale capability version, malformed manifest, license/provenance 거부를 포함한다.
+- runtime adapter kind는 hosted connector/remote MCP/local MCP/agent-host에 매핑하고 signed webhook ingress를 outbound executor와 분리한다.
+- runtime gate가 cross-workspace install/grant/revoke, stale capability version, malformed manifest, license/provenance 거부, actor/subject mismatch, revoked delegation, widened-update no-consent, remote endpoint SSRF/redirect/DNS-rebinding을 포함한다.
 
 #### Out of scope
 
@@ -319,7 +334,7 @@ plugin은 spec/fixture뿐이다. core DB registry first를 v0 권고로 두고, 
 
 #### Goal
 
-ADR-0115 계약에 따라 `external_webhook`을 첫 reference plugin으로 발급·회전·서명 검증·수신까지 닫는다.
+ADR-0115 계약에 따라 signed inbound webhook trigger를 첫 reference ingress surface로 발급·회전·서명 검증·수신까지 닫는다. 이 ingress는 Manifest v0의 outbound `runtime.kind=external_webhook`과 다른 방향이며, 기존 runtime kind를 재사용하지 않는다. 새 manifest surface/kind는 ADR-0115가 명시적으로 versioning한다.
 
 #### Acceptance
 

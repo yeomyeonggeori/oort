@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-16 (momo-main/GPT 5.6) · PLN-20260716-01 Plugin Platform productization
+- Codex/Hermes/MCP와 Google Workspace·GitHub·Notion 공식 표면을 대조해 plugin package와 runtime adapter를 분리했다.
+- Plugin Center/추천 onboarding과 catalog/install/connection/channel/grant/health 독립 projection, Capability Cache 기반 동적 discovery를 제품 제안으로 정리했다.
+- Drive selected-file read/cite/upload/link는 첫 vertical 후보이며 기존 GitHub-first 전략을 대체하지 않는다. 성재 결정+Accepted ADR 전 구현 순서 변경 금지.
+- 보안 리뷰를 반영해 subject/actor/delegation binding, remote runtime SSRF 경계, Drive create outcome-unknown, webhook ingress/executor 분리를 Fable handoff에 추가했다.
+- 다음: Fable이 ADR-0113/SE-04A 옵션과 threat model을 정교화한 뒤 성재가 선택한다. builder issue는 그 이후다.
+
 ## 2026-07-15 (Codex worker) · MOMO-392 channel chrome/context navigation
 - compact one-line header, unifiedCompact chrome/inset, header-right app Downloads, truthful search-unavailable, channel quick/context/keyboard/VoiceOver actions를 구현했다.
 - standard 1180x760, narrow 980x620, wide 1800x900 실창과 Downloads/search state, light/dark artifacts를 `/tmp/momo-398-design/`에 기록했다.
