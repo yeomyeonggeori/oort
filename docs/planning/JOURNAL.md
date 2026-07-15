@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-15 (Fable, 엔진/인프라 트랙 momo-main 겸임) · 웹 첫 배치 3/3 종결 + 후속 발급
+- MOMO-391(PR #407) 독립 리뷰 Blocker/High 0·Medium 1(만료 access 로그아웃 revoke) → 수정 반영(b499d32, 스모크로 서버측 revoke 실증) → merge `63e7d51` → main `--profile web` 전체 게이트 PASS. 웹 첫 배치(389/390/391) 종결, STATUS/BUILD_TICKETS evidence 정본화.
+- 후속 발급: MOMO-398 `#408` prod Centrifugo allowed_origins(웹 W-4/W-5 선행 필수), MOMO-399 `#409` staging smoke namespace drift(DEVIATION_LOG 항목 `accepted` 판정).
+- 크로스트랙 관찰: UX momo-main 재개 — PR #406(MOMO-385) 머지, MOMO-392~397 이슈(#398~#405) 발급됨. 겹침 정리: 스레드 REST 제안(15-04)은 MOMO-393에 흡수(중복 발급 안 함), 리액션은 MOMO-393 Out of scope라 미결(조율 대기), MOMO-394 첨부·MOMO-395 presence는 각각 파일 동결 계약(ADR-0113/0116)·ADR-0104 큐와의 정합을 UX momo-main과 확인 필요.
+- 다음: 성재 신호 시 MOMO-398/399 Fable 에이전트 착수 → W-4/W-5 + 푸시 P-1/P-2 발급. ADR-0122(음성) 승인 대기 유지.
+
 ## 2026-07-15 (Fable, 엔진/인프라 트랙 momo-main 겸임) · 웹 첫 배치 389/390 머지 + 음성 ADR + 스키마 점검
 - 성재 지시로 이 트랙은 Codex 대신 Fable 구현·검수 체제로 전환. MOMO-389(PR #404)/390(PR #403)을 Fable 에이전트가 worktree 구현 → 독립 리뷰(각각 Blocker/High 0, 게이트 독립 재현) → local_gate.sh 충돌 해소 후 순차 머지(`6fe746f`→`5ecd645`). 리뷰 후속(391 수용기준 web_serving_smoke 포함, GATE_PASSWORD 랜덤화, CSP 주석, spec-first 문구)과 STATUS evidence 반영.
 - 스레드·리액션 점검(성재 질문): 둘 다 스키마 day-1 완비, REST/UI만 미구현 — `research/15-04`. 음성 허들 리서치 완료 → ADR-0122 Proposed(`LiveKit + 임시 허들 + 요약=agent_run Work`, 15-05) — 성재 승인 대기, Accepted≠즉시 착수.
