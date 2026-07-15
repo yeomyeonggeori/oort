@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_channel_management.sh — MOMO-214 channel management runtime gate
+# scripts/verify_channel_management.sh — MOMO-214/385 channel and DM runtime gate
 #
 # Runs after make up && make migrate. It starts MomoServer with the normal
 # NOBYPASSRLS app role, then verifies owner/admin channel create, human/agent
-# membership add/remove, persisted workspace identity rename/read authorization,
-# cross-workspace denial, channel_seq provisioning, and message send through the
-# managed channel.
+# membership add/remove, canonical human/agent DMs, persisted workspace identity
+# rename/read authorization, cross-workspace denial, channel_seq provisioning,
+# and message send through managed and direct-message channels.
 # =============================================================================
 set -euo pipefail
 
@@ -138,6 +138,19 @@ expect_status() {
     exit 1
   fi
   echo "[channel-management] PASS $label ($expected)" >&2
+}
+
+expect_status_one_of() {
+  local first="$1"
+  local second="$2"
+  local label="$3"
+  if [ "$RESPONSE_STATUS" != "$first" ] && [ "$RESPONSE_STATUS" != "$second" ]; then
+    echo "[channel-management] FAIL $label: expected HTTP $first or $second, got $RESPONSE_STATUS" >&2
+    echo "$RESPONSE_BODY" >&2
+    echo "[channel-management] server log: $SERVER_LOG" >&2
+    exit 1
+  fi
+  echo "[channel-management] PASS $label ($RESPONSE_STATUS)" >&2
 }
 
 expect_jq() {
@@ -332,6 +345,58 @@ B_OWNER_TOKEN="$(login "$B_OWNER_EMAIL" "$WORKSPACE_B")"
 OWNER_CHANNEL_NAME="runtime-${RUN_SAFE}"
 ADMIN_CHANNEL_NAME="admin-${RUN_SAFE}"
 
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" \
+  '{"memberId":"00000000-0000-7000-8000-000000000197"}' \
+  "$OWNER_TOKEN"
+expect_status_one_of 200 201 "owner opens canonical human DM"
+expect_jq '.channel.kind == "dm" and (.channel.memberIds | index("00000000-0000-7000-8000-000000000101") != null) and (.channel.memberIds | index("00000000-0000-7000-8000-000000000197") != null)' "human DM response contains the exact pair"
+HUMAN_DM_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.channel.id')"
+
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" \
+  '{"memberId":"00000000-0000-7000-8000-000000000197"}' \
+  "$OWNER_TOKEN"
+expect_status 200 "repeated human DM open returns the existing channel"
+expect_jq --arg expected "$HUMAN_DM_ID" '(.channel.id | ascii_downcase) == ($expected | ascii_downcase) and .created == false' "repeated human DM open preserves canonical identity"
+
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/channels/$HUMAN_DM_ID/messages" \
+  "$(jq -cn --arg id "$(uuidgen)" '{clientMsgId:$id,type:"text",body:"MOMO-385 canonical DM identity runtime"}')" \
+  "$OWNER_TOKEN"
+expect_status 201 "canonical human DM accepts its first verifier message"
+expect_jq --arg expected "$HUMAN_DM_ID" '(.channelId | ascii_downcase) == ($expected | ascii_downcase) and .seq >= 1' "DM message remains on the opened channel identity"
+
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" \
+  '{"memberId":"00000000-0000-7000-8000-000000000197"}' \
+  "$OWNER_TOKEN"
+expect_status 200 "human DM remains canonical after message send"
+expect_jq --arg expected "$HUMAN_DM_ID" '(.channel.id | ascii_downcase) == ($expected | ascii_downcase) and .created == false' "post-message DM open preserves channel identity"
+
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" \
+  '{"memberId":"00000000-0000-7000-8000-000000000102"}' \
+  "$OWNER_TOKEN"
+expect_status_one_of 200 201 "owner opens canonical agent DM"
+expect_jq '.channel.kind == "dm" and (.channel.memberIds | index("00000000-0000-7000-8000-000000000101") != null) and (.channel.memberIds | index("00000000-0000-7000-8000-000000000102") != null)' "agent follows the same canonical DM path"
+AGENT_DM_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.channel.id')"
+
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" "" "$OWNER_TOKEN"
+expect_status 200 "owner lists direct messages"
+expect_jq --arg human "$HUMAN_DM_ID" --arg agent "$AGENT_DM_ID" '([.channels[].id | ascii_downcase] | index($human | ascii_downcase) != null) and ([.channels[].id | ascii_downcase] | index($agent | ascii_downcase) != null)' "human and agent DMs appear immediately in the canonical list"
+
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM channel WHERE workspace_id = '$DEMO_WORKSPACE_ID' AND kind = 'dm' AND dm_key = encode(digest('00000000-0000-7000-8000-000000000101:00000000-0000-7000-8000-000000000197', 'sha256'), 'hex'); COMMIT;" "human pair has exactly one canonical DM row"
+assert_sql_equals 2 "BEGIN; SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID'; SELECT count(*) FROM membership WHERE channel_id = '$AGENT_DM_ID' AND member_id IN ('00000000-0000-7000-8000-000000000101', '00000000-0000-7000-8000-000000000102') AND left_at IS NULL; COMMIT;" "agent DM memberships remain tenant-scoped and active"
+
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" \
+  '{"memberId":"00000000-0000-7000-8000-000000000101"}' \
+  "$OWNER_TOKEN"
+expect_status 400 "self DM is rejected"
+
+api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" \
+  '{"memberId":"23000000-0000-7000-8000-000000000102"}' \
+  "$OWNER_TOKEN"
+expect_status 404 "workspace A cannot open a DM with workspace B member"
+
+api GET "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" "" "$B_OWNER_TOKEN"
+expect_status 403 "workspace B token cannot list workspace A DMs"
+
 api GET "/v1/workspaces/$DEMO_WORKSPACE_ID" "" "$OWNER_TOKEN"
 expect_status 200 "owner reads workspace identity"
 expect_jq '.workspace.id == "'"$DEMO_WORKSPACE_ID"'" and (.workspace.name | length) > 0' "workspace identity response is durable"
@@ -493,4 +558,4 @@ api GET "/v1/workspaces/$WORKSPACE_B/channels" "" "$B_OWNER_TOKEN"
 expect_status 200 "workspace B owner can still read own channels"
 expect_jq 'all(.channels[]; .workspaceId == "'"$WORKSPACE_B"'")' "workspace B read remains tenant scoped"
 
-echo "[channel-management] PASS channel create/member management runtime verifier"
+echo "[channel-management] PASS channel/member/canonical-DM runtime verifier"

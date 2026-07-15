@@ -10,6 +10,12 @@
 - MOMO-390: `{$APP_DOMAIN}` site(SPA file_server+`/v1` proxy 같은 오리진+SPA CSP)가 랜딩했다. 미설정 하위호환은 sentinel `momo-app-domain-unset.localhost` fail-closed(전 경로 404, ACME 무발생 — 리뷰어 adapt/런타임 실측)로 보장하고, 기본 e2e 렌더는 byte-identical. `web_serving_smoke.sh` 전 항목 PASS.
 - 머지 후 리뷰 후속 반영: MOMO-391 수용기준에 `web_serving_smoke.sh` 게이트 포함(fail-closed 회귀 방어), drift 게이트 픽스처 비밀번호 랜덤화, CSP `img-src data:` 의도 주석, LOCAL_PR_GATE spec-first 문구. 선재 발견(staging smoke의 `agentwork` namespace 불일치 — main 기저 FAIL)은 DEVIATION_LOG `pending`.
 
+## MOMO-385 Member Inspector + Canonical DM Navigation (2026-07-15)
+
+- current-channel roster를 Discord식 right inspector로 옮기고 search/people/agent filter, avatar/presence/status/role/capability, copy/mention/context menu를 제공한다. 최신 screenshot 지시에 맞춰 member row는 compact native profile popover를 열고 그 안의 단일 DM action이 canonical DM을 선택한다. 표준 창은 264pt attached inspector, 좁은 창은 scrim 위 320pt overlay로 전환해 timeline과 겹치거나 폭을 밀지 않는다.
+- `ChatViewModel`은 self/inactive/in-flight를 차단하고 DM 성공 즉시 sidebar channel/read-state/subscription/selection을 같은 identity로 갱신한다. REST 응답은 exact workspace/kind/target/current-member pair와 session generation을 검증하며, current member를 authenticated login 또는 JWT `sub`에서 확정하지 못하면 POST 전에 fail-closed한다. server는 transaction 내부 target miss를 결과값으로 반환해 cross-workspace member를 500이 아닌 RLS-safe 404로 변환한다.
+- focused macOS 10건, server DM 3건, roster snapshot 14건, human+agent canonical DM runtime verifier, design preflight와 fresh design review(Blocker 0/High 0/Medium 0)가 PASS했다. standard/narrow light/dark root window와 light/dark profile popover 6건을 WindowServer에서 캡처했으며 final clean local gate 증거는 PR handoff에 기록한다.
+
 ## MOMO-384 Native Channel Creation + Window Tooltip (2026-07-15)
 
 - sidebar inline form을 public/private, name, topic을 받는 native SwiftUI sheet로 교체했다. server와 같은 trim+lowercase+regex validation, 첫 name focus, Esc/Return, localized retry/error를 제공하고 기존 REST create 경로 성공 시 sheet를 닫아 새 channel을 선택한다. local 실패는 bounded issue만 보관하며 raw error 문자열은 장기 `Published` state에 남기지 않는다. 401/not-connected는 sheet를 닫고 기존 전역 session-expired 로그인 복구 CTA로 전달한다.

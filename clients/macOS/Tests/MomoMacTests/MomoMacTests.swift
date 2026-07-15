@@ -6,6 +6,15 @@ import MomoCore
 
 final class MomoMacTests: XCTestCase {
 
+    private func unsignedAccessToken(for member: MemberID) -> String {
+        let payload = Data(#"{"sub":"\#(member.description)"}"#.utf8)
+            .base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return "e30.\(payload).signature"
+    }
+
     // MARK: seq ordering (L4 §1.2 #3 — ordering authority is Message.seq)
 
     func testSeqOrderingPutsAckedBeforeOptimistic() {
@@ -212,6 +221,135 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(english.newDirectMessage, "Start a new DM")
         XCTAssertEqual(english.showAllMembers, "Show all members")
         XCTAssertEqual(english.noDirectoryMembersDetail, "Members appear here after they join the workspace")
+    }
+
+    func testMemberInspectorScopesCurrentChannelAndWorkspaceMembers() {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let otherChannel = ChannelID()
+        let activeHuman = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "민지 Operations",
+            handle: "minji",
+            workspaceRole: .admin,
+            channelIds: [channel]
+        )
+        let inactiveHuman = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            status: .suspended,
+            displayName: "상준 Finance",
+            handle: "sangjun",
+            channelIds: [channel]
+        )
+        let activeAgent = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .agent,
+            displayName: "Hermes 코드 리뷰",
+            handle: "hermes",
+            channelIds: [otherChannel],
+            capabilities: ["code-review"]
+        )
+
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.filteredMembers(
+                [activeAgent, inactiveHuman, activeHuman],
+                audience: .channel,
+                channelID: channel,
+                query: "",
+                scope: .all
+            ).map(\.id),
+            [activeHuman.id]
+        )
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.filteredMembers(
+                [activeAgent, inactiveHuman, activeHuman],
+                audience: .workspace,
+                channelID: channel,
+                query: "HER",
+                scope: .agents
+            ).map(\.id),
+            [activeAgent.id]
+        )
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.filteredMembers(
+                [inactiveHuman, activeHuman],
+                audience: .workspace,
+                channelID: channel,
+                query: "",
+                scope: .people
+            ).map(\.id),
+            [activeHuman.id, inactiveHuman.id]
+        )
+    }
+
+    func testMemberInspectorDirectMessageAvailabilityExplainsSelfInactiveAndInFlight() {
+        let workspace = WorkspaceID()
+        let current = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "성재",
+            handle: "seongjae"
+        )
+        var inactive = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "상준",
+            handle: "sangjun"
+        )
+        inactive.status = .suspended
+        let agent = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .agent,
+            displayName: "Hermes",
+            handle: "hermes"
+        )
+
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.directMessageAvailability(
+                for: current,
+                currentMemberID: current.id,
+                inFlightMemberIDs: []
+            ),
+            .currentUser
+        )
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.directMessageAvailability(
+                for: inactive,
+                currentMemberID: current.id,
+                inFlightMemberIDs: []
+            ),
+            .inactive
+        )
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.directMessageAvailability(
+                for: agent,
+                currentMemberID: current.id,
+                inFlightMemberIDs: [agent.id]
+            ),
+            .inFlight
+        )
+        XCTAssertEqual(
+            MomoMemberInspectorPolicy.directMessageAvailability(
+                for: agent,
+                currentMemberID: current.id,
+                inFlightMemberIDs: []
+            ),
+            .available
+        )
+    }
+
+    func testMemberInspectorUsesOverlayBeforeTimelineWouldBecomeTooNarrow() {
+        XCTAssertFalse(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 759))
+        XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 760))
+        XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 1_200))
     }
 
     func testUnreadNavigationWrapsInCanonicalSidebarOrder() {
@@ -3294,11 +3432,12 @@ final class MomoMacTests: XCTestCase {
         let workspace = WorkspaceID.demo
         let target = MemberID.demoAgent
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000372201")!
+        let accessToken = unsignedAccessToken(for: .demoHuman)
 
         await MockHTTPURLProtocol.setHandler { request in
             switch (request.httpMethod, request.url?.path) {
             case ("POST", "/v1/workspaces/\(workspace.description)/dms"):
-                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(accessToken)")
                 let data = try XCTUnwrap(request.momoBodyData)
                 let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 XCTAssertEqual(body?["memberId"] as? String, target.rawValue.uuidString)
@@ -3329,16 +3468,218 @@ final class MomoMacTests: XCTestCase {
         let backend = MomoServerRESTChatBackend(
             config: MomoServerRESTChatBackendConfig(
                 baseURL: URL(string: "https://momo.test")!,
-                accessToken: "token-123"
+                accessToken: accessToken
             ),
             session: session
         )
-        try await backend.connect(workspace: workspace, accessToken: "token-123")
+        try await backend.connect(workspace: workspace, accessToken: accessToken)
 
         let opened = try await backend.openDirectMessage(workspace: workspace, with: target)
 
         XCTAssertEqual(opened.id, channel)
         XCTAssertEqual(Set(opened.dmMemberIds), Set([MemberID.demoHuman, target]))
+    }
+
+    func testRESTBackendUsesAuthenticatedLoginMemberWhenDirectMessageJWTIsMalformed() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let target = MemberID.demoAgent
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000372204")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("POST", "/v1/auth/login"):
+                return MockHTTPResponse(json: """
+                {
+                  "accessToken": "malformed-token",
+                  "refreshToken": "refresh-token",
+                  "realtimeWebSocketUrl": null,
+                  "member": {
+                    "id": "\(MemberID.demoHuman.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "human",
+                    "status": "active",
+                    "displayName": "상준",
+                    "handle": "sangjun",
+                    "avatarUrl": null,
+                    "role": "owner",
+                    "channelIds": [],
+                    "capabilities": []
+                  }
+                }
+                """)
+            case ("POST", "/v1/workspaces/\(workspace.description)/dms"):
+                return MockHTTPResponse(json: """
+                {
+                  "channel": {
+                    "id": "\(channel.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "dm",
+                    "name": null,
+                    "topic": null,
+                    "dmKey": "authenticated-member-pair",
+                    "memberIds": [
+                      "\(MemberID.demoHuman.description)",
+                      "\(target.description)"
+                    ],
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "archivedAtMs": null
+                  },
+                  "created": true
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "")
+
+        let opened = try await backend.openDirectMessage(workspace: workspace, with: target)
+        let authenticatedMemberID = await backend.authenticatedMemberID()
+        XCTAssertEqual(opened.id, channel)
+        XCTAssertEqual(authenticatedMemberID, .demoHuman)
+    }
+
+    func testRESTBackendRejectsDirectMessageWithoutAuthenticatedMemberOrJWTSubject() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "malformed-token"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "malformed-token")
+
+        do {
+            _ = try await backend.openDirectMessage(workspace: workspace, with: .demoAgent)
+            XCTFail("a DM request without a trusted current member must fail closed")
+        } catch BackendError.notConnected {
+            // Expected before any request is emitted.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
+    func testRESTBackendRejectsDirectMessageResponseOutsideRequestedPair() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let target = MemberID.demoAgent
+        let other = MemberID(uuidString: "00000000-0000-7000-8000-000000372299")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000372202")!
+        let accessToken = unsignedAccessToken(for: .demoHuman)
+
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(json: """
+            {
+              "channel": {
+                "id": "\(channel.description)",
+                "workspaceId": "\(workspace.description)",
+                "kind": "dm",
+                "name": null,
+                "topic": null,
+                "dmKey": "wrong-pair",
+                "memberIds": [
+                  "\(MemberID.demoHuman.description)",
+                  "\(other.description)"
+                ],
+                "createdBy": "\(MemberID.demoHuman.description)",
+                "archivedAtMs": null
+              },
+              "created": true
+            }
+            """)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: accessToken
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: accessToken)
+
+        do {
+            _ = try await backend.openDirectMessage(workspace: workspace, with: target)
+            XCTFail("a mismatched DM pair must not enter the client cache")
+        } catch BackendError.decoding(let reason) {
+            XCTAssertEqual(reason, "direct message response scope mismatch")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testRESTBackendDiscardsDirectMessageResponseAfterSessionClear() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let target = MemberID.demoAgent
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000372203")!
+        let path = "/v1/workspaces/\(workspace.description)/dms"
+        let accessToken = unsignedAccessToken(for: .demoHuman)
+        let controller = BlockingPathResponseController(
+            responses: [
+                path: MockHTTPResponse(json: """
+                {
+                  "channel": {
+                    "id": "\(channel.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "dm",
+                    "name": null,
+                    "topic": null,
+                    "dmKey": "delayed-pair",
+                    "memberIds": [
+                      "\(MemberID.demoHuman.description)",
+                      "\(target.description)"
+                    ],
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "archivedAtMs": null
+                  },
+                  "created": true
+                }
+                """)
+            ],
+            blockedPaths: [path]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: accessToken
+            ),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: accessToken)
+        let openTask = Task {
+            try await backend.openDirectMessage(workspace: workspace, with: target)
+        }
+        await controller.waitForArrival(path: path)
+        await backend.clearSessionSensitiveState()
+        controller.release(path: path)
+
+        do {
+            _ = try await openTask.value
+            XCTFail("a delayed DM response must not survive session clear")
+        } catch is CancellationError {
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
     }
 
     @MainActor
@@ -3349,14 +3690,33 @@ final class MomoMacTests: XCTestCase {
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
         let target = try XCTUnwrap(seed.agents.first)
 
-        await viewModel.startDirectMessage(with: target.id)
+        let firstOpen = await viewModel.startDirectMessage(with: target.id)
+        XCTAssertTrue(firstOpen)
         let firstDM = try XCTUnwrap(viewModel.channels.first { $0.kind == .dm })
-        await viewModel.startDirectMessage(with: target.id)
+        let repeatedOpen = await viewModel.startDirectMessage(with: target.id)
+        XCTAssertTrue(repeatedOpen)
 
         XCTAssertEqual(viewModel.channels.filter { $0.kind == .dm }.count, 1)
         XCTAssertEqual(viewModel.selectedChannelId, firstDM.id)
         XCTAssertEqual(viewModel.directMessageCounterpart(for: firstDM)?.id, target.id)
         XCTAssertTrue(viewModel.member(target.id)?.channelIds.contains(firstDM.id) == true)
+        XCTAssertNil(viewModel.directMessageError)
+    }
+
+    @MainActor
+    func testViewModelRejectsSelfDirectMessageWithoutChangingSelection() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let originalChannel = try XCTUnwrap(viewModel.selectedChannelId)
+        let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
+
+        let selfOpen = await viewModel.startDirectMessage(with: currentMember.id)
+        XCTAssertFalse(selfOpen)
+        XCTAssertEqual(viewModel.selectedChannelId, originalChannel)
+        XCTAssertTrue(viewModel.channels.allSatisfy { $0.kind != .dm })
+        XCTAssertTrue(viewModel.directMessageMutationIds.isEmpty)
         XCTAssertNil(viewModel.directMessageError)
     }
 

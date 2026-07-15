@@ -100,6 +100,7 @@ public struct ChannelListView: View {
     private let openSettings: (() -> Void)?
     private let openDownloads: (() -> Void)?
     private let openUpdates: (() -> Void)?
+    private let openMemberDirectory: (() -> Void)?
     private let showsWorkspaceHeader: Bool
 
     public init(viewModel: ChatViewModel) {
@@ -113,6 +114,7 @@ public struct ChannelListView: View {
         self.openSettings = nil
         self.openDownloads = nil
         self.openUpdates = nil
+        self.openMemberDirectory = nil
         self.showsWorkspaceHeader = true
     }
 
@@ -127,6 +129,7 @@ public struct ChannelListView: View {
         openSettings: (() -> Void)? = nil,
         openDownloads: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
+        openMemberDirectory: (() -> Void)? = nil,
         showsWorkspaceHeader: Bool = true
     ) {
         self.viewModel = viewModel
@@ -139,6 +142,7 @@ public struct ChannelListView: View {
         self.openSettings = openSettings
         self.openDownloads = openDownloads
         self.openUpdates = openUpdates
+        self.openMemberDirectory = openMemberDirectory
         self.showsWorkspaceHeader = showsWorkspaceHeader
     }
 
@@ -169,7 +173,6 @@ public struct ChannelListView: View {
 
                             channelsSection(copy: copy)
                             directMessagesSection(copy: copy)
-                            membersSection(copy: copy)
                         }
                         .padding(MomoTheme.Sidebar.edgeInset)
                     }
@@ -398,7 +401,7 @@ public struct ChannelListView: View {
             Spacer()
 
             Button {
-                showMemberDirectory = true
+                presentMemberDirectory()
             } label: {
                 Image(systemName: "person.2")
                     .frame(
@@ -480,7 +483,7 @@ public struct ChannelListView: View {
                 actionTitle: copy.newDirectMessage,
                 systemImage: "plus"
             ) {
-                showMemberDirectory = true
+                presentMemberDirectory()
             }
 
             if directMessageChannels.isEmpty {
@@ -490,6 +493,14 @@ public struct ChannelListView: View {
                     channelRow(channel)
                 }
             }
+        }
+    }
+
+    private func presentMemberDirectory() {
+        if let openMemberDirectory {
+            openMemberDirectory()
+        } else {
+            showMemberDirectory = true
         }
     }
 

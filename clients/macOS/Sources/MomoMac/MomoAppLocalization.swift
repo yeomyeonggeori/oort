@@ -454,6 +454,27 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var currentChannelMembers: String {
+        switch language {
+        case .korean: return "현재 채널 멤버"
+        case .english: return "Current channel members"
+        }
+    }
+
+    var workspaceMembers: String {
+        switch language {
+        case .korean: return "워크스페이스 멤버"
+        case .english: return "Workspace members"
+        }
+    }
+
+    var closeMemberInspector: String {
+        switch language {
+        case .korean: return "멤버 목록 닫기"
+        case .english: return "Close member list"
+        }
+    }
+
     var browseMembers: String {
         switch language {
         case .korean: return "전체 멤버 보기"
@@ -556,6 +577,41 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "DM을 시작하지 못했습니다. 연결을 확인하고 다시 시도하세요."
         case .english: return "The DM could not be started. Check the connection and try again."
+        }
+    }
+
+    var directMessageSelfUnavailable: String {
+        switch language {
+        case .korean: return "내 프로필입니다. 자신에게는 DM을 보낼 수 없습니다."
+        case .english: return "This is your profile. You cannot send a DM to yourself."
+        }
+    }
+
+    var directMessageInactiveUnavailable: String {
+        switch language {
+        case .korean: return "활성 상태인 멤버에게만 DM을 보낼 수 있습니다."
+        case .english: return "You can send DMs only to active members."
+        }
+    }
+
+    var copyMemberHandle: String {
+        switch language {
+        case .korean: return "핸들 복사"
+        case .english: return "Copy handle"
+        }
+    }
+
+    var mentionMember: String {
+        switch language {
+        case .korean: return "채널에서 멘션"
+        case .english: return "Mention in channel"
+        }
+    }
+
+    var profileActions: String {
+        switch language {
+        case .korean: return "프로필 작업"
+        case .english: return "Profile actions"
         }
     }
 

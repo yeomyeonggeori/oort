@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | MOMO-383 | workspace-first sidebar/header/menu + persisted workspace name | MOMO-382 | swift + runtime-db + macos-ui + design-review | merged — PR #389 / `9c1fc7a` |
 | MOMO-384 (`#390`) | native channel creation sheet + tooltip presenter | MOMO-383 | swift + macos-ui + design-review | PR #394 fresh review PASS, worker `status:needs-review`, merge 전 |
-| MOMO-385 (`#391`) | member inspector + one-click DM | MOMO-383 | swift + runtime-db + macos-ui | ready |
+| MOMO-385 (`#391`) | right member inspector + compact profile/canonical DM | MOMO-383 | swift + runtime-db + macos-ui | worker gates/runtime/design PASS, PR handoff 전 |
 | MOMO-386 (`#392`) | RLS workspace search + macOS results/jump | MOMO-384, MOMO-385 | runtime-db + swift + macos-ui | blocked |
 | MOMO-375 | Work transcript/activity drawer | ADR-0114 surface decision | swift + macos-ui | planned |
 
@@ -66,3 +66,10 @@ ADR draft는 구현/Accepted 판정이 아니다. 성재가 option과 trust boun
 - 실창: standard 1180x760, narrow 980x620, fullscreen, light/dark, attached inspector가 열린 cross-pane의 tooltip screenshot·AX text/frame·Tab/Space/Esc 확인은 **local manual/AX evidence**다. quick-switcher scrim background dismiss도 local manual evidence이며 commit된 자동 test와 구분한다. native sheet는 별도 modal surface라 부모 control tooltip을 위에 띄우지 않는다.
 - PR #394 correctness 반려 수정: create operation/session/workspace readiness+generation, REST connection/workspace/token guard-before-decode, sheet Task/input revision cancel, 401/not-connected 전역 로그인 복구, raw diagnostic 제거를 적용했다. pending clear/same-workspace rebootstrap POST 차단, delayed success/error/409, stale malformed/HTTP error, 새 session in-flight, REST cache, tooltip transition은 commit된 focused 27 tests로 고정했고 macOS 전체 265 tests가 PASS했다.
 - 재리뷰 handoff: Korean light·English dark·increased-contrast·large-text snapshots, fresh correctness/security/performance와 design review 모두 Blocker 0/High 0/Medium 0이다. clean `swift`/actual-launch `macos-ui`/docs gate를 PR #394 evidence 정본으로 삼고 worker는 `status:needs-review`까지만 진행한다. merge/close는 momo-main만 수행한다.
+
+## 9. MOMO-385 checkpoint (2026-07-15)
+
+- 구현: current-channel roster를 right inspector로 옮기고 current/workspace audience, search, people/agent filter, presence/status/role/capability, copy/mention/context action을 연결했다. latest screenshot 계약에 따라 row click은 compact profile popover를 열며 profile의 단일 DM action이 canonical channel을 선택한다.
+- window: standard detail은 264pt attached inspector, narrow detail은 scrim 위 320pt overlay다. standard/narrow light/dark root window와 light/dark profile popover 6건을 실제 WindowServer에서 캡처해 timeline 압축·titlebar/control overlap이 없음을 확인했다.
+- correctness: client는 self/inactive/in-flight와 stale session을 차단하고 authenticated member/JWT `sub` 어느 쪽에서도 현재 멤버를 확정하지 못하면 POST 전에 fail-closed한다. server target miss는 transaction 밖에서 404로 변환해 cross-workspace RLS 경계가 500으로 새지 않는다.
+- 검증: focused macOS 10, server DM 3, roster snapshot 14, two humans+one agent runtime verifier, design preflight와 fresh design review Blocker 0/High 0/Medium 0 PASS. final clean `runtime-db`/`swift`/actual-launch `macos-ui`/docs gate를 PR evidence에 기록하고 worker는 `status:needs-review`까지만 진행한다.

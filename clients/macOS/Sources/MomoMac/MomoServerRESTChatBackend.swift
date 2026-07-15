@@ -332,13 +332,53 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         workspace: WorkspaceID,
         with member: MemberID
     ) async throws -> Channel {
-        let response = try await post(
-            "/v1/workspaces/\(workspace.description)/dms",
-            body: OpenDirectMessageRequestDTO(memberId: member.rawValue),
-            authorized: true,
-            response: OpenDirectMessageResponseDTO.self
-        )
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              let sessionAccessToken = accessToken,
+              !sessionAccessToken.isEmpty
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
+        guard let currentMemberID = authenticatedMember?.id ?? Self.memberIDFromJWT(sessionAccessToken) else {
+            throw BackendError.notConnected
+        }
+        let responseData: Data
+        do {
+            responseData = try await postData(
+                "/v1/workspaces/\(workspace.description)/dms",
+                body: OpenDirectMessageRequestDTO(memberId: member.rawValue),
+                authorized: true
+            )
+        } catch {
+            guard connectionGeneration == generation,
+                  self.workspace == sessionWorkspace,
+                  accessToken == sessionAccessToken
+            else {
+                throw CancellationError()
+            }
+            throw error
+        }
+        guard connectionGeneration == generation,
+              self.workspace == sessionWorkspace,
+              accessToken == sessionAccessToken
+        else {
+            throw CancellationError()
+        }
+        let response: OpenDirectMessageResponseDTO
+        do {
+            response = try decoder.decode(OpenDirectMessageResponseDTO.self, from: responseData)
+        } catch {
+            throw BackendError.decoding(String(describing: error))
+        }
         let channel = try response.channel.channel()
+        guard channel.workspaceId == sessionWorkspace,
+              channel.kind == .dm,
+              channel.dmMemberIds.contains(member),
+              channel.dmMemberIds.contains(currentMemberID)
+        else {
+            throw BackendError.decoding("direct message response scope mismatch")
+        }
         if let index = cachedChannels?.firstIndex(where: { $0.id == channel.id }) {
             cachedChannels?[index] = channel
         } else {

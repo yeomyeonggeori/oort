@@ -13,6 +13,12 @@ import PostgresNIO
 /// transaction; the existing partial unique index on `(workspace_id, dm_key)`
 /// is the concurrency authority for one channel per participant pair.
 struct DMRoutes: Sendable {
+    private enum OpenResult: Sendable {
+        case forbidden
+        case targetNotFound
+        case opened(OpenDirectMessageResponse)
+    }
+
     let db: Database
 
     func add(to group: RouterGroup<AppRequestContext>) {
@@ -64,7 +70,7 @@ struct DMRoutes: Sendable {
         let firstParticipantID = participantIDs[0]
         let secondParticipantID = participantIDs[1]
 
-        let result: OpenDirectMessageResponse = try await db.withTenantTransaction(
+        let result: OpenResult = try await db.withTenantTransaction(
             workspaceID: workspaceID
         ) { conn in
             let role = try await InviteRoutes.activeWorkspaceRole(
@@ -73,7 +79,7 @@ struct DMRoutes: Sendable {
                 memberID: principal.memberID
             )
             guard role != nil else {
-                throw HTTPError(.forbidden, message: "not a workspace member")
+                return .forbidden
             }
 
             let targetRows = try await conn.query(
@@ -90,7 +96,7 @@ struct DMRoutes: Sendable {
                 logger: db.logger
             ).collect()
             guard try targetRows.first?.decode(Bool.self) == true else {
-                throw HTTPError(.notFound, message: "active workspace member not found")
+                return .targetNotFound
             }
 
             // Serialize only this workspace/pair before the INSERT statement takes
@@ -204,15 +210,24 @@ struct DMRoutes: Sendable {
                 throw HTTPError(.internalServerError, message: "direct message could not be opened")
             }
             let (channelJSON, created) = try row.decode((String, Bool).self)
-            return OpenDirectMessageResponse(
-                channel: try ChannelRoutes.decodeChannel(channelJSON),
-                created: created
+            return .opened(
+                OpenDirectMessageResponse(
+                    channel: try ChannelRoutes.decodeChannel(channelJSON),
+                    created: created
+                )
             )
         }
 
-        var response = try result.response(from: request, context: context)
-        response.status = result.created ? .created : .ok
-        return response
+        switch result {
+        case .forbidden:
+            throw HTTPError(.forbidden, message: "not a workspace member")
+        case .targetNotFound:
+            throw HTTPError(.notFound, message: "active workspace member not found")
+        case .opened(let opened):
+            var response = try opened.response(from: request, context: context)
+            response.status = opened.created ? .created : .ok
+            return response
+        }
     }
 
     static func canonicalParticipantIDs(_ first: UUID, _ second: UUID) -> [UUID] {

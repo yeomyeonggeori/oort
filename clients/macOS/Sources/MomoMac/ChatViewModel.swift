@@ -245,6 +245,7 @@ public final class ChatViewModel: ObservableObject {
     private var workspaceNameUpdateGeneration: UInt64 = 0
     private var channelCreateOperationGeneration: UInt64 = 0
     private var channelCreateSessionState: ChannelCreateSessionState = .disconnected
+    private var directMessageOperationTokens: [MemberID: UUID] = [:]
 
     var activeChannelSubscriptionCount: Int { channelSubscriptions.count }
 
@@ -512,6 +513,7 @@ public final class ChatViewModel: ObservableObject {
         approvalDecisionsInFlight = []
         channelMemberMutationIds = []
         directMessageMutationIds = []
+        directMessageOperationTokens = [:]
         directMessageError = nil
         memberDirectoryIsRefreshing = false
         memberDirectoryError = nil
@@ -962,18 +964,31 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func startDirectMessage(with memberID: MemberID) async {
+    @discardableResult
+    public func startDirectMessage(with memberID: MemberID) async -> Bool {
         guard let workspaceId,
               !isCurrentUser(memberID),
+              member(memberID)?.status == .active,
               !directMessageMutationIds.contains(memberID)
-        else { return }
+        else { return false }
 
+        let operationToken = UUID()
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        directMessageOperationTokens[memberID] = operationToken
         directMessageMutationIds.insert(memberID)
         directMessageError = nil
-        defer { directMessageMutationIds.remove(memberID) }
+        defer {
+            if directMessageOperationTokens[memberID] == operationToken {
+                directMessageOperationTokens.removeValue(forKey: memberID)
+                directMessageMutationIds.remove(memberID)
+            }
+        }
 
         do {
             let channel = try await chat.openDirectMessage(workspace: workspaceId, with: memberID)
+            guard directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId)
+            else { return false }
             if let index = channels.firstIndex(where: { $0.id == channel.id }) {
                 channels[index] = channel
             } else {
@@ -990,9 +1005,19 @@ public final class ChatViewModel: ObservableObject {
             directMessageError = nil
             clearConnectionErrorState()
             await selectChannel(channel.id)
+            guard directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  selectedChannelId == channel.id
+            else { return false }
+            return true
         } catch {
+            guard directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  !Self.isCancellation(error)
+            else { return false }
             directMessageError = String(describing: error)
             reportConnectionError(error, as: .actionFailed)
+            return false
         }
     }
 

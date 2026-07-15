@@ -1299,6 +1299,8 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routeSource.contains("activeWorkspaceRole"))
         XCTAssertTrue(routeSource.contains("m.workspace_id ="))
         XCTAssertTrue(routeSource.contains("m.status = 'active'"))
+        XCTAssertTrue(routeSource.contains("return .targetNotFound"))
+        XCTAssertTrue(routeSource.contains("case .targetNotFound:"))
         XCTAssertTrue(routeSource.contains("pg_advisory_xact_lock"))
         XCTAssertTrue(routeSource.contains("ON CONFLICT (workspace_id, dm_key) WHERE kind = 'dm'"))
         XCTAssertTrue(routeSource.contains("ON CONFLICT (channel_id, member_id)"))

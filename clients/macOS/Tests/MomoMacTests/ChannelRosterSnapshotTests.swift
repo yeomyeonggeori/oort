@@ -5,9 +5,8 @@ import SnapshotTesting
 import MomoCore
 @testable import MomoMac
 
-// MOMO-357/365/367 change the sidebar hierarchy, capability badges, and unread state. New canonical references are
-// intentionally absent in the worker patch; the macOS gate machine records
-// them so host-dependent PNGs never become worker-authored baselines.
+// MOMO-357/365/367 cover the sidebar hierarchy, capability badges, and unread state.
+// MOMO-385 moves roster identity and capability evidence into the right member inspector.
 @MainActor
 final class ChannelRosterSnapshotTests: XCTestCase {
     private func fixtureSidebar(
@@ -112,6 +111,73 @@ final class ChannelRosterSnapshotTests: XCTestCase {
         representation.size = size
         hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
 
+        let image = NSImage(size: size)
+        image.addRepresentation(representation)
+        return image
+    }
+
+    private func renderMemberInspector(
+        _ scheme: ColorScheme,
+        capabilitiesByHandle: [String: [String]] = [:]
+    ) async throws -> NSImage {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo(capabilitiesByHandle: capabilitiesByHandle)
+        let viewModel = ChatViewModel(backend: backend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "member-inspector-snapshot")
+        let channel = try XCTUnwrap(seed.channels.first)
+        await viewModel.selectChannel(channel.id)
+        let size = CGSize(width: MomoTheme.MemberInspector.attachedWidth, height: 720)
+        let hostingController = NSHostingController(
+            rootView: MomoChannelMemberInspectorView(
+                viewModel: viewModel,
+                audience: .channel,
+                copy: MomoWorkspaceCopy(language: .korean),
+                close: {},
+                didOpenDirectMessage: {}
+            )
+            .frame(width: size.width, height: size.height)
+            .environment(\.colorScheme, scheme)
+        )
+        let hostingView = hostingController.view
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let window = NSWindow(
+            contentRect: CGRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = appearance
+        window.isReleasedWhenClosed = false
+        window.contentViewController = hostingController
+        hostingView.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        if !NSScreen.screens.isEmpty {
+            window.orderFrontRegardless()
+        }
+        defer { window.close() }
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(150))
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("NSHostingView produced no member inspector bitmap on this host")
+        }
+        representation.size = size
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
         let image = NSImage(size: size)
         image.addRepresentation(representation)
         return image
@@ -290,8 +356,8 @@ final class ChannelRosterSnapshotTests: XCTestCase {
 
     func testChannelRosterRasterContainsAgentBadgePixels() async throws {
         for scheme in [ColorScheme.light, .dark] {
-            let image = try await render(scheme)
-            XCTAssertEqual(image.size, CGSize(width: 340, height: 720))
+            let image = try await renderMemberInspector(scheme)
+            XCTAssertEqual(image.size, CGSize(width: MomoTheme.MemberInspector.attachedWidth, height: 720))
             XCTAssertGreaterThan(
                 try agentAccentPixelCount(in: image),
                 100,
@@ -305,7 +371,7 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             testName: #function.replacingOccurrences(of: "()", with: ""),
             named: "light"
         )
-        let image = try await render(
+        let image = try await renderMemberInspector(
             .light,
             capabilitiesByHandle: ["hermes": ["code", "terminal", "docs"]]
         )
@@ -321,7 +387,7 @@ final class ChannelRosterSnapshotTests: XCTestCase {
             testName: #function.replacingOccurrences(of: "()", with: ""),
             named: "dark"
         )
-        let image = try await render(
+        let image = try await renderMemberInspector(
             .dark,
             capabilitiesByHandle: ["hermes": ["code", "terminal", "docs"]]
         )
@@ -334,15 +400,15 @@ final class ChannelRosterSnapshotTests: XCTestCase {
 
     func testCapabilitySidebarRasterAddsBadgeAccentPixels() async throws {
         for scheme in [ColorScheme.light, .dark] {
-            let baseline = try await render(scheme)
-            let capabilityRaster = try await render(
+            let baseline = try await renderMemberInspector(scheme)
+            let capabilityRaster = try await renderMemberInspector(
                 scheme,
                 capabilitiesByHandle: ["hermes": ["code", "terminal", "docs"]]
             )
             XCTAssertGreaterThan(
                 try agentAccentPixelCount(in: capabilityRaster),
                 try agentAccentPixelCount(in: baseline) + 20,
-                "Capability chips must remain visible in the sidebar under \(scheme) mode"
+                "Capability chips must remain visible in the member inspector under \(scheme) mode"
             )
         }
     }
