@@ -36,3 +36,56 @@
     encode zstd gzip
     reverse_proxy centrifugo:8000
 }
+
+# MOMO-390 (ADR-0119 D1-A): the workspace representative domain serves the web
+# SPA and proxies /v1/* to the api container on the same origin, so the browser
+# client needs no CORS and the server stays unchanged. The api container never
+# serves web assets; Caddy's file_server does.
+#
+# APP_DOMAIN is optional. When it is not configured, the site address falls
+# back to the reserved sentinel below and the site fails closed:
+#   - `.localhost` names always receive a locally-signed certificate from
+#     Caddy's internal CA — no ACME traffic, no public issuance attempt;
+#   - the @app_domain_unset guard matches every request on the sentinel host
+#     and answers 404 before the /v1 proxy and file handlers (the Caddyfile
+#     adapter orders this host-matcher handle ahead of the path handles;
+#     scripts/web_serving_smoke.sh asserts that ordering at runtime);
+#   - the {$API_DOMAIN}/{$REALTIME_DOMAIN} sites above are untouched, so a
+#     deploy without APP_DOMAIN keeps the existing 2-site behavior.
+# NOTE: a set-but-empty APP_DOMAIN is not parseable by Caddy (empty site
+# address). The prod compose maps it as `${APP_DOMAIN:-<sentinel>}` so the
+# container-side value can never be empty; keep that guard when running this
+# file outside compose.
+{$APP_DOMAIN:momo-app-domain-unset.localhost} {
+    import security_headers
+    encode zstd gzip
+
+    @app_domain_unset host momo-app-domain-unset.localhost
+    handle @app_domain_unset {
+        respond "APP_DOMAIN is not configured" 404
+    }
+
+    # MOMO-300: same edge rule as {$API_DOMAIN} — the Centrifugo
+    # subscribe-proxy callback is internal-only. Deny it here too (403,
+    # fail closed) so the rate-limit-excluded route is never web-reachable.
+    handle /v1/centrifugo/* {
+        respond "forbidden" 403
+    }
+
+    handle /v1/* {
+        reverse_proxy api:8080
+    }
+
+    handle {
+        root * /srv/momo-web
+        # ADR-0119 D3-A: strict SPA CSP — own origin only, no inline script.
+        # connect-src additionally allows the realtime websocket origin
+        # (centrifuge-js connects to wss://{$REALTIME_DOMAIN}; the ws URL
+        # itself still comes only from the server's realtimeWebSocketUrl,
+        # ADR-0110).
+        header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss://{$REALTIME_DOMAIN}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        # SPA routing fallback: unknown paths rewrite to index.html.
+        try_files {path} /index.html
+        file_server
+    }
+}
