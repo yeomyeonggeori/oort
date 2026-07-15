@@ -871,10 +871,7 @@ public final class ChatViewModel: ObservableObject {
             subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
             messagesByChannel[result.channel.id] = messagesByChannel[result.channel.id] ?? []
-            recordChannelSelection(result.channel.id)
-            selectedChannelId = result.channel.id
-            activeTimelineChannelId = result.channel.id
-            subscribeRealtimeStatus(channel: result.channel.id)
+            await navigateAsUser(to: result.channel.id, history: .recordSelection)
             return true
         } catch {
             guard !Self.isCancellation(error), !Task.isCancelled,
@@ -995,6 +992,7 @@ public final class ChatViewModel: ObservableObject {
 
         do {
             let channel = try await chat.openDirectMessage(workspace: workspaceId, with: memberID)
+            try Task.checkCancellation()
             guard directMessageOperationTokens[memberID] == operationToken,
                   isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId)
             else { return .ignored }
@@ -1011,12 +1009,16 @@ public final class ChatViewModel: ObservableObject {
             }
             ensureReadStateExists(channel: channel.id)
             subscribe(channel: channel.id)
-            guard navigationIntentGeneration == navigationIntent else { return .ignored }
+            guard !Task.isCancelled,
+                  navigationIntentGeneration == navigationIntent
+            else { return .ignored }
             directMessageError = nil
             clearConnectionErrorState()
             recordChannelSelection(channel.id)
+            guard !Task.isCancelled else { return .ignored }
             await activateChannel(channel.id)
-            guard directMessageOperationTokens[memberID] == operationToken,
+            guard !Task.isCancelled,
+                  directMessageOperationTokens[memberID] == operationToken,
                   isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
                   navigationIntentGeneration == navigationIntent,
                   selectedChannelId == channel.id
@@ -1044,8 +1046,26 @@ public final class ChatViewModel: ObservableObject {
 
     /// Select a channel: load history + (re)subscribe to its realtime stream.
     public func selectChannel(_ id: ChannelID) async {
+        await navigateAsUser(to: id, history: .recordSelection)
+    }
+
+    private enum UserNavigationHistoryMutation {
+        case recordSelection
+        case traverse(to: Int)
+    }
+
+    private func navigateAsUser(
+        to id: ChannelID,
+        history: UserNavigationHistoryMutation
+    ) async {
         _ = beginNavigationIntent()
-        recordChannelSelection(id)
+        switch history {
+        case .recordSelection:
+            recordChannelSelection(id)
+        case .traverse(let destinationIndex):
+            channelNavigationIndex = destinationIndex
+            recordRecentChannel(id)
+        }
         await activateChannel(id)
     }
 
@@ -1077,19 +1097,15 @@ public final class ChatViewModel: ObservableObject {
     public func navigateChannelHistoryBackward() async {
         guard canNavigateChannelHistoryBackward, let channelNavigationIndex else { return }
         let destinationIndex = self.channelNavigationHistory.index(before: channelNavigationIndex)
-        self.channelNavigationIndex = destinationIndex
         let id = channelNavigationHistory[destinationIndex]
-        recordRecentChannel(id)
-        await activateChannel(id)
+        await navigateAsUser(to: id, history: .traverse(to: destinationIndex))
     }
 
     public func navigateChannelHistoryForward() async {
         guard canNavigateChannelHistoryForward, let channelNavigationIndex else { return }
         let destinationIndex = self.channelNavigationHistory.index(after: channelNavigationIndex)
-        self.channelNavigationIndex = destinationIndex
         let id = channelNavigationHistory[destinationIndex]
-        recordRecentChannel(id)
-        await activateChannel(id)
+        await navigateAsUser(to: id, history: .traverse(to: destinationIndex))
     }
 
     @discardableResult

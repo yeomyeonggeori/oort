@@ -3915,6 +3915,122 @@ final class MomoMacTests: XCTestCase {
         XCTAssertNotNil(viewModel.directMessageError)
     }
 
+    @MainActor
+    func testViewModelHistoryNavigationInvalidatesDelayedDirectMessageNavigation() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledDirectMessageBackend(base: base)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let firstChannel = try XCTUnwrap(viewModel.selectedChannelId)
+        let secondChannel = try XCTUnwrap(seed.channels.first { $0.id != firstChannel })
+        await viewModel.selectChannel(secondChannel.id)
+        let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
+        let targets = viewModel.members.filter { $0.id != currentMember.id && $0.status == .active }
+        let backTarget = try XCTUnwrap(targets.first)
+        let forwardTarget = try XCTUnwrap(targets.dropFirst().first)
+        let backDM = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372214")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, backTarget.id]
+        )
+        let forwardDM = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372215")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, forwardTarget.id]
+        )
+        await backend.setOutcome(.success(backDM), for: backTarget.id)
+        await backend.setOutcome(.success(forwardDM), for: forwardTarget.id)
+
+        let pendingBack = Task { await viewModel.startDirectMessage(with: backTarget.id) }
+        await backend.waitForOpen(with: backTarget.id)
+        await viewModel.navigateChannelHistoryBackward()
+        XCTAssertEqual(viewModel.selectedChannelId, firstChannel)
+        await backend.releaseOpen(with: backTarget.id)
+        let backOutcome = await pendingBack.value
+        XCTAssertEqual(backOutcome, .ignored)
+        XCTAssertEqual(viewModel.selectedChannelId, firstChannel)
+
+        let pendingForward = Task { await viewModel.startDirectMessage(with: forwardTarget.id) }
+        await backend.waitForOpen(with: forwardTarget.id)
+        await viewModel.navigateChannelHistoryForward()
+        XCTAssertEqual(viewModel.selectedChannelId, secondChannel.id)
+        await backend.releaseOpen(with: forwardTarget.id)
+        let forwardOutcome = await pendingForward.value
+        XCTAssertEqual(forwardOutcome, .ignored)
+        XCTAssertEqual(viewModel.selectedChannelId, secondChannel.id)
+        XCTAssertNil(viewModel.directMessageError)
+    }
+
+    @MainActor
+    func testViewModelChannelCreationInvalidatesDelayedDirectMessageNavigation() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledDirectMessageBackend(base: base)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
+        let target = try XCTUnwrap(viewModel.members.first { $0.id != currentMember.id && $0.status == .active })
+        let delayedDM = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372216")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, target.id]
+        )
+        await backend.setOutcome(.success(delayedDM), for: target.id)
+
+        let pendingDM = Task { await viewModel.startDirectMessage(with: target.id) }
+        await backend.waitForOpen(with: target.id)
+        let created = await viewModel.createChannel(
+            kind: .privateChannel,
+            name: "dm-race-created",
+            topic: "navigation intent regression"
+        )
+        XCTAssertTrue(created)
+        let createdChannel = try XCTUnwrap(viewModel.channels.first { $0.name == "dm-race-created" })
+        XCTAssertEqual(viewModel.selectedChannelId, createdChannel.id)
+
+        await backend.releaseOpen(with: target.id)
+        let dmOutcome = await pendingDM.value
+        XCTAssertEqual(dmOutcome, .ignored)
+        XCTAssertEqual(viewModel.selectedChannelId, createdChannel.id)
+        XCTAssertTrue(viewModel.channels.contains { $0.id == delayedDM.id })
+        XCTAssertNil(viewModel.directMessageError)
+    }
+
+    @MainActor
+    func testViewModelCancelledDirectMessageIgnoresCancellationInsensitiveBackendResult() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledDirectMessageBackend(base: base)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let originalChannel = try XCTUnwrap(viewModel.selectedChannelId)
+        let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
+        let target = try XCTUnwrap(viewModel.members.first { $0.id != currentMember.id && $0.status == .active })
+        let cancelledDM = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372217")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, target.id]
+        )
+        await backend.setOutcome(.success(cancelledDM), for: target.id)
+
+        let pendingDM = Task { await viewModel.startDirectMessage(with: target.id) }
+        await backend.waitForOpen(with: target.id)
+        pendingDM.cancel()
+        await backend.releaseOpen(with: target.id)
+
+        let dmOutcome = await pendingDM.value
+        XCTAssertEqual(dmOutcome, .ignored)
+        XCTAssertEqual(viewModel.selectedChannelId, originalChannel)
+        XCTAssertFalse(viewModel.channels.contains { $0.id == cancelledDM.id })
+        XCTAssertNil(viewModel.directMessageError)
+        XCTAssertTrue(viewModel.directMessageMutationIds.isEmpty)
+    }
+
     func testRESTBackendLoadsServerOwnedCostSnapshots() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -7076,6 +7192,15 @@ private actor ControlledDirectMessageBackend: ChatBackend {
         case .failure(let error):
             throw error
         }
+    }
+
+    func createChannel(
+        workspace: WorkspaceID,
+        kind: ChannelKind,
+        name: String,
+        topic: String?
+    ) async throws -> ChannelCreateResult {
+        try await base.createChannel(workspace: workspace, kind: kind, name: name, topic: topic)
     }
 
     func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
