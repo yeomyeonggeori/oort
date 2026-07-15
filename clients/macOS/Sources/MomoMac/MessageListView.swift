@@ -13,7 +13,6 @@ public struct MessageListView: View {
     private let onOpenWorkDetail: (RunID) -> Void
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
-    private let onOpenDownloads: (() -> Void)?
     private let focusComposerRequest: UInt64
     private let onChannelHeaderHeightChange: (CGFloat) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -34,14 +33,12 @@ public struct MessageListView: View {
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void = {},
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
-        onOpenDownloads: (() -> Void)? = nil,
         focusComposerRequest: UInt64 = 0
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
-        self.onOpenDownloads = onOpenDownloads
         self.focusComposerRequest = focusComposerRequest
         self.onChannelHeaderHeightChange = { _ in }
     }
@@ -51,7 +48,6 @@ public struct MessageListView: View {
         onOpenWorkDetail: @escaping (RunID) -> Void,
         onRequestLogin: @escaping () -> Void,
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
-        onOpenDownloads: (() -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
     ) {
@@ -59,7 +55,6 @@ public struct MessageListView: View {
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
-        self.onOpenDownloads = onOpenDownloads
         self.focusComposerRequest = focusComposerRequest
         self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
@@ -90,7 +85,6 @@ public struct MessageListView: View {
                 mentionNoticeBanner(notice)
                 Divider()
             }
-            Divider()
             timeline(copy: copy)
             Divider()
             composer(copy: copy)
@@ -127,8 +121,7 @@ public struct MessageListView: View {
                     retryRealtime: viewModel.selectedRealtimeStatus?.canRetry == true ? {
                         Task { await viewModel.retryRealtime() }
                     } : nil,
-                    openMemberDirectory: onOpenMemberDirectory,
-                    openDownloads: onOpenDownloads
+                    openMemberDirectory: onOpenMemberDirectory
                 )
             } else {
                 Text(copy.selectChannel)

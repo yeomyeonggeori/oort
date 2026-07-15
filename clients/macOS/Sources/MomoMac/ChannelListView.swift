@@ -61,6 +61,7 @@ struct MomoWorkspaceIdentityRecoveryButton: View {
 public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.momoWindowChromeTopInset) private var windowChromeTopInset
     @State private var showChannelCreation = false
     @State private var showDiagnostics = false
@@ -104,7 +105,6 @@ public struct ChannelListView: View {
     private let openMemberProfile: ((MemberID) -> Void)?
     private let openWorkspaceSettings: (() -> Void)?
     private let openSettings: (() -> Void)?
-    private let openDownloads: (() -> Void)?
     private let openUpdates: (() -> Void)?
     private let openMemberDirectory: (() -> Void)?
     private let openChannelSettings: ((ChannelID) -> Void)?
@@ -120,7 +120,6 @@ public struct ChannelListView: View {
         self.openMemberProfile = nil
         self.openWorkspaceSettings = nil
         self.openSettings = nil
-        self.openDownloads = nil
         self.openUpdates = nil
         self.openMemberDirectory = nil
         self.openChannelSettings = nil
@@ -137,7 +136,6 @@ public struct ChannelListView: View {
         openMemberProfile: ((MemberID) -> Void)? = nil,
         openWorkspaceSettings: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
-        openDownloads: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
         openMemberDirectory: (() -> Void)? = nil,
         openChannelSettings: ((ChannelID) -> Void)? = nil,
@@ -152,7 +150,6 @@ public struct ChannelListView: View {
         self.openMemberProfile = openMemberProfile
         self.openWorkspaceSettings = openWorkspaceSettings
         self.openSettings = openSettings
-        self.openDownloads = openDownloads
         self.openUpdates = openUpdates
         self.openMemberDirectory = openMemberDirectory
         self.openChannelSettings = openChannelSettings
@@ -203,20 +200,17 @@ public struct ChannelListView: View {
                 if showProfilePanel {
                     Color.primary.opacity(0.001)
                         .onTapGesture {
-                            withAnimation(sidebarPanelAnimation) {
-                                showProfilePanel = false
-                            }
+                            showProfilePanel = false
                         }
                         .zIndex(1)
 
                     profilePanel(copy: copy)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
-                        .padding(.bottom, 76)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .opacity
-                        ))
+                        .padding(
+                            .bottom,
+                            MomoTheme.Sidebar.footerMinimumHeight + MomoTheme.Sidebar.sectionSpacing
+                        )
                         .zIndex(2)
                 }
             }
@@ -226,8 +220,13 @@ public struct ChannelListView: View {
             )
             .padding(.top, topInset)
         }
-        .momoSurface(.panel, cornerRadius: 0, extent: .windowChrome)
-        .animation(sidebarPanelAnimation, value: showProfilePanel)
+        .background(
+            MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
+                .ignoresSafeArea()
+        )
+        .overlay(alignment: .trailing) {
+            Divider()
+        }
         .onAppear {
             refreshHermesEndpointDraftIfNeeded()
             hermesAlias = Self.dogfoodHermesAlias
@@ -329,7 +328,7 @@ public struct ChannelListView: View {
             }
         }
         .padding(.horizontal, MomoTheme.Sidebar.contentSpacing)
-        .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
+        .padding(.vertical, MomoTheme.Sidebar.compactSpacing)
         .frame(maxWidth: .infinity, minHeight: MomoTheme.Sidebar.headerMinimumHeight, alignment: .leading)
         .popover(isPresented: $showWorkspaceMenu, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
@@ -1074,9 +1073,7 @@ public struct ChannelListView: View {
 
     private func profileFooter(copy: MomoWorkspaceCopy) -> some View {
         Button {
-            withAnimation(sidebarPanelAnimation) {
-                showProfilePanel.toggle()
-            }
+            showProfilePanel.toggle()
         } label: {
             HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
                 MomoProfileAvatar(
@@ -1159,10 +1156,6 @@ public struct ChannelListView: View {
             profileAction(copy.settings, systemImage: "gearshape") {
                 showProfilePanel = false
                 openSettings?()
-            }
-            profileAction(copy.downloads, systemImage: "tray.and.arrow.down") {
-                showProfilePanel = false
-                openDownloads?()
             }
             profileAction(copy.updates, systemImage: "arrow.down.circle") {
                 showProfilePanel = false

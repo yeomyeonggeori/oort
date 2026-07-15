@@ -393,8 +393,15 @@ struct MomoWorkspaceCopy {
 
     var appDownloads: String {
         switch language {
-        case .korean: return "앱 다운로드와 업데이트"
-        case .english: return "App downloads and updates"
+        case .korean: return "다운로드"
+        case .english: return "Downloads"
+        }
+    }
+
+    var workspaceManagers: String {
+        switch language {
+        case .korean: return "관리자"
+        case .english: return "Managers"
         }
     }
 
@@ -1861,15 +1868,15 @@ struct MomoWorkspaceCopy {
 
     var downloadsSubtitle: String {
         switch language {
-        case .korean: return "앱 업데이트 파일과 로컬 다운로드 위치를 확인합니다. 채팅 첨부파일 다운로드는 아직 지원하지 않습니다."
-        case .english: return "Review app update files and local download locations. Chat attachment downloads are not supported yet."
+        case .korean: return "다운로드 위치와 파일 전송 지원 후 표시될 이력을 확인합니다."
+        case .english: return "Review the download location and the history that will appear when file transfer is available."
         }
     }
 
     var downloadsScopeNote: String {
         switch language {
-        case .korean: return "이 화면은 momo 앱 업데이트와 이 Mac의 다운로드 폴더만 다룹니다. 채팅 첨부파일은 다운로드하지 않습니다."
-        case .english: return "This view covers momo app updates and this Mac's download folder only. It does not download chat attachments."
+        case .korean: return "채팅 첨부파일 다운로드는 파일 전송 기능이 연결된 뒤 이곳에 기록됩니다."
+        case .english: return "Chat attachment downloads will appear here after file transfer support is connected."
         }
     }
 
@@ -1940,6 +1947,55 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "확인 실패"
         case .english: return "Check failed"
+        }
+    }
+
+    var downloadCompleted: String {
+        switch language {
+        case .korean: return "완료"
+        case .english: return "Completed"
+        }
+    }
+
+    var downloadFailed: String {
+        switch language {
+        case .korean: return "실패"
+        case .english: return "Failed"
+        }
+    }
+
+    var downloadActions: String {
+        switch language {
+        case .korean: return "다운로드 작업"
+        case .english: return "Download actions"
+        }
+    }
+
+    var showInFinder: String {
+        switch language {
+        case .korean: return "Finder에서 보기"
+        case .english: return "Show in Finder"
+        }
+    }
+
+    var deleteDownload: String {
+        switch language {
+        case .korean: return "삭제"
+        case .english: return "Delete"
+        }
+    }
+
+    var downloadDeleteFailedTitle: String {
+        switch language {
+        case .korean: return "파일을 삭제할 수 없습니다"
+        case .english: return "Unable to delete file"
+        }
+    }
+
+    var downloadDeleteFailedMessage: String {
+        switch language {
+        case .korean: return "파일이 다운로드 폴더에 있는지와 접근 권한을 확인한 뒤 다시 시도하세요. 이력은 그대로 유지됩니다."
+        case .english: return "Check that the file is in the Downloads folder and that momo has access, then try again. The history entry was kept."
         }
     }
 

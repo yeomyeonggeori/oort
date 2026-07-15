@@ -17,8 +17,11 @@ enum MomoMemberDirectMessageAvailability: Equatable {
 enum MomoMemberInspectorPolicy {
     struct Groups: Equatable {
         let members: [Member]
-        let people: [Member]
+        let managers: [Member]
         let agents: [Member]
+        let online: [Member]
+        let away: [Member]
+        let offline: [Member]
     }
 
     static func filteredMembers(
@@ -68,10 +71,21 @@ enum MomoMemberInspectorPolicy {
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
             return lhs.handle.localizedCaseInsensitiveCompare(rhs.handle) == .orderedAscending
         }
+        let managers = filtered.filter {
+            !$0.isAgent && ($0.workspaceRole == .owner || $0.workspaceRole == .admin)
+        }
+        let managerIDs = Set(managers.map(\.id))
+        let agents = filtered.filter(\.isAgent)
+        let people = filtered.filter { !$0.isAgent && !managerIDs.contains($0.id) }
         return Groups(
             members: filtered,
-            people: filtered.filter { !$0.isAgent },
-            agents: filtered.filter(\.isAgent)
+            managers: managers,
+            agents: agents,
+            online: people.filter { $0.status == .active && $0.presence == .online },
+            away: people.filter {
+                $0.status == .active && ($0.presence == .away || $0.presence == .working)
+            },
+            offline: people.filter { $0.status != .active || $0.presence == .offline }
         )
     }
 
@@ -100,7 +114,6 @@ struct MomoChannelMemberInspectorView: View {
     let didOpenDirectMessage: () -> Void
 
     @State private var query = ""
-    @State private var scope: MomoMemberDirectoryScope = .all
     @State private var selectedMemberID: MemberID?
     @State private var hoveredMemberID: MemberID?
     @State private var failedDirectMessageMemberID: MemberID?
@@ -167,7 +180,7 @@ struct MomoChannelMemberInspectorView: View {
             audience: audience,
             channelID: viewModel.selectedChannelId,
             query: query,
-            scope: scope
+            scope: .all
         )
     }
 
@@ -181,6 +194,7 @@ struct MomoChannelMemberInspectorView: View {
                 Text(title)
                     .font(.headline)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.82)
                 Text(copy.channelMemberCount(memberCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -203,25 +217,41 @@ struct MomoChannelMemberInspectorView: View {
             .accessibilityLabel(copy.closeMemberInspector)
         }
         .padding(.horizontal, MomoTheme.MemberInspector.edgeInset)
-        .padding(.vertical, MomoTheme.MemberInspector.standardSpacing)
         .frame(minHeight: MomoTheme.ChannelHeader.minimumHeight)
     }
 
     private var filters: some View {
         VStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
-            TextField(copy.searchMembers, text: $query)
-                .textFieldStyle(.roundedBorder)
-                .focused($focusedControl, equals: .search)
-                .accessibilityLabel(copy.searchMembers)
-                .accessibilityIdentifier("momo-member-inspector-search")
-
-            Picker(copy.memberType, selection: $scope) {
-                Text(copy.allMembers).tag(MomoMemberDirectoryScope.all)
-                Text(copy.people).tag(MomoMemberDirectoryScope.people)
-                Text(copy.agents).tag(MomoMemberDirectoryScope.agents)
+            HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField(copy.searchMembers, text: $query)
+                    .textFieldStyle(.plain)
+                    .focused($focusedControl, equals: .search)
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(copy.clearMemberSearch)
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            .padding(.horizontal, MomoTheme.MemberInspector.standardSpacing)
+            .frame(height: 32)
+            .background(
+                MomoTheme.MemberInspector.hoverBackground,
+                in: RoundedRectangle(cornerRadius: MomoTheme.MemberInspector.rowCornerRadius)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: MomoTheme.MemberInspector.rowCornerRadius)
+                    .strokeBorder(Color.primary.opacity(0.1))
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(copy.searchMembers)
+            .accessibilityIdentifier("momo-member-inspector-search")
 
             if viewModel.selectedRealtimeStatus?.isFallbackActive == true {
                 Label(copy.memberDirectoryOffline, systemImage: "wifi.slash")
@@ -274,8 +304,6 @@ struct MomoChannelMemberInspectorView: View {
             } actions: {
                 if !query.isEmpty {
                     Button(copy.clearMemberSearch) { query = "" }
-                } else if scope != .all {
-                    Button(copy.showAllMembers) { scope = .all }
                 } else {
                     Button(copy.retry) {
                         Task { await viewModel.refreshMemberDirectory() }
@@ -289,9 +317,9 @@ struct MomoChannelMemberInspectorView: View {
 
     private func memberList(groups: MomoMemberInspectorPolicy.Groups) -> some View {
         List {
-            if !groups.people.isEmpty {
-                Section("\(copy.people) · \(groups.people.count)") {
-                    ForEach(groups.people) { member in
+            if !groups.managers.isEmpty {
+                Section("\(copy.workspaceManagers) · \(groups.managers.count)") {
+                    ForEach(groups.managers) { member in
                         memberRow(member)
                     }
                 }
@@ -299,6 +327,27 @@ struct MomoChannelMemberInspectorView: View {
             if !groups.agents.isEmpty {
                 Section("\(copy.agents) · \(groups.agents.count)") {
                     ForEach(groups.agents) { member in
+                        memberRow(member)
+                    }
+                }
+            }
+            if !groups.online.isEmpty {
+                Section("\(copy.presenceOnline) · \(groups.online.count)") {
+                    ForEach(groups.online) { member in
+                        memberRow(member)
+                    }
+                }
+            }
+            if !groups.away.isEmpty {
+                Section("\(copy.presenceAway) · \(groups.away.count)") {
+                    ForEach(groups.away) { member in
+                        memberRow(member)
+                    }
+                }
+            }
+            if !groups.offline.isEmpty {
+                Section("\(copy.presenceOffline) · \(groups.offline.count)") {
+                    ForEach(groups.offline) { member in
                         memberRow(member)
                     }
                 }
