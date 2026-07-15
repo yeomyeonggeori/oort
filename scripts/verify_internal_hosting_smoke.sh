@@ -34,10 +34,12 @@ SMOKE_COMPOSE="$PROD_DIR/docker-compose.internal-smoke.yml"
 SMOKE_ENV="$PROD_DIR/internal-smoke.env.example"
 CADDYFILE="$PROD_DIR/Caddyfile"
 CENTRIFUGO_CONFIG="$PROD_DIR/centrifugo.prod.json"
+CENTRIFUGO_DEV_CONFIG="infra/centrifugo.json"
 CONFIG_OUT="${TMPDIR:-/tmp}/momo-internal-hosting-smoke-compose.yml"
 
 for path in \
   "$PROD_COMPOSE" "$SMOKE_COMPOSE" "$SMOKE_ENV" "$CADDYFILE" "$CENTRIFUGO_CONFIG" \
+  "$CENTRIFUGO_DEV_CONFIG" \
   "scripts/migrate.sh" "server/Sources/MomoServer/App.swift" \
   "server/Migrations/001_init.sql" "server/Migrations/002_seed.sql" \
   "infra/prod/pgbackrest.conf.example" "docs/SECRETS_BACKUP_RUNBOOK.md" \
@@ -88,7 +90,13 @@ grep -Fq 'reverse_proxy centrifugo:8000' "$CADDYFILE" || fail "Caddyfile must pr
 grep -Fq 'Strict-Transport-Security' "$CADDYFILE" || fail "Caddyfile missing HSTS header"
 # MOMO-300: rate-limit-excluded subscribe proxy must be edge-denied (403).
 grep -Fq 'handle /v1/centrifugo/*' "$CADDYFILE" || fail "Caddyfile must deny /v1/centrifugo/* at the edge (MOMO-300)"
-grep -A1 'handle /v1/centrifugo/\*' "$CADDYFILE" | grep -Eq 'respond .*403' || fail "Caddyfile /v1/centrifugo/* handle must respond 403"
+# MOMO-399: MOMO-390 added a second edge site ({$APP_DOMAIN}) with its own
+# /v1/centrifugo/* handle. Require EVERY such handle to respond 403 so one
+# site block losing its deny cannot hide behind another block's match.
+centrifugo_deny_handles="$(grep -Fc 'handle /v1/centrifugo/*' "$CADDYFILE")"
+centrifugo_deny_403s="$(grep -A1 'handle /v1/centrifugo/\*' "$CADDYFILE" | grep -Ec 'respond .*403' || true)"
+[ "$centrifugo_deny_403s" -eq "$centrifugo_deny_handles" ] \
+  || fail "every Caddyfile /v1/centrifugo/* handle must respond 403 (handles=$centrifugo_deny_handles, 403s=$centrifugo_deny_403s)"
 grep -Eq 'published: "?18080"?' "$CONFIG_OUT" || fail "internal smoke HTTP port must be local-only 18080 by default"
 grep -Eq 'published: "?18443"?' "$CONFIG_OUT" || fail "internal smoke HTTPS port must be local-only 18443 by default"
 if grep -Eq 'published: "?5432"?|published: "?6379"?|published: "?8000"?|published: "?8080"?' "$CONFIG_OUT"; then
@@ -99,7 +107,25 @@ pass "Caddy is the only public edge; API/realtime route internally"
 section "Centrifugo Redis engine and subscribe proxy"
 jq empty "$CENTRIFUGO_CONFIG"
 jq -e '.engine.type == "redis"' "$CENTRIFUGO_CONFIG" >/dev/null || fail "Centrifugo prod config must use Redis engine"
-jq -e '([.channel.namespaces[].name] | sort) == ["agent","ch","dm","user"]' "$CENTRIFUGO_CONFIG" >/dev/null || fail "Centrifugo namespaces must be agent/ch/dm/user"
+# MOMO-399: derive the namespace expectation from infra/centrifugo.json (the
+# local/dev runtime SoT config exercised by the runtime gates) instead of a
+# hardcoded list. MOMO-338 added the agentwork namespace and this gate's frozen
+# list went stale, failing main (DEVIATION_LOG 2026-07-15). The prod namespace
+# set may never drift from the dev namespace set; future additions are picked
+# up automatically as long as both configs change together.
+dev_namespaces="$(jq -r '[.channel.namespaces[].name] | sort | join(",")' "$CENTRIFUGO_DEV_CONFIG")"
+prod_namespaces="$(jq -r '[.channel.namespaces[].name] | sort | join(",")' "$CENTRIFUGO_CONFIG")"
+[ -n "$dev_namespaces" ] || fail "no Centrifugo namespaces parsed from $CENTRIFUGO_DEV_CONFIG"
+[ "$prod_namespaces" = "$dev_namespaces" ] \
+  || fail "Centrifugo namespace drift: prod=[$prod_namespaces] dev=[$dev_namespaces] — prod config must carry the same namespace set as $CENTRIFUGO_DEV_CONFIG"
+# Presence-only core contract (additions never break this; removing a product
+# namespace must consciously touch this gate).
+for ns in agent agentwork ch dm user; do
+  case ",$prod_namespaces," in
+    *",$ns,"*) ;;
+    *) fail "Centrifugo prod config missing required namespace: $ns" ;;
+  esac
+done
 jq -e '.channel.proxy.subscribe.endpoint == "http://api:8080/v1/centrifugo/subscribe"' "$CENTRIFUGO_CONFIG" >/dev/null || fail "subscribe proxy must use compose-internal api:8080"
 grep -Fq 'CENTRIFUGO_ENGINE_TYPE: redis' "$PROD_COMPOSE" || fail "compose must enable Centrifugo Redis engine"
 grep -Fq 'CENTRIFUGO_REDIS_ADDRESS' "$PROD_COMPOSE" || fail "compose must wire Centrifugo Redis address from env"

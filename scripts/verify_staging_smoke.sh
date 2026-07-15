@@ -29,6 +29,7 @@ COMPOSE_FILE="$PROD_DIR/docker-compose.prod.yml"
 ENV_EXAMPLE="$PROD_DIR/.env.example"
 CADDYFILE="$PROD_DIR/Caddyfile"
 CENTRIFUGO_CONFIG="$PROD_DIR/centrifugo.prod.json"
+CENTRIFUGO_DEV_CONFIG="infra/centrifugo.json"
 SECRETS_EXAMPLE="$PROD_DIR/secrets.env.example"
 PGBACKREST_CONF="$PROD_DIR/pgbackrest.conf.example"
 PGBACKREST_POSTGRES="$PROD_DIR/postgresql.pgbackrest.conf.example"
@@ -39,6 +40,7 @@ PREFLIGHT_EVIDENCE_DIR="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-public-hos
 
 for path in \
   "$COMPOSE_FILE" "$ENV_EXAMPLE" "$CADDYFILE" "$CENTRIFUGO_CONFIG" \
+  "$CENTRIFUGO_DEV_CONFIG" \
   "$SECRETS_EXAMPLE" "$PGBACKREST_CONF" "$PGBACKREST_POSTGRES" \
   "$PGBACKREST_CRON" "$RUNBOOK" "$PREFLIGHT" ".sops.yaml.example" ".gitignore"; do
   [ -f "$path" ] || fail "missing required staging smoke file: $path"
@@ -72,7 +74,13 @@ grep -Fq 'X-Content-Type-Options' "$CADDYFILE" || fail "Caddyfile missing X-Cont
 # the compose network); the edge must deny /v1/centrifugo/* so the
 # rate-limit-excluded CENT_PROXY_SECRET route is never publicly reachable.
 grep -Fq 'handle /v1/centrifugo/*' "$CADDYFILE" || fail "Caddyfile must deny /v1/centrifugo/* at the edge (MOMO-300)"
-grep -A1 'handle /v1/centrifugo/\*' "$CADDYFILE" | grep -Eq 'respond .*403' || fail "Caddyfile /v1/centrifugo/* handle must respond 403"
+# MOMO-399: MOMO-390 added a second edge site ({$APP_DOMAIN}) with its own
+# /v1/centrifugo/* handle. Require EVERY such handle to respond 403 so one
+# site block losing its deny cannot hide behind another block's match.
+centrifugo_deny_handles="$(grep -Fc 'handle /v1/centrifugo/*' "$CADDYFILE")"
+centrifugo_deny_403s="$(grep -A1 'handle /v1/centrifugo/\*' "$CADDYFILE" | grep -Ec 'respond .*403' || true)"
+[ "$centrifugo_deny_403s" -eq "$centrifugo_deny_handles" ] \
+  || fail "every Caddyfile /v1/centrifugo/* handle must respond 403 (handles=$centrifugo_deny_handles, 403s=$centrifugo_deny_403s)"
 if command -v caddy >/dev/null 2>&1; then
   env ACME_EMAIL=ops@example.com \
     API_DOMAIN=api.staging.example.com \
@@ -87,7 +95,25 @@ echo "==> Centrifugo prod config validation"
 jq empty "$CENTRIFUGO_CONFIG"
 jq -e '.engine.type == "redis"' "$CENTRIFUGO_CONFIG" >/dev/null || fail "Centrifugo prod config must use Redis engine"
 jq -e '.engine.redis.address == "redis://redis:6379/0"' "$CENTRIFUGO_CONFIG" >/dev/null || fail "Centrifugo Redis address must use internal redis service"
-jq -e '([.channel.namespaces[].name] | sort) == ["agent","ch","dm","user"]' "$CENTRIFUGO_CONFIG" >/dev/null || fail "Centrifugo namespaces must be agent/ch/dm/user"
+# MOMO-399: derive the namespace expectation from infra/centrifugo.json (the
+# local/dev runtime SoT config exercised by the runtime gates) instead of a
+# hardcoded list. MOMO-338 added the agentwork namespace and this gate's frozen
+# list went stale, failing main (DEVIATION_LOG 2026-07-15). The prod namespace
+# set may never drift from the dev namespace set; future additions are picked
+# up automatically as long as both configs change together.
+dev_namespaces="$(jq -r '[.channel.namespaces[].name] | sort | join(",")' "$CENTRIFUGO_DEV_CONFIG")"
+prod_namespaces="$(jq -r '[.channel.namespaces[].name] | sort | join(",")' "$CENTRIFUGO_CONFIG")"
+[ -n "$dev_namespaces" ] || fail "no Centrifugo namespaces parsed from $CENTRIFUGO_DEV_CONFIG"
+[ "$prod_namespaces" = "$dev_namespaces" ] \
+  || fail "Centrifugo namespace drift: prod=[$prod_namespaces] dev=[$dev_namespaces] — prod config must carry the same namespace set as $CENTRIFUGO_DEV_CONFIG"
+# Presence-only core contract (additions never break this; removing a product
+# namespace must consciously touch this gate).
+for ns in agent agentwork ch dm user; do
+  case ",$prod_namespaces," in
+    *",$ns,"*) ;;
+    *) fail "Centrifugo prod config missing required namespace: $ns" ;;
+  esac
+done
 jq -e '.channel.proxy.subscribe.endpoint == "http://api:8080/v1/centrifugo/subscribe"' "$CENTRIFUGO_CONFIG" >/dev/null || fail "subscribe proxy must stay on internal api:8080"
 jq -e '.client.subscription_token.enabled == true' "$CENTRIFUGO_CONFIG" >/dev/null || fail "subscription tokens must be enabled"
 jq -e '
