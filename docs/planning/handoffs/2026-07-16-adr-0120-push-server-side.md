@@ -4,7 +4,7 @@
 > Planning ID: `ADR-0120` · Planner owner: `Fable` · Integrator: Fable(엔진/인프라 트랙 momo-main 겸임, 성재 승인 2026-07-15)
 > 발급: 2026-07-16 · 기준 커밋: `edb9737` · Supersedes: 없음
 > 근거 ADR: `ADR-0120 (Accepted 2026-07-15)` D2/D3/D4 · 대상 goal: MOMO-403, MOMO-404 · 병렬 가능: 아니오 — 403 → 404 직렬(404가 403의 등록 데이터를 소비)
-> GitHub binding: 미발급 (Issue 생성 후 metadata-only binding)
+> GitHub binding: MOMO-403=`#420`, MOMO-404=`#421` (발급 2026-07-16)
 
 ## 1. 결정 요약
 
@@ -14,8 +14,8 @@ ADR-0120은 "판정은 서버 한 곳(notifier), 전달은 Dawn 운영 relay, �
 
 | 순서 | goal | 이슈 | 의존 | 병렬 |
 |---|---|---|---|---|
-| 1 | MOMO-403 device/push_token 등록·해지 REST + 수명주기 | (발급 대기) | — | — |
-| 2 | MOMO-404 notifier worker(판정 v0 + dispatch_log + mock relay) | (발급 대기) | MOMO-403 | — |
+| 1 | MOMO-403 device/push_token 등록·해지 REST + 수명주기 | #420 | — | — |
+| 2 | MOMO-404 notifier worker(판정 v0 + dispatch_log + mock relay) | #421 | MOMO-403 | — |
 
 머지 순서: 403 → 404.
 
