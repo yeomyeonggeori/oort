@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // =============================================================================
-// MOMO-391 login -> timeline browser smoke (driven by
+// MOMO-391 + MOMO-400 web browser smoke (driven by
 // scripts/verify_web_login_smoke.sh; do not run against a non-disposable
-// stack — it writes messages).
+// stack — it writes messages and decides approvals).
 //
 // What it proves, end to end, in a real Chromium against the REAL prod
 // Caddyfile edge (strict CSP, same-origin /v1 proxy, wss realtime origin):
@@ -23,6 +23,33 @@
 //      for the 15-minute expiry), and the client must rotate once and retry
 //      with the ROTATED pair — proven by both refresh tokens being dead via
 //      direct REST afterwards.
+//
+// MOMO-400 additions (ADR-0119 W-4):
+//   8. read-state: the sidebar unread badge initializes from the bulk GET;
+//      an EXTERNAL cursor PUT (direct REST, not the browser) clears the badge
+//      with zero further read-state GETs from the page — the update can only
+//      have arrived over the `user:read-state#<member-id>` websocket push.
+//      Opening a channel / receiving live messages drives browser-side cursor
+//      PUTs whose bodies are asserted never-regressing (a re-PUT of the same
+//      seq is legitimate; only a LOWER seq is a regression).
+//   9. Composer idempotency: the first in-browser send is forwarded to the
+//      server but answered with a synthetic 500 (deterministic lost-response
+//      stand-in). The composer keeps the draft and the SAME clientMsgId; the
+//      retry must reuse it, and both the timeline DOM and REST history must
+//      show exactly ONE message (server-side ON CONFLICT dedup, L4 §3.1).
+//  10. Approvals: the fixtures carry the REAL gateway's dangerous fields
+//      (arguments tool JSON, tool_grant, estimated_micro_usd) in both
+//      approval.payload and message props; the cards must render as ADR-0112
+//      basic-mode cards on BOTH surfaces (timeline card + approvals panel
+//      card) with zero leakage of those fields' unique markers; an
+//      in-browser 승인 commits (receipt 200) and flips the card; a second
+//      approval decided EXTERNALLY first answers the in-browser 거부 with a
+//      409 RECEIPT that must transition the card to the authoritative status
+//      (no error surface) — the decided-elsewhere flow is normal, not an
+//      error.
+//  11. DM: the sidebar DM section is fed by GET /dms; the picker opens a DM
+//      with the seeded agent via POST /dms (idempotent) and the composer
+//      round-trips a message in it.
 //
 // Networking: the e2e Caddy edge listens on an alternate loopback port, but
 // CSP host sources match on DEFAULT ports (wss://rt.localhost == :443). So a
@@ -55,6 +82,17 @@ const PASSWORD = env("WEB_SMOKE_PASSWORD");
 const CHANNEL_NAME = env("WEB_SMOKE_CHANNEL_NAME", "general");
 const OUT_DIR = env("WEB_SMOKE_OUT_DIR", "/tmp/momo-web-login-smoke");
 const HEADLESS = env("WEB_SMOKE_HEADLESS", "1") !== "0";
+// MOMO-400 fixtures (installed by verify_web_login_smoke.sh):
+const UNREAD_CHANNEL_NAME = env("WEB_SMOKE_UNREAD_CHANNEL_NAME", "agent-lab");
+const APPROVAL_ID = env("WEB_SMOKE_APPROVAL_ID");
+const APPROVAL2_ID = env("WEB_SMOKE_APPROVAL2_ID");
+const DM_AGENT_HANDLE = env("WEB_SMOKE_DM_AGENT_HANDLE", "kim-intern");
+// ADR-0112 leak probes: unique marker planted in the fixtures' arguments /
+// tool_grant, plus the fixture estimated_micro_usd figures (comma-separated).
+const LEAK_MARKER = env("WEB_SMOKE_LEAK_MARKER", "LEAKPROBE");
+const LEAK_MICRO_USD = env("WEB_SMOKE_LEAK_MICRO_USD", "431337,917331")
+  .split(",")
+  .filter(Boolean);
 
 const failures = [];
 function pass(message) {
@@ -62,6 +100,32 @@ function pass(message) {
 }
 function fail(message) {
   throw new Error(`FAIL: ${message}`);
+}
+
+// ADR-0112 basic-mode leak assertion (review fix M1): beyond the structural
+// tells (JSON punctuation, field names, currency), assert the fixture's
+// unique dangerous-field markers and cost figures never reach the DOM.
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const LEAK_RE = new RegExp(
+  [
+    "[{}[\\]]",
+    "micro_usd",
+    "arguments",
+    "tool_grant",
+    "\\bUSD\\b",
+    "\\$",
+    ...[LEAK_MARKER, ...LEAK_MICRO_USD].map(escapeRegExp),
+  ].join("|")
+);
+function assertNoApprovalLeak(text, where) {
+  const match = LEAK_RE.exec(text);
+  if (match !== null) {
+    failures.push(
+      `${where} leaks tool JSON / tool_grant / cost details (ADR-0112 basic mode violation; matched ${JSON.stringify(match[0])})`
+    );
+    return false;
+  }
+  return true;
 }
 
 // ---- REST helpers (direct to the api host port; browser-independent) --------
@@ -191,18 +255,55 @@ try {
   };
 
   let afterBackfillSeen = false;
-  let afterZeroSeen = false;
+  let afterZeroOnSeededChannel = false;
+  let readStateGetCount = 0;
+  const readStatePuts = [];
   page.on("request", (request) => {
     const url = request.url();
     if (url.includes("/messages?") && url.includes("after=")) {
       afterBackfillSeen = true;
       // Regression guard (MOMO-391 review fix 2): a catch-up before the head
       // page establishes a baseline would fire `after=0` and page the whole
-      // channel history oldest-first. #general is seeded before the browser
-      // phase, so a legitimate after=0 cannot occur here.
-      if (new URL(url).searchParams.get("after") === "0") {
-        afterZeroSeen = true;
+      // channel history oldest-first. Scoped to the SEEDED channel: #general
+      // always has messages here, so after=0 on it can only be a lost
+      // baseline. On a confirmed-EMPTY channel (the MOMO-400 parking channel,
+      // or a fresh DM) seq 0 IS the head — after=0 there is the correct
+      // recovery cursor, not a regression.
+      if (
+        new URL(url).searchParams.get("after") === "0" &&
+        url.toLowerCase().includes(general.id.toLowerCase())
+      ) {
+        afterZeroOnSeededChannel = true;
       }
+    }
+    // MOMO-400 read-state observability: count bulk GETs (push-proof control)
+    // and record every cursor PUT body (monotonicity assertion).
+    if (
+      request.method() === "GET" &&
+      /\/v1\/workspaces\/[^/]+\/read-state(\?|$)/.test(url)
+    ) {
+      readStateGetCount += 1;
+    }
+    if (request.method() === "PUT" && url.includes("/read-state")) {
+      let body = {};
+      try {
+        body = JSON.parse(request.postData() ?? "{}");
+      } catch {
+        // keep {} — the monotonicity check will flag it
+      }
+      readStatePuts.push({ url, body });
+    }
+  });
+  // L4: the push proof below pins the GET counter only after every observed
+  // bulk GET's RESPONSE has completed — an in-flight response landing after
+  // the external PUT could otherwise clear the badge and fake the proof.
+  let readStateGetResponseCount = 0;
+  page.on("response", (response) => {
+    if (
+      response.request().method() === "GET" &&
+      /\/v1\/workspaces\/[^/]+\/read-state(\?|$)/.test(response.url())
+    ) {
+      readStateGetResponseCount += 1;
     }
   });
 
@@ -218,6 +319,95 @@ try {
   await page.getByTestId("channel-list").waitFor({ timeout: 20000 });
   pass("browser login ok; channel list rendered");
 
+  try {
+    await page
+      .locator('[data-testid="realtime-status"][data-status="connected"]')
+      .waitFor({ timeout: 30000 });
+  } catch (cause) {
+    dumpDiagnostics();
+    throw cause;
+  }
+  pass("realtime websocket connected under the strict CSP");
+
+  // 8) read-state: park on the no-unread fixture channel so #general's badge
+  //    stays observable (viewing a channel advances its cursor by design).
+  //    Parking determinism relies on the server's lower(name) channel sort
+  //    (agent-lab < general): the app auto-opens the FIRST listed channel, so
+  //    the initial open already lands on the parked channel, never #general.
+  await page
+    .locator(
+      `[data-testid="channel-item"][data-channel-name="${UNREAD_CHANNEL_NAME}"]`
+    )
+    .click();
+
+  const generalBadge = page.locator(
+    `[data-testid="unread-badge"][data-channel-name="${CHANNEL_NAME}"]`
+  );
+  await generalBadge.waitFor({ timeout: 20000 });
+  const badgeCount = Number(await generalBadge.getAttribute("data-count"));
+  if (!(badgeCount > 0)) {
+    failures.push(`#${CHANNEL_NAME} unread badge rendered without a count`);
+  } else {
+    pass(
+      `sidebar unread badge for #${CHANNEL_NAME} initialized from the bulk read-state GET (count ${badgeCount})`
+    );
+  }
+
+  // The personal-channel subscription always starts recovered:false, which
+  // re-baselines with one extra bulk GET. Wait for that GET's RESPONSE to
+  // complete — with no read-state GET still in flight — before pinning the
+  // push-proof counter (review fix L4: a request-only wait left a window
+  // where the in-flight response, not the push, could clear the badge).
+  {
+    const deadline = Date.now() + 20000;
+    while (
+      (readStateGetResponseCount < 2 ||
+        readStateGetCount !== readStateGetResponseCount) &&
+      Date.now() < deadline
+    ) {
+      await page.waitForTimeout(100);
+    }
+    if (readStateGetResponseCount < 2) {
+      failures.push(
+        "read-state subscription re-baseline (recovered:false bulk GET) never completed"
+      );
+    } else if (readStateGetCount !== readStateGetResponseCount) {
+      failures.push(
+        "a read-state GET was still in flight when pinning the push-proof counter"
+      );
+    }
+  }
+
+  // External cursor PUT (direct REST, not the browser): the ONLY way the
+  // badge can clear without another read-state GET is the
+  // user:read-state#<member-id> websocket push.
+  const generalHead = await api(
+    `/v1/workspaces/${workspaceId}/channels/${general.id}/messages?limit=1`,
+    { token }
+  );
+  const generalLatestSeq = generalHead.messages[0]?.seq ?? 0;
+  if (generalLatestSeq === 0) fail("#general has no messages; cannot run the read-state push proof");
+  const readStateGetsBeforePush = readStateGetCount;
+  await api(
+    `/v1/workspaces/${workspaceId}/channels/${general.id}/read-state`,
+    { method: "PUT", token, body: { last_read_seq: generalLatestSeq } }
+  );
+  try {
+    await generalBadge.waitFor({ state: "detached", timeout: 30000 });
+  } catch (cause) {
+    dumpDiagnostics();
+    throw cause;
+  }
+  if (readStateGetCount !== readStateGetsBeforePush) {
+    failures.push(
+      "badge cleared but extra read-state GETs ran — push reception not proven"
+    );
+  } else {
+    pass(
+      "external cursor PUT cleared the badge through the user:read-state push (zero further read-state GETs)"
+    );
+  }
+
   await page
     .locator(`[data-testid="channel-item"][data-channel-name="${CHANNEL_NAME}"]`)
     .click();
@@ -229,19 +419,9 @@ try {
   }
   pass(`timeline displays the seeded messages in #${CHANNEL_NAME}`);
 
-  try {
-    await page
-      .locator('[data-testid="realtime-status"][data-status="connected"]')
-      .waitFor({ timeout: 30000 });
-  } catch (cause) {
-    dumpDiagnostics();
-    throw cause;
-  }
-  pass("realtime websocket connected under the strict CSP");
-
   // 3) Live path: REST send while subscribed -> rendered via wss.
   const liveBody = `web smoke realtime ${runId} ${crypto.randomUUID()}`;
-  await api(
+  const liveMessage = await api(
     `/v1/workspaces/${workspaceId}/channels/${general.id}/messages`,
     {
       method: "POST",
@@ -259,16 +439,317 @@ try {
   }
   pass("REST-sent message arrived live over the realtime rail");
 
+  // Viewing the live arrival must advance the browser-side cursor to its seq.
+  {
+    const deadline = Date.now() + 20000;
+    let advanced = false;
+    while (Date.now() < deadline) {
+      advanced = readStatePuts.some(
+        (put) =>
+          put.url.toLowerCase().includes(general.id.toLowerCase()) &&
+          put.body.last_read_seq >= liveMessage.seq
+      );
+      if (advanced) break;
+      await page.waitForTimeout(100);
+    }
+    if (!advanced) {
+      failures.push(
+        "no browser read-state PUT advanced the cursor to the live message seq"
+      );
+    } else {
+      pass("live arrival drove a browser cursor PUT up to its seq");
+    }
+  }
+
   if (!afterBackfillSeen) {
     failures.push(
       "expected at least one REST `?after=` catch-up request after subscribe"
     );
-  } else if (afterZeroSeen) {
+  } else if (afterZeroOnSeededChannel) {
     failures.push(
-      "catch-up ran without a seq baseline (`after=0`) — Timeline must defer until the head page loads"
+      "catch-up ran without a seq baseline (`after=0` on the seeded channel) — Timeline must defer until the head page loads"
     );
   } else {
-    pass("REST ?after= catch-up ran on subscription establish (baseline > 0)");
+    pass(
+      "REST ?after= catch-up ran on subscription establish (baseline > 0 on the seeded channel)"
+    );
+  }
+
+  // 9) Composer idempotency: forward the first POST to the server, answer it
+  //    with a synthetic 500 (deterministic lost-response), and require the
+  //    retry to reuse the SAME clientMsgId with exactly one resulting message.
+  const composerBody = `web smoke composer ${runId}`;
+  const composerPosts = [];
+  let composerInterceptArmed = true;
+  await page.route(
+    "**/v1/workspaces/*/channels/*/messages*",
+    async (route) => {
+      const request = route.request();
+      if (request.method() !== "POST") return route.continue();
+      let parsed = {};
+      try {
+        parsed = JSON.parse(request.postData() ?? "{}");
+      } catch {
+        // recorded as {}; the clientMsgId assertion will flag it
+      }
+      composerPosts.push(parsed);
+      if (composerInterceptArmed) {
+        composerInterceptArmed = false;
+        // Forward first: the insert COMMITS server-side, then the response
+        // is replaced — the same observable input as a response lost on the
+        // network after commit.
+        await route.fetch();
+        return route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "internal", message: "smoke induced failure" },
+          }),
+        });
+      }
+      return route.continue();
+    }
+  );
+
+  await page.getByTestId("composer-input").fill(composerBody);
+  await page.getByTestId("composer-send").click();
+  await page.getByTestId("composer-error").waitFor({ timeout: 20000 });
+  pass("composer surfaced the failed send with retry copy (draft preserved)");
+
+  await page.getByTestId("composer-retry").click();
+  await page
+    .locator('[data-testid="timeline-message"]', { hasText: composerBody })
+    .waitFor({ timeout: 30000 });
+  await page.unroute("**/v1/workspaces/*/channels/*/messages*");
+
+  if (composerPosts.length !== 2) {
+    failures.push(
+      `composer idempotency: expected exactly 2 POSTs (send + retry), saw ${composerPosts.length}`
+    );
+  } else if (
+    !composerPosts[0].clientMsgId ||
+    composerPosts[0].clientMsgId !== composerPosts[1].clientMsgId
+  ) {
+    failures.push(
+      "composer retry must reuse the SAME clientMsgId (idempotent re-send)"
+    );
+  } else {
+    pass("composer retry reused the same clientMsgId");
+  }
+
+  // Let the (deduplicated) broadcast land, then require exactly one render
+  // and exactly one committed row.
+  await page.waitForTimeout(1500);
+  const composerDomCount = await page
+    .locator('[data-testid="timeline-message"]', { hasText: composerBody })
+    .count();
+  if (composerDomCount !== 1) {
+    failures.push(
+      `idempotent re-send rendered ${composerDomCount} timeline messages; expected exactly 1`
+    );
+  }
+  const generalHistory = await api(
+    `/v1/workspaces/${workspaceId}/channels/${general.id}/messages?limit=200`,
+    { token }
+  );
+  const composerCopies = generalHistory.messages.filter(
+    (message) => message.body === composerBody
+  );
+  if (composerCopies.length !== 1) {
+    failures.push(
+      `idempotent re-send committed ${composerCopies.length} rows; expected exactly 1`
+    );
+  } else if (composerDomCount === 1) {
+    pass(
+      "clientMsgId re-send produced exactly one message (DOM and REST history)"
+    );
+  }
+
+  // 10) Approvals: fixtures render as ADR-0112 basic-mode cards.
+  const pendingBadge = page.getByTestId("approvals-pending-count");
+  await pendingBadge.waitFor({ timeout: 20000 });
+  const pendingCount = Number(await pendingBadge.getAttribute("data-count"));
+  if (pendingCount !== 2) {
+    failures.push(
+      `sidebar pending-approvals badge shows ${pendingCount}; expected the 2 fixtures`
+    );
+  } else {
+    pass("sidebar shows the 2 pending approval fixtures");
+  }
+
+  await page.getByTestId("approvals-button").click();
+  await page.getByTestId("approvals-panel").waitFor({ timeout: 20000 });
+  const panelCardCount = await page
+    .locator('[data-testid="approvals-panel"] [data-testid="approval-card"]')
+    .count();
+  if (panelCardCount !== 2) {
+    failures.push(
+      `approvals panel lists ${panelCardCount} pending cards; expected 2`
+    );
+  } else {
+    pass("approvals panel lists both pending fixtures");
+  }
+  // M1: the PANEL card renders from approval.payload (which now carries the
+  // real gateway's arguments/tool_grant/estimated_micro_usd) — assert the
+  // basic-mode no-leak invariant on this surface too, before closing.
+  const panelCard1 = page.locator(
+    `[data-testid="approvals-panel"] [data-testid="approval-card"][data-approval-id="${APPROVAL_ID.toLowerCase()}"]`
+  );
+  await panelCard1.waitFor({ timeout: 20000 });
+  if (
+    assertNoApprovalLeak(await panelCard1.innerText(), "approvals panel card")
+  ) {
+    pass(
+      "approvals panel card stays in ADR-0112 basic mode (no arguments/tool_grant/cost markers from the payload)"
+    );
+  }
+  await page.getByTestId("approvals-close").click();
+  await page.getByTestId("timeline").waitFor({ timeout: 20000 });
+
+  const approvalCard1 = page.locator(
+    `[data-testid="approval-card"][data-approval-id="${APPROVAL_ID.toLowerCase()}"]`
+  );
+  await approvalCard1.waitFor({ timeout: 20000 });
+  // M1: the TIMELINE card renders from message props (which now carry the
+  // real gateway's arguments/tool_grant/estimated_micro_usd).
+  const cardText = await approvalCard1.innerText();
+  if (assertNoApprovalLeak(cardText, "timeline approval card")) {
+    pass(
+      "timeline approval card stays in ADR-0112 basic mode (no arguments/tool_grant/cost markers from the props)"
+    );
+  }
+
+  await approvalCard1.getByTestId("approval-approve").click();
+  await approvalCard1
+    .locator('[data-testid="approval-state"]')
+    .waitFor({ timeout: 20000 });
+  const card1State = await approvalCard1
+    .locator('[data-testid="approval-state"]')
+    .innerText();
+  if (!card1State.includes("승인됨")) {
+    failures.push(`approved card shows "${card1State}"; expected 승인됨`);
+  }
+  const approvedList = await api(
+    `/v1/workspaces/${workspaceId}/approvals?status=approved`,
+    { token }
+  );
+  if (
+    !approvedList.approvals.some(
+      (approval) => approval.id.toLowerCase() === APPROVAL_ID.toLowerCase()
+    )
+  ) {
+    failures.push(
+      "REST approvals?status=approved does not contain the browser-approved fixture"
+    );
+  } else if (card1State.includes("승인됨")) {
+    pass(
+      "in-browser 승인 committed: receipt 200 -> card 승인됨 -> REST projection approved"
+    );
+  }
+
+  // 409 path: settle the second fixture EXTERNALLY first, then decide the
+  // opposite way in the browser. The 409 receipt must transition the card to
+  // the authoritative status — quiet note, no error surface.
+  await api(
+    `/v1/workspaces/${workspaceId}/approvals/${APPROVAL2_ID}/decision`,
+    {
+      method: "POST",
+      token,
+      body: {
+        approval_id: APPROVAL2_ID,
+        approve: true,
+        client_decision_id: crypto.randomUUID(),
+      },
+    }
+  );
+  const approvalCard2 = page.locator(
+    `[data-testid="approval-card"][data-approval-id="${APPROVAL2_ID.toLowerCase()}"]`
+  );
+  await approvalCard2.getByTestId("approval-reject").click();
+  await approvalCard2
+    .locator('[data-testid="approval-state"]')
+    .waitFor({ timeout: 20000 });
+  const card2State = await approvalCard2
+    .locator('[data-testid="approval-state"]')
+    .innerText();
+  const card2Errors = await approvalCard2
+    .locator('[data-testid="approval-error"]')
+    .count();
+  const card2Notes = await approvalCard2
+    .locator('[data-testid="approval-note"]')
+    .count();
+  if (!card2State.includes("승인됨")) {
+    failures.push(
+      `409 receipt must flip the card to the authoritative status (승인됨), saw "${card2State}"`
+    );
+  } else if (card2Errors !== 0) {
+    failures.push(
+      "409 decided-elsewhere rendered an error — it must be a normal card state transition"
+    );
+  } else if (card2Notes !== 1) {
+    failures.push("409 decided-elsewhere card is missing the quiet note");
+  } else {
+    pass(
+      "409 receipt (decided on another device first) transitioned the card with a quiet note — no error"
+    );
+  }
+
+  // 11) DM: picker -> POST /dms -> composer round-trip -> GET /dms lists it.
+  await page.getByTestId("dm-new-button").click();
+  await page
+    .locator(
+      `[data-testid="dm-candidate"][data-member-handle="${DM_AGENT_HANDLE}"]`
+    )
+    .click();
+  await page
+    .locator('[data-testid="channel-item"][data-channel-kind="dm"]')
+    .first()
+    .waitFor({ timeout: 20000 });
+  const dmBody = `web smoke dm ${runId}`;
+  await page.getByTestId("composer-input").fill(dmBody);
+  await page.getByTestId("composer-send").click();
+  await page
+    .locator('[data-testid="timeline-message"]', { hasText: dmBody })
+    .waitFor({ timeout: 30000 });
+  const dmList = await api(`/v1/workspaces/${workspaceId}/dms`, { token });
+  if (dmList.channels.length === 0) {
+    failures.push("GET /dms lists no channels after opening a DM");
+  } else {
+    pass(
+      "DM opened through the picker (POST /dms), composer message round-tripped, GET /dms lists it"
+    );
+  }
+
+  // Read-state PUT monotonicity across the whole run: the client must never
+  // request a cursor REGRESSION on any channel. Only a LOWER seq than the
+  // highest already PUT is a regression (review fix L3): re-PUTting the same
+  // seq is legitimate client behavior (e.g. re-confirming the cursor on
+  // channel re-entry), so `<` — not `<=` — is the failure condition.
+  if (readStatePuts.length === 0) {
+    failures.push("expected at least one browser-side read-state PUT");
+  } else {
+    let regressed = false;
+    const highest = new Map();
+    for (const { url, body } of readStatePuts) {
+      const match = url.match(/channels\/([^/]+)\/read-state/);
+      const key = (match?.[1] ?? "?").toLowerCase();
+      const previous = highest.get(key) ?? 0;
+      if (
+        typeof body.last_read_seq !== "number" ||
+        body.last_read_seq < previous
+      ) {
+        failures.push(
+          `read-state PUT regression on channel ${key}: ${body.last_read_seq} after ${previous}`
+        );
+        regressed = true;
+      }
+      highest.set(key, Math.max(previous, body.last_read_seq ?? 0));
+    }
+    if (!regressed) {
+      pass(
+        `browser cursor PUTs never regressed (${readStatePuts.length} PUTs, non-decreasing per channel)`
+      );
+    }
   }
 
   const cspViolations = consoleErrors.filter((text) =>
@@ -378,4 +859,6 @@ if (failures.length > 0) {
   for (const failure of failures) console.error(`FAIL: ${failure}`);
   process.exit(1);
 }
-console.log("MOMO-391 web login/timeline browser smoke PASS");
+console.log(
+  "MOMO-391/MOMO-400 web login/timeline/compose/read-state/approvals browser smoke PASS"
+);

@@ -34,6 +34,17 @@ export type WorkspaceChannelsResponse =
   components["schemas"]["WorkspaceChannelsResponse"];
 export type RealtimeTokenResponse =
   components["schemas"]["RealtimeTokenResponse"];
+export type SendMessageRequest = components["schemas"]["SendMessageRequest"];
+export type ReadState = components["schemas"]["ReadState"];
+export type ReadStateListResponse =
+  components["schemas"]["ReadStateListResponse"];
+export type OpenDirectMessageResponse =
+  components["schemas"]["OpenDirectMessageResponse"];
+export type ApprovalProjection = components["schemas"]["ApprovalProjection"];
+export type ApprovalProjectionPage =
+  components["schemas"]["ApprovalProjectionPage"];
+export type ApprovalDecisionReceipt =
+  components["schemas"]["ApprovalDecisionReceipt"];
 type RefreshResponse = components["schemas"]["RefreshResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 
@@ -109,13 +120,14 @@ export function refreshSession(): Promise<boolean> {
 }
 
 /**
- * Authenticated JSON request against the same-origin /v1 surface.
- * On 401 it attempts exactly one refresh rotation, then retries once.
+ * Authenticated request against the same-origin /v1 surface.
+ * On 401 it attempts exactly one refresh rotation, then retries once; a
+ * 401 that survives the rotation ends the session (D3-A).
  */
-export async function apiFetch<T>(
+async function authorizedFetch(
   path: string,
   init: RequestInit = {}
-): Promise<T> {
+): Promise<Response> {
   let response = await rawRequest(path, init, getAccessToken());
   if (response.status === 401 && getRefreshToken()) {
     const rotated = await refreshSession();
@@ -123,10 +135,17 @@ export async function apiFetch<T>(
       response = await rawRequest(path, init, getAccessToken());
     }
   }
-  if (!response.ok) {
-    if (response.status === 401) clearSession();
-    throw await parseError(response);
-  }
+  if (response.status === 401) clearSession();
+  return response;
+}
+
+/** authorizedFetch + JSON decode; every non-2xx becomes an ApiError. */
+export async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {}
+): Promise<T> {
+  const response = await authorizedFetch(path, init);
+  if (!response.ok) throw await parseError(response);
   return (await response.json()) as T;
 }
 
@@ -234,4 +253,128 @@ export function fetchMessages(
   return apiFetch<MessagePage>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
   );
+}
+
+// ---- write path (MOMO-400) ---------------------------------------------------
+
+/**
+ * Single write path: POST -> PG (gapless seq) -> outbox -> relay. Retrying
+ * with the SAME clientMsgId is idempotent — the server returns the original
+ * message (201 either way). The response body IS the server echo (committed,
+ * seq-authoritative); rendering it is not optimistic rendering.
+ */
+export function sendMessage(
+  workspaceId: string,
+  channelId: string,
+  clientMsgId: string,
+  body: string
+): Promise<Message> {
+  const request: SendMessageRequest = { clientMsgId, type: "text", body };
+  return apiFetch<Message>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages`,
+    { method: "POST", body: JSON.stringify(request) }
+  );
+}
+
+// ---- read-state (ADR-0109) ---------------------------------------------------
+
+export function fetchReadStates(
+  workspaceId: string
+): Promise<ReadStateListResponse> {
+  return apiFetch<ReadStateListResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/read-state`
+  );
+}
+
+/**
+ * Advance the caller's cursor. Server-side the effective cursor is
+ * `max(current, min(requested, latestSeq))` — it can never move backward;
+ * the caller (useReadStates) additionally never REQUESTS a regression.
+ */
+export function updateReadState(
+  workspaceId: string,
+  channelId: string,
+  lastReadSeq: number
+): Promise<ReadState> {
+  return apiFetch<ReadState>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/read-state`,
+    { method: "PUT", body: JSON.stringify({ last_read_seq: lastReadSeq }) }
+  );
+}
+
+// ---- DMs -----------------------------------------------------------------------
+
+export function listDms(
+  workspaceId: string
+): Promise<WorkspaceChannelsResponse> {
+  return apiFetch<WorkspaceChannelsResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/dms`
+  );
+}
+
+/** Idempotent per pair: 201 creates, 200 returns the existing channel. */
+export function openDm(
+  workspaceId: string,
+  memberId: string
+): Promise<OpenDirectMessageResponse> {
+  return apiFetch<OpenDirectMessageResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/dms`,
+    { method: "POST", body: JSON.stringify({ memberId }) }
+  );
+}
+
+// ---- approvals (ADR-0112 basic mode) -------------------------------------------
+
+export function listApprovals(
+  workspaceId: string,
+  status: "pending" | "approved" | "rejected" | "expired" | "cancelled" =
+    "pending"
+): Promise<ApprovalProjectionPage> {
+  return apiFetch<ApprovalProjectionPage>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/approvals?status=${status}`
+  );
+}
+
+export interface ApprovalDecisionResult {
+  /** 200 committed/idempotent-retry; 403/404/409 expected receipt failures. */
+  httpStatus: number;
+  receipt: ApprovalDecisionReceipt;
+}
+
+/**
+ * POST an approval decision. The contract (openapi.yaml, canonical) returns
+ * the SAME receipt schema for 200 AND for the expected failures 403/404/409
+ * — a 409 (decided elsewhere first / expired / idempotency conflict) is part
+ * of the normal flow and must drive a card state transition, not an error
+ * toast. Only 400/401/429 use the generic error envelope and throw.
+ */
+export async function decideApproval(
+  workspaceId: string,
+  approvalId: string,
+  approve: boolean,
+  clientDecisionId: string
+): Promise<ApprovalDecisionResult> {
+  const response = await authorizedFetch(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/approvals/${encodeURIComponent(approvalId)}/decision`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        approval_id: approvalId,
+        approve,
+        client_decision_id: clientDecisionId,
+      }),
+    }
+  );
+  if (
+    response.ok ||
+    response.status === 403 ||
+    response.status === 404 ||
+    response.status === 409
+  ) {
+    return {
+      httpStatus: response.status,
+      receipt: (await response.json()) as ApprovalDecisionReceipt,
+    };
+  }
+  throw await parseError(response);
 }

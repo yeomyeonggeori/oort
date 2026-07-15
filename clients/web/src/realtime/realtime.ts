@@ -40,6 +40,8 @@ export interface MessageNewEvent {
     author_member_id: string;
     hlc_ts: number;
     hlc_count: number;
+    /** Present on agent-gateway broadcasts (e.g. approval_request linkage). */
+    props?: Record<string, unknown> | null;
   };
 }
 
@@ -49,11 +51,41 @@ export interface ChannelSubscriptionHandlers {
   onPublication: (event: MessageNewEvent) => void;
 }
 
+/**
+ * read_state event envelope on the personal channel (ADR-0109). The server
+ * bakes it in ReadStateRoutes.broadcastPayload; UUID fields are Swift
+ * uuidString (UPPERCASE) — compare case-insensitively.
+ */
+export interface ReadStateEvent {
+  type: string;
+  v: number;
+  ts: number;
+  payload: {
+    workspace_id: string;
+    member_id: string;
+    channel_id: string;
+    last_read_seq: number;
+    latest_seq: number;
+    unread_count: number;
+    mention_count: number;
+  };
+}
+
+export interface ReadStateSubscriptionHandlers {
+  /** `recovered:false` requires a bulk read-state GET to re-baseline. */
+  onSubscribed: (recovered: boolean) => void;
+  onPublication: (event: ReadStateEvent) => void;
+}
+
 export interface RealtimeHandle {
   subscribeChannel: (
     workspaceId: string,
     channelId: string,
     handlers: ChannelSubscriptionHandlers
+  ) => () => void;
+  subscribeReadState: (
+    memberId: string,
+    handlers: ReadStateSubscriptionHandlers
   ) => () => void;
   dispose: () => void;
 }
@@ -68,6 +100,20 @@ export function centrifugoChannelName(
   channelId: string
 ): string {
   return `ch:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
+}
+
+/**
+ * Personal read-state channel (Centrifugo user-limited `user:` namespace).
+ * The member-id spelling is the server's, verbatim: the outbox row is baked
+ * with Swift `UUID.uuidString` (UPPERCASE) in
+ * server/Sources/MomoServer/Routes/ReadStateRoutes.swift:227
+ * (`personalChannel`), and Centrifugo only authorizes a user-limited
+ * subscribe when the `#<user>` part byte-matches the connection JWT `sub` —
+ * which the server also mints as `memberID.uuidString` (UPPERCASE,
+ * server/Sources/MomoServer/Auth/JWT.swift:172). Hence toUpperCase().
+ */
+export function readStateChannelName(memberId: string): string {
+  return `user:read-state#${memberId.toUpperCase()}`;
 }
 
 export function createRealtime(
@@ -116,8 +162,41 @@ export function createRealtime(
     };
   }
 
+  function subscribeReadState(
+    memberId: string,
+    handlers: ReadStateSubscriptionHandlers
+  ): () => void {
+    const name = readStateChannelName(memberId);
+    let sub: Subscription | null =
+      client.getSubscription(name) ?? client.newSubscription(name);
+
+    const onSubscribed = (ctx: { recovered?: boolean }) => {
+      handlers.onSubscribed(ctx.recovered === true);
+    };
+    const onPublication = (ctx: { data?: unknown }) => {
+      const event = ctx.data as ReadStateEvent | undefined;
+      if (event && event.type === "read_state" && event.payload) {
+        handlers.onPublication(event);
+      }
+    };
+
+    sub.on("subscribed", onSubscribed);
+    sub.on("publication", onPublication);
+    sub.subscribe();
+
+    return () => {
+      if (!sub) return;
+      sub.off("subscribed", onSubscribed);
+      sub.off("publication", onPublication);
+      sub.unsubscribe();
+      client.removeSubscription(sub);
+      sub = null;
+    };
+  }
+
   return {
     subscribeChannel,
+    subscribeReadState,
     dispose: () => {
       client.disconnect();
     },

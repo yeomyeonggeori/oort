@@ -1,9 +1,10 @@
 # momo web client (v0)
 
-ADR-0119 W-2 (MOMO-391): 브라우저용 momo 클라이언트의 첫 스캐폴드.
-로그인 → 채널 목록 → 타임라인 읽기(seq 페이지네이션 + `?after=` backfill) →
-centrifuge-js 실시간 구독까지가 v0 스코프다(D5-A). 메시지 작성/read-state/
-승인 카드(W-4), 초대 링크 웹 합류(W-5)는 후속 티켓이다.
+ADR-0119 W-2 (MOMO-391) 스캐폴드: 로그인 → 채널 목록 → 타임라인 읽기(seq
+페이지네이션 + `?after=` backfill) → centrifuge-js 실시간 구독.
+ADR-0119 W-4 (MOMO-400)가 대화 표면을 연다: 메시지 작성(clientMsgId 멱등),
+read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 기본
+모드), DM 목록/열기. 초대 링크 웹 합류(W-5)는 후속 티켓이다.
 
 - 스택: Vite + React + TypeScript + centrifuge-js (전부 permissive 라이선스,
   ADR-0119 D2-A). 상태관리 라이브러리 없음(v0 규모에서 불필요).
@@ -45,8 +46,14 @@ centrifuge-js 실시간 구독까지가 v0 스코프다(D5-A). 메시지 작성/
   동시 요청은 single-flight로 직렬화했지만 탭 간 조정(BroadcastChannel/
   Web Locks)은 미구현 — 내부 알파에서 실제로 문제가 되면 이탈 보고 후 후속
   티켓으로 다룬다(핸드오프 패킷 §9의 열린 질문).
-- 읽기 전용 타임라인(작성 UI 없음), unread/read-state 미표시, 파일/웹훅/
-  presence/멀티 워크스페이스 rail 비구현(각 ADR 게이트, ADR-0119 D5-A non-goals).
+- **낙관적 렌더링 없음(v0 의도)**: composer는 서버 echo(POST 201 응답/
+  브로드캐스트/backfill)만 렌더한다. 커밋 전에 화면에 나타나는 행은 없다 —
+  오프라인/재시도 UX 고도화는 재기획 질문(핸드오프 패킷 §9).
+- 승인 카드 상태는 receipt 기반 전이다: 타 기기에서 먼저 결정된 승인은 이
+  탭에서 결정 시도 시 409 receipt로 교정된다(실시간 approval 이벤트 rail은
+  비구현 — ADR 게이트 대상).
+- 파일/웹훅/presence/멀티 워크스페이스 rail 비구현(각 ADR 게이트,
+  ADR-0119 D5-A non-goals).
 
 ## 실시간 계약
 
@@ -66,6 +73,17 @@ centrifuge-js 실시간 구독까지가 v0 스코프다(D5-A). 메시지 작성/
   (relay가 Swift `uuidString`으로 publish하고 Centrifugo 채널명은 대소문자
   구분). REST가 주는 소문자 id는 클라에서 대문자로 정규화한다. UUID 비교는
   항상 case-insensitive(`uuidEq`).
+- read-state 개인 채널은 `user:read-state#<MEMBER_UUID>` — member-id 표기의
+  정본은 서버가 outbox에 굽는 채널명이다:
+  `server/Sources/MomoServer/Routes/ReadStateRoutes.swift:227`
+  (`personalChannel`, Swift `uuidString` = **대문자**). Centrifugo
+  user-limited 채널은 `#` 뒤가 연결 JWT `sub`와 byte-match해야 하는데 그
+  `sub`도 대문자 `uuidString`이다
+  (`server/Sources/MomoServer/Auth/JWT.swift:172`). 그래서
+  `readStateChannelName`은 member id를 `toUpperCase()`한다.
+- read-state cursor는 단조 전진: 서버가 `max(current, min(requested,
+  latestSeq))`로 보장하고, 클라(`src/state/readStates.ts`)도 후퇴 PUT을
+  보내지 않는다. unread 계산의 권위는 서버 projection이다.
 
 ## 개발
 
@@ -97,4 +115,7 @@ scripts/local_gate.sh --profile web
 단계 상세와 스모크 격리 규칙(전용 compose 프로젝트 `momo391web`, 루프백 포트
 18990-18995, 자기 것만 정리)은 `docs/LOCAL_PR_GATE.md`의 "Web client gate"
 섹션 참조. 브라우저 스모크는 실제 prod Caddyfile(엄격 CSP) 뒤에서 Chromium으로
-로그인 → 타임라인 표시 → 실시간 수신까지 검증한다.
+로그인 → 타임라인 표시 → 실시간 수신에 더해(MOMO-400) 작성 멱등(동일
+clientMsgId 재전송 → DOM/REST 각 1건), read-state 반영(외부 cursor PUT → user
+채널 push로 배지 갱신, 브라우저 PUT 단조성), 승인 왕복(승인 200 receipt +
+타 기기 선결정 409 receipt의 카드 전이), DM 열기/왕복까지 검증한다.

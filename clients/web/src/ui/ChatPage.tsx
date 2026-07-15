@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Channel, RosterMember } from "../api/client";
-import { fetchRoster, listChannels, logout, uuidEq } from "../api/client";
+import {
+  fetchRoster,
+  listChannels,
+  listDms,
+  logout,
+  openDm,
+  uuidEq,
+} from "../api/client";
 import type { SessionData } from "../auth/session";
 import type { RealtimeHandle, RealtimeStatus } from "../realtime/realtime";
 import { createRealtime } from "../realtime/realtime";
+import { useApprovals } from "../state/approvals";
+import { useReadStates } from "../state/readStates";
+import ApprovalsPanel from "./ApprovalsPanel";
 import ChannelList from "./ChannelList";
 import Timeline from "./Timeline";
 
@@ -20,10 +30,13 @@ const STATUS_LABEL: Record<RealtimeStatus, string> = {
 export default function ChatPage({ session }: ChatPageProps) {
   const workspaceId = session.member.workspaceId;
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [dms, setDms] = useState<Channel[]>([]);
   const [roster, setRoster] = useState<RosterMember[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(
     null
   );
+  const [view, setView] = useState<"channel" | "approvals">("channel");
+  const [dmPickerOpen, setDmPickerOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] =
     useState<RealtimeStatus>("connecting");
@@ -43,19 +56,37 @@ export default function ChatPage({ session }: ChatPageProps) {
     };
   }, [session.realtimeWebSocketUrl]);
 
+  const readStates = useReadStates(workspaceId, session.member.id, realtime);
+  const approvals = useApprovals(workspaceId);
+  const refreshPending = approvals.refreshPending;
+
+  // Re-sync the pending list whenever the approvals surface opens.
+  useEffect(() => {
+    if (view === "approvals") void refreshPending();
+  }, [refreshPending, view]);
+
   useEffect(() => {
     let cancelled = false;
     async function loadWorkspace() {
       try {
-        const [channelsResponse, rosterResponse] = await Promise.all([
-          listChannels(workspaceId),
-          fetchRoster(workspaceId),
-        ]);
+        const [channelsResponse, dmsResponse, rosterResponse] =
+          await Promise.all([
+            listChannels(workspaceId),
+            listDms(workspaceId),
+            fetchRoster(workspaceId),
+          ]);
         if (cancelled) return;
-        setChannels(channelsResponse.channels);
+        // The DM sidebar section is fed by GET /dms; drop DMs from the
+        // channels listing to avoid double entries.
+        const regular = channelsResponse.channels.filter(
+          (channel) => channel.kind !== "dm"
+        );
+        setChannels(regular);
+        setDms(dmsResponse.channels);
         setRoster(rosterResponse.members);
         setSelectedChannelId(
-          (current) => current ?? channelsResponse.channels[0]?.id ?? null
+          (current) =>
+            current ?? regular[0]?.id ?? dmsResponse.channels[0]?.id ?? null
         );
       } catch {
         if (!cancelled) {
@@ -97,9 +128,48 @@ export default function ChatPage({ session }: ChatPageProps) {
     [displayNameFor, session.member.id]
   );
 
+  const dmCandidates = useMemo(
+    () =>
+      roster.filter(
+        (member) =>
+          member.status === "active" && !uuidEq(member.id, session.member.id)
+      ),
+    [roster, session.member.id]
+  );
+
+  const handleOpenDm = useCallback(
+    async (memberId: string) => {
+      try {
+        const response = await openDm(workspaceId, memberId);
+        setDms((current) =>
+          current.some((channel) => uuidEq(channel.id, response.channel.id))
+            ? current
+            : [response.channel, ...current]
+        );
+        setSelectedChannelId(response.channel.id);
+        setDmPickerOpen(false);
+        setView("channel");
+      } catch {
+        setLoadError("대화를 열지 못했습니다. 잠시 후 다시 시도해 주세요.");
+      }
+    },
+    [workspaceId]
+  );
+
+  const handleSelectChannel = useCallback((channelId: string) => {
+    setSelectedChannelId(channelId);
+    setView("channel");
+    setLoadError(null);
+  }, []);
+
   const selectedChannel =
-    channels.find((channel) => uuidEq(channel.id, selectedChannelId ?? "")) ??
-    null;
+    [...channels, ...dms].find((channel) =>
+      uuidEq(channel.id, selectedChannelId ?? "")
+    ) ?? null;
+
+  const pendingApprovalCount = approvals.pending.filter(
+    (approval) => approvals.statusFor(approval.id) === "pending"
+  ).length;
 
   return (
     <div className="chat-layout">
@@ -115,11 +185,43 @@ export default function ChatPage({ session }: ChatPageProps) {
           </span>
         </header>
 
+        <button
+          type="button"
+          className={
+            view === "approvals"
+              ? "approvals-button approvals-button-active"
+              : "approvals-button"
+          }
+          data-testid="approvals-button"
+          onClick={() =>
+            setView((current) =>
+              current === "approvals" ? "channel" : "approvals"
+            )
+          }
+        >
+          승인 요청
+          {pendingApprovalCount > 0 && (
+            <span
+              className="unread-badge"
+              data-testid="approvals-pending-count"
+              data-count={pendingApprovalCount}
+            >
+              {pendingApprovalCount}
+            </span>
+          )}
+        </button>
+
         <ChannelList
           channels={channels}
+          dms={dms}
           selectedChannelId={selectedChannelId}
           labelFor={channelLabelFor}
-          onSelect={setSelectedChannelId}
+          onSelect={handleSelectChannel}
+          unreadFor={readStates.entryFor}
+          dmPickerOpen={dmPickerOpen}
+          onToggleDmPicker={() => setDmPickerOpen((open) => !open)}
+          dmCandidates={dmCandidates}
+          onOpenDm={(memberId) => void handleOpenDm(memberId)}
         />
 
         <footer className="sidebar-footer">
@@ -139,7 +241,13 @@ export default function ChatPage({ session }: ChatPageProps) {
 
       <main className="main-pane">
         {loadError !== null && <p className="load-error">{loadError}</p>}
-        {selectedChannel ? (
+        {view === "approvals" ? (
+          <ApprovalsPanel
+            approvals={approvals}
+            displayNameFor={displayNameFor}
+            onClose={() => setView("channel")}
+          />
+        ) : selectedChannel ? (
           <Timeline
             key={selectedChannel.id.toLowerCase()}
             workspaceId={workspaceId}
@@ -147,6 +255,8 @@ export default function ChatPage({ session }: ChatPageProps) {
             channelLabel={channelLabelFor(selectedChannel)}
             displayNameFor={displayNameFor}
             realtime={realtime}
+            approvals={approvals}
+            onLatestSeq={readStates.reportViewedSeq}
           />
         ) : (
           loadError === null && (
