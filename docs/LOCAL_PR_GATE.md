@@ -92,6 +92,48 @@ scripts/local_gate.sh --profile m3-dbc
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
 
+### OpenAPI contract drift gate (MOMO-389)
+
+`docs/api/openapi.yaml` is the canonical web v0 client contract (ADR-0119
+D4-A): login/refresh/logout, `/v1/join`, realtime-token, roster (+`/members`
+alias), channels (list/create), messages (send/history incl. `?after=<seq>`
+backfill), read-state (bulk GET + cursor PUT), dms (list/open), and approvals
+(list/decision). Any PR that touches `docs/api/openapi.yaml`, the DTOs or
+handlers behind that surface, or a client generated from the spec must run:
+
+```bash
+scripts/verify_openapi_contract.sh
+```
+
+The gate boots an isolated e2e compose stack (`infra/docker-compose.e2e.yml`)
+under its own compose project (default `momo389gate`) on non-default host
+ports (`18980`-`18983`), installs disposable fixtures (a dedicated gate
+member, one invite code, one pending approval — seed rows are not mutated),
+samples **every operation documented in the spec** against the live server,
+and validates each response with `scripts/openapi_shape_check.py`: required
+keys, types, enums, UUID format, no unexpected `null`s, and a closed-world
+key check — a response key the spec does not declare fails as drift, and a
+spec operation without a live sample fails operation coverage. The stack is
+torn down afterwards; it never touches containers from other compose
+projects. Overrides: `OPENAPI_GATE_PORT` / `OPENAPI_GATE_POSTGRES_PORT` /
+`OPENAPI_GATE_CENT_PORT` / `OPENAPI_GATE_HERMES_PORT` (host port conflicts),
+`OPENAPI_GATE_COMPOSE_PROJECT`, `OPENAPI_GATE_BOOT_TIMEOUT` (the api
+container cold-builds MomoServer on first run; allow many minutes),
+`OPENAPI_GATE_KEEP=1` (keep the stack for debugging).
+
+To verify an already-running **disposable** stack instead of booting one
+(fixtures write rows into it):
+
+```bash
+BASE_URL=http://127.0.0.1:18980 \
+OPENAPI_GATE_DATABASE_URL=postgres://momo:...@127.0.0.1:18981/momo \
+scripts/verify_openapi_contract.sh
+```
+
+The `docs` profile statically checks the spec parse and both gate scripts;
+the runtime drift gate runs standalone until the `web` profile (MOMO-391)
+wires it in.
+
 `staging-smoke` now exercises `scripts/prod_env_preflight.sh --evidence-dir` in
 two ways: tracked example staging env must fail-fast on placeholders, while a
 synthetic non-placeholder public/staging env shape must pass and write

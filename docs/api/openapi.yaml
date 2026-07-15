@@ -1,0 +1,1597 @@
+openapi: 3.0.3
+
+# =============================================================================
+# momo REST API — web v0 surface (MOMO-389, ADR-0119 D4-A)
+#
+# This file is the canonical client contract for the web v0 surface. Clients
+# (clients/web via openapi-typescript, and MomoCore as a conformance target)
+# follow this spec; the spec itself is kept field-level identical to the
+# server DTOs in server/Sources/MomoServer/Routes/DTOs.swift and the Routes/*
+# handlers. Drift between this spec and the running server is detected by
+# scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
+#
+# Scope: web v0 only (ADR-0119 D5-A). Routes outside this surface (invites
+# admin, workspace identity, agent runs, cost projection, platform admin,
+# MCP, centrifugo proxy, health) are intentionally NOT documented here.
+#
+# Encoding rules (server truth):
+# - Optional response fields are OMITTED when absent (Swift encodeIfPresent);
+#   they are never serialized as JSON null. Fields listed under `required`
+#   are always present.
+# - Object schemas in this spec are CLOSED for the drift gate: a response key
+#   that is not listed here is contract drift. Arbitrary-shape fields are the
+#   explicit exceptions (Message.props, ApprovalProjection.payload).
+# - Timestamps are epoch milliseconds and carry an `AtMs`/`_ms`/`Ms` suffix.
+# - UUID casing is mixed by design: values that pass through Swift
+#   Foundation.UUID are UPPERCASE; values passed through from PostgreSQL JSON
+#   are lowercase. Clients must compare UUIDs case-insensitively.
+# - Message ordering authority is `message.seq` per channel (L4 §3.1);
+#   realtime is transport-only and REST backfill uses `?after=<seq>`.
+# =============================================================================
+
+info:
+  title: momo REST API (web v0 surface)
+  version: 0.1.0
+  description: >
+    Canonical REST contract for the momo web v0 client surface:
+    login/refresh/logout, public invite join, realtime token issuance,
+    workspace roster, channels (list/create), messages (send/history with
+    seq-cursor pagination and `?after=` backfill), read-state (bulk read +
+    cursor advance), direct messages (list/open), and approvals
+    (list/decision). Mirrors the MomoServer implementation field by field.
+
+servers:
+  - url: /
+    description: >
+      Same-origin deployment (ADR-0119 D1-A). The web SPA and the `/v1/*` API
+      are served from one origin; the realtime WebSocket address is NOT
+      derived from this origin — the only authority is the
+      `realtimeWebSocketUrl` field returned by login/join (ADR-0110).
+
+tags:
+  - name: auth
+    description: Session token issuance, rotation, revocation, realtime token.
+  - name: join
+    description: Public invite self-signup (no auth required).
+  - name: roster
+    description: Workspace member roster.
+  - name: channels
+    description: Workspace channels.
+  - name: messages
+    description: Channel messages — the single write path (REST -> PG -> outbox).
+  - name: read-state
+    description: ADR-0109 per-member read cursors and unread/mention counts.
+  - name: dms
+    description: 1:1 direct message channels.
+  - name: approvals
+    description: Human-in-the-loop approval projections and decisions.
+
+paths:
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: authLogin
+      summary: Log in with email/password and receive a session token pair.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Credentials verified; session issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: authRefresh
+      summary: Rotate a refresh token into a new access/refresh pair.
+      description: >
+        Single-use rotation (MOMO-300): the presented refresh token is revoked
+        atomically; replaying it returns 401. Exactly one concurrent caller
+        wins.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New token pair issued; the old refresh token is dead.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResponse"
+        "401":
+          description: Invalid, expired, revoked, or already-used refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Member is no longer active in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: authLogout
+      summary: Revoke the presented session tokens (idempotent).
+      description: >
+        Requires a signature-valid access token in the Authorization header
+        (an already-revoked access token still gets a 200 — logging out twice
+        is idempotent, reported via `alreadyRevoked`). The optional body may
+        carry the session's refresh token so the whole session dies at once;
+        a refresh token belonging to another member/workspace is rejected
+        with 403.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutRequest"
+      responses:
+        "200":
+          description: Revocation outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutResponse"
+        "401":
+          description: Missing/invalid access token signature.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Body refresh token does not match this session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/realtime-token:
+    post:
+      tags: [auth]
+      operationId: authRealtimeToken
+      summary: Issue a short-lived Centrifugo connection JWT.
+      description: >
+        The returned token authenticates the WebSocket connection at the
+        server-owned `realtimeWebSocketUrl` (ADR-0110). Requires the
+        `messages:read` scope for humans.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Connection token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RealtimeTokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Missing scope or member no longer active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/join:
+    post:
+      tags: [join]
+      operationId: publicJoin
+      summary: Join a workspace with an invite code (public, no auth).
+      description: >
+        Redeems a high-entropy invite code, creating (201) or reusing (200) a
+        human member, granting membership in every joinable public channel,
+        and issuing a session token pair. Snake-case body aliases accepted by
+        the server: `display_name`, `time_zone`/`tz`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JoinRequest"
+      responses:
+        "201":
+          description: New member created and joined.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResponse"
+        "200":
+          description: Existing member (same email) re-joined.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinResponse"
+        "400":
+          description: Invalid code/email/displayName/handle/password shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Role escalation or non-joinable member state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Invite code is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Already redeemed, exhausted, or no joinable channels.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: Invite code expired or revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/roster:
+    get:
+      tags: [roster]
+      operationId: getRoster
+      summary: List active workspace members (humans and agents).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: kind
+          in: query
+          required: false
+          description: Filter by member kind. Alias accepted by the server, `member_kind`.
+          schema:
+            type: string
+            enum: [human, agent]
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..500.
+          schema:
+            type: integer
+            default: 200
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Roster of active members with an active channel membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRosterResponse"
+        "400":
+          description: kind must be human or agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/members:
+    get:
+      tags: [roster]
+      operationId: getRosterMembersAlias
+      summary: Compatibility alias of the roster endpoint.
+      description: Same handler, parameters, and response as `/roster`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [human, agent]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 200
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Roster of active members with an active channel membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceRosterResponse"
+        "400":
+          description: kind must be human or agent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels:
+    get:
+      tags: [channels]
+      operationId: listChannels
+      summary: List channels the authenticated member belongs to.
+      description: >
+        Returns public/private/dm channels where the caller has an active
+        membership, ordered public -> private -> dm, then by name.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: include_archived
+          in: query
+          required: false
+          description: Include archived channels when `true`. CamelCase alias accepted by the server, `includeArchived`.
+          schema:
+            type: boolean
+            default: false
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..500.
+          schema:
+            type: integer
+            default: 200
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Channels visible to the member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceChannelsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      tags: [channels]
+      operationId: createChannel
+      summary: Create a public/private channel (workspace admin only).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelRequest"
+      responses:
+        "201":
+          description: Channel created with the creator as channel owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateChannelResponse"
+        "400":
+          description: Invalid kind/name/topic shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Channel name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages:
+    post:
+      tags: [messages]
+      operationId: sendMessage
+      summary: Send a message (idempotent via clientMsgId).
+      description: >
+        The single write path (L4 §3.1): one transaction bumps the gapless
+        per-channel `seq`, inserts the message, and enqueues the realtime
+        broadcast through the transactional outbox. Retrying with the same
+        `clientMsgId` returns the original message (exactly-once effect) —
+        the response status is 201 in both cases.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendMessageRequest"
+      responses:
+        "201":
+          description: Message committed with its authoritative `seq`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          description: Invalid workspace/channel id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a member of this channel, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Channel not found or not provisioned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      tags: [messages]
+      operationId: getMessageHistory
+      summary: Read message history (seq-cursor pagination).
+      description: >
+        Without cursors, returns the newest messages ordered by `seq`
+        descending. `before=<seq>` pages older history (descending).
+        `after=<seq>` is the realtime-recovery backfill: it returns messages
+        with `seq > after` in ASCENDING order and takes precedence over
+        `before` when both are present.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..200.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: before
+          in: query
+          required: false
+          description: Return messages with `seq` strictly below this cursor (older).
+          schema:
+            type: integer
+            format: int64
+        - name: after
+          in: query
+          required: false
+          description: Return messages with `seq` strictly above this cursor (backfill, ascending).
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: One page of messages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessagePage"
+        "400":
+          description: Invalid workspace/channel id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a member of this channel, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/read-state:
+    get:
+      tags: [read-state]
+      operationId: listReadStates
+      summary: Bulk read-state for every channel the member belongs to.
+      description: >
+        ADR-0109 read surface. One entry per active membership on a
+        non-archived channel, bound to the authenticated principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Read-state projections for the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadStateListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/read-state:
+    put:
+      tags: [read-state]
+      operationId: updateReadState
+      summary: Advance the caller's read cursor for a channel.
+      description: >
+        Monotonic: the effective cursor is
+        `max(current, min(requested, latestSeq))` — it never moves backward
+        and never beyond the channel head. The cursor owner is always the
+        authenticated principal; no member id is accepted in the body.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReadStateRequest"
+      responses:
+        "200":
+          description: Effective read-state after the update.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadState"
+        "400":
+          description: last_read_seq must be non-negative, or invalid ids.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a member of this channel, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/dms:
+    get:
+      tags: [dms]
+      operationId: listDms
+      summary: List the caller's active 1:1 DM channels.
+      description: Newest-created first; at most 500 channels.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: DM channels with active participant ids.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceChannelsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      tags: [dms]
+      operationId: openDm
+      summary: Open (or reuse) the 1:1 DM channel with another member.
+      description: >
+        Idempotent per participant pair: creates the DM channel on first call
+        (201) and returns the existing one afterwards (200). Snake-case body
+        alias accepted by the server, `member_id`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenDirectMessageRequest"
+      responses:
+        "201":
+          description: DM channel newly created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenDirectMessageResponse"
+        "200":
+          description: Existing DM channel returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenDirectMessageResponse"
+        "400":
+          description: Target must be another member / invalid ids.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Active workspace member not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/approvals:
+    get:
+      tags: [approvals]
+      operationId: listApprovals
+      summary: List approval projections visible to the caller.
+      description: >
+        Requires an active human member; only approvals on channels where the
+        caller has an active membership are returned. Ordered by expiry
+        (soonest first, NULLs last), then newest first.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: status
+          in: query
+          required: false
+          description: Approval status filter; defaults to `pending`.
+          schema:
+            type: string
+            enum: [pending, approved, rejected, expired, cancelled]
+            default: pending
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..500.
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: Approval projections.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalProjectionPage"
+        "400":
+          description: Invalid status filter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not an active human workspace member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision:
+    post:
+      tags: [approvals]
+      operationId: decideApproval
+      summary: Approve or reject a pending approval (idempotent).
+      description: >
+        Human-only. `client_decision_id` provides idempotency — retrying the
+        same decision returns the original receipt (200); a different
+        decision under the same `client_decision_id` returns a 409 receipt
+        with status `idempotency_conflict`. Expected failures (403/404/409)
+        return the SAME receipt schema (not the generic error envelope) with
+        a diagnostic `status`; the generic error envelope is used only for
+        400 body/path mismatches and 401 auth failures.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: approvalId
+          in: path
+          required: true
+          description: Approval UUID; must match the body `approval_id`.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: Decision committed (or identical idempotent retry).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionReceipt"
+        "400":
+          description: approval_id does not match path / invalid ids.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Receipt-shaped expected failure (not human / not a channel member).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionReceipt"
+        "404":
+          description: Receipt-shaped expected failure (approval not found).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionReceipt"
+        "409":
+          description: >
+            Receipt-shaped expected failure — already decided, expired before
+            decision, or idempotency conflict.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalDecisionReceipt"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        App access token (15m TTL) from login/join/refresh, sent as
+        `Authorization: Bearer <accessToken>`. Tokens are hash-persisted
+        server-side and revocable (MOMO-300).
+
+  parameters:
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      description: >
+        Workspace UUID. Must equal the workspace bound into the access token;
+        any other value is rejected with 403 (tenant isolation, L4 §1.3).
+      schema:
+        type: string
+        format: uuid
+    ChannelId:
+      name: channelId
+      in: path
+      required: true
+      description: Channel UUID.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: Missing, invalid, expired, or revoked access token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Not an active workspace member, or workspace scope mismatch.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: >
+        Per-IP or per-member sliding-window rate limit exceeded (MOMO-300).
+        Carries a `Retry-After` header in seconds.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    # ---- Error envelope (Hummingbird HTTPError) ------------------------------
+    ErrorResponse:
+      type: object
+      description: >
+        Generic error envelope. Some errors (no message) may return an empty
+        body with only the status code.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+
+    # ---- Auth ----------------------------------------------------------------
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          description: Human member email within the workspace.
+        password:
+          type: string
+        workspace:
+          type: string
+          format: uuid
+          description: >
+            Optional explicit workspace UUID. When omitted (or not a valid
+            UUID) the server falls back to the seeded demo workspace
+            (single-tenant v0 convenience).
+        platformAdminSecret:
+          type: string
+          description: >
+            Optional platform-admin elevation secret (snake-case alias
+            `platform_admin_secret`). Irrelevant to the web v0 client; the
+            account password must still verify before it can add scope.
+
+    LoginResponse:
+      type: object
+      required: [accessToken, refreshToken, member, realtimeWebSocketUrl]
+      properties:
+        accessToken:
+          type: string
+          description: Bearer access JWT, 15 minute TTL.
+        refreshToken:
+          type: string
+          description: Single-use rotating refresh JWT, 30 day TTL.
+        member:
+          $ref: "#/components/schemas/Member"
+        realtimeWebSocketUrl:
+          type: string
+          description: >
+            The ONLY authority for the realtime WebSocket address (ADR-0110).
+            Never derive it from the API origin.
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    RefreshResponse:
+      type: object
+      required: [accessToken, refreshToken]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    LogoutRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+          description: >
+            Optional refresh token of the same session to revoke alongside
+            the access token.
+
+    LogoutResponse:
+      type: object
+      required: [status, revokedAccess, revokedRefresh, alreadyRevoked]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        revokedAccess:
+          type: boolean
+          description: The access token transitioned to revoked in this call.
+        revokedRefresh:
+          type: boolean
+          description: The body refresh token transitioned to revoked in this call.
+        alreadyRevoked:
+          type: boolean
+          description: Nothing new was revoked (idempotent repeat logout).
+
+    RealtimeTokenResponse:
+      type: object
+      required: [token, tokenType, expiresAtMs, ttlSeconds, workspaceId, memberId]
+      properties:
+        token:
+          type: string
+          description: Centrifugo connection JWT.
+        tokenType:
+          type: string
+          enum: [centrifugo.connection.jwt]
+        expiresAtMs:
+          type: integer
+          format: int64
+        ttlSeconds:
+          type: integer
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+
+    Member:
+      type: object
+      description: Minimal member identity as returned by login/join.
+      required: [id, workspaceId, kind, displayName, handle]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [human, agent]
+        displayName:
+          type: string
+        handle:
+          type: string
+
+    # ---- Public join -----------------------------------------------------------
+    JoinRequest:
+      type: object
+      required: [code, email, displayName, password]
+      properties:
+        code:
+          type: string
+          description: Raw invite code (shown once at creation; server stores only the hash).
+        email:
+          type: string
+          description: Lowercased/trimmed server-side; must contain `@`.
+        displayName:
+          type: string
+          description: 1..100 chars after trimming. Snake-case alias `display_name`.
+        handle:
+          type: string
+          pattern: "^[a-z0-9_-]{2,32}$"
+          description: Optional; derived from the email local part when omitted.
+        password:
+          type: string
+          description: Required, at most 1024 chars.
+        timeZone:
+          type: string
+          description: Optional IANA time zone; defaults to UTC. Aliases `time_zone`, `tz`.
+
+    JoinMembership:
+      type: object
+      required: [id, channelId, role]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+
+    InviteCode:
+      type: object
+      description: >
+        Invite metadata. The raw code is intentionally absent (only returned
+        once at creation, outside this surface).
+      required:
+        - id
+        - workspaceId
+        - codePreview
+        - role
+        - maxUses
+        - usedCount
+        - expiresAtMs
+        - createdBy
+        - createdAtMs
+        - updatedAtMs
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        codePreview:
+          type: string
+          description: Safe display hint (may be empty).
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        maxUses:
+          type: integer
+        usedCount:
+          type: integer
+        expiresAtMs:
+          type: integer
+          format: int64
+        revokedAtMs:
+          type: integer
+          format: int64
+        revokedBy:
+          type: string
+          format: uuid
+        revocationReason:
+          type: string
+        createdBy:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+
+    JoinResponse:
+      type: object
+      required:
+        - accessToken
+        - refreshToken
+        - workspaceId
+        - member
+        - realtimeWebSocketUrl
+        - memberships
+        - invite
+        - redemptionId
+        - createdMember
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        workspaceId:
+          type: string
+          format: uuid
+        member:
+          $ref: "#/components/schemas/Member"
+        realtimeWebSocketUrl:
+          type: string
+          description: Server-owned WebSocket address authority (ADR-0110).
+        memberships:
+          type: array
+          items:
+            $ref: "#/components/schemas/JoinMembership"
+          description: Public-channel memberships granted by this join.
+        invite:
+          $ref: "#/components/schemas/InviteCode"
+        redemptionId:
+          type: string
+          format: uuid
+        createdMember:
+          type: boolean
+          description: True when a new member row was created (response status 201).
+
+    # ---- Roster ----------------------------------------------------------------
+    RosterMember:
+      type: object
+      description: >
+        Roster entry. Human-only fields (email/timeZone) and agent-only
+        fields (agentModel/ownerHumanId/maxConcurrentRuns/maxRunSteps) are
+        present only for the matching kind; agent secrets and execution
+        config are never exposed.
+      required:
+        - id
+        - workspaceId
+        - kind
+        - status
+        - displayName
+        - handle
+        - channelCount
+        - channelIds
+        - capabilities
+        - createdAtMs
+        - updatedAtMs
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [human, agent]
+        status:
+          type: string
+          enum: [active, invited, suspended, deleted]
+        displayName:
+          type: string
+        handle:
+          type: string
+        avatarUrl:
+          type: string
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        channelCount:
+          type: integer
+        channelIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        capabilities:
+          type: array
+          items:
+            type: string
+          description: Public capability projection for agents; empty for humans.
+        email:
+          type: string
+        timeZone:
+          type: string
+        agentModel:
+          type: string
+        ownerHumanId:
+          type: string
+          format: uuid
+        maxConcurrentRuns:
+          type: integer
+        maxRunSteps:
+          type: integer
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+
+    WorkspaceRosterResponse:
+      type: object
+      required: [members, humanCount, agentCount]
+      properties:
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/RosterMember"
+        humanCount:
+          type: integer
+        agentCount:
+          type: integer
+
+    # ---- Channels ----------------------------------------------------------------
+    Channel:
+      type: object
+      required: [id, workspaceId, kind]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [public, private, dm]
+        name:
+          type: string
+          description: Absent for DM channels.
+        topic:
+          type: string
+        dmKey:
+          type: string
+          description: Canonical participant-pair hash; DM channels only.
+        memberIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: Active participants for DM channels; empty array for public/private.
+        createdBy:
+          type: string
+          format: uuid
+        archivedAtMs:
+          type: integer
+          format: int64
+          description: Present only when the channel is archived.
+
+    WorkspaceChannelsResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Channel"
+
+    CreateChannelRequest:
+      type: object
+      required: [kind, name]
+      properties:
+        kind:
+          type: string
+          enum: [public, private]
+        name:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]*[a-z0-9]$|^[a-z0-9]$"
+          description: 1..80 chars; lowercased server-side.
+        topic:
+          type: string
+          description: At most 280 chars; blank collapses to absent.
+
+    ChannelMembership:
+      type: object
+      required: [id, workspaceId, channelId, memberId, role, joinedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        joinedAtMs:
+          type: integer
+          format: int64
+        leftAtMs:
+          type: integer
+          format: int64
+          description: Present only after the member left the channel.
+
+    CreateChannelResponse:
+      type: object
+      required: [channel, creatorMembership]
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
+        creatorMembership:
+          $ref: "#/components/schemas/ChannelMembership"
+
+    MembershipRole:
+      type: string
+      enum: [owner, admin, member, guest]
+
+    # ---- Messages ----------------------------------------------------------------
+    SendMessageRequest:
+      type: object
+      required: [clientMsgId]
+      properties:
+        clientMsgId:
+          type: string
+          format: uuid
+          description: Client-generated idempotency key (L4 §3.1).
+        type:
+          type: string
+          enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
+          default: text
+        body:
+          type: string
+        props:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Simplified structured payload for v0 — a flat string-to-string
+            map on send. The server-owned `mention_member_ids` key is
+            stripped and recomputed server-side.
+        runId:
+          type: string
+          format: uuid
+          description: Agent-run binding; agent principals only.
+
+    Message:
+      type: object
+      required: [id, channelId, seq, hlcTs, hlcCount, authorMemberId, type, createdAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+          description: Gapless per-channel sequence; the ordering authority.
+        hlcTs:
+          type: integer
+          format: int64
+        hlcCount:
+          type: integer
+        authorMemberId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
+        body:
+          type: string
+        props:
+          type: object
+          additionalProperties: true
+          description: >
+            Arbitrary JSON object; includes the server-computed
+            `mention_member_ids` array when the message mentions members.
+            Omitted when empty.
+        runId:
+          type: string
+          format: uuid
+        clientMsgId:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+
+    MessagePage:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+          description: >
+            Descending by seq for head/`before` reads; ASCENDING for
+            `after` backfill reads.
+        nextBefore:
+          type: integer
+          format: int64
+          description: >
+            Smallest seq in this page — pass as `before` to fetch older
+            messages. Omitted when the page is empty.
+
+    # ---- Read state (snake_case wire contract, ADR-0109) --------------------------
+    UpdateReadStateRequest:
+      type: object
+      required: [last_read_seq]
+      properties:
+        last_read_seq:
+          type: integer
+          format: int64
+          minimum: 0
+
+    ReadState:
+      type: object
+      required: [channel_id, last_read_seq, latest_seq, unread_count, mention_count]
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        last_read_seq:
+          type: integer
+          format: int64
+        latest_seq:
+          type: integer
+          format: int64
+        unread_count:
+          type: integer
+          format: int64
+        mention_count:
+          type: integer
+
+    ReadStateListResponse:
+      type: object
+      required: [read_states]
+      properties:
+        read_states:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReadState"
+
+    # ---- DMs ----------------------------------------------------------------------
+    OpenDirectMessageRequest:
+      type: object
+      required: [memberId]
+      properties:
+        memberId:
+          type: string
+          format: uuid
+          description: >
+            The other participant (must differ from the caller). Snake-case
+            alias accepted by the server, `member_id`.
+
+    OpenDirectMessageResponse:
+      type: object
+      required: [channel, created]
+      properties:
+        channel:
+          $ref: "#/components/schemas/Channel"
+        created:
+          type: boolean
+          description: True when the DM channel was created by this call (status 201).
+
+    # ---- Approvals (snake_case wire contract) ---------------------------------------
+    ApprovalProjection:
+      type: object
+      required:
+        - id
+        - workspace_id
+        - run_id
+        - channel_id
+        - requested_by
+        - action_type
+        - payload
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspace_id:
+          type: string
+          format: uuid
+        run_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        request_message_id:
+          type: string
+          format: uuid
+          description: The approval_request message, when one exists.
+        requested_by:
+          type: string
+          format: uuid
+          description: The requesting agent member.
+        on_behalf_of:
+          type: string
+          description: Delegation subject, projected from `payload.on_behalf_of`.
+        action_type:
+          type: string
+          description: e.g. `tool_call`, `deploy`, `spend`.
+        payload: {}
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired, cancelled]
+        estimated_micro_usd:
+          type: integer
+          format: int64
+          description: Projected from payload when present as a number or numeric string.
+        is_reversible:
+          type: boolean
+        decided_by:
+          type: string
+          format: uuid
+        decided_at_ms:
+          type: integer
+          format: int64
+        decision_reason:
+          type: string
+        expires_at_ms:
+          type: integer
+          format: int64
+
+    ApprovalProjectionPage:
+      type: object
+      required: [approvals]
+      properties:
+        approvals:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApprovalProjection"
+
+    ApprovalDecisionRequest:
+      type: object
+      required: [approval_id, approve, client_decision_id]
+      properties:
+        approval_id:
+          type: string
+          format: uuid
+          description: Must equal the path approvalId.
+        approve:
+          type: boolean
+        reason:
+          type: string
+          description: Optional; trimmed and truncated to 2000 chars server-side.
+        client_decision_id:
+          type: string
+          format: uuid
+          description: Client-generated idempotency key for the decision.
+
+    ApprovalDecisionReceipt:
+      type: object
+      description: >
+        Decision acknowledgement. Committed decisions carry status
+        approved/rejected; expected failures reuse this shape with a
+        diagnostic status (e.g. idempotency_conflict, forbidden, not_found,
+        bad_request, expired, or the approval's current status on a 409).
+      required: [approval_id, status]
+      properties:
+        approval_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        decided_by:
+          type: string
+          format: uuid
+          description: Absent for system-side outcomes such as expiry.
+        decided_at_ms:
+          type: integer
+          format: int64
+        decision_reason:
+          type: string
