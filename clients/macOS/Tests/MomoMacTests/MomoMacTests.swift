@@ -3233,6 +3233,61 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "POST", "DELETE"])
     }
 
+    func testRESTBackendRejectsCrossWorkspaceChannelCreateResponse() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let otherWorkspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000384401")!
+        let membership = UUID(uuidString: "00000000-0000-7000-8000-000000384402")!
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(statusCode: 201, json: """
+            {
+              "channel": {
+                "id": "\(channel.description)",
+                "workspaceId": "\(otherWorkspace.description)",
+                "kind": "public",
+                "name": "wrong-scope",
+                "topic": null,
+                "dmKey": null,
+                "createdBy": "\(MemberID.demoHuman.description)",
+                "archivedAtMs": null
+              },
+              "creatorMembership": {
+                "id": "\(membership.uuidString)",
+                "workspaceId": "\(otherWorkspace.description)",
+                "channelId": "\(channel.description)",
+                "memberId": "\(MemberID.demoHuman.description)",
+                "role": "owner",
+                "joinedAtMs": 1782864000000,
+                "leftAtMs": null
+              }
+            }
+            """)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        do {
+            _ = try await backend.createChannel(
+                workspace: workspace,
+                kind: .publicChannel,
+                name: "wrong-scope",
+                topic: nil
+            )
+            XCTFail("cross-workspace create response should be rejected")
+        } catch BackendError.decoding(let reason) {
+            XCTAssertEqual(reason, "channel create response scope mismatch")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testRESTBackendOpensIdempotentDirectMessageWithParticipants() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -3408,7 +3463,6 @@ final class MomoMacTests: XCTestCase {
         let didCreateDuplicate = await viewModel.createChannel(kind: .publicChannel, name: "ops-lab")
         XCTAssertFalse(didCreateDuplicate)
         XCTAssertEqual(viewModel.channelCreateIssue, .duplicateName)
-        XCTAssertTrue(viewModel.channelCreateDiagnostic?.contains("channel name already exists") == true)
         XCTAssertNil(viewModel.connectionError)
         XCTAssertNil(viewModel.connectionIssue)
     }
@@ -4830,6 +4884,179 @@ final class MomoMacTests: XCTestCase {
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.filter { $0.url?.path == channelsBPath }.count, 1)
         XCTAssertTrue(requests.contains { $0.url?.path == historyBPath })
+    }
+
+    func testRESTBackendDelayedChannelCreateCannotMutateReconnectedSessionCache() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let staleChannel = ChannelID(uuidString: "00000000-0000-7000-8000-000000384201")!
+        let currentChannel = ChannelID(uuidString: "00000000-0000-7000-8000-000000384202")!
+        let membership = UUID(uuidString: "00000000-0000-7000-8000-000000384301")!
+        let createAPath = "/v1/workspaces/\(workspaceA.description)/channels"
+        let channelsBPath = "/v1/workspaces/\(workspaceB.description)/channels"
+        let historyBPath = "/v1/workspaces/\(workspaceB.description)/channels/\(currentChannel.description)/messages"
+        let controller = BlockingPathResponseController(
+            responses: [
+                createAPath: MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "channel": {
+                    "id": "\(staleChannel.description)",
+                    "workspaceId": "\(workspaceA.description)",
+                    "kind": "public",
+                    "name": "stale-create",
+                    "topic": null,
+                    "dmKey": null,
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "archivedAtMs": null
+                  },
+                  "creatorMembership": {
+                    "id": "\(membership.uuidString)",
+                    "workspaceId": "\(workspaceA.description)",
+                    "channelId": "\(staleChannel.description)",
+                    "memberId": "\(MemberID.demoHuman.description)",
+                    "role": "owner",
+                    "joinedAtMs": 1782864000000,
+                    "leftAtMs": null
+                  }
+                }
+                """),
+                channelsBPath: MockHTTPResponse(json: """
+                {"channels":[{
+                  "id":"\(currentChannel.description)",
+                  "workspaceId":"\(workspaceB.description)",
+                  "kind":"public",
+                  "name":"current",
+                  "topic":null,
+                  "dmKey":null,
+                  "createdBy":null,
+                  "archivedAtMs":null
+                }]}
+                """),
+                historyBPath: MockHTTPResponse(json: #"{"messages":[]}"#),
+            ],
+            blockedPaths: [createAPath]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        try await backend.connect(workspace: workspaceA, accessToken: "token-a")
+        let staleCreate = Task {
+            try await backend.createChannel(
+                workspace: workspaceA,
+                kind: .publicChannel,
+                name: "stale-create",
+                topic: nil
+            )
+        }
+        await controller.waitForArrival(path: createAPath)
+        try await backend.connect(workspace: workspaceB, accessToken: "token-b")
+        let currentChannels = try await backend.channels(workspace: workspaceB)
+        XCTAssertEqual(currentChannels.map(\.id), [currentChannel])
+        controller.release(path: createAPath)
+
+        do {
+            _ = try await staleCreate.value
+            XCTFail("channel create from an invalidated connection should cancel")
+        } catch is CancellationError {
+            // Expected: session A cannot mutate session B's channel cache.
+        }
+        _ = try await backend.search(workspace: workspaceB, query: "needle")
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.filter { $0.url?.path == channelsBPath }.count, 1)
+        XCTAssertTrue(requests.contains { $0.url?.path == historyBPath })
+    }
+
+    func testRESTBackendStaleMalformedChannelCreateResponseCancelsBeforeDecoding() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let createPath = "/v1/workspaces/\(workspaceA.description)/channels"
+        let controller = BlockingPathResponseController(
+            responses: [
+                createPath: MockHTTPResponse(statusCode: 201, json: #"{"channel":"#),
+            ],
+            blockedPaths: [createPath]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        try await backend.connect(workspace: workspaceA, accessToken: "token-a")
+        let staleCreate = Task {
+            try await backend.createChannel(
+                workspace: workspaceA,
+                kind: .publicChannel,
+                name: "stale-malformed",
+                topic: nil
+            )
+        }
+        await controller.waitForArrival(path: createPath)
+        try await backend.connect(workspace: workspaceB, accessToken: "token-b")
+        controller.release(path: createPath)
+
+        do {
+            _ = try await staleCreate.value
+            XCTFail("stale malformed response should cancel before DTO decoding")
+        } catch is CancellationError {
+            // Expected: stale scope wins over malformed response diagnostics.
+        } catch {
+            XCTFail("stale malformed response should normalize to CancellationError: \(error)")
+        }
+    }
+
+    func testRESTBackendStaleDelayedChannelCreateHTTPErrorNormalizesToCancellation() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let createPath = "/v1/workspaces/\(workspaceA.description)/channels"
+        let controller = BlockingPathResponseController(
+            responses: [
+                createPath: MockHTTPResponse(
+                    statusCode: 503,
+                    json: #"{"title":"temporarily unavailable","detail":"retry"}"#
+                ),
+            ],
+            blockedPaths: [createPath]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+
+        try await backend.connect(workspace: workspaceA, accessToken: "token-a")
+        let staleCreate = Task {
+            try await backend.createChannel(
+                workspace: workspaceA,
+                kind: .publicChannel,
+                name: "stale-error",
+                topic: nil
+            )
+        }
+        await controller.waitForArrival(path: createPath)
+        try await backend.connect(workspace: workspaceB, accessToken: "token-b")
+        controller.release(path: createPath)
+
+        do {
+            _ = try await staleCreate.value
+            XCTFail("stale HTTP error should cancel")
+        } catch is CancellationError {
+            // Expected: the invalidated session owns neither errors nor cache writes.
+        } catch {
+            XCTFail("stale HTTP error should normalize to CancellationError: \(error)")
+        }
     }
 
     private static func loginResponse(

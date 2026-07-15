@@ -5,8 +5,10 @@
 
 ## MOMO-384 Native Channel Creation + Window Tooltip (2026-07-15)
 
-- sidebar inline form을 public/private, name, topic을 받는 native SwiftUI sheet로 교체했다. server와 같은 trim+lowercase+regex validation, 첫 name focus, Esc/Return, localized retry/error를 제공하고 기존 REST create 경로 성공 시 sheet를 닫아 새 channel을 선택한다. create 실패 진단은 보존하되 sheet local error만 표시해 전역 connection banner와 중복하지 않는다.
-- icon control help는 root named coordinate space의 비차단 overlay presenter로 옮겼다. 0.12s 표시, intrinsic short width/최대 280pt 3-line wrap, edge clamp, stale-dismiss source guard, keyboard focus/VoiceOver hint를 적용했으며 narrow/standard/fullscreen, light/dark, attached inspector가 열린 cross-pane 실제 창에서 AX text/frame과 clipping 부재를 확인했다. native sheet는 별도 modal surface이므로 부모 tooltip을 그 위에 강제 노출하지 않는다.
+- sidebar inline form을 public/private, name, topic을 받는 native SwiftUI sheet로 교체했다. server와 같은 trim+lowercase+regex validation, 첫 name focus, Esc/Return, localized retry/error를 제공하고 기존 REST create 경로 성공 시 sheet를 닫아 새 channel을 선택한다. local 실패는 bounded issue만 보관하며 raw error 문자열은 장기 `Published` state에 남기지 않는다. 401/not-connected는 sheet를 닫고 기존 전역 session-expired 로그인 복구 CTA로 전달한다.
+- channel create는 view-model operation/session generation과 시작 workspace, REST backend connection generation/workspace/access token을 await 전후로 대조한다. clear/rebootstrap/input cancel 뒤 도착한 success/error/defer는 channel·membership·selection·issue·in-flight/cache를 갱신하지 않으며, sheet Task도 disappear/session/input revision 변경에서 취소한다.
+- icon control help는 root named coordinate space의 비차단 overlay presenter로 옮겼다. 0.12s 표시, intrinsic short width/최대 280pt 3-line wrap, edge clamp, hover/focus source 복원과 live copy 갱신을 적용했다. visual tooltip은 AX tree에서 숨기고 원래 icon-only button에 action label을 둔다. narrow/standard/fullscreen·light/dark·attached inspector의 screenshot/AX frame과 Tab/Space/Esc는 **local manual/AX evidence**이며, generation/auth/tooltip transition·contrast/large-text는 commit된 자동 test/snapshot evidence로 구분한다. native sheet는 별도 modal surface이므로 부모 tooltip을 그 위에 강제 노출하지 않는다.
+- independent correctness/security/performance 반려의 session-transition admission, sheet pre-start cancellation, REST stale guard ordering, initial auth-expired 항목을 회귀 테스트로 닫았다. focused 27건과 macOS 전체 265건이 0 failure이며 fresh correctness/security/performance와 design review 모두 Blocker 0/High 0/Medium 0이다. PR #394는 worker `status:needs-review` handoff까지만 진행하고 merge/close는 momo-main이 수행한다.
 
 ## MOMO-383 Workspace-first Navigation (2026-07-15)
 

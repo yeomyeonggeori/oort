@@ -82,7 +82,6 @@ public enum MomoConnectionIssue: Sendable, Equatable {
 public enum MomoChannelCreateIssue: Sendable, Equatable {
     case invalidInput
     case duplicateName
-    case authenticationExpired
     case permissionDenied
     case connection
     case unavailable
@@ -125,6 +124,12 @@ public final class ChatViewModel: ObservableObject {
     private struct AgentCredentialRefresh {
         let id: UUID
         let task: Task<[MomoAgentCredential], Error>
+    }
+
+    private enum ChannelCreateSessionState: Equatable {
+        case disconnected
+        case transitioning
+        case ready(WorkspaceID)
     }
 
     // Backend contracts (same instance conforms to both, but typed separately).
@@ -191,7 +196,7 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     @Published public private(set) var channelCreateInFlight = false
     @Published public private(set) var channelCreateIssue: MomoChannelCreateIssue?
-    @Published private(set) var channelCreateDiagnostic: String?
+    @Published private(set) var channelCreateSessionGeneration: UInt64 = 0
     @Published public private(set) var channelMemberMutationIds: Set<MemberID> = []
     @Published public private(set) var directMessageMutationIds: Set<MemberID> = []
     @Published public private(set) var directMessageError: String?
@@ -238,6 +243,8 @@ public final class ChatViewModel: ObservableObject {
     private var workspaceIdentitySessionGeneration: UInt64 = 0
     private var workspaceIdentityLoadGeneration: UInt64 = 0
     private var workspaceNameUpdateGeneration: UInt64 = 0
+    private var channelCreateOperationGeneration: UInt64 = 0
+    private var channelCreateSessionState: ChannelCreateSessionState = .disconnected
 
     var activeChannelSubscriptionCount: Int { channelSubscriptions.count }
 
@@ -288,6 +295,7 @@ public final class ChatViewModel: ObservableObject {
 
     /// Connect + load workspace roster/channels. Selects the first channel.
     public func bootstrap(workspace: WorkspaceID, accessToken: String) async {
+        invalidateChannelCreationForSessionChange()
         workspaceIdentitySessionGeneration &+= 1
         workspaceIdentityLoadGeneration &+= 1
         let identitySessionGeneration = workspaceIdentitySessionGeneration
@@ -418,15 +426,21 @@ public final class ChatViewModel: ObservableObject {
                     workspaceID: workspace
                 )
             }
+            channelCreateSessionState = .ready(workspace)
             clearConnectionErrorState(force: true)
         } catch {
             guard workspaceIdentitySessionGeneration == identitySessionGeneration else { return }
-            guard !Self.isCancellation(error) else { return }
+            if Self.isCancellation(error) {
+                channelCreateSessionState = .disconnected
+                return
+            }
+            channelCreateSessionState = .disconnected
             reportConnectionError(error)
         }
     }
 
     public func clearSessionSensitiveState() async {
+        invalidateChannelCreationForSessionChange()
         workspaceIdentitySessionGeneration &+= 1
         workspaceIdentityLoadGeneration &+= 1
         workspaceNameUpdateGeneration &+= 1
@@ -496,9 +510,6 @@ public final class ChatViewModel: ObservableObject {
         workDetailErrorsById = [:]
         approvals = [:]
         approvalDecisionsInFlight = []
-        channelCreateInFlight = false
-        channelCreateIssue = nil
-        channelCreateDiagnostic = nil
         channelMemberMutationIds = []
         directMessageMutationIds = []
         directMessageError = nil
@@ -509,6 +520,7 @@ public final class ChatViewModel: ObservableObject {
         isLocalContextCopilotRefreshing = false
         clearConnectionErrorState(force: true)
         pendingFallbackMentionRuns = [:]
+        channelCreateSessionState = .disconnected
     }
 
     public func updateWorkspaceName(_ name: String) async -> Bool {
@@ -789,30 +801,58 @@ public final class ChatViewModel: ObservableObject {
 
     @discardableResult
     public func createChannel(kind: ChannelKind, name: String, topic: String? = nil) async -> Bool {
-        guard let workspaceId, !channelCreateInFlight else {
+        guard case .ready(let createWorkspace) = channelCreateSessionState else {
+            if channelCreateSessionState == .disconnected {
+                channelCreateIssue = nil
+                reportChannelCreateAuthenticationExpired(BackendError.notConnected)
+            }
+            return false
+        }
+        guard let workspaceId, workspaceId == createWorkspace else {
+            channelCreateIssue = nil
+            reportChannelCreateAuthenticationExpired(BackendError.notConnected)
+            return false
+        }
+        guard !channelCreateInFlight else {
             channelCreateIssue = .unavailable
-            channelCreateDiagnostic = "Channel creation is unavailable without an active workspace."
             return false
         }
         let normalizedName = MomoChannelCreationValidation.normalizedName(name)
         guard !normalizedName.isEmpty else {
             channelCreateIssue = .invalidInput
-            channelCreateDiagnostic = "Channel name is required."
             return false
         }
         let trimmedTopic = topic.map(MomoChannelCreationValidation.normalizedTopic)
+        channelCreateOperationGeneration &+= 1
+        let operationGeneration = channelCreateOperationGeneration
+        let sessionGeneration = channelCreateSessionGeneration
+        let startingWorkspace = workspaceId
         channelCreateIssue = nil
-        channelCreateDiagnostic = nil
         channelCreateInFlight = true
-        defer { channelCreateInFlight = false }
+        defer {
+            if isChannelCreateOperationCurrent(
+                operationGeneration,
+                sessionGeneration: sessionGeneration,
+                workspaceID: startingWorkspace
+            ) {
+                channelCreateInFlight = false
+            }
+        }
 
         do {
             let result = try await chat.createChannel(
-                workspace: workspaceId,
+                workspace: startingWorkspace,
                 kind: kind,
                 name: normalizedName,
                 topic: trimmedTopic?.isEmpty == true ? nil : trimmedTopic
             )
+            guard !Task.isCancelled,
+                  isChannelCreateOperationCurrent(
+                    operationGeneration,
+                    sessionGeneration: sessionGeneration,
+                    workspaceID: startingWorkspace
+                  )
+            else { return false }
             if !channels.contains(where: { $0.id == result.channel.id }) {
                 channels.append(result.channel)
                 sortChannels()
@@ -820,23 +860,61 @@ public final class ChatViewModel: ObservableObject {
             ensureReadStateExists(channel: result.channel.id)
             subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
-            await selectChannel(result.channel.id)
+            messagesByChannel[result.channel.id] = messagesByChannel[result.channel.id] ?? []
+            recordChannelSelection(result.channel.id)
+            selectedChannelId = result.channel.id
+            activeTimelineChannelId = result.channel.id
+            subscribeRealtimeStatus(channel: result.channel.id)
             return true
         } catch {
-            channelCreateIssue = Self.channelCreateIssue(for: error)
-            channelCreateDiagnostic = String(describing: error)
+            guard !Self.isCancellation(error), !Task.isCancelled,
+                  isChannelCreateOperationCurrent(
+                    operationGeneration,
+                    sessionGeneration: sessionGeneration,
+                    workspaceID: startingWorkspace
+                  )
+            else { return false }
+            if Self.isChannelCreateAuthenticationExpired(error) {
+                channelCreateIssue = nil
+                reportChannelCreateAuthenticationExpired(error)
+            } else {
+                channelCreateIssue = Self.channelCreateIssue(for: error)
+            }
             return false
         }
     }
 
-    nonisolated static func channelCreateIssue(for error: any Error) -> MomoChannelCreateIssue {
+    public func cancelChannelCreation() {
+        channelCreateOperationGeneration &+= 1
+        channelCreateInFlight = false
+        channelCreateIssue = nil
+    }
+
+    private func invalidateChannelCreationForSessionChange() {
+        channelCreateSessionState = .transitioning
+        channelCreateSessionGeneration &+= 1
+        cancelChannelCreation()
+    }
+
+    private func isChannelCreateOperationCurrent(
+        _ operationGeneration: UInt64,
+        sessionGeneration: UInt64,
+        workspaceID: WorkspaceID
+    ) -> Bool {
+        channelCreateOperationGeneration == operationGeneration
+            && channelCreateSessionGeneration == sessionGeneration
+            && self.workspaceId == workspaceID
+            && channelCreateSessionState == .ready(workspaceID)
+    }
+
+    nonisolated static func channelCreateIssue(for error: any Error) -> MomoChannelCreateIssue? {
         guard let backendError = error as? BackendError else { return .unavailable }
         switch backendError {
         case .notConnected:
-            return .authenticationExpired
+            return nil
         case .problem(let status, _, _):
             switch status {
-            case 401: return .authenticationExpired
+            case 401: return nil
             case 403: return .permissionDenied
             case 409: return .duplicateName
             default: return .unavailable
@@ -846,6 +924,23 @@ public final class ChatViewModel: ObservableObject {
         case .decoding, .budgetExceeded:
             return .unavailable
         }
+    }
+
+    nonisolated private static func isChannelCreateAuthenticationExpired(_ error: any Error) -> Bool {
+        guard let backendError = error as? BackendError else { return false }
+        switch backendError {
+        case .notConnected:
+            return true
+        case .problem(status: 401, title: _, detail: _):
+            return true
+        case .problem, .realtime, .timedOut, .decoding, .budgetExceeded:
+            return false
+        }
+    }
+
+    private func reportChannelCreateAuthenticationExpired(_ error: any Error) {
+        connectionError = String(describing: error)
+        connectionIssue = .authenticationExpired
     }
 
     public func refreshMemberDirectory() async {

@@ -1598,8 +1598,6 @@ struct MomoWorkspaceCopy {
         case (.english, .invalidInput): return "Review the fields and try again."
         case (.korean, .duplicateName): return "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요."
         case (.english, .duplicateName): return "A channel with this name already exists. Try a different name."
-        case (.korean, .authenticationExpired): return "로그인이 만료되었습니다. 다시 로그인한 뒤 채널을 만드세요."
-        case (.english, .authenticationExpired): return "Your session expired. Sign in again before creating the channel."
         case (.korean, .permissionDenied): return "채널을 만들 권한이 없습니다. 워크스페이스 관리자에게 요청하세요."
         case (.english, .permissionDenied): return "You do not have permission to create channels. Ask a workspace admin."
         case (.korean, .connection): return "서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도하세요."

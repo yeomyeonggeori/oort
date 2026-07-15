@@ -1893,9 +1893,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 
 ### ☐ MOMO-384 (`#390`) 수용기준 — Native channel creation sheet + tooltip presenter `[swift/macos-ui]` · 의존: MOMO-383
 - [x] channel `+`가 sidebar inline form이 아니라 native sheet를 열고 public/private, name, topic, server-aligned normalize/validation, loading, readable local error/retry를 제공. 기존 REST create 경로를 재사용하고 성공 시 새 channel 선택.
-- [x] quick tooltip을 row-local overlay가 아닌 root named coordinate/window-level presenter로 바꿔 sibling pane/attached inspector clipping 제거. short intrinsic width, 280pt 3-line cap, 0.12s delay, stale-dismiss guard, hit-testing off.
-- [x] keyboard focus/Tab/Space, submit/Esc, VoiceOver label/hint, narrow·standard·fullscreen, light/dark, tooltip cross-pane를 실제 창 screenshot+AX frame으로 검증. native sheet는 별도 modal surface라 부모 tooltip을 강제 노출하지 않음.
-- [x] fresh design-review Blocker 0 / High 0. Korean light·English dark·increased-contrast·large-text snapshots와 clean commit `swift`/launch 포함 `macos-ui`/docs gate evidence를 worker PR handoff에 첨부.
+- [x] quick tooltip을 row-local overlay가 아닌 root named coordinate/window-level presenter로 바꿔 sibling pane/attached inspector clipping 제거. short intrinsic width, 280pt 3-line cap, 0.12s delay, hover/focus source 복원, visible copy update/dismiss, hit-testing off.
+- [x] visual tooltip은 accessibility hidden, icon-only source는 실제 action accessibility label을 소유. keyboard focus/Tab/Space, submit/Esc, narrow·standard·fullscreen, light/dark, tooltip cross-pane screenshot+AX frame은 **local manual/AX evidence**이며 commit된 자동 test가 아님. native sheet는 별도 modal surface라 부모 tooltip을 강제 노출하지 않음.
+- [x] PR #394 correctness 반려를 반영해 view-model create operation/session/workspace readiness+generation, REST connection/workspace/token guard-before-decode, sheet Task/input revision cancellation, 401/not-connected 전역 로그인 복구, raw create diagnostic 제거를 추가. pending clear/same-workspace rebootstrap POST 차단, delayed success/error/409, 새 session in-flight, stale malformed/HTTP error, REST cache, tooltip transition을 focused 27 tests로 고정하고 macOS 전체 265 tests PASS.
+- [x] fresh security/correctness/performance review Blocker 0/High 0/Medium 0, fresh design review Blocker 0/High 0/Medium 0. final clean `swift`/actual-launch `macos-ui`/docs gate evidence는 PR #394 worker handoff에 기록하며, MOMO-384는 merge 전 `status:needs-review`로만 둔다.
 
 ### ☐ MOMO-385 (`#391`) 수용기준 — Member inspector + one-click DM `[swift/runtime-db/macos-ui]` · 의존: MOMO-383
 - [ ] active non-self person/agent member row primary click이 기존 idempotent DM REST를 호출하고 해당 DM으로 이동.

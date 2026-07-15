@@ -812,6 +812,7 @@ public struct ChannelListView: View {
                     tint: MomoTheme.agentAccent,
                     isVisible: isHovering,
                     isDisabled: !viewModel.canInsertMention(for: member),
+                    actionLabel: "Mention @\(member.handle)",
                     helpText: viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)"
                 ) {
                     viewModel.insertMention(for: member)
@@ -823,6 +824,7 @@ public struct ChannelListView: View {
                     tint: .secondary,
                     isVisible: isHovering,
                     isDisabled: false,
+                    actionLabel: copy.editProfile,
                     helpText: copy.editProfile
                 ) {
                     openMemberProfile?(member.id)
@@ -850,6 +852,7 @@ public struct ChannelListView: View {
         tint: Color,
         isVisible: Bool,
         isDisabled: Bool,
+        actionLabel: String,
         helpText: String,
         action: @escaping () -> Void
     ) -> some View {
@@ -869,6 +872,7 @@ public struct ChannelListView: View {
         .disabled(isDisabled)
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
+        .accessibilityLabel(actionLabel)
         .accessibilityHidden(!isVisible)
         .help(helpText)
         .momoQuickTooltip(helpText)
@@ -878,6 +882,8 @@ public struct ChannelListView: View {
         let copy = MomoWorkspaceCopy(language: language)
         let inChannel = viewModel.isMember(member.id)
         let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
+        let actionLabel = inChannel ? copy.removeFromChannel : copy.addToChannel
+        let accessibilityLabel = "\(actionLabel), \(member.displayName)"
         return Button {
             performMemberMutation(member, isMember: inChannel)
         } label: {
@@ -896,9 +902,10 @@ public struct ChannelListView: View {
         .disabled(isWorking)
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityHidden(!isVisible)
-        .help(inChannel ? copy.removeFromChannel : copy.addToChannel)
-        .momoQuickTooltip(inChannel ? copy.removeFromChannel : copy.addToChannel)
+        .help(actionLabel)
+        .momoQuickTooltip(actionLabel)
     }
 
     private func performMemberMutation(_ member: Member, isMember: Bool) {

@@ -50,16 +50,89 @@ enum MomoQuickTooltipMeasurement {
 
 @MainActor
 final class MomoQuickTooltipPresenter: ObservableObject {
-    @Published private(set) var item: MomoQuickTooltipItem?
+    private struct SourceState {
+        var text: String
+        var anchor: CGRect
+        var isHovering: Bool
+        var isFocused: Bool
+        var isReady: Bool
+        var activationOrder: UInt64
 
-    func show(sourceID: UUID, text: String, anchor: CGRect) {
-        guard !text.isEmpty, !anchor.isEmpty else { return }
-        item = MomoQuickTooltipItem(sourceID: sourceID, text: text, anchor: anchor)
+        var isActive: Bool { isHovering || isFocused }
     }
 
-    func dismiss(sourceID: UUID) {
-        guard item?.sourceID == sourceID else { return }
-        item = nil
+    @Published private(set) var item: MomoQuickTooltipItem?
+    private var sources: [UUID: SourceState] = [:]
+    private var activationCounter: UInt64 = 0
+
+    func update(
+        sourceID: UUID,
+        text: String,
+        anchor: CGRect,
+        isHovering: Bool,
+        isFocused: Bool
+    ) {
+        guard !text.isEmpty, !anchor.isEmpty else {
+            remove(sourceID: sourceID)
+            return
+        }
+        let wasActive = sources[sourceID]?.isActive == true
+        let remainsActive = isHovering || isFocused
+        guard remainsActive else {
+            remove(sourceID: sourceID)
+            return
+        }
+        var source = sources[sourceID] ?? SourceState(
+            text: text,
+            anchor: anchor,
+            isHovering: false,
+            isFocused: false,
+            isReady: false,
+            activationOrder: 0
+        )
+        source.text = text
+        source.anchor = anchor
+        source.isHovering = isHovering
+        source.isFocused = isFocused
+        if !wasActive {
+            source.isReady = false
+        }
+        sources[sourceID] = source
+        refreshItem()
+    }
+
+    func present(sourceID: UUID) {
+        guard var source = sources[sourceID], source.isActive else { return }
+        activationCounter &+= 1
+        source.isReady = true
+        source.activationOrder = activationCounter
+        sources[sourceID] = source
+        refreshItem()
+    }
+
+    func remove(sourceID: UUID) {
+        sources[sourceID] = nil
+        refreshItem()
+    }
+
+    private func refreshItem() {
+        let visible = sources
+            .filter { $0.value.isReady && $0.value.isActive }
+            .max { lhs, rhs in
+                let lhsHoverPriority = lhs.value.isHovering ? 1 : 0
+                let rhsHoverPriority = rhs.value.isHovering ? 1 : 0
+                if lhsHoverPriority != rhsHoverPriority {
+                    return lhsHoverPriority < rhsHoverPriority
+                }
+                return lhs.value.activationOrder < rhs.value.activationOrder
+            }
+        item = visible.map { entry in
+            MomoQuickTooltipItem(
+                sourceID: entry.key,
+                text: entry.value.text,
+                anchor: entry.value.anchor
+            )
+        }
     }
 }
 
@@ -89,6 +162,7 @@ struct MomoQuickTooltipOverlay: View {
             }
         }
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
         .animation(reduceMotion ? nil : MomoTheme.Motion.hover, value: presenter.item)
     }
 }
@@ -149,12 +223,13 @@ private struct MomoQuickTooltipModifier: ViewModifier {
                     let frame = geometry.frame(in: .named(MomoQuickTooltipCoordinateSpace.window))
                     Color.clear
                         .allowsHitTesting(false)
-                        .onAppear { anchorFrame = frame }
+                        .onAppear {
+                            anchorFrame = frame
+                            synchronizePresenter()
+                        }
                         .onChange(of: frame) { _, updatedFrame in
                             anchorFrame = updatedFrame
-                            if isHovering || isFocused {
-                                presenter?.show(sourceID: sourceID, text: text, anchor: updatedFrame)
-                            }
+                            synchronizePresenter()
                         }
                 }
             }
@@ -165,16 +240,19 @@ private struct MomoQuickTooltipModifier: ViewModifier {
             .onChange(of: isFocused) { _, _ in
                 updatePresentation()
             }
+            .onChange(of: text) { _, _ in
+                synchronizePresenter()
+            }
             .onDisappear {
                 presentationTask?.cancel()
-                presenter?.dismiss(sourceID: sourceID)
+                presenter?.remove(sourceID: sourceID)
             }
     }
 
     private func updatePresentation() {
         presentationTask?.cancel()
+        synchronizePresenter()
         guard isHovering || isFocused else {
-            presenter?.dismiss(sourceID: sourceID)
             return
         }
         presentationTask = Task { @MainActor in
@@ -183,8 +261,18 @@ private struct MomoQuickTooltipModifier: ViewModifier {
                 try? await Task.sleep(for: .seconds(duration))
             }
             guard !Task.isCancelled, isHovering || isFocused else { return }
-            presenter?.show(sourceID: sourceID, text: text, anchor: anchorFrame)
+            presenter?.present(sourceID: sourceID)
         }
+    }
+
+    private func synchronizePresenter() {
+        presenter?.update(
+            sourceID: sourceID,
+            text: text,
+            anchor: anchorFrame,
+            isHovering: isHovering,
+            isFocused: isFocused
+        )
     }
 }
 
@@ -202,5 +290,6 @@ struct MomoQuickTooltipLabel: View {
             .padding(.vertical, MomoTheme.QuickTooltip.verticalPadding)
             .frame(maxWidth: MomoTheme.QuickTooltip.maximumWidth)
             .momoSurface(.card, cornerRadius: MomoTheme.cornerSmall)
+            .accessibilityHidden(true)
     }
 }

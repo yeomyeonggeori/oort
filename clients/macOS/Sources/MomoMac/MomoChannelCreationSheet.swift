@@ -61,6 +61,81 @@ struct MomoChannelCreationFeedback: Equatable {
     }
 }
 
+struct MomoChannelCreationSubmissionState: Equatable {
+    struct Attempt: Equatable {
+        let id: UUID
+        let inputRevision: UInt64
+    }
+
+    private(set) var inputRevision: UInt64 = 0
+    private(set) var attemptID: UUID?
+
+    mutating func begin() -> Attempt {
+        let id = UUID()
+        attemptID = id
+        return Attempt(id: id, inputRevision: inputRevision)
+    }
+
+    mutating func inputDidChange() {
+        inputRevision &+= 1
+        attemptID = nil
+    }
+
+    mutating func cancel() {
+        attemptID = nil
+    }
+
+    func isCurrent(_ attempt: Attempt) -> Bool {
+        attemptID == attempt.id && inputRevision == attempt.inputRevision
+    }
+
+    mutating func finish(_ attempt: Attempt) -> Bool {
+        guard isCurrent(attempt) else { return false }
+        attemptID = nil
+        return true
+    }
+}
+
+enum MomoChannelCreationCompletion: Equatable {
+    case dismiss
+    case showIssue(MomoChannelCreateIssue)
+    case ignore
+
+    static func resolve(
+        created: Bool,
+        localIssue: MomoChannelCreateIssue?,
+        connectionIssue: MomoConnectionIssue?
+    ) -> Self {
+        if created || connectionIssue == .authenticationExpired {
+            return .dismiss
+        }
+        if let localIssue {
+            return .showIssue(localIssue)
+        }
+        return .ignore
+    }
+
+    static func shouldDismissBeforePresentation(connectionIssue: MomoConnectionIssue?) -> Bool {
+        connectionIssue == .authenticationExpired
+    }
+}
+
+@MainActor
+enum MomoChannelCreationSubmitCoordinator {
+    static func run(
+        expectedSessionGeneration: UInt64,
+        isAttemptCurrent: @MainActor () -> Bool,
+        currentSessionGeneration: @MainActor () -> UInt64,
+        create: @MainActor () async -> Bool
+    ) async -> Bool? {
+        guard !Task.isCancelled,
+              isAttemptCurrent(),
+              currentSessionGeneration() == expectedSessionGeneration
+        else { return nil }
+        return await create()
+    }
+}
+
 struct MomoChannelCreationSheet: View {
     @ObservedObject var viewModel: ChatViewModel
     let copy: MomoWorkspaceCopy
@@ -71,7 +146,21 @@ struct MomoChannelCreationSheet: View {
     @State private var topic = ""
     @State private var attemptedSubmission = false
     @State private var feedback = MomoChannelCreationFeedback()
+    @State private var submission = MomoChannelCreationSubmissionState()
+    @State private var submissionTask: Task<Void, Never>?
+    @State private var presentedSessionGeneration: UInt64?
     @FocusState private var focusedField: MomoChannelCreationField?
+
+    init(
+        viewModel: ChatViewModel,
+        copy: MomoWorkspaceCopy,
+        dismiss: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.copy = copy
+        self.dismiss = dismiss
+        _presentedSessionGeneration = State(initialValue: viewModel.channelCreateSessionGeneration)
+    }
 
     var body: some View {
         MomoChannelCreationSheetContent(
@@ -93,12 +182,34 @@ struct MomoChannelCreationSheet: View {
             dismiss()
         }
         .task {
+            guard !MomoChannelCreationCompletion.shouldDismissBeforePresentation(
+                connectionIssue: viewModel.connectionIssue
+            ) else {
+                cancelSubmission()
+                dismiss()
+                return
+            }
             await Task.yield()
             focusedField = .name
         }
-        .onChange(of: kind) { _, _ in feedback.clearForInputChange() }
-        .onChange(of: name) { _, _ in feedback.clearForInputChange() }
-        .onChange(of: topic) { _, _ in feedback.clearForInputChange() }
+        .onChange(of: kind) { _, _ in handleInputChange() }
+        .onChange(of: name) { _, _ in handleInputChange() }
+        .onChange(of: topic) { _, _ in handleInputChange() }
+        .onChange(of: viewModel.channelCreateSessionGeneration) { _, generation in
+            guard let presentedSessionGeneration,
+                  generation != presentedSessionGeneration
+            else { return }
+            cancelSubmission()
+            dismiss()
+        }
+        .onChange(of: viewModel.connectionIssue) { _, issue in
+            guard issue == .authenticationExpired else { return }
+            cancelSubmission()
+            dismiss()
+        }
+        .onDisappear {
+            cancelSubmission()
+        }
     }
 
     private func submit() {
@@ -110,18 +221,59 @@ struct MomoChannelCreationSheet: View {
             return
         }
 
-        Task {
-            let created = await viewModel.createChannel(
-                kind: kind,
-                name: MomoChannelCreationValidation.normalizedName(name),
-                topic: MomoChannelCreationValidation.normalizedTopic(topic)
+        submissionTask?.cancel()
+        let attempt = submission.begin()
+        let sessionGeneration = viewModel.channelCreateSessionGeneration
+        let submittedKind = kind
+        let submittedName = MomoChannelCreationValidation.normalizedName(name)
+        let submittedTopic = MomoChannelCreationValidation.normalizedTopic(topic)
+        submissionTask = Task { @MainActor in
+            guard let created = await MomoChannelCreationSubmitCoordinator.run(
+                expectedSessionGeneration: sessionGeneration,
+                isAttemptCurrent: { submission.isCurrent(attempt) },
+                currentSessionGeneration: { viewModel.channelCreateSessionGeneration },
+                create: {
+                    await viewModel.createChannel(
+                        kind: submittedKind,
+                        name: submittedName,
+                        topic: submittedTopic
+                    )
+                }
             )
-            if created {
+            else { return }
+            guard !Task.isCancelled,
+                  submission.isCurrent(attempt),
+                  viewModel.channelCreateSessionGeneration == sessionGeneration
+            else { return }
+            guard submission.finish(attempt) else { return }
+            submissionTask = nil
+            switch MomoChannelCreationCompletion.resolve(
+                created: created,
+                localIssue: viewModel.channelCreateIssue,
+                connectionIssue: viewModel.connectionIssue
+            ) {
+            case .dismiss:
                 dismiss()
-            } else {
-                feedback.issue = viewModel.channelCreateIssue ?? .unavailable
+            case .showIssue(let issue):
+                feedback.issue = issue
+            case .ignore:
+                break
             }
         }
+    }
+
+    private func handleInputChange() {
+        submission.inputDidChange()
+        feedback.clearForInputChange()
+        guard submissionTask != nil else { return }
+        cancelSubmission()
+    }
+
+    private func cancelSubmission() {
+        submissionTask?.cancel()
+        submissionTask = nil
+        submission.cancel()
+        viewModel.cancelChannelCreation()
     }
 }
 
@@ -191,6 +343,7 @@ struct MomoChannelCreationSheetContent: View {
                 }
             }
             .formStyle(.grouped)
+            .disabled(isCreating)
 
             if let creationIssue {
                 VStack(alignment: .leading, spacing: MomoTheme.ChannelCreation.standardSpacing) {
