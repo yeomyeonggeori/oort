@@ -445,13 +445,16 @@ for v in "$JOIN_CODE" "$EXPIRED_CODE" "$EXHAUSTED_CODE" "$EXPIRED_INVITE_ID"; do
 done
 
 # Deterministic expiry: creation rejects past expiresAtMs, so the fixture SQL
-# back-dates the row (same fixture-transaction pattern as the approvals above).
+# back-dates the row (same fixture-transaction pattern as the approvals
+# above). created_at moves too: invite_code_expires_ck enforces
+# expires_at > created_at (003_onboarding.sql:67).
 run_sql <<SQL
 BEGIN;
 SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID';
 SET LOCAL row_security = off;
 UPDATE invite_code
-   SET expires_at = now() - interval '1 hour',
+   SET created_at = now() - interval '2 hours',
+       expires_at = now() - interval '1 hour',
        updated_at = now()
  WHERE id = '$EXPIRED_INVITE_ID';
 COMMIT;
