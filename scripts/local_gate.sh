@@ -10,7 +10,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -54,7 +54,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -73,7 +73,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -108,6 +108,7 @@ AUTO_NEED_LIVE=0
 AUTO_NEED_STAGING=0
 AUTO_NEED_HOSTRT=0
 AUTO_NEED_DIAG=0
+AUTO_NEED_WEB=0
 AUTO_NEED_ALL=0
 
 auto_classify_script() {
@@ -127,6 +128,10 @@ auto_classify_script() {
       AUTO_NEED_HOSTRT=1; AUTO_REASONS+=("$1 -> host-runtime") ;;
     scripts/verify_macos_real_backend_ui_bootstrap.sh|scripts/verify_macos_real_backend_ui.sh|scripts/macos_dev_run.sh)
       AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> macos-ui") ;;
+    scripts/web_serving_smoke.sh|scripts/verify_web_login_smoke.sh)
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
+    scripts/verify_openapi_contract.sh|scripts/openapi_shape_check.py)
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (OpenAPI drift gate runs inside the web profile)") ;;
     scripts/collect_diagnostics.sh)
       AUTO_NEED_DIAG=1; AUTO_REASONS+=("$1 -> diagnostics") ;;
     *)
@@ -138,8 +143,14 @@ auto_classify_script() {
 
 auto_classify_path() {
   case "$1" in
+    docs/api/openapi.yaml)
+      # The client contract spec: drift is verified against the live server
+      # inside the web profile (verify_openapi_contract.sh).
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (contract spec; runtime drift gate)") ;;
     docs/*|research/*|legal/*|*.md)
       AUTO_REASONS+=("$1 -> docs") ;;
+    clients/web/*)
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
     clients/*)
       AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> swift+macos-ui") ;;
     server/Migrations/*)
@@ -221,7 +232,7 @@ auto_select_profile() {
   done
   set +f
 
-  local units=$((AUTO_NEED_MACOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG))
+  local units=$((AUTO_NEED_MACOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
     AUTO_SUGGESTED="all"
     if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
@@ -229,6 +240,9 @@ auto_select_profile() {
     fi
     if [ "$AUTO_NEED_DIAG" -eq 1 ]; then
       AUTO_REASONS+=("note: profile 'all' does not include the diagnostics smoke; run --profile diagnostics separately")
+    fi
+    if [ "$AUTO_NEED_WEB" -eq 1 ]; then
+      AUTO_REASONS+=("note: profile 'all' does not include the web profile; run --profile web separately")
     fi
   elif [ "$AUTO_NEED_MACOS" -eq 1 ]; then
     AUTO_SUGGESTED="macos-ui"
@@ -246,6 +260,8 @@ auto_select_profile() {
     AUTO_SUGGESTED="host-runtime"
   elif [ "$AUTO_NEED_DIAG" -eq 1 ]; then
     AUTO_SUGGESTED="diagnostics"
+  elif [ "$AUTO_NEED_WEB" -eq 1 ]; then
+    AUTO_SUGGESTED="web"
   else
     AUTO_SUGGESTED="docs"
   fi
@@ -265,7 +281,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -395,7 +411,7 @@ add_static_commands() {
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures -name "*.json" -print0 | xargs -0 jq empty'
   add_cmd_once "openapi contract spec parse" "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/api/openapi.yaml\"); puts \"docs/api/openapi.yaml\"'"
   add_cmd_once "Centrifugo exact credential metadata contract" 'test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/centrifugo.json)" = "true"; test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/prod/centrifugo.prod.json)" = "true"; grep -Fq "\"include_connection_meta\": true" scripts/local_alpha_runner.sh'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_design_preflight.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_openapi_contract.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_design_preflight.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_openapi_contract.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_login_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/docker/internal-smoke-migrate.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "deploy bundle synthetic fixture" 'scripts/tests/test_make_deploy_bundle.sh'
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
@@ -585,6 +601,29 @@ add_local_alpha_commands() {
   add_note_once not_covered "Public AWS/staging resources, public TLS/DNS, real registry pull, SOPS production secret injection, external Hermes staging connectivity, production pgBackRest stanza/check/full backup, WAL archive push, time-target PITR, notarization, TestFlight, iOS/APNs, and M7 release gate PASS remain out of scope."
 }
 
+add_web_commands() {
+  # MOMO-391 (ADR-0119 W-2): clients/web quality + e2e gate.
+  # install -> lint -> typecheck -> generated-types sync -> build -> license
+  # gate -> serving smoke (MOMO-390 regression: APP_DOMAIN sentinel
+  # fail-closed + strict CSP) -> browser login/timeline smoke (e2e compose)
+  # -> OpenAPI runtime drift gate (spec vs live server, MOMO-389).
+  add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
+  add_cmd "web install (npm ci)" '(cd clients/web && npm ci --no-audit --no-fund)'
+  add_cmd "web lint (eslint)" '(cd clients/web && npm run lint)'
+  add_cmd "web typecheck (tsc --noEmit)" '(cd clients/web && npm run typecheck)'
+  add_cmd "web generated API types in sync with docs/api/openapi.yaml" '(cd clients/web && npm run generate:types && git diff --exit-code -- src/api/schema.d.ts) || { echo "src/api/schema.d.ts is stale — run (cd clients/web && npm run generate:types) and commit the result"; exit 1; }'
+  add_cmd "web build (vite, CSP-safe output)" '(cd clients/web && npm run build)'
+  add_cmd "web dependency license gate (permissive-only, full transitive list)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; (cd clients/web && WEB_LICENSE_REPORT="$out" node scripts/check-licenses.mjs) && echo "license inventory: $out"'
+  add_cmd "web serving smoke (Caddy APP_DOMAIN edge + sentinel fail-closed)" 'scripts/web_serving_smoke.sh'
+  add_cmd "web login -> timeline browser smoke (e2e compose)" 'scripts/verify_web_login_smoke.sh'
+  add_cmd "OpenAPI contract drift gate (spec vs live server)" 'scripts/verify_openapi_contract.sh'
+  add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
+  add_note_once coverage "MOMO-390 serving regression via scripts/web_serving_smoke.sh: prod Caddyfile parse matrix (APP_DOMAIN set/unset/empty), SPA deep-link fallback, /v1 proxy wiring, /v1/centrifugo edge 403, strict SPA CSP headers, and APP_DOMAIN-unset sentinel fail-closed ordering (guard before proxy)."
+  add_note_once coverage "MOMO-391 browser smoke via scripts/verify_web_login_smoke.sh: isolated e2e compose stack (project momo391web, loopback ports 18990-18995) serving the built SPA through the real prod Caddyfile; real Chromium login (workspace empty -> demo fallback), channel list, seeded timeline display, wss realtime subscribe under the strict CSP, REST-sent message rendered live through REST -> PG -> outbox -> relay -> Centrifugo, REST ?after= catch-up on subscribe, and zero CSP console violations."
+  add_note_once coverage "MOMO-389 runtime drift gate via scripts/verify_openapi_contract.sh: every documented web v0 operation sampled against a disposable live server and shape-checked closed-world against docs/api/openapi.yaml."
+  add_note_once not_covered "Real DNS/ACME/TLS on public hosts, message composition (W-4), invite web join (W-5), read-state/approval surfaces, and Safari/Firefox coverage (the smoke drives Chromium) remain out of scope for the web v0 gate."
+}
+
 add_m3_dbc_commands() {
   add_static_commands
   add_runtime_env_guard_command
@@ -676,6 +715,9 @@ case "$PROFILE" in
     ;;
   m3-dbc)
     add_m3_dbc_commands
+    ;;
+  web)
+    add_web_commands
     ;;
   all)
     add_static_commands

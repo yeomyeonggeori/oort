@@ -1,0 +1,36 @@
+{
+  "name": "momo-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "momo web client v0 (ADR-0119 W-2): login + channel list + timeline read + realtime subscribe",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "generate:types": "openapi-typescript ../../docs/api/openapi.yaml -o src/api/schema.d.ts",
+    "check:licenses": "node scripts/check-licenses.mjs"
+  },
+  "dependencies": {
+    "centrifuge": "^5.3.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react-swc": "^3.10.0",
+    "eslint": "^9.30.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.2.0",
+    "openapi-typescript": "^7.8.0",
+    "playwright": "^1.53.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.35.0",
+    "vite": "^7.0.0"
+  }
+}

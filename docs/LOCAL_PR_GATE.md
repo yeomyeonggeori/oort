@@ -70,6 +70,7 @@ Profiles:
 | `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
+| `web` | `clients/web`, `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + eslint + `tsc --noEmit` + generated-types sync check (openapi-typescript output vs committed `src/api/schema.d.ts`) + vite build + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
@@ -89,6 +90,7 @@ scripts/local_gate.sh --profile external-agent-provider
 scripts/verify_local_hermes_credentialed_smoke.sh
 LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui
 scripts/local_gate.sh --profile m3-dbc
+scripts/local_gate.sh --profile web
 scripts/local_gate.sh --profile docs --output-dir /tmp/momo-local-gate
 ```
 
@@ -133,9 +135,54 @@ OPENAPI_GATE_DATABASE_URL=postgres://momo:...@127.0.0.1:18981/momo \
 scripts/verify_openapi_contract.sh
 ```
 
-The `docs` profile statically checks the spec parse and both gate scripts;
-the runtime drift gate runs standalone until the `web` profile (MOMO-391)
-wires it in.
+The `docs` profile statically checks the spec parse and both gate scripts.
+The runtime drift gate is wired into the `web` profile (MOMO-391) and also
+runs standalone with the command above.
+
+### Web client gate (`web` profile, MOMO-391)
+
+`scripts/local_gate.sh --profile web` is the merge gate for `clients/web`
+and web-serving changes (ADR-0119 W-2). Steps, in order:
+
+1. worktree-clean guard, `npm ci`, `eslint`, `tsc --noEmit` inside
+   `clients/web`.
+2. Generated-types sync: `npm run generate:types` re-renders
+   `src/api/schema.d.ts` from `docs/api/openapi.yaml` and the gate fails if
+   the committed file differs — spec changes and client types cannot drift
+   apart in one PR.
+3. `vite build` (production bundle must stay CSP-safe: no inline
+   script/style — the browser smoke enforces this at runtime too).
+4. License gate: `clients/web/scripts/check-licenses.mjs` walks the full
+   installed transitive closure from `package-lock.json`, fails on anything
+   outside the permissive allowlist (MIT/Apache-2.0/ISC/BSD family;
+   dev-only reviewed exceptions BlueOak-1.0.0 and Python-2.0), and writes a
+   Markdown license inventory to the gate output dir — attach it to the PR.
+5. `scripts/web_serving_smoke.sh` — MOMO-390 regression: Caddyfile parse
+   matrix, SPA fallback, `/v1` proxy wiring, centrifugo edge 403, strict
+   CSP headers, and the APP_DOMAIN-unset sentinel fail-closed ordering
+   (guard evaluated before the proxy — PR #403 review Medium-1).
+6. `scripts/verify_web_login_smoke.sh` — boots an isolated e2e compose
+   stack (project `momo391web`, loopback ports `18990`-`18995`), serves the
+   built SPA through the real prod Caddyfile, and drives headless Chromium
+   (playwright) through login (workspace empty → demo fallback) → channel
+   list → timeline display of REST-seeded messages → wss realtime subscribe
+   under the strict CSP → a REST-sent message rendered live through
+   REST → PG → outbox → relay → Centrifugo → browser, plus REST `?after=`
+   catch-up evidence and zero CSP console violations. First run downloads
+   the playwright Chromium build (cached) and cold-builds the api/relay
+   Swift containers — allow many minutes. Overrides:
+   `WEB_LOGIN_SMOKE_PORT`/`..._POSTGRES_PORT`/`..._CENT_PORT`/
+   `..._HERMES_PORT`/`..._EDGE_HTTPS`/`..._EDGE_HTTP` (port conflicts),
+   `WEB_LOGIN_SMOKE_PROJECT`, `WEB_LOGIN_SMOKE_BOOT_TIMEOUT`,
+   `WEB_LOGIN_SMOKE_KEEP=1`.
+7. `scripts/verify_openapi_contract.sh` — the MOMO-389 runtime drift gate
+   (its own isolated stack, see above).
+
+CSP contract note: the web client uses centrifuge-js in websocket-only
+transport mode because the serving CSP allows `connect-src 'self'` +
+`wss://REALTIME_DOMAIN` and nothing else. Adding an HTTP-based fallback
+transport requires updating the Caddyfile CSP and the
+`scripts/web_serving_smoke.sh` expectations in the same PR.
 
 `staging-smoke` now exercises `scripts/prod_env_preflight.sh --evidence-dir` in
 two ways: tracked example staging env must fail-fast on placeholders, while a
@@ -399,6 +446,7 @@ Use the profile that matches the changed surface.
 | `external-agent-provider` | opt-in credentialed external agent runtime smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
 | `macos-ui` | MomoMac UI/run changes | `scripts/local_gate.sh --profile macos-ui`; add `LOCAL_GATE_LAUNCH_UI=1` for dev `.app` launch, process/window smoke, logs, and termination |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
+| `web` | `clients/web`, `docs/api/openapi.yaml`, web serving/login smoke changes | `scripts/local_gate.sh --profile web` (install/lint/typecheck/types-sync/build/license gate + serving smoke + Chromium login→timeline e2e smoke + OpenAPI runtime drift gate) |
 
 ## 5. PR Body Evidence
 

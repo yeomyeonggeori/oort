@@ -32,5 +32,12 @@
       }
     }
   },
-  "client": { "subscription_token": { "enabled": true } }
+  "client": {
+    "allowed_origins": [
+      "https://app.localhost",
+      "http://localhost:5173",
+      "http://127.0.0.1:5173"
+    ],
+    "subscription_token": { "enabled": true }
+  }
 }
