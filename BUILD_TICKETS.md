@@ -1926,11 +1926,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 서버 소스 무변경. 스펙이 서버와 어긋나는 지점을 발견하면 스펙을 서버에 맞추고 그 사실을 PR 이탈 섹션에 기록(서버 수정 금지 — 웹 v0 표면 밖 라우트는 문서화하지 않음).
 - [ ] `docs` 게이트 + 신규 drift 게이트 PASS evidence를 PR에 첨부.
 
-### ☐ MOMO-390 (`#396`) 수용기준 — ADR-0119 W-3: Caddy APP_DOMAIN site + 웹 정적 서빙 `[infra/docs]` · 의존: 없음 (MOMO-389와 병렬)
-- [ ] `infra/prod/Caddyfile`에 `{$APP_DOMAIN}` site 추가: SPA 정적 자산 file_server + `/v1/*` → `api:8080` reverse_proxy(같은 오리진 — ADR-0119 D1-A) + `/v1/centrifugo/*` 엣지 403 유지 + security_headers import + SPA용 CSP(자체 오리진 한정, `connect-src`에 REALTIME_DOMAIN wss 허용, inline script 금지).
-- [ ] `APP_DOMAIN` 미설정 배포는 기존 2-site 동작 완전 무변화(웹 없는 셀프호스팅 하위 호환).
-- [ ] prod/e2e compose에 웹 자산 서빙 경로 추가(빌드 산출물 volume 또는 자산 이미지 — 방식은 worker 재량, 단 api 컨테이너가 웹을 서빙하지 않는다). e2e는 placeholder index.html로 서빙 smoke 검증.
-- [ ] `docs/DEPLOY.md`에 APP_DOMAIN 델타(신규 env·DNS·비설정 시 동작) 기록. 기존 게이트 무회귀.
+### ☑ MOMO-390 (`#396`) 수용기준 — ADR-0119 W-3: Caddy APP_DOMAIN site + 웹 정적 서빙 `[infra/docs]` · 의존: 없음 (MOMO-389와 병렬)
+- [x] `infra/prod/Caddyfile`에 `{$APP_DOMAIN}` site 추가: SPA 정적 자산 file_server + `try_files` index.html 폴백 + `/v1/*` → `api:8080` reverse_proxy(같은 오리진 — ADR-0119 D1-A) + `/v1/centrifugo/*` 엣지 403 + security_headers import + SPA CSP(자체 오리진 한정, `connect-src 'self' wss://{$REALTIME_DOMAIN}`, inline script 금지) — 전부 `scripts/web_serving_smoke.sh` 런타임 검증.
+- [x] `APP_DOMAIN` 미설정 하위 호환: site 주소가 예약 sentinel `momo-app-domain-unset.localhost`로 폴백(내부 CA만, ACME 무발생)하고 sentinel host 요청은 `/`·deep link·`/v1/*` 전부 404 fail-closed. 빈 문자열은 Caddy 파싱 불가라 compose가 `${APP_DOMAIN:-sentinel}`로 흡수(smoke가 set/unset/empty 파싱 매트릭스 검증). 기존 2-site 동작 무변화.
+- [x] prod compose: caddy `/srv/momo-web`에 named volume(기본, 빈 볼륨=404) 또는 `MOMO_WEB_DIST_DIR` host 경로 마운트 — api 컨테이너는 웹 서빙 안 함. e2e compose: `web` 프로파일 `web-edge` 서비스(prod Caddyfile + placeholder index.html)로 서빙 smoke; 기본(프로파일 미지정) e2e 렌더는 변경 전과 byte-identical.
+- [x] `docs/DEPLOY.md` §4.4에 APP_DOMAIN 델타(신규 env·DNS·미설정 동작·자산 배치) 기록. `prod_env_preflight.sh` strict 모드에 optional APP_DOMAIN 검사(placeholder/reserved 거부, API/REALTIME 중복 거부, unset 허용) 추가. 기존 게이트 무회귀(staging-smoke의 centrifugo namespace FAIL은 main 기저 선재 — PR evidence 기록).
 
 ### ☐ MOMO-391 (`#397`) 수용기준 — ADR-0119 W-2: clients/web 스캐폴드 + 로그인/타임라인 v0 `[web(신설)/docs]` · 의존: MOMO-389, MOMO-390
 - [ ] `clients/web` 신설: Vite + React + TypeScript, 의존성 전부 permissive(MIT/Apache/ISC/BSD — 라이선스 목록을 PR에 첨부, GPL/AGPL 금지), 타입은 MOMO-389 스펙에서 openapi-typescript 생성.

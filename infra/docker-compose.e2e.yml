@@ -204,6 +204,36 @@ services:
       mock-hermes:
         condition: service_healthy
 
+  # MOMO-390: web serving smoke boundary. Runs the prod Caddyfile (the real
+  # deploy artifact) against localhost-only domains to verify the {$APP_DOMAIN}
+  # SPA site: placeholder index.html serving, SPA deep-link fallback, /v1/*
+  # proxy wiring, and the /v1/centrifugo/* edge 403. Profile-gated (`web`) so
+  # existing runtime gate profiles never boot it; scripts/web_serving_smoke.sh
+  # is the entry point (MOMO-391 reuses this edge for the full login smoke).
+  # `.localhost` site addresses use Caddy's internal CA only — no ACME traffic,
+  # no production domains (ADR-0002 e2e boundary).
+  web-edge:
+    image: caddy:2-alpine
+    profiles: ["web"]
+    restart: "no"
+    environment:
+      ACME_EMAIL: ${WEB_EDGE_ACME_EMAIL:-e2e-web@momo.localhost}
+      API_DOMAIN: ${WEB_EDGE_API_DOMAIN:-api.localhost}
+      REALTIME_DOMAIN: ${WEB_EDGE_REALTIME_DOMAIN:-rt.localhost}
+      APP_DOMAIN: ${WEB_EDGE_APP_DOMAIN:-app.localhost}
+    ports:
+      - "127.0.0.1:${WEB_EDGE_HTTP_PORT:-19080}:80"
+      - "127.0.0.1:${WEB_EDGE_HTTPS_PORT:-19443}:443"
+    volumes:
+      - ./prod/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./e2e/web-placeholder:/srv/momo-web:ro
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 2s
+
 volumes:
   e2e-pgdata:
   api-swiftpm:

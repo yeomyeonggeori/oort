@@ -481,6 +481,25 @@ if [ "$runtime_mode" = "strict" ]; then
   assert_email CADDY_EMAIL
   assert_email ACME_EMAIL
 
+  # MOMO-390 (ADR-0119): APP_DOMAIN (web SPA serving) is optional — unset
+  # keeps the web-less 2-site deploy. When set it must be a real public DNS
+  # name (the reserved momo-app-domain-unset.localhost sentinel and other
+  # local/placeholder values are rejected by the shared rules) and must be
+  # distinct from the API/realtime sites: D1-A explicitly rejected serving
+  # the web on the API domain, and duplicate Caddy site addresses fail to
+  # boot at the edge anyway.
+  if [ "$(get_var APP_DOMAIN)" != "" ]; then
+    assert_no_prod_placeholder APP_DOMAIN
+    assert_public_domain APP_DOMAIN
+    if [ "$(get_var APP_DOMAIN)" = "$(get_var API_DOMAIN)" ] || [ "$(get_var APP_DOMAIN)" = "$(get_var REALTIME_DOMAIN)" ]; then
+      fail "APP_DOMAIN must differ from API_DOMAIN and REALTIME_DOMAIN (ADR-0119 D1-A)"
+    else
+      pass "APP_DOMAIN is distinct from API_DOMAIN/REALTIME_DOMAIN"
+    fi
+  else
+    pass "APP_DOMAIN is unset — web serving disabled, 2-site deploy (allowed)"
+  fi
+
   assert_not_latest_or_smoke_image MOMO_API_IMAGE
   assert_not_latest_or_smoke_image MOMO_RELAY_IMAGE
   assert_not_latest_or_smoke_image MOMO_WORKER_IMAGE

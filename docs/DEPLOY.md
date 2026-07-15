@@ -81,7 +81,7 @@
 | 요구 | 비고 |
 |---|---|
 | VPS 1대 | 전용 vCPU 4코어/16GB급. ~$30~50/월 `(추정, 주문 시점 단가 재확인)`. 10인×수팀 v0 충분(L4 §0.2). |
-| 공인 도메인 | `api.<domain>` / `rt.<domain>` A/AAAA 레코드를 VPS IP로. Caddy ACME가 인증서 자동 발급(80/443 인바운드 허용 필요). |
+| 공인 도메인 | `api.<domain>` / `rt.<domain>` A/AAAA 레코드를 VPS IP로. Caddy ACME가 인증서 자동 발급(80/443 인바운드 허용 필요). 웹 클라이언트를 쓰면 `APP_DOMAIN`(예: `momo.<domain>`)도 추가 — optional, §4.4. |
 | Docker + Compose v2 | `docker compose version`. |
 | age 키 | `age-keygen`으로 생성. 공개키는 `.sops.yaml`에, 개인키는 **호스트에만**(또는 KMS). |
 | pgBackRest | 백업 repo(로컬 디스크 또는 S3 호환 오브젝트스토리지). |
@@ -277,6 +277,28 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 > `CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY`/`CENTRIFUGO_HTTP_API_KEY`로 주입해야 한다.
 > Centrifugo v6는 일반 JSON 문자열의 `"${...}"` 플레이스홀더를 설정값으로 자동 치환하지 않는다.
 > 제약 유지: `history_meta_ttl` > `history_ttl`, namespace 상속 없음(각 명시). Redis 전환으로 presence/recovery가 재시작·다중 인스턴스에서 안정. 진짜 복구는 여전히 REST `?after=<seq>` backfill(Postgres SoT, L4 §4.3).
+
+### 4.4 웹 클라이언트 서빙 (`APP_DOMAIN`) — MOMO-390 / ADR-0119 D1-A
+
+워크스페이스 대표 도메인이 곧 웹 주소다: Caddy가 `{$APP_DOMAIN}` site에서 SPA 정적 자산을 서빙하고 같은 오리진의 `/v1/*`를 `api:8080`으로 프록시한다(브라우저 기준 SPA와 API가 같은 오리진 → CORS/쿠키 문제 원천 회피, 서버 무변경). realtime은 기존 `rt.` 도메인 유지(토큰 인증이라 교차 오리진 무해). **api 컨테이너는 웹 자산을 서빙하지 않는다.**
+
+**신규 env (전부 optional):**
+
+| 키 | 기본값 | 의미 |
+|---|---|---|
+| `APP_DOMAIN` | (unset) | 웹 SPA 공개 도메인(예: `momo.example.com`). unset이면 웹 서빙 비활성. |
+| `MOMO_WEB_DIST_DIR` | `momo-web-dist`(named volume) | Caddy `/srv/momo-web`에 마운트할 웹 빌드 산출물. 절대경로를 주면 host bind mount, 미설정이면 named volume(빈 볼륨 = 404, 웹 없는 배포에 무해). |
+| `WEB_DIST_VOLUME_NAME` | `momo-web-dist` | 기본 named volume의 이름 오버라이드. |
+
+**DNS/TLS:** `APP_DOMAIN`을 쓰려면 해당 이름의 A/AAAA 레코드를 VPS IP로 추가한다(§2와 동일, Caddy ACME 자동 발급). `rt.<domain>`/`api.<domain>`과 **다른 이름**이어야 한다 — `prod_env_preflight.sh`가 strict 모드에서 APP_DOMAIN 설정 시 public DNS 형태·placeholder 금지·API/REALTIME과의 중복을 fail-fast로 검사한다(unset은 항상 허용).
+
+**미설정(`APP_DOMAIN` unset) 시 동작 — 완전 하위 호환:** Caddyfile의 site 주소가 예약 sentinel `momo-app-domain-unset.localhost`로 폴백된다. `.localhost`는 Caddy 내부 CA로만 인증서가 발급되어 ACME 트래픽이 없고, sentinel host를 겨냥한 요청은 모든 경로(`/`·deep link·`/v1/*`)에서 404로 fail-closed된다(호스트 매처 가드가 프록시/파일 핸들보다 먼저 평가 — `scripts/web_serving_smoke.sh`가 런타임 검증). 기존 `api.`/`rt.` 2-site 동작은 무변화. **주의:** compose는 `${APP_DOMAIN:-<sentinel>}`로 빈 문자열도 sentinel로 흡수한다 — Caddy는 빈 site 주소를 파싱하지 못하므로 compose 밖에서 이 Caddyfile을 쓸 때도 `APP_DOMAIN`을 빈 값으로 export하지 말 것.
+
+**자산 배치(v0 운영 경로):** 빌드 머신에서 `clients/web`(MOMO-391+) 산출물 `dist/`를 만들고 호스트 경로(예: `/opt/momo/web-dist`)로 복사한 뒤 `MOMO_WEB_DIST_DIR=/opt/momo/web-dist`를 설정한다(prod 호스트에서 소스 빌드 금지 — ADR-0002). 자산 이미지(publish 파이프라인) 승격은 MOMO-391+에서 재검토.
+
+**보안 헤더:** `{$APP_DOMAIN}` site는 공통 `security_headers`(HSTS·`X-Frame-Options DENY` 등)에 더해 SPA 응답에 엄격 CSP를 강제한다 — 자체 오리진 한정, inline script 금지, `connect-src`만 `wss://{$REALTIME_DOMAIN}` 추가 허용(ADR-0119 D3-A; 공개 배포 전 httpOnly 쿠키 승격 게이트는 ADR-0119 참조). `/v1/centrifugo/*`는 이 site에서도 엣지 403(MOMO-300과 동일 규칙).
+
+**검증:** `scripts/web_serving_smoke.sh` — e2e compose `web` 프로파일로 prod Caddyfile을 localhost 도메인에 대해 기동해 placeholder 서빙·SPA 폴백·`/v1` 프록시 배선·엣지 403·CSP·unset fail-closed를 검사한다(고유 `COMPOSE_PROJECT_NAME` + loopback 대체 포트만 사용).
 
 ---
 
