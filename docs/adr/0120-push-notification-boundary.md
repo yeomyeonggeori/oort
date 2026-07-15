@@ -1,6 +1,6 @@
 # ADR-0120: 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier
 
-- Status: **Proposed** (2026-07-15, Fable draft — 성재 option 승인 대기)
+- Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A~D5-A 전체 승인. Dawn 운영 항목(Apple Developer 계정·relay 배포)은 별도 실행 결정, 서버측 P-1/P-2는 웹 배치 후 발급)
 - 관련: `research/15-platform-expansion/01`(Slack 판정 교훈)·`02` §2-1(4사 relay 구조), ADR-0109(unread — 판정의 데이터 기반), ADR-0004(자격증명 비유입 — 같은 결의 content 비유입), ux-bible P8(알림 예산)·P9(판정 로직은 서버 한 곳)·P10(관측 내장), 로드맵 M5·EP-IOS(MOMO-040~043 승계)
 - 발단: 성재 인프라 발제(2026-07-15) 중 푸시. iOS(M5)의 전제조건이며 Dawn 운영 인프라가 필요해 **리드타임이 가장 긴 항목** — 웹 우선 결정과 무관하게 draft를 선행한다.
 

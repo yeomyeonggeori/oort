@@ -272,6 +272,15 @@ MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 �
 - **Work Console:** MOMO-375는 transcript/activity drawer까지만 허용한다. `Control+backtick` command input, Codex/Claude/OpenCode process, cwd/repo/worktree, sandbox/approval relay는 ADR-0114 승인 뒤 새 builder로 분리한다. momo 서버는 command process나 upstream credential을 보관하지 않는다.
 - **엔진 병렬 planning:** ADR-0113 credential/capability/action trust + ADR-0116 context/memory retention을 먼저 draft하고, ADR-0114 interactive Work host, ADR-0115 signed webhook ingress를 잇는다. 각 engine PR은 기본적으로 `clients/macOS/**`를 잠근다.
 
+### 1.6 플랫폼 확장 overlay (ADR-0119/0120/0121 · 2026-07-15 Accepted, 성재 발제)
+
+메신저 이해도·슈퍼앱·인프라 발제(2026-07-15)의 리서치(`research/15-platform-expansion/`, 바이블 `docs/architecture/bible/`)가 ADR 3건으로 정본화됐다. 실행은 Fable이 엔진/인프라 트랙 한정 momo-main 겸임(성재 승인)으로 오케스트레이션하며, UX 트랙(momo-main·성재, `clients/macOS/**`)과 파일군을 분리한다. M0~M8 backbone 불변 — 전부 overlay.
+
+- **🌐 웹 트랙 신설 (ADR-0119, iOS보다 선행 — 성재 확정):** 서버 대표 도메인(`APP_DOMAIN`)이 SPA와 `/v1` 프록시를 같은 오리진에서 서빙 — "서버 URL이 곧 웹 주소". v0 스코프는 "초대받은 사람이 브라우저로 합류해 대화"(기본 모드만). 첫 배치: MOMO-389(OpenAPI 계약 정본+drift 게이트) → MOMO-390(Caddy APP_DOMAIN+정적 서빙) → MOMO-391(clients/web 스캐폴드+로그인/타임라인). 패킷: `docs/planning/handoffs/2026-07-15-adr-0119-web-track.md`. W-4(작성/승인 왕복)·W-5(초대 웹 합류)는 391 랜딩 후 발급.
+- **푸시 (ADR-0120):** Dawn 운영 오픈소스 PushRelay + id-only 페이로드(대화 내용 Dawn 비경유) + outbox 소비 단일 notifier(판정 한 곳, P9) + 전면 무료·rate limit. 서버측 P-1(등록 REST)/P-2(notifier)는 iOS 앱 전 선행 가능 — 웹 첫 배치 뒤 발급. relay 배포·Apple Developer 계정은 별도 실행 결정.
+- **셀프호스팅 배포판 (ADR-0121):** install/upgrade 스크립트(ADR-0002 승계)+"5분 설치" 문서+단일노드 상한 명시, universal link 초대(웹 랜딩 우선, 검증은 셀프호스트 서버), BM=Zulip 모델(전 기능 무료, 수익은 호스팅/relay/지원), 기본 공개 서버 비내장. S 배치는 웹 배치 랜딩 후 순차.
+- **리전:** 멀티 리전은 비채택이 업계 표준(Slack 코어도 단일 리전) — 단일 노드+확장 레버(`docs/DEPLOY.md` §11) 유지가 결정이다.
+
 ### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
 
 | 항목 | 비용 | 비고 |

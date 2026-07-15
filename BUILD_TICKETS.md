@@ -1920,6 +1920,25 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] raw access/refresh/connection JWT/shared secret을 stdout evidence에 출력하지 않고 auth/refresh 실패 body 비노출. `umask 077` 후 `mktemp -d`, exact-dir cleanup 적용.
 - [x] human realtime liveness를 `session` + `label='access'`로 강화해 refresh row 차단. RLS·`schema_v0.sql` 무변경. focused verifier PASS; review 반영 final clean `runtime-db`·`docs` evidence는 PR #393 기록.
 
+### ☐ MOMO-389 수용기준 — ADR-0119 W-1: OpenAPI 계약 정본 v0 + drift 게이트 `[python/docs]` · 의존: 없음
+- [ ] `docs/api/openapi.yaml` 신설 — 웹 v0 표면 한정: login/refresh/logout/join/realtime-token/roster/channels(list·create)/messages(send·history)/read-state(bulk GET·cursor PUT)/dms(list·open)/approvals(list·decision). 요청/응답 스키마는 현행 서버 DTO(`server/Sources/MomoServer/Routes/DTOs.swift`)와 필드 단위 일치.
+- [ ] drift 게이트 스크립트 신설: e2e compose 서버를 상대로 스펙 내 각 라우트의 실제 응답 shape(필수 키·타입)를 표본 검증하고 불일치 시 FAIL. `LOCAL_PR_GATE.md`에 등록.
+- [ ] 서버 소스 무변경. 스펙이 서버와 어긋나는 지점을 발견하면 스펙을 서버에 맞추고 그 사실을 PR 이탈 섹션에 기록(서버 수정 금지 — 웹 v0 표면 밖 라우트는 문서화하지 않음).
+- [ ] `docs` 게이트 + 신규 drift 게이트 PASS evidence를 PR에 첨부.
+
+### ☐ MOMO-390 수용기준 — ADR-0119 W-3: Caddy APP_DOMAIN site + 웹 정적 서빙 `[infra/docs]` · 의존: 없음 (MOMO-389와 병렬)
+- [ ] `infra/prod/Caddyfile`에 `{$APP_DOMAIN}` site 추가: SPA 정적 자산 file_server + `/v1/*` → `api:8080` reverse_proxy(같은 오리진 — ADR-0119 D1-A) + `/v1/centrifugo/*` 엣지 403 유지 + security_headers import + SPA용 CSP(자체 오리진 한정, `connect-src`에 REALTIME_DOMAIN wss 허용, inline script 금지).
+- [ ] `APP_DOMAIN` 미설정 배포는 기존 2-site 동작 완전 무변화(웹 없는 셀프호스팅 하위 호환).
+- [ ] prod/e2e compose에 웹 자산 서빙 경로 추가(빌드 산출물 volume 또는 자산 이미지 — 방식은 worker 재량, 단 api 컨테이너가 웹을 서빙하지 않는다). e2e는 placeholder index.html로 서빙 smoke 검증.
+- [ ] `docs/DEPLOY.md`에 APP_DOMAIN 델타(신규 env·DNS·비설정 시 동작) 기록. 기존 게이트 무회귀.
+
+### ☐ MOMO-391 수용기준 — ADR-0119 W-2: clients/web 스캐폴드 + 로그인/타임라인 v0 `[web(신설)/docs]` · 의존: MOMO-389, MOMO-390
+- [ ] `clients/web` 신설: Vite + React + TypeScript, 의존성 전부 permissive(MIT/Apache/ISC/BSD — 라이선스 목록을 PR에 첨부, GPL/AGPL 금지), 타입은 MOMO-389 스펙에서 openapi-typescript 생성.
+- [ ] 로그인(email/password/workspace) → 채널 목록 → 타임라인 읽기(seq 기반 history + `?after=<seq>` backfill) → centrifuge-js 실시간 구독. websocket 주소는 login/join 응답의 `realtimeWebSocketUrl`만 사용(ADR-0110 — API URL에서 추론 금지), 연결 토큰은 `POST /v1/auth/realtime-token`. recovery 실패(`recovered:false`) 시 REST backfill 폴백.
+- [ ] 토큰 정책 ADR-0119 D3-A 준수: access 메모리 보관, refresh localStorage(회전 사용), 로그아웃 시 서버 revoke + 로컬 삭제. 공개 배포 전 httpOnly 승격 게이트를 코드 주석이 아닌 `clients/web/README.md`에 명문화.
+- [ ] `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`: install → lint → typecheck → build → e2e compose 대상 로그인→타임라인 smoke) + `LOCAL_PR_GATE.md` 갱신.
+- [ ] `clients/macOS`·`server` 소스 무변경. ADR-0112 기본 모드 문법만(개발자 밀도·Work 상세·비용 표시 없음). 파일 업로드/웹훅 UI/presence 표시/멀티 워크스페이스 rail 비구현(각 ADR 게이트).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

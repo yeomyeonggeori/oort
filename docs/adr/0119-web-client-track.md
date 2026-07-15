@@ -1,6 +1,6 @@
 # ADR-0119: 웹 클라이언트 트랙 — "서버 URL이 곧 웹 주소"
 
-- Status: **Proposed** (2026-07-15, Fable draft — 성재 option 승인 대기)
+- Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A~D5-A 전체 승인, 웹 우선 확정. 실행은 Fable이 엔진/인프라 트랙 한정 momo-main 겸임으로 진행)
 - 관련: `research/15-platform-expansion/`(00 코드 사실·02 업계 패턴·03 제안), ADR-0002(compose 레이어링), ADR-0112(듀얼 모드 — 웹 v0는 기본 모드만), ADR-0117(멀티 워크스페이스 — 웹 데이터 모델이 선반영), ADR-0121(배포판·초대 관통, 병행 draft), ux-bible P2·P5·P6
 - 발단: 성재 발제(2026-07-15) "본인 서버 URL을 웹에 입력하면 웹사이트에서도 확인" + 방향 확정 "웹 먼저가 맞는 듯" — iOS(M5)보다 웹 선행. 엔진/인프라 트랙은 Fable 위임, UX/UI 트랙(momo-main·성재)과 파일군 비충돌이 배치 제약.
 

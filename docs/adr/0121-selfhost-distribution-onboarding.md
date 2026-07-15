@@ -1,6 +1,6 @@
 # ADR-0121: 셀프호스팅 배포판과 온보딩 — "무료로 서버를 파고, 링크 하나로 초대한다"
 
-- Status: **Proposed** (2026-07-15, Fable draft — 성재 option 승인 대기)
+- Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A/D2-A/D3/D4/D5-A/D6-A 전체 승인. S 배치는 웹 W 배치 랜딩 후 순차 발급)
 - 관련: ADR-0002(compose 레이어링 — install/upgrade 경계 예약분 승계), ADR-0107(CI 신뢰 경계, queued)·ADR-0108(서버 스택, queued), ADR-0119(웹 — 초대 링크의 1차 랜딩 표면), ADR-0120(relay 등록 온보딩), ADR-0112 D4(초대→가입→첫 대화 여정), `research/15-platform-expansion/02`(4사 배포·초대·BM 비교), `docs/DEPLOY.md`·`docs/AWS_INTERNAL_ALPHA.md`(현행 수동 런북)
 - 발단: 성재 발제(2026-07-15) "오픈소스지만 우리가 호스팅한 서버를 바탕으로 서버를 무료로 파고, 멤버를 초대하고, 기능을 사용하게" — 배포판의 제품화 결정.
 

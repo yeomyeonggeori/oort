@@ -5,7 +5,11 @@
 
 ---
 
-## 2026-07-15 (Fable, 엔진/인프라 planner) · ADR-0119/0120/0121 draft
+## 2026-07-15 (Fable, 엔진/인프라 트랙 momo-main 겸임) · ADR-0119~0121 Accepted + 웹 첫 배치 발급
+- 성재가 세 ADR 권고안을 전부 승인(AskUserQuestion 기록)했고, 이 트랙 한정 Fable의 momo-main 겸임(티켓·패킷·Issue 발급)도 승인했다. ADR 3건 Status를 Accepted로 전환.
+- MOMO-389(OpenAPI 계약 정본+drift 게이트)/390(Caddy APP_DOMAIN+정적 서빙)/391(clients/web 스캐폴드) 수용기준을 BUILD_TICKETS에 등록하고 ready 패킷 `2026-07-15-adr-0119-web-track.md`를 발급했다. ROADMAP §1.6 플랫폼 확장 overlay 신설.
+- 경계: UX 트랙(`clients/macOS/**`, MOMO-385/386)과 파일군 분리 유지. 웹 검증은 e2e compose(로컬 러너 수명주기 이슈와 무관). P/S 배치는 웹 배치 랜딩 후.
+- 다음: GitHub Issue 발급(389/390 ready, 391 blocked) → 패킷 binding 갱신 → worker spawn은 성재 신호 대기.
 - 성재 위임(엔진/인프라 트랙, 웹 우선 확정)에 따라 ADR-0119(웹 클라이언트 트랙), 0120(푸시 relay+notifier), 0121(배포판·초대 온보딩)을 Proposed로 기안하고 CURRENT_STATE 레인을 claim했다. base: MOMO-384 머지 후 main `b720250`.
 - 웹 핵심 결정 제안: 같은 오리진 서빙(APP_DOMAIN site+`/v1` proxy — CORS 원천 회피, 서버 무변경), Vite+React+centrifuge-js, v0 토큰은 메모리+localStorage(공개 배포 전 httpOnly 승격 게이트), 수기 OpenAPI 정본+drift 게이트, v0 스코프="초대받은 사람이 브라우저로 합류해 대화".
 - 코드 사실 대조: CORS/쿠키 코드 0건, login=body 베어러+회전(DTOs.swift:41-58), Caddy 2-site. UX 트랙(MOMO-385/386, clients/macOS)과 파일군 비충돌 확인.

@@ -41,9 +41,9 @@
 | `PLN-20260714-02` | 슈퍼앱 엔진 실행 로드맵(Work·MCP·GWS·plugin/webhook·approval) | engine planner + `momo-main` review | **`integrated-adr-drafts-pending`** | 성재 | gap audit/review/main 통합 완료(MOMO-381). ADR-0113~0116은 draft goal 발급 후 option 승인 필요 |
 | `PLN-20260715-01` | Workspace-first messenger + superapp shell | `momo-main` | **`in-progress`** | 성재 | MOMO-382 정본 통합 후 MOMO-383을 첫 UX builder로 발급 |
 | `PLN-20260715-02` | 메신저 아키텍처 바이블 + 플랫폼 확장 리서치(iOS/웹/푸시/파일/웹훅/리전/셀프호스팅 배포판) | Fable | **`research-complete`** | 성재 | 성재 지시(2026-07-15): 엔진/인프라 트랙을 Fable에 위임, **웹 우선** — ADR-0119/0120/0121 draft로 승계 |
-| `ADR-0119` | 웹 클라이언트 트랙 — 서버 URL=웹 주소, 브라우저 인증/서빙/계약 경계 | Fable | **`drafting`** | 성재 | Proposed draft + option 승인 요청 (웹 우선 — 성재 방향 확정) |
-| `ADR-0120` | 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier | Fable | **`drafting`** | 성재 | Proposed draft + option 승인 요청 |
-| `ADR-0121` | 셀프호스팅 배포판·온보딩 — install/upgrade, universal link 초대, BM 경계 | Fable | **`drafting`** | 성재 | Proposed draft + option 승인 요청 |
+| `ADR-0119` | 웹 클라이언트 트랙 — 서버 URL=웹 주소, 브라우저 인증/서빙/계약 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | 첫 배치 MOMO-389→390→391 발급 (패킷 `2026-07-15-adr-0119-web-track.md`). W-4/W-5는 391 랜딩 후 |
+| `ADR-0120` | 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | P-1/P-2는 웹 첫 배치 뒤 발급. relay 배포·Apple 계정은 별도 실행 결정 |
+| `ADR-0121` | 셀프호스팅 배포판·온보딩 — install/upgrade, universal link 초대, BM 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | S 배치는 웹 배치 랜딩 후 순차 발급 |
 | `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | 내부 팀 알파를 현재 실행 가정으로 검토하되, 확정 표기는 성재 승인과 ADR 정본화 이후로 제한 |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |
 | `ADR-0105..0108` | 검색·정체성·CI·서버 스택 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |
@@ -86,6 +86,7 @@
 | 슈퍼앱 엔진 기획 통합 | `2026-07-14-pln-20260714-02-superapp-engine.md` | MOMO-381 `#383` | `done` (PR #384, main `011b630`) | 완료 — ADR draft queue 대기 |
 | Workspace-first UX planning | `2026-07-15-workspace-first-superapp-shell.md` | MOMO-382 `#385` | `done` (PR #386, main `6f89d3b`) | 실행 체인 정본화 완료 |
 | Workspace-first UX builders | 같은 패킷 | MOMO-383 `#387` → MOMO-384 `#390` / MOMO-385 `#391` → MOMO-386 `#392` | `in-progress` | 383 review fix·full worker gates 완료, momo-main final rereview 후 390/391 unblock |
+| **ADR-0119 웹 첫 배치** | `2026-07-15-adr-0119-web-track.md` | MOMO-389 / MOMO-390 → MOMO-391 | `ready` (Issue 발급 중) | 389·390 병렬 → 391. 오케스트레이션: Fable(엔진/인프라 트랙 겸임) |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
