@@ -98,6 +98,16 @@ services:
       CENTRIFUGO_ENGINE_TYPE: redis
       CENTRIFUGO_ENGINE_REDIS_ADDRESS: ${CENTRIFUGO_REDIS_ADDRESS:?set CENTRIFUGO_REDIS_ADDRESS}
       CENTRIFUGO_LOG_LEVEL: ${CENTRIFUGO_LOG_LEVEL:-info}
+      # MOMO-398: browser Origin allowance for web realtime, derived from
+      # APP_DOMAIN so the only origin that can ever be injected is
+      # https://<APP_DOMAIN> (single-origin contract, no separate operator
+      # knob to drift). `:+` renders an empty value when APP_DOMAIN is unset
+      # OR set-but-empty — the same emptiness rule the caddy sentinel above
+      # applies — and Centrifugo v6 treats empty env vars as unset, so a
+      # web-less deploy keeps `client.allowed_origins` undefined exactly as
+      # before (browser Origins stay rejected, fail closed). Native clients
+      # send no Origin header and bypass the check entirely in both modes.
+      CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: ${APP_DOMAIN:+https://${APP_DOMAIN}}
       # MOMO-300: subscribe proxy shared-secret header. This env override wins
       # over the change-me placeholder committed in centrifugo.prod.json; the
       # API rejects proxy callbacks without the exact secret (fail closed).
