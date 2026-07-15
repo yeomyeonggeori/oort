@@ -125,6 +125,24 @@ body {
   font-size: 13px;
 }
 
+/* ---- join landing (MOMO-401) ------------------------------------------------ */
+
+.join-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.join-error-copy {
+  margin: 0;
+}
+
+.join-login-link {
+  align-self: center;
+  border: none;
+}
+
 .primary-button {
   font: inherit;
   font-weight: 600;

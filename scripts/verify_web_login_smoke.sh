@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_web_login_smoke.sh — MOMO-391 + MOMO-400 web e2e smoke
+# scripts/verify_web_login_smoke.sh — MOMO-391 + MOMO-400 + MOMO-401 web e2e smoke
 #
 # Boots an ISOLATED e2e compose stack (infra/docker-compose.e2e.yml) under its
 # own compose project on non-default loopback ports, serves the built SPA
@@ -26,6 +26,19 @@
 #     in-browser 승인 (receipt 200) and an externally pre-decided 409 receipt
 #     that must transition the card, not error.
 #   - DM: picker -> POST /dms open -> composer round-trip -> GET /dms listing.
+#
+# MOMO-401 (ADR-0119 W-5 / ADR-0121 D2-B) additions:
+#   - invite fixtures: a disposable ADMIN member logs in over REST and issues
+#     three invites via POST /v1/workspaces/:ws/invites; one is expired by
+#     fixture SQL, one exhausted by redeeming its single use over REST
+#     POST /v1/join. Raw codes are passed to the browser smoke via env only —
+#     never echoed to the log.
+#   - browser: /join/<code> deep link -> address bar stripped of the code ->
+#     join form -> session established from the JoinResponse token pair ->
+#     timeline entry -> logout -> re-login with the just-created credentials.
+#   - error UX: expired / exhausted / invalid codes render DISTINCT Korean
+#     copy (data-error-kind), and the raw code never appears in any
+#     non-document request URL or console line.
 #
 # Isolation: dedicated COMPOSE_PROJECT_NAME (default momo391web), loopback
 # host ports 18990-18995, teardown removes only this project's containers and
@@ -109,6 +122,18 @@ SMOKE_MEMBER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SMOKE_EMAIL="web-smoke-$RUN_ID@momo.local"
 SMOKE_PASSWORD="web-smoke-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SMOKE_HANDLE="web-smoke-$RUN_EPOCH"
+# MOMO-401: disposable ADMIN fixture (invite issuance requires a workspace
+# owner/admin — InviteRoutes.requireWorkspaceAdmin; the seed demo owner has no
+# password hash, so the smoke installs its own admin, same pattern as above).
+SMOKE_ADMIN_MEMBER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+SMOKE_ADMIN_EMAIL="web-smoke-adm-$RUN_ID@momo.local"
+SMOKE_ADMIN_PASSWORD="web-smoke-adm-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+SMOKE_ADMIN_HANDLE="web-smoke-adm-$RUN_EPOCH"
+# MOMO-401: credentials the BROWSER join form will register (created through
+# the /join/<code> happy path, then re-used for the re-login proof).
+SMOKE_JOIN_EMAIL="web-smoke-join-$RUN_ID@momo.local"
+SMOKE_JOIN_PASSWORD="web-smoke-join-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+SMOKE_JOIN_DISPLAY_NAME="Web Smoke Joiner"
 DEMO_WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 GENERAL_CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 # MOMO-400 fixtures: #agent-lab is the "parked" channel (no unread) and the
@@ -252,6 +277,20 @@ VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'member
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'member');
 
+-- MOMO-401: disposable admin member — invite issuance over REST requires an
+-- active workspace membership with role owner/admin (highest membership role
+-- wins, InviteRoutes.activeWorkspaceRole).
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES ('$SMOKE_ADMIN_MEMBER_ID', '$DEMO_WORKSPACE_ID', 'human', 'active',
+        'Web Smoke Admin', '$SMOKE_ADMIN_HANDLE');
+
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
+VALUES ('$SMOKE_ADMIN_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$SMOKE_ADMIN_EMAIL', true,
+        momo_password_hash('$SMOKE_ADMIN_PASSWORD'), 'UTC');
+
+INSERT INTO membership (workspace_id, channel_id, member_id, role)
+VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$SMOKE_ADMIN_MEMBER_ID', 'admin');
+
 -- MOMO-400: two pending approval fixtures in #general (agent = seeded 김인턴),
 -- each with its approval_request timeline message (single-transaction seq
 -- bump, mirroring the server's write path). Fixture SQL pattern follows
@@ -359,6 +398,59 @@ while :; do
 done
 echo "[web-smoke] relay drained the broadcast outbox — realtime rail is live"
 
+# ---- MOMO-401 invite fixtures -------------------------------------------------
+# Issued over REST by the disposable admin (the invite REST surface is outside
+# the openapi.yaml web v0 scope — the SPA consumes only the spec'd /v1/join;
+# this REST call is smoke tooling, not client surface). The raw codes are
+# bearer secrets: they go into shell variables and the browser via env, and
+# are deliberately never echoed.
+echo "[web-smoke] issuing invite fixtures over REST (admin: create x3; expire one via fixture SQL, exhaust one via /v1/join)"
+ADMIN_ACCESS="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -cn --arg e "$SMOKE_ADMIN_EMAIL" --arg p "$SMOKE_ADMIN_PASSWORD" '{email:$e,password:$p}')" \
+  | jq -r '.accessToken')"
+[ -n "$ADMIN_ACCESS" ] && [ "$ADMIN_ACCESS" != "null" ] || { echo "[web-smoke] admin fixture login failed" >&2; exit 1; }
+
+create_invite() { # $1 = maxUses -> JSON on stdout
+  curl -fsS -X POST "$BASE_URL/v1/workspaces/$DEMO_WORKSPACE_ID/invites" \
+    -H "Authorization: Bearer $ADMIN_ACCESS" -H 'Content-Type: application/json' \
+    -d "$(jq -cn --argjson m "$1" '{role:"member",maxUses:$m}')"
+}
+
+JOIN_INVITE_JSON="$(create_invite 1)"
+JOIN_CODE="$(printf '%s' "$JOIN_INVITE_JSON" | jq -r '.code')"
+EXPIRED_INVITE_JSON="$(create_invite 1)"
+EXPIRED_CODE="$(printf '%s' "$EXPIRED_INVITE_JSON" | jq -r '.code')"
+EXPIRED_INVITE_ID="$(printf '%s' "$EXPIRED_INVITE_JSON" | jq -r '.invite.id' | tr '[:upper:]' '[:lower:]')"
+EXHAUSTED_INVITE_JSON="$(create_invite 1)"
+EXHAUSTED_CODE="$(printf '%s' "$EXHAUSTED_INVITE_JSON" | jq -r '.code')"
+for v in "$JOIN_CODE" "$EXPIRED_CODE" "$EXHAUSTED_CODE" "$EXPIRED_INVITE_ID"; do
+  [ -n "$v" ] && [ "$v" != "null" ] || { echo "[web-smoke] invite fixture issuance failed" >&2; exit 1; }
+done
+
+# Deterministic expiry: creation rejects past expiresAtMs, so the fixture SQL
+# back-dates the row (same fixture-transaction pattern as the approvals above).
+run_sql <<SQL
+BEGIN;
+SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID';
+SET LOCAL row_security = off;
+UPDATE invite_code
+   SET expires_at = now() - interval '1 hour',
+       updated_at = now()
+ WHERE id = '$EXPIRED_INVITE_ID';
+COMMIT;
+SQL
+
+# Exhaust the single-use invite through the REAL public join path (REST): the
+# browser attempt afterwards must hit the 409 exhausted envelope.
+burner_status="$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/v1/join" \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -cn --arg c "$EXHAUSTED_CODE" --arg e "web-smoke-burner-$RUN_ID@momo.local" \
+        --arg p "$SMOKE_PASSWORD" \
+        '{code:$c,email:$e,displayName:"Web Smoke Burner",password:$p}')")"
+[ "$burner_status" = "201" ] || { echo "[web-smoke] exhaust-fixture join expected 201, got $burner_status" >&2; exit 1; }
+echo "[web-smoke] invite fixtures ready (valid / expired / exhausted)"
+
 echo "[web-smoke] running the browser smoke (playwright chromium)"
 (
   cd "$WEB_DIR"
@@ -376,13 +468,20 @@ echo "[web-smoke] running the browser smoke (playwright chromium)"
   WEB_SMOKE_LEAK_MARKER="$LEAK_MARKER" \
   WEB_SMOKE_LEAK_MICRO_USD="$LEAK_MICRO_USD_1,$LEAK_MICRO_USD_2" \
   WEB_SMOKE_DM_AGENT_HANDLE="kim-intern" \
+  WEB_SMOKE_JOIN_CODE="$JOIN_CODE" \
+  WEB_SMOKE_JOIN_EXPIRED_CODE="$EXPIRED_CODE" \
+  WEB_SMOKE_JOIN_EXHAUSTED_CODE="$EXHAUSTED_CODE" \
+  WEB_SMOKE_JOIN_EMAIL="$SMOKE_JOIN_EMAIL" \
+  WEB_SMOKE_JOIN_PASSWORD="$SMOKE_JOIN_PASSWORD" \
+  WEB_SMOKE_JOIN_DISPLAY_NAME="$SMOKE_JOIN_DISPLAY_NAME" \
   WEB_SMOKE_OUT_DIR="$OUT_DIR" \
   node smoke/login-timeline.smoke.mjs
 )
 
 echo
-echo "MOMO-391 + MOMO-400 web browser smoke PASS"
+echo "MOMO-391 + MOMO-400 + MOMO-401 web browser smoke PASS"
 echo "- stack: compose project '$PROJECT' (api :$API_PORT, edge :$EDGE_HTTPS), torn down on exit"
 echo "- verified (MOMO-391): SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up (never after=0), expired-access logout rotate+retry with server-side revoke, zero CSP console violations"
 echo "- verified (MOMO-400): unread badge from bulk read-state GET, external cursor PUT reflected via user:read-state push (zero extra GETs, counter pinned only after the re-baseline GET response completed), never-regressing browser cursor PUTs, composer clientMsgId idempotent retry (one DOM render + one REST row), ADR-0112 approval cards leak none of the gateway-shaped fixture's arguments/tool_grant/estimated_micro_usd (timeline card + panel card), in-browser approve receipt 200, externally pre-decided 409 receipt as card state transition, DM open via POST /dms + composer round-trip + GET /dms listing"
+echo "- verified (MOMO-401): REST invite issuance by the disposable admin, /join/<code> deep link with the code stripped from the address bar before any API call, browser join -> session from the JoinResponse token pair -> timeline entry, logout -> re-login with the join-created credentials, expired/exhausted/invalid codes rendered as distinct Korean error copy, and the raw code absent from every non-document request URL and console line"
 echo "- artifacts: $OUT_DIR"
