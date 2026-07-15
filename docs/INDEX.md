@@ -77,6 +77,7 @@
 | [`docs/adr/0101-agent-identity-credentials.md`](adr/0101-agent-identity-credentials.md) | **에이전트 신원 ADR(Accepted — Option A)**: 공유 시크릿 → per-agent `agent_bearer` + Phase 2 delegation. 구현: MOMO-337~339 | M1/보안 |
 | [`docs/adr/0102-agent-execution-path.md`](adr/0102-agent-execution-path.md) | **에이전트 실행 경로 ADR(Accepted — Option C)**: gateway=BYOA / worker=managed 이중 경로 + 서버 소유 보장 매트릭스 + SD-5 소급 승인 | M1/에이전트 |
 | [`docs/architecture/overview.md`](architecture/overview.md) | **아키텍처 정본**: 불변식 6개 + 시스템/수명주기/엔티티 mermaid 다이어그램 + 판정 요약 + ADR 결정 큐. 어긋나는 코드 변경은 같은 PR에서 갱신 | 전반 |
+| [`docs/architecture/bible/README.md`](architecture/bible/README.md) | **메신저 아키텍처 바이블(학습용 파생 문서, 정본 아님)**: 문제 지도 M1~M11 + momo 뼈대 해설 + Slack/Discord/셀프호스팅 계열 비교 + 결정 큐 대조 — 정본과 어긋나면 정본 우선 | 전반 |
 | [`docs/ux-bible/README.md`](ux-bible/README.md) | **UX 바이블 정본**: Slack 코퍼스 36선 기반 원칙 P1~P15 — UI/UX 티켓 수용기준이 원칙 번호를 인용 | M3+ |
 | [`docs/planning/README.md`](planning/README.md) | **기획 레이어 운영 정본**: 제품 오너/planner/momo-main/worker 역할, 병렬 planning claim, ADR→티켓→핸드오프 체인, 구현 병렬 최대 5, 이탈 환류 | 전반 |
 | [`docs/planning/CURRENT_STATE.md`](planning/CURRENT_STATE.md) | **컨텍스트 압축 복원 정본**: 활성 planning owner, 결정 대기, 구현 handoff, 다음 체크포인트. `momo-main`만 통합 갱신 | 전반 |

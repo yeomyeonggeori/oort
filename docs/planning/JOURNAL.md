@@ -5,7 +5,11 @@
 
 ---
 
-## 2026-07-15 (Codex worker) · MOMO-383 delayed roster/channel cache P2
+## 2026-07-15 (Fable, planner+momo-main 겸임) · PLN-20260715-02 바이블 + 플랫폼 확장 리서치
+- 성재 발제(이해도/슈퍼앱 수용성/인프라)를 받아 메신저 아키텍처 바이블 초판 6장(`docs/architecture/bible/`, 학습용 파생 등급)과 `research/15-platform-expansion/` 00~03을 랜딩했다. INDEX 등재, planning lane claim/갱신은 momo-main 자격으로 수행.
+- 코드 대조 결론: 푸시/프레즌스/파일/웹훅은 "스키마·placeholder만 있고 경로 없음", 웹·리전은 완전 미예약, 그룹채팅은 기완비. 업계 결론: push relay는 Dawn 운영이 구조적 필연(id-only), 웹은 서버 동일 도메인 서빙, 멀티리전은 업계 전체가 비채택.
+- 신규 ADR 후보 3건(α 푸시 relay, β 웹 트랙, γ 배포판·온보딩)과 기존 큐 입력(0104/0105/0113·0116/0115/0117)을 `15/03-decision-proposals.md`로 제안 — 번호 발급·우선순위·웹vs iOS 순서는 성재 결정 대기(§6).
+- 다음: 성재가 §6 승인 시 ADR-α부터 draft 착수(0104 병렬 claim 가능). 바이블 07~10장은 해당 ADR 승격 후 집필.
 - REST `members`/`channels`가 요청 시작 generation+workspace를 capture하고 reconnect 뒤 돌아온 이전 session 응답은 `CancellationError`로 폐기해 current cache를 건드리지 않게 했다.
 - delayed A roster/channel → connect B → B cache load → A release race 2건을 deterministic URLProtocol gate로 고정했다. 전체 Swift count는 Core 24·Server 80·Relay 2·Worker 29·macOS 234 = 369.
 - 이전 dirty-worktree gate evidence는 폐기한다. 새 final commit에서 dirty 허용 없이 runtime-db, 실제 launch macos-ui, docs를 실행하고 PR #389 handoff에 commit/evidence를 기록한다.
