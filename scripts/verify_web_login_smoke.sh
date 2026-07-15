@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_web_login_smoke.sh — MOMO-391 web login -> timeline e2e smoke
+# scripts/verify_web_login_smoke.sh — MOMO-391 + MOMO-400 web e2e smoke
 #
 # Boots an ISOLATED e2e compose stack (infra/docker-compose.e2e.yml) under its
 # own compose project on non-default loopback ports, serves the built SPA
@@ -13,6 +13,19 @@
 #   Centrifugo -> browser) -> REST `?after=` catch-up evidence (never after=0)
 #   -> expired-access logout rotate+retry with server-side revoke -> zero CSP
 #   console violations.
+#
+# MOMO-400 (ADR-0119 W-4) additions:
+#   - read-state: bulk-GET badge init, external cursor PUT reflected through
+#     the `user:read-state#<member-id>` push (badge clears with zero extra
+#     GETs), browser cursor PUTs strictly monotonic.
+#   - composer idempotency: first in-browser send forwarded to the server but
+#     answered 500; retry must reuse the SAME clientMsgId; exactly one message
+#     in DOM and REST history.
+#   - approvals: two pending fixtures (agent_run + approval + approval_request
+#     message, same SQL pattern as scripts/verify_openapi_contract.sh);
+#     in-browser 승인 (receipt 200) and an externally pre-decided 409 receipt
+#     that must transition the card, not error.
+#   - DM: picker -> POST /dms open -> composer round-trip -> GET /dms listing.
 #
 # Isolation: dedicated COMPOSE_PROJECT_NAME (default momo391web), loopback
 # host ports 18990-18995, teardown removes only this project's containers and
@@ -98,6 +111,20 @@ SMOKE_PASSWORD="web-smoke-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SMOKE_HANDLE="web-smoke-$RUN_EPOCH"
 DEMO_WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 GENERAL_CHANNEL_ID="00000000-0000-7000-8000-000000000201"
+# MOMO-400 fixtures: #agent-lab is the "parked" channel (no unread) and the
+# seeded 김인턴 agent (MOMO_AGENT_SEED_MODE=e2e, 002_seed.sql) authors the two
+# pending approval fixtures in #general — same pattern as the OpenAPI gate.
+AGENT_LAB_CHANNEL_ID="00000000-0000-7000-8000-000000000202"
+KIM_INTERN_MEMBER_ID="00000000-0000-7000-8000-000000000102"
+RUN1_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+APPROVAL1_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+RUN2_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+APPROVAL2_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+# Message props mirror the server's spelling (Swift uuidString = UPPERCASE).
+APPROVAL1_UPPER="$(printf '%s' "$APPROVAL1_UUID" | tr '[:lower:]' '[:upper:]')"
+APPROVAL2_UPPER="$(printf '%s' "$APPROVAL2_UUID" | tr '[:lower:]' '[:upper:]')"
+RUN1_UPPER="$(printf '%s' "$RUN1_UUID" | tr '[:lower:]' '[:upper:]')"
+RUN2_UPPER="$(printf '%s' "$RUN2_UUID" | tr '[:lower:]' '[:upper:]')"
 
 compose() {
   PORT="$API_PORT" \
@@ -190,6 +217,16 @@ BEGIN;
 SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID';
 SET LOCAL row_security = off;
 
+DO \$\$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM agent WHERE member_id = '$KIM_INTERN_MEMBER_ID'
+  ) THEN
+    RAISE EXCEPTION
+      'agent seed missing — run the e2e stack with MOMO_AGENT_SEED_MODE=e2e (002_seed.sql)';
+  END IF;
+END \$\$;
+
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('$SMOKE_MEMBER_ID', '$DEMO_WORKSPACE_ID', 'human', 'active',
         'Web Smoke', '$SMOKE_HANDLE');
@@ -200,6 +237,85 @@ VALUES ('$SMOKE_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$SMOKE_EMAIL', true,
 
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'member');
+
+-- MOMO-400: second channel membership — the browser parks here (no unread)
+-- so #general's badge stays observable for the read-state assertions.
+INSERT INTO membership (workspace_id, channel_id, member_id, role)
+VALUES ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'member');
+
+-- MOMO-400: two pending approval fixtures in #general (agent = seeded 김인턴),
+-- each with its approval_request timeline message (single-transaction seq
+-- bump, mirroring the server's write path). Fixture SQL pattern follows
+-- scripts/verify_openapi_contract.sh. The payload deliberately CONTAINS tool
+-- JSON and a cost estimate: the smoke asserts the card never renders them
+-- (ADR-0112 basic mode).
+
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key)
+VALUES
+  ('$RUN1_UUID', '$DEMO_WORKSPACE_ID', '$KIM_INTERN_MEMBER_ID',
+   '$GENERAL_CHANNEL_ID', 'awaiting_approval',
+   '{"prompt":"web smoke approval one"}'::jsonb, 'web-smoke-1-$RUN_ID'),
+  ('$RUN2_UUID', '$DEMO_WORKSPACE_ID', '$KIM_INTERN_MEMBER_ID',
+   '$GENERAL_CHANNEL_ID', 'awaiting_approval',
+   '{"prompt":"web smoke approval two"}'::jsonb, 'web-smoke-2-$RUN_ID');
+
+INSERT INTO approval
+  (id, workspace_id, run_id, channel_id, requested_by, action_type, payload,
+   status, expires_at)
+VALUES
+  ('$APPROVAL1_UUID', '$DEMO_WORKSPACE_ID', '$RUN1_UUID',
+   '$GENERAL_CHANNEL_ID', '$KIM_INTERN_MEMBER_ID', 'tool_call',
+   '{"tool_call":{"call_id":"web-smoke-1","name":"github.search_issues","arguments":{"query":"web"}},"title":"GitHub 이슈 검색 실행","summary":"김인턴이 GitHub 이슈를 검색하려고 합니다.","estimated_micro_usd":4200,"is_reversible":true}'::jsonb,
+   'pending', now() + interval '1 hour'),
+  ('$APPROVAL2_UUID', '$DEMO_WORKSPACE_ID', '$RUN2_UUID',
+   '$GENERAL_CHANNEL_ID', '$KIM_INTERN_MEMBER_ID', 'tool_call',
+   '{"tool_call":{"call_id":"web-smoke-2","name":"github.create_comment","arguments":{"body":"draft"}},"title":"GitHub 코멘트 작성","summary":"김인턴이 이슈에 코멘트를 남기려고 합니다.","estimated_micro_usd":9000,"is_reversible":false}'::jsonb,
+   'pending', now() + interval '1 hour');
+
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$GENERAL_CHANNEL_ID'
+  RETURNING last_seq AS seq
+), msg AS (
+  INSERT INTO message
+    (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+     author_member_id, type, body, props, run_id)
+  SELECT '$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', b.seq,
+         (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+         '$KIM_INTERN_MEMBER_ID', 'approval_request'::message_type,
+         'GitHub 이슈 검색 실행 승인 요청',
+         '{"approval_id":"$APPROVAL1_UPPER","run_id":"$RUN1_UPPER","channel_id":"$GENERAL_CHANNEL_ID","action_type":"tool_call","title":"GitHub 이슈 검색 실행","summary":"김인턴이 GitHub 이슈를 검색하려고 합니다.","status":"pending","source":"web-smoke"}'::jsonb,
+         '$RUN1_UUID'
+    FROM bumped b
+  RETURNING id
+)
+UPDATE approval
+   SET request_message_id = (SELECT id FROM msg)
+ WHERE id = '$APPROVAL1_UUID';
+
+WITH bumped AS (
+  UPDATE channel_seq
+     SET last_seq = last_seq + 1
+   WHERE channel_id = '$GENERAL_CHANNEL_ID'
+  RETURNING last_seq AS seq
+), msg AS (
+  INSERT INTO message
+    (workspace_id, channel_id, seq, hlc_ts, hlc_count,
+     author_member_id, type, body, props, run_id)
+  SELECT '$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', b.seq,
+         (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
+         '$KIM_INTERN_MEMBER_ID', 'approval_request'::message_type,
+         'GitHub 코멘트 작성 승인 요청',
+         '{"approval_id":"$APPROVAL2_UPPER","run_id":"$RUN2_UPPER","channel_id":"$GENERAL_CHANNEL_ID","action_type":"tool_call","title":"GitHub 코멘트 작성","summary":"김인턴이 이슈에 코멘트를 남기려고 합니다.","status":"pending","source":"web-smoke"}'::jsonb,
+         '$RUN2_UUID'
+    FROM bumped b
+  RETURNING id
+)
+UPDATE approval
+   SET request_message_id = (SELECT id FROM msg)
+ WHERE id = '$APPROVAL2_UUID';
 
 COMMIT;
 SQL
@@ -244,12 +360,17 @@ echo "[web-smoke] running the browser smoke (playwright chromium)"
   WEB_SMOKE_EMAIL="$SMOKE_EMAIL" \
   WEB_SMOKE_PASSWORD="$SMOKE_PASSWORD" \
   WEB_SMOKE_CHANNEL_NAME="general" \
+  WEB_SMOKE_UNREAD_CHANNEL_NAME="agent-lab" \
+  WEB_SMOKE_APPROVAL_ID="$APPROVAL1_UUID" \
+  WEB_SMOKE_APPROVAL2_ID="$APPROVAL2_UUID" \
+  WEB_SMOKE_DM_AGENT_HANDLE="kim-intern" \
   WEB_SMOKE_OUT_DIR="$OUT_DIR" \
   node smoke/login-timeline.smoke.mjs
 )
 
 echo
-echo "MOMO-391 web login/timeline smoke PASS"
+echo "MOMO-391 + MOMO-400 web browser smoke PASS"
 echo "- stack: compose project '$PROJECT' (api :$API_PORT, edge :$EDGE_HTTPS), torn down on exit"
-echo "- verified: SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up (never after=0), expired-access logout rotate+retry with server-side revoke, zero CSP console violations"
+echo "- verified (MOMO-391): SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up (never after=0), expired-access logout rotate+retry with server-side revoke, zero CSP console violations"
+echo "- verified (MOMO-400): unread badge from bulk read-state GET, external cursor PUT reflected via user:read-state push (zero extra GETs), strictly monotonic browser cursor PUTs, composer clientMsgId idempotent retry (one DOM render + one REST row), ADR-0112 approval cards (no tool JSON/cost), in-browser approve receipt 200, externally pre-decided 409 receipt as card state transition, DM open via POST /dms + composer round-trip + GET /dms listing"
 echo "- artifacts: $OUT_DIR"

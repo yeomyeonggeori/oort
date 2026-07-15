@@ -139,10 +139,10 @@ The `docs` profile statically checks the spec parse and both gate scripts.
 The runtime drift gate is wired into the `web` profile (MOMO-391) and also
 runs standalone with the command above.
 
-### Web client gate (`web` profile, MOMO-391)
+### Web client gate (`web` profile, MOMO-391 + MOMO-400)
 
 `scripts/local_gate.sh --profile web` is the merge gate for `clients/web`
-and web-serving changes (ADR-0119 W-2). Steps, in order:
+and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
 
 1. worktree-clean guard, `npm ci`, `eslint`, `tsc --noEmit` inside
    `clients/web`.
@@ -168,9 +168,19 @@ and web-serving changes (ADR-0119 W-2). Steps, in order:
    list → timeline display of REST-seeded messages → wss realtime subscribe
    under the strict CSP → a REST-sent message rendered live through
    REST → PG → outbox → relay → Centrifugo → browser, plus REST `?after=`
-   catch-up evidence and zero CSP console violations. First run downloads
-   the playwright Chromium build (cached) and cold-builds the api/relay
-   Swift containers — allow many minutes. Overrides:
+   catch-up evidence and zero CSP console violations. MOMO-400 extends the
+   same run with: composer `clientMsgId` idempotency (first send forwarded
+   to the server but answered 500; the retry must reuse the SAME
+   `clientMsgId` and leave exactly one DOM render and one committed row),
+   the read-state rail (bulk GET badge init; an EXTERNAL cursor PUT clears
+   the badge through the `user:read-state#<member-id>` push with zero
+   further read-state GETs; browser cursor PUTs asserted strictly
+   monotonic), ADR-0112 approval cards (no tool JSON/cost leakage;
+   in-browser approve → receipt 200; an externally pre-decided approval →
+   409 receipt handled as a card state transition, not an error), and DM
+   open via `POST /dms` + composer round-trip + `GET /dms` listing. First
+   run downloads the playwright Chromium build (cached) and cold-builds
+   the api/relay Swift containers — allow many minutes. Overrides:
    `WEB_LOGIN_SMOKE_PORT`/`..._POSTGRES_PORT`/`..._CENT_PORT`/
    `..._HERMES_PORT`/`..._EDGE_HTTPS`/`..._EDGE_HTTP` (port conflicts),
    `WEB_LOGIN_SMOKE_PROJECT`, `WEB_LOGIN_SMOKE_BOOT_TIMEOUT`,

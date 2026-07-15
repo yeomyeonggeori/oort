@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Channel, Message } from "../api/client";
 import { fetchMessages } from "../api/client";
 import type { MessageNewEvent, RealtimeHandle } from "../realtime/realtime";
+import type { ApprovalsStore } from "../state/approvals";
+import ApprovalCard from "./ApprovalCard";
+import Composer from "./Composer";
 
 interface TimelineProps {
   workspaceId: string;
@@ -9,6 +12,9 @@ interface TimelineProps {
   channelLabel: string;
   displayNameFor: (memberId: string) => string;
   realtime: RealtimeHandle | null;
+  approvals: ApprovalsStore;
+  /** Highest committed seq rendered — drives the read-state cursor PUT. */
+  onLatestSeq: (channelId: string, seq: number) => void;
 }
 
 /** Normalized display message (REST camelCase + realtime snake_case unify). */
@@ -19,6 +25,7 @@ interface UiMessage {
   body?: string;
   authorMemberId: string;
   createdAtMs: number;
+  props?: Record<string, unknown>;
 }
 
 const HEAD_PAGE_LIMIT = 50;
@@ -45,6 +52,7 @@ function fromRest(message: Message): UiMessage {
     createdAtMs: message.createdAtMs,
   };
   if (message.body !== undefined) ui.body = message.body;
+  if (message.props !== undefined) ui.props = message.props;
   return ui;
 }
 
@@ -62,7 +70,37 @@ function fromRealtime(event: MessageNewEvent): UiMessage {
   if (payload.body !== undefined && payload.body !== null) {
     ui.body = payload.body;
   }
+  if (payload.props !== undefined && payload.props !== null) {
+    ui.props = payload.props;
+  }
   return ui;
+}
+
+/**
+ * approval_request messages carry the linkage in props (approval_id plus the
+ * plain-language title/summary the server wrote). Only those prose strings
+ * are read — tool JSON/arguments/cost stay unrendered (ADR-0112 basic mode).
+ */
+function approvalCardProps(message: UiMessage): {
+  approvalId: string;
+  title: string;
+  summary?: string;
+} | null {
+  const props = message.props;
+  if (!props) return null;
+  const approvalId = props["approval_id"];
+  if (typeof approvalId !== "string" || approvalId === "") return null;
+  const title = props["title"];
+  const summary = props["summary"];
+  const result: { approvalId: string; title: string; summary?: string } = {
+    approvalId,
+    title:
+      typeof title === "string" && title !== ""
+        ? title
+        : (message.body ?? "승인 요청"),
+  };
+  if (typeof summary === "string" && summary !== "") result.summary = summary;
+  return result;
 }
 
 /** seq is the per-channel ordering authority; merge dedupes on it. */
@@ -94,6 +132,8 @@ export default function Timeline({
   channelLabel,
   displayNameFor,
   realtime,
+  approvals,
+  onLatestSeq,
 }: TimelineProps) {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -234,6 +274,14 @@ export default function Timeline({
     }
   }, [messages]);
 
+  // Viewing this channel = reading it: report the highest COMMITTED seq so
+  // the read-state store can advance the cursor (monotonic PUT; the store
+  // dedupes and never regresses).
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last) onLatestSeq(channelId, last.seq);
+  }, [channelId, messages, onLatestSeq]);
+
   function handleScroll() {
     const list = listRef.current;
     if (!list) return;
@@ -274,45 +322,67 @@ export default function Timeline({
         )}
 
         <ol className="message-list">
-          {messages.map((message) => (
-            <li
-              key={message.seq}
-              className="message-row"
-              data-testid="timeline-message"
-              data-seq={message.seq}
-            >
-              <div className="message-meta">
-                <span className="message-author">
-                  {displayNameFor(message.authorMemberId)}
-                </span>
-                <time
-                  className="message-time"
-                  title={fullFormat.format(new Date(message.createdAtMs))}
-                >
-                  {timeFormat.format(new Date(message.createdAtMs))}
-                </time>
-              </div>
-              {message.type !== "text" && (
-                <span className="message-type-badge">
-                  {TYPE_LABEL[message.type] ?? message.type}
-                </span>
-              )}
-              {message.body !== undefined && message.body !== "" ? (
-                <p className="message-body">{message.body}</p>
-              ) : (
-                message.type !== "text" && (
-                  <p className="message-body muted">에이전트 활동</p>
-                )
-              )}
-            </li>
-          ))}
+          {messages.map((message) => {
+            const approvalCard =
+              message.type === "approval_request"
+                ? approvalCardProps(message)
+                : null;
+            return (
+              <li
+                key={message.seq}
+                className="message-row"
+                data-testid="timeline-message"
+                data-seq={message.seq}
+              >
+                <div className="message-meta">
+                  <span className="message-author">
+                    {displayNameFor(message.authorMemberId)}
+                  </span>
+                  <time
+                    className="message-time"
+                    title={fullFormat.format(new Date(message.createdAtMs))}
+                  >
+                    {timeFormat.format(new Date(message.createdAtMs))}
+                  </time>
+                </div>
+                {approvalCard !== null ? (
+                  <ApprovalCard
+                    approvalId={approvalCard.approvalId}
+                    title={approvalCard.title}
+                    summary={approvalCard.summary}
+                    requesterName={displayNameFor(message.authorMemberId)}
+                    status={approvals.statusFor(approvalCard.approvalId)}
+                    decide={approvals.decide}
+                  />
+                ) : (
+                  <>
+                    {message.type !== "text" && (
+                      <span className="message-type-badge">
+                        {TYPE_LABEL[message.type] ?? message.type}
+                      </span>
+                    )}
+                    {message.body !== undefined && message.body !== "" ? (
+                      <p className="message-body">{message.body}</p>
+                    ) : (
+                      message.type !== "text" && (
+                        <p className="message-body muted">에이전트 활동</p>
+                      )
+                    )}
+                  </>
+                )}
+              </li>
+            );
+          })}
         </ol>
       </div>
 
       <footer className="timeline-footer">
-        <p className="muted">
-          읽기 전용 미리보기입니다. 메시지 작성은 다음 업데이트에서 열립니다.
-        </p>
+        <Composer
+          workspaceId={workspaceId}
+          channelId={channelId}
+          placeholder={`${channelLabel}에 메시지 보내기`}
+          onSent={(message) => appendMessages([fromRest(message)])}
+        />
       </footer>
     </div>
   );
