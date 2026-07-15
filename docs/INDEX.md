@@ -87,6 +87,7 @@
 | [`docs/planning/handoffs/`](planning/handoffs/) | 발급된 핸드오프 패킷 (첫 패킷: 2026-07-10 ADR-0101 agent identity 배치) | 전반 |
 | [`docs/planning/proposals/2026-07-15-workspace-first-superapp-shell.md`](planning/proposals/2026-07-15-workspace-first-superapp-shell.md) | 2026-07-14 실창 QA를 workspace-first messenger와 governed Work Console 경계로 분할한 실행 제안 | M3/슈퍼앱 |
 | [`docs/planning/handoffs/2026-07-15-workspace-first-superapp-shell.md`](planning/handoffs/2026-07-15-workspace-first-superapp-shell.md) | MOMO-383~386 UX buildable queue와 ADR-0113~0116 engine planning lock/handoff | M3/슈퍼앱 |
+| [`docs/planning/handoffs/2026-07-16-plugin-platform-fable.md`](planning/handoffs/2026-07-16-plugin-platform-fable.md) | Plugin Platform 제품화를 위한 Fable 엔진 핸드오프: ADR-0113 custody, SE-04A registry, Drive vertical 후보, 동적 discovery | 슈퍼앱/플러그인 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 
@@ -169,6 +170,8 @@
 | [`research/13-redesign/01-agent-native-redesign-2026-07.md`](../research/13-redesign/01-agent-native-redesign-2026-07.md) | **2026-07 재설계 방향 문서** — 코드베이스 진단(P1~P7: 디자인 시스템 부재/테이블스테이크스 공백/에이전트 단발 컨텍스트/프로토콜 고립/보안 갭/온디바이스 반쪽) + 레퍼런스 채택(astryx/openagents/Codex app/Slack Kit/Discord/Compass/FoundationModels/SpeechTranscriber/pgvector) + 6트랙 재설계(MomoDS·코어UX·MCP/A2A/AG-UI·RAG/Context Broker·음성·보안) + MOMO-300~315 티켓 델타 |
 | [`research/13-redesign/02-gate-optimization.md`](../research/13-redesign/02-gate-optimization.md) | Local gate 실측 감사(Swift 10회 중복 빌드/worktree 캐시 비공유/2회 마이그레이션) + 3-wave 최적화(diff 기반 `--auto` 프로파일/BuildKit cache mount/공유 빌드 캐시) + 디자인 리뷰 자동화 루프(`.claude/skills/momo-design-taste` + `.claude/agents/design-review`) + MOMO-316~319 |
 | [`research/13-redesign/03-google-workspace-files-rag.md`](../research/13-redesign/03-google-workspace-files-rag.md) | Google Drive workspace archive + RAG 역사적 제안. archive는 ADR 전 동결, MOMO-320 재사용 금지; 최신 경로는 superapp engine proposal 참조 |
+| [`research/16-plugin-platform/00-plugin-ecosystem-research.md`](../research/16-plugin-platform/00-plugin-ecosystem-research.md) | Codex/Hermes/MCP와 Google Workspace·GitHub·Notion 공식 표면, 라이선스/인증/토큰 경계, plugin 후보 우선순위 조사 |
+| [`research/16-plugin-platform/01-momo-plugin-platform-product-proposal.md`](../research/16-plugin-platform/01-momo-plugin-platform-product-proposal.md) | Plugin Center·온보딩 추천·독립 lifecycle projection·Capability Cache discovery·Drive-first 후보 제품 제안 |
 | [`research/11-agent-runtime/fixtures/plugin-manifest-v0/`](../research/11-agent-runtime/fixtures/plugin-manifest-v0/) | Plugin Manifest v0 JSON fixtures(GitHub Issues, Google Workspace read-mostly, high-risk write approval policy) |
 | `research/01·02·05a` | 유니콘 발굴 방법론 · 섹션 택소노미 · 에이전트 메신저 스캔(배경) |
 
