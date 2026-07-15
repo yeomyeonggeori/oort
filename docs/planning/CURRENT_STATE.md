@@ -39,13 +39,12 @@
 | `ADR-0112` | 제품 표면 재정렬 — 듀얼 모드·Slack 기본기·Codex급 상호작용 (성재 발제) | Fable | **`accepted`** (2026-07-14) | 성재 ✓ | Wave A+379 종결; B/C는 육안 QA 후 발급 |
 | `PLN-20260714-01` | UX/UI 수동 QA + ADR-0112 후속 실행 순서 | `momo-main` | **`superseded`** | 성재 | 2026-07-14 실창 QA를 `PLN-20260715-01`로 이어받음 |
 | `PLN-20260714-02` | 슈퍼앱 엔진 실행 로드맵(Work·MCP·GWS·plugin/webhook·approval) | engine planner + `momo-main` review | **`integrated-adr-drafts-pending`** | 성재 | gap audit/review/main 통합 완료(MOMO-381). ADR-0113~0116은 draft goal 발급 후 option 승인 필요 |
-| `PLN-20260716-01` | Plugin Platform 제품화(Codex형 catalog·온보딩·동적 discovery·Google Drive vertical 후보) | `momo-main` → Fable engine planner | **`proposal-ready-for-refinement`** | 성재 | Fable이 credential custody, Drive-first vs GitHub-first 옵션, identity/delegation binding, remote runtime egress를 ADR-0113/SE-04A draft로 구체화. 성재 option 승인 전 builder issue 금지 |
 | `PLN-20260715-01` | Workspace-first messenger + superapp shell | `momo-main` | **`in-progress`** | 성재 | MOMO-382 정본 통합 후 MOMO-383을 첫 UX builder로 발급 |
 | `PLN-20260715-02` | 메신저 아키텍처 바이블 + 플랫폼 확장 리서치(iOS/웹/푸시/파일/웹훅/리전/셀프호스팅 배포판) | Fable | **`research-complete`** | 성재 | 성재 지시(2026-07-15): 엔진/인프라 트랙을 Fable에 위임, **웹 우선** — ADR-0119/0120/0121 draft로 승계 |
 | `ADR-0119` | 웹 클라이언트 트랙 — 서버 URL=웹 주소, 브라우저 인증/서빙/계약 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | 첫 배치 MOMO-389→390→391 발급 (패킷 `2026-07-15-adr-0119-web-track.md`). W-4/W-5는 391 랜딩 후 |
 | `ADR-0120` | 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | P-1/P-2는 웹 첫 배치 뒤 발급. relay 배포·Apple 계정은 별도 실행 결정 |
 | `ADR-0121` | 셀프호스팅 배포판·온보딩 — install/upgrade, universal link 초대, BM 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | S 배치는 웹 배치 랜딩 후 순차 발급 |
-| `PLN-20260716-01` | 플러그인 플랫폼(공식+커스텀, 원클릭 설치, 서버 단위 관리, 1호 Drive) 선행 리서치 | Fable | **`research-complete`** | 성재 | `research/16-plugin-platform/` 00~02 랜딩. ADR-0113 draft 입력 + Fable 엔진 세션 핸드오프(02) 준비 완료. UI는 Codex handoff 대기 |
+| `PLN-20260716-01` | 플러그인 플랫폼 제품화(Codex형 catalog·온보딩·동적 discovery·1호 Drive) | Fable (engine planner) — momo-main 지정과 합치 | **`research-complete → refinement-pending`** | 성재 | 리서치 `research/16-plugin-platform/00~02` 랜딩. 다음: Fable 엔진 세션이 02 핸드오프로 착수 — credential custody·Drive-first vs GitHub-first·identity/delegation binding·remote runtime egress를 ADR-0113/SE-04A draft로 구체화(momo-main 요청 승계). 성재 option 승인 전 builder issue 금지 |
 | `ADR-0122` | 음성 허들 + 회의 지능 — LiveKit 미디어, 임시 허들 모델, 전사 파이프라인, 요약=에이전트 Work | Fable | **`proposed`** | 성재 | 성재 발제(2026-07-15) 리서치 완료(15-05). option 승인 대기 — Accepted≠즉시 착수(웹/푸시 뒤) |
 | `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | 내부 팀 알파를 현재 실행 가정으로 검토하되, 확정 표기는 성재 승인과 ADR 정본화 이후로 제한 |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |

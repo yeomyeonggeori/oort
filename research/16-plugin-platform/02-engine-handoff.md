@@ -25,6 +25,8 @@
 
 ## 2순위 작업: ADR-0113 draft 기안 (engine planner 몫)
 
+**momo-main(UX 트랙) 지정 구체화 항목 4개(CURRENT_STATE 2026-07-16 — 반드시 Options에 포함):** ① credential custody ② Drive-first vs GitHub-first 우선 vertical ③ identity/delegation binding(누구 명의의 grant인가 — 사용자 vs 에이전트 vs workspace) ④ remote runtime egress(에이전트 호스트의 외부 트래픽 경계). Codex 측 플러그인 UI 기획 overlay가 main에 랜딩되어 있으니 `git log --all --grep=plugin -i` 및 docs/planning/proposals 최신을 대조할 것.
+
 - 01 §1 커스터디 권고 + §4 Drive 모드 A 우선 + 에이전트 호스트 토큰 보유의 신뢰 경계(다중 사용자 워크스페이스에서 토큰 소유자 명시)를 Options로 구조화.
 - (A) 서버측 보관 모델을 기각이 아닌 명시 Option으로 두고 ADR-0004 경계 변경 비용을 적시(성재가 트레이드오프를 보고 결정).
 - SE-04A 계약 확장(3층 manifest·momo 확장 필드·server.json 참조·추천 세트 정책 필드)을 파생 배치로.
