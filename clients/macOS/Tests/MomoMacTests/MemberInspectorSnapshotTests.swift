@@ -26,20 +26,25 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         }
         let (viewModel, member) = try await makeViewModel()
         let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        let profile = MomoChannelMemberInspectorView(
+        let application = NSApplication.shared
+        let previousApplicationAppearance = application.appearance
+        application.appearance = appearance
+        defer { application.appearance = previousApplicationAppearance }
+        let profile = MomoMemberProfilePopoverView(
             viewModel: viewModel,
-            audience: .channel,
+            member: member,
             copy: MomoWorkspaceCopy(language: scheme == .dark ? .english : .korean),
-            captureProfileMemberID: member.id,
-            close: {},
-            didOpenDirectMessage: {}
+            showsDirectMessageFailure: false,
+            copyHandle: {},
+            mention: {},
+            openDirectMessage: {}
         )
         .environment(\.colorScheme, scheme)
         .frame(width: MomoTheme.MemberInspector.profileWidth)
 
         let anchor = NSButton(title: member.displayName, target: nil, action: nil)
-        anchor.frame = NSRect(x: 24, y: 24, width: 160, height: 32)
-        let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 240, height: 96))
+        anchor.frame = NSRect(x: 120, y: 254, width: 160, height: 32)
+        let anchorView = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 540))
         anchorView.addSubview(anchor)
         let anchorWindow = NSWindow(
             contentRect: anchorView.bounds,
@@ -68,10 +73,16 @@ final class MemberInspectorSnapshotTests: XCTestCase {
 
         try await Task.sleep(for: .milliseconds(250))
         guard let profileWindow = popover.contentViewController?.view.window,
-              let cgImage = CGWindowListCreateImage(
-                .null,
+              let windowInfo = CGWindowListCopyWindowInfo(
                 .optionIncludingWindow,
-                CGWindowID(profileWindow.windowNumber),
+                CGWindowID(profileWindow.windowNumber)
+              ) as? [[String: Any]],
+              let boundsDictionary = windowInfo.first?[kCGWindowBounds as String] as? NSDictionary,
+              let windowBounds = CGRect(dictionaryRepresentation: boundsDictionary),
+              let cgImage = CGWindowListCreateImage(
+                windowBounds,
+                .optionOnScreenOnly,
+                kCGNullWindowID,
                 [.boundsIgnoreFraming, .bestResolution]
               )
         else {
@@ -110,5 +121,74 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         XCTAssertGreaterThan(light.size.width, 0)
         XCTAssertGreaterThan(light.size.height, 0)
         XCTAssertEqual(light.size, dark.size)
+    }
+
+    func testInspectorSearchReceivesInitialKeyboardFocusInRealWindow() async throws {
+        guard !NSScreen.screens.isEmpty else {
+            throw XCTSkip("MOMO-385 keyboard focus evidence requires a WindowServer compositor")
+        }
+        let (viewModel, _) = try await makeViewModel()
+        let hostingController = NSHostingController(
+            rootView: MomoChannelMemberInspectorView(
+                viewModel: viewModel,
+                audience: .channel,
+                copy: MomoWorkspaceCopy(language: .english),
+                close: {},
+                didOpenDirectMessage: {}
+            )
+            .frame(width: MomoTheme.MemberInspector.overlayWidth, height: 620)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: MomoTheme.MemberInspector.overlayWidth, height: 620),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = hostingController
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+
+        try await Task.sleep(for: .milliseconds(250))
+        let fieldEditor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        let textField = try XCTUnwrap(fieldEditor.delegate as? NSTextField)
+        XCTAssertEqual(textField.placeholderString, MomoWorkspaceCopy(language: .english).searchMembers)
+    }
+
+    func testComposerFocusRequestRestoresKeyboardFocusInRealWindow() async throws {
+        guard !NSScreen.screens.isEmpty else {
+            throw XCTSkip("MOMO-385 focus restoration evidence requires a WindowServer compositor")
+        }
+        let (viewModel, _) = try await makeViewModel()
+        let hostingController = NSHostingController(
+            rootView: MessageListView(viewModel: viewModel, focusComposerRequest: 0)
+                .frame(width: 760, height: 620)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = hostingController
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+
+        try await Task.sleep(for: .milliseconds(150))
+        hostingController.rootView = MessageListView(
+            viewModel: viewModel,
+            focusComposerRequest: 1
+        )
+        .frame(width: 760, height: 620)
+        try await Task.sleep(for: .milliseconds(250))
+
+        let fieldEditor = try XCTUnwrap(window.firstResponder as? NSTextView)
+        let textField = try XCTUnwrap(fieldEditor.delegate as? NSTextField)
+        XCTAssertTrue(
+            [MomoUILanguage.korean, .english]
+                .map { MomoWorkspaceCopy(language: $0).messagePlaceholder }
+                .contains(textField.placeholderString ?? "")
+        )
     }
 }

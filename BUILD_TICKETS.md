@@ -1898,12 +1898,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] PR #394 correctness 반려를 반영해 view-model create operation/session/workspace readiness+generation, REST connection/workspace/token guard-before-decode, sheet Task/input revision cancellation, 401/not-connected 전역 로그인 복구, raw create diagnostic 제거를 추가. pending clear/same-workspace rebootstrap POST 차단, delayed success/error/409, 새 session in-flight, stale malformed/HTTP error, REST cache, tooltip transition을 focused 27 tests로 고정하고 macOS 전체 265 tests PASS.
 - [x] fresh security/correctness/performance review Blocker 0/High 0/Medium 0, fresh design review Blocker 0/High 0/Medium 0. final clean `swift`/actual-launch `macos-ui`/docs gate evidence는 PR #394 worker handoff에 기록하며, MOMO-384는 merge 전 `status:needs-review`로만 둔다.
 
-### ☑ MOMO-385 (`#391`) 수용기준 — Member inspector + one-click DM `[swift/runtime-db/macos-ui]` · 의존: MOMO-383
-- [x] 최신 screenshot 계약에 따라 active non-self person/agent row primary click은 compact profile을 열고, profile의 단일 DM action/context action이 기존 idempotent DM REST를 호출해 해당 DM으로 이동.
-- [x] DM 생성 즉시 sidebar DM section에 나타나며 첫 메시지 이후에도 같은 channel identity/read-state를 유지.
-- [x] member directory를 대화 컨텍스트를 보존하는 right inspector 중심으로 정리하고 search/filter/profile/DM action 유지. narrow 창은 timeline을 압축하지 않는 overlay로 전환.
-- [x] self/inactive/error 상태를 명확히 처리하고 two members + one agent fixture에서 idempotency/RLS/cross-workspace 404를 검증. current-member identity 파싱 실패는 POST 전 fail-closed.
-- [x] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
+### ☐ MOMO-385 (`#391`) 수용기준 — Member inspector + one-click DM `[swift/runtime-db/macos-ui]` · 의존: MOMO-383
+- [ ] active non-self person/agent member row primary click이 기존 idempotent DM REST를 호출하고 해당 DM으로 이동.
+- [ ] DM 생성 즉시 sidebar DM section에 나타나며 첫 메시지 이후에도 같은 channel identity/read-state를 유지.
+- [ ] member directory를 대화 컨텍스트를 보존하는 right inspector 중심으로 정리하고 search/filter/profile/DM action 유지.
+- [ ] self/inactive/error 상태를 명확히 처리하고 two members + one agent fixture에서 idempotency/RLS 검증.
+- [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
 
 ### ☐ MOMO-386 (`#392`) 수용기준 — Workspace search v0 `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-384, MOMO-385
 - [ ] workspace-scoped RLS server search endpoint 구현. tenant token만 허용하고 BYPASSRLS 금지.

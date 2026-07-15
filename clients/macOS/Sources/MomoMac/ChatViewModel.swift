@@ -97,6 +97,12 @@ public enum WorkspaceNameUpdateIssue: Sendable, Equatable {
     case connection
 }
 
+public enum MomoDirectMessageOpenOutcome: Sendable, Equatable {
+    case opened(ChannelID)
+    case ignored
+    case failed
+}
+
 // MARK: - ChatViewModel
 //
 // The single source of UI state for the macOS demo. Drives ChannelListView,
@@ -246,6 +252,7 @@ public final class ChatViewModel: ObservableObject {
     private var channelCreateOperationGeneration: UInt64 = 0
     private var channelCreateSessionState: ChannelCreateSessionState = .disconnected
     private var directMessageOperationTokens: [MemberID: UUID] = [:]
+    private var navigationIntentGeneration: UInt64 = 0
 
     var activeChannelSubscriptionCount: Int { channelSubscriptions.count }
 
@@ -443,6 +450,7 @@ public final class ChatViewModel: ObservableObject {
     public func clearSessionSensitiveState() async {
         invalidateChannelCreationForSessionChange()
         workspaceIdentitySessionGeneration &+= 1
+        navigationIntentGeneration &+= 1
         workspaceIdentityLoadGeneration &+= 1
         workspaceNameUpdateGeneration &+= 1
         channelSubscriptions.values.forEach { $0.cancel() }
@@ -965,15 +973,16 @@ public final class ChatViewModel: ObservableObject {
     }
 
     @discardableResult
-    public func startDirectMessage(with memberID: MemberID) async -> Bool {
+    public func startDirectMessage(with memberID: MemberID) async -> MomoDirectMessageOpenOutcome {
         guard let workspaceId,
               !isCurrentUser(memberID),
               member(memberID)?.status == .active,
               !directMessageMutationIds.contains(memberID)
-        else { return false }
+        else { return .ignored }
 
         let operationToken = UUID()
         let sessionGeneration = workspaceIdentitySessionGeneration
+        let navigationIntent = beginNavigationIntent()
         directMessageOperationTokens[memberID] = operationToken
         directMessageMutationIds.insert(memberID)
         directMessageError = nil
@@ -988,7 +997,7 @@ public final class ChatViewModel: ObservableObject {
             let channel = try await chat.openDirectMessage(workspace: workspaceId, with: memberID)
             guard directMessageOperationTokens[memberID] == operationToken,
                   isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId)
-            else { return false }
+            else { return .ignored }
             if let index = channels.firstIndex(where: { $0.id == channel.id }) {
                 channels[index] = channel
             } else {
@@ -1002,22 +1011,26 @@ public final class ChatViewModel: ObservableObject {
             }
             ensureReadStateExists(channel: channel.id)
             subscribe(channel: channel.id)
+            guard navigationIntentGeneration == navigationIntent else { return .ignored }
             directMessageError = nil
             clearConnectionErrorState()
-            await selectChannel(channel.id)
+            recordChannelSelection(channel.id)
+            await activateChannel(channel.id)
             guard directMessageOperationTokens[memberID] == operationToken,
                   isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  navigationIntentGeneration == navigationIntent,
                   selectedChannelId == channel.id
-            else { return false }
-            return true
+            else { return .ignored }
+            return .opened(channel.id)
         } catch {
             guard directMessageOperationTokens[memberID] == operationToken,
                   isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  navigationIntentGeneration == navigationIntent,
                   !Self.isCancellation(error)
-            else { return false }
+            else { return .ignored }
             directMessageError = String(describing: error)
             reportConnectionError(error, as: .actionFailed)
-            return false
+            return .failed
         }
     }
 
@@ -1031,8 +1044,15 @@ public final class ChatViewModel: ObservableObject {
 
     /// Select a channel: load history + (re)subscribe to its realtime stream.
     public func selectChannel(_ id: ChannelID) async {
+        _ = beginNavigationIntent()
         recordChannelSelection(id)
         await activateChannel(id)
+    }
+
+    @discardableResult
+    private func beginNavigationIntent() -> UInt64 {
+        navigationIntentGeneration &+= 1
+        return navigationIntentGeneration
     }
 
     public var canNavigateChannelHistoryBackward: Bool {

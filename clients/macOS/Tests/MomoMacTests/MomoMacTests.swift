@@ -212,12 +212,14 @@ final class MomoMacTests: XCTestCase {
     func testMemberDirectoryCopyUsesVerbFirstDMActions() {
         let korean = MomoWorkspaceCopy(language: .korean)
         XCTAssertEqual(korean.sendDirectMessage, "DM 보내기")
+        XCTAssertEqual(korean.openingDirectMessage, "DM 여는 중")
         XCTAssertEqual(korean.newDirectMessage, "새 DM 시작")
         XCTAssertEqual(korean.showAllMembers, "전체 멤버 보기")
         XCTAssertEqual(korean.noDirectoryMembersDetail, "워크스페이스에 참여한 멤버가 여기에 표시됩니다")
 
         let english = MomoWorkspaceCopy(language: .english)
         XCTAssertEqual(english.sendDirectMessage, "Send a DM")
+        XCTAssertEqual(english.openingDirectMessage, "Opening DM")
         XCTAssertEqual(english.newDirectMessage, "Start a new DM")
         XCTAssertEqual(english.showAllMembers, "Show all members")
         XCTAssertEqual(english.noDirectoryMembersDetail, "Members appear here after they join the workspace")
@@ -350,6 +352,24 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 759))
         XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 760))
         XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 1_200))
+        XCTAssertTrue(
+            MomoMemberInspectorLayout.blocksTimelineInteraction(
+                isPresented: true,
+                usesAttachedInspector: false
+            )
+        )
+        XCTAssertFalse(
+            MomoMemberInspectorLayout.blocksTimelineInteraction(
+                isPresented: true,
+                usesAttachedInspector: true
+            )
+        )
+        XCTAssertFalse(
+            MomoMemberInspectorLayout.blocksTimelineInteraction(
+                isPresented: false,
+                usesAttachedInspector: false
+            )
+        )
     }
 
     func testUnreadNavigationWrapsInCanonicalSidebarOrder() {
@@ -3622,6 +3642,85 @@ final class MomoMacTests: XCTestCase {
         }
     }
 
+    func testRESTBackendRejectsMalformedDirectMessageParticipantSets() async throws {
+        let workspace = WorkspaceID.demo
+        let target = MemberID.demoAgent
+        let other = MemberID(uuidString: "00000000-0000-7000-8000-000000372298")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000372205")!
+        let accessToken = unsignedAccessToken(for: .demoHuman)
+        let cases: [(String, [String])] = [
+            ("extra", [MemberID.demoHuman.description, target.description, other.description]),
+            ("duplicate", [MemberID.demoHuman.description, MemberID.demoHuman.description]),
+            ("invalid", [MemberID.demoHuman.description, "not-a-member-id"]),
+        ]
+
+        for (name, memberIDs) in cases {
+            await MockHTTPURLProtocol.reset()
+            let memberIDsData = try JSONSerialization.data(withJSONObject: memberIDs)
+            let memberIDsJSON = try XCTUnwrap(String(data: memberIDsData, encoding: .utf8))
+            await MockHTTPURLProtocol.setHandler { _ in
+                MockHTTPResponse(json: """
+                {
+                  "channel": {
+                    "id": "\(channel.description)",
+                    "workspaceId": "\(workspace.description)",
+                    "kind": "dm",
+                    "name": null,
+                    "topic": null,
+                    "dmKey": "\(name)-pair",
+                    "memberIds": \(memberIDsJSON),
+                    "createdBy": "\(MemberID.demoHuman.description)",
+                    "archivedAtMs": null
+                  },
+                  "created": true
+                }
+                """)
+            }
+            let backend = MomoServerRESTChatBackend(
+                config: MomoServerRESTChatBackendConfig(
+                    baseURL: URL(string: "https://momo.test")!,
+                    accessToken: accessToken
+                ),
+                session: URLSession(configuration: .momoMocked)
+            )
+            try await backend.connect(workspace: workspace, accessToken: accessToken)
+
+            do {
+                _ = try await backend.openDirectMessage(workspace: workspace, with: target)
+                XCTFail("\(name) DM participants must be rejected")
+            } catch BackendError.decoding(let reason) {
+                XCTAssertEqual(reason, "direct message response scope mismatch")
+            } catch {
+                XCTFail("unexpected \(name) error: \(error)")
+            }
+        }
+    }
+
+    func testRESTBackendRejectsSelfDirectMessageBeforeRequest() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let accessToken = unsignedAccessToken(for: .demoHuman)
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: accessToken
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: accessToken)
+
+        do {
+            _ = try await backend.openDirectMessage(workspace: workspace, with: .demoHuman)
+            XCTFail("self-DM must fail before a request is emitted")
+        } catch BackendError.decoding(let reason) {
+            XCTAssertEqual(reason, "direct message target must differ from current member")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertTrue(requests.isEmpty)
+    }
+
     func testRESTBackendDiscardsDirectMessageResponseAfterSessionClear() async throws {
         await MockHTTPURLProtocol.reset()
         let session = URLSession(configuration: .momoMocked)
@@ -3691,10 +3790,10 @@ final class MomoMacTests: XCTestCase {
         let target = try XCTUnwrap(seed.agents.first)
 
         let firstOpen = await viewModel.startDirectMessage(with: target.id)
-        XCTAssertTrue(firstOpen)
         let firstDM = try XCTUnwrap(viewModel.channels.first { $0.kind == .dm })
+        XCTAssertEqual(firstOpen, .opened(firstDM.id))
         let repeatedOpen = await viewModel.startDirectMessage(with: target.id)
-        XCTAssertTrue(repeatedOpen)
+        XCTAssertEqual(repeatedOpen, .opened(firstDM.id))
 
         XCTAssertEqual(viewModel.channels.filter { $0.kind == .dm }.count, 1)
         XCTAssertEqual(viewModel.selectedChannelId, firstDM.id)
@@ -3713,11 +3812,107 @@ final class MomoMacTests: XCTestCase {
         let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
 
         let selfOpen = await viewModel.startDirectMessage(with: currentMember.id)
-        XCTAssertFalse(selfOpen)
+        XCTAssertEqual(selfOpen, .ignored)
         XCTAssertEqual(viewModel.selectedChannelId, originalChannel)
         XCTAssertTrue(viewModel.channels.allSatisfy { $0.kind != .dm })
         XCTAssertTrue(viewModel.directMessageMutationIds.isEmpty)
         XCTAssertNil(viewModel.directMessageError)
+    }
+
+    @MainActor
+    func testViewModelKeepsNewestDirectMessageNavigationIntent() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledDirectMessageBackend(base: base)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
+        let targets = viewModel.members.filter { $0.id != currentMember.id && $0.status == .active }
+        let targetA = try XCTUnwrap(targets.first)
+        let targetB = try XCTUnwrap(targets.dropFirst().first)
+        let channelA = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372211")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, targetA.id]
+        )
+        let channelB = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372212")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, targetB.id]
+        )
+        await backend.setOutcome(.success(channelA), for: targetA.id)
+        await backend.setOutcome(.success(channelB), for: targetB.id)
+
+        let openA = Task { await viewModel.startDirectMessage(with: targetA.id) }
+        await backend.waitForOpen(with: targetA.id)
+        let openB = Task { await viewModel.startDirectMessage(with: targetB.id) }
+        await backend.waitForOpen(with: targetB.id)
+        await backend.releaseOpen(with: targetB.id)
+        let outcomeB = await openB.value
+        XCTAssertEqual(outcomeB, .opened(channelB.id))
+        await backend.releaseOpen(with: targetA.id)
+        let outcomeA = await openA.value
+        XCTAssertEqual(outcomeA, .ignored)
+
+        XCTAssertEqual(viewModel.selectedChannelId, channelB.id)
+        XCTAssertTrue(viewModel.channels.contains { $0.id == channelA.id })
+        XCTAssertTrue(viewModel.channels.contains { $0.id == channelB.id })
+        XCTAssertNil(viewModel.directMessageError)
+    }
+
+    @MainActor
+    func testViewModelManualSelectionInvalidatesDelayedDirectMessageNavigationAndFailure() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let backend = ControlledDirectMessageBackend(base: base)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "demo")
+        let originalChannel = try XCTUnwrap(viewModel.selectedChannelId)
+        let currentMember = try XCTUnwrap(viewModel.authenticatedMember)
+        let targets = viewModel.members.filter { $0.id != currentMember.id && $0.status == .active }
+        let successTarget = try XCTUnwrap(targets.first)
+        let failureTarget = try XCTUnwrap(targets.dropFirst().first)
+        let delayedChannel = Channel(
+            id: ChannelID(uuidString: "00000000-0000-7000-8000-000000372213")!,
+            workspaceId: seed.workspace,
+            kind: .dm,
+            dmMemberIds: [currentMember.id, successTarget.id]
+        )
+        await backend.setOutcome(.success(delayedChannel), for: successTarget.id)
+        await backend.setOutcome(
+            .failure(.problem(status: 503, title: "Unavailable", detail: nil)),
+            for: failureTarget.id
+        )
+
+        let delayedSuccess = Task { await viewModel.startDirectMessage(with: successTarget.id) }
+        await backend.waitForOpen(with: successTarget.id)
+        await viewModel.selectChannel(originalChannel)
+        await backend.releaseOpen(with: successTarget.id)
+        let delayedSuccessOutcome = await delayedSuccess.value
+        XCTAssertEqual(delayedSuccessOutcome, .ignored)
+        XCTAssertEqual(viewModel.selectedChannelId, originalChannel)
+        XCTAssertTrue(viewModel.channels.contains { $0.id == delayedChannel.id })
+
+        let delayedFailure = Task { await viewModel.startDirectMessage(with: failureTarget.id) }
+        await backend.waitForOpen(with: failureTarget.id)
+        await viewModel.selectChannel(originalChannel)
+        await backend.releaseOpen(with: failureTarget.id)
+        let delayedFailureOutcome = await delayedFailure.value
+        XCTAssertEqual(delayedFailureOutcome, .ignored)
+        XCTAssertNil(viewModel.directMessageError)
+
+        await backend.setOutcome(
+            .failure(.problem(status: 503, title: "Unavailable", detail: nil)),
+            for: failureTarget.id
+        )
+        let currentFailure = Task { await viewModel.startDirectMessage(with: failureTarget.id) }
+        await backend.waitForOpen(with: failureTarget.id)
+        await backend.releaseOpen(with: failureTarget.id)
+        let currentFailureOutcome = await currentFailure.value
+        XCTAssertEqual(currentFailureOutcome, .failed)
+        XCTAssertNotNil(viewModel.directMessageError)
     }
 
     func testRESTBackendLoadsServerOwnedCostSnapshots() async throws {
@@ -6802,5 +6997,112 @@ private extension URLRequest {
             data.append(buffer, count: count)
         }
         return data
+    }
+}
+
+private actor ControlledDirectMessageBackend: ChatBackend {
+    enum Outcome: Sendable {
+        case success(Channel)
+        case failure(BackendError)
+    }
+
+    private let base: LiveChatBackend
+    private var outcomes: [MemberID: Outcome] = [:]
+    private var arrivedMembers: Set<MemberID> = []
+    private var arrivalWaiters: [MemberID: [CheckedContinuation<Void, Never>]] = [:]
+    private var releaseWaiters: [MemberID: CheckedContinuation<Void, Never>] = [:]
+
+    init(base: LiveChatBackend) {
+        self.base = base
+    }
+
+    func setOutcome(_ outcome: Outcome, for memberID: MemberID) {
+        outcomes[memberID] = outcome
+        arrivedMembers.remove(memberID)
+    }
+
+    func waitForOpen(with memberID: MemberID) async {
+        if arrivedMembers.contains(memberID) { return }
+        await withCheckedContinuation { continuation in
+            arrivalWaiters[memberID, default: []].append(continuation)
+        }
+    }
+
+    func releaseOpen(with memberID: MemberID) {
+        releaseWaiters.removeValue(forKey: memberID)?.resume()
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        try await base.history(channel: channel, after: seq, limit: limit)
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func openDirectMessage(workspace: WorkspaceID, with member: MemberID) async throws -> Channel {
+        guard let outcome = outcomes[member] else {
+            throw BackendError.problem(status: 500, title: "Missing test outcome", detail: nil)
+        }
+        arrivedMembers.insert(member)
+        let waiters = arrivalWaiters.removeValue(forKey: member) ?? []
+        waiters.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            releaseWaiters[member] = continuation
+        }
+        switch outcome {
+        case .success(let channel):
+            return channel
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
     }
 }

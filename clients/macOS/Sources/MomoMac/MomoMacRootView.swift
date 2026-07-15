@@ -39,6 +39,7 @@ public struct MomoMacRootView: View {
     @State private var showKeyboardShortcuts = false
     @State private var showMemberInspector = true
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
+    @State private var composerFocusRequest: UInt64 = 0
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
@@ -180,11 +181,17 @@ public struct MomoMacRootView: View {
             channelHeaderHeight: channelHeaderHeight
         )
         let showsMemberInspector = showMemberInspector && !showDetailPane
+        let blocksTimelineForMemberOverlay = MomoMemberInspectorLayout.blocksTimelineInteraction(
+            isPresented: showsMemberInspector,
+            usesAttachedInspector: useAttachedMemberInspector
+        )
 
         return ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
                 messageTimeline
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .allowsHitTesting(!blocksTimelineForMemberOverlay)
+                    .accessibilityHidden(blocksTimelineForMemberOverlay)
 
                 if showDetailPane && useAttachedInspector {
                     Divider()
@@ -245,6 +252,7 @@ public struct MomoMacRootView: View {
                     MomoTheme.modalScrim
                         .transition(.opacity)
                         .contentShape(Rectangle())
+                        .accessibilityHidden(true)
                         .onTapGesture {
                             closeMemberInspector()
                         }
@@ -253,6 +261,7 @@ public struct MomoMacRootView: View {
                         .frame(width: memberInspectorOverlayWidth(for: availableDetailWidth))
                         .padding(.trailing, MomoTheme.MemberInspector.standardSpacing)
                         .padding(.vertical, MomoTheme.MemberInspector.standardSpacing)
+                        .accessibilityAddTraits(.isModal)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                 }
             }
@@ -311,6 +320,7 @@ public struct MomoMacRootView: View {
                 sessionChrome?.switchSession()
             },
             onOpenMemberDirectory: memberDirectoryAction,
+            focusComposerRequest: composerFocusRequest,
             onChannelHeaderHeightChange: { newHeight in
                 guard newHeight > 0, abs(channelHeaderHeight - newHeight) > 0.5 else { return }
                 channelHeaderHeight = newHeight
@@ -347,6 +357,7 @@ public struct MomoMacRootView: View {
         withAnimation(layoutAnimation) {
             if showMemberInspector, memberInspectorAudience == .channel, !showDetailPane {
                 showMemberInspector = false
+                composerFocusRequest &+= 1
             } else {
                 detailPanePresentation.close()
                 memberInspectorAudience = .channel
@@ -366,6 +377,7 @@ public struct MomoMacRootView: View {
     private func closeMemberInspector() {
         withAnimation(layoutAnimation) {
             showMemberInspector = false
+            composerFocusRequest &+= 1
         }
     }
 
@@ -595,6 +607,13 @@ enum MomoWindowChromeLayout {
 enum MomoMemberInspectorLayout {
     static func usesAttachedInspector(detailWidth: CGFloat) -> Bool {
         detailWidth >= MomoTheme.MemberInspector.attachedMinimumDetailWidth
+    }
+
+    static func blocksTimelineInteraction(
+        isPresented: Bool,
+        usesAttachedInspector: Bool
+    ) -> Bool {
+        isPresented && !usesAttachedInspector
     }
 }
 

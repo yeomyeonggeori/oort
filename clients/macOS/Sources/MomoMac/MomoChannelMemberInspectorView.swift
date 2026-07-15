@@ -15,6 +15,12 @@ enum MomoMemberDirectMessageAvailability: Equatable {
 }
 
 enum MomoMemberInspectorPolicy {
+    struct Groups: Equatable {
+        let members: [Member]
+        let people: [Member]
+        let agents: [Member]
+    }
+
     static func filteredMembers(
         _ members: [Member],
         audience: MomoMemberInspectorAudience,
@@ -22,6 +28,22 @@ enum MomoMemberInspectorPolicy {
         query: String,
         scope: MomoMemberDirectoryScope
     ) -> [Member] {
+        groups(
+            members,
+            audience: audience,
+            channelID: channelID,
+            query: query,
+            scope: scope
+        ).members
+    }
+
+    static func groups(
+        _ members: [Member],
+        audience: MomoMemberInspectorAudience,
+        channelID: ChannelID?,
+        query: String,
+        scope: MomoMemberDirectoryScope
+    ) -> Groups {
         let audienceMembers = members.filter { member in
             guard member.status != .deleted else { return false }
             switch audience {
@@ -33,7 +55,7 @@ enum MomoMemberInspectorPolicy {
             }
         }
 
-        return MomoMemberDirectoryPolicy.filteredMembers(
+        let filtered = MomoMemberDirectoryPolicy.filteredMembers(
             audienceMembers,
             query: query,
             scope: scope
@@ -46,6 +68,11 @@ enum MomoMemberInspectorPolicy {
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
             return lhs.handle.localizedCaseInsensitiveCompare(rhs.handle) == .orderedAscending
         }
+        return Groups(
+            members: filtered,
+            people: filtered.filter { !$0.isAgent },
+            agents: filtered.filter(\.isAgent)
+        )
     }
 
     static func directMessageAvailability(
@@ -61,25 +88,30 @@ enum MomoMemberInspectorPolicy {
 }
 
 struct MomoChannelMemberInspectorView: View {
+    private enum FocusTarget: Hashable {
+        case search
+        case close
+    }
+
     @ObservedObject var viewModel: ChatViewModel
     let audience: MomoMemberInspectorAudience
     let copy: MomoWorkspaceCopy
     let close: () -> Void
     let didOpenDirectMessage: () -> Void
-    private let captureProfileMemberID: MemberID?
 
     @State private var query = ""
     @State private var scope: MomoMemberDirectoryScope = .all
     @State private var selectedMemberID: MemberID?
     @State private var hoveredMemberID: MemberID?
     @State private var failedDirectMessageMemberID: MemberID?
+    @State private var directMessageTasks: [MemberID: Task<Void, Never>] = [:]
+    @FocusState private var focusedControl: FocusTarget?
 
     init(
         viewModel: ChatViewModel,
         audience: MomoMemberInspectorAudience,
         copy: MomoWorkspaceCopy,
         initialMemberID: MemberID? = nil,
-        captureProfileMemberID: MemberID? = nil,
         close: @escaping () -> Void,
         didOpenDirectMessage: @escaping () -> Void
     ) {
@@ -88,33 +120,32 @@ struct MomoChannelMemberInspectorView: View {
         self.copy = copy
         self.close = close
         self.didOpenDirectMessage = didOpenDirectMessage
-        self.captureProfileMemberID = captureProfileMemberID
         _selectedMemberID = State(initialValue: initialMemberID)
     }
 
-    @ViewBuilder
     var body: some View {
-        if let captureProfileMemberID,
-           let member = viewModel.member(captureProfileMemberID) {
-            memberProfile(member)
-                .momoSurface(.card, cornerRadius: MomoTheme.cornerMedium)
-        } else {
-            inspectorPresentation
-        }
+        inspectorPresentation
     }
 
     private var inspectorPresentation: some View {
-        VStack(spacing: 0) {
-            header
+        let groups = memberGroups
+        return VStack(spacing: 0) {
+            header(memberCount: groups.members.count)
             Divider()
             filters
-            stateContent
+            stateContent(groups: groups)
         }
         .momoSurface(.panel, cornerRadius: 0)
         .task {
             if viewModel.members.isEmpty {
                 await viewModel.refreshMemberDirectory()
             }
+            await Task.yield()
+            focusedControl = .search
+        }
+        .onDisappear {
+            directMessageTasks.values.forEach { $0.cancel() }
+            directMessageTasks = [:]
         }
         .onChange(of: viewModel.selectedChannelId) { _, _ in
             selectedMemberID = nil
@@ -130,8 +161,8 @@ struct MomoChannelMemberInspectorView: View {
         }
     }
 
-    private var filteredMembers: [Member] {
-        MomoMemberInspectorPolicy.filteredMembers(
+    private var memberGroups: MomoMemberInspectorPolicy.Groups {
+        MomoMemberInspectorPolicy.groups(
             viewModel.members,
             audience: audience,
             channelID: viewModel.selectedChannelId,
@@ -140,25 +171,17 @@ struct MomoChannelMemberInspectorView: View {
         )
     }
 
-    private var people: [Member] {
-        filteredMembers.filter { !$0.isAgent }
-    }
-
-    private var agents: [Member] {
-        filteredMembers.filter(\.isAgent)
-    }
-
     private var title: String {
         audience == .channel ? copy.currentChannelMembers : copy.workspaceMembers
     }
 
-    private var header: some View {
+    private func header(memberCount: Int) -> some View {
         HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
             VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.compactSpacing) {
                 Text(title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(copy.channelMemberCount(filteredMembers.count))
+                Text(copy.channelMemberCount(memberCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -176,6 +199,7 @@ struct MomoChannelMemberInspectorView: View {
             .help(copy.closeMemberInspector)
             .momoQuickTooltip(copy.closeMemberInspector)
             .keyboardShortcut(.cancelAction)
+            .focused($focusedControl, equals: .close)
             .accessibilityLabel(copy.closeMemberInspector)
         }
         .padding(.horizontal, MomoTheme.MemberInspector.edgeInset)
@@ -187,7 +211,9 @@ struct MomoChannelMemberInspectorView: View {
         VStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
             TextField(copy.searchMembers, text: $query)
                 .textFieldStyle(.roundedBorder)
+                .focused($focusedControl, equals: .search)
                 .accessibilityLabel(copy.searchMembers)
+                .accessibilityIdentifier("momo-member-inspector-search")
 
             Picker(copy.memberType, selection: $scope) {
                 Text(copy.allMembers).tag(MomoMemberDirectoryScope.all)
@@ -223,7 +249,7 @@ struct MomoChannelMemberInspectorView: View {
     }
 
     @ViewBuilder
-    private var stateContent: some View {
+    private func stateContent(groups: MomoMemberInspectorPolicy.Groups) -> some View {
         if viewModel.memberDirectoryIsRefreshing && viewModel.members.isEmpty {
             ProgressView(copy.loadingMembers)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -237,7 +263,7 @@ struct MomoChannelMemberInspectorView: View {
                     Task { await viewModel.refreshMemberDirectory() }
                 }
             }
-        } else if filteredMembers.isEmpty {
+        } else if groups.members.isEmpty {
             ContentUnavailableView {
                 Label(
                     query.isEmpty ? copy.noDirectoryMembers : copy.noMemberSearchResults,
@@ -257,22 +283,22 @@ struct MomoChannelMemberInspectorView: View {
                 }
             }
         } else {
-            memberList
+            memberList(groups: groups)
         }
     }
 
-    private var memberList: some View {
+    private func memberList(groups: MomoMemberInspectorPolicy.Groups) -> some View {
         List {
-            if !people.isEmpty {
-                Section("\(copy.people) · \(people.count)") {
-                    ForEach(people) { member in
+            if !groups.people.isEmpty {
+                Section("\(copy.people) · \(groups.people.count)") {
+                    ForEach(groups.people) { member in
                         memberRow(member)
                     }
                 }
             }
-            if !agents.isEmpty {
-                Section("\(copy.agents) · \(agents.count)") {
-                    ForEach(agents) { member in
+            if !groups.agents.isEmpty {
+                Section("\(copy.agents) · \(groups.agents.count)") {
+                    ForEach(groups.agents) { member in
                         memberRow(member)
                     }
                 }
@@ -294,6 +320,7 @@ struct MomoChannelMemberInspectorView: View {
                     HStack(spacing: MomoTheme.MemberInspector.compactSpacing) {
                         Text(member.displayName)
                             .font(.body.weight(.medium))
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         if member.isAgent {
                             MomoAgentBadgeGroup(capabilities: [], maximumCapabilities: 0)
@@ -332,7 +359,7 @@ struct MomoChannelMemberInspectorView: View {
             hoveredMemberID = hovering ? member.id : nil
         }
         .popover(isPresented: profileBinding(for: member.id), arrowEdge: .trailing) {
-            memberProfile(member)
+            profilePopoverContent(member)
         }
         .contextMenu {
             memberActions(member, includesProfileAction: true)
@@ -367,112 +394,19 @@ struct MomoChannelMemberInspectorView: View {
         )
     }
 
-    private func memberProfile(_ member: Member) -> some View {
-        VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.sectionSpacing) {
-            HStack(alignment: .top, spacing: MomoTheme.MemberInspector.contentSpacing) {
-                memberAvatar(member, size: MomoTheme.MemberInspector.profileIconSize)
-                VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.compactSpacing) {
-                    HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
-                        Text(member.displayName)
-                            .font(.title3.weight(.semibold))
-                            .fixedSize(horizontal: false, vertical: true)
-                        if member.isAgent {
-                            MomoAgentBadgeGroup(capabilities: [], maximumCapabilities: 0)
-                        }
-                    }
-                    Text("@\(member.handle)")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                    Text(copy.presenceTitle(effectivePresence(for: member)))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            GroupBox(copy.memberProfile) {
-                VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.standardSpacing) {
-                    LabeledContent(copy.memberType) {
-                        Text(member.isAgent ? copy.agent : copy.human)
-                    }
-                    LabeledContent(copy.memberRole) {
-                        Text(copy.workspaceRoleTitle(member.workspaceRole))
-                    }
-                    LabeledContent(copy.status) {
-                        Text(copy.memberStatusTitle(member.status))
-                    }
-                    if member.isAgent, !member.normalizedCapabilities.isEmpty {
-                        MomoAgentBadgeGroup(
-                            capabilities: member.normalizedCapabilities,
-                            maximumCapabilities: 2,
-                            showsAgentIdentity: false
-                        )
-                    }
-                }
-                .padding(.top, MomoTheme.MemberInspector.standardSpacing)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if failedDirectMessageMemberID == member.id {
-                Label(copy.directMessageFailed, systemImage: "exclamationmark.triangle.fill")
-                    .font(.callout)
-                    .foregroundStyle(MomoTheme.irreversibleRed)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if directMessageAvailability(for: member) == .currentUser {
-                Text(copy.directMessageSelfUnavailable)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if directMessageAvailability(for: member) == .inactive {
-                Text(copy.directMessageInactiveUnavailable)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
-                Button {
-                    copyHandle(member)
-                } label: {
-                    Label(copy.copyMemberHandle, systemImage: "doc.on.doc")
-                        .labelStyle(.iconOnly)
-                }
-                .help(copy.copyMemberHandle)
-                .accessibilityLabel(copy.copyMemberHandle)
-
-                Button {
-                    viewModel.insertMention(for: member)
-                    selectedMemberID = nil
-                } label: {
-                    Label(copy.mentionMember, systemImage: "at")
-                        .labelStyle(.iconOnly)
-                }
-                .disabled(!viewModel.canInsertMention(for: member))
-                .help(copy.mentionMember)
-                .accessibilityLabel(copy.mentionMember)
-
-                Spacer(minLength: MomoTheme.MemberInspector.compactSpacing)
-
-                Button {
-                    openDirectMessage(member)
-                } label: {
-                    if directMessageAvailability(for: member) == .inFlight {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Label(copy.sendDirectMessage, systemImage: "bubble.left")
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(directMessageAvailability(for: member) != .available)
-            }
-            .controlSize(.small)
-        }
-        .padding(MomoTheme.MemberInspector.edgeInset)
-        .frame(width: MomoTheme.MemberInspector.profileWidth, alignment: .leading)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(copy.memberProfile)
+    private func profilePopoverContent(_ member: Member) -> some View {
+        MomoMemberProfilePopoverView(
+            viewModel: viewModel,
+            member: member,
+            copy: copy,
+            showsDirectMessageFailure: failedDirectMessageMemberID == member.id,
+            copyHandle: { copyHandle(member) },
+            mention: {
+                viewModel.insertMention(for: member)
+                selectedMemberID = nil
+            },
+            openDirectMessage: { openDirectMessage(member) }
+        )
     }
 
     @ViewBuilder
@@ -516,15 +450,22 @@ struct MomoChannelMemberInspectorView: View {
     private func openDirectMessage(_ member: Member) {
         guard directMessageAvailability(for: member) == .available else { return }
         failedDirectMessageMemberID = nil
-        Task {
-            let opened = await viewModel.startDirectMessage(with: member.id)
-            guard opened else {
+        let memberID = member.id
+        let task = Task { @MainActor in
+            let outcome = await viewModel.startDirectMessage(with: memberID)
+            guard !Task.isCancelled else { return }
+            directMessageTasks.removeValue(forKey: memberID)
+            switch outcome {
+            case .opened:
+                selectedMemberID = nil
+                didOpenDirectMessage()
+            case .ignored:
+                break
+            case .failed:
                 failedDirectMessageMemberID = member.id
-                return
             }
-            selectedMemberID = nil
-            didOpenDirectMessage()
         }
+        directMessageTasks[memberID] = task
     }
 
     private func copyHandle(_ member: Member) {
@@ -543,6 +484,168 @@ struct MomoChannelMemberInspectorView: View {
     }
 
     private func memberAvatar(_ member: Member, size: CGFloat) -> some View {
+        MomoMemberAvatarView(viewModel: viewModel, member: member, size: size)
+    }
+
+    private func effectivePresence(for member: Member) -> Presence {
+        if member.status != .active { return .offline }
+        if member.isAgent, viewModel.isAgentWorking(member) { return .working }
+        return member.presence
+    }
+
+}
+
+struct MomoMemberProfilePopoverView: View {
+    @ObservedObject var viewModel: ChatViewModel
+    let member: Member
+    let copy: MomoWorkspaceCopy
+    let showsDirectMessageFailure: Bool
+    let copyHandle: () -> Void
+    let mention: () -> Void
+    let openDirectMessage: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.sectionSpacing) {
+            HStack(alignment: .top, spacing: MomoTheme.MemberInspector.contentSpacing) {
+                MomoMemberAvatarView(
+                    viewModel: viewModel,
+                    member: member,
+                    size: MomoTheme.MemberInspector.profileIconSize
+                )
+                VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.compactSpacing) {
+                    HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
+                        Text(member.displayName)
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if member.isAgent {
+                            MomoAgentBadgeGroup(capabilities: [], maximumCapabilities: 0)
+                        }
+                    }
+                    Text("@\(member.handle)")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Text(copy.presenceTitle(effectivePresence))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            GroupBox(copy.memberProfile) {
+                VStack(alignment: .leading, spacing: MomoTheme.MemberInspector.standardSpacing) {
+                    LabeledContent(copy.memberType) {
+                        Text(member.isAgent ? copy.agent : copy.human)
+                    }
+                    LabeledContent(copy.memberRole) {
+                        Text(copy.workspaceRoleTitle(member.workspaceRole))
+                    }
+                    LabeledContent(copy.status) {
+                        Text(copy.memberStatusTitle(member.status))
+                    }
+                    if member.isAgent, !member.normalizedCapabilities.isEmpty {
+                        MomoAgentBadgeGroup(
+                            capabilities: member.normalizedCapabilities,
+                            maximumCapabilities: 2,
+                            showsAgentIdentity: false
+                        )
+                    }
+                }
+                .padding(.top, MomoTheme.MemberInspector.standardSpacing)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            availabilityMessage
+
+            HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
+                Button(action: copyHandle) {
+                    Label(copy.copyMemberHandle, systemImage: "doc.on.doc")
+                        .labelStyle(.iconOnly)
+                }
+                .help(copy.copyMemberHandle)
+                .accessibilityLabel(copy.copyMemberHandle)
+
+                Button(action: mention) {
+                    Label(copy.mentionMember, systemImage: "at")
+                        .labelStyle(.iconOnly)
+                }
+                .disabled(!viewModel.canInsertMention(for: member))
+                .help(copy.mentionMember)
+                .accessibilityLabel(copy.mentionMember)
+
+                Spacer(minLength: MomoTheme.MemberInspector.compactSpacing)
+
+                Button(action: openDirectMessage) {
+                    HStack(spacing: MomoTheme.MemberInspector.standardSpacing) {
+                        Label(copy.sendDirectMessage, systemImage: "bubble.left")
+                        if directMessageAvailability == .inFlight {
+                            ProgressView()
+                                .controlSize(.small)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: true)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(directMessageAvailability != .available)
+                .accessibilityLabel(copy.sendDirectMessage)
+                .accessibilityValue(directMessageAccessibilityValue)
+            }
+            .controlSize(.small)
+        }
+        .padding(MomoTheme.MemberInspector.edgeInset)
+        .frame(width: MomoTheme.MemberInspector.profileWidth, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(copy.memberProfile)
+    }
+
+    @ViewBuilder
+    private var availabilityMessage: some View {
+        if showsDirectMessageFailure {
+            Label(copy.directMessageFailed, systemImage: "exclamationmark.triangle.fill")
+                .font(.callout)
+                .foregroundStyle(MomoTheme.irreversibleRed)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if directMessageAvailability == .currentUser {
+            Text(copy.directMessageSelfUnavailable)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        } else if directMessageAvailability == .inactive {
+            Text(copy.directMessageInactiveUnavailable)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var directMessageAvailability: MomoMemberDirectMessageAvailability {
+        MomoMemberInspectorPolicy.directMessageAvailability(
+            for: member,
+            currentMemberID: viewModel.currentNavigationMemberID,
+            inFlightMemberIDs: viewModel.directMessageMutationIds
+        )
+    }
+
+    private var directMessageAccessibilityValue: String {
+        directMessageAvailability == .inFlight ? copy.openingDirectMessage : ""
+    }
+
+    private var effectivePresence: Presence {
+        if member.status != .active { return .offline }
+        if member.isAgent, viewModel.isAgentWorking(member) { return .working }
+        return member.presence
+    }
+
+}
+
+private struct MomoMemberAvatarView: View {
+    @ObservedObject var viewModel: ChatViewModel
+    let member: Member
+    let size: CGFloat
+
+    var body: some View {
         ZStack {
             Circle()
                 .fill(member.isAgent ? MomoTheme.agentAccent.opacity(0.16) : Color.primary.opacity(0.08))
@@ -551,18 +654,21 @@ struct MomoChannelMemberInspectorView: View {
                     if case .success(let image) = phase {
                         image.resizable().scaledToFill()
                     } else {
-                        avatarFallback(member)
+                        avatarFallback
                     }
                 }
                 .clipShape(Circle())
             } else {
-                avatarFallback(member)
+                avatarFallback
             }
         }
-        .frame(width: size, height: size)
+        .frame(
+            width: size,
+            height: size
+        )
         .overlay(alignment: .bottomTrailing) {
             Circle()
-                .fill(presenceColor(for: member))
+                .fill(presenceColor)
                 .frame(
                     width: MomoTheme.MemberInspector.presenceSize,
                     height: MomoTheme.MemberInspector.presenceSize
@@ -575,36 +681,34 @@ struct MomoChannelMemberInspectorView: View {
         .accessibilityHidden(true)
     }
 
-    private func avatarFallback(_ member: Member) -> some View {
-        Text(memberInitials(member))
+    private var avatarFallback: some View {
+        Text(memberInitials)
             .font(.caption.weight(.semibold))
             .foregroundStyle(member.isAgent ? MomoTheme.agentAccent : .primary)
             .minimumScaleFactor(0.7)
             .lineLimit(1)
     }
 
-    private func memberInitials(_ member: Member) -> String {
+    private var memberInitials: String {
         let words = member.displayName.split(whereSeparator: \.isWhitespace)
         let initials = words.prefix(2).compactMap(\.first).map(String.init).joined()
         return initials.isEmpty ? String(member.handle.prefix(2)).uppercased() : initials
     }
 
-    private func effectivePresence(for member: Member) -> Presence {
-        if member.status != .active { return .offline }
-        if member.isAgent, viewModel.isAgentWorking(member) { return .working }
-        return member.presence
-    }
-
-    private func presenceColor(for member: Member) -> Color {
-        switch effectivePresence(for: member) {
+    private var presenceColor: Color {
+        switch effectivePresence {
         case .online:
             return MomoTheme.reversibleGreen
-        case .working:
-            return MomoTheme.costAmber
-        case .away:
+        case .working, .away:
             return MomoTheme.costAmber
         case .offline:
             return .secondary
         }
+    }
+
+    private var effectivePresence: Presence {
+        if member.status != .active { return .offline }
+        if member.isAgent, viewModel.isAgentWorking(member) { return .working }
+        return member.presence
     }
 }

@@ -418,8 +418,7 @@ public struct MemberDirectoryView: View {
     private func openDirectMessage(with member: Member) {
         guard canDirectMessage(member) else { return }
         Task {
-            await viewModel.startDirectMessage(with: member.id)
-            if viewModel.directMessageError == nil {
+            if case .opened = await viewModel.startDirectMessage(with: member.id) {
                 dismiss()
             }
         }

@@ -566,6 +566,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var openingDirectMessage: String {
+        switch language {
+        case .korean: return "DM 여는 중"
+        case .english: return "Opening DM"
+        }
+    }
+
     var newDirectMessage: String {
         switch language {
         case .korean: return "새 DM 시작"

@@ -13,6 +13,7 @@ public struct MessageListView: View {
     private let onOpenWorkDetail: (RunID) -> Void
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
+    private let focusComposerRequest: UInt64
     private let onChannelHeaderHeightChange: (CGFloat) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
@@ -32,12 +33,14 @@ public struct MessageListView: View {
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void = {},
-        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
+        onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
+        focusComposerRequest: UInt64 = 0
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.focusComposerRequest = focusComposerRequest
         self.onChannelHeaderHeightChange = { _ in }
     }
 
@@ -46,12 +49,14 @@ public struct MessageListView: View {
         onOpenWorkDetail: @escaping (RunID) -> Void,
         onRequestLogin: @escaping () -> Void,
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
+        focusComposerRequest: UInt64 = 0,
         onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.focusComposerRequest = focusComposerRequest
         self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
 
@@ -89,6 +94,9 @@ public struct MessageListView: View {
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
         .onPreferenceChange(MomoChannelHeaderHeightPreferenceKey.self) { height in
             onChannelHeaderHeightChange(height)
+        }
+        .onChange(of: focusComposerRequest) { _, _ in
+            isComposerFocused = true
         }
         .sheet(isPresented: $showChannelSettings) {
             if let channel = viewModel.selectedChannel {
@@ -602,6 +610,7 @@ public struct MessageListView: View {
                     .lineLimit(1...5)
                     .font(.body)
                     .focused($isComposerFocused)
+                    .accessibilityIdentifier("momo-message-composer")
                     .onSubmit(submit)
                     .onChange(of: viewModel.composerDraft) { _, draft in
                         viewModel.composerDraftDidChange(draft)

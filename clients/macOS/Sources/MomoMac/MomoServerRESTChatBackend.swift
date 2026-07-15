@@ -343,6 +343,9 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         guard let currentMemberID = authenticatedMember?.id ?? Self.memberIDFromJWT(sessionAccessToken) else {
             throw BackendError.notConnected
         }
+        guard member != currentMemberID else {
+            throw BackendError.decoding("direct message target must differ from current member")
+        }
         let responseData: Data
         do {
             responseData = try await postData(
@@ -371,11 +374,11 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         } catch {
             throw BackendError.decoding(String(describing: error))
         }
+        let participantIDs = try response.channel.directMessageParticipantIDs()
         let channel = try response.channel.channel()
         guard channel.workspaceId == sessionWorkspace,
               channel.kind == .dm,
-              channel.dmMemberIds.contains(member),
-              channel.dmMemberIds.contains(currentMemberID)
+              Set(participantIDs) == Set([currentMemberID, member])
         else {
             throw BackendError.decoding("direct message response scope mismatch")
         }
@@ -1272,6 +1275,22 @@ private struct ChannelDTO: Decodable {
     let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
+
+    func directMessageParticipantIDs() throws -> [MemberID] {
+        guard let memberIds, memberIds.count == 2 else {
+            throw BackendError.decoding("direct message response scope mismatch")
+        }
+        let participants = try memberIds.map { rawMemberID in
+            guard let memberID = MemberID(uuidString: rawMemberID) else {
+                throw BackendError.decoding("direct message response scope mismatch")
+            }
+            return memberID
+        }
+        guard Set(participants).count == 2 else {
+            throw BackendError.decoding("direct message response scope mismatch")
+        }
+        return participants
+    }
 
     func channel() throws -> Channel {
         guard let id = ChannelID(uuidString: id) else {
