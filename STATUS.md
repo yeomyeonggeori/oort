@@ -16,6 +16,12 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-401 초대 링크 웹 합류 — 웹 v0 완주 (2026-07-16)
+
+- `/join/<code>`가 랜딩(PR #419, `9616c67`)하며 **ADR-0119 웹 v0 스코프("초대받은 사람이 브라우저로 합류해 대화한다") 7티켓 완주**: 389 계약 정본 → 390 서빙 → 391 읽기 → 398 prod realtime 개통 → 399 게이트 복구 → 400 대화 왕복 → 401 초대 합류.
+- join은 스펙 정본(JoinResponse required accessToken/refreshToken)대로 가입 즉시 세션 진입 — 독립 리뷰가 스펙·서버(JoinRoutes) 양쪽 대조로 판정 확인. 초대 코드는 모듈 로드 시 즉시 history.replace로 비잔류, 만료/소진/무효 구분 카피는 서버 안정 문자열 대조 완료. 미인식 409는 결합 폴백(리뷰 M1 반영).
+- 스모크 32 PASS(코드 비유출·가입→재로그인 왕복·오류 3케이스 포함), 격리 게이트 잔여물 0. 게이트 경화 부산물: api/relay staggered boot(공용 스크립트 — Docker VM 메모리 압박 대응).
+
 ## MOMO-400 웹 작성·read-state·승인 카드 + realtime 왕복 (2026-07-16)
 
 - ADR-0119 W-4가 랜딩(PR #414, `4a06ec5`) — composer(clientMsgId 멱등, 실패 후 편집 시 새 키), read-state 단조 파이프라인(max-merge 후퇴 불가 논증을 리뷰가 검증, 서버 공식과 동일식), 승인 카드 receipt 상태 전이(409 settled=조용한 전이, idempotency_conflict만 오류 — 서버 시맨틱 1:1), DM 목록/열기. `user:read-state#<ID>` 대문자 채널명은 서버 4개 지점 코드 대조로 확정.

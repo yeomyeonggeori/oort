@@ -1973,12 +1973,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] smoke 확장(작성 멱등·read-state 반영·승인 왕복·409 receipt) 포함 `--profile web` 전체 PASS.
 - [x] 종결: PR #414(+리뷰 반영 2) merge `4a06ec5`. 독립 리뷰 Blocker/High 0·Medium 1(스모크 커버리지) 반영 — gateway형 픽스처+양 표면 무누출 단정, DOM 레벨 음성 대조 실증(심은 누출을 단정이 검출). 최종 스모크 25 PASS/0 FAIL.
 
-### ☐ MOMO-401 (`#411`) 수용기준 — ADR-0119 W-5: 초대 링크 웹 합류 `/join/<code>` `[web/docs]` · 의존: MOMO-400 (같은 파일군)
-- [ ] SPA `/join/<code>` 라우트: 공개 `POST /v1/join` 호출(openapi 정본 스키마), 성공 시 가입 완료 → join 응답이 로그인 토큰 미포함이면 로그인 폼 프리필 연결(스펙을 앞지르는 자동 로그인 금지).
-- [ ] 초대 오류 UX: 만료/사용 소진/revoked를 서버 오류 envelope 기반 사용자 카피로 구분 표시.
-- [ ] ADR-0121 D2-B 형태(서버 자체 도메인 링크)가 이 티켓의 산출물 — Dawn 단축 링크(S-4)는 범위 밖.
-- [ ] smoke: 시드 admin으로 초대 발급 → `/join/<code>` → 가입 → 로그인 → 타임라인 진입 + 만료/소진 오류 케이스. `--profile web` 전체 PASS.
-- [ ] 서버·clients/macOS·스펙 무변경.
+### ☑ MOMO-401 (`#411`) 수용기준 — ADR-0119 W-5: 초대 링크 웹 합류 `/join/<code>` `[web/docs]` · 의존: MOMO-400 (같은 파일군)
+- [x] SPA `/join/<code>` 라우트: 공개 `POST /v1/join` 호출(openapi 정본 스키마), 성공 시 가입 완료 → join 응답이 로그인 토큰 미포함이면 로그인 폼 프리필 연결(스펙을 앞지르는 자동 로그인 금지).
+- [x] 초대 오류 UX: 만료/사용 소진/revoked를 서버 오류 envelope 기반 사용자 카피로 구분 표시.
+- [x] ADR-0121 D2-B 형태(서버 자체 도메인 링크)가 이 티켓의 산출물 — Dawn 단축 링크(S-4)는 범위 밖.
+- [x] smoke: 시드 admin으로 초대 발급 → `/join/<code>` → 가입 → 로그인 → 타임라인 진입 + 만료/소진 오류 케이스. `--profile web` 전체 PASS.
+- [x] 서버·clients/macOS·스펙 무변경.
+- [x] 종결: PR #419(+리뷰 M1/L1 반영 3f88888) merge `9616c67`. 독립 리뷰 Blocker/High 0 — join 토큰 판정(JoinResponse required 토큰=스펙 준수)·오류 카피의 서버 문자열 7지점 대조·코드 비유출 전부 확인. 스모크 32 PASS(신규 7)·web 게이트 전체 PASS. **ADR-0119 웹 v0 스코프(389~391·398~401) 완주.**
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

@@ -89,7 +89,7 @@
 | 슈퍼앱 엔진 기획 통합 | `2026-07-14-pln-20260714-02-superapp-engine.md` | MOMO-381 `#383` | `done` (PR #384, main `011b630`) | 완료 — ADR draft queue 대기 |
 | Workspace-first UX planning | `2026-07-15-workspace-first-superapp-shell.md` | MOMO-382 `#385` | `done` (PR #386, main `6f89d3b`) | 실행 체인 정본화 완료 |
 | Workspace-first UX builders | 같은 패킷 | MOMO-383 `#387` → MOMO-384 `#390` / MOMO-385 `#391` → MOMO-386 `#392` | `in-progress` | 383/384 merged, 385 PR #406 final navigation/cancellation review fixes 완료 / needs-review handoff |
-| **ADR-0119 웹 첫 배치** | `2026-07-15-adr-0119-web-track.md` | MOMO-389 `#395` → MOMO-390 `#396` → MOMO-391 `#397` | **배치 종결** — 389 `6fe746f` · 390 `5ecd645` · 391 `63e7d51`(main `web` 게이트 PASS) | 398·399·400 **done**(`#413`/`#412`/`#414` merge) → **401 `#411` unblock·착수**가 웹 v0 마지막. 오케스트레이션: Fable(엔진/인프라 트랙 겸임) |
+| **ADR-0119 웹 첫 배치** | `2026-07-15-adr-0119-web-track.md` | MOMO-389 `#395` → MOMO-390 `#396` → MOMO-391 `#397` | **배치 종결** — 389 `6fe746f` · 390 `5ecd645` · 391 `63e7d51`(main `web` 게이트 PASS) | **웹 v0 완주**(2026-07-16) — 398 `#413`·399 `#412`·400 `#414`·401 `#419` 전부 merge. 다음: 푸시 P-1/P-2 발급(ADR-0120) · ADR-0122 승인 대기 · 플러그인(16-02) 위임 대기 |
 
 동적 GitHub/worktree 상태는 이 문서에 복사하지 않는다. `scripts/goal_status.sh`를 실행해 확인한다.
 
