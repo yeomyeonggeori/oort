@@ -57,8 +57,10 @@
 #   WEB_LOGIN_SMOKE_EDGE_HTTP      web-edge http port   (default: 18995)
 #   WEB_LOGIN_SMOKE_BOOT_TIMEOUT   seconds for api /health (default: 2400 —
 #                                  the api container cold-builds Swift)
-#   WEB_LOGIN_SMOKE_RELAY_TIMEOUT  seconds for outbox drain (default: 1200 —
-#                                  the relay container also cold-builds)
+#   WEB_LOGIN_SMOKE_RELAY_TIMEOUT  seconds for outbox drain (default: 2400 —
+#                                  the relay container also cold-builds, and
+#                                  its boot is staggered AFTER the api build
+#                                  finishes to halve peak compiler memory)
 #   WEB_LOGIN_SMOKE_KEEP=1         keep the stack up for debugging
 #   WEB_LOGIN_SMOKE_OUT_DIR        artifact dir (screenshot); defaults under
 #                                  $LOCAL_GATE_OUTPUT_DIR or $TMPDIR
@@ -104,7 +106,7 @@ HERMES_PORT_HOST="${WEB_LOGIN_SMOKE_HERMES_PORT:-18993}"
 EDGE_HTTPS="${WEB_LOGIN_SMOKE_EDGE_HTTPS:-18994}"
 EDGE_HTTP="${WEB_LOGIN_SMOKE_EDGE_HTTP:-18995}"
 BOOT_TIMEOUT="${WEB_LOGIN_SMOKE_BOOT_TIMEOUT:-2400}"
-RELAY_TIMEOUT="${WEB_LOGIN_SMOKE_RELAY_TIMEOUT:-1200}"
+RELAY_TIMEOUT="${WEB_LOGIN_SMOKE_RELAY_TIMEOUT:-2400}"
 
 APP_HOST="app.localhost"
 API_HOST="api.localhost"
@@ -209,7 +211,13 @@ echo "[web-smoke] ensuring playwright chromium is installed (cached after first 
 (cd "$WEB_DIR" && npx playwright install chromium)
 
 echo "[web-smoke] booting compose project '$PROJECT' (api :$API_PORT, edge :$EDGE_HTTPS)"
-compose up -d api relay web-edge
+# Peak-memory guard (MOMO-401 hardening): api and relay each cold-build Swift
+# INSIDE their containers. Starting both together doubles peak compiler memory
+# and has OOM-killed the builds ("compile command failed due to signal 9") on
+# a default-sized (~8 GiB) Docker Desktop VM. Boot the api alone first — its
+# health turning green means its build finished — then start the relay and web
+# edge; the outbox-drain wait below already tolerates the later relay boot.
+compose up -d api
 
 BASE_URL="http://127.0.0.1:$API_PORT"
 echo "[web-smoke] waiting for $BASE_URL/health (timeout ${BOOT_TIMEOUT}s; cold Swift build can take many minutes)"
@@ -228,6 +236,9 @@ until curl -fsS "$BASE_URL/health" >/dev/null 2>&1; do
   sleep 3
 done
 echo "[web-smoke] api health is green"
+
+echo "[web-smoke] starting relay and web-edge (staggered after the api build)"
+compose up -d relay web-edge
 
 echo "[web-smoke] waiting for web-edge to serve the SPA"
 edge_ok=0
@@ -388,6 +399,11 @@ while :; do
   pending="$(printf '%s' "$pending" | tr -d '[:space:]')"
   if [ "$pending" = "0" ]; then
     break
+  fi
+  if [ -n "$(compose ps -aq --status exited relay 2>/dev/null)" ]; then
+    echo "[web-smoke] relay container exited before draining the outbox" >&2
+    compose logs --tail 120 relay >&2 || true
+    exit 1
   fi
   if [ "$(date -u +%s)" -ge "$relay_deadline" ]; then
     echo "[web-smoke] timed out waiting for the relay to drain the outbox (pending=$pending)" >&2
