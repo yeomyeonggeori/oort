@@ -1964,13 +1964,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `staging-smoke` 프로파일 PASS evidence.
 - [x] 종결: PR #412 merge `5e034fa`, main `staging-smoke` 프로파일 PASS(rc=0). 통합자 직접 diff 검수(소형 tooling) + 음성 대조 3종 evidence.
 
-### ☐ MOMO-400 (`#410`) 수용기준 — ADR-0119 W-4: 웹 작성·read-state·승인 카드 + realtime 왕복 `[web/docs]` · 의존: 웹 첫 배치 종결
-- [ ] composer: `POST messages`(`clientMsgId` 멱등 — 재전송 중복 없음 smoke 실증), 표시는 서버 echo(브로드캐스트/backfill) 기준, seq 권위 준수. 오류/재시도 카피 제공.
-- [ ] read-state: bulk GET 초기화 + 열람 시 단조 cursor PUT + 사이드바 unread 배지 + `user:read-state#<member-id>` 실시간 구독(채널명 표기는 서버 outbox 코드 대조 — 첫 배치 리뷰 방식 승계).
-- [ ] 승인 카드: approvals 목록/타임라인 approval_request에 승인·거부(decision POST). 403/404/409 **receipt 스키마**(openapi 정본)를 카드 상태 전이로 처리(409=타 기기 선결정은 오류가 아님). ADR-0112 기본 모드 문법만.
-- [ ] DM: dms 목록 사이드바 노출 + 열기(open) 최소 경로.
-- [ ] `docs/api/openapi.yaml` 무변경(스펙 밖 라우트 소비 금지). 서버·clients/macOS 무변경.
-- [ ] smoke 확장(작성 멱등·read-state 반영·승인 왕복·409 receipt) 포함 `--profile web` 전체 PASS.
+### ☑ MOMO-400 (`#410`) 수용기준 — ADR-0119 W-4: 웹 작성·read-state·승인 카드 + realtime 왕복 `[web/docs]` · 의존: 웹 첫 배치 종결
+- [x] composer: `POST messages`(`clientMsgId` 멱등 — 재전송 중복 없음 smoke 실증), 표시는 서버 echo(브로드캐스트/backfill) 기준, seq 권위 준수. 오류/재시도 카피 제공.
+- [x] read-state: bulk GET 초기화 + 열람 시 단조 cursor PUT + 사이드바 unread 배지 + `user:read-state#<member-id>` 실시간 구독(채널명 표기는 서버 outbox 코드 대조 — 첫 배치 리뷰 방식 승계).
+- [x] 승인 카드: approvals 목록/타임라인 approval_request에 승인·거부(decision POST). 403/404/409 **receipt 스키마**(openapi 정본)를 카드 상태 전이로 처리(409=타 기기 선결정은 오류가 아님). ADR-0112 기본 모드 문법만.
+- [x] DM: dms 목록 사이드바 노출 + 열기(open) 최소 경로.
+- [x] `docs/api/openapi.yaml` 무변경(스펙 밖 라우트 소비 금지). 서버·clients/macOS 무변경.
+- [x] smoke 확장(작성 멱등·read-state 반영·승인 왕복·409 receipt) 포함 `--profile web` 전체 PASS.
+- [x] 종결: PR #414(+리뷰 반영 2) merge `4a06ec5`. 독립 리뷰 Blocker/High 0·Medium 1(스모크 커버리지) 반영 — gateway형 픽스처+양 표면 무누출 단정, DOM 레벨 음성 대조 실증(심은 누출을 단정이 검출). 최종 스모크 25 PASS/0 FAIL.
 
 ### ☐ MOMO-401 (`#411`) 수용기준 — ADR-0119 W-5: 초대 링크 웹 합류 `/join/<code>` `[web/docs]` · 의존: MOMO-400 (같은 파일군)
 - [ ] SPA `/join/<code>` 라우트: 공개 `POST /v1/join` 호출(openapi 정본 스키마), 성공 시 가입 완료 → join 응답이 로그인 토큰 미포함이면 로그인 폼 프리필 연결(스펙을 앞지르는 자동 로그인 금지).

@@ -18,6 +18,11 @@
 - MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
 - 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
 
+## 2026-07-16 (Fable, 엔진/인프라 트랙 momo-main 겸임) · MOMO-400 종결 + 플러그인 플랫폼 리서치
+- MOMO-398(`#413`)/399(`#412`)/400(`#414`) 순차 머지. 400은 stall된 수정 에이전트를 통합자가 직접 인수 — 남겨진 의도적 누출을 강화 단정이 DOM 레벨 검출(음성 대조 실증), 최종 스모크 25 PASS/0. 유령 게이트 스택 5벌 정리(janitor+수동, momo_main 보존)로 OOM 재발 조건 제거.
+- 성재 발제(플러그인 플랫폼, 1호 Drive)로 PLN-20260716-01 claim → `research/16-plugin-platform/` 00(생태계: 3층 표준 수렴·커스터디=클라이언트 문제·원클릭의 실체)·01(제안: 기존 ADR-0113→SE-04A 큐의 제품화, Drive 모드A는 동결 트랙 우회 첫 slice)·02(Fable 엔진 세션 핸드오프) 랜딩. 구현 없음 — 문서화만(성재 지시). hang된 하위 리서치 2기는 shutdown, 몫은 02의 1순위 검증 목록으로 승계.
+- 다음: MOMO-401 `#411` unblock·착수(웹 v0 마지막) → 푸시 P-1/P-2. 플러그인은 성재가 02를 별도 Fable 세션에 위임. UI handoff(Codex) 도착 시 01 §5와 대조.
+
 ## 2026-07-15 (Fable, 엔진/인프라 트랙 momo-main 겸임) · 웹 첫 배치 3/3 종결 + 후속 발급
 - MOMO-391(PR #407) 독립 리뷰 Blocker/High 0·Medium 1(만료 access 로그아웃 revoke) → 수정 반영(b499d32, 스모크로 서버측 revoke 실증) → merge `63e7d51` → main `--profile web` 전체 게이트 PASS. 웹 첫 배치(389/390/391) 종결, STATUS/BUILD_TICKETS evidence 정본화.
 - 후속 발급: MOMO-398 `#408` prod Centrifugo allowed_origins(웹 W-4/W-5 선행 필수), MOMO-399 `#409` staging smoke namespace drift(DEVIATION_LOG 항목 `accepted` 판정).
