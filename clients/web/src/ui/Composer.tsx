@@ -32,26 +32,36 @@ export default function Composer({
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
-  const clientMsgIdRef = useRef<string | null>(null);
+  // The idempotency key is BOUND to the exact body it was minted for: an
+  // unchanged retry reuses it (idempotent re-send), while any edited text
+  // gets a fresh key — the failed attempt may have committed the OLD body
+  // server-side, and reusing its key would silently swallow the edit.
+  const attemptRef = useRef<{ clientMsgId: string; body: string } | null>(
+    null
+  );
 
   async function send() {
     const body = draft.trim();
     if (body === "" || sending) return;
-    clientMsgIdRef.current ??= crypto.randomUUID();
+    if (attemptRef.current === null || attemptRef.current.body !== body) {
+      attemptRef.current = { clientMsgId: crypto.randomUUID(), body };
+    }
+    const attempt = attemptRef.current;
     setSending(true);
     try {
       const message = await sendMessage(
         workspaceId,
         channelId,
-        clientMsgIdRef.current,
+        attempt.clientMsgId,
         body
       );
-      clientMsgIdRef.current = null;
-      setDraft("");
+      if (attemptRef.current === attempt) attemptRef.current = null;
+      // Clear only what was sent — keep anything typed while in flight.
+      setDraft((current) => (current.trim() === body ? "" : current));
       setSendFailed(false);
       onSent(message);
     } catch {
-      // Keep the draft AND the clientMsgId: retry is idempotent.
+      // Keep the draft AND the attempt: retry is idempotent.
       setSendFailed(true);
     } finally {
       setSending(false);
@@ -64,12 +74,7 @@ export default function Composer({
   }
 
   function handleDraftChange(value: string) {
-    if (sendFailed) {
-      // Edited after a failure: new attempt, new idempotency key (the failed
-      // one may have committed the old body server-side).
-      clientMsgIdRef.current = null;
-      setSendFailed(false);
-    }
+    if (sendFailed) setSendFailed(false);
     setDraft(value);
   }
 
