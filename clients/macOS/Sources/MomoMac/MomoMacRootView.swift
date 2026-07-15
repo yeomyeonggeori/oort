@@ -27,6 +27,7 @@ enum MomoMemberDirectoryNavigation {
 
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
+    @StateObject private var quickTooltipPresenter = MomoQuickTooltipPresenter()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var detailPanePresentation = MomoDetailPanePresentationState()
     @State private var selectedProfileMemberID: MemberID?
@@ -116,7 +117,9 @@ public struct MomoMacRootView: View {
             }
         }
         .navigationSplitViewStyle(.balanced)
+        .coordinateSpace(name: MomoQuickTooltipCoordinateSpace.window)
         .environment(\.momoWindowChromeTopInset, windowChromeMetrics.topInset)
+        .environment(\.momoQuickTooltipPresenter, quickTooltipPresenter)
         .background {
             MomoWindowChromeMetricsReader { metrics in
                 guard metrics != windowChromeMetrics else { return }
@@ -149,6 +152,9 @@ public struct MomoMacRootView: View {
                 }
                 .accessibilityAddTraits(.isModal)
             }
+        }
+        .overlay {
+            MomoQuickTooltipOverlay(presenter: quickTooltipPresenter)
         }
         .sheet(isPresented: $showKeyboardShortcuts) {
             MomoKeyboardShortcutsView(copy: copy)

@@ -1877,7 +1877,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
   - 오케스트레이터 종결: 1차 수정(safeAreaInsets 기반)이 리뷰 실창 AX 실측으로 **런타임 no-op 반증**(NavigationSplitView 칼럼 safe area=0) → `NSWindow.contentLayoutRect` 기반 재수정 + harness 프로덕션 창 구성(fullSizeContentView+unified toolbar) 교체 → 2차 실측 리뷰 PASS(3케이스 AX 좌표: 사이드바 y72/헤더 y64 가시·AXPress 동작/패널 y136/타이틀 중복 0/dead control 0). canonical 3종 기록(프로덕션 기하 육안 확인), 206 tests 0 fail, clean+root `macos-ui` PASS(`local-gate-macos-ui-20260714T092306Z-pid99890-ns1784020986266307000-wt9a510db2fbf3-r569e0bf3e9f3.md`), PR #380 merge(`cef7430`).
   - 이월(별도 티켓 후보): 사이드바 멤버 행 이름 절단("H…" — 기존 결함, layoutPriority), harness 빈 툴바 밴드 높이 미세 불일치.
 
-### ☐ MOMO-383 (`#387`) 수용기준 — Workspace-first navigation `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-382
+### ☑ MOMO-383 (`#387`) 수용기준 — Workspace-first navigation `[server/swift/runtime-db/macos-ui]` · 의존: MOMO-382
 - [x] toolbar의 떠 있는 workspace capsule을 제거하고 sidebar 최상단에 icon/name/current-user context를 channel/DM보다 상위 컨텍스트로 표시.
 - [x] workspace primary menu에서 설정/rename 진입, workspace ID 복사, 멤버 초대 제공.
 - [x] ADR-0118의 active-member read + owner/admin workspace name update REST와 macOS binding을 추가해 재로그인·다른 client에서도 이름 유지. 일반 member write 거부, RLS/tenant 격리, audit metadata 검증.
@@ -1889,13 +1889,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] private schema/function은 exact create로 pre-existing drift를 fail-closed하고 owner+app exact ACL을 검증. internal smoke의 roles absent→migrate→test bootstrap과 production의 secure external role preprovision→migrate를 isolated PG18에서 실행하며, production 역할 누락/속성 drift는 migration 전에 거부.
 - [x] no-cache sidebar error에도 localized retry, `⇧⌘R`, VoiceOver label/hint를 제공. settings spacing scale 준수와 trimmed name counter/validation/save 일치, increased-contrast/large-text raster 2종 PASS.
 - [x] connect/session generation과 delayed members/channels cache write 폐기, subscription exact-task cleanup, identity+channels parallel bootstrap, bounded one-query workspace read, narrow settings projection 회귀 포함. design-review Blocker 0, final clean commit에서 full `runtime-db`와 launch 포함 `macos-ui` local gate를 재실행. 전체 Swift Core 24·Server 80·Relay 2·Worker 29·macOS 234 = 369 tests 0 failure.
-- [ ] PR #389 draft final rereview/merge는 momo-main만 수행.
+- [x] PR #389는 momo-main이 main `9c1fc7a`로 merge.
 
 ### ☐ MOMO-384 (`#390`) 수용기준 — Native channel creation sheet + tooltip presenter `[swift/macos-ui]` · 의존: MOMO-383
-- [ ] channel `+`가 sidebar inline form이 아니라 native sheet를 열고 public/private, name, topic, validation/loading/error를 제공.
-- [ ] quick tooltip을 row-local overlay가 아닌 window-level presenter 또는 system `.help` fallback으로 바꿔 sibling pane/inspector clipping 제거.
-- [ ] keyboard submit/cancel, VoiceOver label, narrow window, tooltip cross-pane 실창 evidence.
-- [ ] design-review Blocker 0 + `swift`/`macos-ui` local gate PASS.
+- [x] channel `+`가 sidebar inline form이 아니라 native sheet를 열고 public/private, name, topic, server-aligned normalize/validation, loading, readable local error/retry를 제공. 기존 REST create 경로를 재사용하고 성공 시 새 channel 선택.
+- [x] quick tooltip을 row-local overlay가 아닌 root named coordinate/window-level presenter로 바꿔 sibling pane/attached inspector clipping 제거. short intrinsic width, 280pt 3-line cap, 0.12s delay, hover/focus source 복원, visible copy update/dismiss, hit-testing off.
+- [x] visual tooltip은 accessibility hidden, icon-only source는 실제 action accessibility label을 소유. keyboard focus/Tab/Space, submit/Esc, narrow·standard·fullscreen, light/dark, tooltip cross-pane screenshot+AX frame은 **local manual/AX evidence**이며 commit된 자동 test가 아님. native sheet는 별도 modal surface라 부모 tooltip을 강제 노출하지 않음.
+- [x] PR #394 correctness 반려를 반영해 view-model create operation/session/workspace readiness+generation, REST connection/workspace/token guard-before-decode, sheet Task/input revision cancellation, 401/not-connected 전역 로그인 복구, raw create diagnostic 제거를 추가. pending clear/same-workspace rebootstrap POST 차단, delayed success/error/409, 새 session in-flight, stale malformed/HTTP error, REST cache, tooltip transition을 focused 27 tests로 고정하고 macOS 전체 265 tests PASS.
+- [x] fresh security/correctness/performance review Blocker 0/High 0/Medium 0, fresh design review Blocker 0/High 0/Medium 0. final clean `swift`/actual-launch `macos-ui`/docs gate evidence는 PR #394 worker handoff에 기록하며, MOMO-384는 merge 전 `status:needs-review`로만 둔다.
 
 ### ☐ MOMO-385 (`#391`) 수용기준 — Member inspector + one-click DM `[swift/runtime-db/macos-ui]` · 의존: MOMO-383
 - [ ] active non-self person/agent member row primary click이 기존 idempotent DM REST를 호출하고 해당 DM으로 이동.

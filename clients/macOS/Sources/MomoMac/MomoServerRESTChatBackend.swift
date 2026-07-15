@@ -455,14 +455,54 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         name: String,
         topic: String?
     ) async throws -> ChannelCreateResult {
-        let response = try await post(
-            "/v1/workspaces/\(workspace.description)/channels",
-            body: CreateChannelRequest(kind: kind.rawValue, name: name, topic: topic),
-            authorized: true,
-            response: CreateChannelResponseDTO.self
-        )
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              let sessionAccessToken = accessToken,
+              !sessionAccessToken.isEmpty
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
+        let responseData: Data
+        do {
+            responseData = try await postData(
+                "/v1/workspaces/\(workspace.description)/channels",
+                body: CreateChannelRequest(kind: kind.rawValue, name: name, topic: topic),
+                authorized: true
+            )
+        } catch {
+            guard connectionGeneration == generation,
+                  self.workspace == sessionWorkspace,
+                  accessToken == sessionAccessToken
+            else {
+                throw CancellationError()
+            }
+            throw error
+        }
+        guard connectionGeneration == generation,
+              self.workspace == sessionWorkspace,
+              accessToken == sessionAccessToken
+        else {
+            throw CancellationError()
+        }
+        let response: CreateChannelResponseDTO
+        do {
+            response = try decoder.decode(CreateChannelResponseDTO.self, from: responseData)
+        } catch {
+            throw BackendError.decoding(String(describing: error))
+        }
         let result = try response.result()
-        cachedChannels = (cachedChannels ?? []) + [result.channel]
+        guard result.channel.workspaceId == sessionWorkspace,
+              result.creatorMembership.workspaceId == sessionWorkspace,
+              result.creatorMembership.channelId == result.channel.id
+        else {
+            throw BackendError.decoding("channel create response scope mismatch")
+        }
+        var updatedChannels = cachedChannels ?? []
+        if !updatedChannels.contains(where: { $0.id == result.channel.id }) {
+            updatedChannels.append(result.channel)
+        }
+        cachedChannels = updatedChannels
         return result
     }
 
@@ -695,6 +735,25 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return try await execute(request, response: response)
     }
 
+    private func postData<RequestBody: Encodable>(
+        _ path: String,
+        body: RequestBody,
+        authorized: Bool,
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    ) async throws -> Data {
+        var request = URLRequest(
+            url: config.baseURL.appendingPathComponent(path),
+            cachePolicy: cachePolicy
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        if authorized {
+            try authorize(&request)
+        }
+        return try await executeData(request)
+    }
+
     private func put<RequestBody: Encodable, ResponseBody: Decodable>(
         _ path: String,
         body: RequestBody,
@@ -740,6 +799,15 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     private func execute<T: Decodable>(_ request: URLRequest, response: T.Type) async throws -> T {
+        let data = try await executeData(request)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            throw BackendError.decoding(String(describing: error))
+        }
+    }
+
+    private func executeData(_ request: URLRequest) async throws -> Data {
         do {
             let (data, urlResponse) = try await session.data(for: request)
             guard let http = urlResponse as? HTTPURLResponse else {
@@ -748,11 +816,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             guard (200..<300).contains(http.statusCode) else {
                 throw problemError(status: http.statusCode, data: data)
             }
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch {
-                throw BackendError.decoding(String(describing: error))
-            }
+            return data
         } catch let error as BackendError {
             throw error
         } catch is CancellationError {

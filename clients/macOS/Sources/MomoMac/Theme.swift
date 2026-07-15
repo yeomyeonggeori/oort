@@ -204,6 +204,25 @@ public enum MomoTheme {
         public static let stateChange = Animation.easeOut(duration: stateChangeDuration)
     }
 
+    public enum QuickTooltip {
+        public static let maximumWidth: CGFloat = 280
+        public static let anchorGap: CGFloat = 8
+        public static let screenEdgeInset: CGFloat = 8
+        public static let horizontalPadding: CGFloat = 8
+        public static let verticalPadding: CGFloat = 4
+    }
+
+    public enum ChannelCreation {
+        public static let minimumWidth: CGFloat = 480
+        public static let idealWidth: CGFloat = 520
+        public static let minimumHeight: CGFloat = 420
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let sectionSpacing: CGFloat = 24
+        public static let edgeInset: CGFloat = 24
+        public static let background = Color(nsColor: .windowBackgroundColor)
+    }
+
     /// Component tokens for the primary macOS sidebar. Values live here so
     /// channel, DM, member, and utility rows share one density contract.
     public enum Sidebar {

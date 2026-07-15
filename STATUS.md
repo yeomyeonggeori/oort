@@ -3,6 +3,13 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-384 Native Channel Creation + Window Tooltip (2026-07-15)
+
+- sidebar inline form을 public/private, name, topic을 받는 native SwiftUI sheet로 교체했다. server와 같은 trim+lowercase+regex validation, 첫 name focus, Esc/Return, localized retry/error를 제공하고 기존 REST create 경로 성공 시 sheet를 닫아 새 channel을 선택한다. local 실패는 bounded issue만 보관하며 raw error 문자열은 장기 `Published` state에 남기지 않는다. 401/not-connected는 sheet를 닫고 기존 전역 session-expired 로그인 복구 CTA로 전달한다.
+- channel create는 view-model operation/session generation과 시작 workspace, REST backend connection generation/workspace/access token을 await 전후로 대조한다. clear/rebootstrap/input cancel 뒤 도착한 success/error/defer는 channel·membership·selection·issue·in-flight/cache를 갱신하지 않으며, sheet Task도 disappear/session/input revision 변경에서 취소한다.
+- icon control help는 root named coordinate space의 비차단 overlay presenter로 옮겼다. 0.12s 표시, intrinsic short width/최대 280pt 3-line wrap, edge clamp, hover/focus source 복원과 live copy 갱신을 적용했다. visual tooltip은 AX tree에서 숨기고 원래 icon-only button에 action label을 둔다. narrow/standard/fullscreen·light/dark·attached inspector의 screenshot/AX frame과 Tab/Space/Esc는 **local manual/AX evidence**이며, generation/auth/tooltip transition·contrast/large-text는 commit된 자동 test/snapshot evidence로 구분한다. native sheet는 별도 modal surface이므로 부모 tooltip을 그 위에 강제 노출하지 않는다.
+- independent correctness/security/performance 반려의 session-transition admission, sheet pre-start cancellation, REST stale guard ordering, initial auth-expired 항목을 회귀 테스트로 닫았다. focused 27건과 macOS 전체 265건이 0 failure이며 fresh correctness/security/performance와 design review 모두 Blocker 0/High 0/Medium 0이다. PR #394는 worker `status:needs-review` handoff까지만 진행하고 merge/close는 momo-main이 수행한다.
+
 ## MOMO-383 Workspace-first Navigation (2026-07-15)
 
 - toolbar의 떠 있는 workspace capsule을 제거하고 sidebar 최상단에 icon/name/member identity를 배치했다. native popover 메뉴에서 서버 설정, 멤버 초대, workspace ID 복사를 제공하며 표준 1180x760·좁은 900x650 실창에서 traffic light/channel header 겹침이 없음을 확인했다.
@@ -12,7 +19,7 @@
 - migration 009는 workspace root에 `ENABLE/FORCE RLS`와 exact `app.workspace_id` policy를 추가했다. public join의 invite hash→workspace UUID lookup은 `momo_join_private` locked schema의 fixed-path `SECURITY DEFINER` 함수 하나로 제한한다. private object는 exact create라 preseed/drift 시 transaction이 실패하고 ACL은 owner+app만 허용한다. internal smoke의 roles absent→migrate→test bootstrap과 production의 externally provisioned roles→migrate 순서를 각각 isolated PG18에서 검증하며, production은 역할 누락/속성 drift를 migration 전에 거부한다.
 - 설정은 1-80자 validation, owner/admin 전용 이유, conflict/permission/connection별 한국어·영어 오류를 제공한다. no-cache load 실패도 sidebar에 keyboard(`⇧⌘R`)/VoiceOver 가능한 retry를 노출하고 semantic primary text로 고대비를 보장한다. settings는 streaming `ChatViewModel` 대신 좁은 projection만 관찰하며 counter/validation/save는 같은 trimmed 문자열을 사용한다. 전체 Swift 테스트는 Core 24·Server 80·Relay 2·Worker 29·macOS 234, 총 369건 0 failure로 통과했다.
 - workspace icon과 invite policy는 계속 이 Mac의 local display draft다. 다중 workspace rail은 ADR-0117 전 구현하지 않는다. 후속은 MOMO-384 `#390`, MOMO-385 `#391`, MOMO-386 `#392`다.
-- final review fix는 delayed login→clear·overlapping A/B connect뿐 아니라 delayed members/channels 응답도 connection generation+exact workspace guard로 폐기해 reconnect 뒤 cache를 덮지 못하게 했다. normal/error realtime resubscribe cleanup, guarded parallel bootstrap, one-query workspace membership read, narrow settings invalidation을 포함해 focused 신규 macOS 8 + server 1과 raster 2종이 PASS했다. 이전 dirty-worktree gate evidence는 폐기하며 final commit의 clean `runtime-db`/실제 launch `macos-ui`/docs evidence는 PR #389 handoff에 기록한다.
+- final review fix는 delayed login→clear·overlapping A/B connect뿐 아니라 delayed members/channels 응답도 connection generation+exact workspace guard로 폐기해 reconnect 뒤 cache를 덮지 못하게 했다. normal/error realtime resubscribe cleanup, guarded parallel bootstrap, one-query workspace membership read, narrow settings invalidation을 포함해 focused 신규 macOS 8 + server 1과 raster 2종이 PASS했다. PR #389는 main `9c1fc7a`로 merge됐다.
 
 ## MOMO-388 Auth-Hardening Realtime Credential Binding Verifier (2026-07-15)
 

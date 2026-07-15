@@ -56,7 +56,7 @@ public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.momoWindowChromeTopInset) private var windowChromeTopInset
-    @State private var isCreatingChannel = false
+    @State private var showChannelCreation = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
     @State private var showProfilePanel = false
@@ -67,9 +67,6 @@ public struct ChannelListView: View {
     @State private var hoveredMemberID: MemberID?
     @State private var hoveredUtility: MomoSidebarUtility?
     @State private var channelPresentationRevision = 0
-    @State private var newChannelName = ""
-    @State private var newChannelTopic = ""
-    @State private var newChannelKind: ChannelKind = .publicChannel
     @State private var inviteMode: MomoInviteMode = .human
     @State private var agentInviteInFlight = false
     @State private var agentInviteError: String?
@@ -232,6 +229,13 @@ public struct ChannelListView: View {
         }
         .sheet(item: $agentCredentialReveal) { reveal in
             MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
+        }
+        .sheet(isPresented: $showChannelCreation) {
+            MomoChannelCreationSheet(
+                viewModel: viewModel,
+                copy: copy,
+                dismiss: { showChannelCreation = false }
+            )
         }
         .sheet(isPresented: $showMemberDirectory) {
             MemberDirectoryView(viewModel: viewModel)
@@ -453,14 +457,10 @@ public struct ChannelListView: View {
         VStack(alignment: .leading, spacing: MomoTheme.Sidebar.itemSpacing) {
             sidebarSectionHeader(
                 title: copy.channels,
-                actionTitle: isCreatingChannel ? copy.cancel : copy.newChannel,
-                systemImage: isCreatingChannel ? "xmark" : "plus"
+                actionTitle: copy.newChannel,
+                systemImage: "plus"
             ) {
-                isCreatingChannel.toggle()
-            }
-
-            if isCreatingChannel {
-                channelCreateForm(copy: copy)
+                showChannelCreation = true
             }
 
             if standardChannels.isEmpty {
@@ -812,6 +812,7 @@ public struct ChannelListView: View {
                     tint: MomoTheme.agentAccent,
                     isVisible: isHovering,
                     isDisabled: !viewModel.canInsertMention(for: member),
+                    actionLabel: "Mention @\(member.handle)",
                     helpText: viewModel.mentionUnavailableReason(for: member) ?? "Mention @\(member.handle)"
                 ) {
                     viewModel.insertMention(for: member)
@@ -823,6 +824,7 @@ public struct ChannelListView: View {
                     tint: .secondary,
                     isVisible: isHovering,
                     isDisabled: false,
+                    actionLabel: copy.editProfile,
                     helpText: copy.editProfile
                 ) {
                     openMemberProfile?(member.id)
@@ -845,49 +847,12 @@ public struct ChannelListView: View {
         }
     }
 
-    private func channelCreateForm(copy: MomoWorkspaceCopy) -> some View {
-        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.standardSpacing) {
-            Picker("Kind", selection: $newChannelKind) {
-                Label(copy.publicChannel, systemImage: "number").tag(ChannelKind.publicChannel)
-                Label(copy.privateChannel, systemImage: "lock").tag(ChannelKind.privateChannel)
-            }
-            .pickerStyle(.segmented)
-
-            TextField(copy.channelNamePlaceholder, text: $newChannelName)
-                .textFieldStyle(.roundedBorder)
-            TextField(copy.channelTopicPlaceholder, text: $newChannelTopic)
-                .textFieldStyle(.roundedBorder)
-
-            HStack {
-                Spacer()
-                Button {
-                    Task {
-                        await viewModel.createChannel(
-                            kind: newChannelKind,
-                            name: newChannelName,
-                            topic: newChannelTopic
-                        )
-                        if viewModel.connectionError == nil {
-                            newChannelName = ""
-                            newChannelTopic = ""
-                            newChannelKind = .publicChannel
-                            isCreatingChannel = false
-                        }
-                    }
-                } label: {
-                    Label(copy.create, systemImage: "checkmark.circle")
-                }
-                .disabled(viewModel.channelCreateInFlight || newChannelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(.vertical, MomoTheme.Sidebar.compactSpacing)
-    }
-
     private func memberHoverAction(
         systemImage: String,
         tint: Color,
         isVisible: Bool,
         isDisabled: Bool,
+        actionLabel: String,
         helpText: String,
         action: @escaping () -> Void
     ) -> some View {
@@ -907,6 +872,7 @@ public struct ChannelListView: View {
         .disabled(isDisabled)
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
+        .accessibilityLabel(actionLabel)
         .accessibilityHidden(!isVisible)
         .help(helpText)
         .momoQuickTooltip(helpText)
@@ -916,6 +882,8 @@ public struct ChannelListView: View {
         let copy = MomoWorkspaceCopy(language: language)
         let inChannel = viewModel.isMember(member.id)
         let isWorking = viewModel.channelMemberMutationIds.contains(member.id)
+        let actionLabel = inChannel ? copy.removeFromChannel : copy.addToChannel
+        let accessibilityLabel = "\(actionLabel), \(member.displayName)"
         return Button {
             performMemberMutation(member, isMember: inChannel)
         } label: {
@@ -934,9 +902,10 @@ public struct ChannelListView: View {
         .disabled(isWorking)
         .opacity(isVisible ? 1 : 0)
         .allowsHitTesting(isVisible)
+        .accessibilityLabel(accessibilityLabel)
         .accessibilityHidden(!isVisible)
-        .help(inChannel ? copy.removeFromChannel : copy.addToChannel)
-        .momoQuickTooltip(inChannel ? copy.removeFromChannel : copy.addToChannel)
+        .help(actionLabel)
+        .momoQuickTooltip(actionLabel)
     }
 
     private func performMemberMutation(_ member: Member, isMember: Bool) {
