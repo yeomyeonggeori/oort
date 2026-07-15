@@ -1914,6 +1914,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 두 workspace 격리, 첫 페이지 밖 오래된 message, modifier parsing, DM/channel 결과를 runtime 검증.
 - [ ] design-review Blocker 0 + `runtime-db`/`swift`/`macos-ui` local gate PASS.
 
+### ☐ MOMO-392 (`#398`) 수용기준 — macOS channel chrome + contextual navigation polish `[swift/macos-ui]`
+- [x] 채널 헤더를 48pt 한 줄 이름 중심으로 압축하고 topic/description은 tooltip·VoiceOver 보조 설명으로 제공. 헤더 상시 gear 제거.
+- [x] `unifiedCompact` titlebar + 실제 `contentLayoutRect` inset으로 traffic light/sidebar/header/right inspector가 standard 1180x760, narrow 980x620, wide 1800x900에서 겹치지 않음. narrow inspector는 측정된 channel header 아래에 고정.
+- [x] 헤더 우측 Downloads가 기존 app update/local download folder surface를 열고, 한국어/영어 copy와 VoiceOver hint가 chat attachment download 미지원을 명시.
+- [x] MOMO-386 backend가 없는 현재 workspace search는 localized unavailable/roadmap state와 `⌘K` 대안만 제공하고 fake result를 만들지 않음.
+- [x] channel row selected/hover invite/settings quick action, context menu의 invite/settings/notification-planned/copy-ID, `⇧⌘I`/`⇧⌘,` 및 VoiceOver custom action 동등 경로 제공.
+- [x] channel creation sheet, unread, DM, member inspector/roster 보존. bilingual copy, Reduce Motion 기존 root animation policy, light/dark real-window evidence 포함.
+- [ ] focused/full Swift tests, design preflight, `swift`/`macos-ui` local gate, fresh design-review Blocker 0를 PR evidence에 기록. worker는 PR 생성 뒤 `status:needs-review`까지만 전환하고 merge/close하지 않음.
+
 ### ☑ MOMO-388 수용기준 — Auth-hardening verifier realtime credential binding drift `[tooling/runtime-db/docs]` · Issue #388
 - [x] 로그인 access/refresh token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest만 DB와 대조해 각 `token.id`를 확정. `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row ID와 같은지 UUID canonical 비교.
 - [x] active exact access-row binding만 허용. active refresh-row ID·`meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 `result == null && error.code == 403` 검증.

@@ -21,6 +21,7 @@
 | MOMO-384 (`#390`) | native channel creation sheet + tooltip presenter | MOMO-383 | swift + macos-ui + design-review | PR #394 fresh review PASS, worker `status:needs-review`, merge 전 |
 | MOMO-385 (`#391`) | member inspector + one-click DM | MOMO-383 | swift + runtime-db + macos-ui | PR #406 review fixes·worker gates PASS, `status:needs-review`, merge 전 |
 | MOMO-386 (`#392`) | RLS workspace search + macOS results/jump | MOMO-384, MOMO-385 | runtime-db + swift + macos-ui | blocked |
+| MOMO-392 (`#398`) | compact channel chrome + contextual navigation polish | MOMO-384, MOMO-385 | swift + macos-ui + design-review | worker implementation/gates in progress |
 | MOMO-375 | Work transcript/activity drawer | ADR-0114 surface decision | swift + macos-ui | planned |
 
 ## 4. Engine planning queue
@@ -66,3 +67,11 @@ ADR draft는 구현/Accepted 판정이 아니다. 성재가 option과 trust boun
 - 실창: standard 1180x760, narrow 980x620, fullscreen, light/dark, attached inspector가 열린 cross-pane의 tooltip screenshot·AX text/frame·Tab/Space/Esc 확인은 **local manual/AX evidence**다. quick-switcher scrim background dismiss도 local manual evidence이며 commit된 자동 test와 구분한다. native sheet는 별도 modal surface라 부모 control tooltip을 위에 띄우지 않는다.
 - PR #394 correctness 반려 수정: create operation/session/workspace readiness+generation, REST connection/workspace/token guard-before-decode, sheet Task/input revision cancel, 401/not-connected 전역 로그인 복구, raw diagnostic 제거를 적용했다. pending clear/same-workspace rebootstrap POST 차단, delayed success/error/409, stale malformed/HTTP error, 새 session in-flight, REST cache, tooltip transition은 commit된 focused 27 tests로 고정했고 macOS 전체 265 tests가 PASS했다.
 - 재리뷰 handoff: Korean light·English dark·increased-contrast·large-text snapshots, fresh correctness/security/performance와 design review 모두 Blocker 0/High 0/Medium 0이다. clean `swift`/actual-launch `macos-ui`/docs gate를 PR #394 evidence 정본으로 삼고 worker는 `status:needs-review`까지만 진행한다. merge/close는 momo-main만 수행한다.
+
+## 9. MOMO-392 checkpoint (2026-07-15)
+
+- 구현: compact one-line channel header, `unifiedCompact` titlebar, measured content/inspector inset, header-right app Downloads, truthful unavailable workspace search, selected/hover/context/keyboard/VoiceOver channel actions.
+- 경계: Downloads는 app update/local folder only이며 chat attachment download는 미지원. workspace search backend는 MOMO-386 소유라 이번 goal은 fake result 없이 unavailable state만 제공한다.
+- 보존: native channel creation sheet, unread/DM navigation, MOMO-385 right member inspector와 canonical DM 경로를 변경하지 않는다.
+- 증거: real-window standard 1180x760, narrow 980x620, wide 1800x900, Downloads, search-unavailable와 light/dark snapshot artifact를 `/tmp/momo-398-design/`에 기록했다.
+- handoff 전 남은 것: full tests, design preflight, clean `swift`/`macos-ui`, fresh design-review Blocker 0, PR 생성과 `status:needs-review` 전환. merge/close는 momo-main만 수행한다.

@@ -593,6 +593,11 @@ struct MomoDownloadsSettingsSurface: View {
 
     var body: some View {
         MomoSettingsScrollView {
+            Label(copy.downloadsScopeNote, systemImage: "info.circle")
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             MomoSettingsSection(title: copy.downloadFolder, subtitle: copy.downloadFolderSubtitle) {
                 HStack(spacing: 12) {
                     Image(systemName: "folder")
@@ -861,7 +866,7 @@ enum MomoLocalChannelPresentationStore {
     }
 }
 
-private enum MomoChannelSettingsTab: String, CaseIterable, Identifiable {
+enum MomoChannelSettingsTab: String, CaseIterable, Identifiable {
     case general
     case members
     case integrations
@@ -880,18 +885,26 @@ struct MomoChannelSettingsSheet: View {
     @State private var channelName: String
     @State private var channelTopic: String
     @State private var savedLocally = false
+    private let canManageMembers: Bool
 
     init(
         copy: MomoWorkspaceCopy,
         channel: Channel,
         presentation: MomoChannelPresentation,
         viewModel: ChatViewModel,
+        initialTab: MomoChannelSettingsTab = .general,
         onSavePresentation: @escaping (MomoChannelPresentation) -> Void
     ) {
         self.copy = copy
         self.channel = channel
         self.viewModel = viewModel
         self.onSavePresentation = onSavePresentation
+        let canManageMembers = MomoChannelActionPolicy.canManageMembers(
+            in: channel,
+            canManageWorkspace: viewModel.canManageWorkspace
+        )
+        self.canManageMembers = canManageMembers
+        _selectedTab = State(initialValue: initialTab == .members && !canManageMembers ? .general : initialTab)
         _channelName = State(initialValue: presentation.name)
         _channelTopic = State(initialValue: presentation.topic ?? "")
     }
@@ -930,7 +943,9 @@ struct MomoChannelSettingsSheet: View {
             VStack(spacing: MomoTheme.ChannelHeader.standardSpacing) {
                 Picker(copy.channelSettings, selection: $selectedTab) {
                     Text(copy.general).tag(MomoChannelSettingsTab.general)
-                    Text(copy.members).tag(MomoChannelSettingsTab.members)
+                    if canManageMembers {
+                        Text(copy.members).tag(MomoChannelSettingsTab.members)
+                    }
                     Text(copy.integrations).tag(MomoChannelSettingsTab.integrations)
                 }
                 .pickerStyle(.segmented)
@@ -941,7 +956,11 @@ struct MomoChannelSettingsSheet: View {
                     case .general:
                         generalSettings
                     case .members:
-                        memberSettings
+                        if canManageMembers {
+                            memberSettings
+                        } else {
+                            generalSettings
+                        }
                     case .integrations:
                         integrationSettings
                     }

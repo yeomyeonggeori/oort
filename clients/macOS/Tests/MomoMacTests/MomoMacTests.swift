@@ -4138,6 +4138,32 @@ final class MomoMacTests: XCTestCase {
         XCTAssertNil(viewModel.connectionIssue)
     }
 
+    func testDemoBackendRejectsMembershipMutationForDirectMessages() async throws {
+        let backend = LiveChatBackend()
+        let seed = await backend.seedDemo()
+        try await backend.connect(workspace: seed.workspace, accessToken: "t")
+        let agent = try XCTUnwrap(seed.agents.first)
+        let human = seed.human
+        let directMessage = try await backend.openDirectMessage(
+            workspace: seed.workspace,
+            with: agent.id
+        )
+
+        do {
+            _ = try await backend.addMember(human.id, to: directMessage.id, role: .member)
+            XCTFail("DM membership must remain immutable")
+        } catch let BackendError.problem(status, _, _) {
+            XCTAssertEqual(status, 404)
+        }
+
+        do {
+            _ = try await backend.removeMember(agent.id, from: directMessage.id)
+            XCTFail("DM membership must remain immutable")
+        } catch let BackendError.problem(status, _, _) {
+            XCTAssertEqual(status, 404)
+        }
+    }
+
     @MainActor
     func testViewModelBootstrapSurfacesRESTChannelListFailure() async throws {
         await MockHTTPURLProtocol.reset()

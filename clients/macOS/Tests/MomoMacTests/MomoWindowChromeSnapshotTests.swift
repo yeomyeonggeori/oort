@@ -67,7 +67,7 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
 
     private func rootView(for scenario: Scenario) async throws -> some View {
         let backend = LiveChatBackend()
-        let seed = await backend.seedDemo()
+        let seed = await backend.seedDemo(baseTimestampMs: 1_752_572_700_000)
         let viewModel = ChatViewModel(backend: backend)
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "window-chrome-snapshot")
         let channel = try XCTUnwrap(seed.channels.last)
@@ -117,7 +117,7 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         window.isReleasedWhenClosed = false
         window.title = "momo"
         window.titleVisibility = MomoWindowChromeStyle.showsSystemTitle ? .visible : .hidden
-        window.toolbarStyle = .unified
+        window.toolbarStyle = MomoWindowChromeStyle.appKitToolbarStyle
         window.toolbar = NSToolbar(identifier: "momo.snapshot.window-chrome.\(scenario.name)")
         window.contentViewController = hostingController
         hostingView.appearance = appearance
@@ -168,7 +168,26 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             ) else {
                 throw XCTSkip("WindowServer could not capture the MOMO-379 production window")
             }
-            return NSImage(cgImage: cgImage, size: scenario.size)
+            let scale = window.backingScaleFactor
+            let expectedPixelSize = CGSize(
+                width: scenario.size.width * scale,
+                height: scenario.size.height * scale
+            )
+            let captureRect = CGRect(
+                x: (CGFloat(cgImage.width) - expectedPixelSize.width) / 2,
+                y: (CGFloat(cgImage.height) - expectedPixelSize.height) / 2,
+                width: expectedPixelSize.width,
+                height: expectedPixelSize.height
+            ).integral
+            guard captureRect.minX >= 0,
+                  captureRect.minY >= 0,
+                  captureRect.maxX <= CGFloat(cgImage.width),
+                  captureRect.maxY <= CGFloat(cgImage.height),
+                  let normalizedCapture = cgImage.cropping(to: captureRect)
+            else {
+                throw XCTSkip("WindowServer capture was smaller than the requested MOMO chrome frame")
+            }
+            return NSImage(cgImage: normalizedCapture, size: scenario.size)
         }
 
         guard let frameView = window.contentView?.superview else {
@@ -260,6 +279,19 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             try writeDesignReviewArtifact(
                 image,
                 named: "momo-385-\(scenario.name).png"
+            )
+            XCTAssertEqual(image.size.width, scenario.size.width)
+            XCTAssertEqual(image.size.height, scenario.size.height)
+        }
+    }
+
+    func testChannelNavigationWritesStandardAndNarrowRealWindowArtifacts() async throws {
+        let scenarios = [memberInspectorNarrowDark, memberInspectorStandardLight]
+        for scenario in scenarios {
+            let image = try await render(scenario, requiresWindowServer: true)
+            try writeDesignReviewArtifact(
+                image,
+                named: "momo-392-channel-navigation-\(scenario.name).png"
             )
             XCTAssertEqual(image.size.width, scenario.size.width)
             XCTAssertEqual(image.size.height, scenario.size.height)

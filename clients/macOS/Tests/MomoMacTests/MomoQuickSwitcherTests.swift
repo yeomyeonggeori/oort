@@ -155,6 +155,10 @@ final class MomoQuickSwitcherTests: XCTestCase {
         state.toggle()
         state.dismiss()
         XCTAssertFalse(state.isPresented)
+
+        state.present()
+        state.present()
+        XCTAssertTrue(state.isPresented, "an alternate entry never closes an already presented switcher")
     }
 
     func testChannelNumberAndHistoryNavigation() async throws {

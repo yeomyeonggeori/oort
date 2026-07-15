@@ -83,6 +83,59 @@ final class MomoChannelChromeTests: XCTestCase {
         )
     }
 
+    func testCompactChromeAndChannelHeaderUseThinStableContracts() {
+        XCTAssertEqual(MomoWindowChromeStyle.appKitToolbarStyle, .unifiedCompact)
+        XCTAssertEqual(MomoTheme.ChannelHeader.minimumHeight, 48)
+    }
+
+    func testChannelQuickActionsAreLimitedToSelectionOrHover() {
+        XCTAssertFalse(
+            MomoChannelRowActionVisibility.isVisible(isSelected: false, isHovered: false)
+        )
+        XCTAssertTrue(
+            MomoChannelRowActionVisibility.isVisible(isSelected: true, isHovered: false)
+        )
+        XCTAssertTrue(
+            MomoChannelRowActionVisibility.isVisible(isSelected: false, isHovered: true)
+        )
+    }
+
+    func testOnlyActivePublicAndPrivateChannelsAllowMembershipManagement() {
+        let workspace = WorkspaceID()
+        XCTAssertTrue(MomoChannelActionPolicy.canManageMembers(in: Channel(
+            id: ChannelID(), workspaceId: workspace, kind: .publicChannel
+        )))
+        XCTAssertTrue(MomoChannelActionPolicy.canManageMembers(in: Channel(
+            id: ChannelID(), workspaceId: workspace, kind: .privateChannel
+        )))
+        XCTAssertFalse(MomoChannelActionPolicy.canManageMembers(in: Channel(
+            id: ChannelID(), workspaceId: workspace, kind: .dm
+        )))
+        XCTAssertFalse(MomoChannelActionPolicy.canManageMembers(in: Channel(
+            id: ChannelID(),
+            workspaceId: workspace,
+            kind: .publicChannel,
+            archivedAtMs: 1
+        )))
+        XCTAssertFalse(MomoChannelActionPolicy.canManageMembers(
+            in: Channel(id: ChannelID(), workspaceId: workspace, kind: .publicChannel),
+            canManageWorkspace: false
+        ))
+        XCTAssertFalse(MomoChannelActionPolicy.canOpenSettings(in: Channel(
+            id: ChannelID(), workspaceId: workspace, kind: .dm
+        )))
+    }
+
+    func testSearchAndDownloadCopyDescribeCurrentCapabilities() {
+        let korean = MomoWorkspaceCopy(language: .korean)
+        let english = MomoWorkspaceCopy(language: .english)
+
+        XCTAssertTrue(korean.workspaceSearchUnavailableDetail.contains("서버 메시지 검색이 없습니다"))
+        XCTAssertTrue(english.workspaceSearchUnavailableDetail.contains("does not include server message search"))
+        XCTAssertTrue(korean.downloadsScopeNote.contains("채팅 첨부파일"))
+        XCTAssertTrue(english.downloadsScopeNote.contains("does not download chat attachments"))
+    }
+
     func testChannelPresentationNormalizesNameAndOptionalTopic() throws {
         let presentation = try XCTUnwrap(
             MomoChannelPresentation(name: "  design-system  ", topic: "  하나의 타임라인, two densities  ").normalized

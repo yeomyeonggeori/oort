@@ -269,7 +269,8 @@ public enum MomoTheme {
     public enum ChannelHeader {
         public static let iconSize: CGFloat = 24
         public static let actionSize: CGFloat = 28
-        public static let minimumHeight: CGFloat = 64
+        public static let minimumHeight: CGFloat = 48
+        public static let searchUnavailableWidth: CGFloat = 320
         public static let settingsSheetWidth: CGFloat = 640
         public static let settingsSheetHeight: CGFloat = 520
 

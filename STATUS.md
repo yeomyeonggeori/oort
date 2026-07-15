@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-392 Channel Chrome + Contextual Navigation Polish (2026-07-15)
+
+- 채널 헤더를 48pt 한 줄 이름 중심으로 압축하고 주제는 tooltip/VoiceOver 보조 설명으로 내렸다. 창은 `unifiedCompact` 단일 타이틀바와 `NSWindow.contentLayoutRect` 기반 inset을 유지하며, 좁은 창의 member inspector도 측정된 채널 헤더 아래에서만 시작한다. 표준 1180x760, 좁은 980x620, wide 1800x900 실창 캡처에서 traffic light/sidebar/header/inspector 겹침이 없음을 확인했다.
+- 헤더 우측 Downloads는 기존 로컬 앱 업데이트/다운로드 폴더 surface를 열며, 채팅 첨부파일 다운로드가 아님을 한국어/영어 화면과 VoiceOver hint에 명시했다. MOMO-386 server search가 아직 없으므로 toolbar/`⌘F` 검색은 가짜 결과 대신 localized unavailable popover와 현재 채널/멤버만 찾는 `⌘K` 대안을 제공한다.
+- 헤더의 상시 channel gear는 제거했다. sidebar channel 행은 선택/hover 때 invite/settings를 노출하고 context menu·VoiceOver·`⇧⌘I`/`⇧⌘,` 동등 경로, notification planned disabled state, copy ID를 제공한다. 기존 생성 sheet/unread/DM/right roster는 보존했다. focused tests와 real-window artifacts는 PASS했으며 최종 `swift`/`macos-ui`/design-review evidence는 PR handoff에 기록한다.
+
 ## MOMO-391 clients/web 스캐폴드 + 로그인/타임라인 v0 (2026-07-15)
 
 - ADR-0119 W-2: `clients/web` 신설(Vite+React+TS+centrifuge-js, 전 의존성 permissive — 전이 포함 인벤토리는 게이트가 생성). 로그인(email/password/workspace 옵션 — 미지정 시 서버 demo 폴백) → 채널 목록 → 타임라인 읽기(seq desc head + `before` 페이지네이션 + `?after=` ASC backfill) → centrifuge-js websocket-only 실시간 구독(recovered:false 및 seq 갭에서 REST `?after=` 폴백). websocket 주소는 login 응답 `realtimeWebSocketUrl`만 사용(ADR-0110), 연결 토큰은 `POST /v1/auth/realtime-token`, 구독 인가는 subscribe proxy 서버 재검증. 토큰 정책 D3-A(access 메모리/refresh localStorage 회전/로그아웃 revoke) + 공개 배포 전 httpOnly 승격 게이트를 `clients/web/README.md`에 명문화.

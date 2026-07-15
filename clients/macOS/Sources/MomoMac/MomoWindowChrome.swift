@@ -24,13 +24,14 @@ struct MomoWindowChromeMetrics: Equatable {
 
 enum MomoWindowChromeStyle {
     static let showsSystemTitle = false
+    static let appKitToolbarStyle: NSWindow.ToolbarStyle = .unifiedCompact
 }
 
 public extension Scene {
     /// Keeps every macOS host on the same unified-toolbar title policy.
     func momoWindowChromeStyle() -> some Scene {
         windowToolbarStyle(
-            .unified(showsTitle: MomoWindowChromeStyle.showsSystemTitle)
+            .unifiedCompact(showsTitle: MomoWindowChromeStyle.showsSystemTitle)
         )
     }
 }

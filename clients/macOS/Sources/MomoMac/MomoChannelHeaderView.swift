@@ -14,7 +14,7 @@ struct MomoChannelHeaderView: View {
     let copy: MomoWorkspaceCopy
     let retryRealtime: (() -> Void)?
     let openMemberDirectory: MomoMemberDirectoryHook?
-    let openSettings: () -> Void
+    let openDownloads: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .center, spacing: MomoTheme.ChannelHeader.contentSpacing) {
@@ -38,29 +38,31 @@ struct MomoChannelHeaderView: View {
 
                 memberCountControl
 
-                Button(action: openSettings) {
-                    Label(copy.channelSettings, systemImage: "gearshape")
-                        .labelStyle(.iconOnly)
-                        .frame(
-                            width: MomoTheme.ChannelHeader.actionSize,
-                            height: MomoTheme.ChannelHeader.actionSize
-                        )
+                if let openDownloads {
+                    Button(action: openDownloads) {
+                        Image(systemName: "tray.and.arrow.down")
+                            .frame(
+                                width: MomoTheme.ChannelHeader.iconSize,
+                                height: MomoTheme.ChannelHeader.iconSize
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .help(copy.appDownloads)
+                    .momoQuickTooltip(copy.appDownloads)
+                    .accessibilityLabel(copy.appDownloads)
+                    .accessibilityHint(copy.downloadsScopeNote)
+                    .accessibilityIdentifier("app-downloads-entry")
                 }
-                .buttonStyle(.borderless)
-                .help(copy.channelSettings)
-                .momoQuickTooltip(copy.channelSettings)
-                .accessibilityLabel(copy.channelSettings)
             }
             .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.horizontal, MomoTheme.ChannelHeader.edgeInset)
-        .padding(.vertical, MomoTheme.ChannelHeader.standardSpacing)
         .frame(minHeight: MomoTheme.ChannelHeader.minimumHeight)
         .momoSurface(.panel, cornerRadius: 0)
     }
 
     private var channelIdentity: some View {
-        HStack(alignment: .top, spacing: MomoTheme.ChannelHeader.standardSpacing) {
+        HStack(alignment: .center, spacing: MomoTheme.ChannelHeader.standardSpacing) {
             Image(systemName: channel.kind == .dm ? "person.2.fill" : channel.kind == .privateChannel ? "lock.fill" : "number")
                 .momoTypography(.toolbarTitle)
                 .foregroundStyle(.secondary)
@@ -69,20 +71,15 @@ struct MomoChannelHeaderView: View {
                     height: MomoTheme.ChannelHeader.iconSize
                 )
 
-            VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.compactSpacing) {
-                Text(presentation.name)
-                    .momoTypography(.screenTitle)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let topic = presentation.topic, !topic.isEmpty {
-                    Text(topic)
-                        .momoTypography(.supporting)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
+            Text(presentation.name)
+                .momoTypography(.screenTitle)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
+        .help(presentation.topic ?? presentation.name)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(presentation.name)
+        .accessibilityHint(presentation.topic ?? "")
     }
 
     @ViewBuilder
