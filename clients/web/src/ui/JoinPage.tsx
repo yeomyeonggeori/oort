@@ -44,7 +44,9 @@ type JoinErrorKind =
   | "forbidden"
   | "bad-input"
   | "rate-limited"
-  | "network";
+  | "network"
+  | "conflict"
+  | "unknown";
 
 interface JoinError {
   kind: JoinErrorKind;
@@ -113,9 +115,18 @@ function classifyJoinError(cause: unknown): JoinError {
           suggestLogin: false,
         };
       }
+      if (message.includes("no joinable") || message.includes("channels")) {
+        return {
+          kind: "no-channels",
+          copy: "지금은 합류할 수 있는 채널이 없습니다. 워크스페이스 관리자에게 문의해 주세요.",
+          suggestLogin: false,
+        };
+      }
+      // Unrecognized 409: combined, non-assertive fallback (review #419 M1) —
+      // mirrors the defensive 410 fallback instead of claiming a specific cause.
       return {
-        kind: "no-channels",
-        copy: "지금은 합류할 수 있는 채널이 없습니다. 워크스페이스 관리자에게 문의해 주세요.",
+        kind: "conflict",
+        copy: "이 초대로는 지금 가입할 수 없습니다. 초대를 다시 받거나 워크스페이스 관리자에게 문의해 주세요.",
         suggestLogin: false,
       };
     case 403:
@@ -138,7 +149,7 @@ function classifyJoinError(cause: unknown): JoinError {
       };
     default:
       return {
-        kind: "network",
+        kind: "unknown",
         copy: "가입에 실패했습니다. 잠시 후 다시 시도해 주세요.",
         suggestLogin: false,
       };
