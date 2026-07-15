@@ -766,6 +766,8 @@ final class MomoChannelCreationSnapshotTests: XCTestCase {
         }
         hostingView.appearance = NSAppearance(named: appearanceName)
         hostingView.layoutSubtreeIfNeeded()
+        await Task.yield()
+        hostingView.layoutSubtreeIfNeeded()
         hostingView.displayIfNeeded()
 
         guard let representation = NSBitmapImageRep(
