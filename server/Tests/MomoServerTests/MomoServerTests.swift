@@ -1999,4 +1999,91 @@ final class MomoServerTests: XCTestCase {
             agentGateway: AgentGatewayConfig(mode: .worker, secret: "")
         )
     }
+
+    // MARK: - MOMO-403 device/push_token registration (ADR-0120 P-1)
+
+    func testDeviceRegistrationPlatformAndEnvValidation() throws {
+        XCTAssertEqual(try DeviceRoutes.normalizedPlatform(" iOS "), "ios")
+        XCTAssertEqual(try DeviceRoutes.normalizedPlatform("MACOS"), "macos")
+        XCTAssertThrowsError(try DeviceRoutes.normalizedPlatform("android"))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedPlatform(""))
+
+        XCTAssertEqual(try DeviceRoutes.normalizedEnv("Sandbox"), "sandbox")
+        XCTAssertEqual(try DeviceRoutes.normalizedEnv(" production "), "production")
+        XCTAssertThrowsError(try DeviceRoutes.normalizedEnv("prod"))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedEnv(""))
+    }
+
+    func testDeviceRegistrationApnsTokenNormalization() throws {
+        let hex64 = String(repeating: "AB12cd34", count: 8)
+        XCTAssertEqual(try DeviceRoutes.normalizedApnsToken(" \(hex64) "), hex64.lowercased())
+        // Case-stable normalization keeps UNIQUE (apns_token, env) arbitration exact.
+        XCTAssertEqual(
+            try DeviceRoutes.normalizedApnsToken(hex64.uppercased()),
+            try DeviceRoutes.normalizedApnsToken(hex64.lowercased())
+        )
+        XCTAssertThrowsError(try DeviceRoutes.normalizedApnsToken("not-hex-token!"))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedApnsToken("abcdef"))          // too short
+        XCTAssertThrowsError(try DeviceRoutes.normalizedApnsToken(String(repeating: "a", count: 513)))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedApnsToken(""))
+    }
+
+    func testDeviceRegistrationTopicAndAppBuildValidation() throws {
+        XCTAssertEqual(try DeviceRoutes.normalizedTopic(" kim.dawn.momo "), "kim.dawn.momo")
+        XCTAssertThrowsError(try DeviceRoutes.normalizedTopic(""))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedTopic("has space.bundle"))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedTopic("ctrl\u{0007}bundle"))
+        XCTAssertThrowsError(try DeviceRoutes.normalizedTopic(String(repeating: "a", count: 257)))
+
+        XCTAssertNil(try DeviceRoutes.validatedAppBuild(nil))
+        XCTAssertNil(try DeviceRoutes.validatedAppBuild("   "))
+        XCTAssertEqual(try DeviceRoutes.validatedAppBuild(" 1.0.0+42 "), "1.0.0+42")
+        XCTAssertThrowsError(try DeviceRoutes.validatedAppBuild(String(repeating: "b", count: 65)))
+    }
+
+    func testDeviceRegistrationDeviceIDValidation() throws {
+        let id = UUID()
+        XCTAssertEqual(try DeviceRoutes.validatedDeviceID(" \(id.uuidString) "), id)
+        XCTAssertEqual(try DeviceRoutes.validatedDeviceID(id.uuidString.lowercased()), id)
+        XCTAssertThrowsError(try DeviceRoutes.validatedDeviceID("not-a-uuid"))
+        XCTAssertThrowsError(try DeviceRoutes.validatedDeviceID(""))
+    }
+
+    func testDeviceRoutesNeverReturnRawApnsToken() {
+        // The wire receipt is suffix/ref only (MOMO-403 hard contract): the
+        // shared SELECT fragment must render `right(apns_token, 8)` and never
+        // project the raw column into the response JSON.
+        XCTAssertTrue(DeviceRoutes.deviceJSONSelect.contains("right(t.apns_token, 8)"))
+        XCTAssertFalse(DeviceRoutes.deviceJSONSelect.contains("'apnsToken', t.apns_token"))
+        XCTAssertFalse(DeviceRoutes.deviceJSONSelect.contains("'apns_token', t.apns_token"))
+
+        // And the DTO shape itself has no full-token field.
+        let mirror = Mirror(reflecting: PushTokenDTO(
+            id: "", deviceId: "", env: "sandbox", topic: "t",
+            apnsTokenSuffix: "s", invalidatedAtMs: nil, createdAtMs: 0, updatedAtMs: 0
+        ))
+        XCTAssertFalse(mirror.children.contains { $0.label == "apnsToken" })
+    }
+
+    func testPushRegistrationMigrationStaticContract() throws {
+        // 010: one ACTIVE token per (device, env) partial unique index +
+        // device_id lookup index; rows are invalidated, never deleted, so no
+        // DROP/DELETE may appear (dispatch_log FK preservation, ADR-0120 D4).
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/010_push_registration.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE UNIQUE INDEX push_token_device_env_active_uniq"))
+        XCTAssertTrue(migration.contains("ON push_token (device_id, env)"))
+        XCTAssertTrue(migration.contains("WHERE invalidated_at IS NULL"))
+        XCTAssertTrue(migration.contains("CREATE INDEX push_token_device_idx"))
+        XCTAssertFalse(migration.lowercased().contains("drop table"))
+        XCTAssertFalse(migration.lowercased().contains("delete from"))
+        XCTAssertFalse(migration.lowercased().contains("alter table device"))
+        XCTAssertFalse(migration.lowercased().contains("alter table push_token"))
+    }
 }

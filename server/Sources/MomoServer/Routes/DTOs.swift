@@ -701,6 +701,104 @@ struct SubscribeProxyResponse: ResponseEncodable {
     }
 }
 
+// ---- APNs devices (MOMO-403, ADR-0120 D4) ----
+
+/// POST /v1/workspaces/{ws}/devices request body.
+struct RegisterDeviceRequest: Decodable {
+    /// Client-generated stable device identity (UUID). Re-sending the same id
+    /// is the idempotent re-registration / token-rotation path.
+    let deviceId: String
+    /// `ios` or `macos` (`device_platform` enum).
+    let platform: String
+    let appBuild: String?
+    /// Hex APNs device token. Stored, never echoed back — responses carry
+    /// only the trailing suffix.
+    let apnsToken: String
+    /// `sandbox` or `production` (`push_env` enum).
+    let env: String
+    /// APNs topic (app bundle id).
+    let topic: String
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceId
+        case deviceIdSnake = "device_id"
+        case platform
+        case appBuild
+        case appBuildSnake = "app_build"
+        case apnsToken
+        case apnsTokenSnake = "apns_token"
+        case env
+        case topic
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard let deviceId = try c.decodeIfPresent(String.self, forKey: .deviceId)
+            ?? c.decodeIfPresent(String.self, forKey: .deviceIdSnake)
+        else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.deviceId,
+                .init(codingPath: decoder.codingPath, debugDescription: "deviceId is required")
+            )
+        }
+        guard let apnsToken = try c.decodeIfPresent(String.self, forKey: .apnsToken)
+            ?? c.decodeIfPresent(String.self, forKey: .apnsTokenSnake)
+        else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.apnsToken,
+                .init(codingPath: decoder.codingPath, debugDescription: "apnsToken is required")
+            )
+        }
+        self.deviceId = deviceId
+        self.apnsToken = apnsToken
+        self.platform = try c.decode(String.self, forKey: .platform)
+        self.appBuild = try c.decodeIfPresent(String.self, forKey: .appBuild)
+            ?? c.decodeIfPresent(String.self, forKey: .appBuildSnake)
+        self.env = try c.decode(String.self, forKey: .env)
+        self.topic = try c.decode(String.self, forKey: .topic)
+    }
+}
+
+/// Push token as returned by the device routes. The raw apns_token is
+/// intentionally absent — `apnsTokenSuffix` (trailing 8 hex chars) is the
+/// only registration receipt (MOMO-403: no raw token in responses).
+struct PushTokenDTO: ResponseEncodable, Decodable {
+    let id: String
+    let deviceId: String
+    let env: String
+    let topic: String
+    let apnsTokenSuffix: String
+    let invalidatedAtMs: Int64?
+    let createdAtMs: Int64
+    let updatedAtMs: Int64
+}
+
+struct DeviceDTO: ResponseEncodable, Decodable {
+    let id: String
+    let workspaceId: String
+    let memberId: String
+    let platform: String
+    let appBuild: String?
+    let lastSeenAtMs: Int64
+    let createdAtMs: Int64
+    let pushTokens: [PushTokenDTO]
+}
+
+struct RegisterDeviceResponse: ResponseEncodable {
+    let device: DeviceDTO
+}
+
+struct DeviceListResponse: ResponseEncodable {
+    let devices: [DeviceDTO]
+}
+
+struct RevokeDeviceResponse: ResponseEncodable {
+    let device: DeviceDTO
+    /// Number of tokens flipped to invalidated by THIS call (0 = idempotent
+    /// repeat). Rows are never deleted.
+    let invalidatedCount: Int
+}
+
 // ---- Health ----
 
 struct HealthResponse: ResponseEncodable {
