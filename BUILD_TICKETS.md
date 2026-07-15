@@ -1953,7 +1953,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 가능하면 하드코딩 목록 대신 config 파싱 대조로 구조 개선(재량 — 과하면 목록 갱신 + drift 주석).
 - [ ] `staging-smoke` 프로파일 PASS evidence.
 
-### ☐ MOMO-400 수용기준 — ADR-0119 W-4: 웹 작성·read-state·승인 카드 + realtime 왕복 `[web/docs]` · 의존: 웹 첫 배치 종결
+### ☐ MOMO-400 (`#410`) 수용기준 — ADR-0119 W-4: 웹 작성·read-state·승인 카드 + realtime 왕복 `[web/docs]` · 의존: 웹 첫 배치 종결
 - [ ] composer: `POST messages`(`clientMsgId` 멱등 — 재전송 중복 없음 smoke 실증), 표시는 서버 echo(브로드캐스트/backfill) 기준, seq 권위 준수. 오류/재시도 카피 제공.
 - [ ] read-state: bulk GET 초기화 + 열람 시 단조 cursor PUT + 사이드바 unread 배지 + `user:read-state#<member-id>` 실시간 구독(채널명 표기는 서버 outbox 코드 대조 — 첫 배치 리뷰 방식 승계).
 - [ ] 승인 카드: approvals 목록/타임라인 approval_request에 승인·거부(decision POST). 403/404/409 **receipt 스키마**(openapi 정본)를 카드 상태 전이로 처리(409=타 기기 선결정은 오류가 아님). ADR-0112 기본 모드 문법만.
@@ -1961,7 +1961,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] `docs/api/openapi.yaml` 무변경(스펙 밖 라우트 소비 금지). 서버·clients/macOS 무변경.
 - [ ] smoke 확장(작성 멱등·read-state 반영·승인 왕복·409 receipt) 포함 `--profile web` 전체 PASS.
 
-### ☐ MOMO-401 수용기준 — ADR-0119 W-5: 초대 링크 웹 합류 `/join/<code>` `[web/docs]` · 의존: MOMO-400 (같은 파일군)
+### ☐ MOMO-401 (`#411`) 수용기준 — ADR-0119 W-5: 초대 링크 웹 합류 `/join/<code>` `[web/docs]` · 의존: MOMO-400 (같은 파일군)
 - [ ] SPA `/join/<code>` 라우트: 공개 `POST /v1/join` 호출(openapi 정본 스키마), 성공 시 가입 완료 → join 응답이 로그인 토큰 미포함이면 로그인 폼 프리필 연결(스펙을 앞지르는 자동 로그인 금지).
 - [ ] 초대 오류 UX: 만료/사용 소진/revoked를 서버 오류 envelope 기반 사용자 카피로 구분 표시.
 - [ ] ADR-0121 D2-B 형태(서버 자체 도메인 링크)가 이 티켓의 산출물 — Dawn 단축 링크(S-4)는 범위 밖.
