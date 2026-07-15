@@ -1920,11 +1920,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] raw access/refresh/connection JWT/shared secret을 stdout evidence에 출력하지 않고 auth/refresh 실패 body 비노출. `umask 077` 후 `mktemp -d`, exact-dir cleanup 적용.
 - [x] human realtime liveness를 `session` + `label='access'`로 강화해 refresh row 차단. RLS·`schema_v0.sql` 무변경. focused verifier PASS; review 반영 final clean `runtime-db`·`docs` evidence는 PR #393 기록.
 
-### ☐ MOMO-389 (`#395`) 수용기준 — ADR-0119 W-1: OpenAPI 계약 정본 v0 + drift 게이트 `[python/docs]` · 의존: 없음
-- [ ] `docs/api/openapi.yaml` 신설 — 웹 v0 표면 한정: login/refresh/logout/join/realtime-token/roster/channels(list·create)/messages(send·history)/read-state(bulk GET·cursor PUT)/dms(list·open)/approvals(list·decision). 요청/응답 스키마는 현행 서버 DTO(`server/Sources/MomoServer/Routes/DTOs.swift`)와 필드 단위 일치.
-- [ ] drift 게이트 스크립트 신설: e2e compose 서버를 상대로 스펙 내 각 라우트의 실제 응답 shape(필수 키·타입)를 표본 검증하고 불일치 시 FAIL. `LOCAL_PR_GATE.md`에 등록.
-- [ ] 서버 소스 무변경. 스펙이 서버와 어긋나는 지점을 발견하면 스펙을 서버에 맞추고 그 사실을 PR 이탈 섹션에 기록(서버 수정 금지 — 웹 v0 표면 밖 라우트는 문서화하지 않음).
-- [ ] `docs` 게이트 + 신규 drift 게이트 PASS evidence를 PR에 첨부.
+### ☑ MOMO-389 (`#395`) 수용기준 — ADR-0119 W-1: OpenAPI 계약 정본 v0 + drift 게이트 `[python/docs]` · 의존: 없음
+- [x] `docs/api/openapi.yaml` 신설 — 웹 v0 표면 17개 오퍼레이션: login/refresh/logout/join/realtime-token/roster/channels(list·create)/messages(send·history)/read-state(bulk GET·cursor PUT)/dms(list·open)/approvals(list·decision). 서버 DTO와 필드 단위 일치 — 독립 리뷰가 10개 스키마 그룹 전수 대조로 확인.
+- [x] drift 게이트 신설: `scripts/verify_openapi_contract.sh`(격리 e2e compose `momo389gate` 자체 기동·정리) + `scripts/openapi_shape_check.py`(필수 키·타입·enum·UUID·closed-world). 20/20 표본 PASS, 합성 drift 음성 대조 전부 검출. `LOCAL_PR_GATE.md` 등록.
+- [x] 서버 소스 무변경. 스펙을 서버에 맞춘 판정 5건(workspace demo 폴백·snake/camel 혼재·UUID 대소문자·옵셔널=키 생략·decision receipt 실패 스키마)을 PR #404 이탈 섹션에 기록.
+- [x] `docs` 게이트 + drift 게이트 PASS — evidence는 PR #404 + 독립 리뷰 재현. main merge `6fe746f`.
 
 ### ☑ MOMO-390 (`#396`) 수용기준 — ADR-0119 W-3: Caddy APP_DOMAIN site + 웹 정적 서빙 `[infra/docs]` · 의존: 없음 (MOMO-389와 병렬)
 - [x] `infra/prod/Caddyfile`에 `{$APP_DOMAIN}` site 추가: SPA 정적 자산 file_server + `try_files` index.html 폴백 + `/v1/*` → `api:8080` reverse_proxy(같은 오리진 — ADR-0119 D1-A) + `/v1/centrifugo/*` 엣지 403 + security_headers import + SPA CSP(자체 오리진 한정, `connect-src 'self' wss://{$REALTIME_DOMAIN}`, inline script 금지) — 전부 `scripts/web_serving_smoke.sh` 런타임 검증.
@@ -1937,6 +1937,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 로그인(email/password/workspace) → 채널 목록 → 타임라인 읽기(seq 기반 history + `?after=<seq>` backfill) → centrifuge-js 실시간 구독. websocket 주소는 login/join 응답의 `realtimeWebSocketUrl`만 사용(ADR-0110 — API URL에서 추론 금지), 연결 토큰은 `POST /v1/auth/realtime-token`. recovery 실패(`recovered:false`) 시 REST backfill 폴백.
 - [ ] 토큰 정책 ADR-0119 D3-A 준수: access 메모리 보관, refresh localStorage(회전 사용), 로그아웃 시 서버 revoke + 로컬 삭제. 공개 배포 전 httpOnly 승격 게이트를 코드 주석이 아닌 `clients/web/README.md`에 명문화.
 - [ ] `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`: install → lint → typecheck → build → e2e compose 대상 로그인→타임라인 smoke) + `LOCAL_PR_GATE.md` 갱신.
+- [ ] `web` 프로파일에 `scripts/web_serving_smoke.sh` 실행 포함 — APP_DOMAIN sentinel fail-closed(가드가 proxy보다 먼저 평가) 자동 회귀 방어(PR #403 리뷰 Medium-1). centrifuge-js가 HTTP 폴백 transport를 쓰게 되면 CSP `connect-src`를 Caddyfile에서 명시 확장하고 smoke 기대값을 함께 갱신.
 - [ ] `clients/macOS`·`server` 소스 무변경. ADR-0112 기본 모드 문법만(개발자 밀도·Work 상세·비용 표시 없음). 파일 업로드/웹훅 UI/presence 표시/멀티 워크스페이스 rail 비구현(각 ADR 게이트).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console

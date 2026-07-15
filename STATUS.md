@@ -3,6 +3,13 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-389/390 웹 트랙 첫 배치 — OpenAPI 계약 정본 + APP_DOMAIN 서빙 (2026-07-15)
+
+- ADR-0119(웹 클라이언트 트랙) 첫 배치를 Fable 구현·독립 리뷰·순차 머지로 랜딩했다(엔진/인프라 트랙 Fable momo-main 겸임 — 성재 승인). MOMO-389=PR #404(`6fe746f`), MOMO-390=PR #403(`5ecd645`), 두 PR 모두 독립 리뷰 Blocker 0/High 0.
+- MOMO-389: `docs/api/openapi.yaml` 17개 오퍼레이션이 클라이언트 계약의 스펙 정본이 됐다. drift 게이트(`verify_openapi_contract.sh`+`openapi_shape_check.py`)는 격리 e2e compose를 자체 기동해 20/20 표본 shape 일치 PASS, 리뷰어가 합성 drift 5종 검출과 잔여물 0을 독립 재현했다. 스펙을 서버에 맞춘 판정 5건은 PR #404 이탈 섹션이 정본.
+- MOMO-390: `{$APP_DOMAIN}` site(SPA file_server+`/v1` proxy 같은 오리진+SPA CSP)가 랜딩했다. 미설정 하위호환은 sentinel `momo-app-domain-unset.localhost` fail-closed(전 경로 404, ACME 무발생 — 리뷰어 adapt/런타임 실측)로 보장하고, 기본 e2e 렌더는 byte-identical. `web_serving_smoke.sh` 전 항목 PASS.
+- 머지 후 리뷰 후속 반영: MOMO-391 수용기준에 `web_serving_smoke.sh` 게이트 포함(fail-closed 회귀 방어), drift 게이트 픽스처 비밀번호 랜덤화, CSP `img-src data:` 의도 주석, LOCAL_PR_GATE spec-first 문구. 선재 발견(staging smoke의 `agentwork` namespace 불일치 — main 기저 FAIL)은 DEVIATION_LOG `pending`.
+
 ## MOMO-384 Native Channel Creation + Window Tooltip (2026-07-15)
 
 - sidebar inline form을 public/private, name, topic을 받는 native SwiftUI sheet로 교체했다. server와 같은 trim+lowercase+regex validation, 첫 name focus, Esc/Return, localized retry/error를 제공하고 기존 REST create 경로 성공 시 sheet를 닫아 새 channel을 선택한다. local 실패는 bounded issue만 보관하며 raw error 문자열은 장기 `Published` state에 남기지 않는다. 401/not-connected는 sheet를 닫고 기존 전역 session-expired 로그인 복구 CTA로 전달한다.

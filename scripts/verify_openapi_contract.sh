@@ -76,7 +76,10 @@ GENERAL_CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 KIM_INTERN_MEMBER_ID="00000000-0000-7000-8000-000000000102"
 GATE_MEMBER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 GATE_EMAIL="gate-$RUN_ID@momo.local"
-GATE_PASSWORD="openapi-gate-pw"
+# Random per run: in BASE_URL(external stack) mode the fixture member row can
+# outlive the gate, so it must never carry a well-known password (PR #404
+# review Low-1). Override only for deterministic debugging.
+GATE_PASSWORD="${OPENAPI_GATE_PASSWORD:-gate-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
 GATE_HANDLE="gate-$RUN_EPOCH"
 JOIN_EMAIL="gate-join-$RUN_ID@momo.local"
 INVITE_CODE="gate-invite-$(uuidgen | tr '[:upper:]' '[:lower:]')"

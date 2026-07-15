@@ -113,7 +113,10 @@ samples **every operation documented in the spec** against the live server,
 and validates each response with `scripts/openapi_shape_check.py`: required
 keys, types, enums, UUID format, no unexpected `null`s, and a closed-world
 key check — a response key the spec does not declare fails as drift, and a
-spec operation without a live sample fails operation coverage. The stack is
+spec operation without a live sample fails operation coverage. The intended
+workflow is spec-first: a PR that adds or changes a response field on a
+documented route must update `docs/api/openapi.yaml` in the same PR, or this
+gate fails. The stack is
 torn down afterwards; it never touches containers from other compose
 projects. Overrides: `OPENAPI_GATE_PORT` / `OPENAPI_GATE_POSTGRES_PORT` /
 `OPENAPI_GATE_CENT_PORT` / `OPENAPI_GATE_HERMES_PORT` (host port conflicts),
