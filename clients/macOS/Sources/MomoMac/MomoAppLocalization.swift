@@ -1985,6 +1985,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var downloadDeleteFailedTitle: String {
+        switch language {
+        case .korean: return "파일을 삭제할 수 없습니다"
+        case .english: return "Unable to delete file"
+        }
+    }
+
+    var downloadDeleteFailedMessage: String {
+        switch language {
+        case .korean: return "파일이 다운로드 폴더에 있는지와 접근 권한을 확인한 뒤 다시 시도하세요. 이력은 그대로 유지됩니다."
+        case .english: return "Check that the file is in the Downloads folder and that momo has access, then try again. The history entry was kept."
+        }
+    }
+
     var updatesSubtitle: String {
         switch language {
         case .korean: return "현재 버전과 알파 업데이트 상태를 확인합니다."

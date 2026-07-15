@@ -1929,7 +1929,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] channel unread 합계를 Dock badge `1...99+`로 표시하고 0/logout에서 clear.
 - [x] Downloads를 채널 선택과 무관한 app toolbar 우측 icon popover로 이동하고 security-scoped folder open/change, 영속 history, item-level open/Finder/delete를 제공. Updates는 profile menu에 유지.
 - [x] profile menu의 rise/move animation을 제거하고 footer button 위 약 16pt 간격으로 즉시 표시.
-- [x] build와 macOS 전체 294 tests 0 failure, 실행 앱과 standard/narrow/light/dark artifact에서 sidebar/header/roster/downloads/profile menu 상호작용 확인.
+- [x] build와 macOS 전체 296 tests 0 failure, 실행 앱과 standard/narrow/light/dark artifact에서 sidebar/header/roster/downloads/profile menu 상호작용 확인. 다운로드 삭제는 resolved folder boundary를 벗어나는 symlink/sibling path를 거부하고 실제 삭제 성공 후에만 history를 제거.
 - [ ] clean `macos-ui` gate와 fresh design-review Blocker 0를 PR evidence에 기록하고 momo-main review/merge 후 main gate 재검증.
 - [ ] 실제 채팅 첨부파일 download record 공급은 MOMO-394에서 구현. 이번 surface의 영속 store와 item action은 준비하되 가짜 history를 생성하지 않음.
 

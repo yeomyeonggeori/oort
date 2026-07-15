@@ -8,7 +8,7 @@
 - `NavigationSplitView`가 이미 unified toolbar 아래에서 시작하는데 AppKit content inset을 다시 더하던 이중 보정과 pane별 border/rounding/shadow를 제거했다. 좌측 workspace row, 가운데 channel header, 우측 member inspector가 각각 독립된 한 줄 header로 정렬되고 경계에는 separator 하나만 남는다. profile menu는 이동 animation 없이 즉시 열리며 footer button 위 약 16pt 간격을 유지한다.
 - 우측 roster는 전체/사람/에이전트 탭 대신 관리자·에이전트·온라인·자리 비움·오프라인으로 그룹화하고 search/profile/DM 경로를 보존했다. 채널 unread 합계를 Dock badge에 `1...99+`로 표시하고 0 또는 logout에서 지운다.
 - Downloads는 채널 선택과 무관한 앱 상단 우측 icon popover로 이동했다. security-scoped bookmark를 사용하는 폴더 열기·변경, 최대 50건의 영속 이력, 항목별 열기·Finder 보기·삭제를 제공하고 Updates는 profile menu에 유지한다. MOMO-394가 실제 채팅 첨부파일 전송 기록을 공급하기 전에는 가짜 이력을 만들지 않는다.
-- macOS build와 전체 294 tests가 0 failure로 PASS했다. 표준·좁은·light/dark real-window artifact에서 flat sidebar, pane header 정렬, grouped roster와 영문 inspector header를 재검증했고 실행 앱에서 downloads popover와 animation 없는 profile menu 동작을 확인했다. 최종 clean `macos-ui`와 fresh design-review evidence는 PR에 기록한다.
+- macOS build와 전체 296 tests가 0 failure로 PASS했다. 표준·좁은·light/dark real-window artifact에서 flat sidebar, pane header 정렬, grouped roster와 영문 inspector header를 재검증했고 실행 앱에서 downloads popover와 animation 없는 profile menu 동작을 확인했다. 다운로드 이력은 실제 폴더 경계와 symlink를 해석해 폴더 밖 파일을 거부하며, 삭제 성공 후에만 이력을 제거한다. 최종 clean `macos-ui`와 fresh design-review evidence는 PR에 기록한다.
 
 ## MOMO-392 Channel Chrome + Contextual Navigation Polish (2026-07-15)
 

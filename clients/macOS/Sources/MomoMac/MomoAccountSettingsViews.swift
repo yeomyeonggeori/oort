@@ -704,6 +704,109 @@ enum MomoDownloadHistoryStore {
     }
 }
 
+enum MomoDownloadFileBoundary {
+    static func managedFileURL(
+        recordPath: String,
+        downloadsFolder: URL,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        MomoDownloadsFolderAccess.withAccess(to: downloadsFolder) {
+            validatedFileURL(
+                recordPath: recordPath,
+                downloadsFolder: downloadsFolder,
+                fileManager: fileManager
+            )
+        }
+    }
+
+    private static func validatedFileURL(
+        recordPath: String,
+        downloadsFolder: URL,
+        fileManager: FileManager
+    ) -> URL? {
+        let storedFileURL = URL(fileURLWithPath: recordPath).standardizedFileURL
+        let storedFolderURL = downloadsFolder.standardizedFileURL
+        let storedFolderPrefix = descendantPrefix(for: storedFolderURL)
+
+        guard storedFileURL.path.hasPrefix(storedFolderPrefix),
+              !containsSymlinkBelowRoot(
+                  fileURL: storedFileURL,
+                  folderURL: storedFolderURL,
+                  fileManager: fileManager
+              ) else {
+            return nil
+        }
+
+        let resolvedFileURL = storedFileURL.resolvingSymlinksInPath().standardizedFileURL
+        let resolvedFolderURL = storedFolderURL.resolvingSymlinksInPath().standardizedFileURL
+        let folderPrefix = resolvedFolderURL.path.hasSuffix("/")
+            ? resolvedFolderURL.path
+            : resolvedFolderURL.path + "/"
+
+        guard resolvedFileURL.path.hasPrefix(folderPrefix),
+              let values = try? resolvedFileURL.resourceValues(
+                  forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+              ),
+              values.isRegularFile == true,
+              values.isSymbolicLink != true else {
+            return nil
+        }
+        return resolvedFileURL
+    }
+
+    private static func descendantPrefix(for folderURL: URL) -> String {
+        folderURL.path.hasSuffix("/") ? folderURL.path : folderURL.path + "/"
+    }
+
+    private static func containsSymlinkBelowRoot(
+        fileURL: URL,
+        folderURL: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        let folderComponents = folderURL.pathComponents
+        let fileComponents = fileURL.pathComponents
+        guard fileComponents.count > folderComponents.count else { return true }
+
+        var currentURL = folderURL
+        for component in fileComponents.dropFirst(folderComponents.count) {
+            currentURL.appendPathComponent(component)
+            guard let attributes = try? fileManager.attributesOfItem(atPath: currentURL.path) else {
+                return true
+            }
+            if attributes[.type] as? FileAttributeType == .typeSymbolicLink {
+                return true
+            }
+        }
+        return false
+    }
+
+    @discardableResult
+    static func delete(
+        record: MomoDownloadHistoryRecord,
+        downloadsFolder: URL,
+        defaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> Bool {
+        do {
+            try MomoDownloadsFolderAccess.withAccess(to: downloadsFolder) {
+                guard let fileURL = validatedFileURL(
+                    recordPath: record.filePath,
+                    downloadsFolder: downloadsFolder,
+                    fileManager: fileManager
+                ) else {
+                    throw CocoaError(.fileReadNoPermission)
+                }
+                try fileManager.removeItem(at: fileURL)
+            }
+        } catch {
+            return false
+        }
+
+        MomoDownloadHistoryStore.remove(record.id, defaults: defaults)
+        return true
+    }
+}
+
 struct MomoDownloadsSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     @AppStorage(MomoDownloadsFolderAccess.pathKey) private var downloadsFolderPath = ""
@@ -1474,8 +1577,11 @@ private struct MomoDownloadHistoryRowView: View {
     let copy: MomoWorkspaceCopy
     let downloadsFolder: URL
     let didDelete: () -> Void
+    @State private var showsDeleteFailure = false
 
     var body: some View {
+        let availableFileURL = managedFileURL
+
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: record.outcome == .completed ? "doc.fill" : "exclamationmark.triangle.fill")
                 .font(MomoTheme.Typography.row.weight(.semibold))
@@ -1507,19 +1613,19 @@ private struct MomoDownloadHistoryRowView: View {
                 Button(copy.openDownload) {
                     openRecord()
                 }
-                .disabled(managedFileURL.map { !FileManager.default.fileExists(atPath: $0.path) } ?? true)
+                .disabled(availableFileURL == nil)
 
                 Button(copy.showInFinder) {
                     revealRecord()
                 }
-                .disabled(managedFileURL.map { !FileManager.default.fileExists(atPath: $0.path) } ?? true)
+                .disabled(availableFileURL == nil)
 
                 Divider()
 
                 Button(copy.deleteDownload, role: .destructive) {
                     deleteRecord()
                 }
-                .disabled(managedFileURL == nil)
+                .disabled(availableFileURL == nil)
             } label: {
                 Image(systemName: "ellipsis")
                     .frame(width: MomoTheme.ChannelHeader.actionSize, height: MomoTheme.ChannelHeader.actionSize)
@@ -1534,6 +1640,11 @@ private struct MomoDownloadHistoryRowView: View {
             MomoTheme.Downloads.hoverBackground,
             in: RoundedRectangle(cornerRadius: MomoTheme.Downloads.rowCornerRadius)
         )
+        .alert(copy.downloadDeleteFailedTitle, isPresented: $showsDeleteFailure) {
+            Button(copy.done, role: .cancel) {}
+        } message: {
+            Text(copy.downloadDeleteFailedMessage)
+        }
     }
 
     @MainActor
@@ -1553,22 +1664,21 @@ private struct MomoDownloadHistoryRowView: View {
     }
 
     private func deleteRecord() {
-        guard let fileURL = managedFileURL else { return }
-        let folderURL = downloadsFolder.standardizedFileURL
-
-        MomoDownloadsFolderAccess.withAccess(to: folderURL) {
-            try? FileManager.default.removeItem(at: fileURL)
+        if MomoDownloadFileBoundary.delete(
+            record: record,
+            downloadsFolder: downloadsFolder
+        ) {
+            didDelete()
+        } else {
+            showsDeleteFailure = true
         }
-        MomoDownloadHistoryStore.remove(record.id)
-        didDelete()
     }
 
     private var managedFileURL: URL? {
-        let fileURL = URL(fileURLWithPath: record.filePath).standardizedFileURL
-        let folderURL = downloadsFolder.standardizedFileURL
-        let folderPrefix = folderURL.path.hasSuffix("/") ? folderURL.path : folderURL.path + "/"
-        guard fileURL.path.hasPrefix(folderPrefix) else { return nil }
-        return fileURL
+        MomoDownloadFileBoundary.managedFileURL(
+            recordPath: record.filePath,
+            downloadsFolder: downloadsFolder
+        )
     }
 }
 

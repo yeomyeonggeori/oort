@@ -176,6 +176,121 @@ final class MomoChannelChromeTests: XCTestCase {
 
         MomoDownloadHistoryStore.remove(recent.id, defaults: defaults)
         XCTAssertEqual(MomoDownloadHistoryStore.load(defaults: defaults), [old])
+
+        for index in 0..<(MomoDownloadHistoryStore.maximumRecordCount + 5) {
+            MomoDownloadHistoryStore.record(
+                MomoDownloadHistoryRecord(
+                    fileName: "file-\(index).txt",
+                    filePath: "/tmp/momo/file-\(index).txt",
+                    recordedAt: Date(timeIntervalSince1970: TimeInterval(index + 10)),
+                    outcome: .completed
+                ),
+                defaults: defaults
+            )
+        }
+        XCTAssertEqual(
+            MomoDownloadHistoryStore.load(defaults: defaults).count,
+            MomoDownloadHistoryStore.maximumRecordCount
+        )
+    }
+
+    func testDownloadFileBoundaryRejectsOutsidePrefixAndEscapingSymlink() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("momo-download-boundary-\(UUID().uuidString)", isDirectory: true)
+        let downloads = root.appendingPathComponent("Downloads", isDirectory: true)
+        let prefixCollision = root.appendingPathComponent("Downloads-other", isDirectory: true)
+        let outside = root.appendingPathComponent("outside", isDirectory: true)
+        try fileManager.createDirectory(at: downloads, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: prefixCollision, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        let siblingFile = prefixCollision.appendingPathComponent("report.txt")
+        let outsideFile = outside.appendingPathComponent("secret.txt")
+        let directoryRecord = downloads.appendingPathComponent("nested", isDirectory: true)
+        try Data("sibling".utf8).write(to: siblingFile)
+        try Data("outside".utf8).write(to: outsideFile)
+        try fileManager.createDirectory(at: directoryRecord, withIntermediateDirectories: true)
+        let escapingLink = downloads.appendingPathComponent("outside-link")
+        try fileManager.createSymbolicLink(at: escapingLink, withDestinationURL: outside)
+        let finalLink = downloads.appendingPathComponent("final-link.txt")
+        try fileManager.createSymbolicLink(at: finalLink, withDestinationURL: outsideFile)
+
+        XCTAssertNil(
+            MomoDownloadFileBoundary.managedFileURL(
+                recordPath: siblingFile.path,
+                downloadsFolder: downloads
+            )
+        )
+        XCTAssertNil(
+            MomoDownloadFileBoundary.managedFileURL(
+                recordPath: escapingLink.appendingPathComponent("secret.txt").path,
+                downloadsFolder: downloads
+            )
+        )
+        XCTAssertNil(
+            MomoDownloadFileBoundary.managedFileURL(
+                recordPath: finalLink.path,
+                downloadsFolder: downloads
+            )
+        )
+        XCTAssertNil(
+            MomoDownloadFileBoundary.managedFileURL(
+                recordPath: directoryRecord.path,
+                downloadsFolder: downloads
+            )
+        )
+        XCTAssertTrue(fileManager.fileExists(atPath: outsideFile.path))
+    }
+
+    func testDownloadDeleteKeepsHistoryOnFailureAndRemovesItAfterSuccess() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory
+            .appendingPathComponent("momo-download-delete-\(UUID().uuidString)", isDirectory: true)
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: root) }
+
+        let suiteName = "MomoChannelChromeTests.downloadDelete.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let missingRecord = MomoDownloadHistoryRecord(
+            fileName: "missing.txt",
+            filePath: root.appendingPathComponent("missing.txt").path,
+            outcome: .completed
+        )
+        MomoDownloadHistoryStore.record(missingRecord, defaults: defaults)
+
+        XCTAssertFalse(
+            MomoDownloadFileBoundary.delete(
+                record: missingRecord,
+                downloadsFolder: root,
+                defaults: defaults,
+                fileManager: fileManager
+            )
+        )
+        XCTAssertEqual(MomoDownloadHistoryStore.load(defaults: defaults), [missingRecord])
+
+        let fileURL = root.appendingPathComponent("completed.txt")
+        try Data("completed".utf8).write(to: fileURL)
+        let completedRecord = MomoDownloadHistoryRecord(
+            fileName: fileURL.lastPathComponent,
+            filePath: fileURL.path,
+            outcome: .completed
+        )
+        MomoDownloadHistoryStore.record(completedRecord, defaults: defaults)
+
+        XCTAssertTrue(
+            MomoDownloadFileBoundary.delete(
+                record: completedRecord,
+                downloadsFolder: root,
+                defaults: defaults,
+                fileManager: fileManager
+            )
+        )
+        XCTAssertFalse(fileManager.fileExists(atPath: fileURL.path))
+        XCTAssertFalse(MomoDownloadHistoryStore.load(defaults: defaults).contains(completedRecord))
     }
 
     func testChannelPresentationNormalizesNameAndOptionalTopic() throws {
