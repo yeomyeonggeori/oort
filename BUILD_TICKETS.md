@@ -1933,13 +1933,25 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] prod compose: caddy `/srv/momo-web`에 named volume(기본, 빈 볼륨=404) 또는 `MOMO_WEB_DIST_DIR` host 경로 마운트 — api 컨테이너는 웹 서빙 안 함. e2e compose: `web` 프로파일 `web-edge` 서비스(prod Caddyfile + placeholder index.html)로 서빙 smoke; 기본(프로파일 미지정) e2e 렌더는 변경 전과 byte-identical.
 - [x] `docs/DEPLOY.md` §4.4에 APP_DOMAIN 델타(신규 env·DNS·미설정 동작·자산 배치) 기록. `prod_env_preflight.sh` strict 모드에 optional APP_DOMAIN 검사(placeholder/reserved 거부, API/REALTIME 중복 거부, unset 허용) 추가. 기존 게이트 무회귀(staging-smoke의 centrifugo namespace FAIL은 main 기저 선재 — PR evidence 기록).
 
-### ☐ MOMO-391 (`#397`) 수용기준 — ADR-0119 W-2: clients/web 스캐폴드 + 로그인/타임라인 v0 `[web(신설)/docs]` · 의존: MOMO-389, MOMO-390
-- [ ] `clients/web` 신설: Vite + React + TypeScript, 의존성 전부 permissive(MIT/Apache/ISC/BSD — 라이선스 목록을 PR에 첨부, GPL/AGPL 금지), 타입은 MOMO-389 스펙에서 openapi-typescript 생성.
-- [ ] 로그인(email/password/workspace) → 채널 목록 → 타임라인 읽기(seq 기반 history + `?after=<seq>` backfill) → centrifuge-js 실시간 구독. websocket 주소는 login/join 응답의 `realtimeWebSocketUrl`만 사용(ADR-0110 — API URL에서 추론 금지), 연결 토큰은 `POST /v1/auth/realtime-token`. recovery 실패(`recovered:false`) 시 REST backfill 폴백.
-- [ ] 토큰 정책 ADR-0119 D3-A 준수: access 메모리 보관, refresh localStorage(회전 사용), 로그아웃 시 서버 revoke + 로컬 삭제. 공개 배포 전 httpOnly 승격 게이트를 코드 주석이 아닌 `clients/web/README.md`에 명문화.
-- [ ] `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`: install → lint → typecheck → build → e2e compose 대상 로그인→타임라인 smoke) + `LOCAL_PR_GATE.md` 갱신.
-- [ ] `web` 프로파일에 `scripts/web_serving_smoke.sh` 실행 포함 — APP_DOMAIN sentinel fail-closed(가드가 proxy보다 먼저 평가) 자동 회귀 방어(PR #403 리뷰 Medium-1). centrifuge-js가 HTTP 폴백 transport를 쓰게 되면 CSP `connect-src`를 Caddyfile에서 명시 확장하고 smoke 기대값을 함께 갱신.
-- [ ] `clients/macOS`·`server` 소스 무변경. ADR-0112 기본 모드 문법만(개발자 밀도·Work 상세·비용 표시 없음). 파일 업로드/웹훅 UI/presence 표시/멀티 워크스페이스 rail 비구현(각 ADR 게이트).
+### ☑ MOMO-391 (`#397`) 수용기준 — ADR-0119 W-2: clients/web 스캐폴드 + 로그인/타임라인 v0 `[web(신설)/docs]` · 의존: MOMO-389, MOMO-390
+- [x] `clients/web` 신설: Vite + React + TypeScript, 의존성 전부 permissive(MIT/Apache/ISC/BSD — 라이선스 목록을 PR에 첨부, GPL/AGPL 금지), 타입은 MOMO-389 스펙에서 openapi-typescript 생성.
+- [x] 로그인(email/password/workspace) → 채널 목록 → 타임라인 읽기(seq 기반 history + `?after=<seq>` backfill) → centrifuge-js 실시간 구독. websocket 주소는 login/join 응답의 `realtimeWebSocketUrl`만 사용(ADR-0110 — API URL에서 추론 금지), 연결 토큰은 `POST /v1/auth/realtime-token`. recovery 실패(`recovered:false`) 시 REST backfill 폴백.
+- [x] 토큰 정책 ADR-0119 D3-A 준수: access 메모리 보관, refresh localStorage(회전 사용), 로그아웃 시 서버 revoke + 로컬 삭제. 공개 배포 전 httpOnly 승격 게이트를 코드 주석이 아닌 `clients/web/README.md`에 명문화.
+- [x] `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`: install → lint → typecheck → build → e2e compose 대상 로그인→타임라인 smoke) + `LOCAL_PR_GATE.md` 갱신.
+- [x] `web` 프로파일에 `scripts/web_serving_smoke.sh` 실행 포함 — APP_DOMAIN sentinel fail-closed(가드가 proxy보다 먼저 평가) 자동 회귀 방어(PR #403 리뷰 Medium-1). centrifuge-js가 HTTP 폴백 transport를 쓰게 되면 CSP `connect-src`를 Caddyfile에서 명시 확장하고 smoke 기대값을 함께 갱신.
+- [x] `clients/macOS`·`server` 소스 무변경. ADR-0112 기본 모드 문법만(개발자 밀도·Work 상세·비용 표시 없음). 파일 업로드/웹훅 UI/presence 표시/멀티 워크스페이스 rail 비구현(각 ADR 게이트).
+- [x] 종결 evidence: PR #407(+리뷰 반영 b499d32) merge `63e7d51`, 독립 리뷰 Blocker/High 0(Medium 1 반영 — 만료 access 로그아웃 revoke 재시도), merge 후 main `web` 프로파일 전체 게이트 PASS. relay 채널명 대소문자 일치는 리뷰어가 서버 코드 대조로 실증.
+
+### ☐ MOMO-398 수용기준 — prod Centrifugo `allowed_origins`: 웹 realtime 개통 `[infra/docs]` · 의존: 없음 (W-4/W-5 선행 필수)
+- [ ] prod Centrifugo 설정에 브라우저 Origin 허용을 추가한다: `APP_DOMAIN` 설정 시 `https://{APP_DOMAIN}`만 allowed_origins로 주입(compose env 또는 config 템플릿 — 방식 재량), 미설정 배포는 기존 동작 완전 무변화.
+- [ ] 네이티브(비브라우저) 클라이언트 무회귀 — Origin 미전송 경로는 계속 허용됨을 근거로 명시.
+- [ ] `prod_env_preflight.sh`/`docs/DEPLOY.md`에 델타 반영. prod compose config 렌더 검증(set/unset 매트릭스).
+- [ ] 배경: PR #407 계획 이탈 §1 — allowed_origins 공백 시 브라우저 wss 403(현재 prod는 fail-closed 상태라 무해, 웹 W-4/W-5 전 개통 필요).
+
+### ☐ MOMO-399 수용기준 — staging/internal smoke의 Centrifugo namespace drift 수정 `[tooling/docs]` · 의존: 없음
+- [ ] `verify_staging_smoke.sh`·`verify_internal_hosting_smoke.sh`의 namespace 기대를 현행 `centrifugo.prod.json` 5개(`ch/dm/agent/agentwork/user`)와 일치시켜 main 기저 FAIL을 해소한다(MOMO-338이 `agentwork` 추가 시 미갱신 — DEVIATION_LOG 2026-07-15).
+- [ ] 가능하면 하드코딩 목록 대신 config 파싱 대조로 구조 개선(재량 — 과하면 목록 갱신 + drift 주석).
+- [ ] `staging-smoke` 프로파일 PASS evidence.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

@@ -10,6 +10,13 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-391 clients/web v0 — 웹 첫 배치 종결 (2026-07-15)
+
+- ADR-0119 W-2가 랜딩하며 웹 첫 배치(389→390→391)가 종결됐다. PR #407(+리뷰 반영 `b499d32`) merge `63e7d51`. 독립 리뷰 Blocker 0/High 0/Medium 1 — Medium(만료 access 로그아웃 시 서버 revoke 무산)은 회전 1회 재시도로 수정하고, 스모크가 "401→회전 1회→재시도 revoke, 회전 전·후 refresh 모두 서버측 사망"을 실증했다.
+- `clients/web`(Vite+React+TS+centrifuge-js, 전이 포함 permissive-only 라이선스 게이트), `web` 게이트 프로파일(npm ci→lint→tsc→타입 동기화→build→라이선스→web_serving_smoke→실 Chromium 로그인/타임라인/실시간/`?after=` catch-up/CSP 0→drift 게이트)이 신설됐고, merge 후 main에서 `--profile web` 전체 PASS.
+- 리뷰어가 relay 채널명(`MessageRoutes.swift:153` uuidString 대문자) ↔ 웹 구독 채널명 일치를 서버 코드 대조로 실증했다. DM도 서버가 `ch:`로 publish함을 확인.
+- 계획 이탈: prod Centrifugo `allowed_origins` 공백 시 브라우저 wss 403(현재 fail-closed라 무해) → MOMO-398로 발급. dev/e2e allowed_origins만 이번에 수정.
+
 ## MOMO-389/390 웹 트랙 첫 배치 — OpenAPI 계약 정본 + APP_DOMAIN 서빙 (2026-07-15)
 
 - ADR-0119(웹 클라이언트 트랙) 첫 배치를 Fable 구현·독립 리뷰·순차 머지로 랜딩했다(엔진/인프라 트랙 Fable momo-main 겸임 — 성재 승인). MOMO-389=PR #404(`6fe746f`), MOMO-390=PR #403(`5ecd645`), 두 PR 모두 독립 리뷰 Blocker 0/High 0.
