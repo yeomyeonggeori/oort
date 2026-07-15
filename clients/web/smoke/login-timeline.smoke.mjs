@@ -16,6 +16,13 @@
 //   5. A message posted over REST while the page is subscribed arrives
 //      through the full write path (REST -> PG -> outbox -> relay ->
 //      Centrifugo -> wss) and is rendered live.
+//   6. Catch-up never runs without a seq baseline: no `?after=0` request is
+//      ever issued (the Timeline defers catch-up until the head page lands).
+//   7. Logout with an EXPIRED access token still revokes server-side: the
+//      first /v1/auth/logout is intercepted with a 401 (deterministic stand-in
+//      for the 15-minute expiry), and the client must rotate once and retry
+//      with the ROTATED pair — proven by both refresh tokens being dead via
+//      direct REST afterwards.
 //
 // Networking: the e2e Caddy edge listens on an alternate loopback port, but
 // CSP host sources match on DEFAULT ports (wss://rt.localhost == :443). So a
@@ -184,10 +191,18 @@ try {
   };
 
   let afterBackfillSeen = false;
+  let afterZeroSeen = false;
   page.on("request", (request) => {
     const url = request.url();
     if (url.includes("/messages?") && url.includes("after=")) {
       afterBackfillSeen = true;
+      // Regression guard (MOMO-391 review fix 2): a catch-up before the head
+      // page establishes a baseline would fire `after=0` and page the whole
+      // channel history oldest-first. #general is seeded before the browser
+      // phase, so a legitimate after=0 cannot occur here.
+      if (new URL(url).searchParams.get("after") === "0") {
+        afterZeroSeen = true;
+      }
     }
   });
 
@@ -248,8 +263,12 @@ try {
     failures.push(
       "expected at least one REST `?after=` catch-up request after subscribe"
     );
+  } else if (afterZeroSeen) {
+    failures.push(
+      "catch-up ran without a seq baseline (`after=0`) — Timeline must defer until the head page loads"
+    );
   } else {
-    pass("REST ?after= catch-up ran on subscription establish");
+    pass("REST ?after= catch-up ran on subscription establish (baseline > 0)");
   }
 
   const cspViolations = consoleErrors.filter((text) =>
@@ -266,6 +285,90 @@ try {
     fullPage: true,
   });
   console.log(`screenshot: ${join(OUT_DIR, "web-login-timeline.png")}`);
+
+  // 4) Expired-access logout must still revoke server-side (MOMO-391 review
+  //    fix 1). The FIRST /v1/auth/logout is fulfilled with 401 locally — the
+  //    same observable input the client gets from a 15-minute-old access
+  //    token — so the client must rotate once and retry with the re-read
+  //    ROTATED pair against the real server. Only that first response is
+  //    mocked; the rotation and the retried logout hit the actual stack.
+  const refreshResponses = [];
+  const logoutStatuses = [];
+  page.on("response", (response) => {
+    const url = response.url();
+    if (url.includes("/v1/auth/refresh")) refreshResponses.push(response);
+    if (url.includes("/v1/auth/logout")) logoutStatuses.push(response.status());
+  });
+  let logoutInterceptUsed = false;
+  await page.route("**/v1/auth/logout", async (route) => {
+    if (logoutInterceptUsed) return route.continue();
+    logoutInterceptUsed = true;
+    await route.fulfill({
+      status: 401,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unauthorized", message: "expired access (smoke)" },
+      }),
+    });
+  });
+
+  const preLogoutRaw = await page.evaluate(() =>
+    localStorage.getItem("momo.web.session.v1")
+  );
+  if (!preLogoutRaw) fail("session storage empty before logout");
+  const preLogoutRefresh = JSON.parse(preLogoutRaw).refreshToken;
+
+  await page.getByTestId("logout-button").click();
+  await page.getByTestId("login-email").waitFor({ timeout: 20000 });
+  pass("logout returned to the login form (local wipe)");
+
+  const storedAfterLogout = await page.evaluate(() =>
+    localStorage.getItem("momo.web.session.v1")
+  );
+  if (storedAfterLogout !== null) {
+    failures.push("localStorage session survived logout");
+  }
+
+  const refreshProbe = (refreshToken) =>
+    fetch(`${API_BASE}/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+  if (logoutStatuses.length !== 2 || logoutStatuses[0] !== 401) {
+    failures.push(
+      `expected logout 401 -> single retry, saw statuses: [${logoutStatuses.join(", ")}]`
+    );
+  } else if (logoutStatuses[1] < 200 || logoutStatuses[1] >= 300) {
+    failures.push(
+      `retried logout after rotation was not 2xx: ${logoutStatuses[1]}`
+    );
+  } else if (refreshResponses.length !== 1) {
+    failures.push(
+      `logout 401 must trigger exactly one refresh rotation, saw ${refreshResponses.length}`
+    );
+  } else {
+    const rotated = await refreshResponses[0].json();
+    // The ROTATED refresh token must be dead — the retry has to re-read the
+    // fresh pair (replaying the stale body would leave this one alive) …
+    const rotatedProbe = await refreshProbe(rotated.refreshToken);
+    // … and the pre-rotation token was consumed by the rotation itself.
+    const staleProbe = await refreshProbe(preLogoutRefresh);
+    if (rotatedProbe.ok) {
+      failures.push(
+        "rotated refresh token still alive after logout — server-side revocation did not happen"
+      );
+    } else if (staleProbe.ok) {
+      failures.push(
+        "pre-rotation refresh token still alive after logout rotation"
+      );
+    } else {
+      pass(
+        "expired-access logout: 401 -> one rotation -> retried revoke with the rotated pair; both refresh tokens dead server-side"
+      );
+    }
+  }
 } finally {
   await browser.close();
   proxy.close();

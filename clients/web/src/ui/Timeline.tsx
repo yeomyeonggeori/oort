@@ -106,6 +106,13 @@ export default function Timeline({
   // read it outside of React's render cycle.
   const lastSeqRef = useRef(0);
   const catchUpRunningRef = useRef(false);
+  // Until the head page establishes a seq baseline, catch-up must not run:
+  // `after=0` would page the whole channel history oldest-first (up to
+  // MAX_BACKFILL_PAGES * BACKFILL_LIMIT) and can stop short, leaving a seq
+  // hole. Requests arriving early are deferred and replayed once loaded.
+  // (Refs reset per channel — Timeline is keyed by channel id in ChatPage.)
+  const headLoadedRef = useRef(false);
+  const pendingCatchUpRef = useRef(false);
   const channelId = channel.id;
 
   const appendMessages = useCallback((incoming: UiMessage[]) => {
@@ -125,6 +132,12 @@ export default function Timeline({
    * Centrifugo history is a convenience, Postgres seq is the truth.
    */
   const catchUp = useCallback(async () => {
+    if (!headLoadedRef.current) {
+      // No baseline yet (initial mount race: onSubscribed/publication gap can
+      // fire before the head page lands). Defer — loadHead replays it.
+      pendingCatchUpRef.current = true;
+      return;
+    }
     if (catchUpRunningRef.current) return;
     catchUpRunningRef.current = true;
     try {
@@ -157,6 +170,14 @@ export default function Timeline({
         setOldestCursor(response.nextBefore ?? null);
         setLoaded(true);
         setLoadError(null);
+        // Baseline established (lastSeqRef set via appendMessages). Unblock
+        // catch-up and replay one deferred request so the recovered:false /
+        // gap fallback semantics survive the initial mount race.
+        headLoadedRef.current = true;
+        if (pendingCatchUpRef.current) {
+          pendingCatchUpRef.current = false;
+          void catchUp();
+        }
       } catch {
         if (!cancelled) setLoadError("메시지를 불러오지 못했습니다.");
       }
@@ -165,7 +186,7 @@ export default function Timeline({
     return () => {
       cancelled = true;
     };
-  }, [appendMessages, channelId, workspaceId]);
+  }, [appendMessages, catchUp, channelId, workspaceId]);
 
   // Realtime subscription; server-side subscribe proxy authorizes it.
   useEffect(() => {

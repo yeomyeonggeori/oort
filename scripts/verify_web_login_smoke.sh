@@ -10,7 +10,8 @@
 #   login form (workspace empty -> demo fallback) -> channel list -> #general
 #   timeline (REST seeded messages displayed) -> realtime wss subscribe under
 #   CSP -> REST-sent message rendered live (REST -> PG -> outbox -> relay ->
-#   Centrifugo -> browser) -> REST `?after=` catch-up evidence -> zero CSP
+#   Centrifugo -> browser) -> REST `?after=` catch-up evidence (never after=0)
+#   -> expired-access logout rotate+retry with server-side revoke -> zero CSP
 #   console violations.
 #
 # Isolation: dedicated COMPOSE_PROJECT_NAME (default momo391web), loopback
@@ -250,5 +251,5 @@ echo "[web-smoke] running the browser smoke (playwright chromium)"
 echo
 echo "MOMO-391 web login/timeline smoke PASS"
 echo "- stack: compose project '$PROJECT' (api :$API_PORT, edge :$EDGE_HTTPS), torn down on exit"
-echo "- verified: SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up, zero CSP console violations"
+echo "- verified: SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up (never after=0), expired-access logout rotate+retry with server-side revoke, zero CSP console violations"
 echo "- artifacts: $OUT_DIR"

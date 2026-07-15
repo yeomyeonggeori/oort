@@ -147,10 +147,12 @@ auto_classify_path() {
       # The client contract spec: drift is verified against the live server
       # inside the web profile (verify_openapi_contract.sh).
       AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web (contract spec; runtime drift gate)") ;;
+    clients/web/*)
+      # Before the docs/*.md pattern on purpose: clients/web/README.md is the
+      # httpOnly promotion-gate canon — a web surface change, not docs.
+      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
     docs/*|research/*|legal/*|*.md)
       AUTO_REASONS+=("$1 -> docs") ;;
-    clients/web/*)
-      AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
     clients/*)
       AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> swift+macos-ui") ;;
     server/Migrations/*)

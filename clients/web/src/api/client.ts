@@ -152,18 +152,34 @@ export async function login(
   return loginResponse;
 }
 
+function postLogout(): Promise<Response> {
+  // Read both tokens at call time: after a rotation the retry MUST carry the
+  // refreshed pair, not a stale closure copy.
+  const refreshToken = getRefreshToken();
+  return rawRequest(
+    "/v1/auth/logout",
+    {
+      method: "POST",
+      body: JSON.stringify(refreshToken ? { refreshToken } : {}),
+    },
+    getAccessToken()
+  );
+}
+
 /** Server-side revocation first (best effort), then local wipe — D3-A. */
 export async function logout(): Promise<void> {
-  const refreshToken = getRefreshToken();
   try {
-    await rawRequest(
-      "/v1/auth/logout",
-      {
-        method: "POST",
-        body: JSON.stringify(refreshToken ? { refreshToken } : {}),
-      },
-      getAccessToken()
-    );
+    const response = await postLogout();
+    // Expired access token => 401 before the server revokes anything, while
+    // the refresh token stays alive for 30 days. Rotate once and retry with
+    // the RE-READ pair. apiFetch is deliberately not reused here: it would
+    // replay the original body, whose pre-rotation refresh token is already
+    // dead, leaving the freshly rotated pair unrevoked. One retry only; on
+    // failure we still fall through to the local wipe.
+    if (response.status === 401 && getRefreshToken()) {
+      const rotated = await refreshSession();
+      if (rotated) await postLogout();
+    }
   } catch {
     // Network failure must not trap the user in a session; local wipe wins.
   } finally {
