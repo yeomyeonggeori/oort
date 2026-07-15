@@ -1504,6 +1504,111 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var createChannelTitle: String {
+        switch language {
+        case .korean: return "채널 만들기"
+        case .english: return "Create a channel"
+        }
+    }
+
+    var createChannelSubtitle: String {
+        switch language {
+        case .korean: return "대화를 정리할 공개 범위와 이름, 주제를 설정하세요."
+        case .english: return "Choose who can join, then add a name and topic for the conversation."
+        }
+    }
+
+    var channelVisibilityLabel: String {
+        switch language {
+        case .korean: return "공개 범위"
+        case .english: return "Visibility"
+        }
+    }
+
+    var channelNameLabel: String {
+        switch language {
+        case .korean: return "채널 이름"
+        case .english: return "Channel name"
+        }
+    }
+
+    var channelTopicLabel: String {
+        switch language {
+        case .korean: return "주제"
+        case .english: return "Topic"
+        }
+    }
+
+    var channelNameHelp: String {
+        switch language {
+        case .korean: return "영문, 숫자, 하이픈, 밑줄로 80자 이내로 입력하세요. 영문은 소문자로 저장됩니다."
+        case .english: return "Use up to 80 letters, numbers, hyphens, or underscores. Letters are saved in lowercase."
+        }
+    }
+
+    var channelTopicHelp: String {
+        switch language {
+        case .korean: return "선택 사항이며 280자까지 입력할 수 있습니다."
+        case .english: return "Optional, up to 280 characters."
+        }
+    }
+
+    var createChannelAction: String {
+        switch language {
+        case .korean: return "채널 만들기"
+        case .english: return "Create channel"
+        }
+    }
+
+    var creatingChannel: String {
+        switch language {
+        case .korean: return "채널 만드는 중"
+        case .english: return "Creating channel"
+        }
+    }
+
+    var retryChannelCreation: String {
+        switch language {
+        case .korean: return "채널 만들기 다시 시도"
+        case .english: return "Try creating the channel again"
+        }
+    }
+
+    func channelNameValidationMessage(_ error: MomoChannelNameValidationError) -> String {
+        switch (language, error) {
+        case (.korean, .required): return "채널 이름을 입력하세요."
+        case (.english, .required): return "Enter a channel name."
+        case (.korean, .tooLong): return "채널 이름은 80자 이내여야 합니다."
+        case (.english, .tooLong): return "Keep the channel name to 80 characters or fewer."
+        case (.korean, .unsupportedCharacters): return "영문, 숫자, 하이픈, 밑줄만 사용할 수 있습니다."
+        case (.english, .unsupportedCharacters): return "Use only letters, numbers, hyphens, or underscores."
+        }
+    }
+
+    func channelTopicValidationMessage(_ error: MomoChannelTopicValidationError) -> String {
+        switch (language, error) {
+        case (.korean, .tooLong): return "주제는 280자 이내여야 합니다."
+        case (.english, .tooLong): return "Keep the topic to 280 characters or fewer."
+        }
+    }
+
+    func channelCreateErrorMessage(_ issue: MomoChannelCreateIssue) -> String {
+        switch (language, issue) {
+        case (.korean, .invalidInput): return "입력 내용을 확인한 뒤 다시 시도하세요."
+        case (.english, .invalidInput): return "Review the fields and try again."
+        case (.korean, .duplicateName): return "같은 이름의 채널이 이미 있습니다. 다른 이름으로 다시 시도하세요."
+        case (.english, .duplicateName): return "A channel with this name already exists. Try a different name."
+        case (.korean, .authenticationExpired): return "로그인이 만료되었습니다. 다시 로그인한 뒤 채널을 만드세요."
+        case (.english, .authenticationExpired): return "Your session expired. Sign in again before creating the channel."
+        case (.korean, .permissionDenied): return "채널을 만들 권한이 없습니다. 워크스페이스 관리자에게 요청하세요."
+        case (.english, .permissionDenied): return "You do not have permission to create channels. Ask a workspace admin."
+        case (.korean, .connection): return "서버에 연결하지 못했습니다. 연결을 확인하고 다시 시도하세요."
+        case (.english, .connection): return "The server could not be reached. Check your connection and try again."
+        case (.korean, .unavailable): return "채널을 만들지 못했습니다. 잠시 후 다시 시도하세요."
+        case (.english, .unavailable): return "The channel could not be created. Try again in a moment."
+        }
+    }
+
     var cancel: String {
         switch language {
         case .korean: return "취소"
@@ -1534,15 +1639,15 @@ struct MomoWorkspaceCopy {
 
     var channelNamePlaceholder: String {
         switch language {
-        case .korean: return "채널 이름"
-        case .english: return "name"
+        case .korean: return "product-planning"
+        case .english: return "product-planning"
         }
     }
 
     var channelTopicPlaceholder: String {
         switch language {
-        case .korean: return "주제"
-        case .english: return "topic"
+        case .korean: return "선택 사항"
+        case .english: return "Optional"
         }
     }
 

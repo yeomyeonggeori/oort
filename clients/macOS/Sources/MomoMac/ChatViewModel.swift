@@ -79,6 +79,15 @@ public enum MomoConnectionIssue: Sendable, Equatable {
     case actionFailed
 }
 
+public enum MomoChannelCreateIssue: Sendable, Equatable {
+    case invalidInput
+    case duplicateName
+    case authenticationExpired
+    case permissionDenied
+    case connection
+    case unavailable
+}
+
 public enum WorkspaceNameUpdateIssue: Sendable, Equatable {
     case unavailable
     case invalidName
@@ -181,6 +190,8 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     @Published public private(set) var channelCreateInFlight = false
+    @Published public private(set) var channelCreateIssue: MomoChannelCreateIssue?
+    @Published private(set) var channelCreateDiagnostic: String?
     @Published public private(set) var channelMemberMutationIds: Set<MemberID> = []
     @Published public private(set) var directMessageMutationIds: Set<MemberID> = []
     @Published public private(set) var directMessageError: String?
@@ -486,6 +497,8 @@ public final class ChatViewModel: ObservableObject {
         approvals = [:]
         approvalDecisionsInFlight = []
         channelCreateInFlight = false
+        channelCreateIssue = nil
+        channelCreateDiagnostic = nil
         channelMemberMutationIds = []
         directMessageMutationIds = []
         directMessageError = nil
@@ -774,14 +787,22 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func createChannel(kind: ChannelKind, name: String, topic: String? = nil) async {
-        guard let workspaceId, !channelCreateInFlight else { return }
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            reportConnectionError("Channel name is required.", as: .actionFailed)
-            return
+    @discardableResult
+    public func createChannel(kind: ChannelKind, name: String, topic: String? = nil) async -> Bool {
+        guard let workspaceId, !channelCreateInFlight else {
+            channelCreateIssue = .unavailable
+            channelCreateDiagnostic = "Channel creation is unavailable without an active workspace."
+            return false
         }
-        let trimmedTopic = topic?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedName = MomoChannelCreationValidation.normalizedName(name)
+        guard !normalizedName.isEmpty else {
+            channelCreateIssue = .invalidInput
+            channelCreateDiagnostic = "Channel name is required."
+            return false
+        }
+        let trimmedTopic = topic.map(MomoChannelCreationValidation.normalizedTopic)
+        channelCreateIssue = nil
+        channelCreateDiagnostic = nil
         channelCreateInFlight = true
         defer { channelCreateInFlight = false }
 
@@ -789,7 +810,7 @@ public final class ChatViewModel: ObservableObject {
             let result = try await chat.createChannel(
                 workspace: workspaceId,
                 kind: kind,
-                name: trimmedName,
+                name: normalizedName,
                 topic: trimmedTopic?.isEmpty == true ? nil : trimmedTopic
             )
             if !channels.contains(where: { $0.id == result.channel.id }) {
@@ -799,10 +820,31 @@ public final class ChatViewModel: ObservableObject {
             ensureReadStateExists(channel: result.channel.id)
             subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
-            clearConnectionErrorState()
             await selectChannel(result.channel.id)
+            return true
         } catch {
-            reportConnectionError(error, as: .actionFailed)
+            channelCreateIssue = Self.channelCreateIssue(for: error)
+            channelCreateDiagnostic = String(describing: error)
+            return false
+        }
+    }
+
+    nonisolated static func channelCreateIssue(for error: any Error) -> MomoChannelCreateIssue {
+        guard let backendError = error as? BackendError else { return .unavailable }
+        switch backendError {
+        case .notConnected:
+            return .authenticationExpired
+        case .problem(let status, _, _):
+            switch status {
+            case 401: return .authenticationExpired
+            case 403: return .permissionDenied
+            case 409: return .duplicateName
+            default: return .unavailable
+            }
+        case .realtime, .timedOut:
+            return .connection
+        case .decoding, .budgetExceeded:
+            return .unavailable
         }
     }
 

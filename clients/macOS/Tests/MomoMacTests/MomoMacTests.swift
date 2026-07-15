@@ -3388,7 +3388,12 @@ final class MomoMacTests: XCTestCase {
         viewModel.setChannels(seed.channels)
 
         let agent = try XCTUnwrap(seed.agents.first)
-        await viewModel.createChannel(kind: .privateChannel, name: "ops-lab", topic: "internal test")
+        let didCreate = await viewModel.createChannel(
+            kind: .privateChannel,
+            name: "ops-lab",
+            topic: "internal test"
+        )
+        XCTAssertTrue(didCreate)
 
         let created = try XCTUnwrap(viewModel.channels.first(where: { $0.name == "ops-lab" }))
         XCTAssertEqual(viewModel.selectedChannelId, created.id)
@@ -3400,9 +3405,12 @@ final class MomoMacTests: XCTestCase {
         await viewModel.removeMember(agent.id, from: created.id)
         XCTAssertFalse(viewModel.isMember(agent.id, in: created.id))
 
-        await viewModel.createChannel(kind: .publicChannel, name: "ops-lab")
-        XCTAssertTrue(viewModel.connectionError?.contains("channel name already exists") == true)
-        XCTAssertEqual(viewModel.connectionIssue, .actionFailed)
+        let didCreateDuplicate = await viewModel.createChannel(kind: .publicChannel, name: "ops-lab")
+        XCTAssertFalse(didCreateDuplicate)
+        XCTAssertEqual(viewModel.channelCreateIssue, .duplicateName)
+        XCTAssertTrue(viewModel.channelCreateDiagnostic?.contains("channel name already exists") == true)
+        XCTAssertNil(viewModel.connectionError)
+        XCTAssertNil(viewModel.connectionIssue)
     }
 
     @MainActor
