@@ -1942,11 +1942,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `clients/macOS`·`server` 소스 무변경. ADR-0112 기본 모드 문법만(개발자 밀도·Work 상세·비용 표시 없음). 파일 업로드/웹훅 UI/presence 표시/멀티 워크스페이스 rail 비구현(각 ADR 게이트).
 - [x] 종결 evidence: PR #407(+리뷰 반영 b499d32) merge `63e7d51`, 독립 리뷰 Blocker/High 0(Medium 1 반영 — 만료 access 로그아웃 revoke 재시도), merge 후 main `web` 프로파일 전체 게이트 PASS. relay 채널명 대소문자 일치는 리뷰어가 서버 코드 대조로 실증.
 
-### ☐ MOMO-398 (`#408`) 수용기준 — prod Centrifugo `allowed_origins`: 웹 realtime 개통 `[infra/docs]` · 의존: 없음 (W-4/W-5 선행 필수)
-- [ ] prod Centrifugo 설정에 브라우저 Origin 허용을 추가한다: `APP_DOMAIN` 설정 시 `https://{APP_DOMAIN}`만 allowed_origins로 주입(compose env 또는 config 템플릿 — 방식 재량), 미설정 배포는 기존 동작 완전 무변화.
-- [ ] 네이티브(비브라우저) 클라이언트 무회귀 — Origin 미전송 경로는 계속 허용됨을 근거로 명시.
-- [ ] `prod_env_preflight.sh`/`docs/DEPLOY.md`에 델타 반영. prod compose config 렌더 검증(set/unset 매트릭스).
-- [ ] 배경: PR #407 계획 이탈 §1 — allowed_origins 공백 시 브라우저 wss 403(현재 prod는 fail-closed 상태라 무해, 웹 W-4/W-5 전 개통 필요).
+### ☑ MOMO-398 (`#408`) 수용기준 — prod Centrifugo `allowed_origins`: 웹 realtime 개통 `[infra/docs]` · 의존: 없음 (W-4/W-5 선행 필수)
+- [x] prod Centrifugo 설정에 브라우저 Origin 허용을 추가한다: `APP_DOMAIN` 설정 시 `https://{APP_DOMAIN}`만 allowed_origins로 주입(compose env 또는 config 템플릿 — 방식 재량), 미설정 배포는 기존 동작 완전 무변화.
+- [x] 네이티브(비브라우저) 클라이언트 무회귀 — Origin 미전송 경로는 계속 허용됨을 근거로 명시.
+- [x] `prod_env_preflight.sh`/`docs/DEPLOY.md`에 델타 반영. prod compose config 렌더 검증(set/unset 매트릭스).
+- [x] 배경: PR #407 계획 이탈 §1 — allowed_origins 공백 시 브라우저 wss 403(현재 prod는 fail-closed 상태라 무해, 웹 W-4/W-5 전 개통 필요).
+- [x] 종결: PR #413 merge, main `staging-smoke`+`web_serving_smoke` PASS. 실이미지 매트릭스(빈 env≡unset·네이티브 Origin-미전송 무회귀·set 시 단일 오리진만 101) evidence는 PR 본문.
 
 ### ☑ MOMO-399 (`#409`) 수용기준 — staging/internal smoke의 Centrifugo namespace drift 수정 `[tooling/docs]` · 의존: 없음
 - [x] `verify_staging_smoke.sh`·`verify_internal_hosting_smoke.sh`의 namespace 기대를 현행 `centrifugo.prod.json` 5개(`ch/dm/agent/agentwork/user`)와 일치시켜 main 기저 FAIL을 해소한다(MOMO-338이 `agentwork` 추가 시 미갱신 — DEVIATION_LOG 2026-07-15).

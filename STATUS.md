@@ -10,6 +10,10 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-398 prod Centrifugo allowed_origins — 웹 realtime 개통 (2026-07-15)
+
+- prod compose가 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS=${APP_DOMAIN:+https://${APP_DOMAIN}}`를 파생 주입(PR #413) — operator knob 없이 단일 오리진 계약, unset/빈값은 기존 fail-closed 완전 무변화(Centrifugo v6 "빈 env=unset" 문서+실이미지 실증). 네이티브 클라(Origin 미전송)는 양 모드 무영향. preflight strict가 파생 모순 2종을 fail-fast. 웹 W-4/W-5의 prod 개통 선행 조건 충족.
+
 ## MOMO-399 staging/internal smoke namespace drift 수정 (2026-07-15)
 
 - main 기저에서 FAIL하던 `verify_staging_smoke.sh`/`verify_internal_hosting_smoke.sh`를 수정(PR #412, `5e034fa`). 하드코딩 namespace 목록을 dev config 파싱 대조로 전환(추가형 drift 자동 검출 + core 5종 보호), MOMO-390의 APP_DOMAIN site 추가로 생긴 Caddyfile 403 false-PASS 가능성도 개수 대조로 봉합. merge 후 main `staging-smoke` 프로파일 PASS — DEVIATION_LOG 2026-07-15 항목 종결.
