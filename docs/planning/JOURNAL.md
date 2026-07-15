@@ -5,7 +5,11 @@
 
 ---
 
-## 2026-07-15 (Fable, planner+momo-main 겸임) · PLN-20260715-02 바이블 + 플랫폼 확장 리서치
+## 2026-07-15 (Fable, 엔진/인프라 planner) · ADR-0119/0120/0121 draft
+- 성재 위임(엔진/인프라 트랙, 웹 우선 확정)에 따라 ADR-0119(웹 클라이언트 트랙), 0120(푸시 relay+notifier), 0121(배포판·초대 온보딩)을 Proposed로 기안하고 CURRENT_STATE 레인을 claim했다. base: MOMO-384 머지 후 main `b720250`.
+- 웹 핵심 결정 제안: 같은 오리진 서빙(APP_DOMAIN site+`/v1` proxy — CORS 원천 회피, 서버 무변경), Vite+React+centrifuge-js, v0 토큰은 메모리+localStorage(공개 배포 전 httpOnly 승격 게이트), 수기 OpenAPI 정본+drift 게이트, v0 스코프="초대받은 사람이 브라우저로 합류해 대화".
+- 코드 사실 대조: CORS/쿠키 코드 0건, login=body 베어러+회전(DTOs.swift:41-58), Caddy 2-site. UX 트랙(MOMO-385/386, clients/macOS)과 파일군 비충돌 확인.
+- 다음: 성재 option 승인 → Accepted 전환 → 파생 배치(W/P/S) 티켓·패킷 발급(발급 주체는 momo-main 규약 — 겸임 여부 성재 확인 필요). 공용 정본(ROADMAP 웹 트랙 신설 등)은 승인 후 momo-main 통합.
 - 성재 발제(이해도/슈퍼앱 수용성/인프라)를 받아 메신저 아키텍처 바이블 초판 6장(`docs/architecture/bible/`, 학습용 파생 등급)과 `research/15-platform-expansion/` 00~03을 랜딩했다. INDEX 등재, planning lane claim/갱신은 momo-main 자격으로 수행.
 - 코드 대조 결론: 푸시/프레즌스/파일/웹훅은 "스키마·placeholder만 있고 경로 없음", 웹·리전은 완전 미예약, 그룹채팅은 기완비. 업계 결론: push relay는 Dawn 운영이 구조적 필연(id-only), 웹은 서버 동일 도메인 서빙, 멀티리전은 업계 전체가 비채택.
 - 신규 ADR 후보 3건(α 푸시 relay, β 웹 트랙, γ 배포판·온보딩)과 기존 큐 입력(0104/0105/0113·0116/0115/0117)을 `15/03-decision-proposals.md`로 제안 — 번호 발급·우선순위·웹vs iOS 순서는 성재 결정 대기(§6).
