@@ -219,7 +219,7 @@ try {
   };
 
   let afterBackfillSeen = false;
-  let afterZeroSeen = false;
+  let afterZeroOnSeededChannel = false;
   let readStateGetCount = 0;
   const readStatePuts = [];
   page.on("request", (request) => {
@@ -228,10 +228,16 @@ try {
       afterBackfillSeen = true;
       // Regression guard (MOMO-391 review fix 2): a catch-up before the head
       // page establishes a baseline would fire `after=0` and page the whole
-      // channel history oldest-first. #general is seeded before the browser
-      // phase, so a legitimate after=0 cannot occur here.
-      if (new URL(url).searchParams.get("after") === "0") {
-        afterZeroSeen = true;
+      // channel history oldest-first. Scoped to the SEEDED channel: #general
+      // always has messages here, so after=0 on it can only be a lost
+      // baseline. On a confirmed-EMPTY channel (the MOMO-400 parking channel,
+      // or a fresh DM) seq 0 IS the head — after=0 there is the correct
+      // recovery cursor, not a regression.
+      if (
+        new URL(url).searchParams.get("after") === "0" &&
+        url.toLowerCase().includes(general.id.toLowerCase())
+      ) {
+        afterZeroOnSeededChannel = true;
       }
     }
     // MOMO-400 read-state observability: count bulk GETs (push-proof control)
@@ -398,12 +404,14 @@ try {
     failures.push(
       "expected at least one REST `?after=` catch-up request after subscribe"
     );
-  } else if (afterZeroSeen) {
+  } else if (afterZeroOnSeededChannel) {
     failures.push(
-      "catch-up ran without a seq baseline (`after=0`) — Timeline must defer until the head page loads"
+      "catch-up ran without a seq baseline (`after=0` on the seeded channel) — Timeline must defer until the head page loads"
     );
   } else {
-    pass("REST ?after= catch-up ran on subscription establish (baseline > 0)");
+    pass(
+      "REST ?after= catch-up ran on subscription establish (baseline > 0 on the seeded channel)"
+    );
   }
 
   // 9) Composer idempotency: forward the first POST to the server, answer it

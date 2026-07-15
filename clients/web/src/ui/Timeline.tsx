@@ -85,6 +85,7 @@ function approvalCardProps(message: UiMessage): {
   approvalId: string;
   title: string;
   summary?: string;
+  propsStatus?: string;
 } | null {
   const props = message.props;
   if (!props) return null;
@@ -92,7 +93,13 @@ function approvalCardProps(message: UiMessage): {
   if (typeof approvalId !== "string" || approvalId === "") return null;
   const title = props["title"];
   const summary = props["summary"];
-  const result: { approvalId: string; title: string; summary?: string } = {
+  const status = props["status"];
+  const result: {
+    approvalId: string;
+    title: string;
+    summary?: string;
+    propsStatus?: string;
+  } = {
     approvalId,
     title:
       typeof title === "string" && title !== ""
@@ -100,7 +107,25 @@ function approvalCardProps(message: UiMessage): {
         : (message.body ?? "승인 요청"),
   };
   if (typeof summary === "string" && summary !== "") result.summary = summary;
+  if (typeof status === "string" && status !== "") result.propsStatus = status;
   return result;
+}
+
+/**
+ * Card status resolution: the session-local receipt/projection state and the
+ * server-patched message props are both authoritative snapshots; whichever
+ * side carries a SETTLED status wins (a decision elsewhere reaches props on
+ * reload before this session's pending list refreshes, and vice versa).
+ */
+function resolveApprovalStatus(
+  storeStatus: string | null,
+  propsStatus: string | undefined
+): string | null {
+  if (storeStatus !== null && storeStatus !== "pending") return storeStatus;
+  if (propsStatus !== undefined && propsStatus !== "pending") {
+    return propsStatus;
+  }
+  return storeStatus ?? propsStatus ?? null;
 }
 
 /** seq is the per-channel ordering authority; merge dedupes on it. */
@@ -351,7 +376,10 @@ export default function Timeline({
                     title={approvalCard.title}
                     summary={approvalCard.summary}
                     requesterName={displayNameFor(message.authorMemberId)}
-                    status={approvals.statusFor(approvalCard.approvalId)}
+                    status={resolveApprovalStatus(
+                      approvals.statusFor(approvalCard.approvalId),
+                      approvalCard.propsStatus
+                    )}
                     decide={approvals.decide}
                   />
                 ) : (
