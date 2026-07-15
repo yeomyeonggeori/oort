@@ -44,6 +44,24 @@ struct DeviceRoutes: Sendable {
         group.delete("/v1/workspaces/:ws/devices/:device", use: revoke)
     }
 
+    /// PostgresNIO wraps any error thrown inside `withTransaction` in
+    /// `PostgresTransactionError`, which Hummingbird would render as a 500.
+    /// The guard failures below (403/404/409) are intended responses, so
+    /// unwrap them back into their `HTTPError` after the rollback.
+    /// (AgentGatewayRoutes crosses expected 4xx as enum values instead; the
+    /// guard set here is larger, so a single unwrap keeps handlers linear.)
+    private func withTenantTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            return try await db.withTenantTransaction(workspaceID: workspaceID, body)
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
     // MARK: - POST /v1/workspaces/{ws}/devices
 
     @Sendable
@@ -58,7 +76,7 @@ struct DeviceRoutes: Sendable {
         let topic = try Self.normalizedTopic(dto.topic)
         let appBuild = try Self.validatedAppBuild(dto.appBuild)
 
-        let outcome: (device: DeviceDTO, created: Bool) = try await db.withTenantTransaction(
+        let outcome: (device: DeviceDTO, created: Bool) = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
             try await Self.requireActiveMember(conn: conn, logger: db.logger, principal: principal)
@@ -243,7 +261,7 @@ struct DeviceRoutes: Sendable {
         let workspaceID = try Self.workspaceID(context, principal: principal)
         let deviceID = try Self.deviceID(context)
 
-        let outcome: (device: DeviceDTO, invalidated: Int) = try await db.withTenantTransaction(
+        let outcome: (device: DeviceDTO, invalidated: Int) = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
             try await Self.requireActiveMember(conn: conn, logger: db.logger, principal: principal)
