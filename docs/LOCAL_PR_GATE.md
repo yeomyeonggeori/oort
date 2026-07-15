@@ -139,7 +139,7 @@ The `docs` profile statically checks the spec parse and both gate scripts.
 The runtime drift gate is wired into the `web` profile (MOMO-391) and also
 runs standalone with the command above.
 
-### Web client gate (`web` profile, MOMO-391 + MOMO-400)
+### Web client gate (`web` profile, MOMO-391 + MOMO-400 + MOMO-401)
 
 `scripts/local_gate.sh --profile web` is the merge gate for `clients/web`
 and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
@@ -178,7 +178,19 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
    monotonic), ADR-0112 approval cards (no tool JSON/cost leakage;
    in-browser approve → receipt 200; an externally pre-decided approval →
    409 receipt handled as a card state transition, not an error), and DM
-   open via `POST /dms` + composer round-trip + `GET /dms` listing. First
+   open via `POST /dms` + composer round-trip + `GET /dms` listing.
+   MOMO-401 extends the same run with the invite web join (ADR-0121 D2-B):
+   a disposable admin issues invites over REST
+   (`POST /v1/workspaces/:ws/invites` — smoke tooling, not web-client
+   surface), one invite is expired by fixture SQL and one exhausted through
+   a real `POST /v1/join`; a fresh browser context then opens
+   `/join/<code>`, asserts the code is stripped from the address bar
+   (history.replaceState) and never appears in any non-document request URL
+   or console line, joins through the form (session established from the
+   JoinResponse token pair — the spec'd join-login path), enters the
+   #general timeline, logs out and re-logs-in with the join-created
+   credentials, and finally checks that expired / exhausted / invalid codes
+   each render their own Korean error copy (`data-error-kind`). First
    run downloads the playwright Chromium build (cached) and cold-builds
    the api/relay Swift containers — allow many minutes. Overrides:
    `WEB_LOGIN_SMOKE_PORT`/`..._POSTGRES_PORT`/`..._CENT_PORT`/

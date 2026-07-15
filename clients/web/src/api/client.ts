@@ -23,6 +23,8 @@ import {
 // =============================================================================
 
 export type LoginResponse = components["schemas"]["LoginResponse"];
+export type JoinRequest = components["schemas"]["JoinRequest"];
+export type JoinResponse = components["schemas"]["JoinResponse"];
 export type Member = components["schemas"]["Member"];
 export type Channel = components["schemas"]["Channel"];
 export type Message = components["schemas"]["Message"];
@@ -169,6 +171,31 @@ export async function login(
   const loginResponse = (await response.json()) as LoginResponse;
   applyLogin(loginResponse);
   return loginResponse;
+}
+
+/**
+ * Public invite redemption (MOMO-401, ADR-0121 D2-B web landing). No auth:
+ * the invite code is the only credential, and it travels ONLY in this
+ * request body — never in a query string, never in a log line (bearer-secret
+ * handling; the /join/<code> path segment is stripped from the address bar
+ * before this call can happen, see App.tsx).
+ *
+ * 201 creates a member, 200 re-joins an existing one (same email). Both
+ * return a session token pair per the canonical contract — openapi.yaml
+ * JoinResponse REQUIRES accessToken/refreshToken/realtimeWebSocketUrl
+ * ("issuing a session token pair") — so applying the session here IS the
+ * spec'd login path, not an auto-login invented ahead of the spec.
+ */
+export async function joinInvite(request: JoinRequest): Promise<JoinResponse> {
+  const response = await rawRequest(
+    "/v1/join",
+    { method: "POST", body: JSON.stringify(request) },
+    null
+  );
+  if (!response.ok) throw await parseError(response);
+  const joinResponse = (await response.json()) as JoinResponse;
+  applyLogin(joinResponse);
+  return joinResponse;
 }
 
 function postLogout(): Promise<Response> {

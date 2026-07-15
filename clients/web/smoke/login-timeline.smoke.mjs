@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // =============================================================================
-// MOMO-391 + MOMO-400 web browser smoke (driven by
+// MOMO-391 + MOMO-400 + MOMO-401 web browser smoke (driven by
 // scripts/verify_web_login_smoke.sh; do not run against a non-disposable
-// stack — it writes messages and decides approvals).
+// stack — it writes messages, decides approvals and redeems invites).
 //
 // What it proves, end to end, in a real Chromium against the REAL prod
 // Caddyfile edge (strict CSP, same-origin /v1 proxy, wss realtime origin):
@@ -51,6 +51,21 @@
 //      with the seeded agent via POST /dms (idempotent) and the composer
 //      round-trips a message in it.
 //
+// MOMO-401 additions (ADR-0119 W-5 / ADR-0121 D2-B):
+//  12. Invite web join: a FRESH context opens /join/<code> (server-own-domain
+//      link shape). The app must strip the code from the address bar before
+//      anything else (history.replaceState), render the join form, and on
+//      submit establish the session from the JoinResponse token pair — the
+//      spec'd join-login path (openapi.yaml JoinResponse REQUIRES
+//      accessToken/refreshToken) — landing in the #general timeline with the
+//      seeded messages visible. Logout, then the join-created credentials
+//      must pass the normal login form (가입 → 로그인 → 타임라인).
+//  13. Invite error UX: expired / exhausted / invalid codes each render
+//      DISTINCT Korean copy (data-error-kind) derived from the server error
+//      envelope — no raw English server strings.
+//  14. Code hygiene: the raw invite code appears in NO request URL besides
+//      the unavoidable document navigation, and in NO console line.
+//
 // Networking: the e2e Caddy edge listens on an alternate loopback port, but
 // CSP host sources match on DEFAULT ports (wss://rt.localhost == :443). So a
 // tiny fail-closed HTTP CONNECT proxy maps <allowed-host>:443 to the edge
@@ -93,6 +108,18 @@ const LEAK_MARKER = env("WEB_SMOKE_LEAK_MARKER", "LEAKPROBE");
 const LEAK_MICRO_USD = env("WEB_SMOKE_LEAK_MICRO_USD", "431337,917331")
   .split(",")
   .filter(Boolean);
+// MOMO-401 invite fixtures (installed by verify_web_login_smoke.sh). The
+// codes are bearer secrets: this smoke never prints them, and asserts the
+// app leaks them neither into request URLs nor the console.
+const JOIN_CODE = env("WEB_SMOKE_JOIN_CODE");
+const JOIN_EXPIRED_CODE = env("WEB_SMOKE_JOIN_EXPIRED_CODE");
+const JOIN_EXHAUSTED_CODE = env("WEB_SMOKE_JOIN_EXHAUSTED_CODE");
+const JOIN_EMAIL = env("WEB_SMOKE_JOIN_EMAIL");
+const JOIN_PASSWORD = env("WEB_SMOKE_JOIN_PASSWORD");
+const JOIN_DISPLAY_NAME = env(
+  "WEB_SMOKE_JOIN_DISPLAY_NAME",
+  "Web Smoke Joiner"
+);
 
 const failures = [];
 function pass(message) {
@@ -850,6 +877,159 @@ try {
       );
     }
   }
+
+  // ---- MOMO-401: invite web join (/join/<code>, ADR-0121 D2-B) ----------------
+
+  // 12) Happy path in a FRESH context (no stored session): deep link ->
+  //     code stripped from the address bar -> join form -> session applied
+  //     from the JoinResponse token pair -> timeline entry -> logout ->
+  //     re-login with the join-created credentials.
+  const joinContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const joinPage = await joinContext.newPage();
+  const joinConsole = [];
+  joinPage.on("console", (message) => joinConsole.push(message.text()));
+  joinPage.on("pageerror", (error) => joinConsole.push(String(error)));
+  const codeLeakUrls = [];
+  joinPage.on("request", (request) => {
+    const url = request.url();
+    if (
+      !url.includes(JOIN_CODE) &&
+      !url.includes(encodeURIComponent(JOIN_CODE))
+    ) {
+      return;
+    }
+    // The document navigation itself IS the D2-B link shape (path segment —
+    // unavoidable). Any other request carrying the code is a leak.
+    if (
+      request.isNavigationRequest() &&
+      request.resourceType() === "document"
+    ) {
+      return;
+    }
+    codeLeakUrls.push(url);
+  });
+
+  await joinPage.goto(
+    `https://${APP_HOST}/join/${encodeURIComponent(JOIN_CODE)}`,
+    { waitUntil: "load" }
+  );
+  await joinPage.getByTestId("join-email").waitFor({ timeout: 15000 });
+  const strippedUrl = new URL(joinPage.url());
+  if (
+    joinPage.url().includes(JOIN_CODE) ||
+    joinPage.url().includes(encodeURIComponent(JOIN_CODE))
+  ) {
+    failures.push(
+      "invite code survived in the address bar after the join page loaded"
+    );
+  } else if (strippedUrl.pathname !== "/") {
+    failures.push(
+      `/join deep link was not replaced with '/' in the address bar (got ${strippedUrl.pathname})`
+    );
+  } else {
+    pass(
+      "join form rendered; invite code stripped from the address bar (history.replaceState)"
+    );
+  }
+
+  await joinPage.getByTestId("join-email").fill(JOIN_EMAIL);
+  await joinPage.getByTestId("join-display-name").fill(JOIN_DISPLAY_NAME);
+  await joinPage.getByTestId("join-password").fill(JOIN_PASSWORD);
+  await joinPage.getByTestId("join-submit").click();
+
+  await joinPage.getByTestId("channel-list").waitFor({ timeout: 30000 });
+  await joinPage
+    .locator(
+      `[data-testid="channel-item"][data-channel-name="${CHANNEL_NAME}"]`
+    )
+    .click();
+  await joinPage
+    .locator('[data-testid="timeline-message"]', { hasText: seedBodies[0] })
+    .waitFor({ timeout: 20000 });
+  pass(
+    "browser join ok: session established from the JoinResponse token pair (no separate /v1/auth/login) and #general timeline entered"
+  );
+  await joinPage.screenshot({
+    path: join(OUT_DIR, "web-join-timeline.png"),
+    fullPage: true,
+  });
+
+  // 가입 → 로그인 → 타임라인: the credentials created at join must pass the
+  // normal login form (proves the join committed the password server-side).
+  await joinPage.getByTestId("logout-button").click();
+  await joinPage.getByTestId("login-email").waitFor({ timeout: 20000 });
+  await joinPage.getByTestId("login-email").fill(JOIN_EMAIL);
+  await joinPage.getByTestId("login-password").fill(JOIN_PASSWORD);
+  await joinPage.getByTestId("login-submit").click();
+  await joinPage.getByTestId("channel-list").waitFor({ timeout: 20000 });
+  await joinPage.getByTestId("timeline").waitFor({ timeout: 20000 });
+  pass("re-login with the join-created credentials reached the timeline");
+
+  // 14) Code hygiene: no non-document request URL and no console line may
+  //     carry the raw code.
+  if (codeLeakUrls.length > 0) {
+    failures.push(
+      `invite code leaked into ${codeLeakUrls.length} non-document request URL(s)`
+    );
+  } else {
+    pass(
+      "invite code appeared in no request URL besides the document navigation"
+    );
+  }
+  if (joinConsole.some((text) => text.includes(JOIN_CODE))) {
+    failures.push("invite code appeared in browser console output");
+  }
+  const joinCspViolations = joinConsole.filter((text) =>
+    /content security policy|refused to/i.test(text)
+  );
+  if (joinCspViolations.length > 0) {
+    failures.push(
+      `CSP violations on the join surface: ${joinCspViolations.join(" | ")}`
+    );
+  }
+  await joinContext.close();
+
+  // 13) Error UX: expired / exhausted / invalid render DISTINCT Korean copy
+  //     keyed off the server error envelope (spec statuses 410/409/404 plus
+  //     the stable envelope messages splitting 410 expired vs revoked).
+  const errContext = await browser.newContext({ ignoreHTTPSErrors: true });
+  const errPage = await errContext.newPage();
+  const expectJoinError = async (code, expectedKind, copyProbe) => {
+    await errPage.goto(
+      `https://${APP_HOST}/join/${encodeURIComponent(code)}`,
+      { waitUntil: "load" }
+    );
+    await errPage.getByTestId("join-email").waitFor({ timeout: 15000 });
+    await errPage
+      .getByTestId("join-email")
+      .fill(`web-smoke-err-${crypto.randomUUID().slice(0, 8)}@momo.local`);
+    await errPage.getByTestId("join-display-name").fill("Web Smoke Probe");
+    await errPage.getByTestId("join-password").fill(`err-${crypto.randomUUID()}`);
+    await errPage.getByTestId("join-submit").click();
+    const errorBox = errPage.getByTestId("join-error");
+    await errorBox.waitFor({ timeout: 20000 });
+    const kind = await errorBox.getAttribute("data-error-kind");
+    const text = await errorBox.innerText();
+    if (kind !== expectedKind) {
+      failures.push(
+        `join error for the ${expectedKind} case rendered kind "${kind}"`
+      );
+    } else if (!text.includes(copyProbe)) {
+      failures.push(
+        `join ${expectedKind} copy is missing "${copyProbe}" (got: ${text})`
+      );
+    } else {
+      pass(`join error UX: ${expectedKind} rendered its distinct Korean copy`);
+    }
+  };
+  await expectJoinError(JOIN_EXPIRED_CODE, "expired", "만료");
+  await expectJoinError(JOIN_EXHAUSTED_CODE, "exhausted", "소진");
+  await expectJoinError(
+    `web-smoke-invalid-${crypto.randomUUID()}`,
+    "invalid",
+    "유효하지 않"
+  );
+  await errContext.close();
 } finally {
   await browser.close();
   proxy.close();
@@ -860,5 +1040,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  "MOMO-391/MOMO-400 web login/timeline/compose/read-state/approvals browser smoke PASS"
+  "MOMO-391/MOMO-400/MOMO-401 web login/timeline/compose/read-state/approvals/join browser smoke PASS"
 );

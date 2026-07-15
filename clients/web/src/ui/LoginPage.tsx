@@ -2,8 +2,13 @@ import { useState } from "react";
 import type { FormEvent } from "react";
 import { ApiError, login } from "../api/client";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("");
+interface LoginPageProps {
+  /** Prefill from the /join/<code> landing (MOMO-401) — email only, never a secret. */
+  initialEmail?: string | undefined;
+}
+
+export default function LoginPage({ initialEmail }: LoginPageProps) {
+  const [email, setEmail] = useState(initialEmail ?? "");
   const [password, setPassword] = useState("");
   const [workspace, setWorkspace] = useState("");
   const [error, setError] = useState<string | null>(null);
