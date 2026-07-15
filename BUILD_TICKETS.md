@@ -1948,10 +1948,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] `prod_env_preflight.sh`/`docs/DEPLOY.md`에 델타 반영. prod compose config 렌더 검증(set/unset 매트릭스).
 - [ ] 배경: PR #407 계획 이탈 §1 — allowed_origins 공백 시 브라우저 wss 403(현재 prod는 fail-closed 상태라 무해, 웹 W-4/W-5 전 개통 필요).
 
-### ☐ MOMO-399 (`#409`) 수용기준 — staging/internal smoke의 Centrifugo namespace drift 수정 `[tooling/docs]` · 의존: 없음
-- [ ] `verify_staging_smoke.sh`·`verify_internal_hosting_smoke.sh`의 namespace 기대를 현행 `centrifugo.prod.json` 5개(`ch/dm/agent/agentwork/user`)와 일치시켜 main 기저 FAIL을 해소한다(MOMO-338이 `agentwork` 추가 시 미갱신 — DEVIATION_LOG 2026-07-15).
-- [ ] 가능하면 하드코딩 목록 대신 config 파싱 대조로 구조 개선(재량 — 과하면 목록 갱신 + drift 주석).
-- [ ] `staging-smoke` 프로파일 PASS evidence.
+### ☑ MOMO-399 (`#409`) 수용기준 — staging/internal smoke의 Centrifugo namespace drift 수정 `[tooling/docs]` · 의존: 없음
+- [x] `verify_staging_smoke.sh`·`verify_internal_hosting_smoke.sh`의 namespace 기대를 현행 `centrifugo.prod.json` 5개(`ch/dm/agent/agentwork/user`)와 일치시켜 main 기저 FAIL을 해소한다(MOMO-338이 `agentwork` 추가 시 미갱신 — DEVIATION_LOG 2026-07-15).
+- [x] 가능하면 하드코딩 목록 대신 config 파싱 대조로 구조 개선(재량 — 과하면 목록 갱신 + drift 주석).
+- [x] `staging-smoke` 프로파일 PASS evidence.
+- [x] 종결: PR #412 merge `5e034fa`, main `staging-smoke` 프로파일 PASS(rc=0). 통합자 직접 diff 검수(소형 tooling) + 음성 대조 3종 evidence.
 
 ### ☐ MOMO-400 (`#410`) 수용기준 — ADR-0119 W-4: 웹 작성·read-state·승인 카드 + realtime 왕복 `[web/docs]` · 의존: 웹 첫 배치 종결
 - [ ] composer: `POST messages`(`clientMsgId` 멱등 — 재전송 중복 없음 smoke 실증), 표시는 서버 echo(브로드캐스트/backfill) 기준, seq 권위 준수. 오류/재시도 카피 제공.

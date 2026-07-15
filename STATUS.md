@@ -10,6 +10,10 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-399 staging/internal smoke namespace drift 수정 (2026-07-15)
+
+- main 기저에서 FAIL하던 `verify_staging_smoke.sh`/`verify_internal_hosting_smoke.sh`를 수정(PR #412, `5e034fa`). 하드코딩 namespace 목록을 dev config 파싱 대조로 전환(추가형 drift 자동 검출 + core 5종 보호), MOMO-390의 APP_DOMAIN site 추가로 생긴 Caddyfile 403 false-PASS 가능성도 개수 대조로 봉합. merge 후 main `staging-smoke` 프로파일 PASS — DEVIATION_LOG 2026-07-15 항목 종결.
+
 ## MOMO-391 clients/web v0 — 웹 첫 배치 종결 (2026-07-15)
 
 - ADR-0119 W-2가 랜딩하며 웹 첫 배치(389→390→391)가 종결됐다. PR #407(+리뷰 반영 `b499d32`) merge `63e7d51`. 독립 리뷰 Blocker 0/High 0/Medium 1 — Medium(만료 access 로그아웃 시 서버 revoke 무산)은 회전 1회 재시도로 수정하고, 스모크가 "401→회전 1회→재시도 revoke, 회전 전·후 refresh 모두 서버측 사망"을 실증했다.
