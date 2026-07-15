@@ -500,6 +500,28 @@ if [ "$runtime_mode" = "strict" ]; then
     pass "APP_DOMAIN is unset — web serving disabled, 2-site deploy (allowed)"
   fi
 
+  # MOMO-398: prod compose derives the Centrifugo browser-origin allowance
+  # from APP_DOMAIN (CENTRIFUGO_CLIENT_ALLOWED_ORIGINS=${APP_DOMAIN:+https://
+  # ${APP_DOMAIN}}), so an operator-provided CENTRIFUGO_CLIENT_ALLOWED_ORIGINS
+  # is never read by compose interpolation. Any env-file value that disagrees
+  # with the derivation is a contradiction trap: either the operator believes
+  # web realtime is open while it stays fail-closed (set without APP_DOMAIN),
+  # or believes extra/different origins apply while only https://APP_DOMAIN
+  # is injected. Both must fail fast here.
+  if [ "$(get_var APP_DOMAIN)" != "" ]; then
+    momo398_expected="https://$(get_var APP_DOMAIN)"
+    momo398_actual="$(get_var CENTRIFUGO_CLIENT_ALLOWED_ORIGINS)"
+    if [ "$momo398_actual" = "" ] || [ "$momo398_actual" = "$momo398_expected" ]; then
+      pass "Centrifugo allowed_origins derives from APP_DOMAIN ('$momo398_expected' only — web realtime open for the SPA origin)"
+    else
+      fail "CENTRIFUGO_CLIENT_ALLOWED_ORIGINS contradicts the APP_DOMAIN derivation (compose injects only '$momo398_expected'; env file says '$momo398_actual')"
+    fi
+  elif [ "$(get_var CENTRIFUGO_CLIENT_ALLOWED_ORIGINS)" != "" ]; then
+    fail "CENTRIFUGO_CLIENT_ALLOWED_ORIGINS is set but APP_DOMAIN is unset — compose derives origins from APP_DOMAIN only, so this value is ignored and browser realtime stays closed"
+  else
+    pass "Centrifugo allowed_origins stays unset — no web origin, browser realtime remains fail-closed (allowed)"
+  fi
+
   assert_not_latest_or_smoke_image MOMO_API_IMAGE
   assert_not_latest_or_smoke_image MOMO_RELAY_IMAGE
   assert_not_latest_or_smoke_image MOMO_WORKER_IMAGE
