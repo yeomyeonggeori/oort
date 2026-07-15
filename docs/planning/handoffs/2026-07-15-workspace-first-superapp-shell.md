@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | MOMO-383 | workspace-first sidebar/header/menu + persisted workspace name | MOMO-382 | swift + runtime-db + macos-ui + design-review | merged — PR #389 / `9c1fc7a` |
 | MOMO-384 (`#390`) | native channel creation sheet + tooltip presenter | MOMO-383 | swift + macos-ui + design-review | PR #394 fresh review PASS, worker `status:needs-review`, merge 전 |
-| MOMO-385 (`#391`) | member inspector + one-click DM | MOMO-383 | swift + runtime-db + macos-ui | ready |
+| MOMO-385 (`#391`) | member inspector + one-click DM | MOMO-383 | swift + runtime-db + macos-ui | PR #406 review fixes·worker gates PASS, `status:needs-review`, merge 전 |
 | MOMO-386 (`#392`) | RLS workspace search + macOS results/jump | MOMO-384, MOMO-385 | runtime-db + swift + macos-ui | blocked |
 | MOMO-375 | Work transcript/activity drawer | ADR-0114 surface decision | swift + macos-ui | planned |
 
