@@ -1,0 +1,100 @@
+# momo web client (v0)
+
+ADR-0119 W-2 (MOMO-391): 브라우저용 momo 클라이언트의 첫 스캐폴드.
+로그인 → 채널 목록 → 타임라인 읽기(seq 페이지네이션 + `?after=` backfill) →
+centrifuge-js 실시간 구독까지가 v0 스코프다(D5-A). 메시지 작성/read-state/
+승인 카드(W-4), 초대 링크 웹 합류(W-5)는 후속 티켓이다.
+
+- 스택: Vite + React + TypeScript + centrifuge-js (전부 permissive 라이선스,
+  ADR-0119 D2-A). 상태관리 라이브러리 없음(v0 규모에서 불필요).
+- 서빙: 같은 오리진 배포(D1-A). Caddy `{$APP_DOMAIN}` site가 이 앱의 `dist/`를
+  정적 서빙하고 같은 오리진의 `/v1/*`를 api로 프록시한다(`infra/prod/Caddyfile`).
+  CORS 없음, 서버 코드 무변경.
+- REST 계약: `docs/api/openapi.yaml`이 정본. `src/api/schema.d.ts`는
+  `npm run generate:types`(openapi-typescript)로 생성해 **커밋**한다 — web 게이트가
+  스펙과의 동기화를 diff로 강제한다.
+
+## 토큰 정책 (ADR-0119 D3-A — 내부 알파 한정)
+
+| 항목 | v0 (현재) |
+|---|---|
+| access token (15m) | **메모리 전용** — 어디에도 저장하지 않음 |
+| refresh token (30d, 단일사용 회전) | `localStorage` (`momo.web.session.v1`) |
+| 로그아웃 | 서버 revoke(`POST /v1/auth/logout`, access+refresh) 후 로컬 삭제 |
+| 세션 복원 | 저장된 refresh 1회 회전(`POST /v1/auth/refresh` → 새 쌍 발급, 기존 revoke) |
+| XSS 완화 | 엄격 CSP(자체 오리진만, inline script/style 금지) + 토큰 회전 + 서버측 revocation |
+
+### 공개 배포 전 승격 게이트 (필수, ADR-0119 D3-B)
+
+**이 저장 모델은 내부 알파 전용이다.** momo 웹을 내부 알파 밖(공개 알파 포함)
+어떤 대상에게든 배포하기 전에, 아래를 완료해야 한다:
+
+1. refresh token 보관을 `localStorage`에서 **httpOnly Secure SameSite=Strict
+   쿠키**로 승격한다(서버에 쿠키 발급 경로 + CSRF 방어 신설 필요 — 서버 측
+   변경은 별도 ADR-게이트 티켓).
+2. `src/auth/session.ts`의 localStorage 사용을 제거하고 이 README의 표를 갱신한다.
+3. 승격 전 배포는 **금지**다. 이 항목이 남아 있는 한 `clients/web`은 공개
+   배포 게이트를 통과하지 못한 상태로 간주한다.
+
+이 섹션이 승격 게이트의 정본이다(코드 주석이 아니라 여기).
+
+### 알려진 한계 (v0)
+
+- **멀티 탭 refresh 회전 경쟁**: refresh token은 단일사용이라 두 탭이 동시에
+  회전을 시도하면 한쪽이 revoked 토큰을 제시해 세션이 끊길 수 있다. 탭 내
+  동시 요청은 single-flight로 직렬화했지만 탭 간 조정(BroadcastChannel/
+  Web Locks)은 미구현 — 내부 알파에서 실제로 문제가 되면 이탈 보고 후 후속
+  티켓으로 다룬다(핸드오프 패킷 §9의 열린 질문).
+- 읽기 전용 타임라인(작성 UI 없음), unread/read-state 미표시, 파일/웹훅/
+  presence/멀티 워크스페이스 rail 비구현(각 ADR 게이트, ADR-0119 D5-A non-goals).
+
+## 실시간 계약
+
+- websocket 주소는 **login 응답의 `realtimeWebSocketUrl`만** 사용한다
+  (ADR-0110). API 오리진에서 유추하지 않는다.
+- 연결 토큰: `POST /v1/auth/realtime-token`(단기 JWT). 채널 구독은 클라가
+  시도만 하고 Centrifugo subscribe proxy가 서버에서 멤버십/자격 liveness를
+  재검증한다(MOMO-300).
+- **websocket transport 전용**: 서빙 CSP가 `connect-src 'self'` +
+  `wss://REALTIME_DOMAIN`만 허용한다. HTTP 폴백 transport를 추가하려면
+  `infra/prod/Caddyfile` CSP와 `scripts/web_serving_smoke.sh` 기대값을 같은
+  PR에서 갱신해야 한다(가능하면 피할 것).
+- 순서 정본은 `message.seq`. 구독 확립 시(`recovered:false` 포함) REST
+  `?after=<seq>` backfill로 갭을 메운다 — Centrifugo history는 편의,
+  Postgres가 권위다.
+- 구독 채널명은 `ch:ws<WORKSPACE_UUID>.<CHANNEL_UUID>` **대문자** UUID
+  (relay가 Swift `uuidString`으로 publish하고 Centrifugo 채널명은 대소문자
+  구분). REST가 주는 소문자 id는 클라에서 대문자로 정규화한다. UUID 비교는
+  항상 case-insensitive(`uuidEq`).
+
+## 개발
+
+```bash
+cd clients/web
+npm ci
+npm run dev            # http://localhost:5173, /v1 -> 127.0.0.1:8080 프록시
+                       # (MOMO_DEV_API_URL로 대상 변경)
+npm run lint
+npm run typecheck
+npm run generate:types # docs/api/openapi.yaml -> src/api/schema.d.ts (커밋 대상)
+npm run build          # dist/ (Caddy가 서빙; inline script/style 금지 유지)
+npm run check:licenses # permissive-only 라이선스 게이트 + 인벤토리 출력
+```
+
+- `node_modules/`, `dist/`는 커밋 금지(루트 .gitignore), `package-lock.json`은
+  커밋한다.
+- 새 의존성 추가 시: permissive(MIT/Apache/ISC/BSD)만. GPL/AGPL 등 카피레프트
+  유입 금지(하드 룰). `npm run check:licenses`가 게이트에서 강제한다.
+- 스타일은 `src/styles.css` 단일 파일. **inline style/style attribute 금지**
+  (CSP `style-src 'self'`가 런타임에서 차단한다).
+
+## 게이트
+
+```bash
+scripts/local_gate.sh --profile web
+```
+
+단계 상세와 스모크 격리 규칙(전용 compose 프로젝트 `momo391web`, 루프백 포트
+18990-18995, 자기 것만 정리)은 `docs/LOCAL_PR_GATE.md`의 "Web client gate"
+섹션 참조. 브라우저 스모크는 실제 prod Caddyfile(엄격 CSP) 뒤에서 Chromium으로
+로그인 → 타임라인 표시 → 실시간 수신까지 검증한다.

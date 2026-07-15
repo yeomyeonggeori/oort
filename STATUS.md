@@ -3,6 +3,13 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-391 clients/web 스캐폴드 + 로그인/타임라인 v0 (2026-07-15)
+
+- ADR-0119 W-2: `clients/web` 신설(Vite+React+TS+centrifuge-js, 전 의존성 permissive — 전이 포함 인벤토리는 게이트가 생성). 로그인(email/password/workspace 옵션 — 미지정 시 서버 demo 폴백) → 채널 목록 → 타임라인 읽기(seq desc head + `before` 페이지네이션 + `?after=` ASC backfill) → centrifuge-js websocket-only 실시간 구독(recovered:false 및 seq 갭에서 REST `?after=` 폴백). websocket 주소는 login 응답 `realtimeWebSocketUrl`만 사용(ADR-0110), 연결 토큰은 `POST /v1/auth/realtime-token`, 구독 인가는 subscribe proxy 서버 재검증. 토큰 정책 D3-A(access 메모리/refresh localStorage 회전/로그아웃 revoke) + 공개 배포 전 httpOnly 승격 게이트를 `clients/web/README.md`에 명문화.
+- REST 타입은 `docs/api/openapi.yaml`에서 openapi-typescript로 생성·커밋하고, `web` 게이트가 재생성 diff로 스펙 동기화를 강제한다. 구독 채널명은 relay publish와 동일한 대문자 `ch:ws<WS>.<CH>` 정규화, UUID 비교는 case-insensitive.
+- `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
+- runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
+
 ## MOMO-389/390 웹 트랙 첫 배치 — OpenAPI 계약 정본 + APP_DOMAIN 서빙 (2026-07-15)
 
 - ADR-0119(웹 클라이언트 트랙) 첫 배치를 Fable 구현·독립 리뷰·순차 머지로 랜딩했다(엔진/인프라 트랙 Fable momo-main 겸임 — 성재 승인). MOMO-389=PR #404(`6fe746f`), MOMO-390=PR #403(`5ecd645`), 두 PR 모두 독립 리뷰 Blocker 0/High 0.

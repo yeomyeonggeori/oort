@@ -23,6 +23,19 @@
 - swift-crypto, swift-collections, swift-atomics 등 — 각 LICENSE 확인.
 - **테스트 전용(배포 앱 번들 미포함)** — swift-snapshot-testing이 resolve하는 swift-custom-dump·xctest-dynamic-overlay(둘 다 MIT, Point-Free), swift-syntax(Apache-2.0). `SnapshotTesting` product만 import하므로 이 전이 타깃들은 컴파일되지 않는다(단, `Package.resolved`에는 등장).
 
+## 웹 클라이언트 npm 의존성 (clients/web, MOMO-391)
+> 브라우저 번들에 포함되는 런타임 의존성만 표기. dev 도구(vite/eslint/
+> typescript/openapi-typescript/playwright 등)는 배포물 미포함 — 전이 포함
+> 전체 인벤토리는 `clients/web/scripts/check-licenses.mjs`가 게이트마다 생성.
+
+| 패키지 | URL | 라이선스(lockfile 검증) | 사용처 |
+|---|---|---|---|
+| react / react-dom / scheduler | https://github.com/facebook/react | MIT | 웹 UI |
+| centrifuge (centrifuge-js) | https://github.com/centrifugal/centrifuge-js | MIT | 웹 Centrifugo live subscription |
+| protobufjs + @protobufjs/* | https://github.com/protobufjs/protobuf.js | BSD-3-Clause | centrifuge-js 전이(protobuf 코덱; JSON 사용이라 번들에서 tree-shake 대상) |
+| long | https://github.com/dcodeIO/long.js | Apache-2.0 | protobufjs 전이 |
+| events | https://github.com/browserify/events | MIT | centrifuge-js 전이 |
+
 ## 런타임 인프라(앱 번들 외 — 서버 배포물)
 | 컴포넌트 | 라이선스(검증) | 메모 |
 |---|---|---|

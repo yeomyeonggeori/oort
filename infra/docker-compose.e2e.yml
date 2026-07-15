@@ -134,7 +134,12 @@ services:
       PORT: 8080
       DATABASE_URL: postgres://momo_app:momo_app_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
       CENT_API_URL: http://centrifugo:8000/api
-      MOMO_CENTRIFUGO_WS_URL: ws://127.0.0.1:${CENT_PORT:-8000}/connection/websocket
+      # MOMO-391: the web login smoke fronts realtime with the web-edge Caddy
+      # site, so login must hand browsers the wss:// edge address instead of
+      # the raw host-port Centrifugo URL (ADR-0110: this response field is the
+      # only websocket address authority). Default (unset) keeps the existing
+      # direct ws:// URL for every other gate.
+      MOMO_CENTRIFUGO_WS_URL: ${MOMO_E2E_REALTIME_WS_URL:-ws://127.0.0.1:${CENT_PORT:-8000}/connection/websocket}
       HERMES_BASE_URL: http://mock-hermes:8088/v1
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
     ports:
@@ -226,7 +231,10 @@ services:
       - "127.0.0.1:${WEB_EDGE_HTTPS_PORT:-19443}:443"
     volumes:
       - ./prod/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./e2e/web-placeholder:/srv/momo-web:ro
+      # MOMO-391: the login smoke mounts the built SPA (clients/web/dist,
+      # absolute path) here; default stays the MOMO-390 placeholder so the
+      # serving smoke's expectations are unchanged.
+      - ${WEB_EDGE_ASSETS_DIR:-./e2e/web-placeholder}:/srv/momo-web:ro
     healthcheck:
       test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
       interval: 2s
