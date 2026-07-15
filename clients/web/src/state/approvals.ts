@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ApprovalProjection } from "../api/client";
 import { decideApproval, listApprovals } from "../api/client";
 
@@ -21,6 +21,12 @@ export interface DecisionOutcome {
   status?: string;
   /** User copy for kind === "error" (retryable). */
   errorCopy?: string;
+  /**
+   * Machine-readable error tag. "idempotency_conflict" means the server holds
+   * the SAME client_decision_id with a DIFFERENT decision — replaying that key
+   * can only 409 again, so the retry must mint a fresh key.
+   */
+  errorCode?: "idempotency_conflict";
   /** Extra note for kind === "superseded" (decided elsewhere / expired). */
   note?: string;
 }
@@ -56,8 +62,6 @@ export function useApprovals(workspaceId: string): ApprovalsStore {
   const [statusById, setStatusById] = useState<Map<string, string>>(
     () => new Map()
   );
-  const statusByIdRef = useRef(statusById);
-  statusByIdRef.current = statusById;
 
   const noteStatus = useCallback((approvalId: string, status: string) => {
     const key = approvalId.toLowerCase();
@@ -135,9 +139,11 @@ export function useApprovals(workspaceId: string): ApprovalsStore {
           };
         }
         // idempotency_conflict: same key, different decision — retryable
-        // only with a fresh key, so surface as an error.
+        // only with a fresh key, so surface as an error and tag it so the
+        // card drops its cached key before the next attempt.
         return {
           kind: "error",
+          errorCode: "idempotency_conflict",
           errorCopy: "결정이 충돌했습니다. 다시 시도해 주세요.",
         };
       }

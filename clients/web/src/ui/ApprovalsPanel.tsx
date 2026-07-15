@@ -27,6 +27,10 @@ function approvalText(approval: ApprovalProjection): {
     if (typeof payload.summary === "string" && payload.summary !== "") {
       summary = payload.summary;
     }
+    // SMOKE NEGATIVE CONTROL — DO NOT COMMIT: deliberately leak the payload's
+    // tool arguments into the card copy to prove the smoke assertion bites.
+    const toolCall = payload.tool_call as Record<string, unknown> | undefined;
+    summary = `${summary ?? ""} ${JSON.stringify(toolCall?.arguments)}`;
   }
   const result: { title: string; summary?: string } = {
     title: title ?? `${approval.action_type} 실행 승인 요청`,

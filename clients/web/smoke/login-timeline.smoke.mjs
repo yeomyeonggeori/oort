@@ -30,14 +30,18 @@
 //      with zero further read-state GETs from the page — the update can only
 //      have arrived over the `user:read-state#<member-id>` websocket push.
 //      Opening a channel / receiving live messages drives browser-side cursor
-//      PUTs whose bodies are asserted strictly monotonic (never a regression).
+//      PUTs whose bodies are asserted never-regressing (a re-PUT of the same
+//      seq is legitimate; only a LOWER seq is a regression).
 //   9. Composer idempotency: the first in-browser send is forwarded to the
 //      server but answered with a synthetic 500 (deterministic lost-response
 //      stand-in). The composer keeps the draft and the SAME clientMsgId; the
 //      retry must reuse it, and both the timeline DOM and REST history must
 //      show exactly ONE message (server-side ON CONFLICT dedup, L4 §3.1).
-//  10. Approvals: fixture approval_request messages render as ADR-0112
-//      basic-mode cards (no tool JSON / no cost leakage — asserted); an
+//  10. Approvals: the fixtures carry the REAL gateway's dangerous fields
+//      (arguments tool JSON, tool_grant, estimated_micro_usd) in both
+//      approval.payload and message props; the cards must render as ADR-0112
+//      basic-mode cards on BOTH surfaces (timeline card + approvals panel
+//      card) with zero leakage of those fields' unique markers; an
 //      in-browser 승인 commits (receipt 200) and flips the card; a second
 //      approval decided EXTERNALLY first answers the in-browser 거부 with a
 //      409 RECEIPT that must transition the card to the authoritative status
@@ -83,6 +87,12 @@ const UNREAD_CHANNEL_NAME = env("WEB_SMOKE_UNREAD_CHANNEL_NAME", "agent-lab");
 const APPROVAL_ID = env("WEB_SMOKE_APPROVAL_ID");
 const APPROVAL2_ID = env("WEB_SMOKE_APPROVAL2_ID");
 const DM_AGENT_HANDLE = env("WEB_SMOKE_DM_AGENT_HANDLE", "kim-intern");
+// ADR-0112 leak probes: unique marker planted in the fixtures' arguments /
+// tool_grant, plus the fixture estimated_micro_usd figures (comma-separated).
+const LEAK_MARKER = env("WEB_SMOKE_LEAK_MARKER", "LEAKPROBE");
+const LEAK_MICRO_USD = env("WEB_SMOKE_LEAK_MICRO_USD", "431337,917331")
+  .split(",")
+  .filter(Boolean);
 
 const failures = [];
 function pass(message) {
@@ -90,6 +100,32 @@ function pass(message) {
 }
 function fail(message) {
   throw new Error(`FAIL: ${message}`);
+}
+
+// ADR-0112 basic-mode leak assertion (review fix M1): beyond the structural
+// tells (JSON punctuation, field names, currency), assert the fixture's
+// unique dangerous-field markers and cost figures never reach the DOM.
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const LEAK_RE = new RegExp(
+  [
+    "[{}[\\]]",
+    "micro_usd",
+    "arguments",
+    "tool_grant",
+    "\\bUSD\\b",
+    "\\$",
+    ...[LEAK_MARKER, ...LEAK_MICRO_USD].map(escapeRegExp),
+  ].join("|")
+);
+function assertNoApprovalLeak(text, where) {
+  const match = LEAK_RE.exec(text);
+  if (match !== null) {
+    failures.push(
+      `${where} leaks tool JSON / tool_grant / cost details (ADR-0112 basic mode violation; matched ${JSON.stringify(match[0])})`
+    );
+    return false;
+  }
+  return true;
 }
 
 // ---- REST helpers (direct to the api host port; browser-independent) --------
@@ -258,6 +294,18 @@ try {
       readStatePuts.push({ url, body });
     }
   });
+  // L4: the push proof below pins the GET counter only after every observed
+  // bulk GET's RESPONSE has completed — an in-flight response landing after
+  // the external PUT could otherwise clear the badge and fake the proof.
+  let readStateGetResponseCount = 0;
+  page.on("response", (response) => {
+    if (
+      response.request().method() === "GET" &&
+      /\/v1\/workspaces\/[^/]+\/read-state(\?|$)/.test(response.url())
+    ) {
+      readStateGetResponseCount += 1;
+    }
+  });
 
   await page.goto(`https://${APP_HOST}/`, { waitUntil: "load" });
   await page.getByTestId("login-email").waitFor({ timeout: 15000 });
@@ -283,6 +331,9 @@ try {
 
   // 8) read-state: park on the no-unread fixture channel so #general's badge
   //    stays observable (viewing a channel advances its cursor by design).
+  //    Parking determinism relies on the server's lower(name) channel sort
+  //    (agent-lab < general): the app auto-opens the FIRST listed channel, so
+  //    the initial open already lands on the parked channel, never #general.
   await page
     .locator(
       `[data-testid="channel-item"][data-channel-name="${UNREAD_CHANNEL_NAME}"]`
@@ -303,16 +354,26 @@ try {
   }
 
   // The personal-channel subscription always starts recovered:false, which
-  // re-baselines with one extra bulk GET. Wait for it so the push proof below
-  // can pin "no further read-state GETs".
+  // re-baselines with one extra bulk GET. Wait for that GET's RESPONSE to
+  // complete — with no read-state GET still in flight — before pinning the
+  // push-proof counter (review fix L4: a request-only wait left a window
+  // where the in-flight response, not the push, could clear the badge).
   {
     const deadline = Date.now() + 20000;
-    while (readStateGetCount < 2 && Date.now() < deadline) {
+    while (
+      (readStateGetResponseCount < 2 ||
+        readStateGetCount !== readStateGetResponseCount) &&
+      Date.now() < deadline
+    ) {
       await page.waitForTimeout(100);
     }
-    if (readStateGetCount < 2) {
+    if (readStateGetResponseCount < 2) {
       failures.push(
-        "read-state subscription re-baseline (recovered:false bulk GET) never ran"
+        "read-state subscription re-baseline (recovered:false bulk GET) never completed"
+      );
+    } else if (readStateGetCount !== readStateGetResponseCount) {
+      failures.push(
+        "a read-state GET was still in flight when pinning the push-proof counter"
       );
     }
   }
@@ -528,6 +589,20 @@ try {
   } else {
     pass("approvals panel lists both pending fixtures");
   }
+  // M1: the PANEL card renders from approval.payload (which now carries the
+  // real gateway's arguments/tool_grant/estimated_micro_usd) — assert the
+  // basic-mode no-leak invariant on this surface too, before closing.
+  const panelCard1 = page.locator(
+    `[data-testid="approvals-panel"] [data-testid="approval-card"][data-approval-id="${APPROVAL_ID.toLowerCase()}"]`
+  );
+  await panelCard1.waitFor({ timeout: 20000 });
+  if (
+    assertNoApprovalLeak(await panelCard1.innerText(), "approvals panel card")
+  ) {
+    pass(
+      "approvals panel card stays in ADR-0112 basic mode (no arguments/tool_grant/cost markers from the payload)"
+    );
+  }
   await page.getByTestId("approvals-close").click();
   await page.getByTestId("timeline").waitFor({ timeout: 20000 });
 
@@ -535,13 +610,13 @@ try {
     `[data-testid="approval-card"][data-approval-id="${APPROVAL_ID.toLowerCase()}"]`
   );
   await approvalCard1.waitFor({ timeout: 20000 });
+  // M1: the TIMELINE card renders from message props (which now carry the
+  // real gateway's arguments/tool_grant/estimated_micro_usd).
   const cardText = await approvalCard1.innerText();
-  if (/[{}[\]]|micro_usd|arguments|tool_grant|\bUSD\b|\$/.test(cardText)) {
-    failures.push(
-      "approval card leaks tool JSON / cost details (ADR-0112 basic mode violation)"
+  if (assertNoApprovalLeak(cardText, "timeline approval card")) {
+    pass(
+      "timeline approval card stays in ADR-0112 basic mode (no arguments/tool_grant/cost markers from the props)"
     );
-  } else {
-    pass("approval card copy stays in ADR-0112 basic mode (no tool JSON, no cost)");
   }
 
   await approvalCard1.getByTestId("approval-approve").click();
@@ -646,7 +721,10 @@ try {
   }
 
   // Read-state PUT monotonicity across the whole run: the client must never
-  // request a cursor regression on any channel.
+  // request a cursor REGRESSION on any channel. Only a LOWER seq than the
+  // highest already PUT is a regression (review fix L3): re-PUTting the same
+  // seq is legitimate client behavior (e.g. re-confirming the cursor on
+  // channel re-entry), so `<` — not `<=` — is the failure condition.
   if (readStatePuts.length === 0) {
     failures.push("expected at least one browser-side read-state PUT");
   } else {
@@ -658,7 +736,7 @@ try {
       const previous = highest.get(key) ?? 0;
       if (
         typeof body.last_read_seq !== "number" ||
-        body.last_read_seq <= previous
+        body.last_read_seq < previous
       ) {
         failures.push(
           `read-state PUT regression on channel ${key}: ${body.last_read_seq} after ${previous}`
@@ -669,7 +747,7 @@ try {
     }
     if (!regressed) {
       pass(
-        `browser cursor PUTs stayed strictly monotonic (${readStatePuts.length} PUTs)`
+        `browser cursor PUTs never regressed (${readStatePuts.length} PUTs, non-decreasing per channel)`
       );
     }
   }

@@ -63,6 +63,11 @@ export default function ApprovalCard({
         decisionIdsRef.current[slot]
       );
       if (outcome.kind === "error") {
+        if (outcome.errorCode === "idempotency_conflict") {
+          // The server holds this key with a different decision; replaying it
+          // can only 409 again. Drop it so the retry mints a fresh key.
+          delete decisionIdsRef.current[slot];
+        }
         setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");
         return;
       }

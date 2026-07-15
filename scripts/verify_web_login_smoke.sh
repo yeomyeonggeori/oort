@@ -125,6 +125,15 @@ APPROVAL1_UPPER="$(printf '%s' "$APPROVAL1_UUID" | tr '[:lower:]' '[:upper:]')"
 APPROVAL2_UPPER="$(printf '%s' "$APPROVAL2_UUID" | tr '[:lower:]' '[:upper:]')"
 RUN1_UPPER="$(printf '%s' "$RUN1_UUID" | tr '[:lower:]' '[:upper:]')"
 RUN2_UPPER="$(printf '%s' "$RUN2_UUID" | tr '[:lower:]' '[:upper:]')"
+# ADR-0112 leak probes (review fix M1): both approval.payload AND the
+# approval_request message props carry the SAME dangerous fields the real
+# gateway writes (AgentGatewayRoutes.swift approvalPayload /
+# approvalRequestProps): tool `arguments` JSON, `tool_grant`, and
+# `estimated_micro_usd` — each tagged with a unique marker the browser smoke
+# asserts never reaches the rendered DOM (timeline card + panel card).
+LEAK_MARKER="LEAKPROBE-$RUN_EPOCH"
+LEAK_MICRO_USD_1=431337
+LEAK_MICRO_USD_2=917331
 
 compose() {
   PORT="$API_PORT" \
@@ -246,9 +255,10 @@ VALUES ('$DEMO_WORKSPACE_ID', '$AGENT_LAB_CHANNEL_ID', '$SMOKE_MEMBER_ID', 'memb
 -- MOMO-400: two pending approval fixtures in #general (agent = seeded 김인턴),
 -- each with its approval_request timeline message (single-transaction seq
 -- bump, mirroring the server's write path). Fixture SQL pattern follows
--- scripts/verify_openapi_contract.sh. The payload deliberately CONTAINS tool
--- JSON and a cost estimate: the smoke asserts the card never renders them
--- (ADR-0112 basic mode).
+-- scripts/verify_openapi_contract.sh. Both the payload AND the message props
+-- deliberately CONTAIN the real gateway's dangerous fields (arguments tool
+-- JSON, tool_grant, estimated_micro_usd — AgentGatewayRoutes.swift shapes):
+-- the smoke asserts the cards never render any of them (ADR-0112 basic mode).
 
 INSERT INTO agent_run
   (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key)
@@ -266,11 +276,11 @@ INSERT INTO approval
 VALUES
   ('$APPROVAL1_UUID', '$DEMO_WORKSPACE_ID', '$RUN1_UUID',
    '$GENERAL_CHANNEL_ID', '$KIM_INTERN_MEMBER_ID', 'tool_call',
-   '{"tool_call":{"call_id":"web-smoke-1","name":"github.search_issues","arguments":{"query":"web"}},"title":"GitHub 이슈 검색 실행","summary":"김인턴이 GitHub 이슈를 검색하려고 합니다.","estimated_micro_usd":4200,"is_reversible":true}'::jsonb,
+   '{"run_id":"$RUN1_UPPER","action_type":"tool_call","tier":"read_only","tool_call":{"call_id":"web-smoke-1","name":"github.search_issues","arguments":{"query":"$LEAK_MARKER-args-1 repo:momo is:open"},"tool_grant":{"tool":"github.search_issues","scope":"$LEAK_MARKER-grant-1"}},"resume_model":"gateway_resume_agent_job","source":"hermes_gateway","title":"GitHub 이슈 검색 실행","summary":"김인턴이 GitHub 이슈를 검색하려고 합니다.","estimated_micro_usd":$LEAK_MICRO_USD_1,"is_reversible":true}'::jsonb,
    'pending', now() + interval '1 hour'),
   ('$APPROVAL2_UUID', '$DEMO_WORKSPACE_ID', '$RUN2_UUID',
    '$GENERAL_CHANNEL_ID', '$KIM_INTERN_MEMBER_ID', 'tool_call',
-   '{"tool_call":{"call_id":"web-smoke-2","name":"github.create_comment","arguments":{"body":"draft"}},"title":"GitHub 코멘트 작성","summary":"김인턴이 이슈에 코멘트를 남기려고 합니다.","estimated_micro_usd":9000,"is_reversible":false}'::jsonb,
+   '{"run_id":"$RUN2_UPPER","action_type":"tool_call","tier":"network_write","tool_call":{"call_id":"web-smoke-2","name":"github.create_comment","arguments":{"body":"$LEAK_MARKER-args-2 draft comment"},"tool_grant":{"tool":"github.create_comment","scope":"$LEAK_MARKER-grant-2"}},"resume_model":"gateway_resume_agent_job","source":"hermes_gateway","title":"GitHub 코멘트 작성","summary":"김인턴이 이슈에 코멘트를 남기려고 합니다.","estimated_micro_usd":$LEAK_MICRO_USD_2,"is_reversible":false}'::jsonb,
    'pending', now() + interval '1 hour');
 
 WITH bumped AS (
@@ -286,7 +296,7 @@ WITH bumped AS (
          (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
          '$KIM_INTERN_MEMBER_ID', 'approval_request'::message_type,
          'GitHub 이슈 검색 실행 승인 요청',
-         '{"approval_id":"$APPROVAL1_UPPER","run_id":"$RUN1_UPPER","channel_id":"$GENERAL_CHANNEL_ID","action_type":"tool_call","title":"GitHub 이슈 검색 실행","summary":"김인턴이 GitHub 이슈를 검색하려고 합니다.","status":"pending","source":"web-smoke"}'::jsonb,
+         '{"approval_id":"$APPROVAL1_UPPER","run_id":"$RUN1_UPPER","channel_id":"$GENERAL_CHANNEL_ID","action_type":"tool_call","tier":"read_only","call_id":"web-smoke-1","tool_name":"github.search_issues","title":"GitHub 이슈 검색 실행","summary":"김인턴이 GitHub 이슈를 검색하려고 합니다.","arguments":{"query":"$LEAK_MARKER-args-1 repo:momo is:open"},"tool_grant":{"tool":"github.search_issues","scope":"$LEAK_MARKER-grant-1"},"estimated_micro_usd":$LEAK_MICRO_USD_1,"is_reversible":true,"status":"pending","source":"web-smoke"}'::jsonb,
          '$RUN1_UUID'
     FROM bumped b
   RETURNING id
@@ -308,7 +318,7 @@ WITH bumped AS (
          (extract(epoch from clock_timestamp()) * 1000)::bigint, 0,
          '$KIM_INTERN_MEMBER_ID', 'approval_request'::message_type,
          'GitHub 코멘트 작성 승인 요청',
-         '{"approval_id":"$APPROVAL2_UPPER","run_id":"$RUN2_UPPER","channel_id":"$GENERAL_CHANNEL_ID","action_type":"tool_call","title":"GitHub 코멘트 작성","summary":"김인턴이 이슈에 코멘트를 남기려고 합니다.","status":"pending","source":"web-smoke"}'::jsonb,
+         '{"approval_id":"$APPROVAL2_UPPER","run_id":"$RUN2_UPPER","channel_id":"$GENERAL_CHANNEL_ID","action_type":"tool_call","tier":"network_write","call_id":"web-smoke-2","tool_name":"github.create_comment","title":"GitHub 코멘트 작성","summary":"김인턴이 이슈에 코멘트를 남기려고 합니다.","arguments":{"body":"$LEAK_MARKER-args-2 draft comment"},"tool_grant":{"tool":"github.create_comment","scope":"$LEAK_MARKER-grant-2"},"estimated_micro_usd":$LEAK_MICRO_USD_2,"is_reversible":false,"status":"pending","source":"web-smoke"}'::jsonb,
          '$RUN2_UUID'
     FROM bumped b
   RETURNING id
@@ -363,6 +373,8 @@ echo "[web-smoke] running the browser smoke (playwright chromium)"
   WEB_SMOKE_UNREAD_CHANNEL_NAME="agent-lab" \
   WEB_SMOKE_APPROVAL_ID="$APPROVAL1_UUID" \
   WEB_SMOKE_APPROVAL2_ID="$APPROVAL2_UUID" \
+  WEB_SMOKE_LEAK_MARKER="$LEAK_MARKER" \
+  WEB_SMOKE_LEAK_MICRO_USD="$LEAK_MICRO_USD_1,$LEAK_MICRO_USD_2" \
   WEB_SMOKE_DM_AGENT_HANDLE="kim-intern" \
   WEB_SMOKE_OUT_DIR="$OUT_DIR" \
   node smoke/login-timeline.smoke.mjs
@@ -372,5 +384,5 @@ echo
 echo "MOMO-391 + MOMO-400 web browser smoke PASS"
 echo "- stack: compose project '$PROJECT' (api :$API_PORT, edge :$EDGE_HTTPS), torn down on exit"
 echo "- verified (MOMO-391): SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up (never after=0), expired-access logout rotate+retry with server-side revoke, zero CSP console violations"
-echo "- verified (MOMO-400): unread badge from bulk read-state GET, external cursor PUT reflected via user:read-state push (zero extra GETs), strictly monotonic browser cursor PUTs, composer clientMsgId idempotent retry (one DOM render + one REST row), ADR-0112 approval cards (no tool JSON/cost), in-browser approve receipt 200, externally pre-decided 409 receipt as card state transition, DM open via POST /dms + composer round-trip + GET /dms listing"
+echo "- verified (MOMO-400): unread badge from bulk read-state GET, external cursor PUT reflected via user:read-state push (zero extra GETs, counter pinned only after the re-baseline GET response completed), never-regressing browser cursor PUTs, composer clientMsgId idempotent retry (one DOM render + one REST row), ADR-0112 approval cards leak none of the gateway-shaped fixture's arguments/tool_grant/estimated_micro_usd (timeline card + panel card), in-browser approve receipt 200, externally pre-decided 409 receipt as card state transition, DM open via POST /dms + composer round-trip + GET /dms listing"
 echo "- artifacts: $OUT_DIR"
