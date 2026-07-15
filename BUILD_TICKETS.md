@@ -1991,6 +1991,19 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 서버·clients/macOS·스펙 무변경.
 - [x] 종결: PR #419(+리뷰 M1/L1 반영 3f88888) merge `9616c67`. 독립 리뷰 Blocker/High 0 — join 토큰 판정(JoinResponse required 토큰=스펙 준수)·오류 카피의 서버 문자열 7지점 대조·코드 비유출 전부 확인. 스모크 32 PASS(신규 7)·web 게이트 전체 PASS. **ADR-0119 웹 v0 스코프(389~391·398~401) 완주.**
 
+### ☐ MOMO-403 수용기준 — ADR-0120 P-1: device/push_token 등록·해지 REST `[server/runtime-db]` · 의존: 없음
+- [ ] 신규 `DeviceRoutes.swift`: 인증 멤버가 자기 device(platform ios/macos)+push_token(apns_token/env/topic)을 등록(멱등 upsert — 재등록=갱신)·조회·해지. actor binding(타인 device 403), RLS FORCE, 같은 트랜잭션 audit_log. `App.swift` 배선은 최소 블록(UX 트랙 공유 핫파일 — 주변 리팩토링 금지).
+- [ ] 수명주기 계약: 해지 시 `invalidated_at` 기록(물리 삭제 아님 — dispatch_log FK 보존), 410/400 무효화 컬럼 계약(DEPLOY.md 운영 상수)과 정합. schema_v0 불변, 필요 확장은 신규 migration만.
+- [ ] `docs/api/openapi.yaml` 무변경(웹 v0 표면 아님). id-only 원칙과 무관한 라우트지만 응답에 raw apns_token 전문을 되돌려주지 않는다(등록 확인은 ref/suffix만).
+- [ ] 신규 registration verifier: 등록→멱등 재등록→조회→해지→cross-tenant/타인 거부→audit 행. `runtime-db` 게이트 PASS + `LOCAL_PR_GATE.md` 등록.
+
+### ☐ MOMO-404 수용기준 — ADR-0120 P-2: notifier worker + 판정 v0 + mock relay `[server/runtime-db]` · 의존: MOMO-403
+- [ ] 신규 `workers/NotifierWorker`(OutboxRelay 패턴: ServiceLifecycle·SKIP LOCKED·graceful shutdown). 판정은 이 worker 한 곳(P9): v0 = DM 전건 + 멘션(MessageRoutes의 서버 재계산 mention projection 재사용 — 재파싱 금지) + 승인 요청. 채널 알림 설정/DND/mute는 범위 밖(UX MOMO-395가 설정 표면 소유 — 소비자 자리만 주석).
+- [ ] 후보 생성→소비: 같은 tenant 트랜잭션 내구 기록 + at-least-once 소비 + 멱등 dispatch(형태 재량 — 근거 PR 기록). relay `broadcast`·`agent_job` 소비와 경합 없음을 검증. notifier DB role 결정(신설 시 bootstrap/검증 정합, 재사용 시 최소성 근거).
+- [ ] 발송은 mock relay(e2e mock-hermes 패턴)까지 — **id-only 하드 계약**: mock 수신 페이로드에 메시지 본문·표시명 부재를 verifier가 단정. `push_dispatch_log`에 상태 기록(스키마 계약 준수).
+- [ ] e2e compose에 notifier+mock relay 추가하되 기본 프로파일 렌더 불변. `clients/**`·`infra/prod/**` 무변경.
+- [ ] 신규 notifier verifier: DM/멘션/승인 각 1건 왕복(dispatch_log+mock 수신+id-only 단정+재시작 멱등) + relay/agent_job 무회귀. `runtime-db` 게이트 PASS + `LOCAL_PR_GATE.md` 등록. api/relay 콜드빌드는 staggered boot 패턴 승계.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
