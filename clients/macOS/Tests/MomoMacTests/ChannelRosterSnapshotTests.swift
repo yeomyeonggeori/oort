@@ -133,7 +133,8 @@ final class ChannelRosterSnapshotTests: XCTestCase {
                 audience: .channel,
                 copy: MomoWorkspaceCopy(language: .korean),
                 close: {},
-                didOpenDirectMessage: {}
+                didOpenDirectMessage: {},
+                presentation: .attached
             )
             .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, scheme)

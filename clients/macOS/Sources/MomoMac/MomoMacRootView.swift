@@ -238,7 +238,7 @@ public struct MomoMacRootView: View {
                         VStack(spacing: 0) {
                             Color.clear
                                 .frame(height: inspectorTopInset)
-                                .momoSurface(.panel, cornerRadius: 0)
+                                .momoFlatSurface(.panel)
                                 .overlay(alignment: .bottom) {
                                     Divider()
                                 }
@@ -457,7 +457,8 @@ public struct MomoMacRootView: View {
                 if !isAttached {
                     closeMemberInspector()
                 }
-            }
+            },
+            presentation: isAttached ? .attached : .overlay
         )
     }
 
@@ -552,7 +553,10 @@ public struct MomoMacRootView: View {
             case .alpha:
                 AlphaCommandCenterView(viewModel: viewModel)
             case .approvals:
-                ApprovalInboxView(viewModel: viewModel)
+                ApprovalInboxView(
+                    viewModel: viewModel,
+                    inspectorPresentation: presentation
+                )
             case .work:
                 if let selectedWorkRunID {
                     AgentWorkRunDetailView(
@@ -598,10 +602,7 @@ public struct MomoMacRootView: View {
             }
         }
         .frame(width: presentation == .attached ? Self.inspectorWidth : nil)
-        .momoSurface(
-            presentation == .overlay ? .card : .panel,
-            cornerRadius: presentation.cornerRadius
-        )
+        .momoInspectorSurface(presentation)
     }
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
@@ -801,7 +802,7 @@ enum MomoMemberInspectorLayout {
     }
 }
 
-private enum MomoInspectorPresentation {
+enum MomoInspectorPresentation {
     case attached
     case overlay
 
@@ -811,6 +812,21 @@ private enum MomoInspectorPresentation {
             return 0
         case .overlay:
             return MomoTheme.cornerLarge
+        }
+    }
+
+    var usesElevatedSurfaceChrome: Bool {
+        self == .overlay
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func momoInspectorSurface(_ presentation: MomoInspectorPresentation) -> some View {
+        if presentation.usesElevatedSurfaceChrome {
+            momoSurface(.card, cornerRadius: presentation.cornerRadius)
+        } else {
+            momoFlatSurface(.panel)
         }
     }
 }

@@ -17,12 +17,25 @@ import MomoCore
 
 public struct ApprovalInboxView: View {
     @ObservedObject var viewModel: ChatViewModel
+    let inspectorPresentation: MomoInspectorPresentation
+    let ownsInspectorSurface: Bool
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
+        self.inspectorPresentation = .overlay
+        self.ownsInspectorSurface = true
+    }
+
+    init(
+        viewModel: ChatViewModel,
+        inspectorPresentation: MomoInspectorPresentation
+    ) {
+        self.viewModel = viewModel
+        self.inspectorPresentation = inspectorPresentation
+        self.ownsInspectorSurface = false
     }
 
     private var pending: [ApprovalEvent] { viewModel.pendingApprovals }
@@ -48,7 +61,12 @@ public struct ApprovalInboxView: View {
                 .listStyle(.plain)
             }
         }
-        .momoSurface(.panel, cornerRadius: 0)
+        .modifier(
+            MomoApprovalInspectorSurfaceModifier(
+                presentation: inspectorPresentation,
+                ownsSurface: ownsInspectorSurface
+            )
+        )
     }
 
     private var header: some View {
@@ -156,6 +174,20 @@ public struct ApprovalInboxView: View {
             isDeveloperModeEnabled: developerMode,
             isCostDisplayEnabled: showCosts
         )
+    }
+}
+
+private struct MomoApprovalInspectorSurfaceModifier: ViewModifier {
+    let presentation: MomoInspectorPresentation
+    let ownsSurface: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if ownsSurface {
+            content.momoInspectorSurface(presentation)
+        } else {
+            content
+        }
     }
 }
 
