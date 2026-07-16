@@ -43,6 +43,18 @@ struct MomoDirectMessagePicker: View {
                     .textFieldStyle(.plain)
                     .focused($isSearchFocused)
                     .onSubmit(openSelectedDirectMessage)
+                    .onKeyPress(.upArrow) {
+                        moveSelection(offset: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        moveSelection(offset: 1)
+                        return .handled
+                    }
+                    .onKeyPress(.escape) {
+                        dismiss()
+                        return .handled
+                    }
             }
             .padding(8)
             .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous))

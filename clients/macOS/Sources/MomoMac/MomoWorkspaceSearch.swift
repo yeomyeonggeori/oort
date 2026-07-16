@@ -184,6 +184,18 @@ struct MomoWorkspaceSearchView: View {
                     .font(MomoTheme.Typography.row)
                     .focused($isSearchFocused)
                     .onSubmit { activateSelected(from: orderedItems) }
+                    .onKeyPress(.upArrow) {
+                        moveSelection(in: orderedItems, offset: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        moveSelection(in: orderedItems, offset: 1)
+                        return .handled
+                    }
+                    .onKeyPress(.escape) {
+                        dismiss()
+                        return .handled
+                    }
                 Text("esc")
                     .font(MomoTheme.Typography.metadata.monospaced())
                     .foregroundStyle(.tertiary)
