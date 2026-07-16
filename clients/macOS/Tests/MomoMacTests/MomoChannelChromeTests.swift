@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 import MomoCore
 @testable import MomoMac
 
@@ -86,6 +87,27 @@ final class MomoChannelChromeTests: XCTestCase {
     func testCompactChromeAndChannelHeaderUseThinStableContracts() {
         XCTAssertEqual(MomoWindowChromeStyle.appKitToolbarStyle, .unifiedCompact)
         XCTAssertEqual(MomoTheme.ChannelHeader.minimumHeight, 48)
+    }
+
+    @MainActor
+    func testFlatUnifiedChromeRemovesNativeTitlebarSeparation() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        let toolbar = NSToolbar(identifier: "MomoChannelChromeTests.toolbar")
+        toolbar.showsBaselineSeparator = true
+        window.toolbar = toolbar
+        window.titlebarAppearsTransparent = false
+        window.titlebarSeparatorStyle = .line
+
+        MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+
+        XCTAssertTrue(window.titlebarAppearsTransparent)
+        XCTAssertEqual(window.titlebarSeparatorStyle, .none)
+        XCTAssertFalse(try XCTUnwrap(window.toolbar).showsBaselineSeparator)
     }
 
     func testChannelQuickActionsAreLimitedToSelectionOrHover() {

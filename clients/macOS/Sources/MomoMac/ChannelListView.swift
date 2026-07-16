@@ -171,9 +171,6 @@ public struct ChannelListView: View {
                 VStack(spacing: 0) {
                     if showsWorkspaceHeader {
                         sidebarHeader(copy: copy)
-
-                        Divider()
-                            .opacity(0.35)
                     }
 
                     ScrollView {
@@ -189,11 +186,7 @@ public struct ChannelListView: View {
                     }
                     .scrollIndicators(.hidden)
 
-                    Divider()
-                        .opacity(0.35)
                     utilityFooter(copy: copy)
-                    Divider()
-                        .opacity(0.35)
                     profileFooter(copy: copy)
                 }
 
@@ -224,9 +217,6 @@ public struct ChannelListView: View {
             MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
                 .ignoresSafeArea()
         )
-        .overlay(alignment: .trailing) {
-            Divider()
-        }
         .onAppear {
             refreshHermesEndpointDraftIfNeeded()
             hermesAlias = Self.dogfoodHermesAlias
