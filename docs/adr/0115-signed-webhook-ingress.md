@@ -1,6 +1,6 @@
 # ADR-0115: Signed Webhook Ingress — 서명 수신 + Slack-호환 모드
 
-- Status: **Proposed** (2026-07-17, Fable engine planner draft — 성재 option 승인 대기. 예약분(PLN-20260714-02 ADR-S3)의 기안 + ADR-0113 D4(Slack/MM 호환) 입력 통합)
+- Status: **Accepted** (2026-07-17, 성재 — 권고안 D1-A/D2-A/D3/D4 승인. 파생 SE-04B=MOMO-412, §9 부하 규칙 아래 발급)
 - 관련: `docs/planning/proposals/2026-07-14-superapp-engine-roadmap.md` §ADR-0115·SE-04B, ADR-0113(Accepted — D4 Slack-호환 채택, D6 manifest), `research/16-plugin-platform/04`(Slack/MM 와이어 호환 실검증), MOMO-410(plugin registry — webhook은 첫 reference plugin), 제1불변식(단일 쓰기 경로)
 - 발단: 채널 설정의 웹훅 탭은 placeholder(발급·서명·수신 경로 없음). 성재 발제 "Slack/Mattermost에서 쓰던 것 계속 사용"이 ADR-0113 D4로 채택되어, 이 ADR이 그 실행 계약을 정본화한다.
 

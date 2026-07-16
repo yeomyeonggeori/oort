@@ -2062,6 +2062,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 기존 게이트 evidence 포맷·PASS 의미 무변경. 전 프로파일 무회귀(docs 게이트로 스크립트 정적 검증 + runtime-db 1회 실증).
 - [ ] `docs/LOCAL_PR_GATE.md`·`MULTI_SESSION_OPS.md` §9 상호 참조 갱신.
 
+### ☐ MOMO-412 수용기준 — ADR-0115 SE-04B: signed webhook ingress + Slack-호환 모드 `[server/runtime-db]` · 의존: MOMO-410(랜딩됨)
+- [ ] 발급/회전/revoke REST(owner/admin, 채널 바인딩 고정): native 모드는 per-install HMAC-SHA256 — secret은 **one-time reveal**(저장은 key ID/secret ref만, 어떤 테이블·로그·응답에도 raw 미저장), overlap rotation + revoke. webhook install은 MOMO-410 registry의 `external_webhook` plugin install로 기록(audit 같은 트랜잭션).
+- [ ] native 수신: signature base = version+method+canonical endpoint/install ID+timestamp+delivery ID+raw-body SHA-256, constant-time 비교, replay window, strict body/parser limits, rate limit. `(workspace_id, installation_id, delivery_id)` unique receipt + deterministic `client_msg_id` + channel seq/message/outbox **한 tenant 트랜잭션**.
+- [ ] **Slack-호환 모드(D2-A)**: `POST /hooks/{token}`(URL-시크릿, 서명 없음 — 고엔트로피 토큰), 변환기는 `text`+legacy `attachments`(MM 검증 필드 화이트리스트)+`<url|text>`/멘션/`<!channel>` 번역. **`blocks`는 400+명시 오류**. 멱등은 `(install, body hash, 시간창)` 근사. 미지원 목록 문서화(MM 동일).
+- [ ] 발신 author 표기: 사람/에이전트 사칭 불가 하드 계약 — 구체 모델(전용 표기 vs 설치자 위임)은 재량+근거 기록. provider의 Centrifugo 직접 publish 불가.
+- [ ] `docs/api/openapi.yaml`·`clients/**`·`infra/prod/**` 무변경(발급 UI는 UX 트랙 후속). schema_v0 불변 — 신규 migration(014)만.
+- [ ] 신규 verifier: 위조 서명/재전송(replay)/stale timestamp/cross-workspace/회전 경합(신구 키 창)/revoke 후 거부/시크릿 redaction + **Slack 페이로드 픽스처 왕복**(text·attachments 번역 결과 메시지 확인, blocks 400) + receipt 멱등(동일 delivery 재수신 1회 기록). `runtime-db` 게이트 PASS(오케스트레이터 — **§9 부하 체크 후 실행, 종료 시 down**) + `LOCAL_PR_GATE.md` 등록.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
