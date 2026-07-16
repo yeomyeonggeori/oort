@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import MomoCore
 
@@ -54,6 +55,14 @@ public struct MessageListView: View {
     @State private var hoveredMentionCandidateID: MemberID?
     @State private var measuredMentionPanelHeight: CGFloat = 0
     @State private var suppressedMentionDraft: String?
+    @State private var isActionLauncherPresented = false
+    @State private var localDraftSheet: MomoComposerDraftSheet?
+    @State private var attachmentDrafts: [MomoAttachmentDraft] = []
+    @State private var isFileDropTargeted = false
+    @State private var threadTopic = ""
+    @State private var pollQuestion = ""
+    @State private var pollOptions = ["", ""]
+    @State private var selectedPlugins: Set<String> = []
 
     public init(
         viewModel: ChatViewModel,
@@ -125,6 +134,27 @@ public struct MessageListView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
             channelPresentationRevision &+= 1
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            addAttachmentDrafts(urls)
+            return urls.contains(where: \.isFileURL)
+        } isTargeted: { isTargeted in
+            isFileDropTargeted = isTargeted
+        }
+        .overlay {
+            if isFileDropTargeted {
+                MomoFileDropOverlay(copy: MomoComposerActionCopy(language: language))
+            }
+        }
+        .sheet(item: $localDraftSheet) { sheet in
+            MomoLocalDraftSheet(
+                sheet: sheet,
+                copy: MomoComposerActionCopy(language: language),
+                threadTopic: $threadTopic,
+                pollQuestion: $pollQuestion,
+                pollOptions: $pollOptions,
+                selectedPlugins: $selectedPlugins
+            )
         }
     }
 
@@ -580,6 +610,15 @@ public struct MessageListView: View {
                 typingIndicator(copy: copy)
             }
 
+            if !attachmentDrafts.isEmpty {
+                MomoAttachmentDraftStrip(
+                    drafts: attachmentDrafts,
+                    copy: MomoComposerActionCopy(language: language),
+                    onRemove: removeAttachmentDraft,
+                    onClear: { attachmentDrafts.removeAll() }
+                )
+            }
+
             composerSurface(candidates: candidates, copy: copy)
         }
         .padding(.horizontal, 16)
@@ -597,41 +636,31 @@ public struct MessageListView: View {
     private func composerSurface(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
             Button {
-                presentWorkComposer()
+                isActionLauncherPresented.toggle()
             } label: {
-                Label(copy.startWork, systemImage: "hammer")
+                Label(MomoComposerActionCopy(language: language).launcherTitle, systemImage: "plus")
                     .labelStyle(.iconOnly)
+                    .font(.title3.weight(.medium))
                     .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .keyboardShortcut("w", modifiers: [.command, .shift])
             .disabled(viewModel.selectedChannelId == nil)
-            .help("\(copy.startWork)  ⇧⌘W")
-            .accessibilityLabel(copy.startWork)
-            .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
-                AgentWorkComposerView(
-                    viewModel: viewModel,
-                    copy: copy,
-                    initialBrief: initialWorkBrief,
-                    onStarted: { _ in
-                        initialWorkBrief = ""
-                        workCommandDraftToRestore = nil
-                        isWorkComposerPresented = false
-                    },
-                    onCancel: {
-                        if let draft = workCommandDraftToRestore {
-                            viewModel.composerDraft = draft
-                            viewModel.composerDraftDidChange(draft)
-                            isComposerFocused = true
-                        }
-                        initialWorkBrief = ""
-                        workCommandDraftToRestore = nil
-                        isWorkComposerPresented = false
-                    }
-                )
-                .id(workComposerSessionId)
+            .help(MomoComposerActionCopy(language: language).launcherTitle)
+            .accessibilityLabel(MomoComposerActionCopy(language: language).launcherTitle)
+            .popover(isPresented: $isActionLauncherPresented, arrowEdge: .bottom) {
+                MomoComposerActionLauncher(copy: MomoComposerActionCopy(language: language)) { action in
+                    isActionLauncherPresented = false
+                    handleComposerAction(action)
+                }
             }
+
+            Button(action: presentWorkComposer) { EmptyView() }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+                .frame(width: 0, height: 0)
+                .opacity(0)
+                .accessibilityHidden(true)
 
             TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -681,6 +710,29 @@ public struct MessageListView: View {
             .disabled(!canSendMessage)
             .accessibilityLabel(copy.sendMessage)
         }
+        .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
+            AgentWorkComposerView(
+                viewModel: viewModel,
+                copy: copy,
+                initialBrief: initialWorkBrief,
+                onStarted: { _ in
+                    initialWorkBrief = ""
+                    workCommandDraftToRestore = nil
+                    isWorkComposerPresented = false
+                },
+                onCancel: {
+                    if let draft = workCommandDraftToRestore {
+                        viewModel.composerDraft = draft
+                        viewModel.composerDraftDidChange(draft)
+                        isComposerFocused = true
+                    }
+                    initialWorkBrief = ""
+                    workCommandDraftToRestore = nil
+                    isWorkComposerPresented = false
+                }
+            )
+            .id(workComposerSessionId)
+        }
         .padding(.horizontal, 12)
         .frame(minHeight: MomoTheme.composerMinimumHeight)
         // A timeline composer needs one continuous surface; the native rounded
@@ -716,6 +768,40 @@ public struct MessageListView: View {
         .onPreferenceChange(MomoMentionPanelHeightPreferenceKey.self) { height in
             measuredMentionPanelHeight = height
         }
+    }
+
+    private func handleComposerAction(_ action: MomoComposerAction) {
+        switch action {
+        case .fileUpload:
+            chooseAttachmentFiles()
+        case .startWork:
+            presentWorkComposer()
+        case .createThread:
+            localDraftSheet = .thread
+        case .createPoll:
+            localDraftSheet = .poll
+        case .addPlugin:
+            localDraftSheet = .plugins
+        }
+    }
+
+    private func chooseAttachmentFiles() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.begin { response in
+            guard response == .OK else { return }
+            addAttachmentDrafts(panel.urls)
+        }
+    }
+
+    private func addAttachmentDrafts(_ urls: [URL]) {
+        attachmentDrafts = MomoAttachmentDraftCollection.merging(attachmentDrafts, urls: urls)
+    }
+
+    private func removeAttachmentDraft(_ draft: MomoAttachmentDraft) {
+        attachmentDrafts.removeAll { $0.id == draft.id }
     }
 
     private var canSendMessage: Bool {
