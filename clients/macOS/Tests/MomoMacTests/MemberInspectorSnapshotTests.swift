@@ -191,4 +191,44 @@ final class MemberInspectorSnapshotTests: XCTestCase {
                 .contains(textField.placeholderString ?? "")
         )
     }
+
+    func testMentionAutocompleteWritesRealWindowArtifact() async throws {
+        guard !NSScreen.screens.isEmpty else {
+            throw XCTSkip("MOMO-396 mention overlay evidence requires a WindowServer compositor")
+        }
+        let (viewModel, _) = try await makeViewModel()
+        viewModel.composerDraft = "@"
+        XCTAssertGreaterThan(viewModel.mentionAutocompleteCandidates().count, 0)
+
+        let hostingController = NSHostingController(
+            rootView: MessageListView(viewModel: viewModel, focusComposerRequest: 1)
+                .frame(width: 760, height: 620)
+                .environment(\.colorScheme, .dark)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.contentViewController = hostingController
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        defer { window.close() }
+
+        try await Task.sleep(for: .milliseconds(300))
+        guard let cgImage = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            CGWindowID(window.windowNumber),
+            [.boundsIgnoreFraming, .bestResolution]
+        ) else {
+            throw XCTSkip("WindowServer could not capture the MOMO-396 mention overlay")
+        }
+
+        let image = NSImage(cgImage: cgImage, size: window.frame.size)
+        try writeArtifact(image, named: "momo-396-composer-mention-overlay-dark.png")
+        XCTAssertEqual(image.size, window.frame.size)
+    }
 }

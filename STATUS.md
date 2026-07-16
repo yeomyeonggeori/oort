@@ -7,6 +7,12 @@
 
 - migration 012가 seed-none/prod의 시드 owner에 남은 결정론적 `dev-password` 해시만 NULL로 잠그고, 명시적 demo/e2e seed는 기존 로그인 fixture를 유지한다. production/e2e 격리 DB HTTP verifier를 `runtime-db`에 연결했다. Swift 6개 패키지 build와 Core/server/relay/worker/notifier test, macOS non-snapshot 224 test, shell syntax·정적 seed 계약은 worker 검증 완료; Docker `runtime-db`는 오케스트레이터 실행 전까지 `runtime-unverified`다.
 
+## MOMO-396 macOS Composer + Mention Overlay Polish (2026-07-16)
+
+- composer를 최소 56pt의 단일 native surface로 정리하고 내부 `TextField`의 중첩 rounded-border focus ring을 제거했다. 시작 작업과 전송 action은 같은 surface 안에 유지하며 한국어/영어 전송 label을 제공한다.
+- 현재 채널에 실제로 초대된 사람/에이전트만 `@` 후보로 표시한다. 후보 목록은 timeline을 밀지 않는 composer 위 overlay이며 최대 6행, 8pt 간격, 선택 highlight를 사용한다. 위/아래 순환, Tab/Return 선택, Escape 닫기와 mouse 선택을 지원한다.
+- focused mention tests와 전체 macOS 303 tests가 0 failure로 PASS했다. 실제 macOS window artifact에서 focus ring 제거, overlay 위치, 긴 후보 행과 timeline 비이동을 확인했다. 파일 DnD/첨부 기록은 storage·credential 계약이 선행되어야 하는 MOMO-394 범위이며 이번 UI가 가짜 첨부 성공을 만들지 않는다.
+
 ## MOMO-407 초대 보안 계약 (2026-07-16)
 - regenerate 의미론(review #428 M1 명문화): regenerate는 **신규 코드 발급**이므로 만료를 구 invite의 잔여 TTL이 아니라 **기본 7일로 재설정**한다. 잔여 TTL 보존이 필요해지면 후속 티켓으로 분리한다.
 

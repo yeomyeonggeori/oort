@@ -157,6 +157,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var sendMessage: String {
+        switch language {
+        case .korean: return "메시지 보내기"
+        case .english: return "Send message"
+        }
+    }
+
     var timelineEmptyTitle: String {
         switch language {
         case .korean: return "첫 메시지를 보내보세요"
