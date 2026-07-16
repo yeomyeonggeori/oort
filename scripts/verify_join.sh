@@ -286,7 +286,8 @@ echo "[join] admin-created invite grants only its bound member role"
 create_invite admin 1
 ADMIN_BOOTSTRAP_CODE="$INVITE_CODE"
 ADMIN_EMAIL="invite-admin-$RUN_ID@momo.local"
-join_with_code "$ADMIN_BOOTSTRAP_CODE" "$ADMIN_EMAIL" "invite-admin-$RUN_ID" 201
+# handle은 32자 상한 — "invite-admin-"(13)+RUN_ID(최대 22)는 pid 자릿수에 따라 초과(flake). 짧은 prefix 사용.
+join_with_code "$ADMIN_BOOTSTRAP_CODE" "$ADMIN_EMAIL" "inv-adm-$RUN_ID" 201
 ADMIN_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -r '.accessToken')"
 ADMIN_MEMBER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.member.id')"
 create_default_invite member 1 "$ADMIN_TOKEN"
