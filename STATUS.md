@@ -49,6 +49,12 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-410 plugin registry — 플러그인 플랫폼 물리 기반 (2026-07-17)
+
+- ADR-0113 SE-04A 랜딩(PR #435, `1809551`) — migration 013(registry/install/**grant 4-튜플**(self-grant DB CHECK)/capability projection, RLS FORCE), manifest validator(전면 화이트리스트 fail-closed — unknown 키 자체 거부·GPL/AGPL 배제·digest·risk↔tier 매트릭스), PluginRoutes(카탈로그/install/grant/revoke — serverPolicy 게이트), **오피셜 시드 3종**(GitHub `api.githubcopilot.com/mcp/`·Notion `mcp.notion.com/mcp`·Linear `mcp.linear.app/mcp` — 16-03 실검증 그대로, egressDomains 실도메인).
+- 커스터디 A 실증: raw credential이 테이블·응답·audit detail 어디에도 없음을 verifier가 마커 3면 단정. 리뷰 H1(read-path 403/404/409→500)을 트랜잭션 언랩으로 수정 — MOMO-403과 같은 패턴 2회째(3회 시 공용 헬퍼 티켓).
+- 게이트: plugin verifier 전체 PASS(RLS 단정은 라이브 projection 보장 후 — M2 강화) + runtime-db PASS. 크로스트랙 사고 수습 기록: 통합자 add -A 오커밋이 main macOS 빌드를 깨뜨림 → MessageListView revert(e1a9b78)로 복구, UX 작업분 working tree 보존.
+
 ## MOMO-408 prod 시드 fail-closed (2026-07-16)
 
 - migration 012(PR #431, `8193734`): seed-none(prod) 경로에서 dev-password 백필을 차단하고 **기존 백필 행을 전 human 범위로 소급 잠금**(H1 — 리뷰가 pre-MOMO-217 join 행·문서 안내 잔존 노출을 발견). 오잠금 벡터 없음: bcrypt verify 술어가 운영자 변경 비밀번호를 통과시키지 않음(리뷰 확정 + 매트릭스 verifier 단정). 모드 판별은 002/006 동일 컨벤션, 미설정 기본값=잠금(fail-closed).

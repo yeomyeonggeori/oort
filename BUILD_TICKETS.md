@@ -2047,13 +2047,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] schema_v0 불변. verifier: prod-모드 ephemeral PG에서 migrate → dev-password 로그인 401 → 인수 UPDATE → 로그인 200 (201은 원 수용기준 오기 — 로그인 API 계약은 200, worker 이탈 보고로 정정), dev 모드에서 기존 경로 무회귀. `runtime-db` 게이트 PASS(오케스트레이터 실행).
 - [x] 종결: PR #431(+리뷰 H1/H2/M1 반영 ee40e40) merge `8193734`. H1=잠금을 dev-password 전 human으로 확장(잔존 노출 봉합), H2=로컬 러너 명시 부트스트랩(도그푸드 무회귀·prod fail-closed 유지), 오잠금 벡터 없음(리뷰 확정+매트릭스 verifier). 후속 후보: INTERNAL_ALPHA/RUN 문서 dev-password 안내 정비(M2).
 
-### ☐ MOMO-410 (`#434`) 수용기준 — ADR-0113 SE-04A: plugin manifest registry + install/grant 런타임 `[server/runtime-db]` · 의존: 없음
-- [ ] manifest 계약(ADR-0113 D6): 업계 3층(plugin.json 계열 메타 + MCP 서버 참조(원격 URL 우선, `server.json` 스키마 필드 차용) + 선택 SKILL.md 참조) + momo 확장 필드(`approvalTier` 도구→티어 매핑, `risk`, `egressDomains`, `recommendedFor`, `serverPolicy`). validator가 protocol 호환·SPDX 라이선스(GPL/AGPL 거부)·publisher/provenance·digest·tools/scopes/risk/approval policy를 검증하고 unknown 값은 fail-closed.
-- [ ] 신규 migration: plugin registry(카탈로그 항목)·workspace install record·**grant 4-튜플(workspace, member, plugin, scope)**(ADR-0113 D2)·Capability Cache projection. RLS FORCE + audit_log 같은 트랜잭션. schema_v0 불변.
-- [ ] REST: 카탈로그 목록/상세(active member), install/revoke(owner/admin — serverPolicy 게이트), grant/revoke-grant(본인 grant만 — 위임 주체=사용자). **raw credential/토큰을 어떤 테이블·로그·응답에도 저장·노출하지 않는다**(커스터디 A: 토큰은 에이전트 호스트 소유). revoked install/grant는 Capability Cache에서 즉시 제외(fail-closed).
-- [ ] 오피셜 시드 카탈로그: GitHub(remote `api.githubcopilot.com/mcp/`)·Notion(`mcp.notion.com/mcp`)·Linear(`mcp.linear.app/mcp`) 3항목을 manifest 픽스처로 등재(16-03 검증분 — Drive 경로C·Slack-호환 webhook은 후속 SE).
-- [ ] `docs/api/openapi.yaml` 무변경(웹 v0 표면 아님). `clients/**`·`infra/prod/**` 무변경.
-- [ ] 신규 verifier: manifest 검증 fail-closed 매트릭스(GPL 거부·unknown risk·malformed)·install/grant/revoke 왕복·cross-workspace 403·grant 없는 플러그인의 Capability projection 부재·audit 행. `runtime-db` 게이트 PASS(오케스트레이터 실행) + `LOCAL_PR_GATE.md` 등록.
+### ☑ MOMO-410 (`#434`) 수용기준 — ADR-0113 SE-04A: plugin manifest registry + install/grant 런타임 `[server/runtime-db]` · 의존: 없음
+- [x] manifest 계약(ADR-0113 D6): 업계 3층(plugin.json 계열 메타 + MCP 서버 참조(원격 URL 우선, `server.json` 스키마 필드 차용) + 선택 SKILL.md 참조) + momo 확장 필드(`approvalTier` 도구→티어 매핑, `risk`, `egressDomains`, `recommendedFor`, `serverPolicy`). validator가 protocol 호환·SPDX 라이선스(GPL/AGPL 거부)·publisher/provenance·digest·tools/scopes/risk/approval policy를 검증하고 unknown 값은 fail-closed.
+- [x] 신규 migration: plugin registry(카탈로그 항목)·workspace install record·**grant 4-튜플(workspace, member, plugin, scope)**(ADR-0113 D2)·Capability Cache projection. RLS FORCE + audit_log 같은 트랜잭션. schema_v0 불변.
+- [x] REST: 카탈로그 목록/상세(active member), install/revoke(owner/admin — serverPolicy 게이트), grant/revoke-grant(본인 grant만 — 위임 주체=사용자). **raw credential/토큰을 어떤 테이블·로그·응답에도 저장·노출하지 않는다**(커스터디 A: 토큰은 에이전트 호스트 소유). revoked install/grant는 Capability Cache에서 즉시 제외(fail-closed).
+- [x] 오피셜 시드 카탈로그: GitHub(remote `api.githubcopilot.com/mcp/`)·Notion(`mcp.notion.com/mcp`)·Linear(`mcp.linear.app/mcp`) 3항목을 manifest 픽스처로 등재(16-03 검증분 — Drive 경로C·Slack-호환 webhook은 후속 SE).
+- [x] `docs/api/openapi.yaml` 무변경(웹 v0 표면 아님). `clients/**`·`infra/prod/**` 무변경.
+- [x] 신규 verifier: manifest 검증 fail-closed 매트릭스(GPL 거부·unknown risk·malformed)·install/grant/revoke 왕복·cross-workspace 403·grant 없는 플러그인의 Capability projection 부재·audit 행. `runtime-db` 게이트 PASS(오케스트레이터 실행) + `LOCAL_PR_GATE.md` 등록.
+- [x] 종결: PR #435(+리뷰 H1/M1/M2 반영 fb5cebd) merge `1809551`. 커스터디 A 무저장·validator 화이트리스트 fail-closed·grant 4-튜플 DB CHECK — 독립 리뷰 "확인함". plugin verifier 전체 PASS(M2 강화판) + runtime-db PASS(rebase 후). 후속 기록: registry revoke의 projection 무효화(후속 SE), 시드 schemaDigest 실해시(Context Broker 소비 전), read-path 500 패턴 2회째(3회 시 공용 헬퍼 승격).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
