@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# Shared, non-interactive helpers for the production install/upgrade wrappers.
+# This file never prints environment values; image refs are persisted only in
+# the mode-0600 deployment state needed for rollback.
+
+set -euo pipefail
+
+PROD_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "$PROD_DIR/../.." && pwd)"
+COMPOSE_FILE="$PROD_DIR/docker-compose.prod.yml"
+PREFLIGHT="$REPO_ROOT/scripts/prod_env_preflight.sh"
+DEPLOY_STATE_NAME="deploy-state.env"
+
+deploy_log() {
+  printf '[momo-deploy] %s\n' "$*"
+}
+
+deploy_fail() {
+  printf '[momo-deploy] FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+deploy_usage_fail() {
+  printf '[momo-deploy] %s\n' "$*" >&2
+  exit 2
+}
+
+require_file() {
+  [ -f "$1" ] || deploy_fail "required file is missing: $1"
+}
+
+configure_env_source() {
+  if [ -n "${ENV_FILE:-}" ] && [ "${FROM_ENV:-0}" = "1" ]; then
+    deploy_usage_fail "choose exactly one of --env-file or --from-env"
+  fi
+  if [ -z "${ENV_FILE:-}" ] && [ "${FROM_ENV:-0}" != "1" ]; then
+    deploy_usage_fail "missing --env-file FILE or --from-env"
+  fi
+  if [ -n "${ENV_FILE:-}" ]; then
+    require_file "$ENV_FILE"
+    ENV_FILE="$(CDPATH='' cd -- "$(dirname -- "$ENV_FILE")" && pwd)/$(basename -- "$ENV_FILE")"
+  fi
+}
+
+run_prod_preflight() {
+  local args=(--mode "${DEPLOY_MODE:-prod}")
+  if [ -n "${ENV_FILE:-}" ]; then
+    args+=(--env-file "$ENV_FILE")
+  else
+    args+=(--from-env)
+  fi
+  if [ -n "${EVIDENCE_DIR:-}" ]; then
+    args+=(--evidence-dir "$EVIDENCE_DIR")
+  fi
+  deploy_log "validating the redacted production environment contract"
+  "$PREFLIGHT" "${args[@]}"
+}
+
+load_deploy_env() {
+  if [ -n "${ENV_FILE:-}" ]; then
+    set -a
+    # shellcheck disable=SC1090 # operator-selected host-local env file
+    . "$ENV_FILE"
+    set +a
+  fi
+}
+
+validate_digest_ref() {
+  local key="$1"
+  local value="${!key:-}"
+  if [[ ! "$value" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$ ]]; then
+    deploy_fail "$key must be an immutable image ref ending in @sha256:<64 lowercase hex>"
+  fi
+}
+
+validate_momo_image_digests() {
+  validate_digest_ref MOMO_API_IMAGE
+  validate_digest_ref MOMO_RELAY_IMAGE
+  validate_digest_ref MOMO_WORKER_IMAGE
+  validate_digest_ref MOMO_MIGRATE_IMAGE
+  deploy_log "validated four immutable momo image digests"
+}
+
+configure_compose() {
+  COMPOSE=(docker compose)
+  if [ -n "${ENV_FILE:-}" ]; then
+    COMPOSE+=(--env-file "$ENV_FILE")
+  fi
+  COMPOSE+=(-f "$COMPOSE_FILE")
+}
+
+render_compose_contract() {
+  deploy_log "rendering the production compose contract"
+  "${COMPOSE[@]}" config --quiet
+}
+
+check_required_commands() {
+  local command_name
+  for command_name in docker curl; do
+    command -v "$command_name" >/dev/null 2>&1 || deploy_fail "missing required command: $command_name"
+  done
+  docker compose version >/dev/null 2>&1 || deploy_fail "Docker Compose v2 is required"
+  docker info >/dev/null 2>&1 || deploy_fail "Docker daemon is unavailable"
+}
+
+check_dns_name() {
+  local name="$1"
+  if command -v getent >/dev/null 2>&1; then
+    getent hosts "$name" >/dev/null 2>&1 || deploy_fail "DNS does not resolve for a configured public hostname"
+  elif command -v dig >/dev/null 2>&1; then
+    [ -n "$(dig +short "$name" | head -n 1)" ] || deploy_fail "DNS does not resolve for a configured public hostname"
+  else
+    deploy_fail "getent or dig is required for DNS preflight"
+  fi
+}
+
+check_host_contract() {
+  check_required_commands
+  # shellcheck disable=SC2153 # populated by the validated operator env source
+  check_dns_name "$API_DOMAIN"
+  check_dns_name "$REALTIME_DOMAIN"
+  if [ -n "${APP_DOMAIN:-}" ]; then
+    check_dns_name "$APP_DOMAIN"
+  fi
+
+  local disk_root available_kb
+  disk_root="$(dirname -- "$STATE_DIR")"
+  while [ ! -d "$disk_root" ] && [ "$disk_root" != "/" ]; do
+    disk_root="$(dirname -- "$disk_root")"
+  done
+  available_kb="$(df -Pk "$disk_root" | awk 'NR == 2 {print $4}')"
+  [ "${available_kb:-0}" -ge 10485760 ] || deploy_fail "at least 10 GiB free disk is required"
+
+  # Re-running an existing deployment is intentionally safe, so occupied edge
+  # ports are diagnostic rather than fatal. Docker/compose will give the final,
+  # actionable bind error if another process owns them.
+  if command -v lsof >/dev/null 2>&1; then
+    if lsof -nP -iTCP:"${HTTP_PORT:-80}" -sTCP:LISTEN >/dev/null 2>&1 ||
+       lsof -nP -iTCP:"${HTTPS_PORT:-443}" -sTCP:LISTEN >/dev/null 2>&1; then
+      deploy_log "edge port already has a listener; continuing for idempotent re-run"
+    else
+      deploy_log "edge ports are available"
+    fi
+  fi
+  deploy_log "host checks passed (Docker, DNS, disk, edge ports)"
+}
+
+state_file_path() {
+  printf '%s/%s' "$STATE_DIR" "$DEPLOY_STATE_NAME"
+}
+
+write_deploy_state() {
+  local state_file temp_file
+  state_file="$(state_file_path)"
+  mkdir -p "$STATE_DIR"
+  umask 077
+  temp_file="$(mktemp "$STATE_DIR/.deploy-state.XXXXXX")"
+  {
+    printf 'MOMO_IMAGE_TAG=%s\n' "$MOMO_IMAGE_TAG"
+    printf 'MOMO_API_IMAGE=%s\n' "$MOMO_API_IMAGE"
+    printf 'MOMO_RELAY_IMAGE=%s\n' "$MOMO_RELAY_IMAGE"
+    printf 'MOMO_WORKER_IMAGE=%s\n' "$MOMO_WORKER_IMAGE"
+    printf 'MOMO_MIGRATE_IMAGE=%s\n' "$MOMO_MIGRATE_IMAGE"
+  } > "$temp_file"
+  chmod 600 "$temp_file"
+  mv -f "$temp_file" "$state_file"
+  deploy_log "recorded the immutable deployment image set in mode-0600 state"
+}
+
+read_state_value() {
+  local state_file="$1"
+  local key="$2"
+  local value
+  value="$(awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, ""); print; exit}' "$state_file")"
+  if [[ ! "$value" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$ ]]; then
+    deploy_fail "rollback state has an invalid or missing $key"
+  fi
+  printf '%s' "$value"
+}
+
+wait_service_running() {
+  local service="$1"
+  local _attempt
+  for _attempt in $(seq 1 30); do
+    if "${COMPOSE[@]}" ps --status running --services | grep -Fxq "$service"; then
+      return 0
+    fi
+    sleep 2
+  done
+  deploy_log "service did not reach running state: $service"
+  "${COMPOSE[@]}" ps "$service" >&2 || true
+  return 1
+}
+
+wait_public_health() {
+  local _attempt
+  for _attempt in $(seq 1 45); do
+    if curl --fail --silent --show-error --max-time 5 "https://${API_DOMAIN}/health" >/dev/null 2>&1; then
+      deploy_log "public API health check passed"
+      return 0
+    fi
+    sleep 2
+  done
+  deploy_log "public API health check failed; inspect caddy and api logs"
+  "${COMPOSE[@]}" ps >&2 || true
+  return 1
+}
+
+print_failure_diagnostics() {
+  deploy_log "diagnostics: docker compose ps"
+  "${COMPOSE[@]}" ps >&2 || true
+  deploy_log "diagnostics: inspect redacted service logs locally; do not paste secrets"
+  deploy_log "run: docker compose -f infra/prod/docker-compose.prod.yml logs --tail=200 caddy api migrate relay worker"
+}

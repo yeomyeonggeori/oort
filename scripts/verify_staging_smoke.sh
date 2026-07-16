@@ -36,15 +36,20 @@ PGBACKREST_POSTGRES="$PROD_DIR/postgresql.pgbackrest.conf.example"
 PGBACKREST_CRON="$PROD_DIR/pgbackrest-cron.example"
 RUNBOOK="docs/SECRETS_BACKUP_RUNBOOK.md"
 PREFLIGHT="scripts/prod_env_preflight.sh"
+INSTALL_UPGRADE_VERIFIER="scripts/verify_prod_install_upgrade.sh"
 PREFLIGHT_EVIDENCE_DIR="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-public-host-preflight}"
 
 for path in \
   "$COMPOSE_FILE" "$ENV_EXAMPLE" "$CADDYFILE" "$CENTRIFUGO_CONFIG" \
   "$CENTRIFUGO_DEV_CONFIG" \
   "$SECRETS_EXAMPLE" "$PGBACKREST_CONF" "$PGBACKREST_POSTGRES" \
-  "$PGBACKREST_CRON" "$RUNBOOK" "$PREFLIGHT" ".sops.yaml.example" ".gitignore"; do
+  "$PGBACKREST_CRON" "$RUNBOOK" "$PREFLIGHT" "$INSTALL_UPGRADE_VERIFIER" ".sops.yaml.example" ".gitignore"; do
   [ -f "$path" ] || fail "missing required staging smoke file: $path"
 done
+
+echo "==> install/upgrade static contract"
+"$INSTALL_UPGRADE_VERIFIER"
+pass "install/upgrade argument, digest, migration-order, and rollback matrix"
 
 echo "==> prod compose config"
 docker compose --env-file "$ENV_EXAMPLE" -f "$COMPOSE_FILE" config --quiet

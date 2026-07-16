@@ -262,6 +262,15 @@ synthetic non-placeholder public/staging env shape must pass and write
 SOPS/volume/pgBackRest required env coverage for PR review without touching a
 real host.
 
+MOMO-406 adds `scripts/verify_prod_install_upgrade.sh` to the same profile. It
+uses a fake Docker command and synthetic non-secret env to cover the
+non-interactive argument matrix, strict per-service `@sha256` pins, preflight
+wiring, compose-config invocation, install/migrate ordering, backup-evidence
+gate, sequential upgrade, and previous-image app rollback. It does not start a
+container. `scripts/verify_staging_smoke.sh` still performs the real
+`docker compose config --quiet` render; the orchestrator records that Docker
+gate separately.
+
 For the external provider profile, keep stack ports in `.env.worktree` and pass
 only momo-facing provider endpoint/key values through the shell or, preferably,
 a separate untracked file. Codex/OpenAI OAuth login and provider API keys stay
@@ -505,7 +514,7 @@ Use the profile that matches the changed surface.
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
 | `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` (includes design pre-flight ratchet + snapshot tests) |
 | `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
-| `staging-smoke` | MOMO-005/006/007/229 deploy config, Caddy/Centrifugo, public host preflight, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
+| `staging-smoke` | MOMO-005/006/007/229/406 deploy config, Caddy/Centrifugo, install/upgrade matrix, public host preflight, secret/backup runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | backup/PITR restore rehearsal evidence | `scripts/local_gate.sh --profile backup` |
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha`; add `LOCAL_GATE_LAUNCH_UI=1` for MomoMacDevApp process/window/log launch evidence |
