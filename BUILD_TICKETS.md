@@ -2056,19 +2056,21 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 신규 verifier: manifest 검증 fail-closed 매트릭스(GPL 거부·unknown risk·malformed)·install/grant/revoke 왕복·cross-workspace 403·grant 없는 플러그인의 Capability projection 부재·audit 행. `runtime-db` 게이트 PASS(오케스트레이터 실행) + `LOCAL_PR_GATE.md` 등록.
 - [x] 종결: PR #435(+리뷰 H1/M1/M2 반영 fb5cebd) merge `1809551`. 커스터디 A 무저장·validator 화이트리스트 fail-closed·grant 4-튜플 DB CHECK — 독립 리뷰 "확인함". plugin verifier 전체 PASS(M2 강화판) + runtime-db PASS(rebase 후). 후속 기록: registry revoke의 projection 무효화(후속 SE), 시드 schemaDigest 실해시(Context Broker 소비 전), read-path 500 패턴 2회째(3회 시 공용 헬퍼 승격).
 
-### ☐ MOMO-411 (`#436`) 수용기준 — local_gate 리소스 가드: --down + 부하 체크 `[tooling]` · 의존: 없음
-- [ ] `scripts/local_gate.sh`에 ① `--down`(또는 기본 trap): runtime-* 프로파일이 올린 compose project를 게이트 종료 시(성공/실패 모두) down — 명시 opt-out(`--keep-stack`)만 예외 ② 시작 전 부하 체크: load(1min)>12면 경고+확인 요구(env `LOCAL_GATE_FORCE=1`로 우회), `MULTI_SESSION_OPS.md` §9 임계값과 일치.
-- [ ] `compose_janitor.sh`의 매칭 사각지대 보완: `momo240_*` 프로젝트도 stale 후보에 포함(볼륨은 계속 불변).
-- [ ] 기존 게이트 evidence 포맷·PASS 의미 무변경. 전 프로파일 무회귀(docs 게이트로 스크립트 정적 검증 + runtime-db 1회 실증).
-- [ ] `docs/LOCAL_PR_GATE.md`·`MULTI_SESSION_OPS.md` §9 상호 참조 갱신.
+### ☑ MOMO-411 (`#436`) 수용기준 — local_gate 리소스 가드: --down + 부하 체크 `[tooling]` · 의존: 없음
+- [x] `scripts/local_gate.sh`에 ① `--down`(또는 기본 trap): runtime-* 프로파일이 올린 compose project를 게이트 종료 시(성공/실패 모두) down — 명시 opt-out(`--keep-stack`)만 예외 ② 시작 전 부하 체크: load(1min)>12면 경고+확인 요구(env `LOCAL_GATE_FORCE=1`로 우회), `MULTI_SESSION_OPS.md` §9 임계값과 일치.
+- [x] `compose_janitor.sh`의 매칭 사각지대 보완: `momo240_*` 프로젝트도 stale 후보에 포함(볼륨은 계속 불변).
+- [x] 기존 게이트 evidence 포맷·PASS 의미 무변경. 전 프로파일 무회귀(docs 게이트로 스크립트 정적 검증 + runtime-db 1회 실증).
+- [x] `docs/LOCAL_PR_GATE.md`·`MULTI_SESSION_OPS.md` §9 상호 참조 갱신.
+- [x] 종결: PR #439(+리뷰 H1/M1/M2/M3/L1/L5 반영) merge `710a069`. teardown 잔재 0 두 런 실증(dirty-fail·clean), --down + 부하 체크(load>12 차단) + momo240 PID 보호 + pre-existing 스택(momo_main) 무접촉. macOS 스냅샷 FAIL은 origin/main 선재(UX 트랙 — 격리 확정).
 
-### ☐ MOMO-412 (`#438`) 수용기준 — ADR-0115 SE-04B: signed webhook ingress + Slack-호환 모드 `[server/runtime-db]` · 의존: MOMO-410(랜딩됨)
-- [ ] 발급/회전/revoke REST(owner/admin, 채널 바인딩 고정): native 모드는 per-install HMAC-SHA256 — secret은 **one-time reveal**(저장은 key ID/secret ref만, 어떤 테이블·로그·응답에도 raw 미저장), overlap rotation + revoke. webhook install은 MOMO-410 registry의 `external_webhook` plugin install로 기록(audit 같은 트랜잭션).
-- [ ] native 수신: signature base = version+method+canonical endpoint/install ID+timestamp+delivery ID+raw-body SHA-256, constant-time 비교, replay window, strict body/parser limits, rate limit. `(workspace_id, installation_id, delivery_id)` unique receipt + deterministic `client_msg_id` + channel seq/message/outbox **한 tenant 트랜잭션**.
-- [ ] **Slack-호환 모드(D2-A)**: `POST /hooks/{token}`(URL-시크릿, 서명 없음 — 고엔트로피 토큰), 변환기는 `text`+legacy `attachments`(MM 검증 필드 화이트리스트)+`<url|text>`/멘션/`<!channel>` 번역. **`blocks`는 400+명시 오류**. 멱등은 `(install, body hash, 시간창)` 근사. 미지원 목록 문서화(MM 동일).
-- [ ] 발신 author 표기: 사람/에이전트 사칭 불가 하드 계약 — 구체 모델(전용 표기 vs 설치자 위임)은 재량+근거 기록. provider의 Centrifugo 직접 publish 불가.
-- [ ] `docs/api/openapi.yaml`·`clients/**`·`infra/prod/**` 무변경(발급 UI는 UX 트랙 후속). schema_v0 불변 — 신규 migration(014)만.
-- [ ] 신규 verifier: 위조 서명/재전송(replay)/stale timestamp/cross-workspace/회전 경합(신구 키 창)/revoke 후 거부/시크릿 redaction + **Slack 페이로드 픽스처 왕복**(text·attachments 번역 결과 메시지 확인, blocks 400) + receipt 멱등(동일 delivery 재수신 1회 기록). `runtime-db` 게이트 PASS(오케스트레이터 — **§9 부하 체크 후 실행, 종료 시 down**) + `LOCAL_PR_GATE.md` 등록.
+### ☑ MOMO-412 (`#438`) 수용기준 — ADR-0115 SE-04B: signed webhook ingress + Slack-호환 모드 `[server/runtime-db]` · 의존: MOMO-410(랜딩됨)
+- [x] 발급/회전/revoke REST(owner/admin, 채널 바인딩 고정): native 모드는 per-install HMAC-SHA256 — secret은 **one-time reveal**(저장은 key ID/secret ref만, 어떤 테이블·로그·응답에도 raw 미저장), overlap rotation + revoke. webhook install은 MOMO-410 registry의 `external_webhook` plugin install로 기록(audit 같은 트랜잭션).
+- [x] native 수신: signature base = version+method+canonical endpoint/install ID+timestamp+delivery ID+raw-body SHA-256, constant-time 비교, replay window, strict body/parser limits, rate limit. `(workspace_id, installation_id, delivery_id)` unique receipt + deterministic `client_msg_id` + channel seq/message/outbox **한 tenant 트랜잭션**.
+- [x] **Slack-호환 모드(D2-A)**: `POST /hooks/{token}`(URL-시크릿, 서명 없음 — 고엔트로피 토큰), 변환기는 `text`+legacy `attachments`(MM 검증 필드 화이트리스트)+`<url|text>`/멘션/`<!channel>` 번역. **`blocks`는 400+명시 오류**. 멱등은 `(install, body hash, 시간창)` 근사. 미지원 목록 문서화(MM 동일).
+- [x] 발신 author 표기: 사람/에이전트 사칭 불가 하드 계약 — 구체 모델(전용 표기 vs 설치자 위임)은 재량+근거 기록. provider의 Centrifugo 직접 publish 불가.
+- [x] `docs/api/openapi.yaml`·`clients/**`·`infra/prod/**` 무변경(발급 UI는 UX 트랙 후속). schema_v0 불변 — 신규 migration(014)만.
+- [x] 신규 verifier: 위조 서명/재전송(replay)/stale timestamp/cross-workspace/회전 경합(신구 키 창)/revoke 후 거부/시크릿 redaction + **Slack 페이로드 픽스처 왕복**(text·attachments 번역 결과 메시지 확인, blocks 400) + receipt 멱등(동일 delivery 재수신 1회 기록). `runtime-db` 게이트 PASS(오케스트레이터 — **§9 부하 체크 후 실행, 종료 시 down**) + `LOCAL_PR_GATE.md` 등록.
+- [x] 종결: PR #443(+리뷰 H1 반영·verifier 단정 수정) merge `5ff5161`. webhook verifier 전체 PASS(native HMAC 위조/replay/cross-workspace·키 회전·secret custody+redaction·**Slack 변환 왕복 201+미지원 무시+author 사칭 차단**·1-tx). 리뷰: 암호학·secret·단일 쓰기 경로 "흠 없음". M1/M2(rate limit·master key 분리)는 DEVIATION_LOG pending.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

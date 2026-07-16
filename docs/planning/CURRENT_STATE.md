@@ -44,7 +44,7 @@
 | `ADR-0119` | 웹 클라이언트 트랙 — 서버 URL=웹 주소, 브라우저 인증/서빙/계약 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | 첫 배치 MOMO-389→390→391 발급 (패킷 `2026-07-15-adr-0119-web-track.md`). W-4/W-5는 391 랜딩 후 |
 | `ADR-0120` | 푸시 알림 경계 — Dawn 운영 push relay + 서버 notifier | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | P-1/P-2는 웹 첫 배치 뒤 발급. relay 배포·Apple 계정은 별도 실행 결정 |
 | `ADR-0121` | 셀프호스팅 배포판·온보딩 — install/upgrade, universal link 초대, BM 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | S 배치는 웹 배치 랜딩 후 순차 발급 |
-| `PLN-20260716-01` | 플러그인 플랫폼 제품화 + Slack/MM 호환 표면 | Fable (engine planner) | **`adr-accepted → building`** | 성재 ✓ | **SE-04A 종결**(`1809551`) → **ADR-0115 Proposed 기안**(HMAC native+Slack-호환 모드) — 성재 승인 후 SE-04B 발급(부하 안정 조건). 후속: GitHub grant 왕복→Drive 경로C. UI는 Codex handoff 대기 |
+| `PLN-20260716-01` | 플러그인 플랫폼 제품화 + Slack/MM 호환 표면 | Fable (engine planner) | **`adr-accepted → building`** | 성재 ✓ | **SE-04A·04B 종결**(registry `1809551` / webhook `5ff5161` — ADR-0115 Accepted). 다음: GitHub grant 왕복→Drive 경로C(SA 포장). UI는 Codex handoff 대기 · 리소스 거버넌스 §9 + MOMO-411 gate --down 정착 |
 | `ADR-0122` | 음성 허들 + 회의 지능 — LiveKit 미디어, 임시 허들 모델, 전사 파이프라인, 요약=에이전트 Work | Fable | **`proposed`** | 성재 | 성재 발제(2026-07-15) 리서치 완료(15-05). option 승인 대기 — Accepted≠즉시 착수(웹/푸시 뒤) |
 | `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | 내부 팀 알파를 현재 실행 가정으로 검토하되, 확정 표기는 성재 승인과 ADR 정본화 이후로 제한 |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |

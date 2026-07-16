@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-411/412 게이트 리소스 가드 + signed webhook ingress (2026-07-17)
+
+- **MOMO-411**(`710a069`): local_gate runtime-* 프로파일이 게이트 종료 시 자기 compose 스택을 down(성공/실패/HUP 모두), 시작 전 load>12 차단(§9), momo240 local-alpha는 PID-liveness 보호, pre-existing 스택(momo_main)은 무접촉. 2026-07-17 발열 사고(게이트 잔재 증식)의 구조적 봉합 — teardown 잔재 0 두 런 실증.
+- **MOMO-412**(`5ff5161`, ADR-0115 SE-04B): signed webhook ingress — native HMAC-SHA256(signature base=version+method+endpoint+install+timestamp+delivery+bodyhash, constant-time, replay window, 키 회전 overlap, one-time secret custody) + **Slack-호환 모드**(URL-시크릿, MM 검증 부분집합 화이트리스트, 미지원 필드 무시로 Grafana/Alertmanager가 URL 교체만으로 동작 — 독립 리뷰 H1 반영, blocks만 400, username/icon 무시로 author 사칭 차단). 수신=한 tenant 트랜잭션(receipt+deterministic client_msg_id+seq+message+outbox). 리뷰가 암호학·secret custody·단일 쓰기 경로를 "흠 없음" 확정.
+- 공통: 게이트의 macOS 스냅샷 FAIL은 UX 트랙 선재 결함(origin/main HEAD 격리 재현) — DEVIATION_LOG. M1/M2(per-install rate limit·WEBHOOK_MASTER_KEY 분리)는 pending.
+
 ## MOMO-445 macOS single-owner inspector boundary (2026-07-17)
 
 - 가운데 타임라인과 붙어 있는 우측 승인·멤버 패널 사이의 이중 경계를 제거했다. 가운데 본문은 경계를 소유하지 않고, 레이아웃의 단일 `Divider`만 경계를 그리며 붙어 있는 패널은 semantic fill만 사용한다.

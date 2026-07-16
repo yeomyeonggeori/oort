@@ -25,6 +25,12 @@
 - 주의 인계: 메인 worktree의 STATUS.md/Theme.swift도 구버전 스냅샷 — GPT 세션이 잔재 정리 전까지 통합자 플러시는 임시 worktree 경유.
 - 다음: 438/436 PR 검수(§9 부하 규칙 아래 게이트) → 순차 머지.
 
+## 2026-07-17 (Fable, 오케스트레이터) · MOMO-411/412 종결 — 리소스 가드 + webhook ingress
+- MOMO-411(`710a069`)·412(`5ff5161`) 순차 머지. 411=gate --down+부하 체크(발열 사고 봉합, teardown 잔재 0 실증), 412=ADR-0115 signed webhook + Slack-호환(리뷰 H1로 미지원 필드 무시 전환 — Grafana/Alertmanager URL 교체 동작). codex worker 2기 병렬, 오케스트레이터 검수·게이트·머지.
+- 사고/해프닝 3건 무손실 처리: ①메인 worktree UX WIP를 임시 worktree cherry-pick 우회로 무접촉 push(§4.1 정본화) ②PR #439 GitHub mergeable-UNKNOWN 오작동 → 재오픈 후 정상 머지 ③rebase STATUS 반복 충돌 → origin 정규화. verifier 단정 오류 2건(201·토큰 매칭)은 H1 반영 케이스의 실수로 서버 무관, 수정.
+- macOS 스냅샷 FAIL은 origin/main HEAD 격리 재현으로 UX 트랙 선재 확정 — 두 게이트 모두 이 사유로 무한 대기 없이 서버 표면 실증(단독 verifier)으로 머지 판정.
+- 다음: ADR-0113 후속(GitHub grant 왕복→Drive 경로C). M1/M2·MOMO-390 smoke 등 DEVIATION_LOG pending 정리. UX 스냅샷 drift는 UX 트랙 통보 필요.
+
 ## 2026-07-17 (Fable, 오케스트레이터) · 리소스 거버넌스 정본화 + ADR-0115 draft
 - 성재 지시로 부하 규칙을 프로젝트 정본화: `MULTI_SESSION_OPS.md` **§9 Resource Governance**(부하 체크 게이트 load>12 금지/8~12 단일/`<8` 정상, 게이트 후 down 의무, 호스트 전체 heavy 동시 1개, 잔재 판별 팁) — 전 세션(Fable/GPT/Codex) 적용. tooling 봉합 MOMO-411 `#436` 발급(status:ready, 부하 안정 후 착수).
 - 부하 모니터 가동(load<8 3연속 시 heavy 재개 신호). ADR-0115 Proposed 기안(문서 작업) — HMAC native 모드 + Slack-호환 URL-시크릿 모드(blocks v0 거부), SE-04B 계약 승계.
