@@ -132,6 +132,9 @@ public struct MessageListView: View {
         .onChange(of: focusComposerRequest) { _, _ in
             isComposerFocused = true
         }
+        .onChange(of: viewModel.selectedChannelId) { _, _ in
+            resetLocalComposerDraftsForChannelChange()
+        }
         .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
             channelPresentationRevision &+= 1
         }
@@ -619,6 +622,10 @@ public struct MessageListView: View {
                 )
             }
 
+            if hasLocalStructuredDrafts {
+                localStructuredDraftSummary
+            }
+
             composerSurface(candidates: candidates, copy: copy)
         }
         .padding(.horizontal, 16)
@@ -660,6 +667,8 @@ public struct MessageListView: View {
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .frame(width: 0, height: 0)
                 .opacity(0)
+                .disabled(viewModel.selectedChannelId == nil)
+                .allowsHitTesting(false)
                 .accessibilityHidden(true)
 
             TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
@@ -775,7 +784,10 @@ public struct MessageListView: View {
         case .fileUpload:
             chooseAttachmentFiles()
         case .startWork:
-            presentWorkComposer()
+            Task { @MainActor in
+                await Task.yield()
+                presentWorkComposer()
+            }
         case .createThread:
             localDraftSheet = .thread
         case .createPoll:
@@ -802,6 +814,63 @@ public struct MessageListView: View {
 
     private func removeAttachmentDraft(_ draft: MomoAttachmentDraft) {
         attachmentDrafts.removeAll { $0.id == draft.id }
+    }
+
+    private var hasLocalStructuredDrafts: Bool {
+        !threadTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !pollQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || pollOptions.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            || !selectedPlugins.isEmpty
+    }
+
+    private var localStructuredDraftSummary: some View {
+        let copy = MomoComposerActionCopy(language: language)
+        return VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.standardSpacing) {
+            Label(copy.draftSummaryTitle, systemImage: "square.and.pencil")
+                .font(MomoTheme.Typography.supporting.weight(.medium))
+            HStack(spacing: MomoTheme.ComposerAction.standardSpacing) {
+                if !threadTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button {
+                        localDraftSheet = .thread
+                    } label: {
+                        Label(copy.threadDraftLabel, systemImage: MomoComposerAction.createThread.systemImage)
+                    }
+                }
+                if !pollQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || pollOptions.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                    Button {
+                        localDraftSheet = .poll
+                    } label: {
+                        Label(copy.pollDraftLabel, systemImage: MomoComposerAction.createPoll.systemImage)
+                    }
+                }
+                if !selectedPlugins.isEmpty {
+                    Button {
+                        localDraftSheet = .plugins
+                    } label: {
+                        Label("\(copy.pluginDraftLabel) \(selectedPlugins.count)", systemImage: MomoComposerAction.addPlugin.systemImage)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .buttonStyle(.bordered)
+            Label(copy.connectionPending, systemImage: "info.circle")
+                .font(MomoTheme.Typography.metadata)
+                .foregroundStyle(.secondary)
+        }
+        .padding(MomoTheme.ComposerAction.contentSpacing)
+        .momoSurface(.panel, cornerRadius: MomoTheme.cornerMedium)
+    }
+
+    private func resetLocalComposerDraftsForChannelChange() {
+        isActionLauncherPresented = false
+        isWorkComposerPresented = false
+        localDraftSheet = nil
+        attachmentDrafts.removeAll()
+        threadTopic = ""
+        pollQuestion = ""
+        pollOptions = ["", ""]
+        selectedPlugins.removeAll()
     }
 
     private var canSendMessage: Bool {

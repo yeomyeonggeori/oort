@@ -31,9 +31,8 @@ enum MomoComposerDraftSheet: String, Identifiable {
 
 struct MomoAttachmentDraft: Identifiable, Equatable {
     let url: URL
-    let byteCount: Int64?
 
-    var id: URL { url.standardizedFileURL }
+    var id: URL { url.resolvingSymlinksInPath().standardizedFileURL }
     var name: String { url.lastPathComponent }
 
     var systemImage: String {
@@ -47,9 +46,7 @@ struct MomoAttachmentDraft: Identifiable, Equatable {
     }
 
     init(url: URL) {
-        self.url = url.standardizedFileURL
-        let values = try? url.resourceValues(forKeys: [.fileSizeKey])
-        self.byteCount = values?.fileSize.map(Int64.init)
+        self.url = url.resolvingSymlinksInPath().standardizedFileURL
     }
 }
 
@@ -60,7 +57,7 @@ enum MomoAttachmentDraftCollection {
     ) -> [MomoAttachmentDraft] {
         var result = existing
         var identifiers = Set(existing.map(\.id))
-        for url in urls where url.isFileURL {
+        for url in urls where url.isFileURL && !url.hasDirectoryPath {
             let draft = MomoAttachmentDraft(url: url)
             if identifiers.insert(draft.id).inserted {
                 result.append(draft)
@@ -74,19 +71,21 @@ struct MomoComposerActionCopy {
     let language: MomoUILanguage
 
     var launcherTitle: String { localized("추가", "Add") }
-    var fileUpload: String { localized("파일 업로드", "Upload file") }
-    var fileUploadDetail: String { localized("이미지, 문서 또는 영상을 첨부합니다", "Attach an image, document, or video") }
+    var fileUpload: String { localized("파일 첨부", "Attach files") }
+    var fileUploadDetail: String { localized("이미지, 문서 또는 영상을 로컬 초안에 담습니다", "Add images, documents, or videos to a local draft") }
     var startWork: String { localized("새 작업 시작", "Start new work") }
     var startWorkDetail: String { localized("에이전트에게 실행할 일을 맡깁니다", "Delegate a task to an agent") }
-    var createThread: String { localized("스레드 만들기", "Create thread") }
+    var createThread: String { localized("스레드 초안", "Thread draft") }
     var createThreadDetail: String { localized("대화 주제를 로컬 초안으로 준비합니다", "Prepare a local conversation draft") }
-    var createPoll: String { localized("투표 만들기", "Create poll") }
+    var createPoll: String { localized("투표 초안", "Poll draft") }
     var createPollDetail: String { localized("질문과 선택지를 먼저 작성합니다", "Draft a question and its options") }
-    var addPlugin: String { localized("플러그인 추가", "Add plugin") }
-    var addPluginDetail: String { localized("사용 가능한 업무 도구를 둘러봅니다", "Browse available work tools") }
+    var addPlugin: String { localized("플러그인 둘러보기", "Browse plugins") }
+    var addPluginDetail: String { localized("연결 전 업무 도구와 권한 화면을 미리 봅니다", "Preview work tools and permissions before connecting") }
     var localDraft: String { localized("로컬 초안", "Local draft") }
-    var connectionPending: String { localized("연결 준비 후 채널에 공유할 수 있습니다", "Share this in the channel when its connection is ready") }
+    var localOnlyStatus: String { localized("로컬 전용 · 전송 안 됨", "Local only · not sent") }
+    var connectionPending: String { localized("이 기기의 로컬 미리보기입니다. 아직 채널에 저장되거나 전송되지 않습니다.", "This is a local preview on this Mac. It is not saved or sent to the channel yet.") }
     var remove: String { localized("첨부 제거", "Remove attachment") }
+    func removeAttachment(_ filename: String) -> String { localized("\(filename) 첨부 제거", "Remove attachment \(filename)") }
     var clearAll: String { localized("모두 지우기", "Clear all") }
     var threadTitle: String { localized("새 스레드", "New thread") }
     var threadPrompt: String { localized("어떤 주제로 대화를 이어갈까요?", "What should this conversation be about?") }
@@ -98,7 +97,12 @@ struct MomoComposerActionCopy {
     var pluginSubtitle: String { localized("설치 경험을 미리 확인하세요. 실제 연결은 엔진 준비 후 활성화됩니다.", "Preview the install experience. Connections activate when the engine is ready.") }
     var selected: String { localized("선택됨", "Selected") }
     var select: String { localized("선택", "Select") }
-    var done: String { localized("완료", "Done") }
+    var deselect: String { localized("선택 해제", "Deselect") }
+    var closePreview: String { localized("미리보기 닫기", "Close preview") }
+    var draftSummaryTitle: String { localized("작성 중인 로컬 초안", "Local drafts in progress") }
+    var threadDraftLabel: String { localized("스레드", "Thread") }
+    var pollDraftLabel: String { localized("투표", "Poll") }
+    var pluginDraftLabel: String { localized("플러그인", "Plugins") }
 
     func title(for action: MomoComposerAction) -> String {
         switch action {
@@ -209,7 +213,9 @@ struct MomoAttachmentDraftStrip: View {
             VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.compactSpacing) {
                 Text(draft.name)
                     .font(MomoTheme.Typography.supporting.weight(.medium))
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .help(draft.name)
                 Text(detail(for: draft))
                     .font(MomoTheme.Typography.metadata)
                     .foregroundStyle(.secondary)
@@ -222,16 +228,17 @@ struct MomoAttachmentDraftStrip: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .accessibilityLabel(copy.remove)
+            .accessibilityLabel(copy.removeAttachment(draft.name))
         }
         .padding(MomoTheme.ComposerAction.standardSpacing)
         .frame(width: MomoTheme.ComposerAction.attachmentWidth)
         .momoSurface(.card, cornerRadius: MomoTheme.cornerSmall)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(draft.name)
     }
 
     private func detail(for draft: MomoAttachmentDraft) -> String {
-        guard let byteCount = draft.byteCount else { return copy.localDraft }
-        return ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
+        copy.localOnlyStatus
     }
 }
 
@@ -277,7 +284,7 @@ struct MomoLocalDraftSheet: View {
                 Label(title, systemImage: icon)
                     .font(MomoTheme.Typography.screenTitle)
                 Spacer()
-                Button(copy.done) { dismiss() }
+                Button(copy.closePreview) { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(MomoTheme.ComposerAction.sheetInset)
@@ -325,7 +332,8 @@ struct MomoLocalDraftSheet: View {
                             .frame(width: MomoTheme.ComposerAction.iconSize)
                         Text(plugin).font(MomoTheme.Typography.row)
                         Spacer()
-                        Button(selectedPlugins.contains(plugin) ? copy.selected : copy.select) {
+                        let isSelected = selectedPlugins.contains(plugin)
+                        Button(isSelected ? copy.deselect : copy.select) {
                             if selectedPlugins.contains(plugin) {
                                 selectedPlugins.remove(plugin)
                             } else {
@@ -333,6 +341,9 @@ struct MomoLocalDraftSheet: View {
                             }
                         }
                         .buttonStyle(.bordered)
+                        .accessibilityLabel("\(plugin), \(isSelected ? copy.deselect : copy.select)")
+                        .accessibilityValue(isSelected ? copy.selected : copy.select)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
                     }
                     .frame(minHeight: MomoTheme.ComposerAction.rowMinimumHeight)
                 }
