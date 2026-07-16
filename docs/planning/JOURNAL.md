@@ -18,6 +18,11 @@
 - MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
 - 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
 
+## 2026-07-16 (Fable, 엔진/인프라 트랙 momo-main 겸임) · MOMO-404 종결 — ADR-0120 서버측 절반 완성
+- P-2(PR #424 `a8a1089`) 종결. 후보 기록은 011 트리거(재량 행사 — 리뷰가 불변식 정합을 일회용 PG 재현으로 판정, overview.md에 "생산자 트리거 유일·신규는 ADR" 정본화). 리뷰 H1/M1/L1 반영 후 verifier 재PASS. stall 방지 계약(대기 전 push)이 처음으로 완전 작동.
+- ADR-0120 잔여는 Dawn 운영 결정 대상: P-3(PushRelay 실발송 — Apple Developer 계정+relay 배포), P-4(iOS/M5). 후속 후보: push_candidate prune(L3), D2 필드 목록 ADR 반영(L2).
+- 다음 후보(성재 신호 대기): ① ADR-0121 S 배치(install.sh — 배포판) ② 리액션 서버 REST(15-04, UX 트랙 조율) ③ ADR-0122 승인 시 음성 V-1 ④ 플러그인 위임(16-02). 엔진/인프라 트랙의 발급 가능 잔량은 이 4개.
+
 ## 2026-07-16 (Fable, 엔진/인프라 트랙 momo-main 겸임) · MOMO-403 종결 + 크로스트랙 정리
 - ADR-0120 P-1(MOMO-403, PR #422 `36c0d70`) 종결 — device 등록 REST + migration 010(단일 ACTIVE 토큰 DB 강제). 구현 에이전트 stall을 통합자가 인수(verifier 재실행 PASS→push/PR), 독립 리뷰 Medium(TOCTOU)을 RETURNING 원자 재검증으로 봉합 후 verifier 반영본 재PASS. runtime-db 프로파일에 verifier 편입.
 - 푸시 배치 발급: MOMO-403 `#420`/404 `#421` + 패킷(2026-07-16-adr-0120-push-server-side.md — id-only 하드 계약·outbox 소비자 경합 방지·MOMO-395 설정 표면 경계).

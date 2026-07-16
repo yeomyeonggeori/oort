@@ -23,6 +23,12 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-404 NotifierWorker — ADR-0120 서버측 절반 완성 (2026-07-16)
+
+- P-2 랜딩(PR #424, `a8a1089`) — migration 011의 message AFTER INSERT 트리거가 같은 트랜잭션에서 outbox `push_candidate`를 기록(생산자 트리거는 이 1건이 유일 — overview.md 정본화), NotifierWorker(momo_notifier BYPASSRLS)가 SKIP LOCKED 소비, 판정 v0(DM 전건/멘션 projection 재사용/승인→active human)을 한 곳에 고정, id-only 페이로드로 mock relay dispatch + push_dispatch_log.
+- 독립 리뷰: 트리거 = 불변식 정합(같은 트랜잭션 — 일회용 PG18에서 RLS 경유 발화 독립 재현), 3-소비자 kind 상호 배제·dispatch 멱등(exactly-once log/at-least-once relay+collapse_id) 확인. High(overview 동PR 갱신)·Medium(relay 실패를 실 HTTP status+relay_http: reason으로 settle — P-3 오무효화 차단) 반영 후 verifier 재PASS.
+- **ADR-0120 서버측 절반(P-1 등록 REST + P-2 notifier) 완성.** 잔여: P-3 PushRelay 실발송(Dawn 운영 결정 — Apple Developer 계정/relay 배포), P-4 iOS Notification Extension(M5). 후속 기록: push_candidate pending prune 티켓 후보(L3), relay 장기 다운 시 failed 종결(L4 — P-3 재검토), D2 문언-필드 목록 정합(L2 — ADR-0120 반영).
+
 ## MOMO-403 device/push_token 등록·해지 REST (2026-07-16)
 
 - ADR-0120 P-1 랜딩(PR #422, `36c0d70`) — DeviceRoutes(등록 멱등 upsert+토큰 회전, device+env당 단일 ACTIVE 토큰은 migration 010 partial unique로 DB 강제, 해지=invalidated_at 행 보존, suffix-only receipt). App.swift 배선 1줄.

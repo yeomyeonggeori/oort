@@ -1998,12 +1998,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 신규 registration verifier: 등록→멱등 재등록→조회→해지→cross-tenant/타인 거부→audit 행. `runtime-db` 게이트 PASS + `LOCAL_PR_GATE.md` 등록.
 - [x] 종결: PR #422(+리뷰 M1/L1/L3/L4 반영 ae919a3) merge `36c0d70`. 독립 리뷰 Blocker/High 0 — actor binding 이중 방벽·suffix-only·SQL 바인딩·rate limit 상속·migration 010 partial unique(DB 강제) 전부 확인함. 반영본 verifier 재실행 PASS.
 
-### ☐ MOMO-404 (`#421`) 수용기준 — ADR-0120 P-2: notifier worker + 판정 v0 + mock relay `[server/runtime-db]` · 의존: MOMO-403
-- [ ] 신규 `workers/NotifierWorker`(OutboxRelay 패턴: ServiceLifecycle·SKIP LOCKED·graceful shutdown). 판정은 이 worker 한 곳(P9): v0 = DM 전건 + 멘션(MessageRoutes의 서버 재계산 mention projection 재사용 — 재파싱 금지) + 승인 요청. 채널 알림 설정/DND/mute는 범위 밖(UX MOMO-395가 설정 표면 소유 — 소비자 자리만 주석).
-- [ ] 후보 생성→소비: 같은 tenant 트랜잭션 내구 기록 + at-least-once 소비 + 멱등 dispatch(형태 재량 — 근거 PR 기록). relay `broadcast`·`agent_job` 소비와 경합 없음을 검증. notifier DB role 결정(신설 시 bootstrap/검증 정합, 재사용 시 최소성 근거).
-- [ ] 발송은 mock relay(e2e mock-hermes 패턴)까지 — **id-only 하드 계약**: mock 수신 페이로드에 메시지 본문·표시명 부재를 verifier가 단정. `push_dispatch_log`에 상태 기록(스키마 계약 준수).
-- [ ] e2e compose에 notifier+mock relay 추가하되 기본 프로파일 렌더 불변. `clients/**`·`infra/prod/**` 무변경.
-- [ ] 신규 notifier verifier: DM/멘션/승인 각 1건 왕복(dispatch_log+mock 수신+id-only 단정+재시작 멱등) + relay/agent_job 무회귀. `runtime-db` 게이트 PASS + `LOCAL_PR_GATE.md` 등록. api/relay 콜드빌드는 staggered boot 패턴 승계.
+### ☑ MOMO-404 (`#421`) 수용기준 — ADR-0120 P-2: notifier worker + 판정 v0 + mock relay `[server/runtime-db]` · 의존: MOMO-403
+- [x] 신규 `workers/NotifierWorker`(OutboxRelay 패턴: ServiceLifecycle·SKIP LOCKED·graceful shutdown). 판정은 이 worker 한 곳(P9): v0 = DM 전건 + 멘션(MessageRoutes의 서버 재계산 mention projection 재사용 — 재파싱 금지) + 승인 요청. 채널 알림 설정/DND/mute는 범위 밖(UX MOMO-395가 설정 표면 소유 — 소비자 자리만 주석).
+- [x] 후보 생성→소비: 같은 tenant 트랜잭션 내구 기록 + at-least-once 소비 + 멱등 dispatch(형태 재량 — 근거 PR 기록). relay `broadcast`·`agent_job` 소비와 경합 없음을 검증. notifier DB role 결정(신설 시 bootstrap/검증 정합, 재사용 시 최소성 근거).
+- [x] 발송은 mock relay(e2e mock-hermes 패턴)까지 — **id-only 하드 계약**: mock 수신 페이로드에 메시지 본문·표시명 부재를 verifier가 단정. `push_dispatch_log`에 상태 기록(스키마 계약 준수).
+- [x] e2e compose에 notifier+mock relay 추가하되 기본 프로파일 렌더 불변. `clients/**`·`infra/prod/**` 무변경.
+- [x] 신규 notifier verifier: DM/멘션/승인 각 1건 왕복(dispatch_log+mock 수신+id-only 단정+재시작 멱등) + relay/agent_job 무회귀. `runtime-db` 게이트 PASS + `LOCAL_PR_GATE.md` 등록. api/relay 콜드빌드는 staggered boot 패턴 승계.
+- [x] 종결: PR #424(+리뷰 H1/M1/L1 반영 5ed2914) merge `a8a1089`. 트리거 채택은 리뷰 판정 "재량 행사·불변식 정합"(일회용 PG 독립 재현 포함) — overview.md 동PR 정본화. 반영본 verifier 재PASS(DM 1/멘션 1/승인 2/agent 0, id-only 전건, 재시작 중복 0).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
