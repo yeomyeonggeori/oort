@@ -2031,7 +2031,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `verify_join.sh` 확장 또는 신규 verifier: 기본 만료 적용·역할 바인딩(owner 거부)·regenerate 왕복(구 코드 즉시 무효)·audit. `runtime-db` 게이트 PASS.
 - [x] 종결: PR #428(+M1 명문화·verifier casing 수정) merge `4a8b288`. 독립 리뷰 확인: owner fail-closed 3중 방어(화이트리스트+DB CHECK+join rank), regenerate 단일 CTE 트랜잭션(구 코드 유효 창 없음). runtime-db 게이트 PASS.
 
-### ☐ MOMO-408 수용기준 — prod 시드 fail-closed: dev-password 백필 차단 `[server/runtime-db]` · 의존: 없음 (PR #429 리뷰 H1 파생 — 공개 배포 전 필수)
+### ☐ MOMO-408 (`#430`) 수용기준 — prod 시드 fail-closed: dev-password 백필 차단 `[server/runtime-db]` · 의존: 없음 (PR #429 리뷰 H1 파생 — 공개 배포 전 필수)
 - [ ] prod 모드에서 시드 owner(`demo@momo.local`)가 **결정론적 `dev-password`로 로그인 가능한 창을 제거**한다: `005_auth_password_hash.sql`의 무조건 백필을 신규 migration으로 교정 — dev/e2e/demo 모드에서만 백필 유지, production은 `password_hash IS NULL` 유지(로그인 fail-closed) 또는 시드 시 랜덤·비복원 해시. 방식 재량(모드 판별은 기존 seed-mode 컨벤션 — `002_seed.sql`/`006` 의 게이팅 방식 대조), 근거 PR 기록.
 - [ ] `momo_password_verify`가 NULL hash에 대해 항상 false(오류 아님)임을 확인·유지 — 인수 전 로그인 시도는 401.
 - [ ] 기존 배포 소급: 신규 migration이 **이미 백필된 dev-password 행**을 prod 모드에서 잠근다(해당 워크스페이스 owner가 dev-password 그대로면 무효화). dev/e2e 로컬 스택 무회귀(기존 verifier들의 dev-password 로그인 의존 지점 대조 필수 — verify_join/verify_rls 등).
