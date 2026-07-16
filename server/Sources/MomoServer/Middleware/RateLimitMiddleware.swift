@@ -185,9 +185,11 @@ struct IPRateLimitMiddleware: RouterMiddleware {
             if verdict.shouldAudit {
                 // Per-IP axis runs before AuthMiddleware → no principal/tenant
                 // even for authenticated callers → server log only (see header).
+                let loggedPath = SecretRedactingRequestLogMiddleware<AppRequestContext>
+                    .redactedPath(path)
                 logger.warning(
                     "rate limit exceeded (per-ip)",
-                    metadata: ["ip": .string(ip), "path": .string(path),
+                    metadata: ["ip": .string(ip), "path": .string(loggedPath),
                                "limit": .stringConvertible(config.perIPLimit)]
                 )
             }
@@ -234,7 +236,8 @@ struct MemberRateLimitMiddleware: RouterMiddleware {
                     key: principal.memberID.uuidString,
                     limit: config.perMemberLimit,
                     windowSeconds: config.windowSeconds,
-                    path: path,
+                    path: SecretRedactingRequestLogMiddleware<AppRequestContext>
+                        .redactedPath(path),
                     ip: RateLimitSupport.clientIP(request: request, context: context),
                     logger: logger
                 )

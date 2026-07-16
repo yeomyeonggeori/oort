@@ -75,7 +75,7 @@ Profiles:
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + macOS real-backend smoke + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet; add `LOCAL_GATE_LAUNCH_UI=1` for foreground MomoMacDevApp process/window/log evidence |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + `LOCAL_GATE_LAUNCH_UI=1` MomoMacDevApp real-backend process/window evidence + redacted diagnostics bundle |
-| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` + `scripts/verify_push_notifier.sh` + `scripts/verify_plugin_registry.sh` (isolated plugin manifest/install/grant/projection/custody-A roundtrip) |
+| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` + `scripts/verify_push_notifier.sh` + `scripts/verify_plugin_registry.sh` + `scripts/verify_signed_webhook_ingress.sh` (isolated native HMAC + Slack-compatible ingress roundtrip) |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
@@ -204,7 +204,8 @@ BYPASSRLS session, and 011 enum/trigger/index presence. Wired into the
 
 `scripts/verify_plugin_registry.sh` boots an isolated e2e API stack (project
 `momo410plugins`, loopback ports `19800`-`19803`) and verifies the official
-GitHub/Notion/Linear manifest seeds, D6 three-layer manifest fields and
+GitHub/Notion/Linear manifest seeds plus the `external_webhook` registry marker,
+D6 three-layer manifest fields and
 `egressDomains`, whitelist validator failures (unknown protocol/risk/approval
 policy, GPL, malformed document, digest mismatch, revoked catalog entry),
 active-member catalog reads, owner/admin install policy, delegated user's
@@ -216,6 +217,23 @@ FORCE RLS isolation. Wired into `runtime-db`; also runs standalone. Overrides:
 `PLUGIN_GATE_PORT` / `PLUGIN_GATE_POSTGRES_PORT` / `PLUGIN_GATE_CENT_PORT` /
 `PLUGIN_GATE_HERMES_PORT`, `PLUGIN_GATE_PROJECT`, `PLUGIN_GATE_BOOT_TIMEOUT`,
 `PLUGIN_GATE_KEEP=1`.
+
+### Signed webhook ingress gate (MOMO-412, ADR-0115 SE-04B)
+
+`scripts/verify_signed_webhook_ingress.sh` boots an isolated e2e API stack
+(project `momo412webhook`, loopback ports `19900`-`19903`) and verifies native
+HMAC forgery/replay/stale timestamp/cross-workspace rejection, deterministic
+receipt idempotency, old/new key overlap and zero-overlap rotation, revoke, and
+the single tenant transaction from receipt through `message.seq` and outbox.
+It also round-trips the Mattermost-compatible Slack `text` + legacy attachment
+fixture (`<url|text>`, member mention, `<!channel>`), asserts `blocks` and `ts`
+return explicit 400 errors, and proves raw native/URL secrets are absent from
+tables, list/ingress/revoke responses, audit detail, and request logs. All three
+new tables are checked for FORCE RLS isolation. Wired into `runtime-db`; also
+runs standalone. Overrides: `WEBHOOK_GATE_PORT` /
+`WEBHOOK_GATE_POSTGRES_PORT` / `WEBHOOK_GATE_CENT_PORT` /
+`WEBHOOK_GATE_HERMES_PORT`, `WEBHOOK_GATE_PROJECT`,
+`WEBHOOK_GATE_BOOT_TIMEOUT`, `WEBHOOK_GATE_KEEP=1`.
 
 ### Web client gate (`web` profile, MOMO-391 + MOMO-400 + MOMO-401)
 
@@ -550,7 +568,7 @@ Use the profile that matches the changed surface.
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha`; add `LOCAL_GATE_LAUNCH_UI=1` for MomoMacDevApp process/window/log launch evidence |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |
-| `runtime-db` | migrations/server/RLS/join/push-registration/push-notifier/plugin-registry changes | `scripts/local_gate.sh --profile runtime-db` |
+| `runtime-db` | migrations/server/RLS/join/push-registration/push-notifier/plugin-registry/webhook-ingress changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |

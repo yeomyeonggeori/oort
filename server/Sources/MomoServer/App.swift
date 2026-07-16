@@ -31,7 +31,7 @@ enum AppBuilder {
 
         // ---- Router ----
         let router = Router(context: AppRequestContext.self)
-        router.add(middleware: LogRequestsMiddleware(.info))
+        router.add(middleware: SecretRedactingRequestLogMiddleware(.info))
         // MOMO-300 per-IP rate limit — applies to public + protected routes
         // (excludes /health and the shared-secret-authenticated subscribe proxy).
         let rateLimiter = SlidingWindowRateLimiter()
@@ -108,6 +108,9 @@ enum AppBuilder {
         PlatformAdminRoutes(db: db).add(to: authed)
         DeviceRoutes(db: db).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
+        let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)
+        webhookRoutes.addPublic(to: router)
+        webhookRoutes.addProtected(to: authed)
 
         // ---- Application ----
         // The PostgresClient is a ServiceLifecycle.Service; hand it to the app's
