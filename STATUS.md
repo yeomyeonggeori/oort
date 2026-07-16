@@ -3,6 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-414 macOS unified flat sidebar shell (2026-07-17)
+
+- 좌측 패널의 내부 수평 구분선·수동 우측선과 네이티브 타이틀바 기준선 중첩을 제거했다. `NavigationSplitView`의 resize/collapse 동작은 유지하면서 sidebar와 unified titlebar를 하나의 평면으로 연결하고, 가운데 본문과는 네이티브 세로 경계 하나만 남긴다.
+- AppKit 창 크롬 정책을 macOS 14 호스트에 좁게 적용하고 SwiftUI의 지연 toolbar 설치 뒤 한 번 재적용한다. focused `MomoChannelChromeTests` 19/19 PASS, design/correctness review Blocker 0이다.
+
 ## MOMO-410 plugin manifest registry + install/grant 런타임 (2026-07-17)
 
 - ADR-0113 D2/D5/D6에 따라 migration 013의 catalog/install/grant 4-튜플/Capability projection, 화이트리스트 manifest validator, owner/admin install·본인 grant/revoke REST, GitHub/Notion/Linear 오피셜 시드와 custody-A 비밀정보 무저장 경계를 추가했다. 서버 Swift build와 91 tests, fixture JSON·verifier shell syntax는 worker 검증 완료; Docker `runtime-db`는 오케스트레이터 실행 전까지 `runtime-unverified`다.

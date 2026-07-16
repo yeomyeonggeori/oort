@@ -25,6 +25,17 @@ struct MomoWindowChromeMetrics: Equatable {
 enum MomoWindowChromeStyle {
     static let showsSystemTitle = false
     static let appKitToolbarStyle: NSWindow.ToolbarStyle = .unifiedCompact
+
+    /// SwiftUI on macOS 14 has no scene-level API for removing the native
+    /// toolbar baseline. Keep this narrow AppKit policy here so the sidebar
+    /// surface can continue through the titlebar without a second horizontal
+    /// divider or an elevated toolbar material.
+    @MainActor
+    static func applyFlatUnifiedChrome(to window: NSWindow) {
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.toolbar?.showsBaselineSeparator = false
+    }
 }
 
 public extension Scene {
@@ -88,6 +99,7 @@ final class MomoWindowChromeMetricsView: NSView {
 
     func publishMetricsIfNeeded() {
         guard let window, let contentView = window.contentView else { return }
+        MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
         // NavigationSplitView columns report a zero SwiftUI top safe area in
         // full-size unified windows. NSWindow's contentLayoutRect is the
         // AppKit-owned boundary that also follows fullscreen toolbar changes.
@@ -107,6 +119,14 @@ final class MomoWindowChromeMetricsView: NSView {
         removeWindowObservers()
         observedWindow = window
         guard let window else { return }
+
+        // SwiftUI can install or replace its toolbar one run-loop turn after
+        // the representable enters the window. Reapply once after attachment
+        // so the native baseline cannot reappear between titlebar and sidebar.
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window else { return }
+            MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+        }
 
         let names: [Notification.Name] = [
             NSWindow.didResizeNotification,
