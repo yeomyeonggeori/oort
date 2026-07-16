@@ -23,6 +23,7 @@
 - 검증 분담 계약 작동: worker=정적/swift, docker 게이트=오케스트레이터 — runtime-db 1차 실행이 verifier UUID strict 비교 결함을 실제로 잡음.
 - 후속 후보: prod 시드 fail-closed 서버 티켓(H1 파생, 공개 배포 전 필수 성격), install fake-docker trace, regenerate 404/409 분기.
 - 다음 잔량: S-4 universal link(웹), 리액션 REST(UX 조율), ADR-0122 승인 시 음성 V-1, 플러그인 위임(16-02).
+- 종결 확정: main post-merge runtime-db가 verifier flake 2건(핸들 32자 상한 — pid 자릿수 의존)을 잡아 전수 감사로 봉합(`f460867`·`a23c261`), 3차 런 **PASS**(join 44 PASS). 배치 완전 종결.
 
 ## 2026-07-16 (Fable, 엔진/인프라 트랙 momo-main 겸임) · MOMO-404 종결 — ADR-0120 서버측 절반 완성
 - P-2(PR #424 `a8a1089`) 종결. 후보 기록은 011 트리거(재량 행사 — 리뷰가 불변식 정합을 일회용 PG 재현으로 판정, overview.md에 "생산자 트리거 유일·신규는 ADR" 정본화). 리뷰 H1/M1/L1 반영 후 verifier 재PASS. stall 방지 계약(대기 전 push)이 처음으로 완전 작동.
