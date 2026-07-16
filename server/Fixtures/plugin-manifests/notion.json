@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "momo.plugin.v1",
+  "plugin": {
+    "id": "com.momo.plugins.notion",
+    "name": "Notion",
+    "version": "1.0.0",
+    "description": "Official Notion hosted MCP integration",
+    "publisher": { "id": "makenotion", "name": "Notion", "verified": true },
+    "license": { "spdx": "MIT", "kind": "open_source" },
+    "provenance": {
+      "sourceURL": "https://github.com/makenotion/notion-mcp-server",
+      "releaseRef": "hosted",
+      "verified": true
+    }
+  },
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "streamable_http",
+    "url": "https://mcp.notion.com/mcp",
+    "server": { "name": "makenotion/notion-mcp-server", "version": "hosted" },
+    "tools": [{
+      "name": "notion.search",
+      "description": "Search pages available to the delegated user",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "query": { "type": "string" } },
+        "additionalProperties": false
+      },
+      "schemaDigest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "scopes": ["notion:read"],
+      "risk": "read",
+      "approvalPolicy": "none"
+    }]
+  },
+  "skill": { "reference": null, "optional": true },
+  "momo": {
+    "approvalTier": { "notion.search": "read_only" },
+    "risk": "low",
+    "egressDomains": ["mcp.notion.com"],
+    "recommendedFor": ["knowledge-management", "documentation"],
+    "serverPolicy": {
+      "installAllowed": true,
+      "enabledByDefault": false,
+      "allowedRoles": ["owner", "admin"]
+    }
+  }
+}
