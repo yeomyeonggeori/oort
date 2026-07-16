@@ -947,13 +947,9 @@ enum MomoMacDetailPane: String, CaseIterable, Identifiable {
 // it connects + loads the roster.
 
 public enum MomoMacDemo {
-    /// Build + connect a demo ViewModel against an in-memory seeded backend.
+    /// Build a demo that never consults process environment or reaches a server.
     @MainActor
-    public static func makeViewModel() async -> ChatViewModel {
-        if let config = MomoServerRESTChatBackendConfig.fromEnvironment() {
-            return await makeRESTViewModel(config: config)
-        }
-
+    public static func makeLocalDemoViewModel() async -> ChatViewModel {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
         let vm = ChatViewModel(backend: backend)
@@ -963,6 +959,15 @@ public enum MomoMacDemo {
             await vm.selectChannel(first.id)
         }
         return vm
+    }
+
+    /// Build + connect a demo ViewModel against an in-memory seeded backend.
+    @MainActor
+    public static func makeViewModel() async -> ChatViewModel {
+        if let config = MomoServerRESTChatBackendConfig.fromEnvironment() {
+            return await makeRESTViewModel(config: config)
+        }
+        return await makeLocalDemoViewModel()
     }
 
     /// Build + connect a dev ViewModel against local MomoServer REST.

@@ -1933,6 +1933,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] clean `macos-ui` gate와 fresh design-review Blocker 0를 PR evidence에 기록하고 momo-main review/merge 후 main gate 재검증.
 - [ ] 실제 채팅 첨부파일 download record 공급은 MOMO-394에서 구현. 이번 surface의 영속 store와 item action은 준비하되 가짜 history를 생성하지 않음.
 
+### ☑ MOMO-405 (`#423`) 수용기준 — Signal Architecture 반응형 온보딩 `[swift/macos-ui]`
+- [x] 첫 화면은 초대 참여·기존 로그인·로컬 체험·설치된 self-hosted 서버 연결의 네 실제 경로를 먼저 제시하고, 선택 뒤에만 자격정보 form을 연다.
+- [x] `<760pt` compact, `760..<1120pt` stacked, `>=1120pt` bounded split 레이아웃을 제공하며 앱 시작 창은 680pt까지 줄일 수 있다. 고정 bitmap 대신 SwiftUI `Canvas`로 신호 배경을 그려 Retina/resize에서 선명도를 유지한다.
+- [x] 로그인·초대·demo·Keychain 기존 경로를 보존한다. focused test는 반응형 경계·경로 상태·순수 local demo를 확인하고, 전체 macOS suite와 real-backend UI gate가 로그인·초대·credential 저장 경로를 회귀 검증한다. 실패한 수동·환경 자동접속 ViewModel은 실시간 구독과 세션 민감 상태를 정리한다.
+- [x] 일반 모드의 `local alpha` 표식을 숨기고 self-host 경로는 이미 설치된 서버 연결 범위만 설명한다. 한국어/영어, Light/Dark, 키보드 focus ring과 VoiceOver label/hint를 제공한다.
+- [x] compact/default/large Light/Dark 정본 snapshot, focused onboarding 19/19, full macOS 301/301, `macos-ui` gate, fresh design-review Blocker/Major 0와 correctness review Blocker/High/Medium 0를 PR evidence로 기록한다.
+
 ### ☑ MOMO-388 수용기준 — Auth-hardening verifier realtime credential binding drift `[tooling/runtime-db/docs]` · Issue #388
 - [x] 로그인 access/refresh token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest만 DB와 대조해 각 `token.id`를 확정. `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row ID와 같은지 UUID canonical 비교.
 - [x] active exact access-row binding만 허용. active refresh-row ID·`meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 `result == null && error.code == 403` 검증.

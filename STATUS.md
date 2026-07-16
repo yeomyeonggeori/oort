@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-405 Signal Architecture 반응형 온보딩 (2026-07-16)
+
+- 첫 화면을 초대 참여·기존 로그인·로컬 체험·설치된 self-hosted 서버 연결의 실제 제품 경로로 재구성하고, 자격정보 입력은 선택 이후에만 노출한다. 680pt compact부터 1600pt bounded split까지 같은 SwiftUI `Canvas` 신호 배경과 native list/form을 사용하며 한국어/영어, 키보드 포커스, Light/Dark를 지원한다.
+- 실패 후에도 선택 경로가 보존되고, Return 제출은 유효한 자격정보에서만 동작하며 성공 전에는 Keychain/UserDefaults를 갱신하지 않는다. 실패한 수동·환경 자동접속 ViewModel은 실시간 구독과 세션 민감 상태를 정리한다. 일반 모드에서는 `local alpha` 구현 표식을 숨기고, self-host 경로가 서버를 새로 프로비저닝하는 것처럼 말하지 않는다.
+- compact/default/large Light/Dark 정본 스냅샷 6종을 현재 중립 signal rail로 기록했다. focused onboarding 19/19, 전체 macOS 301/301, `macos-ui` local gate가 PASS했고, fresh design-review는 Blocker/Major 0, correctness review는 Blocker/High/Medium 0으로 승인됐다. 최종 clean evidence는 issue #423의 PR에 기록한다.
+
 ## MOMO-402 macOS Top Chrome / Roster / Dock / Downloads Polish (2026-07-16)
 
 - `NavigationSplitView`가 이미 unified toolbar 아래에서 시작하는데 AppKit content inset을 다시 더하던 이중 보정과 pane별 border/rounding/shadow를 제거했다. 좌측 workspace row, 가운데 channel header, 우측 member inspector가 각각 독립된 한 줄 header로 정렬되고 경계에는 separator 하나만 남는다. profile menu는 이동 animation 없이 즉시 열리며 footer button 위 약 16pt 간격을 유지한다.

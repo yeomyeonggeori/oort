@@ -42,7 +42,15 @@ public enum MomoTheme {
     /// First-run and server-session entry. A single width contract keeps the
     /// hero and authentication surface centered from compact to wide windows.
     public enum Onboarding {
-        public static let contentMaximumWidth: CGFloat = 560
+        public static let minimumWindowWidth: CGFloat = 680
+        public static let connectedMinimumWindowWidth: CGFloat = 980
+        public static let minimumWindowHeight: CGFloat = 620
+        public static let choiceMaximumWidth: CGFloat = 520
+        public static let detailMaximumWidth: CGFloat = 560
+        public static let heroMaximumWidth: CGFloat = 520
+        public static let splitContentMaximumWidth: CGFloat = 1_104
+        public static let wideBreakpoint: CGFloat = 1_120
+        public static let compactBreakpoint: CGFloat = 760
         public static let fieldMinimumHeight: CGFloat = 48
         public static let markSize: CGFloat = 40
 
@@ -53,12 +61,45 @@ public enum MomoTheme {
         public static let blockSpacing: CGFloat = 24
         public static let edgeInset: CGFloat = 32
 
-        public static let backdropTop = Color(nsColor: .windowBackgroundColor)
-        public static let backdropMiddle = Color(nsColor: .windowBackgroundColor)
-        public static let backdropBottom = MomoTheme.humanAccent.opacity(0.05)
         public static let fieldBackground = Color(nsColor: .controlBackgroundColor)
         public static let fieldBorder = MomoTheme.subtleBorder
         public static let focusBorder = MomoTheme.humanAccent
+
+        public static func signalBackground(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark
+                ? Color(red: 0.025, green: 0.032, blue: 0.038)
+                : Color(red: 0.925, green: 0.945, blue: 0.950)
+        }
+
+        public static func signalGrid(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark
+                ? Color.white.opacity(0.08)
+                : Color.black.opacity(0.09)
+        }
+
+        public static func signalRail(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark
+                ? Color.white.opacity(0.42)
+                : Color.black.opacity(0.32)
+        }
+
+        public static func signalPlane(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark
+                ? Color(red: 0.98, green: 0.32, blue: 0.25)
+                : Color(red: 0.88, green: 0.23, blue: 0.18)
+        }
+
+        public static func signalForeground(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.white.opacity(0.94) : Color.black.opacity(0.88)
+        }
+
+        public static func signalSecondaryForeground(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.white.opacity(0.88) : Color.black.opacity(0.76)
+        }
+
+        public static func choiceHover(colorScheme: ColorScheme) -> Color {
+            colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.05)
+        }
     }
 
     /// Three calm elevation levels shared by the shell. Primitive scheme colors
