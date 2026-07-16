@@ -294,7 +294,7 @@ create_default_invite member 1 "$ADMIN_TOKEN"
 ADMIN_CREATED_INVITE_ID="$INVITE_ID"
 ADMIN_CREATED_CODE="$INVITE_CODE"
 BOUND_EMAIL="bound-member-$RUN_ID@momo.local"
-join_with_code "$ADMIN_CREATED_CODE" "$BOUND_EMAIL" "bound-member-$RUN_ID" 201
+join_with_code "$ADMIN_CREATED_CODE" "$BOUND_EMAIL" "bound-mem-$RUN_ID" 201
 BOUND_MEMBER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.member.id')"
 if ! printf '%s' "$RESPONSE_BODY" | jq -e '[.memberships[].role] | length > 0 and all(. == "member")' >/dev/null; then
   echo "[join] FAIL admin-created member invite response role binding" >&2
