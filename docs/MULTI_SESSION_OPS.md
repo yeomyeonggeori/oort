@@ -154,6 +154,15 @@ Coordinate before opening parallel work in:
 
 Large shared changes should be merged by `momo-main` in dependency order. Workers should rebase/refresh from `main` after upstream PRs merge, rerun the relevant local gate, and update their PR evidence.
 
+### 4.1 메인 worktree 소유권 (2026-07-17 사고 후 정본)
+
+메인 체크아웃(`/Users/kwakseongjae/projects/momo`)은 **통합(momo-main) 문서·머지 전용**이다. 어떤 세션도 여기서 구현 파일(clients/server/workers 소스)을 작업하지 않는다 — 구현은 반드시 `scripts/goal_claim.sh`가 만드는 격리 worktree에서.
+
+1. **통합 세션(들)**: 메인 worktree에서는 planning/docs 파일만 수정하고, 커밋은 **명시적 파일 지정 add만**(`git add -A`/`git add .` 금지 — 타 세션 미커밋 작업분을 삼킨 사고 2회: 오커밋→main 빌드 파손, stash 시도).
+2. **타 세션의 미커밋 파일 발견 시**: 절대 stash/checkout/reset --hard/정리하지 않는다. 잔재로 보여도 해당 트랙 세션에 확인을 요청하고 무접촉으로 둔다.
+3. **push 충돌 시**: 메인 worktree에서 rebase가 타 세션 파일에 막히면, 임시 worktree(`git worktree add <tmp> origin/main`) + cherry-pick + `push origin HEAD:main`으로 우회한다 — working tree 무접촉. 이후 로컬 main은 `git reset origin/main`(mixed — working tree 보존)으로만 동기화.
+4. 구현 세션(GPT momo-main 포함)이 메인 worktree에서 초안을 잡았다면, worktree로 옮긴 뒤 **메인 worktree의 사본을 스스로 정리**한다(잔재를 남기면 타 세션의 rebase/게이트가 막힌다).
+
 ## 5. Worker Prompt Template
 
 Paste this into a worker chat:
