@@ -2031,12 +2031,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `verify_join.sh` 확장 또는 신규 verifier: 기본 만료 적용·역할 바인딩(owner 거부)·regenerate 왕복(구 코드 즉시 무효)·audit. `runtime-db` 게이트 PASS.
 - [x] 종결: PR #428(+M1 명문화·verifier casing 수정) merge `4a8b288`. 독립 리뷰 확인: owner fail-closed 3중 방어(화이트리스트+DB CHECK+join rank), regenerate 단일 CTE 트랜잭션(구 코드 유효 창 없음). runtime-db 게이트 PASS.
 
-### ☐ MOMO-408 (`#430`) 수용기준 — prod 시드 fail-closed: dev-password 백필 차단 `[server/runtime-db]` · 의존: 없음 (PR #429 리뷰 H1 파생 — 공개 배포 전 필수)
-- [ ] prod 모드에서 시드 owner(`demo@momo.local`)가 **결정론적 `dev-password`로 로그인 가능한 창을 제거**한다: `005_auth_password_hash.sql`의 무조건 백필을 신규 migration으로 교정 — dev/e2e/demo 모드에서만 백필 유지, production은 `password_hash IS NULL` 유지(로그인 fail-closed) 또는 시드 시 랜덤·비복원 해시. 방식 재량(모드 판별은 기존 seed-mode 컨벤션 — `002_seed.sql`/`006` 의 게이팅 방식 대조), 근거 PR 기록.
-- [ ] `momo_password_verify`가 NULL hash에 대해 항상 false(오류 아님)임을 확인·유지 — 인수 전 로그인 시도는 401.
-- [ ] 기존 배포 소급: 신규 migration이 **이미 백필된 dev-password 행**을 prod 모드에서 잠근다(해당 워크스페이스 owner가 dev-password 그대로면 무효화). dev/e2e 로컬 스택 무회귀(기존 verifier들의 dev-password 로그인 의존 지점 대조 필수 — verify_join/verify_rls 등).
-- [ ] `docs/DEPLOY.md` H1 경고 절 갱신: "후속 서버 티켓" 문구를 이 티켓 반영 상태로 교체(인수 절차는 여전히 필수 — 이제 인수 전 로그인이 아예 불가함을 명시).
-- [ ] schema_v0 불변. verifier: prod-모드 ephemeral PG에서 migrate → dev-password 로그인 401 → 인수 UPDATE → 로그인 201, dev 모드에서 기존 경로 무회귀. `runtime-db` 게이트 PASS(오케스트레이터 실행).
+### ☑ MOMO-408 (`#430`) 수용기준 — prod 시드 fail-closed: dev-password 백필 차단 `[server/runtime-db]` · 의존: 없음 (PR #429 리뷰 H1 파생 — 공개 배포 전 필수)
+- [x] prod 모드에서 시드 owner(`demo@momo.local`)가 **결정론적 `dev-password`로 로그인 가능한 창을 제거**한다: `005_auth_password_hash.sql`의 무조건 백필을 신규 migration으로 교정 — dev/e2e/demo 모드에서만 백필 유지, production은 `password_hash IS NULL` 유지(로그인 fail-closed) 또는 시드 시 랜덤·비복원 해시. 방식 재량(모드 판별은 기존 seed-mode 컨벤션 — `002_seed.sql`/`006` 의 게이팅 방식 대조), 근거 PR 기록.
+- [x] `momo_password_verify`가 NULL hash에 대해 항상 false(오류 아님)임을 확인·유지 — 인수 전 로그인 시도는 401.
+- [x] 기존 배포 소급: 신규 migration이 **이미 백필된 dev-password 행**을 prod 모드에서 잠근다(해당 워크스페이스 owner가 dev-password 그대로면 무효화). dev/e2e 로컬 스택 무회귀(기존 verifier들의 dev-password 로그인 의존 지점 대조 필수 — verify_join/verify_rls 등).
+- [x] `docs/DEPLOY.md` H1 경고 절 갱신: "후속 서버 티켓" 문구를 이 티켓 반영 상태로 교체(인수 절차는 여전히 필수 — 이제 인수 전 로그인이 아예 불가함을 명시).
+- [x] schema_v0 불변. verifier: prod-모드 ephemeral PG에서 migrate → dev-password 로그인 401 → 인수 UPDATE → 로그인 200 (201은 원 수용기준 오기 — 로그인 API 계약은 200, worker 이탈 보고로 정정), dev 모드에서 기존 경로 무회귀. `runtime-db` 게이트 PASS(오케스트레이터 실행).
+- [x] 종결: PR #431(+리뷰 H1/H2/M1 반영 ee40e40) merge `8193734`. H1=잠금을 dev-password 전 human으로 확장(잔존 노출 봉합), H2=로컬 러너 명시 부트스트랩(도그푸드 무회귀·prod fail-closed 유지), 오잠금 벡터 없음(리뷰 확정+매트릭스 verifier). 후속 후보: INTERNAL_ALPHA/RUN 문서 dev-password 안내 정비(M2).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

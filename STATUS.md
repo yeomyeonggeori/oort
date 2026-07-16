@@ -39,6 +39,12 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-408 prod 시드 fail-closed (2026-07-16)
+
+- migration 012(PR #431, `8193734`): seed-none(prod) 경로에서 dev-password 백필을 차단하고 **기존 백필 행을 전 human 범위로 소급 잠금**(H1 — 리뷰가 pre-MOMO-217 join 행·문서 안내 잔존 노출을 발견). 오잠금 벡터 없음: bcrypt verify 술어가 운영자 변경 비밀번호를 통과시키지 않음(리뷰 확정 + 매트릭스 verifier 단정). 모드 판별은 002/006 동일 컨벤션, 미설정 기본값=잠금(fail-closed).
+- 로컬 도그푸드 무회귀(H2): local_alpha_runner가 migrate 직후 **명시적** owner 부트스트랩(MOMO_LOGIN_PASSWORD, 기본 dev-password) — 암묵 백필 금지·명시 provisioning이라는 티켓 철학 그대로. prod(install.sh)는 부트스트랩 없음 → DEPLOY.md 인수 절차 전 로그인 401.
+- evidence: seed verifier 4/4 PASS(prod 401/인수 200/확장 잠금 매트릭스/e2e 무회귀), 수정 전 runtime-db 전체 PASS + 델타 등가 논증(PR #431 코멘트). 후속: INTERNAL_ALPHA/RUN dev-password 안내 정비 티켓 후보.
+
 ## MOMO-406/407 셀프호스팅 배치 1 — install/upgrade + 초대 보안 (2026-07-16)
 
 - ADR-0121 S-1/S-2가 랜딩(PR #429 `bb3efc6` / #428 `4a8b288`) — **codex-fleet 복귀 1호 배치**(worker=gpt-5.6-sol medium 병렬 2기, 오케스트레이터=Fable 리뷰·게이트·머지).
