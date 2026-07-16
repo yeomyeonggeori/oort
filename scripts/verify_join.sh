@@ -4,7 +4,8 @@
 #
 # Runs after make up && make migrate. It starts MomoServer on the worktree port,
 # creates real invites via the authenticated invite API, exercises public join,
-# verifies login/bootstrap/read access, and checks deterministic failure modes.
+# verifies invite expiry/role/regenerate security contracts, login/bootstrap/read
+# access, and deterministic failure modes.
 # =============================================================================
 set -euo pipefail
 
@@ -181,6 +182,30 @@ create_invite() {
   INVITE_CODE="$(printf '%s' "$RESPONSE_BODY" | jq -r '.code')"
 }
 
+create_default_invite() {
+  local role="$1"
+  local max_uses="$2"
+  local token="$3"
+  local body
+  body="$(jq -cn \
+    --arg role "$role" \
+    --argjson maxUses "$max_uses" \
+    '{role:$role,maxUses:$maxUses}')"
+  api POST "/v1/workspaces/$WORKSPACE_ID/invites" "$body" "$token"
+  expect_status 201 "create default-expiry $role invite maxUses=$max_uses"
+  INVITE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.invite.id')"
+  INVITE_CODE="$(printf '%s' "$RESPONSE_BODY" | jq -r '.code')"
+}
+
+regenerate_invite() {
+  local invite_id="$1"
+  local token="$2"
+  api POST "/v1/workspaces/$WORKSPACE_ID/invites/$invite_id/regenerate" "" "$token"
+  expect_status 201 "regenerate invite"
+  INVITE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.invite.id')"
+  INVITE_CODE="$(printf '%s' "$RESPONSE_BODY" | jq -r '.code')"
+}
+
 revoke_invite() {
   local invite_id="$1"
   api POST "/v1/workspaces/$WORKSPACE_ID/invites/$invite_id/revoke" \
@@ -224,6 +249,58 @@ assert_sql_equals() {
 
 start_server
 login_demo_owner
+
+echo "[join] invite security contract: default expiry + owner rejection"
+create_default_invite member 2 "$OWNER_TOKEN"
+DEFAULT_INVITE_ID="$INVITE_ID"
+DEFAULT_CODE="$INVITE_CODE"
+DEFAULT_DELTA_MS="$(printf '%s' "$RESPONSE_BODY" | jq -r '.invite.expiresAtMs - .invite.createdAtMs')"
+if [ "$DEFAULT_DELTA_MS" != "604800000" ]; then
+  echo "[join] FAIL default invite expiry: expected 604800000ms, got $DEFAULT_DELTA_MS" >&2
+  exit 1
+fi
+echo "[join] PASS default invite expiry is exactly seven days"
+if [ "$(printf '%s' "$RESPONSE_BODY" | jq -c 'keys | sort')" != '["code","invite"]' ]; then
+  echo "[join] FAIL create response shape drifted" >&2
+  exit 1
+fi
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE action = 'invite.created' AND target_id = '$DEFAULT_INVITE_ID'; COMMIT;" "invite creation audit is transactional"
+
+api POST "/v1/workspaces/$WORKSPACE_ID/invites" '{"role":"owner"}' "$OWNER_TOKEN"
+expect_status 400 "owner-role invite rejected fail-closed"
+assert_sql_equals 0 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM invite_code WHERE role = 'owner'; COMMIT;" "owner-role invite was not persisted"
+
+echo "[join] regenerate atomically revokes old code and preserves role binding"
+OLD_INVITE_ID="$DEFAULT_INVITE_ID"
+OLD_CODE="$DEFAULT_CODE"
+regenerate_invite "$OLD_INVITE_ID" "$OWNER_TOKEN"
+REGENERATED_INVITE_ID="$INVITE_ID"
+REGENERATED_CODE="$INVITE_CODE"
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM invite_code WHERE id = '$OLD_INVITE_ID' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revocation_reason = 'regenerated'; COMMIT;" "regenerate revoked old invite"
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM invite_code WHERE id = '$REGENERATED_INVITE_ID' AND role = 'member' AND max_uses = 2 AND revoked_at IS NULL; COMMIT;" "regenerate preserved role and max uses"
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE action = 'invite.regenerated' AND target_id = '$OLD_INVITE_ID' AND lower(detail->>'new_invite_id') = lower('$REGENERATED_INVITE_ID') AND detail->>'role' = 'member'; COMMIT;" "regenerate audit links old and new invites"
+join_with_code "$OLD_CODE" "regen-old-$RUN_ID@momo.local" "regen-old-$RUN_ID" 410
+join_with_code "$REGENERATED_CODE" "regen-new-$RUN_ID@momo.local" "regen-new-$RUN_ID" 201
+
+echo "[join] admin-created invite grants only its bound member role"
+create_invite admin 1
+ADMIN_BOOTSTRAP_CODE="$INVITE_CODE"
+ADMIN_EMAIL="invite-admin-$RUN_ID@momo.local"
+join_with_code "$ADMIN_BOOTSTRAP_CODE" "$ADMIN_EMAIL" "invite-admin-$RUN_ID" 201
+ADMIN_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -r '.accessToken')"
+ADMIN_MEMBER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.member.id')"
+create_default_invite member 1 "$ADMIN_TOKEN"
+ADMIN_CREATED_INVITE_ID="$INVITE_ID"
+ADMIN_CREATED_CODE="$INVITE_CODE"
+BOUND_EMAIL="bound-member-$RUN_ID@momo.local"
+join_with_code "$ADMIN_CREATED_CODE" "$BOUND_EMAIL" "bound-member-$RUN_ID" 201
+BOUND_MEMBER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.member.id')"
+if ! printf '%s' "$RESPONSE_BODY" | jq -e '[.memberships[].role] | length > 0 and all(. == "member")' >/dev/null; then
+  echo "[join] FAIL admin-created member invite response role binding" >&2
+  exit 1
+fi
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT CASE WHEN count(*) > 0 AND bool_and(role = 'member') THEN 1 ELSE 0 END FROM membership WHERE member_id = '$BOUND_MEMBER_ID' AND left_at IS NULL; COMMIT;" "admin-created invite persisted only member role"
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM invite_code WHERE id = '$ADMIN_CREATED_INVITE_ID' AND created_by = '$ADMIN_MEMBER_ID' AND role = 'member'; COMMIT;" "admin-created invite retained explicit role"
 
 echo "[join] valid public join -> login/bootstrap/read path"
 create_invite member 3

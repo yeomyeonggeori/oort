@@ -22,6 +22,13 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try InviteRoutes.validatedMaxUses(10_001))
     }
 
+    func testInviteExpiryAllowsDatabaseDefaultAndValidatesExplicitValue() throws {
+        XCTAssertNil(try InviteRoutes.validatedExpiresAtMs(nil))
+        let future = Int64(Date().timeIntervalSince1970 * 1000) + 60_000
+        XCTAssertEqual(try InviteRoutes.validatedExpiresAtMs(future), future)
+        XCTAssertThrowsError(try InviteRoutes.validatedExpiresAtMs(0))
+    }
+
     func testWorkspaceNameValidationNormalizesHumanReadableNames() throws {
         XCTAssertEqual(try WorkspaceRoutes.normalizedName("  momo team  "), "momo team")
         XCTAssertEqual(try WorkspaceRoutes.normalizedName("  모모 작업실\n"), "모모 작업실")

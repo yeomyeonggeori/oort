@@ -8,6 +8,7 @@ import PostgresNIO
 ///   POST /v1/workspaces/{ws}/invites                  owner/admin create
 ///   GET  /v1/workspaces/{ws}/invites                  owner/admin list
 ///   POST /v1/workspaces/{ws}/invites/{invite}/revoke  owner/admin revoke
+///   POST /v1/workspaces/{ws}/invites/{invite}/regenerate owner/admin atomic replace
 ///   POST /v1/workspaces/{ws}/invites/redeem           member redeem for self
 ///
 /// Every handler verifies the path workspace matches the JWT workspace, then
@@ -21,6 +22,7 @@ struct InviteRoutes: Sendable {
         group.get("/v1/workspaces/:ws/invites", use: list)
         group.post("/v1/workspaces/:ws/invites/redeem", use: redeem)
         group.post("/v1/workspaces/:ws/invites/:invite/revoke", use: revoke)
+        group.post("/v1/workspaces/:ws/invites/:invite/regenerate", use: regenerate)
     }
 
     @Sendable
@@ -52,7 +54,10 @@ struct InviteRoutes: Sendable {
                          right(raw_code, 6),
                          \(role)::membership_role,
                          \(maxUses),
-                         to_timestamp(\(expiresAtMs) / 1000.0),
+                         COALESCE(
+                           to_timestamp(\(expiresAtMs) / 1000.0),
+                           now() + interval '7 days'
+                         ),
                          \(principal.memberID),
                          \(metadataJSON)::jsonb
                     FROM generated
@@ -87,8 +92,18 @@ struct InviteRoutes: Sendable {
                 throw HTTPError(.internalServerError, message: "invite code creation failed")
             }
             let (inviteJSON, rawCode) = try row.decode((String, String).self)
-            return try CreateInviteResponse(
-                invite: Self.decodeInvite(inviteJSON),
+            let invite = try Self.decodeInvite(inviteJSON)
+            try await Self.insertInviteAudit(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                actorMemberID: principal.memberID,
+                action: "invite.created",
+                targetID: try Self.uuid(invite.id, label: "created invite"),
+                detailJSON: Self.encodeAuditDetail(["role": role, "max_uses": maxUses])
+            )
+            return CreateInviteResponse(
+                invite: invite,
                 code: rawCode
             )
         }
@@ -160,14 +175,21 @@ struct InviteRoutes: Sendable {
             try await Self.requireWorkspaceAdmin(conn: conn, logger: db.logger, principal: principal)
             let rows = try await conn.query(
                 """
-                WITH updated AS (
-                  UPDATE invite_code
-                     SET revoked_at = COALESCE(revoked_at, now()),
-                         revoked_by = COALESCE(revoked_by, \(principal.memberID)),
-                         revocation_reason = COALESCE(revocation_reason, \(reason)),
-                         updated_at = now()
+                WITH matched AS (
+                  SELECT id, revoked_at
+                    FROM invite_code
                    WHERE id = \(inviteID)
-                  RETURNING *
+                   FOR UPDATE
+                ),
+                updated AS (
+                  UPDATE invite_code i
+                     SET revoked_at = COALESCE(i.revoked_at, now()),
+                         revoked_by = COALESCE(i.revoked_by, \(principal.memberID)),
+                         revocation_reason = COALESCE(i.revocation_reason, \(reason)),
+                         updated_at = now()
+                    FROM matched m
+                   WHERE i.id = m.id
+                  RETURNING i.*, (m.revoked_at IS NULL) AS newly_revoked
                 )
                 SELECT jsonb_build_object(
                          'id', u.id,
@@ -187,7 +209,8 @@ struct InviteRoutes: Sendable {
                          'createdBy', u.created_by,
                          'createdAtMs', floor(extract(epoch from u.created_at) * 1000)::bigint,
                          'updatedAtMs', floor(extract(epoch from u.updated_at) * 1000)::bigint
-                       )::text AS invite_json
+                       )::text AS invite_json,
+                       u.newly_revoked
                   FROM updated u
                 """,
                 logger: db.logger
@@ -195,10 +218,120 @@ struct InviteRoutes: Sendable {
             guard let row = rows.first else {
                 throw HTTPError(.notFound, message: "invite code not found")
             }
-            return try Self.decodeInvite(row.decode(String.self))
+            let (inviteJSON, newlyRevoked) = try row.decode((String, Bool).self)
+            let invite = try Self.decodeInvite(inviteJSON)
+            if newlyRevoked {
+                try await Self.insertInviteAudit(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    actorMemberID: principal.memberID,
+                    action: "invite.revoked",
+                    targetID: inviteID,
+                    detailJSON: Self.encodeAuditDetail(["reason": reason ?? NSNull()])
+                )
+            }
+            return invite
         }
 
         return try invite.response(from: request, context: context)
+    }
+
+    @Sendable
+    func regenerate(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let workspaceID = try Self.workspaceID(context, principal: principal)
+        let inviteID = try Self.inviteID(context)
+
+        let created: CreateInviteResponse = try await db.withTenantTransaction(
+            workspaceID: workspaceID
+        ) { conn in
+            try await Self.requireWorkspaceAdmin(conn: conn, logger: db.logger, principal: principal)
+
+            let rows = try await conn.query(
+                """
+                WITH locked AS (
+                  SELECT *
+                    FROM invite_code
+                   WHERE id = \(inviteID)
+                     AND revoked_at IS NULL
+                   FOR UPDATE
+                ),
+                revoked AS (
+                  UPDATE invite_code i
+                     SET revoked_at = now(),
+                         revoked_by = \(principal.memberID),
+                         revocation_reason = 'regenerated',
+                         updated_at = now()
+                    FROM locked l
+                   WHERE i.id = l.id
+                  RETURNING l.*
+                ),
+                generated AS (
+                  SELECT momo_generate_invite_code() AS raw_code
+                ),
+                inserted AS (
+                  INSERT INTO invite_code
+                    (workspace_id, code_hash, code_preview, role, max_uses,
+                     expires_at, created_by, metadata)
+                  SELECT r.workspace_id,
+                         momo_invite_code_hash(g.raw_code),
+                         right(g.raw_code, 6),
+                         r.role,
+                         r.max_uses,
+                         now() + interval '7 days',
+                         \(principal.memberID),
+                         r.metadata
+                    FROM revoked r
+                    CROSS JOIN generated g
+                  RETURNING *
+                )
+                SELECT jsonb_build_object(
+                         'id', i.id,
+                         'workspaceId', i.workspace_id,
+                         'codePreview', i.code_preview,
+                         'role', i.role::text,
+                         'maxUses', i.max_uses,
+                         'usedCount', i.used_count,
+                         'expiresAtMs', floor(extract(epoch from i.expires_at) * 1000)::bigint,
+                         'revokedAtMs', NULL,
+                         'revokedBy', NULL,
+                         'revocationReason', NULL,
+                         'createdBy', i.created_by,
+                         'createdAtMs', floor(extract(epoch from i.created_at) * 1000)::bigint,
+                         'updatedAtMs', floor(extract(epoch from i.updated_at) * 1000)::bigint
+                       )::text AS invite_json,
+                       g.raw_code
+                  FROM inserted i
+                  CROSS JOIN generated g
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.conflict, message: "invite code not found or already revoked")
+            }
+            let (inviteJSON, rawCode) = try row.decode((String, String).self)
+            let invite = try Self.decodeInvite(inviteJSON)
+            let newInviteID = try Self.uuid(invite.id, label: "regenerated invite")
+            try await Self.insertInviteAudit(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                actorMemberID: principal.memberID,
+                action: "invite.regenerated",
+                targetID: inviteID,
+                detailJSON: Self.encodeAuditDetail([
+                    "new_invite_id": newInviteID.uuidString,
+                    "role": invite.role,
+                    "max_uses": invite.maxUses,
+                ])
+            )
+            return CreateInviteResponse(invite: invite, code: rawCode)
+        }
+
+        var response = try created.response(from: request, context: context)
+        response.status = .created
+        return response
     }
 
     @Sendable
@@ -329,13 +462,13 @@ struct InviteRoutes: Sendable {
         return value
     }
 
-    static func validatedExpiresAtMs(_ expiresAtMs: Int64?) throws -> Int64 {
+    static func validatedExpiresAtMs(_ expiresAtMs: Int64?) throws -> Int64? {
+        guard let expiresAtMs else { return nil }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let value = expiresAtMs ?? nowMs + 7 * 24 * 60 * 60 * 1000
-        guard value > nowMs else {
+        guard expiresAtMs > nowMs else {
             throw HTTPError(.badRequest, message: "expiresAtMs must be in the future")
         }
-        return value
+        return expiresAtMs
     }
 
     static func normalizedCode(_ code: String) throws -> String {
@@ -413,5 +546,45 @@ struct InviteRoutes: Sendable {
               let str = String(data: data, encoding: .utf8)
         else { return "{}" }
         return str
+    }
+
+    static func uuid(_ raw: String, label: String) throws -> UUID {
+        guard let value = UUID(uuidString: raw) else {
+            throw HTTPError(.internalServerError, message: "\(label) id is invalid")
+        }
+        return value
+    }
+
+    static func encodeAuditDetail(_ detail: [String: Any]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: detail),
+              let value = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return value
+    }
+
+    static func insertInviteAudit(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        actorMemberID: UUID,
+        action: String,
+        targetID: UUID,
+        detailJSON: String
+    ) async throws {
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, action, target_type, target_id, detail)
+            VALUES (
+              \(workspaceID),
+              \(actorMemberID),
+              \(action),
+              'invite_code',
+              \(targetID),
+              \(detailJSON)::jsonb
+            )
+            """,
+            logger: logger
+        )
     }
 }
