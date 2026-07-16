@@ -4,6 +4,7 @@
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
 ## MOMO-407 초대 보안 계약 (2026-07-16)
+- regenerate 의미론(review #428 M1 명문화): regenerate는 **신규 코드 발급**이므로 만료를 구 invite의 잔여 TTL이 아니라 **기본 7일로 재설정**한다. 잔여 TTL 보존이 필요해지면 후속 티켓으로 분리한다.
 
 - 초대 미지정 만료를 DB transaction 기준 7일로 고정하고 owner role을 fail-closed로 유지했다. 원자 regenerate 경로는 기존 코드를 즉시 revoke한 뒤 role/maxUses/metadata를 바인딩한 새 코드를 발급하며 create/revoke/regenerate audit를 같은 tenant transaction에 기록한다. 기존 스키마가 계약을 수용하므로 migration과 OpenAPI 응답 shape는 변경하지 않았다.
 - `verify_join.sh`에 기본 만료·owner 거부·admin 생성 role 바인딩·regenerate 구 코드 무효화/audit 왕복을 추가했다. Swift build/test와 verifier `bash -n`은 worker 검증 완료; Docker `runtime-db`는 오케스트레이터 실행 전까지 `runtime-unverified`다.
