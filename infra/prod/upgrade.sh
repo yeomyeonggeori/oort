@@ -51,7 +51,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-case "$DEPLOY_MODE" in staging|prod|production) ;; *) deploy_usage_fail "--mode must be staging or prod" ;; esac
+case "$DEPLOY_MODE" in staging|prod|production) ;; *) deploy_usage_fail "--mode must be staging, prod, or production" ;; esac
 configure_env_source
 run_prod_preflight
 load_deploy_env
@@ -112,8 +112,17 @@ if [ "$ROLLBACK_ONLY" = "1" ]; then
   exit 0
 fi
 
+# review #429 L4: a re-run with the SAME image set must not overwrite the
+# rollback target (that would erase the real previous set).
+if [ -f "$CURRENT_STATE" ] \
+  && grep -Fq "MOMO_API_IMAGE=$MOMO_API_IMAGE" "$CURRENT_STATE" \
+  && grep -Fq "MOMO_RELAY_IMAGE=$MOMO_RELAY_IMAGE" "$CURRENT_STATE" \
+  && grep -Fq "MOMO_WORKER_IMAGE=$MOMO_WORKER_IMAGE" "$CURRENT_STATE"; then
+  deploy_log "requested image set matches the current deploy state; keeping the existing rollback target"
+else
 cp "$CURRENT_STATE" "${CURRENT_STATE}.previous"
 chmod 600 "${CURRENT_STATE}.previous"
+fi
 deploy_log "preserved the current image set for rollback"
 
 upgrade_failed=0

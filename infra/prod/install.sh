@@ -42,7 +42,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-case "$DEPLOY_MODE" in staging|prod|production) ;; *) deploy_usage_fail "--mode must be staging or prod" ;; esac
+case "$DEPLOY_MODE" in staging|prod|production) ;; *) deploy_usage_fail "--mode must be staging, prod, or production" ;; esac
 configure_env_source
 run_prod_preflight
 load_deploy_env

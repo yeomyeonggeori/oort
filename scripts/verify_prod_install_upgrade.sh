@@ -199,9 +199,11 @@ grep -Fq 'ADR-0120 P-3 / ADR-0121 S-5 placeholder' "$INSTALL" ||
 grep -Fq 'MOMO_API_IMAGE="$OLD_API"' "$UPGRADE" || fail "rollback image override is missing"
 pass "preflight, relay placeholder, and rollback source wiring are present"
 
-if rg -n 'echo.*(PASSWORD|HMAC|API_KEY|TOKEN|SECRET|DATABASE_URL|HERMES)' \
+# grep(POSIX)만 사용 — rg는 이 게이트 체인의 가용 전제가 아니며, 부재 시
+# exit 127이 "매치 없음"으로 오독되어 검사가 조용히 스킵된다 (review #429 M1).
+if grep -En '(echo|printf).*(PASSWORD|HMAC|API_KEY|TOKEN|SECRET|DATABASE_URL|HERMES)' \
   "$INSTALL" "$UPGRADE" "$LIB" >/dev/null; then
-  fail "deployment scripts contain a secret-value echo pattern"
+  fail "deployment scripts contain a secret-value echo/printf pattern"
 fi
 pass "deployment scripts contain no secret-value echo path"
 

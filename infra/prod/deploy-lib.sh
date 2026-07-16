@@ -106,9 +106,9 @@ check_required_commands() {
 check_dns_name() {
   local name="$1"
   if command -v getent >/dev/null 2>&1; then
-    getent hosts "$name" >/dev/null 2>&1 || deploy_fail "DNS does not resolve for a configured public hostname"
+    getent hosts "$name" >/dev/null 2>&1 || deploy_fail "DNS does not resolve for public hostname: $name"
   elif command -v dig >/dev/null 2>&1; then
-    [ -n "$(dig +short "$name" | head -n 1)" ] || deploy_fail "DNS does not resolve for a configured public hostname"
+    [ -n "$(dig +short "$name" | head -n 1)" ] || deploy_fail "DNS does not resolve for public hostname: $name"
   else
     deploy_fail "getent or dig is required for DNS preflight"
   fi
