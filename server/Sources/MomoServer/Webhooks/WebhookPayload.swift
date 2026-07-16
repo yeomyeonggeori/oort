@@ -59,7 +59,13 @@ enum WebhookPayload {
                 message: "Slack-compatible blocks are not supported in v0; use text and legacy attachments"
             )
         }
-        try requireOnlyKeys(root, allowed: ["text", "attachments"], label: "Slack-compatible")
+        // Review #443 H1: Mattermost's 12-year Slack-compat contract IGNORES
+        // unsupported top-level fields (username, icon_emoji, channel,
+        // link_names, mrkdwn, unfurl_links, ...) rather than rejecting — that
+        // is what lets GitHub/Jenkins/Grafana/Alertmanager work by swapping
+        // only the URL. We read text/attachments and drop the rest. Dropping
+        // identity overrides (username/icon_*) also keeps author non-spoofable.
+        // Only `blocks` is a hard 400 (handled above).
 
         var sections: [String] = []
         if let rawText = root["text"] {
@@ -96,11 +102,9 @@ enum WebhookPayload {
     }
 
     static func translateSlackMarkup(_ source: String) throws -> String {
-        let bold = try NSRegularExpression(pattern: #"(?<!\*)\*[^*\n]+\*(?!\*)"#)
+        // Review #443 H1: `*bold*` is left as-is (rendered literally) — MM does
+        // the same. Rejecting it 400s Grafana's default `*Alerting*` templates.
         let sourceRange = NSRange(source.startIndex..<source.endIndex, in: source)
-        if bold.firstMatch(in: source, range: sourceRange) != nil {
-            throw HTTPError(.badRequest, message: "Slack *bold* mrkdwn is not supported")
-        }
         let pattern = #"<([^<>]+)>"#
         let regex = try NSRegularExpression(pattern: pattern)
         var output = source
@@ -112,28 +116,37 @@ enum WebhookPayload {
             let replacement: String
             if token == "!channel" {
                 replacement = "@channel"
-            } else if token == "!everyone" || token == "!here" || token.hasPrefix("!subteam^") {
-                throw HTTPError(.badRequest, message: "unsupported Slack special mention <\(token)>")
+            } else if token == "!everyone" || token == "!here" {
+                // H1: render as plain text; momo doesn't interpret Slack broadcasts.
+                replacement = "@\(token.dropFirst())"
+            } else if token.hasPrefix("!subteam^") {
+                replacement = "@team"
             } else if token.hasPrefix("#") {
-                throw HTTPError(.badRequest, message: "Slack channel ID mentions are not supported")
+                // Slack channel-ID mention: render the label after `|`, else drop.
+                let parts = token.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                replacement = parts.count == 2 ? "#\(parts[1])" : ""
             } else if token.hasPrefix("@") {
-                let id = String(token.dropFirst())
-                guard id.wholeMatch(of: /^[A-Za-z0-9._-]{1,80}$/) != nil else {
-                    throw HTTPError(.badRequest, message: "invalid Slack member mention")
+                // `<@U123>` or legacy `<@U123|label>` — prefer the label.
+                let inner = String(token.dropFirst())
+                let parts = inner.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+                if parts.count == 2, !parts[1].isEmpty {
+                    replacement = "@\(parts[1])"
+                } else if inner.wholeMatch(of: /^[A-Za-z0-9._-]{1,80}$/) != nil {
+                    replacement = "@\(inner)"
+                } else {
+                    replacement = "@\(inner)"  // literal fallback; never 400 a mention
                 }
-                replacement = "@\(id)"
             } else {
                 let parts = token.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
                 let target = String(parts[0])
-                guard let url = URL(string: target),
-                      ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "")
-                else {
-                    throw HTTPError(.badRequest, message: "unsupported Slack angle-bracket token")
-                }
-                if parts.count == 2, !parts[1].isEmpty {
-                    replacement = "[\(parts[1])](\(target))"
+                if let url = URL(string: target),
+                   ["http", "https", "mailto"].contains(url.scheme?.lowercased() ?? "") {
+                    replacement = (parts.count == 2 && !parts[1].isEmpty)
+                        ? "[\(parts[1])](\(target))" : target
                 } else {
-                    replacement = target
+                    // H1: unknown angle-bracket token rendered literally, not 400.
+                    replacement = (parts.count == 2 && !parts[1].isEmpty)
+                        ? String(parts[1]) : target
                 }
             }
             output.replaceSubrange(wholeRange, with: replacement)
@@ -147,7 +160,10 @@ enum WebhookPayload {
             "title", "title_link", "text", "fields", "image_url", "thumb_url",
             "footer", "footer_icon",
         ]
-        try requireOnlyKeys(object, allowed: allowed, label: "Slack attachment")
+        // Review #443 H1: unknown attachment keys (ts, mrkdwn_in, actions, ...)
+        // are ignored, not rejected — MM parity, so Alertmanager/Grafana
+        // attachments render instead of 400ing on first delivery.
+        _ = allowed
         var lines: [String] = []
 
         func translated(_ key: String) throws -> String? {
@@ -184,7 +200,7 @@ enum WebhookPayload {
                 guard let field = rawField as? [String: Any] else {
                     throw HTTPError(.badRequest, message: "Slack attachment field must be an object")
                 }
-                try requireOnlyKeys(field, allowed: ["title", "value", "short"], label: "Slack attachment field")
+                // H1: unknown field keys ignored (MM parity).
                 if let short = field["short"], !(short is Bool) {
                     throw HTTPError(.badRequest, message: "Slack attachment field short must be boolean")
                 }

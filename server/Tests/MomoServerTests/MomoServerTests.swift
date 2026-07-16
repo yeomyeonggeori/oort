@@ -2164,23 +2164,23 @@ final class MomoServerTests: XCTestCase {
         )
     }
 
-    func testSlackCompatibleRejectsBlocksAndMattermostUnsupportedFields() {
+    func testSlackCompatibleRejectsOnlyBlocks() throws {
+        // Review #443 H1: blocks stays a hard 400 (v0 unsupported)...
         XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","blocks":[]}"#.utf8))) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
             XCTAssertTrue(String(describing: error).contains("blocks"))
         }
-        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","mrkdwn":true}"#.utf8))) { error in
-            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
-        }
-        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"attachments":[{"text":"x","ts":1}]}"#.utf8))) { error in
-            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
-        }
-        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"<!everyone>"}"#.utf8))) { error in
-            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
-        }
-        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"*bold*"}"#.utf8))) { error in
-            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
-        }
+        // ...but Mattermost-unsupported fields are IGNORED, not rejected, so
+        // real tools (Grafana/Alertmanager) work by swapping only the URL.
+        XCTAssertEqual(
+            try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","mrkdwn":true,"username":"grafana","icon_emoji":":fire:"}"#.utf8)).body,
+            "x")
+        // identity overrides are dropped → author stays non-spoofable.
+        XCTAssertEqual(
+            try WebhookPayload.slackCompatible(data: Data(#"{"attachments":[{"text":"deploy ok","ts":1,"mrkdwn_in":["text"]}]}"#.utf8)).body,
+            "deploy ok")
+        // *bold* renders literally; broadcast mentions render as plain text.
+        XCTAssertEqual(try WebhookPayload.slackCompatible(data: Data(#"{"text":"*Alerting* <!everyone>"}"#.utf8)).body, "*Alerting* @everyone")
     }
 
     func testNativeWebhookPayloadIsStrictAndBounded() throws {

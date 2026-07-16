@@ -105,9 +105,12 @@ secret은 발급·회전 응답에서 한 번만 보인다. Slack-compatible은
 Slack 변환기의 v0 화이트리스트는 Mattermost 선례와 같은 top-level `text`,
 legacy `attachments`의 `fallback/color/pretext/author_name/author_link/author_icon/
 title/title_link/text/fields/image_url/thumb_url/footer/footer_icon` 및 field의
-`title/value/short`다. `<url|text>`, `<@member>`, `<!channel>`만 번역한다.
-`blocks`, `<#CHANNEL_ID>`, mrkdwn/parse/link_names, `*bold*`, `<!everyone>`,
-attachment `ts`와 unknown 필드는 명시적 400으로 거부한다.
+`title/value/short`다. `<url|text>`, `<@member>`, `<!channel>`을 번역하고,
+`<!everyone>`/`<!here>`/legacy pipe mention은 평문으로, `*bold*`는 그대로
+렌더한다. Mattermost 선례와 동일하게 **미지원 필드(mrkdwn/parse/link_names,
+username/icon_* identity override, attachment `ts`/`mrkdwn_in`, unknown 키)는
+거부가 아니라 무시**해 기존 Slack 도구가 URL 교체만으로 동작하게 한다(username/
+icon override를 무시함으로써 author 사칭도 차단). **`blocks`만 명시적 400**이다.
 
 두 모드 모두 검증 뒤 `webhook_receipt`와 deterministic `client_msg_id`,
 `channel_seq` bump, `message`, broadcast `outbox`를 한 tenant transaction에서

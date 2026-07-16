@@ -258,8 +258,20 @@ got="$(printf "SELECT props->>'source', props->>'webhook_mode', props->>'slack_c
 api POST "$SLACK_URL" '{"text":"x","blocks":[]}'
 expect_status 400 "Slack blocks rejected with explicit error"
 printf '%s' "$RESPONSE_BODY" | jq -e '.error.message | contains("blocks")' >/dev/null
-api POST "$SLACK_URL" '{"attachments":[{"text":"x","ts":1}]}'
-expect_status 400 "Mattermost-unsupported attachment ts rejected"
+# Review #443 H1: Mattermost-unsupported fields are IGNORED (rendered), not
+# rejected — the whole point of "swap only the URL". Grafana/Alertmanager-shaped
+# payload (username/icon_emoji/*bold*/attachment ts+mrkdwn_in) must 202, drop
+# the identity override, and render the text.
+api POST "$SLACK_URL" '{"text":"*Alerting* fired","username":"grafana","icon_emoji":":fire:","attachments":[{"text":"cpu high","ts":1,"mrkdwn_in":["text"]}]}'
+expect_status 202 "Mattermost-unsupported fields ignored (tool works by URL swap)"
+IGNORE_MSG="$(printf "SELECT id FROM message WHERE channel_id='$GENERAL_CHANNEL' ORDER BY seq DESC LIMIT 1;\n" | sql_scalar)"
+got="$(printf "SELECT body FROM message WHERE id='$IGNORE_MSG';\n" | sql_scalar)"
+case "$got" in
+  *"*Alerting* fired"*|*"cpu high"*) : ;;
+  *) echo "[webhook] ignored-field payload did not render expected text: $got" >&2; exit 1 ;;
+esac
+printf '%s' "$got" | grep -q 'grafana' && { echo "[webhook] identity override leaked into message" >&2; exit 1; }
+printf "SELECT display_name FROM member WHERE id=(SELECT author_member_id FROM message WHERE id='$IGNORE_MSG');\n" | sql_scalar | grep -q 'grafana' && { echo "[webhook] username spoofed the author" >&2; exit 1; } || true
 
 # Raw native secret and Slack URL token may appear only in their one-time
 # issuance response held in this process. They must not be persisted, audited,
