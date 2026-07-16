@@ -1480,6 +1480,31 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(viewModel.mentionNotice, "Hermes Local mention inserted.")
     }
 
+    func testMentionSelectionWrapsAndHandlesEmptyCandidates() {
+        let first = MemberID()
+        let second = MemberID()
+        let third = MemberID()
+        let candidates = [first, second, third]
+
+        XCTAssertEqual(
+            MomoMentionSelection.moved(current: first, candidates: candidates, offset: -1),
+            third
+        )
+        XCTAssertEqual(
+            MomoMentionSelection.moved(current: third, candidates: candidates, offset: 1),
+            first
+        )
+        XCTAssertEqual(
+            MomoMentionSelection.moved(current: nil, candidates: candidates, offset: 1),
+            first
+        )
+        XCTAssertEqual(
+            MomoMentionSelection.moved(current: nil, candidates: candidates, offset: -1),
+            third
+        )
+        XCTAssertNil(MomoMentionSelection.moved(current: nil, candidates: [], offset: 1))
+    }
+
     @MainActor
     func testWorkAgentCandidatesRequireActiveChannelInviteAndCapability() async throws {
         let backend = LiveChatBackend()

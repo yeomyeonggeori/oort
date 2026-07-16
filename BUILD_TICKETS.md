@@ -1940,6 +1940,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 일반 모드의 `local alpha` 표식을 숨기고 self-host 경로는 이미 설치된 서버 연결 범위만 설명한다. 한국어/영어, Light/Dark, 키보드 focus ring과 VoiceOver label/hint를 제공한다.
 - [x] compact/default/large Light/Dark 정본 snapshot, focused onboarding 19/19, full macOS 301/301, `macos-ui` gate, fresh design-review Blocker/Major 0와 correctness review Blocker/High/Medium 0를 PR evidence로 기록한다.
 
+### ☑ MOMO-396 (`#402`) 수용기준 — macOS composer + mention overlay polish `[swift/macos-ui]`
+- [x] composer를 최소 56pt의 단일 surface로 구성하고 중첩 native rounded-border ring과 별도 outer focus ring을 제거. 시작 작업과 전송 action은 같은 surface 안에서 keyboard/VoiceOver 경로를 유지.
+- [x] 현재 채널 active membership인 사람/에이전트만 `@` 후보로 표시. 최대 6행 overlay는 콘텐츠 실측 기반으로 composer 위 8pt 간격에 떠서 timeline/composer 높이를 바꾸지 않음.
+- [x] 위/아래 순환, Tab/Return 선택, Escape 닫기, mouse 선택·hover를 지원하고 후보 선택 시 현재 mention token을 `@handle `로 치환. selected trait와 순서/전체 개수를 VoiceOver에 제공.
+- [x] focused mention selection test와 전체 macOS suite는 동작 회귀를, Light/Dark 실제 macOS window artifact와 fresh design review는 overlay 위치·긴 이름·timeline 비이동을 각각 검증.
+- [ ] final clean `macos-ui` gate와 fresh design/correctness/security/performance review를 PR evidence에 기록하고 momo-main review/merge 후 main gate 재검증.
+- [ ] 파일 DnD/첨부 전송은 MOMO-394 storage·credential ADR 선행 후 구현. 이번 변경은 가짜 첨부 상태나 다운로드 이력을 만들지 않음.
+
 ### ☑ MOMO-388 수용기준 — Auth-hardening verifier realtime credential binding drift `[tooling/runtime-db/docs]` · Issue #388
 - [x] 로그인 access/refresh token-row lookup은 raw bearer를 SQL·psql argv·log에 넣지 않고 로컬 SHA-256 digest만 DB와 대조해 각 `token.id`를 확정. `POST /v1/auth/realtime-token`의 server-minted JWT `meta.token_id`가 exact access row ID와 같은지 UUID canonical 비교.
 - [x] active exact access-row binding만 허용. active refresh-row ID·`meta` 누락·임의 token ID·다른 멤버 binding·logout/revoke 이후 binding은 모두 `result == null && error.code == 403` 검증.

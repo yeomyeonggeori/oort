@@ -1,6 +1,29 @@
 import SwiftUI
 import MomoCore
 
+enum MomoMentionSelection {
+    static func moved(
+        current: MemberID?,
+        candidates: [MemberID],
+        offset: Int
+    ) -> MemberID? {
+        guard !candidates.isEmpty else { return nil }
+        guard let currentIndex = current.flatMap(candidates.firstIndex(of:)) else {
+            return offset < 0 ? candidates.last : candidates.first
+        }
+        let nextIndex = (currentIndex + offset + candidates.count) % candidates.count
+        return candidates[nextIndex]
+    }
+}
+
+private struct MomoMentionPanelHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 // MARK: - MessageListView  (seq-ordered)
 //
 // The channel timeline. Ordering authority is Message.seq (L4 §1.2 #3): the
@@ -27,6 +50,10 @@ public struct MessageListView: View {
     @State private var workCommandDraftToRestore: String?
     @State private var workComposerSessionId = UUID()
     @State private var channelPresentationRevision = 0
+    @State private var selectedMentionCandidateID: MemberID?
+    @State private var hoveredMentionCandidateID: MemberID?
+    @State private var measuredMentionPanelHeight: CGFloat = 0
+    @State private var suppressedMentionDraft: String?
 
     public init(
         viewModel: ChatViewModel,
@@ -545,70 +572,155 @@ public struct MessageListView: View {
     // MARK: Composer (optimistic send)
 
     private func composer(copy: MomoWorkspaceCopy) -> some View {
-        let candidates = viewModel.mentionAutocompleteCandidates()
+        let candidates = suppressedMentionDraft == viewModel.composerDraft
+            ? []
+            : Array(viewModel.mentionAutocompleteCandidates().prefix(MomoTheme.mentionAutocompleteMaximumRows))
         return VStack(alignment: .leading, spacing: 8) {
-            if !candidates.isEmpty {
-                mentionAutocomplete(candidates: Array(candidates.prefix(6)), copy: copy)
-            }
-
             if !viewModel.visibleTypingMembers.isEmpty {
                 typingIndicator(copy: copy)
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    presentWorkComposer()
-                } label: {
-                    Label(copy.startWork, systemImage: "hammer")
-                        .labelStyle(.iconOnly)
-                }
-                .keyboardShortcut("w", modifiers: [.command, .shift])
-                .disabled(viewModel.selectedChannelId == nil)
-                .help("\(copy.startWork)  ⇧⌘W")
-                .accessibilityLabel(copy.startWork)
-                .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
-                    AgentWorkComposerView(
-                        viewModel: viewModel,
-                        copy: copy,
-                        initialBrief: initialWorkBrief,
-                        onStarted: { _ in
-                            initialWorkBrief = ""
-                            workCommandDraftToRestore = nil
-                            isWorkComposerPresented = false
-                        },
-                        onCancel: {
-                            if let draft = workCommandDraftToRestore {
-                                viewModel.composerDraft = draft
-                                viewModel.composerDraftDidChange(draft)
-                                isComposerFocused = true
-                            }
-                            initialWorkBrief = ""
-                            workCommandDraftToRestore = nil
-                            isWorkComposerPresented = false
-                        }
-                    )
-                    .id(workComposerSessionId)
-                }
-
-                TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...5)
-                    .font(.body)
-                    .focused($isComposerFocused)
-                    .accessibilityIdentifier("momo-message-composer")
-                    .onSubmit(submit)
-                    .onChange(of: viewModel.composerDraft) { _, draft in
-                        viewModel.composerDraftDidChange(draft)
-                    }
-                Button(action: submit) {
-                    Image(systemName: "paperplane.fill")
-                }
-                .disabled(viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || viewModel.selectedChannelId == nil)
-            }
+            composerSurface(candidates: candidates, copy: copy)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+        .zIndex(10)
+        .onChange(of: candidates.map(\.id)) { _, candidateIDs in
+            guard let selectedMentionCandidateID,
+                  candidateIDs.contains(selectedMentionCandidateID) else {
+                self.selectedMentionCandidateID = candidateIDs.first
+                return
+            }
+        }
+    }
+
+    private func composerSurface(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Button {
+                presentWorkComposer()
+            } label: {
+                Label(copy.startWork, systemImage: "hammer")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .keyboardShortcut("w", modifiers: [.command, .shift])
+            .disabled(viewModel.selectedChannelId == nil)
+            .help("\(copy.startWork)  ⇧⌘W")
+            .accessibilityLabel(copy.startWork)
+            .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
+                AgentWorkComposerView(
+                    viewModel: viewModel,
+                    copy: copy,
+                    initialBrief: initialWorkBrief,
+                    onStarted: { _ in
+                        initialWorkBrief = ""
+                        workCommandDraftToRestore = nil
+                        isWorkComposerPresented = false
+                    },
+                    onCancel: {
+                        if let draft = workCommandDraftToRestore {
+                            viewModel.composerDraft = draft
+                            viewModel.composerDraftDidChange(draft)
+                            isComposerFocused = true
+                        }
+                        initialWorkBrief = ""
+                        workCommandDraftToRestore = nil
+                        isWorkComposerPresented = false
+                    }
+                )
+                .id(workComposerSessionId)
+            }
+
+            TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .lineLimit(1...5)
+                .font(.body)
+                .padding(.vertical, 12)
+                .focused($isComposerFocused)
+                .accessibilityIdentifier("momo-message-composer")
+                .onSubmit {
+                    if candidates.isEmpty {
+                        submit()
+                    } else {
+                        completeSelectedMention(from: candidates)
+                    }
+                }
+                .onKeyPress(.upArrow) {
+                    moveMentionSelection(in: candidates, offset: -1)
+                }
+                .onKeyPress(.downArrow) {
+                    moveMentionSelection(in: candidates, offset: 1)
+                }
+                .onKeyPress(.tab) {
+                    guard !candidates.isEmpty else { return .ignored }
+                    completeSelectedMention(from: candidates)
+                    return .handled
+                }
+                .onKeyPress(.escape) {
+                    guard !candidates.isEmpty else { return .ignored }
+                    suppressedMentionDraft = viewModel.composerDraft
+                    selectedMentionCandidateID = nil
+                    return .handled
+                }
+                .onChange(of: viewModel.composerDraft) { _, draft in
+                    if draft != suppressedMentionDraft {
+                        suppressedMentionDraft = nil
+                    }
+                    viewModel.composerDraftDidChange(draft)
+                }
+
+            Button(action: submit) {
+                Label(copy.sendMessage, systemImage: "paperplane.fill")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(canSendMessage ? MomoTheme.humanAccent : Color.secondary)
+            .disabled(!canSendMessage)
+            .accessibilityLabel(copy.sendMessage)
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: MomoTheme.composerMinimumHeight)
+        // A timeline composer needs one continuous surface; the native rounded
+        // TextField draws a second focus ring and visually nests the control.
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(
+            cornerRadius: MomoTheme.cornerMedium,
+            style: .continuous
+        ))
+        .overlay {
+            RoundedRectangle(cornerRadius: MomoTheme.cornerMedium, style: .continuous)
+                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
+        }
+        // The system popover does not expose row-level keyboard selection state,
+        // so this window-local overlay keeps the candidate list anchored without
+        // changing the timeline layout.
+        .overlay(alignment: .topLeading) {
+            if !candidates.isEmpty {
+                mentionAutocomplete(candidates: candidates, copy: copy)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: MomoMentionPanelHeightPreferenceKey.self,
+                                value: geometry.size.height
+                            )
+                        }
+                    }
+                    // The first layout pass measures intrinsic localized row
+                    // height. Only then reveal the panel at the exact 8pt gap.
+                    .opacity(measuredMentionPanelHeight > 0 ? 1 : 0)
+                    .offset(y: -measuredMentionPanelHeight - 8)
+            }
+        }
+        .onPreferenceChange(MomoMentionPanelHeightPreferenceKey.self) { height in
+            measuredMentionPanelHeight = height
+        }
+    }
+
+    private var canSendMessage: Bool {
+        !viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && viewModel.selectedChannelId != nil
     }
 
     private func typingIndicator(copy: MomoWorkspaceCopy) -> some View {
@@ -634,15 +746,20 @@ public struct MessageListView: View {
                 .font(MomoTheme.Typography.supporting.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
-            ForEach(candidates) { member in
+            ForEach(Array(candidates.enumerated()), id: \.element.id) { index, member in
+                let isSelected = member.id == selectedMentionCandidateID
+                let isHovered = member.id == hoveredMentionCandidateID
                 Button {
-                    viewModel.completeMentionAutocomplete(with: member)
+                    completeMention(with: member)
                 } label: {
                     HStack(spacing: 12) {
                         MentionCandidateAvatar(member: member, isWorking: viewModel.isAgentWorking(member))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(member.displayName)
                                 .font(MomoTheme.Typography.emphasizedRow)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .layoutPriority(1)
                             HStack(spacing: MomoTheme.AgentBadge.spacing) {
                                 Text(member.isAgent ? "@\(member.handle)" : "@\(member.handle) · \(copy.human)")
                                     .font(MomoTheme.Typography.supporting)
@@ -661,13 +778,61 @@ public struct MessageListView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
+                    .background(
+                        isSelected
+                            ? MomoTheme.QuickSwitcher.selectionBackground
+                            : (isHovered ? MomoTheme.QuickSwitcher.hoverBackground : Color.clear),
+                        in: RoundedRectangle(
+                            cornerRadius: MomoTheme.QuickSwitcher.rowCornerRadius,
+                            style: .continuous
+                        )
+                    )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(
+                    "\(member.displayName), @\(member.handle), \(member.isAgent ? copy.agent : copy.human)"
+                )
+                .accessibilityValue(
+                    copy.mentionAutocompletePosition(
+                        index: index + 1,
+                        total: candidates.count,
+                        isSelected: isSelected
+                    )
+                )
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .onHover { hovering in
+                    hoveredMentionCandidateID = hovering ? member.id : nil
+                }
             }
         }
         .padding(8)
         .frame(width: MomoTheme.mentionAutocompleteWidth, alignment: .leading)
         .momoSurface(.card)
+    }
+
+    private func moveMentionSelection(in candidates: [Member], offset: Int) -> KeyPress.Result {
+        guard !candidates.isEmpty else { return .ignored }
+        selectedMentionCandidateID = MomoMentionSelection.moved(
+            current: selectedMentionCandidateID,
+            candidates: candidates.map(\.id),
+            offset: offset
+        )
+        return .handled
+    }
+
+    private func completeSelectedMention(from candidates: [Member]) {
+        let selected = selectedMentionCandidateID
+            .flatMap { id in candidates.first { $0.id == id } }
+            ?? candidates.first
+        guard let selected else { return }
+        completeMention(with: selected)
+    }
+
+    private func completeMention(with member: Member) {
+        viewModel.completeMentionAutocomplete(with: member)
+        selectedMentionCandidateID = nil
+        suppressedMentionDraft = nil
+        isComposerFocused = true
     }
 
     private var preferredAgent: Member? {

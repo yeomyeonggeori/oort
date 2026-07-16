@@ -157,6 +157,13 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var sendMessage: String {
+        switch language {
+        case .korean: return "메시지 보내기"
+        case .english: return "Send message"
+        }
+    }
+
     var timelineEmptyTitle: String {
         switch language {
         case .korean: return "첫 메시지를 보내보세요"
@@ -196,6 +203,15 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "멘션할 멤버"
         case .english: return "Mention"
+        }
+    }
+
+    func mentionAutocompletePosition(index: Int, total: Int, isSelected: Bool) -> String {
+        switch language {
+        case .korean:
+            return isSelected ? "선택됨, \(index)/\(total)" : "\(index)/\(total)"
+        case .english:
+            return isSelected ? "Selected, \(index) of \(total)" : "\(index) of \(total)"
         }
     }
 
