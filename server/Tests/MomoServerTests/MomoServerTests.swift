@@ -2178,6 +2178,9 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"<!everyone>"}"#.utf8))) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
         }
+        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"*bold*"}"#.utf8))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
     }
 
     func testNativeWebhookPayloadIsStrictAndBounded() throws {

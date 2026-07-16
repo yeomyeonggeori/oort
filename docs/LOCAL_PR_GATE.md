@@ -204,7 +204,8 @@ BYPASSRLS session, and 011 enum/trigger/index presence. Wired into the
 
 `scripts/verify_plugin_registry.sh` boots an isolated e2e API stack (project
 `momo410plugins`, loopback ports `19800`-`19803`) and verifies the official
-GitHub/Notion/Linear manifest seeds, D6 three-layer manifest fields and
+GitHub/Notion/Linear manifest seeds plus the `external_webhook` registry marker,
+D6 three-layer manifest fields and
 `egressDomains`, whitelist validator failures (unknown protocol/risk/approval
 policy, GPL, malformed document, digest mismatch, revoked catalog entry),
 active-member catalog reads, owner/admin install policy, delegated user's

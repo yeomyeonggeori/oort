@@ -96,11 +96,15 @@ enum WebhookPayload {
     }
 
     static func translateSlackMarkup(_ source: String) throws -> String {
+        let bold = try NSRegularExpression(pattern: #"(?<!\*)\*[^*\n]+\*(?!\*)"#)
+        let sourceRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        if bold.firstMatch(in: source, range: sourceRange) != nil {
+            throw HTTPError(.badRequest, message: "Slack *bold* mrkdwn is not supported")
+        }
         let pattern = #"<([^<>]+)>"#
         let regex = try NSRegularExpression(pattern: pattern)
-        let range = NSRange(source.startIndex..<source.endIndex, in: source)
         var output = source
-        for match in regex.matches(in: source, range: range).reversed() {
+        for match in regex.matches(in: source, range: sourceRange).reversed() {
             guard let tokenRange = Range(match.range(at: 1), in: source),
                   let wholeRange = Range(match.range(at: 0), in: output)
             else { continue }

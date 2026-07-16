@@ -6,7 +6,7 @@
 ## MOMO-412 signed webhook ingress + Slack-compatible mode (2026-07-17)
 
 - ADR-0115에 따라 migration 014의 channel-bound install/key-ref-or-token-hash/receipt RLS 원장, owner/admin 발급·overlap 회전·revoke REST, native HMAC/replay 검증, Mattermost legacy attachment 부분집합 Slack 변환기와 receipt→message.seq→outbox 단일 tenant 트랜잭션을 추가했다. 전용 service member author와 URL-secret 로그 redaction으로 사람/에이전트 사칭 및 raw secret 저장을 피한다.
-- 서버 Swift build/test와 webhook verifier shell syntax는 worker 검증 대상으로 추가했다. Docker `runtime-db`의 위조/replay/stale/cross-workspace/rotation/revoke/Slack fixture/redaction 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+- 서버 `swift build`와 98 tests, webhook/plugin/local-gate verifier `bash -n`이 PASS했다. Docker `runtime-db`의 위조/replay/stale/cross-workspace/rotation/revoke/Slack fixture/redaction 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
 
 ## MOMO-410 plugin manifest registry + install/grant 런타임 (2026-07-17)
 
