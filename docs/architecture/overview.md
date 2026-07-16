@@ -40,6 +40,7 @@ flowchart LR
 ```
 
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
+- 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 판정(DM/멘션/승인) 후 id-only 페이로드를 push relay(mock — 실발송은 P-3)로 dispatch한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
 - 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = momo 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
 
 ### 클라이언트 roster와 realtime discovery
@@ -186,7 +187,7 @@ erDiagram
     agent_run ||--o{ approval : requests
     member ||--o{ token : "agent_bearer(Phase 1 사용)·delegation(Phase 2)"
     channel ||--|| channel_seq : "gapless 카운터"
-    workspace ||--o{ outbox : "broadcast + agent_job"
+    workspace ||--o{ outbox : "broadcast + agent_job + push_candidate"
     agent_run ||--o{ usage_ledger : bills
 ```
 

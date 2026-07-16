@@ -242,6 +242,64 @@ services:
       retries: 30
       start_period: 2s
 
+  # MOMO-404 (ADR-0120 P-2): push notifier boundary. Profile-gated (`push`) so
+  # every existing gate profile renders byte-identically (MOMO-390 precedent);
+  # scripts/verify_push_notifier.sh is the entry point. mock-push-relay stands
+  # in for the Dawn-operated PushRelay (P-3) and exposes /received so the
+  # verifier can assert the id-only dispatch contract (no message body, no
+  # display names — ADR-0120 D2).
+  mock-push-relay:
+    image: python:3.12-slim
+    profiles: ["push"]
+    restart: "no"
+    working_dir: /workspace
+    command: ["python3", "scripts/mock_push_relay.py", "--host", "0.0.0.0", "--port", "8090"]
+    ports:
+      - "${PUSH_RELAY_PORT:-8090}:8090"
+    volumes:
+      - *source-mount
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python3 -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8090/health\", timeout=2).read()'",
+        ]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
+  # NotifierWorker: outbox kind='push_candidate' consumer — judgment v0 (DM +
+  # mention + approval request) + push_dispatch_log + relay dispatch. Connects
+  # as the BYPASSRLS momo_notifier role (bootstrap_roles.sql). Scratch lives in
+  # the container filesystem (no named volume) so the default-profile compose
+  # render stays untouched; `docker compose restart notifier` keeps the build.
+  notifier:
+    image: swift:6.2
+    profiles: ["push"]
+    restart: "no"
+    init: true
+    working_dir: /workspace
+    command:
+      [
+        "bash",
+        "-lc",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers && cp -R /workspace/workers/NotifierWorker /tmp/momo-src/workers/NotifierWorker && cd /tmp/momo-src && swift run --package-path workers/NotifierWorker --scratch-path /tmp/momo-swiftpm/notifier NotifierWorker",
+      ]
+    environment:
+      <<: *e2e-common-env
+      NOTIFIER_DATABASE_URL: postgres://momo_notifier:momo_notifier_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
+      PUSH_RELAY_URL: http://mock-push-relay:8090/v1/push
+      PUSH_RELAY_SERVER_ID: momo-e2e
+      NOTIFIER_POLL_INTERVAL_MS: ${NOTIFIER_POLL_INTERVAL_MS:-100}
+    volumes:
+      - *source-mount
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      mock-push-relay:
+        condition: service_healthy
+
 volumes:
   e2e-pgdata:
   api-swiftpm:

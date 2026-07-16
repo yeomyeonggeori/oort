@@ -56,7 +56,7 @@ start_postgres "$BOOTSTRAP_CONTAINER" "$BOOTSTRAP_DB"
 
 role_count=$(docker exec "$BOOTSTRAP_CONTAINER" psql \
   -U postgres -d "$BOOTSTRAP_DB" -tA --no-psqlrc \
-  -c "SELECT count(*) FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');")
+  -c "SELECT count(*) FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker','momo_notifier');")
 if [ "$role_count" != "0" ]; then
   echo "[role-bootstrap] fresh cluster unexpectedly contains runtime roles" >&2
   exit 1
@@ -110,7 +110,7 @@ if [ "$resolved_workspace" != "00000000-0000-7000-8000-000000000001" ]; then
   echo "[role-bootstrap] momo_app lookup returned unexpected workspace: $resolved_workspace" >&2
   exit 1
 fi
-for denied_role in momo_relay momo_worker; do
+for denied_role in momo_relay momo_worker momo_notifier; do
   if docker exec --env "PGPASSWORD=${denied_role}_dev_pw" \
     "$BOOTSTRAP_CONTAINER" psql -h 127.0.0.1 -U "$denied_role" -d "$BOOTSTRAP_DB" \
     -v ON_ERROR_STOP=1 --no-psqlrc \
