@@ -35,6 +35,13 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-406/407 셀프호스팅 배치 1 — install/upgrade + 초대 보안 (2026-07-16)
+
+- ADR-0121 S-1/S-2가 랜딩(PR #429 `bb3efc6` / #428 `4a8b288`) — **codex-fleet 복귀 1호 배치**(worker=gpt-5.6-sol medium 병렬 2기, 오케스트레이터=Fable 리뷰·게이트·머지).
+- S-1: `infra/prod/install.sh`/`upgrade.sh`(pinned digest 강제·preflight 재사용·app-only 롤백+forward-only migration 비대칭 명시) + DEPLOY.md "5분 설치"(단일노드 상한 500 계획값). 리뷰 H1로 **시드 owner의 공개 dev-password 창**을 경고+필수 인수 스텝으로 승격 — prod fail-closed 시드는 후속 서버 티켓 후보. 정적 verifier+shellcheck+staging-smoke PASS.
+- S-2: 초대 기본 만료 7일(명시 경로 무회귀)·owner 초대 3중 fail-closed·regenerate 원자 CTE(revoke+재발급+audit 한 문장 — 구 코드 유효 창 없음). openapi/schema 무변경. runtime-db 게이트 PASS(1차 FAIL=verifier UUID 대소문자 strict 비교 → case-insensitive 수정).
+- 잔여 후속 후보: prod 시드 fail-closed(신규 서버 티켓), install 실경로 fake-docker trace, regenerate 404/409 분기, 초대 부정 경로 verifier 2콜.
+
 ## MOMO-404 NotifierWorker — ADR-0120 서버측 절반 완성 (2026-07-16)
 
 - P-2 랜딩(PR #424, `a8a1089`) — migration 011의 message AFTER INSERT 트리거가 같은 트랜잭션에서 outbox `push_candidate`를 기록(생산자 트리거는 이 1건이 유일 — overview.md 정본화), NotifierWorker(momo_notifier BYPASSRLS)가 SKIP LOCKED 소비, 판정 v0(DM 전건/멘션 projection 재사용/승인→active human)을 한 곳에 고정, id-only 페이로드로 mock relay dispatch + push_dispatch_log.

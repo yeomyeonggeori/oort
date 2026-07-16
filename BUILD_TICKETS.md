@@ -2013,21 +2013,23 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 신규 notifier verifier: DM/멘션/승인 각 1건 왕복(dispatch_log+mock 수신+id-only 단정+재시작 멱등) + relay/agent_job 무회귀. `runtime-db` 게이트 PASS + `LOCAL_PR_GATE.md` 등록. api/relay 콜드빌드는 staggered boot 패턴 승계.
 - [x] 종결: PR #424(+리뷰 H1/M1/L1 반영 5ed2914) merge `a8a1089`. 트리거 채택은 리뷰 판정 "재량 행사·불변식 정합"(일회용 PG 독립 재현 포함) — overview.md 동PR 정본화. 반영본 verifier 재PASS(DM 1/멘션 1/승인 2/agent 0, id-only 전건, 재시작 중복 0).
 
-### ☐ MOMO-406 (`#425`) 수용기준 — ADR-0121 S-1: install/upgrade 스크립트 + "5분 설치" 문서 `[infra/staging-smoke/docs]` · 의존: 없음
-- [ ] `infra/prod/install.sh`: ADR-0002 계약 승계 — pinned image digest 입력 검증 → env/시크릿 preflight(`prod_env_preflight.sh` 재사용) → compose pull/up 순서(migrate one-shot 포함) → 헬스 확인 → 실패 시 명확한 진단 출력. 비대화형(플래그/env 입력) + 멱등(재실행 안전).
-- [ ] `infra/prod/upgrade.sh`: 현재 태그 기록 → 새 digest pull → migrate → 순차 재기동 → 헬스 확인 → **실패 시 이전 태그 롤백 경로**(문서화된 수동 개입 지점 포함). DB migration은 전방 전용(롤백은 앱 레이어만)임을 명시.
-- [ ] `docs/DEPLOY.md`에 "5분 설치" 절: 전제(도메인/DNS/docker) → install.sh 한 줄 → 첫 워크스페이스/초대까지. **단일 노드 상한을 숫자로 명시**(동시 수백 명 보수 표기 — ADR-0121 D1). relay 등록 스텝(ADR-0120 P-3)은 자리만(주석) — 실패해도 설치 성공(오프그리드 1급).
-- [ ] 두 스크립트 모두 `bash -n`+shellcheck clean, `docker compose config` 렌더 기반 정적 검증 포함(실 VPS 불요). 시크릿 값 echo 금지.
-- [ ] `staging-smoke` 프로파일 확장 또는 신규 verifier로 install/upgrade의 정적 계약(인자 검증·롤백 경로 존재·preflight 배선) 검증. `LOCAL_PR_GATE.md` 등록.
-- [ ] `clients/**`·`server/**` 무변경. compose/Caddyfile 기존 계약(APP_DOMAIN sentinel, allowed_origins 파생) 무회귀.
+### ☑ MOMO-406 (`#425`) 수용기준 — ADR-0121 S-1: install/upgrade 스크립트 + "5분 설치" 문서 `[infra/staging-smoke/docs]` · 의존: 없음
+- [x] `infra/prod/install.sh`: ADR-0002 계약 승계 — pinned image digest 입력 검증 → env/시크릿 preflight(`prod_env_preflight.sh` 재사용) → compose pull/up 순서(migrate one-shot 포함) → 헬스 확인 → 실패 시 명확한 진단 출력. 비대화형(플래그/env 입력) + 멱등(재실행 안전).
+- [x] `infra/prod/upgrade.sh`: 현재 태그 기록 → 새 digest pull → migrate → 순차 재기동 → 헬스 확인 → **실패 시 이전 태그 롤백 경로**(문서화된 수동 개입 지점 포함). DB migration은 전방 전용(롤백은 앱 레이어만)임을 명시.
+- [x] `docs/DEPLOY.md`에 "5분 설치" 절: 전제(도메인/DNS/docker) → install.sh 한 줄 → 첫 워크스페이스/초대까지. **단일 노드 상한을 숫자로 명시**(동시 수백 명 보수 표기 — ADR-0121 D1). relay 등록 스텝(ADR-0120 P-3)은 자리만(주석) — 실패해도 설치 성공(오프그리드 1급).
+- [x] 두 스크립트 모두 `bash -n`+shellcheck clean, `docker compose config` 렌더 기반 정적 검증 포함(실 VPS 불요). 시크릿 값 echo 금지.
+- [x] `staging-smoke` 프로파일 확장 또는 신규 verifier로 install/upgrade의 정적 계약(인자 검증·롤백 경로 존재·preflight 배선) 검증. `LOCAL_PR_GATE.md` 등록.
+- [x] `clients/**`·`server/**` 무변경. compose/Caddyfile 기존 계약(APP_DOMAIN sentinel, allowed_origins 파생) 무회귀.
+- [x] 종결: PR #429(+리뷰 H1/M1/L 반영 1865bbf) merge `bb3efc6`. worker=gpt-5.6-sol medium(codex-fleet 복귀 1호). H1=시드 dev-password 공개 창 경고·인수 필수 스텝 승격(+prod fail-closed 시드 후속 티켓 후보). main staging-smoke PASS.
 
-### ☐ MOMO-407 (`#426`) 수용기준 — ADR-0121 S-2: 초대 보안 계약 구현 `[server/runtime-db]` · 의존: 없음 (MOMO-406과 병렬 — 파일군 분리)
-- [ ] 만료 기본값 명문화·구현: 초대 생성 시 `expiresAt` 미지정이면 서버 기본 적용 — 링크 초대 7일(ADR-0121 D3). 기존 명시 지정 경로 무회귀.
-- [ ] 역할 바인딩 검증: 초대에 실린 role대로만 가입되고(admin이 만든 링크도 명시 role로만), owner role 초대 생성은 거부(fail-closed). 생성자 권한(owner/admin) 검증 기존 유지.
-- [ ] regenerate: 기존 초대를 revoke하고 새 코드를 발급하는 명시 경로(신규 REST 또는 기존 revoke+create 조합의 원자 트랜잭션 — 설계 재량, 근거 PR 기록). audit_log 기록.
-- [ ] `docs/api/openapi.yaml` 무변경(웹 v0 표면의 join/invites 응답 shape 불변 — 기본 만료는 응답 필드 값으로만 드러남). shape 변경이 필요해지면 멈추고 이탈 보고.
-- [ ] 기존 invite 스키마(`003_onboarding.sql` — max_uses/expires_at/revoked_at/role) 내에서 구현 — 신규 migration은 필요 시에만(근거 기록). schema_v0 불변.
-- [ ] `verify_join.sh` 확장 또는 신규 verifier: 기본 만료 적용·역할 바인딩(owner 거부)·regenerate 왕복(구 코드 즉시 무효)·audit. `runtime-db` 게이트 PASS.
+### ☑ MOMO-407 (`#426`) 수용기준 — ADR-0121 S-2: 초대 보안 계약 구현 `[server/runtime-db]` · 의존: 없음 (MOMO-406과 병렬 — 파일군 분리)
+- [x] 만료 기본값 명문화·구현: 초대 생성 시 `expiresAt` 미지정이면 서버 기본 적용 — 링크 초대 7일(ADR-0121 D3). 기존 명시 지정 경로 무회귀.
+- [x] 역할 바인딩 검증: 초대에 실린 role대로만 가입되고(admin이 만든 링크도 명시 role로만), owner role 초대 생성은 거부(fail-closed). 생성자 권한(owner/admin) 검증 기존 유지.
+- [x] regenerate: 기존 초대를 revoke하고 새 코드를 발급하는 명시 경로(신규 REST 또는 기존 revoke+create 조합의 원자 트랜잭션 — 설계 재량, 근거 PR 기록). audit_log 기록.
+- [x] `docs/api/openapi.yaml` 무변경(웹 v0 표면의 join/invites 응답 shape 불변 — 기본 만료는 응답 필드 값으로만 드러남). shape 변경이 필요해지면 멈추고 이탈 보고.
+- [x] 기존 invite 스키마(`003_onboarding.sql` — max_uses/expires_at/revoked_at/role) 내에서 구현 — 신규 migration은 필요 시에만(근거 기록). schema_v0 불변.
+- [x] `verify_join.sh` 확장 또는 신규 verifier: 기본 만료 적용·역할 바인딩(owner 거부)·regenerate 왕복(구 코드 즉시 무효)·audit. `runtime-db` 게이트 PASS.
+- [x] 종결: PR #428(+M1 명문화·verifier casing 수정) merge `4a8b288`. 독립 리뷰 확인: owner fail-closed 3중 방어(화이트리스트+DB CHECK+join rank), regenerate 단일 CTE 트랜잭션(구 코드 유효 창 없음). runtime-db 게이트 PASS.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
