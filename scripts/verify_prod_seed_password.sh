@@ -185,6 +185,39 @@ if [ "$status" != "200" ]; then
   exit 1
 fi
 echo "[prod-seed-password] PASS takeover updated one owner and operator login succeeds (200)"
+
+# Review #431 M1 + H1 regression: re-running the widened 012 lock predicate
+# must (a) NEVER touch an operator-owned password (over-lock guard) and
+# (b) lock ANY remaining dev-password human, not just the seeded owner.
+lock_matrix="$(docker exec --interactive "$POSTGRES_CONTAINER" psql \
+  -U postgres -d "$PROD_DB" -v ON_ERROR_STOP=1 --no-psqlrc -At <<SQL
+BEGIN;
+SET LOCAL app.workspace_id = '$WORKSPACE_ID';
+INSERT INTO member (id, workspace_id, kind, display_name, handle, status)
+VALUES ('00000000-0000-7000-8000-0000000004a1', '$WORKSPACE_ID', 'human', 'Legacy Backfilled', 'legacy-backfilled', 'active')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash)
+VALUES ('00000000-0000-7000-8000-0000000004a1', '$WORKSPACE_ID', 'legacy-backfilled@momo.local', true, momo_password_hash('dev-password'))
+ON CONFLICT (member_id) DO UPDATE SET password_hash = momo_password_hash('dev-password');
+WITH locked AS (
+  UPDATE human
+     SET password_hash = NULL
+   WHERE momo_password_verify('dev-password', password_hash)
+   RETURNING member_id
+)
+SELECT
+  (SELECT count(*) FROM locked) AS locked_rows,
+  (SELECT count(*) FROM human
+    WHERE member_id = '$OWNER_MEMBER_ID'
+      AND momo_password_verify('operator-owned-password', password_hash)) AS owner_preserved;
+COMMIT;
+SQL
+)"
+if ! printf '%s\n' "$lock_matrix" | grep -qx '1|1'; then
+  echo "[prod-seed-password] FAIL widened lock matrix: expected 'locked_rows=1|owner_preserved=1', got '$lock_matrix'" >&2
+  exit 1
+fi
+echo "[prod-seed-password] PASS widened lock hits non-owner dev-password rows and never touches operator-owned passwords"
 stop_server
 
 E2E_PORT="$(free_port)"

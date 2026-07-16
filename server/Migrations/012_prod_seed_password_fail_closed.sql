@@ -26,8 +26,12 @@ UPDATE human
 -- Covers both fresh installs (005 -> 012 in one migration run) and existing
 -- deployments upgrading after 005. momo_password_verify is NULL-safe and this
 -- predicate preserves any password that is no longer the deterministic seed.
+-- Review #431 H1: 005 backfilled EVERY human (pre-MOMO-217 join rows had NULL
+-- hashes; INTERNAL_ALPHA copy even instructed dev-password signups), so the
+-- lock must cover every row still verifying as the deterministic seed — not
+-- just the seeded owner. Locking a publicly known password is fail-closed,
+-- never over-lock: any operator-changed password fails the verify predicate.
 UPDATE human
    SET password_hash = NULL
- WHERE member_id = '00000000-0000-7000-8000-000000000101'
-   AND momo_password_verify('dev-password', password_hash);
+ WHERE momo_password_verify('dev-password', password_hash);
 \endif
