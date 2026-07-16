@@ -2062,7 +2062,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 기존 게이트 evidence 포맷·PASS 의미 무변경. 전 프로파일 무회귀(docs 게이트로 스크립트 정적 검증 + runtime-db 1회 실증).
 - [ ] `docs/LOCAL_PR_GATE.md`·`MULTI_SESSION_OPS.md` §9 상호 참조 갱신.
 
-### ☐ MOMO-412 수용기준 — ADR-0115 SE-04B: signed webhook ingress + Slack-호환 모드 `[server/runtime-db]` · 의존: MOMO-410(랜딩됨)
+### ☐ MOMO-412 (`#438`) 수용기준 — ADR-0115 SE-04B: signed webhook ingress + Slack-호환 모드 `[server/runtime-db]` · 의존: MOMO-410(랜딩됨)
 - [ ] 발급/회전/revoke REST(owner/admin, 채널 바인딩 고정): native 모드는 per-install HMAC-SHA256 — secret은 **one-time reveal**(저장은 key ID/secret ref만, 어떤 테이블·로그·응답에도 raw 미저장), overlap rotation + revoke. webhook install은 MOMO-410 registry의 `external_webhook` plugin install로 기록(audit 같은 트랜잭션).
 - [ ] native 수신: signature base = version+method+canonical endpoint/install ID+timestamp+delivery ID+raw-body SHA-256, constant-time 비교, replay window, strict body/parser limits, rate limit. `(workspace_id, installation_id, delivery_id)` unique receipt + deterministic `client_msg_id` + channel seq/message/outbox **한 tenant 트랜잭션**.
 - [ ] **Slack-호환 모드(D2-A)**: `POST /hooks/{token}`(URL-시크릿, 서명 없음 — 고엔트로피 토큰), 변환기는 `text`+legacy `attachments`(MM 검증 필드 화이트리스트)+`<url|text>`/멘션/`<!channel>` 번역. **`blocks`는 400+명시 오류**. 멱등은 `(install, body hash, 시간창)` 근사. 미지원 목록 문서화(MM 동일).
