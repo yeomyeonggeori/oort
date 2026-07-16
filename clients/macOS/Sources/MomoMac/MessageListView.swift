@@ -39,12 +39,14 @@ public struct MessageListView: View {
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private let focusComposerRequest: UInt64
     private let onChannelHeaderHeightChange: (CGFloat) -> Void
+    private let serverIdentity: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
     @FocusState private var isComposerFocused: Bool
+    @AccessibilityFocusState private var accessibilityFocusedMessageID: MessageID?
     @State private var isPinnedToTimelineBottom = true
     @State private var isWorkComposerPresented = false
     @State private var initialWorkBrief = ""
@@ -57,25 +59,28 @@ public struct MessageListView: View {
     @State private var suppressedMentionDraft: String?
     @State private var isActionLauncherPresented = false
     @State private var localDraftSheet: MomoComposerDraftSheet?
-    @State private var attachmentDrafts: [MomoAttachmentDraft] = []
+    @State private var attachmentDraftsByChannel: [ChannelID: [MomoAttachmentDraft]] = [:]
+    @State private var selectedPlugins: Set<String> = []
     @State private var isFileDropTargeted = false
     @State private var threadTopic = ""
     @State private var pollQuestion = ""
     @State private var pollOptions = ["", ""]
-    @State private var selectedPlugins: Set<String> = []
+    @State private var highlightedMessageID: MessageID?
 
     public init(
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void = {},
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
-        focusComposerRequest: UInt64 = 0
+        focusComposerRequest: UInt64 = 0,
+        serverIdentity: String? = nil
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.focusComposerRequest = focusComposerRequest
+        self.serverIdentity = serverIdentity
         self.onChannelHeaderHeightChange = { _ in }
     }
 
@@ -85,6 +90,7 @@ public struct MessageListView: View {
         onRequestLogin: @escaping () -> Void,
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
         focusComposerRequest: UInt64 = 0,
+        serverIdentity: String? = nil,
         onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
     ) {
         self.viewModel = viewModel
@@ -92,6 +98,7 @@ public struct MessageListView: View {
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.focusComposerRequest = focusComposerRequest
+        self.serverIdentity = serverIdentity
         self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
 
@@ -134,13 +141,14 @@ public struct MessageListView: View {
         }
         .onChange(of: viewModel.selectedChannelId) { _, _ in
             resetLocalComposerDraftsForChannelChange()
+            pruneAttachmentDrafts()
+            loadSelectedPlugins()
         }
         .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
             channelPresentationRevision &+= 1
         }
         .dropDestination(for: URL.self) { urls, _ in
-            addAttachmentDrafts(urls)
-            return urls.contains(where: \.isFileURL)
+            addAttachmentDrafts(urls) > 0
         } isTargeted: { isTargeted in
             isFileDropTargeted = isTargeted
         }
@@ -159,6 +167,10 @@ public struct MessageListView: View {
                 selectedPlugins: $selectedPlugins
             )
         }
+        .onAppear(perform: loadSelectedPlugins)
+        .onChange(of: selectedPlugins) { _, _ in saveSelectedPlugins() }
+        .onChange(of: viewModel.workspaceId) { _, _ in loadSelectedPlugins() }
+        .onChange(of: viewModel.currentNavigationMemberID) { _, _ in loadSelectedPlugins() }
     }
 
     // MARK: Channel header
@@ -496,6 +508,19 @@ public struct MessageListView: View {
                 .onChange(of: viewModel.visibleWorkingAgents.map(\.id)) { _, _ in
                     followNewTimelineContentIfNeeded(proxy)
                 }
+                .onChange(of: viewModel.requestedMessageFocus) { _, messageID in
+                    guard let messageID else { return }
+                    proxy.scrollTo(messageID, anchor: .center)
+                    highlightedMessageID = messageID
+                    accessibilityFocusedMessageID = messageID
+                    viewModel.consumeRequestedMessageFocus(messageID)
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .seconds(2))
+                        if highlightedMessageID == messageID {
+                            highlightedMessageID = nil
+                        }
+                    }
+                }
             }
         }
     }
@@ -523,6 +548,14 @@ public struct MessageListView: View {
                 presentation: presentation
             )
             .padding(.top, item.startsGroup ? 8 : 0)
+            .background(
+                highlightedMessageID == item.message.id
+                    ? (viewModel.member(item.message.authorMemberId)?.isAgent == true
+                        ? MomoTheme.agentAccent.opacity(0.12)
+                        : MomoTheme.humanAccent.opacity(0.12))
+                    : Color.clear
+            )
+            .accessibilityFocused($accessibilityFocusedMessageID, equals: item.message.id)
         }
         .id(item.id)
         .onAppear {
@@ -618,7 +651,7 @@ public struct MessageListView: View {
                     drafts: attachmentDrafts,
                     copy: MomoComposerActionCopy(language: language),
                     onRemove: removeAttachmentDraft,
-                    onClear: { attachmentDrafts.removeAll() }
+                    onClear: clearAttachmentDrafts
                 )
             }
 
@@ -819,19 +852,39 @@ public struct MessageListView: View {
         }
     }
 
-    private func addAttachmentDrafts(_ urls: [URL]) {
-        attachmentDrafts = MomoAttachmentDraftCollection.merging(attachmentDrafts, urls: urls)
+    @discardableResult
+    private func addAttachmentDrafts(_ urls: [URL]) -> Int {
+        guard let channelID = viewModel.selectedChannelId else { return 0 }
+        let regularFiles = urls.filter { url in
+            guard url.isFileURL else { return false }
+            return (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+        attachmentDraftsByChannel[channelID] = MomoAttachmentDraftCollection.merging(
+            attachmentDraftsByChannel[channelID] ?? [],
+            urls: regularFiles
+        )
+        return regularFiles.count
     }
 
     private func removeAttachmentDraft(_ draft: MomoAttachmentDraft) {
-        attachmentDrafts.removeAll { $0.id == draft.id }
+        guard let channelID = viewModel.selectedChannelId else { return }
+        attachmentDraftsByChannel[channelID]?.removeAll { $0.id == draft.id }
+    }
+
+    private func clearAttachmentDrafts() {
+        guard let channelID = viewModel.selectedChannelId else { return }
+        attachmentDraftsByChannel[channelID] = []
+    }
+
+    private var attachmentDrafts: [MomoAttachmentDraft] {
+        guard let channelID = viewModel.selectedChannelId else { return [] }
+        return attachmentDraftsByChannel[channelID] ?? []
     }
 
     private var hasLocalStructuredDrafts: Bool {
         !threadTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || !pollQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || pollOptions.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            || !selectedPlugins.isEmpty
     }
 
     private var localStructuredDraftSummary: some View {
@@ -855,13 +908,6 @@ public struct MessageListView: View {
                         Label(copy.pollDraftLabel, systemImage: MomoComposerAction.createPoll.systemImage)
                     }
                 }
-                if !selectedPlugins.isEmpty {
-                    Button {
-                        localDraftSheet = .plugins
-                    } label: {
-                        Label("\(copy.pluginDraftLabel) \(selectedPlugins.count)", systemImage: MomoComposerAction.addPlugin.systemImage)
-                    }
-                }
                 Spacer(minLength: 0)
             }
             .buttonStyle(.bordered)
@@ -877,11 +923,38 @@ public struct MessageListView: View {
         isActionLauncherPresented = false
         isWorkComposerPresented = false
         localDraftSheet = nil
-        attachmentDrafts.removeAll()
         threadTopic = ""
         pollQuestion = ""
         pollOptions = ["", ""]
-        selectedPlugins.removeAll()
+    }
+
+    private var selectedPluginsDefaultsKey: String {
+        let server = normalizedServerIdentity
+        let workspace = viewModel.workspaceId?.description ?? "demo"
+        let member = viewModel.currentNavigationMemberID?.description ?? "anonymous"
+        return "momo.plugins.localSelected.v1.\(server).\(workspace).\(member)"
+    }
+
+    private var normalizedServerIdentity: String {
+        let value = serverIdentity?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "demo"
+        return value.data(using: .utf8)?.base64EncodedString() ?? "demo"
+    }
+
+    private func pruneAttachmentDrafts() {
+        let allowed = Set(viewModel.channels.map(\.id))
+        attachmentDraftsByChannel = attachmentDraftsByChannel.filter { allowed.contains($0.key) }
+    }
+
+    private func loadSelectedPlugins() {
+        let raw = UserDefaults.standard.string(forKey: selectedPluginsDefaultsKey) ?? ""
+        selectedPlugins = Set(raw.split(separator: "\n").map(String.init))
+    }
+
+    private func saveSelectedPlugins() {
+        UserDefaults.standard.set(
+            selectedPlugins.sorted().joined(separator: "\n"),
+            forKey: selectedPluginsDefaultsKey
+        )
     }
 
     private var canSendMessage: Bool {

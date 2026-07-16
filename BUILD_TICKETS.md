@@ -2081,3 +2081,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.
 > SwiftPM 의존성은 최신 안정 태그로 resolve. 스텁은 `// TODO` 명시.
+# MOMO-447 macOS dogfood interaction shells completion
+
+- [x] local attachment picker/DnD/chip UX (durable upload adapter pending)
+- [x] demo/local profile draft editing + real-server read-only profile surface
+- [x] approval inspector hierarchy/action strip
+- [x] `⌘F` workspace search over loaded channel/member/message/file metadata
+- [x] searchable DM member picker using the existing DM mutation path
+- [x] persistent local plugin selection preview for Drive/Calendar/Gmail/GitHub/Notion
+- [ ] engine handoff: attachment storage, persistent profile API, server FTS, plugin registry/grant/OAuth

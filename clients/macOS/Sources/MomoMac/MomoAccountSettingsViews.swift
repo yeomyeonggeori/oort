@@ -9,6 +9,8 @@ import MomoCore
 struct MomoProfileSettingsSurface: View {
     let copy: MomoWorkspaceCopy
     let summary: MomoServerSessionSummary?
+    let member: Member?
+    let allowsEditing: Bool
     @AppStorage("momo.profile.displayName") private var displayNameDraft = ""
     @AppStorage("momo.profile.avatarPath") private var avatarPath = ""
 
@@ -18,7 +20,7 @@ struct MomoProfileSettingsSurface: View {
                 HStack(alignment: .top, spacing: 16) {
                     MomoSettingsAvatarMark(
                         text: profileInitials,
-                        imagePath: avatarPath,
+                        imagePath: allowsEditing ? avatarPath : "",
                         shape: .circle,
                         size: 74
                     )
@@ -28,6 +30,7 @@ struct MomoProfileSettingsSurface: View {
                             TextField(copy.displayName, text: displayNameBinding)
                                 .textFieldStyle(.roundedBorder)
                                 .font(MomoTheme.Typography.row)
+                                .disabled(!allowsEditing)
                         }
 
                         HStack(spacing: 8) {
@@ -36,13 +39,14 @@ struct MomoProfileSettingsSurface: View {
                             } label: {
                                 Label(copy.chooseImage, systemImage: "photo")
                             }
+                            .disabled(!allowsEditing)
 
                             Button {
                                 avatarPath = ""
                             } label: {
                                 Label(copy.removeImage, systemImage: "arrow.uturn.backward")
                             }
-                            .disabled(avatarPath.isEmpty)
+                            .disabled(avatarPath.isEmpty || !allowsEditing)
                         }
                         .controlSize(.regular)
                     }
@@ -57,7 +61,10 @@ struct MomoProfileSettingsSurface: View {
                 ])
             }
 
-            Label(copy.profileLocalDraftNote, systemImage: "info.circle")
+            Label(
+                allowsEditing ? copy.profileLocalDraftNote : copy.serverManagedProfileNote,
+                systemImage: allowsEditing ? "info.circle" : "lock"
+            )
                 .font(MomoTheme.Typography.supporting)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
@@ -67,6 +74,7 @@ struct MomoProfileSettingsSurface: View {
     private var displayNameBinding: Binding<String> {
         Binding(
             get: {
+                guard allowsEditing else { return fallbackDisplayName }
                 let trimmed = displayNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                 return trimmed.isEmpty ? fallbackDisplayName : displayNameDraft
             },
@@ -77,11 +85,14 @@ struct MomoProfileSettingsSurface: View {
     }
 
     private var effectiveDisplayName: String {
+        guard allowsEditing else { return fallbackDisplayName }
         let trimmed = displayNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? fallbackDisplayName : trimmed
     }
 
     private var fallbackDisplayName: String {
+        let memberName = (member?.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !memberName.isEmpty { return memberName }
         let summaryName = (summary?.memberDisplayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return summaryName.isEmpty ? "momo" : summaryName
     }
@@ -422,9 +433,16 @@ struct MomoMemberProfileSettingsSurface: View {
         self.member = member
         self.viewModel = viewModel
         self.onSave = onSave
-        _displayName = State(initialValue: MomoLocalProfileStore.displayName(for: member) ?? member.displayName)
-        _avatarPath = State(initialValue: MomoLocalProfileStore.avatarPath(for: member) ?? member.avatarURL?.path ?? "")
-        _presenceRaw = State(initialValue: (MomoLocalProfileStore.presence(for: member) ?? member.presence).rawValue)
+        let allowsEditing = viewModel.allowsLocalProfileEditing
+        _displayName = State(initialValue: allowsEditing
+            ? (MomoLocalProfileStore.displayName(for: member) ?? member.displayName)
+            : member.displayName)
+        _avatarPath = State(initialValue: allowsEditing
+            ? (MomoLocalProfileStore.avatarPath(for: member) ?? member.avatarURL?.path ?? "")
+            : (member.avatarURL?.path ?? ""))
+        _presenceRaw = State(initialValue: (allowsEditing
+            ? (MomoLocalProfileStore.presence(for: member) ?? member.presence)
+            : member.presence).rawValue)
     }
 
     var body: some View {
@@ -452,6 +470,7 @@ struct MomoMemberProfileSettingsSurface: View {
                             TextField(copy.displayName, text: $displayName)
                                 .textFieldStyle(.roundedBorder)
                                 .font(.body)
+                                .disabled(!viewModel.allowsLocalProfileEditing)
                         }
 
                         MomoSettingsInfoGrid(rows: [
@@ -472,13 +491,14 @@ struct MomoMemberProfileSettingsSurface: View {
                             } label: {
                                 Label(copy.chooseImage, systemImage: "photo")
                             }
+                            .disabled(!viewModel.allowsLocalProfileEditing)
 
                             Button {
                                 avatarPath = ""
                             } label: {
                                 Label(copy.removeImage, systemImage: "arrow.uturn.backward")
                             }
-                            .disabled(avatarPath.isEmpty)
+                            .disabled(avatarPath.isEmpty || !viewModel.allowsLocalProfileEditing)
                         }
                     }
                 }
@@ -494,6 +514,7 @@ struct MomoMemberProfileSettingsSurface: View {
                     }
                     .pickerStyle(.menu)
                     .frame(maxWidth: 190)
+                    .disabled(!viewModel.allowsLocalProfileEditing)
                 }
 
                 HStack {
@@ -504,7 +525,10 @@ struct MomoMemberProfileSettingsSurface: View {
                         Label(copy.saveProfile, systemImage: "checkmark.circle")
                     }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            || !viewModel.allowsLocalProfileEditing
+                    )
                 }
             }
 
@@ -518,13 +542,30 @@ struct MomoMemberProfileSettingsSurface: View {
                 )
             }
 
-            Label(copy.profileLocalDraftNote, systemImage: "info.circle")
+            Label(
+                viewModel.allowsLocalProfileEditing
+                    ? copy.profileLocalDraftNote
+                    : copy.serverManagedProfileNote,
+                systemImage: viewModel.allowsLocalProfileEditing ? "info.circle" : "lock"
+            )
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 4)
         }
         .sheet(item: $credentialReveal) { reveal in
             MomoAgentCredentialRevealSheet(copy: copy, reveal: reveal)
+        }
+        .onChange(of: member.displayName) { _, value in
+            guard !viewModel.allowsLocalProfileEditing else { return }
+            displayName = value
+        }
+        .onChange(of: member.avatarURL) { _, value in
+            guard !viewModel.allowsLocalProfileEditing else { return }
+            avatarPath = value?.path ?? ""
+        }
+        .onChange(of: member.presence) { _, value in
+            guard !viewModel.allowsLocalProfileEditing else { return }
+            presenceRaw = value.rawValue
         }
     }
 

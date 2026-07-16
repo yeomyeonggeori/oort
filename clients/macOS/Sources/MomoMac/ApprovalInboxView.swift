@@ -45,8 +45,10 @@ public struct ApprovalInboxView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
+            if !pending.isEmpty {
+                actionStrip
+                Divider()
+            }
             if pending.isEmpty {
                 ContentUnavailableViewCompat(
                     title: copy.noPendingApprovals,
@@ -69,38 +71,44 @@ public struct ApprovalInboxView: View {
         )
     }
 
-    private var header: some View {
+    private var actionStrip: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(copy.approvals) (\(pending.count))")
-                    .font(MomoTheme.Typography.screenTitle)
-                Text(copy.agentApprovalInboxSubtitle)
-                    .font(MomoTheme.Typography.supporting)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
+            Text(pendingSummary)
+                .font(MomoTheme.Typography.supporting.weight(.medium))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
             Spacer()
-            if presentation.showsDeveloperDetails {
-                // Batch action (experience C money-shot): approve only reversible ones.
-                Button {
-                    Task { await approveAllReversible() }
-                } label: {
-                    Label(copy.approveAllReversible, systemImage: "checkmark.circle")
-                }
-                .disabled(!pending.contains { $0.isReversible == true })
+            Button {
+                Task { await approveAllReversible() }
+            } label: {
+                Label(approveAllLabel, systemImage: "checkmark.circle")
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .disabled(!pending.contains { $0.isReversible == true })
         }
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var pendingSummary: String {
+        copy.language == .korean ? "확인이 필요한 요청 \(pending.count)개" : "\(pending.count) requests need review"
+    }
+
+    private var approveAllLabel: String {
+        let count = pending.filter { $0.isReversible == true }.count
+        return copy.language == .korean
+            ? "되돌릴 수 있는 \(count)건 승인"
+            : "Approve \(count) reversible"
     }
 
     @ViewBuilder
     private func row(_ approval: ApprovalEvent) -> some View {
         let isInFlight = viewModel.approvalDecisionsInFlight.contains(approval.approvalId)
-        HStack(alignment: .top, spacing: 10) {
-            if presentation.showsDeveloperDetails {
-                riskBadge(approval.isReversible)
-            }
-            VStack(alignment: .leading, spacing: 3) {
+        let didFail = viewModel.approvalDecisionFailedIds.contains(approval.approvalId)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
                 if presentation.showsDeveloperDetails {
                     HStack(spacing: 6) {
                         Text(agentName(approval.requestedBy)).font(MomoTheme.Typography.emphasizedRow)
@@ -123,33 +131,44 @@ public struct ApprovalInboxView: View {
                     .font(.body)
                     .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            Spacer()
-            VStack(spacing: 6) {
-                Button(copy.approve) { Task { await viewModel.decideApproval(approval.approvalId, approve: true) } }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
-                Button(copy.reject) { Task { await viewModel.decideApproval(approval.approvalId, approve: false) } }
-                    .buttonStyle(.bordered).controlSize(.small)
-                if isInFlight {
-                    ProgressView().controlSize(.small)
+                    riskLabel(approval.isReversible)
                 }
+                Spacer()
+                VStack(spacing: 6) {
+                    Button(copy.approve) { Task { await viewModel.decideApproval(approval.approvalId, approve: true) } }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    Button(copy.reject) { Task { await viewModel.decideApproval(approval.approvalId, approve: false) } }
+                        .buttonStyle(.bordered).controlSize(.small)
+                    if isInFlight {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .disabled(isInFlight)
             }
-            .disabled(isInFlight)
+            if didFail {
+                Label(
+                    copy.language == .korean ? "처리하지 못했습니다. 다시 시도해 주세요." : "Could not complete. Try again.",
+                    systemImage: "exclamationmark.circle"
+                )
+                .font(MomoTheme.Typography.metadata)
+                .foregroundStyle(MomoTheme.irreversibleRed)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(copy.language == .korean ? "승인 처리 실패" : "Approval failed")
+            }
         }
-        .padding(12)
-        .momoSurface(.card)
-        .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
+        .padding(.vertical, 8)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+        .listRowSeparator(.visible)
     }
 
-    @ViewBuilder
-    private func riskBadge(_ reversible: Bool?) -> some View {
+    private func riskLabel(_ reversible: Bool?) -> some View {
         let isReversible = reversible ?? false
-        Circle()
-            .fill(isReversible ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
-            .frame(width: 10, height: 10)
-            .padding(.top, 5)
+        return Label(
+            isReversible ? copy.reversible : copy.irreversible,
+            systemImage: isReversible ? "arrow.uturn.backward.circle" : "exclamationmark.shield"
+        )
+            .font(MomoTheme.Typography.metadata.weight(.medium))
+            .foregroundStyle(isReversible ? MomoTheme.reversibleGreen : MomoTheme.irreversibleRed)
             .help(isReversible ? copy.reversible : copy.irreversible)
     }
 

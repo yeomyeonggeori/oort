@@ -29,6 +29,36 @@ enum MomoComposerDraftSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
+enum MomoPluginCatalogFilter: String, CaseIterable, Identifiable {
+    case recommended
+    case installed
+    case custom
+
+    var id: String { rawValue }
+}
+
+struct MomoPluginCatalogItem: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let systemImage: String
+    let koreanSummary: String
+    let englishSummary: String
+    let koreanCapabilities: [String]
+    let englishCapabilities: [String]
+
+    func capabilities(for language: MomoUILanguage) -> [String] {
+        language == .korean ? koreanCapabilities : englishCapabilities
+    }
+
+    static let recommended: [MomoPluginCatalogItem] = [
+        .init(id: "google-drive", name: "Google Drive", systemImage: "externaldrive", koreanSummary: "문서를 찾고 결과물을 저장하거나 링크로 공유합니다.", englishSummary: "Find documents, save deliverables, and share links.", koreanCapabilities: ["검색", "업로드", "공유"], englishCapabilities: ["Search", "Upload", "Share"]),
+        .init(id: "google-calendar", name: "Google Calendar", systemImage: "calendar", koreanSummary: "일정을 확인하고 승인 후 새 일정을 만듭니다.", englishSummary: "Check schedules and create events after approval.", koreanCapabilities: ["일정 조회", "일정 생성"], englishCapabilities: ["Read events", "Create events"]),
+        .init(id: "gmail", name: "Gmail", systemImage: "envelope", koreanSummary: "메일과 스레드를 찾고 승인 가능한 초안을 준비합니다.", englishSummary: "Find mail and prepare approval-ready drafts.", koreanCapabilities: ["메일 검색", "초안"], englishCapabilities: ["Search mail", "Draft"]),
+        .init(id: "github", name: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", koreanSummary: "이슈, PR, 코드 변경 상태를 채널에서 다룹니다.", englishSummary: "Work with issues, pull requests, and code activity.", koreanCapabilities: ["이슈", "PR", "코드"], englishCapabilities: ["Issues", "PRs", "Code"]),
+        .init(id: "notion", name: "Notion", systemImage: "doc.text", koreanSummary: "팀 문서를 검색하고 새 문서 초안을 만듭니다.", englishSummary: "Search team knowledge and draft new pages.", koreanCapabilities: ["문서 검색", "문서 초안"], englishCapabilities: ["Search pages", "Draft pages"]),
+    ]
+}
+
 struct MomoAttachmentDraft: Identifiable, Equatable {
     let url: URL
 
@@ -94,10 +124,18 @@ struct MomoComposerActionCopy {
     var pollQuestion: String { localized("질문", "Question") }
     var pollOption: String { localized("선택지", "Option") }
     var pluginTitle: String { localized("플러그인 둘러보기", "Browse plugins") }
-    var pluginSubtitle: String { localized("설치 경험을 미리 확인하세요. 실제 연결은 엔진 준비 후 활성화됩니다.", "Preview the install experience. Connections activate when the engine is ready.") }
+    var pluginSubtitle: String { localized("워크스페이스에서 사용할 도구를 고르고 필요한 권한을 미리 확인하세요.", "Choose tools for this workspace and review the permissions they need.") }
     var selected: String { localized("선택됨", "Selected") }
     var select: String { localized("선택", "Select") }
     var deselect: String { localized("선택 해제", "Deselect") }
+    var install: String { localized("이 Mac에서 선택", "Select on this Mac") }
+    var installed: String { localized("선택됨", "Selected") }
+    var recommended: String { localized("추천", "Recommended") }
+    var custom: String { localized("커스텀", "Custom") }
+    var pluginSearch: String { localized("플러그인 검색", "Search plugins") }
+    var customPluginTitle: String { localized("커스텀 플러그인", "Custom plugin") }
+    var customPluginDetail: String { localized("커스텀 플러그인 연결은 준비 중입니다. 연결 가능한 항목이 생기면 이 화면에서 추가할 수 있습니다.", "Custom plugin connections are coming later. Available connections will appear here.") }
+    var pluginFilterLabel: String { localized("플러그인 보기", "Plugin view") }
     var closePreview: String { localized("미리보기 닫기", "Close preview") }
     var draftSummaryTitle: String { localized("작성 중인 로컬 초안", "Local drafts in progress") }
     var threadDraftLabel: String { localized("스레드", "Thread") }
@@ -281,8 +319,8 @@ struct MomoLocalDraftSheet: View {
     @Binding var pollOptions: [String]
     @Binding var selectedPlugins: Set<String>
     @Environment(\.dismiss) private var dismiss
-
-    private let plugins = ["Google Drive", "Google Calendar", "Gmail", "GitHub", "Notion"]
+    @State private var pluginFilter = MomoPluginCatalogFilter.recommended
+    @State private var pluginQuery = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -291,7 +329,7 @@ struct MomoLocalDraftSheet: View {
                     .font(MomoTheme.Typography.screenTitle)
                 Spacer()
                 Button(copy.closePreview) { dismiss() }
-                    .keyboardShortcut(.defaultAction)
+                    .keyboardShortcut(.cancelAction)
             }
             .padding(MomoTheme.ComposerAction.sheetInset)
             Divider()
@@ -327,35 +365,139 @@ struct MomoLocalDraftSheet: View {
             }
             .formStyle(.grouped)
         case .plugins:
-            VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.sectionSpacing) {
-                Text(copy.pluginSubtitle)
-                    .font(MomoTheme.Typography.supporting)
-                    .foregroundStyle(.secondary)
-                ForEach(plugins, id: \.self) { plugin in
-                    HStack {
-                        Image(systemName: pluginIcon(plugin))
-                            .font(.title3)
-                            .frame(width: MomoTheme.ComposerAction.iconSize)
-                        Text(plugin).font(MomoTheme.Typography.row)
-                        Spacer()
-                        let isSelected = selectedPlugins.contains(plugin)
-                        Button(isSelected ? copy.deselect : copy.select) {
-                            if selectedPlugins.contains(plugin) {
-                                selectedPlugins.remove(plugin)
-                            } else {
-                                selectedPlugins.insert(plugin)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("\(plugin), \(isSelected ? copy.deselect : copy.select)")
-                        .accessibilityValue(isSelected ? copy.selected : copy.select)
-                        .accessibilityAddTraits(isSelected ? .isSelected : [])
-                    }
-                    .frame(minHeight: MomoTheme.ComposerAction.rowMinimumHeight)
-                }
-                connectionNote
-            }
+            pluginCatalog
         }
+    }
+
+    private var pluginCatalog: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.sectionSpacing) {
+            Text(copy.pluginSubtitle)
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: MomoTheme.ComposerAction.contentSpacing) {
+                HStack(spacing: MomoTheme.ComposerAction.standardSpacing) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField(copy.pluginSearch, text: $pluginQuery).textFieldStyle(.plain)
+                }
+                .padding(MomoTheme.ComposerAction.standardSpacing)
+                .background(
+                    .primary.opacity(0.05),
+                    in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous)
+                )
+
+                Picker("", selection: $pluginFilter) {
+                    Text(copy.recommended).tag(MomoPluginCatalogFilter.recommended)
+                    Text(copy.installed).tag(MomoPluginCatalogFilter.installed)
+                    Text(copy.custom).tag(MomoPluginCatalogFilter.custom)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .accessibilityLabel(copy.pluginFilterLabel)
+            }
+
+            if pluginFilter == .custom {
+                pluginEmptyState(
+                    title: copy.customPluginTitle,
+                    detail: copy.customPluginDetail,
+                    systemImage: "shippingbox"
+                )
+            } else if visiblePlugins.isEmpty {
+                pluginEmptyState(
+                    title: pluginEmptyTitle,
+                    detail: pluginEmptyDetail,
+                    systemImage: "puzzlepiece.extension"
+                )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(visiblePlugins) { plugin in
+                            pluginRow(plugin)
+                            if plugin.id != visiblePlugins.last?.id { Divider() }
+                        }
+                    }
+                }
+            }
+            connectionNote
+        }
+    }
+
+    private func pluginEmptyState(title: String, detail: String, systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.standardSpacing) {
+            Label(title, systemImage: systemImage)
+                .font(MomoTheme.Typography.emphasizedRow)
+            Text(detail)
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: MomoTheme.QuickSwitcher.resultsMinimumHeight, alignment: .topLeading)
+        .padding(.top, MomoTheme.ComposerAction.contentSpacing)
+    }
+
+    private var visiblePlugins: [MomoPluginCatalogItem] {
+        MomoPluginCatalogItem.recommended.filter { plugin in
+            let matchesFilter = pluginFilter == .recommended || selectedPlugins.contains(plugin.id)
+            let query = pluginQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let matchesQuery = query.isEmpty
+                || plugin.name.localizedCaseInsensitiveContains(query)
+                || plugin.capabilities(for: copy.language).contains { $0.localizedCaseInsensitiveContains(query) }
+            return matchesFilter && matchesQuery
+        }
+    }
+
+    private var pluginEmptyTitle: String {
+        if !pluginQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return copy.language == .korean ? "검색 결과가 없습니다" : "No plugins found"
+        }
+        return copy.language == .korean ? "설치한 플러그인이 없습니다" : "No installed plugins"
+    }
+
+    private var pluginEmptyDetail: String {
+        if !pluginQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return copy.language == .korean ? "다른 이름이나 기능으로 검색해보세요." : "Try another name or capability."
+        }
+        return copy.language == .korean ? "추천 탭에서 사용할 플러그인을 선택하세요." : "Choose a plugin from Recommended."
+    }
+
+    private func pluginRow(_ plugin: MomoPluginCatalogItem) -> some View {
+        let isInstalled = selectedPlugins.contains(plugin.id)
+        return HStack(alignment: .center, spacing: MomoTheme.ComposerAction.contentSpacing) {
+                Image(systemName: plugin.systemImage)
+                    .font(.title2)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        .primary.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous)
+                    )
+                VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.compactSpacing) {
+                    Text(plugin.name).font(MomoTheme.Typography.emphasizedRow)
+                    Text(copy.language == .korean ? plugin.koreanSummary : plugin.englishSummary)
+                        .font(MomoTheme.Typography.supporting)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Text(plugin.capabilities(for: copy.language).joined(separator: " · "))
+                        .font(MomoTheme.Typography.metadata)
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                if isInstalled {
+                    Button(copy.deselect) {
+                        selectedPlugins.remove(plugin.id)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .accessibilityLabel("\(copy.deselect) \(plugin.name)")
+                } else {
+                    Button(copy.install) {
+                        selectedPlugins.insert(plugin.id)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityLabel("\(copy.install) \(plugin.name)")
+                }
+        }
+        .padding(.vertical, MomoTheme.ComposerAction.contentSpacing)
+        .contentShape(Rectangle())
     }
 
     private var connectionNote: some View {
@@ -380,13 +522,4 @@ struct MomoLocalDraftSheet: View {
         }
     }
 
-    private func pluginIcon(_ plugin: String) -> String {
-        switch plugin {
-        case "Google Drive": return "externaldrive"
-        case "Google Calendar": return "calendar"
-        case "Gmail": return "envelope"
-        case "GitHub": return "chevron.left.forwardslash.chevron.right"
-        default: return "doc.text"
-        }
-    }
 }
