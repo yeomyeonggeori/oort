@@ -1941,10 +1941,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] compact/default/large Light/Dark 정본 snapshot, focused onboarding 19/19, full macOS 301/301, `macos-ui` gate, fresh design-review Blocker/Major 0와 correctness review Blocker/High/Medium 0를 PR evidence로 기록한다.
 
 ### ☑ MOMO-396 (`#402`) 수용기준 — macOS composer + mention overlay polish `[swift/macos-ui]`
-- [x] composer를 최소 56pt의 단일 surface로 구성하고 중첩 native rounded-border focus ring을 제거. 시작 작업과 전송 action은 같은 surface 안에서 keyboard/VoiceOver 경로를 유지.
-- [x] 현재 채널 active membership인 사람/에이전트만 `@` 후보로 표시. 최대 6행 overlay는 composer 위 8pt 간격에 떠서 timeline/composer 높이를 바꾸지 않음.
-- [x] 위/아래 순환, Tab/Return 선택, Escape 닫기, mouse 선택을 지원하고 후보 선택 시 현재 mention token을 `@handle `로 치환.
-- [x] focused mention tests, 전체 macOS 303 tests, 실제 macOS window artifact에서 focus ring·overlay 위치·timeline 비이동 검증 PASS.
+- [x] composer를 최소 56pt의 단일 surface로 구성하고 중첩 native rounded-border ring과 별도 outer focus ring을 제거. 시작 작업과 전송 action은 같은 surface 안에서 keyboard/VoiceOver 경로를 유지.
+- [x] 현재 채널 active membership인 사람/에이전트만 `@` 후보로 표시. 최대 6행 overlay는 콘텐츠 실측 기반으로 composer 위 8pt 간격에 떠서 timeline/composer 높이를 바꾸지 않음.
+- [x] 위/아래 순환, Tab/Return 선택, Escape 닫기, mouse 선택·hover를 지원하고 후보 선택 시 현재 mention token을 `@handle `로 치환. selected trait와 순서/전체 개수를 VoiceOver에 제공.
+- [x] focused mention selection test와 전체 macOS suite는 동작 회귀를, Light/Dark 실제 macOS window artifact와 fresh design review는 overlay 위치·긴 이름·timeline 비이동을 각각 검증.
 - [ ] final clean `macos-ui` gate와 fresh design/correctness/security/performance review를 PR evidence에 기록하고 momo-main review/merge 후 main gate 재검증.
 - [ ] 파일 DnD/첨부 전송은 MOMO-394 storage·credential ADR 선행 후 구현. 이번 변경은 가짜 첨부 상태나 다운로드 이력을 만들지 않음.
 

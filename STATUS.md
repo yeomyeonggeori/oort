@@ -9,9 +9,9 @@
 
 ## MOMO-396 macOS Composer + Mention Overlay Polish (2026-07-16)
 
-- composer를 최소 56pt의 단일 native surface로 정리하고 내부 `TextField`의 중첩 rounded-border focus ring을 제거했다. 시작 작업과 전송 action은 같은 surface 안에 유지하며 한국어/영어 전송 label을 제공한다.
-- 현재 채널에 실제로 초대된 사람/에이전트만 `@` 후보로 표시한다. 후보 목록은 timeline을 밀지 않는 composer 위 overlay이며 최대 6행, 8pt 간격, 선택 highlight를 사용한다. 위/아래 순환, Tab/Return 선택, Escape 닫기와 mouse 선택을 지원한다.
-- focused mention tests와 전체 macOS 303 tests가 0 failure로 PASS했다. 실제 macOS window artifact에서 focus ring 제거, overlay 위치, 긴 후보 행과 timeline 비이동을 확인했다. 파일 DnD/첨부 기록은 storage·credential 계약이 선행되어야 하는 MOMO-394 범위이며 이번 UI가 가짜 첨부 성공을 만들지 않는다.
+- composer를 최소 56pt의 단일 native surface로 정리하고 내부 `TextField`의 중첩 rounded-border ring과 별도 outer focus ring을 제거한다. 삽입 caret, keyboard navigation, VoiceOver 상태는 유지하고 시작 작업과 전송 action은 같은 surface 안에 두며 한국어/영어 전송 label을 제공한다.
+- 현재 채널에 실제로 초대된 사람/에이전트만 `@` 후보로 표시한다. 후보 목록은 timeline을 밀지 않는 composer 위 overlay이며 최대 6행, 콘텐츠 실측 기반 8pt 간격, keyboard-selected/hover highlight와 VoiceOver 선택 위치를 제공한다. 위/아래 순환, Tab/Return 선택, Escape 닫기와 mouse 선택을 지원한다.
+- focused mention selection test와 전체 macOS suite를 자동 회귀로 사용하고, Light/Dark 실제 macOS window artifact를 별도 디자인 리뷰 증거로 기록한다. 파일 DnD/첨부 기록은 storage·credential 계약이 선행되어야 하는 MOMO-394 범위이며 이번 UI가 가짜 첨부 성공을 만들지 않는다.
 
 ## MOMO-407 초대 보안 계약 (2026-07-16)
 - regenerate 의미론(review #428 M1 명문화): regenerate는 **신규 코드 발급**이므로 만료를 구 invite의 잔여 TTL이 아니라 **기본 7일로 재설정**한다. 잔여 TTL 보존이 필요해지면 후속 티켓으로 분리한다.

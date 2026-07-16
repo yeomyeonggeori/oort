@@ -1496,7 +1496,11 @@ final class MomoMacTests: XCTestCase {
         )
         XCTAssertEqual(
             MomoMentionSelection.moved(current: nil, candidates: candidates, offset: 1),
-            second
+            first
+        )
+        XCTAssertEqual(
+            MomoMentionSelection.moved(current: nil, candidates: candidates, offset: -1),
+            third
         )
         XCTAssertNil(MomoMentionSelection.moved(current: nil, candidates: [], offset: 1))
     }

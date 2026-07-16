@@ -8,9 +8,19 @@ enum MomoMentionSelection {
         offset: Int
     ) -> MemberID? {
         guard !candidates.isEmpty else { return nil }
-        let currentIndex = current.flatMap(candidates.firstIndex(of:)) ?? 0
+        guard let currentIndex = current.flatMap(candidates.firstIndex(of:)) else {
+            return offset < 0 ? candidates.last : candidates.first
+        }
         let nextIndex = (currentIndex + offset + candidates.count) % candidates.count
         return candidates[nextIndex]
+    }
+}
+
+private struct MomoMentionPanelHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -41,6 +51,8 @@ public struct MessageListView: View {
     @State private var workComposerSessionId = UUID()
     @State private var channelPresentationRevision = 0
     @State private var selectedMentionCandidateID: MemberID?
+    @State private var hoveredMentionCandidateID: MemberID?
+    @State private var measuredMentionPanelHeight: CGFloat = 0
     @State private var suppressedMentionDraft: String?
 
     public init(
@@ -687,8 +699,22 @@ public struct MessageListView: View {
         .overlay(alignment: .topLeading) {
             if !candidates.isEmpty {
                 mentionAutocomplete(candidates: candidates, copy: copy)
-                    .offset(y: -mentionPanelHeight(for: candidates) - 8)
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: MomoMentionPanelHeightPreferenceKey.self,
+                                value: geometry.size.height
+                            )
+                        }
+                    }
+                    // The first layout pass measures intrinsic localized row
+                    // height. Only then reveal the panel at the exact 8pt gap.
+                    .opacity(measuredMentionPanelHeight > 0 ? 1 : 0)
+                    .offset(y: -measuredMentionPanelHeight - 8)
             }
+        }
+        .onPreferenceChange(MomoMentionPanelHeightPreferenceKey.self) { height in
+            measuredMentionPanelHeight = height
         }
     }
 
@@ -720,7 +746,9 @@ public struct MessageListView: View {
                 .font(MomoTheme.Typography.supporting.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 8)
-            ForEach(candidates) { member in
+            ForEach(Array(candidates.enumerated()), id: \.element.id) { index, member in
+                let isSelected = member.id == selectedMentionCandidateID
+                let isHovered = member.id == hoveredMentionCandidateID
                 Button {
                     completeMention(with: member)
                 } label: {
@@ -748,9 +776,9 @@ public struct MessageListView: View {
                     .padding(.vertical, 8)
                     .contentShape(Rectangle())
                     .background(
-                        member.id == selectedMentionCandidateID
+                        isSelected
                             ? MomoTheme.QuickSwitcher.selectionBackground
-                            : Color.clear,
+                            : (isHovered ? MomoTheme.QuickSwitcher.hoverBackground : Color.clear),
                         in: RoundedRectangle(
                             cornerRadius: MomoTheme.QuickSwitcher.rowCornerRadius,
                             style: .continuous
@@ -758,15 +786,23 @@ public struct MessageListView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(member.displayName), @\(member.handle)")
+                .accessibilityValue(
+                    copy.mentionAutocompletePosition(
+                        index: index + 1,
+                        total: candidates.count,
+                        isSelected: isSelected
+                    )
+                )
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .onHover { hovering in
+                    hoveredMentionCandidateID = hovering ? member.id : nil
+                }
             }
         }
         .padding(8)
         .frame(width: MomoTheme.mentionAutocompleteWidth, alignment: .leading)
         .momoSurface(.card)
-    }
-
-    private func mentionPanelHeight(for candidates: [Member]) -> CGFloat {
-        40 + CGFloat(candidates.count) * MomoTheme.mentionAutocompleteRowHeight
     }
 
     private func moveMentionSelection(in candidates: [Member], offset: Int) -> KeyPress.Result {

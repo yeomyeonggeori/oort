@@ -192,18 +192,31 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         )
     }
 
-    func testMentionAutocompleteWritesRealWindowArtifact() async throws {
+    private func captureMentionAutocomplete(
+        scheme: ColorScheme,
+        artifactName: String
+    ) async throws -> NSImage {
         guard !NSScreen.screens.isEmpty else {
             throw XCTSkip("MOMO-396 mention overlay evidence requires a WindowServer compositor")
         }
         let (viewModel, _) = try await makeViewModel()
+        _ = try await viewModel.inviteDogfoodAgent(
+            displayName: "긴 이름을 가진 Hermes Research Assistant",
+            handle: "@hermes",
+            avatarPath: nil
+        )
         viewModel.composerDraft = "@"
         XCTAssertGreaterThan(viewModel.mentionAutocompleteCandidates().count, 0)
 
+        let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+        let application = NSApplication.shared
+        let previousApplicationAppearance = application.appearance
+        application.appearance = appearance
+        defer { application.appearance = previousApplicationAppearance }
         let hostingController = NSHostingController(
             rootView: MessageListView(viewModel: viewModel, focusComposerRequest: 1)
                 .frame(width: 760, height: 620)
-                .environment(\.colorScheme, .dark)
+                .environment(\.colorScheme, scheme)
         )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 620),
@@ -211,7 +224,7 @@ final class MemberInspectorSnapshotTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = appearance
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -228,7 +241,21 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         }
 
         let image = NSImage(cgImage: cgImage, size: window.frame.size)
-        try writeArtifact(image, named: "momo-396-composer-mention-overlay-dark.png")
-        XCTAssertEqual(image.size, window.frame.size)
+        try writeArtifact(image, named: artifactName)
+        return image
+    }
+
+    func testMentionAutocompleteWritesLightAndDarkRealWindowArtifacts() async throws {
+        let light = try await captureMentionAutocomplete(
+            scheme: .light,
+            artifactName: "momo-396-composer-mention-overlay-light.png"
+        )
+        let dark = try await captureMentionAutocomplete(
+            scheme: .dark,
+            artifactName: "momo-396-composer-mention-overlay-dark.png"
+        )
+        XCTAssertEqual(light.size, dark.size)
+        XCTAssertEqual(light.size.width, 760)
+        XCTAssertGreaterThanOrEqual(light.size.height, 620)
     }
 }

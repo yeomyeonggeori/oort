@@ -206,6 +206,15 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    func mentionAutocompletePosition(index: Int, total: Int, isSelected: Bool) -> String {
+        switch language {
+        case .korean:
+            return isSelected ? "선택됨, \(index)/\(total)" : "\(index)/\(total)"
+        case .english:
+            return isSelected ? "Selected, \(index) of \(total)" : "\(index) of \(total)"
+        }
+    }
+
     func typingIndicator(_ names: [String]) -> String {
         let visible = names.prefix(2).joined(separator: ", ")
         let remainder = max(0, names.count - 2)
