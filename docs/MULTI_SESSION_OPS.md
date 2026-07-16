@@ -83,7 +83,7 @@ Parallel runtime gates can leave Docker Compose containers or networks after a w
 scripts/compose_janitor.sh
 ```
 
-The janitor is dry-run by default. It only lists Compose-labeled worktree projects whose name starts with `momo_` and no longer matches an active git worktree. It explicitly protects the root `momo` project, `momo_default`, `supabase`, active worktree projects, and non-momo Docker resources.
+The janitor is dry-run by default. It only lists Compose-labeled worktree projects whose name starts with `momo_` or `momo240_` (live local-alpha runners are PID-protected) and no longer matches an active git worktree. It explicitly protects the root `momo` project, `momo_default`, `supabase`, active worktree projects, and non-momo Docker resources.
 
 Cleanup requires an explicit flag:
 
@@ -261,12 +261,17 @@ docker ps --format '{{.Names}}' | grep -c momo   # 활성 momo 스택 수
 - **load 8~12**: heavy 작업 1개만, 동시 실행 금지.
 - **load < 8**: 정상 진행. 그래도 docker-heavy 게이트는 **세션당 동시 1개**(9.2).
 
+`scripts/local_gate.sh`의 `runtime-db`/`runtime-relay`/`runtime-live`/`runtime-agent`는
+이 정본과 같은 **load(1min) > 12** 임계값을 시작 전에 자동 검사한다. 부하를 확인하고
+위험을 명시적으로 수용한 경우에만 `LOCAL_GATE_FORCE=1`로 우회한다. 사용법과 evidence
+계약은 [`LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md#2-standard-script)를 참조한다.
+
 ### 9.2 잔재 방지 (사고 원인의 성문화)
 
-1. **게이트 런 종료 즉시 해당 worktree의 compose project를 down한다** — `local_gate.sh` runtime-* 프로파일의 `make up`은 스택을 내리지 않는다(게이트 런 1회 = postgres+centrifugo 잔재 1벌). down은 게이트를 돌린 세션의 의무다. (tooling: MOMO-411 `--down` 플래그 전까지 수동.)
+1. **게이트 런 종료 즉시 해당 worktree의 compose project를 down한다** — `local_gate.sh`의 위 runtime-* 프로파일은 `make up` 시작 후 성공/실패/중단 EXIT trap에서 기본 `make down`한다. 디버깅을 위해 의도적으로 보존할 때만 `--keep-stack`을 사용하며, 이후 수동 `make down`은 실행 세션의 의무다.
 2. docker-heavy 게이트는 **호스트 전체에서 동시 1개** — 다른 트랙이 게이트 중이면(`docker ps`에서 분 단위 신생 momo 스택 관찰) 대기.
 3. goal 종결(머지·close) 시 해당 goal의 worktree 제거 + compose 스택 down + network rm까지가 종결이다.
-4. 배치 종결마다 `scripts/compose_janitor.sh --cleanup` + `docker builder prune -f --filter until=72h`. 주 1회 `~/.local/bin/momo-docker-reclaim.sh --aggressive`.
+4. 배치 종결마다 `scripts/compose_janitor.sh --cleanup`(`momo_`와 `momo240_` stale project 대상, 볼륨 불변; [`LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md#2-standard-script)) + `docker builder prune -f --filter until=72h`. 주 1회 `~/.local/bin/momo-docker-reclaim.sh --aggressive`.
 5. 무거운 타 프로젝트 병행 시 Codex worker 동시 spawn 1~2로 제한(평시 상한 5와 별개의 부하 상한).
 
 ### 9.3 판별 팁
