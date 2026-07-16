@@ -148,10 +148,10 @@ enum WebhookPayload {
 
         func translated(_ key: String) throws -> String? {
             guard let raw = object[key] else { return nil }
-            guard let value = raw as? String else {
+            guard let rawValue = raw as? String else {
                 throw HTTPError(.badRequest, message: "Slack attachment \(key) must be a string")
             }
-            let value = try translateSlackMarkup(value).trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = try translateSlackMarkup(rawValue).trimmingCharacters(in: .whitespacesAndNewlines)
             return value.isEmpty ? nil : value
         }
 

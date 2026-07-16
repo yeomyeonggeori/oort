@@ -873,7 +873,7 @@ struct WebhookRoutes: Sendable {
     private static func normalizedLabel(_ raw: String?) throws -> String {
         let value = (raw ?? "Incoming Webhook").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.count <= 80,
-              value.unicodeScalars.allSatisfy({ !$0.properties.isControl })
+              !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
         else {
             throw HTTPError(.badRequest, message: "label must contain 1...80 printable characters")
         }
