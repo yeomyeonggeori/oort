@@ -23,6 +23,12 @@
 - `web` 게이트 프로파일 신설(`scripts/local_gate.sh --profile web`): npm ci → eslint → tsc → 생성 타입 동기화 → vite build → permissive-only 라이선스 게이트 → `web_serving_smoke.sh`(APP_DOMAIN sentinel fail-closed 회귀) → `verify_web_login_smoke.sh`(격리 e2e compose `momo391web` + 실제 prod Caddyfile 엄격 CSP 뒤 Chromium 로그인→타임라인→실시간 수신 스모크) → `verify_openapi_contract.sh` runtime drift 게이트. `clients/macOS`·`server` 소스 무변경.
 - runtime-unverified: 공개 호스트 DNS/ACME/TLS 뒤 실서빙, Safari/Firefox(스모크는 Chromium), 멀티 탭 refresh 회전 경쟁(README 한계 명시). 작성/read-state/승인 카드(W-4), 초대 웹 합류(W-5)는 후속.
 
+## MOMO-403 device/push_token 등록·해지 REST (2026-07-16)
+
+- ADR-0120 P-1 랜딩(PR #422, `36c0d70`) — DeviceRoutes(등록 멱등 upsert+토큰 회전, device+env당 단일 ACTIVE 토큰은 migration 010 partial unique로 DB 강제, 해지=invalidated_at 행 보존, suffix-only receipt). App.swift 배선 1줄.
+- 독립 리뷰 Medium(등록 upsert TOCTOU — 혼합 소유 row 가능성)을 RETURNING member_id 원자 재검증으로 봉합하고, 동시 등록 23505→409, list active 멤버 요구, revoke 응답 raw 토큰 단정까지 반영. 반영본으로 verifier 전체 재실행 PASS(등록/회전/타인 403/cross-tenant/revoke 수명주기/reclaim rebind/audit/RLS).
+- runtime-db 프로파일에 push registration verifier 편입. 다음: MOMO-404 NotifierWorker(판정 v0 + id-only mock relay).
+
 ## MOMO-401 초대 링크 웹 합류 — 웹 v0 완주 (2026-07-16)
 
 - `/join/<code>`가 랜딩(PR #419, `9616c67`)하며 **ADR-0119 웹 v0 스코프("초대받은 사람이 브라우저로 합류해 대화한다") 7티켓 완주**: 389 계약 정본 → 390 서빙 → 391 읽기 → 398 prod realtime 개통 → 399 게이트 복구 → 400 대화 왕복 → 401 초대 합류.

@@ -18,6 +18,12 @@
 - MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
 - 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
 
+## 2026-07-16 (Fable, 엔진/인프라 트랙 momo-main 겸임) · MOMO-403 종결 + 크로스트랙 정리
+- ADR-0120 P-1(MOMO-403, PR #422 `36c0d70`) 종결 — device 등록 REST + migration 010(단일 ACTIVE 토큰 DB 강제). 구현 에이전트 stall을 통합자가 인수(verifier 재실행 PASS→push/PR), 독립 리뷰 Medium(TOCTOU)을 RETURNING 원자 재검증으로 봉합 후 verifier 반영본 재PASS. runtime-db 프로파일에 verifier 편입.
+- 푸시 배치 발급: MOMO-403 `#420`/404 `#421` + 패킷(2026-07-16-adr-0120-push-server-side.md — id-only 하드 계약·outbox 소비자 경합 방지·MOMO-395 설정 표면 경계).
+- 크로스트랙: GPT momo-main 복귀 관찰(MOMO-402 `#418` 머지·plugin overlay). PLN-20260716-01 중복 레인을 한 행으로 병합, momo-main 지정 구체화 4항목(custody/Drive-vs-GitHub/delegation binding/egress)을 16-02 핸드오프에 승계. 유령 스택 정리 2회(성재 승인).
+- 다음: MOMO-404 NotifierWorker 착수(unblock 완료) → 리뷰/머지로 ADR-0120 서버측 절반 완성. P-3(relay 실발송)는 Dawn 운영 결정 대기.
+
 ## 2026-07-16 (Fable, 엔진/인프라 트랙 momo-main 겸임) · MOMO-401 종결 — 웹 v0 완주
 - MOMO-401(PR #419) 머지(`9616c67`)로 ADR-0119 웹 v0 7티켓 완주. 구현 에이전트는 stall이 아니라 콜드빌드 3런의 장주행이었고(총 4h, 게이트 경화 2커밋 자가 산출), PR 선생성·리뷰 M1/L1 반영은 통합자가 수행. 독립 리뷰 Blocker/High 0.
 - join=스펙 준수 즉시 세션(JoinResponse required 토큰), 초대 코드 비잔류, 오류 카피 서버 문자열 대조. 스모크 32 PASS.
