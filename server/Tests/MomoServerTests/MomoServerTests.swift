@@ -7,6 +7,120 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual("MomoServer", "MomoServer")
     }
 
+    func testOfficialPluginManifestsValidateAndMatchVerifiedEndpoints() throws {
+        let fixtures = try pluginFixtureDirectory()
+        let expected: [(String, String, String)] = [
+            ("github", "com.momo.plugins.github", "api.githubcopilot.com"),
+            ("notion", "com.momo.plugins.notion", "mcp.notion.com"),
+            ("linear", "com.momo.plugins.linear", "mcp.linear.app"),
+        ]
+        let digest = "sha256:" + String(repeating: "a", count: 64)
+        for (fixture, pluginID, domain) in expected {
+            let json = try String(
+                contentsOf: fixtures.appendingPathComponent("\(fixture).json"),
+                encoding: .utf8
+            )
+            let manifest = try PluginManifestValidator.validate(
+                manifestJSON: json,
+                expectedDigest: digest,
+                computedDigest: digest,
+                revoked: false
+            )
+            XCTAssertEqual(manifest.pluginID, pluginID)
+            XCTAssertEqual(manifest.egressDomains, [domain])
+            XCTAssertFalse(manifest.enabledByDefault)
+            XCTAssertEqual(manifest.allowedRoles, ["owner", "admin"])
+        }
+    }
+
+    func testPluginManifestValidatorFailsClosedMatrix() throws {
+        let fixture = try String(
+            contentsOf: try pluginFixtureDirectory().appendingPathComponent("github.json"),
+            encoding: .utf8
+        )
+        let digest = "sha256:" + String(repeating: "a", count: 64)
+        let mutations = [
+            fixture.replacingOccurrences(of: "2025-06-18", with: "2099-01-01"),
+            fixture.replacingOccurrences(of: "\"risk\": \"read\"", with: "\"risk\": \"future-risk\""),
+            fixture.replacingOccurrences(of: "\"approvalPolicy\": \"none\"", with: "\"approvalPolicy\": \"maybe\""),
+            fixture.replacingOccurrences(of: "\"additionalProperties\": false", with: "\"additionalProperties\": true"),
+            fixture.replacingOccurrences(of: "\"spdx\": \"MIT\"", with: "\"spdx\": \"GPL-3.0-only\""),
+            fixture.replacingOccurrences(of: "\"publisher\": {", with: "\"access_token\": \"must-not-enter\", \"publisher\": {")
+        ]
+        for mutation in mutations {
+            XCTAssertThrowsError(try PluginManifestValidator.validate(
+                manifestJSON: mutation,
+                expectedDigest: digest,
+                computedDigest: digest,
+                revoked: false
+            ))
+        }
+        XCTAssertThrowsError(try PluginManifestValidator.validate(
+            manifestJSON: fixture,
+            expectedDigest: digest,
+            computedDigest: "sha256:" + String(repeating: "b", count: 64),
+            revoked: false
+        ))
+        XCTAssertThrowsError(try PluginManifestValidator.validate(
+            manifestJSON: fixture,
+            expectedDigest: digest,
+            computedDigest: digest,
+            revoked: true
+        ))
+        XCTAssertThrowsError(try PluginManifestValidator.validate(
+            manifestJSON: "{not-json",
+            expectedDigest: digest,
+            computedDigest: digest,
+            revoked: false
+        ))
+    }
+
+    func testPluginRegistryMigrationAndCustodyAStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/013_plugin_registry.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("plugin_grant_four_tuple_uniq"))
+        XCTAssertTrue(migration.contains("UNIQUE (workspace_id, member_id, plugin_id, scope)"))
+        XCTAssertTrue(migration.contains("'workspace_plugin_install','plugin_grant','plugin_capability_projection'"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("sha256(convert_to(manifest::text, 'UTF8'))"))
+        XCTAssertTrue(migration.contains("https://api.githubcopilot.com/mcp/"))
+        XCTAssertTrue(migration.contains("https://mcp.notion.com/mcp"))
+        XCTAssertTrue(migration.contains("https://mcp.linear.app/mcp"))
+        XCTAssertFalse(migration.contains("credential_ciphertext"))
+        XCTAssertFalse(migration.contains("access_token     "))
+        XCTAssertFalse(migration.contains("refresh_token    "))
+
+        let route = try String(
+            contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/PluginRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertFalse(route.contains("logger.info"))
+        XCTAssertFalse(route.contains("logger.debug"))
+        XCTAssertFalse(route.contains("accessToken"))
+        XCTAssertFalse(route.contains("refreshToken"))
+    }
+
+    func testPluginScopeValidationIsFailClosed() throws {
+        XCTAssertEqual(try PluginRoutes.normalizedScope(" GitHub:Read "), "github:read")
+        XCTAssertThrowsError(try PluginRoutes.normalizedScope(""))
+        XCTAssertThrowsError(try PluginRoutes.normalizedScope("github read"))
+        XCTAssertThrowsError(try PluginRoutes.normalizedScope("../secret"))
+    }
+
+    private func pluginFixtureDirectory() throws -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/plugin-manifests", isDirectory: true)
+    }
+
     func testInviteRoleValidationDefaultsAndRejectsOwner() throws {
         XCTAssertEqual(try InviteRoutes.normalizedRole(nil), "member")
         XCTAssertEqual(try InviteRoutes.normalizedRole(" ADMIN "), "admin")

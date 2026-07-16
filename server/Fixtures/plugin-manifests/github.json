@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "momo.plugin.v1",
+  "plugin": {
+    "id": "com.momo.plugins.github",
+    "name": "GitHub",
+    "version": "1.0.0",
+    "description": "Official GitHub hosted MCP integration",
+    "publisher": { "id": "github", "name": "GitHub", "verified": true },
+    "license": { "spdx": "MIT", "kind": "open_source" },
+    "provenance": {
+      "sourceURL": "https://github.com/github/github-mcp-server",
+      "releaseRef": "hosted",
+      "verified": true
+    }
+  },
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "streamable_http",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "server": { "name": "github/github-mcp-server", "version": "hosted" },
+    "tools": [{
+      "name": "github.list_repositories",
+      "description": "List repositories available to the delegated user",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "schemaDigest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "scopes": ["github:read"],
+      "risk": "read",
+      "approvalPolicy": "none"
+    }]
+  },
+  "skill": { "reference": null, "optional": true },
+  "momo": {
+    "approvalTier": { "github.list_repositories": "read_only" },
+    "risk": "low",
+    "egressDomains": ["api.githubcopilot.com"],
+    "recommendedFor": ["software-development", "work-tracking"],
+    "serverPolicy": {
+      "installAllowed": true,
+      "enabledByDefault": false,
+      "allowedRoles": ["owner", "admin"]
+    }
+  }
+}

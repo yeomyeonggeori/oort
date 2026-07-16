@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "momo.plugin.v1",
+  "plugin": {
+    "id": "com.momo.plugins.linear",
+    "name": "Linear",
+    "version": "1.0.0",
+    "description": "Official Linear hosted MCP integration",
+    "publisher": { "id": "linear", "name": "Linear", "verified": true },
+    "license": { "spdx": "LicenseRef-Linear-Hosted-Service", "kind": "hosted_only" },
+    "provenance": {
+      "sourceURL": "https://linear.app/docs/mcp",
+      "releaseRef": "hosted",
+      "verified": true
+    }
+  },
+  "mcp": {
+    "protocolVersion": "2025-06-18",
+    "transport": "streamable_http",
+    "url": "https://mcp.linear.app/mcp",
+    "server": { "name": "linear-hosted-mcp", "version": "hosted" },
+    "tools": [{
+      "name": "linear.list_issues",
+      "description": "List issues available to the delegated user",
+      "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+      "schemaDigest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "scopes": ["linear:read"],
+      "risk": "read",
+      "approvalPolicy": "none"
+    }]
+  },
+  "skill": { "reference": null, "optional": true },
+  "momo": {
+    "approvalTier": { "linear.list_issues": "read_only" },
+    "risk": "low",
+    "egressDomains": ["mcp.linear.app"],
+    "recommendedFor": ["work-tracking", "product-development"],
+    "serverPolicy": {
+      "installAllowed": true,
+      "enabledByDefault": false,
+      "allowedRoles": ["owner", "admin"]
+    }
+  }
+}
