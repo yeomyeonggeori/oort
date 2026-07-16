@@ -315,8 +315,12 @@ case "$PROFILE" in
 esac
 
 RUNTIME_COMPOSE_PROFILE=0
+RUNTIME_COMPOSE_PREEXISTING=0
 case "$PROFILE" in
-  runtime-db|runtime-relay|runtime-live|runtime-agent)
+  runtime-db|runtime-relay|runtime-live|runtime-agent|all|m3-dbc)
+    # all/m3-dbc included (review #439 M2): they run the same `make up`
+    # bootstrap and are the heaviest profiles — the incident class this
+    # guard exists for.
     RUNTIME_COMPOSE_PROFILE=1
     ;;
 esac
@@ -381,11 +385,13 @@ case "$PROFILE" in
     local_gate_emergency_cleanup() {
       local original_rc=$?
       trap - EXIT INT TERM
-      if [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]; then
+      if [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ] && [ "${RUNTIME_COMPOSE_PREEXISTING:-0}" -eq 0 ]; then
         echo "local gate: taking down runtime Compose stack" | tee -a "$LOG_FILE"
-        if ! make down 2>&1 | tee -a "$LOG_FILE"; then
+        if ! bash -lc "make down" 2>&1 | tee -a "$LOG_FILE"; then
           echo "WARNING: runtime Compose teardown failed; run 'make down' manually." | tee -a "$LOG_FILE" >&2
         fi
+      elif [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "${RUNTIME_COMPOSE_PREEXISTING:-0}" -eq 1 ]; then
+        echo "local gate: pre-existing Compose stack retained (not started by this gate)" | tee -a "$LOG_FILE"
       elif [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ]; then
         echo "local gate: --keep-stack set; runtime Compose stack retained" | tee -a "$LOG_FILE"
       fi
@@ -397,6 +403,7 @@ case "$PROFILE" in
     trap local_gate_emergency_cleanup EXIT
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    trap 'exit 129' HUP
     ;;
 esac
 
@@ -844,6 +851,23 @@ run_cmd() {
 
   set +e
   if [ "$label" = "docker compose up (--wait healthy)" ] && [ "$RUNTIME_COMPOSE_PROFILE" -eq 1 ]; then
+    # Review #439 M1: a stack that was ALREADY running before this gate (e.g.
+    # the momo_main dogfood stack when running from the main checkout) must
+    # not be torn down by our EXIT trap — we only own what we started.
+    # Resolve the project exactly like the Makefile does (ENV_FILE chain),
+    # because a bare `docker compose ps` would ignore .env.worktree.
+    gate_env_file=""
+    for f in .env.worktree .env infra/.env.example; do
+      [ -f "$f" ] && { gate_env_file="$f"; break; }
+    done
+    gate_project=""
+    if [ -n "$gate_env_file" ]; then
+      gate_project="$(grep -E '^COMPOSE_PROJECT_NAME=' "$gate_env_file" | tail -1 | cut -d= -f2)"
+    fi
+    if [ -n "$gate_project" ] && docker ps -q --filter "label=com.docker.compose.project=$gate_project" 2>/dev/null | grep -q .; then
+      echo "local gate: Compose project '$gate_project' pre-exists this gate run; teardown will be skipped (not owned by this gate)" | tee -a "$LOG_FILE"
+      RUNTIME_COMPOSE_PREEXISTING=1
+    fi
     # Mark before invoking `make up`: an interrupted/partially successful Compose
     # start still needs the same EXIT-trap teardown as a completed bootstrap.
     RUNTIME_COMPOSE_STARTED=1

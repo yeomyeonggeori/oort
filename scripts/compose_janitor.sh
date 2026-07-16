@@ -184,10 +184,28 @@ is_active_project() {
   grep -Fxq "$project" "$active_projects_file"
 }
 
+# Review #439 H1: momo240_<pid> projects come from local_alpha_runner.sh
+# (COMPOSE_PROJECT_NAME=momo240_$$) and have NO worktree to mark them active —
+# a live dogfood/soak session would otherwise be classified stale and killed
+# by --cleanup. The suffix IS the runner PID: protect while that PID is alive.
+is_live_local_alpha() {
+  local project="$1"
+  local pid="${project#momo240_}"
+  case "$pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  kill -0 "$pid" 2>/dev/null
+}
+
 is_candidate_project() {
   local project="$1"
   case "$project" in
-    momo_*|momo240_*)
+    momo240_*)
+      is_live_local_alpha "$project" && return 1
+      is_active_project "$project" && return 1
+      return 0
+      ;;
+    momo_*)
       is_active_project "$project" && return 1
       return 0
       ;;
@@ -213,10 +231,19 @@ protect_reason_for_project() {
     momo)
       printf 'protected:root-momo-project\n'
       ;;
+    momo240_*)
+      if is_live_local_alpha "$project"; then
+        printf 'protected:live-local-alpha-runner\n'
+      elif is_active_project "$project"; then
+        printf 'protected:active-worktree\n'
+      else
+        printf 'candidate\n'
+      fi
+      ;;
     supabase|supabase_*)
       printf 'protected:supabase\n'
       ;;
-    momo_*|momo240_*)
+    momo_*)
       if is_active_project "$project"; then
         printf 'protected:active-worktree\n'
       else

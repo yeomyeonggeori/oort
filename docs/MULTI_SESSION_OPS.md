@@ -83,7 +83,7 @@ Parallel runtime gates can leave Docker Compose containers or networks after a w
 scripts/compose_janitor.sh
 ```
 
-The janitor is dry-run by default. It only lists Compose-labeled worktree projects whose name starts with `momo_` and no longer matches an active git worktree. It explicitly protects the root `momo` project, `momo_default`, `supabase`, active worktree projects, and non-momo Docker resources.
+The janitor is dry-run by default. It only lists Compose-labeled worktree projects whose name starts with `momo_` or `momo240_` (live local-alpha runners are PID-protected) and no longer matches an active git worktree. It explicitly protects the root `momo` project, `momo_default`, `supabase`, active worktree projects, and non-momo Docker resources.
 
 Cleanup requires an explicit flag:
 
