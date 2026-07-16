@@ -677,6 +677,26 @@ run_cmd docker-ps docker compose --env-file "$ENV_FILE" \
 # Persistent local-alpha starts with people/channels only. Agents appear after
 # the pairing invite; ignore a caller's demo/e2e seed opt-in at this boundary.
 run_cmd migrate env MOMO_AGENT_SEED_MODE=none sh "$REPO_ROOT/scripts/migrate.sh"
+
+# Migration 012 fail-closes the seeded owner (and any dev-password row) on the
+# prod-like seed-none path. The LOCAL alpha stack re-establishes a login by an
+# EXPLICIT local-only bootstrap — the exact philosophy of MOMO-408: implicit
+# backfill is forbidden, explicit operator provisioning is the takeover path.
+# MOMO_LOGIN_PASSWORD defaults to dev-password so the local dogfood loop keeps
+# its historical UX; production (install.sh) has no such bootstrap and stays
+# fail-closed until the documented sops takeover.
+LOCAL_LOGIN_PASSWORD=${MOMO_LOGIN_PASSWORD:-dev-password}
+run_cmd owner-login-bootstrap docker compose --env-file "$ENV_FILE" \
+  -f "$REPO_ROOT/infra/docker-compose.yml" \
+  -f "$COMPOSE_OVERRIDE" exec -T \
+  -e LOCAL_LOGIN_PASSWORD="$LOCAL_LOGIN_PASSWORD" postgres \
+  psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
+\getenv local_password LOCAL_LOGIN_PASSWORD
+UPDATE human
+   SET password_hash = momo_password_hash(:'local_password')
+ WHERE member_id = '00000000-0000-7000-8000-000000000101'
+   AND password_hash IS NULL;
+SQL
 run_cmd verify-rls sh "$REPO_ROOT/scripts/verify_rls.sh"
 
 if [ "$HERMES_MODE" = "mock" ]; then

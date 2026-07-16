@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static MOMO-355 contract checks. Never opens a DB or network connection."""
+"""Static seed-policy contract checks. Never opens a DB or network connection."""
 
 from pathlib import Path
 
@@ -48,6 +48,21 @@ def main() -> None:
     assert seed_006.count(r"\if :MOMO_AGENT_SEED_ENABLED") == 1
     require_id_only_inside_agent_seed_guard(seed_002, "00000000-0000-7000-8000-000000000102")
     require_id_only_inside_agent_seed_guard(seed_006, "00000000-0000-7000-8000-000000000103")
+
+    seed_012 = read("server/Migrations/012_prod_seed_password_fail_closed.sql")
+    require(
+        seed_012,
+        r"\if :MOMO_AGENT_SEED_ENABLED",
+        "momo_password_hash('dev-password')",
+        "SET password_hash = NULL",
+        "momo_password_verify('dev-password', password_hash)",
+        "00000000-0000-7000-8000-000000000101",
+    )
+    require(
+        read("scripts/local_gate.sh"),
+        "scripts/verify_prod_seed_password.sh",
+        "Production seed password fail-closed verification (MOMO-408)",
+    )
 
     require(
         read("scripts/local_alpha_runner.sh"),
