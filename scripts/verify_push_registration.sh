@@ -334,6 +334,8 @@ expect_status 201 "workspace B registers its own device (positive control)"
 # ---- 9) revoke = invalidated_at, never DELETE -----------------------------------
 api DELETE "$DEV_PATH/$DEVICE1_ID" "" "$M1_ACCESS"
 expect_status 200 "M1 revokes D1"
+expect_no_raw_token "$TOKEN1" "revoke response"
+expect_no_raw_token "$TOKEN2" "revoke response"
 got="$(printf '%s' "$RESPONSE_BODY" | jq -r '.invalidatedCount')"
 [ "$got" = "1" ] || { echo "[push-reg] FAIL: revoke expected invalidatedCount=1, got $got" >&2; exit 1; }
 got="$(printf "SELECT count(*) FROM push_token WHERE device_id = '$DEVICE1_ID' AND invalidated_at IS NULL;\n" | sql_scalar)"

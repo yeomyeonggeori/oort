@@ -108,12 +108,19 @@ struct DeviceRoutes: Sendable {
                 ON CONFLICT (id) DO UPDATE
                    SET app_build = EXCLUDED.app_build,
                        last_seen_at = now()
-                RETURNING (xmax = 0) AS created
+                RETURNING (xmax = 0) AS created, member_id
                 """,
                 logger: db.logger
             ).collect()
-            guard let created = try upsertRows.first?.decode(Bool.self) else {
+            guard let (created, ownerAfterUpsert) = try upsertRows.first?.decode((Bool, UUID).self) else {
                 throw HTTPError(.internalServerError, message: "device upsert failed")
+            }
+            // M1 (review #422): the pre-check above races with a concurrent
+            // first registration — re-verify ownership on the row the upsert
+            // actually touched, atomically, so a mixed-owner device/token pair
+            // can never commit.
+            guard ownerAfterUpsert == principal.memberID else {
+                throw HTTPError(.forbidden, message: "device is registered to another member")
             }
 
             // 3) Actor binding on the token: an ACTIVE (apns_token, env) row
@@ -155,7 +162,11 @@ struct DeviceRoutes: Sendable {
             ).collect()
             let rotatedCount = rotatedRows.count
 
-            // 5) Upsert the incoming token.
+            // 5) Upsert the incoming token. A concurrent committed ACTIVE
+            //    token on the same (device, env) hits the 010 partial unique
+            //    index outside our ON CONFLICT target — surface it as a
+            //    retryable 409, not a 500 (review #422 L1).
+            do {
             if let existingTokenID {
                 _ = try await conn.query(
                     """
@@ -187,6 +198,9 @@ struct DeviceRoutes: Sendable {
                 guard insertedRows.first != nil else {
                     throw HTTPError(.conflict, message: "push token is already registered in another workspace")
                 }
+            }
+            } catch let error as PSQLError where error.serverInfo?[.sqlState] == "23505" {
+                throw HTTPError(.conflict, message: "concurrent registration for this device — retry")
             }
 
             // 6) Audit — same transaction; suffix only, never the raw token.
@@ -238,6 +252,7 @@ struct DeviceRoutes: Sendable {
         let devices: [DeviceDTO] = try await db.withTenantConnection(
             workspaceID: workspaceID
         ) { conn in
+            try await Self.requireActiveMember(conn: conn, logger: db.logger, principal: principal)
             let rows = try await conn.query(
                 """
                 SELECT \(unescaped: Self.deviceJSONSelect)
