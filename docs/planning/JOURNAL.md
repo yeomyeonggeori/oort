@@ -18,6 +18,12 @@
 - MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
 - 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
 
+## 2026-07-17 (Fable, engine planner+오케스트레이터) · ADR-0113 Accepted → SE-04A 착수
+- 성재 승인("ㄱㄱ")으로 ADR-0113 Accepted 전환. UX 트랙은 GPT Codex 앱 진행분 팔로업만(MOMO-402 머지·409 발급 관찰 — 개입 없음, 추후 일괄 점검 형식).
+- SE-04A=MOMO-410 `#434` 발급(수용기준+패킷 `2026-07-17-adr-0113-se04a-plugin-registry.md`) → codex worker(5.6 sol medium) spawn. registry 스키마(013)+validator fail-closed+install/grant/revoke REST+Capability projection+오피셜 시드 3종(GitHub/Notion/Linear).
+- 사고 1건 자가 복구: `git add -A`가 UX 트랙 미커밋 작업분(MomoComposerActionLauncher.swift)을 오커밋 → 인덱스만 revert(working tree 보존, `9ade613`). **교훈: 메인 worktree는 UX Codex와 공유 — 이후 명시적 파일 지정 add만.**
+- 다음: 410 PR 검수·머지 → SE-04B(Slack-호환 webhook, ADR-0115 draft 병행 필요) 발급 판단.
+
 ## 2026-07-16 (Fable, momo-main 오케스트레이터) · MOMO-408 종결 — H1 노출 확장 봉합
 - PR #431 머지(`8193734`). 독립 리뷰가 H1(owner만 잠그면 pre-MOMO-217 join 행 잔존 노출)·H2(로컬 도그푸드 루프 파손 미기재)를 잡음 → planner 처분: 잠금 전 human 확장 + 로컬 러너 명시 부트스트랩(철학 일치). 오잠금 가드 매트릭스 verifier 추가, seed verifier 4/4 PASS.
 - 전체 runtime-db 재실행 2회 외부 중단(SIGTERM) → 등가 논증으로 대체(수정 전 전체 PASS + 델타 3파일이 게이트 비대상/단독 검증 완료 — PR 코멘트 정본). 한가한 시점 전체 1회 재확인 권장.
