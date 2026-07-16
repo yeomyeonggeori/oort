@@ -1,0 +1,17 @@
+# MOMO-404 verifier-only compose overlay (ADR-0120 P-2).
+#
+# scripts/verify_push_notifier.sh layers this over infra/docker-compose.e2e.yml
+# (`-f base -f overlay`) to flip the api into AGENT_GATEWAY_MODE=gateway for
+# the approval-request leg: the seeded @hermes mention then produces a
+# kind='agent_job' method='gateway' outbox row that the verifier drives via
+# per-agent bearer REST (pending claim -> approval_request event), creating a
+# real approval_request message without booting AgentWorker (one less cold
+# Swift build under Docker VM memory pressure).
+#
+# Kept as an overlay on purpose: the base e2e compose must render
+# byte-identically for every existing gate profile (MOMO-390 precedent), and
+# gateway mode is a per-verifier decision, not an e2e default.
+services:
+  api:
+    environment:
+      AGENT_GATEWAY_MODE: gateway

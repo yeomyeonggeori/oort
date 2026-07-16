@@ -49,6 +49,10 @@ Environment:
   LOCAL_SOAK_OUTBOX_FAIL_COUNT  Fail threshold for pending outbox rows. Default: 100.
   LOCAL_SOAK_OUTBOX_WARN_AGE_SECONDS  Warn threshold for oldest pending row. Default: 60.
   LOCAL_SOAK_OUTBOX_FAIL_AGE_SECONDS  Fail threshold for oldest pending row. Default: 600.
+  LOCAL_SOAK_OUTBOX_KINDS       SQL kind list the pending alarm watches.
+                                Default: 'broadcast','agent_job' (MOMO-404:
+                                push_candidate rows are expected to pend when
+                                the NotifierWorker is not deployed).
 EOF
 }
 
@@ -339,7 +343,14 @@ check_db_and_outbox() {
 
   local outbox_out="$snap_dir/outbox-pending.tsv"
   local outbox_err="$snap_dir/outbox-pending.err"
-  if ! psql_capture "SELECT count(*)::text || E'\t' || COALESCE(max(EXTRACT(EPOCH FROM (now() - created_at)))::bigint, 0)::text FROM outbox WHERE status = 'pending';" "$outbox_out" "$outbox_err"; then
+  # MOMO-404: kind-scoped. Every message insert now also enqueues a
+  # kind='push_candidate' row (011 trigger); stacks that do not run the
+  # NotifierWorker accumulate those rows legitimately, so the stuck-row alarm
+  # only watches kinds whose consumers this soak stack actually runs. Set
+  # LOCAL_SOAK_OUTBOX_KINDS="'broadcast','agent_job','push_candidate'" when the
+  # notifier is part of the soak deployment.
+  local outbox_kinds="${LOCAL_SOAK_OUTBOX_KINDS:-'broadcast','agent_job'}"
+  if ! psql_capture "SELECT count(*)::text || E'\t' || COALESCE(max(EXTRACT(EPOCH FROM (now() - created_at)))::bigint, 0)::text FROM outbox WHERE status = 'pending' AND kind::text IN ($outbox_kinds);" "$outbox_out" "$outbox_err"; then
     record_event "FAIL" "outbox" "pending outbox query failed"
     return 0
   fi
