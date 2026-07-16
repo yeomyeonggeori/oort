@@ -3,6 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-445 macOS single-owner inspector boundary (2026-07-17)
+
+- 가운데 타임라인과 붙어 있는 우측 승인·멤버 패널 사이의 이중 경계를 제거했다. 가운데 본문은 경계를 소유하지 않고, 레이아웃의 단일 `Divider`만 경계를 그리며 붙어 있는 패널은 semantic fill만 사용한다.
+- 좁은 창에서 떠 있는 inspector는 기존 card outline과 shadow를 유지한다. focused `MomoChannelChromeTests` 20/20 PASS이며 server/schema/engine 변경은 없다.
+
 ## MOMO-414 macOS unified flat sidebar shell (2026-07-17)
 
 - 좌측 패널의 내부 수평 구분선·수동 우측선과 네이티브 타이틀바 기준선 중첩을 제거했다. `NavigationSplitView`의 resize/collapse 동작은 유지하면서 sidebar와 unified titlebar를 하나의 평면으로 연결하고, 가운데 본문과는 네이티브 세로 경계 하나만 남긴다.

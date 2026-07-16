@@ -112,6 +112,7 @@ struct MomoChannelMemberInspectorView: View {
     let copy: MomoWorkspaceCopy
     let close: () -> Void
     let didOpenDirectMessage: () -> Void
+    let presentation: MomoInspectorPresentation
 
     @State private var query = ""
     @State private var selectedMemberID: MemberID?
@@ -126,13 +127,15 @@ struct MomoChannelMemberInspectorView: View {
         copy: MomoWorkspaceCopy,
         initialMemberID: MemberID? = nil,
         close: @escaping () -> Void,
-        didOpenDirectMessage: @escaping () -> Void
+        didOpenDirectMessage: @escaping () -> Void,
+        presentation: MomoInspectorPresentation
     ) {
         self.viewModel = viewModel
         self.audience = audience
         self.copy = copy
         self.close = close
         self.didOpenDirectMessage = didOpenDirectMessage
+        self.presentation = presentation
         _selectedMemberID = State(initialValue: initialMemberID)
     }
 
@@ -148,7 +151,7 @@ struct MomoChannelMemberInspectorView: View {
             filters
             stateContent(groups: groups)
         }
-        .momoSurface(.panel, cornerRadius: 0)
+        .momoInspectorSurface(presentation)
         .task {
             if viewModel.members.isEmpty {
                 await viewModel.refreshMemberDirectory()

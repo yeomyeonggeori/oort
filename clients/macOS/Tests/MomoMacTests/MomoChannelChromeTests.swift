@@ -4,6 +4,30 @@ import MomoCore
 @testable import MomoMac
 
 final class MomoChannelChromeTests: XCTestCase {
+    @MainActor
+    func testApprovalInboxSurfaceOwnershipSeparatesStandaloneFromRootComposition() {
+        let viewModel = ChatViewModel(backend: LiveChatBackend())
+
+        XCTAssertTrue(ApprovalInboxView(viewModel: viewModel).ownsInspectorSurface)
+        XCTAssertFalse(
+            ApprovalInboxView(
+                viewModel: viewModel,
+                inspectorPresentation: .attached
+            ).ownsInspectorSurface
+        )
+        XCTAssertFalse(
+            ApprovalInboxView(
+                viewModel: viewModel,
+                inspectorPresentation: .overlay
+            ).ownsInspectorSurface
+        )
+    }
+
+    func testAttachedInspectorUsesFlatSurfaceWhileOverlayKeepsElevatedChrome() {
+        XCTAssertFalse(MomoInspectorPresentation.attached.usesElevatedSurfaceChrome)
+        XCTAssertTrue(MomoInspectorPresentation.overlay.usesElevatedSurfaceChrome)
+    }
+
     func testDetailPanePresentationClosesAfterSwitchingPane() {
         var state = MomoDetailPanePresentationState()
 

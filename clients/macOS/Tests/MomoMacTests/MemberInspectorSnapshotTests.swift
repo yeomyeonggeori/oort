@@ -134,7 +134,8 @@ final class MemberInspectorSnapshotTests: XCTestCase {
                 audience: .channel,
                 copy: MomoWorkspaceCopy(language: .english),
                 close: {},
-                didOpenDirectMessage: {}
+                didOpenDirectMessage: {},
+                presentation: .overlay
             )
             .frame(width: MomoTheme.MemberInspector.overlayWidth, height: 620)
         )

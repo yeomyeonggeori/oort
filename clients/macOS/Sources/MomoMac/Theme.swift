@@ -449,9 +449,35 @@ public extension View {
         modifier(MomoSurfaceModifier(level: level, cornerRadius: cornerRadius, extent: extent))
     }
 
+    /// Fills a structural pane without drawing its own border or shadow. The
+    /// split layout owns separators so adjacent panes never double-stroke.
+    func momoFlatSurface(
+        _ level: MomoTheme.Surface.Level,
+        extent: MomoTheme.Surface.Extent = .bounded
+    ) -> some View {
+        modifier(MomoFlatSurfaceModifier(level: level, extent: extent))
+    }
+
     /// Applies a semantic role and explicitly honors macOS per-app text sizing.
     func momoTypography(_ role: MomoTheme.Typography.Role) -> some View {
         modifier(MomoTypographyModifier(role: role))
+    }
+}
+
+private struct MomoFlatSurfaceModifier: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let level: MomoTheme.Surface.Level
+    let extent: MomoTheme.Surface.Extent
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        let fill = MomoTheme.Surface.style(level, colorScheme: colorScheme).fill
+        switch extent {
+        case .bounded:
+            content.background(fill)
+        case .windowChrome:
+            content.background(fill.ignoresSafeArea())
+        }
     }
 }
 
