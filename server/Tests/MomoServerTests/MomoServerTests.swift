@@ -2082,6 +2082,148 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(response.headers[.contentType], "application/json")
     }
 
+    // MARK: - MOMO-412 signed webhook ingress (ADR-0115)
+
+    func testWebhookCryptoUsesOpaqueReferencesAndDeterministicIdempotency() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let installationID = UUID(uuidString: "41200000-0000-7000-8000-000000000001")!
+        let reference = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        let secret = WebhookCrypto.nativeSecret(masterKey: "master", secretRef: reference)
+
+        XCTAssertTrue(secret.hasPrefix("momo_whsec_v1."))
+        XCTAssertFalse(secret.contains(reference))
+        XCTAssertEqual(secret, WebhookCrypto.nativeSecret(masterKey: "master", secretRef: reference))
+        XCTAssertNotEqual(secret, WebhookCrypto.nativeSecret(masterKey: "other", secretRef: reference))
+
+        let token = "momo_hook_v1.\(workspaceID.uuidString.lowercased()).\(reference)"
+        XCTAssertEqual(WebhookCrypto.workspaceID(fromSlackToken: token), workspaceID)
+        XCTAssertNil(WebhookCrypto.workspaceID(fromSlackToken: "not-a-hook"))
+        XCTAssertEqual(WebhookCrypto.tokenHash(token).count, "sha256:".count + 64)
+
+        let first = WebhookCrypto.deterministicClientMessageID([
+            workspaceID.uuidString, installationID.uuidString, "delivery-1",
+        ])
+        let retry = WebhookCrypto.deterministicClientMessageID([
+            workspaceID.uuidString, installationID.uuidString, "delivery-1",
+        ])
+        let other = WebhookCrypto.deterministicClientMessageID([
+            workspaceID.uuidString, installationID.uuidString, "delivery-2",
+        ])
+        XCTAssertEqual(first, retry)
+        XCTAssertNotEqual(first, other)
+    }
+
+    func testWebhookCanonicalSignatureBaseBindsEveryADR0115Component() {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let installationID = UUID(uuidString: "41200000-0000-7000-8000-000000000001")!
+        let base = WebhookCrypto.canonicalSignatureBase(
+            workspaceID: workspaceID,
+            installationID: installationID,
+            timestamp: "1784260000",
+            deliveryID: "delivery-1",
+            bodySHA256: String(repeating: "a", count: 64)
+        )
+
+        XCTAssertEqual(
+            base,
+            "v1\nPOST\n/v1/webhooks/00000000-0000-7000-8000-000000000001/41200000-0000-7000-8000-000000000001\n41200000-0000-7000-8000-000000000001\n1784260000\ndelivery-1\n\(String(repeating: "a", count: 64))"
+        )
+        let signature = WebhookCrypto.signature(secret: "secret", base: base)
+        XCTAssertEqual(signature.count, 64)
+        XCTAssertEqual(signature, WebhookCrypto.signature(secret: "secret", base: base))
+    }
+
+    func testSlackCompatibleFixtureTranslatesMattermostSubset() throws {
+        let data = Data(#"""
+        {
+          "text":"Build <https://ci.example/run/7|passed> <!channel> <@U123>",
+          "attachments":[{
+            "fallback":"deploy result",
+            "color":"#36a64f",
+            "pretext":"Production deploy",
+            "author_name":"CI Bot",
+            "author_link":"https://ci.example/",
+            "author_icon":"https://ci.example/icon.png",
+            "title":"Release 7",
+            "title_link":"https://ci.example/run/7",
+            "text":"Completed <https://ci.example/log|logs>",
+            "fields":[{"title":"Status","value":"green","short":true}],
+            "image_url":"https://ci.example/result.png",
+            "thumb_url":"https://ci.example/thumb.png",
+            "footer":"Jenkins",
+            "footer_icon":"https://ci.example/footer.png"
+          }]
+        }
+        """#.utf8)
+
+        let rendered = try WebhookPayload.slackCompatible(data: data)
+        XCTAssertEqual(rendered.clientProps, ["slack_compatible": "true"])
+        XCTAssertEqual(
+            rendered.body,
+            "Build [passed](https://ci.example/run/7) @channel @U123\n\nProduction deploy\n[CI Bot](https://ci.example/)\n[Release 7](https://ci.example/run/7)\nCompleted [logs](https://ci.example/log)\nStatus: green\nhttps://ci.example/result.png\nhttps://ci.example/thumb.png\nJenkins"
+        )
+    }
+
+    func testSlackCompatibleRejectsBlocksAndMattermostUnsupportedFields() {
+        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","blocks":[]}"#.utf8))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+            XCTAssertTrue((error as? HTTPError)?.message.contains("blocks") == true)
+        }
+        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","mrkdwn":true}"#.utf8))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"attachments":[{"text":"x","ts":1}]}"#.utf8))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+        XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"<!everyone>"}"#.utf8))) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+    }
+
+    func testNativeWebhookPayloadIsStrictAndBounded() throws {
+        let rendered = try WebhookPayload.native(data: Data(#"{"text":"deploy complete","event_type":"deploy","metadata":{"region":"ap-northeast-2"}}"#.utf8))
+        XCTAssertEqual(rendered.body, "deploy complete")
+        XCTAssertEqual(rendered.clientProps["event_type"], "deploy")
+        XCTAssertEqual(rendered.clientProps["metadata.region"], "ap-northeast-2")
+
+        XCTAssertThrowsError(try WebhookPayload.native(data: Data(#"{"text":"x","secret":"must-not-pass"}"#.utf8)))
+        XCTAssertThrowsError(try WebhookPayload.native(data: Data(#"{"text":""}"#.utf8)))
+    }
+
+    func testSlackURLSecretIsRedactedFromRequestLogging() {
+        let token = "momo_hook_v1.00000000-0000-7000-8000-000000000001.raw-secret"
+        XCTAssertEqual(
+            SecretRedactingRequestLogMiddleware<AppRequestContext>.redactedPath("/hooks/\(token)"),
+            "/hooks/[REDACTED]"
+        )
+        XCTAssertEqual(
+            SecretRedactingRequestLogMiddleware<AppRequestContext>.redactedPath("/health"),
+            "/health"
+        )
+    }
+
+    func testWebhookRouteKeepsReceiptMessageAndOutboxInOneTenantTransaction() throws {
+        let testFile = URL(fileURLWithPath: #filePath)
+        let serverRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/WebhookRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("withTenantTransactionUnwrapped"))
+        XCTAssertTrue(source.contains("INSERT INTO webhook_receipt"))
+        XCTAssertTrue(source.contains("UPDATE channel_seq"))
+        XCTAssertTrue(source.contains("INSERT INTO message"))
+        XCTAssertTrue(source.contains("INSERT INTO outbox"))
+        XCTAssertTrue(source.contains("deterministicClientMessageID"))
+        XCTAssertFalse(source.contains("CentrifugoClient"))
+        XCTAssertFalse(source.contains("/api/publish"))
+        XCTAssertFalse(source.contains("withPlatformReadConnection"))
+        XCTAssertFalse(source.contains("BYPASSRLS"))
+    }
+
     private func testServerConfig(
         accessTokenTTL: TimeInterval = 15 * 60,
         centConnectionTokenTTL: TimeInterval = 5 * 60

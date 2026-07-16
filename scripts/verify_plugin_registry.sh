@@ -146,10 +146,10 @@ GITHUB_PATH="$PLUGINS/$GITHUB"
 
 api GET "$PLUGINS" "" "$OWNER_ACCESS"
 expect_status 200 "active member lists catalog"
-[ "$(printf '%s' "$RESPONSE_BODY" | jq '.plugins | length')" = "3" ] || {
-  echo "[plugin-reg] official catalog must contain exactly three seeds" >&2; exit 1; }
+[ "$(printf '%s' "$RESPONSE_BODY" | jq '.plugins | length')" = "4" ] || {
+  echo "[plugin-reg] official catalog must contain four seeds after MOMO-412" >&2; exit 1; }
 printf '%s' "$RESPONSE_BODY" | jq -e '
-  [.plugins[].pluginId] | sort == ["com.momo.plugins.github","com.momo.plugins.linear","com.momo.plugins.notion"]
+  [.plugins[].pluginId] | sort == ["com.momo.plugins.github","com.momo.plugins.linear","com.momo.plugins.notion","external_webhook"]
 ' >/dev/null
 
 api GET "$GITHUB_PATH" "" "$OWNER_ACCESS"
@@ -293,7 +293,7 @@ SQL
 
 echo
 echo "MOMO-410 plugin registry verification PASS"
-echo "- official seeds: GitHub/Notion/Linear endpoints + egress domains"
+echo "- official seeds: GitHub/Notion/Linear endpoints + external_webhook registry marker"
 echo "- validator: protocol/risk/approval/SPDX/malformed/digest/revoked fail closed"
 echo "- runtime: install -> grant -> revoke-grant -> re-grant -> revoke-install, same-tx audit, immediate projection invalidation"
 echo "- custody A: raw marker absent from tables, responses, and audit detail; tenant tables FORCE RLS isolated"

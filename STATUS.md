@@ -3,15 +3,10 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
-## MOMO-445 macOS single-owner inspector boundary (2026-07-17)
+## MOMO-412 signed webhook ingress + Slack-compatible mode (2026-07-17)
 
-- 가운데 타임라인과 붙어 있는 우측 승인·멤버 패널 사이의 이중 경계를 제거했다. 가운데 본문은 경계를 소유하지 않고, 레이아웃의 단일 `Divider`만 경계를 그리며 붙어 있는 패널은 semantic fill만 사용한다.
-- 좁은 창에서 떠 있는 inspector는 기존 card outline과 shadow를 유지한다. focused `MomoChannelChromeTests` 20/20 PASS이며 server/schema/engine 변경은 없다.
-
-## MOMO-414 macOS unified flat sidebar shell (2026-07-17)
-
-- 좌측 패널의 내부 수평 구분선·수동 우측선과 네이티브 타이틀바 기준선 중첩을 제거했다. `NavigationSplitView`의 resize/collapse 동작은 유지하면서 sidebar와 unified titlebar를 하나의 평면으로 연결하고, 가운데 본문과는 네이티브 세로 경계 하나만 남긴다.
-- AppKit 창 크롬 정책을 macOS 14 호스트에 좁게 적용하고 SwiftUI의 지연 toolbar 설치 뒤 한 번 재적용한다. focused `MomoChannelChromeTests` 19/19 PASS, design/correctness review Blocker 0이다.
+- ADR-0115에 따라 migration 014의 channel-bound install/key-ref-or-token-hash/receipt RLS 원장, owner/admin 발급·overlap 회전·revoke REST, native HMAC/replay 검증, Mattermost legacy attachment 부분집합 Slack 변환기와 receipt→message.seq→outbox 단일 tenant 트랜잭션을 추가했다. 전용 service member author와 URL-secret 로그 redaction으로 사람/에이전트 사칭 및 raw secret 저장을 피한다.
+- 서버 Swift build/test와 webhook verifier shell syntax는 worker 검증 대상으로 추가했다. Docker `runtime-db`의 위조/replay/stale/cross-workspace/rotation/revoke/Slack fixture/redaction 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
 
 ## MOMO-410 plugin manifest registry + install/grant 런타임 (2026-07-17)
 

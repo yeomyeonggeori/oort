@@ -92,6 +92,30 @@ read-state는 Postgres `read_state`가 유일한 권위다(ADR-0109). 클라이�
 이전 서버/개발용 fallback으로만 사용한다. REST API와 realtime 공개 도메인은 계속
 분리할 수 있으며(ADR-0002), 클라이언트는 API URL에서 realtime 주소를 추론하지 않는다.
 
+### Signed webhook ingress
+
+ADR-0115의 외부 수신 경로는 두 모드가 같은 원장을 사용한다. native는
+`POST /v1/webhooks/{workspace}/{installation}`에 per-install HMAC-SHA256과
+key ID/timestamp/delivery ID를 보내며 5분 replay window를 강제한다. DB에는
+server master와 domain-separated KDF에 넣을 opaque key reference만 남고, 파생
+secret은 발급·회전 응답에서 한 번만 보인다. Slack-compatible은
+`POST /hooks/{token}`의 URL 자체가 시크릿이며 전체 token 대신 SHA-256만 저장한다.
+전역 요청 logger는 이 경로를 `/hooks/[REDACTED]`로 치환한다.
+
+Slack 변환기의 v0 화이트리스트는 Mattermost 선례와 같은 top-level `text`,
+legacy `attachments`의 `fallback/color/pretext/author_name/author_link/author_icon/
+title/title_link/text/fields/image_url/thumb_url/footer/footer_icon` 및 field의
+`title/value/short`다. `<url|text>`, `<@member>`, `<!channel>`만 번역한다.
+`blocks`, `<#CHANNEL_ID>`, mrkdwn/parse/link_names, `*bold*`, `<!everyone>`,
+attachment `ts`와 unknown 필드는 명시적 400으로 거부한다.
+
+두 모드 모두 검증 뒤 `webhook_receipt`와 deterministic `client_msg_id`,
+`channel_seq` bump, `message`, broadcast `outbox`를 한 tenant transaction에서
+기록한다. 설치별 전용 service member가 author가 되며 props의
+`source=external_webhook`이 사람/실제 agent output과 구분한다. 이 멤버는
+schema_v0 호환을 위해 `agent` 저장 타입을 쓰지만 agent row·token·provider·실행
+권한은 갖지 않는다. relay만 outbox를 Centrifugo에 publish한다.
+
 ### Work v0 run 표면
 
 ADR-0111의 Work는 새 실행 개체가 아니라 기존 `agent_run`이다. active human channel
