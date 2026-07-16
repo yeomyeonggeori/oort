@@ -18,6 +18,13 @@
 - MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
 - 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
 
+## 2026-07-17 (Fable, 오케스트레이터) · ADR-0115 Accepted → SE-04B/411 착수 + worktree 소유권 사고
+- ADR-0115 Accepted(성재) → MOMO-412 `#438`(SE-04B webhook+Slack-호환)·MOMO-411 `#436`(gate 리소스 가드) codex worker 2기 병렬 spawn(§9 부하 체크: load 10.9, 412만 실질 부하 — 규칙 내).
+- **worktree 소유권 사고(3번째 크로스 세션 파일 사건)**: 통합자가 메인 worktree의 GPT UX 작업분(MessageListView+launcher)을 stash 시도 → 성재가 차단. 판별 결과 GPT는 #437을 격리 worktree에서 정상 머지했고 메인 worktree 사본은 다른 버전(잔재 추정, 단 확정은 GPT 세션 몫 — 무접촉 유지). 내 커밋은 임시 worktree cherry-pick으로 push 우회.
+- **§4.1 메인 worktree 소유권 규칙 정본화**: 메인 체크아웃=docs/머지 전용, add -A 금지, 타 세션 미커밋 파일 무접촉(stash/reset 금지), push 충돌 시 임시 worktree 우회, 초안 잔재는 만든 세션이 정리.
+- 주의 인계: 메인 worktree의 STATUS.md/Theme.swift도 구버전 스냅샷 — GPT 세션이 잔재 정리 전까지 통합자 플러시는 임시 worktree 경유.
+- 다음: 438/436 PR 검수(§9 부하 규칙 아래 게이트) → 순차 머지.
+
 ## 2026-07-17 (Fable, 오케스트레이터) · 리소스 거버넌스 정본화 + ADR-0115 draft
 - 성재 지시로 부하 규칙을 프로젝트 정본화: `MULTI_SESSION_OPS.md` **§9 Resource Governance**(부하 체크 게이트 load>12 금지/8~12 단일/`<8` 정상, 게이트 후 down 의무, 호스트 전체 heavy 동시 1개, 잔재 판별 팁) — 전 세션(Fable/GPT/Codex) 적용. tooling 봉합 MOMO-411 `#436` 발급(status:ready, 부하 안정 후 착수).
 - 부하 모니터 가동(load<8 3연속 시 heavy 재개 신호). ADR-0115 Proposed 기안(문서 작업) — HMAC native 모드 + Slack-호환 URL-시크릿 모드(blocks v0 거부), SE-04B 계약 승계.
