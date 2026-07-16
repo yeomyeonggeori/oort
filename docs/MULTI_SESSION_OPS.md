@@ -235,6 +235,35 @@ Use the narrowest profile that honestly covers the changed surface:
 
 PR evidence must come from a clean worktree. Exploratory pre-commit runs may use `LOCAL_GATE_ALLOW_DIRTY=1`, but that evidence is not enough to merge.
 
-## 9. Thread Tool Note
+## 9. Resource Governance (호스트 부하 규칙 — 2026-07-17 발열 사고 후 정본)
+
+> 적용 대상: **momo에서 게이트/빌드/soak를 돌리는 모든 세션**(Fable 엔진 트랙, GPT momo-main/UX 트랙, Codex worker 러너). 이 머신에서는 tf-hwp 등 다른 프로젝트도 병행되므로 momo 세션 합산이 아니라 **호스트 전체 기준**으로 판단한다.
+
+### 9.1 부하 체크 게이트 (heavy 작업 전 의무)
+
+docker-heavy 작업(runtime-* 게이트, e2e compose verifier, 컨테이너 내 Swift 빌드, soak) 시작 전에 확인한다:
+
+```sh
+uptime            # load 1min 기준
+docker ps --format '{{.Names}}' | grep -c momo   # 활성 momo 스택 수
+```
+
+- **load(1min) > 12** (18코어의 ~65%): heavy 작업 시작 금지 — 문서/리뷰/기획 작업으로 전환하거나 부하 하강 대기.
+- **load 8~12**: heavy 작업 1개만, 동시 실행 금지.
+- **load < 8**: 정상 진행. 그래도 docker-heavy 게이트는 **세션당 동시 1개**(9.2).
+
+### 9.2 잔재 방지 (사고 원인의 성문화)
+
+1. **게이트 런 종료 즉시 해당 worktree의 compose project를 down한다** — `local_gate.sh` runtime-* 프로파일의 `make up`은 스택을 내리지 않는다(게이트 런 1회 = postgres+centrifugo 잔재 1벌). down은 게이트를 돌린 세션의 의무다. (tooling: MOMO-411 `--down` 플래그 전까지 수동.)
+2. docker-heavy 게이트는 **호스트 전체에서 동시 1개** — 다른 트랙이 게이트 중이면(`docker ps`에서 분 단위 신생 momo 스택 관찰) 대기.
+3. goal 종결(머지·close) 시 해당 goal의 worktree 제거 + compose 스택 down + network rm까지가 종결이다.
+4. 배치 종결마다 `scripts/compose_janitor.sh --cleanup` + `docker builder prune -f --filter until=72h`. 주 1회 `~/.local/bin/momo-docker-reclaim.sh --aggressive`.
+5. 무거운 타 프로젝트 병행 시 Codex worker 동시 spawn 1~2로 제한(평시 상한 5와 별개의 부하 상한).
+
+### 9.3 판별 팁
+
+`docker ps`에서 **Up 수 시간짜리 `momo_feat-*`/`momo240_*` postgres+centrifugo 쌍 = 잔재**(활성 게이트는 분 단위). `momo_main`과 분 단위 신생 스택만 보존 대상. 유휴 판정이 애매하면 해당 트랙 세션에 확인 후 down.
+
+## 10. Thread Tool Note
 
 If Codex thread tools are available, `momo-main` can create or hand off worker threads. If tools are unavailable or awkward, use the prompt template above. The durable lock remains GitHub Issue + remote branch + PR, not the chat itself.
