@@ -209,7 +209,7 @@ public struct ChannelListView: View {
                         .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
                         .padding(
                             .bottom,
-                            MomoTheme.Sidebar.footerMinimumHeight + MomoTheme.Sidebar.sectionSpacing
+                            MomoTheme.Sidebar.footerMinimumHeight + MomoTheme.Sidebar.standardSpacing
                         )
                         .zIndex(2)
                 }
@@ -1160,11 +1160,6 @@ public struct ChannelListView: View {
             profileAction(copy.updates, systemImage: "arrow.down.circle") {
                 showProfilePanel = false
                 openUpdates?()
-            }
-            profileAction(copy.inviteMembers, systemImage: "person.badge.plus") {
-                showProfilePanel = false
-                inviteMode = .human
-                showMemberInvite = true
             }
 
             Divider()
