@@ -4,7 +4,7 @@
 > Planning ID: `ADR-0121` · Planner owner: `Fable` · Integrator: Fable(엔진/인프라 트랙 momo-main 겸임, 성재 승인 2026-07-15) · **구현: Codex worker(gpt-5.6-sol medium, 성재 지시 2026-07-16 — Fable 전담 체제 종료)**
 > 발급: 2026-07-16 · 기준 커밋: `51ff19d` · Supersedes: 없음
 > 근거 ADR: `ADR-0121 (Accepted 2026-07-15)` D1-A/D3 + ADR-0002(install/upgrade 레이어 예약) · 대상 goal: MOMO-406, MOMO-407 · 병렬 가능: **예** — 파일군 분리(infra/scripts/docs vs server), 머지는 406 → 407 순차
-> GitHub binding: 미발급 (Issue 생성 후 metadata-only binding)
+> GitHub binding: MOMO-406=`#425`, MOMO-407=`#426` (발급 2026-07-16)
 
 ## 1. 결정 요약
 
@@ -14,8 +14,8 @@ ADR-0121은 "서버 파기를 런북에서 제품으로" 만드는 결정이다.
 
 | 순서 | goal | 이슈 | 의존 | 병렬 |
 |---|---|---|---|---|
-| 1 | MOMO-406 install/upgrade + 5분 설치 문서 | (발급 대기) | — | 407과 병렬 |
-| 2 | MOMO-407 초대 보안 계약(만료 기본·role 바인딩·regenerate) | (발급 대기) | — | 406과 병렬 |
+| 1 | MOMO-406 install/upgrade + 5분 설치 문서 | #425 | — | 407과 병렬 |
+| 2 | MOMO-407 초대 보안 계약(만료 기본·role 바인딩·regenerate) | #426 | — | 406과 병렬 |
 
 머지 순서: 406 → 407 (구현 병렬, 머지 순차 — momo 규칙).
 
