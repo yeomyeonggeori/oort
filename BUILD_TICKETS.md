@@ -2047,7 +2047,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] schema_v0 불변. verifier: prod-모드 ephemeral PG에서 migrate → dev-password 로그인 401 → 인수 UPDATE → 로그인 200 (201은 원 수용기준 오기 — 로그인 API 계약은 200, worker 이탈 보고로 정정), dev 모드에서 기존 경로 무회귀. `runtime-db` 게이트 PASS(오케스트레이터 실행).
 - [x] 종결: PR #431(+리뷰 H1/H2/M1 반영 ee40e40) merge `8193734`. H1=잠금을 dev-password 전 human으로 확장(잔존 노출 봉합), H2=로컬 러너 명시 부트스트랩(도그푸드 무회귀·prod fail-closed 유지), 오잠금 벡터 없음(리뷰 확정+매트릭스 verifier). 후속 후보: INTERNAL_ALPHA/RUN 문서 dev-password 안내 정비(M2).
 
-### ☐ MOMO-410 수용기준 — ADR-0113 SE-04A: plugin manifest registry + install/grant 런타임 `[server/runtime-db]` · 의존: 없음
+### ☐ MOMO-410 (`#434`) 수용기준 — ADR-0113 SE-04A: plugin manifest registry + install/grant 런타임 `[server/runtime-db]` · 의존: 없음
 - [ ] manifest 계약(ADR-0113 D6): 업계 3층(plugin.json 계열 메타 + MCP 서버 참조(원격 URL 우선, `server.json` 스키마 필드 차용) + 선택 SKILL.md 참조) + momo 확장 필드(`approvalTier` 도구→티어 매핑, `risk`, `egressDomains`, `recommendedFor`, `serverPolicy`). validator가 protocol 호환·SPDX 라이선스(GPL/AGPL 거부)·publisher/provenance·digest·tools/scopes/risk/approval policy를 검증하고 unknown 값은 fail-closed.
 - [ ] 신규 migration: plugin registry(카탈로그 항목)·workspace install record·**grant 4-튜플(workspace, member, plugin, scope)**(ADR-0113 D2)·Capability Cache projection. RLS FORCE + audit_log 같은 트랜잭션. schema_v0 불변.
 - [ ] REST: 카탈로그 목록/상세(active member), install/revoke(owner/admin — serverPolicy 게이트), grant/revoke-grant(본인 grant만 — 위임 주체=사용자). **raw credential/토큰을 어떤 테이블·로그·응답에도 저장·노출하지 않는다**(커스터디 A: 토큰은 에이전트 호스트 소유). revoked install/grant는 Capability Cache에서 즉시 제외(fail-closed).

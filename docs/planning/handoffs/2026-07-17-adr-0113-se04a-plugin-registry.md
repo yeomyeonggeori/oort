@@ -4,7 +4,7 @@
 > Planning ID: `ADR-0113` · Planner owner: `Fable` · Integrator: Fable(엔진/인프라 트랙 momo-main 겸임) · 구현: Codex worker(gpt-5.6-sol medium)
 > 발급: 2026-07-17 · 기준 커밋: `9ade613` · Supersedes: 없음
 > 근거 ADR: `ADR-0113 (Accepted 2026-07-17)` D2/D5/D6 · 대상 goal: MOMO-410 · 병렬 가능: 단독
-> GitHub binding: 미발급 (Issue 생성 후 metadata-only binding)
+> GitHub binding: MOMO-410=`#434` (발급 2026-07-17)
 
 ## 1. 결정 요약
 
@@ -14,7 +14,7 @@ ADR-0113은 플러그인 = "manifest + MCP 서버 참조 + momo 확장 필드"�
 
 | 순서 | goal | 이슈 | 의존 |
 |---|---|---|---|
-| 1 | MOMO-410 registry+validator+REST+시드 3종 | (발급 대기) | — |
+| 1 | MOMO-410 registry+validator+REST+시드 3종 | #434 | — |
 
 후속 예약(이 goal 범위 밖): SE-04B(webhook+Slack-호환), GitHub grant 왕복, Drive 경로 C, 온보딩 추천 세트.
 
