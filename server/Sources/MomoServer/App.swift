@@ -106,6 +106,7 @@ enum AppBuilder {
         InviteRoutes(db: db).add(to: authed)
         InboundMCPRoutes(db: db).add(to: authed)
         PlatformAdminRoutes(db: db).add(to: authed)
+        DeviceRoutes(db: db).add(to: authed)
 
         // ---- Application ----
         // The PostgresClient is a ServiceLifecycle.Service; hand it to the app's

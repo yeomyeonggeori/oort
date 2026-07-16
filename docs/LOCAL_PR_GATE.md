@@ -63,7 +63,7 @@ Profiles:
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + macOS real-backend smoke + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet; add `LOCAL_GATE_LAUNCH_UI=1` for foreground MomoMacDevApp process/window/log evidence |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + `LOCAL_GATE_LAUNCH_UI=1` MomoMacDevApp real-backend process/window evidence + redacted diagnostics bundle |
-| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` |
+| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` (isolated e2e compose push device/token registration lifecycle) |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
@@ -138,6 +138,28 @@ scripts/verify_openapi_contract.sh
 The `docs` profile statically checks the spec parse and both gate scripts.
 The runtime drift gate is wired into the `web` profile (MOMO-391) and also
 runs standalone with the command above.
+
+### Push device registration gate (MOMO-403, ADR-0120 P-1)
+
+`scripts/verify_push_registration.sh` is the runtime gate for the APNs
+device/push_token registration REST (`DeviceRoutes.swift`). It boots an
+isolated e2e compose stack (project `momo403push`, loopback ports
+`19500`-`19503`, `api` service only — a single in-container cold Swift build,
+inheriting the MOMO-401 staggered-boot memory guard), installs disposable
+member fixtures in the demo workspace plus a second fixture tenant, and
+asserts: register 201 with suffix-only receipt (the raw hex `apns_token`
+never appears in any response body or `audit_log.detail`), idempotent
+re-registration with token rotation (exactly one ACTIVE token per
+device+env — 010 partial unique index; invalidated rows preserved for
+`push_dispatch_log`), own-devices-only listing, actor-binding 403s (another
+member's device or active token), cross-tenant 403 (workspace scope
+mismatch) and 409 (RLS-invisible token conflict), revoke as
+`invalidated_at` (no row deletion; idempotent; 404 unknown),
+invalidated-token reclaim (account switch), same-transaction audit rows,
+and `momo_app` RLS isolation for `device`/`push_token`. Wired into the
+`runtime-db` profile; also runs standalone. Overrides: `PUSH_GATE_PORT` /
+`PUSH_GATE_POSTGRES_PORT` / `PUSH_GATE_CENT_PORT` / `PUSH_GATE_HERMES_PORT`,
+`PUSH_GATE_PROJECT`, `PUSH_GATE_BOOT_TIMEOUT`, `PUSH_GATE_KEEP=1`.
 
 ### Web client gate (`web` profile, MOMO-391 + MOMO-400 + MOMO-401)
 
@@ -461,7 +483,7 @@ Use the profile that matches the changed surface.
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha`; add `LOCAL_GATE_LAUNCH_UI=1` for MomoMacDevApp process/window/log launch evidence |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |
-| `runtime-db` | migrations/server/RLS/join changes | `scripts/local_gate.sh --profile runtime-db` |
+| `runtime-db` | migrations/server/RLS/join/push-registration changes | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
