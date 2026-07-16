@@ -263,13 +263,14 @@ printf '%s' "$RESPONSE_BODY" | jq -e '.error.message | contains("blocks")' >/dev
 # payload (username/icon_emoji/*bold*/attachment ts+mrkdwn_in) must 202, drop
 # the identity override, and render the text.
 api POST "$SLACK_URL" '{"text":"*Alerting* fired","username":"grafana","icon_emoji":":fire:","attachments":[{"text":"cpu high","ts":1,"mrkdwn_in":["text"]}]}'
-expect_status 202 "Mattermost-unsupported fields ignored (tool works by URL swap)"
+expect_status 201 "Mattermost-unsupported fields ignored (tool works by URL swap)"
 IGNORE_MSG="$(printf "SELECT id FROM message WHERE channel_id='$GENERAL_CHANNEL' ORDER BY seq DESC LIMIT 1;\n" | sql_scalar)"
 got="$(printf "SELECT body FROM message WHERE id='$IGNORE_MSG';\n" | sql_scalar)"
-case "$got" in
-  *"*Alerting* fired"*|*"cpu high"*) : ;;
-  *) echo "[webhook] ignored-field payload did not render expected text: $got" >&2; exit 1 ;;
-esac
+# sql_scalar collapses whitespace; match on tokens (fnmatch-safe, no globbing
+# the literal * in *Alerting*).
+if ! printf '%s' "$got" | grep -Fq 'Alerting' || ! printf '%s' "$got" | grep -Fq 'cpu'; then
+  echo "[webhook] ignored-field payload did not render expected text: $got" >&2; exit 1
+fi
 printf '%s' "$got" | grep -q 'grafana' && { echo "[webhook] identity override leaked into message" >&2; exit 1; }
 printf "SELECT display_name FROM member WHERE id=(SELECT author_member_id FROM message WHERE id='$IGNORE_MSG');\n" | sql_scalar | grep -q 'grafana' && { echo "[webhook] username spoofed the author" >&2; exit 1; } || true
 
