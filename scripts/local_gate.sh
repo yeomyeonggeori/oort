@@ -6,6 +6,7 @@ set -u -o pipefail
 PROFILE=""
 PROFILE_EXPLICIT=0
 AUTO_MODE=0
+KEEP_STACK=0
 OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
@@ -21,6 +22,8 @@ Options:
                       the evidence markdown.
   --profile PROFILE   Gate profile to run. Default: docs (when --auto is not given)
   --output-dir DIR    Directory for log/evidence files. Default: $TMPDIR/momo-local-gate
+  --keep-stack        Keep the main runtime-* Compose stack after the gate exits.
+                      By default it is taken down on success, failure, or interruption.
   -h, --help          Show this help.
 
 Environment:
@@ -30,6 +33,7 @@ Environment:
   LOCAL_GATE_ALLOW_DIRTY=1 Allow pre-commit exploratory runs with dirty files.
   LOCAL_GATE_BASE_REF      Defaults to origin/main for committed PR diff checks and
                           --auto profile selection (falls back to local main).
+  LOCAL_GATE_FORCE=1       Run a runtime-* profile even when host load(1min) is > 12.
   DEVELOPER_DIR           Defaults to /Applications/Xcode.app/Contents/Developer for Swift gates.
   ENV_FILE                Optional runtime env file consumed by Makefile/runtime scripts.
 EOF
@@ -49,6 +53,10 @@ while [ "$#" -gt 0 ]; do
     --output-dir)
       OUT_DIR="${2:-}"
       shift 2
+      ;;
+    --keep-stack)
+      KEEP_STACK=1
+      shift
       ;;
     -h|--help)
       usage
@@ -87,6 +95,21 @@ if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
   exit 1
 fi
 cd "$REPO_ROOT" || exit 1
+
+local_gate_load_1m() {
+  local load=""
+
+  if [ -r /proc/loadavg ]; then
+    load="$(awk '{ print $1; exit }' /proc/loadavg 2>/dev/null)"
+  elif command -v sysctl >/dev/null 2>&1; then
+    load="$(sysctl -n vm.loadavg 2>/dev/null | awk '{ gsub(/[{}]/, ""); print $1; exit }')"
+  fi
+
+  case "$load" in
+    ""|*[!0-9.]*) return 1 ;;
+  esac
+  printf '%s\n' "$load"
+}
 
 # =============================================================================
 # --auto profile selection (MOMO-316)
@@ -291,6 +314,28 @@ case "$PROFILE" in
     ;;
 esac
 
+RUNTIME_COMPOSE_PROFILE=0
+case "$PROFILE" in
+  runtime-db|runtime-relay|runtime-live|runtime-agent)
+    RUNTIME_COMPOSE_PROFILE=1
+    ;;
+esac
+
+if [ "$RUNTIME_COMPOSE_PROFILE" -eq 1 ]; then
+  if LOAD_1M="$(local_gate_load_1m)"; then
+    if awk -v load="$LOAD_1M" 'BEGIN { exit !(load > 12) }'; then
+      if [ "${LOCAL_GATE_FORCE:-0}" != "1" ]; then
+        echo "WARNING: host load(1min) is $LOAD_1M (> 12); refusing to start $PROFILE." >&2
+        echo "Wait for host load to fall, or confirm the override with LOCAL_GATE_FORCE=1." >&2
+        exit 1
+      fi
+      echo "WARNING: LOCAL_GATE_FORCE=1 set; continuing despite host load(1min) $LOAD_1M (> 12)." >&2
+    fi
+  else
+    echo "WARNING: unable to read host load(1min); continuing without the load guard." >&2
+  fi
+fi
+
 mkdir -p "$OUT_DIR" || exit 1
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 START_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -322,6 +367,7 @@ export LOCAL_GATE_RUN_ID="$RUN_ID"
 export LOCAL_GATE_LOCAL_ALPHA_DIR="$OUT_DIR/local-alpha-${RUN_ID}"
 export LOCAL_GATE_INTERNAL_ALPHA_DIR="$OUT_DIR/internal-alpha-${RUN_ID}"
 export MOMO_RUNTIME_GUARD_REPO_ROOT="$REPO_ROOT"
+RUNTIME_COMPOSE_STARTED=0
 case "$PROFILE" in
   local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all)
     # shellcheck source=scripts/runtime_process_guard.sh
@@ -335,6 +381,14 @@ case "$PROFILE" in
     local_gate_emergency_cleanup() {
       local original_rc=$?
       trap - EXIT INT TERM
+      if [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]; then
+        echo "local gate: taking down runtime Compose stack" | tee -a "$LOG_FILE"
+        if ! make down 2>&1 | tee -a "$LOG_FILE"; then
+          echo "WARNING: runtime Compose teardown failed; run 'make down' manually." | tee -a "$LOG_FILE" >&2
+        fi
+      elif [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ]; then
+        echo "local gate: --keep-stack set; runtime Compose stack retained" | tee -a "$LOG_FILE"
+      fi
       if momo_guard_validate_marker "${MOMO_GATE_RUN_MARKER:-}"; then
         momo_cleanup_gate_marker "$MOMO_GATE_RUN_MARKER" "local gate emergency cleanup" || true
       fi
@@ -789,6 +843,11 @@ run_cmd() {
   } | tee -a "$LOG_FILE"
 
   set +e
+  if [ "$label" = "docker compose up (--wait healthy)" ] && [ "$RUNTIME_COMPOSE_PROFILE" -eq 1 ]; then
+    # Mark before invoking `make up`: an interrupted/partially successful Compose
+    # start still needs the same EXIT-trap teardown as a completed bootstrap.
+    RUNTIME_COMPOSE_STARTED=1
+  fi
   bash -lc "$command" 2>&1 | tee -a "$LOG_FILE"
   code=${PIPESTATUS[0]}
   set +e

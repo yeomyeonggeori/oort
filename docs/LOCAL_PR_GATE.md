@@ -51,6 +51,18 @@ This keeps evidence paths collision-safe when the same profile runs in parallel
 from multiple worktrees. Use `--output-dir <dir>` or `LOCAL_GATE_OUT_DIR=<dir>`
 when you need a stable parent directory for local evidence files.
 
+Before `runtime-db`, `runtime-relay`, `runtime-live`, or `runtime-agent`
+starts, the script enforces the host resource threshold defined in
+[`MULTI_SESSION_OPS.md` §9](MULTI_SESSION_OPS.md#9-resource-governance-호스트-부하-규칙--2026-07-17-발열-사고-후-정본):
+load(1min) greater than 12 stops the run with a warning. After checking the
+host and accepting the risk, an operator may explicitly override that stop
+with `LOCAL_GATE_FORCE=1`.
+
+Those runtime profiles also take down the main worktree Compose project on
+success, failure, or interruption after `make up` starts. Use `--keep-stack`
+only when the stack is intentionally needed for debugging; the evidence format
+and PASS criteria are unchanged by this resource cleanup.
+
 Profiles:
 
 | Profile | Use when | What it runs |
@@ -462,10 +474,12 @@ worktree Docker Compose resources with:
 scripts/compose_janitor.sh
 ```
 
-This command is dry-run by default. It lists only stale `momo_` worktree Compose
+This command is dry-run by default. It lists only stale `momo_` and `momo240_` worktree Compose
 projects, containers, and networks; it protects `momo_default`, the root `momo`
 project, `supabase`, active worktree projects, and non-momo resources. Removal
-requires an explicit cleanup flag:
+requires an explicit cleanup flag. Volumes remain untouched. See
+[`MULTI_SESSION_OPS.md` §9](MULTI_SESSION_OPS.md#9-resource-governance-호스트-부하-규칙--2026-07-17-발열-사고-후-정본)
+for the host-wide load and stale-stack policy:
 
 ```bash
 scripts/compose_janitor.sh --cleanup

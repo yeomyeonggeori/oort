@@ -14,7 +14,7 @@ Lists stale Docker Compose projects/containers/networks created by momo worktree
 local gates. The default is dry-run. Resources are removed only with --cleanup.
 
 Safety rules:
-  - Only Compose-labeled projects whose name starts with momo_ are candidates.
+  - Only Compose-labeled projects whose name starts with momo_ or momo240_ are candidates.
   - Active git worktree projects are protected.
   - Project momo, network momo_default, project supabase, and non-momo resources
     are protected.
@@ -187,7 +187,7 @@ is_active_project() {
 is_candidate_project() {
   local project="$1"
   case "$project" in
-    momo_*)
+    momo_*|momo240_*)
       is_active_project "$project" && return 1
       return 0
       ;;
@@ -216,7 +216,7 @@ protect_reason_for_project() {
     supabase|supabase_*)
       printf 'protected:supabase\n'
       ;;
-    momo_*)
+    momo_*|momo240_*)
       if is_active_project "$project"; then
         printf 'protected:active-worktree\n'
       else
