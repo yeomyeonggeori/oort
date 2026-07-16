@@ -24,6 +24,7 @@
   - ✅ `.sops.yaml.example` + `infra/prod/secrets.env.example` — SOPS/age 운영 계약, 실제 시크릿 미포함 (MOMO-006)
   - ✅ `infra/prod/pgbackrest*.example` + `docs/SECRETS_BACKUP_RUNBOOK.md` — 백업/복원 skeleton과 리허설 절차 (MOMO-006)
   - ✅ `scripts/verify_staging_smoke.sh` + `scripts/local_gate.sh --profile staging-smoke` — VPS 시크릿 없는 prod compose/Caddy/Centrifugo/secrets/pgBackRest/public preflight evidence local gate (MOMO-007/MOMO-229)
+  - ✅ `infra/prod/install.sh` + `infra/prod/upgrade.sh` + `scripts/verify_prod_install_upgrade.sh` — pinned digest 설치, forward-only upgrade/app rollback, 정적 인자 매트릭스 (MOMO-406)
   - ✅ `infra/prod/docker-compose.internal-smoke.yml` + `infra/prod/internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh` — 내부 테스트용 single-node hosting smoke gate (MOMO-216)
   - ✅ `infra/prod/docker/` + `scripts/verify_internal_host_runtime.sh` + `scripts/local_gate.sh --profile host-runtime` — local image 기반 prod+internal-smoke boot/health/migrate/message/relay/mock-agent runtime gate (MOMO-220)
   - ✅ `scripts/verify_backup_restore_rehearsal.sh` + `scripts/local_gate.sh --profile backup` — 임시 PostgreSQL source→dump→별도 restore→marker checksum evidence gate (MOMO-222)
@@ -32,6 +33,131 @@
   - ✅ `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh` — AWS 1주일 internal alpha topology/cost/security-group/backup/deploy/rollback preflight (MOMO-233)
   - ✅ `server/Migrations/003_onboarding.sql` — invite_code + redemption audit (MOMO-010)
   - ✅ `docs/RUN.md`에 staging smoke gate와 host-runtime 기동/롤백/시크릿/백업 절차 추가 (MOMO-007)
+
+---
+
+## 0.1 5분 설치 (MOMO-406, ADR-0121 D1-A)
+
+대상은 **Ubuntu LTS 단일 노드**에서 터미널을 사용할 수 있는 운영자 1명이다. 설치
+스크립트는 비대화형이며 같은 env로 다시 실행해도 안전하다. 아래 5분은 이미지가 이미
+registry에 있고 DNS가 전파됐다는 전제의 **운영자 작업 시간**이다. 이미지 다운로드,
+DNS 전파, ACME 인증서 발급 시간은 포함하지 않는다.
+
+### 전제
+
+- 공인 DNS의 `API_DOMAIN`, `REALTIME_DOMAIN`이 이 호스트를 가리킨다. 웹을 함께
+  제공할 때만 별도 `APP_DOMAIN`을 설정한다. unset/빈 값이면 기존
+  `momo-app-domain-unset.localhost` sentinel과 2-site 동작이 유지된다.
+- Docker Engine + Compose v2, `curl`, `getent`(또는 `dig`), 80/443 인바운드,
+  여유 디스크 10 GiB 이상이 준비돼 있다.
+- `infra/prod/secrets.env.example`을 바탕으로 SOPS/age 또는 권한 제한 host-local env를
+  만들었다. 네 momo 이미지(`api`, `relay`, `worker`, `migrate`)는 각각
+  `ghcr.io/...@sha256:<64 hex>` 전체 digest ref여야 한다. `latest`나 tag-only 입력은
+  install/upgrade가 거부한다.
+- pgBackRest stanza/check/full backup/WAL/PITR 의무와 외부 Hermes HTTPS 자격증명을
+  env에 선언했다. 값은 로그나 PR evidence에 붙이지 않는다.
+
+SOPS를 쓰는 권장 한 줄 설치:
+
+```sh
+sops exec-env /secure/momo/prod.sops.env \
+  'infra/prod/install.sh --from-env --mode prod --state-dir /var/lib/momo --evidence-dir /var/lib/momo/evidence'
+```
+
+tmpfs/권한 0600 host-local env를 쓰는 동등 경로:
+
+```sh
+infra/prod/install.sh --env-file /run/momo/prod.env --mode prod \
+  --state-dir /var/lib/momo --evidence-dir /var/lib/momo/evidence
+```
+
+스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → `docker compose config
+--quiet` → pull → PostgreSQL/Redis/Centrifugo → one-shot `migrate` →
+API/relay/worker/Caddy → `https://API_DOMAIN/health` 순으로 실행한다. 실패하면 `compose
+ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는다. 성공한 이미지 세트는
+`/var/lib/momo/deploy-state.env`에 mode 0600으로 기록한다.
+
+### 설치 완료의 일부: owner 자격증명 인수 (필수 — URL 공유 전)
+
+> **경고 (review #429 H1):** 마이그레이션 직후 시드 owner(`demo@momo.local`)는 **공개적으로
+> 알려진 결정론적 비밀번호(`dev-password`, `005_auth_password_hash.sql` 백필)** 를 가진다.
+> install.sh의 "install complete"는 이 인수 절차까지 마쳐야 완료다 — 아래 UPDATE를 실행하기
+> 전에는 서버 URL을 누구와도 공유하지 마라. (prod 모드 시드의 fail-closed 랜덤 비밀번호는
+> 후속 서버 티켓으로 분리 — 이 문서 창구가 그때까지의 유일한 방어다.)
+
+마이그레이션은 첫 bootstrap workspace와 owner 행을 멱등 생성한다. 초기 owner 자격증명은
+공개 설치 로그가 아니라 운영자의 SOPS/host-only provisioning 경계에서 설정해야 한다.
+암호화된 env에 `MOMO_INITIAL_OWNER_EMAIL`과 `MOMO_INITIAL_OWNER_PASSWORD`를 추가한 뒤,
+호스트에서 아래 one-shot 인수 절차를 실행한다. `psql \getenv`를 사용하므로 비밀번호 값은
+명령 인자·stdout에 나타나지 않는다.
+
+```sh
+sops exec-env /secure/momo/prod.sops.env \
+  'docker compose -f infra/prod/docker-compose.prod.yml exec -T \
+   -e MOMO_INITIAL_OWNER_EMAIL -e MOMO_INITIAL_OWNER_PASSWORD postgres \
+   psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+\getenv owner_email MOMO_INITIAL_OWNER_EMAIL
+\getenv owner_password MOMO_INITIAL_OWNER_PASSWORD
+BEGIN;
+SET LOCAL app.workspace_id = '00000000-0000-7000-8000-000000000001';
+UPDATE human
+   SET email = :'owner_email', email_verified = true,
+       password_hash = momo_password_hash(:'owner_password')
+ WHERE member_id = '00000000-0000-7000-8000-000000000101';
+COMMIT;
+SQL
+```
+
+그 자격증명으로 macOS 앱의 **설치된 self-hosted 서버 연결**에서
+`https://API_DOMAIN`에 로그인한 뒤, 워크스페이스 설정 → 멤버 → 초대 링크 만들기를
+선택한다. 원본 초대 코드는 한 번만 표시되는 bearer secret이므로 공개 로그·shell
+history·PR evidence에 복사하지 않는다. 이 시점이 "첫 워크스페이스/초대" 완료다.
+
+> 현재 v1 installer는 사람 계정 비밀번호나 원본 초대 코드를 인자로 받거나 출력하지
+> 않는다. 초기 owner credential provisioning은 호스트 DB 관리자 책임이며, 가입자가
+> 사용할 링크 초대의 기본 만료/역할/regenerate 서버 계약은 MOMO-407이 담당한다.
+
+relay 등록은 ADR-0120 P-3/S-5의 후속 자리만 `install.sh` 끝에 주석으로 예약돼 있다.
+등록 실패는 향후에도 설치 성공을 뒤집지 않으며, relay 없는 오프그리드 설치는 1급이다.
+
+### 업그레이드와 롤백
+
+실제 업그레이드는 먼저 성공한 백업 evidence가 필요하다. 새 SOPS env도 네 이미지 모두
+새 digest를 가리켜야 한다.
+
+```sh
+sops exec-env /secure/momo/prod-next.sops.env \
+  'infra/prod/upgrade.sh --from-env --mode prod --state-dir /var/lib/momo \
+   --backup-evidence /var/lib/momo/evidence/backup-restore-evidence.json'
+```
+
+upgrade는 현재 이미지 세트를 `.previous`로 보존하고 새 digest pull → migrate →
+api/relay/worker 순차 재기동 → health 순으로 진행한다. v1은 짧은 중단을 허용한다.
+실패하면 이전 **앱 이미지** 3개를 자동 복구한다. DB migration은 전방 전용이라 절대
+자동 역마이그레이션하지 않는다. 이전 앱이 새 스키마와 호환되지 않거나 자동 복구 후에도
+health가 실패하면 바로 멈추고 운영자가 판단해야 한다.
+
+성공 후 수동 app rollback이 필요할 때:
+
+```sh
+sops exec-env /secure/momo/prod-next.sops.env \
+  'infra/prod/upgrade.sh --from-env --mode prod --state-dir /var/lib/momo \
+   --rollback-only --rollback-state /var/lib/momo/deploy-state.env.previous'
+```
+
+변경 없이 입력·compose render·rollback 경로만 확인하려면 `install.sh` 또는
+`upgrade.sh`에 `--dry-run`을 붙인다. 실제 DNS/TLS, registry pull/run, SOPS 복호화,
+pgBackRest backup/PITR, 외부 Hermes 연결은 실제 호스트 evidence가 생기기 전까지
+`runtime-unverified(public host)`다.
+
+### 단일 노드 상한
+
+v1 문서상 보수 상한은 **동시 사용자 수백 명(최대 500명 계획값)** 이다. 이는 SLA나
+부하시험 PASS 수치가 아니다 — ADR-0121 D1-A의 경계("동시 수백 명")를 이 문서가 500으로
+구체화한 계획값이다. 500명에 접근하거나
+CPU/메모리/DB latency가 지속 상승하면 먼저 API/relay/worker를 수평 분리하고, 이후
+PostgreSQL/Redis를 관리형 또는 별도 노드로 옮긴다. 실제 팀 트래픽 부하시험 전에는 이
+수치를 검증된 처리량으로 표현하지 않는다.
 
 ---
 

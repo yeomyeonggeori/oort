@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# Static MOMO-406 contract matrix. No real Docker daemon, VPS, DNS, or secret is used.
+set -euo pipefail
+
+fail() {
+  printf '[install-upgrade-static] FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+pass() {
+  printf '[install-upgrade-static] PASS: %s\n' "$*"
+}
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "must run inside the repository"
+cd "$REPO_ROOT"
+
+INSTALL="infra/prod/install.sh"
+UPGRADE="infra/prod/upgrade.sh"
+LIB="infra/prod/deploy-lib.sh"
+for path in "$INSTALL" "$UPGRADE" "$LIB"; do
+  [ -x "$path" ] || fail "missing executable deployment script: $path"
+done
+
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/momo406.XXXXXX")"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+FAKE_BIN="$TMP_ROOT/bin"
+TRACE="$TMP_ROOT/docker.trace"
+DEPLOY_STATE_NAME="deploy-state.env"
+mkdir -p "$FAKE_BIN" "$TMP_ROOT/state"
+
+cat > "$FAKE_BIN/docker" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'api_image=%s args=%s\n' "${MOMO_API_IMAGE:-unset}" "$*" >> "${MOMO406_DOCKER_TRACE:?}"
+if [ "${1:-}" = "compose" ] && [ "${2:-}" = "version" ]; then
+  printf 'Docker Compose version v2.30.0\n'
+fi
+case " $* " in
+  *' ps --status running --services '*) printf 'api\nrelay\nworker\ncaddy\n' ;;
+esac
+if [ "${MOMO406_FAIL_NEW_API_ONCE:-0}" = "1" ] &&
+   [[ " $* " == *' up -d --no-deps --force-recreate api '* ]] &&
+   [ "${MOMO_API_IMAGE:-}" = "${MOMO406_NEW_API_IMAGE:-}" ] &&
+   [ ! -f "${MOMO406_FAILURE_MARKER:?}" ]; then
+  : > "$MOMO406_FAILURE_MARKER"
+  exit 1
+fi
+SH
+chmod +x "$FAKE_BIN/docker"
+
+cat > "$FAKE_BIN/curl" <<'SH'
+#!/usr/bin/env bash
+exit 0
+SH
+cat > "$FAKE_BIN/getent" <<'SH'
+#!/usr/bin/env bash
+printf '203.0.113.10 %s\n' "${2:-host}"
+SH
+chmod +x "$FAKE_BIN/curl" "$FAKE_BIN/getent"
+
+DIGEST_A="$(printf 'a%.0s' {1..64})"
+DIGEST_B="$(printf 'b%.0s' {1..64})"
+DIGEST_C="$(printf 'c%.0s' {1..64})"
+DIGEST_D="$(printf 'd%.0s' {1..64})"
+OLD_A="$(printf '1%.0s' {1..64})"
+OLD_B="$(printf '2%.0s' {1..64})"
+OLD_C="$(printf '3%.0s' {1..64})"
+OLD_D="$(printf '4%.0s' {1..64})"
+ENV_FILE="$TMP_ROOT/prod.env"
+
+cat > "$ENV_FILE" <<EOF
+COMPOSE_PROJECT_NAME=momo-406-static
+MOMO_ENV=staging
+SECRET_SOURCE=host-local
+PUBLIC_BASE_URL=https://api.momo-install.example.net
+API_DOMAIN=api.momo-install.example.net
+REALTIME_DOMAIN=rt.momo-install.example.net
+MOMO_CENTRIFUGO_WS_URL=wss://rt.momo-install.example.net/connection/websocket
+CADDY_EMAIL=ops@momo-install.example.net
+ACME_EMAIL=ops@momo-install.example.net
+HTTP_PORT=80
+HTTPS_PORT=443
+MOMO_IMAGE_TAG=sha-0123456789abcdef0123456789abcdef01234567
+MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server@sha256:$DIGEST_A
+MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay@sha256:$DIGEST_B
+MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker@sha256:$DIGEST_C
+MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate@sha256:$DIGEST_D
+POSTGRES_DB=momo
+POSTGRES_USER=momo
+POSTGRES_PASSWORD=8d96741fb02c4e1ca8dd803a5f121c11
+DATABASE_URL=postgres://momo:8d96741fb02c4e1ca8dd803a5f121c11@postgres:5432/momo
+RELAY_DATABASE_URL=postgres://momo_relay:25d89609443e44219a554563e39ac89b@postgres:5432/momo
+DB_VOLUME_NAME=momo-406-static-pgdata
+REDIS_PASSWORD=1099a519ac6d439fba20c1940d483108
+CENTRIFUGO_REDIS_ADDRESS=redis://:1099a519ac6d439fba20c1940d483108@redis:6379/0
+REDIS_VOLUME_NAME=momo-406-static-redis
+CENT_TOKEN_HMAC=5d5b20976e38402a949e1b19655b0a9b
+CENT_API_KEY=69fed31405fb4696b3677e12a4f09737
+CENT_PROXY_SECRET=b3b355af9df54d2f9df7b46d51aad7dc
+JWT_HMAC=231171fc80c5458a84c0c52cd5b9f284
+AGENT_PROVIDER_MODE=external-hermes
+AGENT_MODEL=hermes-agent
+HERMES_BASE_URL=https://gateway.momo-install.example.net/v1
+HERMES_API_KEY=913df1fc642345ecb78c1d84e52024b0
+PGBACKREST_STANZA=momo
+PGBACKREST_REPO1_PATH=/var/lib/pgbackrest
+PGBACKREST_REPO1_CIPHER_PASS=4611197d28804171910eb3becbdd23aa
+PGBACKREST_WAL_ARCHIVE_REQUIRED=1
+PGBACKREST_STANZA_CHECK_REQUIRED=1
+PGBACKREST_FULL_BACKUP_REQUIRED=1
+PGBACKREST_PITR_REHEARSAL_REQUIRED=1
+EOF
+
+cat > "$TMP_ROOT/state/$DEPLOY_STATE_NAME" <<EOF
+MOMO_IMAGE_TAG=sha-fedcba9876543210fedcba9876543210fedcba98
+MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server@sha256:$OLD_A
+MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay@sha256:$OLD_B
+MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker@sha256:$OLD_C
+MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate@sha256:$OLD_D
+EOF
+chmod 600 "$TMP_ROOT/state/$DEPLOY_STATE_NAME"
+cp "$TMP_ROOT/state/$DEPLOY_STATE_NAME" "$TMP_ROOT/state/$DEPLOY_STATE_NAME.previous"
+
+run_capture() {
+  local output="$1"
+  shift
+  PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" "$@" >"$output" 2>&1
+}
+
+if run_capture "$TMP_ROOT/missing-source.out" "$INSTALL" --dry-run; then
+  fail "install accepted a missing env source"
+fi
+grep -Fq 'missing --env-file FILE or --from-env' "$TMP_ROOT/missing-source.out" ||
+  fail "missing env source did not produce an actionable error"
+pass "install rejects missing/ambiguous non-interactive input"
+
+TAG_ENV="$TMP_ROOT/tag.env"
+sed "s|MOMO_API_IMAGE=.*|MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:\${MOMO_IMAGE_TAG}|" "$ENV_FILE" > "$TAG_ENV"
+if run_capture "$TMP_ROOT/tag.out" "$INSTALL" --env-file "$TAG_ENV" --mode staging --state-dir "$TMP_ROOT/tag-state" --dry-run; then
+  fail "install accepted a tag-only app image"
+fi
+grep -Fq 'MOMO_API_IMAGE must be an immutable image ref' "$TMP_ROOT/tag.out" ||
+  fail "tag-only image did not reach the installer digest guard"
+pass "install requires per-image sha256 digests beyond the shared preflight"
+
+run_capture "$TMP_ROOT/install.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
+  --state-dir "$TMP_ROOT/install-state" --dry-run
+grep -Fq 'pull pinned images -> start postgres/redis/centrifugo -> run migrate once -> start api/relay/worker/caddy' "$TMP_ROOT/install.out" ||
+  fail "install dry-run plan lost the ordered migration/start contract"
+grep -Fq 'config --quiet' "$TRACE" || fail "install did not render docker compose config"
+pass "install dry-run validates preflight/digests/compose and ordered idempotent plan"
+
+if run_capture "$TMP_ROOT/no-backup.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
+  --state-dir "$TMP_ROOT/state"; then
+  fail "upgrade accepted a real run without backup evidence"
+fi
+grep -Fq 'required file is missing' "$TMP_ROOT/no-backup.out" ||
+  fail "missing backup evidence did not fail before mutation"
+pass "real upgrade requires explicit backup evidence"
+
+run_capture "$TMP_ROOT/upgrade.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
+  --state-dir "$TMP_ROOT/state" --dry-run
+grep -Fq 'run forward migration -> restart api/relay/worker sequentially' "$TMP_ROOT/upgrade.out" ||
+  fail "upgrade dry-run lost migration/restart ordering"
+grep -Fq 'automatically restore previous api/relay/worker digests' "$TMP_ROOT/upgrade.out" ||
+  fail "upgrade dry-run lost the previous-image rollback path"
+grep -Fq 'database remains forward-only' "$TMP_ROOT/upgrade.out" ||
+  fail "upgrade dry-run did not disclose forward-only database migrations"
+pass "upgrade dry-run exposes sequential restart and app-only rollback asymmetry"
+
+printf '{"result":"PASS"}\n' > "$TMP_ROOT/backup.json"
+FAILURE_MARKER="$TMP_ROOT/new-api-failed"
+if PATH="$FAKE_BIN:$PATH" MOMO406_DOCKER_TRACE="$TRACE" \
+  MOMO406_FAIL_NEW_API_ONCE=1 MOMO406_NEW_API_IMAGE="ghcr.io/dawn-kim-official/momo-server@sha256:$DIGEST_A" \
+  MOMO406_FAILURE_MARKER="$FAILURE_MARKER" \
+  "$UPGRADE" --env-file "$ENV_FILE" --mode staging --state-dir "$TMP_ROOT/state" \
+  --backup-evidence "$TMP_ROOT/backup.json" >"$TMP_ROOT/failed-upgrade.out" 2>&1; then
+  fail "simulated new-api failure unexpectedly reported upgrade success"
+fi
+[ -f "$FAILURE_MARKER" ] || fail "simulated new-api restart failure did not execute"
+grep -Fq "api_image=ghcr.io/dawn-kim-official/momo-server@sha256:$OLD_A args=" "$TRACE" ||
+  fail "failed upgrade did not execute the previous-api digest rollback"
+grep -Fq 'previous app images restored, database migrations remain forward-only' "$TMP_ROOT/failed-upgrade.out" ||
+  fail "failed upgrade did not report successful app rollback and DB asymmetry"
+pass "simulated restart failure executes previous-digest app rollback"
+
+run_capture "$TMP_ROOT/rollback.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
+  --state-dir "$TMP_ROOT/state" --rollback-only \
+  --rollback-state "$TMP_ROOT/state/$DEPLOY_STATE_NAME.previous" --dry-run
+grep -Fq 'restore previous api/relay/worker digests; do not reverse migrations' "$TMP_ROOT/rollback.out" ||
+  fail "manual rollback dry-run path is missing"
+pass "documented manual rollback state is executable in dry-run mode"
+
+grep -Fq 'run_prod_preflight' "$INSTALL" || fail "install lost prod_env_preflight wiring"
+grep -Fq 'run_prod_preflight' "$UPGRADE" || fail "upgrade lost prod_env_preflight wiring"
+grep -Fq 'ADR-0120 P-3 / ADR-0121 S-5 placeholder' "$INSTALL" ||
+  fail "optional relay registration placeholder is missing"
+# shellcheck disable=SC2016 # literal source-code contract, not shell expansion
+grep -Fq 'MOMO_API_IMAGE="$OLD_API"' "$UPGRADE" || fail "rollback image override is missing"
+pass "preflight, relay placeholder, and rollback source wiring are present"
+
+# grep(POSIX)만 사용 — rg는 이 게이트 체인의 가용 전제가 아니며, 부재 시
+# exit 127이 "매치 없음"으로 오독되어 검사가 조용히 스킵된다 (review #429 M1).
+if grep -En '(echo|printf).*(PASSWORD|HMAC|API_KEY|TOKEN|SECRET|DATABASE_URL|HERMES)' \
+  "$INSTALL" "$UPGRADE" "$LIB" >/dev/null; then
+  fail "deployment scripts contain a secret-value echo/printf pattern"
+fi
+pass "deployment scripts contain no secret-value echo path"
+
+printf '[install-upgrade-static] PASS: MOMO-406 static argument/rollback matrix complete\n'
