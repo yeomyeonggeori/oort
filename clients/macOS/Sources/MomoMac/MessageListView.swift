@@ -642,25 +642,35 @@ public struct MessageListView: View {
 
     private func composerSurface(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
-            Button {
-                isActionLauncherPresented.toggle()
-            } label: {
-                Label(MomoComposerActionCopy(language: language).launcherTitle, systemImage: "plus")
-                    .labelStyle(.iconOnly)
-                    .font(.title3.weight(.medium))
-                    .frame(width: 32, height: 32)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(viewModel.selectedChannelId == nil)
-            .help(MomoComposerActionCopy(language: language).launcherTitle)
-            .accessibilityLabel(MomoComposerActionCopy(language: language).launcherTitle)
-            .popover(isPresented: $isActionLauncherPresented, arrowEdge: .bottom) {
-                MomoComposerActionLauncher(copy: MomoComposerActionCopy(language: language)) { action in
-                    isActionLauncherPresented = false
-                    handleComposerAction(action)
+            ZStack {
+                Button {
+                    isActionLauncherPresented.toggle()
+                } label: {
+                    Label(MomoComposerActionCopy(language: language).launcherTitle, systemImage: "plus")
+                        .labelStyle(.iconOnly)
+                        .font(.title3.weight(.medium))
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(viewModel.selectedChannelId == nil)
+                .help(MomoComposerActionCopy(language: language).launcherTitle)
+                .accessibilityLabel(MomoComposerActionCopy(language: language).launcherTitle)
+                .popover(isPresented: $isActionLauncherPresented, arrowEdge: .bottom) {
+                    MomoComposerActionLauncher(copy: MomoComposerActionCopy(language: language)) { action in
+                        isActionLauncherPresented = false
+                        handleComposerAction(action)
+                    }
+                }
+
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                    .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
+                        workComposerPopover(copy: copy)
+                    }
             }
 
             Button(action: presentWorkComposer) { EmptyView() }
@@ -719,29 +729,6 @@ public struct MessageListView: View {
             .disabled(!canSendMessage)
             .accessibilityLabel(copy.sendMessage)
         }
-        .popover(isPresented: $isWorkComposerPresented, arrowEdge: .bottom) {
-            AgentWorkComposerView(
-                viewModel: viewModel,
-                copy: copy,
-                initialBrief: initialWorkBrief,
-                onStarted: { _ in
-                    initialWorkBrief = ""
-                    workCommandDraftToRestore = nil
-                    isWorkComposerPresented = false
-                },
-                onCancel: {
-                    if let draft = workCommandDraftToRestore {
-                        viewModel.composerDraft = draft
-                        viewModel.composerDraftDidChange(draft)
-                        isComposerFocused = true
-                    }
-                    initialWorkBrief = ""
-                    workCommandDraftToRestore = nil
-                    isWorkComposerPresented = false
-                }
-            )
-            .id(workComposerSessionId)
-        }
         .padding(.horizontal, 12)
         .frame(minHeight: MomoTheme.composerMinimumHeight)
         // A timeline composer needs one continuous surface; the native rounded
@@ -777,6 +764,30 @@ public struct MessageListView: View {
         .onPreferenceChange(MomoMentionPanelHeightPreferenceKey.self) { height in
             measuredMentionPanelHeight = height
         }
+    }
+
+    private func workComposerPopover(copy: MomoWorkspaceCopy) -> some View {
+        AgentWorkComposerView(
+            viewModel: viewModel,
+            copy: copy,
+            initialBrief: initialWorkBrief,
+            onStarted: { _ in
+                initialWorkBrief = ""
+                workCommandDraftToRestore = nil
+                isWorkComposerPresented = false
+            },
+            onCancel: {
+                if let draft = workCommandDraftToRestore {
+                    viewModel.composerDraft = draft
+                    viewModel.composerDraftDidChange(draft)
+                    isComposerFocused = true
+                }
+                initialWorkBrief = ""
+                workCommandDraftToRestore = nil
+                isWorkComposerPresented = false
+            }
+        )
+        .id(workComposerSessionId)
     }
 
     private func handleComposerAction(_ action: MomoComposerAction) {

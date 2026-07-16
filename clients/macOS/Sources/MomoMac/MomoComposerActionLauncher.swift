@@ -159,6 +159,12 @@ struct MomoComposerActionLauncher: View {
                                 .lineLimit(1)
                         }
                         Spacer(minLength: 0)
+                        if action == .startWork {
+                            Text("⇧⌘W")
+                                .font(MomoTheme.Typography.metadata.monospacedDigit())
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                        }
                     }
                     .contentShape(Rectangle())
                     .padding(.horizontal, MomoTheme.ComposerAction.contentSpacing)
