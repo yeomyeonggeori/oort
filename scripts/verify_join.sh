@@ -278,7 +278,7 @@ REGENERATED_INVITE_ID="$INVITE_ID"
 REGENERATED_CODE="$INVITE_CODE"
 assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM invite_code WHERE id = '$OLD_INVITE_ID' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revocation_reason = 'regenerated'; COMMIT;" "regenerate revoked old invite"
 assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM invite_code WHERE id = '$REGENERATED_INVITE_ID' AND role = 'member' AND max_uses = 2 AND revoked_at IS NULL; COMMIT;" "regenerate preserved role and max uses"
-assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE action = 'invite.regenerated' AND target_id = '$OLD_INVITE_ID' AND detail->>'new_invite_id' = '$REGENERATED_INVITE_ID' AND detail->>'role' = 'member'; COMMIT;" "regenerate audit links old and new invites"
+assert_sql_equals 1 "BEGIN; SET LOCAL app.workspace_id = '$WORKSPACE_ID'; SELECT count(*) FROM audit_log WHERE action = 'invite.regenerated' AND target_id = '$OLD_INVITE_ID' AND lower(detail->>'new_invite_id') = lower('$REGENERATED_INVITE_ID') AND detail->>'role' = 'member'; COMMIT;" "regenerate audit links old and new invites"
 join_with_code "$OLD_CODE" "regen-old-$RUN_ID@momo.local" "regen-old-$RUN_ID" 410
 join_with_code "$REGENERATED_CODE" "regen-new-$RUN_ID@momo.local" "regen-new-$RUN_ID" 201
 
