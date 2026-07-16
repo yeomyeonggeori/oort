@@ -18,6 +18,10 @@
 - MOMO-386 search backend와 chat attachment downloads/notification engine은 구현하지 않고 UI에서 planned/unsupported로 명시했다.
 - 남은 것: full tests/preflight/local gates/fresh design review → commit/push/PR → `status:needs-review`; worker는 merge/close하지 않는다.
 
+## 2026-07-16 (Fable, engine planner+오케스트레이터) · ADR-0113 기안 + MOMO-408 발급
+- 성재 지시(플러그인 우선순위 상향·오피셜 집중·Slack/MM 호환)로 3축 분배: ① MOMO-408 `#430`(prod 시드 fail-closed, H1 파생) codex worker 가동 ② 실검증 리서치 2건 완료 — **16-03: Google 공식 Workspace MCP 존재(2026-05 Preview, 배포자별 GCP 필수), GitHub/Notion/Linear 전부 remote+DCR 위임 가능** / **16-04: Slack 호환의 실체=와이어 포맷뿐, MM incoming webhook 선례 검증, MM 플러그인 바이너리 기각 확정(Apps Framework 철회가 반면교사)** ③ **ADR-0113 Proposed 기안** — custody A(호스트=클라이언트+remote 우선), delegation 4-튜플, GitHub-first+Drive 경로C(SA 포장 — 동결 사유 우회), D4 Slack-호환 webhook(ADR-0115 입력), egress manifest 명시.
+- 다음: 성재 ADR-0113 option 승인 → SE-04A부터 파생. MOMO-408 PR 대기 중.
+
 ## 2026-07-16 (Fable, momo-main 오케스트레이터) · ADR-0121 배치 1 종결 — codex-fleet 복귀
 - 성재 지시로 구현 체제 전환: Fable 전담 → **codex-fleet(worker=gpt-5.6-sol medium)**. MOMO-406/407 병렬 spawn(stall 워치) → 둘 다 클린 완주 → 독립 리뷰 2건 병렬 → 반영(429: H1 시드 dev-password 경고+M1 rg 스킵 봉합, 428: M1 의미론+verifier casing) → 순차 머지(`bb3efc6`→`4a8b288`) → main 게이트 PASS.
 - 검증 분담 계약 작동: worker=정적/swift, docker 게이트=오케스트레이터 — runtime-db 1차 실행이 verifier UUID strict 비교 결함을 실제로 잡음.
