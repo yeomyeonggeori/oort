@@ -2056,7 +2056,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 신규 verifier: manifest 검증 fail-closed 매트릭스(GPL 거부·unknown risk·malformed)·install/grant/revoke 왕복·cross-workspace 403·grant 없는 플러그인의 Capability projection 부재·audit 행. `runtime-db` 게이트 PASS(오케스트레이터 실행) + `LOCAL_PR_GATE.md` 등록.
 - [x] 종결: PR #435(+리뷰 H1/M1/M2 반영 fb5cebd) merge `1809551`. 커스터디 A 무저장·validator 화이트리스트 fail-closed·grant 4-튜플 DB CHECK — 독립 리뷰 "확인함". plugin verifier 전체 PASS(M2 강화판) + runtime-db PASS(rebase 후). 후속 기록: registry revoke의 projection 무효화(후속 SE), 시드 schemaDigest 실해시(Context Broker 소비 전), read-path 500 패턴 2회째(3회 시 공용 헬퍼 승격).
 
-### ☐ MOMO-411 수용기준 — local_gate 리소스 가드: --down + 부하 체크 `[tooling]` · 의존: 없음
+### ☐ MOMO-411 (`#436`) 수용기준 — local_gate 리소스 가드: --down + 부하 체크 `[tooling]` · 의존: 없음
 - [ ] `scripts/local_gate.sh`에 ① `--down`(또는 기본 trap): runtime-* 프로파일이 올린 compose project를 게이트 종료 시(성공/실패 모두) down — 명시 opt-out(`--keep-stack`)만 예외 ② 시작 전 부하 체크: load(1min)>12면 경고+확인 요구(env `LOCAL_GATE_FORCE=1`로 우회), `MULTI_SESSION_OPS.md` §9 임계값과 일치.
 - [ ] `compose_janitor.sh`의 매칭 사각지대 보완: `momo240_*` 프로젝트도 stale 후보에 포함(볼륨은 계속 불변).
 - [ ] 기존 게이트 evidence 포맷·PASS 의미 무변경. 전 프로파일 무회귀(docs 게이트로 스크립트 정적 검증 + runtime-db 1회 실증).
