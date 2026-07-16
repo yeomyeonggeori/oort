@@ -79,11 +79,11 @@ ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는�
 
 ### 설치 완료의 일부: owner 자격증명 인수 (필수 — URL 공유 전)
 
-> **경고 (review #429 H1):** 마이그레이션 직후 시드 owner(`demo@momo.local`)는 **공개적으로
-> 알려진 결정론적 비밀번호(`dev-password`, `005_auth_password_hash.sql` 백필)** 를 가진다.
-> install.sh의 "install complete"는 이 인수 절차까지 마쳐야 완료다 — 아래 UPDATE를 실행하기
-> 전에는 서버 URL을 누구와도 공유하지 마라. (prod 모드 시드의 fail-closed 랜덤 비밀번호는
-> 후속 서버 티켓으로 분리 — 이 문서 창구가 그때까지의 유일한 방어다.)
+> **경고 (review #429 H1, MOMO-408 반영):** prod 모드 마이그레이션은 시드 owner
+> (`demo@momo.local`)의 공개된 결정론적 비밀번호(`dev-password`)를 무효화한다. 아래 인수
+> UPDATE 전에는 해당 계정 로그인이 HTTP 401로 fail-closed된다. 그래도 install.sh의
+> "install complete"는 운영자 소유 email/password로 인수하고 실제 로그인을 확인해야 완료다 —
+> 인수 전에는 서버 URL을 누구와도 공유하지 마라.
 
 마이그레이션은 첫 bootstrap workspace와 owner 행을 멱등 생성한다. 초기 owner 자격증명은
 공개 설치 로그가 아니라 운영자의 SOPS/host-only provisioning 경계에서 설정해야 한다.
