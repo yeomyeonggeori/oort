@@ -6,7 +6,6 @@ struct MomoMacApp: App {
     var body: some Scene {
         WindowGroup("momo") {
             MomoMacHostRoot()
-                .frame(minWidth: 980, minHeight: 620)
         }
         .defaultSize(width: 1180, height: 760)
         .momoWindowChromeStyle()

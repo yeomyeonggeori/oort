@@ -19,6 +19,7 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
         initialFocus: MomoSessionField? = nil,
+        initialPath: MomoOnboardingPath? = nil,
         developerMode: Bool = true
     ) -> some View {
         let suite = "momo.snapshot.onboarding.\(UUID().uuidString)"
@@ -43,7 +44,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             controller: controller,
             errorMessage: errorMessage,
             failureKind: failureKind,
-            initialFocus: initialFocus
+            initialFocus: initialFocus,
+            initialPath: initialPath
         )
             .environment(\.colorScheme, scheme)
             .defaultAppStorage(defaults)
@@ -56,6 +58,7 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         errorMessage: String? = nil,
         failureKind: MomoSessionFailureKind? = nil,
         initialFocus: MomoSessionField? = nil,
+        initialPath: MomoOnboardingPath? = nil,
         developerMode: Bool = true
     ) throws -> NSImage {
         let hostingView = NSHostingView(
@@ -65,6 +68,7 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 errorMessage: errorMessage,
                 failureKind: failureKind,
                 initialFocus: initialFocus,
+                initialPath: initialPath,
                 developerMode: developerMode
             )
             .frame(width: size.width, height: size.height)
@@ -118,6 +122,10 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 "Canonical MOMO-368 snapshot will be recorded by the orchestrator: \(reference.lastPathComponent)"
             )
         }
+    }
+
+    private var snapshotRecordMode: SnapshotTestingConfiguration.Record? {
+        ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1" ? .all : nil
     }
 
     private func renderSettings(
@@ -244,7 +252,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         assertSnapshot(
             of: try render(size: defaultSize, scheme: .light),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "light"
+            named: "light",
+            record: snapshotRecordMode
         )
     }
 
@@ -253,7 +262,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         assertSnapshot(
             of: try render(size: defaultSize, scheme: .dark),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "dark"
+            named: "dark",
+            record: snapshotRecordMode
         )
     }
 
@@ -262,7 +272,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         assertSnapshot(
             of: try render(size: largeSize, scheme: .light),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "light"
+            named: "light",
+            record: snapshotRecordMode
         )
     }
 
@@ -271,7 +282,28 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
         assertSnapshot(
             of: try render(size: largeSize, scheme: .dark),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "dark"
+            named: "dark",
+            record: snapshotRecordMode
+        )
+    }
+
+    func testOnboardingCompactWidthLightSnapshot() throws {
+        try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "light")
+        assertSnapshot(
+            of: try render(size: compactSize, scheme: .light),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light",
+            record: snapshotRecordMode
+        )
+    }
+
+    func testOnboardingCompactWidthDarkSnapshot() throws {
+        try requireCanonicalReference(testName: #function.replacingOccurrences(of: "()", with: ""), named: "dark")
+        assertSnapshot(
+            of: try render(size: compactSize, scheme: .dark),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark",
+            record: snapshotRecordMode
         )
     }
 
@@ -283,7 +315,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             form: MomoServerSessionForm?,
             errorMessage: String?,
             failureKind: MomoSessionFailureKind?,
-            initialFocus: MomoSessionField?
+            initialFocus: MomoSessionField?,
+            initialPath: MomoOnboardingPath?
         )
         let credentials = MomoServerSessionForm(
             baseURLString: "https://team.momo.local",
@@ -297,14 +330,14 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
             inviteCode: "MOMO-368"
         )
         let variants: [Variant] = [
-            ("onboarding-default-light.png", defaultSize, .light, nil, nil, nil, nil),
-            ("onboarding-default-dark.png", defaultSize, .dark, nil, nil, nil, nil),
-            ("onboarding-large-light.png", largeSize, .light, nil, nil, nil, nil),
-            ("onboarding-large-dark.png", largeSize, .dark, nil, nil, nil, nil),
-            ("onboarding-compact-light.png", compactSize, .light, nil, nil, nil, nil),
-            ("onboarding-focused-field.png", defaultSize, .light, nil, nil, nil, .serverURL),
-            ("onboarding-sign-in.png", defaultSize, .light, credentials, nil, nil, nil),
-            ("onboarding-invite-enabled.png", defaultSize, .dark, invite, nil, nil, nil),
+            ("onboarding-default-light.png", defaultSize, .light, nil, nil, nil, nil, nil),
+            ("onboarding-default-dark.png", defaultSize, .dark, nil, nil, nil, nil, nil),
+            ("onboarding-large-light.png", largeSize, .light, nil, nil, nil, nil, nil),
+            ("onboarding-large-dark.png", largeSize, .dark, nil, nil, nil, nil, nil),
+            ("onboarding-compact-light.png", compactSize, .light, nil, nil, nil, nil, nil),
+            ("onboarding-focused-field.png", defaultSize, .light, nil, nil, nil, .serverURL, .signIn),
+            ("onboarding-sign-in.png", defaultSize, .light, credentials, nil, nil, nil, .signIn),
+            ("onboarding-invite-enabled.png", defaultSize, .dark, invite, nil, nil, nil, .join),
             (
                 "onboarding-offline.png",
                 defaultSize,
@@ -312,7 +345,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 credentials,
                 "The Internet connection appears to be offline.",
                 .offline,
-                nil
+                nil,
+                .signIn
             ),
         ]
 
@@ -323,7 +357,8 @@ final class MomoServerSessionOnboardingSnapshotTests: XCTestCase {
                 form: variant.form,
                 errorMessage: variant.errorMessage,
                 failureKind: variant.failureKind,
-                initialFocus: variant.initialFocus
+                initialFocus: variant.initialFocus,
+                initialPath: variant.initialPath
             )
             XCTAssertEqual(image.size, variant.size)
             try writeDesignReviewArtifact(image, named: variant.name)
