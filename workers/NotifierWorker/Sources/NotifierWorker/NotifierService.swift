@@ -347,6 +347,7 @@ struct NotifierService: Service {
                  AND mem.workspace_id = \(workspaceID)
                  AND mem.status = 'active'
                  AND mem.deleted_at IS NULL
+                 AND mem.kind = 'human' -- 방어 필터(review #424 L1): 오늘은 agent가 push_token을 가질 수 없지만 스키마 드리프트에도 안전하게
                WHERE ms.channel_id = (SELECT channel_id FROM msg)
                  AND ms.workspace_id = \(workspaceID)
                  AND ms.left_at IS NULL
@@ -360,6 +361,7 @@ struct NotifierService: Service {
                AND t.workspace_id = \(workspaceID)
                AND t.invalidated_at IS NULL
               JOIN device d ON d.id = t.device_id
+               AND d.workspace_id = \(workspaceID)
              WHERE r.reason IS NOT NULL
              ORDER BY r.member_id, t.id
             """,
@@ -499,12 +501,21 @@ struct NotifierService: Service {
                     "apnsStatus": .stringConvertible(status),
                 ])
                 return nil
-            case .permanentFailure(let reason):
-                // Never succeeds on retry — settle with a synthetic 4xx so the
-                // ledger shows the outcome instead of looping forever.
-                await settleDispatch(logID: logID, apnsStatus: 400, apnsReason: reason)
-                logger.error("permanent dispatch failure; settled as 400", metadata: [
-                    "collapseId": .string(collapseID), "reason": .string(reason),
+            case .permanentFailure(let relayHTTPStatus, let reason):
+                // Never succeeds on retry — settle with the REAL relay HTTP
+                // status and a "relay_http:" prefixed reason so P-3 can never
+                // mistake a relay-level failure for a genuine APNs 400
+                // (BadDeviceToken) and over-invalidate healthy tokens
+                // (review #424 M1). invalidated_at judgement happens only on
+                // the accepted path's real APNs receipt.
+                await settleDispatch(
+                    logID: logID,
+                    apnsStatus: relayHTTPStatus,
+                    apnsReason: "relay_http: \(reason)")
+                logger.error("permanent dispatch failure; settled with relay status", metadata: [
+                    "collapseId": .string(collapseID),
+                    "relayHTTPStatus": .stringConvertible(relayHTTPStatus),
+                    "reason": .string(reason),
                 ])
                 return nil
             case .transientFailure(let reason):

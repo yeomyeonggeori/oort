@@ -68,7 +68,7 @@ struct PushRelayClient: Sendable {
     enum DispatchResult: Sendable {
         case accepted(apnsStatus: Int, apnsReason: String?)
         case transientFailure(String)
-        case permanentFailure(String)
+        case permanentFailure(relayHTTPStatus: Int, reason: String)
     }
 
     func dispatch(_ payload: PushDispatch) async throws -> DispatchResult {
@@ -91,7 +91,7 @@ struct PushRelayClient: Sendable {
         if code == 429 || code >= 500 {
             return .transientFailure("HTTP \(code)")
         }
-        return .permanentFailure("HTTP \(code)")
+        return .permanentFailure(relayHTTPStatus: Int(code), reason: "HTTP \(code)")
     }
 
     /// Decode the relay receipt `{apns_status, apns_reason?}`; a 200 with an
