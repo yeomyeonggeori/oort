@@ -2203,6 +2203,13 @@ final class MomoServerTests: XCTestCase {
             SecretRedactingRequestLogMiddleware<AppRequestContext>.redactedPath("/health"),
             "/health"
         )
+        let rateLimitSourcePath = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/MomoServer/Middleware/RateLimitMiddleware.swift")
+        let rateLimitSource = try? String(contentsOf: rateLimitSourcePath, encoding: .utf8)
+        XCTAssertTrue(rateLimitSource?.contains(".redactedPath(path)") == true)
     }
 
     func testWebhookRouteKeepsReceiptMessageAndOutboxInOneTenantTransaction() throws {
