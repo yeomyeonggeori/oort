@@ -24,7 +24,10 @@ struct PluginRoutes: Sendable {
     func list(_ request: Request, context: AppRequestContext) async throws -> Response {
         let principal = try Self.humanPrincipal(context)
         let workspaceID = try Self.workspaceID(context, principal: principal)
-        let plugins = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        // Review #435 H1: HTTPError thrown inside the tenant closure gets
+        // wrapped by PostgresNIO and rendered as 500 — unwrap like the
+        // mutating handlers so 403/404/409 keep their semantics.
+        let plugins = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             _ = try await Self.requireWorkspaceRole(conn: conn, logger: db.logger, principal: principal)
             let rows = try await conn.query(
                 """
@@ -68,7 +71,7 @@ struct PluginRoutes: Sendable {
         let principal = try Self.humanPrincipal(context)
         let workspaceID = try Self.workspaceID(context, principal: principal)
         let pluginID = try Self.pluginID(context)
-        let dto = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        let dto = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             _ = try await Self.requireWorkspaceRole(conn: conn, logger: db.logger, principal: principal)
             let row = try await Self.registryRow(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, pluginID: pluginID

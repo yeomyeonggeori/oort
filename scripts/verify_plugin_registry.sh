@@ -260,6 +260,18 @@ expect_manifest_rejected "digest mismatch rejected"
 run_sql -c "UPDATE plugin_registry SET revoked_at=now() WHERE plugin_id='$GITHUB'"
 expect_manifest_rejected "revoked catalog entry rejected"
 
+# Review #435 M2: the projection RLS assertion is only meaningful while a
+# grant is ACTIVE — the registry was left revoked by the last rejection case
+# and install/grant were revoked earlier, so a zero-row projection would pass
+# vacuously. Restore the registry entry and re-run the real REST install +
+# grant so all three tenant tables carry a live DEMO_WS row when tenant B looks.
+restore_registry
+api POST "$GITHUB_PATH/install" '{"enabled":true}' "$OWNER_ACCESS"
+expect_status 200 "re-install before RLS assertion"
+api POST "$GITHUB_PATH/grants" '{"scope":"github:read"}' "$OWNER_ACCESS"
+expect_status 200 "re-grant before RLS assertion"
+got="$(printf "SELECT count(*) FROM plugin_capability_projection WHERE workspace_id='$DEMO_WS' AND plugin_id='$GITHUB';\n" | sql_scalar)"
+[ "$got" != "0" ] || { echo "[plugin-reg] expected a live projection before the RLS assertion" >&2; exit 1; }
 run_sql <<SQL
 SET ROLE momo_app;
 BEGIN;
