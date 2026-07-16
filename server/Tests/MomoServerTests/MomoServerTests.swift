@@ -2167,7 +2167,7 @@ final class MomoServerTests: XCTestCase {
     func testSlackCompatibleRejectsBlocksAndMattermostUnsupportedFields() {
         XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","blocks":[]}"#.utf8))) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
-            XCTAssertTrue((error as? HTTPError)?.message.contains("blocks") == true)
+            XCTAssertTrue(String(describing: error).contains("blocks"))
         }
         XCTAssertThrowsError(try WebhookPayload.slackCompatible(data: Data(#"{"text":"x","mrkdwn":true}"#.utf8))) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
