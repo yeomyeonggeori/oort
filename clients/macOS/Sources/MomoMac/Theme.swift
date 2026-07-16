@@ -42,6 +42,21 @@ public enum MomoTheme {
     public static let memberInvitePopoverWidth: CGFloat = 340
     public static let memberInvitePopoverMaximumHeight: CGFloat = 640
 
+    public enum ComposerAction {
+        public static let launcherWidth: CGFloat = 340
+        public static let rowMinimumHeight: CGFloat = 56
+        public static let iconSize: CGFloat = 28
+        public static let attachmentWidth: CGFloat = 240
+        public static let sheetMinimumWidth: CGFloat = 520
+        public static let sheetMinimumHeight: CGFloat = 420
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let sheetInset: CGFloat = 24
+        public static let dropInset: CGFloat = 32
+    }
+
     /// First-run and server-session entry. A single width contract keeps the
     /// hero and authentication surface centered from compact to wide windows.
     public enum Onboarding {

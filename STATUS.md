@@ -7,6 +7,12 @@
 
 - ADR-0113 D2/D5/D6에 따라 migration 013의 catalog/install/grant 4-튜플/Capability projection, 화이트리스트 manifest validator, owner/admin install·본인 grant/revoke REST, GitHub/Notion/Linear 오피셜 시드와 custody-A 비밀정보 무저장 경계를 추가했다. 서버 Swift build와 91 tests, fixture JSON·verifier shell syntax는 worker 검증 완료; Docker `runtime-db`는 오케스트레이터 실행 전까지 `runtime-unverified`다.
 
+## MOMO-409 macOS composer action launcher + local draft surfaces (2026-07-17)
+
+- composer의 단일 목적 hammer 버튼을 가운데 정렬된 `+` action launcher로 바꾸고 파일 업로드·새 작업·스레드·투표·플러그인 5개 경로를 native anchored popover로 제공한다. 기존 Agent Work 실행 경로와 `⇧⌘W`는 유지한다.
+- 파일 선택과 timeline file URL drag/drop은 전송 전 local attachment draft chip으로만 표시하며 중복 제거·개별 제거·전체 비우기를 지원한다. 서버 storage 계약 전에는 durable upload 성공을 주장하지 않는다.
+- 스레드·투표·플러그인은 동작 가능한 local draft sheet로 제공한다. 플러그인 surface는 Drive·Calendar·Gmail·GitHub·Notion 후보를 미리 탐색·선택할 수 있고, 실제 install/grant는 엔진 계약 연결 전까지 명확히 `연결 준비`로 표시한다. focused tests와 전체 macOS suite 303 tests, design preflight, 실창 launcher/plugin preview를 검증했다. 최종 `macos-ui`와 fresh design-review evidence는 PR에 기록한다.
+
 ## MOMO-408 prod 시드 password fail-closed (2026-07-16)
 
 - migration 012가 seed-none/prod의 시드 owner에 남은 결정론적 `dev-password` 해시만 NULL로 잠그고, 명시적 demo/e2e seed는 기존 로그인 fixture를 유지한다. production/e2e 격리 DB HTTP verifier를 `runtime-db`에 연결했다. Swift 6개 패키지 build와 Core/server/relay/worker/notifier test, macOS non-snapshot 224 test, shell syntax·정적 seed 계약은 worker 검증 완료; Docker `runtime-db`는 오케스트레이터 실행 전까지 `runtime-unverified`다.
