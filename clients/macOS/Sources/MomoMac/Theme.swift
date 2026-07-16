@@ -32,7 +32,7 @@ public enum MomoTheme {
     public static let bubbleCorner = cornerMedium
     public static let gutter: CGFloat = 12
     public static let messageAvatarSize: CGFloat = 28
-    public static let mentionAutocompleteWidth: CGFloat = 300
+    public static let mentionAutocompleteWidth: CGFloat = 360
     public static let composerMinimumHeight: CGFloat = 56
     public static let mentionAutocompleteRowHeight: CGFloat = 52
     public static let mentionAutocompleteMaximumRows = 6

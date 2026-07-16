@@ -757,6 +757,9 @@ public struct MessageListView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(member.displayName)
                                 .font(MomoTheme.Typography.emphasizedRow)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .layoutPriority(1)
                             HStack(spacing: MomoTheme.AgentBadge.spacing) {
                                 Text(member.isAgent ? "@\(member.handle)" : "@\(member.handle) · \(copy.human)")
                                     .font(MomoTheme.Typography.supporting)
@@ -786,7 +789,9 @@ public struct MessageListView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(member.displayName), @\(member.handle)")
+                .accessibilityLabel(
+                    "\(member.displayName), @\(member.handle), \(member.isAgent ? copy.agent : copy.human)"
+                )
                 .accessibilityValue(
                     copy.mentionAutocompletePosition(
                         index: index + 1,
