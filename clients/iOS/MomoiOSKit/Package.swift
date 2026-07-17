@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v14), .iOS(.v17)],
     products: [
         .library(name: "MomoiOSKit", targets: ["MomoiOSKit"]),
+        .library(name: "MomoiOSPushKit", targets: ["MomoiOSPushKit"]),
     ],
     dependencies: [
         .package(path: "../../Core"),
@@ -17,12 +18,21 @@ let package = Package(
             dependencies: [
                 .product(name: "MomoCore", package: "Core"),
                 .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
+                "MomoiOSPushKit",
             ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .target(
+            name: "MomoiOSPushKit",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "MomoiOSKitTests",
-            dependencies: ["MomoiOSKit", .product(name: "MomoCore", package: "Core")],
+            dependencies: [
+                "MomoiOSKit",
+                "MomoiOSPushKit",
+                .product(name: "MomoCore", package: "Core"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

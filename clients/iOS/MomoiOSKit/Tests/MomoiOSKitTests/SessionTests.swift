@@ -1,7 +1,90 @@
 import Foundation
 import MomoCore
 @testable import MomoiOSKit
+@testable import MomoiOSPushKit
 import Testing
+
+@Suite("MomoiOS push")
+struct PushTests {
+    @Test("momo id-only payload parses and creates a deep link")
+    func payloadParsing() throws {
+        let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
+
+        #expect(envelope.schema == "momo.push.notification.v1")
+        #expect(envelope.channelID == "00000000-0000-0000-0000-000000000010")
+        #expect(envelope.deepLinkURL?.absoluteString == "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020")
+        #expect(IOSPushDeepLink(envelope: envelope)?.channelID == fixtureChannel().id)
+    }
+
+    @Test("NSE resolver replaces placeholder after fetch")
+    func fetchReplacement() async throws {
+        let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
+        let resolver = PushNotificationResolver(fetcher: SuccessfulPushFetcher())
+
+        let resolved = await resolver.resolve(envelope: envelope, session: pushSession())
+
+        #expect(resolved == PushDisplayContent(title: "김인턴", body: "승인 요청을 확인해 주세요."))
+    }
+
+    @Test("NSE resolver keeps placeholder when fetch fails")
+    func fetchFailureIsFailOpen() async throws {
+        let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
+        let resolver = PushNotificationResolver(fetcher: FailingPushFetcher())
+
+        let resolved = await resolver.resolve(envelope: envelope, session: pushSession())
+
+        #expect(resolved == .placeholder)
+    }
+
+    @Test("device registration and revocation map the server REST contract")
+    func registrationRequestMapping() throws {
+        let deviceID = UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
+        let request = try MomoPushRegistrationClient.registrationRequest(
+            session: fixtureSession(),
+            deviceID: deviceID,
+            apnsToken: Data(repeating: 0xab, count: 32),
+            appBuild: "42"
+        )
+        let body = try #require(request.httpBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path.hasSuffix("/v1/workspaces/00000000-0000-0000-0000-000000000001/devices") == true)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer access")
+        #expect(json["deviceId"] as? String == deviceID.uuidString)
+        #expect(json["platform"] as? String == "ios")
+        #expect(json["appBuild"] as? String == "42")
+        #expect(json["apnsToken"] as? String == String(repeating: "ab", count: 32))
+        #expect(json["env"] as? String == "sandbox")
+        #expect(json["topic"] as? String == "app.momo.ios")
+
+        let revoke = MomoPushRegistrationClient.revocationRequest(session: fixtureSession(), deviceID: deviceID)
+        #expect(revoke.httpMethod == "DELETE")
+        #expect(revoke.url?.path.hasSuffix("/devices/\(deviceID.uuidString)") == true)
+    }
+
+    private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":1,"mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v1","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request"}}"#
+
+    private func pushSession() -> PushFetchSession {
+        PushFetchSession(
+            baseURL: URL(string: "https://momo.example")!,
+            workspaceID: fixtureWorkspaceID.description,
+            accessToken: "access-token"
+        )
+    }
+}
+
+private struct SuccessfulPushFetcher: PushMessageFetching {
+    func fetch(envelope: MomoPushEnvelope, session: PushFetchSession) async throws -> PushDisplayContent {
+        PushDisplayContent(title: "김인턴", body: "승인 요청을 확인해 주세요.")
+    }
+}
+
+private struct FailingPushFetcher: PushMessageFetching {
+    func fetch(envelope: MomoPushEnvelope, session: PushFetchSession) async throws -> PushDisplayContent {
+        throw MomoPushError.fetchFailed
+    }
+}
 
 @Suite("MomoiOSKit session")
 struct SessionTests {
@@ -46,6 +129,33 @@ struct SessionTests {
         store.clearSession()
         #expect(store.loadSession() == nil)
         #expect(store.loadForm() == form)
+    }
+
+    @Test("legacy standard defaults migrate to the App Group once")
+    func appGroupMigration() throws {
+        let groupName = "MomoiOSKitTests.group.\(UUID().uuidString)"
+        let legacyName = "MomoiOSKitTests.legacy.\(UUID().uuidString)"
+        let group = try #require(UserDefaults(suiteName: groupName))
+        let legacy = try #require(UserDefaults(suiteName: legacyName))
+        defer {
+            group.removePersistentDomain(forName: groupName)
+            legacy.removePersistentDomain(forName: legacyName)
+        }
+        let form = SessionForm(serverURL: "https://legacy.example", email: "legacy@momo.local")
+        let session = fixtureSession()
+        legacy.set(try JSONEncoder().encode(form), forKey: "momo.ios.dev.session.form")
+        legacy.set(try JSONEncoder().encode(session), forKey: "momo.ios.dev.session.authenticated")
+        let store = SessionStore(defaults: group, legacyDefaults: legacy)
+
+        #expect(store.loadForm() == form)
+        let pushData = try #require(group.data(forKey: MomoPushContract.sessionKey))
+        let pushSession = try JSONDecoder().decode(PushFetchSession.self, from: pushData)
+        #expect(pushSession.baseURL == session.baseURL)
+        #expect(pushSession.workspaceID == session.workspaceID.description)
+        #expect(pushSession.accessToken == session.accessToken)
+        legacy.set(try JSONEncoder().encode(SessionForm()), forKey: "momo.ios.dev.session.form")
+        let second = SessionStore(defaults: group, legacyDefaults: legacy)
+        #expect(second.loadForm() == form)
     }
 
     @Test("bootstrap response maps workspace and channels")

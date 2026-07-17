@@ -1,0 +1,190 @@
+import Foundation
+
+public enum MomoPushContract {
+    public static let appGroupIdentifier = "group.app.momo.ios"
+    public static let sessionKey = "momo.ios.dev.session.push-fetch"
+    public static let placeholderTitle = "momo"
+    public static let placeholderBody = "새 알림"
+}
+
+public struct PushFetchSession: Codable, Equatable, Sendable {
+    public let baseURL: URL
+    public let workspaceID: String
+    public let accessToken: String
+
+    public init(baseURL: URL, workspaceID: String, accessToken: String) {
+        self.baseURL = baseURL
+        self.workspaceID = workspaceID
+        self.accessToken = accessToken
+    }
+}
+
+public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
+    public let schema: String
+    public let serverID: String
+    public let workspaceID: String
+    public let channelID: String
+    public let messageID: String
+    public let collapseID: String
+    public let reason: String
+
+    enum CodingKeys: String, CodingKey {
+        case schema
+        case serverID = "server_id"
+        case workspaceID = "workspace_id"
+        case channelID = "channel_id"
+        case messageID = "message_id"
+        case collapseID = "collapse_id"
+        case reason
+    }
+
+    public var deepLinkURL: URL? {
+        var components = URLComponents()
+        components.scheme = "momo"
+        components.host = "push"
+        components.path = "/workspaces/\(workspaceID)/channels/\(channelID)/messages/\(messageID)"
+        return components.url
+    }
+}
+
+public enum MomoPushParser {
+    private struct Root: Decodable {
+        let momo: MomoPushEnvelope
+    }
+
+    public static func parse(data: Data) throws -> MomoPushEnvelope {
+        let envelope = try JSONDecoder().decode(Root.self, from: data).momo
+        guard envelope.schema == "momo.push.notification.v1",
+              UUID(uuidString: envelope.workspaceID) != nil,
+              UUID(uuidString: envelope.channelID) != nil,
+              UUID(uuidString: envelope.messageID) != nil,
+              !envelope.serverID.isEmpty,
+              !envelope.collapseID.isEmpty,
+              ["dm", "mention", "approval_request"].contains(envelope.reason)
+        else {
+            throw MomoPushError.invalidEnvelope
+        }
+        return envelope
+    }
+
+    public static func parse(userInfo: [AnyHashable: Any]) throws -> MomoPushEnvelope {
+        try parse(data: JSONSerialization.data(withJSONObject: userInfo))
+    }
+}
+
+public struct PushDisplayContent: Equatable, Sendable {
+    public let title: String
+    public let body: String
+
+    public init(title: String, body: String) {
+        self.title = title
+        self.body = body
+    }
+
+    public static let placeholder = PushDisplayContent(
+        title: MomoPushContract.placeholderTitle,
+        body: MomoPushContract.placeholderBody
+    )
+}
+
+public protocol PushMessageFetching: Sendable {
+    func fetch(envelope: MomoPushEnvelope, session: PushFetchSession) async throws -> PushDisplayContent
+}
+
+public struct PushNotificationResolver: Sendable {
+    private let fetcher: any PushMessageFetching
+
+    public init(fetcher: any PushMessageFetching) {
+        self.fetcher = fetcher
+    }
+
+    public func resolve(
+        envelope: MomoPushEnvelope,
+        session: PushFetchSession,
+        fallback: PushDisplayContent = .placeholder
+    ) async -> PushDisplayContent {
+        guard envelope.workspaceID.lowercased() == session.workspaceID.lowercased() else {
+            return fallback
+        }
+        do {
+            return try await fetcher.fetch(envelope: envelope, session: session)
+        } catch {
+            return fallback
+        }
+    }
+}
+
+public actor MomoPushRESTFetcher: PushMessageFetching {
+    private struct MessagePage: Decodable {
+        let messages: [Message]
+    }
+
+    private struct Message: Decodable {
+        let id: String
+        let authorMemberID: String
+        let body: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, body
+            case authorMemberID = "authorMemberId"
+        }
+    }
+
+    private struct Roster: Decodable {
+        let members: [Member]
+    }
+
+    private struct Member: Decodable {
+        let id: String
+        let displayName: String
+    }
+
+    private let session: URLSession
+    private let decoder = JSONDecoder()
+
+    public init(session: URLSession = .shared) {
+        self.session = session
+    }
+
+    public func fetch(envelope: MomoPushEnvelope, session fetchSession: PushFetchSession) async throws -> PushDisplayContent {
+        let root = "/v1/workspaces/\(fetchSession.workspaceID)"
+        async let messageData = get(
+            root + "/channels/\(envelope.channelID)/messages?limit=200",
+            fetchSession: fetchSession
+        )
+        async let rosterData = get(root + "/roster", fetchSession: fetchSession)
+        let page = try decoder.decode(MessagePage.self, from: try await messageData)
+        let roster = try decoder.decode(Roster.self, from: try await rosterData)
+        guard let message = page.messages.first(where: { $0.id.lowercased() == envelope.messageID.lowercased() }),
+              let body = message.body?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !body.isEmpty,
+              let author = roster.members.first(where: {
+                  $0.id.lowercased() == message.authorMemberID.lowercased()
+              }),
+              !author.displayName.isEmpty
+        else {
+            throw MomoPushError.messageUnavailable
+        }
+        return PushDisplayContent(title: author.displayName, body: body)
+    }
+
+    private func get(_ path: String, fetchSession: PushFetchSession) async throws -> Data {
+        guard let url = URL(string: path, relativeTo: fetchSession.baseURL)?.absoluteURL else {
+            throw MomoPushError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(fetchSession.accessToken)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MomoPushError.fetchFailed
+        }
+        return data
+    }
+}
+
+public enum MomoPushError: Error {
+    case invalidEnvelope
+    case invalidURL
+    case messageUnavailable
+    case fetchFailed
+}

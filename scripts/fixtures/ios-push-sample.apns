@@ -1,0 +1,21 @@
+{
+  "Simulator Target Bundle": "app.momo.ios",
+  "aps": {
+    "alert": {
+      "title": "momo",
+      "body": "새 알림"
+    },
+    "badge": 1,
+    "mutable-content": 1,
+    "content-available": 1
+  },
+  "momo": {
+    "schema": "momo.push.notification.v1",
+    "server_id": "server-a",
+    "workspace_id": "00000000-0000-0000-0000-000000000001",
+    "channel_id": "00000000-0000-0000-0000-000000000010",
+    "message_id": "00000000-0000-0000-0000-000000000020",
+    "collapse_id": "message-20",
+    "reason": "approval_request"
+  }
+}
