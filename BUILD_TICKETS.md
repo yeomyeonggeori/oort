@@ -2168,10 +2168,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 등록 실패 `try?` 삼킴 제거 → os_log(토큰 suffix만) + 1회+foreground 재시도. 실기기 재검증은 [manual]. 상세: issue #484 본문(패킷 겸용).
 - 랜딩: PR #485 squash `37480d2`(2026-07-18). APS_ENVIRONMENT→Info.plist→런타임 매핑(테스트 20/20), os_log 전 지점 + foreground 재시도. 시뮬레이터 게이트 PASS. 실기기 재검증(케이블 Run)은 성재 [manual] 대기.
 
-### ☐ MOMO-468 (`#486`) 수용기준 — V-1 huddle 스키마+수명주기+LiveKit JWT `[runtime-db]` · 의존: ADR-0122 Accepted
-- [ ] 016_huddle(huddle+participant, RLS FORCE, 활성 partial index) + 시작(멱등)/join(JWT)/leave(마지막 퇴장=종료)/active REST — 같은 tx + outbox 3종 이벤트 + audit.
-- [ ] LiveKit HS256 JWT(video grant, ttl 10분), env 미설정 시 503 fail-closed. verify_huddle_lifecycle(격리 compose, LiveKit 불요) + runtime-db 편입 + openapi 명세.
-- [ ] 상세: issue #486 본문(패킷 겸용). V-2(infra)→V-3(macOS, UX 조율)→V-3b(iOS) 순차.
+### ☑ MOMO-468 (`#486`) 수용기준 — V-1 huddle 스키마+수명주기+LiveKit JWT `[runtime-db]` · 의존: ADR-0122 Accepted
+- [x] 016_huddle(huddle+participant, RLS FORCE, 활성 partial index) + 시작(멱등)/join(JWT)/leave(마지막 퇴장=종료)/active REST — 같은 tx + outbox 3종 이벤트 + audit.
+- [x] LiveKit HS256 JWT(video grant, ttl 10분), env 미설정 시 503 fail-closed. verify_huddle_lifecycle(격리 compose, LiveKit 불요) + runtime-db 편입 + openapi 명세.
+- [x] 상세: issue #486 본문(패킷 겸용). V-2(infra)→V-3(macOS, UX 조율)→V-3b(iOS) 순차.
+- 랜딩: PR #488 squash `df18a6b`(2026-07-18). 실런: verify_huddle_lifecycle PASS + runtime-db 게이트 PASS(3차 — 1차 §9 부하 거부 정상동작, 2차에서 461 선재 컨테이너 Sendable 결함 발견→PR #490 1줄 수정 선랜딩). openapi 동시 명세.
 
 ### ☑ MOMO-469 (`#487`) 수용기준 — 푸시 탭 deep link 관통 `[ios]` · 의존: MOMO-467 (실기기 E2E 발견)
 - [x] 라우터 관측 가능화 + signedIn에서 pending 소비→채널 타임라인 진입(1회성 클리어), cold/warm/미로그인 보류 3경로.
