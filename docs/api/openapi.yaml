@@ -1,7 +1,7 @@
 openapi: 3.0.3
 
 # =============================================================================
-# momo REST API — web v0 surface (MOMO-389, ADR-0119 D4-A)
+# momo REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
 #
 # This file is the canonical client contract for the web v0 surface. Clients
 # (clients/web via openapi-typescript, and MomoCore as a conformance target)
@@ -10,9 +10,10 @@ openapi: 3.0.3
 # handlers. Drift between this spec and the running server is detected by
 # scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
 #
-# Scope: web v0 only (ADR-0119 D5-A). Routes outside this surface (invites
-# admin, workspace identity, agent runs, cost projection, platform admin,
-# MCP, centrifugo proxy, health) are intentionally NOT documented here.
+# Scope: web v0 (ADR-0119 D5-A) plus the plugin registry/grant, incoming
+# webhook, and hosted Drive MCP surfaces. Other routes (invite admin,
+# workspace identity, agent runs, cost projection, platform admin,
+# centrifugo proxy, health) remain intentionally undocumented here.
 #
 # Encoding rules (server truth):
 # - Optional response fields are OMITTED when absent (Swift encodeIfPresent);
@@ -30,7 +31,7 @@ openapi: 3.0.3
 # =============================================================================
 
 info:
-  title: momo REST API (web v0 surface)
+  title: momo REST API (web v0 + plugin surface)
   version: 0.1.0
   description: >
     Canonical REST contract for the momo web v0 client surface:
@@ -38,7 +39,8 @@ info:
     workspace roster, channels (list/create), messages (send/history with
     seq-cursor pagination and `?after=` backfill), read-state (bulk read +
     cursor advance), direct messages (list/open), and approvals
-    (list/decision). Mirrors the MomoServer implementation field by field.
+    (list/decision), plugin registry/grants, incoming webhooks, and the hosted
+    read-only Drive MCP endpoint. Mirrors MomoServer field by field.
 
 servers:
   - url: /
@@ -65,6 +67,12 @@ tags:
     description: 1:1 direct message channels.
   - name: approvals
     description: Human-in-the-loop approval projections and decisions.
+  - name: plugins
+    description: Plugin catalog, workspace installation, delegated grants, and tool policy.
+  - name: webhooks
+    description: Incoming webhook installation management and public ingress.
+  - name: mcp
+    description: Hosted MCP JSON-RPC endpoints for agent bearers.
 
 paths:
   /v1/auth/login:
@@ -820,6 +828,568 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/plugins:
+    get:
+      tags: [plugins]
+      operationId: listPlugins
+      summary: List the plugin catalog and caller-effective tool policy.
+      description: >
+        Human bearers receive policy for themselves. Agent bearers must supply
+        both delegatedMemberId and channelId; the server verifies that the
+        delegated human and agent are active members of that channel. The
+        response contains policy metadata only, never provider credentials.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/DelegatedMemberId"
+        - $ref: "#/components/parameters/DelegatedChannelId"
+      responses:
+        "200":
+          description: Plugin catalog and effective credential-free tool policy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginCatalogResponse"
+        "400":
+          description: Agent bearer omitted or malformed delegation query parameters.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/plugins/{pluginId}:
+    get:
+      tags: [plugins]
+      operationId: getPlugin
+      summary: Get one plugin manifest and installation state.
+      description: Human bearer only. The manifest is registry metadata and contains no credential.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PluginId"
+      responses:
+        "200":
+          description: Plugin detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginDetailResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Plugin is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Registered manifest fails validation or is revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/plugins/{pluginId}/install:
+    post:
+      tags: [plugins]
+      operationId: installPlugin
+      summary: Install or re-enable a plugin for the workspace.
+      description: Human bearer only; manifest serverPolicy and workspace role are enforced.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PluginId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InstallPluginRequest"
+      responses:
+        "200":
+          description: Existing installation updated or restored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginMutationResponse"
+        "201":
+          description: Installation created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginMutationResponse"
+        "400":
+          description: Invalid request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Plugin is not registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Registered manifest fails validation or is revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [plugins]
+      operationId: revokePluginInstall
+      summary: Revoke a workspace plugin installation and all its grants.
+      description: Human workspace owner/admin only. Repeating a revoke is idempotent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PluginId"
+      responses:
+        "200":
+          description: Installation is revoked and capability projections are removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginMutationResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Plugin installation does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/plugins/{pluginId}/grants:
+    post:
+      tags: [plugins]
+      operationId: grantPluginScope
+      summary: Grant one declared plugin scope to the calling human.
+      description: The plugin must be actively installed; no provider credential is accepted or returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PluginId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantPluginRequest"
+      responses:
+        "200":
+          description: Existing grant restored or refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginMutationResponse"
+        "201":
+          description: Grant created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginMutationResponse"
+        "400":
+          description: Scope is invalid or not declared by the plugin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Plugin is not installed and enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/plugins/{pluginId}/grants/{scope}:
+    delete:
+      tags: [plugins]
+      operationId: revokePluginScope
+      summary: Revoke one plugin scope belonging to the calling human.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/PluginId"
+        - name: scope
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 120
+      responses:
+        "200":
+          description: Grant is revoked and its capability projection removed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PluginMutationResponse"
+        "400":
+          description: Scope path value is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Plugin grant does not exist.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/webhooks:
+    get:
+      tags: [webhooks]
+      operationId: listWebhookInstallations
+      summary: List incoming webhook installations.
+      description: Human workspace owner/admin only. Secrets and Slack URL tokens are never returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: At most 200 installations, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookInstallationListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      tags: [webhooks]
+      operationId: createWebhookInstallation
+      summary: Create an incoming webhook installation.
+      description: >
+        Human workspace owner/admin only. The native HMAC secret or
+        Slack-compatible URL token is revealed exactly once in this response,
+        is never persisted in raw form, and the response is `no-store`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWebhookRequest"
+      responses:
+        "201":
+          description: Installation and one-time ingress credential issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSecretResponse"
+        "400":
+          description: Invalid channel, mode, or label.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Active target channel not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/webhooks/{installationId}/rotate:
+    post:
+      tags: [webhooks]
+      operationId: rotateWebhookSecret
+      summary: Rotate an incoming webhook credential.
+      description: >
+        The replacement secret or secret-bearing URL is revealed exactly once
+        and returned with `Cache-Control: no-store`. The previous credential
+        remains valid only for overlapSeconds.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WebhookInstallationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RotateWebhookRequest"
+      responses:
+        "200":
+          description: Replacement credential issued once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSecretResponse"
+        "400":
+          description: overlapSeconds is outside 0..604800.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Installation not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Installation is revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/webhooks/{installationId}:
+    delete:
+      tags: [webhooks]
+      operationId: revokeWebhookInstallation
+      summary: Revoke an incoming webhook installation and all its credentials.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WebhookInstallationId"
+      responses:
+        "200":
+          description: Installation is revoked; no secret is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookRevokeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Installation not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/webhooks/{workspaceId}/{installationId}:
+    post:
+      tags: [webhooks]
+      operationId: receiveNativeWebhook
+      summary: Receive a native momo HMAC-signed webhook.
+      description: >
+        Public ingress authenticated by X-Momo-Signature-Version,
+        X-Momo-Key-Id, X-Momo-Timestamp, X-Momo-Delivery-Id, and
+        X-Momo-Signature. The signature base and replay window are defined by
+        ADR-0115. A first delivery returns 201; an idempotent replay returns 200.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WebhookInstallationId"
+        - $ref: "#/components/parameters/MomoSignatureVersion"
+        - $ref: "#/components/parameters/MomoKeyId"
+        - $ref: "#/components/parameters/MomoTimestamp"
+        - $ref: "#/components/parameters/MomoDeliveryId"
+        - $ref: "#/components/parameters/MomoSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NativeWebhookPayload"
+      responses:
+        "200":
+          description: Duplicate delivery; original receipt returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookIngressResponse"
+        "201":
+          description: Delivery committed through message + transactional outbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookIngressResponse"
+        "400":
+          description: Payload is not a supported native webhook object.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Signature, key, timestamp, delivery ID, or installation is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Body exceeds 262144 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /hooks/{token}:
+    post:
+      tags: [webhooks]
+      operationId: receiveSlackCompatibleWebhook
+      summary: Receive a Slack-compatible incoming webhook.
+      description: >
+        The URL token is the credential and must be treated as a secret.
+        Supported Slack/Mattermost text and legacy attachment fields are
+        rendered; identity overrides are ignored. `blocks` is explicitly
+        rejected with 400. First delivery returns 201 and a body-hash/window
+        duplicate returns 200.
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          description: One-time-issued opaque URL credential. Never log or persist in plaintext.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlackCompatibleWebhookPayload"
+      responses:
+        "200":
+          description: Duplicate delivery; original receipt returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookIngressResponse"
+        "201":
+          description: Delivery committed through message + transactional outbox.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookIngressResponse"
+        "400":
+          description: Malformed JSON, missing content, or unsupported blocks.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: URL credential is invalid, expired, rotated out, or revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Body exceeds 262144 bytes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/mcp/drive:
+    post:
+      tags: [mcp]
+      operationId: driveMcp
+      summary: Call the hosted read-only Drive MCP JSON-RPC endpoint.
+      description: >
+        Agent bearer only. delegatedMemberId and channelId are mandatory and
+        bind every call to a shared channel. `initialize`, `tools/list`, and
+        `tools/call` are supported. JSON-RPC failures use HTTP 200 with codes
+        -32700, -32600, -32601, -32602, or -32003; -32003 means the delegated
+        human lacks an active drive:read grant. No Google credential is exposed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DelegatedMemberIdRequired"
+        - $ref: "#/components/parameters/DelegatedChannelIdRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DriveMCPRequest"
+      responses:
+        "200":
+          description: JSON-RPC success or protocol/application error envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DriveMCPResponse"
+        "400":
+          description: Delegation query is missing or malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Bearer is human or delegation/channel binding fails.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
 components:
   securitySchemes:
     bearerAuth:
@@ -850,6 +1420,92 @@ components:
       schema:
         type: string
         format: uuid
+    PluginId:
+      name: pluginId
+      in: path
+      required: true
+      description: Stable plugin manifest identifier.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    DelegatedMemberId:
+      name: delegatedMemberId
+      in: query
+      required: false
+      description: Required for an agent bearer; ignored for a human bearer.
+      schema:
+        type: string
+        format: uuid
+    DelegatedChannelId:
+      name: channelId
+      in: query
+      required: false
+      description: Required for an agent bearer; must contain both agent and delegated human.
+      schema:
+        type: string
+        format: uuid
+    DelegatedMemberIdRequired:
+      name: delegatedMemberId
+      in: query
+      required: true
+      description: Active human whose grant is delegated to the agent call.
+      schema:
+        type: string
+        format: uuid
+    DelegatedChannelIdRequired:
+      name: channelId
+      in: query
+      required: true
+      description: Active channel containing both the delegated human and calling agent.
+      schema:
+        type: string
+        format: uuid
+    WebhookInstallationId:
+      name: installationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MomoSignatureVersion:
+      name: X-Momo-Signature-Version
+      in: header
+      required: true
+      schema:
+        type: string
+        enum: [v1]
+    MomoKeyId:
+      name: X-Momo-Key-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    MomoTimestamp:
+      name: X-Momo-Timestamp
+      in: header
+      required: true
+      description: Unix seconds; accepted only inside the five-minute replay window.
+      schema:
+        type: integer
+        format: int64
+    MomoDeliveryId:
+      name: X-Momo-Delivery-Id
+      in: header
+      required: true
+      description: Idempotency key, 1..200 characters from the server allowlist.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 200
+    MomoSignature:
+      name: X-Momo-Signature
+      in: header
+      required: true
+      description: Lower/uppercase hexadecimal HMAC-SHA256, optionally prefixed with `v1=`.
+      schema:
+        type: string
 
   responses:
     Unauthorized:
@@ -1544,6 +2200,349 @@ components:
         expires_at_ms:
           type: integer
           format: int64
+
+    # ---- Plugin registry and delegated tool policy --------------------------
+    InstallPluginRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+
+    GrantPluginRequest:
+      type: object
+      required: [scope]
+      properties:
+        scope:
+          type: string
+
+    PluginCatalogItem:
+      type: object
+      required:
+        - pluginId
+        - name
+        - version
+        - description
+        - official
+        - recommended
+        - egressDomains
+        - recommendedFor
+        - installed
+        - enabled
+      properties:
+        pluginId: {type: string}
+        name: {type: string}
+        version: {type: string}
+        description: {type: string}
+        official: {type: boolean}
+        recommended:
+          type: boolean
+          description: True for the fixed onboarding set (GitHub, Drive, external webhook).
+        egressDomains:
+          type: array
+          items: {type: string}
+        recommendedFor:
+          type: array
+          items: {type: string}
+        installed: {type: boolean}
+        enabled: {type: boolean}
+
+    PluginPolicyTool:
+      type: object
+      required: [name, risk, approvalTier]
+      properties:
+        name: {type: string}
+        risk: {type: string}
+        approvalTier: {type: string}
+
+    PluginPolicyMCP:
+      type: object
+      required: [url, transport]
+      properties:
+        url: {type: string}
+        transport: {type: string}
+
+    PluginPolicyDescriptor:
+      type: object
+      required: [pluginId, mcp, egressDomains, tools]
+      properties:
+        pluginId: {type: string}
+        mcp:
+          $ref: "#/components/schemas/PluginPolicyMCP"
+        egressDomains:
+          type: array
+          items: {type: string}
+        tools:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginPolicyTool"
+
+    PluginToolPolicy:
+      type: object
+      required: [plugins]
+      properties:
+        plugins:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginPolicyDescriptor"
+
+    PluginCatalogResponse:
+      type: object
+      required: [plugins, toolPolicy]
+      properties:
+        plugins:
+          type: array
+          items:
+            $ref: "#/components/schemas/PluginCatalogItem"
+        toolPolicy:
+          $ref: "#/components/schemas/PluginToolPolicy"
+
+    PluginDetail:
+      type: object
+      required:
+        - pluginId
+        - name
+        - version
+        - description
+        - official
+        - egressDomains
+        - recommendedFor
+        - installed
+        - enabled
+        - manifest
+      properties:
+        pluginId: {type: string}
+        name: {type: string}
+        version: {type: string}
+        description: {type: string}
+        official: {type: boolean}
+        egressDomains:
+          type: array
+          items: {type: string}
+        recommendedFor:
+          type: array
+          items: {type: string}
+        installed: {type: boolean}
+        enabled: {type: boolean}
+        manifest:
+          description: Validated registry manifest. Its manifest-version-specific shape is preserved.
+          type: object
+          additionalProperties: true
+
+    PluginDetailResponse:
+      type: object
+      required: [plugin]
+      properties:
+        plugin:
+          $ref: "#/components/schemas/PluginDetail"
+
+    PluginMutationResponse:
+      type: object
+      required: [pluginId, status, enabled, capabilities]
+      properties:
+        pluginId: {type: string}
+        memberId:
+          type: string
+          format: uuid
+        scope: {type: string}
+        status: {type: string}
+        enabled: {type: boolean}
+        auditRef:
+          type: string
+          format: uuid
+        capabilities:
+          type: array
+          items: {type: string}
+
+    # ---- Incoming webhooks --------------------------------------------------
+    CreateWebhookRequest:
+      type: object
+      required: [channelId, mode]
+      properties:
+        channelId:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [native, slack_compatible]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 80
+
+    RotateWebhookRequest:
+      type: object
+      properties:
+        overlapSeconds:
+          type: integer
+          minimum: 0
+          maximum: 604800
+          default: 86400
+
+    WebhookInstallation:
+      type: object
+      required: [id, channelId, authorMemberId, mode, label, status, createdAtMs, updatedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        authorMemberId:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [native, slack_compatible]
+        label: {type: string}
+        status:
+          type: string
+          enum: [active, revoked]
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+
+    WebhookInstallationListResponse:
+      type: object
+      required: [installations]
+      properties:
+        installations:
+          type: array
+          items:
+            $ref: "#/components/schemas/WebhookInstallation"
+
+    WebhookSecretResponse:
+      type: object
+      description: >
+        One-time credential response. Native mode includes secret,
+        signatureVersion, and algorithm; Slack-compatible mode embeds the
+        opaque secret only in url. Absent mode-specific fields are omitted.
+      required: [installation, keyId, url]
+      properties:
+        installation:
+          $ref: "#/components/schemas/WebhookInstallation"
+        keyId:
+          type: string
+          format: uuid
+        secret:
+          type: string
+          description: Native HMAC secret, revealed once and never persisted in raw form.
+        url:
+          type: string
+          description: Native relative ingress path or one-time Slack-compatible secret URL.
+        signatureVersion:
+          type: string
+          enum: [v1]
+        algorithm:
+          type: string
+          enum: [HMAC-SHA256]
+        overlapSeconds:
+          type: integer
+
+    WebhookRevokeResponse:
+      type: object
+      required: [installation, revoked]
+      properties:
+        installation:
+          $ref: "#/components/schemas/WebhookInstallation"
+        revoked: {type: boolean}
+
+    WebhookIngressResponse:
+      type: object
+      required: [receiptId, messageId, seq, duplicate]
+      properties:
+        receiptId:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+        duplicate: {type: boolean}
+
+    NativeWebhookPayload:
+      type: object
+      required: [text]
+      additionalProperties: false
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 40000
+        event_type:
+          type: string
+          minLength: 1
+          maxLength: 120
+        metadata:
+          type: object
+          maxProperties: 32
+          additionalProperties:
+            type: string
+            maxLength: 1000
+
+    SlackCompatibleWebhookPayload:
+      type: object
+      description: >
+        Mattermost-compatible subset. text and legacy attachments are read;
+        unsupported fields are ignored except blocks, which returns 400.
+      not:
+        required: [blocks]
+      properties:
+        text: {type: string}
+        attachments:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            additionalProperties: true
+      additionalProperties: true
+
+    # ---- Hosted Drive MCP JSON-RPC -----------------------------------------
+    DriveMCPRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id:
+          description: Required by the server for a valid request; string, number, or null on parse errors.
+        method:
+          type: string
+          enum: [initialize, tools/list, tools/call]
+        params:
+          type: object
+          additionalProperties: true
+
+    DriveMCPError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: integer
+          enum: [-32700, -32600, -32601, -32602, -32003]
+        message: {type: string}
+        data:
+          type: object
+          additionalProperties: true
+
+    DriveMCPResponse:
+      type: object
+      description: Exactly one of result or error is emitted; nil fields are omitted by Swift.
+      required: [jsonrpc, id]
+      properties:
+        jsonrpc:
+          type: string
+          enum: ["2.0"]
+        id: {}
+        result: {}
+        error:
+          $ref: "#/components/schemas/DriveMCPError"
 
     ApprovalProjectionPage:
       type: object

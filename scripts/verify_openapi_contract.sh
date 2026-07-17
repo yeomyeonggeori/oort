@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_openapi_contract.sh — MOMO-389 OpenAPI contract drift gate
+# scripts/verify_openapi_contract.sh — MOMO-389/MOMO-459 OpenAPI contract drift gate
 #
 # Verifies that the live server's response shapes (required keys + types)
-# match docs/api/openapi.yaml — the canonical web v0 client contract
-# (ADR-0119 D4-A). Every operation documented in the spec is sampled against
+# match docs/api/openapi.yaml — the canonical web v0 + plugin contract
+# (ADR-0119 D4-A, ADR-0113, ADR-0115). Every documented operation is sampled against
 # a running MomoServer and validated by scripts/openapi_shape_check.py with a
 # closed-world policy: undeclared response keys, missing required keys, type
 # mismatches, and unexpected nulls all FAIL (non-zero exit).
@@ -47,8 +47,17 @@ need() {
 
 need curl
 need jq
-need python3
 need uuidgen
+need openssl
+# openapi_shape_check uses modern Python syntax/contracts. The gate PATH may
+# prefer Xcode's Python 3.9, so select Python >= 3.10 explicitly (MOMO-458).
+PYTHON_BIN=""
+for cand in python3.13 python3.12 python3.11 python3.10 python3; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    PYTHON_BIN="$cand"; break
+  fi
+done
+[ -n "$PYTHON_BIN" ] || { echo "[openapi] missing python >= 3.10" >&2; exit 1; }
 
 SPEC_YAML="${OPENAPI_SPEC:-$REPO_ROOT/docs/api/openapi.yaml}"
 [ -f "$SPEC_YAML" ] || { echo "[openapi] spec not found: $SPEC_YAML" >&2; exit 1; }
@@ -75,6 +84,7 @@ DEMO_WORKSPACE_ID="00000000-0000-7000-8000-000000000001"
 GENERAL_CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 KIM_INTERN_MEMBER_ID="00000000-0000-7000-8000-000000000102"
 GATE_MEMBER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+GATE_AGENT_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 GATE_EMAIL="gate-$RUN_ID@momo.local"
 # Random per run: in BASE_URL(external stack) mode the fixture member row can
 # outlive the gate, so it must never carry a well-known password (PR #404
@@ -125,8 +135,8 @@ convert_spec() {
       return 0
     fi
   fi
-  if python3 -c "import yaml" >/dev/null 2>&1; then
-    python3 -c \
+  if "$PYTHON_BIN" -c "import yaml" >/dev/null 2>&1; then
+    "$PYTHON_BIN" -c \
       'import json,sys,yaml; json.dump(yaml.safe_load(open(sys.argv[1])), sys.stdout)' \
       "$SPEC_YAML" >"$SPEC_JSON"
     return 0
@@ -200,7 +210,7 @@ run_sql() {
   fi
 }
 
-echo "[openapi] installing gate fixtures (member/invite/approval)"
+echo "[openapi] installing gate fixtures (member/agent/invite/approval)"
 run_sql <<SQL
 BEGIN;
 SET LOCAL app.workspace_id = '$DEMO_WORKSPACE_ID';
@@ -219,14 +229,21 @@ END \$\$;
 -- Dedicated gate human with workspace-admin channel role in #general.
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('$GATE_MEMBER_ID', '$DEMO_WORKSPACE_ID', 'human', 'active',
-        'OpenAPI Gate', '$GATE_HANDLE');
+        'OpenAPI Gate', '$GATE_HANDLE'),
+       ('$GATE_AGENT_ID', '$DEMO_WORKSPACE_ID', 'agent', 'active',
+        'OpenAPI Gate Agent', 'gate-agent-$RUN_EPOCH');
 
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES ('$GATE_MEMBER_ID', '$DEMO_WORKSPACE_ID', '$GATE_EMAIL', true,
         momo_password_hash('$GATE_PASSWORD'), 'UTC');
 
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
-VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$GATE_MEMBER_ID', 'admin');
+VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$GATE_MEMBER_ID', 'admin'),
+       ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$GATE_AGENT_ID', 'member');
+
+INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt, owner_human_id)
+VALUES ('$GATE_AGENT_ID', '$DEMO_WORKSPACE_ID', 'openapi-gate',
+        'http://localhost:8088/v1', 'MOMO-459 OpenAPI gate', '$GATE_MEMBER_ID');
 
 -- Invite code for the /v1/join sample (raw code known only to this run).
 INSERT INTO invite_code
@@ -288,6 +305,44 @@ sample() {
     '{name:$name, method:$method, path:$path, status:$status, body_file:$body_file}' \
     >>"$MANIFEST"
   echo "[openapi] SAMPLE $name -> $expected"
+}
+
+record_sample() {
+  local name="$1" method="$2" template="$3" expected="$4"
+  if [ "$RESPONSE_STATUS" != "$expected" ]; then
+    echo "[openapi] FAIL $name: expected HTTP $expected, got $RESPONSE_STATUS" >&2
+    echo "$RESPONSE_BODY" >&2
+    exit 1
+  fi
+  SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
+  local file
+  file="$(printf '%s/sample-%02d-%s.json' "$TMP_DIR" "$SAMPLE_INDEX" "$name")"
+  printf '%s' "$RESPONSE_BODY" >"$file"
+  jq -cn --arg name "$name" --arg method "$method" --arg path "$template" \
+    --arg status "$expected" --arg body_file "$file" \
+    '{name:$name, method:$method, path:$path, status:$status, body_file:$body_file}' \
+    >>"$MANIFEST"
+  echo "[openapi] SAMPLE $name -> $expected"
+}
+
+native_webhook_sample() {
+  local name="$1" template="$2" path="$3" body="$4" key_id="$5" secret="$6" delivery_id="$7"
+  local timestamp body_hash signature_base signature out="$TMP_DIR/last-response.json"
+  timestamp="$(date -u +%s)"
+  body_hash="$(printf '%s' "$body" | openssl dgst -sha256 | awk '{print $NF}')"
+  signature_base="$(printf 'v1\nPOST\n%s\n%s\n%s\n%s\n%s' \
+    "$path" "${path##*/}" "$timestamp" "$delivery_id" "$body_hash")"
+  signature="$(printf '%s' "$signature_base" | openssl dgst -sha256 -hmac "$secret" | awk '{print $NF}')"
+  RESPONSE_STATUS="$(curl -sS -o "$out" -w "%{http_code}" -X POST "$BASE_URL$path" \
+    -H 'Content-Type: application/json' \
+    -H 'X-Momo-Signature-Version: v1' \
+    -H "X-Momo-Key-Id: $key_id" \
+    -H "X-Momo-Timestamp: $timestamp" \
+    -H "X-Momo-Delivery-Id: $delivery_id" \
+    -H "X-Momo-Signature: v1=$signature" \
+    --data-binary "$body")"
+  RESPONSE_BODY="$(cat "$out")"
+  record_sample "$name" post "$template" 201
 }
 
 guard_jq() {
@@ -388,6 +443,102 @@ sample approval-decision post \
       '{approval_id:$a,approve:true,reason:"openapi drift gate",client_decision_id:$d}')" "$ACCESS"
 guard_jq '.status == "approved"' "decision receipt reports approved"
 
+# plugins: catalog/detail -> install/grant -> delegated agent policy
+DRIVE_PLUGIN="com.momo.plugins.drive"
+DRIVE_PATH="/v1/workspaces/$WS/plugins/$DRIVE_PLUGIN"
+sample plugins-list get "/v1/workspaces/{workspaceId}/plugins" \
+  "/v1/workspaces/$WS/plugins" 200 "" "$ACCESS"
+guard_jq '(.plugins | map(select(.pluginId == "com.momo.plugins.drive")) | length) == 1' \
+  "Drive is present in the plugin catalog"
+
+sample plugin-detail get "/v1/workspaces/{workspaceId}/plugins/{pluginId}" \
+  "$DRIVE_PATH" 200 "" "$ACCESS"
+api post "$DRIVE_PATH/install" '{"enabled":true}' "$ACCESS"
+case "$RESPONSE_STATUS" in
+  200|201) record_sample plugin-install post "/v1/workspaces/{workspaceId}/plugins/{pluginId}/install" "$RESPONSE_STATUS" ;;
+  *) echo "[openapi] FAIL plugin-install: expected HTTP 200/201, got $RESPONSE_STATUS" >&2; exit 1 ;;
+esac
+sample plugin-grant post "/v1/workspaces/{workspaceId}/plugins/{pluginId}/grants" \
+  "$DRIVE_PATH/grants" 201 '{"scope":"drive:read"}' "$ACCESS"
+
+api post "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" \
+  '{"label":"MOMO-459 OpenAPI gate"}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || {
+  echo "[openapi] FAIL agent credential issue: expected 201, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+AGENT_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
+DELEGATION_QUERY="delegatedMemberId=$GATE_MEMBER_ID&channelId=$GENERAL_ID"
+sample plugins-agent-policy get "/v1/workspaces/{workspaceId}/plugins" \
+  "/v1/workspaces/$WS/plugins?$DELEGATION_QUERY" 200 "" "$AGENT_ACCESS"
+guard_jq '(.toolPolicy.plugins | map(select(.pluginId == "com.momo.plugins.drive")) | length) == 1' \
+  "agent policy contains the delegated Drive grant"
+
+# Drive MCP: one HTTP operation, sampled across all implemented JSON-RPC
+# methods and protocol/application error codes.
+MCP_PATH="/v1/mcp/drive?$DELEGATION_QUERY"
+sample drive-mcp-initialize post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' "$AGENT_ACCESS"
+sample drive-mcp-tools-list post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' "$AGENT_ACCESS"
+sample drive-mcp-tools-call post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"drive.search_files","arguments":{"query":"handbook"}}}' "$AGENT_ACCESS"
+sample drive-mcp-parse-error post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":' "$AGENT_ACCESS"
+guard_jq '.error.code == -32700' "Drive MCP parse error code"
+sample drive-mcp-invalid-request post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"1.0","method":"initialize"}' "$AGENT_ACCESS"
+guard_jq '.error.code == -32600' "Drive MCP invalid request code"
+sample drive-mcp-method-not-found post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"2.0","id":4,"method":"unknown"}' "$AGENT_ACCESS"
+guard_jq '.error.code == -32601' "Drive MCP method-not-found code"
+sample drive-mcp-invalid-params post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{}}' "$AGENT_ACCESS"
+guard_jq '.error.code == -32602' "Drive MCP invalid-params code"
+
+sample plugin-grant-revoke delete \
+  "/v1/workspaces/{workspaceId}/plugins/{pluginId}/grants/{scope}" \
+  "$DRIVE_PATH/grants/drive:read" 200 "" "$ACCESS"
+sample drive-mcp-grant-required post "/v1/mcp/drive" "$MCP_PATH" 200 \
+  '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"drive.search_files","arguments":{}}}' "$AGENT_ACCESS"
+guard_jq '.error.code == -32003 and .error.data.code == "momo.drive.grant_required"' \
+  "Drive MCP grant-required code"
+sample plugin-install-revoke delete "/v1/workspaces/{workspaceId}/plugins/{pluginId}/install" \
+  "$DRIVE_PATH/install" 200 "" "$ACCESS"
+
+# webhooks: management, native signed ingress, Slack-compatible ingress.
+WEBHOOKS_PATH="/v1/workspaces/$WS/webhooks"
+sample webhook-create post "/v1/workspaces/{workspaceId}/webhooks" "$WEBHOOKS_PATH" 201 \
+  "$(jq -cn --arg ch "$GENERAL_ID" '{channelId:$ch,mode:"native",label:"OpenAPI Native"}')" "$ACCESS"
+NATIVE_INSTALL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.installation.id' | tr '[:upper:]' '[:lower:]')"
+NATIVE_KEY="$(printf '%s' "$RESPONSE_BODY" | jq -er '.keyId' | tr '[:upper:]' '[:lower:]')"
+NATIVE_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -er '.secret')"
+NATIVE_URL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.url')"
+
+sample webhook-rotate post "/v1/workspaces/{workspaceId}/webhooks/{installationId}/rotate" \
+  "$WEBHOOKS_PATH/$NATIVE_INSTALL/rotate" 200 '{"overlapSeconds":0}' "$ACCESS"
+NATIVE_KEY="$(printf '%s' "$RESPONSE_BODY" | jq -er '.keyId' | tr '[:upper:]' '[:lower:]')"
+NATIVE_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -er '.secret')"
+
+sample webhooks-list get "/v1/workspaces/{workspaceId}/webhooks" "$WEBHOOKS_PATH" 200 "" "$ACCESS"
+guard_jq 'all(.installations[]; has("secret") | not)' "webhook list omits one-time secrets"
+native_webhook_sample native-webhook "/v1/webhooks/{workspaceId}/{installationId}" \
+  "$NATIVE_URL" '{"text":"OpenAPI native delivery","event_type":"contract"}' \
+  "$NATIVE_KEY" "$NATIVE_SECRET" "openapi-$RUN_ID"
+
+api post "$WEBHOOKS_PATH" \
+  "$(jq -cn --arg ch "$GENERAL_ID" '{channelId:$ch,mode:"slack_compatible",label:"OpenAPI Slack"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || {
+  echo "[openapi] FAIL Slack-compatible webhook issue: expected 201, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+SLACK_URL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.url')"
+sample slack-webhook post "/hooks/{token}" "$SLACK_URL" 201 \
+  '{"text":"OpenAPI Slack-compatible delivery"}'
+
+sample webhook-revoke delete "/v1/workspaces/{workspaceId}/webhooks/{installationId}" \
+  "$WEBHOOKS_PATH/$NATIVE_INSTALL" 200 "" "$ACCESS"
+
 # error envelope + logout (last: revokes the session)
 sample unauthorized get "/v1/workspaces/{workspaceId}/roster" "/v1/workspaces/$WS/roster" 401 ""
 sample logout post "/v1/auth/logout" "/v1/auth/logout" 200 \
@@ -397,7 +548,7 @@ guard_jq '.revokedAccess == true and .revokedRefresh == true' "logout revoked bo
 # ---- 5) Validate every sample against the spec (+ full operation coverage) ---
 jq -s '{samples: .}' "$MANIFEST" >"$TMP_DIR/manifest.json"
 echo "[openapi] validating $(jq '.samples | length' "$TMP_DIR/manifest.json") samples against the spec"
-python3 "$SCRIPT_DIR/openapi_shape_check.py" \
+"$PYTHON_BIN" "$SCRIPT_DIR/openapi_shape_check.py" \
   --spec "$SPEC_JSON" \
   --manifest "$TMP_DIR/manifest.json" \
   --require-operation-coverage
