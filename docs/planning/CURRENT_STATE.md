@@ -37,6 +37,7 @@
 | `ADR-0109` | unread/read-state 서버 계약 (UX P7) | Fable | **`accepted`** (2026-07-13) | 성재 ✓ | Wave 2(MOMO-366/367)까지 랜딩 완료 — 후속 없음 |
 | `ADR-0111` | Agent Work Surface — 메신저 내 업무·터미널·코드 실행 (성재 발제) | Fable | **`accepted`** (2026-07-13, Option A=BYOA) | 성재 ✓ | 배치 종결 (2026-07-13) |
 | `ADR-0112` | 제품 표면 재정렬 — 듀얼 모드·Slack 기본기·Codex급 상호작용 (성재 발제) | Fable | **`accepted`** (2026-07-14) | 성재 ✓ | Wave A+379 종결; B/C는 육안 QA 후 발급 |
+| `ADR-0123` | iOS 클라이언트 v0 — dogfood-first 모바일 수신부 (성재 발제 2026-07-17) | Fable | **`proposed`** | 성재 | D1~D6 권고안 승인 대기 → Accepted 시 IOS-1부터 순차 발급(구현=codex iOS 플러그인) |
 | `PLN-20260714-01` | UX/UI 수동 QA + ADR-0112 후속 실행 순서 | `momo-main` | **`superseded`** | 성재 | 2026-07-14 실창 QA를 `PLN-20260715-01`로 이어받음 |
 | `PLN-20260714-02` | 슈퍼앱 엔진 실행 로드맵(Work·MCP·GWS·plugin/webhook·approval) | engine planner + `momo-main` review | **`integrated-adr-drafts-pending`** | 성재 | gap audit/review/main 통합 완료(MOMO-381). ADR-0113~0116은 draft goal 발급 후 option 승인 필요 |
 | `PLN-20260715-01` | Workspace-first messenger + superapp shell | `momo-main` | **`in-progress`** | 성재 | MOMO-382 정본 통합 후 MOMO-383을 첫 UX builder로 발급 |

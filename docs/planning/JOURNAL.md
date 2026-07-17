@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-17 (Fable 기획) · ADR-0123 iOS 클라이언트 v0 기안
+- 성재 발제로 iOS 트랙 기획 착수. 실측: MomoCore 20파일 AppKit 0(그대로 재사용), 레거시 EP-IOS 분해(040 승계·041 기완성·042/043 M8 이월), 팀/APNs 전제 금일 확인 완료.
+- D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
+- 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
+
 ## 2026-07-17 (Fable 엔진 트랙+성재) · S-4 v0 + P-3 PushRelay 랜딩 — 성재 개입 3건 전부 종결
 - MOMO-460 `69ace59`(services/LinkShort — /i/<code>→302, 도메인은 DNS만 붙이면 됨) + MOMO-461 `94b62bc`(relay/PushRelay — Ed25519 등록제·rate limit·APNs ES256 발송, NotifierWorker 서명 옵트인).
 - APNs 자격증명: 기존 개인 유료 계정 키 4SSR3XS7WZ(Team YWQQFQM38J) 재사용 — 실 smoke 2단: 자격증명 단독(400 BadDeviceToken 판정) + relay 경유 end-to-end(apns_id 발급 passthrough). .p8은 ~/.momo-secrets/(레포 밖).
