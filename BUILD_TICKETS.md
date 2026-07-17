@@ -2163,6 +2163,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] IOS_TESTFLIGHT_RUNBOOK([manual]: App ID/App Group 등록→서명→archive 업로드→internal 테스터→실기기 E2E 체크리스트, 서버 연결 옵션). 서명/업로드 실행은 성재. 상세: issue #482 본문(패킷 겸용).
 - 랜딩: PR #483 squash `3d321c6`(2026-07-17). 오케스트레이터: Release 시뮬레이터 빌드 SUCCEEDED. 잔여는 런북 [manual] 48단계(성재) — 실기기 E2E가 iOS v0 배치의 최종 evidence.
 
+### ☐ MOMO-467 (`#484`) 수용기준 — IOS-4 후속: 등록 env 자동판별 + 실패 관측 `[ios]` · 의존: MOMO-465 (실기기 검증서 발견)
+- [ ] 디바이스 등록 env를 aps-environment(development/production)로 자동 판별(sandbox 하드코딩 제거) + 매핑 단위 테스트.
+- [ ] 등록 실패 `try?` 삼킴 제거 → os_log(토큰 suffix만) + 1회+foreground 재시도. 실기기 재검증은 [manual]. 상세: issue #484 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
