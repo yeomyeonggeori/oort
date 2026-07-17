@@ -160,8 +160,9 @@ Large shared changes should be merged by `momo-main` in dependency order. Worker
 
 1. **통합 세션(들)**: 메인 worktree에서는 planning/docs 파일만 수정하고, 커밋은 **명시적 파일 지정 add만**(`git add -A`/`git add .` 금지 — 타 세션 미커밋 작업분을 삼킨 사고 2회: 오커밋→main 빌드 파손, stash 시도).
 2. **타 세션의 미커밋 파일 발견 시**: 절대 stash/checkout/reset --hard/정리하지 않는다. 잔재로 보여도 해당 트랙 세션에 확인을 요청하고 무접촉으로 둔다.
-3. **push 충돌 시**: 메인 worktree에서 rebase가 타 세션 파일에 막히면, 임시 worktree(`git worktree add <tmp> origin/main`) + cherry-pick + `push origin HEAD:main`으로 우회한다 — working tree 무접촉. 이후 로컬 main은 `git reset origin/main`(mixed — working tree 보존)으로만 동기화.
+3. **push 충돌 시**: 메인 worktree에서 rebase가 타 세션 파일에 막히면, 임시 worktree(`git worktree add <tmp> origin/main`) + cherry-pick + `push origin HEAD:main`으로 우회한다 — working tree 무접촉.
 4. 구현 세션(GPT momo-main 포함)이 메인 worktree에서 초안을 잡았다면, worktree로 옮긴 뒤 **메인 worktree의 사본을 스스로 정리**한다(잔재를 남기면 타 세션의 rebase/게이트가 막힌다).
+5. **루트 clean 유지 + 동기화 규약 (2026-07-17 mixed-reset 착시 사고 후)**: 메인 체크아웃은 항상 clean(`git status` 0건) + `origin/main` 일치가 기본 상태다. 동기화는 clean 확인 후 `git pull --ff-only`만 사용한다. dirty 트리 위 `git reset origin/main`(mixed)은 HEAD/index만 이동하고 파일은 낡은 버전으로 남아, 이후 세션에 "수천 줄 미커밋 역삭제"라는 착시를 만든다(2026-07-17: 낡은 스냅샷 2,973줄이 webhook/게이트 하드닝을 되돌리는 변경처럼 보임 — 전 파일이 과거 커밋 blob과 일치함을 확인 후 stash 보존으로 해소). 부득이 dirty 상태에서 mixed reset을 쓴 세션은 그 사실을 JOURNAL에 남긴다.
 
 ## 5. Worker Prompt Template
 
