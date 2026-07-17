@@ -3,6 +3,12 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-466 iOS TestFlight internal 배포 준비 (2026-07-17)
+
+- Xcode 26 단일 1024px AppIcon을 생성하는 CoreGraphics 스크립트와 절제된 단색 `m` 모노그램 PNG를 추가하고, 앱 asset catalog·Team `YWQQFQM38J`·NSE bundle `app.momo.ios.NotificationService`·Debug/Release APNs 환경을 배포 계약에 맞췄다.
+- `docs/IOS_TESTFLIGHT_RUNBOOK.md`에 App ID/App Group, 자동 서명, Organizer 업로드, internal tester, LAN/AWS 연결, 실기기 APNs/NSE/deep-link/device-row E2E를 `[manual]`로 정리했다. 실제 서명·archive·업로드·실기기 E2E는 성재 수행 전이며 manual-unverified다.
+- `docs` local gate와 아이콘 1024x1024 RGB·alpha 없음·결정적 재생성 검사는 PASS했다. Release 시뮬레이터 sanity는 worker sandbox가 CoreSimulatorService와 `~/Library/Caches` 쓰기를 차단해 컴파일 진입 전 종료됐으므로 runtime-unverified이며, 런북 §4 명령을 sandbox 밖에서 재실행해야 한다.
+
 ## MOMO-457 hosted read-only Drive MCP (2026-07-17)
 
 - `POST /v1/mcp/drive`에 agent bearer+위임 채널 binding, 매 호출 활성 `drive:read` grant 잠금 재검증, 결과 audit를 묶은 stateless MCP initialize/tools.list/tools.call과 공유 드라이브 read-only 3도구를 추가했다. Drive backend는 명시 local stub과 env 기반 Google SA 구현으로 분리되고 키 바이트는 DB·응답·audit·로그에 유입되지 않는다.
