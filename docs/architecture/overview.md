@@ -46,6 +46,8 @@ flowchart LR
 
   이 호스트 커스터디 모델은 에이전트 호스트가 사용자가 직접 소유·통제하는 머신이라는 전제다. OAuth/PAT 등 MCP 자격증명은 그 호스트의 MCP 클라이언트에만 보관해야 하며 momo 서버나 Context Packet으로 전달하지 않는다. 다중 사용자 workspace에서도 한 에이전트 호스트를 사용자 사이에 공유하지 않고, 각 사용자의 호스트 세션과 토큰 저장소를 분리한다.
 
+  Drive 경로 C는 이 일반 remote 커스터디 모델의 좁은 서버 소유 예외다(ADR-0113 D3/D5). `com.momo.plugins.drive`의 상대 MCP endpoint는 catalog 응답에서 현재 서버의 public origin으로 절대화되고, `POST /v1/mcp/drive`는 agent bearer와 위임 사용자·채널 binding, 매 호출의 활성 `drive:read` grant를 재검증한다. 도구는 공유 드라이브 검색·메타데이터·bounded text export 3개뿐이며 전부 read-only다. 배포 운영자가 SA 키 파일과 공유 드라이브 ID를 환경으로 주입하고 키 바이트는 DB·응답·audit·로그에 들어가지 않는다. SA 생성·공유 드라이브 멤버십·수동 실호출 evidence는 [`docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`](../GWS_INTERNAL_CONSENT_RUNBOOK.md)가 정본이다.
+
 ### 클라이언트 roster와 realtime discovery
 
 macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 active

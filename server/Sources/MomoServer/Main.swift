@@ -20,6 +20,10 @@ struct MomoServerMain {
 
         let config = Config.load()
         try config.agentProvider.validateForBoot(environmentName: config.momoEnvironment)
+        try DriveBackendFactory.validateForBoot(
+            environmentName: config.momoEnvironment,
+            environment: ProcessInfo.processInfo.environment
+        )
         // MOMO-300: strict envs must not boot with a placeholder proxy secret.
         try config.validateSecurityForBoot()
         logger.info("starting MomoServer", metadata: [
