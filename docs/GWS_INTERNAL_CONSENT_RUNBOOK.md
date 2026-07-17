@@ -61,7 +61,11 @@
 | `shared_drive_id` | Drive URL의 `0A…` id | 드라이브 1개만 |
 | `boundary_kind` | `shared_drive_member` | MOMO-123 §6 제3모드 |
 | `shared_drive_role` | `content_manager` | |
-| scope 계획 | `drive.file`(SA 자신, 우선) | 부족 판명 시 SA만 `drive.readonly`로 확장하고 scope inventory에 사유 기록(`research/13-redesign/03` §6 실증 1) |
+| scope 계획 | ~~`drive.file`~~ → **`drive.readonly`(SA만, 2026-07-17 실증 확정)** | 실증: `drive.file` 토큰으로 `drives.get`/`files.list`가 403(insufficient scopes) — 공유 드라이브 메타·목록 접근에 불충분. SA 한정 `drive.readonly` 채택(서버 `GoogleDriveSABackend`도 동일 scope). Internal consent라 검증 부담 없음 |
+
+### 6.1 dawn 배포 기록 (2026-07-17, 성재 수행)
+
+GCP project `momo-dawn`(dawn.kim 조직 하위) · SA `momo-archive@momo-dawn.iam.gserviceaccount.com` · 키는 운영자 로컬 시크릿 경로(레포 밖, 0600) · 공유 드라이브 `momo-dawn` = `0AHKTseTvG-mpUk9PVA`(SA=콘텐츠 관리자) · `boundary_kind=shared_drive_member` · scope=`drive.readonly`(§6 실증). 참고: 조직 기본 정책 `iam.disableServiceAccountKeyCreation`(legacy+managed, Google secure-by-default)이 키 발급을 차단 — momo-dawn 프로젝트 한정 상위 정책 재정의로 해제(조직 정책 관리자 역할 필요).
 
 ## 7. 검증 체크리스트
 
