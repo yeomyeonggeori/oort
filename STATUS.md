@@ -7,6 +7,11 @@
 
 - Hermes adapter가 packet마다 agent job의 위임 사용자·채널을 이용해 plugin projection을 재조회하고, 유효 grant의 allowlisted MCP descriptor만 `context_packet_projection.tool_policy`에 포함한다. revoke는 다음 packet에 즉시 반영되고 조회/descriptor 오류는 플러그인 단위 또는 전체 기본 거부한다.
 - 서버 plugin 목록은 agent bearer에 대해 같은 채널의 위임 사용자 binding을 검증한 뒤 credential-free tool policy를 추가 응답한다. mock REST Python 계약 테스트와 실서버 install→grant→조회→revoke verifier를 추가했다. 오케스트레이터 실런으로 grant 왕복 verifier·plugin registry 회귀·runtime-agent 게이트 모두 PASS(2026-07-17) — runtime 검증 완료.
+
+## MOMO-455 macOS composer action icon optical alignment (2026-07-17)
+
+- composer의 시작 작업·전송 SF Symbol에 1pt 상향 optical correction을 적용하되, 동일한 32pt 정사각 클릭 영역과 접근성 label, 기존 action을 유지했다. focused macOS tests가 PASS했고 server/schema/engine 변경은 없다.
+
 ## MOMO-451 macOS full-height window shell (2026-07-17)
 
 - production `NSWindow`에 `fullSizeContentView`를 적용해 좌측·가운데·우측 shell이 별도 제목 표시줄 아래가 아니라 트래픽라이트 영역까지 이어지도록 했다. 시스템 창 제목과 native toolbar separator/baseline은 숨기되 AppKit이 트래픽라이트 상호작용을 계속 소유한다.

@@ -693,10 +693,12 @@ public struct MessageListView: View {
                 Button {
                     isActionLauncherPresented.toggle()
                 } label: {
-                    Label(MomoComposerActionCopy(language: language).launcherTitle, systemImage: "plus")
-                        .labelStyle(.iconOnly)
-                        .font(.title3.weight(.medium))
-                        .frame(width: 32, height: 32)
+                    ZStack {
+                        Image(systemName: "plus")
+                            .font(.title3.weight(.medium))
+                            .offset(y: -1)
+                    }
+                    .frame(width: 32, height: 32)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -767,9 +769,13 @@ public struct MessageListView: View {
                 }
 
             Button(action: submit) {
-                Label(copy.sendMessage, systemImage: "paperplane.fill")
-                    .labelStyle(.iconOnly)
-                    .frame(width: 32, height: 32)
+                ZStack {
+                    Image(systemName: "paperplane.fill")
+                        .font(.body.weight(.medium))
+                        .offset(y: -1)
+                }
+                .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .foregroundStyle(canSendMessage ? MomoTheme.humanAccent : Color.secondary)
