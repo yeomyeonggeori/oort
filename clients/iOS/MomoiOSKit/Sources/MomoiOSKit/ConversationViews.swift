@@ -120,6 +120,7 @@ public struct IOSWorkspaceView: View {
             IOSTimelineView(
                 item: item,
                 members: model.membersByID,
+                currentMemberID: session.member.id,
                 backend: backend
             )
         } label: {
@@ -180,11 +181,16 @@ private struct IOSTimelineView: View {
     init(
         item: IOSChannelListItem,
         members: [MemberID: Member],
+        currentMemberID: MemberID,
         backend: any IOSConversationBackend
     ) {
         self.item = item
         self.members = members
-        _model = State(initialValue: IOSTimelineModel(channel: item.id, backend: backend))
+        _model = State(initialValue: IOSTimelineModel(
+            channel: item.id,
+            currentMemberID: currentMemberID,
+            backend: backend
+        ))
     }
 
     var body: some View {
@@ -203,17 +209,43 @@ private struct IOSTimelineView: View {
                         ContentUnavailableView(
                             "No messages yet",
                             systemImage: "bubble.left",
-                            description: Text("Send the first message from momo on Mac.")
+                            description: Text("Write the first message below.")
                         )
                     }
                 case .loaded:
                     ForEach(model.messages) { message in
-                        IOSMessageRow(message: message, member: members[message.authorMemberId])
+                        IOSMessageRow(
+                            message: message,
+                            member: members[message.authorMemberId],
+                            quotedBody: quotedBody(for: message),
+                            model: model
+                        )
                             .id(message.id)
                             .listRowSeparator(.hidden)
                             .accessibilityIdentifier("message.\(message.id.description)")
                             .onAppear { visibleMessageIDs.insert(message.id) }
                             .onDisappear { visibleMessageIDs.remove(message.id) }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                if !message.isDeleted {
+                                    Button {
+                                        model.selectReply(to: message)
+                                    } label: {
+                                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
+                                    }
+                                    .tint(.accentColor)
+                                    .accessibilityIdentifier("reply.\(message.id.description)")
+                                }
+                            }
+                            .contextMenu {
+                                if !message.isDeleted {
+                                    Button {
+                                        model.selectReply(to: message)
+                                    } label: {
+                                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
+                                    }
+                                    .accessibilityIdentifier("replyMenu.\(message.id.description)")
+                                }
+                            }
                     }
                 }
             }
@@ -232,12 +264,24 @@ private struct IOSTimelineView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            IOSMessageComposer(model: model)
+        }
         .listStyle(.plain)
+        .scrollDismissesKeyboard(.interactively)
         .navigationTitle(item.title)
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.retry() }
         .task { await model.load() }
         .onDisappear { model.stop() }
+    }
+
+    private func quotedBody(for message: Message) -> String? {
+        let replyID = message.replyToId
+            ?? message.props["reply_to_id"]?.stringValue.flatMap(MessageID.init(uuidString:))
+        guard let replyID,
+              let reply = model.messages.first(where: { $0.id == replyID }) else { return nil }
+        return reply.body
     }
 
     private var offlineBanner: some View {
@@ -293,6 +337,8 @@ private struct IOSTimelineView: View {
 private struct IOSMessageRow: View {
     let message: Message
     let member: Member?
+    let quotedBody: String?
+    let model: IOSTimelineModel
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -312,11 +358,30 @@ private struct IOSMessageRow: View {
                             .monospacedDigit()
                     }
                 }
+                if let quotedBody {
+                    Label {
+                        Text(quotedBody)
+                            .lineLimit(2)
+                    } icon: {
+                        Image(systemName: "quote.bubble")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Replying to: \(quotedBody)")
+                }
                 messageContent
+                if message.isPendingAck {
+                    Label(
+                        message.state == .failed ? "Message not sent" : "Sending message",
+                        systemImage: message.state == .failed ? "exclamationmark.circle" : "clock"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(.vertical, 8)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: message.type == .approvalRequest ? .contain : .combine)
     }
 
     @ViewBuilder
@@ -326,7 +391,7 @@ private struct IOSMessageRow: View {
                 .font(.body)
                 .foregroundStyle(.secondary)
         } else if message.type == .approvalRequest {
-            IOSApprovalReadOnlyCard(message: message)
+            IOSApprovalDecisionCard(message: message, model: model)
         } else {
             Text(message.body ?? fallbackText)
                 .font(.body)
@@ -348,8 +413,11 @@ private struct IOSMessageRow: View {
     }
 }
 
-private struct IOSApprovalReadOnlyCard: View {
+@MainActor
+private struct IOSApprovalDecisionCard: View {
     let message: Message
+    let model: IOSTimelineModel
+    @State private var pendingIrreversibleDecision: Bool?
 
     var body: some View {
         GroupBox {
@@ -363,13 +431,97 @@ private struct IOSApprovalReadOnlyCard: View {
                 Label(statusLabel, systemImage: statusIcon)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
+                decisionControls
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } label: {
             Label("Approval request", systemImage: "checkmark.shield")
         }
-        .accessibilityLabel("Approval request, \(actionName), \(statusLabel), read only")
+        .accessibilityLabel("Approval request, \(actionName), \(statusLabel)")
+        .confirmationDialog(
+            "Record irreversible decision?",
+            isPresented: Binding(
+                get: { pendingIrreversibleDecision != nil },
+                set: { if !$0 { pendingIrreversibleDecision = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            if let approve = pendingIrreversibleDecision {
+                Button(approve ? "Approve irreversible action" : "Reject irreversible action", role: approve ? .destructive : nil) {
+                    pendingIrreversibleDecision = nil
+                    Task { await model.decideApproval(message, approve: approve) }
+                }
+                .accessibilityIdentifier("confirmApprovalDecision")
+            }
+            Button("Keep decision pending", role: .cancel) {
+                pendingIrreversibleDecision = nil
+            }
+            .accessibilityIdentifier("cancelApprovalDecision")
+        } message: {
+            Text("This decision cannot be undone. Review the requested action before recording it.")
+        }
     }
+
+    @ViewBuilder
+    private var decisionControls: some View {
+        if status == .pending, let approvalID {
+            let isInFlight = model.approvalDecisionsInFlight.contains(approvalID)
+            let didFail = model.approvalDecisionFailures.contains(approvalID)
+            if didFail {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label("Decision not recorded. Retry the same decision.", systemImage: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry recording decision") {
+                        Task { await model.retryApprovalDecision(for: message) }
+                    }
+                    .accessibilityIdentifier("retryApproval.\(approvalID.description)")
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { approvalButtons(approvalID: approvalID) }
+                    VStack(alignment: .leading, spacing: 8) { approvalButtons(approvalID: approvalID) }
+                }
+                .disabled(isInFlight)
+
+                if isInFlight {
+                    ProgressView("Recording decision")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func approvalButtons(approvalID: ApprovalID) -> some View {
+        Button {
+            decide(approve: true)
+        } label: {
+            Label("Approve request", systemImage: "checkmark.circle.fill")
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityIdentifier("approve.\(approvalID.description)")
+
+        Button {
+            decide(approve: false)
+        } label: {
+            Label("Reject request", systemImage: "xmark.circle")
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("reject.\(approvalID.description)")
+    }
+
+    private func decide(approve: Bool) {
+        if isIrreversible {
+            pendingIrreversibleDecision = approve
+        } else {
+            Task { await model.decideApproval(message, approve: approve) }
+        }
+    }
+
+    private var approvalID: ApprovalID? { IOSTimelineModel.approvalID(for: message) }
+    private var status: ApprovalStatus { model.approvalStatus(for: message) }
+    private var isIrreversible: Bool { message.props["is_reversible"]?.boolValue != true }
 
     private var actionName: String {
         message.props["action_type"]?.stringValue
@@ -378,19 +530,104 @@ private struct IOSApprovalReadOnlyCard: View {
     }
 
     private var statusLabel: String {
-        switch message.props["approval_status"]?.stringValue {
-        case "approved": "Approved"
-        case "rejected": "Rejected"
-        default: "Awaiting decision"
+        switch status {
+        case .approved: "Approved"
+        case .rejected: "Rejected"
+        case .expired: "Expired"
+        case .cancelled: "Cancelled"
+        case .pending: "Awaiting decision"
         }
     }
 
     private var statusIcon: String {
-        switch message.props["approval_status"]?.stringValue {
-        case "approved": "checkmark.circle"
-        case "rejected": "xmark.circle"
-        default: "clock"
+        switch status {
+        case .approved: "checkmark.circle"
+        case .rejected: "xmark.circle"
+        case .expired: "clock.badge.exclamationmark"
+        case .cancelled: "minus.circle"
+        case .pending: "clock"
         }
+    }
+}
+
+@MainActor
+private struct IOSMessageComposer: View {
+    @Bindable var model: IOSTimelineModel
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let reply = model.replyTarget {
+                HStack(alignment: .top, spacing: 8) {
+                    Label {
+                        Text(reply.body ?? "Selected message")
+                            .lineLimit(2)
+                    } icon: {
+                        Image(systemName: "arrowshape.turn.up.left")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button {
+                        model.cancelReply()
+                    } label: {
+                        Label("Cancel reply", systemImage: "xmark.circle.fill")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityIdentifier("cancelReply")
+                    .frame(minWidth: 44, minHeight: 44)
+                }
+            }
+
+            if let failure = model.sendFailureMessage {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(failure, systemImage: "exclamationmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Retry sending message") {
+                        Task { await model.retryFailedSend() }
+                    }
+                    .disabled(model.isSending)
+                    .accessibilityIdentifier("retrySend")
+                }
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Write a message", text: $model.composerDraft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isFocused)
+                    .submitLabel(.send)
+                    .onSubmit { submit() }
+                    .accessibilityLabel("Write a message")
+                    .accessibilityIdentifier("messageComposer")
+
+                Button(action: submit) {
+                    Label("Send message", systemImage: "arrow.up.circle.fill")
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("Send message")
+                .accessibilityIdentifier("sendMessage")
+                .frame(minWidth: 44, minHeight: 44)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private var canSend: Bool {
+        !model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && model.phase == .loaded
+            && !model.isSending
+            && model.sendFailureMessage == nil
+    }
+
+    private func submit() {
+        guard canSend else { return }
+        Task { await model.sendComposerDraft() }
     }
 }
 
