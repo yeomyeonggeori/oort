@@ -2105,6 +2105,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] provider/Codex 브랜드 에셋을 복제하지 않고 공식 브랜드 에셋 적용 전까지 semantic SF Symbol을 사용한다.
 - [x] 보안·correctness·성능·접근성 리뷰 Blocker 0 / High 0, macOS 330 tests PASS.
 
+### ☐ MOMO-457 (`#463`) 수용기준 — SE-04D Drive 경로 C MCP 포장 v0 `[runtime-db]` · 의존: MOMO-449
+- [ ] `POST /v1/mcp/drive` stateless MCP 부분집합(initialize/tools.list/tools.call) — agent bearer+위임 binding, tools/call마다 grant 재검증 fail-closed + audit 같은 트랜잭션.
+- [ ] read-only 3종(search_files/get_file_metadata/export_text, 공유 드라이브 한정) + DriveBackend 분리(SA env 커스터디, stub 옵트인·prod 거부).
+- [ ] drive.json manifest(momo-hosted 표기, descriptor 절대화) + `verify_drive_mcp.sh`(stub, 실 Google 무호출) PASS.
+- [ ] 쓰기/업로드/폴러/경로 A 전부 out of scope(GWS-ARCHIVE 트랙). 상세: issue #463 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
