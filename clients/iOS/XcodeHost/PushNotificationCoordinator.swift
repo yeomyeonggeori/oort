@@ -1,7 +1,13 @@
 import MomoiOSKit
 import MomoiOSPushKit
+import OSLog
 import UIKit
 import UserNotifications
+
+private let pushLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "app.momo.ios",
+    category: "push"
+)
 
 final class MomoiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
@@ -18,8 +24,23 @@ final class MomoiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let tokenSuffix = deviceToken.suffix(4).map { String(format: "%02x", $0) }.joined()
+        pushLogger.info("APNs device token received suffix=\(tokenSuffix, privacy: .public)")
         Task { @MainActor in
             await PushNotificationCoordinator.shared.didRegister(deviceToken: deviceToken)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: any Error
+    ) {
+        pushLogger.error("APNs remote notification registration failed: \(error.localizedDescription, privacy: .public)")
+    }
+
+    func applicationWillEnterForeground(_ application: UIApplication) {
+        Task { @MainActor in
+            await PushNotificationCoordinator.shared.retryRegistrationOnForeground()
         }
     }
 
@@ -45,6 +66,9 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
     private let client = MomoPushRegistrationClient()
     private var activeSession: IOSSession?
     private var deviceToken: Data?
+    private var retryOnNextForeground = false
+    private var usedForegroundRetry = false
+    private var isRegistering = false
 
     private init() {}
 
@@ -57,9 +81,10 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
             authorized = (try? await center.requestAuthorization(options: [.alert, .badge, .sound])) == true
         }
         guard authorized else { return }
+        pushLogger.info("Requesting APNs remote notification registration")
         UIApplication.shared.registerForRemoteNotifications()
         if let deviceToken {
-            await register(deviceToken: deviceToken, session: session)
+            await register(deviceToken: deviceToken, session: session, allowsImmediateRetry: true)
         }
     }
 
@@ -72,18 +97,92 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
 
     func didRegister(deviceToken: Data) async {
         self.deviceToken = deviceToken
+        retryOnNextForeground = false
+        usedForegroundRetry = false
         guard let activeSession else { return }
-        await register(deviceToken: deviceToken, session: activeSession)
+        await register(deviceToken: deviceToken, session: activeSession, allowsImmediateRetry: true)
     }
 
-    private func register(deviceToken: Data, session: IOSSession) async {
+    func retryRegistrationOnForeground() async {
+        guard retryOnNextForeground, !usedForegroundRetry,
+              let deviceToken, let activeSession else { return }
+        retryOnNextForeground = false
+        usedForegroundRetry = true
+        pushLogger.info("Retrying device registration on foreground entry")
+        await register(deviceToken: deviceToken, session: activeSession, allowsImmediateRetry: false)
+    }
+
+    private func register(
+        deviceToken: Data,
+        session: IOSSession,
+        allowsImmediateRetry: Bool
+    ) async {
+        guard !isRegistering else { return }
+        isRegistering = true
+        defer { isRegistering = false }
+
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-        try? await client.register(
-            session: session,
-            deviceID: store.loadOrCreateDeviceID(),
-            apnsToken: deviceToken,
-            appBuild: build
+        let environment = Self.registrationEnvironment(
+            apsEnvironment: Bundle.main.object(forInfoDictionaryKey: "MomoAPNSEnvironment") as? String
         )
+        let tokenSuffix = deviceToken.suffix(4).map { String(format: "%02x", $0) }.joined()
+        let attemptCount = allowsImmediateRetry ? 2 : 1
+
+        for attempt in 1...attemptCount {
+            pushLogger.info(
+                "Device registration POST attempt=\(attempt, privacy: .public) env=\(environment.rawValue, privacy: .public) token_suffix=\(tokenSuffix, privacy: .public)"
+            )
+            do {
+                try await client.register(
+                    session: session,
+                    deviceID: store.loadOrCreateDeviceID(),
+                    apnsToken: deviceToken,
+                    appBuild: build,
+                    environment: environment
+                )
+                retryOnNextForeground = false
+                pushLogger.info("Device registration POST succeeded token_suffix=\(tokenSuffix, privacy: .public)")
+                return
+            } catch is CancellationError {
+                pushLogger.notice("Device registration POST cancelled token_suffix=\(tokenSuffix, privacy: .public)")
+                return
+            } catch {
+                let failure = Self.registrationFailureDescription(error)
+                pushLogger.error(
+                    "Device registration POST failed attempt=\(attempt, privacy: .public) token_suffix=\(tokenSuffix, privacy: .public): \(failure, privacy: .public)"
+                )
+            }
+        }
+
+        retryOnNextForeground = !usedForegroundRetry
+    }
+
+    private static func registrationEnvironment(apsEnvironment: String?) -> APNSRegistrationEnvironment {
+        if let environment = APNSRegistrationEnvironment.from(apsEnvironment: apsEnvironment) {
+            return environment
+        }
+#if DEBUG
+        pushLogger.notice("Missing aps-environment build value; falling back to sandbox for Debug")
+        return .sandbox
+#else
+        pushLogger.notice("Missing aps-environment build value; falling back to production for Release")
+        return .production
+#endif
+    }
+
+    private static func registrationFailureDescription(_ error: any Error) -> String {
+        switch error {
+        case SessionError.server(let status, _):
+            "server HTTP \(status)"
+        case SessionError.transport(_):
+            "transport error"
+        case SessionError.validation(_):
+            "request validation error"
+        case SessionError.decoding(_):
+            "response decoding error"
+        default:
+            "unexpected \(String(describing: type(of: error)))"
+        }
     }
 
     private static func isAuthorized(_ status: UNAuthorizationStatus) -> Bool {
