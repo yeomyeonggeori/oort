@@ -18,6 +18,19 @@ public final class NoopIOSPushLifecycle: IOSPushLifecycle {
     public func revoke(session: IOSSession) async {}
 }
 
+public enum APNSRegistrationEnvironment: String, Sendable {
+    case sandbox
+    case production
+
+    public static func from(apsEnvironment: String?) -> Self? {
+        switch apsEnvironment?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "development": .sandbox
+        case "production": .production
+        default: nil
+        }
+    }
+}
+
 public actor MomoPushRegistrationClient {
     public static let topic = "app.momo.ios"
 
@@ -40,13 +53,15 @@ public actor MomoPushRegistrationClient {
         session: IOSSession,
         deviceID: UUID,
         apnsToken: Data,
-        appBuild: String?
+        appBuild: String?,
+        environment: APNSRegistrationEnvironment
     ) async throws {
         let request = try Self.registrationRequest(
             session: session,
             deviceID: deviceID,
             apnsToken: apnsToken,
-            appBuild: appBuild
+            appBuild: appBuild,
+            environment: environment
         )
         try await execute(request)
     }
@@ -59,7 +74,8 @@ public actor MomoPushRegistrationClient {
         session: IOSSession,
         deviceID: UUID,
         apnsToken: Data,
-        appBuild: String?
+        appBuild: String?,
+        environment: APNSRegistrationEnvironment
     ) throws -> URLRequest {
         let path = "/v1/workspaces/\(session.workspaceID.description)/devices"
         var request = URLRequest(url: session.baseURL.appendingPathComponent(path))
@@ -71,7 +87,7 @@ public actor MomoPushRegistrationClient {
             platform: "ios",
             appBuild: appBuild,
             apnsToken: apnsToken.map { String(format: "%02x", $0) }.joined(),
-            env: "sandbox",
+            env: environment.rawValue,
             topic: topic
         ))
         return request

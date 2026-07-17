@@ -43,7 +43,8 @@ struct PushTests {
             session: fixtureSession(),
             deviceID: deviceID,
             apnsToken: Data(repeating: 0xab, count: 32),
-            appBuild: "42"
+            appBuild: "42",
+            environment: .sandbox
         )
         let body = try #require(request.httpBody)
         let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
@@ -63,6 +64,29 @@ struct PushTests {
         #expect(revoke.url?.path.hasSuffix("/devices/\(deviceID.uuidString)") == true)
     }
 
+    @Test("APNs entitlement values map to server registration environments")
+    func registrationEnvironmentMapping() {
+        #expect(APNSRegistrationEnvironment.from(apsEnvironment: "development") == .sandbox)
+        #expect(APNSRegistrationEnvironment.from(apsEnvironment: "production") == .production)
+    }
+
+    @Test("device registration propagates a backend 4xx response")
+    func registrationFailurePropagation() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FailingRegistrationURLProtocol.self]
+        let client = MomoPushRegistrationClient(urlSession: URLSession(configuration: configuration))
+
+        await #expect(throws: SessionError.server(status: 422, message: "invalid push token")) {
+            try await client.register(
+                session: fixtureSession(),
+                deviceID: UUID(),
+                apnsToken: Data(repeating: 0xcd, count: 32),
+                appBuild: "42",
+                environment: .sandbox
+            )
+        }
+    }
+
     private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":1,"mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v1","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request"}}"#
 
     private func pushSession() -> PushFetchSession {
@@ -72,6 +96,31 @@ struct PushTests {
             accessToken: "access-token"
         )
     }
+}
+
+private final class FailingRegistrationURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let url = request.url,
+              let response = HTTPURLResponse(
+                url: url,
+                statusCode: 422,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/plain"]
+              )
+        else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badURL))
+            return
+        }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("invalid push token".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 private struct SuccessfulPushFetcher: PushMessageFetching {
