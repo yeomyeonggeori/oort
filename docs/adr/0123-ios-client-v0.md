@@ -1,6 +1,6 @@
 # ADR-0123: iOS 클라이언트 v0 — dogfood-first 모바일 수신부
 
-- Status: **Proposed** (2026-07-17, planner Fable — 성재 결정 대기)
+- Status: **Accepted** (2026-07-17, 성재 — D1~D6 권고안 전체 승인 "ㄱㄱ". IOS-1(MOMO-462)부터 순차 발급, 구현=codex iOS 플러그인)
 - 관련: ADR-0120(푸시 — P-1/P-2/P-3 랜딩 완료, P-4가 이 ADR로 합류), ADR-0119(웹 v0 — "웹 먼저" 결정의 다음 순번), ADR-0112(제품 표면), `docs/BACKLOG.md` EP-IOS(MOMO-040~043 레거시), ROADMAP M5, ux-bible P1~P15
 - 발단: 성재 지시(2026-07-17) "iOS 클라이언트 트랙 기획부터 진행. 구현은 codex iOS 플러그인으로 위임." 서버측 푸시 전 구간(등록 REST→notifier→PushRelay 실발송)이 완성되어 모바일 수신부만 남았다.
 
@@ -11,7 +11,7 @@
 3. **레거시 EP-IOS 정리**: MOMO-040(xcodeproj 골격)은 승계. MOMO-041(APNs 서버측)은 ADR-0120 P-1~P-3으로 **이미 완성**. MOMO-042(계정 삭제)·043(privacy manifest)·EP-UGC는 **App Store 제출 요건** — dogfood v0와 무관하므로 M8/EP-STORE 시점으로 이월.
 4. **배포 전제 확인됨**: 성재 개인 유료 Apple Developer 계정(Team `YWQQFQM38J`), APNs 키 실검증 완료(2026-07-17). TestFlight internal은 개인 팀으로 충분. Apple silicon 시뮬레이터는 APNs sandbox 푸시 수신을 지원해 실기기 전 검증 폭이 넓다.
 
-## Options & Decision (Proposed)
+## Options & Decision
 
 ### D1. 타깃 구조와 코드 공유
 - **A (권고) — 얇은 앱 셸 + SwiftPM 킷 + MomoCore 재사용**: `clients/iOS/MomoiOS.xcodeproj`(앱 엔트리·서명·capability만) + `clients/iOS/MomoiOSKit`(SwiftPM — 뷰·뷰모델·전 로직, 테스트 가능) + `clients/Core` 의존. macOS 뷰모델 공유는 v0에서 하지 않는다 — **복제 후 수렴**(v1에서 공용 ViewModel 추출 재평가, 지금 추출하면 활발한 UX 트랙과 충돌).

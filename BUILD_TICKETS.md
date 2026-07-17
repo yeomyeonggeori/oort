@@ -2136,6 +2136,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 실 .p8 smoke는 오케스트레이터(자격증명 실검증 2026-07-17 완료: 샌드박스 400 BadDeviceToken 판정). 상세: issue #471 본문(패킷 겸용).
 - 랜딩: PR #473 squash `94b62bc`(2026-07-17). 실런: PushRelay 4/4+Notifier 3/3 테스트, verify_push_relay PASS(서명/403/429/id-only), **실 .p8 end-to-end smoke PASS**(서명 dispatch→ES256→APNs 샌드박스 apns_id 발급+400 BadDeviceToken passthrough). 후속 노트: push-type alert+무alert 조합은 P-4(iOS 확장) 시점 조정, prod에서 stub sender 거부 하드닝 후보.
 
+### ☐ MOMO-462 (`#474`) 수용기준 — IOS-1 iOS 앱 골격 `[ios]` · 의존: ADR-0123 Accepted (MOMO-040 승계)
+- [ ] `clients/iOS/MomoiOS.xcodeproj`(iOS 26 SDK, bundle app.momo.ios, Push+Background Modes entitlements, CODE_SIGNING_ALLOWED=NO 시뮬레이터 빌드) + `MomoiOSKit`(SwiftPM, MomoCore path 의존) — 셸은 엔트리만, 로직은 킷.
+- [ ] 로그인(맥 폼 필드 계약 동일·HIG·Dynamic Type)→부트스트랩→자리표시 홈. 세션은 UserDefaults(키체인 금지, MOMO-452 결정). MomoMac REST 클라이언트는 필요 최소 복제(Core 이동 금지 — D1 복제 후 수렴).
+- [ ] `verify_ios_build.sh`(시뮬레이터 동적 탐색) + local_gate `ios` 프로파일 + drift guard 케이스 + taste `references/ios-rubric.md`.
+- [ ] 시뮬레이터 게이트 실런은 오케스트레이터. 상세: issue #474 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
