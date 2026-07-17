@@ -21,6 +21,9 @@ struct Config: Sendable {
     // Self-identification the relay uses for registration/rate limiting (D5).
     // No conversation content — an opaque server identifier only.
     var serverID: String
+    // Optional Ed25519 PKCS#8 PEM (or raw 32-byte seed). When absent, requests
+    // remain unsigned for compatibility with the repo-local P-2 mock relay.
+    var pushRelayPrivateKeyPath: String?
 
     // ---- Notifier loop tuning (OutboxRelay §8.1 pattern) ----------------------
     var pollInterval: Duration   // fallback poll cadence
@@ -53,6 +56,9 @@ struct Config: Sendable {
             pgDatabase: pg?.database ?? env("POSTGRES_DB", "momo"),
             pushRelayURL: env("PUSH_RELAY_URL", "http://localhost:8090/v1/push"),
             serverID: env("PUSH_RELAY_SERVER_ID", "momo-local"),
+            pushRelayPrivateKeyPath: ProcessInfo.processInfo.environment[
+                "MOMO_PUSH_RELAY_PRIVATE_KEY_PATH"
+            ],
             pollInterval: .milliseconds(pollMs),
             claimBatchSize: envInt("NOTIFIER_CLAIM_BATCH", 32),
             maxAttempts: envInt("NOTIFIER_MAX_ATTEMPTS", 8)

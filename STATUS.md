@@ -121,6 +121,11 @@
 - S-2: 초대 기본 만료 7일(명시 경로 무회귀)·owner 초대 3중 fail-closed·regenerate 원자 CTE(revoke+재발급+audit 한 문장 — 구 코드 유효 창 없음). openapi/schema 무변경. runtime-db 게이트 PASS(1차 FAIL=verifier UUID 대소문자 strict 비교 → case-insensitive 수정).
 - 잔여 후속 후보: prod 시드 fail-closed(신규 서버 티켓), install 실경로 fake-docker trace, regenerate 404/409 분기, 초대 부정 경로 verifier 2콜.
 
+## MOMO-461 PushRelay v0 (2026-07-17)
+
+- ADR-0120 P-3 PushRelay를 repo 내 Swift 패키지로 추가했다. env 공개키 등록제, raw-body Ed25519 검증, 서버별 60/min sliding-window, 닫힌 `momo.push.dispatch.v1` 필드 집합과 id-only APNs payload, APNSSender Stub/실 ES256 provider JWT+AsyncHTTPClient 경계를 구현했다. Notifier 서명은 개인키 env 설정 때만 첨부해 기존 mock 호환을 유지한다.
+- `verify_push_relay.sh`는 실 키/APNs/Docker 없이 정상 200+Stub capture, bad signature/미등록 403, 429, content 비유입을 검증한다. 실 `.p8` sandbox `400 BadDeviceToken` passthrough smoke와 Dawn 배포는 오케스트레이터 작업으로 남는다(`runtime-unverified: real APNs relay smoke`).
+
 ## MOMO-404 NotifierWorker — ADR-0120 서버측 절반 완성 (2026-07-16)
 
 - P-2 랜딩(PR #424, `a8a1089`) — migration 011의 message AFTER INSERT 트리거가 같은 트랜잭션에서 outbox `push_candidate`를 기록(생산자 트리거는 이 1건이 유일 — overview.md 정본화), NotifierWorker(momo_notifier BYPASSRLS)가 SKIP LOCKED 소비, 판정 v0(DM 전건/멘션 projection 재사용/승인→active human)을 한 곳에 고정, id-only 페이로드로 mock relay dispatch + push_dispatch_log.
