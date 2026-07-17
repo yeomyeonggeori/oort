@@ -2124,6 +2124,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 기타 미기재 표면은 추가 않고 목록만(스코프 고정). 상세: issue #468 본문(패킷 겸용).
 - 랜딩: PR #469 squash `c109043`(2026-07-17). 신규 13 operation 라이브 대조 41/41 PASS. 오케스트레이터 후속 1커밋: expires_at_ms 오배치(DriveMCP 응답→ApprovalProjection) 교정 — 선재 approvals 스펙 drift 동시 마감. 잔여 미기재 표면 목록은 PR #469 본문(후속 문서 티켓 후보).
 
+### ☐ MOMO-460 (`#470`) 수용기준 — S-4 v0 초대 단축 링크 리다이렉터 `[swift]` · 의존: 없음 (도메인 미정 대응)
+- [ ] `services/LinkShort`(Hummingbird 2): `/i/{code}`→302 `{TARGET}/join/{code}`(검증 없음·매핑만), `/healthz`, env 미설정 부팅 거부.
+- [ ] Makefile SWIFT_PKGS + 게이트 편입 + 단위 테스트 + `verify_linkshort.sh`(호스트 프로세스, docker 불필요).
+- [ ] 도메인 확정 후 multi-tenant 매핑은 후속. 상세: issue #470 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
