@@ -2124,10 +2124,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 기타 미기재 표면은 추가 않고 목록만(스코프 고정). 상세: issue #468 본문(패킷 겸용).
 - 랜딩: PR #469 squash `c109043`(2026-07-17). 신규 13 operation 라이브 대조 41/41 PASS. 오케스트레이터 후속 1커밋: expires_at_ms 오배치(DriveMCP 응답→ApprovalProjection) 교정 — 선재 approvals 스펙 drift 동시 마감. 잔여 미기재 표면 목록은 PR #469 본문(후속 문서 티켓 후보).
 
-### ☐ MOMO-460 (`#470`) 수용기준 — S-4 v0 초대 단축 링크 리다이렉터 `[swift]` · 의존: 없음 (도메인 미정 대응)
-- [ ] `services/LinkShort`(Hummingbird 2): `/i/{code}`→302 `{TARGET}/join/{code}`(검증 없음·매핑만), `/healthz`, env 미설정 부팅 거부.
-- [ ] Makefile SWIFT_PKGS + 게이트 편입 + 단위 테스트 + `verify_linkshort.sh`(호스트 프로세스, docker 불필요).
-- [ ] 도메인 확정 후 multi-tenant 매핑은 후속. 상세: issue #470 본문(패킷 겸용).
+### ☑ MOMO-460 (`#470`) 수용기준 — S-4 v0 초대 단축 링크 리다이렉터 `[swift]` · 의존: 없음 (도메인 미정 대응)
+- [x] `services/LinkShort`(Hummingbird 2): `/i/{code}`→302 `{TARGET}/join/{code}`(검증 없음·매핑만), `/healthz`, env 미설정 부팅 거부.
+- [x] Makefile SWIFT_PKGS + 게이트 편입 + 단위 테스트 + `verify_linkshort.sh`(호스트 프로세스, docker 불필요).
+- [x] 도메인 확정 후 multi-tenant 매핑은 후속. 상세: issue #470 본문(패킷 겸용).
+- 랜딩: PR #472 squash `69ace59`(2026-07-17). 오케스트레이터 실런: LinkShort 테스트 4/4 + verify_linkshort PASS(healthz 200/redirect 302/invalid 400/포트 회수) + drift guard PASS. 도메인 확정 시 DNS만 — multi-tenant 매핑은 그때 후속.
 
 ### ☐ MOMO-461 (`#471`) 수용기준 — ADR-0120 P-3 PushRelay v0 `[swift]` · 의존: P-1/P-2 (기랜딩)
 - [ ] `relay/PushRelay`: /v1/push(momo.push.dispatch.v1) — env 레지스트리(server_id→Ed25519 공개키) 서명 검증 403/rate limit 429, APNSSender 프로토콜(실 ES256 HTTP/2 + Stub), APNs status passthrough(410/400 invalidate 정합), id-only 유지.
