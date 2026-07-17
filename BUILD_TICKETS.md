@@ -2153,9 +2153,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 승인/거부 결정(client_decision_id 멱등, 비가역 티어 확인 1단계, 상태 전이) + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #478 본문(패킷 겸용).
 - 랜딩: PR #479 squash `9aad292`(2026-07-17). 오케스트레이터 실런: 시뮬레이터 게이트 PASS. 전송 clientMsgId 낙관→reducer 수렴, 결정은 pending 저장으로 재시도에도 같은 clientDecisionId(멱등), 비가역 확인 다이얼로그 destructive role.
 
-### ☐ MOMO-465 (`#480`) 수용기준 — IOS-4 푸시 수신 (P-4) `[ios]` · 의존: MOMO-464
-- [ ] 권한→토큰→`POST /v1/workspaces/:ws/devices` 등록(로그아웃 DELETE) + App Group 세션 공유 + NSE id-only fetch(실패 fail-open) + deep link(cold start 포함).
-- [ ] relay placeholder alert(정적, 내용 비포함) + verify_push_relay 단정 갱신 + .apns 픽스처. simctl push smoke는 오케스트레이터. 상세: issue #480 본문(패킷 겸용).
+### ☑ MOMO-465 (`#480`) 수용기준 — IOS-4 푸시 수신 (P-4) `[ios]` · 의존: MOMO-464
+- [x] 권한→토큰→`POST /v1/workspaces/:ws/devices` 등록(로그아웃 DELETE) + App Group 세션 공유 + NSE id-only fetch(실패 fail-open) + deep link(cold start 포함).
+- [x] relay placeholder alert(정적, 내용 비포함) + verify_push_relay 단정 갱신 + .apns 픽스처. simctl push smoke는 오케스트레이터. 상세: issue #480 본문(패킷 겸용).
+- 랜딩: PR #481 squash `a0e3d0c`(2026-07-17). 1차 worker 모델 capacity 사망→동일 worktree 이어받기 재스폰 성공(빈번 커밋 계약 유효). 오케스트레이터 수정 3건: Swift 6 sending 캡처(NSE unchecked Sendable 관용구·delegate nonisolated 환원·PushKit import — worker 샌드박스 xcodebuild 불가로 미검출). 실런: 킷 18/18(swift-testing) + relay 4/4+verifier + 시뮬레이터 게이트 + simctl push 전달. 배너 표시 evidence는 권한 흐름상 IOS-5 실기기 몫(정직 기록).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
