@@ -2197,6 +2197,9 @@ components:
           format: int64
         decision_reason:
           type: string
+        expires_at_ms:
+          type: integer
+          format: int64
 
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
@@ -2540,9 +2543,6 @@ components:
         result: {}
         error:
           $ref: "#/components/schemas/DriveMCPError"
-        expires_at_ms:
-          type: integer
-          format: int64
 
     ApprovalProjectionPage:
       type: object
