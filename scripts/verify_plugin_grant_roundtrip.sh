@@ -32,6 +32,8 @@ AGENT_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 HUMAN_EMAIL="plugin-roundtrip-$RUN_ID@momo.local"
 HUMAN_PASSWORD="plugin-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 GITHUB="com.momo.plugins.github"
+NOTION="com.momo.plugins.notion"
+LINEAR="com.momo.plugins.linear"
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" HERMES_PORT="$HERMES_PORT_HOST" \
@@ -108,10 +110,20 @@ curl -fsS -X POST "$BASE_URL/v1/auth/login" -H 'Content-Type: application/json' 
   >"$LOGIN_JSON"
 HUMAN_TOKEN="$(jq -er '.accessToken' "$LOGIN_JSON")"
 
-PLUGIN_PATH="/v1/workspaces/$WORKSPACE_ID/plugins/$GITHUB"
-api POST "$PLUGIN_PATH/install" "$HUMAN_TOKEN" '{"enabled":true}' "$TMP_DIR/install.json"
-api POST "$PLUGIN_PATH/grants" "$HUMAN_TOKEN" '{"scope":"github:read"}' "$TMP_DIR/grant.json"
-jq -e '.status == "active" and .capabilities == ["github.list_repositories"]' "$TMP_DIR/grant.json" >/dev/null
+GITHUB_PATH="/v1/workspaces/$WORKSPACE_ID/plugins/$GITHUB"
+NOTION_PATH="/v1/workspaces/$WORKSPACE_ID/plugins/$NOTION"
+LINEAR_PATH="/v1/workspaces/$WORKSPACE_ID/plugins/$LINEAR"
+
+api POST "$GITHUB_PATH/install" "$HUMAN_TOKEN" '{"enabled":true}' "$TMP_DIR/install-github.json"
+api POST "$NOTION_PATH/install" "$HUMAN_TOKEN" '{"enabled":true}' "$TMP_DIR/install-notion.json"
+api POST "$LINEAR_PATH/install" "$HUMAN_TOKEN" '{"enabled":true}' "$TMP_DIR/install-linear.json"
+
+api POST "$GITHUB_PATH/grants" "$HUMAN_TOKEN" '{"scope":"github:read"}' "$TMP_DIR/grant-github.json"
+api POST "$NOTION_PATH/grants" "$HUMAN_TOKEN" '{"scope":"notion:read"}' "$TMP_DIR/grant-notion.json"
+api POST "$LINEAR_PATH/grants" "$HUMAN_TOKEN" '{"scope":"linear:read"}' "$TMP_DIR/grant-linear.json"
+jq -e '.status == "active" and .capabilities == ["github.list_repositories"]' "$TMP_DIR/grant-github.json" >/dev/null
+jq -e '.status == "active" and .capabilities == ["notion.search"]' "$TMP_DIR/grant-notion.json" >/dev/null
+jq -e '.status == "active" and .capabilities == ["linear.list_issues"]' "$TMP_DIR/grant-linear.json" >/dev/null
 
 api POST "/v1/workspaces/$WORKSPACE_ID/agents/$AGENT_ID/credentials" "$HUMAN_TOKEN" \
   '{"label":"MOMO-449 verifier"}' "$TMP_DIR/credential.json"
@@ -120,12 +132,26 @@ AGENT_TOKEN="$(jq -er '.token' "$TMP_DIR/credential.json")"
 POLICY_PATH="/v1/workspaces/$WORKSPACE_ID/plugins?delegatedMemberId=$HUMAN_ID&channelId=$CHANNEL_ID"
 api GET "$POLICY_PATH" "$AGENT_TOKEN" '' "$TMP_DIR/before.json"
 jq -e --arg plugin "$GITHUB" '
-  .toolPolicy.plugins == [{
-    pluginId: $plugin,
-    mcp: {url:"https://api.githubcopilot.com/mcp/", transport:"streamable_http"},
-    egressDomains:["api.githubcopilot.com"],
-    tools:[{name:"github.list_repositories", risk:"read", approvalTier:"read_only"}]
-  }]
+  .toolPolicy.plugins == [
+    {
+      pluginId: $plugin,
+      mcp: {url:"https://api.githubcopilot.com/mcp/", transport:"streamable_http"},
+      egressDomains:["api.githubcopilot.com"],
+      tools:[{name:"github.list_repositories", risk:"read", approvalTier:"read_only"}]
+    },
+    {
+      pluginId: "com.momo.plugins.linear",
+      mcp: {url:"https://mcp.linear.app/mcp", transport:"streamable_http"},
+      egressDomains:["mcp.linear.app"],
+      tools:[{name:"linear.list_issues", risk:"read", approvalTier:"read_only"}]
+    },
+    {
+      pluginId: "com.momo.plugins.notion",
+      mcp: {url:"https://mcp.notion.com/mcp", transport:"streamable_http"},
+      egressDomains:["mcp.notion.com"],
+      tools:[{name:"notion.search", risk:"read", approvalTier:"read_only"}]
+    }
+  ]
 ' "$TMP_DIR/before.json" >/dev/null
 
 PYTHONPATH="$REPO_ROOT/adapters/hermes" python3 - "$TMP_DIR/before.json" <<'PY'
@@ -136,15 +162,31 @@ from momo_adapter import MomoAdapter
 with open(sys.argv[1], encoding="utf-8") as handle:
     response = json.load(handle)
 policy = MomoAdapter._normalize_plugin_tool_policy(response)
-assert len(policy["plugins"]) == 1, policy
+assert len(policy["plugins"]) == 3, policy
 serialized = json.dumps(policy, sort_keys=True).lower()
 for forbidden in ("credential", "access_token", "refresh_token", "authorization", "password"):
     assert forbidden not in serialized, forbidden
 PY
 
-api DELETE "$PLUGIN_PATH/grants/github:read" "$HUMAN_TOKEN" '' "$TMP_DIR/revoke.json"
-jq -e '.status == "revoked"' "$TMP_DIR/revoke.json" >/dev/null
+api DELETE "$NOTION_PATH/grants/notion:read" "$HUMAN_TOKEN" '' "$TMP_DIR/revoke-notion.json"
+jq -e '.status == "revoked"' "$TMP_DIR/revoke-notion.json" >/dev/null
 api GET "$POLICY_PATH" "$AGENT_TOKEN" '' "$TMP_DIR/after.json"
-jq -e '.toolPolicy.plugins == []' "$TMP_DIR/after.json" >/dev/null
+jq -e -s '
+  .[1].toolPolicy.plugins ==
+    [.[0].toolPolicy.plugins[] | select(.pluginId != "com.momo.plugins.notion")]
+' "$TMP_DIR/before.json" "$TMP_DIR/after.json" >/dev/null
 
-echo "MOMO-449 plugin grant Context Packet roundtrip PASS (no GitHub network call)"
+api DELETE "$LINEAR_PATH/grants/linear:read" "$HUMAN_TOKEN" '' "$TMP_DIR/revoke-linear.json"
+jq -e '.status == "revoked"' "$TMP_DIR/revoke-linear.json" >/dev/null
+api GET "$POLICY_PATH" "$AGENT_TOKEN" '' "$TMP_DIR/after-linear.json"
+jq -e -s '
+  .[1].toolPolicy.plugins ==
+    [.[0].toolPolicy.plugins[] | select(.pluginId != "com.momo.plugins.linear")]
+' "$TMP_DIR/after.json" "$TMP_DIR/after-linear.json" >/dev/null
+
+api DELETE "$GITHUB_PATH/grants/github:read" "$HUMAN_TOKEN" '' "$TMP_DIR/revoke-github.json"
+jq -e '.status == "revoked"' "$TMP_DIR/revoke-github.json" >/dev/null
+api GET "$POLICY_PATH" "$AGENT_TOKEN" '' "$TMP_DIR/after-github.json"
+jq -e '.toolPolicy.plugins == []' "$TMP_DIR/after-github.json" >/dev/null
+
+echo "MOMO-458 GitHub/Notion/Linear grant Context Packet roundtrip PASS (no provider network call)"

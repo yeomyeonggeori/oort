@@ -45,6 +45,42 @@ def github_descriptor():
     }
 
 
+def linear_descriptor():
+    return {
+        "pluginId": "com.momo.plugins.linear",
+        "mcp": {
+            "url": "https://mcp.linear.app/mcp",
+            "transport": "streamable_http",
+        },
+        "egressDomains": ["mcp.linear.app"],
+        "tools": [
+            {
+                "name": "linear.list_issues",
+                "risk": "read",
+                "approvalTier": "read_only",
+            }
+        ],
+    }
+
+
+def notion_descriptor():
+    return {
+        "pluginId": "com.momo.plugins.notion",
+        "mcp": {
+            "url": "https://mcp.notion.com/mcp",
+            "transport": "streamable_http",
+        },
+        "egressDomains": ["mcp.notion.com"],
+        "tools": [
+            {
+                "name": "notion.search",
+                "risk": "read",
+                "approvalTier": "read_only",
+            }
+        ],
+    }
+
+
 def packet_payload():
     return {
         "workspace_id": WORKSPACE_ID,
@@ -78,6 +114,19 @@ class MockRESTAdapter(momo_adapter.MomoAdapter):
 
 
 class PluginToolPolicyContractTests(unittest.TestCase):
+    def test_multiple_active_grants_preserve_the_exact_descriptor_set(self):
+        descriptors = [github_descriptor(), linear_descriptor(), notion_descriptor()]
+        adapter = MockRESTAdapter(
+            [{"plugins": [], "toolPolicy": {"plugins": descriptors}}]
+        )
+
+        assembled = asyncio.run(adapter._payload_with_plugin_tool_policy(packet_payload()))
+
+        self.assertEqual(
+            assembled["context_packet_projection"]["tool_policy"],
+            {"plugins": descriptors},
+        )
+
     def test_active_grant_includes_allowlisted_mcp_descriptor(self):
         adapter = MockRESTAdapter(
             [{"plugins": [], "toolPolicy": {"plugins": [github_descriptor()]}}]

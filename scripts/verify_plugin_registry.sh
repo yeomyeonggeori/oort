@@ -151,6 +151,13 @@ expect_status 200 "active member lists catalog"
 printf '%s' "$RESPONSE_BODY" | jq -e '
   [.plugins[].pluginId] | sort == ["com.momo.plugins.drive","com.momo.plugins.github","com.momo.plugins.linear","com.momo.plugins.notion","external_webhook"]
 ' >/dev/null
+printf '%s' "$RESPONSE_BODY" | jq -e '
+  ([.plugins[] | select(.recommended == true) | .pluginId] | sort) ==
+    ["com.momo.plugins.drive","com.momo.plugins.github","external_webhook"] and
+  ([.plugins[] | select(.recommended == false) | .pluginId] | sort) ==
+    ["com.momo.plugins.linear","com.momo.plugins.notion"] and
+  ([.plugins[] | has("recommended")] | all)
+' >/dev/null
 
 api GET "$GITHUB_PATH" "" "$OWNER_ACCESS"
 expect_status 200 "catalog detail is readable"
