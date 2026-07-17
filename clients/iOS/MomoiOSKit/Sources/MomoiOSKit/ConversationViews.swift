@@ -120,7 +120,6 @@ public struct IOSWorkspaceView: View {
             IOSTimelineView(
                 item: item,
                 members: model.membersByID,
-                currentMemberID: session.member.id,
                 backend: backend
             )
         } label: {
@@ -174,45 +173,56 @@ private struct IOSChannelRow: View {
 private struct IOSTimelineView: View {
     let item: IOSChannelListItem
     let members: [MemberID: Member]
-    let currentMemberID: MemberID
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model: IOSTimelineModel
 
     init(
         item: IOSChannelListItem,
         members: [MemberID: Member],
-        currentMemberID: MemberID,
         backend: any IOSConversationBackend
     ) {
         self.item = item
         self.members = members
-        self.currentMemberID = currentMemberID
         _model = State(initialValue: IOSTimelineModel(channel: item.id, backend: backend))
     }
 
     var body: some View {
-        List {
-            if model.realtimeStatus.isFallbackActive, model.phase == .loaded {
-                offlineBanner
-            }
-            switch model.phase {
-            case .loading:
-                loadingMessages
-            case .failed(let failure):
-                timelineFailure(failure)
-            case .loaded where model.messages.isEmpty:
-                Section {
-                    ContentUnavailableView(
-                        "No messages yet",
-                        systemImage: "bubble.left",
-                        description: Text("Send the first message from momo on Mac.")
-                    )
+        ScrollViewReader { proxy in
+            List {
+                if model.realtimeStatus.isFallbackActive, model.phase == .loaded {
+                    offlineBanner
                 }
-            case .loaded:
-                ForEach(model.messages) { message in
-                    IOSMessageRow(message: message, member: members[message.authorMemberId])
-                        .id(message.id)
-                        .listRowSeparator(.hidden)
-                        .accessibilityIdentifier("message.\(message.id.description)")
+                switch model.phase {
+                case .loading:
+                    loadingMessages
+                case .failed(let failure):
+                    timelineFailure(failure)
+                case .loaded where model.messages.isEmpty:
+                    Section {
+                        ContentUnavailableView(
+                            "No messages yet",
+                            systemImage: "bubble.left",
+                            description: Text("Send the first message from momo on Mac.")
+                        )
+                    }
+                case .loaded:
+                    ForEach(model.messages) { message in
+                        IOSMessageRow(message: message, member: members[message.authorMemberId])
+                            .id(message.id)
+                            .listRowSeparator(.hidden)
+                            .accessibilityIdentifier("message.\(message.id.description)")
+                    }
+                }
+            }
+            .defaultScrollAnchor(.bottom)
+            .onChange(of: model.messages.last?.id) { _, latestMessageID in
+                guard let latestMessageID else { return }
+                if reduceMotion {
+                    proxy.scrollTo(latestMessageID, anchor: .bottom)
+                } else {
+                    withAnimation(.snappy) {
+                        proxy.scrollTo(latestMessageID, anchor: .bottom)
+                    }
                 }
             }
         }
@@ -243,10 +253,15 @@ private struct IOSTimelineView: View {
     }
 
     private var loadingMessages: some View {
-        ForEach(0..<4, id: \.self) { _ in
-            IOSMessagePlaceholder()
-                .redacted(reason: .placeholder)
-                .accessibilityHidden(true)
+        Section {
+            ForEach(0..<4, id: \.self) { _ in
+                IOSMessagePlaceholder()
+                    .redacted(reason: .placeholder)
+                    .accessibilityHidden(true)
+            }
+        } header: {
+            Label("Loading messages", systemImage: "ellipsis.message")
+                .accessibilityIdentifier("loadingMessages")
         }
     }
 
@@ -275,7 +290,7 @@ private struct IOSMessageRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: member?.kind == .agent ? "circle.hexagongrid.fill" : "person.crop.circle.fill")
+            Image(systemName: "person.crop.circle.fill")
                 .font(.title3)
                 .foregroundStyle(member?.kind == .agent ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
                 .accessibilityHidden(true)
@@ -339,7 +354,7 @@ private struct IOSApprovalReadOnlyCard: View {
                         .font(.body)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Label(statusLabel, systemImage: "clock")
+                Label(statusLabel, systemImage: statusIcon)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
@@ -361,6 +376,14 @@ private struct IOSApprovalReadOnlyCard: View {
         case "approved": "Approved"
         case "rejected": "Rejected"
         default: "Awaiting decision"
+        }
+    }
+
+    private var statusIcon: String {
+        switch message.props["approval_status"]?.stringValue {
+        case "approved": "checkmark.circle"
+        case "rejected": "xmark.circle"
+        default: "clock"
         }
     }
 }
