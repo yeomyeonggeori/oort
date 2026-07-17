@@ -167,6 +167,8 @@ cp infra/.env.example .env
 | `JWT_HMAC` | 서버 | App access(15m)/refresh(30d) 토큰 HS256 서명 시크릿(§7.1). |
 | `MOMO_LIVEKIT_API_KEY` / `MOMO_LIVEKIT_API_SECRET` | 서버 | ADR-0122 허들 room grant의 `iss`와 HS256 서명 키. App JWT/Centrifugo 키와 분리하며 secret은 응답·audit·로그에 넣지 않는다. |
 | `MOMO_LIVEKIT_URL` | 서버 | 클라이언트에 반환할 LiveKit `http(s)`/`ws(s)` endpoint. 세 LiveKit 값 중 하나라도 없거나 URL이 잘못되면 허들 API는 503 `허들 미구성`으로 fail-closed한다. LiveKit 컨테이너 기동은 V-2 범위다. |
+| `LIVEKIT_PORT` / `LIVEKIT_RTC_TCP_PORT` | compose `huddle` profile | LiveKit signaling/HTTP(기본 7880)와 TCP RTC fallback(기본 7881)의 호스트 포트. |
+| `LIVEKIT_RTC_UDP_START` / `LIVEKIT_RTC_UDP_END` | compose `huddle` profile | 컨테이너의 제한된 UDP media range 50000~50100에 대응하는 같은 크기의 호스트 포트 범위. 기본 50000~50100. |
 | `AGENT_PROVIDER_MODE` | 서버, worker | `local-mock` / `internal-host-mock` / `external-hermes`. staging/prod/internal-host는 `external-hermes`만 허용. |
 | `AGENT_MODEL` | 서버, worker | 김인턴 provider model label(기본 `hermes-agent`). |
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |
@@ -551,7 +553,33 @@ docker compose -f infra/docker-compose.yml logs -f
 
 > **compose layer 분리:** `infra/docker-compose.yml`은 dev/local runtime iteration용 PG18+Centrifugo layer다. `infra/docker-compose.e2e.yml`은 MOMO-186 local gate 전용으로 API/relay/worker/mock-Hermes까지 같은 compose project에 넣는다. `infra/prod/docker-compose.prod.yml`은 source checkout 없는 image-based staging/prod skeleton이다.
 
-### 3.1 E2E compose static validation
+### 3.1 음성 허들용 LiveKit 옵트인
+
+LiveKit은 기본 `make up`에 포함되지 않는다. 음성 허들을 사용할 때만 `huddle` profile을
+명시하고, `.env`의 `MOMO_LIVEKIT_API_KEY`/`MOMO_LIVEKIT_API_SECRET`가 MomoServer와
+LiveKit 양쪽에 동일하게 주입되는지 확인한다.
+
+```sh
+docker compose -f infra/docker-compose.yml --profile huddle up -d livekit
+docker compose -f infra/docker-compose.yml --profile huddle ps livekit
+
+# 종료(기본 postgres/centrifugo를 함께 내리지 않으려면 서비스만 지정)
+docker compose -f infra/docker-compose.yml --profile huddle stop livekit
+```
+
+V-1이 발급한 실제 join JWT의 LiveKit 수락 검증은 독립 verifier다. 이 스크립트는 격리된
+V-1 API stack과 `huddle` profile을 기동하고 `/rtc/validate`의 유효 토큰 200 및 무효 토큰
+401/403을 확인한 뒤 trap으로 teardown한다. LiveKit이 무거운 옵트인 서비스라
+`local_gate --profile runtime-db`에는 편입하지 않았으며, V-3에서 재평가한다.
+
+```sh
+scripts/verify_huddle_livekit.sh
+```
+
+`runtime-unverified(worker)`: MOMO-470 worker는 Docker를 실행하지 않는다. 위 verifier의
+PASS evidence는 momo-main 오케스트레이터가 실제 실행한 뒤에만 기록한다.
+
+### 3.2 E2E compose static validation
 
 MOMO-186 e2e layer는 local gate가 전체 service boundary를 재현하기 위한 초안이다. dev compose를 대체하지 않고, prod compose의 image-based/source-checkout-free 원칙도 건드리지 않는다.
 
@@ -565,7 +593,7 @@ scripts/local_gate.sh --profile docs
 
 서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
 
-### 3.2 Internal alpha diagnostics bundle
+### 3.3 Internal alpha diagnostics bundle
 
 내부 테스트 중 장애 상황을 공유할 때는 raw 로그를 직접 붙이지 말고 redacted bundle을 만든다.
 

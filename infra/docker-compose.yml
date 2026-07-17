@@ -72,6 +72,32 @@ services:
         condition: service_healthy
 
   # ---------------------------------------------------------------------------
+  # LiveKit — ADR-0122 voice huddle SFU. Heavy/optional: never starts with the
+  # default stack; opt in with `docker compose --profile huddle up -d livekit`.
+  # API credentials are injected through LIVEKIT_KEYS and must match the
+  # MOMO_LIVEKIT_* values used by MomoServer.
+  # ---------------------------------------------------------------------------
+  livekit:
+    image: livekit/livekit-server:v1.9.0
+    profiles: ["huddle"]
+    restart: unless-stopped
+    command: --config=/etc/livekit/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: '${MOMO_LIVEKIT_API_KEY:-devkey}: ${MOMO_LIVEKIT_API_SECRET:-change-me-livekit-api-secret}'
+    ports:
+      - "${LIVEKIT_PORT:-7880}:7880"
+      - "${LIVEKIT_RTC_TCP_PORT:-7881}:7881"
+      - "${LIVEKIT_RTC_UDP_START:-50000}-${LIVEKIT_RTC_UDP_END:-50100}:50000-50100/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7880/"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
   # relay / worker — 추후(후속 티켓에서 Swift 실행 패키지 빌드 후 서비스로 추가).
   #   relay  (T06 relay/OutboxRelay): outbox SKIP LOCKED 클레임 → Centrifugo /api/publish.
   #            BYPASSRLS role로 전 테넌트 폴링. depends_on: postgres(healthy), centrifugo.

@@ -200,6 +200,36 @@ PostgreSQL/Redis를 관리형 또는 별도 노드로 옮긴다. 실제 팀 트�
 
 > Centrifugo Memory→Redis 전환은 **발행/구독 코드 불변**(검증됨, L4 §4.3). subscribe proxy 콜백 URL(`http://api:8080/v1/centrifugo/subscribe`)은 compose 내부 네트워크로 유지(외부 비노출).
 
+### 1.1 LiveKit 셀프호스트 델타 (ADR-0122 V-2)
+
+로컬 단일 노드 허들은 `infra/docker-compose.yml`의 `huddle` profile로만 LiveKit을
+옵트인한다. 기본 stack과 e2e compose는 LiveKit을 상시 기동하지 않는다. 운영 승격 시에는
+다음 인바운드 포트를 호스트 방화벽과 클라우드 security group 양쪽에서 명시적으로 연다.
+
+| 포트 | 프로토콜 | 용도 |
+|---|---|---|
+| 7880 | TCP | signaling WebSocket/HTTP (`MOMO_LIVEKIT_URL`) |
+| 7881 | TCP | WebRTC TCP fallback |
+| 50000~50100 | UDP | v0 제한 media range |
+| 3478 | UDP | 내장 TURN listener — 도메인/TLS 확보 후 활성화 |
+| 5349 또는 443 | TCP/TLS | TURN/TLS relay — 도메인/TLS 확보 후 활성화 |
+
+`infra/livekit.yaml`은 TURN을 기본 비활성으로 두고 아래 형태의 주석 예시만 제공한다.
+공개 `turn.<domain>`과 유효한 TLS 인증서가 준비된 뒤 실제 값으로 승격하며, API key/secret은
+SOPS 등 운영 secret source에서 주입하고 파일에 쓰지 않는다.
+
+```yaml
+turn:
+  enabled: true
+  domain: turn.example.com
+  tls_port: 5349
+  udp_port: 3478
+```
+
+직접 UDP가 차단되는 기업망에서는 relay 후보가 없으면 통화 연결이 실패하므로, public
+배포 전에 TURN/TLS 경로를 필수 운영 게이트로 검증한다. 현재 TURN 도메인/TLS와 prod
+compose 승격은 `runtime-unverified(public host)`이며 MOMO-470의 로컬 수락 범위 밖이다.
+
 ---
 
 ## 2. 사전 요구 (운영 호스트)
@@ -279,6 +309,9 @@ SOPS_AGE_KEY_FILE=~/.config/sops/age/keys.txt \
 | `CENT_TOKEN_HMAC` | `openssl rand -hex 32` | client connection/subscription JWT 서명. |
 | `CENT_API_KEY` | `openssl rand -hex 32` | server publish 인증(`X-API-Key`, relay/worker만). |
 | `JWT_HMAC` | `openssl rand -hex 32` | App access/refresh 토큰 HS256. |
+| `MOMO_LIVEKIT_API_KEY` | `openssl rand -hex 16` | LiveKit token issuer/API key. LiveKit과 MomoServer에 동일 주입. |
+| `MOMO_LIVEKIT_API_SECRET` | `openssl rand -hex 32` | LiveKit HS256 secret. App/Centrifugo JWT 키와 분리. |
+| `MOMO_LIVEKIT_URL` | 배포 endpoint | 클라이언트가 접속할 public `wss://` LiveKit endpoint. |
 | `AGENT_PROVIDER_MODE` | literal | staging/prod/internal-host는 반드시 `external-hermes`. |
 | `AGENT_MODEL` | literal | 기본 `hermes-agent`; provider/model 라벨. |
 | `HERMES_BASE_URL` | (hermes 발급) | OpenAI-compatible `/v1` base URL. staging/prod/internal-host는 `https://`만 허용. |

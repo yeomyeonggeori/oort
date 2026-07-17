@@ -1,0 +1,19 @@
+# ADR-0122 V-2 local/single-node LiveKit configuration.
+# API credentials are deliberately absent: docker-compose injects them through
+# LIVEKIT_KEYS from MOMO_LIVEKIT_API_KEY/MOMO_LIVEKIT_API_SECRET.
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+
+logging:
+  level: info
+
+# TURN is deferred until a public domain and TLS certificate exist. Example:
+# turn:
+#   enabled: true
+#   domain: turn.example.com
+#   tls_port: 5349
+#   udp_port: 3478
