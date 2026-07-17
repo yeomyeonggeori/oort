@@ -688,7 +688,7 @@ public struct MessageListView: View {
     }
 
     private func composerSurface(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             ZStack {
                 Button {
                     isActionLauncherPresented.toggle()

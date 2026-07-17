@@ -124,11 +124,15 @@ final class MomoChannelChromeTests: XCTestCase {
         let toolbar = NSToolbar(identifier: "MomoChannelChromeTests.toolbar")
         toolbar.showsBaselineSeparator = true
         window.toolbar = toolbar
+        window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.titlebarSeparatorStyle = .line
 
         MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
 
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        XCTAssertEqual(window.toolbarStyle, .unifiedCompact)
         XCTAssertTrue(window.titlebarAppearsTransparent)
         XCTAssertEqual(window.titlebarSeparatorStyle, .none)
         XCTAssertFalse(try XCTUnwrap(window.toolbar).showsBaselineSeparator)

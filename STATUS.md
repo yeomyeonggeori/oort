@@ -3,6 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-451 macOS full-height window shell (2026-07-17)
+
+- production `NSWindow`에 `fullSizeContentView`를 적용해 좌측·가운데·우측 shell이 별도 제목 표시줄 아래가 아니라 트래픽라이트 영역까지 이어지도록 했다. 시스템 창 제목과 native toolbar separator/baseline은 숨기되 AppKit이 트래픽라이트 상호작용을 계속 소유한다.
+- 창 속성 적용은 layout 반복 호출에서 값이 달라질 때만 수행한다. composer의 시작 작업·전송 아이콘은 입력 surface 기준 수직 중앙으로 맞췄고, focused chrome tests 21/21 및 real-window snapshots 6/6가 PASS했다. server/schema/engine 변경은 없다.
+
 ## MOMO-411/412 게이트 리소스 가드 + signed webhook ingress (2026-07-17)
 
 - **MOMO-411**(`710a069`): local_gate runtime-* 프로파일이 게이트 종료 시 자기 compose 스택을 down(성공/실패/HUP 모두), 시작 전 load>12 차단(§9), momo240 local-alpha는 PID-liveness 보호, pre-existing 스택(momo_main)은 무접촉. 2026-07-17 발열 사고(게이트 잔재 증식)의 구조적 봉합 — teardown 잔재 0 두 런 실증.
