@@ -104,6 +104,108 @@ struct SessionTests {
     }
 }
 
+@Suite("MomoiOSKit conversations")
+struct ConversationTests {
+    @Test("channel list maps channel mentions and DM unread from mock backend")
+    @MainActor
+    func channelListMapping() async throws {
+        let dmID = ChannelID(uuidString: "00000000-0000-0000-0000-000000000011")!
+        let teammateID = MemberID(uuidString: "00000000-0000-0000-0000-000000000003")!
+        let channel = fixtureChannel()
+        let dm = Channel(
+            id: dmID,
+            workspaceId: fixtureWorkspaceID,
+            kind: .dm,
+            dmMemberIds: [fixtureMemberID, teammateID]
+        )
+        let snapshot = IOSConversationSnapshot(
+            channels: [dm, channel],
+            members: [
+                fixtureSession().member,
+                Member(
+                    id: teammateID,
+                    workspaceId: fixtureWorkspaceID,
+                    kind: .agent,
+                    displayName: "김인턴 Research Agent",
+                    handle: "hermes"
+                ),
+            ],
+            readStates: [
+                ChannelReadState(channelId: channel.id, lastReadSeq: 8, latestSeq: 13, unreadCount: 5, mentionCount: 2),
+                ChannelReadState(channelId: dmID, lastReadSeq: 3, latestSeq: 10, unreadCount: 7, mentionCount: 1),
+            ]
+        )
+        let model = IOSChannelListModel(
+            currentMemberID: fixtureMemberID,
+            backend: MockConversationBackend(snapshot: snapshot)
+        )
+
+        await model.load()
+
+        #expect(model.phase == .loaded)
+        #expect(model.sections.channels.first?.badgeLabel == "2")
+        #expect(model.sections.channels.first?.unreadCount == 5)
+        #expect(model.sections.directMessages.first?.title == "김인턴 Research Agent")
+        #expect(model.sections.directMessages.first?.badgeLabel == "7")
+    }
+
+    @Test("timeline history from mock backend is ordered by seq")
+    @MainActor
+    func timelineHistoryOrder() async {
+        let channel = fixtureChannel()
+        let backend = MockConversationBackend(
+            snapshot: IOSConversationSnapshot(channels: [channel], members: [], readStates: []),
+            history: [fixtureMessage(sequence: 4), fixtureMessage(sequence: 2)]
+        )
+        let model = IOSTimelineModel(channel: channel.id, backend: backend)
+
+        await model.load()
+
+        #expect(model.phase == .loaded)
+        #expect(model.messages.compactMap(\.seq) == [2, 4])
+        model.stop()
+    }
+
+    @Test("timeline append keeps seq order and drops replay duplicates")
+    func timelineAppendOrderAndDeduplication() {
+        let channel = fixtureChannel().id
+        let first = fixtureMessage(sequence: 1)
+        let third = fixtureMessage(sequence: 3)
+        let second = fixtureMessage(sequence: 2)
+        var messages = IOSTimelineReducer.sorted([third, first])
+
+        messages = IOSTimelineReducer.applying(.message(second), to: messages, channel: channel)
+        messages = IOSTimelineReducer.applying(.message(second), to: messages, channel: channel)
+        messages = IOSTimelineReducer.applying(
+            .message(fixtureMessage(sequence: 2, idSeed: 99)),
+            to: messages,
+            channel: channel
+        )
+
+        #expect(messages.compactMap(\.seq) == [1, 2, 3])
+        #expect(messages.count == 3)
+    }
+
+    @Test("unread badge caps large server counts")
+    func unreadBadgeCap() {
+        let sections = IOSChannelListMapper.sections(
+            channels: [fixtureChannel()],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: fixtureChannel().id,
+                    lastReadSeq: 1,
+                    latestSeq: 151,
+                    unreadCount: 150,
+                    mentionCount: 120
+                ),
+            ],
+            currentMemberID: fixtureMemberID
+        )
+        #expect(sections.channels.first?.badgeLabel == "99+")
+    }
+}
+
 private struct MockBackend: SessionBackend {
     let session: IOSSession
     let bootstrap: WorkspaceBootstrap
@@ -119,6 +221,35 @@ private struct OfflineBackend: SessionBackend {
 
     func bootstrap(session: IOSSession) async throws -> WorkspaceBootstrap {
         throw SessionError.transport("offline")
+    }
+}
+
+private struct MockConversationBackend: IOSConversationBackend {
+    let snapshotValue: IOSConversationSnapshot
+    let historyValue: [Message]
+
+    init(snapshot: IOSConversationSnapshot, history: [Message] = []) {
+        self.snapshotValue = snapshot
+        self.historyValue = history
+    }
+
+    func snapshot() async throws -> IOSConversationSnapshot { snapshotValue }
+
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] {
+        historyValue
+    }
+
+    func markRead(channel: ChannelID, through sequence: Int64) async throws {}
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        AsyncStream { $0.finish() }
+    }
+
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { continuation in
+            continuation.yield(.restFallback(channel: channel))
+            continuation.finish()
+        }
     }
 }
 
@@ -146,6 +277,19 @@ private func fixtureChannel() -> Channel {
         workspaceId: fixtureWorkspaceID,
         kind: .publicChannel,
         name: "general"
+    )
+}
+
+private func fixtureMessage(sequence: Int64, idSeed: Int64? = nil) -> Message {
+    let seed = idSeed ?? sequence
+    let suffix = String(format: "%012lld", seed)
+    return Message(
+        id: MessageID(uuidString: "00000000-0000-0000-0001-\(suffix)")!,
+        channelId: fixtureChannel().id,
+        seq: sequence,
+        hlcTs: sequence,
+        authorMemberId: fixtureMemberID,
+        body: "긴 한국어와 English가 함께 있는 메시지로 세 줄 레이아웃을 검증합니다. Timeline content stays readable at larger Dynamic Type sizes."
     )
 }
 
