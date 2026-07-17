@@ -3,7 +3,7 @@ import MomoCore
 import SwiftCentrifuge
 
 /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
-/// Read-only REST and Centrifugo surface for IOS-2.
+/// REST writes and Centrifugo reads for the iOS companion.
 public actor MomoServerConversationClient: IOSConversationBackend {
     private let authenticated: IOSSession
     private let urlSession: URLSession
@@ -111,6 +111,51 @@ public actor MomoServerConversationClient: IOSConversationBackend {
             }
         }
         return await provider.realtimeStatus(channel: channel)
+    }
+
+    /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
+    /// Uses the existing REST-only single write path with client_msg_id idempotency.
+    public func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(draft.channelId.description)/messages"
+        var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(IOSSendMessageRequest(
+            clientMsgId: clientMsgId,
+            type: draft.type.rawValue,
+            body: draft.body,
+            props: draft.props.objectValue?.compactMapValues(\.stringValue),
+            runId: nil
+        ))
+        do {
+            var message = try decoder.decode(IOSMessageDTO.self, from: try await execute(request: request)).value()
+            message.clientMsgId = clientMsgId
+            message.replyToId = draft.replyToId
+            return message
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned a sent message this app could not read.")
+        }
+    }
+
+    /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
+    /// Retries preserve ApprovalDecisionRequest.clientDecisionId.
+    public func decideApproval(_ decision: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/approvals/\(decision.approvalId.description)/decision"
+        var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(decision)
+        do {
+            return try decoder.decode(IOSApprovalDecisionReceiptDTO.self, from: try await execute(request: request)).value()
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned an approval decision this app could not read.")
+        }
     }
 
     private func get(_ path: String) async throws -> Data {
@@ -352,6 +397,50 @@ private final class IOSCentrifugoDelegate: CentrifugeClientDelegate, CentrifugeS
 }
 
 private struct IOSRealtimeTokenResponse: Decodable { let token: String }
+private struct IOSSendMessageRequest: Encodable {
+    let clientMsgId: UUID
+    let type: String
+    let body: String?
+    let props: [String: String]?
+    let runId: UUID?
+
+    private enum CodingKeys: String, CodingKey {
+        case clientMsgId = "client_msg_id"
+        case type
+        case body
+        case props
+        case runId = "run_id"
+    }
+}
+private struct IOSApprovalDecisionReceiptDTO: Decodable {
+    let approvalId: String
+    let status: String
+    let decidedBy: String?
+    let decidedAtMs: Int64?
+    let decisionReason: String?
+
+    func value() throws -> ApprovalDecisionReceipt {
+        guard let approvalID = ApprovalID(uuidString: approvalId),
+              let status = ApprovalStatus(rawValue: status) else {
+            throw SessionError.decoding("The server returned an invalid approval decision.")
+        }
+        return ApprovalDecisionReceipt(
+            approvalId: approvalID,
+            status: status,
+            decidedBy: decidedBy.flatMap(MemberID.init(uuidString:)),
+            decidedAtMs: decidedAtMs,
+            decisionReason: decisionReason
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case approvalId = "approval_id"
+        case status
+        case decidedBy = "decided_by"
+        case decidedAtMs = "decided_at_ms"
+        case decisionReason = "decision_reason"
+    }
+}
 private struct IOSMarkReadRequest: Encodable {
     let lastReadSequence: Int64
     private enum CodingKeys: String, CodingKey { case lastReadSequence = "last_read_seq" }

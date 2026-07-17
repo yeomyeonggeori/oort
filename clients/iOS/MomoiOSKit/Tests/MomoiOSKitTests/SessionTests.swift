@@ -157,7 +157,7 @@ struct ConversationTests {
             snapshot: IOSConversationSnapshot(channels: [channel], members: [], readStates: []),
             history: [fixtureMessage(sequence: 4), fixtureMessage(sequence: 2)]
         )
-        let model = IOSTimelineModel(channel: channel.id, backend: backend)
+        let model = IOSTimelineModel(channel: channel.id, currentMemberID: fixtureMemberID, backend: backend)
 
         await model.load()
 
@@ -203,6 +203,104 @@ struct ConversationTests {
             currentMemberID: fixtureMemberID
         )
         #expect(sections.channels.first?.badgeLabel == "99+")
+    }
+
+    @Test("optimistic send reconciles by client message ID")
+    @MainActor
+    func optimisticSendReconciliation() async {
+        let backend = RecordingConversationBackend()
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        model.composerDraft = "Ship the iOS reply path"
+
+        await model.sendComposerDraft()
+
+        let calls = await backend.sendCalls
+        #expect(calls.count == 1)
+        #expect(model.messages.count == 1)
+        #expect(model.messages.first?.seq == 41)
+        #expect(model.messages.first?.clientMsgId == calls.first?.clientMsgId)
+        #expect(model.sendFailureMessage == nil)
+    }
+
+    @Test("failed send retries with the same idempotency key")
+    @MainActor
+    func failedSendRetry() async {
+        let backend = RecordingConversationBackend(failFirstSend: true)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        model.composerDraft = "Retry this exact request"
+
+        await model.sendComposerDraft()
+        #expect(model.messages.first?.state == .failed)
+        #expect(model.sendFailureMessage != nil)
+        await model.retryFailedSend()
+
+        let calls = await backend.sendCalls
+        #expect(calls.count == 2)
+        #expect(calls[0].clientMsgId == calls[1].clientMsgId)
+        #expect(model.messages.count == 1)
+        #expect(model.messages.first?.seq == 41)
+        #expect(model.sendFailureMessage == nil)
+    }
+
+    @Test("reply send preserves the quoted message field")
+    @MainActor
+    func replySend() async {
+        let backend = RecordingConversationBackend()
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        let quoted = fixtureMessage(sequence: 7)
+        model.selectReply(to: quoted)
+        model.composerDraft = "Proceed with the reviewed plan"
+
+        await model.sendComposerDraft()
+
+        let call = await backend.sendCalls.first
+        #expect(call?.draft.replyToId == quoted.id)
+        #expect(call?.draft.props["reply_to_id"]?.stringValue == quoted.id.description)
+        #expect(model.messages.first?.replyToId == quoted.id)
+    }
+
+    @Test("approval retry preserves decision ID and updates card status")
+    @MainActor
+    func approvalDecisionRetry() async {
+        let backend = RecordingConversationBackend(failFirstApproval: true)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        let approval = fixtureApprovalMessage()
+        await backend.setHistory([approval])
+        await model.load()
+
+        await model.decideApproval(approval, approve: true)
+        guard let approvalID = IOSTimelineModel.approvalID(for: approval) else {
+            Issue.record("Expected an approval ID")
+            return
+        }
+        #expect(model.approvalDecisionFailures.contains(approvalID))
+        await model.retryApprovalDecision(for: approval)
+
+        let calls = await backend.approvalCalls
+        #expect(calls.count == 2)
+        #expect(calls[0].clientDecisionId == calls[1].clientDecisionId)
+        #expect(model.approvalStatus(for: model.messages[0]) == .approved)
+        #expect(!model.approvalDecisionFailures.contains(approvalID))
+        model.stop()
     }
 }
 
@@ -251,6 +349,66 @@ private struct MockConversationBackend: IOSConversationBackend {
             continuation.finish()
         }
     }
+
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        fixtureMessage(sequence: 1)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
+}
+
+private actor RecordingConversationBackend: IOSConversationBackend {
+    struct SendCall: Sendable {
+        let draft: DraftMessage
+        let clientMsgId: UUID
+    }
+
+    private var historyValue: [Message] = []
+    private let failFirstSend: Bool
+    private let failFirstApproval: Bool
+    private(set) var sendCalls: [SendCall] = []
+    private(set) var approvalCalls: [ApprovalDecisionRequest] = []
+
+    init(failFirstSend: Bool = false, failFirstApproval: Bool = false) {
+        self.failFirstSend = failFirstSend
+        self.failFirstApproval = failFirstApproval
+    }
+
+    func setHistory(_ messages: [Message]) { historyValue = messages }
+    func snapshot() async throws -> IOSConversationSnapshot {
+        IOSConversationSnapshot(channels: [fixtureChannel()], members: [], readStates: [])
+    }
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { historyValue }
+    func markRead(channel: ChannelID, through sequence: Int64) async throws {}
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { $0.finish() }
+    }
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        sendCalls.append(SendCall(draft: draft, clientMsgId: clientMsgId))
+        if failFirstSend, sendCalls.count == 1 { throw SessionError.transport("offline") }
+        let now: Int64 = 41
+        return Message(
+            id: MessageID(uuidString: "00000000-0000-0000-0001-000000000041")!,
+            channelId: draft.channelId,
+            seq: 41,
+            hlcTs: now,
+            authorMemberId: fixtureMemberID,
+            type: draft.type,
+            body: draft.body,
+            props: draft.props,
+            replyToId: draft.replyToId,
+            clientMsgId: clientMsgId,
+            createdAtMs: now
+        )
+    }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        approvalCalls.append(request)
+        if failFirstApproval, approvalCalls.count == 1 { throw SessionError.transport("offline") }
+        return ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
 }
 
 private func fixtureSession() -> IOSSession {
@@ -290,6 +448,24 @@ private func fixtureMessage(sequence: Int64, idSeed: Int64? = nil) -> Message {
         hlcTs: sequence,
         authorMemberId: fixtureMemberID,
         body: "긴 한국어와 English가 함께 있는 메시지로 세 줄 레이아웃을 검증합니다. Timeline content stays readable at larger Dynamic Type sizes."
+    )
+}
+
+private func fixtureApprovalMessage() -> Message {
+    Message(
+        id: MessageID(uuidString: "00000000-0000-0000-0001-000000000088")!,
+        channelId: fixtureChannel().id,
+        seq: 8,
+        hlcTs: 8,
+        authorMemberId: fixtureMemberID,
+        type: .approvalRequest,
+        body: "Deploy the production migration after reviewing the rollback plan.",
+        props: [
+            "approval_id": "00000000-0000-0000-0002-000000000001",
+            "approval_status": "pending",
+            "action_type": "deploy",
+            "is_reversible": false,
+        ]
     )
 }
 
