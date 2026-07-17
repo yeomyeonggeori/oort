@@ -22,13 +22,20 @@ struct PluginRoutes: Sendable {
 
     @Sendable
     func list(_ request: Request, context: AppRequestContext) async throws -> Response {
-        let principal = try Self.humanPrincipal(context)
+        let principal = try context.requirePrincipal()
         let workspaceID = try Self.workspaceID(context, principal: principal)
         // Review #435 H1: HTTPError thrown inside the tenant closure gets
         // wrapped by PostgresNIO and rendered as 500 — unwrap like the
         // mutating handlers so 403/404/409 keep their semantics.
-        let plugins = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        let result = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             _ = try await Self.requireWorkspaceRole(conn: conn, logger: db.logger, principal: principal)
+            let policyMemberID = try await Self.policyMemberID(
+                request: request,
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                principal: principal
+            )
             let rows = try await conn.query(
                 """
                 SELECT pr.plugin_id,
@@ -47,9 +54,11 @@ struct PluginRoutes: Sendable {
                 """,
                 logger: db.logger
             ).collect()
-            return try rows.compactMap { row -> PluginCatalogItemDTO? in
+            var manifests: [String: (RegistryRow, ValidatedPluginManifest)] = [:]
+            let plugins = try rows.compactMap { row -> PluginCatalogItemDTO? in
                 let decoded = try Self.decodeRegistryRow(row)
                 guard let manifest = try? Self.validatedManifest(decoded) else { return nil }
+                manifests[manifest.pluginID] = (decoded, manifest)
                 return PluginCatalogItemDTO(
                     pluginId: manifest.pluginID,
                     name: manifest.name,
@@ -62,8 +71,63 @@ struct PluginRoutes: Sendable {
                     enabled: decoded.installed && decoded.enabled
                 )
             }
+            let capabilityRows = try await conn.query(
+                """
+                SELECT pcp.plugin_id, pcp.tool_name, pcp.risk, pcp.approval_tier
+                  FROM plugin_capability_projection pcp
+                  JOIN plugin_grant pg
+                    ON pg.id = pcp.grant_id
+                   AND pg.workspace_id = pcp.workspace_id
+                   AND pg.member_id = pcp.member_id
+                   AND pg.plugin_id = pcp.plugin_id
+                   AND pg.scope = pcp.scope
+                   AND pg.status = 'active'
+                   AND pg.revoked_at IS NULL
+                  JOIN workspace_plugin_install wpi
+                    ON wpi.workspace_id = pcp.workspace_id
+                   AND wpi.plugin_id = pcp.plugin_id
+                   AND wpi.enabled
+                   AND wpi.revoked_at IS NULL
+                 WHERE pcp.workspace_id = \(workspaceID)
+                   AND pcp.member_id = \(policyMemberID)
+                 ORDER BY pcp.plugin_id, pcp.tool_name
+                """,
+                logger: db.logger
+            ).collect()
+            var toolsByPlugin: [String: [PluginPolicyToolDTO]] = [:]
+            for row in capabilityRows {
+                let (pluginID, toolName, risk, approvalTier) = try row.decode(
+                    (String, String, String, String).self
+                )
+                guard manifests[pluginID] != nil else { continue }
+                toolsByPlugin[pluginID, default: []].append(
+                    PluginPolicyToolDTO(
+                        name: toolName,
+                        risk: risk,
+                        approvalTier: approvalTier
+                    )
+                )
+            }
+            let policyPlugins = toolsByPlugin.keys.sorted().compactMap { pluginID -> PluginPolicyDescriptorDTO? in
+                guard let (_, manifest) = manifests[pluginID],
+                      let tools = toolsByPlugin[pluginID], !tools.isEmpty
+                else { return nil }
+                return PluginPolicyDescriptorDTO(
+                    pluginId: pluginID,
+                    mcp: PluginPolicyMCPDTO(
+                        url: manifest.mcpURL,
+                        transport: manifest.mcpTransport
+                    ),
+                    egressDomains: manifest.egressDomains,
+                    tools: tools
+                )
+            }
+            return PluginCatalogResponse(
+                plugins: plugins,
+                toolPolicy: PluginToolPolicyDTO(plugins: policyPlugins)
+            )
         }
-        return try PluginCatalogResponse(plugins: plugins).response(from: request, context: context)
+        return try result.response(from: request, context: context)
     }
 
     @Sendable
@@ -573,6 +637,49 @@ struct PluginRoutes: Sendable {
         return principal
     }
 
+    private static func policyMemberID(
+        request: Request,
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        principal: AuthPrincipal
+    ) async throws -> UUID {
+        guard principal.kind == .agent else { return principal.memberID }
+        guard let delegatedRaw = request.uri.queryParameters["delegatedMemberId"].map(String.init),
+              let channelRaw = request.uri.queryParameters["channelId"].map(String.init),
+              let delegatedMemberID = UUID(uuidString: delegatedRaw),
+              let channelID = UUID(uuidString: channelRaw)
+        else {
+            throw HTTPError(.badRequest, message: "agent plugin policy requires delegatedMemberId and channelId")
+        }
+        let rows = try await conn.query(
+            """
+            SELECT 1
+              FROM member delegated
+              JOIN membership delegated_membership
+                ON delegated_membership.workspace_id = delegated.workspace_id
+               AND delegated_membership.member_id = delegated.id
+               AND delegated_membership.channel_id = \(channelID)
+               AND delegated_membership.left_at IS NULL
+              JOIN membership agent_membership
+                ON agent_membership.workspace_id = delegated_membership.workspace_id
+               AND agent_membership.channel_id = delegated_membership.channel_id
+               AND agent_membership.member_id = \(principal.memberID)
+               AND agent_membership.left_at IS NULL
+             WHERE delegated.workspace_id = \(workspaceID)
+               AND delegated.id = \(delegatedMemberID)
+               AND delegated.kind = 'human'
+               AND delegated.status = 'active'
+               AND delegated.deleted_at IS NULL
+            """,
+            logger: logger
+        ).collect()
+        guard !rows.isEmpty else {
+            throw HTTPError(.forbidden, message: "delegated member is not active in the agent job channel")
+        }
+        return delegatedMemberID
+    }
+
     private static func workspaceID(
         _ context: AppRequestContext, principal: AuthPrincipal
     ) throws -> UUID {
@@ -710,6 +817,29 @@ private struct PluginCatalogItemDTO: Codable, Sendable {
 
 private struct PluginCatalogResponse: Codable, ResponseEncodable, Sendable {
     let plugins: [PluginCatalogItemDTO]
+    let toolPolicy: PluginToolPolicyDTO
+}
+
+private struct PluginToolPolicyDTO: Codable, Sendable {
+    let plugins: [PluginPolicyDescriptorDTO]
+}
+
+private struct PluginPolicyDescriptorDTO: Codable, Sendable {
+    let pluginId: String
+    let mcp: PluginPolicyMCPDTO
+    let egressDomains: [String]
+    let tools: [PluginPolicyToolDTO]
+}
+
+private struct PluginPolicyMCPDTO: Codable, Sendable {
+    let url: String
+    let transport: String
+}
+
+private struct PluginPolicyToolDTO: Codable, Sendable {
+    let name: String
+    let risk: String
+    let approvalTier: String
 }
 
 private struct PluginDetailDTO: Codable, Sendable {

@@ -138,6 +138,14 @@ struct AuthMiddleware: RouterMiddleware {
         {
             return "messages:read"
         }
+        if method == "GET",
+           segments.count == 4,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "plugins"
+        {
+            return "messages:read"
+        }
         if method == "PUT",
            segments.count == 6,
            segments[0] == "v1",

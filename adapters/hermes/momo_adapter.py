@@ -57,7 +57,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Mapping, Optional, Sequence
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 log = logging.getLogger("momo.adapter")
 
@@ -516,6 +516,155 @@ class MomoAdapter(BasePlatformAdapter):
 
     async def _get(self, path: str) -> dict[str, Any]:
         return await self._request_json("GET", path)
+
+    async def _payload_with_plugin_tool_policy(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Build the plugin slice of one Context Packet from live grants.
+
+        The lookup is intentionally packet-scoped: retaining it on the adapter
+        would let a revoked grant survive into a later run.  The server response
+        is treated as untrusted policy input and copied through a strict
+        descriptor allowlist, so provider credentials cannot enter the packet.
+        Any transport/shape failure produces an empty policy (fail-closed).
+        """
+        delegated_member_id = str(
+            payload.get("author_member_id") or payload.get("authorMemberId") or ""
+        ).strip()
+        channel_id = str(
+            payload.get("channel_id") or payload.get("channelId") or ""
+        ).strip()
+        policy: dict[str, Any] = {"plugins": []}
+        if not delegated_member_id or not channel_id:
+            log.warning("plugin tool policy omitted: packet actor/channel binding missing")
+        else:
+            query = urlencode({
+                "delegatedMemberId": delegated_member_id,
+                "channelId": channel_id,
+            })
+            path = f"/v1/workspaces/{self.cfg.workspace_id}/plugins?{query}"
+            try:
+                response = await self._get(path)
+                policy = self._normalize_plugin_tool_policy(response)
+            except Exception as exc:  # policy lookup must fail closed per ADR-0113 D5
+                log.warning(
+                    "plugin tool policy lookup failed closed: %s",
+                    self._redact_gateway_error(exc),
+                )
+
+        assembled = dict(payload)
+        raw_packet = payload.get("context_packet_projection")
+        packet = dict(raw_packet) if isinstance(raw_packet, Mapping) else {}
+        packet["tool_policy"] = policy
+        assembled["context_packet_projection"] = packet
+        return assembled
+
+    @classmethod
+    def _normalize_plugin_tool_policy(
+        cls, response: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        raw_policy = response.get("toolPolicy")
+        raw_plugins = raw_policy.get("plugins") if isinstance(raw_policy, Mapping) else None
+        if not isinstance(raw_plugins, Sequence) or isinstance(
+            raw_plugins, (str, bytes, bytearray)
+        ):
+            log.warning("plugin tool policy response is malformed; denying all plugins")
+            return {"plugins": []}
+
+        plugins: list[dict[str, Any]] = []
+        seen_plugins: set[str] = set()
+        for raw_plugin in raw_plugins:
+            descriptor = cls._normalize_plugin_descriptor(raw_plugin)
+            if descriptor is None:
+                log.warning("skipping malformed plugin tool policy descriptor")
+                continue
+            plugin_id = descriptor["pluginId"]
+            if plugin_id in seen_plugins:
+                log.warning("skipping duplicate plugin tool policy descriptor: %s", plugin_id)
+                continue
+            seen_plugins.add(plugin_id)
+            plugins.append(descriptor)
+        return {"plugins": plugins}
+
+    @staticmethod
+    def _normalize_plugin_descriptor(raw: Any) -> Optional[dict[str, Any]]:
+        if not isinstance(raw, Mapping):
+            return None
+        plugin_id = raw.get("pluginId")
+        mcp = raw.get("mcp")
+        domains = raw.get("egressDomains")
+        tools = raw.get("tools")
+        if (
+            not isinstance(plugin_id, str)
+            or re.fullmatch(r"[a-z0-9][a-z0-9._-]{2,127}", plugin_id) is None
+            or not isinstance(mcp, Mapping)
+            or not isinstance(domains, Sequence)
+            or isinstance(domains, (str, bytes, bytearray))
+            or not isinstance(tools, Sequence)
+            or isinstance(tools, (str, bytes, bytearray))
+        ):
+            return None
+
+        url = mcp.get("url")
+        transport = mcp.get("transport")
+        if not isinstance(url, str) or transport != "streamable_http":
+            return None
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            return None
+
+        normalized_domains: list[str] = []
+        for domain in domains:
+            if (
+                not isinstance(domain, str)
+                or domain != domain.lower()
+                or re.fullmatch(
+                    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}",
+                    domain,
+                )
+                is None
+            ):
+                return None
+            normalized_domains.append(domain)
+        if not normalized_domains or len(set(normalized_domains)) != len(normalized_domains):
+            return None
+        if parsed.hostname.lower() not in normalized_domains:
+            return None
+
+        normalized_tools: list[dict[str, str]] = []
+        seen_tools: set[str] = set()
+        for tool in tools:
+            if not isinstance(tool, Mapping):
+                return None
+            name = tool.get("name")
+            risk = tool.get("risk")
+            approval_tier = tool.get("approvalTier")
+            if (
+                not isinstance(name, str)
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name) is None
+                or risk not in {"read", "write", "admin"}
+                or approval_tier
+                not in {"read_only", "workspace_write", "network_write"}
+                or name in seen_tools
+            ):
+                return None
+            seen_tools.add(name)
+            normalized_tools.append({
+                "name": name,
+                "risk": str(risk),
+                "approvalTier": str(approval_tier),
+            })
+        if not normalized_tools:
+            return None
+
+        # Deliberately reconstruct only the descriptor contract.  Unknown keys,
+        # including token/auth/credential-shaped fields, never cross this line.
+        return {
+            "pluginId": plugin_id,
+            "mcp": {"url": url, "transport": transport},
+            "egressDomains": normalized_domains,
+            "tools": normalized_tools,
+        }
 
     # ----- connect (L4 §6.3) ----------------------------------------------
 
@@ -1387,7 +1536,8 @@ class MomoAdapter(BasePlatformAdapter):
                 else "job received",
             )
             try:
-                result = await self._run_gateway_job(payload)
+                packet_payload = await self._payload_with_plugin_tool_policy(payload)
+                result = await self._run_gateway_job(packet_payload)
             except Exception as exc:  # noqa: BLE001 - durable readable failure
                 log.error(
                     "gateway job failed: run=%s error=%s",

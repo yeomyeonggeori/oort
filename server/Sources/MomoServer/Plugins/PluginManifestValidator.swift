@@ -14,6 +14,8 @@ struct ValidatedPluginManifest: Equatable, Sendable {
     let name: String
     let version: String
     let description: String
+    let mcpURL: String
+    let mcpTransport: String
     let egressDomains: [String]
     let recommendedFor: [String]
     let installAllowed: Bool
@@ -121,10 +123,12 @@ enum PluginManifestValidator {
         guard supportedProtocolVersions.contains(try string(mcp, "protocolVersion", at: "mcp")) else {
             throw rejected("unknown MCP protocol")
         }
-        guard supportedTransports.contains(try string(mcp, "transport", at: "mcp")) else {
+        let mcpTransport = try string(mcp, "transport", at: "mcp")
+        guard supportedTransports.contains(mcpTransport) else {
             throw rejected("unknown MCP transport")
         }
-        guard let endpoint = URL(string: try string(mcp, "url", at: "mcp")),
+        let mcpURL = try string(mcp, "url", at: "mcp")
+        guard let endpoint = URL(string: mcpURL),
               endpoint.scheme == "https", let endpointHost = endpoint.host?.lowercased()
         else { throw rejected("MCP endpoint must be HTTPS") }
         let server = try object(mcp, "server", at: "mcp")
@@ -222,6 +226,8 @@ enum PluginManifestValidator {
             name: name,
             version: version,
             description: description,
+            mcpURL: mcpURL,
+            mcpTransport: mcpTransport,
             egressDomains: egressDomains,
             recommendedFor: recommendedFor,
             installAllowed: installAllowed,

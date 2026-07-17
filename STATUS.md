@@ -3,6 +3,10 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-449 GitHub grant → Context Packet tool policy (2026-07-17)
+
+- Hermes adapter가 packet마다 agent job의 위임 사용자·채널을 이용해 plugin projection을 재조회하고, 유효 grant의 allowlisted MCP descriptor만 `context_packet_projection.tool_policy`에 포함한다. revoke는 다음 packet에 즉시 반영되고 조회/descriptor 오류는 플러그인 단위 또는 전체 기본 거부한다.
+- 서버 plugin 목록은 agent bearer에 대해 같은 채널의 위임 사용자 binding을 검증한 뒤 credential-free tool policy를 추가 응답한다. mock REST Python 계약 테스트와 실서버 install→grant→조회→revoke verifier를 추가했으며 Docker 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
 ## MOMO-451 macOS full-height window shell (2026-07-17)
 
 - production `NSWindow`에 `fullSizeContentView`를 적용해 좌측·가운데·우측 shell이 별도 제목 표시줄 아래가 아니라 트래픽라이트 영역까지 이어지도록 했다. 시스템 창 제목과 native toolbar separator/baseline은 숨기되 AppKit이 트래픽라이트 상호작용을 계속 소유한다.
