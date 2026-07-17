@@ -156,6 +156,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     @Published public private(set) var requestedMessageFocus: MessageID?
+    @Published public private(set) var failedMessageFocus: MessageID?
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
@@ -519,6 +520,7 @@ public final class ChatViewModel: ObservableObject {
         isCreatingWorkRun = false
         workCreationError = nil
         requestedMessageFocus = nil
+        failedMessageFocus = nil
         approvalDecisionFailedIds = []
         workHistoryErrorsByChannel = [:]
         workDetailErrorsById = [:]
@@ -1056,18 +1058,28 @@ public final class ChatViewModel: ObservableObject {
 
     public func focusMessage(_ messageID: MessageID, in channelID: ChannelID) async {
         let navigationIntent = beginNavigationIntent()
+        requestedMessageFocus = nil
+        failedMessageFocus = nil
         recordChannelSelection(channelID)
         await activateChannel(channelID)
         guard !Task.isCancelled,
               navigationIntentGeneration == navigationIntent,
               selectedChannelId == channelID
         else { return }
+        guard messagesByChannel[channelID]?.contains(where: { $0.id == messageID }) == true else {
+            failedMessageFocus = messageID
+            return
+        }
         requestedMessageFocus = messageID
     }
 
     public func consumeRequestedMessageFocus(_ messageID: MessageID) {
         guard requestedMessageFocus == messageID else { return }
         requestedMessageFocus = nil
+    }
+
+    public func clearFailedMessageFocus() {
+        failedMessageFocus = nil
     }
 
     private enum UserNavigationHistoryMutation {
@@ -1093,6 +1105,8 @@ public final class ChatViewModel: ObservableObject {
     @discardableResult
     private func beginNavigationIntent() -> UInt64 {
         navigationIntentGeneration &+= 1
+        requestedMessageFocus = nil
+        failedMessageFocus = nil
         return navigationIntentGeneration
     }
 

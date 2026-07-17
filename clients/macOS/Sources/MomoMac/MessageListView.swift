@@ -124,6 +124,21 @@ public struct MessageListView: View {
                 connectionBanner(issue, copy: copy)
                 Divider()
             }
+            if viewModel.failedMessageFocus != nil {
+                HStack(spacing: 8) {
+                    Label(copy.messageFocusFailedDetail, systemImage: "magnifyingglass")
+                        .font(MomoTheme.Typography.supporting)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(copy.dismissMessageFocusFailure) {
+                        viewModel.clearFailedMessageFocus()
+                    }
+                    .controlSize(.small)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                Divider()
+            }
             if let notice = viewModel.mentionNotice {
                 mentionNoticeBanner(notice)
                 Divider()
@@ -510,6 +525,7 @@ public struct MessageListView: View {
                 }
                 .onChange(of: viewModel.requestedMessageFocus) { _, messageID in
                     guard let messageID else { return }
+                    isPinnedToTimelineBottom = false
                     proxy.scrollTo(messageID, anchor: .center)
                     highlightedMessageID = messageID
                     accessibilityFocusedMessageID = messageID
@@ -550,9 +566,7 @@ public struct MessageListView: View {
             .padding(.top, item.startsGroup ? 8 : 0)
             .background(
                 highlightedMessageID == item.message.id
-                    ? (viewModel.member(item.message.authorMemberId)?.isAgent == true
-                        ? MomoTheme.agentAccent.opacity(0.12)
-                        : MomoTheme.humanAccent.opacity(0.12))
+                    ? MomoTheme.selectionBackground
                     : Color.clear
             )
             .accessibilityFocused($accessibilityFocusedMessageID, equals: item.message.id)

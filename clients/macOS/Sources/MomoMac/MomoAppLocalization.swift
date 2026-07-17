@@ -1555,6 +1555,20 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var messageFocusFailedDetail: String {
+        switch language {
+        case .korean: return "메시지가 최근 로드 범위에 없습니다. 검색을 다시 열어 최신 결과를 선택하세요."
+        case .english: return "The message is outside the recent loaded range. Reopen search and choose an updated result."
+        }
+    }
+
+    var dismissMessageFocusFailure: String {
+        switch language {
+        case .korean: return "알림 닫기"
+        case .english: return "Dismiss notice"
+        }
+    }
+
     var messageSendFailedTitle: String {
         switch language {
         case .korean: return "메시지를 보내지 못했습니다"
@@ -1809,13 +1823,6 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "에이전트가 외부 작업 전 확인을 요청하면 여기에 모입니다."
         case .english: return "Agent actions that need human review collect here."
-        }
-    }
-
-    var approveAllReversible: String {
-        switch language {
-        case .korean: return "되돌릴 수 있는 요청 모두 승인"
-        case .english: return "Approve all reversible"
         }
     }
 

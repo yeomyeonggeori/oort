@@ -83,6 +83,7 @@ struct MomoQuickSwitcherView: View {
     @State private var query = ""
     @State private var keyboardState = MomoQuickSwitcherKeyboardState()
     @State private var hoveredItemID: MomoQuickSwitcherDestination?
+    @State private var shouldScrollSelection = false
     @FocusState private var searchIsFocused: Bool
     @AccessibilityFocusState private var accessibilityFocusedItemID: MomoQuickSwitcherDestination?
 
@@ -223,7 +224,8 @@ struct MomoQuickSwitcherView: View {
                     .padding(MomoTheme.QuickSwitcher.standardSpacing)
                 }
                 .onChange(of: keyboardState.selectedID) { _, selectedID in
-                    guard let selectedID else { return }
+                    guard shouldScrollSelection, let selectedID else { return }
+                    shouldScrollSelection = false
                     proxy.scrollTo(selectedID, anchor: .center)
                 }
             }
@@ -361,7 +363,17 @@ struct MomoQuickSwitcherView: View {
     }
 
     private func handle(_ event: MomoQuickSwitcherKeyEvent) {
+        let previousSelection = keyboardState.selectedID
+        switch event {
+        case .moveUp, .moveDown:
+            shouldScrollSelection = true
+        case .confirm, .cancel:
+            break
+        }
         let outcome = keyboardState.handle(event, items: items)
+        if keyboardState.selectedID == previousSelection {
+            shouldScrollSelection = false
+        }
         switch event {
         case .moveUp, .moveDown:
             accessibilityFocusedItemID = keyboardState.selectedID

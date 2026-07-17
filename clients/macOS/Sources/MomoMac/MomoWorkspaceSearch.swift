@@ -169,6 +169,7 @@ struct MomoWorkspaceSearchView: View {
     @State private var selectedItemID: String?
     @State private var searchResults: [MomoWorkspaceSearchItem.Kind: [MomoWorkspaceSearchItem]] = [:]
     @State private var refreshTask: Task<Void, Never>?
+    @State private var shouldScrollSelection = false
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
@@ -214,7 +215,8 @@ struct MomoWorkspaceSearchView: View {
                                 .padding(16)
                         }
                         .onChange(of: selectedItemID) { _, itemID in
-                            guard let itemID else { return }
+                            guard shouldScrollSelection, let itemID else { return }
+                            shouldScrollSelection = false
                             proxy.scrollTo(itemID, anchor: .center)
                         }
                     }
@@ -234,7 +236,8 @@ struct MomoWorkspaceSearchView: View {
                         .padding(16)
                     }
                     .onChange(of: selectedItemID) { _, itemID in
-                        guard let itemID else { return }
+                        guard shouldScrollSelection, let itemID else { return }
+                        shouldScrollSelection = false
                         proxy.scrollTo(itemID, anchor: .center)
                     }
                 }
@@ -295,7 +298,7 @@ struct MomoWorkspaceSearchView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: item.isAgent ? "cpu" : item.systemImage)
-                            .frame(width: 24)
+                            .frame(width: MomoTheme.WorkspaceSearch.iconWidth)
                             .foregroundStyle(item.isAgent ? MomoTheme.agentAccent : .secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title)
@@ -310,10 +313,10 @@ struct MomoWorkspaceSearchView: View {
                         Spacer()
                     }
                     .padding(.horizontal, 8)
-                    .frame(minHeight: 48)
+                    .frame(minHeight: MomoTheme.WorkspaceSearch.rowMinimumHeight)
                     .contentShape(Rectangle())
                     .background(
-                            selectedItemID == item.id ? Color.primary.opacity(0.08) : Color.clear,
+                        selectedItemID == item.id ? MomoTheme.selectionBackground : Color.clear,
                         in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous)
                     )
                 }
@@ -400,7 +403,9 @@ struct MomoWorkspaceSearchView: View {
     private func moveSelection(in items: [MomoWorkspaceSearchItem], offset: Int) {
         guard !items.isEmpty else { selectedItemID = nil; return }
         let current = items.firstIndex { $0.id == selectedItemID } ?? 0
-        selectedItemID = items[(current + offset + items.count) % items.count].id
+        let nextID = items[(current + offset + items.count) % items.count].id
+        shouldScrollSelection = nextID != selectedItemID
+        selectedItemID = nextID
     }
 
     private func activateSelected(from items: [MomoWorkspaceSearchItem]) {

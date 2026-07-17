@@ -8,6 +8,7 @@ struct MomoDirectMessagePicker: View {
     @State private var query = ""
     @State private var errorMessage: String?
     @State private var selectedMemberID: MemberID?
+    @State private var shouldScrollSelection = false
     @FocusState private var isSearchFocused: Bool
 
     private var candidates: [Member] {
@@ -32,7 +33,7 @@ struct MomoDirectMessagePicker: View {
                     Text(subtitle).font(MomoTheme.Typography.supporting).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button(copy.closeDetailPane, action: dismiss)
+                Button(closeAction, action: dismiss)
                     .keyboardShortcut(.cancelAction)
             }
             .padding(16)
@@ -105,7 +106,7 @@ struct MomoDirectMessagePicker: View {
                             }
                             .contentShape(Rectangle())
                             .background(
-                                selectedMemberID == member.id ? Color.primary.opacity(0.08) : Color.clear,
+                                selectedMemberID == member.id ? MomoTheme.selectionBackground : Color.clear,
                                 in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall, style: .continuous)
                             )
                         }
@@ -119,7 +120,8 @@ struct MomoDirectMessagePicker: View {
                     }
                     .listStyle(.plain)
                     .onChange(of: selectedMemberID) { _, memberID in
-                        guard let memberID else { return }
+                        guard shouldScrollSelection, let memberID else { return }
+                        shouldScrollSelection = false
                         proxy.scrollTo(memberID, anchor: .center)
                     }
                 }
@@ -194,7 +196,9 @@ struct MomoDirectMessagePicker: View {
     private func moveSelection(offset: Int) {
         guard !candidates.isEmpty else { selectedMemberID = nil; return }
         let currentIndex = candidates.firstIndex { $0.id == selectedMemberID } ?? 0
-        selectedMemberID = candidates[(currentIndex + offset + candidates.count) % candidates.count].id
+        let nextID = candidates[(currentIndex + offset + candidates.count) % candidates.count].id
+        shouldScrollSelection = nextID != selectedMemberID
+        selectedMemberID = nextID
     }
 
     private func openSelectedDirectMessage() {

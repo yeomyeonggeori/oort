@@ -303,7 +303,9 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             testName: #function.replacingOccurrences(of: "()", with: ""),
             named: "light"
         )
-        let image = try await render(standardLight, requiresWindowServer: true)
+        // Light mode is stable through the offscreen NSWindow fallback used by
+        // the artifact test above, so workers can refresh copy-sensitive canonicals.
+        let image = try await render(standardLight)
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
