@@ -14,6 +14,7 @@ def read(relative: str) -> str:
 backend = read("clients/macOS/Sources/MomoMac/MomoServerRESTChatBackend.swift")
 view_model = read("clients/macOS/Sources/MomoMac/ChatViewModel.swift")
 sidebar = read("clients/macOS/Sources/MomoMac/ChannelListView.swift")
+account_settings = read("clients/macOS/Sources/MomoMac/MomoAccountSettingsViews.swift")
 session = read("clients/macOS/Sources/MomoMac/MomoServerSession.swift")
 dtos = read("server/Sources/MomoServer/Routes/DTOs.swift")
 verifier = read("scripts/verify_macos_real_backend_ui.sh")
@@ -30,7 +31,10 @@ assert "return activeMembers()" in view_model
 assert "viewModel.activeMembers()" in sidebar
 assert "isHiddenDogfoodAgent" not in sidebar
 assert "guard allowsLocalProfileEditing else { return }" in view_model
-assert ".disabled(!viewModel.allowsLocalProfileEditing)" in sidebar
+assert ".disabled(!allowsEditing)" in account_settings
+assert "allowsEditing: viewModel.allowsLocalProfileEditing" in read(
+    "clients/macOS/Sources/MomoMac/MomoMacRootView.swift"
+)
 
 assert "NSHostingView" in snapshot_test
 assert "testChannelRosterRasterContainsAgentBadgePixels" in snapshot_test

@@ -9,6 +9,13 @@
 - **MOMO-412**(`5ff5161`, ADR-0115 SE-04B): signed webhook ingress — native HMAC-SHA256(signature base=version+method+endpoint+install+timestamp+delivery+bodyhash, constant-time, replay window, 키 회전 overlap, one-time secret custody) + **Slack-호환 모드**(URL-시크릿, MM 검증 부분집합 화이트리스트, 미지원 필드 무시로 Grafana/Alertmanager가 URL 교체만으로 동작 — 독립 리뷰 H1 반영, blocks만 400, username/icon 무시로 author 사칭 차단). 수신=한 tenant 트랜잭션(receipt+deterministic client_msg_id+seq+message+outbox). 리뷰가 암호학·secret custody·단일 쓰기 경로를 "흠 없음" 확정.
 - 공통: 게이트의 macOS 스냅샷 FAIL은 UX 트랙 선재 결함(origin/main HEAD 격리 재현) — DEVIATION_LOG. M1/M2(per-install rate limit·WEBHOOK_MASTER_KEY 분리)는 pending.
 
+## MOMO-447 macOS dogfood interaction shells completion (2026-07-17)
+
+- `⌘F`/toolbar 검색을 채널·활성 멤버·현재 클라이언트에 로드된 메시지·명시적 첨부 메타데이터 이름을 찾는 로컬 검색 surface로 교체했다. 검색 결과는 채널 이동 또는 멤버 프로필로 연결되며, 서버 FTS가 준비되면 같은 destination 계약 뒤에서 교체한다.
+- 다이렉트 메시지 `+`는 검색 가능한 사람/에이전트 선택 sheet로 연결하고 기존 실제 DM 생성 경로를 재사용한다. 프로필 surface는 demo/local 모드에서 로컬 초안 편집을 제공하고, real-server 모드에서는 서버 값의 read-only 표시로 fail-closed한다.
+- 승인 inspector의 중복 헤더를 제거하고 요청 수·되돌릴 수 있는 요청 일괄 승인 action을 한 줄에 배치했다. 플러그인 카탈로그는 Drive·Calendar·Gmail·GitHub·Notion의 로컬 선택/해제 상태를 앱 재실행과 채널 이동 사이에 유지하며, 실제 registry/grant/OAuth 연결 전에는 미리보기임을 명시한다.
+- 파일 선택·timeline DnD·첨부 chip은 MOMO-409의 local draft 경로를 유지한다. durable upload 성공은 주장하지 않으며 storage API 연결 경계는 `docs/planning/handoffs/2026-07-17-momo-447-dogfood-interaction-shells.md`에 기록했다.
+
 ## MOMO-445 macOS single-owner inspector boundary (2026-07-17)
 
 - 가운데 타임라인과 붙어 있는 우측 승인·멤버 패널 사이의 이중 경계를 제거했다. 가운데 본문은 경계를 소유하지 않고, 레이아웃의 단일 `Divider`만 경계를 그리며 붙어 있는 패널은 semantic fill만 사용한다.

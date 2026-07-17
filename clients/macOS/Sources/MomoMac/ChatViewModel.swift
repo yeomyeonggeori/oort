@@ -155,6 +155,8 @@ public final class ChatViewModel: ObservableObject {
         !usesServerRosterSourceOfTruth
     }
 
+    @Published public private(set) var requestedMessageFocus: MessageID?
+
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
     @Published public private(set) var workspace: Workspace?
@@ -200,6 +202,7 @@ public final class ChatViewModel: ObservableObject {
     // Approval inbox (experience C). Keyed by approval id, newest first in view.
     @Published public private(set) var approvals: [ApprovalID: ApprovalEvent] = [:]
     @Published public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
+    @Published public private(set) var approvalDecisionFailedIds: Set<ApprovalID> = []
     @Published public private(set) var channelCreateInFlight = false
     @Published public private(set) var channelCreateIssue: MomoChannelCreateIssue?
     @Published private(set) var channelCreateSessionGeneration: UInt64 = 0
@@ -515,6 +518,8 @@ public final class ChatViewModel: ObservableObject {
         workRunDetailLoadingIds = []
         isCreatingWorkRun = false
         workCreationError = nil
+        requestedMessageFocus = nil
+        approvalDecisionFailedIds = []
         workHistoryErrorsByChannel = [:]
         workDetailErrorsById = [:]
         approvals = [:]
@@ -1047,6 +1052,22 @@ public final class ChatViewModel: ObservableObject {
     /// Select a channel: load history + (re)subscribe to its realtime stream.
     public func selectChannel(_ id: ChannelID) async {
         await navigateAsUser(to: id, history: .recordSelection)
+    }
+
+    public func focusMessage(_ messageID: MessageID, in channelID: ChannelID) async {
+        let navigationIntent = beginNavigationIntent()
+        recordChannelSelection(channelID)
+        await activateChannel(channelID)
+        guard !Task.isCancelled,
+              navigationIntentGeneration == navigationIntent,
+              selectedChannelId == channelID
+        else { return }
+        requestedMessageFocus = messageID
+    }
+
+    public func consumeRequestedMessageFocus(_ messageID: MessageID) {
+        guard requestedMessageFocus == messageID else { return }
+        requestedMessageFocus = nil
     }
 
     private enum UserNavigationHistoryMutation {
@@ -2259,6 +2280,7 @@ public final class ChatViewModel: ObservableObject {
 
     public func decideApproval(_ id: ApprovalID, approve: Bool, reason: String? = nil) async {
         guard !approvalDecisionsInFlight.contains(id) else { return }
+        approvalDecisionFailedIds.remove(id)
         approvalDecisionsInFlight.insert(id)
         defer { approvalDecisionsInFlight.remove(id) }
 
@@ -2275,6 +2297,7 @@ public final class ChatViewModel: ObservableObject {
                 approvals[id] = ev
             }
         } catch {
+            approvalDecisionFailedIds.insert(id)
             reportConnectionError(error, as: .actionFailed)
         }
     }
@@ -2357,6 +2380,9 @@ public final class ChatViewModel: ObservableObject {
         presence: Presence?
     ) {
         guard allowsLocalProfileEditing else { return }
+        // Real-server roster data remains the source of truth. The settings
+        // surface persists its dogfood-only presentation override separately.
+        guard !usesServerRosterSourceOfTruth else { return }
         guard let index = members.firstIndex(where: { $0.id == id }) else { return }
         let displayName = rawDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !displayName.isEmpty {

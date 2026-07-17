@@ -359,6 +359,17 @@ public enum MomoTheme {
         public static let hoverBackground = Color.primary.opacity(0.06)
     }
 
+    public enum WorkspaceSearch {
+        public static let minimumWidth: CGFloat = 520
+        public static let idealWidth: CGFloat = 640
+        public static let maximumWidth: CGFloat = 720
+        public static let minimumHeight: CGFloat = 440
+        public static let idealHeight: CGFloat = 520
+        public static let maximumHeight: CGFloat = 640
+        public static let rowMinimumHeight: CGFloat = 48
+        public static let iconWidth: CGFloat = 24
+    }
+
     /// Native split-view dimensions and rhythm for the workspace member directory.
     public enum MemberDirectory {
         public static let minimumWidth: CGFloat = 640

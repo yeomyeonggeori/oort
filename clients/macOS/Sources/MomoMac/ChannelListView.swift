@@ -70,6 +70,7 @@ public struct ChannelListView: View {
     @State private var showWorkspaceMenu = false
     @State private var showMemberInvite = false
     @State private var showMemberDirectory = false
+    @State private var showDirectMessagePicker = false
     @State private var hoveredChannelID: ChannelID?
     @State private var hoveredMemberID: MemberID?
     @State private var hoveredUtility: MomoSidebarUtility?
@@ -245,6 +246,13 @@ public struct ChannelListView: View {
         }
         .sheet(isPresented: $showMemberDirectory) {
             MemberDirectoryView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $showDirectMessagePicker) {
+            MomoDirectMessagePicker(
+                viewModel: viewModel,
+                copy: copy,
+                dismiss: { showDirectMessagePicker = false }
+            )
         }
         .sheet(isPresented: $showMemberInvite) {
             memberInvitePopover(copy: copy)
@@ -486,7 +494,7 @@ public struct ChannelListView: View {
                 actionTitle: copy.newDirectMessage,
                 systemImage: "plus"
             ) {
-                presentMemberDirectory()
+                showDirectMessagePicker = true
             }
 
             if directMessageChannels.isEmpty {
@@ -865,10 +873,9 @@ public struct ChannelListView: View {
                     if viewModel.allowsLocalProfileEditing {
                         Label(copy.editProfile, systemImage: "person.text.rectangle")
                     } else {
-                        Label(copy.serverManagedProfileNote, systemImage: "lock")
+                        Label(copy.profile, systemImage: "person.text.rectangle")
                     }
                 }
-                .disabled(!viewModel.allowsLocalProfileEditing)
 
                 if viewModel.selectedChannelId != nil {
                     Divider()
@@ -1130,7 +1137,6 @@ public struct ChannelListView: View {
             profileAction(
                 copy.profile,
                 systemImage: "person.crop.circle",
-                isDisabled: !viewModel.allowsLocalProfileEditing,
                 helpText: viewModel.allowsLocalProfileEditing ? copy.profile : copy.serverManagedProfileNote
             ) {
                 showProfilePanel = false

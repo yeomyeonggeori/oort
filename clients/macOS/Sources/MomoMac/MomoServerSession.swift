@@ -718,6 +718,8 @@ public final class MomoServerSessionController: ObservableObject {
             channelCount: viewModel.channels.count,
             serverURLString: config.baseURL.absoluteString,
             workspaceIDString: config.workspace.description,
+            memberDisplayName: viewModel.authenticatedMember?.displayName,
+            memberHandle: viewModel.authenticatedMember?.handle,
             email: config.login.email
         ), inviteAdmin)
     }
