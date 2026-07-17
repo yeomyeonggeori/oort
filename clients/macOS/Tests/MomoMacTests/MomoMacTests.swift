@@ -6030,6 +6030,107 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(controller.form.savePassword)
         XCTAssertTrue(controller.sessionNotice?.contains("Logged out") == true)
     }
+
+    @MainActor
+    func testFocusMessageReportsWhenReloadedSliceNoLongerContainsTarget() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let channel = try XCTUnwrap(seed.channels.first)
+        let members = try await base.members(workspace: seed.workspace)
+        let author = try XCTUnwrap(members.first)
+        let target = await base.seedDemoMessage(
+            channel: channel.id,
+            author: author.id,
+            body: "검색 뒤 로드 슬라이스에서 사라지는 메시지"
+        )
+        let backend = OmitFocusedMessageChatBackend(base: base, omittedMessageID: target.id)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "focus-test")
+        await viewModel.selectChannel(channel.id)
+        XCTAssertTrue(viewModel.visibleMessages.contains(where: { $0.id == target.id }))
+        await backend.beginOmittingTarget()
+
+        await viewModel.focusMessage(target.id, in: channel.id)
+
+        XCTAssertNil(viewModel.requestedMessageFocus)
+        XCTAssertEqual(viewModel.failedMessageFocus, target.id)
+        viewModel.clearFailedMessageFocus()
+        XCTAssertNil(viewModel.failedMessageFocus)
+    }
+}
+
+private actor OmitFocusedMessageChatBackend: ChatBackend {
+    private let base: LiveChatBackend
+    private let omittedMessageID: MessageID
+    private var omitsTarget = false
+
+    init(base: LiveChatBackend, omittedMessageID: MessageID) {
+        self.base = base
+        self.omittedMessageID = omittedMessageID
+    }
+
+    func beginOmittingTarget() {
+        omitsTarget = true
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        let messages = try await base.history(channel: channel, after: seq, limit: limit)
+        guard omitsTarget else { return messages }
+        return messages.filter { $0.id != omittedMessageID }
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
+    }
 }
 
 private actor RetryOnceSendChatBackend: ChatBackend {

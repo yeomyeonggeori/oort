@@ -9,6 +9,8 @@ import MomoCore
 // lands with the .app follow-up ticket.
 
 public enum MomoTheme {
+    /// Neutral system selection shared by transient list navigation and search focus.
+    public static let selectionBackground = Color.primary.opacity(0.08)
     /// Agent accent (used for agent bubbles, partial streaming, presence ring).
     public static let agentAccent = Color(red: 0.45, green: 0.36, blue: 0.92)
     /// Human accent.
@@ -317,7 +319,7 @@ public enum MomoTheme {
         public static let rowDetailFont = MomoTheme.Typography.supporting
         public static let badgeFont = Font.caption2.weight(.semibold)
 
-        public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
+        public static let selectionBackground = MomoTheme.selectionBackground
         public static let hoverBackground = Color.primary.opacity(0.06)
         public static let utilityBackground = Color.primary.opacity(0.045)
         public static let mentionBadgeBackground = MomoTheme.irreversibleRed
@@ -355,7 +357,7 @@ public enum MomoTheme {
         public static let sectionSpacing: CGFloat = 16
         public static let standardSpacing: CGFloat = 8
         public static let compactSpacing: CGFloat = 4
-        public static let selectionBackground = MomoTheme.humanAccent.opacity(0.18)
+        public static let selectionBackground = MomoTheme.selectionBackground
         public static let hoverBackground = Color.primary.opacity(0.06)
     }
 
