@@ -11,7 +11,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -62,7 +62,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -81,7 +81,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -124,6 +124,7 @@ AUTO_SUGGESTED=""
 AUTO_BASE_DESC=""
 declare -a AUTO_REASONS=()
 AUTO_NEED_MACOS=0
+AUTO_NEED_IOS=0
 AUTO_NEED_DB=0
 AUTO_NEED_RELAY=0
 AUTO_NEED_AGENT=0
@@ -151,6 +152,8 @@ auto_classify_script() {
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
     scripts/verify_internal_host_runtime.sh|scripts/verify_backup_restore_rehearsal.sh)
       AUTO_NEED_HOSTRT=1; AUTO_REASONS+=("$1 -> host-runtime") ;;
+    scripts/verify_ios_build.sh)
+      AUTO_NEED_IOS=1; AUTO_REASONS+=("$1 -> ios") ;;
     scripts/verify_macos_real_backend_ui_bootstrap.sh|scripts/verify_macos_real_backend_ui.sh|scripts/macos_dev_run.sh)
       AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> macos-ui") ;;
     scripts/web_serving_smoke.sh|scripts/verify_web_login_smoke.sh)
@@ -178,6 +181,8 @@ auto_classify_path() {
       AUTO_NEED_WEB=1; AUTO_REASONS+=("$1 -> web") ;;
     docs/*|research/*|legal/*|*.md)
       AUTO_REASONS+=("$1 -> docs") ;;
+    clients/iOS/*)
+      AUTO_NEED_IOS=1; AUTO_REASONS+=("$1 -> ios") ;;
     clients/*)
       AUTO_NEED_MACOS=1; AUTO_REASONS+=("$1 -> swift+macos-ui") ;;
     server/Migrations/*)
@@ -261,7 +266,7 @@ auto_select_profile() {
   done
   set +f
 
-  local units=$((AUTO_NEED_MACOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB))
+  local units=$((AUTO_NEED_MACOS + AUTO_NEED_IOS + AUTO_NEED_DB + AUTO_NEED_RELAY + AUTO_NEED_AGENT + AUTO_NEED_LIVE + AUTO_NEED_STAGING + AUTO_NEED_HOSTRT + AUTO_NEED_DIAG + AUTO_NEED_WEB))
   if [ "$AUTO_NEED_ALL" -eq 1 ] || [ "$units" -gt 1 ]; then
     AUTO_SUGGESTED="all"
     if [ "$AUTO_NEED_LIVE" -eq 1 ]; then
@@ -275,6 +280,8 @@ auto_select_profile() {
     fi
   elif [ "$AUTO_NEED_MACOS" -eq 1 ]; then
     AUTO_SUGGESTED="macos-ui"
+  elif [ "$AUTO_NEED_IOS" -eq 1 ]; then
+    AUTO_SUGGESTED="ios"
   elif [ "$AUTO_NEED_DB" -eq 1 ]; then
     AUTO_SUGGESTED="runtime-db"
   elif [ "$AUTO_NEED_RELAY" -eq 1 ]; then
@@ -310,7 +317,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|web|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -482,6 +489,13 @@ add_static_commands() {
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/adapter.py scripts/mock_hermes.py scripts/mock_push_relay.py scripts/openapi_shape_check.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/smoke_momo_adapter.py scripts/tests/test_agent_seed_policy_contract.py scripts/tests/test_momo354_roster_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_agent_seed_policy_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_momo354_roster_contract.py'
+}
+
+add_ios_commands() {
+  add_cmd_once "iOS verifier shell syntax" "bash -n scripts/verify_ios_build.sh"
+  add_cmd "iOS simulator build and unit tests" "scripts/verify_ios_build.sh"
+  add_note_once coverage "MOMO-462 iOS gate: builds MomoiOS for the generic iOS Simulator, dynamically selects an available iPhone simulator, runs build-for-testing and test-without-building with signing disabled and repo-local DerivedData, then restores simulator state."
+  add_note_once not_covered "Push signing and real APNs delivery remain manual IOS-4/IOS-5 scope."
 }
 
 add_runtime_env_guard_command() {
@@ -798,6 +812,10 @@ case "$PROFILE" in
     add_swift_commands
     add_runtime_bootstrap_commands
     add_macos_ui_commands
+    ;;
+  ios)
+    add_static_commands
+    add_ios_commands
     ;;
   m3-dbc)
     add_m3_dbc_commands

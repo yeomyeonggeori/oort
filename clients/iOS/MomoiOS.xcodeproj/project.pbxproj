@@ -1,0 +1,76 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* MomoiOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000011 /* MomoiOSApp.swift */; };
+		A10000000000000000000002 /* MomoiOSKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000041 /* MomoiOSKit */; };
+		A10000000000000000000003 /* SessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000014 /* SessionTests.swift */; };
+		A10000000000000000000004 /* MomoiOSKit in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000041 /* MomoiOSKit */; };
+		A10000000000000000000005 /* MomoCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000042 /* MomoCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000010 /* MomoiOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MomoiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000011 /* MomoiOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MomoiOSApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A10000000000000000000013 /* MomoiOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MomoiOS.entitlements; sourceTree = "<group>"; };
+		A10000000000000000000014 /* SessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionTests.swift; path = MomoiOSKit/Tests/MomoiOSKitTests/SessionTests.swift; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000015 /* MomoiOSKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MomoiOSKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000020 /* App Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000002 /* MomoiOSKit in Frameworks */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000021 /* Test Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000004 /* MomoiOSKit in Frameworks */, A10000000000000000000005 /* MomoCore in Frameworks */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000030 = {isa = PBXGroup; children = (A10000000000000000000031 /* XcodeHost */, A10000000000000000000014 /* SessionTests.swift */, A10000000000000000000032 /* Products */,); sourceTree = "<group>"; };
+		A10000000000000000000031 /* XcodeHost */ = {isa = PBXGroup; children = (A10000000000000000000011 /* MomoiOSApp.swift */, A10000000000000000000012 /* Info.plist */, A10000000000000000000013 /* MomoiOS.entitlements */,); path = XcodeHost; sourceTree = "<group>"; };
+		A10000000000000000000032 /* Products */ = {isa = PBXGroup; children = (A10000000000000000000010 /* MomoiOS.app */, A10000000000000000000015 /* MomoiOSKitTests.xctest */,); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000050 /* MomoiOS */ = {isa = PBXNativeTarget; buildConfigurationList = A10000000000000000000070; buildPhases = (A10000000000000000000060 /* App Sources */, A10000000000000000000020 /* App Frameworks */,); buildRules = (); dependencies = (); name = MomoiOS; packageProductDependencies = (A10000000000000000000041 /* MomoiOSKit */,); productName = MomoiOS; productReference = A10000000000000000000010 /* MomoiOS.app */; productType = "com.apple.product-type.application"; };
+		A10000000000000000000051 /* MomoiOSKitTests */ = {isa = PBXNativeTarget; buildConfigurationList = A10000000000000000000071; buildPhases = (A10000000000000000000061 /* Test Sources */, A10000000000000000000021 /* Test Frameworks */,); buildRules = (); dependencies = (); name = MomoiOSKitTests; packageProductDependencies = (A10000000000000000000041 /* MomoiOSKit */, A10000000000000000000042 /* MomoCore */,); productName = MomoiOSKitTests; productReference = A10000000000000000000015 /* MomoiOSKitTests.xctest */; productType = "com.apple.product-type.bundle.unit-test"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000040 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2650; LastUpgradeCheck = 2650; TargetAttributes = {A10000000000000000000050 = {CreatedOnToolsVersion = 26.5;}; A10000000000000000000051 = {CreatedOnToolsVersion = 26.5;};};}; buildConfigurationList = A10000000000000000000080; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = A10000000000000000000030; packageReferences = (A10000000000000000000043 /* MomoiOSKit */, A10000000000000000000044 /* Core */,); productRefGroup = A10000000000000000000032; projectDirPath = ""; projectRoot = ""; targets = (A10000000000000000000050 /* MomoiOS */, A10000000000000000000051 /* MomoiOSKitTests */,); };
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000060 /* App Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001 /* MomoiOSApp.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000061 /* Test Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000003 /* SessionTests.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A10000000000000000000072 /* App Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = XcodeHost/MomoiOS.entitlements; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = XcodeHost/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = app.momo.ios; PRODUCT_MODULE_NAME = MomoiOSHost; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		A10000000000000000000073 /* App Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = XcodeHost/MomoiOS.entitlements; CODE_SIGN_STYLE = Automatic; COPY_PHASE_STRIP = NO; CURRENT_PROJECT_VERSION = 1; DEVELOPMENT_TEAM = ""; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = XcodeHost/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks",); MARKETING_VERSION = 0.1.0; PRODUCT_BUNDLE_IDENTIFIER = app.momo.ios; PRODUCT_MODULE_NAME = MomoiOSHost; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+		A10000000000000000000074 /* Tests Debug */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = ""; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = app.momo.ios.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphonesimulator"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = ""; }; name = Debug; };
+		A10000000000000000000075 /* Tests Release */ = {isa = XCBuildConfiguration; buildSettings = {BUNDLE_LOADER = ""; CODE_SIGNING_ALLOWED = NO; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = app.momo.ios.tests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphonesimulator"; SWIFT_STRICT_CONCURRENCY = complete; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = ""; }; name = Release; };
+		A10000000000000000000081 /* Project Debug */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; GCC_C_LANGUAGE_STANDARD = gnu17; GCC_OPTIMIZATION_LEVEL = 0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LOCALIZATION_PREFERS_STRING_CATALOGS = YES; MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE; ONLY_ACTIVE_ARCH = YES; SDKROOT = iphoneos; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
+		A10000000000000000000082 /* Project Release */ = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; COPY_PHASE_STRIP = NO; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; ENABLE_NS_ASSERTIONS = NO; GCC_C_LANGUAGE_STANDARD = gnu17; LOCALIZATION_PREFERS_STRING_CATALOGS = YES; MTL_ENABLE_DEBUG_INFO = NO; SDKROOT = iphoneos; SWIFT_COMPILATION_MODE = wholemodule; VALIDATE_PRODUCT = YES; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A10000000000000000000070 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000072, A10000000000000000000073,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000071 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000074, A10000000000000000000075,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000080 = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000081, A10000000000000000000082,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A10000000000000000000043 /* MomoiOSKit */ = {isa = XCLocalSwiftPackageReference; relativePath = MomoiOSKit; };
+		A10000000000000000000044 /* Core */ = {isa = XCLocalSwiftPackageReference; relativePath = ../Core; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000041 /* MomoiOSKit */ = {isa = XCSwiftPackageProductDependency; package = A10000000000000000000043 /* MomoiOSKit */; productName = MomoiOSKit; };
+		A10000000000000000000042 /* MomoCore */ = {isa = XCSwiftPackageProductDependency; package = A10000000000000000000044 /* Core */; productName = MomoCore; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A10000000000000000000040 /* Project object */;
+}

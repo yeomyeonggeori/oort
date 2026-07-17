@@ -165,3 +165,16 @@ grep -Fq 'add_cmd "docker compose up (--wait healthy)" "make up"' "$LOCAL_GATE" 
 grep -Fq 'if [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]' "$LOCAL_GATE" \
   || fail "default runtime Compose teardown guard is missing"
 echo "[drift-guard-test] PASS macos-ui bootstrap/load-guard/teardown plan (Docker not invoked)"
+
+# MOMO-462: the iOS-specific path must precede the broad clients rule, and its
+# isolated profile must keep static checks before simulator verification.
+ios_path_line="$(grep -nF 'clients/iOS/*)' "$LOCAL_GATE" | cut -d: -f1)"
+clients_path_line="$(grep -nF 'clients/*)' "$LOCAL_GATE" | cut -d: -f1)"
+[ -n "$ios_path_line" ] && [ "$ios_path_line" -lt "$clients_path_line" ] \
+  || fail "clients/iOS auto classification is missing or shadowed by clients/*"
+ios_profile_block="$(awk '/^  ios\)$/,/^    ;;$/' "$LOCAL_GATE")"
+grep -Fq 'add_static_commands' <<<"$ios_profile_block" \
+  || fail "ios profile omitted static commands"
+grep -Fq 'add_ios_commands' <<<"$ios_profile_block" \
+  || fail "ios profile omitted simulator verification"
+echo "[drift-guard-test] PASS ios auto-classification/profile plan (simulator not invoked)"
