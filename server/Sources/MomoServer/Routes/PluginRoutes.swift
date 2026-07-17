@@ -12,6 +12,15 @@ import PostgresNIO
 struct PluginRoutes: Sendable {
     let db: Database
 
+    // ADR-0113 D6 defines the onboarding example set as GitHub + Drive +
+    // Slack-compatible webhook. Keep this product recommendation distinct
+    // from each manifest's category-oriented `recommendedFor` metadata.
+    private static let onboardingRecommendedPluginIDs: Set<String> = [
+        "com.momo.plugins.github",
+        "com.momo.plugins.drive",
+        "external_webhook",
+    ]
+
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/plugins", use: list)
         group.get("/v1/workspaces/:ws/plugins/:plugin", use: detail)
@@ -66,6 +75,7 @@ struct PluginRoutes: Sendable {
                     version: manifest.version,
                     description: manifest.description,
                     official: decoded.official,
+                    recommended: Self.onboardingRecommendedPluginIDs.contains(manifest.pluginID),
                     egressDomains: manifest.egressDomains,
                     recommendedFor: manifest.recommendedFor,
                     installed: decoded.installed,
@@ -859,6 +869,7 @@ private struct PluginCatalogItemDTO: Codable, Sendable {
     let version: String
     let description: String
     let official: Bool
+    let recommended: Bool
     let egressDomains: [String]
     let recommendedFor: [String]
     let installed: Bool
