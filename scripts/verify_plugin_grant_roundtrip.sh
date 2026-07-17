@@ -12,7 +12,15 @@ need docker
 need curl
 need jq
 need uuidgen
-need python3
+# momo_adapter는 dataclass(slots=True)로 Python >= 3.10 필요 — 게이트 환경의
+# PATH가 Xcode 툴체인 python3(3.9)를 앞세울 수 있어 명시 탐색한다.
+PYTHON_BIN=""
+for cand in python3.13 python3.12 python3.11 python3.10 python3; do
+  if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+    PYTHON_BIN="$cand"; break
+  fi
+done
+[ -n "$PYTHON_BIN" ] || { echo "[plugin-roundtrip] missing python >= 3.10" >&2; exit 1; }
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 PROJECT="${PLUGIN_ROUNDTRIP_PROJECT:-momo449pluginroundtrip}"
@@ -154,7 +162,7 @@ jq -e --arg plugin "$GITHUB" '
   ]
 ' "$TMP_DIR/before.json" >/dev/null
 
-PYTHONPATH="$REPO_ROOT/adapters/hermes" python3 - "$TMP_DIR/before.json" <<'PY'
+PYTHONPATH="$REPO_ROOT/adapters/hermes" "$PYTHON_BIN" - "$TMP_DIR/before.json" <<'PY'
 import json
 import sys
 from momo_adapter import MomoAdapter
