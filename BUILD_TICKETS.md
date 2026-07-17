@@ -2092,6 +2092,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] drift guard 테스트 통과 + evidence 체크리스트에 compose up 단계 표기. 상세: issue #452 본문(패킷 겸용).
 - 랜딩: PR #453 squash `b835e76`. 실런 3박자 검증: 자급 기동(compose-up 단계 표기) + §9 거부 실증(load 12.63) + 종료 후 스택 0.
 
+### ☑ MOMO-452 (`#458`) 수용기준 — dev 세션 키체인 우회 `[swift]` · 의존: 없음 (성재 결정 2026-07-17)
+- [x] dev 번들(app.momo.dev.MomoMacDevApp) 한정 평문 UserDefaults 저장으로 이관 — SecItem* 경로 dev에서 제거, 재빌드 후 키체인 프롬프트 0. prod 경로(MomoKeychainPasswordStore) 보존.
+- [x] password 미저장 시 `dev-password` 자동 채움 + "비밀번호 저장" 카피 정리(ko/en) + storageNote 갱신.
+- [x] 세션 store 단위 테스트 2건 신설(기본 자격/저장·삭제 왕복) — 22/22 PASS, pre-flight 0.
+- 랜딩: PR #459 squash `65a55ba`(2026-07-17). 즉시 완화로 기존 키체인 항목은 오케스트레이터가 선삭제.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

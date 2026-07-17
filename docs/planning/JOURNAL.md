@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-17 (Fable 엔진 트랙) · SE-04C 완주 + 게이트 자급 + dev 키체인 우회
+- 3건 랜딩(전부 codex worker 구현→Fable 리뷰·게이트·머지): MOMO-449 `9b20692`(SE-04C grant→tool policy 왕복, 실런 verifier+registry 회귀+runtime-agent 게이트 PASS) · MOMO-450 `b835e76`(macos-ui 게이트 스택 자급, §9 거부 실증 포함 3박자 검증) · MOMO-452 `65a55ba`(dev 키체인 우회+dev-password 자동 채움, 성재 결정).
+- ADR-0113 파생 체인 SE-04A→04B→04C 닫힘. 다음 파생: Drive 경로 C MCP 포장.
+- 루트는 UX 세션이 codex/457 브랜치+미커밋으로 점유 — §4.1 무접촉, 정본·앱 랜딩은 임시/app-landing worktree 우회. UX 세션에 §4.1-4(worktree 이동+루트 정리) 재전달 필요.
+
 ## 2026-07-17 (Fable 엔진 트랙) · MOMO-448 사후 리뷰 수정 랜딩 + 루트 규약 정본화
 - #448 사후 리뷰(코드+design 독립 2축, 둘 다 Blocker 0) → 합의 결함을 MOMO-448(#449)로 티켓화, codex worker(5.6 sol medium) 구현 → PR #450 리뷰 PASS → 게이트 → squash `df0bc00`.
 - 게이트 실패 2건 해소: ①worker 셸 폰트 렌더 편차로 스냅샷 21장 게이트 환경 재기록(교훈: 캐노니컬 RECORD는 오케스트레이터 몫 — worker 프롬프트 계약에 명시할 것) ②macos-ui 프로파일에 `make up` 부재(선재 공백, 소형 티켓 후속 필요).
