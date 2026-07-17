@@ -2173,6 +2173,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] LiveKit HS256 JWT(video grant, ttl 10분), env 미설정 시 503 fail-closed. verify_huddle_lifecycle(격리 compose, LiveKit 불요) + runtime-db 편입 + openapi 명세.
 - [ ] 상세: issue #486 본문(패킷 겸용). V-2(infra)→V-3(macOS, UX 조율)→V-3b(iOS) 순차.
 
+### ☐ MOMO-469 (`#487`) 수용기준 — 푸시 탭 deep link 관통 `[ios]` · 의존: MOMO-467 (실기기 E2E 발견)
+- [ ] 라우터 관측 가능화 + signedIn에서 pending 소비→채널 타임라인 진입(1회성 클리어), cold/warm/미로그인 보류 3경로.
+- [ ] 단위 테스트 + 시뮬레이터 게이트, 실기기 재확인 [manual]. 상세: issue #487 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
