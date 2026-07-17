@@ -12,7 +12,6 @@ need docker
 need curl
 need jq
 need uuidgen
-need rg
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 PROJECT="${DRIVE_MCP_PROJECT:-momo457drivemcp}"
@@ -193,7 +192,7 @@ SQL
 )"
 [ "$AUDIT_COUNTS" = "3:1" ] || { echo "[drive-mcp] unexpected audit counts: $AUDIT_COUNTS" >&2; exit 1; }
 
-if rg -i 'private_key|access_token|refresh_token|client_secret' "$TMP_DIR"/*.json >/dev/null 2>&1; then
+if grep -qiE 'private_key|access_token|refresh_token|client_secret' "$TMP_DIR"/*.json 2>/dev/null; then
   echo "[drive-mcp] credential-shaped response material detected" >&2
   exit 1
 fi
