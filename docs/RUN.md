@@ -165,6 +165,8 @@ cp infra/.env.example .env
 | `CENT_API_URL` | 서버, relay, worker | publish 대상 Centrifugo API 엔드포인트(컨테이너 내부 `http://centrifugo:8000/api`). |
 | `CENT_PROXY_SECRET` | 서버, Centrifugo | **MOMO-300** subscribe proxy 콜백 공유 시크릿. Centrifugo가 `X-Centrifugo-Proxy-Secret` static header로 붙이고(`infra/centrifugo*.json` + compose env override) API가 검증 — 없거나 틀리면 401. staging/prod/internal-host에서는 placeholder면 부팅 fail-fast(`prod_env_preflight.sh` 연계). |
 | `JWT_HMAC` | 서버 | App access(15m)/refresh(30d) 토큰 HS256 서명 시크릿(§7.1). |
+| `MOMO_LIVEKIT_API_KEY` / `MOMO_LIVEKIT_API_SECRET` | 서버 | ADR-0122 허들 room grant의 `iss`와 HS256 서명 키. App JWT/Centrifugo 키와 분리하며 secret은 응답·audit·로그에 넣지 않는다. |
+| `MOMO_LIVEKIT_URL` | 서버 | 클라이언트에 반환할 LiveKit `http(s)`/`ws(s)` endpoint. 세 LiveKit 값 중 하나라도 없거나 URL이 잘못되면 허들 API는 503 `허들 미구성`으로 fail-closed한다. LiveKit 컨테이너 기동은 V-2 범위다. |
 | `AGENT_PROVIDER_MODE` | 서버, worker | `local-mock` / `internal-host-mock` / `external-hermes`. staging/prod/internal-host는 `external-hermes`만 허용. |
 | `AGENT_MODEL` | 서버, worker | 김인턴 provider model label(기본 `hermes-agent`). |
 | `AGENT_HANDLE` / `AGENT_DISPLAY_NAME` | 서버, macOS 표시 | status surface 표시용 agent identity(기본 `kim-intern` / `김인턴`). |

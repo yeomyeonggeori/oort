@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-468 huddle 수명주기 + LiveKit JWT (2026-07-18)
+
+- migration 016에 채널당 단일 활성 huddle과 재입장 이력 participant를 추가하고 FORCE RLS를 적용했다. 시작/참가/퇴장/active REST는 tenant tx 안에서 lifecycle·audit·outbox를 함께 커밋하며 마지막 참가자 퇴장이 huddle을 종료한다.
+- LiveKit HS256 video grant는 별도 API secret으로 10분만 발급하고 세 env가 완비되지 않으면 전 허들 API가 503 `허들 미구성`으로 fail-closed한다. 서버 build와 105 tests, shell/YAML 정적 검증은 PASS; Docker `verify_huddle_lifecycle.sh`는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-466 iOS TestFlight internal 배포 준비 (2026-07-17)
 
 - Xcode 26 단일 1024px AppIcon을 생성하는 CoreGraphics 스크립트와 절제된 단색 `m` 모노그램 PNG를 추가하고, 앱 asset catalog·Team `YWQQFQM38J`·NSE bundle `app.momo.ios.NotificationService`·Debug/Release APNs 환경을 배포 계약에 맞췄다.
