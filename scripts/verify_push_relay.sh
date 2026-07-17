@@ -102,10 +102,14 @@ test "$STATUS" = 429
 test -s "$CAPTURE"
 head -n 1 "$CAPTURE" >"$TMP_ROOT/captured.json"
 test "$(jq -r 'keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "aps,momo"
+test "$(jq -r '.aps | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "alert,badge,content-available,mutable-content"
+test "$(jq -r '.aps.alert | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "body,title"
+test "$(jq -r '.aps.alert.title' "$TMP_ROOT/captured.json")" = "momo"
+test "$(jq -r '.aps.alert.body' "$TMP_ROOT/captured.json")" = "새 알림"
 test "$(jq -r '.momo | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "channel_id,collapse_id,message_id,reason,schema,server_id,workspace_id"
-if grep -Eiq 'body|display_name|handle|channel_name|apns_token' "$TMP_ROOT/captured.json"; then
+if grep -Eiq 'message_body|display_name|handle|channel_name|apns_token' "$TMP_ROOT/captured.json"; then
   echo "id-only APNs payload widened with conversation/token content" >&2
   exit 1
 fi
 
-echo "PASS: signed dispatch HTTP 200 + APNs 410 passthrough + stub capture, bad signature 403, unregistered 403, rate limit 429, id-only APNs payload"
+echo "PASS: signed dispatch HTTP 200 + APNs 410 passthrough + static placeholder alert, bad signature 403, unregistered 403, rate limit 429, id-only momo envelope"
