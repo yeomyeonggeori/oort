@@ -2112,10 +2112,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 쓰기/업로드/폴러/경로 A 전부 out of scope(GWS-ARCHIVE 트랙). 상세: issue #463 본문(패킷 겸용).
 - 랜딩: PR #465 squash `367442c`(2026-07-17). 오케스트레이터 후속 2커밋: verifier rg→grep(호스트 ripgrep 부재) + registry verifier 시드 4→5. 실런: verify_drive_mcp PASS + runtime-db 게이트 PASS. 관찰: 백엔드 호출이 tx 내 실행(SA 타임아웃 15s 유계) — 후속 개선 후보.
 
-### ☐ MOMO-458 (`#466`) 수용기준 — 오피셜 라인업 마감(Notion/Linear 왕복 + 추천 세트) `[runtime-db]` · 의존: MOMO-457
-- [ ] grant 왕복 verifier에 Notion/Linear 추가 — 다중 플러그인 정확 집합 단정 + 개별 revoke 탈락, 실 네트워크 무호출.
-- [ ] 카탈로그 항목 `recommended: Bool`(서버 상수 {github, drive, external_webhook} — ADR-0113 D6 예시 세트) + registry verifier 단정.
-- [ ] python 다중 플러그인 계약 1건. 상세: issue #466 본문(패킷 겸용).
+### ☑ MOMO-458 (`#466`) 수용기준 — 오피셜 라인업 마감(Notion/Linear 왕복 + 추천 세트) `[runtime-db]` · 의존: MOMO-457
+- [x] grant 왕복 verifier에 Notion/Linear 추가 — 다중 플러그인 정확 집합 단정 + 개별 revoke 탈락, 실 네트워크 무호출.
+- [x] 카탈로그 항목 `recommended: Bool`(서버 상수 {github, drive, external_webhook} — ADR-0113 D6 예시 세트) + registry verifier 단정.
+- [x] python 다중 플러그인 계약 1건. 상세: issue #466 본문(패킷 겸용).
+- 랜딩: PR #467 squash `f9085dd`(2026-07-17). 오케스트레이터 후속 2커밋: roundtrip verifier runtime-db 게이트 편입(449 이후 공백) + python>=3.10 명시 탐색(게이트 PATH의 Xcode python3 3.9 회피). 실런 runtime-db 게이트 PASS(플러그인 4 verifier 전체).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
