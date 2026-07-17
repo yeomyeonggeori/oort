@@ -175,7 +175,11 @@ public final class IOSPushDeepLinkRouter {
         pending = IOSPushDeepLink(url: url)
     }
 
-    public func consume(_ link: IOSPushDeepLink) {
-        if pending == link { pending = nil }
+    /// Returns and clears a pending link only when its workspace is signed in.
+    /// Passing `nil` deliberately keeps the link for post-login routing.
+    public func consumePending(for signedInWorkspaceID: WorkspaceID?) -> IOSPushDeepLink? {
+        guard let pending, pending.workspaceID == signedInWorkspaceID else { return nil }
+        self.pending = nil
+        return pending
     }
 }

@@ -16,6 +16,34 @@ struct PushTests {
         #expect(IOSPushDeepLink(envelope: envelope)?.channelID == fixtureChannel().id)
     }
 
+    @MainActor
+    @Test("pending deep link is consumed exactly once for the signed-in workspace")
+    func pendingDeepLinkConsumption() throws {
+        let router = IOSPushDeepLinkRouter()
+        let link = try #require(IOSPushDeepLink(url: Self.deepLinkURL))
+
+        router.route(link: link)
+
+        #expect(router.pending == link)
+        #expect(router.consumePending(for: link.workspaceID) == link)
+        #expect(router.pending == nil)
+        #expect(router.consumePending(for: link.workspaceID) == nil)
+    }
+
+    @MainActor
+    @Test("pending deep link waits for login before consumption")
+    func pendingDeepLinkWaitsForLogin() throws {
+        let router = IOSPushDeepLinkRouter()
+        let link = try #require(IOSPushDeepLink(url: Self.deepLinkURL))
+
+        router.route(link: link)
+
+        #expect(router.consumePending(for: nil) == nil)
+        #expect(router.pending == link)
+        #expect(router.consumePending(for: link.workspaceID) == link)
+        #expect(router.pending == nil)
+    }
+
     @Test("NSE resolver replaces placeholder after fetch")
     func fetchReplacement() async throws {
         let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
@@ -88,6 +116,9 @@ struct PushTests {
     }
 
     private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":1,"mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v1","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request"}}"#
+    private static let deepLinkURL = URL(
+        string: "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020"
+    )!
 
     private func pushSession() -> PushFetchSession {
         PushFetchSession(

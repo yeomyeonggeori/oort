@@ -138,17 +138,31 @@ public struct MomoiOSRootView: View {
         }
         .task { await model.restore() }
         .onOpenURL { deepLinkRouter.route(url: $0) }
-        .onChange(of: deepLinkRouter.pending) { _, link in route(link) }
-        .onChange(of: model.phase) { _, _ in route(deepLinkRouter.pending) }
+        .task(id: deepLinkRouteTrigger) {
+            guard let link = deepLinkRouter.consumePending(
+                for: deepLinkRouteTrigger.signedInWorkspaceID
+            ) else { return }
+            navigationPath = [link]
+        }
     }
 
-    private func route(_ link: IOSPushDeepLink?) {
-        guard let link,
-              case .signedIn(let session, _) = model.phase,
-              session.workspaceID == link.workspaceID else { return }
-        navigationPath = [link]
-        deepLinkRouter.consume(link)
+    private var deepLinkRouteTrigger: DeepLinkRouteTrigger {
+        let signedInWorkspaceID: WorkspaceID?
+        if case .signedIn(let session, _) = model.phase {
+            signedInWorkspaceID = session.workspaceID
+        } else {
+            signedInWorkspaceID = nil
+        }
+        return DeepLinkRouteTrigger(
+            pending: deepLinkRouter.pending,
+            signedInWorkspaceID: signedInWorkspaceID
+        )
     }
+}
+
+private struct DeepLinkRouteTrigger: Equatable {
+    let pending: IOSPushDeepLink?
+    let signedInWorkspaceID: WorkspaceID?
 }
 
 @MainActor
