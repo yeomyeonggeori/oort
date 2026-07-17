@@ -7,6 +7,7 @@
 
 - Xcode 26 단일 1024px AppIcon을 생성하는 CoreGraphics 스크립트와 절제된 단색 `m` 모노그램 PNG를 추가하고, 앱 asset catalog·Team `YWQQFQM38J`·NSE bundle `app.momo.ios.NotificationService`·Debug/Release APNs 환경을 배포 계약에 맞췄다.
 - `docs/IOS_TESTFLIGHT_RUNBOOK.md`에 App ID/App Group, 자동 서명, Organizer 업로드, internal tester, LAN/AWS 연결, 실기기 APNs/NSE/deep-link/device-row E2E를 `[manual]`로 정리했다. 실제 서명·archive·업로드·실기기 E2E는 성재 수행 전이며 manual-unverified다.
+- `docs` local gate와 아이콘 1024x1024 RGB·alpha 없음·결정적 재생성 검사는 PASS했다. Release 시뮬레이터 sanity는 worker sandbox가 CoreSimulatorService와 `~/Library/Caches` 쓰기를 차단해 컴파일 진입 전 종료됐으므로 runtime-unverified이며, 런북 §4 명령을 sandbox 밖에서 재실행해야 한다.
 
 ## MOMO-457 hosted read-only Drive MCP (2026-07-17)
 
