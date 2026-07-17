@@ -32,9 +32,28 @@ enum MomoWindowChromeStyle {
     /// divider or an elevated toolbar material.
     @MainActor
     static func applyFlatUnifiedChrome(to window: NSWindow) {
-        window.titlebarAppearsTransparent = true
-        window.titlebarSeparatorStyle = .none
-        window.toolbar?.showsBaselineSeparator = false
+        // SwiftUI's scene toolbar style alone leaves the content view below a
+        // separate native titlebar band. Extending the content view lets each
+        // shell column paint behind the traffic lights while AppKit continues
+        // to own their safe interaction region.
+        if !window.styleMask.contains(.fullSizeContentView) {
+            window.styleMask.insert(.fullSizeContentView)
+        }
+        if window.titleVisibility != .hidden {
+            window.titleVisibility = .hidden
+        }
+        if !window.titlebarAppearsTransparent {
+            window.titlebarAppearsTransparent = true
+        }
+        if window.titlebarSeparatorStyle != .none {
+            window.titlebarSeparatorStyle = .none
+        }
+        if window.toolbarStyle != appKitToolbarStyle {
+            window.toolbarStyle = appKitToolbarStyle
+        }
+        if window.toolbar?.showsBaselineSeparator == true {
+            window.toolbar?.showsBaselineSeparator = false
+        }
     }
 }
 
