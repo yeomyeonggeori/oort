@@ -2072,6 +2072,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 신규 verifier: 위조 서명/재전송(replay)/stale timestamp/cross-workspace/회전 경합(신구 키 창)/revoke 후 거부/시크릿 redaction + **Slack 페이로드 픽스처 왕복**(text·attachments 번역 결과 메시지 확인, blocks 400) + receipt 멱등(동일 delivery 재수신 1회 기록). `runtime-db` 게이트 PASS(오케스트레이터 — **§9 부하 체크 후 실행, 종료 시 down**) + `LOCAL_PR_GATE.md` 등록.
 - [x] 종결: PR #443(+리뷰 H1 반영·verifier 단정 수정) merge `5ff5161`. webhook verifier 전체 PASS(native HMAC 위조/replay/cross-workspace·키 회전·secret custody+redaction·**Slack 변환 왕복 201+미지원 무시+author 사칭 차단**·1-tx). 리뷰: 암호학·secret·단일 쓰기 경로 "흠 없음". M1/M2(rate limit·master key 분리)는 DEVIATION_LOG pending.
 
+### ☐ MOMO-448 (`#449`) 수용기준 — MOMO-447 사후 리뷰 수정 `[macos-ui]` · 의존: 없음 (사후 품질)
+- [ ] **P0** 검색→메시지 점프 silent 실패 봉합(load-around-target 또는 실패 피드백 + `isPinnedToTimelineBottom=false` 선세팅) — 코드리뷰 M2=디자인 M3, dogfood 체감 버그.
+- [ ] **P0** 검색 포커스 하이라이트를 author-type accent 행 전체 tint에서 중립 system tint 단일 색으로 — momo-design-taste §4 위반(정체성 tint 금지·1 accent).
+- [ ] **P1** hover→scrollTo 피드백 루프(키보드 이동에서만 scrollTo) 3서피스 일괄 + 죽은 토큰 소비/selection 배경 단일 토큰화 + dead copy(approveAllReversible) 제거 + DM 피커 닫기 카피.
+- [ ] **P2** stale light 캐노니컬 재기록 + ApprovalInbox close-crop 스냅샷 + 신규 3서피스(검색/DM/launcher) 스냅샷 light+dark.
+- [ ] `macos-ui` 게이트 PASS(오케스트레이터 §9 부하 체크 후) + pre-flight 유지. 상세: issue #449 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
