@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-17 (Fable 엔진 트랙) · MOMO-448 사후 리뷰 수정 랜딩 + 루트 규약 정본화
+- #448 사후 리뷰(코드+design 독립 2축, 둘 다 Blocker 0) → 합의 결함을 MOMO-448(#449)로 티켓화, codex worker(5.6 sol medium) 구현 → PR #450 리뷰 PASS → 게이트 → squash `df0bc00`.
+- 게이트 실패 2건 해소: ①worker 셸 폰트 렌더 편차로 스냅샷 21장 게이트 환경 재기록(교훈: 캐노니컬 RECORD는 오케스트레이터 몫 — worker 프롬프트 계약에 명시할 것) ②macos-ui 프로파일에 `make up` 부재(선재 공백, 소형 티켓 후속 필요).
+- GPT의 루트 stash 검증: stash@{0,1} 전 파일이 과거 커밋 blob과 일치 — 유일본 0, mixed-reset 착시 확정. §4.1-5 정본화(루트 항상 clean, `pull --ff-only`만, dirty 위 mixed reset 금지, `8202aef`).
+- DEVIATION_LOG 스냅샷 drift pending → accepted 종결(#448+#450). 다음: ADR-0113 후속(GitHub grant 왕복→Drive 경로 C), macos-ui 프로파일 보강 티켓.
+
 ## 2026-07-16 (momo-main/GPT 5.6) · PLN-20260716-01 Plugin Platform productization
 - Codex/Hermes/MCP와 Google Workspace·GitHub·Notion 공식 표면을 대조해 plugin package와 runtime adapter를 분리했다.
 - Plugin Center/추천 onboarding과 catalog/install/connection/channel/grant/health 독립 projection, Capability Cache 기반 동적 discovery를 제품 제안으로 정리했다.
