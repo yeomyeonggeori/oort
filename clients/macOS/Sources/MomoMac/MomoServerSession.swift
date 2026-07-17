@@ -556,18 +556,23 @@ public actor MomoServerSessionClient {
 public final class MomoServerSessionStore: @unchecked Sendable {
     public static let shared = MomoServerSessionStore()
 
+    private static let developmentBundleIdentifier = "app.momo.dev.MomoMacDevApp"
+
     private let defaults: UserDefaults
     private let keychain: MomoKeychainPasswordStore
     private let prefix: String
+    private let usesDevelopmentPasswordStorage: Bool
 
     public init(
         defaults: UserDefaults = .standard,
         keychain: MomoKeychainPasswordStore = .init(),
-        prefix: String = "momo.mac.session."
+        prefix: String = "momo.mac.session.",
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
     ) {
         self.defaults = defaults
         self.keychain = keychain
         self.prefix = prefix
+        self.usesDevelopmentPasswordStorage = bundleIdentifier == Self.developmentBundleIdentifier
     }
 
     public func load() -> MomoServerSessionForm {
@@ -575,7 +580,13 @@ public final class MomoServerSessionStore: @unchecked Sendable {
         let email = defaults.string(forKey: key("email")) ?? "demo@momo.local"
         let inviteCode = defaults.string(forKey: key("inviteCode")) ?? ""
         let savePassword = defaults.bool(forKey: key("savePassword"))
-        let password = savePassword ? (keychain.password(account: email) ?? "") : ""
+        let password: String
+        if usesDevelopmentPasswordStorage {
+            let storedPassword = savePassword ? defaults.string(forKey: key("password")) : nil
+            password = storedPassword ?? "dev-password"
+        } else {
+            password = savePassword ? (keychain.password(account: email) ?? "") : ""
+        }
         return MomoServerSessionForm(
             baseURLString: baseURL,
             email: email,
@@ -591,7 +602,14 @@ public final class MomoServerSessionStore: @unchecked Sendable {
         defaults.set(email, forKey: key("email"))
         defaults.set(form.trimmedInviteCode, forKey: key("inviteCode"))
         defaults.set(form.savePassword, forKey: key("savePassword"))
-        if form.savePassword {
+        if usesDevelopmentPasswordStorage {
+            // Dev-only decision (성재, 2026-07-17): avoid ad-hoc app rebuilds invalidating Keychain ACLs.
+            if form.savePassword {
+                defaults.set(form.password, forKey: key("password"))
+            } else {
+                defaults.removeObject(forKey: key("password"))
+            }
+        } else if form.savePassword {
             keychain.setPassword(form.password, account: email)
         } else {
             keychain.deletePassword(account: email)
@@ -599,9 +617,13 @@ public final class MomoServerSessionStore: @unchecked Sendable {
     }
 
     public func clearSessionSensitiveState(email: String? = nil) {
-        let account = email ?? defaults.string(forKey: key("email"))
-        if let account, !account.isEmpty {
-            keychain.deletePassword(account: account)
+        if usesDevelopmentPasswordStorage {
+            defaults.removeObject(forKey: key("password"))
+        } else {
+            let account = email ?? defaults.string(forKey: key("email"))
+            if let account, !account.isEmpty {
+                keychain.deletePassword(account: account)
+            }
         }
         defaults.set(false, forKey: key("savePassword"))
     }
@@ -2074,8 +2096,8 @@ private struct MomoSessionCopy {
 
     var savePassword: String {
         switch language {
-        case .korean: return "Keychain에 비밀번호 저장"
-        case .english: return "Save password in Keychain"
+        case .korean: return "비밀번호 저장"
+        case .english: return "Save password"
         }
     }
 
@@ -2165,8 +2187,8 @@ private struct MomoSessionCopy {
 
     var storageNote: String {
         switch language {
-        case .korean: return "로컬 알파 모드는 서버 URL, 이메일, 초대 코드, 선택적 Keychain 비밀번호만 저장합니다."
-        case .english: return "Local alpha mode stores server URL, email, invite code, and optional Keychain password."
+        case .korean: return "로컬 알파 모드는 서버 URL, 이메일, 초대 코드와 선택한 경우 비밀번호를 저장합니다."
+        case .english: return "Local alpha mode stores the server URL, email, invite code, and password when selected."
         }
     }
 

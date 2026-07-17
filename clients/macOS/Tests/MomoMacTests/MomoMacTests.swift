@@ -5451,6 +5451,54 @@ final class MomoMacTests: XCTestCase {
         XCTAssertFalse(loaded.savePassword)
     }
 
+    func testDevelopmentSessionStoreDefaultsDemoCredentialsWithoutStoredPassword() {
+        let suite = "momo-dev-session-defaults-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MomoServerSessionStore(
+            defaults: defaults,
+            keychain: MomoKeychainPasswordStore(service: "momo.test.unused.\(suite)"),
+            bundleIdentifier: "app.momo.dev.MomoMacDevApp"
+        )
+
+        let loaded = store.load()
+
+        XCTAssertEqual(loaded.email, "demo@momo.local")
+        XCTAssertEqual(loaded.password, "dev-password")
+        XCTAssertFalse(loaded.savePassword)
+    }
+
+    func testDevelopmentSessionStorePersistsAndClearsPasswordInDefaults() {
+        let suite = "momo-dev-session-roundtrip-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let prefix = "momo.test.session."
+        let store = MomoServerSessionStore(
+            defaults: defaults,
+            keychain: MomoKeychainPasswordStore(service: "momo.test.unused.\(suite)"),
+            prefix: prefix,
+            bundleIdentifier: "app.momo.dev.MomoMacDevApp"
+        )
+
+        store.save(MomoServerSessionForm(
+            baseURLString: "https://momo.test",
+            email: "demo@momo.local",
+            password: "saved-dev-password",
+            inviteCode: "",
+            savePassword: true
+        ))
+
+        XCTAssertEqual(defaults.string(forKey: prefix + "password"), "saved-dev-password")
+        XCTAssertEqual(store.load().password, "saved-dev-password")
+        XCTAssertTrue(store.load().savePassword)
+
+        store.clearSessionSensitiveState()
+
+        XCTAssertNil(defaults.string(forKey: prefix + "password"))
+        XCTAssertEqual(store.load().password, "dev-password")
+        XCTAssertFalse(store.load().savePassword)
+    }
+
     func testRESTBackendClearSessionSensitiveStateDropsTokenAndWorkspace() async throws {
         let backend = MomoServerRESTChatBackend(
             config: MomoServerRESTChatBackendConfig(
