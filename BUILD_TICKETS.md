@@ -2129,6 +2129,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] Makefile SWIFT_PKGS + 게이트 편입 + 단위 테스트 + `verify_linkshort.sh`(호스트 프로세스, docker 불필요).
 - [ ] 도메인 확정 후 multi-tenant 매핑은 후속. 상세: issue #470 본문(패킷 겸용).
 
+### ☐ MOMO-461 (`#471`) 수용기준 — ADR-0120 P-3 PushRelay v0 `[swift]` · 의존: P-1/P-2 (기랜딩)
+- [ ] `relay/PushRelay`: /v1/push(momo.push.dispatch.v1) — env 레지스트리(server_id→Ed25519 공개키) 서명 검증 403/rate limit 429, APNSSender 프로토콜(실 ES256 HTTP/2 + Stub), APNs status passthrough(410/400 invalidate 정합), id-only 유지.
+- [ ] NotifierWorker 서명 첨부(env 옵트인, mock 호환 유지) + keygen + verify_push_relay.sh(Stub·호스트 프로세스) + PUSH_RELAY_RUNBOOK.
+- [ ] 실 .p8 smoke는 오케스트레이터(자격증명 실검증 2026-07-17 완료: 샌드박스 400 BadDeviceToken 판정). 상세: issue #471 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
