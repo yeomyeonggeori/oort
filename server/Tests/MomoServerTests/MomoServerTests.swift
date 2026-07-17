@@ -27,6 +27,8 @@ final class MomoServerTests: XCTestCase {
                 revoked: false
             )
             XCTAssertEqual(manifest.pluginID, pluginID)
+            XCTAssertEqual(manifest.mcpTransport, "streamable_http")
+            XCTAssertEqual(URL(string: manifest.mcpURL)?.host, domain)
             XCTAssertEqual(manifest.egressDomains, [domain])
             XCTAssertFalse(manifest.enabledByDefault)
             XCTAssertEqual(manifest.allowedRoles, ["owner", "admin"])
@@ -507,6 +509,13 @@ final class MomoServerTests: XCTestCase {
             AuthMiddleware.requiredAgentScope(
                 method: "GET",
                 path: "/v1/workspaces/ws/read-state"
+            ),
+            "messages:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "GET",
+                path: "/v1/workspaces/ws/plugins"
             ),
             "messages:read"
         )

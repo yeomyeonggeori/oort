@@ -42,7 +42,9 @@ flowchart LR
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
 - 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 판정(DM/멘션/승인) 후 id-only 페이로드를 push relay(mock — 실발송은 P-3)로 dispatch한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
 - 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = momo 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
-- 플러그인 경계(ADR-0113): momo 서버는 검증된 3층 manifest, workspace install 정책, `(workspace, member, plugin, scope)` grant와 Capability Cache projection, audit만 보유한다. provider OAuth/raw credential은 사용자 소유 BYOA 호스트에만 있고 서버 테이블·로그·응답에 들어오지 않는다. install revoke와 grant revoke는 projection을 같은 transaction에서 제거해 다음 Context Packet이 fail-closed하도록 한다(registry 항목 revoke는 신규 install/grant/검증을 409로 차단하며, 기존 projection 무효화 경로는 후속 SE에서 결정한다).
+- 플러그인 경계(ADR-0113): momo 서버는 검증된 3층 manifest, workspace install 정책, `(workspace, member, plugin, scope)` grant와 Capability Cache projection, audit만 보유한다. provider OAuth/raw credential은 사용자 소유 BYOA 호스트에만 있고 서버 테이블·로그·응답에 들어오지 않는다. install revoke와 grant revoke는 projection을 같은 transaction에서 제거하고, Hermes adapter는 Context Packet마다 위임 사용자와 agent가 함께 속한 채널을 서버에 재검증한 뒤 유효 projection의 MCP 접속 기술자만 tool policy로 조립한다. 조회·manifest가 하나라도 잘못되면 해당 범위를 기본 거부하며 장기 캐시하지 않는다.
+
+  이 호스트 커스터디 모델은 에이전트 호스트가 사용자가 직접 소유·통제하는 머신이라는 전제다. OAuth/PAT 등 MCP 자격증명은 그 호스트의 MCP 클라이언트에만 보관해야 하며 momo 서버나 Context Packet으로 전달하지 않는다. 다중 사용자 workspace에서도 한 에이전트 호스트를 사용자 사이에 공유하지 않고, 각 사용자의 호스트 세션과 토큰 저장소를 분리한다.
 
 ### 클라이언트 roster와 realtime discovery
 

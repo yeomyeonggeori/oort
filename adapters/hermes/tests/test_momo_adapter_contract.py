@@ -77,6 +77,11 @@ class CaptureAdapter(momo_adapter.MomoAdapter):
             return {"runId": self.run_id}
         return {"id": "message-fixture", "seq": 43}
 
+    async def _get(self, path):
+        if path.startswith(f"/v1/workspaces/{self.cfg.workspace_id}/plugins?"):
+            return {"plugins": [], "toolPolicy": {"plugins": []}}
+        return await super()._get(path)
+
     async def handle_message(self, event):
         if (
             isinstance(event, dict)
