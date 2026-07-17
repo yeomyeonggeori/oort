@@ -175,6 +175,7 @@ private struct IOSTimelineView: View {
     let members: [MemberID: Member]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var model: IOSTimelineModel
+    @State private var visibleMessageIDs: Set<MessageID> = []
 
     init(
         item: IOSChannelListItem,
@@ -211,12 +212,17 @@ private struct IOSTimelineView: View {
                             .id(message.id)
                             .listRowSeparator(.hidden)
                             .accessibilityIdentifier("message.\(message.id.description)")
+                            .onAppear { visibleMessageIDs.insert(message.id) }
+                            .onDisappear { visibleMessageIDs.remove(message.id) }
                     }
                 }
             }
             .defaultScrollAnchor(.bottom)
-            .onChange(of: model.messages.last?.id) { _, latestMessageID in
+            .onChange(of: model.messages.last?.id) { previousMessageID, latestMessageID in
                 guard let latestMessageID else { return }
+                guard previousMessageID == nil
+                    || previousMessageID.map(visibleMessageIDs.contains) == true
+                else { return }
                 if reduceMotion {
                     proxy.scrollTo(latestMessageID, anchor: .bottom)
                 } else {
