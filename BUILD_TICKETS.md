@@ -2118,10 +2118,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] python 다중 플러그인 계약 1건. 상세: issue #466 본문(패킷 겸용).
 - 랜딩: PR #467 squash `f9085dd`(2026-07-17). 오케스트레이터 후속 2커밋: roundtrip verifier runtime-db 게이트 편입(449 이후 공백) + python>=3.10 명시 탐색(게이트 PATH의 Xcode python3 3.9 회피). 실런 runtime-db 게이트 PASS(플러그인 4 verifier 전체).
 
-### ☐ MOMO-459 (`#468`) 수용기준 — openapi 플러그인 표면 문서화 `[runtime-db]` · 의존: MOMO-458
-- [ ] plugins CRUD+toolPolicy/webhook 발급·수신/Drive MCP JSON-RPC paths를 실제 DTO 대조로 명세(추측 금지, 코드가 정본).
-- [ ] verify_openapi_contract 라이브 대조 + shape check 소화 + ruby YAML 파싱 PASS.
-- [ ] 기타 미기재 표면은 추가 않고 목록만(스코프 고정). 상세: issue #468 본문(패킷 겸용).
+### ☑ MOMO-459 (`#468`) 수용기준 — openapi 플러그인 표면 문서화 `[runtime-db]` · 의존: MOMO-458
+- [x] plugins CRUD+toolPolicy/webhook 발급·수신/Drive MCP JSON-RPC paths를 실제 DTO 대조로 명세(추측 금지, 코드가 정본).
+- [x] verify_openapi_contract 라이브 대조 + shape check 소화 + ruby YAML 파싱 PASS.
+- [x] 기타 미기재 표면은 추가 않고 목록만(스코프 고정). 상세: issue #468 본문(패킷 겸용).
+- 랜딩: PR #469 squash `c109043`(2026-07-17). 신규 13 operation 라이브 대조 41/41 PASS. 오케스트레이터 후속 1커밋: expires_at_ms 오배치(DriveMCP 응답→ApprovalProjection) 교정 — 선재 approvals 스펙 drift 동시 마감. 잔여 미기재 표면 목록은 PR #469 본문(후속 문서 티켓 후보).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
