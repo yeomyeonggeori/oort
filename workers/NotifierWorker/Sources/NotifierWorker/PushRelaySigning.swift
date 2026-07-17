@@ -1,4 +1,5 @@
-import Crypto
+// Linux swift-crypto에선 Curve25519 PrivateKey가 non-Sendable — 컨테이너 빌드 정합용.
+@preconcurrency import Crypto
 import Foundation
 
 /// Ed25519 signing material for the Dawn PushRelay request boundary. Key bytes
