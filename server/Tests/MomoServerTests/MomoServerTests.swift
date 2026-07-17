@@ -9,13 +9,14 @@ final class MomoServerTests: XCTestCase {
 
     func testOfficialPluginManifestsValidateAndMatchVerifiedEndpoints() throws {
         let fixtures = try pluginFixtureDirectory()
-        let expected: [(String, String, String)] = [
-            ("github", "com.momo.plugins.github", "api.githubcopilot.com"),
-            ("notion", "com.momo.plugins.notion", "mcp.notion.com"),
-            ("linear", "com.momo.plugins.linear", "mcp.linear.app"),
+        let expected: [(String, String, String?, [String], Bool)] = [
+            ("github", "com.momo.plugins.github", "api.githubcopilot.com", ["api.githubcopilot.com"], false),
+            ("notion", "com.momo.plugins.notion", "mcp.notion.com", ["mcp.notion.com"], false),
+            ("linear", "com.momo.plugins.linear", "mcp.linear.app", ["mcp.linear.app"], false),
+            ("drive", "com.momo.plugins.drive", nil, ["www.googleapis.com", "oauth2.googleapis.com"], true),
         ]
         let digest = "sha256:" + String(repeating: "a", count: 64)
-        for (fixture, pluginID, domain) in expected {
+        for (fixture, pluginID, domain, egressDomains, hosted) in expected {
             let json = try String(
                 contentsOf: fixtures.appendingPathComponent("\(fixture).json"),
                 encoding: .utf8
@@ -29,7 +30,8 @@ final class MomoServerTests: XCTestCase {
             XCTAssertEqual(manifest.pluginID, pluginID)
             XCTAssertEqual(manifest.mcpTransport, "streamable_http")
             XCTAssertEqual(URL(string: manifest.mcpURL)?.host, domain)
-            XCTAssertEqual(manifest.egressDomains, [domain])
+            XCTAssertEqual(manifest.egressDomains, egressDomains)
+            XCTAssertEqual(manifest.hosted, hosted)
             XCTAssertFalse(manifest.enabledByDefault)
             XCTAssertEqual(manifest.allowedRoles, ["owner", "admin"])
         }
@@ -75,6 +77,103 @@ final class MomoServerTests: XCTestCase {
             computedDigest: digest,
             revoked: false
         ))
+
+        let relativeRemote = fixture.replacingOccurrences(
+            of: "https://api.githubcopilot.com/mcp/",
+            with: "/v1/mcp/drive"
+        )
+        XCTAssertThrowsError(try PluginManifestValidator.validate(
+            manifestJSON: relativeRemote,
+            expectedDigest: digest,
+            computedDigest: digest,
+            revoked: false
+        ))
+    }
+
+    func testDriveBackendStubAndStrictEnvironmentContract() async throws {
+        XCTAssertNoThrow(try DriveBackendFactory.validateForBoot(
+            environmentName: "local",
+            environment: ["MOMO_DRIVE_BACKEND": "stub"]
+        ))
+        XCTAssertThrowsError(try DriveBackendFactory.validateForBoot(
+            environmentName: "production",
+            environment: ["MOMO_DRIVE_BACKEND": "stub"]
+        ))
+
+        let stub = StubDriveBackend()
+        let search = try await stub.searchFiles(query: "handbook", pageSize: 10)
+        XCTAssertEqual(search.objectValue?["files"]?.arrayValue?.count, 1)
+        let metadata = try await stub.fileMetadata(fileID: "stub-text-1")
+        XCTAssertEqual(metadata.objectValue?["name"]?.stringValue, "readme.txt")
+        let exported = try await stub.exportText(fileID: "stub-doc-1", maxBytes: 1000)
+        XCTAssertEqual(exported.objectValue?["text"]?.stringValue, "momo Drive stub document")
+        do {
+            _ = try await stub.exportText(fileID: "stub-doc-1", maxBytes: 2)
+            XCTFail("stub export must enforce maxBytes")
+        } catch {
+            XCTAssertEqual(error as? DriveBackendError, .contentTooLarge)
+        }
+        XCTAssertNoThrow(try GoogleDriveSABackend.requireFileID("valid_file-ID_1"))
+        XCTAssertThrowsError(try GoogleDriveSABackend.requireFileID("../outside"))
+
+        let toolNames = DriveMCPToolRegistry.tools.compactMap {
+            $0.objectValue?["name"]?.stringValue
+        }
+        XCTAssertEqual(toolNames, [
+            "drive.search_files", "drive.get_file_metadata", "drive.export_text",
+        ])
+    }
+
+    func testDrivePluginMigrationDoesNotPersistCredentialMaterial() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/015_drive_mcp_plugin.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("com.momo.plugins.drive"))
+        XCTAssertTrue(migration.contains("\"hosted\":true"))
+        XCTAssertTrue(migration.contains("\"url\":\"/v1/mcp/drive\""))
+        XCTAssertFalse(migration.contains("private_key"))
+        XCTAssertFalse(migration.contains("access_token"))
+        XCTAssertFalse(migration.contains("shared_drive_id"))
+    }
+
+    func testHostedDriveDescriptorBecomesAbsoluteWithoutRelaxingRemoteHTTPS() throws {
+        let fixture = try String(
+            contentsOf: try pluginFixtureDirectory().appendingPathComponent("drive.json"),
+            encoding: .utf8
+        )
+        let digest = "sha256:" + String(repeating: "a", count: 64)
+        let manifest = try PluginManifestValidator.validate(
+            manifestJSON: fixture,
+            expectedDigest: digest,
+            computedDigest: digest,
+            revoked: false
+        )
+        let request = Request(
+            head: HTTPRequest(
+                method: .get,
+                scheme: "http",
+                authority: "127.0.0.1:20100",
+                path: "/v1/workspaces/ws/plugins"
+            ),
+            body: .init(buffer: .init())
+        )
+        XCTAssertEqual(
+            try PluginRoutes.descriptorURL(manifest: manifest, request: request, environment: [:]),
+            "http://127.0.0.1:20100/v1/mcp/drive"
+        )
+        XCTAssertEqual(
+            try PluginRoutes.descriptorURL(
+                manifest: manifest,
+                request: request,
+                environment: ["PUBLIC_BASE_URL": "https://momo.example.com"]
+            ),
+            "https://momo.example.com/v1/mcp/drive"
+        )
     }
 
     func testPluginRegistryMigrationAndCustodyAStaticContracts() throws {
@@ -510,6 +609,10 @@ final class MomoServerTests: XCTestCase {
                 method: "GET",
                 path: "/v1/workspaces/ws/read-state"
             ),
+            "messages:read"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(method: "POST", path: "/v1/mcp/drive"),
             "messages:read"
         )
         XCTAssertEqual(

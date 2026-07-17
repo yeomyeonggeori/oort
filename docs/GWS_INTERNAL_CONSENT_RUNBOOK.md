@@ -65,6 +65,10 @@
 
 ## 7. 검증 체크리스트
 
+### 7.1 momo-hosted read-only Drive MCP (MOMO-457)
+
+서버에는 repo 밖 시크릿 경로의 `MOMO_DRIVE_SA_KEY_PATH`, 대상 1개인 `MOMO_DRIVE_SHARED_DRIVE_ID`, `MOMO_DRIVE_BACKEND=google`을 주입한다. 키 JSON 원문은 `.env*`, DB, fixture, audit evidence에 복사하지 않는다. `scripts/verify_drive_mcp.sh`는 `MOMO_DRIVE_BACKEND=stub`으로 계약만 검증하며 Google에 접속하지 않는다. 실제 SA smoke는 아래 `[manual]` 절차로만 evidence를 남기고, 응답 본문이나 access token/키 바이트는 evidence에 첨부하지 않는다.
+
 10. `[manual]` SA credential로 1회 스모크(런타임 구현 전이므로 수동, 결과는 runtime-unverified 해소 evidence로 기록):
     - SA로 access token 발급(scope `https://www.googleapis.com/auth/drive.file`) 후
       `GET https://www.googleapis.com/drive/v3/drives/{shared_drive_id}` → 200이면 멤버십/크레덴셜 OK.

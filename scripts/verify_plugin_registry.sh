@@ -146,10 +146,10 @@ GITHUB_PATH="$PLUGINS/$GITHUB"
 
 api GET "$PLUGINS" "" "$OWNER_ACCESS"
 expect_status 200 "active member lists catalog"
-[ "$(printf '%s' "$RESPONSE_BODY" | jq '.plugins | length')" = "4" ] || {
-  echo "[plugin-reg] official catalog must contain four seeds after MOMO-412" >&2; exit 1; }
+[ "$(printf '%s' "$RESPONSE_BODY" | jq '.plugins | length')" = "5" ] || {
+  echo "[plugin-reg] official catalog must contain five seeds after MOMO-457" >&2; exit 1; }
 printf '%s' "$RESPONSE_BODY" | jq -e '
-  [.plugins[].pluginId] | sort == ["com.momo.plugins.github","com.momo.plugins.linear","com.momo.plugins.notion","external_webhook"]
+  [.plugins[].pluginId] | sort == ["com.momo.plugins.drive","com.momo.plugins.github","com.momo.plugins.linear","com.momo.plugins.notion","external_webhook"]
 ' >/dev/null
 
 api GET "$GITHUB_PATH" "" "$OWNER_ACCESS"

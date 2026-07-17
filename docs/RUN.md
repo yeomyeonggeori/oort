@@ -193,6 +193,10 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `PORT` | 서버 | `8080` | HTTP 바인드 포트. **Centrifugo subscribe proxy가 `api:8080`을 콜백**하므로 변경 시 `centrifugo.json`도 맞춰야 함. |
 | `POSTGRES_HOST` | 서버/relay/worker | `localhost` | `DATABASE_URL` 미설정 시 폴백 호스트. |
 | `LOG_LEVEL` | 서버 | (info) | 로그 레벨. |
+| `MOMO_DRIVE_BACKEND` | 서버 | (미설정) | `stub`은 verifier/local 명시 opt-in 전용이며 staging/prod/internal-host 부팅에서 거부된다. 실백엔드는 `google` 또는 `sa`. |
+| `MOMO_DRIVE_SA_KEY_PATH` | 서버 | (미설정) | repo 밖 SA JSON 파일 경로. 키 바이트는 로그·응답·DB에 저장하지 않는다. |
+| `MOMO_DRIVE_SHARED_DRIVE_ID` | 서버 | (미설정) | 경로 C가 접근할 공유 드라이브 1개의 ID. 미설정이면 `tools/call`이 fail-closed 오류를 반환한다. |
+| `PUBLIC_BASE_URL` | 서버 | (요청 origin) | momo-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
 | `CENT_CONNECTION_TOKEN_TTL_SECONDS` | 서버 | `300` | `/v1/auth/realtime-token` Centrifugo connection JWT TTL. dev 값은 60~1800초로 clamp된다. |
 | `RELAY_DATABASE_URL` | relay/worker | (= `DATABASE_URL`) | relay/worker 전용 **BYPASSRLS `momo_relay`** 접속(§2.2/§10.1). 설정 시 우선. |
 | `RELAY_POSTGRES_USER` / `RELAY_POSTGRES_PASSWORD` | relay/worker | (= `POSTGRES_*`) | 위와 동일 목적의 분리 자격증명. |

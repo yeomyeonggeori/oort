@@ -138,6 +138,9 @@ struct AuthMiddleware: RouterMiddleware {
         {
             return "messages:read"
         }
+        if method == "POST", path == "/v1/mcp/drive" {
+            return "messages:read"
+        }
         if method == "GET",
            segments.count == 4,
            segments[0] == "v1",

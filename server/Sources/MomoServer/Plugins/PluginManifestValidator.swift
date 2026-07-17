@@ -16,6 +16,7 @@ struct ValidatedPluginManifest: Equatable, Sendable {
     let description: String
     let mcpURL: String
     let mcpTransport: String
+    let hosted: Bool
     let egressDomains: [String]
     let recommendedFor: [String]
     let installAllowed: Bool
@@ -118,6 +119,22 @@ enum PluginManifestValidator {
         else { throw rejected("publisher provenance is not verified HTTPS") }
         _ = try nonempty(string(provenance, "releaseRef", at: "plugin.provenance"), label: "release ref")
 
+        let momo = try object(root, "momo", at: "manifest")
+        let baseMomoKeys: Set<String> = [
+            "approvalTier", "risk", "egressDomains", "recommendedFor", "serverPolicy",
+        ]
+        let momoKeys = Set(momo.keys)
+        guard momoKeys == baseMomoKeys || momoKeys == baseMomoKeys.union(["hosted"]) else {
+            throw rejected("unknown or missing field at momo")
+        }
+        let hosted: Bool
+        if let value = momo["hosted"] {
+            guard case .bool(let flag) = value else { throw rejected("momo.hosted must be a boolean") }
+            hosted = flag
+        } else {
+            hosted = false
+        }
+
         let mcp = try object(root, "mcp", at: "manifest")
         try requireKeys(mcp, exactly: ["protocolVersion", "transport", "url", "server", "tools"], at: "mcp")
         guard supportedProtocolVersions.contains(try string(mcp, "protocolVersion", at: "mcp")) else {
@@ -128,9 +145,25 @@ enum PluginManifestValidator {
             throw rejected("unknown MCP transport")
         }
         let mcpURL = try string(mcp, "url", at: "mcp")
-        guard let endpoint = URL(string: mcpURL),
-              endpoint.scheme == "https", let endpointHost = endpoint.host?.lowercased()
-        else { throw rejected("MCP endpoint must be HTTPS") }
+        let endpointHost: String?
+        if hosted {
+            guard let endpoint = URLComponents(string: mcpURL),
+                  endpoint.scheme == nil,
+                  endpoint.host == nil,
+                  endpoint.query == nil,
+                  endpoint.fragment == nil,
+                  mcpURL.hasPrefix("/"),
+                  !mcpURL.hasPrefix("//"),
+                  mcpURL.wholeMatch(of: /^\/[A-Za-z0-9._~\/-]+$/) != nil,
+                  !mcpURL.split(separator: "/").contains("..")
+            else { throw rejected("hosted MCP endpoint must be an absolute path") }
+            endpointHost = nil
+        } else {
+            guard let endpoint = URL(string: mcpURL),
+                  endpoint.scheme == "https", let host = endpoint.host?.lowercased()
+            else { throw rejected("MCP endpoint must be HTTPS") }
+            endpointHost = host
+        }
         let server = try object(mcp, "server", at: "mcp")
         try requireKeys(server, exactly: ["name", "version"], at: "mcp.server")
         _ = try nonempty(string(server, "name", at: "mcp.server"), label: "server name")
@@ -147,8 +180,6 @@ enum PluginManifestValidator {
             }
         }
 
-        let momo = try object(root, "momo", at: "manifest")
-        try requireKeys(momo, exactly: ["approvalTier", "risk", "egressDomains", "recommendedFor", "serverPolicy"], at: "momo")
         let pluginRisk = try string(momo, "risk", at: "momo")
         guard allowedPluginRisks.contains(pluginRisk) else { throw rejected("unknown plugin risk") }
         let approvalTier = try object(momo, "approvalTier", at: "momo")
@@ -160,7 +191,7 @@ enum PluginManifestValidator {
                   $0 == $0.lowercased()
                     && $0.wholeMatch(of: /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/) != nil
               }),
-              egressDomains.contains(endpointHost)
+              hosted || endpointHost.map(egressDomains.contains) == true
         else { throw rejected("egressDomains must be unique domain names and include the MCP endpoint") }
         let recommendedFor = try strings(momo, "recommendedFor", at: "momo")
         guard !recommendedFor.isEmpty, recommendedFor.allSatisfy({ !$0.isEmpty }) else {
@@ -228,6 +259,7 @@ enum PluginManifestValidator {
             description: description,
             mcpURL: mcpURL,
             mcpTransport: mcpTransport,
+            hosted: hosted,
             egressDomains: egressDomains,
             recommendedFor: recommendedFor,
             installAllowed: installAllowed,

@@ -1,4 +1,5 @@
 import Foundation
+import HTTPTypes
 import Hummingbird
 import Logging
 import PostgresNIO
@@ -108,14 +109,14 @@ struct PluginRoutes: Sendable {
                     )
                 )
             }
-            let policyPlugins = toolsByPlugin.keys.sorted().compactMap { pluginID -> PluginPolicyDescriptorDTO? in
+            let policyPlugins = try toolsByPlugin.keys.sorted().compactMap { pluginID -> PluginPolicyDescriptorDTO? in
                 guard let (_, manifest) = manifests[pluginID],
                       let tools = toolsByPlugin[pluginID], !tools.isEmpty
                 else { return nil }
                 return PluginPolicyDescriptorDTO(
                     pluginId: pluginID,
                     mcp: PluginPolicyMCPDTO(
-                        url: manifest.mcpURL,
+                        url: try Self.descriptorURL(manifest: manifest, request: request),
                         transport: manifest.mcpTransport
                     ),
                     egressDomains: manifest.egressDomains,
@@ -637,7 +638,7 @@ struct PluginRoutes: Sendable {
         return principal
     }
 
-    private static func policyMemberID(
+    static func policyMemberID(
         request: Request,
         conn: PostgresConnection,
         logger: Logger,
@@ -678,6 +679,55 @@ struct PluginRoutes: Sendable {
             throw HTTPError(.forbidden, message: "delegated member is not active in the agent job channel")
         }
         return delegatedMemberID
+    }
+
+    static func descriptorURL(
+        manifest: ValidatedPluginManifest,
+        request: Request,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws -> String {
+        guard manifest.hosted else { return manifest.mcpURL }
+        if let configured = environment["PUBLIC_BASE_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !configured.isEmpty
+        {
+            guard let components = URLComponents(string: configured),
+                  components.host != nil,
+                  components.user == nil,
+                  components.password == nil,
+                  components.query == nil,
+                  components.fragment == nil,
+                  components.path.isEmpty || components.path == "/",
+                  let base = components.url,
+                  base.scheme == "https" || Self.isLocalHTTP(base),
+                  let resolved = URL(string: manifest.mcpURL, relativeTo: base)?.absoluteURL
+            else { throw HTTPError(.internalServerError, message: "hosted MCP public origin is invalid") }
+            return resolved.absoluteString
+        }
+
+        let forwardedProto = HTTPField.Name("X-Forwarded-Proto")
+            .flatMap { request.headers[$0] }?
+            .split(separator: ",").first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard let host = request.head.authority?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !host.isEmpty,
+              !host.contains("/"),
+              !host.contains("@")
+        else { throw HTTPError(.internalServerError, message: "hosted MCP public origin is unavailable") }
+        let localHost = host.lowercased().hasPrefix("localhost:")
+            || host.lowercased().hasPrefix("127.0.0.1:")
+            || host.lowercased() == "localhost"
+            || host.lowercased() == "127.0.0.1"
+        let scheme = forwardedProto ?? (localHost ? "http" : "https")
+        guard scheme == "https" || scheme == "http" && localHost,
+              let absolute = URL(string: "\(scheme)://\(host)\(manifest.mcpURL)")
+        else { throw HTTPError(.internalServerError, message: "hosted MCP public origin is invalid") }
+        return absolute.absoluteString
+    }
+
+    private static func isLocalHTTP(_ url: URL) -> Bool {
+        guard url.scheme == "http" else { return false }
+        return url.host == "localhost" || url.host == "127.0.0.1"
     }
 
     private static func workspaceID(

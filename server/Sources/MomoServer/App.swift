@@ -19,6 +19,11 @@ enum AppBuilder {
 
         // AsyncHTTPClient powers the CentrifugoClient (server publishes, L4 §4.3).
         let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
+        let driveBackend = await DriveBackendFactory.make(
+            environmentName: config.momoEnvironment,
+            environment: ProcessInfo.processInfo.environment,
+            httpClient: httpClient
+        )
         let centrifugo = CentrifugoClient(
             httpClient: httpClient,
             apiURL: config.centAPIURL,
@@ -108,6 +113,7 @@ enum AppBuilder {
         PlatformAdminRoutes(db: db).add(to: authed)
         DeviceRoutes(db: db).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
+        DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
         let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)
         webhookRoutes.addPublic(to: router)
         webhookRoutes.addProtected(to: authed)
