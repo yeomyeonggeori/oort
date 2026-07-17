@@ -2168,6 +2168,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 등록 실패 `try?` 삼킴 제거 → os_log(토큰 suffix만) + 1회+foreground 재시도. 실기기 재검증은 [manual]. 상세: issue #484 본문(패킷 겸용).
 - 랜딩: PR #485 squash `37480d2`(2026-07-18). APS_ENVIRONMENT→Info.plist→런타임 매핑(테스트 20/20), os_log 전 지점 + foreground 재시도. 시뮬레이터 게이트 PASS. 실기기 재검증(케이블 Run)은 성재 [manual] 대기.
 
+### ☐ MOMO-468 (`#486`) 수용기준 — V-1 huddle 스키마+수명주기+LiveKit JWT `[runtime-db]` · 의존: ADR-0122 Accepted
+- [ ] 016_huddle(huddle+participant, RLS FORCE, 활성 partial index) + 시작(멱등)/join(JWT)/leave(마지막 퇴장=종료)/active REST — 같은 tx + outbox 3종 이벤트 + audit.
+- [ ] LiveKit HS256 JWT(video grant, ttl 10분), env 미설정 시 503 fail-closed. verify_huddle_lifecycle(격리 compose, LiveKit 불요) + runtime-db 편입 + openapi 명세.
+- [ ] 상세: issue #486 본문(패킷 겸용). V-2(infra)→V-3(macOS, UX 조율)→V-3b(iOS) 순차.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

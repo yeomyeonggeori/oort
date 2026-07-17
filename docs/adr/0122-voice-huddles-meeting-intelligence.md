@@ -1,6 +1,6 @@
 # ADR-0122: 음성 허들과 회의 지능 — LiveKit 미디어 + 에이전트 Work 회의록
 
-- Status: **Proposed** (2026-07-15 draft → **2026-07-18 착수 재기안**, Fable — 성재 D1~D3 승인 대기)
+- Status: **Accepted** (2026-07-18, 성재 — D1-A(LiveKit)+D2-A(임시 허들)+D3(v0→v1→v2) 승인 "ㄱㄱ". V-1부터 순차 발급)
 - 관련: `research/15-platform-expansion/05-voice-huddles-meeting-intelligence.md`(조사 원문·출처), `04-threads-reactions-audit.md`(허들 스레드 게시의 전제), ADR-0111(Work=agent_run — v2 요약의 실행 개체), ADR-0002(compose 레이어링), ADR-0113/0116(녹음 산출물 저장은 Drive 트랙 동결 계약과 합류), ux-bible P8·P14
 - 발단: 성재 발제(2026-07-15) "스레드 허들이나 디스코드처럼 음성 채널 + 가능하면 메신저 레벨에서 회의록과 요약 기반 액션아이템 도출"
 
