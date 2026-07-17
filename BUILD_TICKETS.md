@@ -2136,11 +2136,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 실 .p8 smoke는 오케스트레이터(자격증명 실검증 2026-07-17 완료: 샌드박스 400 BadDeviceToken 판정). 상세: issue #471 본문(패킷 겸용).
 - 랜딩: PR #473 squash `94b62bc`(2026-07-17). 실런: PushRelay 4/4+Notifier 3/3 테스트, verify_push_relay PASS(서명/403/429/id-only), **실 .p8 end-to-end smoke PASS**(서명 dispatch→ES256→APNs 샌드박스 apns_id 발급+400 BadDeviceToken passthrough). 후속 노트: push-type alert+무alert 조합은 P-4(iOS 확장) 시점 조정, prod에서 stub sender 거부 하드닝 후보.
 
-### ☐ MOMO-462 (`#474`) 수용기준 — IOS-1 iOS 앱 골격 `[ios]` · 의존: ADR-0123 Accepted (MOMO-040 승계)
-- [ ] `clients/iOS/MomoiOS.xcodeproj`(iOS 26 SDK, bundle app.momo.ios, Push+Background Modes entitlements, CODE_SIGNING_ALLOWED=NO 시뮬레이터 빌드) + `MomoiOSKit`(SwiftPM, MomoCore path 의존) — 셸은 엔트리만, 로직은 킷.
-- [ ] 로그인(맥 폼 필드 계약 동일·HIG·Dynamic Type)→부트스트랩→자리표시 홈. 세션은 UserDefaults(키체인 금지, MOMO-452 결정). MomoMac REST 클라이언트는 필요 최소 복제(Core 이동 금지 — D1 복제 후 수렴).
-- [ ] `verify_ios_build.sh`(시뮬레이터 동적 탐색) + local_gate `ios` 프로파일 + drift guard 케이스 + taste `references/ios-rubric.md`.
-- [ ] 시뮬레이터 게이트 실런은 오케스트레이터. 상세: issue #474 본문(패킷 겸용).
+### ☑ MOMO-462 (`#474`) 수용기준 — IOS-1 iOS 앱 골격 `[ios]` · 의존: ADR-0123 Accepted (MOMO-040 승계)
+- [x] `clients/iOS/MomoiOS.xcodeproj`(iOS 26 SDK, bundle app.momo.ios, Push+Background Modes entitlements, CODE_SIGNING_ALLOWED=NO 시뮬레이터 빌드) + `MomoiOSKit`(SwiftPM, MomoCore path 의존) — 셸은 엔트리만, 로직은 킷.
+- [x] 로그인(맥 폼 필드 계약 동일·HIG·Dynamic Type)→부트스트랩→자리표시 홈. 세션은 UserDefaults(키체인 금지, MOMO-452 결정). MomoMac REST 클라이언트는 필요 최소 복제(Core 이동 금지 — D1 복제 후 수렴).
+- [x] `verify_ios_build.sh`(시뮬레이터 동적 탐색) + local_gate `ios` 프로파일 + drift guard 케이스 + taste `references/ios-rubric.md`.
+- [x] 시뮬레이터 게이트 실런은 오케스트레이터. 상세: issue #474 본문(패킷 겸용).
+- 랜딩: PR #475 squash `cb2f753`(2026-07-17). 오케스트레이터 실런: verify_ios_build PASS(실 시뮬레이터 build-for-testing+test) + 신설 ios 프로파일 게이트 첫 실행 PASS. worker 샌드박스는 CoreSimulatorService 접근 불가 — 시뮬레이터 검증은 오케스트레이터 몫으로 확정(파이프라인 전례).
+
+### ☐ MOMO-463 (`#476`) 수용기준 — IOS-2 목록+타임라인 열람 `[ios]` · 의존: MOMO-462
+- [ ] 채널/DM 목록+unread(ADR-0109 계약)+pull-to-refresh, 타임라인 히스토리+Centrifugo 실시간 append(`message.seq` 순서·중복 가드), 승인 카드 열람 전용.
+- [ ] 상태 4종(빈/로딩/오류/오프라인) + Dynamic Type/혼합 3줄 오버플로 + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #476 본문(패킷 겸용).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
