@@ -2148,9 +2148,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 상태 4종(빈/로딩/오류/오프라인) + Dynamic Type/혼합 3줄 오버플로 + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #476 본문(패킷 겸용).
 - 랜딩: PR #477 squash `daff55e`(2026-07-17). 오케스트레이터 실런: 시뮬레이터 게이트 PASS. IOSTimelineReducer가 id/clientMsgId/seq 3중 가드로 중복·수정 처리, 실시간 끊김 시 REST fallback 배너.
 
-### ☐ MOMO-464 (`#478`) 수용기준 — IOS-3 컴포저+승인 결정 `[ios]` · 의존: MOMO-463
-- [ ] 컴포저 전송(REST 단일 쓰기경로+client_msg_id 멱등, 낙관→reducer 수렴, 실패 재시도) + 인용 답장(스레드 작성 스코프 외).
-- [ ] 승인/거부 결정(client_decision_id 멱등, 비가역 티어 확인 1단계, 상태 전이) + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #478 본문(패킷 겸용).
+### ☑ MOMO-464 (`#478`) 수용기준 — IOS-3 컴포저+승인 결정 `[ios]` · 의존: MOMO-463
+- [x] 컴포저 전송(REST 단일 쓰기경로+client_msg_id 멱등, 낙관→reducer 수렴, 실패 재시도) + 인용 답장(스레드 작성 스코프 외).
+- [x] 승인/거부 결정(client_decision_id 멱등, 비가역 티어 확인 1단계, 상태 전이) + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #478 본문(패킷 겸용).
+- 랜딩: PR #479 squash `9aad292`(2026-07-17). 오케스트레이터 실런: 시뮬레이터 게이트 PASS. 전송 clientMsgId 낙관→reducer 수렴, 결정은 pending 저장으로 재시도에도 같은 clientDecisionId(멱등), 비가역 확인 다이얼로그 destructive role.
+
+### ☐ MOMO-465 (`#480`) 수용기준 — IOS-4 푸시 수신 (P-4) `[ios]` · 의존: MOMO-464
+- [ ] 권한→토큰→`POST /v1/workspaces/:ws/devices` 등록(로그아웃 DELETE) + App Group 세션 공유 + NSE id-only fetch(실패 fail-open) + deep link(cold start 포함).
+- [ ] relay placeholder alert(정적, 내용 비포함) + verify_push_relay 단정 갱신 + .apns 픽스처. simctl push smoke는 오케스트레이터. 상세: issue #480 본문(패킷 겸용).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
