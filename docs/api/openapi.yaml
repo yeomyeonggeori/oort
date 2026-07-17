@@ -59,6 +59,8 @@ tags:
     description: Workspace member roster.
   - name: channels
     description: Workspace channels.
+  - name: huddles
+    description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
   - name: read-state
@@ -448,6 +450,121 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/huddles:
+    post:
+      tags: [huddles]
+      operationId: startHuddle
+      summary: Start the channel huddle, or return the existing active huddle.
+      description: Lifecycle, audit, and realtime event outbox commit in one tenant transaction.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: An active huddle already existed (idempotent replay).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleResponse"
+        "201":
+          description: Huddle created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HuddleResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HuddleNotConfigured"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/huddles/active:
+    get:
+      tags: [huddles]
+      operationId: getActiveHuddle
+      summary: Get the active huddle and current participants for a channel badge.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: Active huddle when present; otherwise the optional field is omitted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActiveHuddleResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/HuddleNotConfigured"
+
+  /v1/workspaces/{workspaceId}/huddles/{huddleId}/join:
+    post:
+      tags: [huddles]
+      operationId: joinHuddle
+      summary: Join or reissue a 10-minute LiveKit room grant.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/HuddleId"
+      responses:
+        "200":
+          description: Current presence plus a freshly issued LiveKit access token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JoinHuddleResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Huddle ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/HuddleNotConfigured"
+
+  /v1/workspaces/{workspaceId}/huddles/{huddleId}/leave:
+    post:
+      tags: [huddles]
+      operationId: leaveHuddle
+      summary: Leave a huddle; the last participant atomically ends it.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/HuddleId"
+      responses:
+        "200":
+          description: Updated huddle and whether this leave ended it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaveHuddleResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: Caller has no current presence to leave.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/HuddleNotConfigured"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/messages:
     post:
@@ -1420,6 +1537,14 @@ components:
       schema:
         type: string
         format: uuid
+    HuddleId:
+      name: huddleId
+      in: path
+      required: true
+      description: Huddle UUID; also used as the LiveKit room name.
+      schema:
+        type: string
+        format: uuid
     PluginId:
       name: pluginId
       in: path
@@ -1516,6 +1641,12 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
     Forbidden:
       description: Not an active workspace member, or workspace scope mismatch.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    HuddleNotConfigured:
+      description: LiveKit API key, secret, or URL is absent/invalid; huddles fail closed.
       content:
         application/json:
           schema:
@@ -1989,6 +2120,89 @@ components:
     MembershipRole:
       type: string
       enum: [owner, admin, member, guest]
+
+    # ---- Huddles ------------------------------------------------------------
+    HuddleParticipant:
+      type: object
+      required: [memberId, displayName, joinedAtMs]
+      properties:
+        memberId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        joinedAtMs:
+          type: integer
+          format: int64
+
+    Huddle:
+      type: object
+      required: [id, workspaceId, channelId, startedBy, startedAtMs, participants]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        startedBy:
+          type: string
+          format: uuid
+        startedAtMs:
+          type: integer
+          format: int64
+        endedAtMs:
+          type: integer
+          format: int64
+          description: Present only after the last participant leaves.
+        participants:
+          type: array
+          description: Current participants only; re-entry history remains server-side.
+          items:
+            $ref: "#/components/schemas/HuddleParticipant"
+
+    HuddleResponse:
+      type: object
+      required: [huddle]
+      properties:
+        huddle:
+          $ref: "#/components/schemas/Huddle"
+
+    ActiveHuddleResponse:
+      type: object
+      properties:
+        huddle:
+          $ref: "#/components/schemas/Huddle"
+
+    JoinHuddleResponse:
+      type: object
+      required: [huddle, livekitUrl, token, expiresAtMs, ttlSeconds]
+      properties:
+        huddle:
+          $ref: "#/components/schemas/Huddle"
+        livekitUrl:
+          type: string
+        token:
+          type: string
+          description: Short-lived LiveKit HS256 access token; never persisted or logged.
+        expiresAtMs:
+          type: integer
+          format: int64
+        ttlSeconds:
+          type: integer
+          enum: [600]
+
+    LeaveHuddleResponse:
+      type: object
+      required: [huddle, ended]
+      properties:
+        huddle:
+          $ref: "#/components/schemas/Huddle"
+        ended:
+          type: boolean
 
     # ---- Messages ----------------------------------------------------------------
     SendMessageRequest:
