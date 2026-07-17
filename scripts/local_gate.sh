@@ -317,10 +317,9 @@ esac
 RUNTIME_COMPOSE_PROFILE=0
 RUNTIME_COMPOSE_PREEXISTING=0
 case "$PROFILE" in
-  runtime-db|runtime-relay|runtime-live|runtime-agent|all|m3-dbc)
-    # all/m3-dbc included (review #439 M2): they run the same `make up`
-    # bootstrap and are the heaviest profiles — the incident class this
-    # guard exists for.
+  runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all|m3-dbc)
+    # macos-ui/all/m3-dbc included: they run the same `make up` bootstrap and
+    # are Docker-heavy — the incident class this guard exists for.
     RUNTIME_COMPOSE_PROFILE=1
     ;;
 esac
@@ -787,6 +786,7 @@ case "$PROFILE" in
     add_static_commands
     add_runtime_env_guard_command
     add_swift_commands
+    add_runtime_bootstrap_commands
     add_macos_ui_commands
     ;;
   m3-dbc)

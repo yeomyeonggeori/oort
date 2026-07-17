@@ -143,3 +143,25 @@ PATH="$FAKE_BIN:$PATH" ENV_FILE="$ENV_FIXTURE" MOMO_CENTRIFUGO_AUTO_RECREATE=1 \
 [ "$(cat "$FAKE_DOCKER_STATE")" = "$desired_digest" ] \
   || fail "opt-in recreate did not apply current config fingerprint"
 echo "[drift-guard-test] PASS Centrifugo match/drift/opt-in recreate scenarios (fake Docker only)"
+
+# MOMO-450: macos-ui must assemble and own the same runtime bootstrap as the
+# runtime-* profiles. This is a static plan check: it never invokes Docker.
+LOCAL_GATE="$REPO_ROOT/scripts/local_gate.sh"
+macos_profile_block="$(awk '/^  macos-ui\)$/,/^    ;;$/' "$LOCAL_GATE")"
+grep -Fq 'add_runtime_bootstrap_commands' <<<"$macos_profile_block" \
+  || fail "macos-ui profile omitted runtime bootstrap"
+
+swift_line="$(printf '%s\n' "$macos_profile_block" | grep -nF 'add_swift_commands' | cut -d: -f1)"
+bootstrap_line="$(printf '%s\n' "$macos_profile_block" | grep -nF 'add_runtime_bootstrap_commands' | cut -d: -f1)"
+macos_line="$(printf '%s\n' "$macos_profile_block" | grep -nF 'add_macos_ui_commands' | cut -d: -f1)"
+[ "$swift_line" -lt "$bootstrap_line" ] && [ "$bootstrap_line" -lt "$macos_line" ] \
+  || fail "macos-ui runtime bootstrap is not between Swift and UI commands"
+
+load_guard_block="$(awk '/^RUNTIME_COMPOSE_PROFILE=0$/,/^if \[ "\$RUNTIME_COMPOSE_PROFILE" -eq 1 \]; then/' "$LOCAL_GATE")"
+grep -Fq 'runtime-agent|macos-ui|all' <<<"$load_guard_block" \
+  || fail "macos-ui profile omitted host load guard"
+grep -Fq 'add_cmd "docker compose up (--wait healthy)" "make up"' "$LOCAL_GATE" \
+  || fail "runtime bootstrap evidence label omitted compose up step"
+grep -Fq 'if [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]' "$LOCAL_GATE" \
+  || fail "default runtime Compose teardown guard is missing"
+echo "[drift-guard-test] PASS macos-ui bootstrap/load-guard/teardown plan (Docker not invoked)"
