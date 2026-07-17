@@ -58,6 +58,8 @@ struct PushRelayClient: Sendable {
     let httpClient: HTTPClient
     let dispatchURL: String   // e.g. http://mock-push-relay:8090/v1/push
     let logger: Logger
+    let serverID: String
+    let requestSigner: PushRelayRequestSigner?
 
     private static let encoder = JSONEncoder()
 
@@ -76,6 +78,13 @@ struct PushRelayClient: Sendable {
         request.method = .POST
         request.headers.add(name: "Content-Type", value: "application/json")
         let encoded = try Self.encoder.encode(payload)
+        if let requestSigner {
+            request.headers.add(name: "X-Momo-Server-Id", value: serverID)
+            request.headers.add(
+                name: "X-Momo-Push-Signature",
+                value: try requestSigner.signatureBase64(for: encoded)
+            )
+        }
         request.body = .bytes(ByteBuffer(data: encoded))
 
         let response = try await httpClient.execute(request, timeout: .seconds(10))

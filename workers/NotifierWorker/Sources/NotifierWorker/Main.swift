@@ -42,10 +42,15 @@ struct NotifierWorkerMain {
 
         // ---- AsyncHTTPClient → push relay dispatch ----
         let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
+        let requestSigner = try config.pushRelayPrivateKeyPath.map {
+            try PushRelayRequestSigner(path: $0)
+        }
         let relay = PushRelayClient(
             httpClient: httpClient,
             dispatchURL: config.pushRelayURL,
-            logger: logger
+            logger: logger,
+            serverID: config.serverID,
+            requestSigner: requestSigner
         )
 
         let notifier = NotifierService(

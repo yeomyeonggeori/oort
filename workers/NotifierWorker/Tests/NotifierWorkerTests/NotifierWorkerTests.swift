@@ -1,7 +1,15 @@
 import XCTest
+import Crypto
 @testable import NotifierWorker
 
 final class NotifierWorkerTests: XCTestCase {
+    func testRelaySignerProducesVerifiableEd25519Signature() throws {
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let signer = try PushRelayRequestSigner(rawSeed: privateKey.rawRepresentation)
+        let body = Data("{\"schema\":\"momo.push.dispatch.v1\"}".utf8)
+        let signature = try XCTUnwrap(Data(base64Encoded: signer.signatureBase64(for: body)))
+        XCTAssertTrue(privateKey.publicKey.isValidSignature(signature, for: body))
+    }
     /// ADR-0120 D2 build-time guard: the relay-bound dispatch payload must
     /// carry exactly the id-only routing field set — nothing that could hold
     /// conversation content (body, display name, handle, channel name,
