@@ -2143,9 +2143,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 시뮬레이터 게이트 실런은 오케스트레이터. 상세: issue #474 본문(패킷 겸용).
 - 랜딩: PR #475 squash `cb2f753`(2026-07-17). 오케스트레이터 실런: verify_ios_build PASS(실 시뮬레이터 build-for-testing+test) + 신설 ios 프로파일 게이트 첫 실행 PASS. worker 샌드박스는 CoreSimulatorService 접근 불가 — 시뮬레이터 검증은 오케스트레이터 몫으로 확정(파이프라인 전례).
 
-### ☐ MOMO-463 (`#476`) 수용기준 — IOS-2 목록+타임라인 열람 `[ios]` · 의존: MOMO-462
-- [ ] 채널/DM 목록+unread(ADR-0109 계약)+pull-to-refresh, 타임라인 히스토리+Centrifugo 실시간 append(`message.seq` 순서·중복 가드), 승인 카드 열람 전용.
-- [ ] 상태 4종(빈/로딩/오류/오프라인) + Dynamic Type/혼합 3줄 오버플로 + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #476 본문(패킷 겸용).
+### ☑ MOMO-463 (`#476`) 수용기준 — IOS-2 목록+타임라인 열람 `[ios]` · 의존: MOMO-462
+- [x] 채널/DM 목록+unread(ADR-0109 계약)+pull-to-refresh, 타임라인 히스토리+Centrifugo 실시간 append(`message.seq` 순서·중복 가드), 승인 카드 열람 전용.
+- [x] 상태 4종(빈/로딩/오류/오프라인) + Dynamic Type/혼합 3줄 오버플로 + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #476 본문(패킷 겸용).
+- 랜딩: PR #477 squash `daff55e`(2026-07-17). 오케스트레이터 실런: 시뮬레이터 게이트 PASS. IOSTimelineReducer가 id/clientMsgId/seq 3중 가드로 중복·수정 처리, 실시간 끊김 시 REST fallback 배너.
+
+### ☐ MOMO-464 (`#478`) 수용기준 — IOS-3 컴포저+승인 결정 `[ios]` · 의존: MOMO-463
+- [ ] 컴포저 전송(REST 단일 쓰기경로+client_msg_id 멱등, 낙관→reducer 수렴, 실패 재시도) + 인용 답장(스레드 작성 스코프 외).
+- [ ] 승인/거부 결정(client_decision_id 멱등, 비가역 티어 확인 1단계, 상태 전이) + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #478 본문(패킷 겸용).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
