@@ -151,6 +151,10 @@ public final class IOSPushDeepLinkRouter {
         pending = link
     }
 
+    public func route(link: IOSPushDeepLink) {
+        pending = link
+    }
+
     public func route(url: URL) {
         pending = IOSPushDeepLink(url: url)
     }

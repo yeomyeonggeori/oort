@@ -1,4 +1,5 @@
 import MomoiOSKit
+import MomoiOSPushKit
 import UIKit
 import UserNotifications
 
@@ -22,12 +23,16 @@ final class MomoiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
         }
     }
 
-    func userNotificationCenter(
+    nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        // non-Sendable 파라미터는 nonisolated 문맥에서 Sendable 값으로 환원 후 hop한다.
+        guard let envelope = try? MomoPushParser.parse(
+            userInfo: response.notification.request.content.userInfo
+        ), let link = IOSPushDeepLink(envelope: envelope) else { return }
         await MainActor.run {
-            IOSPushDeepLinkRouter.shared.route(userInfo: response.notification.request.content.userInfo)
+            IOSPushDeepLinkRouter.shared.route(link: link)
         }
     }
 }
