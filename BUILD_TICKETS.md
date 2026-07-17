@@ -2158,9 +2158,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] relay placeholder alert(정적, 내용 비포함) + verify_push_relay 단정 갱신 + .apns 픽스처. simctl push smoke는 오케스트레이터. 상세: issue #480 본문(패킷 겸용).
 - 랜딩: PR #481 squash `a0e3d0c`(2026-07-17). 1차 worker 모델 capacity 사망→동일 worktree 이어받기 재스폰 성공(빈번 커밋 계약 유효). 오케스트레이터 수정 3건: Swift 6 sending 캡처(NSE unchecked Sendable 관용구·delegate nonisolated 환원·PushKit import — worker 샌드박스 xcodebuild 불가로 미검출). 실런: 킷 18/18(swift-testing) + relay 4/4+verifier + 시뮬레이터 게이트 + simctl push 전달. 배너 표시 evidence는 권한 흐름상 IOS-5 실기기 몫(정직 기록).
 
-### ☐ MOMO-466 (`#482`) 수용기준 — IOS-5 TestFlight 런북+배포 준비 `[ios]` · 의존: MOMO-465
-- [ ] 절제된 dev 아이콘(생성 스크립트+1024 PNG) + Release 시뮬레이터 빌드 sanity + dev 전용 코드 교체 항목 명시.
-- [ ] IOS_TESTFLIGHT_RUNBOOK([manual]: App ID/App Group 등록→서명→archive 업로드→internal 테스터→실기기 E2E 체크리스트, 서버 연결 옵션). 서명/업로드 실행은 성재. 상세: issue #482 본문(패킷 겸용).
+### ☑ MOMO-466 (`#482`) 수용기준 — IOS-5 TestFlight 런북+배포 준비 `[ios]` · 의존: MOMO-465
+- [x] 절제된 dev 아이콘(생성 스크립트+1024 PNG) + Release 시뮬레이터 빌드 sanity + dev 전용 코드 교체 항목 명시.
+- [x] IOS_TESTFLIGHT_RUNBOOK([manual]: App ID/App Group 등록→서명→archive 업로드→internal 테스터→실기기 E2E 체크리스트, 서버 연결 옵션). 서명/업로드 실행은 성재. 상세: issue #482 본문(패킷 겸용).
+- 랜딩: PR #483 squash `3d321c6`(2026-07-17). 오케스트레이터: Release 시뮬레이터 빌드 SUCCEEDED. 잔여는 런북 [manual] 48단계(성재) — 실기기 E2E가 iOS v0 배치의 최종 evidence.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
