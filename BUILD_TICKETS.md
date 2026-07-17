@@ -2105,11 +2105,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] provider/Codex 브랜드 에셋을 복제하지 않고 공식 브랜드 에셋 적용 전까지 semantic SF Symbol을 사용한다.
 - [x] 보안·correctness·성능·접근성 리뷰 Blocker 0 / High 0, macOS 330 tests PASS.
 
-### ☐ MOMO-457 (`#463`) 수용기준 — SE-04D Drive 경로 C MCP 포장 v0 `[runtime-db]` · 의존: MOMO-449
-- [ ] `POST /v1/mcp/drive` stateless MCP 부분집합(initialize/tools.list/tools.call) — agent bearer+위임 binding, tools/call마다 grant 재검증 fail-closed + audit 같은 트랜잭션.
-- [ ] read-only 3종(search_files/get_file_metadata/export_text, 공유 드라이브 한정) + DriveBackend 분리(SA env 커스터디, stub 옵트인·prod 거부).
-- [ ] drive.json manifest(momo-hosted 표기, descriptor 절대화) + `verify_drive_mcp.sh`(stub, 실 Google 무호출) PASS.
-- [ ] 쓰기/업로드/폴러/경로 A 전부 out of scope(GWS-ARCHIVE 트랙). 상세: issue #463 본문(패킷 겸용).
+### ☑ MOMO-457 (`#463`) 수용기준 — SE-04D Drive 경로 C MCP 포장 v0 `[runtime-db]` · 의존: MOMO-449
+- [x] `POST /v1/mcp/drive` stateless MCP 부분집합(initialize/tools.list/tools.call) — agent bearer+위임 binding, tools/call마다 grant 재검증 fail-closed + audit 같은 트랜잭션.
+- [x] read-only 3종(search_files/get_file_metadata/export_text, 공유 드라이브 한정) + DriveBackend 분리(SA env 커스터디, stub 옵트인·prod 거부).
+- [x] drive.json manifest(momo-hosted 표기, descriptor 절대화) + `verify_drive_mcp.sh`(stub, 실 Google 무호출) PASS.
+- [x] 쓰기/업로드/폴러/경로 A 전부 out of scope(GWS-ARCHIVE 트랙). 상세: issue #463 본문(패킷 겸용).
+- 랜딩: PR #465 squash `367442c`(2026-07-17). 오케스트레이터 후속 2커밋: verifier rg→grep(호스트 ripgrep 부재) + registry verifier 시드 4→5. 실런: verify_drive_mcp PASS + runtime-db 게이트 PASS. 관찰: 백엔드 호출이 tx 내 실행(SA 타임아웃 15s 유계) — 후속 개선 후보.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

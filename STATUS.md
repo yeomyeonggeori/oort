@@ -6,7 +6,7 @@
 ## MOMO-457 hosted read-only Drive MCP (2026-07-17)
 
 - `POST /v1/mcp/drive`에 agent bearer+위임 채널 binding, 매 호출 활성 `drive:read` grant 잠금 재검증, 결과 audit를 묶은 stateless MCP initialize/tools.list/tools.call과 공유 드라이브 read-only 3도구를 추가했다. Drive backend는 명시 local stub과 env 기반 Google SA 구현으로 분리되고 키 바이트는 DB·응답·audit·로그에 유입되지 않는다.
-- hosted 상대 endpoint manifest/절대 descriptor, migration 015 seed, stub 격리 verifier를 추가했다. worker 검증은 Swift build/test·Python·bash syntax까지만 수행하며 Docker `verify_drive_mcp.sh`와 실제 SA smoke는 오케스트레이터/수동 실행 전까지 `runtime-unverified`다.
+- hosted 상대 endpoint manifest/절대 descriptor, migration 015 seed, stub 격리 verifier를 추가했다. 오케스트레이터 실런(2026-07-17): `verify_drive_mcp.sh` PASS + registry 시드 5개 기대 갱신 후 `runtime-db` 게이트 PASS — runtime 검증 완료. 실제 Google SA smoke만 GWS 런북 수동 evidence로 남음(스코프 외).
 
 ## MOMO-456 macOS center-pane plugin marketplace UX (2026-07-17)
 
