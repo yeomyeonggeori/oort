@@ -25,13 +25,16 @@ public final class MomoiOSAppModel {
 
     private let store: SessionStore
     private let backend: any SessionBackend
+    private let pushLifecycle: any IOSPushLifecycle
 
     public init(
         store: SessionStore = .shared,
-        backend: any SessionBackend = MomoServerSessionClient()
+        backend: any SessionBackend = MomoServerSessionClient(),
+        pushLifecycle: any IOSPushLifecycle = NoopIOSPushLifecycle.shared
     ) {
         self.store = store
         self.backend = backend
+        self.pushLifecycle = pushLifecycle
         self.form = store.loadForm()
         self.phase = .signedOut
         self.failureKind = nil
@@ -54,6 +57,7 @@ public final class MomoiOSAppModel {
             store.save(form: form)
             store.save(session: session)
             phase = .signedIn(session, bootstrap)
+            await pushLifecycle.activate(session: session)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
@@ -63,7 +67,10 @@ public final class MomoiOSAppModel {
         }
     }
 
-    public func signOut() {
+    public func signOut() async {
+        if case .signedIn(let session, _) = phase {
+            await pushLifecycle.revoke(session: session)
+        }
         store.clearSession()
         errorMessage = nil
         failureKind = nil
@@ -78,6 +85,7 @@ public final class MomoiOSAppModel {
             let bootstrap = try await backend.bootstrap(session: session)
             if saveForm { store.save(form: form) }
             phase = .signedIn(session, bootstrap)
+            await pushLifecycle.activate(session: session)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
@@ -101,13 +109,19 @@ public final class MomoiOSAppModel {
 @MainActor
 public struct MomoiOSRootView: View {
     @State private var model: MomoiOSAppModel
+    @State private var navigationPath: [IOSPushDeepLink] = []
+    @State private var deepLinkRouter: IOSPushDeepLinkRouter
 
-    public init(model: MomoiOSAppModel = MomoiOSAppModel()) {
+    public init(
+        model: MomoiOSAppModel = MomoiOSAppModel(),
+        deepLinkRouter: IOSPushDeepLinkRouter = .shared
+    ) {
         _model = State(initialValue: model)
+        _deepLinkRouter = State(initialValue: deepLinkRouter)
     }
 
     public var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             switch model.phase {
             case .signedOut:
                 LoginView(model: model)
@@ -115,10 +129,25 @@ public struct MomoiOSRootView: View {
                 ProgressView("Connecting to momo")
                     .navigationTitle("momo")
             case .signedIn(let session, let bootstrap):
-                IOSWorkspaceView(session: session, bootstrap: bootstrap, signOut: model.signOut)
+                IOSWorkspaceView(
+                    session: session,
+                    bootstrap: bootstrap,
+                    signOut: model.signOut
+                )
             }
         }
         .task { await model.restore() }
+        .onOpenURL { deepLinkRouter.route(url: $0) }
+        .onChange(of: deepLinkRouter.pending) { _, link in route(link) }
+        .onChange(of: model.phase) { _, _ in route(deepLinkRouter.pending) }
+    }
+
+    private func route(_ link: IOSPushDeepLink?) {
+        guard let link,
+              case .signedIn(let session, _) = model.phase,
+              session.workspaceID == link.workspaceID else { return }
+        navigationPath = [link]
+        deepLinkRouter.consume(link)
     }
 }
 

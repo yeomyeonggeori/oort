@@ -6,14 +6,14 @@ import SwiftUI
 public struct IOSWorkspaceView: View {
     private let session: IOSSession
     private let bootstrap: WorkspaceBootstrap
-    private let signOut: @MainActor () -> Void
+    private let signOut: @MainActor () async -> Void
     private let backend: any IOSConversationBackend
     @State private var model: IOSChannelListModel
 
     public init(
         session: IOSSession,
         bootstrap: WorkspaceBootstrap,
-        signOut: @escaping @MainActor () -> Void
+        signOut: @escaping @MainActor () async -> Void
     ) {
         let backend = MomoServerConversationClient(authenticated: session)
         self.session = session
@@ -41,7 +41,7 @@ public struct IOSWorkspaceView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     LabeledContent("Signed in as", value: session.member.displayName)
-                    Button("Sign out", action: signOut)
+                    Button("Sign out") { Task { await signOut() } }
                 } label: {
                     Label("Workspace menu", systemImage: "person.crop.circle")
                 }
@@ -52,6 +52,22 @@ public struct IOSWorkspaceView: View {
         .onAppear {
             if model.phase == .loaded {
                 Task { await model.refresh() }
+            }
+        }
+        .navigationDestination(for: IOSPushDeepLink.self) { link in
+            if let item = deepLinkedItem(channelID: link.channelID) {
+                IOSTimelineView(
+                    item: item,
+                    members: model.membersByID,
+                    currentMemberID: session.member.id,
+                    backend: backend
+                )
+            } else {
+                ContentUnavailableView(
+                    "Conversation unavailable",
+                    systemImage: "bell.slash",
+                    description: Text("This notification points to a conversation you cannot open.")
+                )
             }
         }
     }
@@ -127,6 +143,20 @@ public struct IOSWorkspaceView: View {
             IOSChannelRow(item: item)
         }
         .accessibilityIdentifier("channel.\(item.id.description)")
+    }
+
+    private func deepLinkedItem(channelID: ChannelID) -> IOSChannelListItem? {
+        if let item = (model.sections.channels + model.sections.directMessages).first(where: { $0.id == channelID }) {
+            return item
+        }
+        guard let channel = bootstrap.channels.first(where: { $0.id == channelID }) else { return nil }
+        let title = channel.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return IOSChannelListItem(
+            channel: channel,
+            title: title?.isEmpty == false ? title! : "Conversation",
+            unreadCount: 0,
+            mentionCount: 0
+        )
     }
 }
 
