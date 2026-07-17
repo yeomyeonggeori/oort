@@ -107,6 +107,9 @@ public struct ChannelListView: View {
     private let openWorkspaceSettings: (() -> Void)?
     private let openSettings: (() -> Void)?
     private let openUpdates: (() -> Void)?
+    private let openPluginMarketplace: (() -> Void)?
+    private let onChannelSelected: ((ChannelID) -> Void)?
+    private let isPluginMarketplaceActive: Bool
     private let openMemberDirectory: (() -> Void)?
     private let openChannelSettings: ((ChannelID) -> Void)?
     private let inviteToChannel: ((ChannelID) -> Void)?
@@ -122,6 +125,9 @@ public struct ChannelListView: View {
         self.openWorkspaceSettings = nil
         self.openSettings = nil
         self.openUpdates = nil
+        self.openPluginMarketplace = nil
+        self.onChannelSelected = nil
+        self.isPluginMarketplaceActive = false
         self.openMemberDirectory = nil
         self.openChannelSettings = nil
         self.inviteToChannel = nil
@@ -138,6 +144,9 @@ public struct ChannelListView: View {
         openWorkspaceSettings: (() -> Void)? = nil,
         openSettings: (() -> Void)? = nil,
         openUpdates: (() -> Void)? = nil,
+        openPluginMarketplace: (() -> Void)? = nil,
+        onChannelSelected: ((ChannelID) -> Void)? = nil,
+        isPluginMarketplaceActive: Bool = false,
         openMemberDirectory: (() -> Void)? = nil,
         openChannelSettings: ((ChannelID) -> Void)? = nil,
         inviteToChannel: ((ChannelID) -> Void)? = nil,
@@ -152,6 +161,9 @@ public struct ChannelListView: View {
         self.openWorkspaceSettings = openWorkspaceSettings
         self.openSettings = openSettings
         self.openUpdates = openUpdates
+        self.openPluginMarketplace = openPluginMarketplace
+        self.onChannelSelected = onChannelSelected
+        self.isPluginMarketplaceActive = isPluginMarketplaceActive
         self.openMemberDirectory = openMemberDirectory
         self.openChannelSettings = openChannelSettings
         self.inviteToChannel = inviteToChannel
@@ -180,6 +192,9 @@ public struct ChannelListView: View {
                                 readStateErrorRow(copy: copy)
                             }
 
+                            if openPluginMarketplace != nil {
+                                pluginMarketplaceRow
+                            }
                             channelsSection(copy: copy)
                             directMessagesSection(copy: copy)
                         }
@@ -265,6 +280,29 @@ public struct ChannelListView: View {
         MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
     }
 
+    private var pluginMarketplaceRow: some View {
+        Button {
+            openPluginMarketplace?()
+        } label: {
+            HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
+                Image(systemName: "puzzlepiece.extension")
+                    .frame(width: MomoTheme.Sidebar.actionSize)
+                Text(language == .korean ? "플러그인" : "Plugins")
+                    .font(MomoTheme.Sidebar.rowFont)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, MomoTheme.Sidebar.rowHorizontalPadding)
+            .frame(maxWidth: .infinity, minHeight: MomoTheme.Sidebar.rowMinimumHeight, alignment: .leading)
+            .background(
+                isPluginMarketplaceActive ? MomoTheme.Sidebar.selectionBackground : Color.clear,
+                in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("sidebar-plugin-marketplace")
+    }
+
     private var visibleChannelMembers: [Member] {
         viewModel.activeMembers()
     }
@@ -333,6 +371,15 @@ public struct ChannelListView: View {
                 workspaceMenuButton(copy.serverSettings, systemImage: "gearshape") {
                     showWorkspaceMenu = false
                     openWorkspaceSettings?()
+                }
+                if openPluginMarketplace != nil {
+                    workspaceMenuButton(
+                        language == .korean ? "플러그인" : "Plugins",
+                        systemImage: "puzzlepiece.extension"
+                    ) {
+                        showWorkspaceMenu = false
+                        openPluginMarketplace?()
+                    }
                 }
                 workspaceMenuButton(copy.inviteMembers, systemImage: "person.badge.plus") {
                     showWorkspaceMenu = false
@@ -583,6 +630,7 @@ public struct ChannelListView: View {
 
         HStack(spacing: MomoTheme.Sidebar.compactSpacing) {
             Button {
+                onChannelSelected?(channel.id)
                 Task { await viewModel.selectChannel(channel.id) }
             } label: {
                 HStack(spacing: MomoTheme.Sidebar.standardSpacing) {

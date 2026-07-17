@@ -38,9 +38,18 @@ enum MomoPluginCatalogFilter: String, CaseIterable, Identifiable {
 }
 
 struct MomoPluginCatalogItem: Identifiable, Hashable {
+    enum Category: String, CaseIterable {
+        case featured
+        case productivity
+        case knowledge
+        case developer
+    }
+
     let id: String
     let name: String
     let systemImage: String
+    let category: Category
+    let isFeatured: Bool
     let koreanSummary: String
     let englishSummary: String
     let koreanCapabilities: [String]
@@ -51,11 +60,11 @@ struct MomoPluginCatalogItem: Identifiable, Hashable {
     }
 
     static let recommended: [MomoPluginCatalogItem] = [
-        .init(id: "google-drive", name: "Google Drive", systemImage: "externaldrive", koreanSummary: "문서를 찾고 결과물을 저장하거나 링크로 공유합니다.", englishSummary: "Find documents, save deliverables, and share links.", koreanCapabilities: ["검색", "업로드", "공유"], englishCapabilities: ["Search", "Upload", "Share"]),
-        .init(id: "google-calendar", name: "Google Calendar", systemImage: "calendar", koreanSummary: "일정을 확인하고 승인 후 새 일정을 만듭니다.", englishSummary: "Check schedules and create events after approval.", koreanCapabilities: ["일정 조회", "일정 생성"], englishCapabilities: ["Read events", "Create events"]),
-        .init(id: "gmail", name: "Gmail", systemImage: "envelope", koreanSummary: "메일과 스레드를 찾고 승인 가능한 초안을 준비합니다.", englishSummary: "Find mail and prepare approval-ready drafts.", koreanCapabilities: ["메일 검색", "초안"], englishCapabilities: ["Search mail", "Draft"]),
-        .init(id: "github", name: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", koreanSummary: "이슈, PR, 코드 변경 상태를 채널에서 다룹니다.", englishSummary: "Work with issues, pull requests, and code activity.", koreanCapabilities: ["이슈", "PR", "코드"], englishCapabilities: ["Issues", "PRs", "Code"]),
-        .init(id: "notion", name: "Notion", systemImage: "doc.text", koreanSummary: "팀 문서를 검색하고 새 문서 초안을 만듭니다.", englishSummary: "Search team knowledge and draft new pages.", koreanCapabilities: ["문서 검색", "문서 초안"], englishCapabilities: ["Search pages", "Draft pages"]),
+        .init(id: "google-drive", name: "Google Drive", systemImage: "externaldrive", category: .featured, isFeatured: true, koreanSummary: "문서를 찾고 결과물을 저장하거나 링크로 공유합니다.", englishSummary: "Find documents, save deliverables, and share links.", koreanCapabilities: ["검색", "업로드", "공유"], englishCapabilities: ["Search", "Upload", "Share"]),
+        .init(id: "google-calendar", name: "Google Calendar", systemImage: "calendar", category: .productivity, isFeatured: true, koreanSummary: "일정을 확인하고 승인 후 새 일정을 만듭니다.", englishSummary: "Check schedules and create events after approval.", koreanCapabilities: ["일정 조회", "일정 생성"], englishCapabilities: ["Read events", "Create events"]),
+        .init(id: "gmail", name: "Gmail", systemImage: "envelope", category: .productivity, isFeatured: false, koreanSummary: "메일과 스레드를 찾고 승인 가능한 초안을 준비합니다.", englishSummary: "Find mail and prepare approval-ready drafts.", koreanCapabilities: ["메일 검색", "초안"], englishCapabilities: ["Search mail", "Draft"]),
+        .init(id: "github", name: "GitHub", systemImage: "chevron.left.forwardslash.chevron.right", category: .developer, isFeatured: true, koreanSummary: "이슈, PR, 코드 변경 상태를 채널에서 다룹니다.", englishSummary: "Work with issues, pull requests, and code activity.", koreanCapabilities: ["이슈", "PR", "코드"], englishCapabilities: ["Issues", "PRs", "Code"]),
+        .init(id: "notion", name: "Notion", systemImage: "doc.text", category: .knowledge, isFeatured: true, koreanSummary: "팀 문서를 검색하고 새 문서 초안을 만듭니다.", englishSummary: "Search team knowledge and draft new pages.", koreanCapabilities: ["문서 검색", "문서 초안"], englishCapabilities: ["Search pages", "Draft pages"]),
     ]
 }
 

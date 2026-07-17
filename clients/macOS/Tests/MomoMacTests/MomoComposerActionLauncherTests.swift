@@ -36,4 +36,18 @@ final class MomoComposerActionLauncherTests: XCTestCase {
         XCTAssertEqual(drafts.map(\.name), ["report.pdf", "demo.mov"])
         XCTAssertEqual(drafts.map(\.systemImage), ["doc.richtext", "video"])
     }
+
+    func testRecommendedPluginCatalogHasStableUniqueEntriesAndCategories() {
+        let plugins = MomoPluginCatalogItem.recommended
+
+        XCTAssertEqual(
+            plugins.map(\.id),
+            ["google-drive", "google-calendar", "gmail", "github", "notion"]
+        )
+        XCTAssertEqual(Set(plugins.map(\.id)).count, plugins.count)
+        XCTAssertTrue(plugins.allSatisfy { !$0.name.isEmpty && !$0.capabilities(for: .korean).isEmpty })
+        XCTAssertTrue(plugins.contains { $0.category == .developer })
+        XCTAssertTrue(plugins.contains { $0.category == .knowledge })
+        XCTAssertTrue(plugins.contains { $0.isFeatured })
+    }
 }

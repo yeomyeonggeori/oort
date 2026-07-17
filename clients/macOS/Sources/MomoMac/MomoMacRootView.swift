@@ -25,6 +25,11 @@ enum MomoMemberDirectoryNavigation {
     }
 }
 
+private enum MomoMacPrimaryDestination {
+    case channel
+    case plugins
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var quickTooltipPresenter = MomoQuickTooltipPresenter()
@@ -44,6 +49,7 @@ public struct MomoMacRootView: View {
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
     @State private var showDownloadsPopover = false
+    @State private var primaryDestination = MomoMacPrimaryDestination.channel
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoAppearancePreference.appStorageKey) private var appearanceRaw = MomoAppearancePreference.system.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
@@ -178,6 +184,9 @@ public struct MomoMacRootView: View {
         .onChange(of: viewModel.readStatesByChannel) { _, states in
             MomoDockUnreadBadgeController.apply(states)
         }
+        .onChange(of: viewModel.selectedChannelId) { _, _ in
+            primaryDestination = .channel
+        }
         .onDisappear {
             MomoDockUnreadBadgeController.clear()
         }
@@ -205,7 +214,7 @@ public struct MomoMacRootView: View {
 
         return ZStack(alignment: .trailing) {
             HStack(spacing: 0) {
-                messageTimeline
+                primaryContent(copy: copy)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(!blocksTimelineForMemberOverlay)
                     .accessibilityHidden(blocksTimelineForMemberOverlay)
@@ -323,6 +332,15 @@ public struct MomoMacRootView: View {
             openUpdates: {
                 openDetailPane(.updates)
             },
+            openPluginMarketplace: {
+                openPluginMarketplace()
+            },
+            onChannelSelected: { _ in
+                withAnimation(layoutAnimation) {
+                    primaryDestination = .channel
+                }
+            },
+            isPluginMarketplaceActive: primaryDestination == .plugins,
             openMemberDirectory: {
                 openWorkspaceMemberInspector()
             },
@@ -352,12 +370,41 @@ public struct MomoMacRootView: View {
             onOpenMemberDirectory: memberDirectoryAction,
             focusComposerRequest: composerFocusRequest,
             serverIdentity: sessionChrome?.summary.serverURLString,
+            onOpenPluginMarketplace: {
+                openPluginMarketplace()
+            },
             onChannelHeaderHeightChange: { newHeight in
                 guard newHeight > 0, abs(channelHeaderHeight - newHeight) > 0.5 else { return }
                 channelHeaderHeight = newHeight
             }
         )
             .frame(minWidth: 0)
+    }
+
+    @ViewBuilder
+    private func primaryContent(copy: MomoWorkspaceCopy) -> some View {
+        switch primaryDestination {
+        case .channel:
+            messageTimeline
+        case .plugins:
+            MomoPluginMarketplaceView(
+                language: language,
+                serverIdentity: sessionChrome?.summary.serverURLString,
+                workspaceID: viewModel.workspaceId,
+                memberID: viewModel.currentNavigationMemberID,
+                onClose: {
+                    primaryDestination = .channel
+                }
+            )
+        }
+    }
+
+    private func openPluginMarketplace() {
+        withAnimation(layoutAnimation) {
+            detailPanePresentation.close()
+            showMemberInspector = false
+            primaryDestination = .plugins
+        }
     }
 
     @ToolbarContentBuilder
@@ -672,22 +719,27 @@ public struct MomoMacRootView: View {
             },
             selectChannel: { number in
                 quickSwitcherPresentation.dismiss()
+                activateChannelSurface()
                 Task { await viewModel.selectChannel(shortcutNumber: number) }
             },
             navigateBackward: {
                 quickSwitcherPresentation.dismiss()
+                activateChannelSurface()
                 Task { await viewModel.navigateChannelHistoryBackward() }
             },
             navigateForward: {
                 quickSwitcherPresentation.dismiss()
+                activateChannelSurface()
                 Task { await viewModel.navigateChannelHistoryForward() }
             },
             navigateToPreviousUnread: {
                 quickSwitcherPresentation.dismiss()
+                activateChannelSurface()
                 Task { await viewModel.navigateToPreviousUnreadChannel() }
             },
             navigateToNextUnread: {
                 quickSwitcherPresentation.dismiss()
+                activateChannelSurface()
                 Task { await viewModel.navigateToNextUnreadChannel() }
             },
             presentShortcutHelp: {
@@ -701,6 +753,7 @@ public struct MomoMacRootView: View {
         quickSwitcherPresentation.dismiss()
         switch destination {
         case .channel(let id):
+            activateChannelSurface()
             Task { await viewModel.selectChannel(id) }
         case .member(let id):
             selectedProfileMemberID = id
@@ -712,12 +765,20 @@ public struct MomoMacRootView: View {
         showWorkspaceSearch = false
         switch destination {
         case .channel(let id):
+            activateChannelSurface()
             Task { await viewModel.selectChannel(id) }
         case .message(let channelID, let messageID):
+            activateChannelSurface()
             Task { await viewModel.focusMessage(messageID, in: channelID) }
         case .member(let id):
             selectedProfileMemberID = id
             openDetailPane(.memberProfile)
+        }
+    }
+
+    private func activateChannelSurface() {
+        withAnimation(layoutAnimation) {
+            primaryDestination = .channel
         }
     }
 
