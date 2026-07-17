@@ -9,11 +9,15 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Core"),
+        .package(url: "https://github.com/centrifugal/centrifuge-swift.git", exact: "0.9.0"),
     ],
     targets: [
         .target(
             name: "MomoiOSKit",
-            dependencies: [.product(name: "MomoCore", package: "Core")],
+            dependencies: [
+                .product(name: "MomoCore", package: "Core"),
+                .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
+            ],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

@@ -115,7 +115,7 @@ public struct MomoiOSRootView: View {
                 ProgressView("Connecting to momo")
                     .navigationTitle("momo")
             case .signedIn(let session, let bootstrap):
-                WorkspaceHomeView(session: session, bootstrap: bootstrap, signOut: model.signOut)
+                IOSWorkspaceView(session: session, bootstrap: bootstrap, signOut: model.signOut)
             }
         }
         .task { await model.restore() }
@@ -177,43 +177,4 @@ private struct LoginView: View {
     }
 }
 
-@MainActor
-private struct WorkspaceHomeView: View {
-    let session: IOSSession
-    let bootstrap: WorkspaceBootstrap
-    let signOut: @MainActor () -> Void
-
-    var body: some View {
-        Form {
-            Section("Workspace") {
-                LabeledContent("Name", value: bootstrap.workspace.name)
-                LabeledContent("Channels", value: bootstrap.channels.count.formatted())
-            }
-
-            Section {
-                if bootstrap.channels.isEmpty {
-                    ContentUnavailableView(
-                        "No channels yet",
-                        systemImage: "number",
-                        description: Text("Create a channel in momo on Mac to get started.")
-                    )
-                } else {
-                    Label("Open momo on Mac to browse these channels.", systemImage: "number")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Signed in") {
-                LabeledContent("Member", value: session.member.displayName)
-                LabeledContent("Server", value: session.baseURL.host ?? session.baseURL.absoluteString)
-            }
-        }
-        .navigationTitle(bootstrap.workspace.name)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Sign out", action: signOut)
-            }
-        }
-    }
-}
 #endif
