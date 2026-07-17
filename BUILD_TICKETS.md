@@ -2080,6 +2080,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `macos-ui` 게이트 PASS(오케스트레이터 §9 부하 체크 후) + pre-flight 유지. 상세: issue #449 본문(패킷 겸용).
 - 랜딩: PR #450 squash `df0bc00`(2026-07-17). 게이트 3차 PASS(테스트 327/0). 오케스트레이터 후속 커밋: 캐노니컬 21장 게이트 환경 재기록(worker 셸 폰트 렌더 편차 — RECORD는 오케스트레이터 몫으로 환류) + selection 토큰 파급분(ChannelRoster 6·QuickSwitcher 4). 발견: macos-ui 프로파일에 `make up` 부재(선재 게이트 공백, 소형 티켓 후속).
 
+### ☐ MOMO-449 (`#451`) 수용기준 — SE-04C GitHub grant→tool policy 왕복 `[runtime-agent]` · 의존: MOMO-410
+- [ ] adapter가 packet 조립 시 유효 grant 있는 플러그인만 MCP 접속 기술자(url/transport/egressDomains/tools risk·approvalTier)를 tool policy에 포함 — fail-closed(D5), 자격증명 필드 자체 부재(ADR-0004/0113).
+- [ ] revoke→다음 조립 즉시 탈락(장기 캐시 금지). malformed manifest는 해당 플러그인만 skip.
+- [ ] hermes 계약 테스트(mock REST) + `scripts/verify_plugin_grant_roundtrip.sh`(github.json 등재→install→grant→포함→revoke→탈락, 실 GitHub 호출 없음).
+- [ ] 호스트 커스터디 전제 문서화(D6 항목). 상세: issue #451 본문(패킷 겸용).
+
+### ☐ MOMO-450 (`#452`) 수용기준 — macos-ui 게이트 스택 자급 `[swift]` · 의존: 없음 (선재 공백)
+- [ ] macos-ui 프로파일 조립에 `add_runtime_bootstrap_commands` 추가 + teardown 기본 동작이 회수 확인 + §9 load 게이트 적용 확인.
+- [ ] drift guard 테스트 통과 + evidence 체크리스트에 compose up 단계 표기. 상세: issue #452 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
