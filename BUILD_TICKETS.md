@@ -2130,10 +2130,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 도메인 확정 후 multi-tenant 매핑은 후속. 상세: issue #470 본문(패킷 겸용).
 - 랜딩: PR #472 squash `69ace59`(2026-07-17). 오케스트레이터 실런: LinkShort 테스트 4/4 + verify_linkshort PASS(healthz 200/redirect 302/invalid 400/포트 회수) + drift guard PASS. 도메인 확정 시 DNS만 — multi-tenant 매핑은 그때 후속.
 
-### ☐ MOMO-461 (`#471`) 수용기준 — ADR-0120 P-3 PushRelay v0 `[swift]` · 의존: P-1/P-2 (기랜딩)
-- [ ] `relay/PushRelay`: /v1/push(momo.push.dispatch.v1) — env 레지스트리(server_id→Ed25519 공개키) 서명 검증 403/rate limit 429, APNSSender 프로토콜(실 ES256 HTTP/2 + Stub), APNs status passthrough(410/400 invalidate 정합), id-only 유지.
-- [ ] NotifierWorker 서명 첨부(env 옵트인, mock 호환 유지) + keygen + verify_push_relay.sh(Stub·호스트 프로세스) + PUSH_RELAY_RUNBOOK.
-- [ ] 실 .p8 smoke는 오케스트레이터(자격증명 실검증 2026-07-17 완료: 샌드박스 400 BadDeviceToken 판정). 상세: issue #471 본문(패킷 겸용).
+### ☑ MOMO-461 (`#471`) 수용기준 — ADR-0120 P-3 PushRelay v0 `[swift]` · 의존: P-1/P-2 (기랜딩)
+- [x] `relay/PushRelay`: /v1/push(momo.push.dispatch.v1) — env 레지스트리(server_id→Ed25519 공개키) 서명 검증 403/rate limit 429, APNSSender 프로토콜(실 ES256 HTTP/2 + Stub), APNs status passthrough(410/400 invalidate 정합), id-only 유지.
+- [x] NotifierWorker 서명 첨부(env 옵트인, mock 호환 유지) + keygen + verify_push_relay.sh(Stub·호스트 프로세스) + PUSH_RELAY_RUNBOOK.
+- [x] 실 .p8 smoke는 오케스트레이터(자격증명 실검증 2026-07-17 완료: 샌드박스 400 BadDeviceToken 판정). 상세: issue #471 본문(패킷 겸용).
+- 랜딩: PR #473 squash `94b62bc`(2026-07-17). 실런: PushRelay 4/4+Notifier 3/3 테스트, verify_push_relay PASS(서명/403/429/id-only), **실 .p8 end-to-end smoke PASS**(서명 dispatch→ES256→APNs 샌드박스 apns_id 발급+400 BadDeviceToken passthrough). 후속 노트: push-type alert+무alert 조합은 P-4(iOS 확장) 시점 조정, prod에서 stub sender 거부 하드닝 후보.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
