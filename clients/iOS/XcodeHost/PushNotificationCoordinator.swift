@@ -74,6 +74,8 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
 
     func activate(session: IOSSession) async {
         activeSession = session
+        retryOnNextForeground = false
+        usedForegroundRetry = false
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         var authorized = Self.isAuthorized(settings.authorizationStatus)
