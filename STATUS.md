@@ -3,6 +3,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-456 macOS center-pane plugin marketplace UX (2026-07-17)
+
+- 사이드바 `플러그인`, 워크스페이스 메뉴, composer `+ > 플러그인 둘러보기`가 모두 대화 영역을 대체하는 하나의 가운데 카탈로그로 연결된다. 검색, 워크스페이스/개인 범위, 분류, 설치됨 필터와 Drive/Calendar/Gmail/GitHub/Notion 후보를 제공한다.
+- 설치/제거 선택은 서버 credential 없이 이 Mac에만 저장하는 UX shell이다. 실제 registry grant/OAuth 연결은 기존 엔진 계약을 그대로 이어받으며, Codex 화면의 브랜드 에셋을 복제하지 않고 공식 제공사 에셋을 받을 때까지 semantic SF Symbol을 사용한다.
+
 ## MOMO-449 GitHub grant → Context Packet tool policy (2026-07-17)
 
 - Hermes adapter가 packet마다 agent job의 위임 사용자·채널을 이용해 plugin projection을 재조회하고, 유효 grant의 allowlisted MCP descriptor만 `context_packet_projection.tool_policy`에 포함한다. revoke는 다음 packet에 즉시 반영되고 조회/descriptor 오류는 플러그인 단위 또는 전체 기본 거부한다.

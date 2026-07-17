@@ -2098,6 +2098,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 세션 store 단위 테스트 2건 신설(기본 자격/저장·삭제 왕복) — 22/22 PASS, pre-flight 0.
 - 랜딩: PR #459 squash `65a55ba`(2026-07-17). 즉시 완화로 기존 키체인 항목은 오케스트레이터가 선삭제.
 
+### ☑ MOMO-456 (`#461`) 수용기준 — macOS center-pane plugin marketplace UX `[swift]` · 의존: MOMO-410
+- [x] sidebar, workspace menu, composer `+`의 세 진입점이 동일한 center-pane catalog로 연결된다.
+- [x] 검색, workspace/personal scope, category, installed-only filter와 Drive/Calendar/Gmail/GitHub/Notion 설치/제거 shell을 제공한다.
+- [x] 선택 상태는 server credential 없이 local-only로 저장하고 실제 registry grant/OAuth 연결 전임을 화면에 명시한다.
+- [x] provider/Codex 브랜드 에셋을 복제하지 않고 공식 브랜드 에셋 적용 전까지 semantic SF Symbol을 사용한다.
+- [x] 보안·correctness·성능·접근성 리뷰 Blocker 0 / High 0, macOS 330 tests PASS.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

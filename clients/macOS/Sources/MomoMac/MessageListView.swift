@@ -39,6 +39,7 @@ public struct MessageListView: View {
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private let focusComposerRequest: UInt64
     private let onChannelHeaderHeightChange: (CGFloat) -> Void
+    private let onOpenPluginMarketplace: () -> Void
     private let serverIdentity: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
@@ -82,6 +83,7 @@ public struct MessageListView: View {
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
         self.onChannelHeaderHeightChange = { _ in }
+        self.onOpenPluginMarketplace = {}
     }
 
     init(
@@ -91,6 +93,7 @@ public struct MessageListView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
+        onOpenPluginMarketplace: @escaping () -> Void = {},
         onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
     ) {
         self.viewModel = viewModel
@@ -99,6 +102,7 @@ public struct MessageListView: View {
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
+        self.onOpenPluginMarketplace = onOpenPluginMarketplace
         self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
 
@@ -857,7 +861,7 @@ public struct MessageListView: View {
         case .createPoll:
             localDraftSheet = .poll
         case .addPlugin:
-            localDraftSheet = .plugins
+            onOpenPluginMarketplace()
         }
     }
 

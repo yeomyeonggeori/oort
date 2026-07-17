@@ -59,6 +59,22 @@ public enum MomoTheme {
         public static let dropInset: CGFloat = 32
     }
 
+    public enum PluginMarketplace {
+        public static let contentMaximumWidth: CGFloat = 1_080
+        public static let scopePickerWidth: CGFloat = 220
+        public static let gridMinimumWidth: CGFloat = 360
+        public static let emptyMinimumHeight: CGFloat = 260
+        public static let rowMinimumHeight: CGFloat = 96
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let edgeInset: CGFloat = 32
+        public static let searchBackground = MomoTheme.Onboarding.fieldBackground
+        public static let iconBackground = Color.accentColor.opacity(0.12)
+        public static let iconForeground = Color.accentColor
+    }
+
     /// First-run and server-session entry. A single width contract keeps the
     /// hero and authentication surface centered from compact to wide windows.
     public enum Onboarding {
