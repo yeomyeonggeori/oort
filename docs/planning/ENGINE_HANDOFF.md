@@ -15,12 +15,14 @@
 | A-5 | `ready` | **허들 UI 폴리시** | V-3 design High 2건(disabled 사유 키보드 접근성, 상태별 시각 증거) + 실창 QA | 폴리시 + 성재 실오디오 QA 동행 | MomoHuddle*.swift |
 | A-6 | `ready`(엔진 완료 6d4dd97) | **파일 첨부 실업로드** | 컴포저 "파일 첨부"=로컬 초안만. **엔진 전제 완비**: Drive SA+공유 드라이브 실검증(2026-07-17), GWS-ARCHIVE 동결 해제 가능 | (엔진 선행 필요 — §B-1 업로드 API 랜딩 후) 첨부→업로드→메시지 연결 | 런북 §6.1, research/13-03 |
 
+| A-7 | `ready`(track/engine) | **검색 서버 승격** | MOMO-475 랜딩 — GET /v1/workspaces/:ws/search/messages(멤버십 필터·seq 커서·snippet+matchOffset) | 로컬 MomoWorkspaceSearchIndex의 메시지 소스를 paged server FTS로 교체(handoff 심: MomoWorkspaceSearchDestination 유지) | SearchRoutes.swift, openapi |
+
 ## B. UI 존재/요구 → 엔진 미구현 (엔진 트랙 역요청)
 
 | # | 상태 | 항목 | 실측 근거 | 엔진이 할 일 |
 |---|---|---|---|---|
 | B-1 | `in-progress`(MOMO-474 `#497`) | **첨부 업로드 API (GWS-ARCHIVE 해제)** | UI 로컬 초안 존재, 서버 업로드 경로 없음. SA·공유드라이브·boundary 전제 전부 실검증 완료 | AttachmentStore + resumable 업로드(클라 직송) + 메시지 연결 — ADR-0113 합류 티켓 |
-| B-2 | `in-progress`(MOMO-475 `#500`) | **워크스페이스 검색 서버 FTS** | macOS 검색=로컬 인덱스(정직 스코프 카피), `message_body_trgm_idx`는 스키마 기존재 | 검색 REST(권한 필터 포함) — MOMO-386의 서버 절반 |
+| B-2 | `done` → track/engine (main 대기) | **워크스페이스 검색 서버 FTS** | macOS 검색=로컬 인덱스(정직 스코프 카피), `message_body_trgm_idx`는 스키마 기존재 | 검색 REST(권한 필터 포함) — MOMO-386의 서버 절반 |
 | B-3 | `ready` | **전송 REST root_id 개방 확인/개방** | A-4의 전제. V-1 노트: "필요 시 동티켓 개방" | 메시지 전송 DTO의 root_id 수용 확인, 미개방 시 소형 티켓 |
 | B-4 | `ready` | **알림 음소거/설정 계약** | 설정 UI·서버 계약 양측 부재(판정은 notifier 한 곳 — P9 정합 필요) | 채널/워크스페이스 음소거 계약 설계(ADR 소형) 후 UI |
 
