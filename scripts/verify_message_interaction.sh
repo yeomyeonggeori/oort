@@ -179,6 +179,21 @@ api "$AUTHOR_TOKEN" PATCH "$MESSAGE_PATH" '{"body":"edited private body"}'
 expect_status 200 "author edit"
 printf '%s' "$RESPONSE_BODY" | jq -e --argjson seq "$MESSAGE_SEQ" \
   '.body == "edited private body" and .state == "edited" and .seq == $seq and (.editedAtMs > 0)' >/dev/null
+EDITED_AT_MS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.editedAtMs')"
+
+# Simulate a client restart/cold load: durable history must restore the edited
+# state and the exact edit timestamp instead of relying on the live event.
+api "$AUTHOR_TOKEN" GET "/v1/workspaces/$WS_A/channels/$CH_A/messages?after=$((MESSAGE_SEQ - 1))&limit=200"
+expect_status 200 "history restores edited message"
+printf '%s' "$RESPONSE_BODY" | jq -e \
+  --arg message "$MESSAGE_ID" --argjson seq "$MESSAGE_SEQ" --argjson edited "$EDITED_AT_MS" '
+  [.messages[]
+   | select((.id | ascii_downcase) == $message)
+   | select(.seq == $seq)
+   | select(.state == "edited")
+   | select(.body == "edited private body")
+   | select(.editedAtMs == $edited)
+   | select(.deletedAtMs == null)] | length == 1' >/dev/null
 
 api "$AUTHOR_TOKEN" PUT "$REACTION_PATH"
 expect_status 200 "reaction add"
@@ -252,10 +267,36 @@ api "$AUTHOR_TOKEN" DELETE "$MESSAGE_PATH"
 expect_status 200 "author delete"
 printf '%s' "$RESPONSE_BODY" | jq -e --argjson seq "$MESSAGE_SEQ" \
   '.state == "deleted" and .seq == $seq and (.deletedAtMs > 0) and (has("body") | not)' >/dev/null
+DELETED_AT_MS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.deletedAtMs')"
 api "$AUTHOR_TOKEN" PATCH "$MESSAGE_PATH" '{"body":"resurrect"}'
 expect_status 400 "edit after delete"
 api "$AUTHOR_TOKEN" DELETE "$MESSAGE_PATH"
 expect_status 200 "delete idempotent retry"
+
+assert_history_tombstone() {
+  local path="$1" label="$2"
+  api "$AUTHOR_TOKEN" GET "$path"
+  expect_status 200 "$label"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    --arg message "$MESSAGE_ID" --argjson seq "$MESSAGE_SEQ" \
+    --argjson edited "$EDITED_AT_MS" --argjson deleted "$DELETED_AT_MS" '
+    [.messages[]
+     | select((.id | ascii_downcase) == $message)
+     | select(.seq == $seq)
+     | select(.state == "deleted")
+     | select(.body == null)
+     | select(.editedAtMs == $edited)
+     | select(.deletedAtMs == $deleted)] | length == 1' >/dev/null
+}
+
+# A restarted/offline client may use any history cursor mode. All three must
+# retain the same explicit tombstone and durable mutation timestamps.
+HISTORY_PATH="/v1/workspaces/$WS_A/channels/$CH_A/messages"
+assert_history_tombstone "$HISTORY_PATH?limit=200" "default history restores tombstone"
+assert_history_tombstone "$HISTORY_PATH?after=$((MESSAGE_SEQ - 1))&limit=200" \
+  "after history restores tombstone"
+assert_history_tombstone "$HISTORY_PATH?before=$((HEAD_SEQ + 1))&limit=200" \
+  "before history restores tombstone"
 
 got="$(sql_value <<SQL
 SELECT (body IS NULL)::int || ':' || (state='deleted')::int || ':' || seq || ':' ||
@@ -359,4 +400,4 @@ SQL
 )"
 [ "$got" = "4" ] || { echo "[interaction] FAIL FORCE RLS metadata: $got" >&2; exit 1; }
 
-echo "MOMO-480 message edit/delete/reaction + delivered realtime history + snapshot + RLS PASS"
+echo "MOMO-481 message interaction realtime + replay-safe durable history + snapshot + RLS PASS"

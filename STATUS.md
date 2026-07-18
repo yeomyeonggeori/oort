@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-481 상호작용 Core replay + history 재시작 수렴 (2026-07-19)
+
+- Core replay는 `message.edited`/`message.deleted`/`reaction.added`/`reaction.removed`를 `thread.updated`와 같은 비순번 projection으로 커서 대조 전에 전달한다. 동일 seq `message.new` 순번·중복 방어와 replay 커서는 그대로이며, Core 테스트가 구 seq 4종 전달·커서 불변과 edit 치환/delete tombstone/reaction 집합 중복 적용 멱등을 단정한다.
+- 서버 history의 after/before/기본 세 변형은 삭제 행을 tombstone으로 유지하고 저장된 `state`/`editedAtMs`/`deletedAtMs`를 투영한다. OpenAPI와 `verify_message_interaction.sh`도 수정 cold-load 및 세 cursor 모드의 삭제 cold-load 수렴을 확인하도록 정렬했다.
+- Core 32 tests와 server 112 tests PASS. verifier bash 정적 검증은 이 goal에서 수행하며 격리 Docker `runtime-db` 실행은 오케스트레이터 담당이라 그 실행 전까지 `runtime-unverified`다. 실 2-client WebSocket E2E는 수용기준대로 C-4 후속 범위다.
+
 ## MOMO-480 상호작용 realtime Centrifugo version 드랍 수정 (2026-07-19)
 
 - 기존 메시지 `seq`를 재사용하는 `message.edited`/`message.deleted`/`reaction.added`/`reaction.removed` outbox envelope에서 Centrifugo `version`을 제거했다. 이벤트의 `data.seq`와 고유 `idempotency_key`는 유지하며, `message.new`가 이미 같은 version을 등록한 뒤 projection이 무언 드랍되던 경로만 닫았다.
