@@ -62,12 +62,15 @@ struct MomoPluginMarketplaceView: View {
             .buttonStyle(.plain)
             .help(isKorean ? "채널로 돌아가기" : "Back to channel")
 
-            VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.compactSpacing) {
+            HStack(alignment: .firstTextBaseline, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
                 Text(isKorean ? "플러그인" : "Plugins")
                     .font(.title2.weight(.semibold))
+                    .fixedSize(horizontal: true, vertical: false)
                 Text(isKorean ? "업무 도구를 연결하고 에이전트와 함께 사용하세요" : "Connect work tools and use them with agents")
                     .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Spacer()
             Button {
@@ -159,7 +162,11 @@ struct MomoPluginMarketplaceView: View {
                 Text(isKorean ? "개인용" : "Personal").tag(Scope.personal)
             }
             .pickerStyle(.segmented)
-            .frame(width: MomoTheme.PluginMarketplace.scopePickerWidth)
+            .labelsHidden()
+            .frame(
+                width: MomoTheme.PluginMarketplace.scopePickerWidth,
+                alignment: .leading
+            )
             .accessibilityLabel(isKorean ? "플러그인 범위" : "Plugin scope")
 
             Spacer()

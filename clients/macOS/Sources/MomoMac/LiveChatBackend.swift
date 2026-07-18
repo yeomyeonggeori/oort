@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing {
+public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var workspaceProfile: Workspace?
@@ -26,6 +26,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     private var members: [Member] = []
     private var channels: [Channel] = []
     private var messagesByChannel: [ChannelID: [Message]] = [:]
+    private var reactionsByMessage: [MessageID: [String: Set<MemberID>]] = [:]
     private var seqByChannel: [ChannelID: Int64] = [:]
     private var sentClientMsgIds: [ChannelID: Set<UUID>] = [:]
     private var readCursorsByMember: [MemberID: [ChannelID: Int64]] = [:]
@@ -976,9 +977,46 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     public func addReaction(_ id: MessageID, emoji: String) async throws {
         for ch in messagesByChannel.keys where messagesByChannel[ch]?.contains(where: { $0.id == id }) == true {
             let author = members.first(where: { $0.kind == .human })?.id ?? MemberID()
+            reactionsByMessage[id, default: [:]][emoji, default: []].insert(author)
             emit(.reaction(ReactionDelta(action: .added, messageId: id, memberId: author, emoji: emoji)), to: ch)
             return
         }
+        throw BackendError.problem(status: 404, title: "not found", detail: "message \(id)")
+    }
+
+    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] {
+        let messageIDs = Set((messagesByChannel[channel] ?? []).map(\.id))
+        return reactionsByMessage.filter { messageIDs.contains($0.key) }
+    }
+
+    func removeReaction(_ id: MessageID, emoji: String) async throws {
+        for ch in messagesByChannel.keys where messagesByChannel[ch]?.contains(where: { $0.id == id }) == true {
+            let author = members.first(where: { $0.kind == .human })?.id ?? MemberID()
+            reactionsByMessage[id]?[emoji]?.remove(author)
+            if reactionsByMessage[id]?[emoji]?.isEmpty == true {
+                reactionsByMessage[id]?[emoji] = nil
+            }
+            if reactionsByMessage[id]?.isEmpty == true {
+                reactionsByMessage[id] = nil
+            }
+            emit(.reaction(ReactionDelta(action: .removed, messageId: id, memberId: author, emoji: emoji)), to: ch)
+            return
+        }
+        throw BackendError.problem(status: 404, title: "not found", detail: "message \(id)")
+    }
+
+    func deleteMessage(_ id: MessageID) async throws -> Message {
+        for (channel, messages) in messagesByChannel {
+            guard let index = messages.firstIndex(where: { $0.id == id }) else { continue }
+            var tombstone = messages[index]
+            tombstone.state = .deleted
+            tombstone.deletedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
+            messagesByChannel[channel]?[index] = tombstone
+            reactionsByMessage[id] = nil
+            emit(.messageDeleted(id), to: channel)
+            return tombstone
+        }
+        throw BackendError.problem(status: 404, title: "not found", detail: "message \(id)")
     }
 
     public func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {

@@ -144,12 +144,17 @@ public final class ChatViewModel: ObservableObject {
     private let readStateBackend: (any ReadStateBackend)?
     private let agentTransport: any AgentTransport
     private let workRunBackend: (any AgentWorkRunBackend)?
+    private let messageInteractionBackend: (any MomoMessageInteractionBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
     private let readStateDebounce: Duration
     private let workspaceIdentityDefaults: UserDefaults
     public let usesServerRosterSourceOfTruth: Bool
+
+    public var supportsMessageInteractions: Bool {
+        messageInteractionBackend != nil
+    }
 
     public var allowsLocalProfileEditing: Bool {
         !usesServerRosterSourceOfTruth
@@ -175,6 +180,11 @@ public final class ChatViewModel: ObservableObject {
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
     @Published private(set) var historyLoadingChannels: Set<ChannelID> = []
+    @Published private var messageReactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
+    @Published private(set) var messageInteractionErrors: [MessageID: MomoMessageInteractionError] = [:]
+    private var reactionMutationsInFlight: Set<String> = []
+    private var reactionSnapshotTokens: [ChannelID: UUID] = [:]
+    private var bufferedReactionDeltasByChannel: [ChannelID: [ReactionDelta]] = [:]
 
     // Live agent state for the selected channel.
     /// In-flight `agent.partial` buffers, keyed by run, for AgentPartialView (L4 §5.2).
@@ -232,6 +242,7 @@ public final class ChatViewModel: ObservableObject {
 
     private var channelSubscriptions: [ChannelID: Task<Void, Never>] = [:]
     private var channelSubscriptionTokens: [ChannelID: UUID] = [:]
+    private var channelSubscriptionReadyTokens: [ChannelID: UUID] = [:]
     private var realtimeStatusSubscription: Task<Void, Never>?
     private var realtimeStatusSubscriptionToken: UUID?
     private var readStateSubscription: Task<Void, Never>?
@@ -249,6 +260,7 @@ public final class ChatViewModel: ObservableObject {
     private var typingStopTasks: [ChannelID: Task<Void, Never>] = [:]
     private var agentCredentialRefreshes: [MemberID: AgentCredentialRefresh] = [:]
     private var failedMessageSend: PendingMessageSend?
+    private var failedReplySends: [MessageID: PendingMessageSend] = [:]
     private var workspaceIdentityCacheScope: String?
     private var workspaceIdentitySessionGeneration: UInt64 = 0
     private var workspaceIdentityLoadGeneration: UInt64 = 0
@@ -289,6 +301,7 @@ public final class ChatViewModel: ObservableObject {
         self.readStateBackend = chat as? any ReadStateBackend
         self.agentTransport = agentTransport
         self.workRunBackend = chat as? any AgentWorkRunBackend
+        self.messageInteractionBackend = chat as? any MomoMessageInteractionBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -314,6 +327,7 @@ public final class ChatViewModel: ObservableObject {
         channelSubscriptions.values.forEach { $0.cancel() }
         channelSubscriptions = [:]
         channelSubscriptionTokens = [:]
+        channelSubscriptionReadyTokens = [:]
         readStateSubscription?.cancel()
         readStateSubscription = nil
         readStateSubscriptionToken = nil
@@ -464,6 +478,7 @@ public final class ChatViewModel: ObservableObject {
         realtimeStatusSubscription?.cancel()
         channelSubscriptions = [:]
         channelSubscriptionTokens = [:]
+        channelSubscriptionReadyTokens = [:]
         readStateSubscription = nil
         readStateSubscriptionToken = nil
         readStateRefreshTask = nil
@@ -514,6 +529,12 @@ public final class ChatViewModel: ObservableObject {
         composerDraft = ""
         mentionNotice = nil
         failedMessageSend = nil
+        failedReplySends = [:]
+        messageReactionMembers = [:]
+        messageInteractionErrors = [:]
+        reactionMutationsInFlight = []
+        reactionSnapshotTokens = [:]
+        bufferedReactionDeltasByChannel = [:]
         workRunsByChannel = [:]
         workRunLoadingChannels = []
         workRunDetailLoadingIds = []
@@ -1237,7 +1258,29 @@ public final class ChatViewModel: ObservableObject {
 
     private func loadHistory(channel: ChannelID) async {
         historyLoadingChannels.insert(channel)
-        defer { historyLoadingChannels.remove(channel) }
+        let reactionSnapshotToken: UUID? = if messageInteractionBackend != nil {
+            UUID()
+        } else {
+            nil
+        }
+        if let reactionSnapshotToken {
+            // Open realtime first, then buffer reaction deltas until the initial
+            // snapshot is installed so there is no snapshot-to-subscribe gap.
+            reactionSnapshotTokens[channel] = reactionSnapshotToken
+            bufferedReactionDeltasByChannel[channel] = []
+            await ensureChannelSubscriptionReady(channel: channel)
+        }
+        defer {
+            historyLoadingChannels.remove(channel)
+            if let reactionSnapshotToken,
+               reactionSnapshotTokens[channel] == reactionSnapshotToken {
+                reactionSnapshotTokens[channel] = nil
+                let bufferedDeltas = bufferedReactionDeltasByChannel.removeValue(forKey: channel) ?? []
+                for delta in bufferedDeltas {
+                    applyReaction(delta)
+                }
+            }
+        }
         do {
             let history = try await chat.history(channel: channel, after: nil, limit: 200)
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
@@ -1245,6 +1288,13 @@ public final class ChatViewModel: ObservableObject {
                 hydrateSidecars(from: message)
                 reconcileFinalMessage(message)
                 reconcileAgentWorking(from: message)
+            }
+            if let messageInteractionBackend {
+                let snapshot = try await messageInteractionBackend.reactionSnapshot(channel: channel)
+                guard reactionSnapshotTokens[channel] == reactionSnapshotToken else { return }
+                for message in history {
+                    messageReactionMembers[message.id] = snapshot[message.id]
+                }
             }
         } catch {
             reportConnectionError(error)
@@ -1465,12 +1515,15 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
     private func subscribe(
         channel: ChannelID,
         sessionGeneration: UInt64? = nil,
         workspaceID: WorkspaceID? = nil
-    ) {
-        guard channelSubscriptions[channel] == nil else { return }
+    ) -> UUID? {
+        if channelSubscriptions[channel] != nil {
+            return channelSubscriptionTokens[channel]
+        }
         let capturedSessionGeneration = sessionGeneration ?? workspaceIdentitySessionGeneration
         let capturedWorkspaceID = workspaceID ?? self.workspaceId
         let subscriptionToken = UUID()
@@ -1486,6 +1539,7 @@ public final class ChatViewModel: ObservableObject {
                     capturedSessionGeneration,
                     workspaceID: capturedWorkspaceID
                 ) else { return }
+                self.channelSubscriptionReadyTokens[channel] = subscriptionToken
                 for await event in events {
                     guard self.isSessionCurrent(
                         capturedSessionGeneration,
@@ -1500,6 +1554,16 @@ public final class ChatViewModel: ObservableObject {
                 ), !Self.isCancellation(error) else { return }
                 self.reportConnectionError(error)
             }
+        }
+        return subscriptionToken
+    }
+
+    private func ensureChannelSubscriptionReady(channel: ChannelID) async {
+        guard let token = subscribe(channel: channel) else { return }
+        while channelSubscriptionTokens[channel] == token,
+              channelSubscriptionReadyTokens[channel] != token,
+              !Task.isCancelled {
+            await Task.yield()
         }
     }
 
@@ -1548,19 +1612,21 @@ public final class ChatViewModel: ObservableObject {
             canRetry: false,
             message: "Retrying realtime; REST history remains available."
         )
-        await loadHistory(channel: channel)
-        if let statusProvider = chat as? any RealtimeStatusProvidingBackend {
-            await statusProvider.retryRealtime(channel: channel)
-        }
         channelSubscriptions[channel]?.cancel()
         channelSubscriptions[channel] = nil
         channelSubscriptionTokens[channel] = nil
+        channelSubscriptionReadyTokens[channel] = nil
+        if let statusProvider = chat as? any RealtimeStatusProvidingBackend {
+            await statusProvider.retryRealtime(channel: channel)
+        }
         subscribe(channel: channel)
+        await loadHistory(channel: channel)
         subscribeRealtimeStatus(channel: channel)
     }
 
     private func finishChannelSubscription(channel: ChannelID, token: UUID) {
         guard channelSubscriptionTokens[channel] == token else { return }
+        channelSubscriptionReadyTokens[channel] = nil
         channelSubscriptionTokens[channel] = nil
         channelSubscriptions[channel] = nil
     }
@@ -1739,14 +1805,215 @@ public final class ChatViewModel: ObservableObject {
         ))
     }
 
+    /// Sends a reply through the existing optimistic message path while preserving
+    /// the engine-owned root/reply identifiers.
+    public func sendReply(body: String, to root: Message, replyingTo target: Message? = nil) async -> Bool {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let rootID = root.rootId ?? root.id
+        let pending: PendingMessageSend
+        if let failed = failedReplySends[rootID], failed.draft.body == trimmed {
+            pending = failed
+            updateOptimisticMessage(
+                clientMsgId: failed.clientMsgId,
+                channel: root.channelId,
+                state: .sent
+            )
+        } else {
+            if let failed = failedReplySends.removeValue(forKey: rootID) {
+                removeOptimisticMessage(
+                    clientMsgId: failed.clientMsgId,
+                    channel: failed.draft.channelId
+                )
+            }
+            let clientMsgId = UUID()
+            let draft = DraftMessage(
+                channelId: root.channelId,
+                type: .text,
+                body: trimmed,
+                rootId: rootID,
+                replyToId: target?.id ?? root.id
+            )
+            pending = PendingMessageSend(
+                draft: draft,
+                clientMsgId: clientMsgId,
+                mentionedAgent: nil
+            )
+            let optimistic = optimisticMessage(
+                body: trimmed,
+                channel: root.channelId,
+                clientMsgId: clientMsgId,
+                rootId: rootID,
+                replyToId: target?.id ?? root.id
+            )
+            upsert(optimistic, channel: root.channelId)
+        }
+        return await performReplySend(pending, rootID: rootID)
+    }
+
+    private func performReplySend(
+        _ pending: PendingMessageSend,
+        rootID: MessageID
+    ) async -> Bool {
+        do {
+            let acked = try await chat.sendOptimistic(
+                pending.draft,
+                clientMsgId: pending.clientMsgId
+            )
+            upsert(acked, channel: pending.draft.channelId)
+            failedReplySends[rootID] = nil
+            messageInteractionErrors[rootID] = nil
+            if failedReplySends.isEmpty, failedMessageSend == nil {
+                clearConnectionErrorState(force: true)
+            }
+            return true
+        } catch {
+            failedReplySends[rootID] = pending
+            updateOptimisticMessage(
+                clientMsgId: pending.clientMsgId,
+                channel: pending.draft.channelId,
+                state: .failed
+            )
+            messageInteractionErrors[rootID] = .replyFailed
+            reportConnectionError(error, as: .sendFailed)
+            return false
+        }
+    }
+
+    public func editMessage(_ message: Message, body: String) async -> Bool {
+        guard supportsMessageInteractions, isCurrentMemberMessage(message) else { return false }
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        do {
+            let updated = try await chat.editMessage(message.id, body: trimmed)
+            upsert(updated, channel: updated.channelId)
+            messageInteractionErrors[message.id] = nil
+            return true
+        } catch {
+            messageInteractionErrors[message.id] = .editFailed
+            reportConnectionError(error, as: .actionFailed)
+            return false
+        }
+    }
+
+    public func deleteMessage(_ message: Message) async -> Bool {
+        guard isCurrentMemberMessage(message), let messageInteractionBackend else { return false }
+        do {
+            let tombstone = try await messageInteractionBackend.deleteMessage(message.id)
+            upsert(tombstone, channel: tombstone.channelId)
+            messageReactionMembers[message.id] = nil
+            messageInteractionErrors[message.id] = nil
+            return true
+        } catch {
+            messageInteractionErrors[message.id] = .deleteFailed
+            reportConnectionError(error, as: .actionFailed)
+            return false
+        }
+    }
+
+    public func reactions(for message: Message) -> [MomoMessageReaction] {
+        let currentMemberID = currentHumanMember?.id
+        return (messageReactionMembers[message.id] ?? [:])
+            .map { emoji, memberIDs in
+                MomoMessageReaction(
+                    emoji: emoji,
+                    memberIDs: memberIDs,
+                    isSelectedByCurrentMember: currentMemberID.map(memberIDs.contains) ?? false
+                )
+            }
+            .filter { $0.count > 0 }
+            .sorted { $0.emoji < $1.emoji }
+    }
+
+    public func toggleReaction(_ emoji: String, on message: Message) async {
+        guard !message.isDeleted,
+              let memberID = currentHumanMember?.id,
+              let messageInteractionBackend else { return }
+        let mutationKey = "\(message.id.description):\(emoji)"
+        guard reactionMutationsInFlight.insert(mutationKey).inserted else { return }
+        defer { reactionMutationsInFlight.remove(mutationKey) }
+        var reactions = messageReactionMembers[message.id] ?? [:]
+        var members = reactions[emoji] ?? []
+        let wasSelected = members.contains(memberID)
+        if wasSelected {
+            members.remove(memberID)
+            reactions[emoji] = members.isEmpty ? nil : members
+            messageReactionMembers[message.id] = reactions
+            do {
+                try await messageInteractionBackend.removeReaction(message.id, emoji: emoji)
+                messageInteractionErrors[message.id] = nil
+            } catch {
+                var latest = messageReactionMembers[message.id] ?? [:]
+                var latestMembers = latest[emoji] ?? []
+                latestMembers.insert(memberID)
+                latest[emoji] = latestMembers
+                messageReactionMembers[message.id] = latest
+                messageInteractionErrors[message.id] = .reactionFailed
+                reportConnectionError(error, as: .actionFailed)
+            }
+        } else {
+            members.insert(memberID)
+            reactions[emoji] = members
+            messageReactionMembers[message.id] = reactions
+            do {
+                try await chat.addReaction(message.id, emoji: emoji)
+                messageInteractionErrors[message.id] = nil
+            } catch {
+                var latest = messageReactionMembers[message.id] ?? [:]
+                var latestMembers = latest[emoji] ?? []
+                latestMembers.remove(memberID)
+                latest[emoji] = latestMembers.isEmpty ? nil : latestMembers
+                messageReactionMembers[message.id] = latest
+                messageInteractionErrors[message.id] = .reactionFailed
+                reportConnectionError(error, as: .actionFailed)
+            }
+        }
+    }
+
+    private func updateOptimisticMessage(
+        clientMsgId: UUID,
+        channel: ChannelID,
+        state: MessageState
+    ) {
+        guard var messages = messagesByChannel[channel],
+              let index = messages.firstIndex(where: { $0.clientMsgId == clientMsgId }) else {
+            return
+        }
+        messages[index].state = state
+        messagesByChannel[channel] = messages
+    }
+
+    private func removeOptimisticMessage(clientMsgId: UUID, channel: ChannelID) {
+        guard var messages = messagesByChannel[channel] else { return }
+        messages.removeAll { $0.clientMsgId == clientMsgId && $0.seq == nil }
+        messagesByChannel[channel] = messages
+    }
+
+    public func replies(to root: Message) -> [Message] {
+        let rootID = root.rootId ?? root.id
+        return (messagesByChannel[root.channelId] ?? [])
+            .filter { $0.rootId == rootID && $0.id != rootID }
+            .sorted(by: Self.seqOrder)
+    }
+
+    public func clearMessageInteractionError(_ messageID: MessageID) {
+        messageInteractionErrors[messageID] = nil
+    }
+
     /// Retries the exact failed request, including its `clientMsgId`, so a lost
     /// acknowledgement cannot create a duplicate durable message.
     public func retryFailedSend() async {
-        guard let failedMessageSend else {
-            clearConnectionErrorState(force: true)
+        if let failedMessageSend {
+            await performSend(failedMessageSend)
             return
         }
-        await performSend(failedMessageSend)
+        if let (rootID, failedReply) = failedReplySends.first {
+            _ = await performReplySend(failedReply, rootID: rootID)
+            return
+        }
+        if failedReplySends.isEmpty {
+            clearConnectionErrorState(force: true)
+        }
     }
 
     private func performSend(_ pending: PendingMessageSend) async {
@@ -2084,10 +2351,27 @@ public final class ChatViewModel: ObservableObject {
         case .typing(let delta):
             guard delta.channelId == channel, activeTimelineChannelId == channel else { return }
             applyTyping(delta)
-        case .reaction, .presence, .huddle:
+        case .reaction(let delta):
+            if reactionSnapshotTokens[channel] != nil {
+                bufferedReactionDeltasByChannel[channel, default: []].append(delta)
+            } else {
+                applyReaction(delta)
+            }
+        case .presence, .huddle:
             // Rendered elsewhere / not material to the v0 demo surfaces.
             break
         }
+    }
+
+    private func applyReaction(_ delta: ReactionDelta) {
+        var reactions = messageReactionMembers[delta.messageId] ?? [:]
+        var members = reactions[delta.emoji] ?? []
+        switch delta.action {
+        case .added: members.insert(delta.memberId)
+        case .removed: members.remove(delta.memberId)
+        }
+        reactions[delta.emoji] = members.isEmpty ? nil : members
+        messageReactionMembers[delta.messageId] = reactions
     }
 
     @discardableResult
@@ -2553,7 +2837,13 @@ public final class ChatViewModel: ObservableObject {
         )
     }
 
-    private func optimisticMessage(body: String, channel: ChannelID, clientMsgId: UUID) -> Message {
+    private func optimisticMessage(
+        body: String,
+        channel: ChannelID,
+        clientMsgId: UUID,
+        rootId: MessageID? = nil,
+        replyToId: MessageID? = nil
+    ) -> Message {
         Message(
             id: MessageID(),
             channelId: channel,
@@ -2563,6 +2853,8 @@ public final class ChatViewModel: ObservableObject {
             type: .text,
             state: .sent,
             body: body,
+            rootId: rootId,
+            replyToId: replyToId,
             clientMsgId: clientMsgId,
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000)
         )

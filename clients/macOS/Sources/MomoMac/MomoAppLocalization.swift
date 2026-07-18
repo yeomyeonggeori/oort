@@ -213,10 +213,143 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var messageSendFailed: String {
+        switch language {
+        case .korean: return "전송 실패"
+        case .english: return "Send failed"
+        }
+    }
+
     var copyMessage: String {
         switch language {
         case .korean: return "메시지 복사"
         case .english: return "Copy message"
+        }
+    }
+
+    var replyToMessage: String {
+        switch language {
+        case .korean: return "스레드에서 답글"
+        case .english: return "Reply in thread"
+        }
+    }
+
+    var addReaction: String {
+        switch language {
+        case .korean: return "반응 추가"
+        case .english: return "Add reaction"
+        }
+    }
+
+    func reactWith(_ emoji: String) -> String {
+        switch language {
+        case .korean: return "\(emoji) 반응"
+        case .english: return "React with \(emoji)"
+        }
+    }
+
+    func reactionCount(emoji: String, count: Int) -> String {
+        switch language {
+        case .korean: return "\(emoji) 반응 \(count)개"
+        case .english: return "\(emoji), \(count) reactions"
+        }
+    }
+
+    var moreMessageActions: String {
+        switch language {
+        case .korean: return "메시지 더보기"
+        case .english: return "More message actions"
+        }
+    }
+
+    var editMessage: String {
+        switch language {
+        case .korean: return "메시지 수정"
+        case .english: return "Edit message"
+        }
+    }
+
+    var deleteMessage: String {
+        switch language {
+        case .korean: return "메시지 삭제"
+        case .english: return "Delete message"
+        }
+    }
+
+    var deleteMessageConfirmation: String {
+        switch language {
+        case .korean: return "이 메시지를 삭제할까요?"
+        case .english: return "Delete this message?"
+        }
+    }
+
+    var save: String {
+        switch language {
+        case .korean: return "저장"
+        case .english: return "Save"
+        }
+    }
+
+    var editedMessage: String {
+        switch language {
+        case .korean: return "수정됨"
+        case .english: return "Edited"
+        }
+    }
+
+    var editMessageKeyboardHint: String {
+        switch language {
+        case .korean: return "⌘↩ 저장 · esc 취소"
+        case .english: return "⌘↩ to save · esc to cancel"
+        }
+    }
+
+    func replyCount(_ count: Int) -> String {
+        switch language {
+        case .korean: return "답글 \(count)개"
+        case .english: return "\(count) replies"
+        }
+    }
+
+    var threadTitle: String {
+        switch language {
+        case .korean: return "답글"
+        case .english: return "Thread"
+        }
+    }
+
+    var closeThread: String {
+        switch language {
+        case .korean: return "답글 패널 닫기"
+        case .english: return "Close thread"
+        }
+    }
+
+    var threadEmpty: String {
+        switch language {
+        case .korean: return "첫 답글을 남겨보세요"
+        case .english: return "Start the conversation"
+        }
+    }
+
+    var threadEmptyAction: String {
+        switch language {
+        case .korean: return "답글 작성"
+        case .english: return "Write a reply"
+        }
+    }
+
+    var deletedMessage: String {
+        switch language {
+        case .korean: return "삭제된 메시지"
+        case .english: return "Deleted message"
+        }
+    }
+
+    var replyPlaceholder: String {
+        switch language {
+        case .korean: return "답글 입력..."
+        case .english: return "Write a reply..."
         }
     }
 
@@ -351,6 +484,22 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var channelMenu: String {
+        switch language {
+        case .korean: return "채널 메뉴"
+        case .english: return "Channel menu"
+        }
+    }
+
+    func channelMenuState(isPresented: Bool) -> String {
+        switch (language, isPresented) {
+        case (.korean, true): return "열림"
+        case (.korean, false): return "닫힘"
+        case (.english, true): return "Expanded"
+        case (.english, false): return "Collapsed"
+        }
+    }
+
     var inviteToChannel: String {
         switch language {
         case .korean: return "채널에 멤버 추가"
@@ -369,6 +518,13 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "채널 ID 복사"
         case .english: return "Copy channel ID"
+        }
+    }
+
+    var closeChannelMenu: String {
+        switch language {
+        case .korean: return "채널 메뉴 닫기"
+        case .english: return "Close channel menu"
         }
     }
 

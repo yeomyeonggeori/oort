@@ -26,7 +26,7 @@ enum MomoMemberDirectoryNavigation {
     }
 }
 
-enum MomoMacPrimaryDestination {
+enum MomoMacPrimaryDestination: Equatable {
     case channel
     case plugins
 }
@@ -49,6 +49,8 @@ public struct MomoMacRootView: View {
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
     @State private var showDownloadsPanel = false
+    @State private var isThreadPresented = false
+    @State private var threadDismissRequest: UInt64 = 0
     @State private var primaryDestination = MomoMacPrimaryDestination.channel
     @State private var transientSidebarWidth: CGFloat?
     @AppStorage("momo.workspace.sidebar.width") private var preferredSidebarWidth = MomoTheme.Sidebar.idealWidth
@@ -57,7 +59,6 @@ public struct MomoMacRootView: View {
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     private let sessionChrome: MomoSessionChrome?
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
-    private static let attachedInspectorMinimumWindowWidth: CGFloat = 1_360
     private static let inspectorWidth: CGFloat = 440
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
@@ -211,10 +212,6 @@ public struct MomoMacRootView: View {
                 detailLayout(
                     copy: copy,
                     availableDetailWidth: detailWidth,
-                    useAttachedInspector: detailWidth >= Self.attachedInspectorMinimumWindowWidth,
-                    useAttachedMemberInspector: MomoMemberInspectorLayout.usesAttachedInspector(
-                        detailWidth: detailWidth
-                    ),
                     showsSidebarToggle: sidebarWidth == 0
                 )
                 .frame(width: detailWidth)
@@ -230,129 +227,79 @@ public struct MomoMacRootView: View {
     private func detailLayout(
         copy: MomoWorkspaceCopy,
         availableDetailWidth: CGFloat,
-        useAttachedInspector: Bool,
-        useAttachedMemberInspector: Bool,
         showsSidebarToggle: Bool
     ) -> some View {
         let showsMemberInspector = showMemberInspector && !showDetailPane
-        let blocksTimelineForMemberOverlay = MomoMemberInspectorLayout.blocksTimelineInteraction(
-            isPresented: showsMemberInspector,
-            usesAttachedInspector: useAttachedMemberInspector
-        )
-        let blocksTimelineForDetailOverlay = showDetailPane && !useAttachedInspector
-        let blocksTimelineInteraction = blocksTimelineForMemberOverlay || blocksTimelineForDetailOverlay
 
-        return ZStack(alignment: .trailing) {
+        return ZStack(alignment: .topTrailing) {
             HStack(spacing: 0) {
                 ZStack {
                     MomoTheme.Surface.style(.background, colorScheme: colorScheme).fill
 
-                    primaryContent(copy: copy)
-                        .environment(
-                            \.momoCenterHeaderLeadingInset,
-                            MomoWindowChromeLayout.centerHeaderLeadingInset(
-                                sidebarVisible: !showsSidebarToggle
-                            )
+                    primaryContent(
+                        copy: copy,
+                        sidebarToggle: MomoSidebarTogglePlacementPolicy.showsInChannelHeader(
+                            sidebarVisible: !showsSidebarToggle,
+                            destination: primaryDestination,
+                            hasSelectedChannel: viewModel.selectedChannel != nil
                         )
-                        .allowsHitTesting(!blocksTimelineInteraction)
-                        .accessibilityHidden(blocksTimelineInteraction)
+                            ? { toggleSidebar() }
+                            : nil
+                    )
+                    .environment(
+                        \.momoCenterHeaderLeadingInset,
+                        MomoWindowChromeLayout.centerHeaderLeadingInset(
+                            sidebarVisible: !showsSidebarToggle,
+                            trafficLightTrailingX: windowChromeMetrics.trafficLightTrailingX
+                        )
+                    )
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    detailChromeControls(
-                        copy: copy,
-                        showsSidebarToggle: showsSidebarToggle
-                    )
-                    .frame(
-                        height: MomoWindowChromeLayout.controlBandHeight
-                    )
-                }
-                .overlay(alignment: .topTrailing) {
-                    if showDownloadsPanel {
-                        // A system popover can leave the app window near screen edges.
-                        // This bounded panel keeps download controls inside the center pane.
-                        MomoDownloadsPanelView(
-                            copy: copy,
-                            onDismiss: { setDownloadsPanelPresented(false) }
-                        )
-                        .padding(.top, MomoWindowChromeLayout.controlBandHeight + 8)
-                        .padding(.trailing, 12)
-                    }
-                }
 
-                if showDetailPane && useAttachedInspector {
-                    detailPaneView(copy: copy, presentation: .attached)
-                    .frame(maxHeight: .infinity)
-                    .frame(width: Self.inspectorWidth)
-                    .background(MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill)
-                    .overlay(alignment: .leading) {
-                        MomoPaneDivider()
+                if showDetailPane {
+                    MomoRightPanelBelowHeader {
+                        detailPaneView(copy: copy, presentation: .attached)
                     }
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                } else if showsMemberInspector && useAttachedMemberInspector {
-                    memberInspectorView(copy: copy, isAttached: true)
-                        .frame(width: MomoTheme.MemberInspector.attachedWidth)
-                        .background(MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill)
-                        .overlay(alignment: .leading) {
-                            MomoPaneDivider()
-                        }
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .frame(
+                        width: MomoRightPanelLayout.width(
+                            preferredWidth: Self.inspectorWidth,
+                            availableWidth: availableDetailWidth
+                        )
+                    )
+                    .transition(.identity)
+                } else if showsMemberInspector {
+                    MomoRightPanelBelowHeader {
+                        memberInspectorView(copy: copy, isAttached: true)
+                    }
+                    .frame(
+                        width: MomoRightPanelLayout.width(
+                            preferredWidth: MomoTheme.MemberInspector.attachedWidth,
+                            availableWidth: availableDetailWidth
+                        )
+                    )
+                    .transition(.identity)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if showDetailPane && !useAttachedInspector {
-                GeometryReader { inspectorGeometry in
-                    ZStack(alignment: .trailing) {
-                        MomoTheme.modalScrim
-                            .transition(.opacity)
-                            .contentShape(Rectangle())
-                            .accessibilityHidden(true)
-                            .onTapGesture {
-                                closeDetailPane()
-                            }
+            detailChromeControls(
+                copy: copy,
+                showsSidebarToggle: MomoSidebarTogglePlacementPolicy.showsInDetailChrome(
+                    sidebarVisible: !showsSidebarToggle,
+                    destination: primaryDestination
+                )
+            )
+            .frame(height: MomoWindowChromeLayout.controlBandHeight)
 
-                        detailPaneView(copy: copy, presentation: .attached)
-                            .frame(maxHeight: .infinity)
-                            .frame(width: overlayInspectorWidth(for: availableDetailWidth))
-                            .frame(maxHeight: .infinity)
-                            .background(
-                                MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
-                            )
-                            .overlay(alignment: .leading) {
-                                MomoPaneDivider()
-                            }
-                            .accessibilityAddTraits(.isModal)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                    .frame(width: inspectorGeometry.size.width, height: inspectorGeometry.size.height)
-                }
-            } else if showsMemberInspector && !useAttachedMemberInspector {
-                GeometryReader { inspectorGeometry in
-                    ZStack(alignment: .trailing) {
-                        MomoTheme.modalScrim
-                            .transition(.opacity)
-                            .contentShape(Rectangle())
-                            .accessibilityHidden(true)
-                            .onTapGesture {
-                                closeMemberInspector()
-                            }
-
-                        memberInspectorView(copy: copy, isAttached: false)
-                            .frame(maxHeight: .infinity)
-                            .frame(width: memberInspectorOverlayWidth(for: availableDetailWidth))
-                            .frame(maxHeight: .infinity)
-                            .background(
-                                MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
-                            )
-                            .overlay(alignment: .leading) {
-                                MomoPaneDivider()
-                            }
-                            .accessibilityAddTraits(.isModal)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
-                    .frame(width: inspectorGeometry.size.width, height: inspectorGeometry.size.height)
-                }
+            if showDownloadsPanel {
+                // A system popover can leave the app window near screen edges.
+                // This bounded panel stays inside the shared window header.
+                MomoDownloadsPanelView(
+                    copy: copy,
+                    onDismiss: { setDownloadsPanelPresented(false) }
+                )
+                .padding(.top, MomoWindowChromeLayout.controlBandHeight + 8)
+                .padding(.trailing, 12)
             }
         }
         .animation(layoutAnimation, value: showDetailPane)
@@ -412,7 +359,7 @@ public struct MomoMacRootView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var messageTimeline: some View {
+    private func messageTimeline(sidebarToggle: (() -> Void)?) -> some View {
         MessageListView(
             viewModel: viewModel,
             onOpenWorkDetail: { runId in
@@ -423,8 +370,26 @@ public struct MomoMacRootView: View {
                 sessionChrome?.switchSession()
             },
             onOpenMemberDirectory: memberDirectoryAction,
+            onOpenChannelSettings: { channelID in
+                presentChannelSettings(channelID, initialTab: .general)
+            },
+            onInviteToChannel: viewModel.canManageWorkspace
+                ? { channelID in
+                    presentChannelSettings(channelID, initialTab: .members)
+                }
+                : nil,
             focusComposerRequest: composerFocusRequest,
             serverIdentity: sessionChrome?.summary.serverURLString,
+            sidebarToggle: sidebarToggle,
+            dismissThreadRequest: threadDismissRequest,
+            onPresentThread: {
+                detailPanePresentation.close()
+                showMemberInspector = false
+                isThreadPresented = true
+            },
+            onDismissThread: {
+                isThreadPresented = false
+            },
             onOpenPluginMarketplace: {
                 openPluginMarketplace()
             }
@@ -433,10 +398,13 @@ public struct MomoMacRootView: View {
     }
 
     @ViewBuilder
-    private func primaryContent(copy: MomoWorkspaceCopy) -> some View {
+    private func primaryContent(
+        copy: MomoWorkspaceCopy,
+        sidebarToggle: (() -> Void)?
+    ) -> some View {
         switch primaryDestination {
         case .channel:
-            messageTimeline
+            messageTimeline(sidebarToggle: sidebarToggle)
         case .plugins:
             MomoPluginMarketplaceView(
                 language: language,
@@ -488,7 +456,6 @@ public struct MomoMacRootView: View {
                     )
                     .contentShape(Rectangle())
             }
-            .help(copy.workspaceSearch)
             .momoQuickTooltip(copy.workspaceSearch)
             .accessibilityLabel(copy.workspaceSearch)
             .accessibilityIdentifier("workspace-search-entry")
@@ -504,7 +471,6 @@ public struct MomoMacRootView: View {
                     )
                     .contentShape(Rectangle())
             }
-            .help(copy.appDownloads)
             .momoQuickTooltip(copy.appDownloads)
             .accessibilityLabel(copy.appDownloads)
             .accessibilityHint(copy.downloadsScopeNote)
@@ -527,7 +493,6 @@ public struct MomoMacRootView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(copy.toggleSidebar)
         .momoQuickTooltip(copy.toggleSidebar)
         .accessibilityLabel(copy.toggleSidebar)
         .accessibilityIdentifier("sidebar-toggle")
@@ -568,8 +533,8 @@ public struct MomoMacRootView: View {
                     closeMemberInspector()
                 }
             },
-            // Narrow windows keep the inspector modal, but the surface remains a
-            // flat, full-height pane instead of turning into a floating card.
+            // All widths use the same attached-pane contract; narrow windows
+            // compress the pane while preserving the timeline instead of adding a modal.
             presentation: .attached
         )
     }
@@ -580,6 +545,7 @@ public struct MomoMacRootView: View {
                 showMemberInspector = false
                 composerFocusRequest &+= 1
             } else {
+                dismissThreadPanel()
                 detailPanePresentation.close()
                 memberInspectorAudience = .channel
                 showMemberInspector = true
@@ -589,6 +555,7 @@ public struct MomoMacRootView: View {
 
     private func openWorkspaceMemberInspector() {
         withAnimation(layoutAnimation) {
+            dismissThreadPanel()
             detailPanePresentation.close()
             memberInspectorAudience = .workspace
             showMemberInspector = true
@@ -633,7 +600,6 @@ public struct MomoMacRootView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
-                .help(copy.closeDetailPane)
                 .momoQuickTooltip(copy.closeDetailPane)
                 .keyboardShortcut(.cancelAction)
             }
@@ -654,7 +620,6 @@ public struct MomoMacRootView: View {
                             .font(.caption.weight(.semibold))
                     }
                     .buttonStyle(.borderless)
-                    .help(relatedPane.subtitle(copy: copy))
                     .momoQuickTooltip(relatedPane.subtitle(copy: copy))
                     Spacer()
                 }
@@ -721,15 +686,23 @@ public struct MomoMacRootView: View {
                 MomoUpdateStatusSurface(copy: copy)
             }
         }
-        .frame(width: presentation == .attached ? Self.inspectorWidth : nil)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .momoInspectorSurface(presentation)
     }
 
     private func openDetailPane(_ pane: MomoMacDetailPane) {
         guard pane != .alpha || developerMode else { return }
         withAnimation(layoutAnimation) {
+            dismissThreadPanel()
+            showMemberInspector = false
             detailPanePresentation.present(pane)
         }
+    }
+
+    private func dismissThreadPanel() {
+        guard isThreadPresented else { return }
+        isThreadPresented = false
+        threadDismissRequest &+= 1
     }
 
     private func closeDetailPane() {
@@ -752,17 +725,6 @@ public struct MomoMacRootView: View {
         channelSettingsRequest = MomoChannelSettingsRequest(
             channelID: channelID,
             initialTab: initialTab
-        )
-    }
-
-    private func overlayInspectorWidth(for detailWidth: CGFloat) -> CGFloat {
-        min(Self.inspectorWidth, max(340, detailWidth - 28))
-    }
-
-    private func memberInspectorOverlayWidth(for detailWidth: CGFloat) -> CGFloat {
-        min(
-            MomoTheme.MemberInspector.overlayWidth,
-            max(MomoTheme.MemberDirectory.listIdealWidth, detailWidth - 24)
         )
     }
 
@@ -964,17 +926,27 @@ enum MomoWindowChromeLayout {
         minimumControlBandHeight
     )
     static let controlBandHeight = integratedHeaderHeight
-    static let collapsedCenterLeadingInset: CGFloat = 112
-    static let sidebarHeaderLeadingInset: CGFloat = 112
-    static let sidebarHeaderTrailingInset: CGFloat = 44
+    // Standard macOS traffic lights occupy roughly the first 72pt. The channel
+    // header adds its regular 16pt edge inset after this reserved chrome region.
+    static let collapsedCenterLeadingInset: CGFloat = 72
+    static let sidebarControlBandHeight = controlBandHeight
+    static let sidebarHeaderLeadingInset: CGFloat = 16
+    static let sidebarHeaderTrailingInset: CGFloat = 16
 
     static func shellTopInset(windowChromeTopInset: CGFloat) -> CGFloat {
         max(0, windowChromeTopInset)
     }
 
-    static func centerHeaderLeadingInset(sidebarVisible: Bool) -> CGFloat {
-        sidebarVisible ? 0 : collapsedCenterLeadingInset
+    static func centerHeaderLeadingInset(
+        sidebarVisible: Bool,
+        trafficLightTrailingX: CGFloat = 0
+    ) -> CGFloat {
+        guard !sidebarVisible else { return 0 }
+        return trafficLightTrailingX > 0
+            ? trafficLightTrailingX
+            : collapsedCenterLeadingInset
     }
+
 
     static let minimumDetailWidth: CGFloat = 560
 
@@ -988,6 +960,24 @@ enum MomoWindowChromeLayout {
         )
         let maximumWidth = min(MomoTheme.Sidebar.maximumWidth, availableMaximum)
         return min(maximumWidth, max(MomoTheme.Sidebar.minimumWidth, preferredWidth))
+    }
+}
+
+enum MomoSidebarTogglePlacementPolicy {
+    static func showsInChannelHeader(
+        sidebarVisible: Bool,
+        destination: MomoMacPrimaryDestination,
+        hasSelectedChannel: Bool
+    ) -> Bool {
+        _ = hasSelectedChannel
+        return !sidebarVisible && destination == .channel
+    }
+
+    static func showsInDetailChrome(
+        sidebarVisible: Bool,
+        destination: MomoMacPrimaryDestination
+    ) -> Bool {
+        !sidebarVisible && destination != .channel
     }
 }
 
@@ -1076,6 +1066,31 @@ private struct MomoSidebarResizeHandle: View {
     }
 }
 
+struct MomoRightPanelBelowHeader<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
+                .frame(height: MomoRightPanelLayout.headerHeight)
+                .accessibilityHidden(true)
+
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill)
+                .overlay(alignment: .leading) {
+                    MomoPaneDivider()
+                }
+        }
+        .frame(maxHeight: .infinity)
+    }
+}
+
 private struct MomoPaneDivider: View {
     @Environment(\.displayScale) private var displayScale
 
@@ -1088,16 +1103,17 @@ private struct MomoPaneDivider: View {
     }
 }
 
-enum MomoMemberInspectorLayout {
-    static func usesAttachedInspector(detailWidth: CGFloat) -> Bool {
-        detailWidth >= MomoTheme.MemberInspector.attachedMinimumDetailWidth
-    }
+enum MomoRightPanelLayout {
+    static let headerHeight = MomoWindowChromeLayout.integratedHeaderHeight
+    static let minimumTimelineWidth: CGFloat = 360
+    static let blocksTimelineInteraction = false
 
-    static func blocksTimelineInteraction(
-        isPresented: Bool,
-        usesAttachedInspector: Bool
-    ) -> Bool {
-        isPresented && !usesAttachedInspector
+    static func width(
+        preferredWidth: CGFloat,
+        availableWidth: CGFloat
+    ) -> CGFloat {
+        guard availableWidth > 0 else { return preferredWidth }
+        return max(0, min(preferredWidth, availableWidth - minimumTimelineWidth))
     }
 }
 

@@ -216,8 +216,14 @@ private struct MomoQuickTooltipModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .help(text)
+            .modifier(
+                MomoNativeHelpFallback(
+                    text: text,
+                    isEnabled: presenter == nil
+                )
+            )
             .focused($isFocused)
+            .accessibilityHint(Text(text))
             .background {
                 GeometryReader { geometry in
                     let frame = geometry.frame(in: .named(MomoQuickTooltipCoordinateSpace.window))
@@ -273,6 +279,20 @@ private struct MomoQuickTooltipModifier: ViewModifier {
             isHovering: isHovering,
             isFocused: isFocused
         )
+    }
+}
+
+private struct MomoNativeHelpFallback: ViewModifier {
+    let text: String
+    let isEnabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content.help(text)
+        } else {
+            content
+        }
     }
 }
 

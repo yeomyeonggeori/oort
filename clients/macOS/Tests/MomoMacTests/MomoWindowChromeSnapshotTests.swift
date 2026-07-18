@@ -270,6 +270,10 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         }
     }
 
+    private var snapshotRecordMode: SnapshotTestingConfiguration.Record? {
+        ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1" ? .all : nil
+    }
+
     func testWindowChromeRasterWritesDesignReviewArtifacts() async throws {
         let scenarios = if NSScreen.screens.isEmpty {
             // cacheDisplay does not composite dark NavigationSplitView
@@ -341,7 +345,8 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "light"
+            named: "light",
+            record: snapshotRecordMode
         )
     }
 
@@ -354,7 +359,8 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "dark"
+            named: "dark",
+            record: snapshotRecordMode
         )
     }
 
@@ -367,7 +373,8 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "dark"
+            named: "dark",
+            record: snapshotRecordMode
         )
     }
 }

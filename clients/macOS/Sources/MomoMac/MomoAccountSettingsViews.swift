@@ -960,7 +960,6 @@ struct MomoDownloadsPanelView: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.cancelAction)
-                .help(copy.dismiss)
                 .momoQuickTooltip(copy.dismiss)
                 .accessibilityLabel(copy.dismiss)
             }
@@ -986,7 +985,6 @@ struct MomoDownloadsPanelView: View {
                             Image(systemName: "arrow.up.forward.app")
                         }
                         .buttonStyle(.plain)
-                        .help(copy.openDownloadsFolder)
                         .momoQuickTooltip(copy.openDownloadsFolder)
                         .accessibilityLabel(copy.openDownloadsFolder)
                         Button {
@@ -995,7 +993,6 @@ struct MomoDownloadsPanelView: View {
                             Image(systemName: "ellipsis")
                         }
                         .buttonStyle(.plain)
-                        .help(copy.changeDownloadFolder)
                         .momoQuickTooltip(copy.changeDownloadFolder)
                         .accessibilityLabel(copy.changeDownloadFolder)
                     }

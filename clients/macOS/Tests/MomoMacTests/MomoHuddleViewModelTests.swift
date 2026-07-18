@@ -4,6 +4,37 @@ import MomoCore
 
 @MainActor
 final class MomoHuddleViewModelTests: XCTestCase {
+    func testComposerControlDistinguishesHuddleLifecycleStates() {
+        XCTAssertEqual(
+            MomoHuddleComposerControlPresentation.resolve(
+                state: .idle,
+                hasActiveHuddle: false
+            ),
+            .init(systemImage: "waveform", tone: .accent)
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlPresentation.resolve(
+                state: .idle,
+                hasActiveHuddle: true
+            ),
+            .init(systemImage: "person.wave.2", tone: .accent)
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlPresentation.resolve(
+                state: .joined,
+                hasActiveHuddle: true
+            ),
+            .init(systemImage: "waveform", tone: .success)
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlPresentation.resolve(
+                state: .failed("연결 실패"),
+                hasActiveHuddle: true
+            ),
+            .init(systemImage: "arrow.clockwise", tone: .warning)
+        )
+    }
+
     func testStartConnectsAudioAndTransitionsToJoined() async {
         let fixture = HuddleFixture()
         let service = MockHuddleService(active: nil, huddle: fixture.huddle)

@@ -213,7 +213,6 @@ struct MomoChannelMemberInspectorView: View {
                     )
             }
             .buttonStyle(.borderless)
-            .help(copy.closeMemberInspector)
             .momoQuickTooltip(copy.closeMemberInspector)
             .keyboardShortcut(.cancelAction)
             .focused($focusedControl, equals: .close)
