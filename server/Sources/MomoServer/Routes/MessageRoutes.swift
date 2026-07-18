@@ -375,13 +375,13 @@ struct MessageRoutes: Sendable {
                     """
                     SELECT m.id, m.seq, m.hlc_ts, m.hlc_count, m.author_member_id,
                            m.type, m.body, m.props::text, m.root_id, m.run_id,
-                           m.client_msg_id, m.created_at,
+                           m.client_msg_id, m.created_at, m.state::text,
+                           m.edited_at, m.deleted_at,
                            t.reply_count, t.last_reply_seq, t.last_reply_at
                       FROM message m
                       LEFT JOIN thread t
                         ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
                      WHERE m.channel_id = \(channelID) AND m.seq > \(after)
-                       AND m.deleted_at IS NULL
                      ORDER BY m.seq ASC
                      LIMIT \(limit)
                     """,
@@ -392,13 +392,13 @@ struct MessageRoutes: Sendable {
                     """
                     SELECT m.id, m.seq, m.hlc_ts, m.hlc_count, m.author_member_id,
                            m.type, m.body, m.props::text, m.root_id, m.run_id,
-                           m.client_msg_id, m.created_at,
+                           m.client_msg_id, m.created_at, m.state::text,
+                           m.edited_at, m.deleted_at,
                            t.reply_count, t.last_reply_seq, t.last_reply_at
                       FROM message m
                       LEFT JOIN thread t
                         ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
                      WHERE m.channel_id = \(channelID) AND m.seq < \(before)
-                       AND m.deleted_at IS NULL
                      ORDER BY m.seq DESC
                      LIMIT \(limit)
                     """,
@@ -409,13 +409,13 @@ struct MessageRoutes: Sendable {
                     """
                     SELECT m.id, m.seq, m.hlc_ts, m.hlc_count, m.author_member_id,
                            m.type, m.body, m.props::text, m.root_id, m.run_id,
-                           m.client_msg_id, m.created_at,
+                           m.client_msg_id, m.created_at, m.state::text,
+                           m.edited_at, m.deleted_at,
                            t.reply_count, t.last_reply_seq, t.last_reply_at
                       FROM message m
                       LEFT JOIN thread t
                         ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
                      WHERE m.channel_id = \(channelID)
-                       AND m.deleted_at IS NULL
                      ORDER BY m.seq DESC
                      LIMIT \(limit)
                     """,
@@ -425,10 +425,11 @@ struct MessageRoutes: Sendable {
 
             let dtos = try rows.map { row -> MessageDTO in
                 let (id, seq, ts, count, author, type, body, propsJSON, rootID,
-                     runID, clientMsgID, createdAt, replyCount, lastReplySeq,
-                     lastReplyAt) = try row.decode(
+                     runID, clientMsgID, createdAt, state, editedAt, deletedAt,
+                     replyCount, lastReplySeq, lastReplyAt) = try row.decode(
                         (UUID, Int64, Int64, Int, UUID, String, String?, String,
-                         UUID?, UUID?, UUID?, Date, Int?, Int64?, Date?).self
+                         UUID?, UUID?, UUID?, Date, String, Date?, Date?, Int?,
+                         Int64?, Date?).self
                      )
                 return MessageDTO(
                     id: id.uuidString, channelId: channelID.uuidString,
@@ -437,7 +438,9 @@ struct MessageRoutes: Sendable {
                     type: type, body: body, props: Self.decodeProps(propsJSON),
                     runId: runID?.uuidString, clientMsgId: clientMsgID?.uuidString,
                     createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
-                    state: nil, editedAtMs: nil, deletedAtMs: nil,
+                    state: state,
+                    editedAtMs: editedAt.map { Int64($0.timeIntervalSince1970 * 1_000) },
+                    deletedAtMs: deletedAt.map { Int64($0.timeIntervalSince1970 * 1_000) },
                     thread: Self.threadRollup(
                         replyCount: replyCount,
                         lastReplySeq: lastReplySeq,

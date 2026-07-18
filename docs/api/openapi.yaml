@@ -1055,7 +1055,10 @@ paths:
         descending. `before=<seq>` pages older history (descending).
         `after=<seq>` is the realtime-recovery backfill: it returns messages
         with `seq > after` in ASCENDING order and takes precedence over
-        `before` when both are present.
+        `before` when both are present. All variants include deleted messages as
+        tombstones (`state=deleted`, omitted/null `body`, populated `deletedAtMs`)
+        and project the durable `state`, `editedAtMs`, and `deletedAtMs` values so
+        clients converge after restart or backfill.
       security:
         - bearerAuth: []
       parameters:
@@ -2895,6 +2898,7 @@ components:
         state:
           type: string
           enum: [sent, edited, deleted, failed]
+          description: Durable message state; history always projects the stored value.
         props:
           type: object
           additionalProperties: true
@@ -2914,9 +2918,11 @@ components:
         editedAtMs:
           type: integer
           format: int64
+          description: Epoch milliseconds of the latest edit when state is edited or deleted after an edit.
         deletedAtMs:
           type: integer
           format: int64
+          description: Epoch milliseconds of deletion; populated for history tombstones.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
 
