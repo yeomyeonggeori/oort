@@ -164,10 +164,14 @@ RESPONSE_STATUS=""
 RESPONSE_BODY=""
 search_api() {
   local token="$1" query="$2" limit="${3:-20}" cursor="${4:-}" out="$TMP_DIR/response.json"
-  local -a args=(-sS -G -o "$out" -w '%{http_code}' -H "Authorization: Bearer $token"
-    --data-urlencode "q=$query" --data-urlencode "limit=$limit")
-  [ -n "$cursor" ] && args+=(--data-urlencode "cursor=$cursor")
-  RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL/v1/workspaces/$WS_A/search/messages")"
+  local encoded_query encoded_cursor url
+  encoded_query="$($PYTHON_BIN -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$query")"
+  url="$BASE_URL/v1/workspaces/$WS_A/search/messages?q=$encoded_query&limit=$limit"
+  if [ -n "$cursor" ]; then
+    encoded_cursor="$($PYTHON_BIN -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$cursor")"
+    url="$url&cursor=$encoded_cursor"
+  fi
+  RESPONSE_STATUS="$(curl -sS -o "$out" -w '%{http_code}' -H "Authorization: Bearer $token" "$url")"
   RESPONSE_BODY="$(<"$out")"
 }
 expect_status() {
