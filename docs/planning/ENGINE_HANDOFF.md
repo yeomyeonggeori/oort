@@ -26,7 +26,7 @@
 | X-2 | `done`(서버 절반 main 랜딩 — MOMO-478) | 반응/수정/삭제 REST+realtime 계약. UI는 capability gate로 기완비 | UI 개방은 **A-9**로 이관 | MessageInteractionModel.swift, MessageInteractionTests (2026-07-18) |
 | X-3 | `done`(MOMO-479 `#508` → track/engine, main 대기) | A-4 잔여였던 정확한 롤업·과거 답글 조회·AgentWorker thread 문맥 보존 | 톱레벨 `thread` 투영, ASC cursor replies REST, `thread.updated` realtime, Worker INSERT 4곳 root_id·롤업 보존 완료. main 랜딩 시 **A-4 ready 전환**(UI: 배지 실데이터·과거 답글 로드·thread.updated 소비) | MessageRoutes.swift, Core ThreadRollup.swift, verify_thread_projection.sh (2026-07-19) |
 | X-4 | `needs-engine-contract` | A-6 잔여: Core `DraftMessage`와 메시지 history/realtime 응답에 `attachmentIds`·첨부 메타데이터 투영이 없어 수신자가 다운로드 대상을 발견할 수 없음 | `DraftMessage` 가산 필드와 Message history/realtime의 attachment projection 또는 message별 attachment 조회 API를 추가. 업로드 URL은 bearer capability이므로 로그·영속 저장 금지 계약 유지 | `AttachmentRoutes.swift`, `MessageRoutes.swift`, `clients/Core/Message.swift`, `verify_attachment_upload.sh` (2026-07-18) |
-| X-5 | `needs-engine-contract` | A-9 잔여: 수정/삭제/반응 이벤트가 원본 메시지 `seq`를 envelope seq·Centrifugo version으로 재사용해 relay stale-skip 및 Core replay drop 대상이 됨. history도 deleted 행을 제외하고 `state/editedAtMs/deletedAtMs`를 투영하지 않아 재진입 시 편집 표시·tombstone이 사라짐 | 메시지 순서 SoT는 유지하되 상호작용 전달용 단조 cursor/version 또는 비-seq mutation 경로를 정의하고 relay/Core를 함께 갱신. history에 수정 상태/시각과 명시적 tombstone 복원 계약을 추가하고 실제 relay/WebSocket 2클라이언트 verifier로 검증 | `MessageRoutes.swift`, `RealtimeSubscriptionDriver.swift`, `OutboxRelay`, `verify_message_interaction.sh`, `docs/planning/JOURNAL.md` stale-skip 기록 (2026-07-19) |
+| X-5 | `done`(MOMO-480 `#511`+MOMO-481 `#513` → track/engine, main 대기) | A-9 잔여: 상호작용 이벤트 브로커/Core 드랍 + history 복원 부재 | ①브로커: 투영 이벤트 no-version 발행(Centrifugo version 게이팅 실측 해소) ②Core replay: 4종 type 분기로 커서 불전진 전달 ③history: tombstone 포함+`state/editedAtMs/deletedAtMs` 투영. main 랜딩 시 **A-9 done 전환 가능**(교차 클라 realtime·재시작 복원 보장). 실 2클라 ws E2E는 C-4 검증 부채 | verify_message_interaction.sh(회귀 가드+재시작 수렴), RealtimeSubscriptionDriver.swift (2026-07-19) |
 
 ## B. 엔진 역요청 — 전량 완료 (main)
 
@@ -39,6 +39,7 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
 | C-1 | 허들 2-클라 실오디오 왕복 | 성재 마이크 필요 — A-5와 함께 |
 | C-2 | Work 실 Codex↔momo 왕복 | 엔진 트랙 후보(성재 Codex 환경 잠깐 필요) |
 | C-3 | iOS deep link 실기기 재확인 | 케이블 Run 1회 |
+| C-4 | 상호작용 실 WebSocket 2-클라이언트 E2E | X-5는 history API 실수신+Core 회귀 테스트로 검증됨 — 실 ws 구독 2클라 왕복은 미실증(맥+아이폰 수동 QA로도 대체 가능) |
 
 ## 완료 이력 (main 랜딩)
 

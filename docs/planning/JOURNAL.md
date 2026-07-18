@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 엔진 트랙) · X-5 체인 완주 — MOMO-480/481 랜딩
+- 480(#511): 상호작용 이벤트 no-version 발행(브로커 드랍 해소) + verifier history 실수신 회귀 가드. 481(#513): Core replay type 분기(커서 불전진)·history tombstone/편집 투영·재시작 수렴 단정. 둘 다 runtime-db 게이트 실패 0.
+- track/engine = main+5(479·재정렬·480·481). **main 랜딩 시 A-9 done·A-4 ready 전환 가능** — 엔진→main 머지 성재 승인 대기. 실 2클라 ws E2E는 C-4 등재(수동 QA 대체 가능).
+- 다음 엔진 후보: X-4(첨부 수신 투영 — A-6 개방) 또는 C-2(Work 실 Codex 왕복).
+
 ## 2026-07-19 (Fable 통합) · UXUI A-8/A-9 배치 → main 머지 (성재 승인)
 - track/uxui@dae7e8a(+1,945) 검수 결함 0 → main f25503d 무충돌 머지. A-8 음소거 UI 완결, A-9는 REST/로컬 UI 범위(4종 실호출·fail-closed·경합 방어) — 교차 클라 realtime·재시작 복원은 X-5 대기(성재 선택지 1 채택).
 - UXUI가 X-5(상호작용 이벤트 seq 재사용 → relay/Core drop + history 투영 부재)를 정확히 역요청 — 엔진이 독립 실측한 MOMO-480(브로커 절반, 게이트 진행 중)과 동일 근원. 잔여(Core replay 비순번 처리·history editedAtMs/state 투영·2클라 verifier)는 MOMO-481 후보.
