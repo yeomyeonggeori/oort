@@ -179,12 +179,15 @@ public actor RealtimeReplayController {
         _ envelope: RealtimeEnvelope,
         backfill: RealtimeBackfill
     ) async throws -> [RealtimeEvent] {
-        // A thread rollup is a projection of the reply at `last_reply_seq`, not
-        // a second message occupying that seq. Deliver it without advancing the
-        // message replay cursor so message.new and thread.updated cannot suppress
-        // one another regardless of relay arrival order.
-        if envelope.type == RealtimeEnvelope.EventType.threadUpdated.rawValue {
+        // These are projections of an existing message/reply, not new messages
+        // occupying their target seq. Deliver them without advancing the replay
+        // cursor so message.new and its projections cannot suppress one another
+        // regardless of relay arrival order.
+        switch RealtimeEnvelope.EventType(rawValue: envelope.type) {
+        case .threadUpdated, .messageEdited, .messageDeleted, .reactionAdded, .reactionRemoved:
             return try nonSequencedEvents(from: envelope)
+        default:
+            break
         }
         guard let seq = envelope.seq else {
             return try nonSequencedEvents(from: envelope)
@@ -214,9 +217,10 @@ public actor RealtimeReplayController {
     private func nonSequencedEvents(from envelope: RealtimeEnvelope) throws -> [RealtimeEvent] {
         guard let event = try decodeKnownEvent(envelope) else { return [] }
         switch event {
-        case .agentPartial, .agentStatus, .typing, .presence, .huddle, .threadUpdated:
+        case .messageEdited, .messageDeleted, .reaction,
+             .agentPartial, .agentStatus, .typing, .presence, .huddle, .threadUpdated:
             return [event]
-        case .message, .messageEdited, .messageDeleted, .reaction, .approval:
+        case .message, .approval:
             return []
         }
     }
