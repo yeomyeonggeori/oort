@@ -2242,6 +2242,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] verify_message_interaction 재시작 수렴 단정(editedAtMs 실값·tombstone 행). 실 2클라 ws E2E는 C-4 이관. 상세: issue #512 본문(패킷 겸용).
 - 랜딩: PR #513 squash → **track/engine**(2026-07-19) → main(2026-07-19). 실런: verifier PASS + server 112/Core 32 + runtime-db 게이트 실패 0. **X-5 체인 완주**(480+481) — A-9 완성 조건 충족.
 
+### ☑ MOMO-482 (`#514`) 수용기준 — X-4 첨부 메타데이터 수신 투영 (A-6 개방) `[runtime-db]` · **PR base=track/engine**
+- [x] history 3변형·전송·replies에 complete 첨부 `{id,name,mime,sizeBytes}` LATERAL 단일쿼리 투영(0건 생략, N+1 없음) + openapi.
+- [x] message.new payload 동일 가산(같은 tx) + Core `Message.attachments`·`DraftMessage.attachmentIds` 옵셔널 가산. 업로드 URL 비노출 유지.
+- [x] verify_attachment_upload 확장(history+realtime 투영·pending/failed 미노출·RLS). 상세: issue #514 본문(패킷 겸용).
+- 랜딩: PR #515 squash → **track/engine**(2026-07-19, main 대기). 실런: 확장 verifier PASS + server 113/Core 33 + runtime-db 게이트 실패 0. main 랜딩 시 A-6 ready.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

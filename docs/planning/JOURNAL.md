@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 엔진 트랙) · MOMO-482 X-4 첨부 투영 랜딩 — X큐 소진
+- 482(#515 → track/engine): history/전송/replies/message.new에 complete 첨부 투영(LATERAL 단일쿼리) + Core Message.attachments/DraftMessage.attachmentIds. 확장 verifier·게이트 실패 0. worker 리뷰 결함 0.
+- 이로써 **UXUI 역요청 X-1~X-5 전량 소진**. track/engine=main+1(482) — 다음 성재 승인 머지 때 A-6 ready 전환.
+- 잔여 후보: C-2(Work 실 Codex 왕복), C-4(2기기 수동 QA), MOMO-472(스냅샷 flake 안정화 #495).
+
 ## 2026-07-19 (Fable 엔진 트랙) · X-5 체인 완주 — MOMO-480/481 랜딩
 - 480(#511): 상호작용 이벤트 no-version 발행(브로커 드랍 해소) + verifier history 실수신 회귀 가드. 481(#513): Core replay type 분기(커서 불전진)·history tombstone/편집 투영·재시작 수렴 단정. 둘 다 runtime-db 게이트 실패 0.
 - track/engine = main+5(479·재정렬·480·481). **main 랜딩 시 A-9 done·A-4 ready 전환 가능** — 엔진→main 머지 성재 승인 대기. 실 2클라 ws E2E는 C-4 등재(수동 QA 대체 가능).
