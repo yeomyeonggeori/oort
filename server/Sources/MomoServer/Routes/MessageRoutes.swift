@@ -75,6 +75,34 @@ struct MessageRoutes: Sendable {
             )
             guard isMember else { return (false, nil) }
 
+            if let rootID = dto.rootId {
+                // A missing same-channel row is deliberately indistinguishable from
+                // a root in another channel. This prevents cross-channel existence
+                // disclosure while enforcing the one-level Slack thread model.
+                let rootRows = try await conn.query(
+                    """
+                    SELECT state::text, deleted_at, root_id
+                      FROM message
+                     WHERE id = \(rootID)
+                       AND channel_id = \(channelID)
+                     LIMIT 1
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let rootRow = rootRows.first else {
+                    throw HTTPError(.notFound, message: "thread root not found")
+                }
+                let (rootState, rootDeletedAt, parentRootID) = try rootRow.decode(
+                    (String, Date?, UUID?).self
+                )
+                guard rootState != "deleted", rootDeletedAt == nil else {
+                    throw HTTPError(.badRequest, message: "thread root is deleted")
+                }
+                guard parentRootID == nil else {
+                    throw HTTPError(.badRequest, message: "thread root must be a top-level message")
+                }
+            }
+
             // ---- L4 §3.1: single-transaction monotonic seq + idempotent insert ----
             // UPDATE channel_seq row-lock serializes writes per-channel (gapless);
             // ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING
@@ -89,13 +117,13 @@ struct MessageRoutes: Sendable {
                 )
                 INSERT INTO message
                   (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
-                   type, body, props, client_msg_id, run_id)
+                   type, body, props, root_id, client_msg_id, run_id)
                 SELECT \(workspaceID), \(channelID), b.seq, \(hlcTs), \(hlcCount),
                        \(principal.memberID), \(type)::message_type, \(body),
-                       \(propsJSON)::jsonb, \(dto.clientMsgId), \(dto.runId)
+                       \(propsJSON)::jsonb, \(dto.rootId), \(dto.clientMsgId), \(dto.runId)
                 FROM bumped b
                 ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING
-                RETURNING id, seq, hlc_ts, hlc_count, created_at, props::text
+                RETURNING id, seq, hlc_ts, hlc_count, created_at, props::text, root_id
                 """,
                 logger: db.logger
             ).collect()
@@ -110,7 +138,7 @@ struct MessageRoutes: Sendable {
                 // the prior seq (exactly-once effect, L4 §3.1).
                 let existing = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, created_at, props::text
+                    SELECT id, seq, hlc_ts, hlc_count, created_at, props::text, root_id
                       FROM message
                      WHERE channel_id = \(channelID)
                        AND author_member_id = \(principal.memberID)
@@ -123,8 +151,8 @@ struct MessageRoutes: Sendable {
                 didInsert = false
             }
 
-            let (id, seq, ts, count, createdAt, rowPropsJSON) =
-                try row.decode((UUID, Int64, Int64, Int, Date, String).self)
+            let (id, seq, ts, count, createdAt, rowPropsJSON, rootID) =
+                try row.decode((UUID, Int64, Int64, Int, Date, String, UUID?).self)
             if didInsert, let attachmentIDs = dto.attachmentIds, !attachmentIDs.isEmpty {
                 try await Self.linkAttachments(
                     conn: conn,
@@ -158,6 +186,33 @@ struct MessageRoutes: Sendable {
             }
             let responseProps = Self.decodeProps(responsePropsJSON)
 
+            if didInsert, let rootID {
+                // ON CONFLICT DO UPDATE takes the root row lock. The increment is
+                // atomic, so concurrent replies cannot lose reply_count updates.
+                _ = try await conn.query(
+                    """
+                    INSERT INTO thread
+                      (root_id, workspace_id, channel_id, reply_count,
+                       last_reply_seq, last_reply_at, participant_ids)
+                    VALUES
+                      (\(rootID), \(workspaceID), \(channelID), 1,
+                       \(seq), \(createdAt), ARRAY[\(principal.memberID)]::uuid[])
+                    ON CONFLICT (root_id) DO UPDATE
+                      SET reply_count = thread.reply_count + 1,
+                          last_reply_seq = EXCLUDED.last_reply_seq,
+                          last_reply_at = EXCLUDED.last_reply_at,
+                          participant_ids = CASE
+                            WHEN EXCLUDED.participant_ids[1] = ANY(thread.participant_ids)
+                              THEN thread.participant_ids
+                            ELSE array_append(
+                              thread.participant_ids, EXCLUDED.participant_ids[1]
+                            )
+                          END
+                    """,
+                    logger: db.logger
+                )
+            }
+
             // ---- outbox INSERT in the SAME tx (L4 §8.1: transactional outbox) ----
             // partition_key = channel_id → per-channel ordering for the relay.
             // payload mirrors the Centrifugo publish args the relay will POST:
@@ -166,7 +221,7 @@ struct MessageRoutes: Sendable {
             let outboxPayload = Self.broadcastPayload(
                 centChannel: centChannel, messageID: id, channelID: channelID,
                 seq: seq, type: type, body: body, authorMemberID: principal.memberID,
-                hlcTs: ts, hlcCount: count
+                hlcTs: ts, hlcCount: count, rootID: rootID
             )
             _ = try await conn.query(
                 """
@@ -218,7 +273,8 @@ struct MessageRoutes: Sendable {
             }
 
             return (true, MessageDTO(
-                id: id.uuidString, channelId: channelID.uuidString, seq: seq,
+                id: id.uuidString, channelId: channelID.uuidString,
+                rootId: rootID?.uuidString, seq: seq,
                 hlcTs: ts, hlcCount: count, authorMemberId: principal.memberID.uuidString,
                 type: type, body: body, props: responseProps,
                 runId: dto.runId?.uuidString, clientMsgId: dto.clientMsgId.uuidString,
@@ -269,7 +325,7 @@ struct MessageRoutes: Sendable {
                 rows = try await conn.query(
                     """
                     SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
-                           props::text, run_id, client_msg_id, created_at
+                           props::text, root_id, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID) AND seq > \(after)
                        AND deleted_at IS NULL
@@ -282,7 +338,7 @@ struct MessageRoutes: Sendable {
                 rows = try await conn.query(
                     """
                     SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
-                           props::text, run_id, client_msg_id, created_at
+                           props::text, root_id, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID) AND seq < \(before)
                        AND deleted_at IS NULL
@@ -295,7 +351,7 @@ struct MessageRoutes: Sendable {
                 rows = try await conn.query(
                     """
                     SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
-                           props::text, run_id, client_msg_id, created_at
+                           props::text, root_id, run_id, client_msg_id, created_at
                       FROM message
                      WHERE channel_id = \(channelID)
                        AND deleted_at IS NULL
@@ -307,10 +363,11 @@ struct MessageRoutes: Sendable {
             }
 
             let dtos = try rows.map { row -> MessageDTO in
-                let (id, seq, ts, count, author, type, body, propsJSON, runID, clientMsgID, createdAt) =
-                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, String, UUID?, UUID?, Date).self)
+                let (id, seq, ts, count, author, type, body, propsJSON, rootID, runID, clientMsgID, createdAt) =
+                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, String, UUID?, UUID?, UUID?, Date).self)
                 return MessageDTO(
-                    id: id.uuidString, channelId: channelID.uuidString, seq: seq,
+                    id: id.uuidString, channelId: channelID.uuidString,
+                    rootId: rootID?.uuidString, seq: seq,
                     hlcTs: ts, hlcCount: count, authorMemberId: author.uuidString,
                     type: type, body: body, props: Self.decodeProps(propsJSON),
                     runId: runID?.uuidString, clientMsgId: clientMsgID?.uuidString,
@@ -1242,7 +1299,8 @@ struct MessageRoutes: Sendable {
     /// Build the outbox `payload` JSON (the args the relay will POST to Centrifugo).
     static func broadcastPayload(
         centChannel: String, messageID: UUID, channelID: UUID, seq: Int64,
-        type: String, body: String?, authorMemberID: UUID, hlcTs: Int64, hlcCount: Int
+        type: String, body: String?, authorMemberID: UUID, hlcTs: Int64, hlcCount: Int,
+        rootID: UUID?
     ) -> String {
         // Event envelope per L4 §5.2: {type, v, ts, seq, payload:{...}}.
         let data: [String: Any] = [
@@ -1259,6 +1317,7 @@ struct MessageRoutes: Sendable {
                 "author_member_id": authorMemberID.uuidString,
                 "hlc_ts": hlcTs,
                 "hlc_count": hlcCount,
+                "root_id": rootID?.uuidString ?? NSNull(),
             ],
         ]
         let envelope: [String: Any] = [
