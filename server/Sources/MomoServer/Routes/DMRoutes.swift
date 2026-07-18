@@ -177,7 +177,15 @@ struct DMRoutes: Sendable {
                            ARRAY[\(firstParticipantID), \(secondParticipantID)]::uuid[]
                          ),
                          'createdBy', selected_channel.created_by,
-                         'archivedAtMs', NULL
+                         'archivedAtMs', NULL,
+                         'muted', EXISTS (
+                           SELECT 1
+                             FROM notification_pref np
+                            WHERE np.workspace_id = selected_channel.workspace_id
+                              AND np.channel_id = selected_channel.id
+                              AND np.member_id = \(principal.memberID)
+                              AND (np.muted_until IS NULL OR np.muted_until > now())
+                         )
                        )::text AS channel_json,
                        selected_channel.created
                   FROM selected_channel
@@ -272,7 +280,15 @@ struct DMRoutes: Sendable {
                               AND participant.left_at IS NULL
                          ),
                          'createdBy', c.created_by,
-                         'archivedAtMs', NULL
+                         'archivedAtMs', NULL,
+                         'muted', EXISTS (
+                           SELECT 1
+                             FROM notification_pref np
+                            WHERE np.workspace_id = c.workspace_id
+                              AND np.channel_id = c.id
+                              AND np.member_id = \(memberID)
+                              AND (np.muted_until IS NULL OR np.muted_until > now())
+                         )
                        ) AS row_json
                   FROM channel c
                   JOIN membership actor_membership

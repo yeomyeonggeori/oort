@@ -453,6 +453,51 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/notification-pref:
+    put:
+      tags: [channels]
+      operationId: updateChannelNotificationPref
+      summary: Mute or unmute push notifications for one channel.
+      description: >
+        Active channel members only. `muted: true` stores an indefinite mute;
+        `muted: false` deletes the preference. Mute suppresses every push
+        reason, including mentions and approval requests, without changing
+        unread/read-state.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNotificationPrefRequest"
+      responses:
+        "200":
+          description: The effective channel mute state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefResponse"
+        "400":
+          description: Invalid request body or identifiers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/huddles:
     post:
       tags: [huddles]
@@ -2226,7 +2271,7 @@ components:
     # ---- Channels ----------------------------------------------------------------
     Channel:
       type: object
-      required: [id, workspaceId, kind]
+      required: [id, workspaceId, kind, muted]
       properties:
         id:
           type: string
@@ -2258,6 +2303,9 @@ components:
           type: integer
           format: int64
           description: Present only when the channel is archived.
+        muted:
+          type: boolean
+          description: Whether push dispatch is suppressed for the authenticated member.
 
     WorkspaceChannelsResponse:
       type: object
@@ -2267,6 +2315,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Channel"
+
+    UpdateNotificationPrefRequest:
+      type: object
+      required: [muted]
+      properties:
+        muted:
+          type: boolean
+
+    NotificationPrefResponse:
+      type: object
+      required: [muted]
+      properties:
+        muted:
+          type: boolean
 
     CreateChannelRequest:
       type: object

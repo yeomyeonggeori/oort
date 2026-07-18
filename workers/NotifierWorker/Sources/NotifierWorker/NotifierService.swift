@@ -23,10 +23,8 @@ import ServiceLifecycle
 ///     humans who can decide it — active human members of the channel
 ///     (ApprovalDecisionRoutes authorization surface), excluding the
 ///     requesting agent.
-///   - MOMO-395 consumer seat: channel notification settings / DND / mute are
-///     owned by the UX track (#401). When that surface lands, its settings
-///     are consumed HERE, as an additional filter over the target set below.
-///     Do not pre-empt its schema.
+///   - Channel mute (ADR-0124): suppress every reason, including mentions and
+///     approval requests. The preference is read at judgment time; no cache.
 ///
 /// Delivery contract:
 ///   - Claim: SELECT ... FOR UPDATE SKIP LOCKED, same as relay/AgentWorker;
@@ -314,9 +312,6 @@ struct NotifierService: Service {
         // A member without an active token contributes no row (agents never
         // have devices, so agent recipients drop out naturally).
         //
-        // MOMO-395 (channel notification settings / DND / mute) consumer
-        // seat: apply those settings as a filter on `recipients` here once
-        // the UX track lands the surface.
         let rows = try await pg.query(
             """
             WITH msg AS (
@@ -362,7 +357,15 @@ struct NotifierService: Service {
                AND t.invalidated_at IS NULL
               JOIN device d ON d.id = t.device_id
                AND d.workspace_id = \(workspaceID)
+              LEFT JOIN notification_pref np
+                ON np.workspace_id = \(workspaceID)
+               AND np.channel_id = (SELECT channel_id FROM msg)
+               AND np.member_id = r.member_id
              WHERE r.reason IS NOT NULL
+               AND (
+                 np.member_id IS NULL
+                 OR (np.muted_until IS NOT NULL AND np.muted_until <= now())
+               )
              ORDER BY r.member_id, t.id
             """,
             logger: logger

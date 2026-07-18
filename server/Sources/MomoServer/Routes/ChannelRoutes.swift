@@ -7,6 +7,7 @@ import PostgresNIO
 ///
 ///   GET /v1/workspaces/{ws}/channels
 ///   POST /v1/workspaces/{ws}/channels
+///   PUT /v1/workspaces/{ws}/channels/{ch}/notification-pref
 ///   POST /v1/workspaces/{ws}/channels/{ch}/members
 ///   DELETE /v1/workspaces/{ws}/channels/{ch}/members/{member}
 ///
@@ -18,6 +19,7 @@ struct ChannelRoutes: Sendable {
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/channels", use: list)
         group.post("/v1/workspaces/:ws/channels", use: create)
+        group.put("/v1/workspaces/:ws/channels/:ch/notification-pref", use: updateNotificationPref)
         group.post("/v1/workspaces/:ws/channels/:ch/members", use: addMember)
         group.delete("/v1/workspaces/:ws/channels/:ch/members/:member", use: removeMember)
     }
@@ -112,7 +114,8 @@ struct ChannelRoutes: Sendable {
                            CASE WHEN c.archived_at IS NULL
                                 THEN NULL
                                 ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint
-                           END
+                           END,
+                         'muted', false
                        )::text AS channel_json,
                        jsonb_build_object(
                          'id', ms.id,
@@ -213,6 +216,86 @@ struct ChannelRoutes: Sendable {
         }
 
         return try ChannelMembershipResponse(membership: membership)
+            .response(from: request, context: context)
+    }
+
+    @Sendable
+    func updateNotificationPref(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let channelID = try Self.channelID(context)
+        let dto = try await request.decode(as: UpdateNotificationPrefRequest.self, context: context)
+
+        try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            let membershipRows = try await conn.query(
+                """
+                SELECT 1
+                  FROM membership ms
+                  JOIN channel c
+                    ON c.id = ms.channel_id
+                   AND c.workspace_id = ms.workspace_id
+                 WHERE ms.workspace_id = \(workspaceID)
+                   AND ms.channel_id = \(channelID)
+                   AND ms.member_id = \(principal.memberID)
+                   AND ms.left_at IS NULL
+                   AND c.archived_at IS NULL
+                """,
+                logger: db.logger
+            ).collect()
+            guard !membershipRows.isEmpty else {
+                throw HTTPError(.forbidden, message: "active channel membership required")
+            }
+
+            if dto.muted {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO notification_pref (
+                      workspace_id, member_id, channel_id, muted_until
+                    )
+                    VALUES (\(workspaceID), \(principal.memberID), \(channelID), NULL)
+                    ON CONFLICT (workspace_id, member_id, channel_id)
+                    DO UPDATE SET muted_until = NULL, updated_at = now()
+                    """,
+                    logger: db.logger
+                )
+            } else {
+                _ = try await conn.query(
+                    """
+                    DELETE FROM notification_pref
+                     WHERE workspace_id = \(workspaceID)
+                       AND member_id = \(principal.memberID)
+                       AND channel_id = \(channelID)
+                    """,
+                    logger: db.logger
+                )
+            }
+
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type,
+                   target_id, via_token_id, detail)
+                VALUES (
+                  \(workspaceID),
+                  \(principal.memberID),
+                  'notification_pref.updated',
+                  'channel',
+                  \(channelID),
+                  \(principal.tokenID),
+                  jsonb_build_object(
+                    'schema', 'momo.notification_pref.updated.v1',
+                    'muted', \(dto.muted)
+                  )
+                )
+                """,
+                logger: db.logger
+            )
+        }
+
+        return try NotificationPrefResponse(muted: dto.muted)
             .response(from: request, context: context)
     }
 
@@ -424,7 +507,15 @@ struct ChannelRoutes: Sendable {
                            CASE WHEN c.archived_at IS NULL
                                 THEN NULL
                                 ELSE floor(extract(epoch from c.archived_at) * 1000)::bigint
-                           END
+                           END,
+                         'muted', EXISTS (
+                           SELECT 1
+                             FROM notification_pref np
+                            WHERE np.workspace_id = c.workspace_id
+                              AND np.channel_id = c.id
+                              AND np.member_id = \(memberID)
+                              AND (np.muted_until IS NULL OR np.muted_until > now())
+                         )
                        ) AS row_json,
                        CASE c.kind::text
                          WHEN 'public' THEN 0

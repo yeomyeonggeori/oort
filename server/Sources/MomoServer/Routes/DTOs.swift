@@ -284,10 +284,21 @@ struct ChannelDTO: ResponseEncodable, Decodable {
     let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
+    /// Server-owned push suppression for the authenticated member.
+    let muted: Bool
 }
 
 struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
     let channels: [ChannelDTO]
+}
+
+/// PUT /v1/workspaces/{ws}/channels/{ch}/notification-pref request body.
+struct UpdateNotificationPrefRequest: Decodable {
+    let muted: Bool
+}
+
+struct NotificationPrefResponse: ResponseEncodable, Decodable {
+    let muted: Bool
 }
 
 /// POST /v1/workspaces/{ws}/dms request body.
