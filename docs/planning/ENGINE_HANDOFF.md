@@ -13,7 +13,7 @@
 | A-3 | `ready` | **초대 단축 링크 노출** | 초대 UI에 `/i/<code>` 노출 grep 0건 | 초대 발급 화면에 단축 링크 복사 버튼(서비스 URL env) | services/LinkShort |
 | A-4 | `ready` | **스레드 실전송 연동** | 컴포저 "스레드 초안"=로컬 초안만(`localDraft` 카피). 서버 `message.root_id`+`thread` 테이블 001부터 기존재 | 로컬 초안 → 실제 root_id 전송/스레드 뷰. 전송 REST의 root_id 개방 여부 선확인(§B-3와 짝) | 001_init.sql:174-205 |
 | A-5 | `ready` | **허들 UI 폴리시** | V-3 design High 2건(disabled 사유 키보드 접근성, 상태별 시각 증거) + 실창 QA | 폴리시 + 성재 실오디오 QA 동행 | MomoHuddle*.swift |
-| A-6 | `ready` | **파일 첨부 실업로드** | 컴포저 "파일 첨부"=로컬 초안만. **엔진 전제 완비**: Drive SA+공유 드라이브 실검증(2026-07-17), GWS-ARCHIVE 동결 해제 가능 | (엔진 선행 필요 — §B-1 업로드 API 랜딩 후) 첨부→업로드→메시지 연결 | 런북 §6.1, research/13-03 |
+| A-6 | `ready`(엔진 완료 6d4dd97) | **파일 첨부 실업로드** | 컴포저 "파일 첨부"=로컬 초안만. **엔진 전제 완비**: Drive SA+공유 드라이브 실검증(2026-07-17), GWS-ARCHIVE 동결 해제 가능 | (엔진 선행 필요 — §B-1 업로드 API 랜딩 후) 첨부→업로드→메시지 연결 | 런북 §6.1, research/13-03 |
 
 ## B. UI 존재/요구 → 엔진 미구현 (엔진 트랙 역요청)
 
@@ -37,4 +37,4 @@
 | # | 항목 | 상태 |
 |---|---|---|
 | D-1 | V-3b iOS 허들 참가 | done → track/engine `0176508` (main 대기) |
-| D-2 | 첨부 업로드 v0 (MOMO-474) | in-progress (track/engine) |
+| D-2 | 첨부 업로드 v0 (MOMO-474) | done → track/engine `6d4dd97` (main 대기) |

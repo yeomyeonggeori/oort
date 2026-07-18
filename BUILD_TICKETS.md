@@ -2197,9 +2197,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 마이크 권한 문구/거부 상태, 503 미구성 처리, 뷰모델 mock 테스트. 시뮬레이터 게이트는 오케스트레이터. 상세: issue #496 본문(패킷 겸용).
 - 랜딩: PR #498 squash `0176508` → **track/engine**(2026-07-18, 새 파이프라인 첫 트랙 머지 — main 미반영, 성재 게이트 대기). 킷 27/27+시뮬레이터 게이트 PASS, LiveKit 2.15.2 핀·마이크 권한·수명주기 정리 확인.
 
-### ☐ MOMO-474 (`#497`) 수용기준 — 첨부 업로드 v0 (Drive archive) `[runtime-db]` · 의존: SA 실검증 완료 · **PR base=track/engine**
-- [ ] 017_attachment(RLS) + 세션 발급(resumable, 클라 직송)/complete 검증/content 프록시/전송 DTO attachmentIds 가산.
-- [ ] DriveArchiveClient(실+stub, drive.file) + verify_attachment_upload(stub) + runtime-db 편입 + openapi. 실 Google smoke는 오케스트레이터. 상세: issue #497 본문(패킷 겸용). ENGINE_HANDOFF B-1→in-progress, 랜딩 시 A-6 해제.
+### ☑ MOMO-474 (`#497`) 수용기준 — 첨부 업로드 v0 (Drive archive) `[runtime-db]` · 의존: SA 실검증 완료 · **PR base=track/engine**
+- [x] 017_attachment(RLS) + 세션 발급(resumable, 클라 직송)/complete 검증/content 프록시/전송 DTO attachmentIds 가산.
+- [x] DriveArchiveClient(실+stub, drive.file) + verify_attachment_upload(stub) + runtime-db 편입 + openapi. 실 Google smoke는 오케스트레이터. 상세: issue #497 본문(패킷 겸용). ENGINE_HANDOFF B-1→in-progress, 랜딩 시 A-6 해제.
+- 랜딩: PR #499 squash `6d4dd97` → **track/engine**(2026-07-18, main 대기). 검증: 첨부 verifier(stub)+서버 107/107+openapi 48/48+**실 Google 왕복 smoke PASS**(resumable→클라 직송 PUT→files.get→alt=media, 정리 완료). 게이트 유일 실패=english-large-text full-suite flake(server 전용 PR·macOS 무관 = 선재, MOMO-472로 확장).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

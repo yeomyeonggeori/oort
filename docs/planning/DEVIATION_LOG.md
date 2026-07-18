@@ -14,6 +14,8 @@
 
 | 2026-07-18 | MOMO-471 / PR #494 (게이트 선재 발견) | `testWorkspaceSearchLightSnapshot`가 격리 통과·full `make test` 실패(폰트캐시/GPU 순서 의존 렌더 비결정, precision 0.98 미세 초과). origin/main에서도 재현 — V-3 무관. | V-3 자체(huddle/Core 34 test) PASS 확인 후 표면 무관 flake로 판정, 재기록 커밋 revert해 PR을 huddle 전용 유지. MOMO-411/412 선례(선재 스냅샷 FAIL 분리)와 동일 처리. | `pending` | MOMO-472(#495) 안정화 티켓 발급 — full-suite 3회 통과 증명 필요. |
 
+| 2026-07-18 | MOMO-474 / PR #499 (게이트 선재) | server 전용 PR인데 runtime-db 게이트의 `testChannelCreationSheetEnglishLargeTextSnapshot`(macOS)가 full-suite flake로 실패. server 변경은 macOS 렌더에 영향 불가 = 선재. | 첨부 verifier+서버 107 test+openapi+실 Google smoke PASS 확인 후 track/engine 머지. MOMO-472(#495) 범위를 이 스냅샷까지 확장. | `pending` | MOMO-472에서 두 스냅샷 결정적 렌더 이관. |
+
 ## 소급 항목 (2026-07-09 감사에서 발견된 역사적 이탈)
 
 아래는 이 로그가 없던 시기의 이탈로, ADR 큐에 이미 배정됨 — 참고용.
