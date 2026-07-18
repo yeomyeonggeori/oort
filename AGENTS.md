@@ -9,6 +9,15 @@
 > **현재 위치:** Phase 0 = 5개 Swift 패키지 `swift build` green. Docker Desktop/psql 기반 M1 런타임 검증을 진행 중이며, hermes 필요 경로는 실제 hermes 또는 mock OpenAI-compatible gateway가 필요하다. **2026-07 재설계 6티켓(316/323/301/300/302/318) 머지 완료(main), 실행 주체 Opus 세션→Codex 인수 — 인수인계·진입점은 `docs/HANDOFF_2026-07.md`, 상태는 `research/13-redesign/00-execution-tracker.md`.**
 > **표기:** `(검증됨)`=교차확인 · `(추정)`=설계/일정 판단 · `runtime-unverified`=해당 goal에서 아직 e2e를 못 닫은 것. **법무 텍스트는 법률 자문 아님.**
 
+## -1. 트랙 파이프라인 (2026-07-18 성재 지시 — 최우선 규칙)
+
+**작업 시작 전 반드시 `docs/TRACKS.md`를 읽고 자기 트랙(UXUI | 엔진)을 선언하라.** 요약:
+1. 작업은 UXUI 트랙(`clients/macOS` 표면)과 엔진 트랙(server/relay/workers/services/infra/scripts/Core/iOS)으로 이원화.
+2. 구현은 항상 워크트리에서(트랙 워크트리: `~/projects/momo-tracks/{uxui,engine}`, 브랜치 `track/uxui`·`track/engine`). 루트(main 체크아웃)에서 구현 금지.
+3. 성재에게 보여주는 빌드는 **자기 트랙 워크트리에서** `scripts/macos_dev_run.sh` 실행 — "빌드 원본: <경로> <브랜치>@<sha>" 고지. main 빌드로 보여주기 금지.
+4. PR/머지 대상은 main이 아니라 **자기 트랙 브랜치**. **track/* → main 머지는 성재의 명시 승인이 있을 때만**(묻고 승인받거나, 성재가 먼저 지시할 때).
+5. 엔진 랜딩 후에는 `docs/planning/ENGINE_HANDOFF.md`에 ready 항목 추가. UXUI는 세션 시작 시 그 파일을 읽고 성재에게 "이거 구현할까요?" 제안.
+
 ## 0. 제품 1줄
 momo = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agent'`)로 참여하는 자체구축 슬랙형 메신저. macOS 우선 + iOS, 공유 Swift 코어(`MomoCore`). 백엔드 **Hummingbird 2 + Centrifugo v6 + PostgreSQL 18**. 에이전트 게이트웨이 = 김인턴/hermes(OpenAI 호환 `/v1/chat/completions` + SSE). 전 의존성 permissive(Apache/MIT) 타깃.
 
