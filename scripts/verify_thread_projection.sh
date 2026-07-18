@@ -249,13 +249,56 @@ done
   exit 1
 }
 
-# Mention Hermes from inside the thread. The worker's durable response must
-# inherit ROOT_ID, increment the same rollup, append the agent participant, and
-# publish another thread.updated in its INSERT transaction.
-send_message "$(uuidgen)" "@hermes MOMO-479 reply inside this thread" "$ROOT_ID"
+# Trigger the worker from inside the thread. The verifier owns the run/job so it
+# can grant the mock's deterministic read-only tool call; otherwise the worker's
+# correct fail-closed policy would pause for approval instead of reaching the
+# final-text INSERT this gate needs to exercise.
+send_message "$(uuidgen)" "MOMO-479 AgentWorker reply inside this thread" "$ROOT_ID"
 expect_status 201 "threaded agent trigger"
 TRIGGER_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id' | tr '[:upper:]' '[:lower:]')"
 TRIGGER_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -er '.seq')"
+AGENT_RUN_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+
+run_sql <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+INSERT INTO agent_run
+  (id, workspace_id, agent_member_id, channel_id, trigger_message_id,
+   status, step_count, max_steps, depth, input, idempotency_key)
+VALUES
+  ('$AGENT_RUN_ID', '$WS_ID', '$AGENT_ID', '$CHANNEL_ID', '$TRIGGER_ID',
+   'queued', 0, 12, 0,
+   jsonb_build_object('prompt', 'MOMO-479 AgentWorker reply inside this thread'),
+   'momo-479-thread-projection-$RUN_SUFFIX');
+INSERT INTO outbox
+  (workspace_id, kind, status, method, payload, partition_key)
+VALUES
+  ('$WS_ID', 'agent_job', 'pending', 'publish',
+   jsonb_build_object(
+     'run_id', '$AGENT_RUN_ID',
+     'workspace_id', '$WS_ID',
+     'agent_member_id', '$AGENT_ID',
+     'channel_id', '$CHANNEL_ID',
+     'author_member_id', '$HUMAN_ID',
+     'trigger_message_id', '$TRIGGER_ID',
+     'trigger_message_seq', $TRIGGER_SEQ,
+     'model', 'hermes-agent',
+     'prompt', 'MOMO-479 AgentWorker reply inside this thread',
+     'max_output_tokens', 64,
+     'step_count', 0,
+     'depth', 0,
+     'consecutive_auto', 0,
+     'tool_grants', jsonb_build_array(jsonb_build_object(
+       'tool_name', 'github.search_issues',
+       'provider', 'github',
+       'grant', 'read',
+       'risk', 'read',
+       'approval_policy', 'none'
+     ))
+   ),
+   '$AGENT_ID');
+COMMIT;
+SQL
 
 AGENT_ASSERTION=""
 deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
@@ -268,7 +311,8 @@ SELECT concat_ws(':', lower(m.id::text), lower(COALESCE(m.root_id::text, '')), m
   FROM agent_run r
   JOIN message m ON m.run_id = r.id
   JOIN thread t ON t.root_id = '$ROOT_ID'
- WHERE r.trigger_message_id = '$TRIGGER_ID'
+ WHERE r.id = '$AGENT_RUN_ID'
+   AND r.trigger_message_id = '$TRIGGER_ID'
    AND m.author_member_id = '$AGENT_ID'
    AND m.type = 'text'
  LIMIT 1;
@@ -315,6 +359,33 @@ SQL
 )"
 [ "$got" = "1" ] || {
   echo "[thread-projection] FAIL agent thread.updated outbox: $got" >&2
+  exit 1
+}
+
+AGENT_THREAD_EVENT_OK=0
+deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+while [ "$(date -u +%s)" -lt "$deadline" ]; do
+  history="$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg ch "$CENT_CHANNEL" '{channel:$ch,limit:100,reverse:true}')" \
+    "$CENT_API_URL/history" 2>/dev/null || printf '{}')"
+  matches="$(printf '%s' "$history" | jq -r \
+    --arg root "$ROOT_ID" --argjson last "$AGENT_SEQ" '
+      [.result.publications[]?.data
+       | select(.type == "thread.updated")
+       | select((.payload.root_id | ascii_downcase) == $root)
+       | select(.payload.reply_count == 5)
+       | select(.payload.last_reply_seq == $last)] | length
+    ' 2>/dev/null || printf '0')"
+  if [ "$matches" != "0" ]; then
+    AGENT_THREAD_EVENT_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "$AGENT_THREAD_EVENT_OK" = "1" ] || {
+  compose logs --tail 120 relay worker >&2 || true
+  echo "[thread-projection] FAIL AgentWorker thread.updated was not delivered" >&2
   exit 1
 }
 
