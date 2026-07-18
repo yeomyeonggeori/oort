@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-476 스레드 답글 전송 + thread 롤업 (2026-07-18)
+
+- 기존 메시지 단일 쓰기 트랜잭션에 같은 채널의 미삭제 톱레벨 `rootId` 검증, `message.root_id`, 원자적 `thread.reply_count` 증가와 last-reply/participant 롤업을 추가했다. 교차채널 root는 404로 존재를 숨기고 삭제 root·대댓글은 400으로 거부하며, 응답/history/realtime payload가 root를 노출한다.
+- server 107 tests, 격리 compose `verify_thread_reply.sh`(정상·멱등 outbox/롤업·동시 2답글·RLS), OpenAPI live drift 48/48 samples·37 operations가 PASS했다.
+
 ## MOMO-475 워크스페이스 메시지 검색 FTS v0 (2026-07-18)
 
 - 활성 채널 멤버십으로 하드 필터된 `GET /v1/workspaces/:ws/search/messages`를 추가했다. 기존 partial GIN trigram 인덱스로 ILIKE 한영 혼합 검색을 수행하며, 최신순 keyset cursor·매치 주변 bounded snippet/offset·검색 전용 멤버 30/min 제한을 제공한다.
