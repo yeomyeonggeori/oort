@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-477 채널 알림 음소거 (2026-07-18)
+
+- ADR-0124에 따라 `notification_pref` FORCE RLS 원장과 채널 멤버 전용 `PUT {muted}`(false=삭제), 채널/DM 응답의 `muted` projection을 추가했다. NotifierWorker는 매 판정 시 preference를 LEFT JOIN해 DM·멘션·승인요청을 모두 후보에서 제외하며 unread/read-state는 변경하지 않는다.
+- server 109 tests, NotifierWorker 3 tests, OpenAPI live drift 50/50 samples·39 operations, 격리 compose `verify_notification_mute.sh`(음소거 전/후/해제·멘션·페어 격리·suppressed 로그 무기록·audit·RLS)가 PASS했다.
+
 ## MOMO-476 스레드 답글 전송 + thread 롤업 (2026-07-18)
 
 - 기존 메시지 단일 쓰기 트랜잭션에 같은 채널의 미삭제 톱레벨 `rootId` 검증, `message.root_id`, 원자적 `thread.reply_count` 증가와 last-reply/participant 롤업을 추가했다. 교차채널 root는 404로 존재를 숨기고 삭제 root·대댓글은 400으로 거부하며, 응답/history/realtime payload가 root를 노출한다.

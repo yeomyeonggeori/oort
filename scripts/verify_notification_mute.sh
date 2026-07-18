@@ -41,15 +41,19 @@ CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 SENDER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 MUTED_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 PEER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+OUTSIDER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SENDER_EMAIL="mute-sender-$RUN_ID@momo.local"
 MUTED_EMAIL="mute-target-$RUN_ID@momo.local"
 PEER_EMAIL="mute-peer-$RUN_ID@momo.local"
+OUTSIDER_EMAIL="mute-outsider-$RUN_ID@momo.local"
 SENDER_PASSWORD="mute-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 MUTED_PASSWORD="mute-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 PEER_PASSWORD="mute-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+OUTSIDER_PASSWORD="mute-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SENDER_HANDLE="mute-send-$RUN_EPOCH"
 MUTED_HANDLE="mute-target-$RUN_EPOCH"
 PEER_HANDLE="mute-peer-$RUN_EPOCH"
+OUTSIDER_HANDLE="mute-out-$RUN_EPOCH"
 
 MUTED_DEVICE_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 PEER_DEVICE_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -172,12 +176,14 @@ INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES
   ('$SENDER_ID', '$WORKSPACE_ID', 'human', 'active', 'Mute Sender', '$SENDER_HANDLE'),
   ('$MUTED_ID', '$WORKSPACE_ID', 'human', 'active', 'Mute Target', '$MUTED_HANDLE'),
-  ('$PEER_ID', '$WORKSPACE_ID', 'human', 'active', 'Mute Peer', '$PEER_HANDLE');
+  ('$PEER_ID', '$WORKSPACE_ID', 'human', 'active', 'Mute Peer', '$PEER_HANDLE'),
+  ('$OUTSIDER_ID', '$WORKSPACE_ID', 'human', 'active', 'Mute Outsider', '$OUTSIDER_HANDLE');
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
 VALUES
   ('$SENDER_ID', '$WORKSPACE_ID', '$SENDER_EMAIL', true, momo_password_hash('$SENDER_PASSWORD'), 'UTC'),
   ('$MUTED_ID', '$WORKSPACE_ID', '$MUTED_EMAIL', true, momo_password_hash('$MUTED_PASSWORD'), 'UTC'),
-  ('$PEER_ID', '$WORKSPACE_ID', '$PEER_EMAIL', true, momo_password_hash('$PEER_PASSWORD'), 'UTC');
+  ('$PEER_ID', '$WORKSPACE_ID', '$PEER_EMAIL', true, momo_password_hash('$PEER_PASSWORD'), 'UTC'),
+  ('$OUTSIDER_ID', '$WORKSPACE_ID', '$OUTSIDER_EMAIL', true, momo_password_hash('$OUTSIDER_PASSWORD'), 'UTC');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WORKSPACE_ID', '$CHANNEL_ID', '$SENDER_ID', 'member'),
@@ -189,7 +195,8 @@ SQL
 SENDER_ACCESS="$(login "$SENDER_EMAIL" "$SENDER_PASSWORD")"
 MUTED_ACCESS="$(login "$MUTED_EMAIL" "$MUTED_PASSWORD")"
 PEER_ACCESS="$(login "$PEER_EMAIL" "$PEER_PASSWORD")"
-for access in "$SENDER_ACCESS" "$MUTED_ACCESS" "$PEER_ACCESS"; do
+OUTSIDER_ACCESS="$(login "$OUTSIDER_EMAIL" "$OUTSIDER_PASSWORD")"
+for access in "$SENDER_ACCESS" "$MUTED_ACCESS" "$PEER_ACCESS" "$OUTSIDER_ACCESS"; do
   [ -n "$access" ] && [ "$access" != "null" ] || { echo "[notification-mute] login failed" >&2; exit 1; }
 done
 
@@ -200,6 +207,9 @@ api POST "$DEVICE_PATH" "$(jq -cn --arg d "$PEER_DEVICE_ID" --arg t "$PEER_TOKEN
 expect_status 201 "peer device registered"
 
 PREF_PATH="/v1/workspaces/$WORKSPACE_ID/channels/$CHANNEL_ID/notification-pref"
+
+api PUT "$PREF_PATH" '{"muted":true}' "$OUTSIDER_ACCESS"
+expect_status 403 "workspace member without channel membership cannot mutate preference"
 
 MSG_BEFORE="$(send_message "before @$MUTED_HANDLE" "$SENDER_ACCESS")"
 wait_sql_eq "1" "dispatch occurs before mute" <<SQL
