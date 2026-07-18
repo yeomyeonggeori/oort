@@ -233,6 +233,63 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(id.description.lowercased(), "018f8b2c-0000-7000-8000-000000000020")
     }
 
+    func testServerMessageInteractionPayloadsDecodeAllFourKinds() throws {
+        let messageID = "018f8b2c-0000-7000-8000-000000000020"
+        let channelID = "018f8b2c-0000-7000-8000-000000000021"
+        let memberID = "018f8b2c-0000-7000-8000-000000000022"
+        let fixtures = [
+            """
+            {"type":"message.edited","v":1,"ts":1718000000100,"seq":7,"payload":{
+              "id":"\(messageID)","channel_id":"\(channelID)","seq":7,
+              "hlc_ts":1718000000000,"hlc_count":0,"author_member_id":"\(memberID)",
+              "type":"text","state":"edited","body":"edited","props":{},
+              "root_id":null,"run_id":null,"client_msg_id":null,
+              "created_at_ms":1718000000000,"edited_at_ms":1718000000100,
+              "deleted_at_ms":null}}
+            """,
+            """
+            {"type":"message.deleted","v":1,"ts":1718000000200,"seq":7,
+             "payload":{"message_id":"\(messageID)"}}
+            """,
+            """
+            {"type":"reaction.added","v":1,"ts":1718000000300,"seq":7,"payload":{
+              "action":"added","message_id":"\(messageID)",
+              "member_id":"\(memberID)","emoji":"👍"}}
+            """,
+            """
+            {"type":"reaction.removed","v":1,"ts":1718000000400,"seq":7,"payload":{
+              "action":"removed","message_id":"\(messageID)",
+              "member_id":"\(memberID)","emoji":"👍"}}
+            """,
+        ]
+        let decoder = JSONDecoder.momo
+        let events = try fixtures.map {
+            try decoder.decode(RealtimeEnvelope.self, from: Data($0.utf8)).decodeEvent()
+        }
+
+        guard case .messageEdited(let edited) = events[0] else {
+            return XCTFail("expected message.edited")
+        }
+        XCTAssertEqual(edited.body, "edited")
+        XCTAssertEqual(edited.state, .edited)
+        XCTAssertEqual(edited.editedAtMs, 1718000000100)
+
+        guard case .messageDeleted(let deletedID) = events[1] else {
+            return XCTFail("expected message.deleted")
+        }
+        XCTAssertEqual(deletedID.description.lowercased(), messageID)
+
+        for (index, expectedAction) in [(2, ReactionDelta.Action.added), (3, .removed)] {
+            guard case .reaction(let delta) = events[index] else {
+                return XCTFail("expected reaction delta at index \(index)")
+            }
+            XCTAssertEqual(delta.action, expectedAction)
+            XCTAssertEqual(delta.messageId.description.lowercased(), messageID)
+            XCTAssertEqual(delta.memberId.description.lowercased(), memberID)
+            XCTAssertEqual(delta.emoji, "👍")
+        }
+    }
+
     func testEnvelopeUnknownTypeThrows() {
         let envelope = RealtimeEnvelope(type: "wat.unknown", ts: 1, payload: [:])
         XCTAssertThrowsError(try envelope.decodeEvent()) { err in

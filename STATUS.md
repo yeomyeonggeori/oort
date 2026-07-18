@@ -6,6 +6,11 @@
 - A-4는 `rootId`를 포함한 1단계 답글 실전송까지 완료했다. 정확한 thread 롤업/오래된 답글 조회(X-3)와 A-6 첨부 수신 투영(X-4)은 엔진 계약 대기로 역핸드오프했으며, durable 동작처럼 보이는 로컬 위장은 추가하지 않았다.
 - macOS 전체 388 tests와 독립 계약 리뷰(Blocker/High/Medium 0), 플러그인 real-window artifact 검증이 PASS했다. 실서버 세션 왕복과 허들 2-클라이언트 실오디오는 별도 runtime/manual 검증으로 남는다.
 
+## MOMO-478 메시지 상호작용 REST + realtime (2026-07-18)
+
+- 작성자 전용 메시지 수정·body NULL soft-delete, 채널 멤버 반응 추가/제거와 직접 집계 스냅샷을 기존 tenant transaction + outbox + audit 경계에 추가했다. 수정·삭제는 기존 `message.seq`를 유지하고, 반응 멱등 재시도는 중복 outbox를 만들지 않으며 삭제 audit에는 원문을 남기지 않는다.
+- 서버 109 tests, Core 27 tests(4종 서버 envelope 디코드), 격리 `verify_message_interaction.sh`, OpenAPI live drift 55/55 samples·44 operations가 PASS했다. 신규 migration은 필요하지 않았다(`001_init.sql`의 reaction UNIQUE·edited_at/deleted_at·FORCE RLS 재사용).
+
 ## iOS v0 실기기 푸시 E2E PASS (2026-07-18)
 
 - 실기기(iPhone, Debug 케이블 빌드)에서 전 체인 실증: 디바이스 등록(env 자동판별 sandbox, MOMO-467) → PushRelay(Ed25519 서명 dispatch) → 실 APNs(.p8, apns_id 발급 200) → 실기기 알림 표시 → **NSE가 REST로 실제 메시지 본문 fetch·교체 성공**. ADR-0120 P-1~P-4 + ADR-0123 IOS-1~5의 최종 evidence.
@@ -15,6 +20,11 @@
 
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
+
+## MOMO-477 채널 알림 음소거 (2026-07-18)
+
+- ADR-0124에 따라 `notification_pref` FORCE RLS 원장과 채널 멤버 전용 `PUT {muted}`(false=삭제), 채널/DM 응답의 `muted` projection을 추가했다. NotifierWorker는 매 판정 시 preference를 LEFT JOIN해 DM·멘션·승인요청을 모두 후보에서 제외하며 unread/read-state는 변경하지 않는다.
+- server 109 tests, NotifierWorker 3 tests, OpenAPI live drift 50/50 samples·39 operations, 격리 compose `verify_notification_mute.sh`(음소거 전/후/해제·멘션·페어 격리·suppressed 로그 무기록·audit·RLS)가 PASS했다.
 
 ## MOMO-476 스레드 답글 전송 + thread 롤업 (2026-07-18)
 

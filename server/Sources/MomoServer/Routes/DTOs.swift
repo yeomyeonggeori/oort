@@ -113,8 +113,14 @@ struct SendMessageRequest: Decodable {
     let attachmentIds: [UUID]?
 }
 
+/// PATCH .../messages/{id} request. The authenticated author is the only
+/// mutable actor; author/member ids are deliberately absent from the body.
+struct EditMessageRequest: Decodable {
+    let body: String
+}
+
 /// A message as returned by send/history (L4 §5.3 Message contract).
-struct MessageDTO: ResponseEncodable {
+struct MessageDTO: ResponseEncodable, Codable, Sendable {
     let id: String
     let channelId: String
     let rootId: String?
@@ -128,6 +134,30 @@ struct MessageDTO: ResponseEncodable {
     let runId: String?
     let clientMsgId: String?
     let createdAtMs: Int64
+    let state: String?
+    let editedAtMs: Int64?
+    let deletedAtMs: Int64?
+}
+
+/// The same delta shape consumed by MomoCore's `ReactionDelta` once it is
+/// nested in a realtime envelope.
+struct ReactionDeltaDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let action: String
+    let messageId: String
+    let memberId: String
+    let emoji: String
+}
+
+/// Cold-load projection used by the macOS interaction model. It intentionally
+/// encodes as the mapping itself (message id -> emoji -> member ids), without a
+/// wrapper key, so the REST contract matches the UI snapshot type exactly.
+struct ReactionSnapshotDTO: ResponseEncodable, Encodable, Sendable {
+    let snapshot: [String: [String: [String]]]
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(snapshot)
+    }
 }
 
 /// GET .../messages response (seq-cursor page, L4 §5.1 / §8.2).
@@ -284,10 +314,21 @@ struct ChannelDTO: ResponseEncodable, Decodable {
     let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
+    /// Server-owned push suppression for the authenticated member.
+    let muted: Bool
 }
 
 struct WorkspaceChannelsResponse: ResponseEncodable, Decodable {
     let channels: [ChannelDTO]
+}
+
+/// PUT /v1/workspaces/{ws}/channels/{ch}/notification-pref request body.
+struct UpdateNotificationPrefRequest: Decodable {
+    let muted: Bool
+}
+
+struct NotificationPrefResponse: ResponseEncodable, Decodable {
+    let muted: Bool
 }
 
 /// POST /v1/workspaces/{ws}/dms request body.

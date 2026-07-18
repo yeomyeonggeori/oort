@@ -24,7 +24,7 @@
 
 ## 파생 (Accepted 후)
 
-MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, channel) PK, muted_until NULL 확장 여지, RLS FORCE) + REST `PUT/DELETE /v1/workspaces/:ws/channels/:ch/notification-pref` + 채널 목록 응답에 `muted` 가산 + notifier 판정 join(억제 시 push_dispatch_log에 suppressed 기록 없이 후보 제외 — 로그 오염 방지) + verifier(음소거 dispatch 0/해제 재개/멘션 억제/다기기 일관/RLS) + openapi. PR base=track/engine.
+MOMO-477 단일 goal: `018_notification_pref` migration((workspace, member, channel) PK, muted_until NULL 확장 여지, RLS FORCE) + REST `PUT /v1/workspaces/:ws/channels/:ch/notification-pref {muted: Bool}`(false=행 삭제) + 채널 목록 응답에 `muted` 가산 + notifier 판정 join(억제 시 push_dispatch_log에 suppressed 기록 없이 후보 제외 — 로그 오염 방지) + verifier(음소거 dispatch 0/해제 재개/멘션 억제/다기기 일관/RLS) + openapi. PR base=track/engine.
 
 ## Consequences
 
