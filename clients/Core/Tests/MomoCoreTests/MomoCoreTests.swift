@@ -306,6 +306,15 @@ final class MomoCoreTests: XCTestCase {
                     "participant_member_ids": .array([]),
                 ]
             ),
+            RealtimeEnvelope(
+                type: "agent.partial",
+                ts: 3,
+                payload: [
+                    "run_id": "00000000-0000-7000-8000-000000000030",
+                    "channel_id": .string(channel.description),
+                    "text_delta": "still connected",
+                ]
+            ),
         ])
         let driver = DefaultRealtimeSubscriptionDriver(transport: transport)
         let stream = try await driver.subscribe(channel: channel, startingAfter: 0) { _, _ in [] }
@@ -313,11 +322,15 @@ final class MomoCoreTests: XCTestCase {
         var received: [RealtimeEvent] = []
         for await event in stream { received.append(event) }
 
-        XCTAssertEqual(received.count, 1)
+        XCTAssertEqual(received.count, 2)
         guard case .huddle(let delta) = received.first else {
             return XCTFail("known event after unknown envelope must still be delivered")
         }
         XCTAssertEqual(delta.action, .started)
+        guard case .agentPartial(let partial) = received.last else {
+            return XCTFail("existing realtime events must still be delivered after an unknown type")
+        }
+        XCTAssertEqual(partial.textDelta, "still connected")
     }
 
     func testRealtimeReplayControllerDropsDuplicateMessageSeq() async throws {
