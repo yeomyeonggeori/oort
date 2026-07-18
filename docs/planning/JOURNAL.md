@@ -15,6 +15,11 @@
 - D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
 - 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
 
+## 2026-07-18 (Fable) · 성재 승인 main 머지 — clean slate `a2ec4fd`
+- UX 464를 Fable이 마감(크롬 계약 상수 52/48 정합, 파생 스냅샷 14장 재기록, 더블클릭 줌 이식) → 342/342+macos-ui 게이트 PASS → **성재 명시 승인으로 track/uxui→main 머지**(TRACKS §3 첫 적용).
+- clean slate: main=track/engine=track/uxui=a2ec4fd, 루트 clean, 성재 앱=uxui 트랙 빌드(빌드 원본 고지 관행 시작). 엔진(음성 V-1~3 포함)은 이미 main에 있었음.
+- 다음: 양 트랙이 여기서 분기 — UXUI는 ENGINE_HANDOFF ready 5건 제안 루프, 엔진은 V-3b(iOS 허들)/회의록 v1/Work 실검증 등 후보.
+
 ## 2026-07-18 (성재+Fable) · 트랙 파이프라인 대전환 (docs/TRACKS.md 정본)
 - 이원화(UXUI/엔진)·워크트리 작업·트랙 워크트리 빌드 확인·**main 머지=성재 명시 승인** 정본화. track/uxui·track/engine + ~/projects/momo-tracks/* 신설. AGENTS.md·CLAUDE.md에 최우선 규칙 삽입. ENGINE_HANDOFF.md 신설(ready 5건 시드).
 - UX 464 리뷰: 자동승인 가드(reversible-only fail-closed) 양호, 루트 잔재의 더블클릭 줌 이식·통합 커밋. **머지 부적합 판정**: ChromeTests 계약 3건 실패+파생 스냅샷 15건 미기록 → track/uxui에 보존(main 보류), UX 마무리 요청. 루트 잔재는 stash 보관 후 루트 clean 복구.
