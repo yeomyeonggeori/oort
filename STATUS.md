@@ -3,7 +3,7 @@
 ## MOMO-478 메시지 상호작용 REST + realtime (2026-07-18)
 
 - 작성자 전용 메시지 수정·body NULL soft-delete, 채널 멤버 반응 추가/제거와 직접 집계 스냅샷을 기존 tenant transaction + outbox + audit 경계에 추가했다. 수정·삭제는 기존 `message.seq`를 유지하고, 반응 멱등 재시도는 중복 outbox를 만들지 않으며 삭제 audit에는 원문을 남기지 않는다.
-- 서버 109 tests, Core 27 tests(4종 서버 envelope 디코드), 격리 `verify_message_interaction.sh`, OpenAPI live drift 54/54 samples·43 operations가 PASS했다. 신규 migration은 필요하지 않았다(`001_init.sql`의 reaction UNIQUE·edited_at/deleted_at·FORCE RLS 재사용).
+- 서버 109 tests, Core 27 tests(4종 서버 envelope 디코드), 격리 `verify_message_interaction.sh`, OpenAPI live drift 55/55 samples·44 operations가 PASS했다. 신규 migration은 필요하지 않았다(`001_init.sql`의 reaction UNIQUE·edited_at/deleted_at·FORCE RLS 재사용).
 
 ## iOS v0 실기기 푸시 E2E PASS (2026-07-18)
 

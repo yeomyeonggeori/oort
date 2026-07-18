@@ -2219,7 +2219,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☐ MOMO-478 (`#506`) 수용기준 — 메시지 상호작용 REST (X-2 서버 절반) `[runtime-db]` · **PR base=track/engine**
 - [x] PATCH 수정(작성자만·edited_at)/DELETE 삭제(tombstone·body NULL·reaction 정리)/PUT·DELETE 반응(멱등·상한)/GET 채널 반응 스냅샷 — 같은 tx+outbox 4 kind(Core 디코더 정본 정합)+audit, seq 불변.
 - [x] openapi + verify_message_interaction + Core 디코드 왕복 테스트 + runtime-db 편입. 상세: issue #506 본문(패킷 겸용). 랜딩 시 X-2→UXUI(501 해제) 개방.
-- worker evidence: `46713f3`(track/engine PR 리뷰 대기) — 서버 109/109, Core 27/27, interaction 격리 runtime PASS, OpenAPI live drift 54/54 samples·43 operations PASS. 신규 migration 없음.
+- worker evidence: `46713f3`(track/engine PR 리뷰 대기) — 서버 109/109, Core 27/27, interaction 격리 runtime PASS, OpenAPI live drift 55/55 samples·44 operations PASS. 신규 migration 없음.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
