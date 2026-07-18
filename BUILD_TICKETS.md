@@ -2222,6 +2222,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] openapi + verify_message_interaction + Core 디코드 왕복 테스트 + runtime-db 편입. 상세: issue #506 본문(패킷 겸용). 랜딩 시 X-2→UXUI(501 해제) 개방.
 - 랜딩: PR #507 squash → **track/engine**(2026-07-18) → main(2026-07-18 밤). 실런: verify_message_interaction PASS + 서버 109/Core 27(payload 왕복 4종). 게이트 유일 실패=ChannelCreation 스냅샷 flake family(선재, MOMO-472 범위 재확장).
 
+### ☐ MOMO-479 (`#508`) 수용기준 — 스레드 롤업 투영 + 답글 조회 + 에이전트 root_id 보존 (X-3) `[runtime-db]` · **PR base=track/engine**
+- [ ] 히스토리/전송 응답 톱레벨 메시지에 `thread: {reply_count, last_reply_seq, last_reply_at}` 가산(LEFT JOIN, 답글 0이면 생략) + Core Message 가산 디코드.
+- [ ] `GET .../messages/:root/replies` seq ASC·cursor·멤버십 강제·교차채널 404·비톱레벨 400·tombstone 포함 + openapi.
+- [ ] 답글 tx outbox `thread.updated` + Core kind 가산(unknown-skip 유지) — 단일 쓰기경로 준수.
+- [ ] AgentWorker 답변 root_id 보존(INSERT 4사이트 전수) + 동일 tx 롤업·이벤트, MessageRoutes 의미론 정합.
+- [ ] verify_thread_projection.sh(롤업 수치/과거 답글/realtime/에이전트/RLS) + runtime-db 편입. 상세: issue #508 본문(패킷 겸용).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

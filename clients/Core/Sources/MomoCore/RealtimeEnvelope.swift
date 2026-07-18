@@ -30,6 +30,7 @@ public struct RealtimeEnvelope: Codable, Sendable, Hashable {
         case messageNew = "message.new"
         case messageEdited = "message.edited"
         case messageDeleted = "message.deleted"
+        case threadUpdated = "thread.updated"
         case reactionAdded = "reaction.added"
         case reactionRemoved = "reaction.removed"
         case typingStart = "typing.start"
@@ -84,6 +85,8 @@ public struct RealtimeEnvelope: Codable, Sendable, Hashable {
                 throw DecodeError.missingField("message_id")
             }
             return .messageDeleted(id)
+        case .threadUpdated:
+            return .threadUpdated(try decode(ThreadRollupDelta.self))
         case .reactionAdded, .reactionRemoved:
             return .reaction(try decode(ReactionDelta.self))
         case .typingStart, .typingStop:

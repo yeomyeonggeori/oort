@@ -2400,6 +2400,13 @@ public final class ChatViewModel: ObservableObject {
                 msgs[idx].state = .deleted
                 messagesByChannel[channel] = msgs
             }
+        case .threadUpdated(let delta):
+            guard delta.channelId == channel,
+                  var messages = messagesByChannel[channel],
+                  let index = messages.firstIndex(where: { $0.id == delta.rootId })
+            else { return }
+            messages[index].thread = delta.rollup
+            messagesByChannel[channel] = messages
         case .agentStatus(let status):
             guard status.channelId == channel, activeTimelineChannelId == channel else { return }
             agentStatuses[status.runId] = status

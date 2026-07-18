@@ -1,5 +1,6 @@
 # momo 기획 현재 상태 (Planning Current State)
 
+> **2026-07-18 운영 정본 이동**: 트랙 파이프라인은 `docs/TRACKS.md`, 트랙 간 작업 큐는 `docs/planning/ENGINE_HANDOFF.md`가 정본이다. main `7e7b283`(UXUI A-1/2/3/5/7 + 엔진 음소거 MOMO-477·상호작용 MOMO-478 동시 랜딩) 기준 두 트랙 브랜치 모두 main과 일치. 아래 스냅샷 세부는 2026-07-16 기준으로 낡았다 — JOURNAL 최신 항목을 우선 신뢰.
 > 기준일: 2026-07-16 · 기준선: **canonical main `05368ea` + PLN-20260716-01 Plugin Platform planning overlay** — Plugin Center·추천 onboarding·동적 capability discovery와 Drive reference vertical 후보를 조사했으며, 기존 GitHub-first 전략과 credential/runtime 경계를 바꾸는 구현은 성재 결정과 Accepted ADR 전까지 열지 않는다. Work v0(362..365)·unread(366/367)·ADR-0112 Wave A+MOMO-379 기반은 유지된다 · 통합 책임: `momo-main`
 > 이 문서는 **컨텍스트 압축/세션 전환 후 가장 먼저 읽는 현재 상태 스냅샷**이다.
 > 결정 근거는 ADR, 검증 증거는 STATUS, 일정은 ROADMAP이 정본이며 이 문서는 그 정본들을 연결하는 포인터다.

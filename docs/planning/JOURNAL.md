@@ -5,7 +5,11 @@
 
 ---
 
-## 2026-07-17 (Fable 엔진 트랙) · ADR-0123 iOS v0 배치 IOS-1~5 완주 (당일)
+## 2026-07-18 (Fable 통합) · 양 트랙 → main 동시 랜딩 (성재 승인 머지)
+- UXUI 배치(6e43928, +5,758) 검수 완료: 웹훅 시크릿 무영속·단축링크 URL 검증·타임라인 rootId 필터·검색 stale 가드 전부 주장=코드 일치, macos-ui 게이트 풀 PASS. 결함 0 — 수정 없이 머지.
+- 머지 순서 uxui(2998b23)→engine(7e7b283). ENGINE_HANDOFF 통합판 작성(A-1/2/3/5/7 done · A-4/6 in-progress · A-8/9 ready · X-3/4 needs-engine-contract), 트랙 브랜치 양쪽 main으로 ff 재정렬.
+- 통합면 검증: 엔진 머지가 uxui 게이트 트리에 더한 것은 server/workers/scripts+Core 테스트뿐(macOS 소스 무접촉) — 양 게이트 evidence가 merged main을 그대로 커버.
+- 다음: UXUI에 A-8(음소거 UI)·A-9(상호작용 개방) 제안, 엔진 다음 작업=X-3(스레드 조회 계약)·X-4(첨부 투영).
 - 5티켓 순차 랜딩: 골격 `cb2f753` → 목록/타임라인 `daff55e` → 컴포저/승인 `9aad292` → 푸시 P-4 `a0e3d0c` → TestFlight 런북 `3d321c6`. 전부 codex worker 구현→Fable 리뷰·시뮬레이터 게이트·머지.
 - 파이프라인 실측: worker 샌드박스는 CoreSimulator/xcodebuild 불가 — iOS 컴파일·시뮬레이터 검증은 오케스트레이터 상시 몫(Swift 6 sending 오류 3건 직접 수정 전례). capacity 사망 1회는 동일 worktree 이어받기+빈번 커밋으로 유실 0 복구.
 - ADR-0120 전 체인 종결(P-4 포함, simctl push 실전달·NSE 18/18). 잔여: 런북 [manual](성재 실기기 E2E)이 배치 최종 evidence. ADR-0123 v1 수렴 항목(뷰모델 공용화)과 M8 이월(042/043) 유지.

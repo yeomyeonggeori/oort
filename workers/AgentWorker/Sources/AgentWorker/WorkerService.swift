@@ -598,6 +598,9 @@ struct WorkerService: Service {
                 _ = try await conn.query(
                     "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
                     logger: logger)
+                let rootID = try await Self.triggerRootID(
+                    conn: conn, logger: logger, job: job, runID: runID
+                )
 
                 _ = try await conn.query(
                     """
@@ -620,19 +623,19 @@ struct WorkerService: Service {
                     )
                     INSERT INTO message
                       (workspace_id, channel_id, seq, hlc_ts, hlc_count,
-                       author_member_id, type, body, props, run_id)
+                       author_member_id, type, body, props, root_id, run_id)
                     SELECT \(job.workspaceID), \(p.channelID), b.seq, \(hlcTs), 0,
                            \(p.agentMemberID), 'system'::message_type,
-                           \(body), \(props)::jsonb, \(runID)
+                           \(body), \(props)::jsonb, \(rootID), \(runID)
                       FROM bumped b
-                    RETURNING id, seq
+                    RETURNING id, seq, created_at
                     """,
                     logger: logger
                 ).collect()
                 guard let row = rows.first else {
                     throw GuardTripError.missingInsertedMessage
                 }
-                let (messageID, seq) = try row.decode((UUID, Int64).self)
+                let (messageID, seq, createdAt) = try row.decode((UUID, Int64, Date).self)
 
                 let outboxPayload = Self.guardTripBroadcastPayload(
                     workspaceID: job.workspaceID,
@@ -643,7 +646,8 @@ struct WorkerService: Service {
                     runID: runID,
                     body: body,
                     props: props,
-                    hlcTs: hlcTs)
+                    hlcTs: hlcTs,
+                    rootID: rootID)
                 _ = try await conn.query(
                     """
                     INSERT INTO outbox
@@ -653,6 +657,16 @@ struct WorkerService: Service {
                        \(outboxPayload)::jsonb, \(p.channelID))
                     """,
                     logger: logger)
+                try await Self.recordThreadProjection(
+                    conn: conn,
+                    logger: logger,
+                    workspaceID: job.workspaceID,
+                    channelID: p.channelID,
+                    rootID: rootID,
+                    replySeq: seq,
+                    replyAt: createdAt,
+                    participantMemberID: p.agentMemberID
+                )
 
                 _ = try await conn.query(
                     """
@@ -748,7 +762,8 @@ struct WorkerService: Service {
         runID: UUID,
         body: String,
         props: String,
-        hlcTs: Int64
+        hlcTs: Int64,
+        rootID: UUID?
     ) -> String {
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
         return jsonString([
@@ -774,6 +789,7 @@ struct WorkerService: Service {
                     "hlcTs": hlcTs,
                     "hlc_count": 0,
                     "hlcCount": 0,
+                    "root_id": rootID?.uuidString ?? NSNull(),
                 ],
             ],
             "version": seq,
@@ -969,6 +985,9 @@ struct WorkerService: Service {
             _ = try await conn.query(
                 "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
                 logger: logger)
+            let rootID = try await Self.triggerRootID(
+                conn: conn, logger: logger, job: job, runID: request.runID
+            )
 
             _ = try await conn.query(
                 """
@@ -993,19 +1012,19 @@ struct WorkerService: Service {
                 )
                 INSERT INTO message
                   (workspace_id, channel_id, seq, hlc_ts, hlc_count,
-                   author_member_id, type, body, props, run_id)
+                   author_member_id, type, body, props, root_id, run_id)
                 SELECT \(job.workspaceID), \(p.channelID), b.seq, \(hlcTs), 0,
                        \(p.agentMemberID), 'tool_result'::message_type,
-                       \(result.body), \(props)::jsonb, \(request.runID)
+                       \(result.body), \(props)::jsonb, \(rootID), \(request.runID)
                   FROM bumped b
-                RETURNING id, seq
+                RETURNING id, seq, created_at
                 """,
                 logger: logger
             ).collect()
             guard let row = rows.first else {
                 throw ResumeApprovalError.missingInsertedToolResult
             }
-            let (messageID, seq) = try row.decode((UUID, Int64).self)
+            let (messageID, seq, createdAt) = try row.decode((UUID, Int64, Date).self)
 
             let outboxPayload = Self.toolResultBroadcastPayload(
                 workspaceID: job.workspaceID,
@@ -1016,7 +1035,8 @@ struct WorkerService: Service {
                 runID: request.runID,
                 body: result.body,
                 props: props,
-                hlcTs: hlcTs
+                hlcTs: hlcTs,
+                rootID: rootID
             )
             _ = try await conn.query(
                 """
@@ -1027,6 +1047,16 @@ struct WorkerService: Service {
                    \(outboxPayload)::jsonb, \(p.channelID))
                 """,
                 logger: logger
+            )
+            try await Self.recordThreadProjection(
+                conn: conn,
+                logger: logger,
+                workspaceID: job.workspaceID,
+                channelID: p.channelID,
+                rootID: rootID,
+                replySeq: seq,
+                replyAt: createdAt,
+                participantMemberID: p.agentMemberID
             )
 
             let detail = Self.resumeAuditDetail(
@@ -1197,6 +1227,9 @@ struct WorkerService: Service {
                 _ = try await conn.query(
                     "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
                     logger: logger)
+                let rootID = try await Self.triggerRootID(
+                    conn: conn, logger: logger, job: job, runID: runID
+                )
 
                 let approvalRows = try await conn.query(
                     """
@@ -1233,19 +1266,21 @@ struct WorkerService: Service {
                     )
                     INSERT INTO message
                       (workspace_id, channel_id, seq, hlc_ts, hlc_count,
-                       author_member_id, type, body, props, run_id)
+                       author_member_id, type, body, props, root_id, run_id)
                     SELECT \(job.workspaceID), \(p.channelID), b.seq, \(hlcTs), \(hlcCount),
                            \(p.agentMemberID), \(plan.messageType)::message_type,
-                           \(body), \(props)::jsonb, \(runID)
+                           \(body), \(props)::jsonb, \(rootID), \(runID)
                       FROM bumped b
-                    RETURNING id, seq
+                    RETURNING id, seq, created_at
                     """,
                     logger: logger
                 ).collect()
                 guard let messageRow = messageRows.first else {
                     throw ApprovalPauseError.missingInsertedMessage
                 }
-                let (messageID, seq) = try messageRow.decode((UUID, Int64).self)
+                let (messageID, seq, createdAt) = try messageRow.decode(
+                    (UUID, Int64, Date).self
+                )
 
                 _ = try await conn.query(
                     """
@@ -1276,7 +1311,8 @@ struct WorkerService: Service {
                     body: body,
                     props: props,
                     hlcTs: hlcTs,
-                    hlcCount: hlcCount
+                    hlcCount: hlcCount,
+                    rootID: rootID
                 )
                 _ = try await conn.query(
                     """
@@ -1287,6 +1323,16 @@ struct WorkerService: Service {
                        \(outboxPayload)::jsonb, \(p.channelID))
                     """,
                     logger: logger
+                )
+                try await Self.recordThreadProjection(
+                    conn: conn,
+                    logger: logger,
+                    workspaceID: job.workspaceID,
+                    channelID: p.channelID,
+                    rootID: rootID,
+                    replySeq: seq,
+                    replyAt: createdAt,
+                    participantMemberID: p.agentMemberID
                 )
 
                 _ = try await conn.query(
@@ -1376,7 +1422,8 @@ struct WorkerService: Service {
         body: String,
         props: String,
         hlcTs: Int64,
-        hlcCount: Int
+        hlcCount: Int,
+        rootID: UUID?
     ) -> String {
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
         let propsObject = (try? JSONSerialization.jsonObject(with: Data(props.utf8))) ?? [:]
@@ -1403,6 +1450,7 @@ struct WorkerService: Service {
                     "hlcTs": hlcTs,
                     "hlc_count": hlcCount,
                     "hlcCount": hlcCount,
+                    "root_id": rootID?.uuidString ?? NSNull(),
                 ],
             ],
             "version": seq,
@@ -1436,7 +1484,8 @@ struct WorkerService: Service {
         runID: UUID,
         body: String,
         props: String,
-        hlcTs: Int64
+        hlcTs: Int64,
+        rootID: UUID?
     ) -> String {
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
         return jsonString([
@@ -1462,6 +1511,7 @@ struct WorkerService: Service {
                     "hlcTs": hlcTs,
                     "hlc_count": 0,
                     "hlcCount": 0,
+                    "root_id": rootID?.uuidString ?? NSNull(),
                 ],
             ],
             "version": seq,
@@ -1561,6 +1611,184 @@ struct WorkerService: Service {
         return string
     }
 
+    private enum ThreadProjectionError: Error, CustomStringConvertible {
+        case missingRun(UUID)
+        case runChannelMismatch(expected: UUID, actual: UUID)
+        case missingTriggerMessage(UUID)
+        case triggerChannelMismatch(expected: UUID, actual: UUID)
+        case missingThreadRollup(UUID)
+
+        var description: String {
+            switch self {
+            case .missingRun(let runID):
+                return "agent run not found while resolving thread root: \(runID.uuidString)"
+            case .runChannelMismatch(let expected, let actual):
+                return "agent run channel mismatch while resolving thread root: expected \(expected.uuidString), got \(actual.uuidString)"
+            case .missingTriggerMessage(let messageID):
+                return "trigger message not found while resolving thread root: \(messageID.uuidString)"
+            case .triggerChannelMismatch(let expected, let actual):
+                return "trigger message channel mismatch while resolving thread root: expected \(expected.uuidString), got \(actual.uuidString)"
+            case .missingThreadRollup(let rootID):
+                return "thread rollup upsert did not return a row: \(rootID.uuidString)"
+            }
+        }
+    }
+
+    /// Preserve the trigger's thread context for every durable worker-authored
+    /// message. Approval-resume jobs may omit trigger_message_id from the job
+    /// payload, so agent_run remains the authoritative fallback. A top-level
+    /// trigger has root_id=NULL and intentionally produces a top-level response.
+    private static func triggerRootID(
+        conn: PostgresConnection,
+        logger: Logger,
+        job: ClaimedJob,
+        runID: UUID?
+    ) async throws -> UUID? {
+        var triggerMessageID = job.payload.triggerMessageID
+        if triggerMessageID == nil, let runID {
+            let runRows = try await conn.query(
+                """
+                SELECT trigger_message_id, channel_id
+                  FROM agent_run
+                 WHERE id = \(runID)
+                 LIMIT 1
+                """,
+                logger: logger
+            ).collect()
+            guard let runRow = runRows.first else {
+                throw ThreadProjectionError.missingRun(runID)
+            }
+            let (storedTriggerMessageID, runChannelID) = try runRow.decode(
+                (UUID?, UUID).self
+            )
+            guard runChannelID == job.payload.channelID else {
+                throw ThreadProjectionError.runChannelMismatch(
+                    expected: job.payload.channelID,
+                    actual: runChannelID
+                )
+            }
+            triggerMessageID = storedTriggerMessageID
+        }
+
+        guard let triggerMessageID else { return nil }
+        let messageRows = try await conn.query(
+            """
+            SELECT channel_id, root_id
+              FROM message
+             WHERE id = \(triggerMessageID)
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        guard let messageRow = messageRows.first else {
+            throw ThreadProjectionError.missingTriggerMessage(triggerMessageID)
+        }
+        let (triggerChannelID, rootID) = try messageRow.decode((UUID, UUID?).self)
+        guard triggerChannelID == job.payload.channelID else {
+            throw ThreadProjectionError.triggerChannelMismatch(
+                expected: job.payload.channelID,
+                actual: triggerChannelID
+            )
+        }
+        return rootID
+    }
+
+    /// Keep the denormalized thread row and its realtime projection in the same
+    /// transaction as the reply INSERT. This deliberately reuses replySeq; it
+    /// never allocates another message/channel sequence.
+    private static func recordThreadProjection(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        rootID: UUID?,
+        replySeq: Int64,
+        replyAt: Date,
+        participantMemberID: UUID
+    ) async throws {
+        guard let rootID else { return }
+        let threadRows = try await conn.query(
+            """
+            INSERT INTO thread
+              (root_id, workspace_id, channel_id, reply_count,
+               last_reply_seq, last_reply_at, participant_ids)
+            VALUES
+              (\(rootID), \(workspaceID), \(channelID), 1,
+               \(replySeq), \(replyAt), ARRAY[\(participantMemberID)]::uuid[])
+            ON CONFLICT (root_id) DO UPDATE
+              SET reply_count = thread.reply_count + 1,
+                  last_reply_seq = EXCLUDED.last_reply_seq,
+                  last_reply_at = EXCLUDED.last_reply_at,
+                  participant_ids = CASE
+                    WHEN EXCLUDED.participant_ids[1] = ANY(thread.participant_ids)
+                      THEN thread.participant_ids
+                    ELSE array_append(
+                      thread.participant_ids, EXCLUDED.participant_ids[1]
+                    )
+                  END
+            RETURNING reply_count, last_reply_seq, last_reply_at
+            """,
+            logger: logger
+        ).collect()
+        guard let threadRow = threadRows.first else {
+            throw ThreadProjectionError.missingThreadRollup(rootID)
+        }
+        let (replyCount, lastReplySeq, lastReplyAt) = try threadRow.decode(
+            (Int, Int64, Date).self
+        )
+        let payload = threadUpdatedPayload(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            rootID: rootID,
+            replyCount: replyCount,
+            lastReplySeq: lastReplySeq,
+            lastReplyAt: lastReplyAt
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox
+              (workspace_id, kind, method, payload, partition_key)
+            VALUES
+              (\(workspaceID), 'broadcast', 'publish',
+               \(payload)::jsonb, \(channelID))
+            """,
+            logger: logger
+        )
+    }
+
+    static func threadUpdatedPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        rootID: UUID,
+        replyCount: Int,
+        lastReplySeq: Int64,
+        lastReplyAt: Date
+    ) -> String {
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let lastReplyAtMs = Int64(lastReplyAt.timeIntervalSince1970 * 1000)
+        return jsonString([
+            "channel": centChannel,
+            "data": [
+                "type": "thread.updated",
+                "v": 1,
+                "ts": lastReplyAtMs,
+                "seq": lastReplySeq,
+                "payload": [
+                    "channel_id": channelID.uuidString,
+                    "root_id": rootID.uuidString,
+                    "reply_count": replyCount,
+                    "last_reply_seq": lastReplySeq,
+                    "last_reply_at": lastReplyAtMs,
+                ],
+            ],
+            // No Centrifugo version: the rollup reuses the reply's seq, and the
+            // broker silently drops a publish whose version is not strictly
+            // greater than the channel's stored version (the reply's own
+            // message.new already claimed this seq). Idempotency stays on the key.
+            "idempotency_key": "\(centChannel):thread.updated:\(rootID.uuidString):\(lastReplySeq)",
+        ])
+    }
+
     // MARK: - message PATCH (streaming mimic, L4 §6.2)
 
     /// PATCH the in-progress agent message (streaming mimic). v0 stub: the durable
@@ -1597,6 +1825,9 @@ struct WorkerService: Service {
                 _ = try await conn.query(
                     "SELECT set_config('app.workspace_id', \(job.workspaceID.uuidString), true)",
                     logger: logger)
+                let rootID = try await Self.triggerRootID(
+                    conn: conn, logger: logger, job: job, runID: runID
+                )
 
                 let existing = try await conn.query(
                     """
@@ -1632,18 +1863,18 @@ struct WorkerService: Service {
                     )
                     INSERT INTO message
                       (workspace_id, channel_id, seq, hlc_ts, hlc_count,
-                       author_member_id, type, body, props, run_id)
+                       author_member_id, type, body, props, root_id, run_id)
                     SELECT \(job.workspaceID), \(job.payload.channelID), b.seq,
                            \(hlcTs), 0, \(job.payload.agentMemberID),
                            'text'::message_type, \(body), \(props)::jsonb,
-                           \(runID)
+                           \(rootID), \(runID)
                       FROM bumped b
-                    RETURNING id, seq
+                    RETURNING id, seq, created_at
                     """,
                     logger: logger
                 ).collect()
                 guard let row = rows.first else { return }
-                let (messageID, seq) = try row.decode((UUID, Int64).self)
+                let (messageID, seq, createdAt) = try row.decode((UUID, Int64, Date).self)
 
                 let outboxPayload = Self.finalTextBroadcastPayload(
                     workspaceID: job.workspaceID,
@@ -1654,7 +1885,8 @@ struct WorkerService: Service {
                     runID: runID,
                     body: body,
                     props: props,
-                    hlcTs: hlcTs
+                    hlcTs: hlcTs,
+                    rootID: rootID
                 )
                 _ = try await conn.query(
                     """
@@ -1665,6 +1897,16 @@ struct WorkerService: Service {
                        \(outboxPayload)::jsonb, \(job.payload.channelID))
                     """,
                     logger: logger
+                )
+                try await Self.recordThreadProjection(
+                    conn: conn,
+                    logger: logger,
+                    workspaceID: job.workspaceID,
+                    channelID: job.payload.channelID,
+                    rootID: rootID,
+                    replySeq: seq,
+                    replyAt: createdAt,
+                    participantMemberID: job.payload.agentMemberID
                 )
 
                 logger.debug("final agent message committed", metadata: [
@@ -1711,7 +1953,8 @@ struct WorkerService: Service {
         runID: UUID,
         body: String,
         props: String,
-        hlcTs: Int64
+        hlcTs: Int64,
+        rootID: UUID?
     ) -> String {
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
         return jsonString([
@@ -1737,6 +1980,7 @@ struct WorkerService: Service {
                     "hlcTs": hlcTs,
                     "hlc_count": 0,
                     "hlcCount": 0,
+                    "root_id": rootID?.uuidString ?? NSNull(),
                 ],
             ],
             "version": seq,

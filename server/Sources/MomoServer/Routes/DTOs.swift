@@ -119,6 +119,21 @@ struct EditMessageRequest: Decodable {
     let body: String
 }
 
+/// Additive thread summary projected only on top-level messages with replies.
+/// The nested wire keys intentionally mirror the durable `thread` projection.
+struct ThreadRollupDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let replyCount: Int
+    let lastReplySeq: Int64
+    /// Epoch milliseconds for the `thread.last_reply_at` timestamptz.
+    let lastReplyAt: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case replyCount = "reply_count"
+        case lastReplySeq = "last_reply_seq"
+        case lastReplyAt = "last_reply_at"
+    }
+}
+
 /// A message as returned by send/history (L4 §5.3 Message contract).
 struct MessageDTO: ResponseEncodable, Codable, Sendable {
     let id: String
@@ -137,6 +152,7 @@ struct MessageDTO: ResponseEncodable, Codable, Sendable {
     let state: String?
     let editedAtMs: Int64?
     let deletedAtMs: Int64?
+    let thread: ThreadRollupDTO?
 }
 
 /// The same delta shape consumed by MomoCore's `ReactionDelta` once it is
@@ -165,6 +181,13 @@ struct MessagePage: ResponseEncodable {
     let messages: [MessageDTO]
     /// Cursor to fetch older messages (pass as `before`); nil at start of history.
     let nextBefore: Int64?
+}
+
+/// GET .../messages/{root}/replies response. Replies are always ordered by
+/// ascending channel seq; pass `nextCursor` back as `cursor` for the next page.
+struct ThreadRepliesPage: ResponseEncodable, Codable, Sendable {
+    let messages: [MessageDTO]
+    let nextCursor: Int64?
 }
 
 /// GET workspace search/messages response. Snippets are server-bounded around
