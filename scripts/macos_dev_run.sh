@@ -170,24 +170,6 @@ build_and_stage() {
   mkdir -p "$APP_BUNDLE/Contents/MacOS" "$APP_BUNDLE/Contents/Resources"
   cp "$built_executable" "$APP_EXECUTABLE"
   chmod +x "$APP_EXECUTABLE"
-
-  # SwiftPM leaves binary frameworks next to the executable and emits an
-  # @loader_path rpath. Preserve that layout inside the dev bundle so optional
-  # binary dependencies (for example LiveKit) can be loaded at launch.
-  local runtime_framework
-  for runtime_framework in "$bin_dir"/*.framework; do
-    [ -d "$runtime_framework" ] || continue
-    ditto "$runtime_framework" "$APP_BUNDLE/Contents/MacOS/$(basename "$runtime_framework")"
-  done
-
-  # Bundle.module first checks Bundle.main.bundleURL for package resources.
-  # Copy every built resource bundle there instead of relying on .build paths.
-  local resource_bundle
-  for resource_bundle in "$bin_dir"/*.bundle; do
-    [ -d "$resource_bundle" ] || continue
-    ditto "$resource_bundle" "$APP_BUNDLE/$(basename "$resource_bundle")"
-  done
-
   if [ -f "$APP_ICON" ]; then
     cp "$APP_ICON" "$APP_BUNDLE/Contents/Resources/MomoMacDevAppIcon.icns"
   fi
