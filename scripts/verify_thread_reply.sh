@@ -2,8 +2,8 @@
 # MOMO-476 thread reply + rollup runtime-db verifier.
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "[thread] missing $1" >&2; exit 1; }; }
@@ -138,10 +138,16 @@ REPLY_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -er '.seq')"
 printf '%s' "$RESPONSE_BODY" | jq -e --arg root "$ROOT_ID" \
   '(.rootId | ascii_downcase) == $root' >/dev/null
 
-got="$(printf "SELECT reply_count || ':' || last_reply_seq || ':' || (last_reply_at IS NOT NULL)::int || ':' || (participant_ids = ARRAY['$MEMBER_ID'::uuid])::int FROM thread WHERE root_id='$ROOT_ID';\n" | sql_value)"
+got="$(sql_value <<SQL
+SELECT reply_count || ':' || last_reply_seq || ':' || (last_reply_at IS NOT NULL)::int || ':' || (participant_ids = ARRAY['$MEMBER_ID'::uuid])::int FROM thread WHERE root_id='$ROOT_ID';
+SQL
+)"
 [ "$got" = "1:$REPLY_SEQ:1:1" ] || { echo "[thread] FAIL initial rollup: $got" >&2; exit 1; }
 
-got="$(printf "SELECT count(*) FROM outbox WHERE workspace_id='$WS_A' AND payload->'data'->'payload'->>'id' ILIKE '$REPLY_ID' AND payload->'data'->'payload'->>'root_id' ILIKE '$ROOT_ID';\n" | sql_value)"
+got="$(sql_value <<SQL
+SELECT count(*) FROM outbox WHERE workspace_id='$WS_A' AND payload->'data'->'payload'->>'id' ILIKE '$REPLY_ID' AND payload->'data'->'payload'->>'root_id' ILIKE '$ROOT_ID';
+SQL
+)"
 [ "$got" = "1" ] || { echo "[thread] FAIL realtime root_id: $got" >&2; exit 1; }
 
 api GET "/v1/workspaces/$WS_A/channels/$CH_A/messages?after=0&limit=200"
@@ -154,7 +160,10 @@ send_message "$CH_A" "$REPLY_CLIENT_ID" "normal reply retry" "$ROOT_ID"
 expect_status 201 "idempotent reply retry"
 [ "$(printf '%s' "$RESPONSE_BODY" | jq -r '.id' | tr '[:upper:]' '[:lower:]')" = "$REPLY_ID" ] || {
   echo "[thread] FAIL idempotent retry returned another message" >&2; exit 1; }
-got="$(printf "SELECT reply_count FROM thread WHERE root_id='$ROOT_ID';\n" | sql_value)"
+got="$(sql_value <<SQL
+SELECT reply_count FROM thread WHERE root_id='$ROOT_ID';
+SQL
+)"
 [ "$got" = "1" ] || { echo "[thread] FAIL retry changed reply_count: $got" >&2; exit 1; }
 
 send_message "$CH_B" "$(uuidgen)" "other channel root"
@@ -166,7 +175,12 @@ expect_status 404 "cross-channel root non-disclosure"
 send_message "$CH_A" "$(uuidgen)" "deleted root"
 expect_status 201 "deleted root fixture"
 DELETED_ROOT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
-printf "BEGIN; SET LOCAL row_security=off; UPDATE message SET state='deleted', deleted_at=clock_timestamp() WHERE id='$DELETED_ROOT_ID'; COMMIT;\n" | run_sql
+run_sql <<SQL
+BEGIN;
+SET LOCAL row_security=off;
+UPDATE message SET state='deleted', deleted_at=clock_timestamp() WHERE id='$DELETED_ROOT_ID';
+COMMIT;
+SQL
 send_message "$CH_A" "$(uuidgen)" "reply to deleted" "$DELETED_ROOT_ID"
 expect_status 400 "deleted root"
 
@@ -180,16 +194,20 @@ CONCURRENT_ROOT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id' | tr '[:upper:
 for index in 1 2; do
   jq -cn --arg c "$(uuidgen)" --arg r "$CONCURRENT_ROOT_ID" --arg b "reply $index" \
     '{clientMsgId:$c,body:$b,rootId:$r}' >"$TMP_DIR/concurrent-$index-request.json"
-  (
-    curl -sS -o "$TMP_DIR/concurrent-$index-response.json" \
-      -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
-      -H "Authorization: Bearer $TOKEN" \
-      --data-binary "@$TMP_DIR/concurrent-$index-request.json" \
-      "$BASE_URL/v1/workspaces/$WS_A/channels/$CH_A/messages" \
-      >"$TMP_DIR/concurrent-$index-status"
-  ) &
-  eval "pid_$index=$!"
 done
+parallel_reply() {
+  local index="$1"
+  curl -sS -o "$TMP_DIR/concurrent-$index-response.json" \
+    -w '%{http_code}' -X POST -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $TOKEN" \
+    --data-binary "@$TMP_DIR/concurrent-$index-request.json" \
+    "$BASE_URL/v1/workspaces/$WS_A/channels/$CH_A/messages" \
+    >"$TMP_DIR/concurrent-$index-status"
+}
+parallel_reply 1 &
+pid_1=$!
+parallel_reply 2 &
+pid_2=$!
 wait "$pid_1"
 wait "$pid_2"
 for index in 1 2; do
@@ -200,12 +218,25 @@ for index in 1 2; do
   }
 done
 MAX_SEQ="$(jq -s 'map(.seq) | max' "$TMP_DIR/concurrent-1-response.json" "$TMP_DIR/concurrent-2-response.json")"
-got="$(printf "SELECT reply_count || ':' || last_reply_seq || ':' || (participant_ids = ARRAY['$MEMBER_ID'::uuid])::int FROM thread WHERE root_id='$CONCURRENT_ROOT_ID';\n" | sql_value)"
+got="$(sql_value <<SQL
+SELECT reply_count || ':' || last_reply_seq || ':' || (participant_ids = ARRAY['$MEMBER_ID'::uuid])::int FROM thread WHERE root_id='$CONCURRENT_ROOT_ID';
+SQL
+)"
 [ "$got" = "2:$MAX_SEQ:1" ] || { echo "[thread] FAIL concurrent rollup: $got" >&2; exit 1; }
 
-got="$(printf "BEGIN; SET LOCAL ROLE momo_app; SET LOCAL app.workspace_id='47600000-0000-7000-8000-000000000099'; SELECT count(*) FROM thread WHERE root_id='$ROOT_ID'; COMMIT;\n" | sql_value)"
+got="$(sql_value <<SQL
+BEGIN;
+SET LOCAL ROLE momo_app;
+SET LOCAL app.workspace_id='47600000-0000-7000-8000-000000000099';
+SELECT count(*) FROM thread WHERE root_id='$ROOT_ID';
+COMMIT;
+SQL
+)"
 [ "$got" = "0" ] || { echo "[thread] FAIL thread RLS isolation: $got" >&2; exit 1; }
-got="$(printf "SELECT count(*) FROM pg_class WHERE relname IN ('message','thread') AND relrowsecurity AND relforcerowsecurity;\n" | sql_value)"
+got="$(sql_value <<SQL
+SELECT count(*) FROM pg_class WHERE relname IN ('message','thread') AND relrowsecurity AND relforcerowsecurity;
+SQL
+)"
 [ "$got" = "2" ] || { echo "[thread] FAIL FORCE RLS metadata: $got" >&2; exit 1; }
 
 echo "MOMO-476 thread reply + atomic rollup + realtime/history + RLS PASS"
