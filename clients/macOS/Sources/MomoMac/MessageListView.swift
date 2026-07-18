@@ -212,7 +212,9 @@ public struct MessageListView: View {
                     retryRealtime: viewModel.selectedRealtimeStatus?.canRetry == true ? {
                         Task { await viewModel.retryRealtime() }
                     } : nil,
-                    openMemberDirectory: onOpenMemberDirectory
+                    openMemberDirectory: onOpenMemberDirectory,
+                    workspaceID: viewModel.workspaceId,
+                    huddleViewModel: .live(serverIdentity: serverIdentity)
                 )
             } else {
                 Text(copy.selectChannel)

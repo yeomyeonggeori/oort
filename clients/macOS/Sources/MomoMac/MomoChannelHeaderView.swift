@@ -17,6 +17,8 @@ struct MomoChannelHeaderView: View {
     let copy: MomoWorkspaceCopy
     let retryRealtime: (() -> Void)?
     let openMemberDirectory: MomoMemberDirectoryHook?
+    let workspaceID: WorkspaceID?
+    @StateObject private var huddleViewModel: MomoHuddleViewModel
 
     init(
         channel: Channel,
@@ -27,7 +29,9 @@ struct MomoChannelHeaderView: View {
         showsCosts: Bool,
         copy: MomoWorkspaceCopy,
         retryRealtime: (() -> Void)?,
-        openMemberDirectory: MomoMemberDirectoryHook?
+        openMemberDirectory: MomoMemberDirectoryHook?,
+        workspaceID: WorkspaceID? = nil,
+        huddleViewModel: MomoHuddleViewModel = MomoHuddleViewModel(service: nil)
     ) {
         self.channel = channel
         self.presentation = presentation
@@ -38,6 +42,8 @@ struct MomoChannelHeaderView: View {
         self.copy = copy
         self.retryRealtime = retryRealtime
         self.openMemberDirectory = openMemberDirectory
+        self.workspaceID = workspaceID
+        _huddleViewModel = StateObject(wrappedValue: huddleViewModel)
     }
 
     var body: some View {
@@ -60,6 +66,11 @@ struct MomoChannelHeaderView: View {
                         .fixedSize()
                 }
 
+                MomoHuddleHeaderControl(
+                    viewModel: huddleViewModel,
+                    copy: MomoHuddleCopy(language: copy.language)
+                )
+
                 memberCountControl
             }
             .fixedSize(horizontal: true, vertical: false)
@@ -72,6 +83,12 @@ struct MomoChannelHeaderView: View {
             Rectangle()
                 .fill(MomoTheme.subtleBorder.opacity(effectiveContrast == .increased ? 1 : 0.65))
                 .frame(height: effectiveContrast == .increased ? 2 : 1)
+        }
+        .task(id: "\(workspaceID?.description ?? "none"):\(channel.id.description)") {
+            await huddleViewModel.activate(workspace: workspaceID, channel: channel.id)
+        }
+        .onDisappear {
+            Task { await huddleViewModel.shutdown() }
         }
     }
 

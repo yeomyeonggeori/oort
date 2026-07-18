@@ -2084,7 +2084,7 @@ public final class ChatViewModel: ObservableObject {
         case .typing(let delta):
             guard delta.channelId == channel, activeTimelineChannelId == channel else { return }
             applyTyping(delta)
-        case .reaction, .presence:
+        case .reaction, .presence, .huddle:
             // Rendered elsewhere / not material to the v0 demo surfaces.
             break
         }
