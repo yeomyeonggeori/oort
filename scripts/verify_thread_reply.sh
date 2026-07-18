@@ -165,6 +165,11 @@ SELECT reply_count FROM thread WHERE root_id='$ROOT_ID';
 SQL
 )"
 [ "$got" = "1" ] || { echo "[thread] FAIL retry changed reply_count: $got" >&2; exit 1; }
+got="$(sql_value <<SQL
+SELECT count(*) FROM outbox WHERE workspace_id='$WS_A' AND payload->'data'->'payload'->>'id' ILIKE '$REPLY_ID';
+SQL
+)"
+[ "$got" = "1" ] || { echo "[thread] FAIL retry duplicated outbox: $got" >&2; exit 1; }
 
 send_message "$CH_B" "$(uuidgen)" "other channel root"
 expect_status 201 "other-channel root send"

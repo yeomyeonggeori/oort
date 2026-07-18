@@ -223,15 +223,17 @@ struct MessageRoutes: Sendable {
                 seq: seq, type: type, body: body, authorMemberID: principal.memberID,
                 hlcTs: ts, hlcCount: count, rootID: rootID
             )
-            _ = try await conn.query(
-                """
-                INSERT INTO outbox
-                  (workspace_id, kind, method, payload, partition_key)
-                VALUES
-                  (\(workspaceID), 'broadcast', 'publish', \(outboxPayload)::jsonb, \(channelID))
-                """,
-                logger: db.logger
-            )
+            if didInsert {
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish', \(outboxPayload)::jsonb, \(channelID))
+                    """,
+                    logger: db.logger
+                )
+            }
 
             // MOMO-215: mention routing is part of the same commit boundary as
             // the source message. It only runs on the first idempotent insert;
