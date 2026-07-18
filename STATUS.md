@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-480 상호작용 realtime Centrifugo version 드랍 수정 (2026-07-19)
+
+- 기존 메시지 `seq`를 재사용하는 `message.edited`/`message.deleted`/`reaction.added`/`reaction.removed` outbox envelope에서 Centrifugo `version`을 제거했다. 이벤트의 `data.seq`와 고유 `idempotency_key`는 유지하며, `message.new`가 이미 같은 version을 등록한 뒤 projection이 무언 드랍되던 경로만 닫았다.
+- `verify_message_interaction.sh`는 relay를 함께 기동하고 첫 `message.new`가 history에 나타나 채널 version이 상승한 뒤, 동일 메시지의 상호작용 4종이 실제 Centrifugo history에 모두 전달됐는지 폴링한다. server build와 112 tests, bash/ShellCheck 정적 검증은 PASS; 격리 Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`다.
+
 ## MOMO-479 스레드 투영 + 답글 조회 + AgentWorker root 보존 (2026-07-19)
 
 - 톱레벨 메시지 history/멱등 send 응답에 옵셔널 `thread` 롤업을 가산하고, 오래된 답글을 `seq ASC` cursor로 복원하는 멤버십 강제 REST와 `thread.updated` transactional outbox/Core 이벤트를 추가했다. 답글 0건은 필드를 생략하며 교차채널 root는 404, reply-as-root는 400, tombstone은 답글 페이지에 남는다.

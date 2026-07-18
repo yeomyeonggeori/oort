@@ -2229,6 +2229,12 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] AgentWorker 답변 root_id 보존(INSERT 4사이트 전수) + 동일 tx 롤업·이벤트, MessageRoutes 의미론 정합.
 - [ ] verify_thread_projection.sh(롤업 수치/과거 답글/realtime/에이전트/RLS) + runtime-db 편입. 상세: issue #508 본문(패킷 겸용).
 
+### ☑ MOMO-480 (`#510`) 수용기준 — 상호작용 realtime 이벤트 version 드랍 수정 (478 선재) `[runtime-db]` · **PR base=track/engine**
+- [x] encodeInteractionPayload version 제거(투영 이벤트 no-version 계약 — 479 thread.updated와 동일) + 사유 주석.
+- [x] verify_message_interaction realtime 단정을 Centrifugo history 실수신으로 강화(새 메시지로 version 상승 상태에서 4종 수신) — 회귀 가드.
+- [x] 서버 테스트 4종 version 단정 XCTAssertNil + 드랍 사유 메시지. 상세: issue #510 본문(패킷 겸용).
+- worker 검증: server build + 112 tests, bash/ShellCheck PASS. 격리 Docker verifier 실런은 오케스트레이터 대기(`runtime-unverified`).
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
