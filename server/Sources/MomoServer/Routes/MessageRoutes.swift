@@ -467,8 +467,8 @@ struct MessageRoutes: Sendable {
         }
 
         let query = request.uri.queryParameters
-        let limit = min(max(query["limit"].flatMap(Int.init) ?? 50, 1), 200)
-        let cursor = try Self.repliesCursor(query["cursor"])
+        let limit = min(max(query["limit"].flatMap { Int($0) } ?? 50, 1), 200)
+        let cursor = try Self.repliesCursor(query["cursor"].map(String.init))
         let fetchLimit = limit + 1
 
         let result: (isMember: Bool, page: ThreadRepliesPage?) = try await db.withTenantConnection(
