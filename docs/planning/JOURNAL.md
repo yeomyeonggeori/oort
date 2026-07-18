@@ -15,6 +15,11 @@
 - D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
 - 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
 
+## 2026-07-18 (Fable) · 엔진 3차 main 머지 `7edad20` — UXUI 큐 전면 개방
+- 검색 FTS(MOMO-475)+스레드 개방(MOMO-476) 통합 게이트 PASS 후 성재 승인 머지. 트랙 재정렬(main=engine).
+- ENGINE_HANDOFF 재구성: A 7건 전부 "main 랜딩·즉시 착수 가능"(마켓플레이스/웹훅/단축링크/스레드/첨부/검색/허들 폴리시). 엔진 잔여=B-4 음소거 ADR, C-2 Work 실검증.
+- 성재가 UXUI에 전달할 멘트 작성 완료(세션 로그) — UXUI는 A 항목을 "이거 구현할까요?" 루프로 소비 시작.
+
 ## 2026-07-18 (Fable) · 엔진 트랙 main 머지 `bd77fe5` (성재 승인 2차)
 - track/engine→main: V-3b iOS 허들 참가(#498) + 첨부 업로드 v0 Drive archive(#499). 게이트 재확인 runtime-db+ios PASS, BUILD_TICKETS 충돌은 main 완성본 채택. ADR-0122 음성 양 클라이언트 완성 + 파일저장 서버 절반 실물(실 Google smoke 검증).
 - clean slate: main=track/engine=bd77fe5. track/uxui는 UX 세션 작업 중(미커밋 19, 트랙 워크트리 — 파이프라인 정착). ENGINE_HANDOFF A-6(파일첨부 UI) 해제됨.
