@@ -15,6 +15,11 @@
 - D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
 - 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
 
+## 2026-07-18 (성재+Fable) · 트랙 파이프라인 대전환 (docs/TRACKS.md 정본)
+- 이원화(UXUI/엔진)·워크트리 작업·트랙 워크트리 빌드 확인·**main 머지=성재 명시 승인** 정본화. track/uxui·track/engine + ~/projects/momo-tracks/* 신설. AGENTS.md·CLAUDE.md에 최우선 규칙 삽입. ENGINE_HANDOFF.md 신설(ready 5건 시드).
+- UX 464 리뷰: 자동승인 가드(reversible-only fail-closed) 양호, 루트 잔재의 더블클릭 줌 이식·통합 커밋. **머지 부적합 판정**: ChromeTests 계약 3건 실패+파생 스냅샷 15건 미기록 → track/uxui에 보존(main 보류), UX 마무리 요청. 루트 잔재는 stash 보관 후 루트 clean 복구.
+- track/uxui는 main(V-3 허들 포함)과 병합 완료(STATUS만 충돌·양쪽 보존). 성재 확인용 앱은 uxui 트랙 빌드로 재실행(46cb58d).
+
 ## 2026-07-18 (Fable) · V-3 랜딩 — 채널에서 말 걸기(음성 UI) 실물
 - `ad983ee`: macOS 허들 UI(헤더 시작/참가·배지·미니패널, livekit swift SDK 2.15.2). 파일스코프 계약 준수(MomoHuddle* 신규+헤더 최소). 블로커가 전방호환 선재결함(미지 이벤트 type이 스트림 종료) 발견 → Core에서 skip 처리 동반 수정.
 - 게이트: huddle/Core 34 test PASS, 유일 실패=workspaceSearch full-suite flake(선재·V-3 무관) → DEVIATION+MOMO-472 분리 후 머지(411/412 선례).
