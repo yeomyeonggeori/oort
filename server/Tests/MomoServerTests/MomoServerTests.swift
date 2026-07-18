@@ -1908,6 +1908,115 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(payload["rootId"])
     }
 
+    func testThreadRollupProjectionAndRealtimePayloadUseAdditiveSnakeCaseContract() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let rootID = UUID(uuidString: "00000000-0000-7000-8000-000000000178")!
+        let authorID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let rollup = try XCTUnwrap(MessageRoutes.threadRollup(
+            replyCount: 3,
+            lastReplySeq: 43,
+            lastReplyAt: Date(timeIntervalSince1970: 1_782_463_260.125)
+        ))
+        XCTAssertEqual(rollup.replyCount, 3)
+        XCTAssertEqual(rollup.lastReplySeq, 43)
+        XCTAssertEqual(rollup.lastReplyAt, 1_782_463_260_125)
+        XCTAssertNil(MessageRoutes.threadRollup(
+            replyCount: 0,
+            lastReplySeq: nil,
+            lastReplyAt: nil
+        ))
+
+        let message = MessageDTO(
+            id: rootID.uuidString,
+            channelId: channelID.uuidString,
+            rootId: nil,
+            seq: 40,
+            hlcTs: 1_782_463_200_000,
+            hlcCount: 0,
+            authorMemberId: authorID.uuidString,
+            type: "text",
+            body: "root",
+            props: nil,
+            runId: nil,
+            clientMsgId: nil,
+            createdAtMs: 1_782_463_200_000,
+            state: nil,
+            editedAtMs: nil,
+            deletedAtMs: nil,
+            thread: rollup
+        )
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(message)) as? [String: Any]
+        )
+        let thread = try XCTUnwrap(encoded["thread"] as? [String: Any])
+        XCTAssertEqual(thread["reply_count"] as? Int, 3)
+        XCTAssertEqual(thread["last_reply_seq"] as? Int, 43)
+        XCTAssertEqual(thread["last_reply_at"] as? Int64, 1_782_463_260_125)
+        XCTAssertNil(thread["replyCount"])
+
+        let raw = MessageRoutes.threadUpdatedPayload(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            rootID: rootID,
+            rollup: rollup
+        )
+        let outbox = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+        )
+        XCTAssertEqual(outbox["version"] as? Int, 43)
+        let data = try XCTUnwrap(outbox["data"] as? [String: Any])
+        XCTAssertEqual(data["type"] as? String, "thread.updated")
+        XCTAssertEqual(data["seq"] as? Int, 43)
+        let payload = try XCTUnwrap(data["payload"] as? [String: Any])
+        XCTAssertEqual(payload["channel_id"] as? String, channelID.uuidString)
+        XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
+        XCTAssertEqual(payload["reply_count"] as? Int, 3)
+        XCTAssertEqual(payload["last_reply_seq"] as? Int, 43)
+        XCTAssertEqual(payload["last_reply_at"] as? Int64, 1_782_463_260_125)
+    }
+
+    func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {
+        XCTAssertNil(try MessageRoutes.repliesCursor(nil))
+        XCTAssertNil(try MessageRoutes.repliesCursor("  "))
+        XCTAssertEqual(try MessageRoutes.repliesCursor("42"), 42)
+        XCTAssertThrowsError(try MessageRoutes.repliesCursor("-1")) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+        XCTAssertThrowsError(
+            try MessageRoutes.validateRepliesRoot(found: false, parentRootID: nil)
+        ) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .notFound)
+        }
+        XCTAssertThrowsError(
+            try MessageRoutes.validateRepliesRoot(found: true, parentRootID: UUID())
+        ) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .badRequest)
+        }
+        XCTAssertNoThrow(try MessageRoutes.validateRepliesRoot(found: true, parentRootID: nil))
+        XCTAssertEqual(MessageRoutes.repliesMembershipError().status, .forbidden)
+
+        let testFile = URL(fileURLWithPath: #filePath)
+        let serverRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MessageRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(source.contains("messages/:root/replies"))
+        XCTAssertTrue(source.contains("withTenantConnection"))
+        XCTAssertTrue(source.contains("hasActiveMembership"))
+        XCTAssertTrue(source.contains("AND root_id = \\(rootID)"))
+        XCTAssertTrue(source.contains("ORDER BY seq ASC"))
+        XCTAssertTrue(source.contains("LEFT JOIN thread t"))
+        XCTAssertTrue(source.contains("t.reply_count > 0"))
+        XCTAssertFalse(source.contains("BYPASSRLS"))
+    }
+
     func testAgentMentionDetectionSupportsDisplayNameHandleAndMemberID() {
         let agentID = UUID(uuidString: "00000000-0000-7000-8000-000000000102")!
 
