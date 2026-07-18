@@ -2,10 +2,10 @@ import Foundation
 
 /// Server configuration loaded from environment variables.
 ///
-/// Keys match `infra/.env.example` so a single `.env` drives docker-compose,
-/// the migration runner, and this server. All have dev-safe defaults so the
-/// process can boot for local smoke checks even before `.env` is filled in
-/// (runtime-unverified — DB/Centrifugo are not running in the build env).
+/// Core keys match `infra/.env.example` so a single `.env` drives compose,
+/// migration, and this server. Core services retain dev-safe defaults for
+/// local smoke; optional feature credentials (LiveKit) remain nil and their
+/// routes fail closed until explicitly configured.
 struct Config: Sendable {
     // ---- HTTP server bind ----
     var host: String
@@ -33,6 +33,11 @@ struct Config: Sendable {
     // (`X-Centrifugo-Proxy-Secret` static header, MOMO-300). The API rejects
     // proxy requests that do not present this value.
     var centProxySecret: String
+
+    // ---- LiveKit huddles (ADR-0122 V-1) ----
+    // Optional as a unit: HuddleRoutes fails closed with 503 unless all three
+    // values are present and the public URL is valid.
+    var liveKit: LiveKitConfig?
 
     // ---- Rate limiting (MOMO-300, in-memory sliding window, single node) ----
     var rateLimit: RateLimitConfig
@@ -87,6 +92,7 @@ struct Config: Sendable {
                 )
             ),
             centProxySecret: env("CENT_PROXY_SECRET", "dev-insecure-cent-proxy-secret"),
+            liveKit: LiveKitConfig.load(environment: ProcessInfo.processInfo.environment),
             rateLimit: RateLimitConfig.load(environment: ProcessInfo.processInfo.environment),
             platformAdminDatabaseURL: ProcessInfo.processInfo.environment["PLATFORM_ADMIN_DATABASE_URL"],
             platformAdminEmails: env("PLATFORM_ADMIN_EMAILS", "")
@@ -186,6 +192,32 @@ struct Config: Sendable {
             password: comps.password ?? "",
             database: db.isEmpty ? "momo" : db
         )
+    }
+}
+
+struct LiveKitConfig: Sendable, Equatable {
+    let apiKey: String
+    let apiSecret: String
+    let url: String
+
+    static func load(environment: [String: String]) -> LiveKitConfig? {
+        func value(_ key: String) -> String? {
+            guard let raw = environment[key]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !raw.isEmpty
+            else { return nil }
+            return raw
+        }
+
+        guard let apiKey = value("MOMO_LIVEKIT_API_KEY"),
+              let apiSecret = value("MOMO_LIVEKIT_API_SECRET"),
+              let rawURL = value("MOMO_LIVEKIT_URL"),
+              let components = URLComponents(string: rawURL),
+              let scheme = components.scheme?.lowercased(),
+              ["http", "https", "ws", "wss"].contains(scheme),
+              components.host != nil
+        else { return nil }
+
+        return LiveKitConfig(apiKey: apiKey, apiSecret: apiSecret, url: rawURL)
     }
 }
 

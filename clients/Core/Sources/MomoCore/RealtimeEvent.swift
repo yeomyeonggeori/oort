@@ -230,6 +230,39 @@ public struct ApprovalEvent: Codable, Sendable, Hashable {
     }
 }
 
+/// Voice-huddle lifecycle delta on a channel subscription (ADR-0122 V-3).
+public struct HuddleDelta: Codable, Sendable, Hashable {
+    public enum Action: String, Codable, Sendable, Hashable {
+        case started
+        case participantsChanged = "participants_changed"
+        case ended
+    }
+
+    public var action: Action
+    public var huddleId: UUID
+    public var channelId: ChannelID
+    public var participantMemberIds: [MemberID]
+
+    public init(
+        action: Action,
+        huddleId: UUID,
+        channelId: ChannelID,
+        participantMemberIds: [MemberID]
+    ) {
+        self.action = action
+        self.huddleId = huddleId
+        self.channelId = channelId
+        self.participantMemberIds = participantMemberIds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case action
+        case huddleId = "huddle_id"
+        case channelId = "channel_id"
+        case participantMemberIds = "participant_member_ids"
+    }
+}
+
 // MARK: - RealtimeEvent (L4 §5.3)
 
 /// Decoded realtime event delivered on a channel stream. Exactly the cases from
@@ -244,4 +277,5 @@ public enum RealtimeEvent: Sendable, Hashable {
     case agentStatus(AgentStatus)    // queued/thinking/streaming/done/error
     case agentPartial(AgentPartial)  // first-class streaming delta
     case approval(ApprovalEvent)
+    case huddle(HuddleDelta)
 }

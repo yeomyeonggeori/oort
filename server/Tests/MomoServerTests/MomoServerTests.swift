@@ -2367,6 +2367,7 @@ final class MomoServerTests: XCTestCase {
             centTokenHMAC: "test-cent-token-hmac",
             centConnectionTokenTTL: centConnectionTokenTTL,
             centProxySecret: "test-cent-proxy-secret",
+            liveKit: nil,
             rateLimit: RateLimitConfig(windowSeconds: 60, perMemberLimit: 600, perIPLimit: 1200),
             platformAdminDatabaseURL: nil,
             platformAdminEmails: [],
@@ -2470,5 +2471,95 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(migration.lowercased().contains("delete from"))
         XCTAssertFalse(migration.lowercased().contains("alter table device"))
         XCTAssertFalse(migration.lowercased().contains("alter table push_token"))
+    }
+
+    // MARK: - MOMO-468 huddles (ADR-0122 V-1)
+
+    func testLiveKitConfigurationIsAllOrNothing() {
+        XCTAssertNil(LiveKitConfig.load(environment: [:]))
+        XCTAssertNil(LiveKitConfig.load(environment: [
+            "MOMO_LIVEKIT_API_KEY": "key",
+            "MOMO_LIVEKIT_API_SECRET": "secret",
+        ]))
+        XCTAssertNil(LiveKitConfig.load(environment: [
+            "MOMO_LIVEKIT_API_KEY": "key",
+            "MOMO_LIVEKIT_API_SECRET": "secret",
+            "MOMO_LIVEKIT_URL": "file:///tmp/livekit",
+        ]))
+        XCTAssertEqual(LiveKitConfig.load(environment: [
+            "MOMO_LIVEKIT_API_KEY": "key",
+            "MOMO_LIVEKIT_API_SECRET": "secret",
+            "MOMO_LIVEKIT_URL": "wss://livekit.momo.test",
+        ]), LiveKitConfig(apiKey: "key", apiSecret: "secret", url: "wss://livekit.momo.test"))
+    }
+
+    func testLiveKitJWTClaimsAndSignatureArePure() throws {
+        let config = LiveKitConfig(
+            apiKey: "livekit-api-key",
+            apiSecret: "livekit-api-secret",
+            url: "wss://livekit.momo.test"
+        )
+        let roomID = UUID(uuidString: "48600000-0000-7000-8000-000000000001")!
+        let memberID = UUID(uuidString: "48600000-0000-7000-8000-000000000002")!
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let first = try LiveKitTokenService.issue(
+            config: config, roomID: roomID, memberID: memberID,
+            displayName: "Huddle Member", now: now
+        )
+        let retry = try LiveKitTokenService.issue(
+            config: config, roomID: roomID, memberID: memberID,
+            displayName: "Huddle Member", now: now
+        )
+
+        XCTAssertEqual(first.token, retry.token)
+        XCTAssertEqual(first.claims.iss, config.apiKey)
+        XCTAssertEqual(first.claims.sub, memberID.uuidString)
+        XCTAssertEqual(first.claims.name, "Huddle Member")
+        XCTAssertEqual(first.claims.nbf, 1_800_000_000)
+        XCTAssertEqual(first.claims.exp - first.claims.nbf, 600)
+        XCTAssertEqual(first.claims.video.room, roomID.uuidString)
+        XCTAssertTrue(first.claims.video.roomJoin)
+        XCTAssertTrue(first.claims.video.canPublish)
+        XCTAssertTrue(first.claims.video.canSubscribe)
+        XCTAssertTrue(LiveKitTokenService.hasValidSignature(first.token, secret: config.apiSecret))
+        XCTAssertFalse(LiveKitTokenService.hasValidSignature(first.token, secret: "wrong-secret"))
+        XCTAssertFalse(first.token.contains(config.apiSecret))
+    }
+
+    func testHuddleLeaveLifecycleTransitionIsPure() {
+        let participantsRemain = HuddleLifecycle.eventAfterLeave(activeParticipantCount: 1)
+        XCTAssertFalse(participantsRemain.ended)
+        XCTAssertEqual(participantsRemain.type, "huddle_participants_changed")
+
+        let lastParticipantLeft = HuddleLifecycle.eventAfterLeave(activeParticipantCount: 0)
+        XCTAssertTrue(lastParticipantLeft.ended)
+        XCTAssertEqual(lastParticipantLeft.type, "huddle_ended")
+    }
+
+    func testHuddleMigrationAndRouteStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/016_huddle.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE huddle"))
+        XCTAssertTrue(migration.contains("CREATE TABLE huddle_participant"))
+        XCTAssertTrue(migration.contains("WHERE ended_at IS NULL"))
+        XCTAssertTrue(migration.contains("WHERE left_at IS NULL"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent("Sources/MomoServer/Routes/HuddleRoutes.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("withTenantTransactionUnwrapped"))
+        XCTAssertTrue(routes.contains("INSERT INTO outbox"))
+        XCTAssertTrue(routes.contains("INSERT INTO audit_log"))
+        XCTAssertFalse(routes.contains("CentrifugoClient"))
+        XCTAssertFalse(routes.contains("/api/publish"))
+        XCTAssertFalse(routes.contains("apiSecret"))
     }
 }

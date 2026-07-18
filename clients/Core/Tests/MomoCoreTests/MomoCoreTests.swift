@@ -262,6 +262,77 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(p.spentMicroUSD, 2100)
     }
 
+    func testEnvelopeMapsHuddleLifecycleEvents() throws {
+        let huddleID = "018f8b2c-0000-7000-8000-000000000040"
+        let channelID = "018f8b2c-0000-7000-8000-000000000041"
+        let memberID = "018f8b2c-0000-7000-8000-000000000042"
+        let fixtures: [(String, HuddleDelta.Action)] = [
+            ("huddle_started", .started),
+            ("huddle_participants_changed", .participantsChanged),
+            ("huddle_ended", .ended),
+        ]
+
+        for (type, expectedAction) in fixtures {
+            let event = try RealtimeEnvelope(
+                type: type,
+                ts: 1,
+                payload: [
+                    "huddle_id": .string(huddleID),
+                    "channel_id": .string(channelID),
+                    "participant_member_ids": .array([.string(memberID)]),
+                ]
+            ).decodeEvent()
+            guard case .huddle(let delta) = event else {
+                return XCTFail("expected .huddle for \(type)")
+            }
+            XCTAssertEqual(delta.action, expectedAction)
+            XCTAssertEqual(delta.huddleId.uuidString.lowercased(), huddleID)
+            XCTAssertEqual(delta.channelId.description.lowercased(), channelID)
+            XCTAssertEqual(delta.participantMemberIds.map { $0.description.lowercased() }, [memberID])
+        }
+    }
+
+    func testRealtimeDriverSkipsUnknownTypeWithoutEndingStream() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let huddleID = "00000000-0000-7000-8000-000000000020"
+        let transport = RealtimeEnvelopeFixtureTransport(envelopes: [
+            RealtimeEnvelope(type: "future.event", ts: 1, payload: [:]),
+            RealtimeEnvelope(
+                type: "huddle_started",
+                ts: 2,
+                payload: [
+                    "huddle_id": .string(huddleID),
+                    "channel_id": .string(channel.description),
+                    "participant_member_ids": .array([]),
+                ]
+            ),
+            RealtimeEnvelope(
+                type: "agent.partial",
+                ts: 3,
+                payload: [
+                    "run_id": "00000000-0000-7000-8000-000000000030",
+                    "channel_id": .string(channel.description),
+                    "text_delta": "still connected",
+                ]
+            ),
+        ])
+        let driver = DefaultRealtimeSubscriptionDriver(transport: transport)
+        let stream = try await driver.subscribe(channel: channel, startingAfter: 0) { _, _ in [] }
+
+        var received: [RealtimeEvent] = []
+        for await event in stream { received.append(event) }
+
+        XCTAssertEqual(received.count, 2)
+        guard case .huddle(let delta) = received.first else {
+            return XCTFail("known event after unknown envelope must still be delivered")
+        }
+        XCTAssertEqual(delta.action, .started)
+        guard case .agentPartial(let partial) = received.last else {
+            return XCTFail("existing realtime events must still be delivered after an unknown type")
+        }
+        XCTAssertEqual(partial.textDelta, "still connected")
+    }
+
     func testRealtimeReplayControllerDropsDuplicateMessageSeq() async throws {
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
         let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
@@ -486,6 +557,22 @@ private actor BackfillScript {
 
     func calls() -> [BackfillCall] {
         recordedCalls
+    }
+}
+
+private struct RealtimeEnvelopeFixtureTransport: RealtimeEnvelopeSubscriptionTransport {
+    let storedEnvelopes: [RealtimeEnvelope]
+
+    init(envelopes: [RealtimeEnvelope]) {
+        storedEnvelopes = envelopes
+    }
+
+    func envelopes(channel: ChannelID) async throws -> AsyncThrowingStream<RealtimeEnvelope, Error> {
+        let storedEnvelopes = self.storedEnvelopes
+        return AsyncThrowingStream { continuation in
+            for envelope in storedEnvelopes { continuation.yield(envelope) }
+            continuation.finish()
+        }
     }
 }
 

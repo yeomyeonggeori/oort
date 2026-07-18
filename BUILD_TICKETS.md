@@ -2136,11 +2136,61 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 실 .p8 smoke는 오케스트레이터(자격증명 실검증 2026-07-17 완료: 샌드박스 400 BadDeviceToken 판정). 상세: issue #471 본문(패킷 겸용).
 - 랜딩: PR #473 squash `94b62bc`(2026-07-17). 실런: PushRelay 4/4+Notifier 3/3 테스트, verify_push_relay PASS(서명/403/429/id-only), **실 .p8 end-to-end smoke PASS**(서명 dispatch→ES256→APNs 샌드박스 apns_id 발급+400 BadDeviceToken passthrough). 후속 노트: push-type alert+무alert 조합은 P-4(iOS 확장) 시점 조정, prod에서 stub sender 거부 하드닝 후보.
 
-### ☐ MOMO-462 (`#474`) 수용기준 — IOS-1 iOS 앱 골격 `[ios]` · 의존: ADR-0123 Accepted (MOMO-040 승계)
-- [ ] `clients/iOS/MomoiOS.xcodeproj`(iOS 26 SDK, bundle app.momo.ios, Push+Background Modes entitlements, CODE_SIGNING_ALLOWED=NO 시뮬레이터 빌드) + `MomoiOSKit`(SwiftPM, MomoCore path 의존) — 셸은 엔트리만, 로직은 킷.
-- [ ] 로그인(맥 폼 필드 계약 동일·HIG·Dynamic Type)→부트스트랩→자리표시 홈. 세션은 UserDefaults(키체인 금지, MOMO-452 결정). MomoMac REST 클라이언트는 필요 최소 복제(Core 이동 금지 — D1 복제 후 수렴).
-- [ ] `verify_ios_build.sh`(시뮬레이터 동적 탐색) + local_gate `ios` 프로파일 + drift guard 케이스 + taste `references/ios-rubric.md`.
-- [ ] 시뮬레이터 게이트 실런은 오케스트레이터. 상세: issue #474 본문(패킷 겸용).
+### ☑ MOMO-462 (`#474`) 수용기준 — IOS-1 iOS 앱 골격 `[ios]` · 의존: ADR-0123 Accepted (MOMO-040 승계)
+- [x] `clients/iOS/MomoiOS.xcodeproj`(iOS 26 SDK, bundle app.momo.ios, Push+Background Modes entitlements, CODE_SIGNING_ALLOWED=NO 시뮬레이터 빌드) + `MomoiOSKit`(SwiftPM, MomoCore path 의존) — 셸은 엔트리만, 로직은 킷.
+- [x] 로그인(맥 폼 필드 계약 동일·HIG·Dynamic Type)→부트스트랩→자리표시 홈. 세션은 UserDefaults(키체인 금지, MOMO-452 결정). MomoMac REST 클라이언트는 필요 최소 복제(Core 이동 금지 — D1 복제 후 수렴).
+- [x] `verify_ios_build.sh`(시뮬레이터 동적 탐색) + local_gate `ios` 프로파일 + drift guard 케이스 + taste `references/ios-rubric.md`.
+- [x] 시뮬레이터 게이트 실런은 오케스트레이터. 상세: issue #474 본문(패킷 겸용).
+- 랜딩: PR #475 squash `cb2f753`(2026-07-17). 오케스트레이터 실런: verify_ios_build PASS(실 시뮬레이터 build-for-testing+test) + 신설 ios 프로파일 게이트 첫 실행 PASS. worker 샌드박스는 CoreSimulatorService 접근 불가 — 시뮬레이터 검증은 오케스트레이터 몫으로 확정(파이프라인 전례).
+
+### ☑ MOMO-463 (`#476`) 수용기준 — IOS-2 목록+타임라인 열람 `[ios]` · 의존: MOMO-462
+- [x] 채널/DM 목록+unread(ADR-0109 계약)+pull-to-refresh, 타임라인 히스토리+Centrifugo 실시간 append(`message.seq` 순서·중복 가드), 승인 카드 열람 전용.
+- [x] 상태 4종(빈/로딩/오류/오프라인) + Dynamic Type/혼합 3줄 오버플로 + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #476 본문(패킷 겸용).
+- 랜딩: PR #477 squash `daff55e`(2026-07-17). 오케스트레이터 실런: 시뮬레이터 게이트 PASS. IOSTimelineReducer가 id/clientMsgId/seq 3중 가드로 중복·수정 처리, 실시간 끊김 시 REST fallback 배너.
+
+### ☑ MOMO-464 (`#478`) 수용기준 — IOS-3 컴포저+승인 결정 `[ios]` · 의존: MOMO-463
+- [x] 컴포저 전송(REST 단일 쓰기경로+client_msg_id 멱등, 낙관→reducer 수렴, 실패 재시도) + 인용 답장(스레드 작성 스코프 외).
+- [x] 승인/거부 결정(client_decision_id 멱등, 비가역 티어 확인 1단계, 상태 전이) + 킷 단위 테스트 + ios 게이트 유지. 상세: issue #478 본문(패킷 겸용).
+- 랜딩: PR #479 squash `9aad292`(2026-07-17). 오케스트레이터 실런: 시뮬레이터 게이트 PASS. 전송 clientMsgId 낙관→reducer 수렴, 결정은 pending 저장으로 재시도에도 같은 clientDecisionId(멱등), 비가역 확인 다이얼로그 destructive role.
+
+### ☑ MOMO-465 (`#480`) 수용기준 — IOS-4 푸시 수신 (P-4) `[ios]` · 의존: MOMO-464
+- [x] 권한→토큰→`POST /v1/workspaces/:ws/devices` 등록(로그아웃 DELETE) + App Group 세션 공유 + NSE id-only fetch(실패 fail-open) + deep link(cold start 포함).
+- [x] relay placeholder alert(정적, 내용 비포함) + verify_push_relay 단정 갱신 + .apns 픽스처. simctl push smoke는 오케스트레이터. 상세: issue #480 본문(패킷 겸용).
+- 랜딩: PR #481 squash `a0e3d0c`(2026-07-17). 1차 worker 모델 capacity 사망→동일 worktree 이어받기 재스폰 성공(빈번 커밋 계약 유효). 오케스트레이터 수정 3건: Swift 6 sending 캡처(NSE unchecked Sendable 관용구·delegate nonisolated 환원·PushKit import — worker 샌드박스 xcodebuild 불가로 미검출). 실런: 킷 18/18(swift-testing) + relay 4/4+verifier + 시뮬레이터 게이트 + simctl push 전달. 배너 표시 evidence는 권한 흐름상 IOS-5 실기기 몫(정직 기록).
+
+### ☑ MOMO-466 (`#482`) 수용기준 — IOS-5 TestFlight 런북+배포 준비 `[ios]` · 의존: MOMO-465
+- [x] 절제된 dev 아이콘(생성 스크립트+1024 PNG) + Release 시뮬레이터 빌드 sanity + dev 전용 코드 교체 항목 명시.
+- [x] IOS_TESTFLIGHT_RUNBOOK([manual]: App ID/App Group 등록→서명→archive 업로드→internal 테스터→실기기 E2E 체크리스트, 서버 연결 옵션). 서명/업로드 실행은 성재. 상세: issue #482 본문(패킷 겸용).
+- 랜딩: PR #483 squash `3d321c6`(2026-07-17). 오케스트레이터: Release 시뮬레이터 빌드 SUCCEEDED. 잔여는 런북 [manual] 48단계(성재) — 실기기 E2E가 iOS v0 배치의 최종 evidence.
+
+### ☑ MOMO-467 (`#484`) 수용기준 — IOS-4 후속: 등록 env 자동판별 + 실패 관측 `[ios]` · 의존: MOMO-465 (실기기 검증서 발견)
+- [x] 디바이스 등록 env를 aps-environment(development/production)로 자동 판별(sandbox 하드코딩 제거) + 매핑 단위 테스트.
+- [x] 등록 실패 `try?` 삼킴 제거 → os_log(토큰 suffix만) + 1회+foreground 재시도. 실기기 재검증은 [manual]. 상세: issue #484 본문(패킷 겸용).
+- 랜딩: PR #485 squash `37480d2`(2026-07-18). APS_ENVIRONMENT→Info.plist→런타임 매핑(테스트 20/20), os_log 전 지점 + foreground 재시도. 시뮬레이터 게이트 PASS. 실기기 재검증(케이블 Run)은 성재 [manual] 대기.
+
+### ☑ MOMO-468 (`#486`) 수용기준 — V-1 huddle 스키마+수명주기+LiveKit JWT `[runtime-db]` · 의존: ADR-0122 Accepted
+- [x] 016_huddle(huddle+participant, RLS FORCE, 활성 partial index) + 시작(멱등)/join(JWT)/leave(마지막 퇴장=종료)/active REST — 같은 tx + outbox 3종 이벤트 + audit.
+- [x] LiveKit HS256 JWT(video grant, ttl 10분), env 미설정 시 503 fail-closed. verify_huddle_lifecycle(격리 compose, LiveKit 불요) + runtime-db 편입 + openapi 명세.
+- [x] 상세: issue #486 본문(패킷 겸용). V-2(infra)→V-3(macOS, UX 조율)→V-3b(iOS) 순차.
+- 랜딩: PR #488 squash `df18a6b`(2026-07-18). 실런: verify_huddle_lifecycle PASS + runtime-db 게이트 PASS(3차 — 1차 §9 부하 거부 정상동작, 2차에서 461 선재 컨테이너 Sendable 결함 발견→PR #490 1줄 수정 선랜딩). openapi 동시 명세.
+
+### ☑ MOMO-469 (`#487`) 수용기준 — 푸시 탭 deep link 관통 `[ios]` · 의존: MOMO-467 (실기기 E2E 발견)
+- [x] 라우터 관측 가능화 + signedIn에서 pending 소비→채널 타임라인 진입(1회성 클리어), cold/warm/미로그인 보류 3경로.
+- [x] 단위 테스트 + 시뮬레이터 게이트, 실기기 재확인 [manual]. 상세: issue #487 본문(패킷 겸용).
+- 랜딩: PR #489 squash(2026-07-18). worker capacity 중단→커밋 보존 인수, 오케스트레이터 보완 1건(import MomoCore). 킷 22/22+시뮬레이터 게이트 PASS. 실기기 재확인 [manual] 대기.
+
+### ☑ MOMO-470 (`#491`) 수용기준 — V-2 compose LiveKit + 실 JWT 수락 `[infra]` · 의존: MOMO-468
+- [x] compose `huddle` profile로 livekit 옵트인(버전 핀·포트·healthcheck·UDP 제한), env.example/RUN/DEPLOY 델타(TURN은 도메인 확보 시 노트).
+- [x] `verify_huddle_livekit.sh`: V-1 join JWT를 실 LiveKit `/rtc/validate` 200 수락 + 무효 거부, teardown. e2e compose 무접촉. 상세: issue #491 본문(패킷 겸용).
+- 랜딩: PR #492 squash `5bab0d2`(2026-07-18). 오케스트레이터: 핀 v1.9.0→v1.13.3 교정 + 실기동 검증 PASS(실 LiveKit이 V-1 JWT 200 수락/무효 401 거부, 스택 회수 확인). 앞선 타임아웃 2회는 Docker Desktop pull 전역 불능(재시작으로 해소, momo 무관).
+
+### ☑ MOMO-471 (`#493`) 수용기준 — V-3 macOS 허들 UI `[swift/macos-ui]` · 의존: MOMO-470 (UX 병행 — 파일 스코프 계약)
+- [x] 헤더 최소 삽입+정적 live 배지, MomoHuddle* 신규 파일군(livekit swift SDK 핀, 오디오만), 수명주기 leave/disconnect 보장, 503 미구성 상태 포함 4종.
+- [x] MessageListView/ChannelListView/MomoMacDevApp* 무접촉(UX 활성 영역). 스냅샷 RECORD 금지. 실오디오 왕복은 오케스트레이터. 상세: issue #493 본문(패킷 겸용).
+- 랜딩: PR #494 squash `ad983ee`(2026-07-18). 블로커 정당(전방호환 결함 발견)→스코프 A 확장 재개. macos-ui 게이트 336테스트 중 huddle/Core 34 PASS, 유일 실패=workspaceSearch 선재 flake(V-3 무관, MOMO-472 분리). 실오디오 2클라 왕복은 성재 협업 검증 대기.
+
+### ☐ MOMO-472 (`#495`) 수용기준 — workspaceSearch 스냅샷 full-suite 비결정성 안정화 `[macos-ui]` · 의존: 없음 (선재 flake)
+- [ ] full `make test` 3회 연속 통과(결정적 렌더 조건 이관 또는 perceptual 미세조정, 근거 기록). 캐노니컬 재기록은 오케스트레이터. 상세: issue #495.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

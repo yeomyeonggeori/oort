@@ -2690,3 +2690,35 @@ struct MomoWorkspaceCopy {
         return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1_000))
     }
 }
+
+struct MomoHuddleCopy {
+    var language: MomoUILanguage
+
+    var start: String { language == .korean ? "허들 시작하기" : "Start huddle" }
+    var join: String { language == .korean ? "허들 참가하기" : "Join huddle" }
+    var live: String { language == .korean ? "진행 중" : "Live" }
+    var connecting: String { language == .korean ? "허들 연결 중" : "Connecting to huddle" }
+    var unavailable: String { language == .korean ? "허들을 사용할 수 없음" : "Huddle unavailable" }
+    var retry: String { language == .korean ? "허들 다시 연결하기" : "Retry huddle" }
+    var participants: String { language == .korean ? "참가자" : "Participants" }
+    var noParticipants: String { language == .korean ? "아직 참가자가 없습니다" : "No one has joined yet" }
+    var mute: String { language == .korean ? "마이크 끄기" : "Mute microphone" }
+    var unmute: String { language == .korean ? "마이크 켜기" : "Unmute microphone" }
+    var leave: String { language == .korean ? "허들 나가기" : "Leave huddle" }
+    var speaking: String { language == .korean ? "말하는 중" : "Speaking" }
+    var open: String { language == .korean ? "허들 열기" : "Open huddle" }
+
+    func participantCount(_ count: Int) -> String {
+        switch language {
+        case .korean: return "\(count)명 참가 중"
+        case .english: return "\(count) in huddle"
+        }
+    }
+
+    func joinWithParticipantCount(_ count: Int) -> String {
+        switch language {
+        case .korean: return "허들 참가하기 · \(count)명"
+        case .english: return "Join huddle · \(count)"
+        }
+    }
+}

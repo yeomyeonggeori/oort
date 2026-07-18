@@ -1,4 +1,5 @@
 import Foundation
+import MomoCore
 import Observation
 #if os(iOS)
 import SwiftUI
@@ -25,13 +26,16 @@ public final class MomoiOSAppModel {
 
     private let store: SessionStore
     private let backend: any SessionBackend
+    private let pushLifecycle: any IOSPushLifecycle
 
     public init(
         store: SessionStore = .shared,
-        backend: any SessionBackend = MomoServerSessionClient()
+        backend: any SessionBackend = MomoServerSessionClient(),
+        pushLifecycle: any IOSPushLifecycle = NoopIOSPushLifecycle.shared
     ) {
         self.store = store
         self.backend = backend
+        self.pushLifecycle = pushLifecycle
         self.form = store.loadForm()
         self.phase = .signedOut
         self.failureKind = nil
@@ -54,6 +58,7 @@ public final class MomoiOSAppModel {
             store.save(form: form)
             store.save(session: session)
             phase = .signedIn(session, bootstrap)
+            await pushLifecycle.activate(session: session)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
@@ -63,7 +68,10 @@ public final class MomoiOSAppModel {
         }
     }
 
-    public func signOut() {
+    public func signOut() async {
+        if case .signedIn(let session, _) = phase {
+            await pushLifecycle.revoke(session: session)
+        }
         store.clearSession()
         errorMessage = nil
         failureKind = nil
@@ -78,6 +86,7 @@ public final class MomoiOSAppModel {
             let bootstrap = try await backend.bootstrap(session: session)
             if saveForm { store.save(form: form) }
             phase = .signedIn(session, bootstrap)
+            await pushLifecycle.activate(session: session)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
@@ -101,13 +110,19 @@ public final class MomoiOSAppModel {
 @MainActor
 public struct MomoiOSRootView: View {
     @State private var model: MomoiOSAppModel
+    @State private var navigationPath: [IOSPushDeepLink] = []
+    @State private var deepLinkRouter: IOSPushDeepLinkRouter
 
-    public init(model: MomoiOSAppModel = MomoiOSAppModel()) {
+    public init(
+        model: MomoiOSAppModel = MomoiOSAppModel(),
+        deepLinkRouter: IOSPushDeepLinkRouter = .shared
+    ) {
         _model = State(initialValue: model)
+        _deepLinkRouter = State(initialValue: deepLinkRouter)
     }
 
     public var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             switch model.phase {
             case .signedOut:
                 LoginView(model: model)
@@ -115,11 +130,40 @@ public struct MomoiOSRootView: View {
                 ProgressView("Connecting to momo")
                     .navigationTitle("momo")
             case .signedIn(let session, let bootstrap):
-                WorkspaceHomeView(session: session, bootstrap: bootstrap, signOut: model.signOut)
+                IOSWorkspaceView(
+                    session: session,
+                    bootstrap: bootstrap,
+                    signOut: model.signOut
+                )
             }
         }
         .task { await model.restore() }
+        .onOpenURL { deepLinkRouter.route(url: $0) }
+        .task(id: deepLinkRouteTrigger) {
+            guard let link = deepLinkRouter.consumePending(
+                for: deepLinkRouteTrigger.signedInWorkspaceID
+            ) else { return }
+            navigationPath = [link]
+        }
     }
+
+    private var deepLinkRouteTrigger: DeepLinkRouteTrigger {
+        let signedInWorkspaceID: WorkspaceID?
+        if case .signedIn(let session, _) = model.phase {
+            signedInWorkspaceID = session.workspaceID
+        } else {
+            signedInWorkspaceID = nil
+        }
+        return DeepLinkRouteTrigger(
+            pending: deepLinkRouter.pending,
+            signedInWorkspaceID: signedInWorkspaceID
+        )
+    }
+}
+
+private struct DeepLinkRouteTrigger: Equatable {
+    let pending: IOSPushDeepLink?
+    let signedInWorkspaceID: WorkspaceID?
 }
 
 @MainActor
@@ -177,43 +221,4 @@ private struct LoginView: View {
     }
 }
 
-@MainActor
-private struct WorkspaceHomeView: View {
-    let session: IOSSession
-    let bootstrap: WorkspaceBootstrap
-    let signOut: @MainActor () -> Void
-
-    var body: some View {
-        Form {
-            Section("Workspace") {
-                LabeledContent("Name", value: bootstrap.workspace.name)
-                LabeledContent("Channels", value: bootstrap.channels.count.formatted())
-            }
-
-            Section {
-                if bootstrap.channels.isEmpty {
-                    ContentUnavailableView(
-                        "No channels yet",
-                        systemImage: "number",
-                        description: Text("Create a channel in momo on Mac to get started.")
-                    )
-                } else {
-                    Label("Open momo on Mac to browse these channels.", systemImage: "number")
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Section("Signed in") {
-                LabeledContent("Member", value: session.member.displayName)
-                LabeledContent("Server", value: session.baseURL.host ?? session.baseURL.absoluteString)
-            }
-        }
-        .navigationTitle(bootstrap.workspace.name)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Sign out", action: signOut)
-            }
-        }
-    }
-}
 #endif

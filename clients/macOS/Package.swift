@@ -36,6 +36,7 @@ let package = Package(
         // Local path dependency on the shared client core (sibling dir).
         .package(name: "MomoCore", path: "../Core"),
         .package(url: "https://github.com/centrifugal/centrifuge-swift.git", exact: "0.9.0"),
+        .package(url: "https://github.com/livekit/client-sdk-swift.git", exact: "2.15.2"),
         // Test-only: deterministic light/dark image snapshots of the SwiftUI surface
         // (MOMO-318). MIT-licensed; only the `SnapshotTesting` product is imported,
         // whose target has no transitive build dependencies (swift-syntax is pulled by
@@ -48,6 +49,7 @@ let package = Package(
             dependencies: [
                 .product(name: "MomoCore", package: "MomoCore"),
                 .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
+                .product(name: "LiveKit", package: "client-sdk-swift"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

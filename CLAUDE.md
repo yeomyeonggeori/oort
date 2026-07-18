@@ -17,6 +17,11 @@
 ## 세션 종료 시 (플러시 의무)
 결정 초안·리서치·티켓/패킷 제안을 repo 파일에 남긴 뒤 `JOURNAL.md`에 항목을 추가한다. `momo-main` 통합 세션은 `CURRENT_STATE.md`도 갱신한다. 채팅에만 있는 맥락은 잃어버린 것으로 간주한다.
 
+## 트랙 파이프라인 (2026-07-18 성재 지시 — 최우선)
+- **`docs/TRACKS.md`가 정본.** 작업 전 자기 트랙(UXUI|엔진) 선언 → 트랙 워크트리(`~/projects/momo-tracks/*`)에서 작업 → 머지는 자기 트랙 브랜치까지 자율.
+- **track/* → main 머지는 성재 명시 승인 필수**(물어보거나, 성재가 지시할 때만). 성재에게 보여주는 빌드는 항상 트랙 워크트리 빌드("빌드 원본" 고지).
+- 엔진 랜딩 → `docs/planning/ENGINE_HANDOFF.md`에 ready 추가. UXUI 세션은 그 큐를 읽고 성재에게 제안.
+
 ## 하드 룰
 - 핵심 불변식: Postgres=SoT · Centrifugo=전송전용 · 단일 쓰기경로(REST→PG→outbox→relay) · 순서=`message.seq` · 에이전트=`member` · RLS FORCE · provider 자격증명 비유입(ADR-0004).
 - 티켓은 핸드오프 패킷(`docs/planning/handoffs/`) 없이 worker에 넘기지 않는다.

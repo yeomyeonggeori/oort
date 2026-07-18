@@ -18,20 +18,24 @@ final class PushRelayTests: XCTestCase {
         XCTAssertEqual(config.port, 28195)
     }
 
-    func testClosedDispatchAndAPNSPayloadContainNoConversationContent() throws {
+    func testClosedDispatchAndAPNSPayloadUseOnlyStaticPlaceholderContent() throws {
         let data = Data(Self.dispatchJSON.utf8)
         let dispatch = try PushDispatch.decodeClosed(data)
         let encoded = try JSONEncoder().encode(APNSPayload(dispatch: dispatch))
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         XCTAssertEqual(Set(object.keys), ["aps", "momo"])
         let aps = try XCTUnwrap(object["aps"] as? [String: Any])
-        XCTAssertEqual(Set(aps.keys), ["badge", "mutable-content", "content-available"])
+        XCTAssertEqual(Set(aps.keys), ["alert", "badge", "mutable-content", "content-available"])
+        let alert = try XCTUnwrap(aps["alert"] as? [String: Any])
+        XCTAssertEqual(Set(alert.keys), ["title", "body"])
+        XCTAssertEqual(alert["title"] as? String, "momo")
+        XCTAssertEqual(alert["body"] as? String, "새 알림")
         let momo = try XCTUnwrap(object["momo"] as? [String: Any])
         XCTAssertEqual(Set(momo.keys), [
             "schema", "server_id", "workspace_id", "channel_id", "message_id", "collapse_id", "reason",
         ])
         let text = String(decoding: encoded, as: UTF8.self)
-        for forbidden in ["body", "display_name", "handle", "channel_name", "apns_token"] {
+        for forbidden in ["message_body", "display_name", "handle", "channel_name", "apns_token"] {
             XCTAssertFalse(text.contains(forbidden))
         }
     }

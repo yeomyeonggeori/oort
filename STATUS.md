@@ -1,3 +1,10 @@
+# momo 진행 현황
+
+## iOS v0 실기기 푸시 E2E PASS (2026-07-18)
+
+- 실기기(iPhone, Debug 케이블 빌드)에서 전 체인 실증: 디바이스 등록(env 자동판별 sandbox, MOMO-467) → PushRelay(Ed25519 서명 dispatch) → 실 APNs(.p8, apns_id 발급 200) → 실기기 알림 표시 → **NSE가 REST로 실제 메시지 본문 fetch·교체 성공**. ADR-0120 P-1~P-4 + ADR-0123 IOS-1~5의 최종 evidence.
+- 발견 1건: 알림 탭 deep link가 채널 목록에서 멈춤 → MOMO-469(`#487`) 발급.
+
 # momo — Phase 0 빌드 STATUS
 
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
@@ -8,6 +15,26 @@
 - 다운로드 화면을 앱 경계를 벗어날 수 있는 시스템 popover에서 가운데 pane 우측 상단의 bounded card panel로 변경했다. 일반 창과 전체화면에서 같은 앱 내부 위치를 유지하고, 표시·해제 animation은 비활성화했으며 닫기 버튼과 Escape 경로를 제공한다.
 - 승인 inspector 헤더 여백을 확대하고 action strip을 `모두 승인`(0건 disabled) + `항상 승인` switch로 재구성했다. `항상 승인`은 이 Mac·현재 workspace에 저장되며 명시적으로 reversible인 요청만 자동 처리한다. irreversible/미분류 요청은 fail-closed하고 `모두 승인`에도 추가 확인을 요구한다.
 - 최신 `/private/tmp/momo-464-three-zone` dev app 실창에서 일반 창·전체화면을 확인했고, focused macOS test와 design preflight가 PASS했다.
+## MOMO-471 macOS 허들 UI + LiveKit audio (2026-07-18)
+
+- 채널 헤더의 시작/참가/live 참가자 표시와 오디오 전용 미니패널(말하는 중, 음소거, 나가기), 503 미구성 상태, JWT 재발급 재연결, 창/로그아웃/채널 전환 leave+disconnect 수명주기를 추가했다. LiveKit Swift SDK 2.15.2를 exact pin했다.
+- Core는 huddle 3종 실시간 이벤트를 강타입으로 전달하고 미지 envelope type을 디버그 로그 후 스킵해 스트림을 유지한다. Core/macOS focused tests와 light/dark/increased-contrast/large-type 렌더는 PASS; compose 2-client 실오디오 왕복은 오케스트레이터 검증 전까지 `runtime-unverified`다.
+
+## MOMO-470 LiveKit compose + 실 JWT 수락 verifier (2026-07-18)
+
+- 고정 버전 LiveKit을 기본 stack과 분리된 `huddle` compose profile로 추가하고 signaling/TCP RTC/제한 UDP range, env 기반 API key/secret, healthcheck와 TURN 후속 운영 계약을 문서화했다.
+- `verify_huddle_livekit.sh`는 V-1 start/join JWT를 실제 LiveKit `/rtc/validate` 200과 무효 JWT 401/403으로 관통한다. worker는 Docker를 실행하지 않아 실기동은 `runtime-unverified`; bash/YAML/정적 계약만 검증한다.
+
+## MOMO-468 huddle 수명주기 + LiveKit JWT (2026-07-18)
+
+- migration 016에 채널당 단일 활성 huddle과 재입장 이력 participant를 추가하고 FORCE RLS를 적용했다. 시작/참가/퇴장/active REST는 tenant tx 안에서 lifecycle·audit·outbox를 함께 커밋하며 마지막 참가자 퇴장이 huddle을 종료한다.
+- LiveKit HS256 video grant는 별도 API secret으로 10분만 발급하고 세 env가 완비되지 않으면 전 허들 API가 503 `허들 미구성`으로 fail-closed한다. 서버 build와 105 tests, shell/YAML 정적 검증은 PASS; Docker `verify_huddle_lifecycle.sh`는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
+## MOMO-466 iOS TestFlight internal 배포 준비 (2026-07-17)
+
+- Xcode 26 단일 1024px AppIcon을 생성하는 CoreGraphics 스크립트와 절제된 단색 `m` 모노그램 PNG를 추가하고, 앱 asset catalog·Team `YWQQFQM38J`·NSE bundle `app.momo.ios.NotificationService`·Debug/Release APNs 환경을 배포 계약에 맞췄다.
+- `docs/IOS_TESTFLIGHT_RUNBOOK.md`에 App ID/App Group, 자동 서명, Organizer 업로드, internal tester, LAN/AWS 연결, 실기기 APNs/NSE/deep-link/device-row E2E를 `[manual]`로 정리했다. 실제 서명·archive·업로드·실기기 E2E는 성재 수행 전이며 manual-unverified다.
+- `docs` local gate와 아이콘 1024x1024 RGB·alpha 없음·결정적 재생성 검사는 PASS했다. Release 시뮬레이터 sanity는 worker sandbox가 CoreSimulatorService와 `~/Library/Caches` 쓰기를 차단해 컴파일 진입 전 종료됐으므로 runtime-unverified이며, 런북 §4 명령을 sandbox 밖에서 재실행해야 한다.
 
 ## MOMO-457 hosted read-only Drive MCP (2026-07-17)
 

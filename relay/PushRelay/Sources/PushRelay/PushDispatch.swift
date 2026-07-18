@@ -82,11 +82,18 @@ enum DispatchValidationError: Error {
 
 struct APNSPayload: Encodable, Sendable {
     struct APS: Encodable, Sendable {
+        struct Alert: Encodable, Sendable {
+            let title = "momo"
+            let body = "새 알림"
+        }
+
+        let alert = Alert()
         let badge: Int
         let mutableContent = 1
         let contentAvailable = 1
 
         enum CodingKeys: String, CodingKey {
+            case alert
             case badge
             case mutableContent = "mutable-content"
             case contentAvailable = "content-available"

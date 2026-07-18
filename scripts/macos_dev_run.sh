@@ -198,6 +198,8 @@ build_and_stage() {
   <string>$MIN_SYSTEM_VERSION</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Speak with your team in a momo huddle.</string>
 </dict>
 </plist>
 EOF

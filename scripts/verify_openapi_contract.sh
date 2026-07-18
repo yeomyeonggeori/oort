@@ -29,6 +29,8 @@
 #   OPENAPI_GATE_HERMES_PORT       mock-hermes port   (default: 18983).
 #   OPENAPI_GATE_BOOT_TIMEOUT      Seconds to wait for /health (default: 2400 —
 #                                  the api container cold-builds Swift).
+#   OPENAPI_GATE_LIVEKIT_*         Optional API_KEY/API_SECRET/URL overrides.
+#                                  BASE_URL mode must configure the target API.
 #   OPENAPI_GATE_KEEP=1            Keep the compose stack up after the run.
 #   OPENAPI_SPEC                   Spec path (default: docs/api/openapi.yaml).
 # =============================================================================
@@ -76,6 +78,18 @@ RUN_EPOCH="$(date -u +%s)"
 RUN_ID="${RUN_EPOCH}-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-openapi-gate-$RUN_ID"
 mkdir -p "$TMP_DIR"
+COMPOSE_OVERRIDE="$TMP_DIR/livekit-env.yml"
+LIVEKIT_API_KEY="${OPENAPI_GATE_LIVEKIT_API_KEY:-openapi-gate-key}"
+LIVEKIT_API_SECRET="${OPENAPI_GATE_LIVEKIT_API_SECRET:-openapi-gate-secret-$RUN_ID}"
+LIVEKIT_URL="${OPENAPI_GATE_LIVEKIT_URL:-ws://127.0.0.1:7880}"
+cat >"$COMPOSE_OVERRIDE" <<YAML
+services:
+  api:
+    environment:
+      MOMO_LIVEKIT_API_KEY: "$LIVEKIT_API_KEY"
+      MOMO_LIVEKIT_API_SECRET: "$LIVEKIT_API_SECRET"
+      MOMO_LIVEKIT_URL: "$LIVEKIT_URL"
+YAML
 SPEC_JSON="$TMP_DIR/openapi.json"
 MANIFEST="$TMP_DIR/manifest.jsonl"
 : >"$MANIFEST"
@@ -101,7 +115,7 @@ compose() {
   POSTGRES_PORT="$GATE_POSTGRES_PORT" \
   CENT_PORT="$GATE_CENT_PORT" \
   HERMES_PORT="$GATE_HERMES_PORT" \
-  docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
+  docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$COMPOSE_OVERRIDE" "$@"
 }
 
 cleanup() {
@@ -384,6 +398,20 @@ GENERAL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.channels[] | select(.name =
 
 sample channel-create post "/v1/workspaces/{workspaceId}/channels" "/v1/workspaces/$WS/channels" 201 \
   "$(jq -cn --arg n "gate-$RUN_EPOCH" '{kind:"public",name:$n,topic:"openapi drift gate"}')" "$ACCESS"
+
+# huddles: start -> active badge -> join grant -> last leave/end
+sample huddle-start post "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/huddles" 201 "" "$ACCESS"
+HUDDLE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.huddle.id')"
+sample huddle-active get "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles/active" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/huddles/active" 200 "" "$ACCESS"
+sample huddle-join post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/join" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/join" 200 "" "$ACCESS"
+guard_jq '.ttlSeconds == 600 and (.token | type == "string")' "huddle join returns a 10-minute grant"
+sample huddle-leave post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/leave" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/leave" 200 "" "$ACCESS"
+guard_jq '.ended == true and (.huddle.endedAtMs | type == "number")' \
+  "last huddle participant ends the room"
 
 # messages: send + history (head + after-backfill)
 sample message-send post \

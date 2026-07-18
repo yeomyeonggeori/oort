@@ -5,10 +5,36 @@
 
 ---
 
+## 2026-07-17 (Fable 엔진 트랙) · ADR-0123 iOS v0 배치 IOS-1~5 완주 (당일)
+- 5티켓 순차 랜딩: 골격 `cb2f753` → 목록/타임라인 `daff55e` → 컴포저/승인 `9aad292` → 푸시 P-4 `a0e3d0c` → TestFlight 런북 `3d321c6`. 전부 codex worker 구현→Fable 리뷰·시뮬레이터 게이트·머지.
+- 파이프라인 실측: worker 샌드박스는 CoreSimulator/xcodebuild 불가 — iOS 컴파일·시뮬레이터 검증은 오케스트레이터 상시 몫(Swift 6 sending 오류 3건 직접 수정 전례). capacity 사망 1회는 동일 worktree 이어받기+빈번 커밋으로 유실 0 복구.
+- ADR-0120 전 체인 종결(P-4 포함, simctl push 실전달·NSE 18/18). 잔여: 런북 [manual](성재 실기기 E2E)이 배치 최종 evidence. ADR-0123 v1 수렴 항목(뷰모델 공용화)과 M8 이월(042/043) 유지.
+
 ## 2026-07-17 (Fable 기획) · ADR-0123 iOS 클라이언트 v0 기안
 - 성재 발제로 iOS 트랙 기획 착수. 실측: MomoCore 20파일 AppKit 0(그대로 재사용), 레거시 EP-IOS 분해(040 승계·041 기완성·042/043 M8 이월), 팀/APNs 전제 금일 확인 완료.
 - D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
 - 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
+
+## 2026-07-18 (Fable) · V-3 랜딩 — 채널에서 말 걸기(음성 UI) 실물
+- `ad983ee`: macOS 허들 UI(헤더 시작/참가·배지·미니패널, livekit swift SDK 2.15.2). 파일스코프 계약 준수(MomoHuddle* 신규+헤더 최소). 블로커가 전방호환 선재결함(미지 이벤트 type이 스트림 종료) 발견 → Core에서 skip 처리 동반 수정.
+- 게이트: huddle/Core 34 test PASS, 유일 실패=workspaceSearch full-suite flake(선재·V-3 무관) → DEVIATION+MOMO-472 분리 후 머지(411/412 선례).
+- 루트 재오염: UX 세션이 또 루트 체크아웃에서 직접 편집(STATUS/Theme/MomoMacRootView 등 미커밋 다수) — §4.1 무접촉, 정본은 temp worktree 우회. 성재 재전달 필요.
+- 잔여: V-3b(iOS 참가), V-3 실오디오 2클라 왕복(성재 협업), 회의록 v1/v2. 음성 배포는 도메인 결정(S-4와 동일) 후 V-2b(TURN).
+
+## 2026-07-18 (Fable) · V-2 랜딩 — 음성 v0 서버·인프라 완성
+- `5bab0d2`: compose huddle profile(옵트인·핀 v1.13.3)로 실 LiveKit 기동, V-1 JWT 실수락 검증(200/무효 401) PASS. 서버→JWT→실 SFU 전 구간 실물.
+- 운영 사건: Docker Desktop 신규 pull 전역 불능(레지스트리 도달성 정상·기존 컨테이너 무영향) — 성재 재시작으로 해소. verifier pull 단계 무한대기 개선 후보(비차단).
+- 다음: V-3(macOS 허들 UI — UX 트랙과 발급 시점 조율 필요), V-3b(iOS 참가). 회의록 v1/v2는 후속.
+
+## 2026-07-18 (Fable) · V-1 랜딩 + iOS 실기기 E2E 완주
+- 음성 V-1 `df18a6b`(huddle 스키마/수명주기/LiveKit JWT — verifier+runtime-db PASS). 게이트가 461 선재 결함(notifier 컨테이너 Linux Sendable) 검출 → #490 1줄 수정. 다음: V-2(compose LiveKit+TURN).
+- iOS: 실기기 푸시 E2E PASS(STATUS 정본) + deep link 수정 `61e5cf3` 랜딩(실기기 재확인 [manual]). worker capacity 사망 2회 모두 커밋 보존 인수로 유실 0.
+- 워크트리 47개 회수(PR MERGED 확인 기반). 오케스트레이터 실런이 잡은 잠복 결함 3종 기록: 렌더 편차/python 버전/컨테이너 Sendable — 전부 worker 환경 사각.
+
+## 2026-07-18 (Fable) · ADR-0122 Accepted + 워크트리 대청소
+- 성재 "ㄱㄱ"로 음성 허들 Accepted(D1 LiveKit/D2 임시 허들/D3 3단계). V-1(MOMO-468 `#486`) 발급 — 서버 전용, UX 무충돌.
+- 워크트리 50→5 회수(47개 — GitHub PR MERGED 확인 후만 삭제, dirty 4개는 §4.1 무접촉 보존). UX 세션은 relay 후 worktree 분리 안착 확인(활성: /private/tmp/momo-464).
+- iOS: MOMO-467(등록 env 자동판별+os_log 관측) 랜딩 `37480d2` — 실기기 재검증(케이블 Run)은 성재 [manual] 대기.
 
 ## 2026-07-17 (Fable 엔진 트랙+성재) · S-4 v0 + P-3 PushRelay 랜딩 — 성재 개입 3건 전부 종결
 - MOMO-460 `69ace59`(services/LinkShort — /i/<code>→302, 도메인은 DNS만 붙이면 됨) + MOMO-461 `94b62bc`(relay/PushRelay — Ed25519 등록제·rate limit·APNs ES256 발송, NotifierWorker 서명 옵트인).
