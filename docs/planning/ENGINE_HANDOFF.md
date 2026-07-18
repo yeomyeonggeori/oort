@@ -11,7 +11,7 @@
 | A-1 | `done` | **마켓플레이스 실서버 연동** | REST 카탈로그·추천·설치/해제·grant 발급/회수와 상태 UI를 연결. `external_webhook`은 채널 통합으로 라우팅하고 세션 변경 시 캐시를 전부 폐기 | `GET/POST/DELETE /v1/workspaces/:ws/plugins...` — PluginRoutes.swift, openapi 명세 완비 |
 | A-2 | `done` | **채널 웹훅 발급 UI** | native/Slack 호환 발급·회전·revoke·목록을 연결. one-time secret/URL은 확인 전 화면 이탈을 잠그고 확인 즉시 메모리에서 폐기 | WebhookRoutes.swift, openapi |
 | A-3 | `done` | **초대 단축 링크 노출** | HTTPS(로컬 개발 예외) public base URL을 검증해 `/i/<code>`를 1회 노출·민감 클립보드로 복사하고 확인 전 이탈을 잠금 | services/LinkShort/README.md |
-| A-4 | `in-progress` | **스레드 실전송** | `rootId`를 포함한 1단계 답글 실전송·엄격 응답 검증 완료. 정확한 서버 롤업/오래된 답글 조회는 **X-3 엔진 계약 대기** | `SendMessageRequest.rootId` + thread 롤업 — MessageRoutes.swift, `verify_thread_reply.sh`가 계약 예시 |
+| A-4 | `ready` | **스레드 실전송 완성** | 기존 1단계 답글 전송에 서버 `Message.thread` 롤업 배지와 오래된 답글 cursor 조회를 연결하고, `thread.updated`로 열린 패널/타임라인 배지를 갱신. 로드된 범위 기반 임시 카운트 제거 | Core `Message.thread`/`ThreadRollupDelta`, `GET .../messages/:root/replies`, `verify_thread_projection.sh` |
 | A-5 | `done` | **허들 UI 폴리시** | 비활성 사유를 포인터·키보드에서 동일하게 설명하고 참가 전/참가 중 상태의 아이콘·레이블·동작을 분리 | MomoHuddle*.swift |
 | A-6 | `in-progress` | **파일 첨부 실업로드** | 업로드 송신 API는 확인했으나 수신 메시지가 첨부를 발견할 Core/history/realtime 투영이 없어 **X-4 엔진 계약 대기**. 로컬 초안을 실물로 오인시키는 부분 구현은 하지 않음 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
 | A-7 | `done` | **검색 서버 승격** | 기존 destination 심을 유지하면서 서버 FTS, 300ms debounce, 최신순 cursor pagination, 오류/빈 상태와 정확한 과거 메시지 이동을 연결 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | X-1 | `done` | `scripts/macos_dev_run.sh` SwiftPM 바이너리 프레임워크·리소스 번들 스테이징(LiveKit DYLD 종료 수정) | main 반영 완료 | UXUI 발견, 양 트랙 빌드 검증 (2026-07-18) |
 | X-2 | `done`(서버 절반 main 랜딩 — MOMO-478) | 반응/수정/삭제 REST+realtime 계약. UI는 capability gate로 기완비 | UI 개방은 **A-9**로 이관 | MessageInteractionModel.swift, MessageInteractionTests (2026-07-18) |
-| X-3 | `in-progress`(MOMO-479 `#508`) | A-4 잔여: 정확한 스레드 롤업과 오래된 답글 조회를 위한 클라이언트 투영이 없음. 현재 배지는 로드된 메시지 범위의 답글 수를 사용 | 최상위 메시지 응답/realtime에 `reply_count`·`last_reply_*` 가산 투영과 스레드 조회 계약 추가. AgentWorker 답변도 원본 `root_id`를 보존 | `MessageRoutes.swift` thread 갱신, macOS `MessageListView.swift`·`MessageThreadPanel.swift` (2026-07-18) |
+| X-3 | `done`(MOMO-479 `#508`) | A-4 잔여였던 정확한 롤업·과거 답글 조회·AgentWorker thread 문맥 보존 | 톱레벨 `thread` 투영, ASC cursor replies REST, `thread.updated`, Worker INSERT 4곳의 root/롤업 보존을 엔진 계약으로 제공. UI 소비는 **A-4 ready** | `MessageRoutes.swift`, Core `ThreadRollup.swift`, `WorkerService.swift`, `verify_thread_projection.sh` (2026-07-19) |
 | X-4 | `needs-engine-contract` | A-6 잔여: Core `DraftMessage`와 메시지 history/realtime 응답에 `attachmentIds`·첨부 메타데이터 투영이 없어 수신자가 다운로드 대상을 발견할 수 없음 | `DraftMessage` 가산 필드와 Message history/realtime의 attachment projection 또는 message별 attachment 조회 API를 추가. 업로드 URL은 bearer capability이므로 로그·영속 저장 금지 계약 유지 | `AttachmentRoutes.swift`, `MessageRoutes.swift`, `clients/Core/Message.swift`, `verify_attachment_upload.sh` (2026-07-18) |
 
 ## B. 엔진 역요청 — 전량 완료 (main)

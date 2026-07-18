@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-479 스레드 투영 + 답글 조회 + AgentWorker root 보존 (2026-07-19)
+
+- 톱레벨 메시지 history/멱등 send 응답에 옵셔널 `thread` 롤업을 가산하고, 오래된 답글을 `seq ASC` cursor로 복원하는 멤버십 강제 REST와 `thread.updated` transactional outbox/Core 이벤트를 추가했다. 답글 0건은 필드를 생략하며 교차채널 root는 404, reply-as-root는 400, tombstone은 답글 페이지에 남는다.
+- AgentWorker의 durable message INSERT 4곳은 트리거가 답글일 때 같은 `root_id`를 보존하고, 같은 트랜잭션에서 MessageRoutes와 동일한 participant 포함 롤업 upsert 및 `thread.updated`를 기록한다. 톱레벨 트리거는 계속 NULL이며 `message.seq` 추가 발급은 없다.
+- server 111 tests, Core 30 tests, AgentWorker 31 tests, iOS 27 tests와 macOS 전체 컴파일이 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했다. `verify_thread_projection.sh`의 bash/ShellCheck 및 runtime-db 편입은 검증했으며, 격리 Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`다.
+
 ## 엔진 준비 UXUI 큐 A-1~A-7 소비 (2026-07-18)
 
 - A-1 마켓플레이스, A-2 채널 웹훅, A-3 초대 단축 링크, A-5 허들 폴리시, A-7 워크스페이스 서버 검색을 실제 엔진 REST 계약에 연결했다. one-time credential은 확인 전 이탈을 잠그고 확인 즉시 메모리에서 폐기하며, 세션·workspace 변경 시 비영속 상태를 전부 무효화한다.
