@@ -66,6 +66,19 @@ public protocol IOSMicrophonePermissionAuthorizing: Sendable {
     func requestPermission() async -> Bool
 }
 
+struct IOSUnavailableHuddleAudioSession: IOSHuddleAudioSession {
+    func connect(url: URL, token: String) async throws {}
+    func disconnect() async {}
+    func setMicrophoneMuted(_ muted: Bool) async throws {}
+    func participantUpdates() async -> AsyncStream<[IOSHuddleAudioParticipant]> {
+        AsyncStream { $0.finish() }
+    }
+}
+
+struct IOSUnavailableMicrophonePermissionAuthorizer: IOSMicrophonePermissionAuthorizing {
+    func requestPermission() async -> Bool { false }
+}
+
 enum IOSHuddleClientError: Error, LocalizedError, Sendable {
     case http(Int, String)
     case invalidResponse

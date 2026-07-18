@@ -129,12 +129,28 @@ public final class IOSTimelineModel {
         self.backend = backend
         self.realtimeStatus = .idle(channel: channel)
         let huddleWorkspace = workspace ?? WorkspaceID()
+        let resolvedAudioSession: any IOSHuddleAudioSession
+        let resolvedPermission: any IOSMicrophonePermissionAuthorizing
+        if let huddleAudioSession {
+            resolvedAudioSession = huddleAudioSession
+        } else if huddleService != nil {
+            resolvedAudioSession = IOSHuddleLiveKitSession()
+        } else {
+            resolvedAudioSession = IOSUnavailableHuddleAudioSession()
+        }
+        if let microphonePermission {
+            resolvedPermission = microphonePermission
+        } else if huddleService != nil {
+            resolvedPermission = IOSSystemMicrophonePermissionAuthorizer()
+        } else {
+            resolvedPermission = IOSUnavailableMicrophonePermissionAuthorizer()
+        }
         self.huddle = IOSHuddleModel(
             workspace: huddleWorkspace,
             channel: channel,
             service: workspace == nil ? nil : huddleService,
-            audioSession: huddleAudioSession ?? IOSHuddleLiveKitSession(),
-            permissionAuthorizer: microphonePermission ?? IOSSystemMicrophonePermissionAuthorizer()
+            audioSession: resolvedAudioSession,
+            permissionAuthorizer: resolvedPermission
         )
     }
 

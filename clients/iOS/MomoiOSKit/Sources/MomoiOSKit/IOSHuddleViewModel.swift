@@ -77,23 +77,28 @@ public final class IOSHuddleModel {
             }
             do {
                 let joined = try await service.join(workspace: workspace, huddle: huddle.id)
-                guard !Task.isCancelled, activationID == activation else { return }
+                joinedHuddleID = joined.huddle.id
+                guard !Task.isCancelled, activationID == activation else {
+                    await leaveCurrentHuddle(reportErrors: false)
+                    return
+                }
                 try await audioSession.connect(url: joined.liveKitURL, token: joined.token)
                 guard !Task.isCancelled, activationID == activation else {
-                    await audioSession.disconnect()
+                    await leaveCurrentHuddle(reportErrors: false)
                     return
                 }
                 activeHuddle = joined.huddle
-                joinedHuddleID = joined.huddle.id
                 isMicrophoneMuted = false
                 state = .joined
                 observeParticipants()
                 scheduleTokenRefresh(joined)
             } catch is CancellationError {
+                await leaveCurrentHuddle(reportErrors: false)
                 return
             } catch {
-                guard !Task.isCancelled, activationID == activation else { return }
-                present(error)
+                let shouldPresent = !Task.isCancelled && activationID == activation
+                await leaveCurrentHuddle(reportErrors: false)
+                if shouldPresent { present(error) }
             }
         }
         joinTask = task
