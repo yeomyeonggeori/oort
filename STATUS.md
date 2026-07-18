@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-470 LiveKit compose + 실 JWT 수락 verifier (2026-07-18)
+
+- 고정 버전 LiveKit을 기본 stack과 분리된 `huddle` compose profile로 추가하고 signaling/TCP RTC/제한 UDP range, env 기반 API key/secret, healthcheck와 TURN 후속 운영 계약을 문서화했다.
+- `verify_huddle_livekit.sh`는 V-1 start/join JWT를 실제 LiveKit `/rtc/validate` 200과 무효 JWT 401/403으로 관통한다. worker는 Docker를 실행하지 않아 실기동은 `runtime-unverified`; bash/YAML/정적 계약만 검증한다.
+
 ## MOMO-468 huddle 수명주기 + LiveKit JWT (2026-07-18)
 
 - migration 016에 채널당 단일 활성 huddle과 재입장 이력 participant를 추가하고 FORCE RLS를 적용했다. 시작/참가/퇴장/active REST는 tenant tx 안에서 lifecycle·audit·outbox를 함께 커밋하며 마지막 참가자 퇴장이 huddle을 종료한다.
