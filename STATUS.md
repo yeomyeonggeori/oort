@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-471 macOS 허들 UI + LiveKit audio (2026-07-18)
+
+- 채널 헤더의 시작/참가/live 참가자 표시와 오디오 전용 미니패널(말하는 중, 음소거, 나가기), 503 미구성 상태, JWT 재발급 재연결, 창/로그아웃/채널 전환 leave+disconnect 수명주기를 추가했다. LiveKit Swift SDK 2.15.2를 exact pin했다.
+- Core는 huddle 3종 실시간 이벤트를 강타입으로 전달하고 미지 envelope type을 디버그 로그 후 스킵해 스트림을 유지한다. Core/macOS focused tests와 light/dark/increased-contrast/large-type 렌더는 PASS; compose 2-client 실오디오 왕복은 오케스트레이터 검증 전까지 `runtime-unverified`다.
+
 ## MOMO-470 LiveKit compose + 실 JWT 수락 verifier (2026-07-18)
 
 - 고정 버전 LiveKit을 기본 stack과 분리된 `huddle` compose profile로 추가하고 signaling/TCP RTC/제한 UDP range, env 기반 API key/secret, healthcheck와 TURN 후속 운영 계약을 문서화했다.

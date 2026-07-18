@@ -40,6 +40,9 @@ public struct RealtimeEnvelope: Codable, Sendable, Hashable {
         case approvalDecided = "approval.decided"
         case mention = "mention"
         case dmSignal = "dm.signal"
+        case huddleStarted = "huddle_started"
+        case huddleParticipantsChanged = "huddle_participants_changed"
+        case huddleEnded = "huddle_ended"
     }
 
     /// Errors raised while mapping an envelope to a `RealtimeEvent`.
@@ -95,6 +98,21 @@ public struct RealtimeEnvelope: Codable, Sendable, Hashable {
             // `user:` namespace notifications are not part of RealtimeEvent (L4 §5.3);
             // surface as unknown so channel subscribers ignore them.
             throw DecodeError.unknownType(type)
+        case .huddleStarted, .huddleParticipantsChanged, .huddleEnded:
+            let action: String = switch kind {
+            case .huddleStarted: "started"
+            case .huddleParticipantsChanged: "participants_changed"
+            case .huddleEnded: "ended"
+            default: preconditionFailure("non-huddle event reached huddle decoder")
+            }
+            var object = payload.objectValue ?? [:]
+            object["action"] = .string(action)
+            do {
+                let data = try JSONEncoder.momo.encode(JSON.object(object))
+                return .huddle(try decoder.decode(HuddleDelta.self, from: data))
+            } catch {
+                throw DecodeError.malformedPayload(type, underlying: error)
+            }
         }
     }
 }

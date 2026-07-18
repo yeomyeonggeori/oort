@@ -205,9 +205,9 @@ public actor RealtimeReplayController {
     }
 
     private func nonSequencedEvents(from envelope: RealtimeEnvelope) throws -> [RealtimeEvent] {
-        let event = try envelope.decodeEvent()
+        guard let event = try decodeKnownEvent(envelope) else { return [] }
         switch event {
-        case .agentPartial, .agentStatus, .typing, .presence:
+        case .agentPartial, .agentStatus, .typing, .presence, .huddle:
             return [event]
         case .message, .messageEdited, .messageDeleted, .reaction, .approval:
             return []
@@ -279,8 +279,8 @@ public actor RealtimeReplayController {
     }
 
     private func apply(_ envelope: RealtimeEnvelope, seq: Int64) throws -> [RealtimeEvent] {
-        let event = try envelope.decodeEvent()
         lastAppliedSeq = seq
+        guard let event = try decodeKnownEvent(envelope) else { return [] }
 
         switch event {
         case .message(let message):
@@ -293,8 +293,21 @@ public actor RealtimeReplayController {
             return [event]
         case .messageDeleted, .reaction, .approval:
             return [event]
-        case .agentPartial, .agentStatus, .typing, .presence:
+        case .agentPartial, .agentStatus, .typing, .presence, .huddle:
             return [event]
+        }
+    }
+
+    /// Unknown types are intentionally consumed without ending the subscription.
+    /// A newer server may publish event kinds this client version does not know yet.
+    private func decodeKnownEvent(_ envelope: RealtimeEnvelope) throws -> RealtimeEvent? {
+        do {
+            return try envelope.decodeEvent()
+        } catch RealtimeEnvelope.DecodeError.unknownType(let type) {
+            #if DEBUG
+            debugPrint("MomoCore realtime: skipped unknown envelope type \(type)")
+            #endif
+            return nil
         }
     }
 
