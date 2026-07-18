@@ -2184,9 +2184,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `verify_huddle_livekit.sh`: V-1 join JWT를 실 LiveKit `/rtc/validate` 200 수락 + 무효 거부, teardown. e2e compose 무접촉. 상세: issue #491 본문(패킷 겸용).
 - 랜딩: PR #492 squash `5bab0d2`(2026-07-18). 오케스트레이터: 핀 v1.9.0→v1.13.3 교정 + 실기동 검증 PASS(실 LiveKit이 V-1 JWT 200 수락/무효 401 거부, 스택 회수 확인). 앞선 타임아웃 2회는 Docker Desktop pull 전역 불능(재시작으로 해소, momo 무관).
 
-### ☐ MOMO-471 (`#493`) 수용기준 — V-3 macOS 허들 UI `[swift/macos-ui]` · 의존: MOMO-470 (UX 병행 — 파일 스코프 계약)
-- [ ] 헤더 최소 삽입+정적 live 배지, MomoHuddle* 신규 파일군(livekit swift SDK 핀, 오디오만), 수명주기 leave/disconnect 보장, 503 미구성 상태 포함 4종.
-- [ ] MessageListView/ChannelListView/MomoMacDevApp* 무접촉(UX 활성 영역). 스냅샷 RECORD 금지. 실오디오 왕복은 오케스트레이터. 상세: issue #493 본문(패킷 겸용).
+### ☑ MOMO-471 (`#493`) 수용기준 — V-3 macOS 허들 UI `[swift/macos-ui]` · 의존: MOMO-470 (UX 병행 — 파일 스코프 계약)
+- [x] 헤더 최소 삽입+정적 live 배지, MomoHuddle* 신규 파일군(livekit swift SDK 핀, 오디오만), 수명주기 leave/disconnect 보장, 503 미구성 상태 포함 4종.
+- [x] MessageListView/ChannelListView/MomoMacDevApp* 무접촉(UX 활성 영역). 스냅샷 RECORD 금지. 실오디오 왕복은 오케스트레이터. 상세: issue #493 본문(패킷 겸용).
+- 랜딩: PR #494 squash `ad983ee`(2026-07-18). 블로커 정당(전방호환 결함 발견)→스코프 A 확장 재개. macos-ui 게이트 336테스트 중 huddle/Core 34 PASS, 유일 실패=workspaceSearch 선재 flake(V-3 무관, MOMO-472 분리). 실오디오 2클라 왕복은 성재 협업 검증 대기.
+
+### ☐ MOMO-472 (`#495`) 수용기준 — workspaceSearch 스냅샷 full-suite 비결정성 안정화 `[macos-ui]` · 의존: 없음 (선재 flake)
+- [ ] full `make test` 3회 연속 통과(결정적 렌더 조건 이관 또는 perceptual 미세조정, 근거 기록). 캐노니컬 재기록은 오케스트레이터. 상세: issue #495.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

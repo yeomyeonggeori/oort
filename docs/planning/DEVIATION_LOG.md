@@ -12,6 +12,8 @@
 | 2026-07-17 | MOMO-412 / PR #443 (리뷰 후속) | webhook native secret KDF의 master key가 `config.jwtHMAC` 재사용(M2) — JWT secret 회전 시 발급된 모든 native webhook secret이 조용히 무효화되는 운영 결합. per-install rate limit 부재(M1)로 토큰 유출 시 채널 flood 상한이 회전/revoke뿐. | 암호학적으론 도메인 분리(`momo.webhook.native.v1\n`)로 안전하나 운영 결합은 실재. infra/prod 무변경 계약상 v0 수용, 후속 분리 권고. | `pending` | `WEBHOOK_MASTER_KEY` 분리 + per-install rate 예산 후속 티켓 제안(성재/판정 대기). |
 | 2026-07-15 | MOMO-390 / PR #403 (선재 발견 보고) | 이 PR의 이탈이 아니라 main 기저(e35be71)의 기존 결함 발견: `verify_staging_smoke.sh`/`verify_internal_hosting_smoke.sh`가 `agent/ch/dm/user` 4개 namespace만 기대해 `centrifugo.prod.json`의 `agentwork` namespace(MOMO-338 도입)와 불일치 — 두 스크립트가 main에서 이미 FAIL. | MOMO-338이 namespace를 추가할 때 두 smoke 스크립트의 기대 목록이 갱신되지 않은 gate drift. 제품 경계 무관, 스크립트 기대값 갱신만 필요한 소형 tooling 수정. | `accepted` | MOMO-399 발급(staging/internal smoke namespace 기대 갱신, ADR 불요) — 엔진/인프라 트랙 위임 범위 내 판정. |
 
+| 2026-07-18 | MOMO-471 / PR #494 (게이트 선재 발견) | `testWorkspaceSearchLightSnapshot`가 격리 통과·full `make test` 실패(폰트캐시/GPU 순서 의존 렌더 비결정, precision 0.98 미세 초과). origin/main에서도 재현 — V-3 무관. | V-3 자체(huddle/Core 34 test) PASS 확인 후 표면 무관 flake로 판정, 재기록 커밋 revert해 PR을 huddle 전용 유지. MOMO-411/412 선례(선재 스냅샷 FAIL 분리)와 동일 처리. | `pending` | MOMO-472(#495) 안정화 티켓 발급 — full-suite 3회 통과 증명 필요. |
+
 ## 소급 항목 (2026-07-09 감사에서 발견된 역사적 이탈)
 
 아래는 이 로그가 없던 시기의 이탈로, ADR 큐에 이미 배정됨 — 참고용.

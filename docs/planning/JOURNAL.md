@@ -15,6 +15,12 @@
 - D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
 - 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
 
+## 2026-07-18 (Fable) · V-3 랜딩 — 채널에서 말 걸기(음성 UI) 실물
+- `ad983ee`: macOS 허들 UI(헤더 시작/참가·배지·미니패널, livekit swift SDK 2.15.2). 파일스코프 계약 준수(MomoHuddle* 신규+헤더 최소). 블로커가 전방호환 선재결함(미지 이벤트 type이 스트림 종료) 발견 → Core에서 skip 처리 동반 수정.
+- 게이트: huddle/Core 34 test PASS, 유일 실패=workspaceSearch full-suite flake(선재·V-3 무관) → DEVIATION+MOMO-472 분리 후 머지(411/412 선례).
+- 루트 재오염: UX 세션이 또 루트 체크아웃에서 직접 편집(STATUS/Theme/MomoMacRootView 등 미커밋 다수) — §4.1 무접촉, 정본은 temp worktree 우회. 성재 재전달 필요.
+- 잔여: V-3b(iOS 참가), V-3 실오디오 2클라 왕복(성재 협업), 회의록 v1/v2. 음성 배포는 도메인 결정(S-4와 동일) 후 V-2b(TURN).
+
 ## 2026-07-18 (Fable) · V-2 랜딩 — 음성 v0 서버·인프라 완성
 - `5bab0d2`: compose huddle profile(옵트인·핀 v1.13.3)로 실 LiveKit 기동, V-1 JWT 실수락 검증(200/무효 401) PASS. 서버→JWT→실 SFU 전 구간 실물.
 - 운영 사건: Docker Desktop 신규 pull 전역 불능(레지스트리 도달성 정상·기존 컨테이너 무영향) — 성재 재시작으로 해소. verifier pull 단계 무한대기 개선 후보(비차단).
