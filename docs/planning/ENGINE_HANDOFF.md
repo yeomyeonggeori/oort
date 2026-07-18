@@ -14,6 +14,7 @@
 | A-4 | `ready` | **스레드 실전송** | 컴포저 "스레드 초안(로컬)"을 실전송으로: 전송 시 `rootId` 포함(**1단계 스레드만** — 대댓글 불가 계약), 타임라인 답글 표시(`rootId` 필드 수신), thread 롤업(reply_count/last_reply) 배지 | `SendMessageRequest.rootId` + thread 롤업 — MessageRoutes.swift, `verify_thread_reply.sh`가 계약 예시 |
 | A-6 | `ready` | **파일 첨부 실업로드** | 컴포저 "파일 첨부(로컬 초안)"를 실물로: ①세션 발급 REST ②**클라가 Google에 직접 청크 PUT**(서버 비경유) ③complete ④전송 시 `attachmentIds` ⑤수신 측 content 프록시 다운로드 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
 | A-7 | `ready` | **검색 서버 승격** | `MomoWorkspaceSearchIndex`의 메시지 소스를 서버 FTS로 교체(기존 심 `MomoWorkspaceSearchDestination` 유지 — handoff 2026-07-17 설계대로). "현재 불러온 대화에서 검색" 카피를 실검색으로 승격 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
+| A-8 | `ready`(track/engine — main 대기) | **채널 음소거 설정 UI** | 채널 목록 응답의 `muted` 표시(음소거 아이콘) + 채널 컨텍스트/설정에 음소거 토글(`PUT /v1/workspaces/:ws/channels/:ch/notification-pref` {muted}) | ChannelRoutes/DTOs, ADR-0124(멘션 포함 전면 억제·unread 무영향), verify_notification_mute.sh가 계약 예시 |
 | A-5 | `ready` | **허들 UI 폴리시** | design High 2건(disabled 사유 키보드 접근성, 참가 상태별 시각 증거) + 실창 QA | MomoHuddle*.swift |
 
 ## UXUI → 엔진 역방향 로그
@@ -27,7 +28,7 @@
 
 | # | 상태 | 항목 | 비고 |
 |---|---|---|---|
-| B-4 | `in-progress`(MOMO-477 `#504`) | 알림 음소거/설정 계약 | 소형 ADR 선행(판정=notifier 한 곳, P9) — 엔진 트랙 다음 후보 |
+| B-4 | `done` → track/engine (main 대기) | 알림 음소거/설정 계약 | 소형 ADR 선행(판정=notifier 한 곳, P9) — 엔진 트랙 다음 후보 |
 
 ## C. 검증 부채
 

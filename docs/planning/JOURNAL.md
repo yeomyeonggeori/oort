@@ -15,6 +15,11 @@
 - D1~D6 기안: 얇은 셸+MomoiOSKit / dogfood 스코프(수신·답장·승인 결정 — "이동 중 승인"이 차별점) / P-4 합류 / TestFlight internal / codex iOS 플러그인 구현+ios 게이트 프로파일 / IOS-1~5 순차 배치.
 - 다음: 성재 D1~D6 승인 → Accepted 반영 → IOS-1 패킷 발급.
 
+## 2026-07-18 (Fable) · B-4 완료 — 엔진 역요청 전량 소화
+- MOMO-477(음소거) track/engine 랜딩: pref REST+채널 목록 muted+notifier 판정 join(멘션 포함 억제·로그 무오염·만료 자동 재개). ADR-0124 Accepted 즉일 구현.
+- 이로써 갭 감사의 B(역요청) 4건 전부 종결(B-1 첨부/B-2 검색/B-3 스레드/B-4 음소거). UXUI A큐는 8건(A-8 음소거 UI 추가). X-1 이식 완료, X-2(반응/수정/삭제 REST)가 엔진 다음 작업.
+- track/engine = main +2(X-1 스테이징 픽스, MOMO-477) — 다음 성재 승인 머지 대기.
+
 ## 2026-07-18 (Fable) · 엔진 3차 main 머지 `7edad20` — UXUI 큐 전면 개방
 - 검색 FTS(MOMO-475)+스레드 개방(MOMO-476) 통합 게이트 PASS 후 성재 승인 머지. 트랙 재정렬(main=engine).
 - ENGINE_HANDOFF 재구성: A 7건 전부 "main 랜딩·즉시 착수 가능"(마켓플레이스/웹훅/단축링크/스레드/첨부/검색/허들 폴리시). 엔진 잔여=B-4 음소거 ADR, C-2 Work 실검증.
