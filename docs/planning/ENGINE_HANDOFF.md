@@ -15,8 +15,8 @@
 | A-5 | `done` | **허들 UI 폴리시** | 비활성 사유를 포인터·키보드에서 동일하게 설명하고 참가 전/참가 중 상태의 아이콘·레이블·동작을 분리 | MomoHuddle*.swift |
 | A-6 | `in-progress` | **파일 첨부 실업로드** | 업로드 송신 API는 확인했으나 수신 메시지가 첨부를 발견할 Core/history/realtime 투영이 없어 **X-4 엔진 계약 대기**. 로컬 초안을 실물로 오인시키는 부분 구현은 하지 않음 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
 | A-7 | `done` | **검색 서버 승격** | 기존 destination 심을 유지하면서 서버 FTS, 300ms debounce, 최신순 cursor pagination, 오류/빈 상태와 정확한 과거 메시지 이동을 연결 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
-| A-8 | `ready` | **채널 음소거 설정 UI** | 채널 목록 응답의 `muted` 표시(음소거 아이콘) + 채널 컨텍스트/설정에 음소거 토글(`PUT /v1/workspaces/:ws/channels/:ch/notification-pref` {muted}). 멘션 포함 전면 억제·unread 무영향(ADR-0124) | ChannelRoutes/DTOs, verify_notification_mute.sh가 계약 예시 |
-| A-9 | `ready` | **반응/수정/삭제 UI 개방** | MomoServerRESTChatBackend의 editMessage/addReaction 501 두 곳을 실호출로 교체 + removeReaction/deleteMessage/reactionSnapshot 구현 → MomoMessageInteractionBackend capability 자동 개방(UI 기완비) | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
+| A-8 | `done` | **채널 음소거 설정 UI** | 채널 목록 `muted` 투영·음소거 아이콘·컨텍스트/설정 토글·낙관 갱신/롤백을 연결. 멘션 포함 전면 억제·unread 무영향(ADR-0124)을 UI에 명시 | ChannelRoutes/DTOs, verify_notification_mute.sh가 계약 예시 |
+| A-9 | `in-progress`(REST/로컬 UI 완료, X-5 대기) | **반응/수정/삭제 UI 개방** | edit/remove/delete/reaction snapshot 실호출과 capability 개방, 세션 전환·동시 수정/삭제 방어 완료. 타 클라이언트 realtime 및 재진입 history 복원은 **X-5 엔진 계약 대기** | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
 
 ## X. UXUI → 엔진 역방향 로그
 
@@ -26,6 +26,7 @@
 | X-2 | `done`(서버 절반 main 랜딩 — MOMO-478) | 반응/수정/삭제 REST+realtime 계약. UI는 capability gate로 기완비 | UI 개방은 **A-9**로 이관 | MessageInteractionModel.swift, MessageInteractionTests (2026-07-18) |
 | X-3 | `done`(MOMO-479 `#508` → track/engine, main 대기) | A-4 잔여였던 정확한 롤업·과거 답글 조회·AgentWorker thread 문맥 보존 | 톱레벨 `thread` 투영, ASC cursor replies REST, `thread.updated` realtime, Worker INSERT 4곳 root_id·롤업 보존 완료. main 랜딩 시 **A-4 ready 전환**(UI: 배지 실데이터·과거 답글 로드·thread.updated 소비) | MessageRoutes.swift, Core ThreadRollup.swift, verify_thread_projection.sh (2026-07-19) |
 | X-4 | `needs-engine-contract` | A-6 잔여: Core `DraftMessage`와 메시지 history/realtime 응답에 `attachmentIds`·첨부 메타데이터 투영이 없어 수신자가 다운로드 대상을 발견할 수 없음 | `DraftMessage` 가산 필드와 Message history/realtime의 attachment projection 또는 message별 attachment 조회 API를 추가. 업로드 URL은 bearer capability이므로 로그·영속 저장 금지 계약 유지 | `AttachmentRoutes.swift`, `MessageRoutes.swift`, `clients/Core/Message.swift`, `verify_attachment_upload.sh` (2026-07-18) |
+| X-5 | `needs-engine-contract` | A-9 잔여: 수정/삭제/반응 이벤트가 원본 메시지 `seq`를 envelope seq·Centrifugo version으로 재사용해 relay stale-skip 및 Core replay drop 대상이 됨. history도 deleted 행을 제외하고 `state/editedAtMs/deletedAtMs`를 투영하지 않아 재진입 시 편집 표시·tombstone이 사라짐 | 메시지 순서 SoT는 유지하되 상호작용 전달용 단조 cursor/version 또는 비-seq mutation 경로를 정의하고 relay/Core를 함께 갱신. history에 수정 상태/시각과 명시적 tombstone 복원 계약을 추가하고 실제 relay/WebSocket 2클라이언트 verifier로 검증 | `MessageRoutes.swift`, `RealtimeSubscriptionDriver.swift`, `OutboxRelay`, `verify_message_interaction.sh`, `docs/planning/JOURNAL.md` stale-skip 기록 (2026-07-19) |
 
 ## B. 엔진 역요청 — 전량 완료 (main)
 

@@ -91,24 +91,25 @@ struct MomoMessageThreadPanel: View {
     }
 
     private func threadMessage(_ message: Message, isRoot: Bool) -> some View {
-        MessageBubble(
+        let canInteract = viewModel.canInteractWithMessage(message)
+        let canModify = viewModel.canModifyMessage(message)
+        return MessageBubble(
             message: message,
             author: viewModel.member(message.authorMemberId),
             reactions: viewModel.reactions(for: message),
-            canModify: viewModel.supportsMessageInteractions
-                && viewModel.isCurrentMemberMessage(message),
+            canModify: canModify,
             interactionError: viewModel.messageInteractionErrors[message.id],
-            onToggleReaction: viewModel.supportsMessageInteractions
+            onToggleReaction: canInteract
                 ? { emoji in
                     Task { await viewModel.toggleReaction(emoji, on: message) }
                 }
                 : nil,
-            onEdit: viewModel.supportsMessageInteractions
+            onEdit: canModify
                 ? { body in
                     await viewModel.editMessage(message, body: body)
                 }
                 : nil,
-            onDelete: viewModel.supportsMessageInteractions
+            onDelete: canModify
                 ? {
                     Task {
                         let didDelete = await viewModel.deleteMessage(message)

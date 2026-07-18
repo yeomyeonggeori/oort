@@ -2771,7 +2771,8 @@ final class MomoMacTests: XCTestCase {
                   "topic":"dogfood",
                   "dmKey":null,
                   "createdBy":"\(MemberID.demoHuman.description)",
-                  "archivedAtMs":null
+                  "archivedAtMs":null,
+                  "muted":false
                 }]}
                 """)
             case ("GET", "/v1/agent-runtime/status"):
@@ -3285,7 +3286,8 @@ final class MomoMacTests: XCTestCase {
                       "topic": "팀 일반 채널",
                       "dmKey": null,
                       "createdBy": "\(MemberID.demoHuman.description)",
-                      "archivedAtMs": null
+                      "archivedAtMs": null,
+                      "muted": true
                     },
                     {
                       "id": "\(agentLab.description)",
@@ -3295,7 +3297,8 @@ final class MomoMacTests: XCTestCase {
                       "topic": "에이전트 실험실",
                       "dmKey": null,
                       "createdBy": "\(MemberID.demoHuman.description)",
-                      "archivedAtMs": null
+                      "archivedAtMs": null,
+                      "muted": false
                     }
                   ]
                 }
@@ -3315,9 +3318,237 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(channels.map(\.id), [.demoGeneral, agentLab])
         XCTAssertEqual(channels.map(\.name), ["general", "agent-lab"])
         XCTAssertEqual(channels.first?.createdBy, .demoHuman)
+        let muteSnapshot = await backend.channelMuteSnapshot(workspace: workspace)
+        XCTAssertEqual(muteSnapshot, [.demoGeneral: true, agentLab: false])
 
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET"])
+    }
+
+    func testRESTBackendUpdatesChannelMutePreferenceAndCachesAuthoritativeState() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/notification-pref"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            let body = try XCTUnwrap(request.momoBodyData)
+            let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Bool])
+            XCTAssertEqual(object, ["muted": true])
+            return MockHTTPResponse(json: #"{"muted":true}"#)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let muted = try await backend.setChannelMuted(channel, muted: true)
+        XCTAssertTrue(muted)
+        let snapshot = await backend.channelMuteSnapshot(workspace: workspace)
+        XCTAssertEqual(snapshot[channel], true)
+    }
+
+    func testRESTBackendPersistsCompleteMessageInteractionContract() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let message = MessageID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let token = unsignedAccessToken(for: .demoHuman)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            let messagePath = "/v1/workspaces/\(workspace.description)/messages/\(message.description)"
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(token)")
+            switch (request.httpMethod, request.url?.path) {
+            case ("PATCH", messagePath):
+                let body = try XCTUnwrap(request.momoBodyData)
+                let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: String])
+                XCTAssertEqual(object, ["body": "수정된 메시지"])
+                return MockHTTPResponse(json: """
+                {
+                  "id":"\(message.description)",
+                  "channelId":"\(channel.description)",
+                  "rootId":null,
+                  "seq":7,
+                  "hlcTs":1700000001000,
+                  "hlcCount":0,
+                  "authorMemberId":"\(MemberID.demoHuman.description)",
+                  "type":"text",
+                  "body":"수정된 메시지",
+                  "props":null,
+                  "runId":null,
+                  "clientMsgId":null,
+                  "createdAtMs":1700000000000,
+                  "state":"edited",
+                  "editedAtMs":1700000001000,
+                  "deletedAtMs":null
+                }
+                """)
+            case ("PUT", let path?) where path.hasSuffix("/reactions/👍"):
+                XCTAssertNil(request.value(forHTTPHeaderField: "Content-Type"))
+                XCTAssertNil(request.momoBodyData)
+                return MockHTTPResponse(json: """
+                {"action":"added","messageId":"\(message.description)","memberId":"\(MemberID.demoHuman.description)","emoji":"👍"}
+                """)
+            case ("DELETE", let path?) where path.hasSuffix("/reactions/👍"):
+                return MockHTTPResponse(json: """
+                {"action":"removed","messageId":"\(message.description)","memberId":"\(MemberID.demoHuman.description)","emoji":"👍"}
+                """)
+            case ("GET", "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/reactions"):
+                return MockHTTPResponse(json: """
+                {"\(message.description)":{"👍":["\(MemberID.demoHuman.description)"]}}
+                """)
+            case ("DELETE", messagePath):
+                return MockHTTPResponse(json: """
+                {
+                  "id":"\(message.description)",
+                  "channelId":"\(channel.description)",
+                  "rootId":null,
+                  "seq":7,
+                  "hlcTs":1700000002000,
+                  "hlcCount":0,
+                  "authorMemberId":"\(MemberID.demoHuman.description)",
+                  "type":"text",
+                  "props":null,
+                  "runId":null,
+                  "clientMsgId":null,
+                  "createdAtMs":1700000000000,
+                  "state":"deleted",
+                  "editedAtMs":1700000001000,
+                  "deletedAtMs":1700000002000
+                }
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected interaction request"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: token)
+
+        let edited = try await backend.editMessage(message, body: "수정된 메시지")
+        XCTAssertEqual(edited.state, .edited)
+        XCTAssertEqual(edited.editedAtMs, 1_700_000_001_000)
+        try await backend.addReaction(message, emoji: "👍")
+        try await backend.removeReaction(message, emoji: "👍")
+        let reactions = try await backend.reactionSnapshot(channel: channel)
+        XCTAssertEqual(reactions[message]?["👍"], [.demoHuman])
+        let deleted = try await backend.deleteMessage(message)
+        XCTAssertEqual(deleted.state, .deleted)
+        XCTAssertNil(deleted.body)
+        XCTAssertEqual(deleted.deletedAtMs, 1_700_000_002_000)
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map(\.httpMethod), ["PATCH", "PUT", "DELETE", "GET", "DELETE"])
+        XCTAssertTrue(requests[1].url?.absoluteString.contains("%F0%9F%91%8D") == true)
+    }
+
+    func testRESTBackendEncodesReactionAsOneURLPathSegment() async throws {
+        await MockHTTPURLProtocol.reset()
+        let session = URLSession(configuration: .momoMocked)
+        let workspace = WorkspaceID.demo
+        let message = MessageID(uuidString: "00000000-0000-7000-8000-000000000906")!
+        let token = unsignedAccessToken(for: .demoHuman)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            let url = try XCTUnwrap(request.url)
+            XCTAssertTrue(url.absoluteString.hasSuffix("/reactions/a%2Fb"))
+            let percentEncodedPath = try XCTUnwrap(
+                URLComponents(url: url, resolvingAgainstBaseURL: false)?.percentEncodedPath
+            )
+            XCTAssertEqual(percentEncodedPath.split(separator: "/").last, "a%2Fb")
+            switch request.httpMethod {
+            case "PUT":
+                return MockHTTPResponse(json: """
+                {"action":"added","messageId":"\(message.description)","memberId":"\(MemberID.demoHuman.description)","emoji":"a/b"}
+                """)
+            case "DELETE":
+                return MockHTTPResponse(json: """
+                {"action":"removed","messageId":"\(message.description)","memberId":"\(MemberID.demoHuman.description)","emoji":"a/b"}
+                """)
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected reaction request"}"#)
+            }
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: token)
+
+        try await backend.addReaction(message, emoji: "a/b")
+        try await backend.removeReaction(message, emoji: "a/b")
+
+        let requests = await MockHTTPURLProtocol.requests()
+        XCTAssertEqual(requests.map(\.httpMethod), ["PUT", "DELETE"])
+        XCTAssertTrue(requests.allSatisfy { $0.url?.absoluteString.contains("/reactions/a%2Fb") == true })
+    }
+
+    func testRESTBackendDelayedEditCannotCrossReconnectedSession() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspaceA = WorkspaceID.demo
+        let workspaceB = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000002")!
+        let channel = ChannelID.demoGeneral
+        let message = MessageID(uuidString: "00000000-0000-7000-8000-000000000902")!
+        let path = "/v1/workspaces/\(workspaceA.description)/messages/\(message.description)"
+        let controller = BlockingPathResponseController(
+            responses: [
+                path: MockHTTPResponse(json: """
+                {
+                  "id":"\(message.description)",
+                  "channelId":"\(channel.description)",
+                  "rootId":null,
+                  "seq":8,
+                  "hlcTs":1700000003000,
+                  "hlcCount":0,
+                  "authorMemberId":"\(MemberID.demoHuman.description)",
+                  "type":"text",
+                  "body":"late edit",
+                  "createdAtMs":1700000000000,
+                  "state":"edited",
+                  "editedAtMs":1700000003000
+                }
+                """)
+            ],
+            blockedPaths: [path]
+        )
+        await MockHTTPURLProtocol.setHandler { request in
+            controller.response(for: request)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspaceA, accessToken: "token-a")
+        let edit = Task {
+            try await backend.editMessage(message, body: "late edit")
+        }
+        await controller.waitForArrival(path: path)
+
+        try await backend.connect(workspace: workspaceB, accessToken: "token-b")
+        controller.release(path: path)
+
+        do {
+            _ = try await edit.value
+            XCTFail("stale edit response must not cross into the reconnected session")
+        } catch is CancellationError {
+            // Expected: generation/workspace/token no longer match.
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
     }
 
     @MainActor
@@ -3387,7 +3618,8 @@ final class MomoMacTests: XCTestCase {
                   "topic":"dogfood",
                   "dmKey":null,
                   "createdBy":"\(MemberID.demoHuman.description)",
-                  "archivedAtMs":null
+                  "archivedAtMs":null,
+                  "muted":false
                 }]}
                 """)
             case ("GET", "/v1/agent-runtime/status"):
@@ -3568,7 +3800,8 @@ final class MomoMacTests: XCTestCase {
                     "topic": "internal test",
                     "dmKey": null,
                     "createdBy": "\(MemberID.demoHuman.description)",
-                    "archivedAtMs": null
+                    "archivedAtMs": null,
+                    "muted": false
                   },
                   "creatorMembership": {
                     "id": "\(membership.uuidString)",
@@ -3665,7 +3898,8 @@ final class MomoMacTests: XCTestCase {
                 "topic": null,
                 "dmKey": null,
                 "createdBy": "\(MemberID.demoHuman.description)",
-                "archivedAtMs": null
+                "archivedAtMs": null,
+                "muted": false
               },
               "creatorMembership": {
                 "id": "\(membership.uuidString)",
@@ -3732,7 +3966,8 @@ final class MomoMacTests: XCTestCase {
                       "\(target.description)"
                     ],
                     "createdBy": "\(MemberID.demoHuman.description)",
-                    "archivedAtMs": null
+                    "archivedAtMs": null,
+                    "muted": false
                   },
                   "created": false
                 }
@@ -3801,7 +4036,8 @@ final class MomoMacTests: XCTestCase {
                       "\(target.description)"
                     ],
                     "createdBy": "\(MemberID.demoHuman.description)",
-                    "archivedAtMs": null
+                    "archivedAtMs": null,
+                    "muted": false
                   },
                   "created": true
                 }
@@ -3873,7 +4109,8 @@ final class MomoMacTests: XCTestCase {
                   "\(other.description)"
                 ],
                 "createdBy": "\(MemberID.demoHuman.description)",
-                "archivedAtMs": null
+                "archivedAtMs": null,
+                "muted": false
               },
               "created": true
             }
@@ -3927,7 +4164,8 @@ final class MomoMacTests: XCTestCase {
                     "dmKey": "\(name)-pair",
                     "memberIds": \(memberIDsJSON),
                     "createdBy": "\(MemberID.demoHuman.description)",
-                    "archivedAtMs": null
+                    "archivedAtMs": null,
+                    "muted": false
                   },
                   "created": true
                 }
@@ -4002,7 +4240,8 @@ final class MomoMacTests: XCTestCase {
                       "\(target.description)"
                     ],
                     "createdBy": "\(MemberID.demoHuman.description)",
-                    "archivedAtMs": null
+                    "archivedAtMs": null,
+                    "muted": false
                   },
                   "created": true
                 }
@@ -4506,6 +4745,36 @@ final class MomoMacTests: XCTestCase {
             XCTAssertEqual(status, 401)
             XCTAssertEqual(title, "unauthorized")
             XCTAssertEqual(detail, "bad token")
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testRESTBackendMapsNestedServerErrorContractToProblemDetail() async throws {
+        await MockHTTPURLProtocol.reset()
+        await MockHTTPURLProtocol.setHandler { _ in
+            MockHTTPResponse(
+                statusCode: 409,
+                json: #"{"error":{"code":"reaction_limit","message":"Reaction limit reached"}}"#
+            )
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123"
+            ),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: .demo, accessToken: "token-123")
+
+        do {
+            try await backend.addReaction(MessageID(), emoji: "👍")
+            XCTFail("reaction should fail on 409")
+        } catch BackendError.problem(let status, let title, let detail) {
+            XCTAssertEqual(status, 409)
+            XCTAssertEqual(title, "reaction_limit")
+            XCTAssertEqual(detail, "Reaction limit reached")
         } catch {
             XCTFail("unexpected error: \(error)")
         }
@@ -5877,7 +6146,8 @@ final class MomoMacTests: XCTestCase {
                   "topic":null,
                   "dmKey":null,
                   "createdBy":null,
-                  "archivedAtMs":null
+                  "archivedAtMs":null,
+                  "muted":false
                 }]}
                 """),
                 channelsBPath: MockHTTPResponse(json: """
@@ -5889,7 +6159,8 @@ final class MomoMacTests: XCTestCase {
                   "topic":null,
                   "dmKey":null,
                   "createdBy":null,
-                  "archivedAtMs":null
+                  "archivedAtMs":null,
+                  "muted":false
                 }]}
                 """),
                 searchBPath: MockHTTPResponse(json: #"{"hits":[],"nextCursor":null}"#),
@@ -5946,7 +6217,8 @@ final class MomoMacTests: XCTestCase {
                     "topic": null,
                     "dmKey": null,
                     "createdBy": "\(MemberID.demoHuman.description)",
-                    "archivedAtMs": null
+                    "archivedAtMs": null,
+                    "muted": false
                   },
                   "creatorMembership": {
                     "id": "\(membership.uuidString)",
@@ -5968,7 +6240,8 @@ final class MomoMacTests: XCTestCase {
                   "topic":null,
                   "dmKey":null,
                   "createdBy":null,
-                  "archivedAtMs":null
+                  "archivedAtMs":null,
+                  "muted":false
                 }]}
                 """),
                 searchBPath: MockHTTPResponse(json: #"{"hits":[],"nextCursor":null}"#),

@@ -818,7 +818,9 @@ public struct MessageListView: View {
         _ item: MessageTimelineItem,
         copy: MomoWorkspaceCopy
     ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let canInteract = viewModel.canInteractWithMessage(item.message)
+        let canModify = viewModel.canModifyMessage(item.message)
+        return VStack(alignment: .leading, spacing: 0) {
             if item.startsDay, let day = item.day {
                 TimelineDayDivider(day: day, copy: copy)
             }
@@ -834,10 +836,9 @@ public struct MessageListView: View {
                 },
                 reactions: viewModel.reactions(for: item.message),
                 replyCount: viewModel.replies(to: item.message).count,
-                canModify: viewModel.supportsMessageInteractions
-                    && viewModel.isCurrentMemberMessage(item.message),
+                canModify: canModify,
                 interactionError: viewModel.messageInteractionErrors[item.message.id],
-                onToggleReaction: viewModel.supportsMessageInteractions
+                onToggleReaction: canInteract
                     ? { emoji in
                         Task { await viewModel.toggleReaction(emoji, on: item.message) }
                     }
@@ -846,12 +847,12 @@ public struct MessageListView: View {
                     onPresentThread()
                     selectedThreadRootID = item.message.rootId ?? item.message.id
                 },
-                onEdit: viewModel.supportsMessageInteractions
+                onEdit: canModify
                     ? { body in
                         await viewModel.editMessage(item.message, body: body)
                     }
                     : nil,
-                onDelete: viewModel.supportsMessageInteractions
+                onDelete: canModify
                     ? {
                         Task {
                             let didDelete = await viewModel.deleteMessage(item.message)

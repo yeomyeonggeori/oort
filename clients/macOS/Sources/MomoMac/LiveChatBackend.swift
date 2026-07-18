@@ -18,13 +18,14 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend {
+public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend, MomoChannelNotificationBackend {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var workspaceProfile: Workspace?
     private var connected = false
     private var members: [Member] = []
     private var channels: [Channel] = []
+    private var channelMuteStates: [ChannelID: Bool] = [:]
     private var messagesByChannel: [ChannelID: [Message]] = [:]
     private var reactionsByMessage: [MessageID: [String: Set<MemberID>]] = [:]
     private var seqByChannel: [ChannelID: Int64] = [:]
@@ -95,6 +96,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         let pg18 = Channel(id: ChannelID(), workspaceId: ws, kind: .publicChannel,
                            name: "feature-pg18", topic: "PG18 마이그레이션", createdBy: human.id)
         channels = [general, pg18]
+        channelMuteStates = Dictionary(uniqueKeysWithValues: channels.map { ($0.id, false) })
         human.channelIds = channels.map(\.id)
         researcher.channelIds = channels.map(\.id)
         builder.channelIds = [pg18.id]
@@ -501,6 +503,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         realtimeStatusStreams = [:]
         realtimeStatusByChannel = [:]
         readStateStreams = [:]
+        channelMuteStates = [:]
         credentialsByAgent = [:]
         workRunsById = [:]
         workRunIdsByClientId = [:]
@@ -563,6 +566,20 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
         channels.filter { $0.workspaceId == workspace }
+    }
+
+    func channelMuteSnapshot(workspace: WorkspaceID) async -> [ChannelID: Bool] {
+        guard self.workspace == workspace else { return [:] }
+        let visibleChannelIDs = Set(channels.lazy.filter { $0.workspaceId == workspace }.map(\.id))
+        return channelMuteStates.filter { visibleChannelIDs.contains($0.key) }
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool {
+        guard connected, channels.contains(where: { $0.id == channel && !$0.isArchived }) else {
+            throw BackendError.problem(status: 403, title: "active channel membership required", detail: nil)
+        }
+        channelMuteStates[channel] = muted
+        return muted
     }
 
     public func workspace(id: WorkspaceID) async throws -> Workspace {
@@ -629,6 +646,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
             createdBy: actor.id
         )
         channels.append(channel)
+        channelMuteStates[channel.id] = false
         messagesByChannel[channel.id] = []
         seqByChannel[channel.id] = 0
         sentClientMsgIds[channel.id] = []
@@ -780,6 +798,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
             createdBy: creator
         )
         channels.append(channel)
+        channelMuteStates[channel.id] = false
         messagesByChannel[channel.id] = []
         seqByChannel[channel.id] = 0
         sentClientMsgIds[channel.id] = []
@@ -966,6 +985,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
                 var m = msgs[idx]
                 m.body = body
                 m.state = .edited
+                m.editedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
                 messagesByChannel[ch]?[idx] = m
                 emit(.messageEdited(m), to: ch)
                 return m
@@ -1010,6 +1030,7 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
             guard let index = messages.firstIndex(where: { $0.id == id }) else { continue }
             var tombstone = messages[index]
             tombstone.state = .deleted
+            tombstone.body = nil
             tombstone.deletedAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
             messagesByChannel[channel]?[index] = tombstone
             reactionsByMessage[id] = nil

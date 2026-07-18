@@ -676,6 +676,9 @@ public struct ChannelListView: View {
         ) && inviteToChannel != nil
         let canOpenSettings = MomoChannelActionPolicy.canOpenSettings(in: channel)
             && openChannelSettings != nil
+        let isMuted = viewModel.isChannelMuted(channel.id)
+        let canManageNotifications = viewModel.supportsChannelNotificationSettings
+            && !channel.isArchived
         let badgeLabel = channel.kind == .dm
             ? MomoUnreadBadge.label(unreadCount: readState?.unreadCount ?? 0)
             : MomoUnreadBadge.label(mentionCount: readState?.mentionCount ?? 0)
@@ -695,6 +698,11 @@ public struct ChannelListView: View {
                         .truncationMode(.tail)
                         .help(displayName)
                     Spacer(minLength: MomoTheme.Sidebar.compactSpacing)
+                    if isMuted {
+                        Image(systemName: "bell.slash.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
                     if let badgeLabel {
                         Text(badgeLabel)
                             .font(MomoTheme.Sidebar.badgeFont)
@@ -713,6 +721,7 @@ public struct ChannelListView: View {
                 unreadCount: readState?.unreadCount ?? 0,
                 mentionCount: readState?.mentionCount ?? 0
             ))
+            .accessibilityValue(isMuted ? copy.channelMuted : "")
 
             if canInvite {
                 channelQuickAction(
@@ -756,6 +765,11 @@ public struct ChannelListView: View {
                     openChannelSettings?(channel.id)
                 }
             }
+            if canManageNotifications {
+                Button(isMuted ? copy.unmuteChannel : copy.muteChannel) {
+                    Task { await viewModel.setChannelMuted(channel.id, muted: !isMuted) }
+                }
+            }
             Button(copy.copyChannelID) {
                 copyChannelID(channel.id)
             }
@@ -786,10 +800,18 @@ public struct ChannelListView: View {
             }
         }
 
-        Button {} label: {
-            Label(copy.channelNotificationsPlanned, systemImage: "bell.slash")
+        if viewModel.supportsChannelNotificationSettings, !channel.isArchived {
+            let isMuted = viewModel.isChannelMuted(channel.id)
+            Button {
+                Task { await viewModel.setChannelMuted(channel.id, muted: !isMuted) }
+            } label: {
+                Label(
+                    isMuted ? copy.unmuteChannel : copy.muteChannel,
+                    systemImage: isMuted ? "bell" : "bell.slash"
+                )
+            }
+            .disabled(viewModel.channelMuteMutationIds.contains(channel.id))
         }
-        .disabled(true)
 
         Divider()
 
