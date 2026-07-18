@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import AgentWorker
 
@@ -730,5 +731,60 @@ final class AgentWorkerTests: XCTestCase {
             .init(role: "system", content: "You are Hermes."),
             .init(role: "user", content: "hi"),
         ])
+    }
+
+    // MARK: - MOMO-479 thread projection
+
+    func testThreadUpdatedPayloadUsesReplySequenceWithoutMintingAnotherSequence() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let rootID = UUID(uuidString: "00000000-0000-7000-8000-000000000508")!
+        let replyAt = Date(timeIntervalSince1970: 1_750_000_000.125)
+        let json = WorkerService.threadUpdatedPayload(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            rootID: rootID,
+            replyCount: 3,
+            lastReplySeq: 44,
+            lastReplyAt: replyAt
+        )
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+        )
+        let data = try XCTUnwrap(object["data"] as? [String: Any])
+        let payload = try XCTUnwrap(data["payload"] as? [String: Any])
+
+        XCTAssertEqual(data["type"] as? String, "thread.updated")
+        XCTAssertEqual(data["seq"] as? Int, 44)
+        XCTAssertEqual(object["version"] as? Int, 44)
+        XCTAssertEqual(payload["channel_id"] as? String, channelID.uuidString)
+        XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
+        XCTAssertEqual(payload["reply_count"] as? Int, 3)
+        XCTAssertEqual(payload["last_reply_seq"] as? Int, 44)
+        XCTAssertEqual(payload["last_reply_at"] as? Int64, 1_750_000_000_125)
+    }
+
+    func testAllFourDurableMessageInsertSitesPreserveThreadContext() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot
+                .appendingPathComponent("Sources/AgentWorker/WorkerService.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(source.components(separatedBy: "INSERT INTO message").count - 1, 4)
+        XCTAssertEqual(source.components(separatedBy: "root_id, run_id)").count - 1, 4)
+        XCTAssertEqual(source.components(separatedBy: "Self.recordThreadProjection(").count - 1, 4)
+        XCTAssertEqual(
+            source.components(separatedBy: #""root_id": rootID?.uuidString ?? NSNull()"#).count - 1,
+            4
+        )
+        XCTAssertTrue(source.contains("FROM agent_run"))
+        XCTAssertTrue(source.contains("SELECT channel_id, root_id"))
+        XCTAssertTrue(source.contains("array_append("))
+        XCTAssertTrue(source.contains(#""type": "thread.updated""#))
     }
 }
