@@ -1245,11 +1245,14 @@ struct MomoChannelSettingsSheet: View {
     let onSavePresentation: (MomoChannelPresentation) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.momoWebhookContext) private var webhookContext
     @State private var selectedTab: MomoChannelSettingsTab = .general
     @State private var channelName: String
     @State private var channelTopic: String
     @State private var savedLocally = false
+    @State private var integrationNavigationLocked = false
     private let canManageMembers: Bool
+    private let canManageIntegrations: Bool
 
     init(
         copy: MomoWorkspaceCopy,
@@ -1268,7 +1271,16 @@ struct MomoChannelSettingsSheet: View {
             canManageWorkspace: viewModel.canManageWorkspace
         )
         self.canManageMembers = canManageMembers
-        _selectedTab = State(initialValue: initialTab == .members && !canManageMembers ? .general : initialTab)
+        let canManageIntegrations = viewModel.canManageWorkspace
+        self.canManageIntegrations = canManageIntegrations
+        let resolvedInitialTab: MomoChannelSettingsTab
+        if initialTab == .members && !canManageMembers
+            || initialTab == .integrations && !canManageIntegrations {
+            resolvedInitialTab = .general
+        } else {
+            resolvedInitialTab = initialTab
+        }
+        _selectedTab = State(initialValue: resolvedInitialTab)
         _channelName = State(initialValue: presentation.name)
         _channelTopic = State(initialValue: presentation.topic ?? "")
     }
@@ -1299,6 +1311,7 @@ struct MomoChannelSettingsSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)
+                .disabled(integrationNavigationLocked)
             }
             .padding(MomoTheme.ChannelHeader.edgeInset)
 
@@ -1310,10 +1323,13 @@ struct MomoChannelSettingsSheet: View {
                     if canManageMembers {
                         Text(copy.members).tag(MomoChannelSettingsTab.members)
                     }
-                    Text(copy.integrations).tag(MomoChannelSettingsTab.integrations)
+                    if canManageIntegrations {
+                        Text(copy.integrations).tag(MomoChannelSettingsTab.integrations)
+                    }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .disabled(integrationNavigationLocked)
 
                 Group {
                     switch selectedTab {
@@ -1326,7 +1342,11 @@ struct MomoChannelSettingsSheet: View {
                             generalSettings
                         }
                     case .integrations:
-                        integrationSettings
+                        if canManageIntegrations {
+                            integrationSettings
+                        } else {
+                            generalSettings
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1337,6 +1357,7 @@ struct MomoChannelSettingsSheet: View {
             width: MomoTheme.ChannelHeader.settingsSheetWidth,
             height: MomoTheme.ChannelHeader.settingsSheetHeight
         )
+        .interactiveDismissDisabled(integrationNavigationLocked)
     }
 
     private var generalSettings: some View {
@@ -1439,19 +1460,12 @@ struct MomoChannelSettingsSheet: View {
     }
 
     private var integrationSettings: some View {
-        Form {
-            Section(copy.webhooks) {
-                LabeledContent(copy.inboundWebhook) {
-                    Text(copy.notConfigured)
-                        .foregroundStyle(.secondary)
-                }
-                Text(copy.webhookPlaceholderDetail)
-                    .momoTypography(.supporting)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .formStyle(.grouped)
+        MomoWebhookSettingsView(
+            language: copy.language,
+            channel: channel,
+            context: webhookContext,
+            navigationLocked: $integrationNavigationLocked
+        )
     }
 
     private var draftPresentation: MomoChannelPresentation {

@@ -170,4 +170,109 @@ final class MomoWorkspaceSearchTests: XCTestCase {
 
         XCTAssertEqual(results[.member]?.map(\.isAgent), [false, true])
     }
+
+    func testServerMessagesReplaceLoadedMessageSourceWhileFilesStayLocal() throws {
+        let workspaceID = WorkspaceID()
+        let channel = Channel(
+            id: ChannelID(), workspaceId: workspaceID,
+            kind: .publicChannel, name: "release"
+        )
+        let member = Member(
+            id: MemberID(), workspaceId: workspaceID,
+            kind: .human, displayName: "상준", handle: "sangjun"
+        )
+        let cached = Message(
+            id: MessageID(), channelId: channel.id, seq: 1, hlcTs: 1,
+            authorMemberId: member.id, body: "old local checklist",
+            props: ["attachments": [["filename": "checklist.pdf"]]]
+        )
+        let serverHit = Message(
+            id: MessageID(), channelId: channel.id, seq: 500, hlcTs: 500,
+            authorMemberId: member.id, body: "server checklist result"
+        )
+
+        let results = MomoWorkspaceSearchIndex.results(
+            query: "checklist",
+            channels: [channel],
+            members: [member],
+            currentMemberID: member.id,
+            messagesByChannel: [channel.id: [cached]],
+            serverMessages: [serverHit]
+        )
+
+        XCTAssertEqual(results[.message]?.map(\.title), ["server checklist result"])
+        XCTAssertEqual(results[.file]?.map(\.title), ["checklist.pdf"])
+        XCTAssertEqual(
+            try XCTUnwrap(results[.message]?.first?.destination),
+            .message(channelID: channel.id, messageID: serverHit.id)
+        )
+    }
+
+    func testServerMessageOrderIsPreservedAcrossChannels() {
+        let workspaceID = WorkspaceID()
+        let firstChannel = Channel(
+            id: ChannelID(), workspaceId: workspaceID,
+            kind: .publicChannel, name: "general"
+        )
+        let secondChannel = Channel(
+            id: ChannelID(), workspaceId: workspaceID,
+            kind: .publicChannel, name: "release"
+        )
+        let member = Member(
+            id: MemberID(), workspaceId: workspaceID,
+            kind: .human, displayName: "상준", handle: "sangjun"
+        )
+        let newest = Message(
+            id: MessageID(), channelId: secondChannel.id, seq: 2, hlcTs: 2,
+            authorMemberId: member.id, body: "deploy newest"
+        )
+        let older = Message(
+            id: MessageID(), channelId: firstChannel.id, seq: 80, hlcTs: 1,
+            authorMemberId: member.id, body: "deploy older"
+        )
+
+        let results = MomoWorkspaceSearchIndex.results(
+            query: "deploy",
+            channels: [firstChannel, secondChannel],
+            members: [member],
+            currentMemberID: member.id,
+            messagesByChannel: [:],
+            serverMessages: [newest, older]
+        )
+
+        XCTAssertEqual(
+            results[.message]?.map(\.destination),
+            [
+                .message(channelID: secondChannel.id, messageID: newest.id),
+                .message(channelID: firstChannel.id, messageID: older.id),
+            ]
+        )
+    }
+
+    func testExplicitEmptyServerPageDoesNotFallBackToLoadedMessages() {
+        let workspaceID = WorkspaceID()
+        let channel = Channel(
+            id: ChannelID(), workspaceId: workspaceID,
+            kind: .publicChannel, name: "general"
+        )
+        let member = Member(
+            id: MemberID(), workspaceId: workspaceID,
+            kind: .human, displayName: "상준", handle: "sangjun"
+        )
+        let cached = Message(
+            id: MessageID(), channelId: channel.id, seq: 1, hlcTs: 1,
+            authorMemberId: member.id, body: "loaded only"
+        )
+
+        let results = MomoWorkspaceSearchIndex.results(
+            query: "loaded",
+            channels: [channel],
+            members: [member],
+            currentMemberID: member.id,
+            messagesByChannel: [channel.id: [cached]],
+            serverMessages: []
+        )
+
+        XCTAssertNil(results[.message])
+    }
 }

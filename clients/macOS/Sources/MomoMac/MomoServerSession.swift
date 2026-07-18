@@ -2258,6 +2258,7 @@ private struct SessionStatusBar: View {
     @State private var showDetails = false
     @State private var showInvites = false
     @State private var showUpdates = false
+    @State private var inviteDismissLocked = false
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
 
     var body: some View {
@@ -2281,6 +2282,7 @@ private struct SessionStatusBar: View {
                     .foregroundStyle(MomoTheme.costAmber)
             }
             languageMenu(copy: copy)
+                .disabled(inviteDismissLocked)
             Button {
                 showDetails.toggle()
             } label: {
@@ -2294,6 +2296,7 @@ private struct SessionStatusBar: View {
                 )
             }
             .controlSize(.small)
+            .disabled(inviteDismissLocked)
             Button {
                 showUpdates.toggle()
             } label: {
@@ -2303,14 +2306,20 @@ private struct SessionStatusBar: View {
                 MomoMacUpdateChannelView()
             }
             .controlSize(.small)
-            if let inviteAdminContext {
+            .disabled(inviteDismissLocked)
+            if let inviteAdminContext, viewModel.canManageWorkspace {
                 Button {
+                    guard !showInvites || !inviteDismissLocked else { return }
                     showInvites.toggle()
                 } label: {
                     Label(copy.invites, systemImage: "person.badge.key")
                 }
-                .popover(isPresented: $showInvites) {
-                    InviteAdminPopover(context: inviteAdminContext)
+                .popover(isPresented: invitePopoverPresentation) {
+                    InviteAdminPopover(
+                        context: inviteAdminContext,
+                        language: language,
+                        dismissLocked: $inviteDismissLocked
+                    )
                 }
                 .controlSize(.small)
             }
@@ -2318,10 +2327,12 @@ private struct SessionStatusBar: View {
                 Label(copy.switchSession, systemImage: "arrow.left.arrow.right")
             }
             .controlSize(.small)
+            .disabled(inviteDismissLocked)
             Button(role: .destructive, action: logout) {
                 Label(copy.logout, systemImage: "rectangle.portrait.and.arrow.right")
             }
             .controlSize(.small)
+            .disabled(inviteDismissLocked)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -2333,6 +2344,16 @@ private struct SessionStatusBar: View {
             .font(.caption)
             .lineLimit(1)
             .foregroundStyle(.secondary)
+    }
+
+    private var invitePopoverPresentation: Binding<Bool> {
+        Binding(
+            get: { showInvites },
+            set: { isPresented in
+                guard isPresented || !inviteDismissLocked else { return }
+                showInvites = isPresented
+            }
+        )
     }
 
     private var language: MomoUILanguage {
@@ -2424,6 +2445,121 @@ enum MomoInviteAdminRetryAction: Equatable {
     case revoke(invite: MomoInviteCode, reason: String)
 }
 
+enum MomoInviteShortLinkConfiguration {
+    static let publicBaseURLEnvironmentKey = "MOMO_LINKSHORT_PUBLIC_BASE_URL"
+
+    static func publicBaseURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL? {
+        guard let rawValue = environment[publicBaseURLEnvironmentKey],
+              let url = URL(string: rawValue),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let scheme = url.scheme?.lowercased(),
+              let host = url.host?.lowercased(),
+              !host.isEmpty,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              url.path.isEmpty || url.path == "/",
+              scheme == "https" || (
+                scheme == "http"
+                    && ["localhost", "127.0.0.1", "::1"].contains(host)
+              )
+        else {
+            return nil
+        }
+        return url
+    }
+
+    static func shortURL(code: String, publicBaseURL: URL?) -> URL? {
+        let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCode.isEmpty, let publicBaseURL else { return nil }
+        return publicBaseURL
+            .appendingPathComponent("i", isDirectory: true)
+            .appendingPathComponent(trimmedCode, isDirectory: false)
+    }
+}
+
+struct MomoInviteOneTimeCopy {
+    let language: MomoUILanguage
+
+    var newInviteCode: String {
+        language == .korean ? "새 초대 코드" : "New invite code"
+    }
+
+    var copyCode: String {
+        language == .korean ? "코드 복사" : "Copy Code"
+    }
+
+    var copyShortLink: String {
+        language == .korean ? "단축 링크 복사" : "Copy Short Link"
+    }
+
+    var savedIt: String {
+        language == .korean ? "저장했습니다" : "I Saved It"
+    }
+
+    var saveNowHint: String {
+        language == .korean
+            ? "지금 코드나 단축 링크를 저장하세요. 기존 초대 목록에는 마스킹된 미리보기만 남아 원본 코드를 다시 확인할 수 없습니다."
+            : "Save the code or short link now. Existing invites only expose a masked preview, so the raw code cannot be recovered later."
+    }
+
+    func inviteCreated(role: MembershipRole) -> String {
+        let roleName: String
+        switch (language, role) {
+        case (.korean, .owner): roleName = "소유자"
+        case (.korean, .admin): roleName = "관리자"
+        case (.korean, .member): roleName = "멤버"
+        case (.korean, .guest): roleName = "게스트"
+        case (.english, .owner): roleName = "owner"
+        case (.english, .admin): roleName = "admin"
+        case (.english, .member): roleName = "member"
+        case (.english, .guest): roleName = "guest"
+        }
+        return language == .korean
+            ? "\(roleName) 초대를 만들었습니다. 지금 원본 코드나 단축 링크를 저장하세요."
+            : "Invite created for \(roleName). Save the raw code or short link now."
+    }
+
+    var inviteCreatedRefreshFailed: String {
+        language == .korean
+            ? "초대는 만들었지만 목록을 새로고치지 못했습니다. 코드를 먼저 저장한 뒤 다시 불러오세요."
+            : "The invite was created, but the list could not be refreshed. Save the code first, then reload the list."
+    }
+
+    var createBeforeCopyingCode: String {
+        language == .korean
+            ? "원본 코드를 복사하려면 먼저 초대를 만드세요."
+            : "Create an invite before copying the raw code."
+    }
+
+    var inviteCodeCopied: String {
+        language == .korean
+            ? "초대 코드를 복사했습니다. 이 화면을 닫으면 마스킹된 미리보기만 남습니다."
+            : "Invite code copied. Only the masked preview remains after this flow."
+    }
+
+    var shortLinkUnavailable: String {
+        language == .korean
+            ? "공개 초대 링크 도메인이 설정되지 않았습니다. 원본 코드를 대신 복사하세요."
+            : "A public invite link domain is not configured. Copy the raw code instead."
+    }
+
+    var createBeforeCopyingShortLink: String {
+        language == .korean
+            ? "단축 링크를 복사하려면 먼저 초대를 만드세요."
+            : "Create an invite before copying the short link."
+    }
+
+    var shortLinkCopied: String {
+        language == .korean
+            ? "단축 초대 링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
+            : "Short invite link copied. The raw invite code remains visible only in this flow."
+    }
+}
+
 @MainActor
 final class MomoInviteAdminViewModel: ObservableObject {
     @Published var invites: [MomoInviteCode] = []
@@ -2439,15 +2575,24 @@ final class MomoInviteAdminViewModel: ObservableObject {
     private let context: MomoInviteAdminContext
     private let client: MomoInviteAdminClient
     private let copyInviteCode: @MainActor (String) -> Void
+    private let publicShortLinkBaseURL: URL?
+    private let copyInviteLink: @MainActor (String) -> Void
+    private let oneTimeCopy: MomoInviteOneTimeCopy
 
     init(
         context: MomoInviteAdminContext,
         client: MomoInviteAdminClient = MomoInviteAdminClient(),
-        copyInviteCode: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard
+        copyInviteCode: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard,
+        publicShortLinkBaseURL: URL? = MomoInviteShortLinkConfiguration.publicBaseURL(),
+        copyInviteLink: @escaping @MainActor (String) -> Void = MomoInviteAdminViewModel.copyToPasteboard,
+        language: MomoUILanguage = .preferredDefault
     ) {
         self.context = context
         self.client = client
         self.copyInviteCode = copyInviteCode
+        self.publicShortLinkBaseURL = publicShortLinkBaseURL
+        self.copyInviteLink = copyInviteLink
+        self.oneTimeCopy = MomoInviteOneTimeCopy(language: language)
     }
 
     func refreshInvites(showNotice: Bool = false) async {
@@ -2488,7 +2633,7 @@ final class MomoInviteAdminViewModel: ObservableObject {
                 )
             )
             createdCode = created.code
-            notice = "Invite created for \(created.invite.role.rawValue). Copy the raw code now; the saved list only keeps a masked preview."
+            notice = oneTimeCopy.inviteCreated(role: created.invite.role)
             errorMessage = nil
             lastFailedAction = nil
             invites.removeAll { $0.id == created.invite.id }
@@ -2496,7 +2641,7 @@ final class MomoInviteAdminViewModel: ObservableObject {
             do {
                 invites = try await loadInvites()
             } catch {
-                errorMessage = "Invite created, but refresh failed: \(error.localizedDescription)"
+                errorMessage = oneTimeCopy.inviteCreatedRefreshFailed
                 lastFailedAction = .refresh
             }
         } catch {
@@ -2531,12 +2676,38 @@ final class MomoInviteAdminViewModel: ObservableObject {
 
     func copyCreatedCode() {
         guard let createdCode, !createdCode.isEmpty else {
-            errorMessage = "Create an invite before copying the raw code."
+            errorMessage = oneTimeCopy.createBeforeCopyingCode
             return
         }
         copyInviteCode(createdCode)
-        notice = "Invite code copied. It cannot be recovered from the masked invite list after this flow."
+        notice = oneTimeCopy.inviteCodeCopied
         errorMessage = nil
+    }
+
+    var createdShortLink: URL? {
+        guard let createdCode else { return nil }
+        return MomoInviteShortLinkConfiguration.shortURL(
+            code: createdCode,
+            publicBaseURL: publicShortLinkBaseURL
+        )
+    }
+
+    func copyCreatedShortLink() {
+        guard let createdCode, !createdCode.isEmpty else {
+            errorMessage = oneTimeCopy.createBeforeCopyingShortLink
+            return
+        }
+        guard let createdShortLink else {
+            errorMessage = oneTimeCopy.shortLinkUnavailable
+            return
+        }
+        copyInviteLink(createdShortLink.absoluteString)
+        notice = oneTimeCopy.shortLinkCopied
+        errorMessage = nil
+    }
+
+    func discardCreatedCode() {
+        createdCode = nil
     }
 
     func retryLastFailure() async {
@@ -2560,20 +2731,31 @@ final class MomoInviteAdminViewModel: ObservableObject {
     }
 
     private static func copyToPasteboard(_ code: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(code, forType: .string)
+        let pasteboard = NSPasteboard.general
+        let concealedType = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let transientType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
+        pasteboard.declareTypes([.string, concealedType, transientType], owner: nil)
+        pasteboard.setString(code, forType: .string)
     }
 }
 
 struct InviteAdminPopover: View {
     @StateObject private var model: MomoInviteAdminViewModel
+    @Binding private var dismissLocked: Bool
     @State private var role: MembershipRole = .member
     @State private var maxUses = "1"
     @State private var expiresInDays = "7"
     @State private var revocationReasons: [UUID: String] = [:]
+    private let oneTimeCopy: MomoInviteOneTimeCopy
 
-    init(context: MomoInviteAdminContext) {
-        _model = StateObject(wrappedValue: MomoInviteAdminViewModel(context: context))
+    init(
+        context: MomoInviteAdminContext,
+        language: MomoUILanguage = .preferredDefault,
+        dismissLocked: Binding<Bool> = .constant(false)
+    ) {
+        _dismissLocked = dismissLocked
+        _model = StateObject(wrappedValue: MomoInviteAdminViewModel(context: context, language: language))
+        oneTimeCopy = MomoInviteOneTimeCopy(language: language)
     }
 
     var body: some View {
@@ -2610,6 +2792,16 @@ struct InviteAdminPopover: View {
                 await model.refreshInvites()
             }
         }
+        .onChange(of: model.operation) { _, _ in
+            synchronizeDismissLock()
+        }
+        .onChange(of: model.createdCode) { _, _ in
+            synchronizeDismissLock()
+        }
+        .onDisappear {
+            model.discardCreatedCode()
+            dismissLocked = false
+        }
     }
 
     private var createControls: some View {
@@ -2640,12 +2832,14 @@ struct InviteAdminPopover: View {
             GridRow {
                 Color.clear
                 Button {
+                    dismissLocked = true
                     Task {
                         await model.createInvite(
                             role: role,
                             maxUsesText: maxUses,
                             expiresInDaysText: expiresInDays
                         )
+                        synchronizeDismissLock()
                     }
                 } label: {
                     if model.operation == .creating {
@@ -2658,7 +2852,7 @@ struct InviteAdminPopover: View {
                         Label("Create Invite", systemImage: "plus.circle")
                     }
                 }
-                .disabled(model.isWorking)
+                .disabled(model.isWorking || model.createdCode != nil)
             }
         }
         .font(.caption)
@@ -2668,23 +2862,51 @@ struct InviteAdminPopover: View {
     private var feedbackRows: some View {
         if let code = model.createdCode {
             VStack(alignment: .leading, spacing: 6) {
-                Text("New invite code")
+                Text(oneTimeCopy.newInviteCode)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Text(code)
                         .font(.system(.body, design: .monospaced))
                         .textSelection(.enabled)
+                        .privacySensitive()
                     Spacer()
                     Button {
                         model.copyCreatedCode()
                     } label: {
-                        Label("Copy Code", systemImage: "doc.on.doc")
+                        Label(oneTimeCopy.copyCode, systemImage: "doc.on.doc")
                     }
                     .controlSize(.small)
                     .disabled(model.isWorking)
                 }
-                Text("Copy it now. Existing invites only expose the masked preview, so the raw code cannot be recovered later.")
+                if let shortLink = model.createdShortLink {
+                    HStack(spacing: 8) {
+                        Label(shortLink.absoluteString, systemImage: "link")
+                            .font(.caption.monospaced())
+                            .lineLimit(1)
+                            .textSelection(.enabled)
+                            .privacySensitive()
+                        Spacer()
+                        Button {
+                            model.copyCreatedShortLink()
+                        } label: {
+                            Text(oneTimeCopy.copyShortLink)
+                        }
+                        .controlSize(.small)
+                        .disabled(model.isWorking)
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button(oneTimeCopy.savedIt) {
+                        model.discardCreatedCode()
+                        synchronizeDismissLock()
+                    }
+                    .controlSize(.small)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(model.isWorking)
+                }
+                Text(oneTimeCopy.saveNowHint)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -2712,7 +2934,11 @@ struct InviteAdminPopover: View {
                 Spacer()
                 if model.canRetry {
                     Button {
-                        Task { await model.retryLastFailure() }
+                        dismissLocked = true
+                        Task {
+                            await model.retryLastFailure()
+                            synchronizeDismissLock()
+                        }
                     } label: {
                         Label("Retry", systemImage: "arrow.clockwise")
                     }
@@ -2787,6 +3013,10 @@ struct InviteAdminPopover: View {
             get: { revocationReason(for: invite) },
             set: { revocationReasons[invite.id] = $0 }
         )
+    }
+
+    private func synchronizeDismissLock() {
+        dismissLocked = model.operation == .creating || model.createdCode != nil
     }
 
     private func expiryText(_ expiresAtMs: Int64) -> String {

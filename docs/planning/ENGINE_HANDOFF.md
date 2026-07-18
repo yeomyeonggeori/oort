@@ -2,44 +2,45 @@
 
 > 규칙: `docs/TRACKS.md` §4. 상태: `ready`(대기) → `proposed`(성재 제안됨) → `in-progress` → `done`.
 > UXUI 세션은 세션 시작 시 §A를 읽고 ready를 성재에게 "이거 구현할까요?"로 제안하고, 집으면 상태를 갱신한다.
-> 2026-07-18 갱신: **§A 전 항목의 엔진 표면이 main(`7edad20`)에 랜딩 완료 — 즉시 착수 가능.**
+> 2026-07-18 밤 통합판: UXUI 실서버 연동 배치(A-1/2/3/5/7 + A-4 답글 전송)와 엔진 배치(음소거 MOMO-477·상호작용 MOMO-478·X-1)가 main에 랜딩.
 
-## A. 엔진 완료(main) → UI 작업 대기 — UXUI 트랙 소비 대상
+## A. UI 작업 큐 — UXUI 트랙 소비 대상
 
 | # | 상태 | 항목 | UI가 할 일 | 착수 포인터 (전부 main) |
 |---|---|---|---|---|
-| A-1 | `ready` | **마켓플레이스 실서버 연동** | 로컬 카탈로그(`MomoPluginCatalogItem`)를 REST로 교체: 카탈로그 조회(`recommended` 필드=추천 섹션), 설치/해제, grant 발급/회수, 설치·grant 상태 표시 | `GET/POST/DELETE /v1/workspaces/:ws/plugins...` — PluginRoutes.swift, openapi 명세 완비 |
-| A-2 | `ready` | **채널 웹훅 발급 UI** | placeholder 탭(`MomoAccountSettingsViews.swift:1451`) 실물화: 발급(**one-time secret 1회 표시** — 재조회 불가 UX 필수)·회전·revoke·수신 URL 복사 | WebhookRoutes.swift, openapi |
-| A-3 | `ready` | **초대 단축 링크 노출** | 초대 발급 화면에 `/i/<code>` 복사 버튼(베이스 URL은 env/설정) | services/LinkShort/README.md |
-| A-4 | `ready` | **스레드 실전송** | 컴포저 "스레드 초안(로컬)"을 실전송으로: 전송 시 `rootId` 포함(**1단계 스레드만** — 대댓글 불가 계약), 타임라인 답글 표시(`rootId` 필드 수신), thread 롤업(reply_count/last_reply) 배지 | `SendMessageRequest.rootId` + thread 롤업 — MessageRoutes.swift, `verify_thread_reply.sh`가 계약 예시 |
-| A-6 | `ready` | **파일 첨부 실업로드** | 컴포저 "파일 첨부(로컬 초안)"를 실물로: ①세션 발급 REST ②**클라가 Google에 직접 청크 PUT**(서버 비경유) ③complete ④전송 시 `attachmentIds` ⑤수신 측 content 프록시 다운로드 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
-| A-7 | `ready` | **검색 서버 승격** | `MomoWorkspaceSearchIndex`의 메시지 소스를 서버 FTS로 교체(기존 심 `MomoWorkspaceSearchDestination` 유지 — handoff 2026-07-17 설계대로). "현재 불러온 대화에서 검색" 카피를 실검색으로 승격 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
-| A-9 | `ready`(track/engine — main 대기) | **반응/수정/삭제 UI 개방** | MomoServerRESTChatBackend의 editMessage/addReaction 501 두 곳을 실호출로 교체 + removeReaction/deleteMessage/reactionSnapshot 구현 → MomoMessageInteractionBackend capability 자동 개방(UI 기완비) | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
-| A-8 | `ready`(track/engine — main 대기) | **채널 음소거 설정 UI** | 채널 목록 응답의 `muted` 표시(음소거 아이콘) + 채널 컨텍스트/설정에 음소거 토글(`PUT /v1/workspaces/:ws/channels/:ch/notification-pref` {muted}) | ChannelRoutes/DTOs, ADR-0124(멘션 포함 전면 억제·unread 무영향), verify_notification_mute.sh가 계약 예시 |
-| A-5 | `ready` | **허들 UI 폴리시** | design High 2건(disabled 사유 키보드 접근성, 참가 상태별 시각 증거) + 실창 QA | MomoHuddle*.swift |
+| A-1 | `done` | **마켓플레이스 실서버 연동** | REST 카탈로그·추천·설치/해제·grant 발급/회수와 상태 UI를 연결. `external_webhook`은 채널 통합으로 라우팅하고 세션 변경 시 캐시를 전부 폐기 | `GET/POST/DELETE /v1/workspaces/:ws/plugins...` — PluginRoutes.swift, openapi 명세 완비 |
+| A-2 | `done` | **채널 웹훅 발급 UI** | native/Slack 호환 발급·회전·revoke·목록을 연결. one-time secret/URL은 확인 전 화면 이탈을 잠그고 확인 즉시 메모리에서 폐기 | WebhookRoutes.swift, openapi |
+| A-3 | `done` | **초대 단축 링크 노출** | HTTPS(로컬 개발 예외) public base URL을 검증해 `/i/<code>`를 1회 노출·민감 클립보드로 복사하고 확인 전 이탈을 잠금 | services/LinkShort/README.md |
+| A-4 | `in-progress` | **스레드 실전송** | `rootId`를 포함한 1단계 답글 실전송·엄격 응답 검증 완료. 정확한 서버 롤업/오래된 답글 조회는 **X-3 엔진 계약 대기** | `SendMessageRequest.rootId` + thread 롤업 — MessageRoutes.swift, `verify_thread_reply.sh`가 계약 예시 |
+| A-5 | `done` | **허들 UI 폴리시** | 비활성 사유를 포인터·키보드에서 동일하게 설명하고 참가 전/참가 중 상태의 아이콘·레이블·동작을 분리 | MomoHuddle*.swift |
+| A-6 | `in-progress` | **파일 첨부 실업로드** | 업로드 송신 API는 확인했으나 수신 메시지가 첨부를 발견할 Core/history/realtime 투영이 없어 **X-4 엔진 계약 대기**. 로컬 초안을 실물로 오인시키는 부분 구현은 하지 않음 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
+| A-7 | `done` | **검색 서버 승격** | 기존 destination 심을 유지하면서 서버 FTS, 300ms debounce, 최신순 cursor pagination, 오류/빈 상태와 정확한 과거 메시지 이동을 연결 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
+| A-8 | `ready` | **채널 음소거 설정 UI** | 채널 목록 응답의 `muted` 표시(음소거 아이콘) + 채널 컨텍스트/설정에 음소거 토글(`PUT /v1/workspaces/:ws/channels/:ch/notification-pref` {muted}). 멘션 포함 전면 억제·unread 무영향(ADR-0124) | ChannelRoutes/DTOs, verify_notification_mute.sh가 계약 예시 |
+| A-9 | `ready` | **반응/수정/삭제 UI 개방** | MomoServerRESTChatBackend의 editMessage/addReaction 501 두 곳을 실호출로 교체 + removeReaction/deleteMessage/reactionSnapshot 구현 → MomoMessageInteractionBackend capability 자동 개방(UI 기완비) | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
 
-## UXUI → 엔진 역방향 로그
+## X. UXUI → 엔진 역방향 로그
 
-| # | 상태 | UXUI에서 확인·수정한 엔진 소유 항목 | 엔진 액션 | 근거 |
+| # | 상태 | UXUI에서 확인·요청한 엔진 소유 항목 | 엔진 액션 | 근거 |
 |---|---|---|---|---|
-| X-1 | `done`(track/engine `baa337e` — main은 다음 승인 머지 승차. 엔진 빌드 기동 검증 OK. uxui 워크트리의 동일 수정 미커밋분은 UXUI가 정리) | `scripts/macos_dev_run.sh`가 SwiftPM 바이너리 프레임워크·리소스 번들을 개발용 `.app`에 스테이징하도록 보완 | `track/engine`에 동일 수정 이식 후 엔진 트랙 빌드로 재검증 | LiveKit 도입 후 `@rpath/LiveKitWebRTC.framework/LiveKitWebRTC` 누락으로 앱이 시작 즉시 DYLD 종료; UXUI 트랙 `--verify` 프로세스+창 PASS (2026-07-18) |
-| X-2 | `done`(서버 절반 → track/engine, main 대기)(B-4 다음 엔진 후보로 채택 — UXUI가 capability gate로 UI를 이미 완비, 엔진 REST edit/reaction/delete+realtime 확인 이벤트만 채우면 즉시 개방) | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 스레드 실전송은 main에 열렸지만 실서버 REST의 `editMessage`·`addReaction`은 현재 501이고 remove/delete 계약도 없어, 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | REST edit/add/remove/delete 명령과 권한 오류·realtime 확인 이벤트를 모두 연결한 뒤 `MomoMessageInteractionBackend` capability를 실서버에 부여 | macOS `MessageInteractionModel.swift`, `ChatViewModel.toggleReaction/deleteMessage`, `MessageInteractionTests` (2026-07-18) |
+| X-1 | `done` | `scripts/macos_dev_run.sh` SwiftPM 바이너리 프레임워크·리소스 번들 스테이징(LiveKit DYLD 종료 수정) | main 반영 완료 | UXUI 발견, 양 트랙 빌드 검증 (2026-07-18) |
+| X-2 | `done`(서버 절반 main 랜딩 — MOMO-478) | 반응/수정/삭제 REST+realtime 계약. UI는 capability gate로 기완비 | UI 개방은 **A-9**로 이관 | MessageInteractionModel.swift, MessageInteractionTests (2026-07-18) |
+| X-3 | `needs-engine-contract` | A-4 잔여: 정확한 스레드 롤업과 오래된 답글 조회를 위한 클라이언트 투영이 없음. 현재 배지는 로드된 메시지 범위의 답글 수를 사용 | 최상위 메시지 응답/realtime에 `reply_count`·`last_reply_*` 가산 투영과 스레드 조회 계약 추가. AgentWorker 답변도 원본 `root_id`를 보존 | `MessageRoutes.swift` thread 갱신, macOS `MessageListView.swift`·`MessageThreadPanel.swift` (2026-07-18) |
+| X-4 | `needs-engine-contract` | A-6 잔여: Core `DraftMessage`와 메시지 history/realtime 응답에 `attachmentIds`·첨부 메타데이터 투영이 없어 수신자가 다운로드 대상을 발견할 수 없음 | `DraftMessage` 가산 필드와 Message history/realtime의 attachment projection 또는 message별 attachment 조회 API를 추가. 업로드 URL은 bearer capability이므로 로그·영속 저장 금지 계약 유지 | `AttachmentRoutes.swift`, `MessageRoutes.swift`, `clients/Core/Message.swift`, `verify_attachment_upload.sh` (2026-07-18) |
 
-## B. 엔진 역요청 (남은 것)
+## B. 엔진 역요청 — 전량 완료 (main)
 
-| # | 상태 | 항목 | 비고 |
-|---|---|---|---|
-| B-4 | `done` → track/engine (main 대기) | 알림 음소거/설정 계약 | 소형 ADR 선행(판정=notifier 한 곳, P9) — 엔진 트랙 다음 후보 |
+B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · B-4 알림 음소거(ADR-0124, MOMO-477) — 2026-07-18 종결.
 
 ## C. 검증 부채
 
 | # | 항목 | 상태 |
 |---|---|---|
 | C-1 | 허들 2-클라 실오디오 왕복 | 성재 마이크 필요 — A-5와 함께 |
-| C-2 | Work 실 Codex↔momo 왕복 | 엔진 트랙 다음 후보(성재 Codex 환경 잠깐 필요) |
+| C-2 | Work 실 Codex↔momo 왕복 | 엔진 트랙 후보(성재 Codex 환경 잠깐 필요) |
 | C-3 | iOS deep link 실기기 재확인 | 케이블 Run 1회 |
 
 ## 완료 이력 (main 랜딩)
 
-- 2026-07-18: B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · 허들 V-1~V-3b(MOMO-468~473)
+- 2026-07-18 밤: UXUI 실서버 연동 배치(A-1/2/3/5/7 + A-4 답글 전송) · 엔진 음소거(MOMO-477)·상호작용 서버(MOMO-478)·X-1 스테이징
+- 2026-07-18: B-1 첨부(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · 허들 V-1~V-3b(MOMO-468~473)
 - 2026-07-17: 플러그인 SE-04A~D(MOMO-410~458) · 웹훅(MOMO-412) · 단축링크(MOMO-460) · iOS v0(MOMO-462~467)

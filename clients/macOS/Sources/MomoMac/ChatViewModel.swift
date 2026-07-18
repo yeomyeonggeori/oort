@@ -145,6 +145,7 @@ public final class ChatViewModel: ObservableObject {
     private let agentTransport: any AgentTransport
     private let workRunBackend: (any AgentWorkRunBackend)?
     private let messageInteractionBackend: (any MomoMessageInteractionBackend)?
+    private let workspaceMessageSearchBackend: (any MomoWorkspaceMessageSearchBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -162,6 +163,7 @@ public final class ChatViewModel: ObservableObject {
 
     @Published public private(set) var requestedMessageFocus: MessageID?
     @Published public private(set) var failedMessageFocus: MessageID?
+    private var workspaceSearchHits: [MessageID: Message] = [:]
 
     // Workspace context.
     @Published public private(set) var workspaceId: WorkspaceID?
@@ -302,6 +304,7 @@ public final class ChatViewModel: ObservableObject {
         self.agentTransport = agentTransport
         self.workRunBackend = chat as? any AgentWorkRunBackend
         self.messageInteractionBackend = chat as? any MomoMessageInteractionBackend
+        self.workspaceMessageSearchBackend = chat as? any MomoWorkspaceMessageSearchBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -542,6 +545,7 @@ public final class ChatViewModel: ObservableObject {
         workCreationError = nil
         requestedMessageFocus = nil
         failedMessageFocus = nil
+        workspaceSearchHits = [:]
         approvalDecisionFailedIds = []
         workHistoryErrorsByChannel = [:]
         workDetailErrorsById = [:]
@@ -1077,6 +1081,45 @@ public final class ChatViewModel: ObservableObject {
         await navigateAsUser(to: id, history: .recordSelection)
     }
 
+    public func searchWorkspaceMessages(query: String) async throws -> [Message] {
+        try await searchWorkspaceMessagePage(query: query, cursor: nil).messages
+    }
+
+    var usesServerWorkspaceMessageSearch: Bool {
+        workspaceId != nil && workspaceMessageSearchBackend != nil
+    }
+
+    func searchWorkspaceMessagePage(
+        query: String,
+        cursor: String?
+    ) async throws -> MomoWorkspaceMessageSearchPage {
+        guard let workspaceId else { throw BackendError.notConnected }
+        let page: MomoWorkspaceMessageSearchPage
+        if let workspaceMessageSearchBackend {
+            page = try await workspaceMessageSearchBackend.searchWorkspaceMessages(
+                workspace: workspaceId,
+                query: query,
+                cursor: cursor,
+                limit: 20
+            )
+        } else {
+            guard cursor == nil else {
+                return MomoWorkspaceMessageSearchPage(messages: [], nextCursor: nil)
+            }
+            page = MomoWorkspaceMessageSearchPage(
+                messages: try await chat.search(workspace: workspaceId, query: query),
+                nextCursor: nil
+            )
+        }
+        if cursor == nil {
+            workspaceSearchHits.removeAll(keepingCapacity: true)
+        }
+        for message in page.messages {
+            workspaceSearchHits[message.id] = message
+        }
+        return page
+    }
+
     public func focusMessage(_ messageID: MessageID, in channelID: ChannelID) async {
         let navigationIntent = beginNavigationIntent()
         requestedMessageFocus = nil
@@ -1087,6 +1130,27 @@ public final class ChatViewModel: ObservableObject {
               navigationIntentGeneration == navigationIntent,
               selectedChannelId == channelID
         else { return }
+        if messagesByChannel[channelID]?.contains(where: { $0.id == messageID }) != true,
+           let hit = workspaceSearchHits[messageID],
+           let sequence = hit.seq {
+            do {
+                let targetPage = try await chat.history(
+                    channel: channelID,
+                    after: max(sequence - 1, 0),
+                    limit: 1
+                )
+                guard !Task.isCancelled,
+                      navigationIntentGeneration == navigationIntent,
+                      selectedChannelId == channelID
+                else { return }
+                if let target = targetPage.first(where: { $0.id == messageID }) {
+                    upsert(target, channel: channelID)
+                }
+            } catch {
+                guard navigationIntentGeneration == navigationIntent else { return }
+                reportConnectionError(error)
+            }
+        }
         guard messagesByChannel[channelID]?.contains(where: { $0.id == messageID }) == true else {
             failedMessageFocus = messageID
             return

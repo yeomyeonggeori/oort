@@ -149,6 +149,7 @@ public struct MomoMacRootView: View {
                     onSavePresentation: { _ in }
                 )
                 .id(request.id)
+                .environment(\.momoWebhookContext, sessionChrome?.inviteAdminContext)
             }
         }
         .onAppear {
@@ -411,6 +412,9 @@ public struct MomoMacRootView: View {
                 serverIdentity: sessionChrome?.summary.serverURLString,
                 workspaceID: viewModel.workspaceId,
                 memberID: viewModel.currentNavigationMemberID,
+                apiContext: sessionChrome?.inviteAdminContext,
+                canManageWorkspace: viewModel.canManageWorkspace,
+                onOpenChannelIntegrations: pluginChannelIntegrationAction,
                 onClose: {
                     primaryDestination = .channel
                 }
@@ -423,6 +427,19 @@ public struct MomoMacRootView: View {
             detailPanePresentation.close()
             showMemberInspector = false
             primaryDestination = .plugins
+        }
+    }
+
+    private var pluginChannelIntegrationAction: (() -> Void)? {
+        guard viewModel.canManageWorkspace,
+              let channelID = viewModel.selectedChannelId,
+              let channel = viewModel.channels.first(where: { $0.id == channelID }),
+              MomoChannelActionPolicy.canOpenSettings(in: channel)
+        else { return nil }
+
+        return {
+            primaryDestination = .channel
+            presentChannelSettings(channelID, initialTab: .integrations)
         }
     }
 
@@ -720,7 +737,8 @@ public struct MomoMacRootView: View {
               initialTab != .members || MomoChannelActionPolicy.canManageMembers(
                 in: channel,
                 canManageWorkspace: viewModel.canManageWorkspace
-              )
+              ),
+              initialTab != .integrations || viewModel.canManageWorkspace
         else { return }
         channelSettingsRequest = MomoChannelSettingsRequest(
             channelID: channelID,

@@ -33,12 +33,15 @@ struct MomoWorkspaceSearchItem: Identifiable, Hashable {
 }
 
 enum MomoWorkspaceSearchIndex {
+    static let maximumServerMessageResults = 100
+
     static func results(
         query: String,
         channels: [Channel],
         members: [Member],
         currentMemberID: MemberID?,
-        messagesByChannel: [ChannelID: [Message]]
+        messagesByChannel: [ChannelID: [Message]],
+        serverMessages: [Message]? = nil
     ) -> [MomoWorkspaceSearchItem.Kind: [MomoWorkspaceSearchItem]] {
         let needle = normalized(query)
         guard !needle.isEmpty else { return [:] }
@@ -82,19 +85,27 @@ enum MomoWorkspaceSearchIndex {
         let visibleChannelIDs = Set(channels.map(\.id))
         var messageItems: [MomoWorkspaceSearchItem] = []
         var fileItems: [MomoWorkspaceSearchItem] = []
+        let messageSource = serverMessages
+            ?? messagesByChannel.values.flatMap { $0 }
+        for message in messageSource where visibleChannelIDs.contains(message.channelId) {
+            let channelID = message.channelId
+            let channelName = channelNames[channelID] ?? "channel"
+            if !message.isDeleted,
+               let body = message.body,
+               matches(needle, values: [body]) {
+                messageItems.append(MomoWorkspaceSearchItem(
+                    id: "message:\(message.id)",
+                    kind: .message,
+                    title: messageExcerpt(body, matching: query),
+                    subtitle: "#\(channelName)",
+                    destination: .message(channelID: channelID, messageID: message.id),
+                    isAgent: false
+                ))
+            }
+        }
         for (channelID, messages) in messagesByChannel where visibleChannelIDs.contains(channelID) {
             let channelName = channelNames[channelID] ?? "channel"
             for message in messages where !message.isDeleted {
-                if let body = message.body, matches(needle, values: [body]) {
-                    messageItems.append(MomoWorkspaceSearchItem(
-                        id: "message:\(message.id)",
-                        kind: .message,
-                        title: messageExcerpt(body, matching: query),
-                        subtitle: "#\(channelName)",
-                        destination: .message(channelID: channelID, messageID: message.id),
-                        isAgent: false
-                    ))
-                }
                 for (attachmentIndex, filename) in attachmentNames(in: message.props).enumerated()
                     where matches(needle, values: [filename]) {
                     fileItems.append(MomoWorkspaceSearchItem(
@@ -112,7 +123,9 @@ enum MomoWorkspaceSearchIndex {
         return [
             .channel: Array(channelItems.prefix(8)),
             .member: Array(memberItems.prefix(8)),
-            .message: Array(messageItems.prefix(20)),
+            .message: Array(messageItems.prefix(
+                serverMessages == nil ? 20 : maximumServerMessageResults
+            )),
             .file: Array(fileItems.prefix(12)),
         ].filter { !$0.value.isEmpty }
     }
@@ -169,12 +182,20 @@ struct MomoWorkspaceSearchView: View {
     @State private var selectedItemID: String?
     @State private var searchResults: [MomoWorkspaceSearchItem.Kind: [MomoWorkspaceSearchItem]] = [:]
     @State private var refreshTask: Task<Void, Never>?
+    @State private var activeSearchToken = UUID()
+    @State private var serverMessages: [Message]? = nil
+    @State private var nextMessageCursor: String?
+    @State private var isSearchingMessages = false
+    @State private var isLoadingMoreMessages = false
+    @State private var messageSearchError: Error?
     @State private var shouldScrollSelection = false
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         let currentResults = searchResults
         let queryIsEmpty = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let queryNeedsMoreCharacters = !queryIsEmpty
+            && query.trimmingCharacters(in: .whitespacesAndNewlines).count < 2
         let orderedItems = queryIsEmpty ? recentChannelItems : flattened(currentResults)
         VStack(spacing: 0) {
             HStack(spacing: 8) {
@@ -221,6 +242,16 @@ struct MomoWorkspaceSearchView: View {
                         }
                     }
                 }
+            } else if currentResults.isEmpty, queryNeedsMoreCharacters {
+                emptyState(
+                    title: messageSearchMinimum,
+                    detail: localSearchStillAvailable,
+                    systemImage: "text.bubble"
+                )
+            } else if currentResults.isEmpty, isSearchingMessages {
+                loadingState
+            } else if currentResults.isEmpty, messageSearchError != nil {
+                searchErrorState
             } else if currentResults.isEmpty {
                 emptyState(title: noResults, detail: query, systemImage: "magnifyingglass")
             } else {
@@ -231,6 +262,30 @@ struct MomoWorkspaceSearchView: View {
                                 if let items = currentResults[kind], !items.isEmpty {
                                     section(kind, items: items)
                                 }
+                            }
+                            if isSearchingMessages {
+                                searchProgressRow
+                            } else if messageSearchError != nil {
+                                searchErrorRow
+                            } else if queryNeedsMoreCharacters {
+                                Text(messageSearchMinimum)
+                                    .font(MomoTheme.Typography.metadata)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if nextMessageCursor != nil {
+                                Button {
+                                    Task { await loadMoreMessages() }
+                                } label: {
+                                    if isLoadingMoreMessages {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    } else {
+                                        Label(loadMoreMessagesLabel, systemImage: "arrow.down.circle")
+                                    }
+                                }
+                                .disabled(isLoadingMoreMessages)
+                                .accessibilityLabel(loadMoreMessagesLabel)
+                                .accessibilityValue(isLoadingMoreMessages ? searchingMessages : "")
                             }
                         }
                         .padding(16)
@@ -245,7 +300,7 @@ struct MomoWorkspaceSearchView: View {
 
             Divider()
             HStack {
-                Label(localScope, systemImage: "macbook")
+                Label(searchScope, systemImage: searchScopeSystemImage)
                 Spacer()
                 Text("⌘F")
             }
@@ -270,12 +325,20 @@ struct MomoWorkspaceSearchView: View {
             isSearchFocused = true
             scheduleRefresh(immediately: true)
         }
-        .onChange(of: query) { _, _ in
+        .onChange(of: query) { _, newQuery in
+            serverMessages = newQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? nil
+                : []
+            isSearchingMessages = false
+            isLoadingMoreMessages = false
+            nextMessageCursor = nil
+            messageSearchError = nil
+            applyResults()
             scheduleRefresh()
         }
-        .onReceive(viewModel.$channels) { _ in scheduleRefresh() }
-        .onReceive(viewModel.$members) { _ in scheduleRefresh() }
-        .onReceive(viewModel.$messagesByChannel) { _ in scheduleRefresh() }
+        .onReceive(viewModel.$channels) { _ in applyResults() }
+        .onReceive(viewModel.$members) { _ in applyResults() }
+        .onReceive(viewModel.$messagesByChannel) { _ in applyResults() }
         .onDisappear { refreshTask?.cancel() }
         .onMoveCommand { direction in
             switch direction {
@@ -342,6 +405,55 @@ struct MomoWorkspaceSearchView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private var loadingState: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text(searchingMessages)
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var searchErrorState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(messageSearchErrorDetail, systemImage: "exclamationmark.triangle")
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+            Button(retrySearch) {
+                scheduleRefresh(immediately: true)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var searchProgressRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text(searchingMessages)
+        }
+        .font(MomoTheme.Typography.metadata)
+        .foregroundStyle(.secondary)
+    }
+
+    private var searchErrorRow: some View {
+        HStack(spacing: 8) {
+            Text(messageSearchErrorDetail)
+                .lineLimit(2)
+            Spacer()
+            Button(retrySearch) {
+                scheduleRefresh(immediately: true)
+            }
+            .controlSize(.small)
+        }
+        .font(MomoTheme.Typography.metadata)
+        .foregroundStyle(.secondary)
+    }
+
     private var recentChannelItems: [MomoWorkspaceSearchItem] {
         let rank = Dictionary(uniqueKeysWithValues: viewModel.recentChannelIds.enumerated().map { ($1, $0) })
         let channels = viewModel.channels.sorted { lhs, rhs in
@@ -371,20 +483,99 @@ struct MomoWorkspaceSearchView: View {
         refreshTask?.cancel()
         refreshTask = Task { @MainActor in
             if !immediately {
-                try? await Task.sleep(for: .milliseconds(120))
+                try? await Task.sleep(for: .milliseconds(300))
             }
             guard !Task.isCancelled else { return }
-            refreshResults()
+            await refreshResults()
         }
     }
 
-    private func refreshResults() {
+    private func refreshResults() async {
+        let requestedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchToken = UUID()
+        activeSearchToken = searchToken
+        serverMessages = requestedQuery.isEmpty ? nil : []
+        nextMessageCursor = nil
+        isSearchingMessages = requestedQuery.count >= 2
+        messageSearchError = nil
+        applyResults()
+
+        guard requestedQuery.count >= 2 else { return }
+        do {
+            let page = try await viewModel.searchWorkspaceMessagePage(
+                query: requestedQuery,
+                cursor: nil
+            )
+            guard !Task.isCancelled,
+                  activeSearchToken == searchToken,
+                  query.trimmingCharacters(in: .whitespacesAndNewlines) == requestedQuery
+            else { return }
+            serverMessages = page.messages
+            nextMessageCursor = page.nextCursor
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled,
+                  activeSearchToken == searchToken,
+                  query.trimmingCharacters(in: .whitespacesAndNewlines) == requestedQuery
+            else { return }
+            messageSearchError = error
+        }
+        isSearchingMessages = false
+        applyResults()
+    }
+
+    private func loadMoreMessages() async {
+        guard let cursor = nextMessageCursor,
+              !isLoadingMoreMessages
+        else { return }
+        let requestedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let searchToken = activeSearchToken
+        isLoadingMoreMessages = true
+        messageSearchError = nil
+        defer {
+            if activeSearchToken == searchToken {
+                isLoadingMoreMessages = false
+            }
+        }
+        do {
+            let page = try await viewModel.searchWorkspaceMessagePage(
+                query: requestedQuery,
+                cursor: cursor
+            )
+            guard !Task.isCancelled,
+                  activeSearchToken == searchToken,
+                  query.trimmingCharacters(in: .whitespacesAndNewlines) == requestedQuery,
+                  nextMessageCursor == cursor
+            else { return }
+            var seen = Set((serverMessages ?? []).map(\.id))
+            let additional = page.messages.filter { seen.insert($0.id).inserted }
+            let combined = (serverMessages ?? []) + additional
+            serverMessages = Array(combined.prefix(MomoWorkspaceSearchIndex.maximumServerMessageResults))
+            nextMessageCursor = combined.count >= MomoWorkspaceSearchIndex.maximumServerMessageResults
+                ? nil
+                : page.nextCursor
+            applyResults()
+        } catch is CancellationError {
+            return
+        } catch {
+            guard activeSearchToken == searchToken,
+                  query.trimmingCharacters(in: .whitespacesAndNewlines) == requestedQuery,
+                  nextMessageCursor == cursor
+            else { return }
+            messageSearchError = error
+            applyResults()
+        }
+    }
+
+    private func applyResults() {
         searchResults = MomoWorkspaceSearchIndex.results(
             query: query,
             channels: viewModel.channels,
             members: viewModel.members,
             currentMemberID: viewModel.currentNavigationMemberID,
-            messagesByChannel: viewModel.messagesByChannel
+            messagesByChannel: viewModel.messagesByChannel,
+            serverMessages: serverMessages
         )
         let items = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? recentChannelItems
@@ -416,9 +607,37 @@ struct MomoWorkspaceSearchView: View {
     private var isKorean: Bool { copy.language == .korean }
     private var searchTitle: String { isKorean ? "워크스페이스 검색" : "Search workspace" }
     private var searchPlaceholder: String { isKorean ? "채널, 멤버, 메시지 또는 파일 검색" : "Search channels, members, messages, or files" }
-    private var searchHint: String { isKorean ? "이 Mac에 불러온 대화와 파일 이름을 한곳에서 찾습니다." : "Find conversations and file names loaded on this Mac." }
+    private var searchHint: String { isKorean ? "워크스페이스 메시지와 이 Mac에 불러온 파일 이름을 한곳에서 찾습니다." : "Find workspace messages and file names loaded on this Mac." }
     private var noResults: String { isKorean ? "검색 결과 없음" : "No results" }
-    private var localScope: String { isKorean ? "현재 불러온 대화에서 검색" : "Searching loaded conversations" }
+    private var searchScope: String {
+        if viewModel.usesServerWorkspaceMessageSearch {
+            return isKorean
+                ? "워크스페이스 메시지 · 이 Mac에 불러온 파일"
+                : "Workspace messages · Files loaded on this Mac"
+        }
+        return isKorean
+            ? "이 Mac에 불러온 대화와 파일"
+            : "Conversations and files loaded on this Mac"
+    }
+    private var searchScopeSystemImage: String {
+        viewModel.usesServerWorkspaceMessageSearch ? "server.rack" : "macbook"
+    }
+    private var searchingMessages: String { isKorean ? "워크스페이스 메시지 검색 중" : "Searching workspace messages" }
+    private var loadMoreMessagesLabel: String { isKorean ? "메시지 더 보기" : "Load more messages" }
+    private var messageSearchMinimum: String { isKorean ? "메시지는 두 글자 이상 입력해 검색하세요" : "Enter at least two characters to search messages" }
+    private var localSearchStillAvailable: String { isKorean ? "채널, 멤버와 불러온 파일 이름은 한 글자부터 검색할 수 있습니다." : "Channels, members, and loaded file names can be searched with one character." }
+    private var retrySearch: String { isKorean ? "검색 다시 시도" : "Retry search" }
+    private var messageSearchErrorDetail: String {
+        if let backendError = messageSearchError as? BackendError,
+           backendError == .notConnected {
+            return isKorean
+                ? "서버에 연결한 뒤 워크스페이스 메시지를 검색할 수 있습니다."
+                : "Connect to the server to search workspace messages."
+        }
+        return isKorean
+            ? "메시지 검색 결과를 불러오지 못했습니다. 다시 시도해 주세요."
+            : "Message search results could not be loaded. Try again."
+    }
     private var selectedLabel: String { isKorean ? "선택됨" : "Selected" }
     private var recentChannelLabel: String { isKorean ? "최근 채널" : "Recent channel" }
     private var directMessageLabel: String { isKorean ? "다이렉트 메시지" : "Direct message" }

@@ -1,13 +1,32 @@
 import SwiftUI
 import MomoCore
 
+enum MomoPluginMarketplaceControlLayout {
+    static let searchMinimumWidth = MomoTheme.PluginMarketplace.scopePickerWidth
+    static let refreshMinimumSize = MomoTheme.MessageInteraction.actionMinimumSize
+
+    static var wideMinimumContentWidth: CGFloat {
+        searchMinimumWidth
+            + MomoTheme.PluginMarketplace.contentSpacing
+            + MomoTheme.PluginMarketplace.gridMinimumWidth
+            + MomoTheme.PluginMarketplace.contentSpacing
+            + refreshMinimumSize
+    }
+
+    static var compactMinimumContentWidth: CGFloat {
+        searchMinimumWidth
+            + MomoTheme.PluginMarketplace.contentSpacing
+            + refreshMinimumSize
+    }
+}
+
 struct MomoPluginMarketplaceView: View {
     @Environment(\.momoCenterHeaderLeadingInset) private var centerHeaderLeadingInset
-    private static let pluginIconSize = MomoTheme.WorkspaceSearch.rowMinimumHeight
 
-    private enum Scope: String, CaseIterable, Identifiable {
-        case workspace
-        case personal
+    private enum CatalogFilter: String, CaseIterable, Identifiable {
+        case all
+        case installed
+        case granted
 
         var id: String { rawValue }
     }
@@ -16,40 +35,71 @@ struct MomoPluginMarketplaceView: View {
     let serverIdentity: String?
     let workspaceID: WorkspaceID?
     let memberID: MemberID?
+    let apiContext: MomoInviteAdminContext?
+    let canManageWorkspace: Bool
+    let onOpenChannelIntegrations: (() -> Void)?
     let onClose: () -> Void
 
+    @StateObject private var store: MomoPluginMarketplaceStore
     @State private var query = ""
-    @State private var scope = Scope.workspace
-    @State private var selectedCategory: MomoPluginCatalogItem.Category?
-    @State private var showsInstalledOnly = false
-    @State private var installedPluginIDs: Set<String> = []
+    @State private var filter = CatalogFilter.all
+    @State private var pendingRemoval: MomoPluginCatalogEntry?
 
-    private var copy: MomoComposerActionCopy { .init(language: language) }
+    init(
+        language: MomoUILanguage,
+        serverIdentity: String?,
+        workspaceID: WorkspaceID?,
+        memberID: MemberID?,
+        apiContext: MomoInviteAdminContext? = nil,
+        canManageWorkspace: Bool = false,
+        onOpenChannelIntegrations: (() -> Void)? = nil,
+        service: any MomoPluginMarketplaceService = MomoPluginMarketplaceRESTService(),
+        onClose: @escaping () -> Void
+    ) {
+        self.language = language
+        self.serverIdentity = serverIdentity
+        self.workspaceID = workspaceID
+        self.memberID = memberID
+        self.apiContext = apiContext
+        self.canManageWorkspace = canManageWorkspace
+        self.onOpenChannelIntegrations = onOpenChannelIntegrations
+        self.onClose = onClose
+        _store = StateObject(wrappedValue: MomoPluginMarketplaceStore(
+            service: service,
+            context: apiContext
+        ))
+    }
+
     private var isKorean: Bool { language == .korean }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.edgeInset) {
-                    searchField
-                    installedSection
-                    catalogControls
-                    catalogSections
-                }
-                .frame(maxWidth: MomoTheme.PluginMarketplace.contentMaximumWidth, alignment: .leading)
-                .padding(.horizontal, MomoTheme.PluginMarketplace.edgeInset)
-                .padding(.vertical, MomoTheme.PluginMarketplace.edgeInset)
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
+            content
         }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
-        .onAppear(perform: loadInstalledPlugins)
-        .onChange(of: scope) { _, _ in loadInstalledPlugins() }
-        .onChange(of: storageIdentity) { _, _ in loadInstalledPlugins() }
-        .onChange(of: installedPluginIDs) { _, _ in saveInstalledPlugins() }
+        .task(id: apiContext) {
+            await store.updateContext(apiContext)
+        }
+        .confirmationDialog(
+            pendingRemoval.map { removalTitle($0) } ?? removalTitle(nil),
+            isPresented: Binding(
+                get: { pendingRemoval != nil },
+                set: { if !$0 { pendingRemoval = nil } }
+            ),
+            presenting: pendingRemoval
+        ) { plugin in
+            Button(removalActionTitle(plugin), role: .destructive) {
+                pendingRemoval = nil
+                Task { await store.revokeInstall(plugin) }
+            }
+            Button(isKorean ? "취소" : "Cancel", role: .cancel) {
+                pendingRemoval = nil
+            }
+        } message: { plugin in
+            Text(removalMessage(plugin))
+        }
         .accessibilityIdentifier("plugin-marketplace")
     }
 
@@ -60,30 +110,28 @@ struct MomoPluginMarketplaceView: View {
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(.plain)
+            .keyboardShortcut(.cancelAction)
             .help(isKorean ? "채널로 돌아가기" : "Back to channel")
 
-            HStack(alignment: .firstTextBaseline, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+            VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.compactSpacing) {
                 Text(isKorean ? "플러그인" : "Plugins")
                     .font(.title2.weight(.semibold))
-                    .fixedSize(horizontal: true, vertical: false)
-                Text(isKorean ? "업무 도구를 연결하고 에이전트와 함께 사용하세요" : "Connect work tools and use them with agents")
+                Text(isKorean
+                    ? "워크스페이스 도구와 내 사용 권한을 관리합니다"
+                    : "Manage workspace tools and your access")
                     .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
             }
-            Spacer()
-            Button {
-                showsInstalledOnly.toggle()
-            } label: {
-                Label(
-                    showsInstalledOnly
-                        ? (isKorean ? "모든 플러그인 보기" : "Show all plugins")
-                        : (isKorean ? "설치됨만 보기" : "Show installed only"),
-                    systemImage: showsInstalledOnly ? "square.grid.2x2" : "checkmark.circle"
-                )
+
+            Spacer(minLength: MomoTheme.PluginMarketplace.standardSpacing)
+
+            if let serverLabel {
+                Label(serverLabel, systemImage: "server.rack")
+                    .font(MomoTheme.Typography.supporting)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .buttonStyle(.bordered)
         }
         .padding(
             .leading,
@@ -97,205 +145,207 @@ struct MomoPluginMarketplaceView: View {
         .frame(minHeight: MomoWindowChromeLayout.integratedHeaderHeight)
     }
 
-    private var searchField: some View {
-        // The centered catalog search is wider than the native toolbar search placement can express.
-        HStack(spacing: MomoTheme.PluginMarketplace.standardSpacing) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField(copy.pluginSearch, text: $query)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .accessibilityIdentifier("plugin-marketplace-search")
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(isKorean ? "검색어 지우기" : "Clear search")
-            }
-        }
-        .padding(.horizontal, MomoTheme.PluginMarketplace.sectionSpacing)
-        .frame(height: MomoTheme.WorkspaceSearch.rowMinimumHeight)
-        .background(MomoTheme.PluginMarketplace.searchBackground, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
-        .overlay {
-            RoundedRectangle(cornerRadius: MomoTheme.cornerSmall)
-                .stroke(MomoTheme.subtleBorder, lineWidth: 1)
+    @ViewBuilder
+    private var content: some View {
+        switch store.phase {
+        case .idle, .loading:
+            stateView(
+                title: isKorean ? "플러그인을 불러오는 중" : "Loading plugins",
+                description: isKorean
+                    ? "워크스페이스 카탈로그와 내 권한을 확인하고 있습니다."
+                    : "Checking the workspace catalog and your access.",
+                systemImage: "puzzlepiece.extension",
+                showsProgress: true
+            )
+        case .unavailable:
+            stateView(
+                title: isKorean ? "실서버 세션이 필요합니다" : "A live server session is required",
+                description: isKorean
+                    ? "채널로 돌아가 서버에 로그인한 뒤 플러그인을 다시 여세요."
+                    : "Return to the channel, sign in to a server, then open Plugins again.",
+                systemImage: "person.crop.circle.badge.exclamationmark",
+                secondaryActionTitle: isKorean ? "채널로 돌아가기" : "Back to channel",
+                secondaryAction: onClose
+            )
+        case .offline:
+            stateView(
+                title: isKorean ? "서버에 연결되어 있지 않습니다" : "Server connection unavailable",
+                description: isKorean
+                    ? "실서버 세션에 연결한 뒤 플러그인 목록을 다시 불러오세요."
+                    : "Connect a live server session, then load the plugin catalog again.",
+                systemImage: "network.slash",
+                primaryActionTitle: isKorean ? "다시 불러오기" : "Reload",
+                primaryAction: { Task { await store.retry() } },
+                secondaryActionTitle: isKorean ? "채널로 돌아가기" : "Back to channel",
+                secondaryAction: onClose
+            )
+        case let .failed(error):
+            stateView(
+                title: catalogFailureTitle(error),
+                description: catalogFailureDescription(error),
+                systemImage: "exclamationmark.triangle",
+                primaryActionTitle: isKorean ? "다시 불러오기" : "Reload",
+                primaryAction: { Task { await store.retry() } },
+                secondaryActionTitle: isKorean ? "채널로 돌아가기" : "Back to channel",
+                secondaryAction: onClose
+            )
+        case .loaded:
+            catalog
         }
     }
 
-    @ViewBuilder
-    private var installedSection: some View {
-        VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
-            sectionTitle(isKorean ? "설치됨" : "Installed")
-            if installedPlugins.isEmpty {
-                HStack(spacing: MomoTheme.PluginMarketplace.standardSpacing) {
-                    Image(systemName: "puzzlepiece.extension")
-                        .foregroundStyle(.secondary)
-                    Text(isKorean ? "아직 선택한 플러그인이 없습니다. 아래에서 업무 도구를 추가해보세요." : "No plugins selected yet. Add a work tool below.")
-                        .font(MomoTheme.Typography.supporting)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.vertical, MomoTheme.PluginMarketplace.standardSpacing)
+    private var catalog: some View {
+        VStack(spacing: 0) {
+            catalogControls
+            Divider()
+            if let failure = store.actionFailure {
+                actionFailureBanner(failure)
+                Divider()
+            }
+            if visiblePlugins.isEmpty {
+                emptyState
             } else {
-                ScrollView(.horizontal) {
-                    HStack(spacing: MomoTheme.PluginMarketplace.standardSpacing) {
-                        ForEach(installedPlugins) { plugin in
-                            pluginIcon(plugin, size: Self.pluginIconSize)
-                                .help(plugin.name)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel(plugin.name)
-                        }
-                    }
-                }
-                .scrollIndicators(.hidden)
+                pluginList
             }
         }
     }
 
     private var catalogControls: some View {
-        HStack {
-            Picker("", selection: $scope) {
-                Text(isKorean ? "워크스페이스" : "Workspace").tag(Scope.workspace)
-                Text(isKorean ? "개인용" : "Personal").tag(Scope.personal)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(
-                width: MomoTheme.PluginMarketplace.scopePickerWidth,
-                alignment: .leading
-            )
-            .accessibilityLabel(isKorean ? "플러그인 범위" : "Plugin scope")
+        ViewThatFits(in: .horizontal) {
+            wideCatalogControls
+            compactCatalogControls
+        }
+        .padding(.horizontal, MomoTheme.PluginMarketplace.edgeInset)
+        .padding(.vertical, MomoTheme.PluginMarketplace.contentSpacing)
+        .frame(maxWidth: MomoTheme.PluginMarketplace.contentMaximumWidth)
+        .frame(maxWidth: .infinity)
+    }
 
-            Spacer()
+    private var wideCatalogControls: some View {
+        HStack(spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+            catalogSearchField
+                .frame(minWidth: MomoPluginMarketplaceControlLayout.searchMinimumWidth)
 
-            Menu {
-                Button {
-                    selectedCategory = nil
-                } label: {
-                    if selectedCategory == nil {
-                        Label(isKorean ? "전체" : "All", systemImage: "checkmark")
-                    } else {
-                        Text(isKorean ? "전체" : "All")
-                    }
-                }
-                ForEach(MomoPluginCatalogItem.Category.allCases, id: \.self) { category in
-                    Button {
-                        selectedCategory = category
-                    } label: {
-                        if selectedCategory == category {
-                            Label(categoryTitle(category), systemImage: "checkmark")
-                        } else {
-                            Text(categoryTitle(category))
-                        }
-                    }
-                }
-            } label: {
-                Label(isKorean ? "분류" : "Categories", systemImage: "line.3.horizontal.decrease")
-                    .labelStyle(.iconOnly)
-            }
-            .menuStyle(.borderlessButton)
-            .help(isKorean ? "분류" : "Categories")
+            catalogFilterPicker
+                .frame(width: MomoTheme.PluginMarketplace.gridMinimumWidth)
 
-            Label(
-                serverIdentity == nil
-                    ? (isKorean ? "로컬 미리보기" : "Local preview")
-                    : (isKorean ? "이 Mac에 선택 저장" : "Selections saved on this Mac"),
-                systemImage: "macbook"
-            )
-            .font(MomoTheme.Typography.supporting)
-            .foregroundStyle(.secondary)
+            refreshCatalogButton
         }
     }
 
-    @ViewBuilder
-    private var catalogSections: some View {
-        if filteredPlugins.isEmpty {
-            ContentUnavailableView(
-                emptyTitle,
-                systemImage: showsInstalledOnly ? "checkmark.circle" : "magnifyingglass",
-                description: Text(emptyDescription)
-            )
-            .frame(maxWidth: .infinity, minHeight: MomoTheme.PluginMarketplace.emptyMinimumHeight)
-        } else {
-            ForEach(visibleCategories, id: \.self) { category in
-                let plugins = filteredPlugins.filter { plugin in
-                    if category == .featured {
-                        return plugin.isFeatured
-                    }
-                    // The default catalog gives featured tools one clear home. A user-selected
-                    // category still reveals every matching tool, including featured entries.
-                    return plugin.category == category && (selectedCategory != nil || !plugin.isFeatured)
-                }
-                if !plugins.isEmpty {
-                    VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
-                        sectionTitle(categoryTitle(category))
-                        LazyVGrid(columns: gridColumns, spacing: MomoTheme.PluginMarketplace.standardSpacing) {
-                            ForEach(plugins) { plugin in
-                                pluginRow(plugin)
-                            }
-                        }
+    private var compactCatalogControls: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+            HStack(spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+                catalogSearchField
+                    .frame(minWidth: MomoPluginMarketplaceControlLayout.searchMinimumWidth)
+                refreshCatalogButton
+            }
+
+            catalogFilterPicker
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var catalogSearchField: some View {
+        TextField(
+            isKorean ? "플러그인 검색" : "Search plugins",
+            text: $query
+        )
+        .textFieldStyle(.roundedBorder)
+        .accessibilityIdentifier("plugin-marketplace-search")
+    }
+
+    private var catalogFilterPicker: some View {
+        Picker(isKorean ? "플러그인 보기" : "Plugin view", selection: $filter) {
+            Text(isKorean ? "전체" : "All").tag(CatalogFilter.all)
+            Text(isKorean ? "설치됨" : "Installed").tag(CatalogFilter.installed)
+            Text(isKorean ? "내 권한" : "My access").tag(CatalogFilter.granted)
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("plugin-marketplace-filter")
+    }
+
+    private var refreshCatalogButton: some View {
+        Button {
+            Task { await store.retry() }
+        } label: {
+            Label(isKorean ? "카탈로그 새로고침" : "Refresh catalog", systemImage: "arrow.clockwise")
+                .labelStyle(.iconOnly)
+                .frame(
+                    minWidth: MomoPluginMarketplaceControlLayout.refreshMinimumSize,
+                    minHeight: MomoPluginMarketplaceControlLayout.refreshMinimumSize
+                )
+        }
+        .accessibilityIdentifier("plugin-marketplace-refresh")
+        .keyboardShortcut("r", modifiers: .command)
+        .help(isKorean ? "카탈로그 새로고침" : "Refresh catalog")
+    }
+
+    private var pluginList: some View {
+        List {
+            if !recommendedPlugins.isEmpty {
+                Section(isKorean ? "추천" : "Recommended") {
+                    ForEach(recommendedPlugins) { plugin in
+                        pluginRow(plugin)
                     }
                 }
             }
 
-            Label(
-                isKorean ? "현재 선택 상태는 이 Mac에 저장됩니다. 서버 권한과 실제 연결은 엔진 연동 후 활성화됩니다." : "Selections are stored on this Mac. Server grants and live connections activate when the engine is linked.",
-                systemImage: "info.circle"
-            )
-            .font(MomoTheme.Typography.supporting)
-            .foregroundStyle(.secondary)
+            if !otherPlugins.isEmpty {
+                Section(isKorean ? "모든 플러그인" : "All plugins") {
+                    ForEach(otherPlugins) { plugin in
+                        pluginRow(plugin)
+                    }
+                }
+            }
         }
+        .listStyle(.inset)
+        .frame(maxWidth: MomoTheme.PluginMarketplace.contentMaximumWidth)
+        .frame(maxWidth: .infinity)
     }
 
-    private func pluginRow(_ plugin: MomoPluginCatalogItem) -> some View {
-        let isInstalled = installedPluginIDs.contains(plugin.id)
-        return HStack(spacing: MomoTheme.PluginMarketplace.contentSpacing) {
-            pluginIcon(plugin, size: Self.pluginIconSize)
+    private func pluginRow(_ plugin: MomoPluginCatalogEntry) -> some View {
+        HStack(alignment: .top, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+            pluginIcon(plugin)
 
             VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.compactSpacing) {
-                Text(plugin.name)
-                    .font(MomoTheme.Typography.emphasizedRow)
-                Text(isKorean ? plugin.koreanSummary : plugin.englishSummary)
+                HStack(spacing: MomoTheme.PluginMarketplace.standardSpacing) {
+                    Text(plugin.name)
+                        .font(MomoTheme.Typography.emphasizedRow)
+                    if plugin.official {
+                        Label(isKorean ? "공식" : "Official", systemImage: "checkmark.seal")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text(plugin.description)
                     .font(MomoTheme.Typography.supporting)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Text(plugin.capabilities(for: language).joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
+                    .lineLimit(3)
+
+                pluginStatus(plugin)
+                pluginScope(plugin)
             }
 
             Spacer(minLength: MomoTheme.PluginMarketplace.standardSpacing)
-
-            if isInstalled {
-                Button(isKorean ? "제거" : "Remove") {
-                    installedPluginIDs.remove(plugin.id)
+            pluginActions(plugin)
+        }
+        .padding(.vertical, MomoTheme.PluginMarketplace.standardSpacing)
+        .contentShape(Rectangle())
+        .task(id: "\(plugin.id):\(store.detailRevision)") {
+            await store.loadDetail(for: plugin)
+        }
+        .contextMenu {
+            if plugin.installed, canManageWorkspace, !plugin.isChannelIntegration {
+                Button(removalActionTitle(plugin), role: .destructive) {
+                    pendingRemoval = plugin
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .accessibilityLabel(isKorean ? "\(plugin.name) 제거" : "Remove \(plugin.name)")
-            } else {
-                Button(copy.install) {
-                    installedPluginIDs.insert(plugin.id)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityLabel(isKorean ? "\(plugin.name) 설치" : "Install \(plugin.name)")
             }
         }
-        .padding(.horizontal, MomoTheme.PluginMarketplace.compactSpacing)
-        .padding(.vertical, MomoTheme.PluginMarketplace.contentSpacing)
-        .frame(minHeight: MomoTheme.PluginMarketplace.rowMinimumHeight)
-        .overlay(alignment: .bottom) {
-            Divider()
-        }
-        .contentShape(Rectangle())
     }
 
-    private func pluginIcon(_ plugin: MomoPluginCatalogItem, size: CGFloat) -> some View {
+    private func pluginIcon(_ plugin: MomoPluginCatalogEntry) -> some View {
         RoundedRectangle(cornerRadius: MomoTheme.cornerSmall)
             .fill(MomoTheme.PluginMarketplace.iconBackground)
             .overlay {
@@ -303,95 +353,382 @@ struct MomoPluginMarketplaceView: View {
                     .font(.title3.weight(.medium))
                     .foregroundStyle(MomoTheme.PluginMarketplace.iconForeground)
             }
-            .frame(width: size, height: size)
+            .frame(
+                width: MomoTheme.WorkspaceSearch.rowMinimumHeight,
+                height: MomoTheme.WorkspaceSearch.rowMinimumHeight
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: MomoTheme.cornerSmall)
                     .stroke(MomoTheme.subtleBorder, lineWidth: 1)
             }
+            .accessibilityHidden(true)
     }
 
-    private func sectionTitle(_ title: String) -> some View {
-        Text(title)
-            .font(.headline)
+    private func pluginStatus(_ plugin: MomoPluginCatalogEntry) -> some View {
+        HStack(spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+            if plugin.isChannelIntegration {
+                Label(isKorean ? "채널 통합" : "Channel integration", systemImage: "number")
+            } else if plugin.installed && plugin.enabled {
+                Label(isKorean ? "워크스페이스에 설치됨" : "Installed for workspace", systemImage: "checkmark.circle")
+            } else if plugin.installed {
+                Label(isKorean ? "설치됨, 비활성" : "Installed, disabled", systemImage: "pause.circle")
+            } else {
+                Label(isKorean ? "설치되지 않음" : "Not installed", systemImage: "circle")
+            }
+
+            if store.grantedPluginIDs.contains(plugin.id) {
+                Label(isKorean ? "내 사용 권한 있음" : "Access granted to me", systemImage: "person.badge.key")
+                    .foregroundStyle(MomoTheme.reversibleGreen)
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
-    private var filteredPlugins: [MomoPluginCatalogItem] {
-        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return MomoPluginCatalogItem.recommended.filter { plugin in
-            let matchesCategory = selectedCategory.map { category in
-                category == .featured ? plugin.isFeatured : plugin.category == category
-            } ?? true
-            let matchesInstalled = !showsInstalledOnly || installedPluginIDs.contains(plugin.id)
-            let matchesQuery = normalized.isEmpty
-                || plugin.name.localizedCaseInsensitiveContains(normalized)
-                || (isKorean ? plugin.koreanSummary : plugin.englishSummary).localizedCaseInsensitiveContains(normalized)
-                || plugin.capabilities(for: language).contains { $0.localizedCaseInsensitiveContains(normalized) }
-            return matchesCategory && matchesInstalled && matchesQuery
+    @ViewBuilder
+    private func pluginScope(_ plugin: MomoPluginCatalogEntry) -> some View {
+        if !plugin.isChannelIntegration {
+            if let detail = store.details[plugin.id] {
+                if let scope = detail.singleDeclaredScope {
+                    Label(scopeTitle(scope), systemImage: "key")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label(
+                        isKorean
+                            ? "여러 권한 범위는 아직 지원하지 않습니다"
+                            : "Multiple permission scopes are not supported yet",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(MomoTheme.costAmber)
+                }
+            } else if store.detailLoadingPluginIDs.contains(plugin.id) {
+                HStack(spacing: MomoTheme.PluginMarketplace.standardSpacing) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(isKorean ? "권한 정보 확인 중" : "Checking permissions")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if store.detailFailures[plugin.id] != nil {
+                Button(isKorean ? "권한 정보 다시 불러오기" : "Reload permission details") {
+                    Task { await store.loadDetail(for: plugin) }
+                }
+                .buttonStyle(.link)
+                .controlSize(.small)
+            }
         }
     }
 
-    private var installedPlugins: [MomoPluginCatalogItem] {
-        MomoPluginCatalogItem.recommended.filter { installedPluginIDs.contains($0.id) }
+    @ViewBuilder
+    private func pluginActions(_ plugin: MomoPluginCatalogEntry) -> some View {
+        if store.isMutating(plugin) {
+            ProgressView()
+                .controlSize(.small)
+                .frame(minWidth: MomoTheme.PluginMarketplace.scopePickerWidth)
+                .accessibilityLabel(isKorean ? "플러그인 상태 변경 중" : "Updating plugin")
+        } else if plugin.isChannelIntegration {
+            Button(isKorean ? "채널 통합 열기" : "Open channel integrations") {
+                onOpenChannelIntegrations?()
+            }
+            .buttonStyle(.bordered)
+            .disabled(onOpenChannelIntegrations == nil)
+            .help(channelIntegrationHelp)
+        } else if !plugin.installed || !plugin.enabled {
+            VStack(alignment: .trailing, spacing: MomoTheme.PluginMarketplace.standardSpacing) {
+                Button(plugin.installed
+                    ? (isKorean ? "다시 활성화" : "Enable again")
+                    : (isKorean ? "워크스페이스에 설치" : "Install for workspace")) {
+                    Task { await store.install(plugin) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canManageWorkspace)
+
+                if !canManageWorkspace {
+                    Text(isKorean ? "관리자 설치 필요" : "Admin installation required")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        } else {
+            HStack(spacing: MomoTheme.PluginMarketplace.standardSpacing) {
+                Button(store.grantedPluginIDs.contains(plugin.id)
+                    ? (isKorean ? "내 권한 회수" : "Revoke my access")
+                    : (isKorean ? "내 사용 허용" : "Grant me access")) {
+                    Task { await store.toggleGrant(for: plugin) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(store.details[plugin.id]?.singleDeclaredScope == nil)
+
+                if canManageWorkspace {
+                    Menu {
+                        Button(removalActionTitle(plugin), role: .destructive) {
+                            pendingRemoval = plugin
+                        }
+                    } label: {
+                        Label(isKorean ? "플러그인 작업" : "Plugin actions", systemImage: "ellipsis.circle")
+                            .labelStyle(.iconOnly)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .help(isKorean ? "플러그인 작업" : "Plugin actions")
+                }
+            }
+        }
     }
 
-    private var visibleCategories: [MomoPluginCatalogItem.Category] {
-        selectedCategory.map { [$0] } ?? [.featured, .productivity, .knowledge, .developer]
+    private func actionFailureBanner(_ error: MomoPluginMarketplaceError) -> some View {
+        HStack(alignment: .top, spacing: MomoTheme.PluginMarketplace.contentSpacing) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(MomoTheme.irreversibleRed)
+            VStack(alignment: .leading, spacing: MomoTheme.PluginMarketplace.compactSpacing) {
+                Text(actionFailureTitle(error))
+                    .font(.body.weight(.semibold))
+                Text(actionFailureDescription(error))
+                    .font(MomoTheme.Typography.supporting)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(isKorean ? "오류 닫기" : "Dismiss error") {
+                store.dismissActionFailure()
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, MomoTheme.PluginMarketplace.edgeInset)
+        .padding(.vertical, MomoTheme.PluginMarketplace.contentSpacing)
+        .frame(maxWidth: MomoTheme.PluginMarketplace.contentMaximumWidth)
+        .frame(maxWidth: .infinity)
+        .background(.regularMaterial)
+    }
+
+    private var emptyState: some View {
+        ContentUnavailableView {
+            Label(emptyTitle, systemImage: "puzzlepiece.extension")
+        } description: {
+            Text(emptyDescription)
+        } actions: {
+            Button(emptyActionTitle) {
+                if store.plugins.isEmpty {
+                    Task { await store.retry() }
+                } else {
+                    query = ""
+                    filter = .all
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func stateView(
+        title: String,
+        description: String,
+        systemImage: String,
+        showsProgress: Bool = false,
+        primaryActionTitle: String? = nil,
+        primaryAction: (() -> Void)? = nil,
+        secondaryActionTitle: String? = nil,
+        secondaryAction: (() -> Void)? = nil
+    ) -> some View {
+        ContentUnavailableView {
+            Label(title, systemImage: systemImage)
+        } description: {
+            Text(description)
+        } actions: {
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            if let primaryActionTitle, let primaryAction {
+                Button(primaryActionTitle, action: primaryAction)
+                    .buttonStyle(.borderedProminent)
+            }
+            if let secondaryActionTitle, let secondaryAction {
+                Button(secondaryActionTitle, action: secondaryAction)
+                    .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var visiblePlugins: [MomoPluginCatalogEntry] {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return store.plugins.filter { plugin in
+            let matchesFilter: Bool
+            switch filter {
+            case .all:
+                matchesFilter = true
+            case .installed:
+                matchesFilter = plugin.installed
+            case .granted:
+                matchesFilter = store.grantedPluginIDs.contains(plugin.id)
+            }
+            let matchesQuery = normalizedQuery.isEmpty
+                || plugin.name.localizedCaseInsensitiveContains(normalizedQuery)
+                || plugin.description.localizedCaseInsensitiveContains(normalizedQuery)
+                || plugin.recommendedFor.contains {
+                    $0.localizedCaseInsensitiveContains(normalizedQuery)
+                }
+            return matchesFilter && matchesQuery
+        }
+    }
+
+    private var recommendedPlugins: [MomoPluginCatalogEntry] {
+        visiblePlugins.filter(\.recommended)
+    }
+
+    private var otherPlugins: [MomoPluginCatalogEntry] {
+        visiblePlugins.filter { !$0.recommended }
+    }
+
+    private var serverLabel: String? {
+        guard let serverIdentity,
+              let url = URL(string: serverIdentity),
+              let host = url.host
+        else { return nil }
+        return host
     }
 
     private var emptyTitle: String {
-        if showsInstalledOnly && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return isKorean ? "설치된 플러그인이 없습니다" : "No installed plugins"
+        if store.plugins.isEmpty {
+            return isKorean ? "카탈로그가 비어 있습니다" : "The catalog is empty"
         }
-        return isKorean ? "검색 결과가 없습니다" : "No plugins found"
+        return isKorean ? "조건에 맞는 플러그인이 없습니다" : "No plugins match"
     }
 
     private var emptyDescription: String {
-        if showsInstalledOnly && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return isKorean ? "모든 플러그인 보기에서 업무 도구를 설치해보세요." : "Install a work tool from Show all plugins."
+        if store.plugins.isEmpty {
+            return isKorean
+                ? "서버 카탈로그를 새로고침해 등록된 도구를 확인하세요."
+                : "Refresh the server catalog to check for registered tools."
         }
-        return isKorean ? "다른 이름이나 기능으로 검색해보세요." : "Try another name or capability."
+        return isKorean
+            ? "검색어를 지우거나 다른 보기 조건을 선택하세요."
+            : "Clear the search or choose another view."
     }
 
-    private func categoryTitle(_ category: MomoPluginCatalogItem.Category) -> String {
-        switch category {
-        case .featured: return isKorean ? "추천" : "Featured"
-        case .productivity: return isKorean ? "생산성" : "Productivity"
-        case .knowledge: return isKorean ? "지식" : "Knowledge"
-        case .developer: return isKorean ? "개발" : "Developer"
+    private var emptyActionTitle: String {
+        store.plugins.isEmpty
+            ? (isKorean ? "카탈로그 새로고침" : "Refresh catalog")
+            : (isKorean ? "필터 지우기" : "Clear filters")
+    }
+
+    private var channelIntegrationHelp: String {
+        if onOpenChannelIntegrations == nil {
+            return isKorean
+                ? "현재 채널을 선택한 뒤 채널 통합에서 웹훅을 관리하세요."
+                : "Select a channel, then manage webhooks in channel integrations."
+        }
+        return isKorean
+            ? "현재 채널의 수신 웹훅 설정을 엽니다."
+            : "Open incoming webhook settings for the current channel."
+    }
+
+    private func scopeTitle(_ scope: String) -> String {
+        let parts = scope.split(separator: ":", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else {
+            return isKorean ? "사용 권한 1개" : "One permission scope"
+        }
+        let resource = parts[0].replacingOccurrences(of: "_", with: " ").capitalized
+        switch parts[1] {
+        case "read":
+            return isKorean ? "\(resource) 읽기 권한" : "Read access to \(resource)"
+        case "write":
+            return isKorean ? "\(resource) 쓰기 권한" : "Write access to \(resource)"
+        default:
+            return isKorean ? "\(resource) 사용 권한" : "Access to \(resource)"
         }
     }
 
-    private var gridColumns: [GridItem] {
-        [GridItem(
-            .adaptive(minimum: MomoTheme.PluginMarketplace.gridMinimumWidth),
-            spacing: MomoTheme.PluginMarketplace.standardSpacing
-        )]
+    private func catalogFailureTitle(_ error: MomoPluginMarketplaceError) -> String {
+        if case let .http(status, _) = error, status == 403 {
+            return isKorean ? "카탈로그를 볼 권한이 없습니다" : "Catalog access denied"
+        }
+        if case let .http(status, _) = error, status == 401 {
+            return isKorean ? "로그인이 만료되었습니다" : "Your session expired"
+        }
+        return isKorean ? "플러그인을 불러오지 못했습니다" : "Plugins could not be loaded"
     }
 
-    private var storageIdentity: String {
-        let rawServer = serverIdentity?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "demo"
-        let server = rawServer.data(using: .utf8)?.base64EncodedString() ?? "demo"
-        let workspace = workspaceID?.description ?? "demo"
-        let member = memberID?.description ?? "anonymous"
-        return "\(server).\(workspace).\(member)"
+    private func catalogFailureDescription(_ error: MomoPluginMarketplaceError) -> String {
+        if case let .http(status, _) = error, status == 403 {
+            return isKorean
+                ? "워크스페이스 관리자에게 플러그인 조회 권한을 요청하세요."
+                : "Ask a workspace administrator for plugin catalog access."
+        }
+        if case let .http(status, _) = error, status == 401 {
+            return isKorean
+                ? "다시 로그인한 뒤 카탈로그를 불러오세요."
+                : "Sign in again, then reload the catalog."
+        }
+        return isKorean
+            ? "서버 연결을 확인한 뒤 다시 불러오세요."
+            : "Check the server connection, then reload."
     }
 
-    private var storageKey: String {
-        let legacyWorkspaceKey = "momo.plugins.localSelected.v1.\(storageIdentity)"
-        switch scope {
-        case .workspace:
-            return legacyWorkspaceKey
-        case .personal:
-            return "\(legacyWorkspaceKey).personal"
+    private func actionFailureTitle(_ error: MomoPluginMarketplaceError) -> String {
+        switch error {
+        case .unsupportedScope:
+            return isKorean ? "이 권한 구성을 아직 지원하지 않습니다" : "This permission setup is not supported yet"
+        case .channelIntegrationRequired:
+            return isKorean ? "채널 통합에서 관리해야 합니다" : "Manage this from channel integrations"
+        case let .http(status, _) where status == 403:
+            return isKorean ? "이 작업을 할 권한이 없습니다" : "You do not have permission for this action"
+        case let .http(status, _) where status == 401:
+            return isKorean ? "로그인이 만료되었습니다" : "Your session expired"
+        case let .http(status, _) where status == 409:
+            return isKorean ? "플러그인 상태가 변경되었습니다" : "The plugin state changed"
+        default:
+            return isKorean ? "플러그인 상태를 변경하지 못했습니다" : "The plugin could not be updated"
         }
     }
 
-    private func loadInstalledPlugins() {
-        let raw = UserDefaults.standard.string(forKey: storageKey) ?? ""
-        installedPluginIDs = Set(raw.split(separator: "\n").map(String.init))
+    private func actionFailureDescription(_ error: MomoPluginMarketplaceError) -> String {
+        switch error {
+        case let .unsupportedScope(_, declaredCount):
+            return isKorean
+                ? "현재 앱은 플러그인당 권한 범위 1개만 처리합니다. 서버에 \(declaredCount)개가 선언되어 작업을 중단했습니다."
+                : "This app currently handles one scope per plugin. The server declared \(declaredCount), so no change was made."
+        case .channelIntegrationRequired:
+            return isKorean
+                ? "수신 웹훅은 현재 채널의 통합 설정에서 발급하고 회수하세요."
+                : "Create and revoke incoming webhooks from the current channel's integration settings."
+        case let .http(status, _) where status == 403:
+            return isKorean
+                ? "워크스페이스 관리자에게 필요한 역할을 요청하세요."
+                : "Ask a workspace administrator for the required role."
+        case let .http(status, _) where status == 401:
+            return isKorean
+                ? "다시 로그인한 뒤 플러그인 작업을 다시 시도하세요."
+                : "Sign in again, then retry the plugin action."
+        case let .http(status, _) where status == 409:
+            return isKorean
+                ? "카탈로그를 새로고침한 뒤 작업을 다시 시도하세요."
+                : "Refresh the catalog, then try the action again."
+        default:
+            return isKorean
+                ? "서버 연결을 확인한 뒤 같은 작업을 다시 시도하세요."
+                : "Check the server connection, then try the same action again."
+        }
     }
 
-    private func saveInstalledPlugins() {
-        UserDefaults.standard.set(installedPluginIDs.sorted().joined(separator: "\n"), forKey: storageKey)
+    private func removalTitle(_ plugin: MomoPluginCatalogEntry?) -> String {
+        guard let plugin else {
+            return isKorean ? "플러그인을 제거할까요?" : "Remove plugin?"
+        }
+        return isKorean
+            ? "\(plugin.name)을 워크스페이스에서 제거할까요?"
+            : "Remove \(plugin.name) from the workspace?"
+    }
+
+    private func removalActionTitle(_ plugin: MomoPluginCatalogEntry) -> String {
+        isKorean
+            ? "\(plugin.name) 제거"
+            : "Remove \(plugin.name)"
+    }
+
+    private func removalMessage(_ plugin: MomoPluginCatalogEntry) -> String {
+        isKorean
+            ? "모든 멤버의 \(plugin.name) 사용 권한도 함께 회수됩니다."
+            : "This also revokes \(plugin.name) access for every member."
     }
 }

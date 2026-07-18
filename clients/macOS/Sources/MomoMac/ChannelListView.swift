@@ -65,6 +65,7 @@ public struct ChannelListView: View {
     @State private var showChannelCreation = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
+    @State private var inviteDismissLocked = false
     @State private var showProfilePanel = false
     @State private var showWorkspaceMenu = false
     @State private var showMemberInvite = false
@@ -301,6 +302,16 @@ public struct ChannelListView: View {
 
     private var language: MomoUILanguage {
         MomoUILanguage(rawValue: languageRaw) ?? .preferredDefault
+    }
+
+    private var invitePopoverPresentation: Binding<Bool> {
+        Binding(
+            get: { showInvites },
+            set: { isPresented in
+                guard isPresented || !inviteDismissLocked else { return }
+                showInvites = isPresented
+            }
+        )
     }
 
     private var pluginMarketplaceRow: some View {
@@ -1193,9 +1204,13 @@ public struct ChannelListView: View {
             .padding(.horizontal, MomoTheme.Sidebar.edgeInset)
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $showInvites) {
+        .popover(isPresented: invitePopoverPresentation) {
             if let context = sessionChrome?.inviteAdminContext {
-                InviteAdminPopover(context: context)
+                InviteAdminPopover(
+                    context: context,
+                    language: language,
+                    dismissLocked: $inviteDismissLocked
+                )
             } else {
                 inviteGuidancePopover(copy: copy)
             }
