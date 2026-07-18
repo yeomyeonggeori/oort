@@ -36,4 +36,5 @@
 
 | # | 항목 | 상태 |
 |---|---|---|
-| D-1 | V-3b iOS 허들 참가 | in-progress (track/engine) |
+| D-1 | V-3b iOS 허들 참가 | done → track/engine `0176508` (main 대기) |
+| D-2 | 첨부 업로드 v0 (MOMO-474) | in-progress (track/engine) |

@@ -2192,9 +2192,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☐ MOMO-472 (`#495`) 수용기준 — workspaceSearch 스냅샷 full-suite 비결정성 안정화 `[macos-ui]` · 의존: 없음 (선재 flake)
 - [ ] full `make test` 3회 연속 통과(결정적 렌더 조건 이관 또는 perceptual 미세조정, 근거 기록). 캐노니컬 재기록은 오케스트레이터. 상세: issue #495.
 
-### ☐ MOMO-473 (`#496`) 수용기준 — V-3b iOS 허들 참가 `[ios]` · 의존: MOMO-471 · **PR base=track/engine**
-- [ ] 진행 중 허들 배너(active+Core 이벤트 실시간, 정적 표기) + 참가 시트(청취/발화/음소거/나가기, LiveKit 2.15.2 핀) + 수명주기 leave/disconnect 보장.
-- [ ] 마이크 권한 문구/거부 상태, 503 미구성 처리, 뷰모델 mock 테스트. 시뮬레이터 게이트는 오케스트레이터. 상세: issue #496 본문(패킷 겸용).
+### ☑ MOMO-473 (`#496`) 수용기준 — V-3b iOS 허들 참가 `[ios]` · 의존: MOMO-471 · **PR base=track/engine**
+- [x] 진행 중 허들 배너(active+Core 이벤트 실시간, 정적 표기) + 참가 시트(청취/발화/음소거/나가기, LiveKit 2.15.2 핀) + 수명주기 leave/disconnect 보장.
+- [x] 마이크 권한 문구/거부 상태, 503 미구성 처리, 뷰모델 mock 테스트. 시뮬레이터 게이트는 오케스트레이터. 상세: issue #496 본문(패킷 겸용).
+- 랜딩: PR #498 squash `0176508` → **track/engine**(2026-07-18, 새 파이프라인 첫 트랙 머지 — main 미반영, 성재 게이트 대기). 킷 27/27+시뮬레이터 게이트 PASS, LiveKit 2.15.2 핀·마이크 권한·수명주기 정리 확인.
 
 ### ☐ MOMO-474 (`#497`) 수용기준 — 첨부 업로드 v0 (Drive archive) `[runtime-db]` · 의존: SA 실검증 완료 · **PR base=track/engine**
 - [ ] 017_attachment(RLS) + 세션 발급(resumable, 클라 직송)/complete 검증/content 프록시/전송 DTO attachmentIds 가산.
