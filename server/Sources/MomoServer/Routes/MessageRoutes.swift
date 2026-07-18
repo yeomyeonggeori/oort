@@ -7,6 +7,11 @@ import PostgresNIO
 ///
 ///   POST   /v1/workspaces/{ws}/channels/{ch}/messages   (send, idempotent)
 ///   GET    /v1/workspaces/{ws}/channels/{ch}/messages    (seq-cursor page)
+///   PATCH  /v1/workspaces/{ws}/messages/{id}             (author edit)
+///   DELETE /v1/workspaces/{ws}/messages/{id}             (author tombstone)
+///   PUT    /v1/workspaces/{ws}/messages/{id}/reactions/{emoji}
+///   DELETE /v1/workspaces/{ws}/messages/{id}/reactions/{emoji}
+///   GET    /v1/workspaces/{ws}/channels/{ch}/reactions   (cold snapshot)
 ///
 /// The send handler runs the §3.1 SQL — `UPDATE channel_seq ... RETURNING` +
 /// `INSERT message` + `INSERT outbox` — in ONE transaction so commit↔publish is
@@ -18,6 +23,11 @@ struct MessageRoutes: Sendable {
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/channels/:ch/messages", use: send)
         group.get("/v1/workspaces/:ws/channels/:ch/messages", use: history)
+        group.patch("/v1/workspaces/:ws/messages/:id", use: edit)
+        group.delete("/v1/workspaces/:ws/messages/:id", use: delete)
+        group.put("/v1/workspaces/:ws/messages/:id/reactions/:emoji", use: addReaction)
+        group.delete("/v1/workspaces/:ws/messages/:id/reactions/:emoji", use: removeReaction)
+        group.get("/v1/workspaces/:ws/channels/:ch/reactions", use: reactionSnapshot)
     }
 
     // MARK: - Send (core write path, L4 §3.1)
@@ -280,7 +290,8 @@ struct MessageRoutes: Sendable {
                 hlcTs: ts, hlcCount: count, authorMemberId: principal.memberID.uuidString,
                 type: type, body: body, props: responseProps,
                 runId: dto.runId?.uuidString, clientMsgId: dto.clientMsgId.uuidString,
-                createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
+                createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
+                state: nil, editedAtMs: nil, deletedAtMs: nil
             ))
         }
 
@@ -373,7 +384,8 @@ struct MessageRoutes: Sendable {
                     hlcTs: ts, hlcCount: count, authorMemberId: author.uuidString,
                     type: type, body: body, props: Self.decodeProps(propsJSON),
                     runId: runID?.uuidString, clientMsgId: clientMsgID?.uuidString,
-                    createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000)
+                    createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
+                    state: nil, editedAtMs: nil, deletedAtMs: nil
                 )
             }
             // nextBefore = smallest seq in this page (for the next older page).
@@ -386,7 +398,574 @@ struct MessageRoutes: Sendable {
         return try page.response(from: request, context: context)
     }
 
+    // MARK: - Message interactions (MOMO-478)
+
+    @Sendable
+    func edit(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, messageID) = try Self.messageScopeIDs(context, principal: principal)
+        let dto = try await request.decode(as: EditMessageRequest.self, context: context)
+        guard !dto.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HTTPError(.badRequest, message: "message body must not be empty")
+        }
+
+        let message: MessageDTO = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let row = try await Self.lockMessage(
+                conn: conn, logger: db.logger, messageID: messageID
+            )
+            guard let row else { throw HTTPError(.notFound, message: "message not found") }
+            guard try await Self.hasActiveMembership(
+                conn: conn, logger: db.logger,
+                channelID: row.channelID, memberID: principal.memberID
+            ) else {
+                throw HTTPError(.forbidden, message: "not a member of this channel")
+            }
+            guard row.authorMemberID == principal.memberID else {
+                throw HTTPError(.forbidden, message: "only the message author may edit")
+            }
+            guard row.state != "deleted", row.deletedAt == nil else {
+                throw HTTPError(.badRequest, message: "deleted messages cannot be edited")
+            }
+
+            let rows = try await conn.query(
+                """
+                UPDATE message
+                   SET body = \(dto.body),
+                       state = 'edited',
+                       edited_at = clock_timestamp()
+                 WHERE id = \(messageID)
+                RETURNING jsonb_build_object(
+                  'id', id::text,
+                  'channelId', channel_id::text,
+                  'rootId', root_id::text,
+                  'seq', seq,
+                  'hlcTs', hlc_ts,
+                  'hlcCount', hlc_count,
+                  'authorMemberId', author_member_id::text,
+                  'type', type::text,
+                  'body', body,
+                  'props', props,
+                  'runId', run_id::text,
+                  'clientMsgId', client_msg_id::text,
+                  'createdAtMs', floor(extract(epoch from created_at) * 1000)::bigint,
+                  'state', state::text,
+                  'editedAtMs', CASE WHEN edited_at IS NULL THEN NULL
+                    ELSE floor(extract(epoch from edited_at) * 1000)::bigint END,
+                  'deletedAtMs', CASE WHEN deleted_at IS NULL THEN NULL
+                    ELSE floor(extract(epoch from deleted_at) * 1000)::bigint END
+                )::text
+                """,
+                logger: db.logger
+            ).collect()
+            guard let updated = rows.first else {
+                throw HTTPError(.notFound, message: "message not found")
+            }
+            let message = try Self.decodeMessageProjection(updated)
+            try await Self.recordInteraction(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                channelID: row.channelID, messageID: messageID,
+                actorMemberID: principal.memberID, viaTokenID: principal.tokenID,
+                action: "message.edited",
+                payload: Self.messageInteractionPayload(
+                    workspaceID: workspaceID,
+                    eventType: "message.edited",
+                    message: message
+                )
+            )
+            return message
+        }
+        return try message.response(from: request, context: context)
+    }
+
+    @Sendable
+    func delete(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, messageID) = try Self.messageScopeIDs(context, principal: principal)
+
+        let message: MessageDTO = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let row = try await Self.lockMessage(
+                conn: conn, logger: db.logger, messageID: messageID
+            )
+            guard let row else { throw HTTPError(.notFound, message: "message not found") }
+            guard try await Self.hasActiveMembership(
+                conn: conn, logger: db.logger,
+                channelID: row.channelID, memberID: principal.memberID
+            ) else {
+                throw HTTPError(.forbidden, message: "not a member of this channel")
+            }
+            guard row.authorMemberID == principal.memberID else {
+                throw HTTPError(.forbidden, message: "only the message author may delete")
+            }
+
+            if row.state == "deleted" || row.deletedAt != nil {
+                return try await Self.loadMessageProjection(
+                    conn: conn, logger: db.logger, messageID: messageID
+                )
+            }
+
+            let rows = try await conn.query(
+                """
+                UPDATE message
+                   SET state = 'deleted',
+                       body = NULL,
+                       deleted_at = clock_timestamp()
+                 WHERE id = \(messageID)
+                RETURNING jsonb_build_object(
+                  'id', id::text,
+                  'channelId', channel_id::text,
+                  'rootId', root_id::text,
+                  'seq', seq,
+                  'hlcTs', hlc_ts,
+                  'hlcCount', hlc_count,
+                  'authorMemberId', author_member_id::text,
+                  'type', type::text,
+                  'body', body,
+                  'props', props,
+                  'runId', run_id::text,
+                  'clientMsgId', client_msg_id::text,
+                  'createdAtMs', floor(extract(epoch from created_at) * 1000)::bigint,
+                  'state', state::text,
+                  'editedAtMs', CASE WHEN edited_at IS NULL THEN NULL
+                    ELSE floor(extract(epoch from edited_at) * 1000)::bigint END,
+                  'deletedAtMs', CASE WHEN deleted_at IS NULL THEN NULL
+                    ELSE floor(extract(epoch from deleted_at) * 1000)::bigint END
+                )::text
+                """,
+                logger: db.logger
+            ).collect()
+            guard let deleted = rows.first else {
+                throw HTTPError(.notFound, message: "message not found")
+            }
+            let message = try Self.decodeMessageProjection(deleted)
+            _ = try await conn.query(
+                "DELETE FROM reaction WHERE message_id = \(messageID)",
+                logger: db.logger
+            )
+            try await Self.recordInteraction(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                channelID: row.channelID, messageID: messageID,
+                actorMemberID: principal.memberID, viaTokenID: principal.tokenID,
+                action: "message.deleted",
+                payload: Self.deleteInteractionPayload(
+                    workspaceID: workspaceID,
+                    message: message
+                )
+            )
+            return message
+        }
+        return try message.response(from: request, context: context)
+    }
+
+    @Sendable
+    func addReaction(_ request: Request, context: AppRequestContext) async throws -> Response {
+        try await mutateReaction(request, context: context, adding: true)
+    }
+
+    @Sendable
+    func removeReaction(_ request: Request, context: AppRequestContext) async throws -> Response {
+        try await mutateReaction(request, context: context, adding: false)
+    }
+
+    private func mutateReaction(
+        _ request: Request,
+        context: AppRequestContext,
+        adding: Bool
+    ) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, messageID) = try Self.messageScopeIDs(context, principal: principal)
+        let emoji = try Self.emojiParameter(context)
+        let action = adding ? "added" : "removed"
+
+        let delta: ReactionDeltaDTO = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            let row = try await Self.lockMessage(
+                conn: conn, logger: db.logger, messageID: messageID
+            )
+            guard let row else { throw HTTPError(.notFound, message: "message not found") }
+            guard try await Self.hasActiveMembership(
+                conn: conn, logger: db.logger,
+                channelID: row.channelID, memberID: principal.memberID
+            ) else {
+                throw HTTPError(.forbidden, message: "not a member of this channel")
+            }
+            if adding, row.state == "deleted" || row.deletedAt != nil {
+                throw HTTPError(.badRequest, message: "deleted messages cannot receive reactions")
+            }
+
+            let changed: Bool
+            if adding {
+                let existing = try await conn.query(
+                    """
+                    SELECT 1 FROM reaction
+                     WHERE message_id = \(messageID)
+                       AND member_id = \(principal.memberID)
+                       AND emoji = \(emoji)
+                     LIMIT 1
+                    """,
+                    logger: db.logger
+                ).collect()
+                if existing.isEmpty {
+                    let countRows = try await conn.query(
+                        "SELECT count(*)::int FROM reaction WHERE message_id = \(messageID)",
+                        logger: db.logger
+                    ).collect()
+                    let count = try countRows.first?.decode(Int.self) ?? 0
+                    guard count < 200 else {
+                        throw HTTPError(.conflict, message: "message reaction limit reached")
+                    }
+                    let inserted = try await conn.query(
+                        """
+                        INSERT INTO reaction (workspace_id, message_id, member_id, emoji)
+                        VALUES (\(workspaceID), \(messageID), \(principal.memberID), \(emoji))
+                        ON CONFLICT (message_id, member_id, emoji) DO NOTHING
+                        RETURNING id
+                        """,
+                        logger: db.logger
+                    ).collect()
+                    changed = !inserted.isEmpty
+                } else {
+                    changed = false
+                }
+            } else {
+                let removed = try await conn.query(
+                    """
+                    DELETE FROM reaction
+                     WHERE message_id = \(messageID)
+                       AND member_id = \(principal.memberID)
+                       AND emoji = \(emoji)
+                    RETURNING id
+                    """,
+                    logger: db.logger
+                ).collect()
+                changed = !removed.isEmpty
+            }
+
+            let delta = ReactionDeltaDTO(
+                action: action,
+                messageId: messageID.uuidString,
+                memberId: principal.memberID.uuidString,
+                emoji: emoji
+            )
+            if changed {
+                try await Self.recordInteraction(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    channelID: row.channelID, messageID: messageID,
+                    actorMemberID: principal.memberID, viaTokenID: principal.tokenID,
+                    action: "reaction.\(action)",
+                    payload: Self.reactionInteractionPayload(
+                        workspaceID: workspaceID,
+                        channelID: row.channelID,
+                        eventType: "reaction.\(action)",
+                        seq: row.seq,
+                        delta: delta
+                    )
+                )
+            }
+            return delta
+        }
+        return try delta.response(from: request, context: context)
+    }
+
+    @Sendable
+    func reactionSnapshot(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, channelID) = try Self.scopeIDs(context, principal: principal)
+
+        let snapshot: ReactionSnapshotDTO = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            guard try await Self.hasActiveMembership(
+                conn: conn, logger: db.logger,
+                channelID: channelID, memberID: principal.memberID
+            ) else {
+                throw HTTPError(.forbidden, message: "not a member of this channel")
+            }
+            let rows = try await conn.query(
+                """
+                SELECT r.message_id, r.emoji, r.member_id
+                  FROM reaction r
+                  JOIN message m ON m.id = r.message_id
+                 WHERE m.channel_id = \(channelID)
+                   AND m.deleted_at IS NULL
+                   AND m.state <> 'deleted'
+                 ORDER BY r.message_id, r.emoji, r.member_id
+                """,
+                logger: db.logger
+            ).collect()
+            var result: [String: [String: [String]]] = [:]
+            for row in rows {
+                let (messageID, emoji, memberID) = try row.decode((UUID, String, UUID).self)
+                result[messageID.uuidString, default: [:]][emoji, default: []]
+                    .append(memberID.uuidString)
+            }
+            return ReactionSnapshotDTO(snapshot: result)
+        }
+        return try snapshot.response(from: request, context: context)
+    }
+
     // MARK: - Helpers
+
+    private struct LockedMessage: Sendable {
+        let channelID: UUID
+        let authorMemberID: UUID
+        let seq: Int64
+        let state: String
+        let deletedAt: Date?
+    }
+
+    private struct InteractionEnvelope: Encodable {
+        let type: String
+        let v: Int
+        let ts: Int64
+        let seq: Int64
+        let payload: JSONValue
+    }
+
+    private struct InteractionOutboxPayload: Encodable {
+        let channel: String
+        let data: InteractionEnvelope
+        let version: Int64
+        let idempotencyKey: String
+
+        private enum CodingKeys: String, CodingKey {
+            case channel, data, version
+            case idempotencyKey = "idempotency_key"
+        }
+    }
+
+    private static func lockMessage(
+        conn: PostgresConnection,
+        logger: Logger,
+        messageID: UUID
+    ) async throws -> LockedMessage? {
+        let rows = try await conn.query(
+            """
+            SELECT channel_id, author_member_id, seq, state::text, deleted_at
+              FROM message
+             WHERE id = \(messageID)
+             FOR UPDATE
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else { return nil }
+        let (channelID, authorMemberID, seq, state, deletedAt) = try row.decode(
+            (UUID, UUID, Int64, String, Date?).self
+        )
+        return LockedMessage(
+            channelID: channelID,
+            authorMemberID: authorMemberID,
+            seq: seq,
+            state: state,
+            deletedAt: deletedAt
+        )
+    }
+
+    private static func loadMessageProjection(
+        conn: PostgresConnection,
+        logger: Logger,
+        messageID: UUID
+    ) async throws -> MessageDTO {
+        let rows = try await conn.query(
+            """
+            SELECT jsonb_build_object(
+              'id', id::text,
+              'channelId', channel_id::text,
+              'rootId', root_id::text,
+              'seq', seq,
+              'hlcTs', hlc_ts,
+              'hlcCount', hlc_count,
+              'authorMemberId', author_member_id::text,
+              'type', type::text,
+              'body', body,
+              'props', props,
+              'runId', run_id::text,
+              'clientMsgId', client_msg_id::text,
+              'createdAtMs', floor(extract(epoch from created_at) * 1000)::bigint,
+              'state', state::text,
+              'editedAtMs', CASE WHEN edited_at IS NULL THEN NULL
+                ELSE floor(extract(epoch from edited_at) * 1000)::bigint END,
+              'deletedAtMs', CASE WHEN deleted_at IS NULL THEN NULL
+                ELSE floor(extract(epoch from deleted_at) * 1000)::bigint END
+            )::text
+              FROM message
+             WHERE id = \(messageID)
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.notFound, message: "message not found")
+        }
+        return try decodeMessageProjection(row)
+    }
+
+    private static func decodeMessageProjection(_ row: PostgresRow) throws -> MessageDTO {
+        let json = try row.decode(String.self)
+        return try JSONDecoder().decode(MessageDTO.self, from: Data(json.utf8))
+    }
+
+    private static func messageInteractionPayload(
+        workspaceID: UUID,
+        eventType: String,
+        message: MessageDTO
+    ) -> String {
+        let props = message.props.map(JSONValue.object) ?? .object([:])
+        let payload = JSONValue.object([
+            "id": .string(message.id),
+            "channel_id": .string(message.channelId),
+            "seq": .int(Int(message.seq)),
+            "hlc_ts": .int(Int(message.hlcTs)),
+            "hlc_count": .int(message.hlcCount),
+            "author_member_id": .string(message.authorMemberId),
+            "type": .string(message.type),
+            "state": .string(message.state ?? "edited"),
+            "body": message.body.map(JSONValue.string) ?? .null,
+            "props": props,
+            "root_id": message.rootId.map(JSONValue.string) ?? .null,
+            "run_id": message.runId.map(JSONValue.string) ?? .null,
+            "client_msg_id": message.clientMsgId.map(JSONValue.string) ?? .null,
+            "created_at_ms": .int(Int(message.createdAtMs)),
+            "edited_at_ms": message.editedAtMs.map { .int(Int($0)) } ?? .null,
+            "deleted_at_ms": message.deletedAtMs.map { .int(Int($0)) } ?? .null,
+        ])
+        return encodeInteractionPayload(
+            workspaceID: workspaceID,
+            channelID: UUID(uuidString: message.channelId)!,
+            eventType: eventType,
+            timestampMs: message.editedAtMs ?? message.deletedAtMs ?? message.hlcTs,
+            seq: message.seq,
+            payload: payload
+        )
+    }
+
+    private static func deleteInteractionPayload(
+        workspaceID: UUID,
+        message: MessageDTO
+    ) -> String {
+        encodeInteractionPayload(
+            workspaceID: workspaceID,
+            channelID: UUID(uuidString: message.channelId)!,
+            eventType: "message.deleted",
+            timestampMs: message.deletedAtMs ?? message.hlcTs,
+            seq: message.seq,
+            payload: .object(["message_id": .string(message.id)])
+        )
+    }
+
+    private static func reactionInteractionPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        eventType: String,
+        seq: Int64,
+        delta: ReactionDeltaDTO
+    ) -> String {
+        encodeInteractionPayload(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            eventType: eventType,
+            timestampMs: Int64(Date().timeIntervalSince1970 * 1_000),
+            seq: seq,
+            payload: .object([
+                "action": .string(delta.action),
+                "message_id": .string(delta.messageId),
+                "member_id": .string(delta.memberId),
+                "emoji": .string(delta.emoji),
+            ])
+        )
+    }
+
+    private static func encodeInteractionPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        eventType: String,
+        timestampMs: Int64,
+        seq: Int64,
+        payload: JSONValue
+    ) -> String {
+        let channel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let value = InteractionOutboxPayload(
+            channel: channel,
+            data: InteractionEnvelope(
+                type: eventType, v: 1, ts: timestampMs, seq: seq, payload: payload
+            ),
+            version: seq,
+            idempotencyKey: "\(channel):\(eventType):\(UUID().uuidString)"
+        )
+        guard let data = try? JSONEncoder().encode(value),
+              let json = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return json
+    }
+
+    private static func recordInteraction(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        actorMemberID: UUID,
+        viaTokenID: UUID,
+        action: String,
+        payload: String
+    ) async throws {
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox (workspace_id, kind, method, payload, partition_key)
+            VALUES (\(workspaceID), 'broadcast', 'publish', \(payload)::jsonb, \(channelID))
+            """,
+            logger: logger
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, action, target_type,
+               target_id, via_token_id, detail)
+            VALUES
+              (\(workspaceID), \(actorMemberID), \(action), 'message',
+               \(messageID), \(viaTokenID),
+               jsonb_build_object(
+                 'schema', 'momo.message_interaction.v1',
+                 'channel_id', \(channelID),
+                 'event_type', \(action)
+               ))
+            """,
+            logger: logger
+        )
+    }
+
+    private static func messageScopeIDs(
+        _ context: AppRequestContext,
+        principal: AuthPrincipal
+    ) throws -> (workspace: UUID, message: UUID) {
+        let wsParam = try context.parameters.require("ws")
+        let messageParam = try context.parameters.require("id")
+        guard let workspaceID = UUID(uuidString: wsParam) else {
+            throw HTTPError(.badRequest, message: "invalid workspace id")
+        }
+        guard workspaceID == principal.workspaceID else {
+            throw HTTPError(.forbidden, message: "workspace scope mismatch")
+        }
+        guard let messageID = UUID(uuidString: messageParam) else {
+            throw HTTPError(.badRequest, message: "invalid message id")
+        }
+        return (workspaceID, messageID)
+    }
+
+    private static func emojiParameter(_ context: AppRequestContext) throws -> String {
+        let raw = try context.parameters.require("emoji")
+        let emoji = raw.removingPercentEncoding ?? raw
+        guard !emoji.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw HTTPError(.badRequest, message: "emoji must not be empty")
+        }
+        guard emoji.count <= 32 else {
+            throw HTTPError(.badRequest, message: "emoji must contain at most 32 characters")
+        }
+        return emoji
+    }
 
     private func withTenantTransactionUnwrapped<Result: Sendable>(
         workspaceID: UUID,

@@ -801,6 +801,197 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/messages/{messageId}:
+    patch:
+      tags: [messages]
+      operationId: editMessage
+      summary: Edit an authored, undeleted message without changing its seq.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/EditMessageRequest"}
+      responses:
+        "200":
+          description: Full edited message with its original seq.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Message"}
+        "400":
+          description: Empty body, malformed id, or an already-deleted message.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not the author/channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: deleteMessage
+      summary: Soft-delete an authored message and remove all its reactions.
+      description: >
+        The tombstone keeps the original seq but sets body to null. The original
+        body is not copied into audit detail. Repeating an already-completed
+        delete returns the same tombstone without another outbox event.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Tombstone message with body omitted and state=deleted.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Message"}
+        "400":
+          description: Malformed message id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not the author/channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/messages/{messageId}/reactions/{emoji}:
+    put:
+      tags: [messages]
+      operationId: addMessageReaction
+      summary: Add the authenticated member's reaction idempotently.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: emoji
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 32}
+      responses:
+        "200":
+          description: Added delta; an existing identical reaction is also success.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReactionDelta"}
+        "400":
+          description: Invalid emoji/message id or deleted message.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: The message already has the maximum 200 reaction rows.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: removeMessageReaction
+      summary: Remove the authenticated member's reaction idempotently.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: emoji
+          in: path
+          required: true
+          schema: {type: string, minLength: 1, maxLength: 32}
+      responses:
+        "200":
+          description: Removed delta; an already-absent reaction is also success.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReactionDelta"}
+        "400":
+          description: Invalid emoji or message id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/reactions:
+    get:
+      tags: [messages]
+      operationId: getChannelReactionSnapshot
+      summary: Load message-to-emoji-to-member reaction sets for a channel.
+      description: Deleted messages are excluded. Empty channels return an empty object.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200":
+          description: Direct message id -> emoji -> member id array mapping.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReactionSnapshot"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/messages:
     post:
       tags: [messages]
@@ -2509,6 +2700,43 @@ components:
             Completed attachments uploaded by this actor in this channel. They
             are linked to the new message inside the canonical message transaction.
 
+    EditMessageRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+
+    ReactionDelta:
+      type: object
+      required: [action, messageId, memberId, emoji]
+      properties:
+        action:
+          type: string
+          enum: [added, removed]
+        messageId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        emoji:
+          type: string
+          minLength: 1
+          maxLength: 32
+
+    ReactionSnapshot:
+      type: object
+      additionalProperties:
+        type: object
+        additionalProperties:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            format: uuid
+
     CreateAttachmentUploadRequest:
       type: object
       required: [name, mime, size]
@@ -2601,6 +2829,9 @@ components:
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
         body:
           type: string
+        state:
+          type: string
+          enum: [sent, edited, deleted, failed]
         props:
           type: object
           additionalProperties: true
@@ -2615,6 +2846,12 @@ components:
           type: string
           format: uuid
         createdAtMs:
+          type: integer
+          format: int64
+        editedAtMs:
+          type: integer
+          format: int64
+        deletedAtMs:
           type: integer
           format: int64
 
