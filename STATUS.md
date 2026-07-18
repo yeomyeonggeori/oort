@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-482 첨부 메타데이터 수신 투영 (2026-07-19)
+
+- complete 상태로 메시지에 바인딩된 첨부만 생성순 `{id,name,mime,sizeBytes}`로 send/history 3변형/replies와 같은 트랜잭션의 `message.new`에 가산했다. 0건은 생략하고 모든 목록 경로는 lateral `jsonb_agg` 단일 쿼리를 사용하며 업로드 capability URL과 Drive 식별자는 투영하지 않는다.
+- Core `Message.attachments`와 `DraftMessage.attachmentIds`는 하위호환 optional 계약으로 추가했다. verifier는 send·history 3변형·Centrifugo history의 동일 배열, 강제 바인딩 pending/failed 미노출, 기존 content proxy·RLS를 검사하며 격리 Docker `runtime-db` 실행은 오케스트레이터 담당이라 그 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-481 상호작용 Core replay + history 재시작 수렴 (2026-07-19)
 
 - Core replay는 `message.edited`/`message.deleted`/`reaction.added`/`reaction.removed`를 `thread.updated`와 같은 비순번 projection으로 커서 대조 전에 전달한다. 동일 seq `message.new` 순번·중복 방어와 replay 커서는 그대로이며, Core 테스트가 구 seq 4종 전달·커서 불변과 edit 치환/delete tombstone/reaction 집합 중복 적용 멱등을 단정한다.
