@@ -23,7 +23,7 @@
 |---|---|---|---|---|
 | B-1 | `in-progress`(MOMO-474 `#497`) | **첨부 업로드 API (GWS-ARCHIVE 해제)** | UI 로컬 초안 존재, 서버 업로드 경로 없음. SA·공유드라이브·boundary 전제 전부 실검증 완료 | AttachmentStore + resumable 업로드(클라 직송) + 메시지 연결 — ADR-0113 합류 티켓 |
 | B-2 | `done` → track/engine (main 대기) | **워크스페이스 검색 서버 FTS** | macOS 검색=로컬 인덱스(정직 스코프 카피), `message_body_trgm_idx`는 스키마 기존재 | 검색 REST(권한 필터 포함) — MOMO-386의 서버 절반 |
-| B-3 | `ready` | **전송 REST root_id 개방 확인/개방** | A-4의 전제. V-1 노트: "필요 시 동티켓 개방" | 메시지 전송 DTO의 root_id 수용 확인, 미개방 시 소형 티켓 |
+| B-3 | `in-progress`(MOMO-476 `#502`) | **전송 REST root_id 개방 확인/개방** | A-4의 전제. V-1 노트: "필요 시 동티켓 개방" | 메시지 전송 DTO의 root_id 수용 확인, 미개방 시 소형 티켓 |
 | B-4 | `ready` | **알림 음소거/설정 계약** | 설정 UI·서버 계약 양측 부재(판정은 notifier 한 곳 — P9 정합 필요) | 채널/워크스페이스 음소거 계약 설계(ADR 소형) 후 UI |
 
 ## C. 랜딩됐지만 runtime-unverified (검증 부채)
