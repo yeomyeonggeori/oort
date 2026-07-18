@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# MOMO-474 Drive archive attachment runtime verifier (stub only; no Google calls).
+# MOMO-474/482 Drive archive attachment upload + receive projection verifier
+# (stub only; no Google calls).
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -26,11 +27,14 @@ PG_PORT="${ATTACHMENT_GATE_POSTGRES_PORT:-19871}"
 CENT_PORT_HOST="${ATTACHMENT_GATE_CENT_PORT:-19872}"
 HERMES_PORT_HOST="${ATTACHMENT_GATE_HERMES_PORT:-19873}"
 BOOT_TIMEOUT="${ATTACHMENT_GATE_BOOT_TIMEOUT:-2400}"
+ASSERT_TIMEOUT="${ATTACHMENT_GATE_ASSERT_TIMEOUT:-240}"
 RUN_ID="$(date -u +%s)-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-attachment-$RUN_ID"
 mkdir -p "$TMP_DIR"
 
 BASE_URL="http://127.0.0.1:$API_PORT"
+CENT_API_URL="http://127.0.0.1:$CENT_PORT_HOST/api"
+CENT_API_KEY="${CENT_API_KEY:-change-me-cent-api-key}"
 COMPOSE_OVERRIDE="$TMP_DIR/drive-archive-stub.yml"
 cat >"$COMPOSE_OVERRIDE" <<YAML
 services:
@@ -59,12 +63,12 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "[attachment] booting isolated stub-only API stack '$PROJECT'"
-compose up -d api
+echo "[attachment] booting isolated stub-only API/relay stack '$PROJECT'"
+compose up -d api relay
 deadline=$(( $(date -u +%s) + BOOT_TIMEOUT ))
 until curl -fsS "$BASE_URL/health" >/dev/null 2>&1; do
   if [ "$(date -u +%s)" -ge "$deadline" ]; then
-    compose logs --tail 120 api >&2 || true
+    compose logs --tail 120 api relay >&2 || true
     echo "[attachment] api health timeout" >&2
     exit 1
   fi
@@ -184,6 +188,22 @@ api POST "$MESSAGE_PATH" "$M1_TOKEN" \
   "$(jq -cn --arg c "$CLIENT_MSG_ID" --arg a "$ATTACHMENT_ID" '{clientMsgId:$c,body:"attachment gate",attachmentIds:[$a]}')"
 expect_status 201 "message attachment binding"
 MESSAGE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
+MESSAGE_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -er '.seq')"
+printf '%s' "$RESPONSE_BODY" | jq -e \
+  --arg attachment "$(printf '%s' "$ATTACHMENT_ID" | tr '[:upper:]' '[:lower:]')" \
+  --argjson size "$PAYLOAD_SIZE" '
+    .attachments == [{
+      id: $attachment,
+      name: "evidence.txt",
+      mime: "text/plain",
+      sizeBytes: $size
+    }]
+    and (.attachments[0] | has("uploadUrl") | not)
+  ' >/dev/null || {
+  echo "[attachment] FAIL send response projection" >&2
+  echo "$RESPONSE_BODY" >&2
+  exit 1
+}
 
 CONTENT_PATH="/v1/workspaces/$WS_A/channels/$CH_A/attachments/$ATTACHMENT_ID/content"
 status="$(curl -sS -o "$TMP_DIR/downloaded" -w '%{http_code}' \
@@ -210,6 +230,97 @@ got="$(printf "SELECT count(*) FROM audit_log WHERE workspace_id='$WS_A' AND tar
 got="$(printf "SELECT count(*) FROM audit_log WHERE workspace_id='$WS_A' AND target_id='$ATTACHMENT_ID' AND action IN ('attachment.upload_completed','attachment.message_linked');\n" | sql_scalar)"
 [ "$got" = "2" ] || { echo "[attachment] FAIL complete/link audit count: $got" >&2; exit 1; }
 
+# Create a second upload row, then force pending/failed rows onto the message as
+# database-level regression fixtures. The public write path correctly rejects
+# these states; direct binding lets history prove it filters status as well as
+# message_id instead of relying only on the write validation.
+api POST "$UPLOAD_PATH" "$M1_TOKEN" \
+  "$(jq -cn '{name:"failed.txt",mime:"text/plain",size:6}')"
+expect_status 201 "failed projection fixture session"
+FAILED_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
+run_sql <<SQL
+BEGIN;
+SET LOCAL row_security = off;
+UPDATE attachment SET message_id = '$MESSAGE_ID' WHERE id = '$PENDING_ID';
+UPDATE attachment
+   SET status = 'failed', message_id = '$MESSAGE_ID'
+ WHERE id = '$FAILED_ID';
+COMMIT;
+SQL
+
+assert_history_projection() {
+  local path="$1" label="$2"
+  api GET "$path" "$M1_TOKEN"
+  expect_status 200 "$label"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    --arg message "$(printf '%s' "$MESSAGE_ID" | tr '[:upper:]' '[:lower:]')" \
+    --arg attachment "$(printf '%s' "$ATTACHMENT_ID" | tr '[:upper:]' '[:lower:]')" \
+    --arg pending "$(printf '%s' "$PENDING_ID" | tr '[:upper:]' '[:lower:]')" \
+    --arg failed "$(printf '%s' "$FAILED_ID" | tr '[:upper:]' '[:lower:]')" \
+    --argjson size "$PAYLOAD_SIZE" '
+      ([.messages[] | select((.id | ascii_downcase) == $message)] | first) as $message
+      | ($message.attachments == [{
+          id: $attachment,
+          name: "evidence.txt",
+          mime: "text/plain",
+          sizeBytes: $size
+        }])
+        and (($message.attachments | map(.id | ascii_downcase) | index($pending)) == null)
+        and (($message.attachments | map(.id | ascii_downcase) | index($failed)) == null)
+        and ($message.attachments[0] | has("uploadUrl") | not)
+    ' >/dev/null || {
+    echo "[attachment] FAIL $label projection" >&2
+    echo "$RESPONSE_BODY" >&2
+    exit 1
+  }
+}
+
+HISTORY_PATH="/v1/workspaces/$WS_A/channels/$CH_A/messages"
+assert_history_projection "$HISTORY_PATH?limit=50" "head history attachment"
+assert_history_projection "$HISTORY_PATH?before=$((MESSAGE_SEQ + 1))&limit=50" \
+  "before history attachment"
+assert_history_projection "$HISTORY_PATH?after=$((MESSAGE_SEQ - 1))&limit=50" \
+  "after history attachment"
+
+CENT_CHANNEL="ch:ws${WS_A}.${CH_A}"
+MESSAGE_EVENT_OK=0
+deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+while [ "$(date -u +%s)" -lt "$deadline" ]; do
+  history="$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg ch "$CENT_CHANNEL" '{channel:$ch,limit:100,reverse:true}')" \
+    "$CENT_API_URL/history" 2>/dev/null || printf '{}')"
+  matches="$(printf '%s' "$history" | jq -r \
+    --arg message "$(printf '%s' "$MESSAGE_ID" | tr '[:upper:]' '[:lower:]')" \
+    --arg attachment "$(printf '%s' "$ATTACHMENT_ID" | tr '[:upper:]' '[:lower:]')" \
+    --arg pending "$(printf '%s' "$PENDING_ID" | tr '[:upper:]' '[:lower:]')" \
+    --arg failed "$(printf '%s' "$FAILED_ID" | tr '[:upper:]' '[:lower:]')" \
+    --argjson size "$PAYLOAD_SIZE" '
+      [.result.publications[]?.data
+       | select(.type == "message.new")
+       | select(((.payload.id // "") | ascii_downcase) == $message)
+       | select(.payload.attachments == [{
+           id: $attachment,
+           name: "evidence.txt",
+           mime: "text/plain",
+           sizeBytes: $size
+         }])
+       | select((.payload.attachments | map(.id | ascii_downcase) | index($pending)) == null)
+       | select((.payload.attachments | map(.id | ascii_downcase) | index($failed)) == null)
+       | select(.payload.attachments[0] | has("uploadUrl") | not)] | length
+    ' 2>/dev/null || printf '0')"
+  if [ "$matches" != "0" ]; then
+    MESSAGE_EVENT_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "$MESSAGE_EVENT_OK" = "1" ] || {
+  compose logs --tail 120 relay >&2 || true
+  echo "[attachment] FAIL message.new attachment projection missing from Centrifugo history" >&2
+  exit 1
+}
+
 got="$(printf "BEGIN; SET LOCAL ROLE momo_app; SET LOCAL app.workspace_id='$WS_A'; SELECT count(*) FROM attachment WHERE workspace_id='$WS_B'; COMMIT;\n" | sql_scalar)"
 [ "$got" = "0" ] || { echo "[attachment] FAIL RLS isolation: $got" >&2; exit 1; }
 got="$(printf "SELECT count(*) FROM pg_class WHERE relname='attachment' AND relrowsecurity AND relforcerowsecurity;\n" | sql_scalar)"
@@ -219,4 +330,4 @@ api POST "$UPLOAD_PATH" "$M1_TOKEN" \
   "$(jq -cn '{name:"too-large.bin",mime:"application/octet-stream",size:104857601}')"
 expect_status 413 "100 MB limit"
 
-echo "MOMO-474 attachment resumable stub + complete + message link + content/RLS/audit PASS"
+echo "MOMO-482 attachment upload + send/history/realtime projection + content/RLS/audit PASS"
