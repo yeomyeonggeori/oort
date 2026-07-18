@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-464 macOS shell/detail polish (2026-07-18)
+
+- 다운로드 화면을 앱 경계를 벗어날 수 있는 시스템 popover에서 가운데 pane 우측 상단의 bounded card panel로 변경했다. 일반 창과 전체화면에서 같은 앱 내부 위치를 유지하고, 표시·해제 animation은 비활성화했으며 닫기 버튼과 Escape 경로를 제공한다.
+- 승인 inspector 헤더 여백을 확대하고 action strip을 `모두 승인`(0건 disabled) + `항상 승인` switch로 재구성했다. `항상 승인`은 이 Mac·현재 workspace에 저장되며 명시적으로 reversible인 요청만 자동 처리한다. irreversible/미분류 요청은 fail-closed하고 `모두 승인`에도 추가 확인을 요구한다.
+- 최신 `/private/tmp/momo-464-three-zone` dev app 실창에서 일반 창·전체화면을 확인했고, focused macOS test와 design preflight가 PASS했다.
 ## MOMO-471 macOS 허들 UI + LiveKit audio (2026-07-18)
 
 - 채널 헤더의 시작/참가/live 참가자 표시와 오디오 전용 미니패널(말하는 중, 음소거, 나가기), 503 미구성 상태, JWT 재발급 재연결, 창/로그아웃/채널 전환 leave+disconnect 수명주기를 추가했다. LiveKit Swift SDK 2.15.2를 exact pin했다.

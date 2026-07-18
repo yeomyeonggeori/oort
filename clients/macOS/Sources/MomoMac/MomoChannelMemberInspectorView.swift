@@ -220,7 +220,7 @@ struct MomoChannelMemberInspectorView: View {
             .accessibilityLabel(copy.closeMemberInspector)
         }
         .padding(.horizontal, MomoTheme.MemberInspector.edgeInset)
-        .frame(minHeight: MomoTheme.ChannelHeader.minimumHeight)
+        .frame(minHeight: MomoWindowChromeLayout.integratedHeaderHeight)
     }
 
     private var filters: some View {

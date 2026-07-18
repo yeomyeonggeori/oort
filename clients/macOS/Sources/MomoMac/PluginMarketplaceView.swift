@@ -2,6 +2,7 @@ import SwiftUI
 import MomoCore
 
 struct MomoPluginMarketplaceView: View {
+    @Environment(\.momoCenterHeaderLeadingInset) private var centerHeaderLeadingInset
     private static let pluginIconSize = MomoTheme.WorkspaceSearch.rowMinimumHeight
 
     private enum Scope: String, CaseIterable, Identifiable {
@@ -81,8 +82,16 @@ struct MomoPluginMarketplaceView: View {
             }
             .buttonStyle(.bordered)
         }
-        .padding(.horizontal, MomoTheme.PluginMarketplace.sectionSpacing)
-        .frame(minHeight: MomoTheme.ChannelHeader.minimumHeight)
+        .padding(
+            .leading,
+            MomoTheme.PluginMarketplace.sectionSpacing + centerHeaderLeadingInset
+        )
+        .padding(
+            .trailing,
+            MomoTheme.PluginMarketplace.sectionSpacing
+                + MomoWindowChromeLayout.centerChromeControlsReservedWidth
+        )
+        .frame(minHeight: MomoWindowChromeLayout.integratedHeaderHeight)
     }
 
     private var searchField: some View {

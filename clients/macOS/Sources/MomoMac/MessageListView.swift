@@ -38,7 +38,6 @@ public struct MessageListView: View {
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private let focusComposerRequest: UInt64
-    private let onChannelHeaderHeightChange: (CGFloat) -> Void
     private let onOpenPluginMarketplace: () -> Void
     private let serverIdentity: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -82,7 +81,6 @@ public struct MessageListView: View {
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
-        self.onChannelHeaderHeightChange = { _ in }
         self.onOpenPluginMarketplace = {}
     }
 
@@ -93,8 +91,7 @@ public struct MessageListView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
-        onOpenPluginMarketplace: @escaping () -> Void = {},
-        onChannelHeaderHeightChange: @escaping (CGFloat) -> Void
+        onOpenPluginMarketplace: @escaping () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
@@ -103,7 +100,6 @@ public struct MessageListView: View {
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
         self.onOpenPluginMarketplace = onOpenPluginMarketplace
-        self.onChannelHeaderHeightChange = onChannelHeaderHeightChange
     }
 
     public var body: some View {
@@ -111,14 +107,6 @@ public struct MessageListView: View {
 
         VStack(spacing: 0) {
             header(copy: copy)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.preference(
-                            key: MomoChannelHeaderHeightPreferenceKey.self,
-                            value: geometry.size.height
-                        )
-                    }
-                }
             if showQuickStart {
                 quickStartCard(copy: copy)
                     .padding(.horizontal, 16)
@@ -152,9 +140,6 @@ public struct MessageListView: View {
             composer(copy: copy)
         }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
-        .onPreferenceChange(MomoChannelHeaderHeightPreferenceKey.self) { height in
-            onChannelHeaderHeightChange(height)
-        }
         .onChange(of: focusComposerRequest) { _, _ in
             isComposerFocused = true
         }
@@ -220,7 +205,10 @@ public struct MessageListView: View {
                 Text(copy.selectChannel)
                     .font(MomoTheme.Typography.row)
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: MomoTheme.ChannelHeader.minimumHeight)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: MomoWindowChromeLayout.integratedHeaderHeight
+                    )
                     .momoSurface(.panel, cornerRadius: 0)
             }
         }
@@ -1164,14 +1152,6 @@ public struct MessageListView: View {
             return nil
         }
         return viewModel.member(agent)
-    }
-}
-
-private struct MomoChannelHeaderHeightPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 

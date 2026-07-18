@@ -15,17 +15,11 @@ final class MomoChannelChromeTests: XCTestCase {
                 inspectorPresentation: .attached
             ).ownsInspectorSurface
         )
-        XCTAssertFalse(
-            ApprovalInboxView(
-                viewModel: viewModel,
-                inspectorPresentation: .overlay
-            ).ownsInspectorSurface
-        )
     }
 
-    func testAttachedInspectorUsesFlatSurfaceWhileOverlayKeepsElevatedChrome() {
+    func testInspectorUsesFlatSurfaceChrome() {
         XCTAssertFalse(MomoInspectorPresentation.attached.usesElevatedSurfaceChrome)
-        XCTAssertTrue(MomoInspectorPresentation.overlay.usesElevatedSurfaceChrome)
+        XCTAssertEqual(MomoInspectorPresentation.attached.cornerRadius, 0)
     }
 
     func testDetailPanePresentationClosesAfterSwitchingPane() {
@@ -55,29 +49,55 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertEqual(state.pane, .approvals)
     }
 
-    func testSafeDetailViewportAndInspectorRespectTheirTopBoundaries() {
-        XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: 52), 0)
-        XCTAssertEqual(MomoWindowChromeLayout.contentTopInset(windowChromeTopInset: -1), 0)
+    func testIntegratedHeadersOwnWindowChromeBandWithoutTransparentSpacer() {
+        XCTAssertEqual(MomoWindowChromeLayout.integratedHeaderHeight, 52)
         XCTAssertEqual(
-            MomoWindowChromeLayout.inspectorTopInset(
-                channelHeaderHeight: 84
-            ),
-            84
+            MomoWindowChromeLayout.controlBandHeight,
+            MomoWindowChromeLayout.integratedHeaderHeight
         )
-        XCTAssertEqual(
-            MomoWindowChromeLayout.inspectorTopInset(
-                channelHeaderHeight: -1
-            ),
-            0
-        )
+        XCTAssertGreaterThan(MomoWindowChromeLayout.centerChromeControlsReservedWidth, 0)
     }
 
-    func testNativeSidebarDoesNotApplyWindowChromeInsetTwice() {
+    func testCenterHeaderUsesTrafficLightInsetOnlyWhenSidebarIsCollapsed() {
         XCTAssertEqual(
-            MomoWindowChromeLayout.sidebarTopInset(
+            MomoWindowChromeLayout.centerHeaderLeadingInset(sidebarVisible: true),
+            0
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLayout.centerHeaderLeadingInset(sidebarVisible: false),
+            MomoWindowChromeLayout.collapsedCenterLeadingInset
+        )
+        XCTAssertEqual(MomoWindowChromeLayout.collapsedCenterLeadingInset, 112)
+    }
+
+    func testThreeZoneShellConsumesWindowChromeInsetOnce() {
+        XCTAssertEqual(
+            MomoWindowChromeLayout.shellTopInset(
                 windowChromeTopInset: 52
             ),
-            0
+            52
+        )
+        XCTAssertEqual(MomoWindowChromeLayout.shellTopInset(windowChromeTopInset: -8), 0)
+    }
+
+    func testMeasuredWindowChromeInsetCannotExpandCenterOrInspectorHeaders() {
+        XCTAssertEqual(MomoWindowChromeLayout.integratedHeaderHeight, 52)
+        XCTAssertEqual(MomoWindowChromeLayout.shellTopInset(windowChromeTopInset: 126), 126)
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarHeaderLeadingInset, 112)
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarHeaderTrailingInset, 44)
+    }
+
+    func testCustomSidebarWidthStaysWithinStableBounds() {
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarWidth(availableWidth: 600), 240)
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarWidth(availableWidth: 1_200), 280)
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarWidth(availableWidth: 2_000), 280)
+        XCTAssertEqual(
+            MomoWindowChromeLayout.sidebarWidth(preferredWidth: 360, availableWidth: 1_200),
+            360
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLayout.sidebarWidth(preferredWidth: 500, availableWidth: 760),
+            240
         )
     }
 
@@ -108,8 +128,9 @@ final class MomoChannelChromeTests: XCTestCase {
         )
     }
 
-    func testCompactChromeAndChannelHeaderUseThinStableContracts() {
-        XCTAssertEqual(MomoWindowChromeStyle.appKitToolbarStyle, .unifiedCompact)
+    func testFullHeightChromeAndChannelHeaderUseThinStableContracts() {
+        XCTAssertFalse(MomoWindowChromeStyle.showsSystemTitle)
+        XCTAssertEqual(MomoWindowChromeLayout.minimumControlBandHeight, 52)
         XCTAssertEqual(MomoTheme.ChannelHeader.minimumHeight, 48)
     }
 
@@ -132,10 +153,29 @@ final class MomoChannelChromeTests: XCTestCase {
 
         XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
         XCTAssertEqual(window.titleVisibility, .hidden)
-        XCTAssertEqual(window.toolbarStyle, .unifiedCompact)
         XCTAssertTrue(window.titlebarAppearsTransparent)
         XCTAssertEqual(window.titlebarSeparatorStyle, .none)
-        XCTAssertFalse(try XCTUnwrap(window.toolbar).showsBaselineSeparator)
+        XCTAssertNil(window.toolbar)
+        XCTAssertTrue(window.isMovableByWindowBackground)
+    }
+
+    @MainActor
+    func testFlatUnifiedChromePreservesInteractiveContentHitTesting() {
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        let button = NSButton(frame: NSRect(x: 40, y: 40, width: 120, height: 32))
+        content.addSubview(button)
+        let window = NSWindow(
+            contentRect: content.bounds,
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = content
+
+        MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+
+        XCTAssertTrue(content.hitTest(NSPoint(x: 80, y: 56)) === button)
+        XCTAssertTrue(content.hitTest(NSPoint(x: 400, y: 300)) === content)
     }
 
     func testChannelQuickActionsAreLimitedToSelectionOrHover() {
@@ -186,6 +226,38 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertTrue(english.downloadsScopeNote.contains("attachment downloads will appear"))
         XCTAssertTrue(korean.downloadsSubtitle.contains("지원 후 표시될"))
         XCTAssertTrue(english.downloadsSubtitle.contains("will appear when file transfer is available"))
+        XCTAssertEqual(korean.approveAll, "모두 승인")
+        XCTAssertEqual(english.approveAll, "Approve all")
+        XCTAssertEqual(korean.alwaysApprove, "항상 승인")
+        XCTAssertEqual(english.alwaysApprove, "Always approve")
+        XCTAssertTrue(korean.alwaysApproveScope.contains("되돌릴 수 있는 요청만"))
+        XCTAssertTrue(english.alwaysApproveScope.contains("Only reversible requests"))
+    }
+
+    func testAutomaticApprovalOnlyAcceptsExplicitlyReversibleRequests() {
+        func approval(isReversible: Bool?) -> ApprovalEvent {
+            ApprovalEvent(
+                action: .requested,
+                approvalId: ApprovalID(),
+                runId: RunID(),
+                channelId: ChannelID(),
+                requestedBy: MemberID(),
+                actionType: "github.issue.create",
+                status: .pending,
+                isReversible: isReversible
+            )
+        }
+
+        let reversible = approval(isReversible: true)
+        let irreversible = approval(isReversible: false)
+        let unknownRisk = approval(isReversible: nil)
+
+        XCTAssertTrue(MomoAutomaticApprovalPolicy.isEligibleForAutomaticApproval(reversible))
+        XCTAssertFalse(MomoAutomaticApprovalPolicy.requiresBatchConfirmation(reversible))
+        XCTAssertFalse(MomoAutomaticApprovalPolicy.isEligibleForAutomaticApproval(irreversible))
+        XCTAssertTrue(MomoAutomaticApprovalPolicy.requiresBatchConfirmation(irreversible))
+        XCTAssertFalse(MomoAutomaticApprovalPolicy.isEligibleForAutomaticApproval(unknownRisk))
+        XCTAssertTrue(MomoAutomaticApprovalPolicy.requiresBatchConfirmation(unknownRisk))
     }
 
     func testDownloadFolderUsesUserSelectedReadWriteSandboxEntitlement() throws {

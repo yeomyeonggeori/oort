@@ -6,7 +6,7 @@ import MomoCore
 // Surfaces every pending approval_request as a batchable 1st-class list (L4
 // experiences §C). Each row: which agent / on-behalf-of (actor·subject delegation,
 // L4 §7.3) / what action / estimated micro_usd / reversible badge. Supports the
-// money-shot batch action "Approve all reversible" (irreversible auto-excluded).
+// batch action "Approve all" for the requests currently awaiting review.
 //
 // This is the v0 PLACEHOLDER per ticket T09: real rows + correct data wiring to
 // decideApproval, but dry-run diff expansion + per-row swipe + risk filters are
@@ -22,10 +22,12 @@ public struct ApprovalInboxView: View {
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
+    @State private var alwaysApproveEnabled = false
+    @State private var showApproveAllConfirmation = false
 
     public init(viewModel: ChatViewModel) {
         self.viewModel = viewModel
-        self.inspectorPresentation = .overlay
+        self.inspectorPresentation = .attached
         self.ownsInspectorSurface = true
     }
 
@@ -45,10 +47,8 @@ public struct ApprovalInboxView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !pending.isEmpty {
-                actionStrip
-                Divider()
-            }
+            actionStrip
+            Divider()
             if pending.isEmpty {
                 ContentUnavailableViewCompat(
                     title: copy.noPendingApprovals,
@@ -69,37 +69,75 @@ public struct ApprovalInboxView: View {
                 ownsSurface: ownsInspectorSurface
             )
         )
+        .confirmationDialog(
+            copy.approveAllConfirmationTitle,
+            isPresented: $showApproveAllConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(copy.approveAll) {
+                Task { await approveAll() }
+            }
+            Button(copy.cancel, role: .cancel) {}
+        } message: {
+            Text(copy.approveAllConfirmationMessage)
+        }
+        .onAppear(perform: loadAlwaysApprovePreference)
+        .onChange(of: viewModel.workspaceId) { _, _ in
+            loadAlwaysApprovePreference()
+        }
+        .onChange(of: alwaysApproveEnabled) { _, isEnabled in
+            UserDefaults.standard.set(isEnabled, forKey: alwaysApproveStorageKey)
+        }
+        .task(id: automaticApprovalIDs) {
+            for approvalID in automaticApprovalIDs {
+                await viewModel.decideApproval(
+                    approvalID,
+                    approve: true,
+                    reason: "approved automatically by local reversible-action preference"
+                )
+            }
+        }
     }
 
     private var actionStrip: some View {
-        HStack {
-            Text(pendingSummary)
-                .font(MomoTheme.Typography.supporting.weight(.medium))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-            Spacer()
-            Button {
-                Task { await approveAllReversible() }
-            } label: {
-                Label(approveAllLabel, systemImage: "checkmark.circle")
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
+                Text(pendingSummary)
+                    .font(MomoTheme.Typography.supporting.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                Spacer()
+                if !alwaysApproveEnabled {
+                    Button {
+                        if pending.contains(where: MomoAutomaticApprovalPolicy.requiresBatchConfirmation) {
+                            showApproveAllConfirmation = true
+                        } else {
+                            Task { await approveAll() }
+                        }
+                    } label: {
+                        Label(copy.approveAll, systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(pending.isEmpty)
+                }
+                Toggle(copy.alwaysApprove, isOn: $alwaysApproveEnabled)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help(copy.alwaysApproveHelp)
+                    .accessibilityHint(copy.alwaysApproveHelp)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
-            .disabled(!pending.contains { $0.isReversible == true })
+            Text(copy.alwaysApproveScope)
+                .font(MomoTheme.Typography.metadata)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.vertical, 12)
     }
 
     private var pendingSummary: String {
         copy.language == .korean ? "확인이 필요한 요청 \(pending.count)개" : "\(pending.count) requests need review"
-    }
-
-    private var approveAllLabel: String {
-        let count = pending.filter { $0.isReversible == true }.count
-        return copy.language == .korean
-            ? "되돌릴 수 있는 \(count)건 승인"
-            : "Approve \(count) reversible"
     }
 
     @ViewBuilder
@@ -172,12 +210,27 @@ public struct ApprovalInboxView: View {
             .help(isReversible ? copy.reversible : copy.irreversible)
     }
 
-    private func approveAllReversible() async {
+    private func approveAll() async {
         for approval in pending
-            where approval.isReversible == true
-                && !viewModel.approvalDecisionsInFlight.contains(approval.approvalId) {
+            where !viewModel.approvalDecisionsInFlight.contains(approval.approvalId) {
             await viewModel.decideApproval(approval.approvalId, approve: true)
         }
+    }
+
+    private var automaticApprovalIDs: [ApprovalID] {
+        guard alwaysApproveEnabled else { return [] }
+        return pending
+            .filter(MomoAutomaticApprovalPolicy.isEligibleForAutomaticApproval)
+            .map(\.approvalId)
+    }
+
+    private var alwaysApproveStorageKey: String {
+        let workspaceScope = viewModel.workspaceId?.description ?? "local"
+        return "momo.approvals.auto-approve-reversible.\(workspaceScope)"
+    }
+
+    private func loadAlwaysApprovePreference() {
+        alwaysApproveEnabled = UserDefaults.standard.bool(forKey: alwaysApproveStorageKey)
     }
 
     private func agentName(_ id: MemberID) -> String {
@@ -193,6 +246,16 @@ public struct ApprovalInboxView: View {
             isDeveloperModeEnabled: developerMode,
             isCostDisplayEnabled: showCosts
         )
+    }
+}
+
+enum MomoAutomaticApprovalPolicy {
+    static func isEligibleForAutomaticApproval(_ approval: ApprovalEvent) -> Bool {
+        approval.isReversible == true
+    }
+
+    static func requiresBatchConfirmation(_ approval: ApprovalEvent) -> Bool {
+        approval.isReversible != true
     }
 }
 

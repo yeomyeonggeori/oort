@@ -357,6 +357,12 @@ public enum MomoTheme {
         public static let edgeInset: CGFloat = 16
     }
 
+    /// Dimensions shared by the full-height three-zone macOS window shell.
+    public enum WindowChrome {
+        public static let minimumControlBandHeight: CGFloat = 52
+        public static let centerControlsReservedWidth: CGFloat = 120
+    }
+
     public enum QuickSwitcher {
         public static let panelWidth: CGFloat = 560
         public static let resultsMinimumHeight: CGFloat = 280

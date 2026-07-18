@@ -14,6 +14,21 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         let size: CGSize
         let scheme: ColorScheme
         let initialDetailPane: MomoMacDetailPane?
+        let initialPrimaryDestination: MomoMacPrimaryDestination
+
+        init(
+            name: String,
+            size: CGSize,
+            scheme: ColorScheme,
+            initialDetailPane: MomoMacDetailPane?,
+            initialPrimaryDestination: MomoMacPrimaryDestination = .channel
+        ) {
+            self.name = name
+            self.size = size
+            self.scheme = scheme
+            self.initialDetailPane = initialDetailPane
+            self.initialPrimaryDestination = initialPrimaryDestination
+        }
     }
 
     private let standardLight = Scenario(
@@ -64,6 +79,13 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         scheme: .dark,
         initialDetailPane: nil
     )
+    private let pluginMarketplaceStandardLight = Scenario(
+        name: "plugin-marketplace-standard-light",
+        size: CGSize(width: 1_180, height: 760),
+        scheme: .light,
+        initialDetailPane: nil,
+        initialPrimaryDestination: .plugins
+    )
 
     private func rootView(for scenario: Scenario) async throws -> some View {
         let backend = LiveChatBackend()
@@ -87,7 +109,8 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             existingViewModel: viewModel,
             sessionChrome: nil,
             initialDetailPane: scenario.initialDetailPane,
-            initialSplitViewVisibility: .all
+            initialSplitViewVisibility: .all,
+            initialPrimaryDestination: scenario.initialPrimaryDestination
         )
         .frame(width: scenario.size.width, height: scenario.size.height)
         .environment(\.colorScheme, scenario.scheme)
@@ -116,10 +139,9 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         window.appearance = appearance
         window.isReleasedWhenClosed = false
         window.title = "momo"
-        window.titleVisibility = MomoWindowChromeStyle.showsSystemTitle ? .visible : .hidden
-        window.toolbarStyle = MomoWindowChromeStyle.appKitToolbarStyle
-        window.toolbar = NSToolbar(identifier: "momo.snapshot.window-chrome.\(scenario.name)")
         window.contentViewController = hostingController
+        MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+        XCTAssertNil(window.toolbar)
         hostingView.appearance = appearance
 
         let usesWindowServer = !NSScreen.screens.isEmpty
@@ -132,7 +154,7 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         }
         hostingController.sizingOptions = []
         // NSHostingController initially proposes the root's fitting size as
-        // content below the toolbar. Reassert the requested *window frame* so
+        // content below the titlebar. Reassert the requested *window frame* so
         // the canonical includes, rather than adds, the unified titlebar.
         window.setFrame(
             CGRect(origin: window.frame.origin, size: scenario.size),
@@ -296,6 +318,16 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
             XCTAssertEqual(image.size.width, scenario.size.width)
             XCTAssertEqual(image.size.height, scenario.size.height)
         }
+    }
+
+    func testPluginMarketplaceWritesRealWindowArtifact() async throws {
+        let image = try await render(pluginMarketplaceStandardLight, requiresWindowServer: true)
+        try writeDesignReviewArtifact(
+            image,
+            named: "momo-464-plugin-marketplace-standard-light.png"
+        )
+        XCTAssertEqual(image.size.width, pluginMarketplaceStandardLight.size.width)
+        XCTAssertEqual(image.size.height, pluginMarketplaceStandardLight.size.height)
     }
 
     func testWindowChromeOverlayLightSnapshot() async throws {
