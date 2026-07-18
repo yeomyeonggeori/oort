@@ -16,6 +16,20 @@ import PostgresNIO
 struct ChannelRoutes: Sendable {
     let db: Database
 
+    /// Preserve intended 4xx responses thrown inside a Postgres transaction.
+    /// PostgresNIO wraps closure errors after rollback by default.
+    private func withTenantTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            return try await db.withTenantTransaction(workspaceID: workspaceID, body)
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
     func add(to group: RouterGroup<AppRequestContext>) {
         group.get("/v1/workspaces/:ws/channels", use: list)
         group.post("/v1/workspaces/:ws/channels", use: create)
@@ -229,7 +243,7 @@ struct ChannelRoutes: Sendable {
         let channelID = try Self.channelID(context)
         let dto = try await request.decode(as: UpdateNotificationPrefRequest.self, context: context)
 
-        try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
             let membershipRows = try await conn.query(
                 """
                 SELECT 1
