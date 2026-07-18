@@ -14,14 +14,15 @@
 | A-4 | `in-progress` | **스레드 실전송** | `rootId`를 포함한 1단계 답글 실전송·엄격 응답 검증 완료. 정확한 서버 롤업/오래된 답글 조회는 X-3 엔진 계약 대기 | `SendMessageRequest.rootId` + thread 롤업 — MessageRoutes.swift, `verify_thread_reply.sh`가 계약 예시 |
 | A-6 | `in-progress` | **파일 첨부 실업로드** | 업로드 송신 API는 확인했으나 수신 메시지가 첨부를 발견할 Core/history/realtime 투영이 없어 X-4 엔진 계약 대기. 로컬 초안을 실물로 오인시키는 부분 구현은 하지 않음 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
 | A-7 | `done` | **검색 서버 승격** | 기존 destination 심을 유지하면서 서버 FTS, 300ms debounce, 최신순 cursor pagination, 오류/빈 상태와 정확한 과거 메시지 이동을 연결 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
+| A-8 | `ready`(track/engine — main 대기) | **채널 음소거 설정 UI** | 채널 목록 응답의 `muted` 표시(음소거 아이콘) + 채널 컨텍스트/설정에 음소거 토글(`PUT /v1/workspaces/:ws/channels/:ch/notification-pref` {muted}) | ChannelRoutes/DTOs, ADR-0124(멘션 포함 전면 억제·unread 무영향), verify_notification_mute.sh가 계약 예시 |
 | A-5 | `done` | **허들 UI 폴리시** | 비활성 사유를 포인터·키보드에서 동일하게 설명하고 참가 전/참가 중 상태의 아이콘·레이블·동작을 분리 | MomoHuddle*.swift |
 
 ## UXUI → 엔진 역방향 로그
 
 | # | 상태 | UXUI에서 확인·수정한 엔진 소유 항목 | 엔진 액션 | 근거 |
 |---|---|---|---|---|
-| X-1 | `needs-engine-sync` | `scripts/macos_dev_run.sh`가 SwiftPM 바이너리 프레임워크·리소스 번들을 개발용 `.app`에 스테이징하도록 보완 | `track/engine`에 동일 수정 이식 후 엔진 트랙 빌드로 재검증 | LiveKit 도입 후 `@rpath/LiveKitWebRTC.framework/LiveKitWebRTC` 누락으로 앱이 시작 즉시 DYLD 종료; UXUI 트랙 `--verify` 프로세스+창 PASS (2026-07-18) |
-| X-2 | `needs-engine-contract` | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 스레드 실전송은 main에 열렸지만 실서버 REST의 `editMessage`·`addReaction`은 현재 501이고 remove/delete 계약도 없어, 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | REST edit/add/remove/delete 명령과 권한 오류·realtime 확인 이벤트를 모두 연결한 뒤 `MomoMessageInteractionBackend` capability를 실서버에 부여 | macOS `MessageInteractionModel.swift`, `ChatViewModel.toggleReaction/deleteMessage`, `MessageInteractionTests` (2026-07-18) |
+| X-1 | `done`(track/engine `baa337e` — main은 다음 승인 머지 승차. 엔진 빌드 기동 검증 OK. uxui 워크트리의 동일 수정 미커밋분은 UXUI가 정리) | `scripts/macos_dev_run.sh`가 SwiftPM 바이너리 프레임워크·리소스 번들을 개발용 `.app`에 스테이징하도록 보완 | `track/engine`에 동일 수정 이식 후 엔진 트랙 빌드로 재검증 | LiveKit 도입 후 `@rpath/LiveKitWebRTC.framework/LiveKitWebRTC` 누락으로 앱이 시작 즉시 DYLD 종료; UXUI 트랙 `--verify` 프로세스+창 PASS (2026-07-18) |
+| X-2 | `accepted-next`(B-4 다음 엔진 후보로 채택 — UXUI가 capability gate로 UI를 이미 완비, 엔진 REST edit/reaction/delete+realtime 확인 이벤트만 채우면 즉시 개방) | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 스레드 실전송은 main에 열렸지만 실서버 REST의 `editMessage`·`addReaction`은 현재 501이고 remove/delete 계약도 없어, 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | REST edit/add/remove/delete 명령과 권한 오류·realtime 확인 이벤트를 모두 연결한 뒤 `MomoMessageInteractionBackend` capability를 실서버에 부여 | macOS `MessageInteractionModel.swift`, `ChatViewModel.toggleReaction/deleteMessage`, `MessageInteractionTests` (2026-07-18) |
 | X-3 | `needs-engine-contract` | A-4 답글 실전송은 `rootId`로 연결했으나 정확한 스레드 롤업과 오래된 답글 조회를 위한 클라이언트 투영이 없음. 현재 배지는 로드된 메시지 범위의 답글 수를 사용 | 최상위 메시지 응답/realtime에 `reply_count`·`last_reply_*` 가산 투영과 스레드 조회 계약 추가. AgentWorker 답변도 원본 `root_id`를 보존 | `MessageRoutes.swift` thread 갱신, macOS `MessageListView.swift`·`MessageThreadPanel.swift` (2026-07-18) |
 | X-4 | `needs-engine-contract` | A-6 송신 업로드 REST는 준비됐지만 Core `DraftMessage`와 메시지 history/realtime 응답에 `attachmentIds`·첨부 메타데이터 투영이 없어 수신자가 다운로드 대상을 발견할 수 없음 | `DraftMessage` 가산 필드와 Message history/realtime의 attachment projection 또는 message별 attachment 조회 API를 추가. 업로드 URL은 bearer capability이므로 로그·영속 저장 금지 계약 유지 | `AttachmentRoutes.swift`, `MessageRoutes.swift`, `clients/Core/Message.swift`, `verify_attachment_upload.sh` (2026-07-18) |
 
@@ -29,7 +30,7 @@
 
 | # | 상태 | 항목 | 비고 |
 |---|---|---|---|
-| B-4 | `ready` | 알림 음소거/설정 계약 | 소형 ADR 선행(판정=notifier 한 곳, P9) — 엔진 트랙 다음 후보 |
+| B-4 | `done` → track/engine (main 대기) | 알림 음소거/설정 계약 | 소형 ADR 선행(판정=notifier 한 곳, P9) — 엔진 트랙 다음 후보 |
 
 ## C. 검증 부채
 
