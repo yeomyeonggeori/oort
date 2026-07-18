@@ -1,6 +1,6 @@
 # ADR-0124: 알림 음소거 계약 — 채널 단위 mute의 서버 판정
 
-- Status: **Proposed** (2026-07-18, Fable — 성재 D1~D3 승인 대기)
+- Status: **Accepted** (2026-07-18, 성재 — D1~D3 권고안 승인 "ㄱㄱ". MOMO-477 발급, track/engine)
 - 관련: ADR-0120(푸시 — 판정은 notifier 한 곳), ux-bible P8(알림 예산)·P9(판정 로직 서버 단일화), ENGINE_HANDOFF B-4, ADR-0109(unread — 배지는 별개 데이터)
 - 발단: 설정 UI·서버 계약 양측 부재(2026-07-18 갭 감사 B-4). dogfood에서 채널이 늘며 알림 통제 수요.
 
@@ -9,7 +9,7 @@
 1. 푸시 판정(DM/멘션/승인요청)은 NotifierWorker 한 곳에 있다(P-2, MOMO-404). 음소거가 클라 로컬이면 다기기(맥·아이폰) 불일치가 나므로 **서버 저장·notifier 판정**이 유일하게 P9 정합이다.
 2. unread/배지(ADR-0109)는 별개 원장 — 음소거는 "푸시를 보낼 것인가"만 바꾸고 unread 집계는 건드리지 않는 것이 단순하다.
 
-## Options & Decision (Proposed)
+## Options & Decision
 
 ### D1. 범위
 - **A (권고) — 채널 단위 무기한 mute + 해제 (v0)**: (member, channel) 페어당 muted bool. 워크스페이스 전역 DND·시간 스케줄(mute until)·키워드는 후속(스키마는 until 확장 여지로 `muted_until timestamptz NULL` — NULL=무기한).

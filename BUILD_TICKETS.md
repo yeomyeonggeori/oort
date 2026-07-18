@@ -2212,6 +2212,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] openapi + verify_thread_reply(롤업 단정·대댓글 400·동시 답글 카운트·RLS) + runtime-db 편입. 상세: issue #502 본문(패킷 겸용). 랜딩 시 B-3 done→A-4 해제.
 - 랜딩: PR #503 squash → **track/engine**(2026-07-18, main 대기). 실런: 서버 109/109 + verify_thread_reply PASS(원자 롤업·실시간/히스토리·RLS) + runtime-db 게이트 PASS.
 
+### ☐ MOMO-477 (`#504`) 수용기준 — 채널 알림 음소거 (ADR-0124) `[runtime-db]` · **PR base=track/engine**
+- [ ] 018_notification_pref(RLS, muted_until 확장 여지) + PUT pref(멤버만·같은 tx audit) + 채널 목록 muted 가산 + notifier 판정 join(멘션 포함 전면 억제, suppressed 무기록).
+- [ ] verify_notification_mute(음소거 0/해제 재개/페어 격리/로그 무오염/RLS) + runtime-db 편입 + openapi. 상세: issue #504 본문(패킷 겸용). 랜딩 시 UXUI A큐에 설정 UI 등재.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
