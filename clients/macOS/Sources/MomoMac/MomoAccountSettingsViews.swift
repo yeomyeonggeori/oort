@@ -1380,6 +1380,38 @@ struct MomoChannelSettingsSheet: View {
                 }
             }
 
+            if viewModel.supportsChannelNotificationSettings, !channel.isArchived {
+                Section(copy.channelNotifications) {
+                    Toggle(isOn: channelMuteBinding) {
+                        VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.compactSpacing) {
+                            Text(copy.muteChannel)
+                                .momoTypography(.row)
+                            Text(copy.channelMuteDescription)
+                                .momoTypography(.supporting)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .disabled(viewModel.channelMuteMutationIds.contains(channel.id))
+
+                    if viewModel.channelMuteMutationIds.contains(channel.id) {
+                        HStack(spacing: MomoTheme.ChannelHeader.compactSpacing) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(copy.updatingChannelNotifications)
+                                .momoTypography(.supporting)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if let error = viewModel.channelNotificationErrors[channel.id] {
+                        Label(error.message(copy: copy), systemImage: "exclamationmark.triangle")
+                            .momoTypography(.supporting)
+                            .foregroundStyle(MomoTheme.costAmber)
+                    }
+                }
+            }
+
             Section {
                 Label(copy.channelLocalDraftNote, systemImage: "info.circle")
                     .momoTypography(.supporting)
@@ -1488,6 +1520,15 @@ struct MomoChannelSettingsSheet: View {
             set: { newValue in
                 channelTopic = newValue
                 savedLocally = false
+            }
+        )
+    }
+
+    private var channelMuteBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.isChannelMuted(channel.id) },
+            set: { muted in
+                Task { await viewModel.setChannelMuted(channel.id, muted: muted) }
             }
         )
     }

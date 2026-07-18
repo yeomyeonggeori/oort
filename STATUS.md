@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## UXUI A-8 채널 음소거 + A-9 메시지 상호작용 실연동 (2026-07-19)
+
+- A-8은 채널/DM `muted` 응답을 목록 아이콘·컨텍스트 메뉴·채널 설정 토글에 연결하고, 낙관 갱신 실패/취소 롤백과 세션 전환 격리, unread 불변식을 적용했다. A-9는 macOS REST backend의 수정·삭제·반응 추가/제거·스냅샷 501을 실제 서버 계약으로 교체해 기존 capability-gated UI를 개방했다.
+- 같은 클라이언트의 REST/local UI는 검증 대상이다. 타 클라이언트 realtime은 원본 message seq/version 재사용으로 drop될 수 있고 history가 수정 상태·삭제 tombstone을 복원하지 못하므로 X-5 `needs-engine-contract`로 남겼다. 이 범위는 runtime-unverified이며 완료로 주장하지 않는다.
+
 ## 엔진 준비 UXUI 큐 A-1~A-7 소비 (2026-07-18)
 
 - A-1 마켓플레이스, A-2 채널 웹훅, A-3 초대 단축 링크, A-5 허들 폴리시, A-7 워크스페이스 서버 검색을 실제 엔진 REST 계약에 연결했다. one-time credential은 확인 전 이탈을 잠그고 확인 즉시 메모리에서 폐기하며, 세션·workspace 변경 시 비영속 상태를 전부 무효화한다.
