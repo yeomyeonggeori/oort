@@ -470,6 +470,7 @@ struct MessageRoutes: Sendable {
                 action: "message.edited",
                 payload: Self.messageInteractionPayload(
                     workspaceID: workspaceID,
+                    channelID: row.channelID,
                     eventType: "message.edited",
                     message: message
                 )
@@ -552,6 +553,7 @@ struct MessageRoutes: Sendable {
                 action: "message.deleted",
                 payload: Self.deleteInteractionPayload(
                     workspaceID: workspaceID,
+                    channelID: row.channelID,
                     message: message
                 )
             )
@@ -810,6 +812,7 @@ struct MessageRoutes: Sendable {
 
     private static func messageInteractionPayload(
         workspaceID: UUID,
+        channelID: UUID,
         eventType: String,
         message: MessageDTO
     ) -> String {
@@ -834,7 +837,7 @@ struct MessageRoutes: Sendable {
         ])
         return encodeInteractionPayload(
             workspaceID: workspaceID,
-            channelID: UUID(uuidString: message.channelId)!,
+            channelID: channelID,
             eventType: eventType,
             timestampMs: message.editedAtMs ?? message.deletedAtMs ?? message.hlcTs,
             seq: message.seq,
@@ -844,11 +847,12 @@ struct MessageRoutes: Sendable {
 
     private static func deleteInteractionPayload(
         workspaceID: UUID,
+        channelID: UUID,
         message: MessageDTO
     ) -> String {
         encodeInteractionPayload(
             workspaceID: workspaceID,
-            channelID: UUID(uuidString: message.channelId)!,
+            channelID: channelID,
             eventType: "message.deleted",
             timestampMs: message.deletedAtMs ?? message.hlcTs,
             seq: message.seq,
