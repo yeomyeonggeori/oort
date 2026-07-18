@@ -19,12 +19,15 @@ PG_PORT="${INTERACTION_GATE_POSTGRES_PORT:-19881}"
 CENT_PORT_HOST="${INTERACTION_GATE_CENT_PORT:-19882}"
 HERMES_PORT_HOST="${INTERACTION_GATE_HERMES_PORT:-19883}"
 BOOT_TIMEOUT="${INTERACTION_GATE_BOOT_TIMEOUT:-2400}"
+ASSERT_TIMEOUT="${INTERACTION_GATE_ASSERT_TIMEOUT:-240}"
 RUN_ID="$(date -u +%s)-$$"
 TMP_DIR="${TMPDIR:-/tmp}/momo-interaction-$RUN_ID"
 mkdir -p "$TMP_DIR"
 
 WS_A="00000000-0000-7000-8000-000000000001"
 CH_A="00000000-0000-7000-8000-000000000201"
+CENT_CHANNEL="ch:ws${WS_A}.${CH_A}"
+CENT_API_KEY="${CENT_API_KEY:-change-me-cent-api-key}"
 AUTHOR_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 OTHER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 OUTSIDER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
@@ -56,8 +59,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 BASE_URL="http://127.0.0.1:$API_PORT"
-echo "[interaction] booting isolated api stack '$PROJECT'"
-compose up -d api
+CENT_API_URL="http://127.0.0.1:$CENT_PORT_HOST/api"
+echo "[interaction] booting isolated api/relay stack '$PROJECT'"
+compose up -d api relay
 deadline=$(( $(date -u +%s) + BOOT_TIMEOUT ))
 until curl -fsS "$BASE_URL/health" >/dev/null 2>&1; do
   if [ "$(date -u +%s)" -ge "$deadline" ]; then
@@ -138,6 +142,34 @@ MESSAGE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id' | tr '[:upper:]' '[:lo
 MESSAGE_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -er '.seq')"
 MESSAGE_PATH="/v1/workspaces/$WS_A/messages/$MESSAGE_ID"
 REACTION_PATH="$MESSAGE_PATH/reactions/%F0%9F%91%8D"
+
+# Establish the exact regression precondition: message.new has already claimed
+# this seq as the Centrifugo channel version before any projection reuses it.
+MESSAGE_NEW_OK=0
+deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+while [ "$(date -u +%s)" -lt "$deadline" ]; do
+  history="$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg ch "$CENT_CHANNEL" '{channel:$ch,limit:100,reverse:true}')" \
+    "$CENT_API_URL/history" 2>/dev/null || printf '{}')"
+  matches="$(printf '%s' "$history" | jq -r \
+    --arg message "$MESSAGE_ID" --argjson seq "$MESSAGE_SEQ" '
+      [.result.publications[]?.data
+       | select(.type == "message.new")
+       | select(((.payload.id // "") | ascii_downcase) == $message)
+       | select(.seq == $seq)] | length
+    ' 2>/dev/null || printf '0')"
+  if [ "$matches" != "0" ]; then
+    MESSAGE_NEW_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "$MESSAGE_NEW_OK" = "1" ] || {
+  compose logs --tail 120 relay >&2 || true
+  echo "[interaction] FAIL message.new did not establish the channel version" >&2
+  exit 1
+}
 
 api "$AUTHOR_TOKEN" PATCH "$MESSAGE_PATH" '{"body":"   "}'
 expect_status 400 "empty edit rejection"
@@ -252,6 +284,39 @@ SELECT count(DISTINCT payload->'data'->>'type') FROM outbox
 SQL
 )"
 [ "$got" = "4" ] || { echo "[interaction] FAIL four event kinds: $got" >&2; exit 1; }
+
+# Relay delivery is the contract: all four no-version projections must survive
+# Centrifugo's version gate after message.new has established the channel head.
+INTERACTION_EVENTS_OK=0
+deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+while [ "$(date -u +%s)" -lt "$deadline" ]; do
+  history="$(curl -fsS -H "X-API-Key: $CENT_API_KEY" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -cn --arg ch "$CENT_CHANNEL" '{channel:$ch,limit:100,reverse:true}')" \
+    "$CENT_API_URL/history" 2>/dev/null || printf '{}')"
+  matches="$(printf '%s' "$history" | jq -r --arg message "$MESSAGE_ID" '
+    [.result.publications[]?.data
+     | select(
+         .type == "message.edited"
+         or .type == "message.deleted"
+         or .type == "reaction.added"
+         or .type == "reaction.removed"
+       )
+     | select(((.payload.message_id // .payload.id // "") | ascii_downcase) == $message)
+     | .type] | unique | length
+  ' 2>/dev/null || printf '0')"
+  if [ "$matches" = "4" ]; then
+    INTERACTION_EVENTS_OK=1
+    break
+  fi
+  sleep 1
+done
+[ "$INTERACTION_EVENTS_OK" = "1" ] || {
+  compose logs --tail 120 relay >&2 || true
+  echo "[interaction] FAIL four interaction events were not delivered to Centrifugo history" >&2
+  exit 1
+}
+
 got="$(sql_value <<SQL
 SELECT count(*) FROM outbox
  WHERE payload->'data'->>'type'='message.edited'
@@ -294,4 +359,4 @@ SQL
 )"
 [ "$got" = "4" ] || { echo "[interaction] FAIL FORCE RLS metadata: $got" >&2; exit 1; }
 
-echo "MOMO-478 message edit/delete/reaction + realtime payload + snapshot + RLS PASS"
+echo "MOMO-480 message edit/delete/reaction + delivered realtime history + snapshot + RLS PASS"
