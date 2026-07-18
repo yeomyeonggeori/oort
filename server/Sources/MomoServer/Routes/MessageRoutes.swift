@@ -7,6 +7,7 @@ import PostgresNIO
 ///
 ///   POST   /v1/workspaces/{ws}/channels/{ch}/messages   (send, idempotent)
 ///   GET    /v1/workspaces/{ws}/channels/{ch}/messages    (seq-cursor page)
+///   GET    /v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies
 ///   PATCH  /v1/workspaces/{ws}/messages/{id}             (author edit)
 ///   DELETE /v1/workspaces/{ws}/messages/{id}             (author tombstone)
 ///   PUT    /v1/workspaces/{ws}/messages/{id}/reactions/{emoji}
@@ -23,6 +24,7 @@ struct MessageRoutes: Sendable {
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/channels/:ch/messages", use: send)
         group.get("/v1/workspaces/:ws/channels/:ch/messages", use: history)
+        group.get("/v1/workspaces/:ws/channels/:ch/messages/:root/replies", use: replies)
         group.patch("/v1/workspaces/:ws/messages/:id", use: edit)
         group.delete("/v1/workspaces/:ws/messages/:id", use: delete)
         group.put("/v1/workspaces/:ws/messages/:id/reactions/:emoji", use: addReaction)
@@ -196,10 +198,11 @@ struct MessageRoutes: Sendable {
             }
             let responseProps = Self.decodeProps(responsePropsJSON)
 
+            var updatedThread: ThreadRollupDTO?
             if didInsert, let rootID {
                 // ON CONFLICT DO UPDATE takes the root row lock. The increment is
                 // atomic, so concurrent replies cannot lose reply_count updates.
-                _ = try await conn.query(
+                let threadRows = try await conn.query(
                     """
                     INSERT INTO thread
                       (root_id, workspace_id, channel_id, reply_count,
@@ -218,9 +221,14 @@ struct MessageRoutes: Sendable {
                               thread.participant_ids, EXCLUDED.participant_ids[1]
                             )
                           END
+                    RETURNING reply_count, last_reply_seq, last_reply_at
                     """,
                     logger: db.logger
-                )
+                ).collect()
+                guard let threadRow = threadRows.first else {
+                    throw HTTPError(.internalServerError, message: "thread rollup update failed")
+                }
+                updatedThread = try Self.decodeThreadRollup(threadRow)
             }
 
             // ---- outbox INSERT in the SAME tx (L4 §8.1: transactional outbox) ----
@@ -243,6 +251,24 @@ struct MessageRoutes: Sendable {
                     """,
                     logger: db.logger
                 )
+                if let rootID, let updatedThread {
+                    let threadPayload = Self.threadUpdatedPayload(
+                        workspaceID: workspaceID,
+                        channelID: channelID,
+                        rootID: rootID,
+                        rollup: updatedThread
+                    )
+                    _ = try await conn.query(
+                        """
+                        INSERT INTO outbox
+                          (workspace_id, kind, method, payload, partition_key)
+                        VALUES
+                          (\(workspaceID), 'broadcast', 'publish',
+                           \(threadPayload)::jsonb, \(channelID))
+                        """,
+                        logger: db.logger
+                    )
+                }
             }
 
             // MOMO-215: mention routing is part of the same commit boundary as
@@ -284,6 +310,15 @@ struct MessageRoutes: Sendable {
                 )
             }
 
+            let responseThread: ThreadRollupDTO?
+            if rootID == nil {
+                responseThread = try await Self.fetchThreadRollup(
+                    conn: conn, logger: db.logger, rootID: id
+                )
+            } else {
+                responseThread = nil
+            }
+
             return (true, MessageDTO(
                 id: id.uuidString, channelId: channelID.uuidString,
                 rootId: rootID?.uuidString, seq: seq,
@@ -291,7 +326,8 @@ struct MessageRoutes: Sendable {
                 type: type, body: body, props: responseProps,
                 runId: dto.runId?.uuidString, clientMsgId: dto.clientMsgId.uuidString,
                 createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
-                state: nil, editedAtMs: nil, deletedAtMs: nil
+                state: nil, editedAtMs: nil, deletedAtMs: nil,
+                thread: responseThread
             ))
         }
 
@@ -337,12 +373,16 @@ struct MessageRoutes: Sendable {
             if let after {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
-                           props::text, root_id, run_id, client_msg_id, created_at
-                      FROM message
-                     WHERE channel_id = \(channelID) AND seq > \(after)
-                       AND deleted_at IS NULL
-                     ORDER BY seq ASC
+                    SELECT m.id, m.seq, m.hlc_ts, m.hlc_count, m.author_member_id,
+                           m.type, m.body, m.props::text, m.root_id, m.run_id,
+                           m.client_msg_id, m.created_at, m.state::text,
+                           m.edited_at, m.deleted_at,
+                           t.reply_count, t.last_reply_seq, t.last_reply_at
+                      FROM message m
+                      LEFT JOIN thread t
+                        ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
+                     WHERE m.channel_id = \(channelID) AND m.seq > \(after)
+                     ORDER BY m.seq ASC
                      LIMIT \(limit)
                     """,
                     logger: db.logger
@@ -350,12 +390,16 @@ struct MessageRoutes: Sendable {
             } else if let before {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
-                           props::text, root_id, run_id, client_msg_id, created_at
-                      FROM message
-                     WHERE channel_id = \(channelID) AND seq < \(before)
-                       AND deleted_at IS NULL
-                     ORDER BY seq DESC
+                    SELECT m.id, m.seq, m.hlc_ts, m.hlc_count, m.author_member_id,
+                           m.type, m.body, m.props::text, m.root_id, m.run_id,
+                           m.client_msg_id, m.created_at, m.state::text,
+                           m.edited_at, m.deleted_at,
+                           t.reply_count, t.last_reply_seq, t.last_reply_at
+                      FROM message m
+                      LEFT JOIN thread t
+                        ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
+                     WHERE m.channel_id = \(channelID) AND m.seq < \(before)
+                     ORDER BY m.seq DESC
                      LIMIT \(limit)
                     """,
                     logger: db.logger
@@ -363,12 +407,16 @@ struct MessageRoutes: Sendable {
             } else {
                 rows = try await conn.query(
                     """
-                    SELECT id, seq, hlc_ts, hlc_count, author_member_id, type, body,
-                           props::text, root_id, run_id, client_msg_id, created_at
-                      FROM message
-                     WHERE channel_id = \(channelID)
-                       AND deleted_at IS NULL
-                     ORDER BY seq DESC
+                    SELECT m.id, m.seq, m.hlc_ts, m.hlc_count, m.author_member_id,
+                           m.type, m.body, m.props::text, m.root_id, m.run_id,
+                           m.client_msg_id, m.created_at, m.state::text,
+                           m.edited_at, m.deleted_at,
+                           t.reply_count, t.last_reply_seq, t.last_reply_at
+                      FROM message m
+                      LEFT JOIN thread t
+                        ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
+                     WHERE m.channel_id = \(channelID)
+                     ORDER BY m.seq DESC
                      LIMIT \(limit)
                     """,
                     logger: db.logger
@@ -376,8 +424,13 @@ struct MessageRoutes: Sendable {
             }
 
             let dtos = try rows.map { row -> MessageDTO in
-                let (id, seq, ts, count, author, type, body, propsJSON, rootID, runID, clientMsgID, createdAt) =
-                    try row.decode((UUID, Int64, Int64, Int, UUID, String, String?, String, UUID?, UUID?, UUID?, Date).self)
+                let (id, seq, ts, count, author, type, body, propsJSON, rootID,
+                     runID, clientMsgID, createdAt, state, editedAt, deletedAt,
+                     replyCount, lastReplySeq, lastReplyAt) = try row.decode(
+                        (UUID, Int64, Int64, Int, UUID, String, String?, String,
+                         UUID?, UUID?, UUID?, Date, String, Date?, Date?, Int?,
+                         Int64?, Date?).self
+                     )
                 return MessageDTO(
                     id: id.uuidString, channelId: channelID.uuidString,
                     rootId: rootID?.uuidString, seq: seq,
@@ -385,7 +438,14 @@ struct MessageRoutes: Sendable {
                     type: type, body: body, props: Self.decodeProps(propsJSON),
                     runId: runID?.uuidString, clientMsgId: clientMsgID?.uuidString,
                     createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
-                    state: nil, editedAtMs: nil, deletedAtMs: nil
+                    state: state,
+                    editedAtMs: editedAt.map { Int64($0.timeIntervalSince1970 * 1_000) },
+                    deletedAtMs: deletedAt.map { Int64($0.timeIntervalSince1970 * 1_000) },
+                    thread: Self.threadRollup(
+                        replyCount: replyCount,
+                        lastReplySeq: lastReplySeq,
+                        lastReplyAt: lastReplyAt
+                    )
                 )
             }
             // nextBefore = smallest seq in this page (for the next older page).
@@ -394,6 +454,96 @@ struct MessageRoutes: Sendable {
         }
         guard result.isMember, let page = result.page else {
             throw HTTPError(.forbidden, message: "not a member of this channel")
+        }
+        return try page.response(from: request, context: context)
+    }
+
+    // MARK: - Thread replies (oldest-first seq cursor)
+
+    @Sendable
+    func replies(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        let (workspaceID, channelID) = try Self.scopeIDs(context, principal: principal)
+        let rootParameter = try context.parameters.require("root")
+        guard let rootID = UUID(uuidString: rootParameter) else {
+            throw HTTPError(.badRequest, message: "invalid thread root id")
+        }
+
+        let query = request.uri.queryParameters
+        let limit = min(max(query["limit"].flatMap { Int($0) } ?? 50, 1), 200)
+        let cursor = try Self.repliesCursor(query["cursor"].map(String.init))
+        let fetchLimit = limit + 1
+
+        let result: (isMember: Bool, page: ThreadRepliesPage?) = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            guard try await Self.hasActiveMembership(
+                conn: conn,
+                logger: db.logger,
+                channelID: channelID,
+                memberID: principal.memberID
+            ) else {
+                return (false, nil)
+            }
+
+            // The channel predicate deliberately makes an absent root and a root
+            // in another channel indistinguishable (404 non-disclosure).
+            let rootRows = try await conn.query(
+                """
+                SELECT root_id
+                  FROM message
+                 WHERE id = \(rootID)
+                   AND channel_id = \(channelID)
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            let parentRootID = try rootRows.first?.decode(UUID?.self)
+            try Self.validateRepliesRoot(
+                found: rootRows.first != nil,
+                parentRootID: parentRootID
+            )
+
+            let rows = try await conn.query(
+                """
+                SELECT jsonb_build_object(
+                  'id', id::text,
+                  'channelId', channel_id::text,
+                  'rootId', root_id::text,
+                  'seq', seq,
+                  'hlcTs', hlc_ts,
+                  'hlcCount', hlc_count,
+                  'authorMemberId', author_member_id::text,
+                  'type', type::text,
+                  'body', body,
+                  'props', props,
+                  'runId', run_id::text,
+                  'clientMsgId', client_msg_id::text,
+                  'createdAtMs', floor(extract(epoch from created_at) * 1000)::bigint,
+                  'state', state::text,
+                  'editedAtMs', CASE WHEN edited_at IS NULL THEN NULL
+                    ELSE floor(extract(epoch from edited_at) * 1000)::bigint END,
+                  'deletedAtMs', CASE WHEN deleted_at IS NULL THEN NULL
+                    ELSE floor(extract(epoch from deleted_at) * 1000)::bigint END
+                )::text
+                  FROM message
+                 WHERE channel_id = \(channelID)
+                   AND root_id = \(rootID)
+                   AND seq > \(cursor ?? 0)
+                 ORDER BY seq ASC
+                 LIMIT \(fetchLimit)
+                """,
+                logger: db.logger
+            ).collect()
+
+            let hasMore = rows.count > limit
+            let messages = try rows.prefix(limit).map(Self.decodeMessageProjection)
+            let nextCursor = hasMore ? messages.last?.seq : nil
+            return (true, ThreadRepliesPage(messages: messages, nextCursor: nextCursor))
+        }
+
+        guard result.isMember, let page = result.page else {
+            throw Self.repliesMembershipError()
         }
         return try page.response(from: request, context: context)
     }
@@ -731,13 +881,84 @@ struct MessageRoutes: Sendable {
     private struct InteractionOutboxPayload: Encodable {
         let channel: String
         let data: InteractionEnvelope
-        let version: Int64
         let idempotencyKey: String
 
         private enum CodingKeys: String, CodingKey {
-            case channel, data, version
+            case channel, data
             case idempotencyKey = "idempotency_key"
         }
+    }
+
+    static func repliesCursor(_ raw: String?) throws -> Int64? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard let cursor = Int64(trimmed), cursor >= 0 else {
+            throw HTTPError(.badRequest, message: "cursor must be a non-negative message seq")
+        }
+        return cursor
+    }
+
+    static func validateRepliesRoot(found: Bool, parentRootID: UUID?) throws {
+        guard found else {
+            throw HTTPError(.notFound, message: "thread root not found")
+        }
+        guard parentRootID == nil else {
+            throw HTTPError(.badRequest, message: "thread root must be a top-level message")
+        }
+    }
+
+    static func repliesMembershipError() -> HTTPError {
+        HTTPError(.forbidden, message: "not a member of this channel")
+    }
+
+    static func threadRollup(
+        replyCount: Int?,
+        lastReplySeq: Int64?,
+        lastReplyAt: Date?
+    ) -> ThreadRollupDTO? {
+        guard let replyCount, replyCount > 0,
+              let lastReplySeq,
+              let lastReplyAt
+        else { return nil }
+        return ThreadRollupDTO(
+            replyCount: replyCount,
+            lastReplySeq: lastReplySeq,
+            lastReplyAt: Int64(lastReplyAt.timeIntervalSince1970 * 1_000)
+        )
+    }
+
+    private static func decodeThreadRollup(_ row: PostgresRow) throws -> ThreadRollupDTO {
+        let (replyCount, lastReplySeq, lastReplyAt) = try row.decode(
+            (Int, Int64?, Date?).self
+        )
+        guard let rollup = threadRollup(
+            replyCount: replyCount,
+            lastReplySeq: lastReplySeq,
+            lastReplyAt: lastReplyAt
+        ) else {
+            throw HTTPError(.internalServerError, message: "invalid thread rollup")
+        }
+        return rollup
+    }
+
+    private static func fetchThreadRollup(
+        conn: PostgresConnection,
+        logger: Logger,
+        rootID: UUID
+    ) async throws -> ThreadRollupDTO? {
+        let rows = try await conn.query(
+            """
+            SELECT reply_count, last_reply_seq, last_reply_at
+              FROM thread
+             WHERE root_id = \(rootID)
+               AND reply_count > 0
+             LIMIT 1
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else { return nil }
+        return try decodeThreadRollup(row)
     }
 
     private static func lockMessage(
@@ -882,7 +1103,7 @@ struct MessageRoutes: Sendable {
         )
     }
 
-    private static func encodeInteractionPayload(
+    static func encodeInteractionPayload(
         workspaceID: UUID,
         channelID: UUID,
         eventType: String,
@@ -896,9 +1117,12 @@ struct MessageRoutes: Sendable {
             data: InteractionEnvelope(
                 type: eventType, v: 1, ts: timestampMs, seq: seq, payload: payload
             ),
-            version: seq,
             idempotencyKey: "\(channel):\(eventType):\(UUID().uuidString)"
         )
+        // No Centrifugo version: interaction projections reuse the target
+        // message's seq without minting a message/channel seq. Its message.new
+        // already claimed that version, so a versioned publish would be silently
+        // dropped. Idempotency stays on the unique key.
         guard let data = try? JSONEncoder().encode(value),
               let json = String(data: data, encoding: .utf8)
         else { return "{}" }
@@ -1879,6 +2103,43 @@ struct MessageRoutes: Sendable {
             return nil
         }
         return props
+    }
+
+    /// Build the additive `thread.updated` publication committed beside a reply.
+    /// It reuses the reply's authoritative seq; no message/channel seq is minted.
+    static func threadUpdatedPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        rootID: UUID,
+        rollup: ThreadRollupDTO
+    ) -> String {
+        let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let data: [String: Any] = [
+            "type": "thread.updated",
+            "v": 1,
+            "ts": rollup.lastReplyAt,
+            "seq": rollup.lastReplySeq,
+            "payload": [
+                "channel_id": channelID.uuidString,
+                "root_id": rootID.uuidString,
+                "reply_count": rollup.replyCount,
+                "last_reply_seq": rollup.lastReplySeq,
+                "last_reply_at": rollup.lastReplyAt,
+            ],
+        ]
+        // No Centrifugo version: the rollup reuses the reply's seq, and the
+        // broker silently drops a publish whose version is not strictly greater
+        // than the channel's stored version (the reply's own message.new already
+        // claimed this seq). Idempotency stays on the unique key.
+        let envelope: [String: Any] = [
+            "channel": centChannel,
+            "data": data,
+            "idempotency_key": "\(centChannel):thread.updated:\(rootID.uuidString):\(rollup.lastReplySeq)",
+        ]
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: envelope),
+              let string = String(data: jsonData, encoding: .utf8)
+        else { return "{}" }
+        return string
     }
 
     /// Build the outbox `payload` JSON (the args the relay will POST to Centrifugo).

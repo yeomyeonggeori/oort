@@ -1,5 +1,22 @@
 # momo 진행 현황
 
+## MOMO-481 상호작용 Core replay + history 재시작 수렴 (2026-07-19)
+
+- Core replay는 `message.edited`/`message.deleted`/`reaction.added`/`reaction.removed`를 `thread.updated`와 같은 비순번 projection으로 커서 대조 전에 전달한다. 동일 seq `message.new` 순번·중복 방어와 replay 커서는 그대로이며, Core 테스트가 구 seq 4종 전달·커서 불변과 edit 치환/delete tombstone/reaction 집합 중복 적용 멱등을 단정한다.
+- 서버 history의 after/before/기본 세 변형은 삭제 행을 tombstone으로 유지하고 저장된 `state`/`editedAtMs`/`deletedAtMs`를 투영한다. OpenAPI와 `verify_message_interaction.sh`도 수정 cold-load 및 세 cursor 모드의 삭제 cold-load 수렴을 확인하도록 정렬했다.
+- Core 32 tests와 server 112 tests PASS. verifier bash 정적 검증은 이 goal에서 수행하며 격리 Docker `runtime-db` 실행은 오케스트레이터 담당이라 그 실행 전까지 `runtime-unverified`다. 실 2-client WebSocket E2E는 수용기준대로 C-4 후속 범위다.
+
+## MOMO-480 상호작용 realtime Centrifugo version 드랍 수정 (2026-07-19)
+
+- 기존 메시지 `seq`를 재사용하는 `message.edited`/`message.deleted`/`reaction.added`/`reaction.removed` outbox envelope에서 Centrifugo `version`을 제거했다. 이벤트의 `data.seq`와 고유 `idempotency_key`는 유지하며, `message.new`가 이미 같은 version을 등록한 뒤 projection이 무언 드랍되던 경로만 닫았다.
+- `verify_message_interaction.sh`는 relay를 함께 기동하고 첫 `message.new`가 history에 나타나 채널 version이 상승한 뒤, 동일 메시지의 상호작용 4종이 실제 Centrifugo history에 모두 전달됐는지 폴링한다. server build와 112 tests, bash/ShellCheck 정적 검증은 PASS; 격리 Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`다.
+
+## MOMO-479 스레드 투영 + 답글 조회 + AgentWorker root 보존 (2026-07-19)
+
+- 톱레벨 메시지 history/멱등 send 응답에 옵셔널 `thread` 롤업을 가산하고, 오래된 답글을 `seq ASC` cursor로 복원하는 멤버십 강제 REST와 `thread.updated` transactional outbox/Core 이벤트를 추가했다. 답글 0건은 필드를 생략하며 교차채널 root는 404, reply-as-root는 400, tombstone은 답글 페이지에 남는다.
+- AgentWorker의 durable message INSERT 4곳은 트리거가 답글일 때 같은 `root_id`를 보존하고, 같은 트랜잭션에서 MessageRoutes와 동일한 participant 포함 롤업 upsert 및 `thread.updated`를 기록한다. 톱레벨 트리거는 계속 NULL이며 `message.seq` 추가 발급은 없다.
+- server 111 tests, Core 30 tests, AgentWorker 31 tests, iOS 27 tests와 macOS 전체 컴파일이 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했다. `verify_thread_projection.sh`의 bash/ShellCheck 및 runtime-db 편입은 검증했으며, 격리 Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`다. (후속: 오케스트레이터 실런 verify_thread_projection 전 항목 PASS — BUILD_TICKETS MOMO-479 랜딩 노트)
+
 ## UXUI A-8 채널 음소거 + A-9 메시지 상호작용 실연동 (2026-07-19)
 
 - A-8은 채널/DM `muted` 응답을 목록 아이콘·컨텍스트 메뉴·채널 설정 토글에 연결하고, 낙관 갱신 실패/취소 롤백과 세션 전환 격리, unread 불변식을 적용했다. A-9는 macOS REST backend의 수정·삭제·반응 추가/제거·스냅샷 501을 실제 서버 계약으로 교체해 기존 capability-gated UI를 개방했다.

@@ -179,6 +179,16 @@ public actor RealtimeReplayController {
         _ envelope: RealtimeEnvelope,
         backfill: RealtimeBackfill
     ) async throws -> [RealtimeEvent] {
+        // These are projections of an existing message/reply, not new messages
+        // occupying their target seq. Deliver them without advancing the replay
+        // cursor so message.new and its projections cannot suppress one another
+        // regardless of relay arrival order.
+        switch RealtimeEnvelope.EventType(rawValue: envelope.type) {
+        case .threadUpdated, .messageEdited, .messageDeleted, .reactionAdded, .reactionRemoved:
+            return try nonSequencedEvents(from: envelope)
+        default:
+            break
+        }
         guard let seq = envelope.seq else {
             return try nonSequencedEvents(from: envelope)
         }
@@ -207,9 +217,10 @@ public actor RealtimeReplayController {
     private func nonSequencedEvents(from envelope: RealtimeEnvelope) throws -> [RealtimeEvent] {
         guard let event = try decodeKnownEvent(envelope) else { return [] }
         switch event {
-        case .agentPartial, .agentStatus, .typing, .presence, .huddle:
+        case .messageEdited, .messageDeleted, .reaction,
+             .agentPartial, .agentStatus, .typing, .presence, .huddle, .threadUpdated:
             return [event]
-        case .message, .messageEdited, .messageDeleted, .reaction, .approval:
+        case .message, .approval:
             return []
         }
     }
@@ -291,7 +302,7 @@ public actor RealtimeReplayController {
         case .messageEdited(let message):
             seenMessageIDs.insert(message.id)
             return [event]
-        case .messageDeleted, .reaction, .approval:
+        case .messageDeleted, .reaction, .approval, .threadUpdated:
             return [event]
         case .agentPartial, .agentStatus, .typing, .presence, .huddle:
             return [event]

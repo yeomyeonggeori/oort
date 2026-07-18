@@ -271,6 +271,7 @@ public enum RealtimeEvent: Sendable, Hashable {
     case message(Message)            // message.new
     case messageEdited(Message)      // message.edited
     case messageDeleted(MessageID)   // message.deleted (tombstone)
+    case threadUpdated(ThreadRollupDelta)
     case reaction(ReactionDelta)
     case typing(TypingDelta)
     case presence(PresenceDelta)

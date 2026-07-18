@@ -176,8 +176,43 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(msg.seq, 42)
         XCTAssertEqual(msg.body, "hello")
         XCTAssertEqual(msg.type, .text)
+        XCTAssertNil(msg.thread, "legacy payloads without a thread projection stay decodable")
         XCTAssertFalse(msg.isPendingAck)
         XCTAssertFalse(msg.isDeleted)
+    }
+
+    func testMessageThreadRollupDecodesAndRoundTripsAdditively() throws {
+        let wire = """
+        {
+          "id": "018f8b2c-0000-7000-8000-000000000001",
+          "channel_id": "018f8b2c-0000-7000-8000-000000000002",
+          "seq": 42,
+          "hlc_ts": 1718000000000,
+          "hlc_count": 0,
+          "author_member_id": "018f8b2c-0000-7000-8000-000000000003",
+          "type": "text",
+          "state": "sent",
+          "body": "thread root",
+          "props": {},
+          "created_at_ms": 1718000000123,
+          "thread": {
+            "reply_count": 3,
+            "last_reply_seq": 47,
+            "last_reply_at": 1718000000999
+          }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder.momo.decode(Message.self, from: wire)
+        XCTAssertEqual(decoded.thread?.replyCount, 3)
+        XCTAssertEqual(decoded.thread?.lastReplySeq, 47)
+        XCTAssertEqual(decoded.thread?.lastReplyAtMs, 1_718_000_000_999)
+
+        let roundTripped = try JSONDecoder.momo.decode(
+            Message.self,
+            from: JSONEncoder.momo.encode(decoded)
+        )
+        XCTAssertEqual(roundTripped, decoded)
     }
 
     func testOptimisticEchoIsPendingAck() {
@@ -231,6 +266,202 @@ final class MomoCoreTests: XCTestCase {
             return XCTFail("expected .messageDeleted")
         }
         XCTAssertEqual(id.description.lowercased(), "018f8b2c-0000-7000-8000-000000000020")
+    }
+
+    func testEnvelopeMapsThreadUpdatedWithoutChangingUnknownTypeBehavior() throws {
+        let channelID = "018f8b2c-0000-7000-8000-000000000021"
+        let rootID = "018f8b2c-0000-7000-8000-000000000020"
+        let event = try RealtimeEnvelope(
+            type: "thread.updated",
+            ts: 1_718_000_000_999,
+            seq: 47,
+            payload: [
+                "channel_id": .string(channelID),
+                "root_id": .string(rootID),
+                "reply_count": .int(3),
+                "last_reply_seq": .int(47),
+                "last_reply_at": .int(1_718_000_000_999),
+            ]
+        ).decodeEvent()
+
+        guard case .threadUpdated(let delta) = event else {
+            return XCTFail("expected .threadUpdated")
+        }
+        XCTAssertEqual(delta.channelId.description.lowercased(), channelID)
+        XCTAssertEqual(delta.rootId.description.lowercased(), rootID)
+        XCTAssertEqual(delta.rollup, ThreadRollup(
+            replyCount: 3,
+            lastReplySeq: 47,
+            lastReplyAtMs: 1_718_000_000_999
+        ))
+
+        XCTAssertThrowsError(
+            try RealtimeEnvelope(type: "thread.future", ts: 1, payload: [:]).decodeEvent()
+        ) { error in
+            guard case RealtimeEnvelope.DecodeError.unknownType("thread.future") = error else {
+                return XCTFail("expected unknownType, got \(error)")
+            }
+        }
+    }
+
+    func testThreadUpdatedSharingReplySeqDoesNotAdvanceOrGetDroppedByReplay() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000000020")!
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 47)
+        let envelope = RealtimeEnvelope(
+            type: "thread.updated",
+            ts: 100,
+            seq: 47,
+            payload: [
+                "channel_id": .string(channel.description),
+                "root_id": .string(root.description),
+                "reply_count": .int(2),
+                "last_reply_seq": .int(47),
+                "last_reply_at": .int(100),
+            ]
+        )
+
+        let events = try await controller.process(envelope) { _, _ in [] }
+        guard case .threadUpdated(let delta) = events.first else {
+            return XCTFail("thread projection sharing an applied reply seq must be delivered")
+        }
+        XCTAssertEqual(delta.replyCount, 2)
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.lastAppliedSeq, 47)
+    }
+
+    func testInteractionEventsSharingAppliedMessageSeqDeliverWithoutAdvancingReplayCursor() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let reactor = MemberID(uuidString: "00000000-0000-7000-8000-000000000102")!
+        let original = Self.message(channel: channel, author: author, seq: 48, body: "original")
+        let edited = Message(
+            id: original.id,
+            channelId: channel,
+            seq: 48,
+            hlcTs: 48,
+            authorMemberId: author,
+            state: .edited,
+            body: "edited",
+            editedAtMs: 100
+        )
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 47)
+        let backfill = BackfillScript(pages: [:])
+
+        let messageEvents = try await controller.process(Self.envelope(original)) { after, limit in
+            await backfill.backfill(after: after, limit: limit)
+        }
+        XCTAssertEqual(messageEvents.messageSeqs, [48])
+
+        let envelopes = [
+            Self.envelope(edited, type: RealtimeEnvelope.EventType.messageEdited.rawValue),
+            RealtimeEnvelope(
+                type: RealtimeEnvelope.EventType.reactionAdded.rawValue,
+                ts: 101,
+                seq: 48,
+                payload: [
+                    "action": "added",
+                    "message_id": .string(original.id.description),
+                    "member_id": .string(reactor.description),
+                    "emoji": "👍",
+                ]
+            ),
+            RealtimeEnvelope(
+                type: RealtimeEnvelope.EventType.reactionRemoved.rawValue,
+                ts: 102,
+                seq: 48,
+                payload: [
+                    "action": "removed",
+                    "message_id": .string(original.id.description),
+                    "member_id": .string(reactor.description),
+                    "emoji": "👍",
+                ]
+            ),
+            RealtimeEnvelope(
+                type: RealtimeEnvelope.EventType.messageDeleted.rawValue,
+                ts: 103,
+                seq: 48,
+                payload: ["message_id": .string(original.id.description)]
+            ),
+        ]
+
+        var interactionEvents: [RealtimeEvent] = []
+        for envelope in envelopes {
+            interactionEvents += try await controller.process(envelope) { after, limit in
+                await backfill.backfill(after: after, limit: limit)
+            }
+            let snapshot = await controller.snapshot()
+            XCTAssertEqual(snapshot.lastAppliedSeq, 48)
+        }
+
+        XCTAssertEqual(interactionEvents.count, 4)
+        guard case .messageEdited(let deliveredEdit) = interactionEvents[0] else {
+            return XCTFail("old-seq message.edited must be delivered")
+        }
+        XCTAssertEqual(deliveredEdit.body, "edited")
+        guard case .reaction(let added) = interactionEvents[1] else {
+            return XCTFail("old-seq reaction.added must be delivered")
+        }
+        XCTAssertEqual(added.action, .added)
+        guard case .reaction(let removed) = interactionEvents[2] else {
+            return XCTFail("old-seq reaction.removed must be delivered")
+        }
+        XCTAssertEqual(removed.action, .removed)
+        guard case .messageDeleted(let deletedID) = interactionEvents[3] else {
+            return XCTFail("old-seq message.deleted must be delivered")
+        }
+        XCTAssertEqual(deletedID, original.id)
+        let backfillCalls = await backfill.calls()
+        XCTAssertTrue(backfillCalls.isEmpty)
+    }
+
+    func testBackfillProjectionCanReapplyDuplicateInteractionEventsIdempotently() {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let reactor = MemberID(uuidString: "00000000-0000-7000-8000-000000000102")!
+        let editedFromHistory = Message(
+            id: MessageID(uuidString: "00000000-0000-7000-8000-000000000201")!,
+            channelId: channel,
+            seq: 48,
+            hlcTs: 48,
+            authorMemberId: author,
+            state: .edited,
+            body: "history edit",
+            editedAtMs: 100
+        )
+        var projection = RealtimeProjectionFixture()
+
+        projection.apply(.message(editedFromHistory))
+        projection.apply(.messageEdited(editedFromHistory))
+        projection.apply(.messageEdited(editedFromHistory))
+        XCTAssertEqual(projection.messages[editedFromHistory.id]?.body, "history edit")
+        XCTAssertEqual(projection.messages[editedFromHistory.id]?.state, .edited)
+
+        let add = RealtimeEvent.reaction(ReactionDelta(
+            action: .added,
+            messageId: editedFromHistory.id,
+            memberId: reactor,
+            emoji: "👍"
+        ))
+        projection.apply(add)
+        projection.apply(add)
+        XCTAssertEqual(projection.reactions[editedFromHistory.id]?["👍"], Set([reactor]))
+
+        let remove = RealtimeEvent.reaction(ReactionDelta(
+            action: .removed,
+            messageId: editedFromHistory.id,
+            memberId: reactor,
+            emoji: "👍"
+        ))
+        projection.apply(remove)
+        projection.apply(remove)
+        XCTAssertNil(projection.reactions[editedFromHistory.id])
+
+        let delete = RealtimeEvent.messageDeleted(editedFromHistory.id)
+        projection.apply(delete)
+        projection.apply(delete)
+        XCTAssertEqual(projection.messages[editedFromHistory.id]?.state, .deleted)
+        XCTAssertNil(projection.messages[editedFromHistory.id]?.body)
     }
 
     func testServerMessageInteractionPayloadsDecodeAllFourKinds() throws {
@@ -573,23 +804,30 @@ final class MomoCoreTests: XCTestCase {
         )
     }
 
-    private static func envelope(_ message: Message) -> RealtimeEnvelope {
-        RealtimeEnvelope(
-            type: "message.new",
+    private static func envelope(_ message: Message, type: String = "message.new") -> RealtimeEnvelope {
+        var payload: [String: JSON] = [
+            "id": .string(message.id.description),
+            "channel_id": .string(message.channelId.description),
+            "seq": .int(message.seq ?? 0),
+            "hlc_ts": .int(message.hlcTs),
+            "hlc_count": .int(Int64(message.hlcCount)),
+            "author_member_id": .string(message.authorMemberId.description),
+            "type": .string(message.type.rawValue),
+            "state": .string(message.state.rawValue),
+            "body": message.body.map(JSON.string) ?? .null,
+            "props": message.props,
+        ]
+        if let editedAtMs = message.editedAtMs {
+            payload["edited_at_ms"] = .int(editedAtMs)
+        }
+        if let deletedAtMs = message.deletedAtMs {
+            payload["deleted_at_ms"] = .int(deletedAtMs)
+        }
+        return RealtimeEnvelope(
+            type: type,
             ts: message.hlcTs,
             seq: message.seq,
-            payload: [
-                "id": .string(message.id.description),
-                "channel_id": .string(message.channelId.description),
-                "seq": .int(message.seq ?? 0),
-                "hlc_ts": .int(message.hlcTs),
-                "hlc_count": .int(Int64(message.hlcCount)),
-                "author_member_id": .string(message.authorMemberId.description),
-                "type": .string(message.type.rawValue),
-                "state": .string(message.state.rawValue),
-                "body": .string(message.body ?? ""),
-                "props": .object([:]),
-            ]
+            payload: .object(payload)
         )
     }
 }
@@ -614,6 +852,36 @@ private actor BackfillScript {
 
     func calls() -> [BackfillCall] {
         recordedCalls
+    }
+}
+
+private struct RealtimeProjectionFixture {
+    var messages: [MessageID: Message] = [:]
+    var reactions: [MessageID: [String: Set<MemberID>]] = [:]
+
+    mutating func apply(_ event: RealtimeEvent) {
+        switch event {
+        case .message(let message), .messageEdited(let message):
+            messages[message.id] = message
+        case .messageDeleted(let id):
+            if var message = messages[id] {
+                message.state = .deleted
+                message.body = nil
+                messages[id] = message
+            }
+            reactions[id] = nil
+        case .reaction(let delta):
+            var byEmoji = reactions[delta.messageId] ?? [:]
+            var members = byEmoji[delta.emoji] ?? []
+            switch delta.action {
+            case .added: members.insert(delta.memberId)
+            case .removed: members.remove(delta.memberId)
+            }
+            byEmoji[delta.emoji] = members.isEmpty ? nil : members
+            reactions[delta.messageId] = byEmoji.isEmpty ? nil : byEmoji
+        case .threadUpdated, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle:
+            break
+        }
     }
 }
 

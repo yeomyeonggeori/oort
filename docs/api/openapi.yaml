@@ -1055,7 +1055,10 @@ paths:
         descending. `before=<seq>` pages older history (descending).
         `after=<seq>` is the realtime-recovery backfill: it returns messages
         with `seq > after` in ASCENDING order and takes precedence over
-        `before` when both are present.
+        `before` when both are present. All variants include deleted messages as
+        tombstones (`state=deleted`, omitted/null `body`, populated `deletedAtMs`)
+        and project the durable `state`, `editedAtMs`, and `deletedAtMs` values so
+        clients converge after restart or backfill.
       security:
         - bearerAuth: []
       parameters:
@@ -1107,6 +1110,69 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/replies:
+    get:
+      tags: [messages]
+      operationId: getThreadReplies
+      summary: Read all replies to a top-level message in ascending seq order.
+      description: >
+        Uses an exclusive message-seq cursor. Deleted replies remain visible as
+        tombstones. The root must exist in this channel and be top-level; a root
+        in another channel is reported as not found. Active channel membership is
+        enforced before the root lookup.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: cursor
+          in: query
+          required: false
+          description: Return replies with `seq` strictly above this cursor.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - name: limit
+          in: query
+          required: false
+          description: Page size, clamped to 1..200.
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: One oldest-first page of replies, including tombstones.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadRepliesPage"
+        "400":
+          description: Invalid id/cursor, or the selected root is itself a reply.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/read-state:
     get:
@@ -2832,6 +2898,7 @@ components:
         state:
           type: string
           enum: [sent, edited, deleted, failed]
+          description: Durable message state; history always projects the stored value.
         props:
           type: object
           additionalProperties: true
@@ -2851,9 +2918,28 @@ components:
         editedAtMs:
           type: integer
           format: int64
+          description: Epoch milliseconds of the latest edit when state is edited or deleted after an edit.
         deletedAtMs:
           type: integer
           format: int64
+          description: Epoch milliseconds of deletion; populated for history tombstones.
+        thread:
+          $ref: "#/components/schemas/ThreadRollup"
+
+    ThreadRollup:
+      type: object
+      required: [reply_count, last_reply_seq, last_reply_at]
+      properties:
+        reply_count:
+          type: integer
+          minimum: 1
+        last_reply_seq:
+          type: integer
+          format: int64
+        last_reply_at:
+          type: integer
+          format: int64
+          description: Epoch milliseconds for the latest reply timestamp.
 
     MessagePage:
       type: object
@@ -2872,6 +2958,20 @@ components:
           description: >
             Smallest seq in this page — pass as `before` to fetch older
             messages. Omitted when the page is empty.
+
+    ThreadRepliesPage:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+          description: Replies ordered by authoritative channel `seq` ascending.
+        nextCursor:
+          type: integer
+          format: int64
+          description: Last seq in this page when more replies remain; pass as `cursor`.
 
     WorkspaceMessageSearchHit:
       type: object

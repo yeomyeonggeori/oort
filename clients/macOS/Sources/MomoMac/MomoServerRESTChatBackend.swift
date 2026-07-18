@@ -1754,6 +1754,7 @@ private struct MessageDTO: Decodable {
     let runId: String?
     let clientMsgId: UUID?
     let createdAtMs: Int64
+    let thread: ThreadRollup?
     let state: String?
     let editedAtMs: Int64?
     let deletedAtMs: Int64?
@@ -1805,6 +1806,7 @@ private struct MessageDTO: Decodable {
             body: body,
             props: props ?? .object([:]),
             rootId: decodedRootID,
+            thread: thread,
             runId: decodedRunID,
             clientMsgId: clientMsgId,
             createdAtMs: createdAtMs,

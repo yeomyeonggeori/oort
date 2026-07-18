@@ -2228,19 +2228,19 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 답글 tx outbox `thread.updated` + Core kind 가산(unknown-skip 유지) — 단일 쓰기경로 준수.
 - [x] AgentWorker 답변 root_id 보존(INSERT 4사이트 전수) + 동일 tx 롤업·이벤트, MessageRoutes 의미론 정합.
 - [x] verify_thread_projection.sh(롤업 수치/과거 답글/realtime/에이전트/RLS) + runtime-db 편입. 상세: issue #508 본문(패킷 겸용).
-- 랜딩: PR #509 squash → **track/engine**(2026-07-19, main 대기). 실런: verify_thread_projection 전 항목 PASS(격리+게이트 내) + server 111/Core 30/AgentWorker 31. 검수 수정: **thread.updated Centrifugo version 무언 드랍 실측·수정**(no-version 발행) — 동일 기전 478 상호작용 이벤트 상시 드랍은 선재 결함으로 MOMO-480(`#510`) 발급. e2e compose cp -Rp·swift run -j 8 안정화(7.7GiB VM OOM 대응). 게이트 잔여 실패=QuickSwitcher 스냅샷 4건(MOMO-472 family 재확장, 격리 6/6 PASS).
+- 랜딩: PR #509 squash → **track/engine**(2026-07-19) → main(2026-07-19). 실런: verify_thread_projection 전 항목 PASS(격리+게이트 내) + server 111/Core 30/AgentWorker 31. 검수 수정: **thread.updated Centrifugo version 무언 드랍 실측·수정**(no-version 발행) — 동일 기전 478 상호작용 이벤트 상시 드랍은 선재 결함으로 MOMO-480(`#510`) 발급. e2e compose cp -Rp·swift run -j 8 안정화(7.7GiB VM OOM 대응). 게이트 잔여 실패=QuickSwitcher 스냅샷 4건(MOMO-472 family 재확장, 격리 6/6 PASS).
 
 ### ☑ MOMO-480 (`#510`) 수용기준 — 상호작용 realtime 이벤트 version 드랍 수정 (478 선재) `[runtime-db]` · **PR base=track/engine**
 - [x] encodeInteractionPayload version 제거(투영 이벤트 no-version 계약 — 479 thread.updated와 동일) + 사유 주석.
 - [x] verify_message_interaction realtime 단정을 Centrifugo history 실수신으로 강화(새 메시지로 version 상승 상태에서 4종 수신) — 회귀 가드.
 - [x] 서버 테스트 4종 version 단정 XCTAssertNil + 드랍 사유 메시지. 상세: issue #510 본문(패킷 겸용).
-- 랜딩: PR #511 squash → **track/engine**(2026-07-19, main 대기). 실런: verify_message_interaction 전 항목 PASS(4종 history 실수신 회귀 가드) + server 112 + runtime-db 게이트 실패 0.
+- 랜딩: PR #511 squash → **track/engine**(2026-07-19) → main(2026-07-19). 실런: verify_message_interaction 전 항목 PASS(4종 history 실수신 회귀 가드) + server 112 + runtime-db 게이트 실패 0.
 
 ### ☑ MOMO-481 (`#512`) 수용기준 — X-5 잔여: 상호작용 Core replay 정합 + history 수정/삭제 투영 `[runtime-db]` · **PR base=track/engine**
 - [x] Core replay: 상호작용 4종을 thread.updated 선례로 type 분기(커서 불전진 전달), message.new 방어 무변경 + 구 seq 전달·커서 불변·백필 멱등 회귀 테스트.
 - [x] history 3변형 tombstone 포함 + state/editedAtMs/deletedAtMs 실값 투영(replies 의미론 정렬) + openapi.
 - [x] verify_message_interaction 재시작 수렴 단정(editedAtMs 실값·tombstone 행). 실 2클라 ws E2E는 C-4 이관. 상세: issue #512 본문(패킷 겸용).
-- 랜딩: PR #513 squash → **track/engine**(2026-07-19, main 대기). 실런: verifier PASS + server 112/Core 32 + runtime-db 게이트 실패 0. **X-5 체인 완주**(480+481) — main 랜딩 시 A-9 완성 조건 충족.
+- 랜딩: PR #513 squash → **track/engine**(2026-07-19) → main(2026-07-19). 실런: verifier PASS + server 112/Core 32 + runtime-db 게이트 실패 0. **X-5 체인 완주**(480+481) — A-9 완성 조건 충족.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

@@ -114,6 +114,11 @@ public enum IOSTimelineReducer {
             if let index = result.firstIndex(where: { $0.id == id }) {
                 result[index].state = .deleted
             }
+        case .threadUpdated(let delta):
+            guard delta.channelId == channel,
+                  let index = result.firstIndex(where: { $0.id == delta.rootId })
+            else { return result }
+            result[index].thread = delta.rollup
         case .reaction, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle:
             break
         }
