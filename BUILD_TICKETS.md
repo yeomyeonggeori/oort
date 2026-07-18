@@ -2179,9 +2179,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 단위 테스트 + 시뮬레이터 게이트, 실기기 재확인 [manual]. 상세: issue #487 본문(패킷 겸용).
 - 랜딩: PR #489 squash(2026-07-18). worker capacity 중단→커밋 보존 인수, 오케스트레이터 보완 1건(import MomoCore). 킷 22/22+시뮬레이터 게이트 PASS. 실기기 재확인 [manual] 대기.
 
-### ☐ MOMO-470 (`#491`) 수용기준 — V-2 compose LiveKit + 실 JWT 수락 `[infra]` · 의존: MOMO-468
-- [ ] compose `huddle` profile로 livekit 옵트인(버전 핀·포트·healthcheck·UDP 제한), env.example/RUN/DEPLOY 델타(TURN은 도메인 확보 시 노트).
-- [ ] `verify_huddle_livekit.sh`: V-1 join JWT를 실 LiveKit `/rtc/validate` 200 수락 + 무효 거부, teardown. e2e compose 무접촉. 상세: issue #491 본문(패킷 겸용).
+### ☑ MOMO-470 (`#491`) 수용기준 — V-2 compose LiveKit + 실 JWT 수락 `[infra]` · 의존: MOMO-468
+- [x] compose `huddle` profile로 livekit 옵트인(버전 핀·포트·healthcheck·UDP 제한), env.example/RUN/DEPLOY 델타(TURN은 도메인 확보 시 노트).
+- [x] `verify_huddle_livekit.sh`: V-1 join JWT를 실 LiveKit `/rtc/validate` 200 수락 + 무효 거부, teardown. e2e compose 무접촉. 상세: issue #491 본문(패킷 겸용).
+- 랜딩: PR #492 squash `5bab0d2`(2026-07-18). 오케스트레이터: 핀 v1.9.0→v1.13.3 교정 + 실기동 검증 PASS(실 LiveKit이 V-1 JWT 200 수락/무효 401 거부, 스택 회수 확인). 앞선 타임아웃 2회는 Docker Desktop pull 전역 불능(재시작으로 해소, momo 무관).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
