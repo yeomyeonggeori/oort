@@ -131,6 +131,15 @@ struct AuthMiddleware: RouterMiddleware {
             return "messages:write"
         }
         if method == "GET",
+           segments.count == 5,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "search",
+           segments[4] == "messages"
+        {
+            return "messages:read"
+        }
+        if method == "GET",
            segments.count == 4,
            segments[0] == "v1",
            segments[1] == "workspaces",
