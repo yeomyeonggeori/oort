@@ -89,6 +89,8 @@ services:
       MOMO_LIVEKIT_API_KEY: "$LIVEKIT_API_KEY"
       MOMO_LIVEKIT_API_SECRET: "$LIVEKIT_API_SECRET"
       MOMO_LIVEKIT_URL: "$LIVEKIT_URL"
+      MOMO_DRIVE_ARCHIVE_BACKEND: stub
+      MOMO_DRIVE_ARCHIVE_STUB_BASE_URL: "http://127.0.0.1:$GATE_PORT"
 YAML
 SPEC_JSON="$TMP_DIR/openapi.json"
 MANIFEST="$TMP_DIR/manifest.jsonl"
@@ -339,6 +341,20 @@ record_sample() {
   echo "[openapi] SAMPLE $name -> $expected"
 }
 
+record_binary_sample() {
+  local name="$1" method="$2" template="$3" expected="$4" body_file="$5" media_type="$6"
+  [ "$RESPONSE_STATUS" = "$expected" ] || {
+    echo "[openapi] FAIL $name: expected HTTP $expected, got $RESPONSE_STATUS" >&2
+    exit 1
+  }
+  SAMPLE_INDEX=$((SAMPLE_INDEX + 1))
+  jq -cn --arg name "$name" --arg method "$method" --arg path "$template" \
+    --arg status "$expected" --arg body_file "$body_file" --arg media_type "$media_type" \
+    '{name:$name, method:$method, path:$path, status:$status,
+      body_file:$body_file, media_type:$media_type}' >>"$MANIFEST"
+  echo "[openapi] SAMPLE $name -> $expected ($media_type)"
+}
+
 native_webhook_sample() {
   local name="$1" template="$2" path="$3" body="$4" key_id="$5" secret="$6" delivery_id="$7"
   local timestamp body_hash signature_base signature out="$TMP_DIR/last-response.json"
@@ -413,11 +429,41 @@ sample huddle-leave post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/leave"
 guard_jq '.ended == true and (.huddle.endedAtMs | type == "number")' \
   "last huddle participant ends the room"
 
-# messages: send + history (head + after-backfill)
+# attachments: resumable session -> direct stub PUT -> complete -> content.
+ATTACHMENT_PAYLOAD="$TMP_DIR/openapi-attachment.txt"
+printf '%s' 'OpenAPI attachment bytes' >"$ATTACHMENT_PAYLOAD"
+ATTACHMENT_SIZE="$(wc -c <"$ATTACHMENT_PAYLOAD" | tr -d '[:space:]')"
+ATTACHMENT_UPLOADS="/v1/workspaces/$WS/channels/$GENERAL_ID/attachments/uploads"
+sample attachment-upload post \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/attachments/uploads" \
+  "$ATTACHMENT_UPLOADS" 201 \
+  "$(jq -cn --argjson s "$ATTACHMENT_SIZE" '{name:"openapi.txt",mime:"text/plain",size:$s}')" "$ACCESS"
+ATTACHMENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
+ATTACHMENT_UPLOAD_URL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.uploadUrl')"
+status="$(curl -sS -o "$TMP_DIR/attachment-put" -w '%{http_code}' -X PUT \
+  -H 'Content-Type: text/plain' --data-binary "@$ATTACHMENT_PAYLOAD" "$ATTACHMENT_UPLOAD_URL")"
+[ "$status" = "200" ] || { echo "[openapi] FAIL attachment PUT: HTTP $status" >&2; exit 1; }
+sample attachment-complete post \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/complete" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/attachments/$ATTACHMENT_ID/complete" 200 "" "$ACCESS"
+
+ATTACHMENT_CONTENT_FILE="$TMP_DIR/attachment-content.bin"
+RESPONSE_STATUS="$(curl -sS -o "$ATTACHMENT_CONTENT_FILE" -w '%{http_code}' \
+  -H "Authorization: Bearer $ACCESS" \
+  "$BASE_URL/v1/workspaces/$WS/channels/$GENERAL_ID/attachments/$ATTACHMENT_ID/content")"
+cmp -s "$ATTACHMENT_PAYLOAD" "$ATTACHMENT_CONTENT_FILE" || {
+  echo "[openapi] FAIL attachment content bytes" >&2; exit 1;
+}
+record_binary_sample attachment-content get \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/content" \
+  200 "$ATTACHMENT_CONTENT_FILE" "*/*"
+
+# messages: send + attachment binding + history (head + after-backfill)
 sample message-send post \
   "/v1/workspaces/{workspaceId}/channels/{channelId}/messages" \
   "/v1/workspaces/$WS/channels/$GENERAL_ID/messages" 201 \
-  "$(jq -cn --arg c "$(uuidgen)" '{clientMsgId:$c,body:"openapi drift gate sample"}')" "$ACCESS"
+  "$(jq -cn --arg c "$(uuidgen)" --arg a "$ATTACHMENT_ID" \
+      '{clientMsgId:$c,body:"openapi drift gate sample",attachmentIds:[$a]}')" "$ACCESS"
 SENT_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -r '.seq')"
 
 sample message-history get \

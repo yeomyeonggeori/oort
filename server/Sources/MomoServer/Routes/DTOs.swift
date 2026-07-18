@@ -109,6 +109,7 @@ struct SendMessageRequest: Decodable {
     let body: String?
     let props: [String: String]? // simplified structured payload for v0 stub
     let runId: UUID?
+    let attachmentIds: [UUID]?
 }
 
 /// A message as returned by send/history (L4 §5.3 Message contract).

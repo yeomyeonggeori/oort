@@ -63,6 +63,8 @@ tags:
     description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
+  - name: attachments
+    description: Drive archive resumable uploads, completion, and authorized content proxy.
   - name: read-state
     description: ADR-0109 per-member read cursors and unread/mention counts.
   - name: dms
@@ -565,6 +567,129 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
           $ref: "#/components/responses/HuddleNotConfigured"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/uploads:
+    post:
+      tags: [attachments]
+      operationId: createAttachmentUpload
+      summary: Create a Drive resumable upload session without proxying file bytes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAttachmentUploadRequest"
+      responses:
+        "201":
+          description: Pending attachment row and resumable capability URL created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentUploadResponse"
+        "400":
+          description: Invalid name, mime, or size.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Attachment exceeds 100 MB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Drive archive is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/complete:
+    post:
+      tags: [attachments]
+      operationId: completeAttachmentUpload
+      summary: Verify Drive size and mime, then mark the uploader's attachment complete.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: Drive metadata verified; attachment is complete.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attachment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership and original uploader are required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attachment or uploaded Drive file not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Size/mime mismatch or invalid lifecycle state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/content:
+    get:
+      tags: [attachments]
+      operationId: getAttachmentContent
+      summary: Stream complete attachment bytes from Drive after channel membership validation.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: Original attachment bytes, streamed from Drive alt=media.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Completed attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/messages:
     post:
@@ -1545,6 +1670,14 @@ components:
       schema:
         type: string
         format: uuid
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      description: Attachment UUID owned by PostgreSQL.
+      schema:
+        type: string
+        format: uuid
     PluginId:
       name: pluginId
       in: path
@@ -2231,6 +2364,77 @@ components:
           type: string
           format: uuid
           description: Agent-run binding; agent principals only.
+        attachmentIds:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            format: uuid
+          uniqueItems: true
+          description: >
+            Completed attachments uploaded by this actor in this channel. They
+            are linked to the new message inside the canonical message transaction.
+
+    CreateAttachmentUploadRequest:
+      type: object
+      required: [name, mime, size]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        mime:
+          type: string
+          maxLength: 255
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 104857600
+
+    AttachmentUploadResponse:
+      type: object
+      required: [id, status, uploadUrl]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending]
+        uploadUrl:
+          type: string
+          format: uri
+          description: Opaque Google resumable upload capability URL.
+
+    Attachment:
+      type: object
+      required: [id, channelId, uploaderMemberId, name, mime, size, status, createdAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        uploaderMemberId:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [pending, complete, failed]
+        createdAtMs:
+          type: integer
+          format: int64
 
     Message:
       type: object

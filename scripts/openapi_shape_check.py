@@ -161,7 +161,7 @@ def validate(spec, schema, value, path, errors):
         return
 
 
-def response_schema(spec, method, path, status):
+def response_schema(spec, method, path, status, media_type="application/json"):
     paths = spec.get("paths", {})
     if path not in paths:
         raise SpecError(f"path not in spec: {path}")
@@ -178,10 +178,10 @@ def response_schema(spec, method, path, status):
     content = response.get("content")
     if not content:
         return None  # documented as body-less
-    media = content.get("application/json")
+    media = content.get(media_type)
     if media is None or "schema" not in media:
         raise SpecError(
-            f"{method.upper()} {path} {status} has no application/json schema"
+            f"{method.upper()} {path} {status} has no {media_type} schema"
         )
     return media["schema"]
 
@@ -230,15 +230,19 @@ def main():
         status = sample["status"]
         label = f"{name} [{method.upper()} {path} -> {status}]"
         try:
-            schema = response_schema(spec, method, path, status)
-            with open(sample["body_file"], encoding="utf-8") as handle:
+            media_type = sample.get("media_type", "application/json")
+            schema = response_schema(spec, method, path, status, media_type)
+            with open(sample["body_file"], "rb") as handle:
                 raw = handle.read()
             if schema is None:
                 if raw.strip():
                     raise SpecError("spec documents no body but response has one")
                 print(f"[openapi-shape] PASS {label} (no body)")
                 continue
-            body = json.loads(raw)
+            if media_type == "application/json":
+                body = json.loads(raw.decode("utf-8"))
+            else:
+                body = raw.decode("latin-1")
             errors = []
             validate(spec, schema, body, "$", errors)
             if errors:
