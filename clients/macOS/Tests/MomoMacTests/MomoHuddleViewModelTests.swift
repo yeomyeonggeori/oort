@@ -81,6 +81,23 @@ final class MomoHuddleViewModelTests: XCTestCase {
         XCTAssertEqual(leaveCount, 1)
         await viewModel.shutdown()
     }
+
+    func testShutdownWhileJoinIsPendingNeverConnectsAudio() async {
+        let fixture = HuddleFixture()
+        let service = MockHuddleService(active: fixture.huddle, huddle: fixture.huddle, joinDelay: .milliseconds(100))
+        let audio = MockHuddleAudioSession()
+        let viewModel = MomoHuddleViewModel(service: service, audioSession: audio)
+
+        await viewModel.activate(workspace: fixture.workspace, channel: fixture.channel)
+        let join = Task { await viewModel.startOrJoin() }
+        try? await Task.sleep(for: .milliseconds(10))
+        await viewModel.shutdown()
+        await join.value
+
+        let connectCount = await audio.connectCount()
+        XCTAssertEqual(connectCount, 0)
+        XCTAssertFalse(viewModel.isJoined)
+    }
 }
 
 private struct HuddleFixture {
@@ -106,13 +123,21 @@ private actor MockHuddleService: MomoHuddleService {
     private let huddle: MomoHuddle
     private let activeError: Error?
     private let leaveError: Error?
+    private let joinDelay: Duration?
     private var recordedLeaveCount = 0
 
-    init(active: MomoHuddle?, huddle: MomoHuddle, activeError: Error? = nil, leaveError: Error? = nil) {
+    init(
+        active: MomoHuddle?,
+        huddle: MomoHuddle,
+        activeError: Error? = nil,
+        leaveError: Error? = nil,
+        joinDelay: Duration? = nil
+    ) {
         activeValue = active
         self.huddle = huddle
         self.activeError = activeError
         self.leaveError = leaveError
+        self.joinDelay = joinDelay
     }
 
     func active(workspace: WorkspaceID, channel: ChannelID) async throws -> MomoHuddle? {
@@ -126,7 +151,8 @@ private actor MockHuddleService: MomoHuddleService {
     }
 
     func join(workspace: WorkspaceID, huddle: UUID) async throws -> MomoHuddleJoin {
-        MomoHuddleJoin(
+        if let joinDelay { try? await Task.sleep(for: joinDelay) }
+        return MomoHuddleJoin(
             huddle: self.huddle,
             liveKitURL: URL(string: "ws://127.0.0.1:7880")!,
             token: "fixture-token",

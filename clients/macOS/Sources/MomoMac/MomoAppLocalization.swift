@@ -2651,4 +2651,11 @@ struct MomoHuddleCopy {
         case .english: return "\(count) in huddle"
         }
     }
+
+    func joinWithParticipantCount(_ count: Int) -> String {
+        switch language {
+        case .korean: return "허들 참가하기 · \(count)명"
+        case .english: return "Join huddle · \(count)"
+        }
+    }
 }

@@ -15,6 +15,7 @@ public final class MomoHuddleViewModel: ObservableObject {
     private var channel: ChannelID?
     private var joinedHuddleID: UUID?
     private var eventTask: Task<Void, Never>?
+    private var joinTask: Task<Void, Never>?
     private var participantTask: Task<Void, Never>?
     private var tokenRefreshTask: Task<Void, Never>?
     private var activationID = UUID()
@@ -58,9 +59,10 @@ public final class MomoHuddleViewModel: ObservableObject {
         }
         if self.workspace == workspace, self.channel == channel, eventTask != nil { return }
 
+        activationID = UUID()
+        await cancelJoin()
         await leaveCurrentHuddle(reportErrors: false)
         eventTask?.cancel()
-        activationID = UUID()
         let currentActivation = activationID
         self.workspace = workspace
         self.channel = channel
@@ -92,7 +94,28 @@ public final class MomoHuddleViewModel: ObservableObject {
         }
     }
 
+    public func beginStartOrJoin() {
+        launchStartOrJoin()
+    }
+
     public func startOrJoin() async {
+        let task = launchStartOrJoin()
+        await task.value
+    }
+
+    @discardableResult
+    private func launchStartOrJoin() -> Task<Void, Never> {
+        joinTask?.cancel()
+        let currentActivation = activationID
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performStartOrJoin(activation: currentActivation)
+        }
+        joinTask = task
+        return task
+    }
+
+    private func performStartOrJoin(activation: UUID) async {
         guard let service, let workspace, let channel else { return }
         state = .connecting
         do {
@@ -102,9 +125,13 @@ public final class MomoHuddleViewModel: ObservableObject {
             } else {
                 huddle = try await service.start(workspace: workspace, channel: channel)
             }
+            guard !Task.isCancelled, activationID == activation else { return }
             activeHuddle = huddle
-            try await connect(to: service.join(workspace: workspace, huddle: huddle.id))
+            let joined = try await service.join(workspace: workspace, huddle: huddle.id)
+            guard !Task.isCancelled, activationID == activation else { return }
+            try await connect(to: joined, activation: activation)
         } catch {
+            guard !Task.isCancelled, activationID == activation else { return }
             present(error)
         }
     }
@@ -135,6 +162,7 @@ public final class MomoHuddleViewModel: ObservableObject {
 
     public func shutdown() async {
         activationID = UUID()
+        await cancelJoin()
         eventTask?.cancel()
         eventTask = nil
         await leaveCurrentHuddle(reportErrors: false)
@@ -147,9 +175,13 @@ public final class MomoHuddleViewModel: ObservableObject {
         switch delta.action {
         case .ended:
             guard activeHuddle?.id == delta.huddleId || joinedHuddleID == delta.huddleId else { return }
-            tokenRefreshTask?.cancel()
+            activationID = UUID()
+            await cancelJoin()
+            let refreshTask = tokenRefreshTask
+            refreshTask?.cancel()
             tokenRefreshTask = nil
             joinedHuddleID = nil
+            await refreshTask?.value
             if let audioSession { await audioSession.disconnect() }
             audioParticipants = []
             activeHuddle = nil
@@ -165,10 +197,14 @@ public final class MomoHuddleViewModel: ObservableObject {
         }
     }
 
-    private func connect(to joined: MomoHuddleJoin) async throws {
+    private func connect(to joined: MomoHuddleJoin, activation: UUID) async throws {
         let audioSession = audioSession ?? MomoHuddleLiveKitSession()
         self.audioSession = audioSession
         try await audioSession.connect(url: joined.liveKitURL, token: joined.token)
+        guard !Task.isCancelled, activationID == activation else {
+            await audioSession.disconnect()
+            return
+        }
         activeHuddle = joined.huddle
         joinedHuddleID = joined.huddle.id
         isMicrophoneMuted = false
@@ -193,6 +229,7 @@ public final class MomoHuddleViewModel: ObservableObject {
         tokenRefreshTask?.cancel()
         let delay = max(1, joined.expiresAt.timeIntervalSince(now()) - 60)
         let huddleID = joined.huddle.id
+        let activation = activationID
         tokenRefreshTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(delay))
@@ -203,8 +240,19 @@ public final class MomoHuddleViewModel: ObservableObject {
                       let workspace = self.workspace
                 else { return }
                 let refreshed = try await service.join(workspace: workspace, huddle: huddleID)
+                guard !Task.isCancelled,
+                      self.joinedHuddleID == huddleID,
+                      self.activationID == activation
+                else { return }
                 guard let audioSession = self.audioSession else { return }
                 try await audioSession.connect(url: refreshed.liveKitURL, token: refreshed.token)
+                guard !Task.isCancelled,
+                      self.joinedHuddleID == huddleID,
+                      self.activationID == activation
+                else {
+                    await audioSession.disconnect()
+                    return
+                }
                 try await audioSession.setMicrophoneMuted(self.isMicrophoneMuted)
                 self.activeHuddle = refreshed.huddle
                 self.state = .joined
@@ -219,12 +267,14 @@ public final class MomoHuddleViewModel: ObservableObject {
     }
 
     private func leaveCurrentHuddle(reportErrors: Bool) async {
-        tokenRefreshTask?.cancel()
+        let huddleID = joinedHuddleID
+        joinedHuddleID = nil
+        let refreshTask = tokenRefreshTask
+        refreshTask?.cancel()
         tokenRefreshTask = nil
         participantTask?.cancel()
         participantTask = nil
-        let huddleID = joinedHuddleID
-        joinedHuddleID = nil
+        await refreshTask?.value
 
         if let audioSession { await audioSession.disconnect() }
         audioParticipants = []
@@ -252,5 +302,12 @@ public final class MomoHuddleViewModel: ObservableObject {
         } else {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func cancelJoin() async {
+        let task = joinTask
+        joinTask = nil
+        task?.cancel()
+        await task?.value
     }
 }

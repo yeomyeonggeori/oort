@@ -13,7 +13,7 @@ struct MomoHuddleHeaderControl: View {
             } else if viewModel.isJoined {
                 showsPanel.toggle()
             } else {
-                Task { await viewModel.startOrJoin() }
+                viewModel.beginStartOrJoin()
             }
         } label: {
             HStack(spacing: 4) {
@@ -38,6 +38,9 @@ struct MomoHuddleHeaderControl: View {
         .popover(isPresented: $showsPanel, arrowEdge: .bottom) {
             MomoHuddlePanelView(viewModel: viewModel, copy: copy)
         }
+        .onChange(of: viewModel.isJoined) { _, isJoined in
+            if !isJoined { showsPanel = false }
+        }
     }
 
     private var buttonTitle: String {
@@ -46,7 +49,10 @@ struct MomoHuddleHeaderControl: View {
         case .joined: copy.participantCount(viewModel.participantCount)
         case .unavailable: copy.unavailable
         case .failed: copy.retry
-        case .idle: viewModel.activeHuddle == nil ? copy.start : copy.join
+        case .idle:
+            viewModel.activeHuddle == nil
+                ? copy.start
+                : copy.joinWithParticipantCount(viewModel.participantCount)
         }
     }
 
@@ -88,17 +94,21 @@ struct MomoHuddlePanelView: View {
             Text(copy.participants)
                 .momoTypography(.supportingEmphasized)
 
-            if participants.isEmpty {
-                Text(copy.noParticipants)
-                    .momoTypography(.supporting)
-                    .foregroundStyle(.secondary)
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(participants) { participant in
-                        participantRow(participant)
+            ScrollView {
+                if participants.isEmpty {
+                    Text(copy.noParticipants)
+                        .momoTypography(.supporting)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(participants) { participant in
+                            participantRow(participant)
+                        }
                     }
                 }
             }
+            .frame(maxHeight: 240)
 
             if case .failed(let message) = viewModel.state {
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -119,6 +129,7 @@ struct MomoHuddlePanelView: View {
                     )
                 }
                 .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(!viewModel.isJoined)
 
                 Spacer()
 
@@ -132,6 +143,7 @@ struct MomoHuddlePanelView: View {
             }
         }
         .padding(16)
+        .frame(width: 320)
         .accessibilityElement(children: .contain)
     }
 
