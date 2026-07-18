@@ -723,7 +723,8 @@ struct WebhookRoutes: Sendable {
             body: rendered.body,
             authorMemberID: authorMemberID,
             hlcTs: hlcTs,
-            hlcCount: 0
+            hlcCount: 0,
+            rootID: nil
         )
         _ = try await conn.query(
             """

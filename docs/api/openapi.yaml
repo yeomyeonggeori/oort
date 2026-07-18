@@ -767,6 +767,9 @@ paths:
         broadcast through the transactional outbox. Retrying with the same
         `clientMsgId` returns the original message (exactly-once effect) —
         the response status is 201 in both cases.
+        Supplying `rootId` creates a one-level thread reply. The root must be an
+        undeleted top-level message in the same channel; cross-channel roots are
+        reported as not found.
       security:
         - bearerAuth: []
       parameters:
@@ -786,7 +789,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Message"
         "400":
-          description: Invalid workspace/channel id.
+          description: Invalid workspace/channel id, deleted root, or nested reply root.
           content:
             application/json:
               schema:
@@ -800,7 +803,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Channel not found or not provisioned.
+          description: Channel/root not found or not provisioned.
           content:
             application/json:
               schema:
@@ -2411,6 +2414,10 @@ components:
           type: string
           format: uuid
           description: Client-generated idempotency key (L4 §3.1).
+        rootId:
+          type: string
+          format: uuid
+          description: Undeleted top-level message in this channel used as the thread root.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -2511,6 +2518,10 @@ components:
         channelId:
           type: string
           format: uuid
+        rootId:
+          type: string
+          format: uuid
+          description: Thread root for a reply; omitted for top-level messages.
         seq:
           type: integer
           format: int64

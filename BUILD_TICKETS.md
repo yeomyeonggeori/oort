@@ -2206,6 +2206,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] GET search/messages — 멤버십 하드 필터(비멤버 0)/deleted 제외/ILIKE+trgm/최신순/seq 키셋 커서/snippet 절단+matchOffset/q≥2/멤버 rate limit.
 - [x] openapi + verify_workspace_search(멤버십·DM·삭제·한영·커서 안정·429·RLS·EXPLAIN trgm) + runtime-db 편입. 상세: issue #500 본문(패킷 겸용). B-2 done→A-7 ready.
 
+### ☐ MOMO-476 (`#502`) 수용기준 — 스레드 답글 전송 개방 `[runtime-db]` · 의존: 없음 · **PR base=track/engine**
+- [ ] SendMessageRequest.rootId 가산(같은 채널·미삭제·톱레벨만, 교차채널 404) + 같은 tx thread 롤업 upsert + 이벤트/응답 rootId 노출.
+- [ ] openapi + verify_thread_reply(롤업 단정·대댓글 400·동시 답글 카운트·RLS) + runtime-db 편입. 상세: issue #502 본문(패킷 겸용). 랜딩 시 B-3 done→A-4 해제.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

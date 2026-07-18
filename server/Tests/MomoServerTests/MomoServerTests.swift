@@ -1863,6 +1863,7 @@ final class MomoServerTests: XCTestCase {
         let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
         let messageID = UUID(uuidString: "00000000-0000-7000-8000-000000000179")!
         let authorID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let rootID = UUID(uuidString: "00000000-0000-7000-8000-000000000178")!
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
 
         let raw = MessageRoutes.broadcastPayload(
@@ -1874,7 +1875,8 @@ final class MomoServerTests: XCTestCase {
             body: "Realtime contract sample.",
             authorMemberID: authorID,
             hlcTs: 1_782_463_260_000,
-            hlcCount: 0
+            hlcCount: 0,
+            rootID: rootID
         )
 
         let object = try XCTUnwrap(
@@ -1893,10 +1895,12 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(payload["author_member_id"] as? String, authorID.uuidString)
         XCTAssertEqual(payload["hlc_ts"] as? Int, 1_782_463_260_000)
         XCTAssertEqual(payload["hlc_count"] as? Int, 0)
+        XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
         XCTAssertNil(payload["channelId"])
         XCTAssertNil(payload["authorMemberId"])
         XCTAssertNil(payload["hlcTs"])
         XCTAssertNil(payload["hlcCount"])
+        XCTAssertNil(payload["rootId"])
     }
 
     func testAgentMentionDetectionSupportsDisplayNameHandleAndMemberID() {
