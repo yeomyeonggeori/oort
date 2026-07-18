@@ -15,6 +15,7 @@ struct MomoKeyboardShortcutItem: Identifiable, Equatable {
 enum MomoKeyboardShortcutCatalog {
     static func items(copy: MomoWorkspaceCopy) -> [MomoKeyboardShortcutItem] {
         [
+            MomoKeyboardShortcutItem(key: "⌥⌘S", label: copy.toggleSidebar),
             MomoKeyboardShortcutItem(key: "⌘K", label: copy.quickSwitcherOpen),
             MomoKeyboardShortcutItem(key: "⌘F", label: copy.workspaceSearch),
             MomoKeyboardShortcutItem(key: "⇧⌘I", label: copy.inviteToChannel),
@@ -106,6 +107,7 @@ public struct MomoMacCommandActions {
     var canNavigateUnreadChannels: Bool
     var canOpenSelectedChannelSettings: Bool
     var canInviteToSelectedChannel: Bool
+    var toggleSidebar: () -> Void
     var presentQuickSwitcher: () -> Void
     var presentWorkspaceSearch: () -> Void
     var presentChannelSettings: () -> Void
@@ -126,6 +128,7 @@ public struct MomoMacCommandActions {
         canNavigateUnreadChannels: Bool,
         canOpenSelectedChannelSettings: Bool,
         canInviteToSelectedChannel: Bool,
+        toggleSidebar: @escaping () -> Void,
         presentQuickSwitcher: @escaping () -> Void,
         presentWorkspaceSearch: @escaping () -> Void,
         presentChannelSettings: @escaping () -> Void,
@@ -145,6 +148,7 @@ public struct MomoMacCommandActions {
         self.canNavigateUnreadChannels = canNavigateUnreadChannels
         self.canOpenSelectedChannelSettings = canOpenSelectedChannelSettings
         self.canInviteToSelectedChannel = canInviteToSelectedChannel
+        self.toggleSidebar = toggleSidebar
         self.presentQuickSwitcher = presentQuickSwitcher
         self.presentWorkspaceSearch = presentWorkspaceSearch
         self.presentChannelSettings = presentChannelSettings
@@ -177,6 +181,14 @@ public struct MomoMacCommands: Commands {
 
     public var body: some Commands {
         CommandMenu(copy.quickSwitcherNavigationMenu) {
+            Button(copy.toggleSidebar) {
+                actions?.toggleSidebar()
+            }
+            .keyboardShortcut("s", modifiers: [.command, .option])
+            .disabled(actions == nil)
+
+            Divider()
+
             Button(copy.quickSwitcherOpen) {
                 actions?.presentQuickSwitcher()
             }

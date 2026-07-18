@@ -11,7 +11,6 @@ struct MomoMacApp: App {
         .momoWindowChromeStyle()
         .commands {
             CommandGroup(replacing: .newItem) {}
-            SidebarCommands()
             MomoMacCommands()
         }
     }

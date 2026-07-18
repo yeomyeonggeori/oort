@@ -935,8 +935,9 @@ struct MomoDownloadsSettingsSurface: View {
     }
 }
 
-struct MomoDownloadsPopoverView: View {
+struct MomoDownloadsPanelView: View {
     let copy: MomoWorkspaceCopy
+    let onDismiss: () -> Void
     @AppStorage(MomoDownloadsFolderAccess.pathKey) private var downloadsFolderPath = ""
     @State private var downloadHistory = MomoDownloadHistoryStore.load()
 
@@ -949,6 +950,19 @@ struct MomoDownloadsPopoverView: View {
                 Text(copy.appDownloads)
                     .font(MomoTheme.Typography.sectionHeader)
                 Spacer()
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .frame(
+                            width: MomoTheme.ChannelHeader.actionSize,
+                            height: MomoTheme.ChannelHeader.actionSize
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help(copy.dismiss)
+                .momoQuickTooltip(copy.dismiss)
+                .accessibilityLabel(copy.dismiss)
             }
             .padding(MomoTheme.Downloads.edgeInset)
 
@@ -1024,6 +1038,8 @@ struct MomoDownloadsPopoverView: View {
             .padding(MomoTheme.Downloads.edgeInset)
         }
         .frame(width: MomoTheme.Downloads.popoverWidth)
+        .frame(maxHeight: MomoTheme.Downloads.popoverMaximumHeight)
+        .momoSurface(.card, cornerRadius: MomoTheme.cornerLarge)
         .onAppear(perform: reloadDownloadHistory)
     }
 

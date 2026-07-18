@@ -45,6 +45,27 @@ enum MomoKoreanParticle {
 struct MomoWorkspaceCopy {
     var language: MomoUILanguage
 
+    var toggleSidebar: String {
+        switch language {
+        case .korean: return "사이드바 전환"
+        case .english: return "Toggle sidebar"
+        }
+    }
+
+    var resizeSidebar: String {
+        switch language {
+        case .korean: return "사이드바 너비 조절"
+        case .english: return "Resize sidebar"
+        }
+    }
+
+    func sidebarWidthValue(_ width: CGFloat) -> String {
+        switch language {
+        case .korean: return "너비 \(Int(width.rounded()))포인트"
+        case .english: return "\(Int(width.rounded())) points wide"
+        }
+    }
+
     var languageLabel: String {
         switch language {
         case .korean: return "언어"
@@ -1830,6 +1851,48 @@ struct MomoWorkspaceCopy {
         switch language {
         case .korean: return "승인"
         case .english: return "Approve"
+        }
+    }
+
+    var approveAll: String {
+        switch language {
+        case .korean: return "모두 승인"
+        case .english: return "Approve all"
+        }
+    }
+
+    var alwaysApprove: String {
+        switch language {
+        case .korean: return "항상 승인"
+        case .english: return "Always approve"
+        }
+    }
+
+    var alwaysApproveHelp: String {
+        switch language {
+        case .korean: return "이 Mac에서 되돌릴 수 있는 요청을 자동 승인합니다."
+        case .english: return "Automatically approve reversible requests on this Mac."
+        }
+    }
+
+    var alwaysApproveScope: String {
+        switch language {
+        case .korean: return "되돌릴 수 있는 요청만 이 Mac에서 자동 승인합니다."
+        case .english: return "Only reversible requests are approved automatically on this Mac."
+        }
+    }
+
+    var approveAllConfirmationTitle: String {
+        switch language {
+        case .korean: return "되돌리기 어려운 요청도 모두 승인할까요?"
+        case .english: return "Approve irreversible requests too?"
+        }
+    }
+
+    var approveAllConfirmationMessage: String {
+        switch language {
+        case .korean: return "목록에 되돌리기 어려운 작업이 포함되어 있습니다. 각 요청을 확인한 뒤 승인하는 것이 안전합니다."
+        case .english: return "This list includes actions that may be difficult to reverse. Reviewing each request first is safer."
         }
     }
 

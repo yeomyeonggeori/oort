@@ -8,6 +8,7 @@ struct MomoChannelHeaderView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var systemContrast
     @Environment(\.momoColorSchemeContrastOverride) private var contrastOverride
+    @Environment(\.momoCenterHeaderLeadingInset) private var centerHeaderLeadingInset
     let channel: Channel
     let presentation: MomoChannelPresentation
     let memberCount: Int
@@ -65,8 +66,12 @@ struct MomoChannelHeaderView: View {
             .fixedSize(horizontal: true, vertical: false)
             .layoutPriority(2)
         }
-        .padding(.horizontal, MomoTheme.ChannelHeader.edgeInset)
-        .frame(minHeight: MomoTheme.ChannelHeader.minimumHeight)
+        .padding(.leading, MomoTheme.ChannelHeader.edgeInset + centerHeaderLeadingInset)
+        .padding(
+            .trailing,
+            MomoTheme.ChannelHeader.edgeInset + MomoWindowChromeLayout.centerChromeControlsReservedWidth
+        )
+        .frame(minHeight: MomoWindowChromeLayout.integratedHeaderHeight)
         .background(MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill)
         .overlay(alignment: .bottom) {
             Rectangle()

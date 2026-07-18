@@ -24,18 +24,11 @@ struct MomoWindowChromeMetrics: Equatable {
 
 enum MomoWindowChromeStyle {
     static let showsSystemTitle = false
-    static let appKitToolbarStyle: NSWindow.ToolbarStyle = .unifiedCompact
 
-    /// SwiftUI on macOS 14 has no scene-level API for removing the native
-    /// toolbar baseline. Keep this narrow AppKit policy here so the sidebar
-    /// surface can continue through the titlebar without a second horizontal
-    /// divider or an elevated toolbar material.
+    /// momo owns the full window surface, including the titlebar background.
+    /// AppKit still owns the traffic lights, but no native toolbar row is kept.
     @MainActor
     static func applyFlatUnifiedChrome(to window: NSWindow) {
-        // SwiftUI's scene toolbar style alone leaves the content view below a
-        // separate native titlebar band. Extending the content view lets each
-        // shell column paint behind the traffic lights while AppKit continues
-        // to own their safe interaction region.
         if !window.styleMask.contains(.fullSizeContentView) {
             window.styleMask.insert(.fullSizeContentView)
         }
@@ -48,21 +41,104 @@ enum MomoWindowChromeStyle {
         if window.titlebarSeparatorStyle != .none {
             window.titlebarSeparatorStyle = .none
         }
-        if window.toolbarStyle != appKitToolbarStyle {
-            window.toolbarStyle = appKitToolbarStyle
+        if window.toolbar != nil {
+            window.toolbar = nil
         }
-        if window.toolbar?.showsBaselineSeparator == true {
-            window.toolbar?.showsBaselineSeparator = false
+        if !window.isMovableByWindowBackground {
+            window.isMovableByWindowBackground = true
         }
     }
 }
 
-public extension Scene {
-    /// Keeps every macOS host on the same unified-toolbar title policy.
-    func momoWindowChromeStyle() -> some Scene {
-        windowToolbarStyle(
-            .unifiedCompact(showsTitle: MomoWindowChromeStyle.showsSystemTitle)
+@MainActor
+enum MomoWindowChromeDoubleClickHandler {
+    static func shouldHandle(
+        clickCount: Int,
+        locationInWindow: NSPoint,
+        window: NSWindow
+    ) -> Bool {
+        guard clickCount == 2,
+              !window.styleMask.contains(.fullScreen),
+              let contentView = window.contentView,
+              topChromeRect(in: window, contentView: contentView).contains(locationInWindow),
+              !isInsideTrafficLight(locationInWindow, window: window),
+              !isInteractiveAccessibilityElement(at: locationInWindow, window: window)
+        else { return false }
+
+        let locationInContent = contentView.convert(locationInWindow, from: nil)
+        return !isInteractive(contentView.hitTest(locationInContent), stoppingAt: contentView)
+    }
+
+    static func topChromeRect(in window: NSWindow, contentView: NSView) -> NSRect {
+        let contentBoundsInWindow = contentView.convert(contentView.bounds, to: nil)
+        let chromeBottom = min(
+            max(window.contentLayoutRect.maxY, contentBoundsInWindow.minY),
+            contentBoundsInWindow.maxY
         )
+        return NSRect(
+            x: contentBoundsInWindow.minX,
+            y: chromeBottom,
+            width: contentBoundsInWindow.width,
+            height: contentBoundsInWindow.maxY - chromeBottom
+        )
+    }
+
+    private static func isInsideTrafficLight(_ point: NSPoint, window: NSWindow) -> Bool {
+        let buttonTypes: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+        return buttonTypes.contains { type in
+            guard let button = window.standardWindowButton(type), !button.isHidden else { return false }
+            return button.convert(button.bounds, to: nil).contains(point)
+        }
+    }
+
+    private static func isInteractive(_ hitView: NSView?, stoppingAt contentView: NSView) -> Bool {
+        var candidate = hitView
+        while let view = candidate {
+            if view is NSControl || view is NSTextView {
+                return true
+            }
+            if view === contentView {
+                break
+            }
+            candidate = view.superview
+        }
+        return false
+    }
+
+    private static func isInteractiveAccessibilityElement(
+        at point: NSPoint,
+        window: NSWindow
+    ) -> Bool {
+        let screenPoint = window.convertPoint(toScreen: point)
+        guard let element = window.accessibilityHitTest(screenPoint) as? NSObject else {
+            return false
+        }
+        let interactiveRoles: Set<NSAccessibility.Role> = [
+            .button,
+            .checkBox,
+            .comboBox,
+            .disclosureTriangle,
+            .incrementor,
+            .link,
+            .menuButton,
+            .popUpButton,
+            .radioButton,
+            .slider,
+            .textArea,
+            .textField,
+        ]
+        guard let role = element.accessibilityAttributeValue(.role) as? NSAccessibility.Role else {
+            return false
+        }
+        return interactiveRoles.contains(role)
+    }
+}
+
+public extension Scene {
+    /// Window chrome is applied by `MomoWindowChromeMetricsReader`. Returning
+    /// the scene unchanged prevents SwiftUI from installing a shared toolbar.
+    func momoWindowChromeStyle() -> some Scene {
+        self
     }
 }
 
@@ -70,10 +146,19 @@ private struct MomoWindowChromeTopInsetKey: EnvironmentKey {
     static let defaultValue: CGFloat = 0
 }
 
+private struct MomoCenterHeaderLeadingInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
 extension EnvironmentValues {
     var momoWindowChromeTopInset: CGFloat {
         get { self[MomoWindowChromeTopInsetKey.self] }
         set { self[MomoWindowChromeTopInsetKey.self] = newValue }
+    }
+
+    var momoCenterHeaderLeadingInset: CGFloat {
+        get { self[MomoCenterHeaderLeadingInsetKey.self] }
+        set { self[MomoCenterHeaderLeadingInsetKey.self] = newValue }
     }
 }
 
@@ -90,6 +175,10 @@ struct MomoWindowChromeMetricsReader: NSViewRepresentable {
         nsView.onChange = onChange
         nsView.publishMetricsIfNeeded()
     }
+
+    static func dismantleNSView(_ nsView: MomoWindowChromeMetricsView, coordinator: Void) {
+        nsView.stopObservingWindow()
+    }
 }
 
 final class MomoWindowChromeMetricsView: NSView {
@@ -97,6 +186,7 @@ final class MomoWindowChromeMetricsView: NSView {
 
     private weak var observedWindow: NSWindow?
     private var lastMetrics: MomoWindowChromeMetrics?
+    private var mouseDownMonitor: Any?
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         if observedWindow !== newWindow {
@@ -139,9 +229,19 @@ final class MomoWindowChromeMetricsView: NSView {
         observedWindow = window
         guard let window else { return }
 
-        // SwiftUI can install or replace its toolbar one run-loop turn after
-        // the representable enters the window. Reapply once after attachment
-        // so the native baseline cannot reappear between titlebar and sidebar.
+        mouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self, weak window] event in
+            guard self != nil, let window, event.window === window else { return event }
+            guard MomoWindowChromeDoubleClickHandler.shouldHandle(
+                clickCount: event.clickCount,
+                locationInWindow: event.locationInWindow,
+                window: window
+            ) else { return event }
+            window.performZoom(nil)
+            return nil
+        }
+
+        // SwiftUI can install window chrome one run-loop turn after the
+        // representable enters the window. Reapply once after attachment.
         DispatchQueue.main.async { [weak self, weak window] in
             guard let self, let window, self.window === window else { return }
             MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
@@ -164,7 +264,15 @@ final class MomoWindowChromeMetricsView: NSView {
         }
     }
 
+    func stopObservingWindow() {
+        removeWindowObservers()
+    }
+
     private func removeWindowObservers() {
+        if let mouseDownMonitor {
+            NSEvent.removeMonitor(mouseDownMonitor)
+            self.mouseDownMonitor = nil
+        }
         if let observedWindow {
             NotificationCenter.default.removeObserver(
                 self,

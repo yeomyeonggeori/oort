@@ -174,12 +174,6 @@ public struct ChannelListView: View {
         let copy = MomoWorkspaceCopy(language: language)
 
         GeometryReader { geometry in
-            // Sidebar content always begins below the real NSWindow titlebar band.
-            // The workspace header is now sidebar-owned rather than toolbar-owned.
-            let topInset = MomoWindowChromeLayout.sidebarTopInset(
-                windowChromeTopInset: windowChromeTopInset
-            )
-
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
                     if showsWorkspaceHeader {
@@ -225,9 +219,8 @@ public struct ChannelListView: View {
             }
             .frame(
                 width: geometry.size.width,
-                height: max(0, geometry.size.height - topInset)
+                height: geometry.size.height
             )
-            .padding(.top, topInset)
         }
         .background(
             MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill
@@ -363,9 +356,22 @@ public struct ChannelListView: View {
                 }
             }
         }
-        .padding(.horizontal, MomoTheme.Sidebar.contentSpacing)
+        .padding(
+            .leading,
+            windowChromeTopInset > 0
+                ? MomoWindowChromeLayout.sidebarHeaderLeadingInset
+                : MomoTheme.Sidebar.contentSpacing
+        )
+        .padding(
+            .trailing,
+            MomoWindowChromeLayout.sidebarHeaderTrailingInset
+        )
         .padding(.vertical, MomoTheme.Sidebar.compactSpacing)
-        .frame(maxWidth: .infinity, minHeight: MomoTheme.Sidebar.headerMinimumHeight, alignment: .leading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: MomoWindowChromeLayout.integratedHeaderHeight,
+            alignment: .leading
+        )
         .popover(isPresented: $showWorkspaceMenu, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
                 workspaceMenuButton(copy.serverSettings, systemImage: "gearshape") {

@@ -3,6 +3,10 @@ import MomoMac
 
 @main
 struct MomoMacDevApp: App {
+    init() {
+        MomoWindowDoubleClickZoom.install()
+    }
+
     var body: some Scene {
         WindowGroup("momo") {
             DevAppRoot()
@@ -11,7 +15,6 @@ struct MomoMacDevApp: App {
         .momoWindowChromeStyle()
         .commands {
             CommandGroup(replacing: .newItem) {}
-            SidebarCommands()
             MomoMacCommands()
         }
     }
