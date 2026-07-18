@@ -2216,6 +2216,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 018_notification_pref(RLS, muted_until 확장 여지) + PUT pref(멤버만·같은 tx audit) + 채널 목록 muted 가산 + notifier 판정 join(멘션 포함 전면 억제, suppressed 무기록).
 - [x] verify_notification_mute(음소거 0/해제 재개/페어 격리/로그 무오염/RLS) + runtime-db 편입 + openapi. 상세: issue #504 본문(패킷 겸용). 랜딩 시 UXUI A큐에 설정 UI 등재.
 
+### ☐ MOMO-478 (`#506`) 수용기준 — 메시지 상호작용 REST (X-2 서버 절반) `[runtime-db]` · **PR base=track/engine**
+- [ ] PATCH 수정(작성자만·edited_at)/DELETE 삭제(tombstone·body NULL·reaction 정리)/PUT·DELETE 반응(멱등·상한)/GET 채널 반응 스냅샷 — 같은 tx+outbox 4 kind(Core 디코더 정본 정합)+audit, seq 불변.
+- [ ] openapi + verify_message_interaction + Core 디코드 왕복 테스트 + runtime-db 편입. 상세: issue #506 본문(패킷 겸용). 랜딩 시 X-2→UXUI(501 해제) 개방.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
