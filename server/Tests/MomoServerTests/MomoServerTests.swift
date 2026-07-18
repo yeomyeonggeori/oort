@@ -1597,7 +1597,8 @@ final class MomoServerTests: XCTestCase {
               "00000000-0000-7000-8000-000000000103"
             ],
             "createdBy": "00000000-0000-7000-8000-000000000101",
-            "archivedAtMs": null
+            "archivedAtMs": null,
+            "muted": false
           },
           "created": false
         }
@@ -1607,6 +1608,7 @@ final class MomoServerTests: XCTestCase {
 
         XCTAssertEqual(response.channel.kind, "dm")
         XCTAssertEqual(response.channel.memberIds?.count, 2)
+        XCTAssertFalse(response.channel.muted)
         XCTAssertFalse(response.created, "A repeated POST returns the existing DM")
     }
 
