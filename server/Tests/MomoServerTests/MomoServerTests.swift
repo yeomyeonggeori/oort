@@ -1863,6 +1863,7 @@ final class MomoServerTests: XCTestCase {
         let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
         let messageID = UUID(uuidString: "00000000-0000-7000-8000-000000000179")!
         let authorID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let rootID = UUID(uuidString: "00000000-0000-7000-8000-000000000178")!
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
 
         let raw = MessageRoutes.broadcastPayload(
@@ -1874,7 +1875,8 @@ final class MomoServerTests: XCTestCase {
             body: "Realtime contract sample.",
             authorMemberID: authorID,
             hlcTs: 1_782_463_260_000,
-            hlcCount: 0
+            hlcCount: 0,
+            rootID: rootID
         )
 
         let object = try XCTUnwrap(
@@ -1893,10 +1895,12 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(payload["author_member_id"] as? String, authorID.uuidString)
         XCTAssertEqual(payload["hlc_ts"] as? Int, 1_782_463_260_000)
         XCTAssertEqual(payload["hlc_count"] as? Int, 0)
+        XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
         XCTAssertNil(payload["channelId"])
         XCTAssertNil(payload["authorMemberId"])
         XCTAssertNil(payload["hlcTs"])
         XCTAssertNil(payload["hlcCount"])
+        XCTAssertNil(payload["rootId"])
     }
 
     func testAgentMentionDetectionSupportsDisplayNameHandleAndMemberID() {
@@ -2654,5 +2658,30 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(routes.contains("CentrifugoClient"))
         XCTAssertFalse(routes.contains("/api/publish"))
         XCTAssertFalse(routes.contains("apiSecret"))
+    }
+
+    func testWorkspaceSearchCursorRoundTripAndLiteralLikePattern() throws {
+        let cursor = SearchRoutes.Cursor(
+            createdAtMicros: 1_900_000_123_456_789,
+            seq: 42,
+            messageID: UUID(uuidString: "50000000-0000-7000-8000-000000000001")!
+        )
+        let encoded = SearchRoutes.encodeCursor(cursor)
+        XCTAssertFalse(encoded.contains("="))
+        XCTAssertEqual(try SearchRoutes.decodeCursor(encoded), cursor)
+        XCTAssertEqual(SearchRoutes.literalLikePattern(#"50%_\완료"#), #"%50\%\_\\완료%"#)
+    }
+
+    func testWorkspaceSearchQueryValidationAndAgentScope() throws {
+        XCTAssertThrowsError(try SearchRoutes.normalizedQuery(" 한 "))
+        XCTAssertEqual(try SearchRoutes.normalizedQuery("  한글 search  "), "한글 search")
+        XCTAssertThrowsError(try SearchRoutes.decodeCursor("not-a-cursor"))
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "GET",
+                path: "/v1/workspaces/50000000-0000-7000-8000-000000000001/search/messages"
+            ),
+            "messages:read"
+        )
     }
 }

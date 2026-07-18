@@ -105,6 +105,7 @@ struct MemberDTO: ResponseEncodable {
 /// POST .../messages request body. `clientMsgId` drives idempotency (L4 §3.1).
 struct SendMessageRequest: Decodable {
     let clientMsgId: UUID
+    let rootId: UUID?
     let type: String?            // defaults to "text"
     let body: String?
     let props: [String: String]? // simplified structured payload for v0 stub
@@ -116,6 +117,7 @@ struct SendMessageRequest: Decodable {
 struct MessageDTO: ResponseEncodable {
     let id: String
     let channelId: String
+    let rootId: String?
     let seq: Int64
     let hlcTs: Int64
     let hlcCount: Int
@@ -133,6 +135,23 @@ struct MessagePage: ResponseEncodable {
     let messages: [MessageDTO]
     /// Cursor to fetch older messages (pass as `before`); nil at start of history.
     let nextBefore: Int64?
+}
+
+/// GET workspace search/messages response. Snippets are server-bounded around
+/// the first match; `matchOffset` is zero-based within `snippet`.
+struct WorkspaceMessageSearchHitDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let channelId: String
+    let messageId: String
+    let seq: Int64
+    let authorMemberId: String
+    let createdAtMs: Int64
+    let snippet: String
+    let matchOffset: Int
+}
+
+struct WorkspaceMessageSearchResponse: ResponseEncodable, Codable, Sendable, Equatable {
+    let hits: [WorkspaceMessageSearchHitDTO]
+    let nextCursor: String?
 }
 
 // ---- Read state ----
