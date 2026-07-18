@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-478 메시지 상호작용 REST + realtime (2026-07-18)
+
+- 작성자 전용 메시지 수정·body NULL soft-delete, 채널 멤버 반응 추가/제거와 직접 집계 스냅샷을 기존 tenant transaction + outbox + audit 경계에 추가했다. 수정·삭제는 기존 `message.seq`를 유지하고, 반응 멱등 재시도는 중복 outbox를 만들지 않으며 삭제 audit에는 원문을 남기지 않는다.
+- 서버 109 tests, Core 27 tests(4종 서버 envelope 디코드), 격리 `verify_message_interaction.sh`, OpenAPI live drift 55/55 samples·44 operations가 PASS했다. 신규 migration은 필요하지 않았다(`001_init.sql`의 reaction UNIQUE·edited_at/deleted_at·FORCE RLS 재사용).
+
 ## iOS v0 실기기 푸시 E2E PASS (2026-07-18)
 
 - 실기기(iPhone, Debug 케이블 빌드)에서 전 체인 실증: 디바이스 등록(env 자동판별 sandbox, MOMO-467) → PushRelay(Ed25519 서명 dispatch) → 실 APNs(.p8, apns_id 발급 200) → 실기기 알림 표시 → **NSE가 REST로 실제 메시지 본문 fetch·교체 성공**. ADR-0120 P-1~P-4 + ADR-0123 IOS-1~5의 최종 evidence.

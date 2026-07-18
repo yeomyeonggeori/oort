@@ -470,6 +470,7 @@ sample message-send post \
   "/v1/workspaces/$WS/channels/$GENERAL_ID/messages" 201 \
   "$(jq -cn --arg c "$(uuidgen)" --arg a "$ATTACHMENT_ID" \
       '{clientMsgId:$c,body:"openapi drift gate sample",attachmentIds:[$a]}')" "$ACCESS"
+SENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
 SENT_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -r '.seq')"
 
 sample message-history get \
@@ -497,6 +498,34 @@ sample read-state-put put \
 
 sample read-state-list get "/v1/workspaces/{workspaceId}/read-state" "/v1/workspaces/$WS/read-state" 200 "" "$ACCESS"
 guard_jq '(.read_states | length) >= 1' "bulk read-state is non-empty"
+
+# message interactions: edit -> reaction add/snapshot/remove -> tombstone.
+sample message-edit patch "/v1/workspaces/{workspaceId}/messages/{messageId}" \
+  "/v1/workspaces/$WS/messages/$SENT_ID" 200 \
+  '{"body":"openapi drift gate sample edited"}' "$ACCESS"
+guard_jq --argjson seq "$SENT_SEQ" \
+  '.state == "edited" and .seq == $seq and (.editedAtMs > 0)' \
+  "message edit preserves seq and returns edited state"
+
+sample reaction-add put "/v1/workspaces/{workspaceId}/messages/{messageId}/reactions/{emoji}" \
+  "/v1/workspaces/$WS/messages/$SENT_ID/reactions/%F0%9F%91%8D" 200 "" "$ACCESS"
+guard_jq '.action == "added" and .emoji == "👍"' "reaction add delta"
+
+sample reaction-snapshot get "/v1/workspaces/{workspaceId}/channels/{channelId}/reactions" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/reactions" 200 "" "$ACCESS"
+guard_jq --arg id "$(printf '%s' "$SENT_ID" | tr '[:upper:]' '[:lower:]')" \
+  'any(to_entries[]; (.key | ascii_downcase) == $id and (.value["👍"] | length) == 1)' \
+  "reaction snapshot contains the edited message"
+
+sample reaction-remove delete "/v1/workspaces/{workspaceId}/messages/{messageId}/reactions/{emoji}" \
+  "/v1/workspaces/$WS/messages/$SENT_ID/reactions/%F0%9F%91%8D" 200 "" "$ACCESS"
+guard_jq '.action == "removed" and .emoji == "👍"' "reaction removal delta"
+
+sample message-delete delete "/v1/workspaces/{workspaceId}/messages/{messageId}" \
+  "/v1/workspaces/$WS/messages/$SENT_ID" 200 "" "$ACCESS"
+guard_jq --argjson seq "$SENT_SEQ" \
+  '.state == "deleted" and .seq == $seq and (.deletedAtMs > 0) and (has("body") | not)' \
+  "message delete returns a body-free tombstone with the original seq"
 
 # public join (201 created + 200 existing-member re-join shape)
 sample join post "/v1/join" "/v1/join" 201 \

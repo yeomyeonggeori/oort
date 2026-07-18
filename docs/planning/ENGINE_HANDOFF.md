@@ -21,7 +21,7 @@
 | # | 상태 | UXUI에서 확인·수정한 엔진 소유 항목 | 엔진 액션 | 근거 |
 |---|---|---|---|---|
 | X-1 | `needs-engine-sync` | `scripts/macos_dev_run.sh`가 SwiftPM 바이너리 프레임워크·리소스 번들을 개발용 `.app`에 스테이징하도록 보완 | `track/engine`에 동일 수정 이식 후 엔진 트랙 빌드로 재검증 | LiveKit 도입 후 `@rpath/LiveKitWebRTC.framework/LiveKitWebRTC` 누락으로 앱이 시작 즉시 DYLD 종료; UXUI 트랙 `--verify` 프로세스+창 PASS (2026-07-18) |
-| X-2 | `needs-engine-contract` | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 스레드 실전송은 main에 열렸지만 실서버 REST의 `editMessage`·`addReaction`은 현재 501이고 remove/delete 계약도 없어, 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | REST edit/add/remove/delete 명령과 권한 오류·realtime 확인 이벤트를 모두 연결한 뒤 `MomoMessageInteractionBackend` capability를 실서버에 부여 | macOS `MessageInteractionModel.swift`, `ChatViewModel.toggleReaction/deleteMessage`, `MessageInteractionTests` (2026-07-18) |
+| X-2 | `needs-review`(MOMO-478 `#506`, track/engine PR 대기 — 랜딩 후 §A `ready` 전환) | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | 서버 edit/add/remove/delete·스냅샷·4종 realtime payload 구현 및 runtime 검증 완료. track/engine 랜딩 후 REST backend의 501을 제거하고 `MomoMessageInteractionBackend` capability를 부여 | `MessageRoutes.swift`, OpenAPI, `verify_message_interaction.sh`, Core 4종 decoder test; worker `46713f3` (2026-07-18) |
 
 ## B. 엔진 역요청 (남은 것)
 
