@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 통합) · UXUI A-8/A-9 배치 → main 머지 (성재 승인)
+- track/uxui@dae7e8a(+1,945) 검수 결함 0 → main f25503d 무충돌 머지. A-8 음소거 UI 완결, A-9는 REST/로컬 UI 범위(4종 실호출·fail-closed·경합 방어) — 교차 클라 realtime·재시작 복원은 X-5 대기(성재 선택지 1 채택).
+- UXUI가 X-5(상호작용 이벤트 seq 재사용 → relay/Core drop + history 투영 부재)를 정확히 역요청 — 엔진이 독립 실측한 MOMO-480(브로커 절반, 게이트 진행 중)과 동일 근원. 잔여(Core replay 비순번 처리·history editedAtMs/state 투영·2클라 verifier)는 MOMO-481 후보.
+- 트랙 재정렬(uxui=main), 앱 재빌드. 엔진 트랙은 main+2(479+480 대기)로 계속 전진.
+
 ## 2026-07-19 (Fable 엔진 트랙) · MOMO-479 X-3 스레드 투영 랜딩 + 478 선재 결함 발견
 - X-3 완주(PR #509 → track/engine): thread 롤업 투영·replies cursor REST·thread.updated·AgentWorker root_id 보존(4사이트). worker(gpt-5.6-sol) 34분 구현, 리뷰 결함 0.
 - **실검증에서 결함 2건 잡음**: ①thread.updated가 Centrifugo version 게이팅에 무언 드랍(version=답글 seq ≤ 저장 version — no-version 발행으로 수정) ②동일 기전으로 **MOMO-478 상호작용 이벤트 4종 상시 드랍**(선재) → MOMO-480(#510) 발급. outbox done이라 무증상인 함정 — A/B 발행 실측으로 확정.
