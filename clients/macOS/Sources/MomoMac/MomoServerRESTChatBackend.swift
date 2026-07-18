@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -24,6 +24,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     private var authenticatedMember: Member?
     private var connectionGeneration: UInt64 = 0
     private var cachedChannels: [Channel]?
+    private var cachedChannelMuteStates: [ChannelID: Bool] = [:]
     private var cachedMembers: [Member]?
     private var lastKnownSeqByChannel: [ChannelID: Int64] = [:]
     private var realtimeStatusByChannel: [ChannelID: RealtimeConnectionStatus] = [:]
@@ -123,6 +124,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         accessToken = nil
         authenticatedMember = nil
         cachedChannels = nil
+        cachedChannelMuteStates = [:]
         cachedMembers = nil
         lastKnownSeqByChannel = [:]
         readStateRealtimeTransport = nil
@@ -301,12 +303,49 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             queryItems: [],
             response: WorkspaceChannelsResponse.self
         )
-        let channels = try response.channels.map { try $0.channel() }
+        let decodedChannels = try response.channels.map { dto in
+            (channel: try dto.channel(), muted: dto.muted)
+        }
         guard connectionGeneration == generation, self.workspace == sessionWorkspace else {
             throw CancellationError()
         }
+        let channels = decodedChannels.map(\.channel)
         cachedChannels = channels
+        cachedChannelMuteStates = Dictionary(
+            uniqueKeysWithValues: decodedChannels.map { ($0.channel.id, $0.muted) }
+        )
         return channels
+    }
+
+    func channelMuteSnapshot(workspace: WorkspaceID) async -> [ChannelID: Bool] {
+        guard self.workspace == workspace, accessToken != nil else { return [:] }
+        return cachedChannelMuteStates
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool {
+        guard let sessionWorkspace = workspace,
+              let sessionAccessToken = accessToken,
+              !sessionAccessToken.isEmpty
+        else {
+            throw BackendError.notConnected
+        }
+        let generation = connectionGeneration
+        let response = try await put(
+            "/v1/workspaces/\(sessionWorkspace.description)/channels/\(channel.description)/notification-pref",
+            body: UpdateNotificationPrefRequestDTO(muted: muted),
+            response: NotificationPrefResponseDTO.self
+        )
+        guard connectionGeneration == generation,
+              workspace == sessionWorkspace,
+              accessToken == sessionAccessToken
+        else {
+            throw CancellationError()
+        }
+        guard response.muted == muted else {
+            throw BackendError.decoding("channel notification preference response mismatch")
+        }
+        cachedChannelMuteStates[channel] = response.muted
+        return response.muted
     }
 
     public func workspace(id: WorkspaceID) async throws -> Workspace {
@@ -391,6 +430,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         } else {
             cachedChannels = (cachedChannels ?? []) + [channel]
         }
+        cachedChannelMuteStates[channel.id] = response.channel.muted
         return channel
     }
 
@@ -550,6 +590,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             updatedChannels.append(result.channel)
         }
         cachedChannels = updatedChannels
+        cachedChannelMuteStates[result.channel.id] = response.channel.muted
         return result
     }
 
@@ -690,11 +731,157 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     public func setTyping(channel: ChannelID, isTyping: Bool) async {}
 
     public func editMessage(_ id: MessageID, body: String) async throws -> Message {
-        throw BackendError.problem(status: 501, title: "not implemented", detail: "REST edit is out of scope for MOMO-177")
+        let context = try requireSessionContext()
+        let response = try await patch(
+            "/v1/workspaces/\(context.workspace.description)/messages/\(id.description)",
+            body: EditMessageRequestDTO(body: body),
+            response: MessageDTO.self
+        )
+        try ensureSessionCurrent(context)
+        let message = try response.message()
+        guard message.id == id,
+              responseBelongsToAuthenticatedMember(message.authorMemberId),
+              message.state == .edited,
+              message.body == body,
+              message.editedAtMs != nil,
+              message.deletedAtMs == nil
+        else {
+            throw BackendError.decoding("message edit response mismatch")
+        }
+        return message
     }
 
     public func addReaction(_ id: MessageID, emoji: String) async throws {
-        throw BackendError.problem(status: 501, title: "not implemented", detail: "REST reactions are out of scope for MOMO-177")
+        let context = try requireSessionContext()
+        let url = try reactionRequestURL(
+            workspace: context.workspace,
+            message: id,
+            emoji: emoji
+        )
+        let response = try await putEmpty(
+            url,
+            response: ReactionDeltaResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        try validateReactionDelta(response, expectedAction: "added", message: id, emoji: emoji)
+    }
+
+    func removeReaction(_ id: MessageID, emoji: String) async throws {
+        let context = try requireSessionContext()
+        let url = try reactionRequestURL(
+            workspace: context.workspace,
+            message: id,
+            emoji: emoji
+        )
+        let response = try await delete(
+            url,
+            authorized: true,
+            response: ReactionDeltaResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        try validateReactionDelta(response, expectedAction: "removed", message: id, emoji: emoji)
+    }
+
+    func deleteMessage(_ id: MessageID) async throws -> Message {
+        let context = try requireSessionContext()
+        let response = try await delete(
+            "/v1/workspaces/\(context.workspace.description)/messages/\(id.description)",
+            authorized: true,
+            response: MessageDTO.self
+        )
+        try ensureSessionCurrent(context)
+        let message = try response.message()
+        guard message.id == id,
+              responseBelongsToAuthenticatedMember(message.authorMemberId),
+              message.state == .deleted,
+              message.body == nil,
+              message.deletedAtMs != nil
+        else {
+            throw BackendError.decoding("message delete response mismatch")
+        }
+        return message
+    }
+
+    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] {
+        let context = try requireSessionContext()
+        let response = try await get(
+            "/v1/workspaces/\(context.workspace.description)/channels/\(channel.description)/reactions",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: [String: [String: [String]]].self
+        )
+        try ensureSessionCurrent(context)
+        var snapshot: [MessageID: [String: Set<MemberID>]] = [:]
+        for (rawMessageID, reactions) in response {
+            guard let messageID = MessageID(uuidString: rawMessageID) else {
+                throw BackendError.decoding("invalid reaction snapshot message id")
+            }
+            var decodedReactions: [String: Set<MemberID>] = [:]
+            for (emoji, rawMemberIDs) in reactions {
+                guard !emoji.isEmpty else {
+                    throw BackendError.decoding("invalid reaction snapshot emoji")
+                }
+                let memberIDs = try rawMemberIDs.map { rawMemberID in
+                    guard let memberID = MemberID(uuidString: rawMemberID) else {
+                        throw BackendError.decoding("invalid reaction snapshot member id")
+                    }
+                    return memberID
+                }
+                decodedReactions[emoji] = Set(memberIDs)
+            }
+            snapshot[messageID] = decodedReactions
+        }
+        return snapshot
+    }
+
+    private func validateReactionDelta(
+        _ response: ReactionDeltaResponseDTO,
+        expectedAction: String,
+        message: MessageID,
+        emoji: String
+    ) throws {
+        guard response.action == expectedAction,
+              response.messageId.lowercased() == message.description.lowercased(),
+              response.emoji == emoji,
+              let memberID = MemberID(uuidString: response.memberId)
+        else {
+            throw BackendError.decoding("reaction response mismatch")
+        }
+        if let expectedMemberID = authenticatedMember?.id ?? accessToken.flatMap(Self.memberIDFromJWT),
+           memberID != expectedMemberID {
+            throw BackendError.decoding("reaction response member mismatch")
+        }
+    }
+
+    private func requireSessionContext() throws -> (
+        workspace: WorkspaceID,
+        accessToken: String,
+        generation: UInt64
+    ) {
+        guard let workspace, let accessToken, !accessToken.isEmpty else {
+            throw BackendError.notConnected
+        }
+        return (workspace, accessToken, connectionGeneration)
+    }
+
+    private func ensureSessionCurrent(
+        _ context: (workspace: WorkspaceID, accessToken: String, generation: UInt64)
+    ) throws {
+        guard connectionGeneration == context.generation,
+              workspace == context.workspace,
+              accessToken == context.accessToken
+        else {
+            throw CancellationError()
+        }
+    }
+
+    private func responseBelongsToAuthenticatedMember(_ memberID: MemberID) -> Bool {
+        guard let expectedMemberID = authenticatedMember?.id
+                ?? accessToken.flatMap(Self.memberIDFromJWT)
+        else {
+            return true
+        }
+        return memberID == expectedMemberID
     }
 
     public func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
@@ -785,6 +972,34 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
 
     // MARK: HTTP
 
+    private func reactionRequestURL(
+        workspace: WorkspaceID,
+        message: MessageID,
+        emoji: String
+    ) throws -> URL {
+        let collectionPath = "/v1/workspaces/\(workspace.description)/messages/\(message.description)/reactions"
+        let collectionURL = config.baseURL.appendingPathComponent(collectionPath)
+        let unreservedPathSegmentCharacters = CharacterSet(
+            charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+        )
+        guard !emoji.isEmpty,
+              let encodedEmoji = emoji.addingPercentEncoding(
+                withAllowedCharacters: unreservedPathSegmentCharacters
+              ),
+              var components = URLComponents(
+                url: collectionURL,
+                resolvingAgainstBaseURL: false
+              )
+        else {
+            throw BackendError.problem(status: 400, title: "bad url", detail: collectionPath)
+        }
+        components.percentEncodedPath += "/\(encodedEmoji)"
+        guard let url = components.url else {
+            throw BackendError.problem(status: 400, title: "bad url", detail: collectionPath)
+        }
+        return url
+    }
+
     private func get<T: Decodable>(
         _ path: String,
         queryItems: [URLQueryItem],
@@ -856,6 +1071,26 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return try await execute(request, response: response)
     }
 
+    private func putEmpty<ResponseBody: Decodable>(
+        _ path: String,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        try await putEmpty(
+            config.baseURL.appendingPathComponent(path),
+            response: response
+        )
+    }
+
+    private func putEmpty<ResponseBody: Decodable>(
+        _ url: URL,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        try authorize(&request)
+        return try await execute(request, response: response)
+    }
+
     private func patch<RequestBody: Encodable, ResponseBody: Decodable>(
         _ path: String,
         body: RequestBody,
@@ -874,7 +1109,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         authorized: Bool,
         response: ResponseBody.Type
     ) async throws -> ResponseBody {
-        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        try await delete(
+            config.baseURL.appendingPathComponent(path),
+            authorized: authorized,
+            response: response
+        )
+    }
+
+    private func delete<ResponseBody: Decodable>(
+        _ url: URL,
+        authorized: Bool,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         if authorized {
             try authorize(&request)
@@ -919,7 +1166,11 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
 
     private func problemError(status: Int, data: Data) -> BackendError {
         if let problem = try? decoder.decode(ProblemResponse.self, from: data) {
-            return .problem(status: status, title: problem.title, detail: problem.detail ?? problem.message)
+            return .problem(
+                status: status,
+                title: problem.title ?? problem.error?.code,
+                detail: problem.detail ?? problem.message ?? problem.error?.message
+            )
         }
         return .problem(status: status, title: HTTPURLResponse.localizedString(forStatusCode: status), detail: nil)
     }
@@ -1358,6 +1609,7 @@ private struct ChannelDTO: Decodable {
     let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
+    let muted: Bool
 
     func directMessageParticipantIDs() throws -> [MemberID] {
         guard let memberIds, memberIds.count == 2 else {
@@ -1397,6 +1649,25 @@ private struct ChannelDTO: Decodable {
             archivedAtMs: archivedAtMs
         )
     }
+}
+
+private struct UpdateNotificationPrefRequestDTO: Encodable {
+    let muted: Bool
+}
+
+private struct NotificationPrefResponseDTO: Decodable {
+    let muted: Bool
+}
+
+private struct EditMessageRequestDTO: Encodable {
+    let body: String
+}
+
+private struct ReactionDeltaResponseDTO: Decodable {
+    let action: String
+    let messageId: String
+    let memberId: String
+    let emoji: String
 }
 
 private struct OpenDirectMessageRequestDTO: Encodable {
@@ -1484,8 +1755,18 @@ private struct MessageDTO: Decodable {
     let clientMsgId: UUID?
     let createdAtMs: Int64
     let thread: ThreadRollup?
+    let state: String?
+    let editedAtMs: Int64?
+    let deletedAtMs: Int64?
 
     func message() throws -> Message {
+        guard let decodedID = MessageID(uuidString: id),
+              let decodedChannelID = ChannelID(uuidString: channelId),
+              let decodedAuthorID = MemberID(uuidString: authorMemberId),
+              let decodedType = MessageType(rawValue: type)
+        else {
+            throw BackendError.decoding("invalid message identity")
+        }
         let decodedRootID: MessageID?
         if let rootId {
             guard let rootID = MessageID(uuidString: rootId) else {
@@ -1495,22 +1776,42 @@ private struct MessageDTO: Decodable {
         } else {
             decodedRootID = nil
         }
+        let decodedState: MessageState
+        if let state {
+            guard let messageState = MessageState(rawValue: state) else {
+                throw BackendError.decoding("invalid message state")
+            }
+            decodedState = messageState
+        } else {
+            decodedState = .sent
+        }
+        let decodedRunID: RunID?
+        if let runId {
+            guard let parsedRunID = RunID(uuidString: runId) else {
+                throw BackendError.decoding("invalid message run id")
+            }
+            decodedRunID = parsedRunID
+        } else {
+            decodedRunID = nil
+        }
         return Message(
-            id: MessageID(uuidString: id) ?? MessageID(),
-            channelId: ChannelID(uuidString: channelId) ?? .demoGeneral,
+            id: decodedID,
+            channelId: decodedChannelID,
             seq: seq,
             hlcTs: hlcTs,
             hlcCount: hlcCount,
-            authorMemberId: MemberID(uuidString: authorMemberId) ?? .demoHuman,
-            type: MessageType(rawValue: type) ?? .text,
-            state: .sent,
+            authorMemberId: decodedAuthorID,
+            type: decodedType,
+            state: decodedState,
             body: body,
             props: props ?? .object([:]),
             rootId: decodedRootID,
             thread: thread,
-            runId: runId.flatMap { RunID(uuidString: $0) },
+            runId: decodedRunID,
             clientMsgId: clientMsgId,
-            createdAtMs: createdAtMs
+            createdAtMs: createdAtMs,
+            editedAtMs: editedAtMs,
+            deletedAtMs: deletedAtMs
         )
     }
 }
@@ -1650,6 +1951,12 @@ private struct ProblemResponse: Decodable {
     let title: String?
     let detail: String?
     let message: String?
+    let error: ServerError?
+
+    struct ServerError: Decodable {
+        let code: String?
+        let message: String?
+    }
 }
 
 private extension JSON {
