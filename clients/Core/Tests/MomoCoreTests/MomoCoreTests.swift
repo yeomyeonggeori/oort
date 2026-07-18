@@ -176,8 +176,43 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(msg.seq, 42)
         XCTAssertEqual(msg.body, "hello")
         XCTAssertEqual(msg.type, .text)
+        XCTAssertNil(msg.thread, "legacy payloads without a thread projection stay decodable")
         XCTAssertFalse(msg.isPendingAck)
         XCTAssertFalse(msg.isDeleted)
+    }
+
+    func testMessageThreadRollupDecodesAndRoundTripsAdditively() throws {
+        let wire = """
+        {
+          "id": "018f8b2c-0000-7000-8000-000000000001",
+          "channel_id": "018f8b2c-0000-7000-8000-000000000002",
+          "seq": 42,
+          "hlc_ts": 1718000000000,
+          "hlc_count": 0,
+          "author_member_id": "018f8b2c-0000-7000-8000-000000000003",
+          "type": "text",
+          "state": "sent",
+          "body": "thread root",
+          "props": {},
+          "created_at_ms": 1718000000123,
+          "thread": {
+            "reply_count": 3,
+            "last_reply_seq": 47,
+            "last_reply_at": 1718000000999
+          }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder.momo.decode(Message.self, from: wire)
+        XCTAssertEqual(decoded.thread?.replyCount, 3)
+        XCTAssertEqual(decoded.thread?.lastReplySeq, 47)
+        XCTAssertEqual(decoded.thread?.lastReplyAtMs, 1_718_000_000_999)
+
+        let roundTripped = try JSONDecoder.momo.decode(
+            Message.self,
+            from: JSONEncoder.momo.encode(decoded)
+        )
+        XCTAssertEqual(roundTripped, decoded)
     }
 
     func testOptimisticEchoIsPendingAck() {
@@ -231,6 +266,68 @@ final class MomoCoreTests: XCTestCase {
             return XCTFail("expected .messageDeleted")
         }
         XCTAssertEqual(id.description.lowercased(), "018f8b2c-0000-7000-8000-000000000020")
+    }
+
+    func testEnvelopeMapsThreadUpdatedWithoutChangingUnknownTypeBehavior() throws {
+        let channelID = "018f8b2c-0000-7000-8000-000000000021"
+        let rootID = "018f8b2c-0000-7000-8000-000000000020"
+        let event = try RealtimeEnvelope(
+            type: "thread.updated",
+            ts: 1_718_000_000_999,
+            seq: 47,
+            payload: [
+                "channel_id": .string(channelID),
+                "root_id": .string(rootID),
+                "reply_count": .int(3),
+                "last_reply_seq": .int(47),
+                "last_reply_at": .int(1_718_000_000_999),
+            ]
+        ).decodeEvent()
+
+        guard case .threadUpdated(let delta) = event else {
+            return XCTFail("expected .threadUpdated")
+        }
+        XCTAssertEqual(delta.channelId.description.lowercased(), channelID)
+        XCTAssertEqual(delta.rootId.description.lowercased(), rootID)
+        XCTAssertEqual(delta.rollup, ThreadRollup(
+            replyCount: 3,
+            lastReplySeq: 47,
+            lastReplyAtMs: 1_718_000_000_999
+        ))
+
+        XCTAssertThrowsError(
+            try RealtimeEnvelope(type: "thread.future", ts: 1, payload: [:]).decodeEvent()
+        ) { error in
+            guard case RealtimeEnvelope.DecodeError.unknownType("thread.future") = error else {
+                return XCTFail("expected unknownType, got \(error)")
+            }
+        }
+    }
+
+    func testThreadUpdatedSharingReplySeqDoesNotAdvanceOrGetDroppedByReplay() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000000020")!
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 47)
+        let envelope = RealtimeEnvelope(
+            type: "thread.updated",
+            ts: 100,
+            seq: 47,
+            payload: [
+                "channel_id": .string(channel.description),
+                "root_id": .string(root.description),
+                "reply_count": .int(2),
+                "last_reply_seq": .int(47),
+                "last_reply_at": .int(100),
+            ]
+        )
+
+        let events = try await controller.process(envelope) { _, _ in [] }
+        guard case .threadUpdated(let delta) = events.first else {
+            return XCTFail("thread projection sharing an applied reply seq must be delivered")
+        }
+        XCTAssertEqual(delta.replyCount, 2)
+        let snapshot = await controller.snapshot()
+        XCTAssertEqual(snapshot.lastAppliedSeq, 47)
     }
 
     func testServerMessageInteractionPayloadsDecodeAllFourKinds() throws {

@@ -1483,6 +1483,7 @@ private struct MessageDTO: Decodable {
     let runId: String?
     let clientMsgId: UUID?
     let createdAtMs: Int64
+    let thread: ThreadRollup?
 
     func message() throws -> Message {
         let decodedRootID: MessageID?
@@ -1506,6 +1507,7 @@ private struct MessageDTO: Decodable {
             body: body,
             props: props ?? .object([:]),
             rootId: decodedRootID,
+            thread: thread,
             runId: runId.flatMap { RunID(uuidString: $0) },
             clientMsgId: clientMsgId,
             createdAtMs: createdAtMs

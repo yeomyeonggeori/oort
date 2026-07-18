@@ -28,6 +28,9 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
     public var props: JSON
     /// Thread root (`nil` = top-level; else the thread's root message id).
     public var rootId: MessageID?
+    /// Server-authoritative reply summary; present only on top-level messages
+    /// with one or more replies. Missing on older payloads for compatibility.
+    public var thread: ThreadRollup?
     /// Direct reply target.
     public var replyToId: MessageID?
     /// Agent provenance: which run produced this message.
@@ -51,6 +54,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         body: String? = nil,
         props: JSON = .object([:]),
         rootId: MessageID? = nil,
+        thread: ThreadRollup? = nil,
         replyToId: MessageID? = nil,
         runId: RunID? = nil,
         clientMsgId: UUID? = nil,
@@ -69,6 +73,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         self.body = body
         self.props = props
         self.rootId = rootId
+        self.thread = thread
         self.replyToId = replyToId
         self.runId = runId
         self.clientMsgId = clientMsgId
@@ -95,6 +100,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         case body
         case props
         case rootId = "root_id"
+        case thread
         case replyToId = "reply_to_id"
         case runId = "run_id"
         case clientMsgId = "client_msg_id"
@@ -116,6 +122,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         self.body = try c.decodeIfPresent(String.self, forKey: .body)
         self.props = try c.decodeIfPresent(JSON.self, forKey: .props) ?? .object([:])
         self.rootId = try c.decodeIfPresent(MessageID.self, forKey: .rootId)
+        self.thread = try c.decodeIfPresent(ThreadRollup.self, forKey: .thread)
         self.replyToId = try c.decodeIfPresent(MessageID.self, forKey: .replyToId)
         self.runId = try c.decodeIfPresent(RunID.self, forKey: .runId)
         self.clientMsgId = try c.decodeIfPresent(UUID.self, forKey: .clientMsgId)
