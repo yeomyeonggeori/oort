@@ -2202,6 +2202,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] DriveArchiveClient(실+stub, drive.file) + verify_attachment_upload(stub) + runtime-db 편입 + openapi. 실 Google smoke는 오케스트레이터. 상세: issue #497 본문(패킷 겸용). ENGINE_HANDOFF B-1→in-progress, 랜딩 시 A-6 해제.
 - 랜딩: PR #499 squash `6d4dd97` → **track/engine**(2026-07-18, main 대기). 검증: 첨부 verifier(stub)+서버 107/107+openapi 48/48+**실 Google 왕복 smoke PASS**(resumable→클라 직송 PUT→files.get→alt=media, 정리 완료). 게이트 유일 실패=english-large-text full-suite flake(server 전용 PR·macOS 무관 = 선재, MOMO-472로 확장).
 
+### ☐ MOMO-475 (`#500`) 수용기준 — 검색 서버 FTS v0 (메시지) `[runtime-db]` · 의존: 없음 · **PR base=track/engine**
+- [ ] GET search/messages — 멤버십 하드 필터(비멤버 0)/deleted 제외/ILIKE+trgm/최신순/seq 커서/snippet 절단+matchOffset/q≥2/멤버 rate limit.
+- [ ] openapi + verify_workspace_search(멤버십·DM·삭제·한영·커서 안정·429·RLS·EXPLAIN trgm) + runtime-db 편입. 상세: issue #500 본문(패킷 겸용). 랜딩 시 B-2 done→A ready.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
