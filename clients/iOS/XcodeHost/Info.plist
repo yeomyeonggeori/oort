@@ -39,6 +39,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>momo connects to your Mac on the local network during internal testing.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Join huddles and speak with your momo workspace using your microphone.</string>
 	<key>MomoAPNSEnvironment</key>
 	<string>$(APS_ENVIRONMENT)</string>
 	<key>UIApplicationSceneManifest</key>

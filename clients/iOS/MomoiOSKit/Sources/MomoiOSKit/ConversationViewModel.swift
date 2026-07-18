@@ -105,6 +105,7 @@ public final class IOSTimelineModel {
     public private(set) var sendFailureMessage: String?
     public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     public private(set) var approvalDecisionFailures: Set<ApprovalID> = []
+    public let huddle: IOSHuddleModel
 
     private let channel: ChannelID
     private let currentMemberID: MemberID
@@ -114,11 +115,27 @@ public final class IOSTimelineModel {
     private var failedSend: IOSPendingMessageSend?
     private var pendingApprovalDecisions: [ApprovalID: IOSPendingApprovalDecision] = [:]
 
-    public init(channel: ChannelID, currentMemberID: MemberID, backend: any IOSConversationBackend) {
+    public init(
+        channel: ChannelID,
+        currentMemberID: MemberID,
+        backend: any IOSConversationBackend,
+        workspace: WorkspaceID? = nil,
+        huddleService: (any IOSHuddleService)? = nil,
+        huddleAudioSession: (any IOSHuddleAudioSession)? = nil,
+        microphonePermission: (any IOSMicrophonePermissionAuthorizing)? = nil
+    ) {
         self.channel = channel
         self.currentMemberID = currentMemberID
         self.backend = backend
         self.realtimeStatus = .idle(channel: channel)
+        let huddleWorkspace = workspace ?? WorkspaceID()
+        self.huddle = IOSHuddleModel(
+            workspace: huddleWorkspace,
+            channel: channel,
+            service: workspace == nil ? nil : huddleService,
+            audioSession: huddleAudioSession ?? IOSHuddleLiveKitSession(),
+            permissionAuthorizer: microphonePermission ?? IOSSystemMicrophonePermissionAuthorizer()
+        )
     }
 
     public func stop() {
@@ -139,6 +156,7 @@ public final class IOSTimelineModel {
                 try? await backend.markRead(channel: channel, through: sequence)
             }
             subscribe()
+            await huddle.activate()
         } catch is CancellationError {
             return
         } catch {
@@ -159,6 +177,24 @@ public final class IOSTimelineModel {
         eventTask?.cancel()
         statusTask?.cancel()
         await load()
+    }
+
+    public func resume() async {
+        guard phase == .loaded else { return }
+        subscribe()
+        await huddle.activate()
+    }
+
+    public func shutdown() async {
+        stop()
+        await huddle.shutdown()
+    }
+
+    func consumeRealtimeEvent(_ event: RealtimeEvent) async {
+        if case .huddle(let delta) = event {
+            await huddle.apply(delta)
+        }
+        messages = IOSTimelineReducer.applying(event, to: messages, channel: channel)
     }
 
     public func selectReply(to message: Message) {
@@ -321,7 +357,7 @@ public final class IOSTimelineModel {
                 let events = try await backend.subscribe(channel: channel)
                 for await event in events {
                     guard !Task.isCancelled, let self else { return }
-                    messages = IOSTimelineReducer.applying(event, to: messages, channel: channel)
+                    await consumeRealtimeEvent(event)
                 }
             } catch is CancellationError {
                 return
