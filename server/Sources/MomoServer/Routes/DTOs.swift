@@ -134,6 +134,15 @@ struct ThreadRollupDTO: ResponseEncodable, Codable, Sendable, Equatable {
     }
 }
 
+/// Download-safe attachment metadata projected on a message. Resumable upload
+/// URLs and archive provider identifiers are deliberately outside this shape.
+struct MessageAttachmentDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let id: String
+    let name: String
+    let mime: String
+    let sizeBytes: Int64
+}
+
 /// A message as returned by send/history (L4 §5.3 Message contract).
 struct MessageDTO: ResponseEncodable, Codable, Sendable {
     let id: String
@@ -152,6 +161,8 @@ struct MessageDTO: ResponseEncodable, Codable, Sendable {
     let state: String?
     let editedAtMs: Int64?
     let deletedAtMs: Int64?
+    /// Present only when one or more completed attachments are bound to this message.
+    let attachments: [MessageAttachmentDTO]?
     let thread: ThreadRollupDTO?
 }
 

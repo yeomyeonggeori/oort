@@ -197,6 +197,9 @@ struct MessageRoutes: Sendable {
                 }
             }
             let responseProps = Self.decodeProps(responsePropsJSON)
+            let attachments = try await Self.fetchAttachments(
+                conn: conn, logger: db.logger, messageID: id
+            )
 
             var updatedThread: ThreadRollupDTO?
             if didInsert, let rootID {
@@ -239,7 +242,8 @@ struct MessageRoutes: Sendable {
             let outboxPayload = Self.broadcastPayload(
                 centChannel: centChannel, messageID: id, channelID: channelID,
                 seq: seq, type: type, body: body, authorMemberID: principal.memberID,
-                hlcTs: ts, hlcCount: count, rootID: rootID
+                hlcTs: ts, hlcCount: count, rootID: rootID,
+                attachments: attachments
             )
             if didInsert {
                 _ = try await conn.query(
@@ -327,6 +331,7 @@ struct MessageRoutes: Sendable {
                 runId: dto.runId?.uuidString, clientMsgId: dto.clientMsgId.uuidString,
                 createdAtMs: Int64(createdAt.timeIntervalSince1970 * 1000),
                 state: nil, editedAtMs: nil, deletedAtMs: nil,
+                attachments: attachments,
                 thread: responseThread
             ))
         }
@@ -377,10 +382,24 @@ struct MessageRoutes: Sendable {
                            m.type, m.body, m.props::text, m.root_id, m.run_id,
                            m.client_msg_id, m.created_at, m.state::text,
                            m.edited_at, m.deleted_at,
-                           t.reply_count, t.last_reply_seq, t.last_reply_at
+                           t.reply_count, t.last_reply_seq, t.last_reply_at,
+                           attachment_projection.items::text
                       FROM message m
                       LEFT JOIN thread t
                         ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
+                      LEFT JOIN LATERAL (
+                        SELECT jsonb_agg(
+                          jsonb_build_object(
+                            'id', a.id::text,
+                            'name', a.name,
+                            'mime', a.mime,
+                            'sizeBytes', a.size_bytes
+                          ) ORDER BY a.created_at ASC, a.id ASC
+                        ) AS items
+                          FROM attachment a
+                         WHERE a.message_id = m.id
+                           AND a.status = 'complete'
+                      ) attachment_projection ON true
                      WHERE m.channel_id = \(channelID) AND m.seq > \(after)
                      ORDER BY m.seq ASC
                      LIMIT \(limit)
@@ -394,10 +413,24 @@ struct MessageRoutes: Sendable {
                            m.type, m.body, m.props::text, m.root_id, m.run_id,
                            m.client_msg_id, m.created_at, m.state::text,
                            m.edited_at, m.deleted_at,
-                           t.reply_count, t.last_reply_seq, t.last_reply_at
+                           t.reply_count, t.last_reply_seq, t.last_reply_at,
+                           attachment_projection.items::text
                       FROM message m
                       LEFT JOIN thread t
                         ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
+                      LEFT JOIN LATERAL (
+                        SELECT jsonb_agg(
+                          jsonb_build_object(
+                            'id', a.id::text,
+                            'name', a.name,
+                            'mime', a.mime,
+                            'sizeBytes', a.size_bytes
+                          ) ORDER BY a.created_at ASC, a.id ASC
+                        ) AS items
+                          FROM attachment a
+                         WHERE a.message_id = m.id
+                           AND a.status = 'complete'
+                      ) attachment_projection ON true
                      WHERE m.channel_id = \(channelID) AND m.seq < \(before)
                      ORDER BY m.seq DESC
                      LIMIT \(limit)
@@ -411,10 +444,24 @@ struct MessageRoutes: Sendable {
                            m.type, m.body, m.props::text, m.root_id, m.run_id,
                            m.client_msg_id, m.created_at, m.state::text,
                            m.edited_at, m.deleted_at,
-                           t.reply_count, t.last_reply_seq, t.last_reply_at
+                           t.reply_count, t.last_reply_seq, t.last_reply_at,
+                           attachment_projection.items::text
                       FROM message m
                       LEFT JOIN thread t
                         ON t.root_id = m.id AND m.root_id IS NULL AND t.reply_count > 0
+                      LEFT JOIN LATERAL (
+                        SELECT jsonb_agg(
+                          jsonb_build_object(
+                            'id', a.id::text,
+                            'name', a.name,
+                            'mime', a.mime,
+                            'sizeBytes', a.size_bytes
+                          ) ORDER BY a.created_at ASC, a.id ASC
+                        ) AS items
+                          FROM attachment a
+                         WHERE a.message_id = m.id
+                           AND a.status = 'complete'
+                      ) attachment_projection ON true
                      WHERE m.channel_id = \(channelID)
                      ORDER BY m.seq DESC
                      LIMIT \(limit)
@@ -426,10 +473,10 @@ struct MessageRoutes: Sendable {
             let dtos = try rows.map { row -> MessageDTO in
                 let (id, seq, ts, count, author, type, body, propsJSON, rootID,
                      runID, clientMsgID, createdAt, state, editedAt, deletedAt,
-                     replyCount, lastReplySeq, lastReplyAt) = try row.decode(
+                     replyCount, lastReplySeq, lastReplyAt, attachmentsJSON) = try row.decode(
                         (UUID, Int64, Int64, Int, UUID, String, String?, String,
                          UUID?, UUID?, UUID?, Date, String, Date?, Date?, Int?,
-                         Int64?, Date?).self
+                         Int64?, Date?, String?).self
                      )
                 return MessageDTO(
                     id: id.uuidString, channelId: channelID.uuidString,
@@ -441,6 +488,7 @@ struct MessageRoutes: Sendable {
                     state: state,
                     editedAtMs: editedAt.map { Int64($0.timeIntervalSince1970 * 1_000) },
                     deletedAtMs: deletedAt.map { Int64($0.timeIntervalSince1970 * 1_000) },
+                    attachments: try Self.attachmentProjection(attachmentsJSON),
                     thread: Self.threadRollup(
                         replyCount: replyCount,
                         lastReplySeq: lastReplySeq,
@@ -506,31 +554,49 @@ struct MessageRoutes: Sendable {
 
             let rows = try await conn.query(
                 """
-                SELECT jsonb_build_object(
-                  'id', id::text,
-                  'channelId', channel_id::text,
-                  'rootId', root_id::text,
-                  'seq', seq,
-                  'hlcTs', hlc_ts,
-                  'hlcCount', hlc_count,
-                  'authorMemberId', author_member_id::text,
-                  'type', type::text,
-                  'body', body,
-                  'props', props,
-                  'runId', run_id::text,
-                  'clientMsgId', client_msg_id::text,
-                  'createdAtMs', floor(extract(epoch from created_at) * 1000)::bigint,
-                  'state', state::text,
-                  'editedAtMs', CASE WHEN edited_at IS NULL THEN NULL
-                    ELSE floor(extract(epoch from edited_at) * 1000)::bigint END,
-                  'deletedAtMs', CASE WHEN deleted_at IS NULL THEN NULL
-                    ELSE floor(extract(epoch from deleted_at) * 1000)::bigint END
+                SELECT (
+                  jsonb_build_object(
+                    'id', m.id::text,
+                    'channelId', m.channel_id::text,
+                    'rootId', m.root_id::text,
+                    'seq', m.seq,
+                    'hlcTs', m.hlc_ts,
+                    'hlcCount', m.hlc_count,
+                    'authorMemberId', m.author_member_id::text,
+                    'type', m.type::text,
+                    'body', m.body,
+                    'props', m.props,
+                    'runId', m.run_id::text,
+                    'clientMsgId', m.client_msg_id::text,
+                    'createdAtMs', floor(extract(epoch from m.created_at) * 1000)::bigint,
+                    'state', m.state::text,
+                    'editedAtMs', CASE WHEN m.edited_at IS NULL THEN NULL
+                      ELSE floor(extract(epoch from m.edited_at) * 1000)::bigint END,
+                    'deletedAtMs', CASE WHEN m.deleted_at IS NULL THEN NULL
+                      ELSE floor(extract(epoch from m.deleted_at) * 1000)::bigint END
+                  ) || CASE
+                    WHEN attachment_projection.items IS NULL THEN '{}'::jsonb
+                    ELSE jsonb_build_object('attachments', attachment_projection.items)
+                  END
                 )::text
-                  FROM message
-                 WHERE channel_id = \(channelID)
-                   AND root_id = \(rootID)
-                   AND seq > \(cursor ?? 0)
-                 ORDER BY seq ASC
+                  FROM message m
+                  LEFT JOIN LATERAL (
+                    SELECT jsonb_agg(
+                      jsonb_build_object(
+                        'id', a.id::text,
+                        'name', a.name,
+                        'mime', a.mime,
+                        'sizeBytes', a.size_bytes
+                      ) ORDER BY a.created_at ASC, a.id ASC
+                    ) AS items
+                      FROM attachment a
+                     WHERE a.message_id = m.id
+                       AND a.status = 'complete'
+                  ) attachment_projection ON true
+                 WHERE m.channel_id = \(channelID)
+                   AND m.root_id = \(rootID)
+                   AND m.seq > \(cursor ?? 0)
+                 ORDER BY m.seq ASC
                  LIMIT \(fetchLimit)
                 """,
                 logger: db.logger
@@ -926,6 +992,40 @@ struct MessageRoutes: Sendable {
             lastReplySeq: lastReplySeq,
             lastReplyAt: Int64(lastReplyAt.timeIntervalSince1970 * 1_000)
         )
+    }
+
+    static func attachmentProjection(_ json: String?) throws -> [MessageAttachmentDTO]? {
+        guard let json else { return nil }
+        let attachments = try JSONDecoder().decode(
+            [MessageAttachmentDTO].self,
+            from: Data(json.utf8)
+        )
+        return attachments.isEmpty ? nil : attachments
+    }
+
+    private static func fetchAttachments(
+        conn: PostgresConnection,
+        logger: Logger,
+        messageID: UUID
+    ) async throws -> [MessageAttachmentDTO]? {
+        let rows = try await conn.query(
+            """
+            SELECT jsonb_agg(
+              jsonb_build_object(
+                'id', id::text,
+                'name', name,
+                'mime', mime,
+                'sizeBytes', size_bytes
+              ) ORDER BY created_at ASC, id ASC
+            )::text
+              FROM attachment
+             WHERE message_id = \(messageID)
+               AND status = 'complete'
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else { return nil }
+        return try attachmentProjection(try row.decode(String?.self))
     }
 
     private static func decodeThreadRollup(_ row: PostgresRow) throws -> ThreadRollupDTO {
@@ -2146,25 +2246,36 @@ struct MessageRoutes: Sendable {
     static func broadcastPayload(
         centChannel: String, messageID: UUID, channelID: UUID, seq: Int64,
         type: String, body: String?, authorMemberID: UUID, hlcTs: Int64, hlcCount: Int,
-        rootID: UUID?
+        rootID: UUID?, attachments: [MessageAttachmentDTO]? = nil
     ) -> String {
         // Event envelope per L4 §5.2: {type, v, ts, seq, payload:{...}}.
+        var messagePayload: [String: Any] = [
+            "id": messageID.uuidString,
+            "channel_id": channelID.uuidString,
+            "seq": seq,
+            "type": type,
+            "body": body as Any,
+            "author_member_id": authorMemberID.uuidString,
+            "hlc_ts": hlcTs,
+            "hlc_count": hlcCount,
+            "root_id": rootID?.uuidString ?? NSNull(),
+        ]
+        if let attachments, !attachments.isEmpty {
+            messagePayload["attachments"] = attachments.map { attachment in
+                [
+                    "id": attachment.id,
+                    "name": attachment.name,
+                    "mime": attachment.mime,
+                    "sizeBytes": attachment.sizeBytes,
+                ] as [String: Any]
+            }
+        }
         let data: [String: Any] = [
             "type": "message.new",
             "v": 1,
             "ts": hlcTs,
             "seq": seq,
-            "payload": [
-                "id": messageID.uuidString,
-                "channel_id": channelID.uuidString,
-                "seq": seq,
-                "type": type,
-                "body": body as Any,
-                "author_member_id": authorMemberID.uuidString,
-                "hlc_ts": hlcTs,
-                "hlc_count": hlcCount,
-                "root_id": rootID?.uuidString ?? NSNull(),
-            ],
+            "payload": messagePayload,
         ]
         let envelope: [String: Any] = [
             "channel": centChannel,
