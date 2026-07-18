@@ -1619,6 +1619,7 @@ public final class ChatViewModel: ObservableObject {
         if let statusProvider = chat as? any RealtimeStatusProvidingBackend {
             await statusProvider.retryRealtime(channel: channel)
         }
+        subscribe(channel: channel)
         await loadHistory(channel: channel)
         subscribeRealtimeStatus(channel: channel)
     }
