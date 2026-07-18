@@ -126,7 +126,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src && cp -R /workspace/server /tmp/momo-src/server && cd /tmp/momo-src && swift run --package-path server --scratch-path /tmp/momo-swiftpm/server MomoServer",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src && cp -Rp /workspace/server /tmp/momo-src/server && cd /tmp/momo-src && swift run -j 8 --package-path server --scratch-path /tmp/momo-swiftpm/server MomoServer",
       ]
     environment:
       <<: *e2e-common-env
@@ -164,7 +164,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/relay && cp -R /workspace/relay/OutboxRelay /tmp/momo-src/relay/OutboxRelay && cd /tmp/momo-src && swift run --package-path relay/OutboxRelay --scratch-path /tmp/momo-swiftpm/relay OutboxRelay",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/relay && cp -Rp /workspace/relay/OutboxRelay /tmp/momo-src/relay/OutboxRelay && cd /tmp/momo-src && swift run -j 8 --package-path relay/OutboxRelay --scratch-path /tmp/momo-swiftpm/relay OutboxRelay",
       ]
     environment:
       <<: *e2e-common-env
@@ -189,7 +189,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers /tmp/momo-src/clients && cp -R /workspace/workers/AgentWorker /tmp/momo-src/workers/AgentWorker && cp -R /workspace/clients/Core /tmp/momo-src/clients/Core && cd /tmp/momo-src && swift run --package-path workers/AgentWorker --scratch-path /tmp/momo-swiftpm/worker AgentWorker",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers /tmp/momo-src/clients && cp -Rp /workspace/workers/AgentWorker /tmp/momo-src/workers/AgentWorker && cp -Rp /workspace/clients/Core /tmp/momo-src/clients/Core && cd /tmp/momo-src && swift run -j 8 --package-path workers/AgentWorker --scratch-path /tmp/momo-swiftpm/worker AgentWorker",
       ]
     environment:
       <<: *e2e-common-env
@@ -284,7 +284,7 @@ services:
       [
         "bash",
         "-lc",
-        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers && cp -R /workspace/workers/NotifierWorker /tmp/momo-src/workers/NotifierWorker && cd /tmp/momo-src && swift run --package-path workers/NotifierWorker --scratch-path /tmp/momo-swiftpm/notifier NotifierWorker",
+        "rm -rf /tmp/momo-src && mkdir -p /tmp/momo-src/workers && cp -Rp /workspace/workers/NotifierWorker /tmp/momo-src/workers/NotifierWorker && cd /tmp/momo-src && swift run -j 8 --package-path workers/NotifierWorker --scratch-path /tmp/momo-swiftpm/notifier NotifierWorker",
       ]
     environment:
       <<: *e2e-common-env

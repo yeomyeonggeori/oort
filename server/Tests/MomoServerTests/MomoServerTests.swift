@@ -1964,7 +1964,10 @@ final class MomoServerTests: XCTestCase {
         let outbox = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
         )
-        XCTAssertEqual(outbox["version"] as? Int, 43)
+        XCTAssertNil(
+            outbox["version"],
+            "thread.updated reuses the reply seq; a Centrifugo version <= the reply's message.new would be silently dropped"
+        )
         let data = try XCTUnwrap(outbox["data"] as? [String: Any])
         XCTAssertEqual(data["type"] as? String, "thread.updated")
         XCTAssertEqual(data["seq"] as? Int, 43)

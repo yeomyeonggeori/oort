@@ -2122,10 +2122,13 @@ struct MessageRoutes: Sendable {
                 "last_reply_at": rollup.lastReplyAt,
             ],
         ]
+        // No Centrifugo version: the rollup reuses the reply's seq, and the
+        // broker silently drops a publish whose version is not strictly greater
+        // than the channel's stored version (the reply's own message.new already
+        // claimed this seq). Idempotency stays on the unique key.
         let envelope: [String: Any] = [
             "channel": centChannel,
             "data": data,
-            "version": rollup.lastReplySeq,
             "idempotency_key": "\(centChannel):thread.updated:\(rootID.uuidString):\(rollup.lastReplySeq)",
         ]
         guard let jsonData = try? JSONSerialization.data(withJSONObject: envelope),

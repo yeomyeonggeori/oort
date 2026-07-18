@@ -756,7 +756,10 @@ final class AgentWorkerTests: XCTestCase {
 
         XCTAssertEqual(data["type"] as? String, "thread.updated")
         XCTAssertEqual(data["seq"] as? Int, 44)
-        XCTAssertEqual(object["version"] as? Int, 44)
+        XCTAssertNil(
+            object["version"],
+            "thread.updated reuses the reply seq; a Centrifugo version <= the reply's message.new would be silently dropped"
+        )
         XCTAssertEqual(payload["channel_id"] as? String, channelID.uuidString)
         XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
         XCTAssertEqual(payload["reply_count"] as? Int, 3)

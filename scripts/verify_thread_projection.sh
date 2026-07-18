@@ -198,7 +198,7 @@ CURSOR="$(printf '%s' "$RESPONSE_BODY" | jq -er '.nextCursor')"
 printf '%s' "$RESPONSE_BODY" | jq -e \
   --arg one "$REPLY_ONE_ID" --arg two "$REPLY_TWO_ID" '
     [.messages[].id | ascii_downcase] == [$one, $two]
-    and (.messages[1].deletedAt != null)
+    and (.messages[1].deletedAtMs != null)
     and (.messages[1].body == null)
   ' >/dev/null
 

@@ -1781,7 +1781,10 @@ struct WorkerService: Service {
                     "last_reply_at": lastReplyAtMs,
                 ],
             ],
-            "version": lastReplySeq,
+            // No Centrifugo version: the rollup reuses the reply's seq, and the
+            // broker silently drops a publish whose version is not strictly
+            // greater than the channel's stored version (the reply's own
+            // message.new already claimed this seq). Idempotency stays on the key.
             "idempotency_key": "\(centChannel):thread.updated:\(rootID.uuidString):\(lastReplySeq)",
         ])
     }
