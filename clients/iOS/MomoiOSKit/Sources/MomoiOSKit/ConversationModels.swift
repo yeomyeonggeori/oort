@@ -114,7 +114,7 @@ public enum IOSTimelineReducer {
             if let index = result.firstIndex(where: { $0.id == id }) {
                 result[index].state = .deleted
             }
-        case .reaction, .typing, .presence, .agentStatus, .agentPartial, .approval:
+        case .reaction, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle:
             break
         }
         return sorted(result)

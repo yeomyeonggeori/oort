@@ -11,6 +11,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../Core"),
         .package(url: "https://github.com/centrifugal/centrifuge-swift.git", exact: "0.9.0"),
+        .package(url: "https://github.com/livekit/client-sdk-swift.git", exact: "2.15.2"),
     ],
     targets: [
         .target(
@@ -18,6 +19,7 @@ let package = Package(
             dependencies: [
                 .product(name: "MomoCore", package: "Core"),
                 .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
+                .product(name: "LiveKit", package: "client-sdk-swift"),
                 "MomoiOSPushKit",
             ],
             swiftSettings: [.swiftLanguageMode(.v6)]

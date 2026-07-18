@@ -1,6 +1,7 @@
 #if os(iOS)
 import MomoCore
 import SwiftUI
+import UIKit
 
 @MainActor
 public struct IOSWorkspaceView: View {
@@ -8,6 +9,7 @@ public struct IOSWorkspaceView: View {
     private let bootstrap: WorkspaceBootstrap
     private let signOut: @MainActor () async -> Void
     private let backend: any IOSConversationBackend
+    private let huddleService: any IOSHuddleService
     @State private var model: IOSChannelListModel
 
     public init(
@@ -20,6 +22,7 @@ public struct IOSWorkspaceView: View {
         self.bootstrap = bootstrap
         self.signOut = signOut
         self.backend = backend
+        self.huddleService = IOSHuddleRESTService(authenticated: session)
         _model = State(initialValue: IOSChannelListModel(currentMemberID: session.member.id, backend: backend))
     }
 
@@ -60,7 +63,9 @@ public struct IOSWorkspaceView: View {
                     item: item,
                     members: model.membersByID,
                     currentMemberID: session.member.id,
-                    backend: backend
+                    backend: backend,
+                    workspace: session.workspaceID,
+                    huddleService: huddleService
                 )
             } else {
                 ContentUnavailableView(
@@ -137,7 +142,9 @@ public struct IOSWorkspaceView: View {
                 item: item,
                 members: model.membersByID,
                 currentMemberID: session.member.id,
-                backend: backend
+                backend: backend,
+                workspace: session.workspaceID,
+                huddleService: huddleService
             )
         } label: {
             IOSChannelRow(item: item)
@@ -205,27 +212,36 @@ private struct IOSTimelineView: View {
     let item: IOSChannelListItem
     let members: [MemberID: Member]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var model: IOSTimelineModel
     @State private var visibleMessageIDs: Set<MessageID> = []
+    @State private var presentedHuddle: IOSHuddle?
 
     init(
         item: IOSChannelListItem,
         members: [MemberID: Member],
         currentMemberID: MemberID,
-        backend: any IOSConversationBackend
+        backend: any IOSConversationBackend,
+        workspace: WorkspaceID,
+        huddleService: any IOSHuddleService
     ) {
         self.item = item
         self.members = members
         _model = State(initialValue: IOSTimelineModel(
             channel: item.id,
             currentMemberID: currentMemberID,
-            backend: backend
+            backend: backend,
+            workspace: workspace,
+            huddleService: huddleService
         ))
     }
 
     var body: some View {
         ScrollViewReader { proxy in
             List {
+                if let activeHuddle = model.huddle.activeHuddle {
+                    huddleBanner(activeHuddle)
+                }
                 if model.realtimeStatus.isFallbackActive, model.phase == .loaded {
                     offlineBanner
                 }
@@ -303,7 +319,59 @@ private struct IOSTimelineView: View {
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await model.retry() }
         .task { await model.load() }
-        .onDisappear { model.stop() }
+        .sheet(item: $presentedHuddle) { _ in
+            IOSHuddleSheet(model: model.huddle)
+        }
+        .onChange(of: model.huddle.activeHuddle?.id) { _, activeID in
+            if activeID == nil { presentedHuddle = nil }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .active:
+                Task { await model.resume() }
+            case .background:
+                Task { await model.shutdown() }
+            case .inactive:
+                break
+            @unknown default:
+                break
+            }
+        }
+        .onDisappear { Task { await model.shutdown() } }
+    }
+
+    private func huddleBanner(_ huddle: IOSHuddle) -> some View {
+        Section {
+            Button {
+                presentedHuddle = huddle
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform")
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Huddle in progress")
+                            .font(.callout.weight(.semibold))
+                        Text(participantCountLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    Text("Live")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Join huddle, \(participantCountLabel)")
+            .accessibilityIdentifier("activeHuddleBanner")
+        }
+    }
+
+    private var participantCountLabel: String {
+        let count = model.huddle.participantCount
+        return count == 1 ? "1 participant" : "\(count) participants"
     }
 
     private func quotedBody(for message: Message) -> String? {
@@ -359,6 +427,139 @@ private struct IOSTimelineView: View {
                     Task { await model.retry() }
                 }
                 .accessibilityIdentifier("retryMessages")
+            }
+        }
+    }
+}
+
+@MainActor
+private struct IOSHuddleSheet: View {
+    let model: IOSHuddleModel
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                statusSection
+                if model.isJoined { participantsSection }
+                controlsSection
+            }
+            .navigationTitle("Huddle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !model.isJoined {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                            .accessibilityIdentifier("dismissHuddle")
+                    }
+                }
+            }
+            .interactiveDismissDisabled(model.isJoined)
+        }
+    }
+
+    @ViewBuilder
+    private var statusSection: some View {
+        Section("Status") {
+            switch model.state {
+            case .connecting:
+                ProgressView("Connecting to huddle")
+                    .accessibilityIdentifier("huddleConnecting")
+            case .permissionDenied:
+                ContentUnavailableView {
+                    Label("Microphone access denied", systemImage: "mic.slash")
+                } description: {
+                    Text("Allow microphone access in Settings to speak in this huddle.")
+                } actions: {
+                    Button("Open Settings") {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        openURL(url)
+                    }
+                    .accessibilityIdentifier("openMicrophoneSettings")
+                }
+            case .failed(let message):
+                ContentUnavailableView {
+                    Label("Could not connect to huddle", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Retry huddle") { Task { await model.retry() } }
+                        .accessibilityIdentifier("retryHuddle")
+                }
+            case .joined:
+                Label(
+                    model.isMicrophoneMuted ? "Microphone muted" : "Microphone on",
+                    systemImage: model.isMicrophoneMuted ? "mic.slash" : "mic"
+                )
+                .accessibilityIdentifier("huddleJoinedStatus")
+            case .idle:
+                Label("Ready to join with audio", systemImage: "waveform")
+            case .unavailable:
+                ContentUnavailableView(
+                    "Huddle unavailable",
+                    systemImage: "waveform.slash",
+                    description: Text("This momo server is not configured for huddles.")
+                )
+            }
+        }
+    }
+
+    private var participantsSection: some View {
+        Section("Participants") {
+            if model.audioParticipants.isEmpty {
+                ProgressView("Loading participants")
+            } else {
+                ForEach(model.audioParticipants) { participant in
+                    HStack {
+                        Label(
+                            participant.displayName,
+                            systemImage: participant.isSpeaking ? "waveform" : "person.crop.circle"
+                        )
+                        Spacer()
+                        if participant.isLocal {
+                            Text("You")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .opacity(participant.isSpeaking ? 1 : 0.55)
+                    .accessibilityLabel(
+                        "\(participant.displayName)\(participant.isLocal ? ", you" : "")\(participant.isSpeaking ? ", speaking" : "")"
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var controlsSection: some View {
+        Section("Controls") {
+            if model.isJoined {
+                Button {
+                    Task { await model.toggleMicrophone() }
+                } label: {
+                    Label(
+                        model.isMicrophoneMuted ? "Turn microphone on" : "Mute microphone",
+                        systemImage: model.isMicrophoneMuted ? "mic" : "mic.slash"
+                    )
+                }
+                .accessibilityIdentifier("toggleHuddleMicrophone")
+
+                Button("Leave huddle", role: .destructive) {
+                    Task {
+                        await model.leave()
+                        if !model.isJoined { dismiss() }
+                    }
+                }
+                .accessibilityIdentifier("leaveHuddle")
+            } else if model.activeHuddle != nil, model.state != .connecting, model.state != .unavailable {
+                Button {
+                    Task { await model.join() }
+                } label: {
+                    Label("Join huddle", systemImage: "waveform")
+                }
+                .accessibilityIdentifier("joinHuddle")
             }
         }
     }
