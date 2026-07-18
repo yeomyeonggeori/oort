@@ -4,6 +4,7 @@
 
 - complete 상태로 메시지에 바인딩된 첨부만 생성순 `{id,name,mime,sizeBytes}`로 send/history 3변형/replies와 같은 트랜잭션의 `message.new`에 가산했다. 0건은 생략하고 모든 목록 경로는 lateral `jsonb_agg` 단일 쿼리를 사용하며 업로드 capability URL과 Drive 식별자는 투영하지 않는다.
 - Core `Message.attachments`와 `DraftMessage.attachmentIds`는 하위호환 optional 계약으로 추가했다. verifier는 send·history 3변형·Centrifugo history의 동일 배열, 강제 바인딩 pending/failed 미노출, 기존 content proxy·RLS를 검사하며 격리 Docker `runtime-db` 실행은 오케스트레이터 담당이라 그 실행 전까지 `runtime-unverified`다.
+- 전체 Swift 패키지 build, Core 33 tests, server 113 tests 및 나머지 relay·worker·LinkShort tests와 docs/OpenAPI/verifier 정적 검증이 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했다.
 
 ## MOMO-481 상호작용 Core replay + history 재시작 수렴 (2026-07-19)
 
