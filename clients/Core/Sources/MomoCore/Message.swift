@@ -31,6 +31,9 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
     /// Server-authoritative reply summary; present only on top-level messages
     /// with one or more replies. Missing on older payloads for compatibility.
     public var thread: ThreadRollup?
+    /// Completed attachments bound to this message. Missing when there are no
+    /// attachments or when decoding an older server/realtime payload.
+    public var attachments: [MessageAttachment]?
     /// Direct reply target.
     public var replyToId: MessageID?
     /// Agent provenance: which run produced this message.
@@ -55,6 +58,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         props: JSON = .object([:]),
         rootId: MessageID? = nil,
         thread: ThreadRollup? = nil,
+        attachments: [MessageAttachment]? = nil,
         replyToId: MessageID? = nil,
         runId: RunID? = nil,
         clientMsgId: UUID? = nil,
@@ -74,6 +78,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         self.props = props
         self.rootId = rootId
         self.thread = thread
+        self.attachments = attachments
         self.replyToId = replyToId
         self.runId = runId
         self.clientMsgId = clientMsgId
@@ -101,6 +106,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         case props
         case rootId = "root_id"
         case thread
+        case attachments
         case replyToId = "reply_to_id"
         case runId = "run_id"
         case clientMsgId = "client_msg_id"
@@ -123,6 +129,7 @@ public struct Message: Identifiable, Codable, Sendable, Hashable {
         self.props = try c.decodeIfPresent(JSON.self, forKey: .props) ?? .object([:])
         self.rootId = try c.decodeIfPresent(MessageID.self, forKey: .rootId)
         self.thread = try c.decodeIfPresent(ThreadRollup.self, forKey: .thread)
+        self.attachments = try c.decodeIfPresent([MessageAttachment].self, forKey: .attachments)
         self.replyToId = try c.decodeIfPresent(MessageID.self, forKey: .replyToId)
         self.runId = try c.decodeIfPresent(RunID.self, forKey: .runId)
         self.clientMsgId = try c.decodeIfPresent(UUID.self, forKey: .clientMsgId)
@@ -142,6 +149,8 @@ public struct DraftMessage: Codable, Sendable, Hashable {
     /// Reply / thread targeting (optional).
     public var rootId: MessageID?
     public var replyToId: MessageID?
+    /// Completed upload ids retained by the composer until the send request.
+    public var attachmentIds: [FileID]?
 
     public init(
         channelId: ChannelID,
@@ -149,7 +158,8 @@ public struct DraftMessage: Codable, Sendable, Hashable {
         body: String? = nil,
         props: JSON = .object([:]),
         rootId: MessageID? = nil,
-        replyToId: MessageID? = nil
+        replyToId: MessageID? = nil,
+        attachmentIds: [FileID]? = nil
     ) {
         self.channelId = channelId
         self.type = type
@@ -157,6 +167,7 @@ public struct DraftMessage: Codable, Sendable, Hashable {
         self.props = props
         self.rootId = rootId
         self.replyToId = replyToId
+        self.attachmentIds = attachmentIds
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -166,5 +177,6 @@ public struct DraftMessage: Codable, Sendable, Hashable {
         case props
         case rootId = "root_id"
         case replyToId = "reply_to_id"
+        case attachmentIds
     }
 }
