@@ -64,7 +64,7 @@ struct MessageRoutes: Sendable {
             }
         }
 
-        let result: (isMember: Bool, message: MessageDTO?) = try await db.withTenantTransaction(
+        let result: (isMember: Bool, message: MessageDTO?) = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
             let isMember = try await Self.hasActiveMembership(
@@ -125,6 +125,18 @@ struct MessageRoutes: Sendable {
 
             let (id, seq, ts, count, createdAt, rowPropsJSON) =
                 try row.decode((UUID, Int64, Int64, Int, Date, String).self)
+            if didInsert, let attachmentIDs = dto.attachmentIds, !attachmentIDs.isEmpty {
+                try await Self.linkAttachments(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    messageID: id,
+                    uploaderMemberID: principal.memberID,
+                    viaTokenID: principal.tokenID,
+                    attachmentIDs: attachmentIDs
+                )
+            }
             var responsePropsJSON = rowPropsJSON
             if didInsert, type == "text" {
                 let mentionMemberIDs = try await ReadStateMentions.record(
@@ -316,6 +328,86 @@ struct MessageRoutes: Sendable {
     }
 
     // MARK: - Helpers
+
+    private func withTenantTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do { return try await db.withTenantTransaction(workspaceID: workspaceID, body) }
+        catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
+    /// Attachment binding is part of the canonical message transaction. A
+    /// failed validation rolls back the message insert and channel-seq bump.
+    private static func linkAttachments(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        channelID: UUID,
+        messageID: UUID,
+        uploaderMemberID: UUID,
+        viaTokenID: UUID,
+        attachmentIDs: [UUID]
+    ) async throws {
+        guard Set(attachmentIDs).count == attachmentIDs.count else {
+            throw HTTPError(.badRequest, message: "attachmentIds must not contain duplicates")
+        }
+        guard attachmentIDs.count <= 20 else {
+            throw HTTPError(.badRequest, message: "attachmentIds must contain at most 20 items")
+        }
+        for attachmentID in attachmentIDs {
+            let rows = try await conn.query(
+                """
+                SELECT status, uploader_member_id, channel_id, message_id
+                  FROM attachment
+                 WHERE id = \(attachmentID)
+                 FOR UPDATE
+                """,
+                logger: logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "attachment not found")
+            }
+            let (status, uploader, attachmentChannel, existingMessage) = try row.decode(
+                (String, UUID, UUID, UUID?).self
+            )
+            guard status == "complete" else {
+                throw HTTPError(.conflict, message: "attachment upload is not complete")
+            }
+            guard uploader == uploaderMemberID else {
+                throw HTTPError(.forbidden, message: "attachment belongs to another uploader")
+            }
+            guard attachmentChannel == channelID else {
+                throw HTTPError(.forbidden, message: "attachment belongs to another channel")
+            }
+            guard existingMessage == nil else {
+                throw HTTPError(.conflict, message: "attachment is already linked")
+            }
+            _ = try await conn.query(
+                "UPDATE attachment SET message_id = \(messageID) WHERE id = \(attachmentID)",
+                logger: logger
+            )
+            let detail = jsonString([
+                "schema": "momo.attachment.message_linked.v1",
+                "channel_id": channelID.uuidString,
+                "message_id": messageID.uuidString,
+            ])
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type,
+                   target_id, via_token_id, detail)
+                VALUES
+                  (\(workspaceID), \(uploaderMemberID), 'attachment.message_linked',
+                   'attachment', \(attachmentID), \(viaTokenID), \(detail)::jsonb)
+                """,
+                logger: logger
+            )
+        }
+    }
 
     /// REST read/write access is channel membership-gated in addition to tenant
     /// RLS. Centrifugo subscribe proxy performs the same check for realtime.
