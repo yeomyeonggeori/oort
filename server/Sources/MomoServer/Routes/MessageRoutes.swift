@@ -878,11 +878,10 @@ struct MessageRoutes: Sendable {
     private struct InteractionOutboxPayload: Encodable {
         let channel: String
         let data: InteractionEnvelope
-        let version: Int64
         let idempotencyKey: String
 
         private enum CodingKeys: String, CodingKey {
-            case channel, data, version
+            case channel, data
             case idempotencyKey = "idempotency_key"
         }
     }
@@ -1101,7 +1100,7 @@ struct MessageRoutes: Sendable {
         )
     }
 
-    private static func encodeInteractionPayload(
+    static func encodeInteractionPayload(
         workspaceID: UUID,
         channelID: UUID,
         eventType: String,
@@ -1115,9 +1114,12 @@ struct MessageRoutes: Sendable {
             data: InteractionEnvelope(
                 type: eventType, v: 1, ts: timestampMs, seq: seq, payload: payload
             ),
-            version: seq,
             idempotencyKey: "\(channel):\(eventType):\(UUID().uuidString)"
         )
+        // No Centrifugo version: interaction projections reuse the target
+        // message's seq without minting a message/channel seq. Its message.new
+        // already claimed that version, so a versioned publish would be silently
+        // dropped. Idempotency stays on the unique key.
         guard let data = try? JSONEncoder().encode(value),
               let json = String(data: data, encoding: .utf8)
         else { return "{}" }
