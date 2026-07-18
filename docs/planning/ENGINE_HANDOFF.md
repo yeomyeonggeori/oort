@@ -24,7 +24,7 @@
 |---|---|---|---|---|
 | X-1 | `done` | `scripts/macos_dev_run.sh` SwiftPM 바이너리 프레임워크·리소스 번들 스테이징(LiveKit DYLD 종료 수정) | main 반영 완료 | UXUI 발견, 양 트랙 빌드 검증 (2026-07-18) |
 | X-2 | `done`(서버 절반 main 랜딩 — MOMO-478) | 반응/수정/삭제 REST+realtime 계약. UI는 capability gate로 기완비 | UI 개방은 **A-9**로 이관 | MessageInteractionModel.swift, MessageInteractionTests (2026-07-18) |
-| X-3 | `in-progress`(MOMO-479 `#508`) | A-4 잔여: 정확한 스레드 롤업과 오래된 답글 조회를 위한 클라이언트 투영이 없음. 현재 배지는 로드된 메시지 범위의 답글 수를 사용 | 최상위 메시지 응답/realtime에 `reply_count`·`last_reply_*` 가산 투영과 스레드 조회 계약 추가. AgentWorker 답변도 원본 `root_id`를 보존 | `MessageRoutes.swift` thread 갱신, macOS `MessageListView.swift`·`MessageThreadPanel.swift` (2026-07-18) |
+| X-3 | `done`(MOMO-479 `#508` → track/engine, main 대기) | A-4 잔여였던 정확한 롤업·과거 답글 조회·AgentWorker thread 문맥 보존 | 톱레벨 `thread` 투영, ASC cursor replies REST, `thread.updated` realtime, Worker INSERT 4곳 root_id·롤업 보존 완료. main 랜딩 시 **A-4 ready 전환**(UI: 배지 실데이터·과거 답글 로드·thread.updated 소비) | MessageRoutes.swift, Core ThreadRollup.swift, verify_thread_projection.sh (2026-07-19) |
 | X-4 | `needs-engine-contract` | A-6 잔여: Core `DraftMessage`와 메시지 history/realtime 응답에 `attachmentIds`·첨부 메타데이터 투영이 없어 수신자가 다운로드 대상을 발견할 수 없음 | `DraftMessage` 가산 필드와 Message history/realtime의 attachment projection 또는 message별 attachment 조회 API를 추가. 업로드 URL은 bearer capability이므로 로그·영속 저장 금지 계약 유지 | `AttachmentRoutes.swift`, `MessageRoutes.swift`, `clients/Core/Message.swift`, `verify_attachment_upload.sh` (2026-07-18) |
 
 ## B. 엔진 역요청 — 전량 완료 (main)
