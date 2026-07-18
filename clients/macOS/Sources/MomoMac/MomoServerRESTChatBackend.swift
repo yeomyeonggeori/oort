@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -143,18 +143,21 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             type: draft.type.rawValue,
             body: draft.body,
             props: draft.props.flatStringObject,
-            runId: nil
+            runId: nil,
+            rootId: draft.rootId
         )
-        var message = try await post(
+        let response = try await post(
             "/v1/workspaces/\(workspace.description)/channels/\(draft.channelId.description)/messages",
             body: request,
             authorized: true,
             response: MessageDTO.self
-        ).message
+        )
+        var message = try response.message()
+        guard message.rootId == draft.rootId else {
+            throw BackendError.decoding("message response thread root mismatch")
+        }
         message.clientMsgId = clientMsgId
         message.props = draft.props
-        message.rootId = draft.rootId
-        message.replyToId = draft.replyToId
         return message
     }
 
@@ -247,7 +250,8 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             queryItems: items,
             response: MessagePage.self
         )
-        let messages = page.messages.map(\.message).sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        let messages = try page.messages.map { try $0.message() }
+            .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
         rememberLastKnownSeq(messages, channel: channel)
         return messages
     }
@@ -628,18 +632,59 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     }
 
     public func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
-        var results: [Message] = []
-        let searchableChannels: [Channel]
-        if let cachedChannels {
-            searchableChannels = cachedChannels
-        } else {
-            searchableChannels = try await channels(workspace: workspace)
+        try await searchWorkspaceMessages(
+            workspace: workspace,
+            query: query,
+            cursor: nil,
+            limit: 20
+        ).messages
+    }
+
+    func searchWorkspaceMessages(
+        workspace: WorkspaceID,
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> MomoWorkspaceMessageSearchPage {
+        guard let sessionWorkspace = self.workspace,
+              sessionWorkspace == workspace,
+              accessToken != nil
+        else {
+            throw BackendError.notConnected
         }
-        for channel in searchableChannels where channel.workspaceId == workspace {
-            let messages = try await history(channel: channel.id, after: nil, limit: 200)
-            results += messages.filter { ($0.body ?? "").localizedCaseInsensitiveContains(query) }
+        let generation = connectionGeneration
+        let response: WorkspaceMessageSearchResponseDTO
+        do {
+            var queryItems = [
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "limit", value: String(min(max(limit, 1), 50))),
+            ]
+            if let cursor, !cursor.isEmpty {
+                queryItems.append(URLQueryItem(name: "cursor", value: cursor))
+            }
+            response = try await get(
+                "/v1/workspaces/\(workspace.description)/search/messages",
+                queryItems: queryItems,
+                cachePolicy: .reloadIgnoringLocalCacheData,
+                response: WorkspaceMessageSearchResponseDTO.self
+            )
+        } catch {
+            guard connectionGeneration == generation,
+                  self.workspace == sessionWorkspace
+            else {
+                throw CancellationError()
+            }
+            throw error
         }
-        return results.sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        guard connectionGeneration == generation,
+              self.workspace == sessionWorkspace
+        else {
+            throw CancellationError()
+        }
+        return try MomoWorkspaceMessageSearchPage(
+            messages: response.hits.map { try $0.message() },
+            nextCursor: response.nextCursor
+        )
     }
 
     public func setTyping(channel: ChannelID, isTyping: Bool) async {}
@@ -743,6 +788,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     private func get<T: Decodable>(
         _ path: String,
         queryItems: [URLQueryItem],
+        cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy,
         response: T.Type
     ) async throws -> T {
         var components = URLComponents(url: config.baseURL.appendingPathComponent(path), resolvingAgainstBaseURL: false)
@@ -752,7 +798,7 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         guard let url = components?.url else {
             throw BackendError.problem(status: 400, title: "bad url", detail: path)
         }
-        var request = URLRequest(url: url)
+        var request = URLRequest(url: url, cachePolicy: cachePolicy)
         request.httpMethod = "GET"
         try authorize(&request)
         return try await execute(request, response: response)
@@ -1234,11 +1280,48 @@ private struct SendMessageRequest: Encodable {
     let body: String?
     let props: [String: String]?
     let runId: UUID?
+    let rootId: MessageID?
 }
 
 private struct MessagePage: Decodable {
     let messages: [MessageDTO]
     let nextBefore: Int64?
+}
+
+private struct WorkspaceMessageSearchResponseDTO: Decodable {
+    let hits: [WorkspaceMessageSearchHitDTO]
+    let nextCursor: String?
+}
+
+private struct WorkspaceMessageSearchHitDTO: Decodable {
+    let channelId: String
+    let messageId: String
+    let seq: Int64
+    let authorMemberId: String
+    let createdAtMs: Int64
+    let snippet: String
+    let matchOffset: Int
+
+    func message() throws -> Message {
+        guard let channelID = ChannelID(uuidString: channelId),
+              let messageID = MessageID(uuidString: messageId),
+              let authorID = MemberID(uuidString: authorMemberId)
+        else {
+            throw BackendError.decoding("invalid workspace search hit identity")
+        }
+        return Message(
+            id: messageID,
+            channelId: channelID,
+            seq: seq,
+            hlcTs: createdAtMs,
+            authorMemberId: authorID,
+            type: .text,
+            state: .sent,
+            body: snippet,
+            props: ["search_match_offset": .int(Int64(matchOffset))],
+            createdAtMs: createdAtMs
+        )
+    }
 }
 
 private struct WorkspaceChannelsResponse: Decodable {
@@ -1389,6 +1472,7 @@ private struct ChannelMembershipResponseDTO: Decodable {
 private struct MessageDTO: Decodable {
     let id: String
     let channelId: String
+    let rootId: String?
     let seq: Int64
     let hlcTs: Int64
     let hlcCount: Int32
@@ -1400,8 +1484,17 @@ private struct MessageDTO: Decodable {
     let clientMsgId: UUID?
     let createdAtMs: Int64
 
-    var message: Message {
-        Message(
+    func message() throws -> Message {
+        let decodedRootID: MessageID?
+        if let rootId {
+            guard let rootID = MessageID(uuidString: rootId) else {
+                throw BackendError.decoding("invalid message thread root id")
+            }
+            decodedRootID = rootID
+        } else {
+            decodedRootID = nil
+        }
+        return Message(
             id: MessageID(uuidString: id) ?? MessageID(),
             channelId: ChannelID(uuidString: channelId) ?? .demoGeneral,
             seq: seq,
@@ -1412,6 +1505,7 @@ private struct MessageDTO: Decodable {
             state: .sent,
             body: body,
             props: props ?? .object([:]),
+            rootId: decodedRootID,
             runId: runId.flatMap { RunID(uuidString: $0) },
             clientMsgId: clientMsgId,
             createdAtMs: createdAtMs

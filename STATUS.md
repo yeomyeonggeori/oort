@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## 엔진 준비 UXUI 큐 A-1~A-7 소비 (2026-07-18)
+
+- A-1 마켓플레이스, A-2 채널 웹훅, A-3 초대 단축 링크, A-5 허들 폴리시, A-7 워크스페이스 서버 검색을 실제 엔진 REST 계약에 연결했다. one-time credential은 확인 전 이탈을 잠그고 확인 즉시 메모리에서 폐기하며, 세션·workspace 변경 시 비영속 상태를 전부 무효화한다.
+- A-4는 `rootId`를 포함한 1단계 답글 실전송까지 완료했다. 정확한 thread 롤업/오래된 답글 조회(X-3)와 A-6 첨부 수신 투영(X-4)은 엔진 계약 대기로 역핸드오프했으며, durable 동작처럼 보이는 로컬 위장은 추가하지 않았다.
+- macOS 전체 388 tests와 독립 계약 리뷰(Blocker/High/Medium 0), 플러그인 real-window artifact 검증이 PASS했다. 실서버 세션 왕복과 허들 2-클라이언트 실오디오는 별도 runtime/manual 검증으로 남는다.
+
 ## iOS v0 실기기 푸시 E2E PASS (2026-07-18)
 
 - 실기기(iPhone, Debug 케이블 빌드)에서 전 체인 실증: 디바이스 등록(env 자동판별 sandbox, MOMO-467) → PushRelay(Ed25519 서명 dispatch) → 실 APNs(.p8, apns_id 발급 200) → 실기기 알림 표시 → **NSE가 REST로 실제 메시지 본문 fetch·교체 성공**. ADR-0120 P-1~P-4 + ADR-0123 IOS-1~5의 최종 evidence.

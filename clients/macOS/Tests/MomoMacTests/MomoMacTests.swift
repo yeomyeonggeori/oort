@@ -3041,10 +3041,12 @@ final class MomoMacTests: XCTestCase {
                 XCTAssertEqual(body?["clientMsgId"] as? String, clientMsgId.uuidString)
                 XCTAssertEqual(body?["type"] as? String, "text")
                 XCTAssertEqual(body?["body"] as? String, "hello REST")
+                XCTAssertEqual(body?["rootId"] as? String, messageID.description)
                 return MockHTTPResponse(statusCode: 201, json: """
                 {
                   "id": "00000000-0000-7000-8000-000000001002",
                   "channelId": "\(channel.description)",
+                  "rootId": "\(messageID.description)",
                   "seq": 8,
                   "hlcTs": 1700000001000,
                   "hlcCount": 0,
@@ -3076,14 +3078,163 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(history.first?.seq, 7)
 
         let ack = try await backend.sendOptimistic(
-            DraftMessage(channelId: channel, type: .text, body: "hello REST"),
+            DraftMessage(
+                channelId: channel,
+                type: .text,
+                body: "hello REST",
+                rootId: messageID
+            ),
             clientMsgId: clientMsgId
         )
         XCTAssertEqual(ack.seq, 8)
         XCTAssertEqual(ack.clientMsgId, clientMsgId)
+        XCTAssertEqual(ack.rootId, messageID)
 
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET", "POST"])
+    }
+
+    func testRESTBackendSearchUsesWorkspaceFTSEndpointAndPreservesHitIdentity() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let message = MessageID(uuidString: "00000000-0000-7000-8000-000000001090")!
+        let author = MemberID.demoHuman
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/search/messages"
+            )
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+            let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+            XCTAssertEqual(items?.first(where: { $0.name == "q" })?.value, "배포 % 확인")
+            XCTAssertEqual(items?.first(where: { $0.name == "limit" })?.value, "20")
+            return MockHTTPResponse(json: """
+            {
+              "hits": [{
+                "channelId": "\(channel.description)",
+                "messageId": "\(message.description)",
+                "seq": 901,
+                "authorMemberId": "\(author.description)",
+                "createdAtMs": 1784376000000,
+                "snippet": "배포 % 확인 결과입니다",
+                "matchOffset": 0
+              }],
+              "nextCursor": "opaque-next"
+            }
+            """)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let results = try await backend.search(workspace: workspace, query: "배포 % 확인")
+
+        XCTAssertEqual(results.map(\.id), [message])
+        XCTAssertEqual(results.first?.channelId, channel)
+        XCTAssertEqual(results.first?.seq, 901)
+        XCTAssertEqual(results.first?.body, "배포 % 확인 결과입니다")
+        XCTAssertEqual(results.first?.props["search_match_offset"]?.intValue, 0)
+    }
+
+    func testRESTBackendSearchPageForwardsOpaqueCursor() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        await MockHTTPURLProtocol.setHandler { request in
+            let items = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+            XCTAssertEqual(items?.first(where: { $0.name == "q" })?.value, "release note")
+            XCTAssertEqual(items?.first(where: { $0.name == "limit" })?.value, "12")
+            XCTAssertEqual(items?.first(where: { $0.name == "cursor" })?.value, "opaque-in")
+            return MockHTTPResponse(json: #"{"hits":[],"nextCursor":"opaque-out"}"#)
+        }
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let page = try await backend.searchWorkspaceMessages(
+            workspace: workspace,
+            query: "release note",
+            cursor: "opaque-in",
+            limit: 12
+        )
+
+        XCTAssertTrue(page.messages.isEmpty)
+        XCTAssertEqual(page.nextCursor, "opaque-out")
+    }
+
+    func testInviteShortLinkRequiresExplicitPublicBaseURL() {
+        XCTAssertNil(MomoInviteShortLinkConfiguration.publicBaseURL(environment: [:]))
+        XCTAssertNil(MomoInviteShortLinkConfiguration.publicBaseURL(environment: [
+            MomoInviteShortLinkConfiguration.publicBaseURLEnvironmentKey: "file:///tmp/invites"
+        ]))
+        XCTAssertNil(MomoInviteShortLinkConfiguration.publicBaseURL(environment: [
+            MomoInviteShortLinkConfiguration.publicBaseURLEnvironmentKey: "http://go.momo.example"
+        ]))
+        XCTAssertNil(MomoInviteShortLinkConfiguration.publicBaseURL(environment: [
+            MomoInviteShortLinkConfiguration.publicBaseURLEnvironmentKey: "https://go.momo.example?token=unsafe"
+        ]))
+        XCTAssertNotNil(MomoInviteShortLinkConfiguration.publicBaseURL(environment: [
+            MomoInviteShortLinkConfiguration.publicBaseURLEnvironmentKey: "http://localhost:28190"
+        ]))
+        let baseURL = MomoInviteShortLinkConfiguration.publicBaseURL(environment: [
+            MomoInviteShortLinkConfiguration.publicBaseURLEnvironmentKey: "https://go.momo.example"
+        ])
+
+        XCTAssertEqual(
+            MomoInviteShortLinkConfiguration.shortURL(
+                code: "momo_raw_232",
+                publicBaseURL: baseURL
+            )?.absoluteString,
+            "https://go.momo.example/i/momo_raw_232"
+        )
+    }
+
+    @MainActor
+    func testInviteShortLinkCopiesOnlyFromCurrentOneTimeCode() {
+        var copiedLink: String?
+        let model = MomoInviteAdminViewModel(
+            context: MomoInviteAdminContext(
+                baseURL: URL(string: "https://api.momo.test")!,
+                workspace: .demo,
+                accessToken: "token"
+            ),
+            publicShortLinkBaseURL: URL(string: "https://go.momo.test")!,
+            copyInviteLink: { copiedLink = $0 },
+            language: .korean
+        )
+
+        model.copyCreatedShortLink()
+        XCTAssertNil(copiedLink)
+        XCTAssertEqual(model.errorMessage, "단축 링크를 복사하려면 먼저 초대를 만드세요.")
+
+        model.createdCode = "momo_raw_once"
+        model.copyCreatedShortLink()
+        XCTAssertEqual(copiedLink, "https://go.momo.test/i/momo_raw_once")
+        XCTAssertNil(model.errorMessage)
+        XCTAssertEqual(
+            model.notice,
+            "단축 초대 링크를 복사했습니다. 원본 코드는 이 화면에서만 확인할 수 있습니다."
+        )
+
+        model.discardCreatedCode()
+        XCTAssertNil(model.createdCode)
+        XCTAssertNil(model.createdShortLink)
+    }
+
+    func testInviteOneTimeFlowActionsFollowSelectedLanguage() {
+        let korean = MomoInviteOneTimeCopy(language: .korean)
+        let english = MomoInviteOneTimeCopy(language: .english)
+
+        XCTAssertEqual(korean.copyShortLink, "단축 링크 복사")
+        XCTAssertEqual(korean.savedIt, "저장했습니다")
+        XCTAssertEqual(korean.inviteCreated(role: .admin), "관리자 초대를 만들었습니다. 지금 원본 코드나 단축 링크를 저장하세요.")
+        XCTAssertEqual(english.copyShortLink, "Copy Short Link")
+        XCTAssertEqual(english.savedIt, "I Saved It")
+        XCTAssertEqual(english.shortLinkUnavailable, "A public invite link domain is not configured. Copy the raw code instead.")
     }
 
     func testRESTBackendLoadsChannelsFromMomoServer() async throws {
@@ -5315,19 +5466,20 @@ final class MomoMacTests: XCTestCase {
                 accessToken: "admin-token"
             ),
             client: MomoInviteAdminClient(session: URLSession(configuration: .momoMocked)),
-            copyInviteCode: { copiedCode = $0 }
+            copyInviteCode: { copiedCode = $0 },
+            language: .english
         )
 
         await model.createInvite(role: .admin, maxUsesText: "2", expiresInDaysText: "14")
         XCTAssertEqual(model.operation, .idle)
         XCTAssertEqual(model.createdCode, "momo_raw_232")
         XCTAssertEqual(model.invites.map(\.id), [inviteID])
-        XCTAssertTrue(model.notice?.contains("Copy the raw code now") == true)
+        XCTAssertEqual(model.notice, "Invite created for admin. Save the raw code or short link now.")
         XCTAssertFalse(model.canRetry)
 
         model.copyCreatedCode()
         XCTAssertEqual(copiedCode, "momo_raw_232")
-        XCTAssertTrue(model.notice?.contains("cannot be recovered") == true)
+        XCTAssertEqual(model.notice, "Invite code copied. Only the masked preview remains after this flow.")
     }
 
     @MainActor
@@ -5373,7 +5525,8 @@ final class MomoMacTests: XCTestCase {
                 accessToken: "admin-token"
             ),
             client: MomoInviteAdminClient(session: URLSession(configuration: .momoMocked)),
-            copyInviteCode: { _ in }
+            copyInviteCode: { _ in },
+            language: .english
         )
 
         await model.refreshInvites(showNotice: true)
@@ -5712,7 +5865,7 @@ final class MomoMacTests: XCTestCase {
         let channelB = ChannelID(uuidString: "00000000-0000-7000-8000-000000000299")!
         let channelsAPath = "/v1/workspaces/\(workspaceA.description)/channels"
         let channelsBPath = "/v1/workspaces/\(workspaceB.description)/channels"
-        let historyBPath = "/v1/workspaces/\(workspaceB.description)/channels/\(channelB.description)/messages"
+        let searchBPath = "/v1/workspaces/\(workspaceB.description)/search/messages"
         let controller = BlockingPathResponseController(
             responses: [
                 channelsAPath: MockHTTPResponse(json: """
@@ -5739,7 +5892,7 @@ final class MomoMacTests: XCTestCase {
                   "archivedAtMs":null
                 }]}
                 """),
-                historyBPath: MockHTTPResponse(json: #"{"messages":[]}"#),
+                searchBPath: MockHTTPResponse(json: #"{"hits":[],"nextCursor":null}"#),
             ],
             blockedPaths: [channelsAPath]
         )
@@ -5768,7 +5921,7 @@ final class MomoMacTests: XCTestCase {
         _ = try await backend.search(workspace: workspaceB, query: "needle")
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.filter { $0.url?.path == channelsBPath }.count, 1)
-        XCTAssertTrue(requests.contains { $0.url?.path == historyBPath })
+        XCTAssertTrue(requests.contains { $0.url?.path == searchBPath })
     }
 
     func testRESTBackendDelayedChannelCreateCannotMutateReconnectedSessionCache() async throws {
@@ -5780,7 +5933,7 @@ final class MomoMacTests: XCTestCase {
         let membership = UUID(uuidString: "00000000-0000-7000-8000-000000384301")!
         let createAPath = "/v1/workspaces/\(workspaceA.description)/channels"
         let channelsBPath = "/v1/workspaces/\(workspaceB.description)/channels"
-        let historyBPath = "/v1/workspaces/\(workspaceB.description)/channels/\(currentChannel.description)/messages"
+        let searchBPath = "/v1/workspaces/\(workspaceB.description)/search/messages"
         let controller = BlockingPathResponseController(
             responses: [
                 createAPath: MockHTTPResponse(statusCode: 201, json: """
@@ -5818,7 +5971,7 @@ final class MomoMacTests: XCTestCase {
                   "archivedAtMs":null
                 }]}
                 """),
-                historyBPath: MockHTTPResponse(json: #"{"messages":[]}"#),
+                searchBPath: MockHTTPResponse(json: #"{"hits":[],"nextCursor":null}"#),
             ],
             blockedPaths: [createAPath]
         )
@@ -5854,7 +6007,7 @@ final class MomoMacTests: XCTestCase {
         _ = try await backend.search(workspace: workspaceB, query: "needle")
         let requests = await MockHTTPURLProtocol.requests()
         XCTAssertEqual(requests.filter { $0.url?.path == channelsBPath }.count, 1)
-        XCTAssertTrue(requests.contains { $0.url?.path == historyBPath })
+        XCTAssertTrue(requests.contains { $0.url?.path == searchBPath })
     }
 
     func testRESTBackendStaleMalformedChannelCreateResponseCancelsBeforeDecoding() async throws {
@@ -6131,7 +6284,7 @@ final class MomoMacTests: XCTestCase {
             author: author.id,
             body: "검색 뒤 로드 슬라이스에서 사라지는 메시지"
         )
-        let backend = OmitFocusedMessageChatBackend(base: base, omittedMessageID: target.id)
+        let backend = OmitFocusedMessageChatBackend(base: base, target: target)
         let viewModel = ChatViewModel(chat: backend, agentTransport: base)
 
         await viewModel.bootstrap(workspace: seed.workspace, accessToken: "focus-test")
@@ -6146,20 +6299,46 @@ final class MomoMacTests: XCTestCase {
         viewModel.clearFailedMessageFocus()
         XCTAssertNil(viewModel.failedMessageFocus)
     }
+
+    @MainActor
+    func testWorkspaceSearchFocusFetchesExactMessageOutsideReloadedSlice() async throws {
+        let base = LiveChatBackend()
+        let seed = await base.seedDemo()
+        let channel = try XCTUnwrap(seed.channels.first)
+        let target = await base.seedDemoMessage(
+            channel: channel.id,
+            author: seed.human.id,
+            body: "오래된 서버 검색 결과"
+        )
+        let backend = OmitFocusedMessageChatBackend(base: base, target: target)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: base)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "focus-search-test")
+        await backend.beginOmittingTarget(allowTargetedFetch: true)
+
+        let hits = try await viewModel.searchWorkspaceMessages(query: "오래된 서버")
+        XCTAssertEqual(hits.map(\.id), [target.id])
+        await viewModel.focusMessage(target.id, in: channel.id)
+
+        XCTAssertEqual(viewModel.requestedMessageFocus, target.id)
+        XCTAssertNil(viewModel.failedMessageFocus)
+        XCTAssertTrue(viewModel.visibleMessages.contains(where: { $0.id == target.id }))
+    }
 }
 
 private actor OmitFocusedMessageChatBackend: ChatBackend {
     private let base: LiveChatBackend
-    private let omittedMessageID: MessageID
+    private let target: Message
     private var omitsTarget = false
+    private var allowsTargetedFetch = false
 
-    init(base: LiveChatBackend, omittedMessageID: MessageID) {
+    init(base: LiveChatBackend, target: Message) {
         self.base = base
-        self.omittedMessageID = omittedMessageID
+        self.target = target
     }
 
-    func beginOmittingTarget() {
+    func beginOmittingTarget(allowTargetedFetch: Bool = false) {
         omitsTarget = true
+        allowsTargetedFetch = allowTargetedFetch
     }
 
     func connect(workspace: WorkspaceID, accessToken: String) async throws {
@@ -6175,9 +6354,16 @@ private actor OmitFocusedMessageChatBackend: ChatBackend {
     }
 
     func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        if omitsTarget,
+           allowsTargetedFetch,
+           let targetSequence = target.seq,
+           seq == max(targetSequence - 1, 0),
+           limit == 1 {
+            return [target]
+        }
         let messages = try await base.history(channel: channel, after: seq, limit: limit)
         guard omitsTarget else { return messages }
-        return messages.filter { $0.id != omittedMessageID }
+        return messages.filter { $0.id != target.id }
     }
 
     func presence(channel: ChannelID) async throws -> [PresenceEntry] {

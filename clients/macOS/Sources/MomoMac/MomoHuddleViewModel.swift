@@ -16,6 +16,7 @@ public final class MomoHuddleViewModel: ObservableObject {
     private var joinedHuddleID: UUID?
     private var eventTask: Task<Void, Never>?
     private var joinTask: Task<Void, Never>?
+    private var joinAttemptID: UUID?
     private var participantTask: Task<Void, Never>?
     private var tokenRefreshTask: Task<Void, Never>?
     private var activationID = UUID()
@@ -29,9 +30,13 @@ public final class MomoHuddleViewModel: ObservableObject {
         self.audioSession = audioSession
         self.now = now
         self.state = service == nil
-            ? .unavailable("Connect to a configured momo server to use huddles.")
+            ? .unavailable(Self.serverConnectionRequiredReason)
             : .idle
     }
+
+    static let serverConnectionRequiredReason = "momo 서버에 연결하면 허들을 사용할 수 있어요."
+    static let workspaceRequiredReason = "워크스페이스를 선택하면 허들을 사용할 수 있어요."
+    static let authenticationRequiredReason = "허들을 사용할 수 없어요. 다시 로그인한 뒤 시도해 주세요."
 
     public static func live(serverIdentity: String?) -> MomoHuddleViewModel {
         guard let serverIdentity,
@@ -54,7 +59,7 @@ public final class MomoHuddleViewModel: ObservableObject {
     public func activate(workspace: WorkspaceID?, channel: ChannelID) async {
         guard let service else { return }
         guard let workspace else {
-            state = .unavailable("Connect to a workspace to use huddles.")
+            state = .unavailable(Self.workspaceRequiredReason)
             return
         }
         if self.workspace == workspace, self.channel == channel, eventTask != nil { return }
@@ -108,14 +113,24 @@ public final class MomoHuddleViewModel: ObservableObject {
 
     @discardableResult
     private func launchStartOrJoin() -> Task<Void, Never> {
-        joinTask?.cancel()
+        if let joinTask { return joinTask }
+
         let currentActivation = activationID
+        let attemptID = UUID()
+        joinAttemptID = attemptID
         let task = Task { [weak self] in
             guard let self else { return }
             await self.performStartOrJoin(activation: currentActivation)
+            self.finishJoinAttempt(attemptID)
         }
         joinTask = task
         return task
+    }
+
+    private func finishJoinAttempt(_ attemptID: UUID) {
+        guard joinAttemptID == attemptID else { return }
+        joinTask = nil
+        joinAttemptID = nil
     }
 
     private func performStartOrJoin(activation: UUID) async {
@@ -301,7 +316,7 @@ public final class MomoHuddleViewModel: ObservableObject {
 
     private func present(_ error: Error) {
         if let error = error as? MomoHuddleClientError, error.isUnconfigured {
-            state = .unavailable(error.localizedDescription)
+            state = .unavailable(Self.authenticationRequiredReason)
         } else {
             state = .failed(error.localizedDescription)
         }
@@ -310,6 +325,7 @@ public final class MomoHuddleViewModel: ObservableObject {
     private func cancelJoin() async {
         let task = joinTask
         joinTask = nil
+        joinAttemptID = nil
         task?.cancel()
         await task?.value
     }

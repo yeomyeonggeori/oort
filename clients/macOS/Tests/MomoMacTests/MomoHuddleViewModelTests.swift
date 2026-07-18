@@ -8,31 +8,129 @@ final class MomoHuddleViewModelTests: XCTestCase {
         XCTAssertEqual(
             MomoHuddleComposerControlPresentation.resolve(
                 state: .idle,
-                hasActiveHuddle: false
+                hasActiveHuddle: false,
+                isChannelSelected: true
             ),
             .init(systemImage: "waveform", tone: .accent)
         )
         XCTAssertEqual(
             MomoHuddleComposerControlPresentation.resolve(
                 state: .idle,
-                hasActiveHuddle: true
+                hasActiveHuddle: true,
+                isChannelSelected: true
             ),
             .init(systemImage: "person.wave.2", tone: .accent)
         )
         XCTAssertEqual(
             MomoHuddleComposerControlPresentation.resolve(
                 state: .joined,
-                hasActiveHuddle: true
+                hasActiveHuddle: true,
+                isChannelSelected: true
             ),
-            .init(systemImage: "waveform", tone: .success)
+            .init(systemImage: "waveform.circle.fill", tone: .success)
         )
         XCTAssertEqual(
             MomoHuddleComposerControlPresentation.resolve(
                 state: .failed("연결 실패"),
-                hasActiveHuddle: true
+                hasActiveHuddle: true,
+                isChannelSelected: true
             ),
             .init(systemImage: "arrow.clockwise", tone: .warning)
         )
+        XCTAssertEqual(
+            MomoHuddleComposerControlPresentation.resolve(
+                state: .unavailable("서버 연결 필요"),
+                hasActiveHuddle: false,
+                isChannelSelected: true
+            ),
+            .init(systemImage: "waveform.slash", tone: .secondary)
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlPresentation.resolve(
+                state: .idle,
+                hasActiveHuddle: false,
+                isChannelSelected: false
+            ),
+            .init(systemImage: "waveform.slash", tone: .secondary)
+        )
+    }
+
+    func testComposerControlExposesBlockedReasonsAsKeyboardActions() {
+        XCTAssertEqual(
+            MomoHuddleComposerControlAction.resolve(
+                state: .unavailable("momo 서버에 연결하세요."),
+                isChannelSelected: true,
+                noChannelReason: "채널을 선택하세요.",
+                connectingReason: "허들 연결 중"
+            ),
+            .explain("momo 서버에 연결하세요.")
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlAction.resolve(
+                state: .idle,
+                isChannelSelected: false,
+                noChannelReason: "채널을 선택하세요.",
+                connectingReason: "허들 연결 중"
+            ),
+            .explain("채널을 선택하세요.")
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlAction.resolve(
+                state: .connecting,
+                isChannelSelected: true,
+                noChannelReason: "채널을 선택하세요.",
+                connectingReason: "허들 연결 중"
+            ),
+            .explain("허들 연결 중")
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlAction.resolve(
+                state: .joined,
+                isChannelSelected: true,
+                noChannelReason: "채널을 선택하세요.",
+                connectingReason: "허들 연결 중"
+            ),
+            .openPanel
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlAction.resolve(
+                state: .idle,
+                isChannelSelected: true,
+                noChannelReason: "채널을 선택하세요.",
+                connectingReason: "허들 연결 중"
+            ),
+            .startOrJoin
+        )
+        XCTAssertEqual(
+            MomoHuddleComposerControlAction.resolve(
+                state: .failed("연결 실패"),
+                isChannelSelected: true,
+                noChannelReason: "채널을 선택하세요.",
+                connectingReason: "허들 연결 중"
+            ),
+            .retry
+        )
+    }
+
+    func testUnavailableAndFailureCopyLocalizesWithoutDiagnosticText() {
+        let diagnostic = "Sign in with MOMO_SERVER_BASE_URL credentials."
+        let korean = MomoHuddleCopy(language: .korean)
+        let english = MomoHuddleCopy(language: .english)
+
+        XCTAssertEqual(
+            english.localizedUnavailableReason(MomoHuddleViewModel.serverConnectionRequiredReason),
+            "Connect to a momo server to use huddles."
+        )
+        XCTAssertEqual(
+            english.localizedUnavailableReason(MomoHuddleViewModel.authenticationRequiredReason),
+            "Huddles are unavailable. Sign in again and retry."
+        )
+        XCTAssertEqual(
+            korean.localizedUnavailableReason(diagnostic),
+            "지금은 허들을 사용할 수 없어요. 잠시 후 다시 시도해 주세요."
+        )
+        XCTAssertFalse(korean.localizedUnavailableReason(diagnostic).contains("MOMO_SERVER_BASE_URL"))
+        XCTAssertFalse(english.connectionFailedReason.contains("credentials"))
     }
 
     func testStartConnectsAudioAndTransitionsToJoined() async {
@@ -54,19 +152,73 @@ final class MomoHuddleViewModelTests: XCTestCase {
         await viewModel.shutdown()
     }
 
-    func testUnconfigured503TransitionsToUnavailableWithReason() async {
+    func testComposerStartUsesSingleFlightWhileJoinIsPending() async {
         let fixture = HuddleFixture()
         let service = MockHuddleService(
             active: nil,
             huddle: fixture.huddle,
-            activeError: MomoHuddleClientError.http(503, "허들 미구성")
+            joinDelay: .milliseconds(100)
+        )
+        let audio = MockHuddleAudioSession()
+        let viewModel = MomoHuddleViewModel(service: service, audioSession: audio)
+
+        await viewModel.activate(workspace: fixture.workspace, channel: fixture.channel)
+        viewModel.beginStartOrJoin()
+        viewModel.beginStartOrJoin()
+        try? await Task.sleep(for: .milliseconds(150))
+
+        let startCount = await service.startCount()
+        let joinCount = await service.joinCount()
+        let connectCount = await audio.connectCount()
+        XCTAssertEqual(viewModel.state, .joined)
+        XCTAssertEqual(startCount, 1)
+        XCTAssertEqual(joinCount, 1)
+        XCTAssertEqual(connectCount, 1)
+        await viewModel.shutdown()
+    }
+
+    func testUnconfiguredErrorUsesSafeUserReasonInsteadOfDiagnosticText() async {
+        let fixture = HuddleFixture()
+        let service = MockHuddleService(
+            active: nil,
+            huddle: fixture.huddle,
+            activeError: MomoHuddleClientError.unavailable(
+                "Sign in again or launch with MOMO_SERVER_BASE_URL credentials."
+            )
         )
         let viewModel = MomoHuddleViewModel(service: service, audioSession: MockHuddleAudioSession())
 
         await viewModel.activate(workspace: fixture.workspace, channel: fixture.channel)
 
-        XCTAssertEqual(viewModel.state, .unavailable("허들 미구성"))
+        XCTAssertEqual(
+            viewModel.state,
+            .unavailable(MomoHuddleViewModel.authenticationRequiredReason)
+        )
+        if case .unavailable(let reason) = viewModel.state {
+            XCTAssertFalse(reason.contains("MOMO_SERVER_BASE_URL"))
+            XCTAssertFalse(reason.contains("credentials"))
+        } else {
+            XCTFail("Expected unavailable huddle state")
+        }
         await viewModel.shutdown()
+    }
+
+    func testMissingServiceAndWorkspaceUseUserFacingKoreanReasons() async {
+        let fixture = HuddleFixture()
+        let unavailable = MomoHuddleViewModel(service: nil)
+        XCTAssertEqual(
+            unavailable.state,
+            .unavailable(MomoHuddleViewModel.serverConnectionRequiredReason)
+        )
+
+        let service = MockHuddleService(active: nil, huddle: fixture.huddle)
+        let missingWorkspace = MomoHuddleViewModel(service: service)
+        await missingWorkspace.activate(workspace: nil, channel: fixture.channel)
+        XCTAssertEqual(
+            missingWorkspace.state,
+            .unavailable(MomoHuddleViewModel.workspaceRequiredReason)
+        )
+        await missingWorkspace.shutdown()
     }
 
     func testEndedRealtimeEventDisconnectsWithoutEndingEventSubscription() async {
@@ -179,6 +331,8 @@ private actor MockHuddleService: MomoHuddleService {
     private let joinDelay: Duration?
     private var recordedLeaveCount = 0
     private var recordedEventSubscriptionCount = 0
+    private var recordedStartCount = 0
+    private var recordedJoinCount = 0
 
     init(
         active: MomoHuddle?,
@@ -200,11 +354,13 @@ private actor MockHuddleService: MomoHuddleService {
     }
 
     func start(workspace: WorkspaceID, channel: ChannelID) async throws -> MomoHuddle {
+        recordedStartCount += 1
         activeValue = huddle
         return huddle
     }
 
     func join(workspace: WorkspaceID, huddle: UUID) async throws -> MomoHuddleJoin {
+        recordedJoinCount += 1
         if let joinDelay {
             await Task.detached { try? await Task.sleep(for: joinDelay) }.value
         }
@@ -229,6 +385,8 @@ private actor MockHuddleService: MomoHuddleService {
 
     func leaveCount() -> Int { recordedLeaveCount }
     func eventSubscriptionCount() -> Int { recordedEventSubscriptionCount }
+    func startCount() -> Int { recordedStartCount }
+    func joinCount() -> Int { recordedJoinCount }
 }
 
 private actor MockHuddleAudioSession: MomoHuddleAudioSession {
