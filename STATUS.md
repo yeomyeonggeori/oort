@@ -10,6 +10,11 @@
 > 생성: 2026-06-24 · 빌드 워크플로우 `momo-phase0-build`(T01~T10) + 로컬 `swift build` 재검증
 > 검증 환경: Swift 6.2.3 (arm64-apple-macosx), Docker Desktop 29.4.3, PostgreSQL client 18.4(`/opt/homebrew/opt/libpq/bin/psql`). 실제 hermes는 없지만 MOMO-004에서 OpenAI-compatible SSE mock으로 AgentWorker e2e를 검증함.
 
+## MOMO-474 첨부 업로드 v0 — Drive workspace archive (2026-07-18)
+
+- migration 017의 attachment FORCE RLS lifecycle과 100 MB 상한, `DriveArchiveClient`(SA `drive.file` Google resumable + strict-env 거부 stub), 업로드 발급·metadata complete·권한 강제 content stream proxy를 추가했다. 메시지 `attachmentIds`는 최초 전송의 seq/message/outbox tenant transaction 안에서 complete·본인·같은 채널을 잠금 검증하고 연결/audit한다.
+- stub verifier는 직접 PUT→complete→메시지 연결→content→비멤버 403→pending 방치/RLS를 검증하며 실 Google 왕복은 계약대로 오케스트레이터 전용이다.
+
 ## MOMO-464 macOS shell/detail polish (2026-07-18)
 
 - 다운로드 화면을 앱 경계를 벗어날 수 있는 시스템 popover에서 가운데 pane 우측 상단의 bounded card panel로 변경했다. 일반 창과 전체화면에서 같은 앱 내부 위치를 유지하고, 표시·해제 animation은 비활성화했으며 닫기 버튼과 Escape 경로를 제공한다.

@@ -198,6 +198,8 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `POSTGRES_HOST` | 서버/relay/worker | `localhost` | `DATABASE_URL` 미설정 시 폴백 호스트. |
 | `LOG_LEVEL` | 서버 | (info) | 로그 레벨. |
 | `MOMO_DRIVE_BACKEND` | 서버 | (미설정) | `stub`은 verifier/local 명시 opt-in 전용이며 staging/prod/internal-host 부팅에서 거부된다. 실백엔드는 `google` 또는 `sa`. |
+| `MOMO_DRIVE_ARCHIVE_BACKEND` | 서버 | (`MOMO_DRIVE_BACKEND` 폴백) | 첨부 archive 백엔드. `google`/`sa`는 `drive.file`로 `channels/<channel_id>/` 폴더와 resumable 세션을 만들며, `stub`은 verifier/local 전용이고 strict 환경에서 부팅 거부된다. |
+| `MOMO_DRIVE_ARCHIVE_STUB_BASE_URL` | 서버 | `http://127.0.0.1:$PORT` | stub이 반환할 직접 PUT base URL. verifier 전용이며 Google 모드에서는 사용하지 않는다. |
 | `MOMO_DRIVE_SA_KEY_PATH` | 서버 | (미설정) | repo 밖 SA JSON 파일 경로. 키 바이트는 로그·응답·DB에 저장하지 않는다. |
 | `MOMO_DRIVE_SHARED_DRIVE_ID` | 서버 | (미설정) | 경로 C가 접근할 공유 드라이브 1개의 ID. 미설정이면 `tools/call`이 fail-closed 오류를 반환한다. |
 | `PUBLIC_BASE_URL` | 서버 | (요청 origin) | momo-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
