@@ -1,6 +1,11 @@
 import SwiftUI
 import MomoCore
 
+private enum MomoHuddleLayout {
+    static let panelWidth: CGFloat = 320
+    static let participantListMaximumHeight: CGFloat = 240
+}
+
 struct MomoHuddleHeaderControl: View {
     @ObservedObject var viewModel: MomoHuddleViewModel
     let copy: MomoHuddleCopy
@@ -108,7 +113,7 @@ struct MomoHuddlePanelView: View {
                     }
                 }
             }
-            .frame(maxHeight: 240)
+            .frame(maxHeight: MomoHuddleLayout.participantListMaximumHeight)
 
             if case .failed(let message) = viewModel.state {
                 Label(message, systemImage: "exclamationmark.triangle")
@@ -143,7 +148,7 @@ struct MomoHuddlePanelView: View {
             }
         }
         .padding(16)
-        .frame(width: 320)
+        .frame(width: MomoHuddleLayout.panelWidth)
         .accessibilityElement(children: .contain)
     }
 

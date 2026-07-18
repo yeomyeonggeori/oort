@@ -98,6 +98,28 @@ final class MomoHuddleViewModelTests: XCTestCase {
         XCTAssertEqual(connectCount, 0)
         XCTAssertFalse(viewModel.isJoined)
     }
+
+    func testPendingChannelActivationCannotResubscribeAfterShutdown() async {
+        let fixture = HuddleFixture()
+        let nextChannel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000202")!
+        let service = MockHuddleService(active: fixture.huddle, huddle: fixture.huddle, joinDelay: .milliseconds(100))
+        let viewModel = MomoHuddleViewModel(service: service, audioSession: MockHuddleAudioSession())
+
+        await viewModel.activate(workspace: fixture.workspace, channel: fixture.channel)
+        try? await Task.sleep(for: .milliseconds(10))
+        let join = Task { await viewModel.startOrJoin() }
+        try? await Task.sleep(for: .milliseconds(10))
+        let switchChannel = Task { await viewModel.activate(workspace: fixture.workspace, channel: nextChannel) }
+        try? await Task.sleep(for: .milliseconds(10))
+        await viewModel.shutdown()
+        await join.value
+        await switchChannel.value
+
+        let eventSubscriptionCount = await service.eventSubscriptionCount()
+        XCTAssertEqual(eventSubscriptionCount, 1)
+        XCTAssertNil(viewModel.activeHuddle)
+        XCTAssertFalse(viewModel.isJoined)
+    }
 }
 
 private struct HuddleFixture {
@@ -125,6 +147,7 @@ private actor MockHuddleService: MomoHuddleService {
     private let leaveError: Error?
     private let joinDelay: Duration?
     private var recordedLeaveCount = 0
+    private var recordedEventSubscriptionCount = 0
 
     init(
         active: MomoHuddle?,
@@ -151,7 +174,9 @@ private actor MockHuddleService: MomoHuddleService {
     }
 
     func join(workspace: WorkspaceID, huddle: UUID) async throws -> MomoHuddleJoin {
-        if let joinDelay { try? await Task.sleep(for: joinDelay) }
+        if let joinDelay {
+            await Task.detached { try? await Task.sleep(for: joinDelay) }.value
+        }
         return MomoHuddleJoin(
             huddle: self.huddle,
             liveKitURL: URL(string: "ws://127.0.0.1:7880")!,
@@ -167,10 +192,12 @@ private actor MockHuddleService: MomoHuddleService {
     }
 
     func events(workspace: WorkspaceID, channel: ChannelID) async throws -> AsyncStream<HuddleDelta> {
-        AsyncStream { _ in }
+        recordedEventSubscriptionCount += 1
+        return AsyncStream<HuddleDelta> { _ in }
     }
 
     func leaveCount() -> Int { recordedLeaveCount }
+    func eventSubscriptionCount() -> Int { recordedEventSubscriptionCount }
 }
 
 private actor MockHuddleAudioSession: MomoHuddleAudioSession {

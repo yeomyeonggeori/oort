@@ -59,11 +59,14 @@ public final class MomoHuddleViewModel: ObservableObject {
         }
         if self.workspace == workspace, self.channel == channel, eventTask != nil { return }
 
-        activationID = UUID()
-        await cancelJoin()
-        await leaveCurrentHuddle(reportErrors: false)
+        let currentActivation = UUID()
+        activationID = currentActivation
         eventTask?.cancel()
-        let currentActivation = activationID
+        eventTask = nil
+        await cancelJoin()
+        guard activationID == currentActivation else { return }
+        await leaveCurrentHuddle(reportErrors: false)
+        guard activationID == currentActivation else { return }
         self.workspace = workspace
         self.channel = channel
         state = .connecting
