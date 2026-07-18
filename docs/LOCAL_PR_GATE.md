@@ -75,7 +75,7 @@ Profiles:
 | `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + macOS real-backend smoke + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet; add `LOCAL_GATE_LAUNCH_UI=1` for foreground MomoMacDevApp process/window/log evidence |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + `LOCAL_GATE_LAUNCH_UI=1` MomoMacDevApp real-backend process/window evidence + redacted diagnostics bundle |
-| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` + `scripts/verify_push_notifier.sh` + `scripts/verify_plugin_registry.sh` + `scripts/verify_signed_webhook_ingress.sh` + `scripts/verify_drive_mcp.sh` (stub-only hosted Drive MCP; no Google call) |
+| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` + `scripts/verify_push_notifier.sh` + `scripts/verify_plugin_registry.sh` + `scripts/verify_signed_webhook_ingress.sh` + `scripts/verify_drive_mcp.sh` + `scripts/verify_attachment_upload.sh` (both stub-only; no Google call) |
 | `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
@@ -228,6 +228,20 @@ operations, revoke fail-closed behavior, success/denial audit rows, and
 credential-shaped response redaction. It never calls Google; real SA smoke is
 the manual evidence in `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`. Wired into
 `runtime-db`; also runs standalone.
+
+### Drive archive attachment gate (MOMO-474, ADR-0113)
+
+`scripts/verify_attachment_upload.sh` boots an isolated e2e API stack with the
+explicit local-only archive stub. It verifies resumable session issuance,
+direct client PUT, Drive metadata completion, uploader-only attachment binding
+inside the canonical message transaction, audit rows, authorized streaming
+content proxy, non-member 403, an abandoned pending row, the 100 MB ceiling,
+and FORCE RLS isolation. The verifier never receives an SA key and never calls
+Google. Real shared-drive smoke remains an orchestrator-only step. Wired into
+`runtime-db`; also runs standalone. Overrides: `ATTACHMENT_GATE_PORT` /
+`ATTACHMENT_GATE_POSTGRES_PORT` / `ATTACHMENT_GATE_CENT_PORT` /
+`ATTACHMENT_GATE_HERMES_PORT`, `ATTACHMENT_GATE_PROJECT`,
+`ATTACHMENT_GATE_BOOT_TIMEOUT`, `ATTACHMENT_GATE_KEEP=1`.
 
 ### Signed webhook ingress gate (MOMO-412, ADR-0115 SE-04B)
 

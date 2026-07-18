@@ -24,6 +24,13 @@ enum AppBuilder {
             environment: ProcessInfo.processInfo.environment,
             httpClient: httpClient
         )
+        let driveArchive = await DriveArchiveClientFactory.make(
+            environmentName: config.momoEnvironment,
+            environment: ProcessInfo.processInfo.environment,
+            httpClient: httpClient,
+            stubBaseURL: ProcessInfo.processInfo.environment["MOMO_DRIVE_ARCHIVE_STUB_BASE_URL"]
+                ?? "http://127.0.0.1:\(config.port)"
+        )
         let centrifugo = CentrifugoClient(
             httpClient: httpClient,
             apiURL: config.centAPIURL,
@@ -74,6 +81,10 @@ enum AppBuilder {
         CentrifugoRoutes(
             db: db, tokenStore: tokenStore, proxySecret: config.centProxySecret
         ).add(to: router)
+        let attachmentRoutes = AttachmentRoutes(db: db, archive: driveArchive)
+        if driveArchive.acceptsStubUploads {
+            attachmentRoutes.addStubUpload(to: router)
+        }
 
         // Gateway callbacks accept per-agent bearer credentials. The shared
         // secret is available only on this narrow group and only when the
@@ -99,6 +110,7 @@ enum AppBuilder {
             ))
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
+        SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)
         AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
         WorkspaceRoutes(db: db).add(to: authed)
@@ -115,6 +127,7 @@ enum AppBuilder {
         HuddleRoutes(db: db, liveKit: config.liveKit).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
         DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
+        attachmentRoutes.addProtected(to: authed)
         let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)
         webhookRoutes.addPublic(to: router)
         webhookRoutes.addProtected(to: authed)

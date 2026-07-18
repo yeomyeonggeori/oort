@@ -2192,6 +2192,26 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 ### ☐ MOMO-472 (`#495`) 수용기준 — workspaceSearch 스냅샷 full-suite 비결정성 안정화 `[macos-ui]` · 의존: 없음 (선재 flake)
 - [ ] full `make test` 3회 연속 통과(결정적 렌더 조건 이관 또는 perceptual 미세조정, 근거 기록). 캐노니컬 재기록은 오케스트레이터. 상세: issue #495.
 
+### ☑ MOMO-473 (`#496`) 수용기준 — V-3b iOS 허들 참가 `[ios]` · 의존: MOMO-471 · **PR base=track/engine**
+- [x] 진행 중 허들 배너(active+Core 이벤트 실시간, 정적 표기) + 참가 시트(청취/발화/음소거/나가기, LiveKit 2.15.2 핀) + 수명주기 leave/disconnect 보장.
+- [x] 마이크 권한 문구/거부 상태, 503 미구성 처리, 뷰모델 mock 테스트. 시뮬레이터 게이트는 오케스트레이터. 상세: issue #496 본문(패킷 겸용).
+- 랜딩: PR #498 squash `0176508` → **track/engine**(2026-07-18, 새 파이프라인 첫 트랙 머지 — main 미반영, 성재 게이트 대기). 킷 27/27+시뮬레이터 게이트 PASS, LiveKit 2.15.2 핀·마이크 권한·수명주기 정리 확인.
+
+### ☑ MOMO-474 (`#497`) 수용기준 — 첨부 업로드 v0 (Drive archive) `[runtime-db]` · 의존: SA 실검증 완료 · **PR base=track/engine**
+- [x] 017_attachment(RLS) + 세션 발급(resumable, 클라 직송)/complete 검증/content 프록시/전송 DTO attachmentIds 가산.
+- [x] DriveArchiveClient(실+stub, drive.file) + verify_attachment_upload(stub) + runtime-db 편입 + openapi. 실 Google smoke는 오케스트레이터. 상세: issue #497 본문(패킷 겸용). ENGINE_HANDOFF B-1→in-progress, 랜딩 시 A-6 해제.
+- 랜딩: PR #499 squash `6d4dd97` → **track/engine**(2026-07-18, main 대기). 검증: 첨부 verifier(stub)+서버 107/107+openapi 48/48+**실 Google 왕복 smoke PASS**(resumable→클라 직송 PUT→files.get→alt=media, 정리 완료). 게이트 유일 실패=english-large-text full-suite flake(server 전용 PR·macOS 무관 = 선재, MOMO-472로 확장).
+
+### ☑ MOMO-475 (`#500`) 수용기준 — 검색 서버 FTS v0 (메시지) `[runtime-db]` · 의존: 없음 · **PR base=track/engine**
+- [x] GET search/messages — 멤버십 하드 필터(비멤버 0)/deleted 제외/ILIKE+trgm/최신순/seq 커서/snippet 절단+matchOffset/q≥2/멤버 rate limit.
+- [x] openapi + verify_workspace_search(멤버십·DM·삭제·한영·커서 안정·429·RLS·EXPLAIN trgm) + runtime-db 편입. 상세: issue #500 본문(패킷 겸용). 랜딩 시 B-2 done→A ready.
+- 랜딩: PR #501 squash → **track/engine**(2026-07-18, main 대기). 실런: 서버 109/109 + verify_workspace_search PASS(멤버십/DM/삭제/한영/커서/429/RLS/EXPLAIN trgm) + runtime-db 게이트 PASS.
+
+### ☑ MOMO-476 (`#502`) 수용기준 — 스레드 답글 전송 개방 `[runtime-db]` · 의존: 없음 · **PR base=track/engine**
+- [x] SendMessageRequest.rootId 가산(같은 채널·미삭제·톱레벨만, 교차채널 404) + 같은 tx thread 롤업 upsert + 이벤트/응답 rootId 노출.
+- [x] openapi + verify_thread_reply(롤업 단정·대댓글 400·동시 답글 카운트·RLS) + runtime-db 편입. 상세: issue #502 본문(패킷 겸용). 랜딩 시 B-3 done→A-4 해제.
+- 랜딩: PR #503 squash → **track/engine**(2026-07-18, main 대기). 실런: 서버 109/109 + verify_thread_reply PASS(원자 롤업·실시간/히스토리·RLS) + runtime-db 게이트 PASS.
+
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
 - [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.

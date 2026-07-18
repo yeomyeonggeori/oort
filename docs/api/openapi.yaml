@@ -63,6 +63,8 @@ tags:
     description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
+  - name: attachments
+    description: Drive archive resumable uploads, completion, and authorized content proxy.
   - name: read-state
     description: ADR-0109 per-member read cursors and unread/mention counts.
   - name: dms
@@ -566,6 +568,194 @@ paths:
         "503":
           $ref: "#/components/responses/HuddleNotConfigured"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/uploads:
+    post:
+      tags: [attachments]
+      operationId: createAttachmentUpload
+      summary: Create a Drive resumable upload session without proxying file bytes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAttachmentUploadRequest"
+      responses:
+        "201":
+          description: Pending attachment row and resumable capability URL created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentUploadResponse"
+        "400":
+          description: Invalid name, mime, or size.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Attachment exceeds 100 MB.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Drive archive is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/complete:
+    post:
+      tags: [attachments]
+      operationId: completeAttachmentUpload
+      summary: Verify Drive size and mime, then mark the uploader's attachment complete.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: Drive metadata verified; attachment is complete.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attachment"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership and original uploader are required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Attachment or uploaded Drive file not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Size/mime mismatch or invalid lifecycle state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/content:
+    get:
+      tags: [attachments]
+      operationId: getAttachmentContent
+      summary: Stream complete attachment bytes from Drive after channel membership validation.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: Original attachment bytes, streamed from Drive alt=media.
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Completed attachment not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/search/messages:
+    get:
+      tags: [messages]
+      operationId: searchWorkspaceMessages
+      summary: Search messages in channels where the caller is an active member.
+      description: >
+        Read-only v0 substring search backed by the existing partial GIN trigram
+        index. Results exclude deleted/body-less messages and channels where the
+        caller has left. Ordering is newest first by created time, then channel
+        sequence; the opaque cursor preserves that keyset across new inserts.
+        Search is limited to 30 requests per authenticated member per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Opaque keyset cursor returned as `nextCursor`.
+      responses:
+        "200":
+          description: Membership-filtered message search page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceMessageSearchResponse"
+        "400":
+          description: Query shorter than two characters or malformed cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Search member rate limit exceeded.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/messages:
     post:
       tags: [messages]
@@ -577,6 +767,9 @@ paths:
         broadcast through the transactional outbox. Retrying with the same
         `clientMsgId` returns the original message (exactly-once effect) —
         the response status is 201 in both cases.
+        Supplying `rootId` creates a one-level thread reply. The root must be an
+        undeleted top-level message in the same channel; cross-channel roots are
+        reported as not found.
       security:
         - bearerAuth: []
       parameters:
@@ -596,7 +789,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Message"
         "400":
-          description: Invalid workspace/channel id.
+          description: Invalid workspace/channel id, deleted root, or nested reply root.
           content:
             application/json:
               schema:
@@ -610,7 +803,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Channel not found or not provisioned.
+          description: Channel/root not found or not provisioned.
           content:
             application/json:
               schema:
@@ -1545,6 +1738,14 @@ components:
       schema:
         type: string
         format: uuid
+    AttachmentId:
+      name: attachmentId
+      in: path
+      required: true
+      description: Attachment UUID owned by PostgreSQL.
+      schema:
+        type: string
+        format: uuid
     PluginId:
       name: pluginId
       in: path
@@ -2213,6 +2414,10 @@ components:
           type: string
           format: uuid
           description: Client-generated idempotency key (L4 §3.1).
+        rootId:
+          type: string
+          format: uuid
+          description: Undeleted top-level message in this channel used as the thread root.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -2231,6 +2436,77 @@ components:
           type: string
           format: uuid
           description: Agent-run binding; agent principals only.
+        attachmentIds:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            format: uuid
+          uniqueItems: true
+          description: >
+            Completed attachments uploaded by this actor in this channel. They
+            are linked to the new message inside the canonical message transaction.
+
+    CreateAttachmentUploadRequest:
+      type: object
+      required: [name, mime, size]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        mime:
+          type: string
+          maxLength: 255
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 104857600
+
+    AttachmentUploadResponse:
+      type: object
+      required: [id, status, uploadUrl]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending]
+        uploadUrl:
+          type: string
+          format: uri
+          description: Opaque Google resumable upload capability URL.
+
+    Attachment:
+      type: object
+      required: [id, channelId, uploaderMemberId, name, mime, size, status, createdAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        uploaderMemberId:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mime:
+          type: string
+        size:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [pending, complete, failed]
+        createdAtMs:
+          type: integer
+          format: int64
 
     Message:
       type: object
@@ -2242,6 +2518,10 @@ components:
         channelId:
           type: string
           format: uuid
+        rootId:
+          type: string
+          format: uuid
+          description: Thread root for a reply; omitted for top-level messages.
         seq:
           type: integer
           format: int64
@@ -2293,6 +2573,46 @@ components:
           description: >
             Smallest seq in this page — pass as `before` to fetch older
             messages. Omitted when the page is empty.
+
+    WorkspaceMessageSearchHit:
+      type: object
+      required: [channelId, messageId, seq, authorMemberId, createdAtMs, snippet, matchOffset]
+      properties:
+        channelId:
+          type: string
+          format: uuid
+        messageId:
+          type: string
+          format: uuid
+        seq:
+          type: integer
+          format: int64
+          description: Authoritative per-channel message sequence.
+        authorMemberId:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+        snippet:
+          type: string
+          description: Bounded text around the first match, with about 80 characters of context per side.
+        matchOffset:
+          type: integer
+          minimum: 0
+          description: Zero-based character offset of the first match within `snippet`.
+
+    WorkspaceMessageSearchResponse:
+      type: object
+      required: [hits]
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceMessageSearchHit"
+        nextCursor:
+          type: string
+          description: Opaque cursor for the next older page; omitted when exhausted.
 
     # ---- Read state (snake_case wire contract, ADR-0109) --------------------------
     UpdateReadStateRequest:

@@ -24,6 +24,10 @@ struct MomoServerMain {
             environmentName: config.momoEnvironment,
             environment: ProcessInfo.processInfo.environment
         )
+        try DriveArchiveClientFactory.validateForBoot(
+            environmentName: config.momoEnvironment,
+            environment: ProcessInfo.processInfo.environment
+        )
         // MOMO-300: strict envs must not boot with a placeholder proxy secret.
         try config.validateSecurityForBoot()
         logger.info("starting MomoServer", metadata: [

@@ -494,12 +494,190 @@ struct ConversationTests {
     }
 }
 
+@Suite("iOS huddle")
+struct IOSHuddleTests {
+    @Test("timeline consumes the typed huddle event")
+    @MainActor
+    func timelineConsumesHuddleEvent() async {
+        let huddle = fixtureHuddle()
+        let service = RecordingHuddleService(activeHuddle: huddle)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: MockConversationBackend(
+                snapshot: IOSConversationSnapshot(channels: [fixtureChannel()], members: [], readStates: [])
+            ),
+            workspace: fixtureWorkspaceID,
+            huddleService: service,
+            huddleAudioSession: RecordingHuddleAudioSession(),
+            microphonePermission: FixedMicrophonePermission(granted: true)
+        )
+
+        await model.consumeRealtimeEvent(.huddle(HuddleDelta(
+            action: .started,
+            huddleId: huddle.id,
+            channelId: fixtureChannel().id,
+            participantMemberIds: [fixtureMemberID]
+        )))
+
+        #expect(model.huddle.activeHuddle?.id == huddle.id)
+        #expect(model.huddle.participantCount == 1)
+    }
+
+    @Test("join mute and leave preserve the audio lifecycle")
+    @MainActor
+    func joinMuteAndLeave() async {
+        let huddle = fixtureHuddle()
+        let service = RecordingHuddleService(activeHuddle: huddle)
+        let audio = RecordingHuddleAudioSession()
+        let model = IOSHuddleModel(
+            workspace: fixtureWorkspaceID,
+            channel: fixtureChannel().id,
+            service: service,
+            audioSession: audio,
+            permissionAuthorizer: FixedMicrophonePermission(granted: true)
+        )
+
+        await model.activate()
+        await model.join()
+        #expect(model.state == .joined)
+        #expect(model.isJoined)
+
+        await model.toggleMicrophone()
+        #expect(model.isMicrophoneMuted)
+
+        await model.leave()
+        #expect(model.state == .idle)
+        #expect(!model.isJoined)
+        #expect(await service.leaveCalls == [huddle.id])
+        #expect(await audio.disconnectCount == 1)
+        #expect(await audio.muteValues == [true])
+    }
+
+    @Test("microphone denial is an explicit state and does not join")
+    @MainActor
+    func microphoneDenied() async {
+        let service = RecordingHuddleService(activeHuddle: fixtureHuddle())
+        let model = IOSHuddleModel(
+            workspace: fixtureWorkspaceID,
+            channel: fixtureChannel().id,
+            service: service,
+            audioSession: RecordingHuddleAudioSession(),
+            permissionAuthorizer: FixedMicrophonePermission(granted: false)
+        )
+
+        await model.activate()
+        await model.join()
+
+        #expect(model.state == .permissionDenied)
+        #expect(await service.joinCount == 0)
+    }
+
+    @Test("server 503 hides the active huddle")
+    @MainActor
+    func unconfiguredServer() async {
+        let model = IOSHuddleModel(
+            workspace: fixtureWorkspaceID,
+            channel: fixtureChannel().id,
+            service: UnconfiguredHuddleService(),
+            audioSession: RecordingHuddleAudioSession(),
+            permissionAuthorizer: FixedMicrophonePermission(granted: true)
+        )
+
+        await model.activate()
+
+        #expect(model.state == .unavailable)
+        #expect(model.activeHuddle == nil)
+    }
+
+    @Test("shutdown leaves the server and disconnects audio")
+    @MainActor
+    func shutdownLifecycle() async {
+        let huddle = fixtureHuddle()
+        let service = RecordingHuddleService(activeHuddle: huddle)
+        let audio = RecordingHuddleAudioSession()
+        let model = IOSHuddleModel(
+            workspace: fixtureWorkspaceID,
+            channel: fixtureChannel().id,
+            service: service,
+            audioSession: audio,
+            permissionAuthorizer: FixedMicrophonePermission(granted: true)
+        )
+
+        await model.activate()
+        await model.join()
+        await model.shutdown()
+
+        #expect(await service.leaveCalls == [huddle.id])
+        #expect(await audio.disconnectCount == 1)
+        #expect(!model.isJoined)
+    }
+}
+
 private struct MockBackend: SessionBackend {
     let session: IOSSession
     let bootstrap: WorkspaceBootstrap
 
     func authenticate(form: SessionForm) async throws -> IOSSession { session }
     func bootstrap(session: IOSSession) async throws -> WorkspaceBootstrap { bootstrap }
+}
+
+private struct FixedMicrophonePermission: IOSMicrophonePermissionAuthorizing {
+    let granted: Bool
+    func requestPermission() async -> Bool { granted }
+}
+
+private actor RecordingHuddleService: IOSHuddleService {
+    let activeHuddle: IOSHuddle?
+    private(set) var joinCount = 0
+    private(set) var leaveCalls: [UUID] = []
+
+    init(activeHuddle: IOSHuddle?) {
+        self.activeHuddle = activeHuddle
+    }
+
+    func active(workspace: WorkspaceID, channel: ChannelID) async throws -> IOSHuddle? { activeHuddle }
+
+    func join(workspace: WorkspaceID, huddle: UUID) async throws -> IOSHuddleJoin {
+        joinCount += 1
+        return IOSHuddleJoin(
+            huddle: activeHuddle!,
+            liveKitURL: URL(string: "wss://livekit.example.test")!,
+            token: "test-token",
+            expiresAt: Date().addingTimeInterval(3_600)
+        )
+    }
+
+    func leave(workspace: WorkspaceID, huddle: UUID) async throws {
+        leaveCalls.append(huddle)
+    }
+}
+
+private struct UnconfiguredHuddleService: IOSHuddleService {
+    func active(workspace: WorkspaceID, channel: ChannelID) async throws -> IOSHuddle? {
+        throw IOSHuddleClientError.http(503, "Huddles are not configured")
+    }
+    func join(workspace: WorkspaceID, huddle: UUID) async throws -> IOSHuddleJoin {
+        throw IOSHuddleClientError.http(503, "Huddles are not configured")
+    }
+    func leave(workspace: WorkspaceID, huddle: UUID) async throws {}
+}
+
+private actor RecordingHuddleAudioSession: IOSHuddleAudioSession {
+    private(set) var disconnectCount = 0
+    private(set) var muteValues: [Bool] = []
+
+    func connect(url: URL, token: String) async throws {}
+    func disconnect() async { disconnectCount += 1 }
+    func setMicrophoneMuted(_ muted: Bool) async throws { muteValues.append(muted) }
+    func participantUpdates() async -> AsyncStream<[IOSHuddleAudioParticipant]> {
+        AsyncStream { continuation in
+            continuation.yield([
+                IOSHuddleAudioParticipant(id: "local", displayName: "Demo User", isSpeaking: false, isLocal: true),
+            ])
+            continuation.finish()
+        }
+    }
 }
 
 private struct OfflineBackend: SessionBackend {
@@ -655,6 +833,20 @@ private func fixtureApprovalMessage() -> Message {
             "approval_status": "pending",
             "action_type": "deploy",
             "is_reversible": false,
+        ]
+    )
+}
+
+private func fixtureHuddle() -> IOSHuddle {
+    IOSHuddle(
+        id: UUID(uuidString: "00000000-0000-0000-0003-000000000001")!,
+        workspaceId: fixtureWorkspaceID,
+        channelId: fixtureChannel().id,
+        startedBy: fixtureMemberID,
+        startedAtMs: 1,
+        endedAtMs: nil,
+        participants: [
+            IOSHuddleParticipant(memberId: fixtureMemberID, displayName: "Demo User", joinedAtMs: 1),
         ]
     )
 }

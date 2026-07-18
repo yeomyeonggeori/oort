@@ -124,6 +124,99 @@ final class MomoServerTests: XCTestCase {
         ])
     }
 
+    func testDriveArchiveStubAndStrictEnvironmentContract() async throws {
+        XCTAssertNoThrow(try DriveArchiveClientFactory.validateForBoot(
+            environmentName: "local",
+            environment: ["MOMO_DRIVE_ARCHIVE_BACKEND": "stub"]
+        ))
+        XCTAssertThrowsError(try DriveArchiveClientFactory.validateForBoot(
+            environmentName: "production",
+            environment: ["MOMO_DRIVE_ARCHIVE_BACKEND": "stub"]
+        ))
+        XCTAssertThrowsError(try DriveArchiveClientFactory.validateForBoot(
+            environmentName: "internal-host",
+            environment: ["MOMO_DRIVE_BACKEND": "stub"]
+        ))
+
+        let stub = StubDriveArchiveClient(baseURL: "http://127.0.0.1:8080/")
+        let channelID = UUID()
+        let payload = Data("momo attachment".utf8)
+        let session = try await stub.createResumableUpload(
+            channelID: channelID,
+            name: "note.txt",
+            mime: "text/plain",
+            sizeBytes: Int64(payload.count)
+        )
+        XCTAssertTrue(session.uploadURL.hasPrefix("http://127.0.0.1:8080/__momo_stub/"))
+        let token = try XCTUnwrap(session.uploadURL.split(separator: "/").last.map(String.init))
+        try await stub.acceptStubUpload(token: token, mime: "text/plain", bytes: payload)
+        let metadata = try await stub.fileMetadata(fileID: session.driveFileID)
+        XCTAssertEqual(metadata.name, "note.txt")
+        XCTAssertEqual(metadata.mime, "text/plain")
+        XCTAssertEqual(metadata.sizeBytes, Int64(payload.count))
+        let content = try await stub.fileContent(fileID: session.driveFileID, maxBytes: 100)
+        XCTAssertEqual(content.mime, "text/plain")
+        XCTAssertEqual(content.sizeBytes, payload.count)
+
+        let mismatch = try await stub.createResumableUpload(
+            channelID: channelID, name: "bad.bin", mime: "application/octet-stream", sizeBytes: 3
+        )
+        let mismatchToken = try XCTUnwrap(
+            mismatch.uploadURL.split(separator: "/").last.map(String.init)
+        )
+        do {
+            try await stub.acceptStubUpload(
+                token: mismatchToken, mime: "application/octet-stream", bytes: Data([1, 2])
+            )
+            XCTFail("stub must enforce the resumable session size")
+        } catch {
+            XCTAssertEqual(
+                error as? DriveArchiveError,
+                .invalidArguments("uploaded size does not match the session")
+            )
+        }
+    }
+
+    func testAttachmentMigrationAndMessageBindingStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/017_attachment.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE attachment"))
+        XCTAssertTrue(migration.contains("size_bytes BETWEEN 0 AND 104857600"))
+        XCTAssertTrue(migration.contains("status IN ('pending', 'complete', 'failed')"))
+        XCTAssertTrue(migration.contains("attachment_pending_cleanup_idx"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/AttachmentRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("active channel membership required"))
+        XCTAssertTrue(routes.contains("INSERT INTO audit_log"))
+        XCTAssertTrue(routes.contains("fileMetadata(fileID:"))
+        XCTAssertTrue(routes.contains("archive.fileContent("))
+        XCTAssertFalse(routes.contains("MOMO_DRIVE_SA_KEY_PATH"))
+
+        let messages = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MessageRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(messages.contains("linkAttachments("))
+        XCTAssertTrue(messages.contains("status == \"complete\""))
+        XCTAssertTrue(messages.contains("uploader == uploaderMemberID"))
+        XCTAssertTrue(messages.contains("UPDATE attachment SET message_id"))
+        XCTAssertTrue(messages.contains("attachment.message_linked"))
+    }
+
     func testDrivePluginMigrationDoesNotPersistCredentialMaterial() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -1770,6 +1863,7 @@ final class MomoServerTests: XCTestCase {
         let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000010")!
         let messageID = UUID(uuidString: "00000000-0000-7000-8000-000000000179")!
         let authorID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let rootID = UUID(uuidString: "00000000-0000-7000-8000-000000000178")!
         let centChannel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
 
         let raw = MessageRoutes.broadcastPayload(
@@ -1781,7 +1875,8 @@ final class MomoServerTests: XCTestCase {
             body: "Realtime contract sample.",
             authorMemberID: authorID,
             hlcTs: 1_782_463_260_000,
-            hlcCount: 0
+            hlcCount: 0,
+            rootID: rootID
         )
 
         let object = try XCTUnwrap(
@@ -1800,10 +1895,12 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(payload["author_member_id"] as? String, authorID.uuidString)
         XCTAssertEqual(payload["hlc_ts"] as? Int, 1_782_463_260_000)
         XCTAssertEqual(payload["hlc_count"] as? Int, 0)
+        XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
         XCTAssertNil(payload["channelId"])
         XCTAssertNil(payload["authorMemberId"])
         XCTAssertNil(payload["hlcTs"])
         XCTAssertNil(payload["hlcCount"])
+        XCTAssertNil(payload["rootId"])
     }
 
     func testAgentMentionDetectionSupportsDisplayNameHandleAndMemberID() {
@@ -2561,5 +2658,30 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(routes.contains("CentrifugoClient"))
         XCTAssertFalse(routes.contains("/api/publish"))
         XCTAssertFalse(routes.contains("apiSecret"))
+    }
+
+    func testWorkspaceSearchCursorRoundTripAndLiteralLikePattern() throws {
+        let cursor = SearchRoutes.Cursor(
+            createdAtMicros: 1_900_000_123_456_789,
+            seq: 42,
+            messageID: UUID(uuidString: "50000000-0000-7000-8000-000000000001")!
+        )
+        let encoded = SearchRoutes.encodeCursor(cursor)
+        XCTAssertFalse(encoded.contains("="))
+        XCTAssertEqual(try SearchRoutes.decodeCursor(encoded), cursor)
+        XCTAssertEqual(SearchRoutes.literalLikePattern(#"50%_\완료"#), #"%50\%\_\\완료%"#)
+    }
+
+    func testWorkspaceSearchQueryValidationAndAgentScope() throws {
+        XCTAssertThrowsError(try SearchRoutes.normalizedQuery(" 한 "))
+        XCTAssertEqual(try SearchRoutes.normalizedQuery("  한글 search  "), "한글 search")
+        XCTAssertThrowsError(try SearchRoutes.decodeCursor("not-a-cursor"))
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "GET",
+                path: "/v1/workspaces/50000000-0000-7000-8000-000000000001/search/messages"
+            ),
+            "messages:read"
+        )
     }
 }
