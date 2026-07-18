@@ -135,6 +135,23 @@ struct MessagePage: ResponseEncodable {
     let nextBefore: Int64?
 }
 
+/// GET workspace search/messages response. Snippets are server-bounded around
+/// the first match; `matchOffset` is zero-based within `snippet`.
+struct WorkspaceMessageSearchHitDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let channelId: String
+    let messageId: String
+    let seq: Int64
+    let authorMemberId: String
+    let createdAtMs: Int64
+    let snippet: String
+    let matchOffset: Int
+}
+
+struct WorkspaceMessageSearchResponse: ResponseEncodable, Codable, Sendable, Equatable {
+    let hits: [WorkspaceMessageSearchHitDTO]
+    let nextCursor: String?
+}
+
 // ---- Read state ----
 
 /// PUT .../read-state request. The actor member id intentionally does not exist

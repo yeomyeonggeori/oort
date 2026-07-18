@@ -477,6 +477,12 @@ sample message-backfill get \
 guard_jq '(.messages | length) >= 1 and (.messages | map(.seq) == (map(.seq) | sort))' \
   "after-backfill is ascending and non-empty"
 
+sample workspace-message-search get \
+  "/v1/workspaces/{workspaceId}/search/messages" \
+  "/v1/workspaces/$WS/search/messages?q=openapi%20drift&limit=20" 200 "" "$ACCESS"
+guard_jq '(.hits | length) >= 1 and all(.hits[]; .matchOffset >= 0)' \
+  "workspace search returns the sent message with a match offset"
+
 # read-state: cursor advance + bulk read
 sample read-state-put put \
   "/v1/workspaces/{workspaceId}/channels/{channelId}/read-state" \

@@ -2655,4 +2655,29 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(routes.contains("/api/publish"))
         XCTAssertFalse(routes.contains("apiSecret"))
     }
+
+    func testWorkspaceSearchCursorRoundTripAndLiteralLikePattern() throws {
+        let cursor = SearchRoutes.Cursor(
+            createdAtMicros: 1_900_000_123_456_789,
+            seq: 42,
+            messageID: UUID(uuidString: "50000000-0000-7000-8000-000000000001")!
+        )
+        let encoded = SearchRoutes.encodeCursor(cursor)
+        XCTAssertFalse(encoded.contains("="))
+        XCTAssertEqual(try SearchRoutes.decodeCursor(encoded), cursor)
+        XCTAssertEqual(SearchRoutes.literalLikePattern(#"50%_\완료"#), #"%50\%\_\\완료%"#)
+    }
+
+    func testWorkspaceSearchQueryValidationAndAgentScope() throws {
+        XCTAssertThrowsError(try SearchRoutes.normalizedQuery(" 한 "))
+        XCTAssertEqual(try SearchRoutes.normalizedQuery("  한글 search  "), "한글 search")
+        XCTAssertThrowsError(try SearchRoutes.decodeCursor("not-a-cursor"))
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "GET",
+                path: "/v1/workspaces/50000000-0000-7000-8000-000000000001/search/messages"
+            ),
+            "messages:read"
+        )
+    }
 }
