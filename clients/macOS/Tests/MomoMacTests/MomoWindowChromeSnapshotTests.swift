@@ -122,11 +122,10 @@ final class MomoWindowChromeSnapshotTests: XCTestCase {
         _ scenario: Scenario,
         requiresWindowServer: Bool = false
     ) async throws -> NSImage {
+        // Appearance is pinned on the window and hosting view below. Mutating
+        // NSApplication.shared.appearance propagates asynchronously and bleeds
+        // into later offscreen snapshot renders (MOMO-472 full-suite flake).
         let appearance = NSAppearance(named: scenario.scheme == .dark ? .darkAqua : .aqua)
-        let application = NSApplication.shared
-        let previousApplicationAppearance = application.appearance
-        application.appearance = appearance
-        defer { application.appearance = previousApplicationAppearance }
 
         let hostingController = NSHostingController(rootView: try await rootView(for: scenario))
         let hostingView = hostingController.view

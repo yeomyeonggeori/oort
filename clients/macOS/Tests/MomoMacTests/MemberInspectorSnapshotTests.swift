@@ -25,11 +25,10 @@ final class MemberInspectorSnapshotTests: XCTestCase {
             throw XCTSkip("MOMO-385 profile evidence requires a WindowServer compositor")
         }
         let (viewModel, member) = try await makeViewModel()
+        // Appearance is pinned per-window/per-popover only. Mutating
+        // NSApplication.shared.appearance propagates asynchronously and bleeds
+        // into later offscreen snapshot renders (MOMO-472 full-suite flake).
         let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        let application = NSApplication.shared
-        let previousApplicationAppearance = application.appearance
-        application.appearance = appearance
-        defer { application.appearance = previousApplicationAppearance }
         let profile = MomoMemberProfilePopoverView(
             viewModel: viewModel,
             member: member,
@@ -58,6 +57,7 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         anchorWindow.makeKeyAndOrderFront(nil)
 
         let popover = NSPopover()
+        popover.appearance = appearance
         popover.behavior = .applicationDefined
         popover.animates = false
         popover.contentSize = NSSize(
@@ -209,11 +209,8 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         viewModel.composerDraft = "@"
         XCTAssertGreaterThan(viewModel.mentionAutocompleteCandidates().count, 0)
 
+        // Window-scoped appearance only — see MOMO-472 note above.
         let appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        let application = NSApplication.shared
-        let previousApplicationAppearance = application.appearance
-        application.appearance = appearance
-        defer { application.appearance = previousApplicationAppearance }
         let hostingController = NSHostingController(
             rootView: MessageListView(viewModel: viewModel, focusComposerRequest: 1)
                 .frame(width: 760, height: 620)
