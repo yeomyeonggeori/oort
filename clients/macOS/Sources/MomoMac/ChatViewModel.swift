@@ -138,6 +138,16 @@ public final class ChatViewModel: ObservableObject {
         case ready(WorkspaceID)
     }
 
+    private enum MessageMutationKind: Equatable {
+        case edit
+        case delete
+    }
+
+    private struct MessageMutationOperation: Equatable {
+        let id: UUID
+        let kind: MessageMutationKind
+    }
+
     // Backend contracts (same instance conforms to both, but typed separately).
     private let chat: any ChatBackend
     private let workspaceBackend: (any WorkspaceBackend)?
@@ -145,6 +155,7 @@ public final class ChatViewModel: ObservableObject {
     private let agentTransport: any AgentTransport
     private let workRunBackend: (any AgentWorkRunBackend)?
     private let messageInteractionBackend: (any MomoMessageInteractionBackend)?
+    private let channelNotificationBackend: (any MomoChannelNotificationBackend)?
     private let workspaceMessageSearchBackend: (any MomoWorkspaceMessageSearchBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
@@ -155,6 +166,10 @@ public final class ChatViewModel: ObservableObject {
 
     public var supportsMessageInteractions: Bool {
         messageInteractionBackend != nil
+    }
+
+    public var supportsChannelNotificationSettings: Bool {
+        channelNotificationBackend != nil
     }
 
     public var allowsLocalProfileEditing: Bool {
@@ -178,15 +193,21 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var recentChannelIds: [ChannelID] = []
     @Published public private(set) var readStatesByChannel: [ChannelID: ChannelReadState] = [:]
     @Published public private(set) var readStateSyncError: String?
+    @Published public private(set) var channelMuteStates: [ChannelID: Bool] = [:]
+    @Published public private(set) var channelMuteMutationIds: Set<ChannelID> = []
+    @Published public private(set) var channelNotificationErrors: [ChannelID: MomoChannelNotificationError] = [:]
+    private var channelMuteMutationTokens: [ChannelID: UUID] = [:]
 
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
     @Published private(set) var historyLoadingChannels: Set<ChannelID> = []
     @Published private var messageReactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
     @Published private(set) var messageInteractionErrors: [MessageID: MomoMessageInteractionError] = [:]
-    private var reactionMutationsInFlight: Set<String> = []
+    private var messageMutationOperations: [MessageID: MessageMutationOperation] = [:]
+    private var reactionMutationTokens: [String: UUID] = [:]
     private var reactionSnapshotTokens: [ChannelID: UUID] = [:]
     private var bufferedReactionDeltasByChannel: [ChannelID: [ReactionDelta]] = [:]
+    private var bufferedTimelineEventsByChannel: [ChannelID: [RealtimeEvent]] = [:]
 
     // Live agent state for the selected channel.
     /// In-flight `agent.partial` buffers, keyed by run, for AgentPartialView (L4 §5.2).
@@ -256,6 +277,7 @@ public final class ChatViewModel: ObservableObject {
     private var channelNavigationHistory: [ChannelID] = []
     private var channelNavigationIndex: Int?
     private var authenticatedMemberId: MemberID?
+    private var authoritativeInteractionMemberId: MemberID?
     private var activeTimelineChannelId: ChannelID?
     private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
     private var localTypingChannels: Set<ChannelID> = []
@@ -304,6 +326,7 @@ public final class ChatViewModel: ObservableObject {
         self.agentTransport = agentTransport
         self.workRunBackend = chat as? any AgentWorkRunBackend
         self.messageInteractionBackend = chat as? any MomoMessageInteractionBackend
+        self.channelNotificationBackend = chat as? any MomoChannelNotificationBackend
         self.workspaceMessageSearchBackend = chat as? any MomoWorkspaceMessageSearchBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
@@ -349,12 +372,14 @@ public final class ChatViewModel: ObservableObject {
                 ? loadedMembers
                 : applyLocalProfileHints(to: loadedMembers)
             let memberProvider = chat as? any AuthenticatedMemberIDProvidingBackend
-            let resolvedMemberID = await memberProvider?.authenticatedMemberID()
+            let providedMemberID = await memberProvider?.authenticatedMemberID()
+            let resolvedMemberID = providedMemberID
                 ?? self.members.first { $0.kind == .human && $0.status == .active }?.id
             guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
                 return
             }
             authenticatedMemberId = resolvedMemberID
+            authoritativeInteractionMemberId = providedMemberID
             let serverScope = await (chat as? any WorkspaceIdentityCacheScopeProviding)?
                 .workspaceIdentityCacheServerScope()
             guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
@@ -373,11 +398,19 @@ public final class ChatViewModel: ObservableObject {
             guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
                 return
             }
+            let loadedMuteStates = await channelNotificationBackend?
+                .channelMuteSnapshot(workspace: workspace) ?? [:]
+            guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
+                return
+            }
             await workspaceIdentityLoad
             guard isWorkspaceIdentitySessionCurrent(identitySessionGeneration, workspaceID: workspace) else {
                 return
             }
             self.channels = loadedChannels
+            self.channelMuteStates = Dictionary(
+                uniqueKeysWithValues: loadedChannels.map { ($0.id, loadedMuteStates[$0.id] ?? false) }
+            )
             if let readStateBackend {
                 do {
                     let states = try await readStateBackend.readStates(workspace: workspace)
@@ -508,9 +541,14 @@ public final class ChatViewModel: ObservableObject {
         recentChannelIds = []
         readStatesByChannel = [:]
         readStateSyncError = nil
+        channelMuteStates = [:]
+        channelMuteMutationIds = []
+        channelNotificationErrors = [:]
+        channelMuteMutationTokens = [:]
         channelNavigationHistory = []
         channelNavigationIndex = nil
         authenticatedMemberId = nil
+        authoritativeInteractionMemberId = nil
         workspaceIdentityCacheScope = nil
         activeTimelineChannelId = nil
         messagesByChannel = [:]
@@ -535,9 +573,11 @@ public final class ChatViewModel: ObservableObject {
         failedReplySends = [:]
         messageReactionMembers = [:]
         messageInteractionErrors = [:]
-        reactionMutationsInFlight = []
+        messageMutationOperations = [:]
+        reactionMutationTokens = [:]
         reactionSnapshotTokens = [:]
         bufferedReactionDeltasByChannel = [:]
+        bufferedTimelineEventsByChannel = [:]
         workRunsByChannel = [:]
         workRunLoadingChannels = []
         workRunDetailLoadingIds = []
@@ -563,6 +603,67 @@ public final class ChatViewModel: ObservableObject {
         clearConnectionErrorState(force: true)
         pendingFallbackMentionRuns = [:]
         channelCreateSessionState = .disconnected
+    }
+
+    public func isChannelMuted(_ channel: ChannelID) -> Bool {
+        channelMuteStates[channel] ?? false
+    }
+
+    @discardableResult
+    public func setChannelMuted(_ channel: ChannelID, muted: Bool) async -> Bool {
+        guard let channelNotificationBackend,
+              let workspaceId,
+              channels.contains(where: { $0.id == channel && !$0.isArchived }),
+              channelMuteMutationTokens[channel] == nil
+        else {
+            return false
+        }
+        let operationToken = UUID()
+        channelMuteMutationTokens[channel] = operationToken
+        channelMuteMutationIds.insert(channel)
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let previousValue = isChannelMuted(channel)
+        channelMuteStates[channel] = muted
+        channelNotificationErrors[channel] = nil
+        defer {
+            if channelMuteMutationTokens[channel] == operationToken {
+                channelMuteMutationTokens[channel] = nil
+                channelMuteMutationIds.remove(channel)
+            }
+        }
+
+        do {
+            let authoritative = try await channelNotificationBackend.setChannelMuted(
+                channel,
+                muted: muted
+            )
+            guard isWorkspaceIdentitySessionCurrent(
+                sessionGeneration,
+                workspaceID: workspaceId
+            ) else {
+                return false
+            }
+            channelMuteStates[channel] = authoritative
+            clearConnectionErrorState()
+            return authoritative == muted
+        } catch {
+            guard isWorkspaceIdentitySessionCurrent(
+                sessionGeneration,
+                workspaceID: workspaceId
+            ) else {
+                return false
+            }
+            channelMuteStates[channel] = previousValue
+            guard !Self.isCancellation(error) else { return false }
+            channelNotificationErrors[channel] = .updateFailed
+            reportConnectionError(error, as: .actionFailed)
+            return false
+        }
+    }
+
+    @discardableResult
+    public func toggleChannelMuted(_ channel: ChannelID) async -> Bool {
+        await setChannelMuted(channel, muted: !isChannelMuted(channel))
     }
 
     public func updateWorkspaceName(_ name: String) async -> Bool {
@@ -829,6 +930,9 @@ public final class ChatViewModel: ObservableObject {
     /// Inject channels (stub seeding path; real backend fetches them over REST).
     public func setChannels(_ channels: [Channel]) {
         self.channels = channels
+        channelMuteStates = Dictionary(
+            uniqueKeysWithValues: channels.map { ($0.id, channelMuteStates[$0.id] ?? false) }
+        )
         for channel in channels {
             ensureReadStateExists(channel: channel.id)
             subscribe(channel: channel.id)
@@ -899,6 +1003,7 @@ public final class ChatViewModel: ObservableObject {
                 channels.append(result.channel)
                 sortChannels()
             }
+            channelMuteStates[result.channel.id] = false
             ensureReadStateExists(channel: result.channel.id)
             subscribe(channel: result.channel.id)
             apply(result.creatorMembership)
@@ -1028,12 +1133,20 @@ public final class ChatViewModel: ObservableObject {
             guard directMessageOperationTokens[memberID] == operationToken,
                   isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId)
             else { return .ignored }
+            let muteSnapshot = await channelNotificationBackend?
+                .channelMuteSnapshot(workspace: workspaceId) ?? [:]
+            guard directMessageOperationTokens[memberID] == operationToken,
+                  isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId)
+            else { return .ignored }
             if let index = channels.firstIndex(where: { $0.id == channel.id }) {
                 channels[index] = channel
             } else {
                 channels.append(channel)
                 sortChannels()
             }
+            channelMuteStates[channel.id] = muteSnapshot[channel.id]
+                ?? channelMuteStates[channel.id]
+                ?? false
             for index in members.indices where channel.dmMemberIds.contains(members[index].id) {
                 if !members[index].channelIds.contains(channel.id) {
                     members[index].channelIds.append(channel.id)
@@ -1321,6 +1434,15 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func loadHistory(channel: ChannelID) async {
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let workspaceID = workspaceId
+        let navigationIntent = navigationIntentGeneration
+        guard isHistoryLoadCurrent(
+            sessionGeneration: sessionGeneration,
+            workspaceID: workspaceID,
+            channel: channel,
+            navigationIntent: navigationIntent
+        ) else { return }
         historyLoadingChannels.insert(channel)
         let reactionSnapshotToken: UUID? = if messageInteractionBackend != nil {
             UUID()
@@ -1332,6 +1454,7 @@ public final class ChatViewModel: ObservableObject {
             // snapshot is installed so there is no snapshot-to-subscribe gap.
             reactionSnapshotTokens[channel] = reactionSnapshotToken
             bufferedReactionDeltasByChannel[channel] = []
+            bufferedTimelineEventsByChannel[channel] = []
             await ensureChannelSubscriptionReady(channel: channel)
         }
         defer {
@@ -1340,29 +1463,80 @@ public final class ChatViewModel: ObservableObject {
                reactionSnapshotTokens[channel] == reactionSnapshotToken {
                 reactionSnapshotTokens[channel] = nil
                 let bufferedDeltas = bufferedReactionDeltasByChannel.removeValue(forKey: channel) ?? []
-                for delta in bufferedDeltas {
-                    applyReaction(delta)
+                let bufferedEvents = bufferedTimelineEventsByChannel.removeValue(forKey: channel) ?? []
+                if isHistoryLoadCurrent(
+                    sessionGeneration: sessionGeneration,
+                    workspaceID: workspaceID,
+                    channel: channel,
+                    navigationIntent: navigationIntent
+                ) {
+                    for event in bufferedEvents {
+                        apply(event, channel: channel)
+                    }
+                    for delta in bufferedDeltas {
+                        applyReaction(delta, channel: channel)
+                    }
                 }
             }
         }
+        guard isHistoryLoadCurrent(
+            sessionGeneration: sessionGeneration,
+            workspaceID: workspaceID,
+            channel: channel,
+            navigationIntent: navigationIntent
+        ) else { return }
         do {
             let history = try await chat.history(channel: channel, after: nil, limit: 200)
+            guard isHistoryLoadCurrent(
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID,
+                channel: channel,
+                navigationIntent: navigationIntent
+            ) else { return }
             messagesByChannel[channel] = history.sorted(by: Self.seqOrder)
             for message in history {
+                if message.isDeleted {
+                    invalidateReactionMutations(for: message.id)
+                    messageReactionMembers[message.id] = nil
+                    messageInteractionErrors[message.id] = nil
+                }
                 hydrateSidecars(from: message)
                 reconcileFinalMessage(message)
                 reconcileAgentWorking(from: message)
             }
             if let messageInteractionBackend {
                 let snapshot = try await messageInteractionBackend.reactionSnapshot(channel: channel)
-                guard reactionSnapshotTokens[channel] == reactionSnapshotToken else { return }
-                for message in history {
+                guard isHistoryLoadCurrent(
+                    sessionGeneration: sessionGeneration,
+                    workspaceID: workspaceID,
+                    channel: channel,
+                    navigationIntent: navigationIntent
+                ), reactionSnapshotTokens[channel] == reactionSnapshotToken else { return }
+                for message in history where !message.isDeleted && !message.isPendingAck {
                     messageReactionMembers[message.id] = snapshot[message.id]
                 }
             }
         } catch {
+            guard isHistoryLoadCurrent(
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID,
+                channel: channel,
+                navigationIntent: navigationIntent
+            ), !Self.isCancellation(error) else { return }
             reportConnectionError(error)
         }
+    }
+
+    private func isHistoryLoadCurrent(
+        sessionGeneration: UInt64,
+        workspaceID: WorkspaceID?,
+        channel: ChannelID,
+        navigationIntent: UInt64
+    ) -> Bool {
+        isSessionCurrent(sessionGeneration, workspaceID: workspaceID)
+            && navigationIntentGeneration == navigationIntent
+            && selectedChannelId == channel
+            && activeTimelineChannelId == channel
     }
 
     private func loadPendingApprovals(workspace: WorkspaceID) async {
@@ -1483,7 +1657,19 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func isCurrentMemberMessage(_ message: Message) -> Bool {
-        currentHumanMember?.id == message.authorMemberId
+        currentInteractionMemberID == message.authorMemberId
+    }
+
+    public func canInteractWithMessage(_ message: Message) -> Bool {
+        supportsMessageInteractions
+            && currentInteractionMemberID != nil
+            && !message.isPendingAck
+            && !message.isDeleted
+            && messageMutationOperations[message.id]?.kind != .delete
+    }
+
+    public func canModifyMessage(_ message: Message) -> Bool {
+        canInteractWithMessage(message) && isCurrentMemberMessage(message)
     }
 
     private func scheduleMarkRead(
@@ -1945,15 +2131,34 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func editMessage(_ message: Message, body: String) async -> Bool {
-        guard supportsMessageInteractions, isCurrentMemberMessage(message) else { return false }
+        guard canModifyMessage(message),
+              let workspaceId,
+              messageMutationOperations[message.id] == nil
+        else { return false }
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let operation = MessageMutationOperation(id: UUID(), kind: .edit)
+        messageMutationOperations[message.id] = operation
+        defer {
+            if messageMutationOperations[message.id] == operation {
+                messageMutationOperations[message.id] = nil
+            }
+        }
         do {
             let updated = try await chat.editMessage(message.id, body: trimmed)
+            guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  messageMutationOperations[message.id] == operation
+            else { return false }
             upsert(updated, channel: updated.channelId)
             messageInteractionErrors[message.id] = nil
+            clearConnectionErrorState()
             return true
         } catch {
+            guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  messageMutationOperations[message.id] == operation,
+                  !Self.isCancellation(error)
+            else { return false }
             messageInteractionErrors[message.id] = .editFailed
             reportConnectionError(error, as: .actionFailed)
             return false
@@ -1961,14 +2166,40 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func deleteMessage(_ message: Message) async -> Bool {
-        guard isCurrentMemberMessage(message), let messageInteractionBackend else { return false }
+        guard canModifyMessage(message),
+              let messageInteractionBackend,
+              let workspaceId,
+              messageMutationOperations[message.id]?.kind != .delete
+        else { return false }
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let operation = MessageMutationOperation(id: UUID(), kind: .delete)
+        // Delete supersedes an edit already in flight. The stale edit response
+        // cannot replace the tombstone because its operation token no longer matches.
+        messageMutationOperations[message.id] = operation
+        defer {
+            if messageMutationOperations[message.id] == operation {
+                messageMutationOperations[message.id] = nil
+            }
+        }
         do {
             let tombstone = try await messageInteractionBackend.deleteMessage(message.id)
+            guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  messageMutationOperations[message.id] == operation
+            else { return false }
+            // Keep reaction operations alive while deletion is only tentative so
+            // they can still finish or roll back if DELETE fails. Once the
+            // tombstone is authoritative, stale reaction completions must stop.
+            invalidateReactionMutations(for: message.id)
             upsert(tombstone, channel: tombstone.channelId)
             messageReactionMembers[message.id] = nil
             messageInteractionErrors[message.id] = nil
+            clearConnectionErrorState()
             return true
         } catch {
+            guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                  messageMutationOperations[message.id] == operation,
+                  !Self.isCancellation(error)
+            else { return false }
             messageInteractionErrors[message.id] = .deleteFailed
             reportConnectionError(error, as: .actionFailed)
             return false
@@ -1976,7 +2207,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func reactions(for message: Message) -> [MomoMessageReaction] {
-        let currentMemberID = currentHumanMember?.id
+        let currentMemberID = currentInteractionMemberID
         return (messageReactionMembers[message.id] ?? [:])
             .map { emoji, memberIDs in
                 MomoMessageReaction(
@@ -1990,12 +2221,20 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func toggleReaction(_ emoji: String, on message: Message) async {
-        guard !message.isDeleted,
-              let memberID = currentHumanMember?.id,
-              let messageInteractionBackend else { return }
+        guard canInteractWithMessage(message),
+              let memberID = currentInteractionMemberID,
+              let messageInteractionBackend,
+              let workspaceId else { return }
         let mutationKey = "\(message.id.description):\(emoji)"
-        guard reactionMutationsInFlight.insert(mutationKey).inserted else { return }
-        defer { reactionMutationsInFlight.remove(mutationKey) }
+        guard reactionMutationTokens[mutationKey] == nil else { return }
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let operationToken = UUID()
+        reactionMutationTokens[mutationKey] = operationToken
+        defer {
+            if reactionMutationTokens[mutationKey] == operationToken {
+                reactionMutationTokens[mutationKey] = nil
+            }
+        }
         var reactions = messageReactionMembers[message.id] ?? [:]
         var members = reactions[emoji] ?? []
         let wasSelected = members.contains(memberID)
@@ -2005,13 +2244,23 @@ public final class ChatViewModel: ObservableObject {
             messageReactionMembers[message.id] = reactions
             do {
                 try await messageInteractionBackend.removeReaction(message.id, emoji: emoji)
+                guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                      reactionMutationTokens[mutationKey] == operationToken,
+                      canApplyReaction(to: message.id, channel: message.channelId)
+                else { return }
                 messageInteractionErrors[message.id] = nil
+                clearConnectionErrorState()
             } catch {
+                guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                      reactionMutationTokens[mutationKey] == operationToken,
+                      canApplyReaction(to: message.id, channel: message.channelId)
+                else { return }
                 var latest = messageReactionMembers[message.id] ?? [:]
                 var latestMembers = latest[emoji] ?? []
                 latestMembers.insert(memberID)
                 latest[emoji] = latestMembers
                 messageReactionMembers[message.id] = latest
+                guard !Self.isCancellation(error) else { return }
                 messageInteractionErrors[message.id] = .reactionFailed
                 reportConnectionError(error, as: .actionFailed)
             }
@@ -2021,17 +2270,39 @@ public final class ChatViewModel: ObservableObject {
             messageReactionMembers[message.id] = reactions
             do {
                 try await chat.addReaction(message.id, emoji: emoji)
+                guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                      reactionMutationTokens[mutationKey] == operationToken,
+                      canApplyReaction(to: message.id, channel: message.channelId)
+                else { return }
                 messageInteractionErrors[message.id] = nil
+                clearConnectionErrorState()
             } catch {
+                guard isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceId),
+                      reactionMutationTokens[mutationKey] == operationToken,
+                      canApplyReaction(to: message.id, channel: message.channelId)
+                else { return }
                 var latest = messageReactionMembers[message.id] ?? [:]
                 var latestMembers = latest[emoji] ?? []
                 latestMembers.remove(memberID)
                 latest[emoji] = latestMembers.isEmpty ? nil : latestMembers
                 messageReactionMembers[message.id] = latest
+                guard !Self.isCancellation(error) else { return }
                 messageInteractionErrors[message.id] = .reactionFailed
                 reportConnectionError(error, as: .actionFailed)
             }
         }
+    }
+
+    private func invalidateReactionMutations(for messageID: MessageID) {
+        let prefix = "\(messageID.description):"
+        reactionMutationTokens = reactionMutationTokens.filter { !$0.key.hasPrefix(prefix) }
+    }
+
+    private func canApplyReaction(to messageID: MessageID, channel: ChannelID) -> Bool {
+        guard let message = messagesByChannel[channel]?.first(where: { $0.id == messageID }) else {
+            return false
+        }
+        return !message.isPendingAck && !message.isDeleted
     }
 
     private func updateOptimisticMessage(
@@ -2388,18 +2659,34 @@ public final class ChatViewModel: ObservableObject {
         switch event {
         case .message(let message):
             guard message.channelId == channel else { return }
+            if reactionSnapshotTokens[channel] != nil {
+                bufferedTimelineEventsByChannel[channel, default: []].append(event)
+                return
+            }
             if upsert(message, channel: channel) {
                 noteIncomingMessageForUnread(message)
             }
         case .messageEdited(let message):
             guard message.channelId == channel else { return }
+            if reactionSnapshotTokens[channel] != nil {
+                bufferedTimelineEventsByChannel[channel, default: []].append(event)
+                return
+            }
             upsert(message, channel: channel)
         case .messageDeleted(let id):
+            if reactionSnapshotTokens[channel] != nil {
+                bufferedTimelineEventsByChannel[channel, default: []].append(event)
+                return
+            }
             if var msgs = messagesByChannel[channel],
                let idx = msgs.firstIndex(where: { $0.id == id }) {
                 msgs[idx].state = .deleted
+                msgs[idx].body = nil
                 messagesByChannel[channel] = msgs
             }
+            invalidateReactionMutations(for: id)
+            messageReactionMembers[id] = nil
+            messageInteractionErrors[id] = nil
         case .threadUpdated(let delta):
             guard delta.channelId == channel,
                   var messages = messagesByChannel[channel],
@@ -2426,7 +2713,7 @@ public final class ChatViewModel: ObservableObject {
             if reactionSnapshotTokens[channel] != nil {
                 bufferedReactionDeltasByChannel[channel, default: []].append(delta)
             } else {
-                applyReaction(delta)
+                applyReaction(delta, channel: channel)
             }
         case .presence, .huddle:
             // Rendered elsewhere / not material to the v0 demo surfaces.
@@ -2434,7 +2721,8 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func applyReaction(_ delta: ReactionDelta) {
+    private func applyReaction(_ delta: ReactionDelta, channel: ChannelID) {
+        guard canApplyReaction(to: delta.messageId, channel: channel) else { return }
         var reactions = messageReactionMembers[delta.messageId] ?? [:]
         var members = reactions[delta.emoji] ?? []
         switch delta.action {
@@ -2451,6 +2739,13 @@ public final class ChatViewModel: ObservableObject {
         let existingIndex = msgs.firstIndex(where: { $0.id == message.id })
             ?? (message.clientMsgId.flatMap { cid in msgs.firstIndex(where: { $0.clientMsgId == cid }) })
         if let idx = existingIndex {
+            let existing = msgs[idx]
+            if existing.id == message.id,
+               existing.state == .deleted,
+               message.state != .deleted,
+               existing.seq == message.seq {
+                return false
+            }
             msgs[idx] = message
         } else {
             msgs.append(message)
@@ -2951,6 +3246,13 @@ public final class ChatViewModel: ObservableObject {
             return authenticated
         }
         return members.first { $0.kind == .human && $0.status == .active }
+    }
+
+    private var currentInteractionMemberID: MemberID? {
+        if usesServerRosterSourceOfTruth {
+            return authoritativeInteractionMemberId
+        }
+        return authenticatedMemberId ?? currentHumanMember?.id
     }
 
     private func startLocalTyping(channel: ChannelID) {

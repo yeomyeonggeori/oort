@@ -137,6 +137,10 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
         }
     }
 
+    private var snapshotRecordMode: SnapshotTestingConfiguration.Record? {
+        ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1" ? .all : nil
+    }
+
     private func writeDesignReviewArtifact(_ image: NSImage, named name: String) throws {
         guard let directory = ProcessInfo.processInfo.environment["MOMO_DESIGN_REVIEW_ARTIFACT_DIR"] else {
             return
@@ -194,7 +198,8 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "light"
+            named: "light",
+            record: snapshotRecordMode
         )
     }
 
@@ -207,7 +212,8 @@ final class MomoChannelChromeSnapshotTests: XCTestCase {
         assertSnapshot(
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
-            named: "dark"
+            named: "dark",
+            record: snapshotRecordMode
         )
     }
 }

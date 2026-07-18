@@ -2222,12 +2222,18 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] openapi + verify_message_interaction + Core 디코드 왕복 테스트 + runtime-db 편입. 상세: issue #506 본문(패킷 겸용). 랜딩 시 X-2→UXUI(501 해제) 개방.
 - 랜딩: PR #507 squash → **track/engine**(2026-07-18) → main(2026-07-18 밤). 실런: verify_message_interaction PASS + 서버 109/Core 27(payload 왕복 4종). 게이트 유일 실패=ChannelCreation 스냅샷 flake family(선재, MOMO-472 범위 재확장).
 
-### ☐ MOMO-479 (`#508`) 수용기준 — 스레드 롤업 투영 + 답글 조회 + 에이전트 root_id 보존 (X-3) `[runtime-db]` · **PR base=track/engine**
-- [ ] 히스토리/전송 응답 톱레벨 메시지에 `thread: {reply_count, last_reply_seq, last_reply_at}` 가산(LEFT JOIN, 답글 0이면 생략) + Core Message 가산 디코드.
-- [ ] `GET .../messages/:root/replies` seq ASC·cursor·멤버십 강제·교차채널 404·비톱레벨 400·tombstone 포함 + openapi.
-- [ ] 답글 tx outbox `thread.updated` + Core kind 가산(unknown-skip 유지) — 단일 쓰기경로 준수.
-- [ ] AgentWorker 답변 root_id 보존(INSERT 4사이트 전수) + 동일 tx 롤업·이벤트, MessageRoutes 의미론 정합.
-- [ ] verify_thread_projection.sh(롤업 수치/과거 답글/realtime/에이전트/RLS) + runtime-db 편입. 상세: issue #508 본문(패킷 겸용).
+### ☑ MOMO-479 (`#508`) 수용기준 — 스레드 롤업 투영 + 답글 조회 + 에이전트 root_id 보존 (X-3) `[runtime-db]` · **PR base=track/engine**
+- [x] 히스토리/전송 응답 톱레벨 메시지에 `thread: {reply_count, last_reply_seq, last_reply_at}` 가산(LEFT JOIN, 답글 0이면 생략) + Core Message 가산 디코드.
+- [x] `GET .../messages/:root/replies` seq ASC·cursor·멤버십 강제·교차채널 404·비톱레벨 400·tombstone 포함 + openapi.
+- [x] 답글 tx outbox `thread.updated` + Core kind 가산(unknown-skip 유지) — 단일 쓰기경로 준수.
+- [x] AgentWorker 답변 root_id 보존(INSERT 4사이트 전수) + 동일 tx 롤업·이벤트, MessageRoutes 의미론 정합.
+- [x] verify_thread_projection.sh(롤업 수치/과거 답글/realtime/에이전트/RLS) + runtime-db 편입. 상세: issue #508 본문(패킷 겸용).
+- 랜딩: PR #509 squash → **track/engine**(2026-07-19, main 대기). 실런: verify_thread_projection 전 항목 PASS(격리+게이트 내) + server 111/Core 30/AgentWorker 31. 검수 수정: **thread.updated Centrifugo version 무언 드랍 실측·수정**(no-version 발행) — 동일 기전 478 상호작용 이벤트 상시 드랍은 선재 결함으로 MOMO-480(`#510`) 발급. e2e compose cp -Rp·swift run -j 8 안정화(7.7GiB VM OOM 대응). 게이트 잔여 실패=QuickSwitcher 스냅샷 4건(MOMO-472 family 재확장, 격리 6/6 PASS).
+
+### ☐ MOMO-480 (`#510`) 수용기준 — 상호작용 realtime 이벤트 version 드랍 수정 (478 선재) `[runtime-db]` · **PR base=track/engine**
+- [ ] encodeInteractionPayload version 제거(투영 이벤트 no-version 계약 — 479 thread.updated와 동일) + 사유 주석.
+- [ ] verify_message_interaction realtime 단정을 Centrifugo history 실수신으로 강화(새 메시지로 version 상승 상태에서 4종 수신) — 회귀 가드.
+- [ ] 서버 테스트 version 단정 XCTAssertNil 교체. 상세: issue #510 본문(패킷 겸용).
 
 ### ☑ MOMO-480 (`#510`) 수용기준 — 상호작용 realtime 이벤트 version 드랍 수정 (478 선재) `[runtime-db]` · **PR base=track/engine**
 - [x] encodeInteractionPayload version 제거(투영 이벤트 no-version 계약 — 479 thread.updated와 동일) + 사유 주석.

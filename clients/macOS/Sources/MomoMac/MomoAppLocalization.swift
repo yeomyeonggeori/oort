@@ -507,10 +507,45 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    var channelNotificationsPlanned: String {
+    var muteChannel: String {
         switch language {
-        case .korean: return "채널 알림은 준비 중"
-        case .english: return "Channel notifications coming later"
+        case .korean: return "채널 음소거"
+        case .english: return "Mute channel"
+        }
+    }
+
+    var unmuteChannel: String {
+        switch language {
+        case .korean: return "채널 알림 켜기"
+        case .english: return "Unmute channel"
+        }
+    }
+
+    var channelMuted: String {
+        switch language {
+        case .korean: return "채널 음소거됨"
+        case .english: return "Channel muted"
+        }
+    }
+
+    var channelNotifications: String {
+        switch language {
+        case .korean: return "알림"
+        case .english: return "Notifications"
+        }
+    }
+
+    var channelMuteDescription: String {
+        switch language {
+        case .korean: return "멘션을 포함한 모든 푸시 알림을 중지합니다. 읽지 않음 표시는 계속 갱신됩니다."
+        case .english: return "Stop all push notifications, including mentions. Unread indicators continue to update."
+        }
+    }
+
+    var updatingChannelNotifications: String {
+        switch language {
+        case .korean: return "채널 알림 설정 변경 중"
+        case .english: return "Updating channel notifications"
         }
     }
 
