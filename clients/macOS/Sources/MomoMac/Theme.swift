@@ -346,7 +346,7 @@ public enum MomoTheme {
     public enum ChannelHeader {
         public static let iconSize: CGFloat = 24
         public static let actionSize: CGFloat = 28
-        public static let minimumHeight: CGFloat = 44
+        public static let minimumHeight: CGFloat = 48
         public static let searchUnavailableWidth: CGFloat = 320
         public static let settingsSheetWidth: CGFloat = 640
         public static let settingsSheetHeight: CGFloat = 520
@@ -359,7 +359,7 @@ public enum MomoTheme {
 
     /// Dimensions shared by the full-height three-zone macOS window shell.
     public enum WindowChrome {
-        public static let minimumControlBandHeight: CGFloat = 44
+        public static let minimumControlBandHeight: CGFloat = 52
         public static let centerControlsReservedWidth: CGFloat = 120
     }
 
