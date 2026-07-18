@@ -2217,9 +2217,10 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] verify_notification_mute(음소거 0/해제 재개/페어 격리/로그 무오염/RLS) + runtime-db 편입 + openapi. 상세: issue #504 본문(패킷 겸용). 랜딩 시 UXUI A큐에 설정 UI 등재.
 - 랜딩: PR #505 squash → **track/engine**(2026-07-18, main 대기). 실런: verify_notification_mute 전 항목 PASS + runtime-db 게이트 PASS. muted_until 만료 자동 재개까지 동작(후속 스케줄 무료).
 
-### ☐ MOMO-478 (`#506`) 수용기준 — 메시지 상호작용 REST (X-2 서버 절반) `[runtime-db]` · **PR base=track/engine**
-- [ ] PATCH 수정(작성자만·edited_at)/DELETE 삭제(tombstone·body NULL·reaction 정리)/PUT·DELETE 반응(멱등·상한)/GET 채널 반응 스냅샷 — 같은 tx+outbox 4 kind(Core 디코더 정본 정합)+audit, seq 불변.
-- [ ] openapi + verify_message_interaction + Core 디코드 왕복 테스트 + runtime-db 편입. 상세: issue #506 본문(패킷 겸용). 랜딩 시 X-2→UXUI(501 해제) 개방.
+### ☑ MOMO-478 (`#506`) 수용기준 — 메시지 상호작용 REST (X-2 서버 절반) `[runtime-db]` · **PR base=track/engine**
+- [x] PATCH 수정(작성자만·edited_at)/DELETE 삭제(tombstone·body NULL·reaction 정리)/PUT·DELETE 반응(멱등·상한)/GET 채널 반응 스냅샷 — 같은 tx+outbox 4 kind(Core 디코더 정본 정합)+audit, seq 불변.
+- [x] openapi + verify_message_interaction + Core 디코드 왕복 테스트 + runtime-db 편입. 상세: issue #506 본문(패킷 겸용). 랜딩 시 X-2→UXUI(501 해제) 개방.
+- 랜딩: PR #507 squash → **track/engine**(2026-07-18, main 대기). 실런: verify_message_interaction PASS + 서버 109/Core 27(payload 왕복 4종). 게이트 유일 실패=ChannelCreation 스냅샷 flake family(선재, MOMO-472 범위 재확장).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

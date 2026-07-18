@@ -14,6 +14,7 @@
 | A-4 | `ready` | **스레드 실전송** | 컴포저 "스레드 초안(로컬)"을 실전송으로: 전송 시 `rootId` 포함(**1단계 스레드만** — 대댓글 불가 계약), 타임라인 답글 표시(`rootId` 필드 수신), thread 롤업(reply_count/last_reply) 배지 | `SendMessageRequest.rootId` + thread 롤업 — MessageRoutes.swift, `verify_thread_reply.sh`가 계약 예시 |
 | A-6 | `ready` | **파일 첨부 실업로드** | 컴포저 "파일 첨부(로컬 초안)"를 실물로: ①세션 발급 REST ②**클라가 Google에 직접 청크 PUT**(서버 비경유) ③complete ④전송 시 `attachmentIds` ⑤수신 측 content 프록시 다운로드 | AttachmentRoutes.swift, openapi, `verify_attachment_upload.sh`가 흐름 예시 |
 | A-7 | `ready` | **검색 서버 승격** | `MomoWorkspaceSearchIndex`의 메시지 소스를 서버 FTS로 교체(기존 심 `MomoWorkspaceSearchDestination` 유지 — handoff 2026-07-17 설계대로). "현재 불러온 대화에서 검색" 카피를 실검색으로 승격 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
+| A-9 | `ready`(track/engine — main 대기) | **반응/수정/삭제 UI 개방** | MomoServerRESTChatBackend의 editMessage/addReaction 501 두 곳을 실호출로 교체 + removeReaction/deleteMessage/reactionSnapshot 구현 → MomoMessageInteractionBackend capability 자동 개방(UI 기완비) | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
 | A-8 | `ready`(track/engine — main 대기) | **채널 음소거 설정 UI** | 채널 목록 응답의 `muted` 표시(음소거 아이콘) + 채널 컨텍스트/설정에 음소거 토글(`PUT /v1/workspaces/:ws/channels/:ch/notification-pref` {muted}) | ChannelRoutes/DTOs, ADR-0124(멘션 포함 전면 억제·unread 무영향), verify_notification_mute.sh가 계약 예시 |
 | A-5 | `ready` | **허들 UI 폴리시** | design High 2건(disabled 사유 키보드 접근성, 참가 상태별 시각 증거) + 실창 QA | MomoHuddle*.swift |
 
@@ -22,7 +23,7 @@
 | # | 상태 | UXUI에서 확인·수정한 엔진 소유 항목 | 엔진 액션 | 근거 |
 |---|---|---|---|---|
 | X-1 | `done`(track/engine `baa337e` — main은 다음 승인 머지 승차. 엔진 빌드 기동 검증 OK. uxui 워크트리의 동일 수정 미커밋분은 UXUI가 정리) | `scripts/macos_dev_run.sh`가 SwiftPM 바이너리 프레임워크·리소스 번들을 개발용 `.app`에 스테이징하도록 보완 | `track/engine`에 동일 수정 이식 후 엔진 트랙 빌드로 재검증 | LiveKit 도입 후 `@rpath/LiveKitWebRTC.framework/LiveKitWebRTC` 누락으로 앱이 시작 즉시 DYLD 종료; UXUI 트랙 `--verify` 프로세스+창 PASS (2026-07-18) |
-| X-2 | `in-progress`(MOMO-478 `#506`, 서버 절반)(B-4 다음 엔진 후보로 채택 — UXUI가 capability gate로 UI를 이미 완비, 엔진 REST edit/reaction/delete+realtime 확인 이벤트만 채우면 즉시 개방) | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 스레드 실전송은 main에 열렸지만 실서버 REST의 `editMessage`·`addReaction`은 현재 501이고 remove/delete 계약도 없어, 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | REST edit/add/remove/delete 명령과 권한 오류·realtime 확인 이벤트를 모두 연결한 뒤 `MomoMessageInteractionBackend` capability를 실서버에 부여 | macOS `MessageInteractionModel.swift`, `ChatViewModel.toggleReaction/deleteMessage`, `MessageInteractionTests` (2026-07-18) |
+| X-2 | `done`(서버 절반 → track/engine, main 대기)(B-4 다음 엔진 후보로 채택 — UXUI가 capability gate로 UI를 이미 완비, 엔진 REST edit/reaction/delete+realtime 확인 이벤트만 채우면 즉시 개방) | 메시지 반응 집계·스레드·작성자 전용 수정/삭제 UX를 구현. 스레드 실전송은 main에 열렸지만 실서버 REST의 `editMessage`·`addReaction`은 현재 501이고 remove/delete 계약도 없어, 네 동작 전체가 영속 가능한 백엔드에서만 UI를 노출하도록 capability gate 적용 | REST edit/add/remove/delete 명령과 권한 오류·realtime 확인 이벤트를 모두 연결한 뒤 `MomoMessageInteractionBackend` capability를 실서버에 부여 | macOS `MessageInteractionModel.swift`, `ChatViewModel.toggleReaction/deleteMessage`, `MessageInteractionTests` (2026-07-18) |
 
 ## B. 엔진 역요청 (남은 것)
 
