@@ -2230,10 +2230,11 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] verify_thread_projection.sh(롤업 수치/과거 답글/realtime/에이전트/RLS) + runtime-db 편입. 상세: issue #508 본문(패킷 겸용).
 - 랜딩: PR #509 squash → **track/engine**(2026-07-19, main 대기). 실런: verify_thread_projection 전 항목 PASS(격리+게이트 내) + server 111/Core 30/AgentWorker 31. 검수 수정: **thread.updated Centrifugo version 무언 드랍 실측·수정**(no-version 발행) — 동일 기전 478 상호작용 이벤트 상시 드랍은 선재 결함으로 MOMO-480(`#510`) 발급. e2e compose cp -Rp·swift run -j 8 안정화(7.7GiB VM OOM 대응). 게이트 잔여 실패=QuickSwitcher 스냅샷 4건(MOMO-472 family 재확장, 격리 6/6 PASS).
 
-### ☐ MOMO-480 (`#510`) 수용기준 — 상호작용 realtime 이벤트 version 드랍 수정 (478 선재) `[runtime-db]` · **PR base=track/engine**
-- [ ] encodeInteractionPayload version 제거(투영 이벤트 no-version 계약 — 479 thread.updated와 동일) + 사유 주석.
-- [ ] verify_message_interaction realtime 단정을 Centrifugo history 실수신으로 강화(새 메시지로 version 상승 상태에서 4종 수신) — 회귀 가드.
-- [ ] 서버 테스트 version 단정 XCTAssertNil 교체. 상세: issue #510 본문(패킷 겸용).
+### ☑ MOMO-480 (`#510`) 수용기준 — 상호작용 realtime 이벤트 version 드랍 수정 (478 선재) `[runtime-db]` · **PR base=track/engine**
+- [x] encodeInteractionPayload version 제거(투영 이벤트 no-version 계약 — 479 thread.updated와 동일) + 사유 주석.
+- [x] verify_message_interaction realtime 단정을 Centrifugo history 실수신으로 강화(새 메시지로 version 상승 상태에서 4종 수신) — 회귀 가드.
+- [x] 서버 테스트 4종 version 단정 XCTAssertNil + 드랍 사유 메시지. 상세: issue #510 본문(패킷 겸용).
+- 실런(오케스트레이터): verify_message_interaction 전 항목 PASS(회귀 전제조건+4종 history 실수신 포함) + server 112 + runtime-db 게이트 PASS(실패 0).
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

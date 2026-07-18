@@ -1979,6 +1979,41 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(payload["last_reply_at"] as? Int64, 1_782_463_260_125)
     }
 
+    func testInteractionEnvelopesOmitCentrifugoVersion() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let channel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        let interactionTypes = [
+            "message.edited",
+            "message.deleted",
+            "reaction.added",
+            "reaction.removed",
+        ]
+
+        for eventType in interactionTypes {
+            let raw = MessageRoutes.encodeInteractionPayload(
+                workspaceID: workspaceID,
+                channelID: channelID,
+                eventType: eventType,
+                timestampMs: 1_782_463_260_125,
+                seq: 43,
+                payload: .object(["message_id": .string(UUID().uuidString)])
+            )
+            let outbox = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+            )
+            XCTAssertNil(
+                outbox["version"],
+                "\(eventType) reuses its target message seq; a Centrifugo version <= message.new would be silently dropped"
+            )
+            XCTAssertEqual(outbox["channel"] as? String, channel)
+            XCTAssertNotNil(outbox["idempotency_key"] as? String)
+            let data = try XCTUnwrap(outbox["data"] as? [String: Any])
+            XCTAssertEqual(data["type"] as? String, eventType)
+            XCTAssertEqual(data["seq"] as? Int, 43)
+        }
+    }
+
     func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {
         XCTAssertNil(try MessageRoutes.repliesCursor(nil))
         XCTAssertNil(try MessageRoutes.repliesCursor("  "))
