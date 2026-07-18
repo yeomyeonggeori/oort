@@ -412,6 +412,12 @@ guard_jq '(.channels | length) >= 1' "channel list is non-empty"
 GENERAL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.channels[] | select(.name == "general") | .id' | head -1)"
 [ -n "$GENERAL_ID" ] || { echo "[openapi] FAIL: #general channel not found" >&2; exit 1; }
 
+sample notification-pref put \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/notification-pref" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/notification-pref" 200 \
+  '{"muted":true}' "$ACCESS"
+guard_jq '.muted == true' "notification preference returns the effective mute state"
+
 sample channel-create post "/v1/workspaces/{workspaceId}/channels" "/v1/workspaces/$WS/channels" 201 \
   "$(jq -cn --arg n "gate-$RUN_EPOCH" '{kind:"public",name:$n,topic:"openapi drift gate"}')" "$ACCESS"
 

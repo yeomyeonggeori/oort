@@ -37,6 +37,7 @@
 | `ADR-0109` | unread/read-state 서버 계약 (UX P7) | Fable | **`accepted`** (2026-07-13) | 성재 ✓ | Wave 2(MOMO-366/367)까지 랜딩 완료 — 후속 없음 |
 | `ADR-0111` | Agent Work Surface — 메신저 내 업무·터미널·코드 실행 (성재 발제) | Fable | **`accepted`** (2026-07-13, Option A=BYOA) | 성재 ✓ | 배치 종결 (2026-07-13) |
 | `ADR-0112` | 제품 표면 재정렬 — 듀얼 모드·Slack 기본기·Codex급 상호작용 (성재 발제) | Fable | **`accepted`** (2026-07-14) | 성재 ✓ | Wave A+379 종결; B/C는 육안 QA 후 발급 |
+| `ADR-0124` | 알림 음소거 계약 (채널 mute, 서버 판정) | Fable | **`accepted`** (2026-07-18) | 성재 ✓ | MOMO-477 진행(track/engine) → 랜딩 시 UXUI A큐에 설정 UI 등재 |
 | `ADR-0122` | 음성 허들 + 회의 지능 (LiveKit) | Fable | **`accepted`** (2026-07-18) | 성재 ✓ | V-1(MOMO-468) 진행 → V-2 infra → V-3 macOS(UX 조율)→V-3b iOS. v1/v2는 후속 |
 | `ADR-0123` | iOS 클라이언트 v0 — dogfood-first 모바일 수신부 (성재 발제 2026-07-17) | Fable | **`accepted`** (2026-07-17) | 성재 ✓ | IOS-1~5 전부 랜딩(2026-07-17, `3d321c6`) — 잔여는 TestFlight 런북 [manual](성재 실기기 E2E). v1 수렴·M8 이월 항목은 ADR 참조 |
 | `PLN-20260714-01` | UX/UI 수동 QA + ADR-0112 후속 실행 순서 | `momo-main` | **`superseded`** | 성재 | 2026-07-14 실창 QA를 `PLN-20260715-01`로 이어받음 |

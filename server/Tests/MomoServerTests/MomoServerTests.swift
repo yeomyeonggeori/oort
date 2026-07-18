@@ -1541,7 +1541,8 @@ final class MomoServerTests: XCTestCase {
               "topic": "팀 일반 채널",
               "dmKey": null,
               "createdBy": "00000000-0000-7000-8000-000000000101",
-              "archivedAtMs": null
+              "archivedAtMs": null,
+              "muted": true
             },
             {
               "id": "00000000-0000-7000-8000-000000000202",
@@ -1551,7 +1552,8 @@ final class MomoServerTests: XCTestCase {
               "topic": "에이전트 실험실",
               "dmKey": null,
               "createdBy": "00000000-0000-7000-8000-000000000101",
-              "archivedAtMs": null
+              "archivedAtMs": null,
+              "muted": false
             }
           ]
         }
@@ -1561,6 +1563,7 @@ final class MomoServerTests: XCTestCase {
 
         XCTAssertEqual(response.channels.map(\.name), ["general", "agent-lab"])
         XCTAssertEqual(response.channels.map(\.kind), ["public", "public"])
+        XCTAssertEqual(response.channels.map(\.muted), [true, false])
         XCTAssertEqual(response.channels.first?.createdBy, "00000000-0000-7000-8000-000000000101")
         XCTAssertNil(response.channels.first?.archivedAtMs)
     }
@@ -1594,7 +1597,8 @@ final class MomoServerTests: XCTestCase {
               "00000000-0000-7000-8000-000000000103"
             ],
             "createdBy": "00000000-0000-7000-8000-000000000101",
-            "archivedAtMs": null
+            "archivedAtMs": null,
+            "muted": false
           },
           "created": false
         }
@@ -1604,6 +1608,7 @@ final class MomoServerTests: XCTestCase {
 
         XCTAssertEqual(response.channel.kind, "dm")
         XCTAssertEqual(response.channel.memberIds?.count, 2)
+        XCTAssertFalse(response.channel.muted)
         XCTAssertFalse(response.created, "A repeated POST returns the existing DM")
     }
 
