@@ -6,9 +6,40 @@ private enum MomoHuddleLayout {
     static let participantListMaximumHeight: CGFloat = 240
 }
 
-struct MomoHuddleHeaderControl: View {
+struct MomoHuddleComposerControlPresentation: Equatable {
+    enum Tone: Equatable {
+        case secondary
+        case accent
+        case success
+        case warning
+    }
+
+    let systemImage: String
+    let tone: Tone
+
+    static func resolve(
+        state: MomoHuddleState,
+        hasActiveHuddle: Bool
+    ) -> MomoHuddleComposerControlPresentation {
+        switch state {
+        case .unavailable, .connecting:
+            return .init(systemImage: "waveform", tone: .secondary)
+        case .idle:
+            return hasActiveHuddle
+                ? .init(systemImage: "person.wave.2", tone: .accent)
+                : .init(systemImage: "waveform", tone: .accent)
+        case .joined:
+            return .init(systemImage: "waveform", tone: .success)
+        case .failed:
+            return .init(systemImage: "arrow.clockwise", tone: .warning)
+        }
+    }
+}
+
+struct MomoHuddleComposerControl: View {
     @ObservedObject var viewModel: MomoHuddleViewModel
     let copy: MomoHuddleCopy
+    let isChannelSelected: Bool
     @State private var showsPanel = false
 
     var body: some View {
@@ -21,21 +52,20 @@ struct MomoHuddleHeaderControl: View {
                 viewModel.beginStartOrJoin()
             }
         } label: {
-            HStack(spacing: 4) {
+            Group {
                 if viewModel.state == .connecting {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Image(systemName: "waveform")
+                    Image(systemName: presentation.systemImage)
                 }
-                Text(buttonTitle)
-                    .monospacedDigit()
             }
-            .momoTypography(.supportingEmphasized)
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(.plain)
+        .foregroundStyle(controlColor)
         .disabled(isDisabled)
-        .help(helpText)
         .momoQuickTooltip(helpText)
         .accessibilityLabel(buttonTitle)
         .accessibilityHint(helpText)
@@ -61,6 +91,22 @@ struct MomoHuddleHeaderControl: View {
         }
     }
 
+    private var presentation: MomoHuddleComposerControlPresentation {
+        .resolve(
+            state: viewModel.state,
+            hasActiveHuddle: viewModel.activeHuddle != nil
+        )
+    }
+
+    private var controlColor: Color {
+        switch presentation.tone {
+        case .secondary: .secondary
+        case .accent: MomoTheme.humanAccent
+        case .success: MomoTheme.reversibleGreen
+        case .warning: MomoTheme.costAmber
+        }
+    }
+
     private var helpText: String {
         switch viewModel.state {
         case .unavailable(let reason), .failed(let reason): reason
@@ -70,7 +116,8 @@ struct MomoHuddleHeaderControl: View {
     }
 
     private var isDisabled: Bool {
-        switch viewModel.state {
+        guard isChannelSelected else { return true }
+        return switch viewModel.state {
         case .unavailable, .connecting: true
         case .idle, .joined, .failed: false
         }

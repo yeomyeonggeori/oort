@@ -58,16 +58,51 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertGreaterThan(MomoWindowChromeLayout.centerChromeControlsReservedWidth, 0)
     }
 
-    func testCenterHeaderUsesTrafficLightInsetOnlyWhenSidebarIsCollapsed() {
+    func testChannelHeaderMenuUsesStableWidthAndLocalizedCloseCopy() {
+        XCTAssertEqual(MomoTheme.ChannelHeader.menuWidth, 320)
+        XCTAssertEqual(MomoWorkspaceCopy(language: .korean).channelMenu, "채널 메뉴")
         XCTAssertEqual(
-            MomoWindowChromeLayout.centerHeaderLeadingInset(sidebarVisible: true),
+            MomoWorkspaceCopy(language: .korean).channelMenuState(isPresented: true),
+            "열림"
+        )
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .english).channelMenuState(isPresented: false),
+            "Collapsed"
+        )
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .korean).closeChannelMenu,
+            "채널 메뉴 닫기"
+        )
+        XCTAssertEqual(
+            MomoWorkspaceCopy(language: .english).closeChannelMenu,
+            "Close channel menu"
+        )
+    }
+
+    func testCollapsedCenterHeaderStartsAfterMeasuredTrafficLights() {
+        XCTAssertEqual(
+            MomoWindowChromeLayout.centerHeaderLeadingInset(
+                sidebarVisible: true,
+                trafficLightTrailingX: 136
+            ),
             0
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLayout.centerHeaderLeadingInset(
+                sidebarVisible: false,
+                trafficLightTrailingX: 136
+            ),
+            136
         )
         XCTAssertEqual(
             MomoWindowChromeLayout.centerHeaderLeadingInset(sidebarVisible: false),
             MomoWindowChromeLayout.collapsedCenterLeadingInset
         )
-        XCTAssertEqual(MomoWindowChromeLayout.collapsedCenterLeadingInset, 112)
+        XCTAssertEqual(
+            MomoWindowChromeLayout.collapsedCenterLeadingInset
+                + MomoTheme.ChannelHeader.edgeInset,
+            88
+        )
     }
 
     func testThreeZoneShellConsumesWindowChromeInsetOnce() {
@@ -83,8 +118,41 @@ final class MomoChannelChromeTests: XCTestCase {
     func testMeasuredWindowChromeInsetCannotExpandCenterOrInspectorHeaders() {
         XCTAssertEqual(MomoWindowChromeLayout.integratedHeaderHeight, 52)
         XCTAssertEqual(MomoWindowChromeLayout.shellTopInset(windowChromeTopInset: 126), 126)
-        XCTAssertEqual(MomoWindowChromeLayout.sidebarHeaderLeadingInset, 112)
-        XCTAssertEqual(MomoWindowChromeLayout.sidebarHeaderTrailingInset, 44)
+        XCTAssertEqual(
+            MomoWindowChromeLayout.sidebarControlBandHeight,
+            MomoWindowChromeLayout.controlBandHeight
+        )
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarHeaderLeadingInset, 16)
+        XCTAssertEqual(MomoWindowChromeLayout.sidebarHeaderTrailingInset, 16)
+    }
+
+    func testSidebarToggleHasExactlyOnePlacementAcrossShellStates() {
+        for hasSelectedChannel in [false, true] {
+            XCTAssertFalse(MomoSidebarTogglePlacementPolicy.showsInChannelHeader(
+                sidebarVisible: true,
+                destination: .channel,
+                hasSelectedChannel: hasSelectedChannel
+            ))
+            XCTAssertTrue(MomoSidebarTogglePlacementPolicy.showsInChannelHeader(
+                sidebarVisible: false,
+                destination: .channel,
+                hasSelectedChannel: hasSelectedChannel
+            ))
+            XCTAssertFalse(MomoSidebarTogglePlacementPolicy.showsInDetailChrome(
+                sidebarVisible: false,
+                destination: .channel
+            ))
+        }
+
+        XCTAssertFalse(MomoSidebarTogglePlacementPolicy.showsInChannelHeader(
+            sidebarVisible: false,
+            destination: .plugins,
+            hasSelectedChannel: true
+        ))
+        XCTAssertTrue(MomoSidebarTogglePlacementPolicy.showsInDetailChrome(
+            sidebarVisible: false,
+            destination: .plugins
+        ))
     }
 
     func testCustomSidebarWidthStaysWithinStableBounds() {
@@ -128,6 +196,23 @@ final class MomoChannelChromeTests: XCTestCase {
         )
     }
 
+    func testTrafficLightAlignmentUsesMeasuredChromeAndHeaderGeometry() {
+        XCTAssertEqual(
+            MomoWindowChromeStyle.trafficLightTargetCenterYFromTop(
+                windowChromeTopInset: 52,
+                headerBandHeight: MomoWindowChromeLayout.integratedHeaderHeight
+            ),
+            52
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLayout.centerHeaderLeadingInset(
+                sidebarVisible: false,
+                trafficLightTrailingX: 136
+            ) + MomoTheme.ChannelHeader.edgeInset,
+            152
+        )
+    }
+
     func testFullHeightChromeAndChannelHeaderUseThinStableContracts() {
         XCTAssertFalse(MomoWindowChromeStyle.showsSystemTitle)
         XCTAssertEqual(MomoWindowChromeLayout.minimumControlBandHeight, 52)
@@ -150,6 +235,38 @@ final class MomoChannelChromeTests: XCTestCase {
         window.titlebarSeparatorStyle = .line
 
         MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+
+        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertEqual(window.titleVisibility, .hidden)
+        XCTAssertTrue(window.titlebarAppearsTransparent)
+        XCTAssertEqual(window.titlebarSeparatorStyle, .none)
+        XCTAssertNil(window.toolbar)
+        XCTAssertTrue(window.isMovableByWindowBackground)
+    }
+
+    @MainActor
+    func testFlatUnifiedChromeRepairsLateSceneMutationAfterAppReactivation() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        var deferredRepair: (@MainActor () -> Void)?
+        MomoWindowChromeStyle.repairFlatUnifiedChromeAcrossLifecycle(to: window) { repair in
+            deferredRepair = repair
+        }
+
+        // Reproduce SwiftUI restoring native scene chrome after AppKit has
+        // already delivered its activation notification.
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
+        window.titlebarSeparatorStyle = .line
+        window.toolbar = NSToolbar(identifier: "MomoChannelChromeTests.reactivation")
+        window.isMovableByWindowBackground = false
+
+        XCTAssertNotNil(deferredRepair)
+        deferredRepair?()
 
         XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
         XCTAssertEqual(window.titleVisibility, .hidden)

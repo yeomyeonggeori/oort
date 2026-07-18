@@ -62,7 +62,6 @@ public struct ChannelListView: View {
     @ObservedObject var viewModel: ChatViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.momoWindowChromeTopInset) private var windowChromeTopInset
     @State private var showChannelCreation = false
     @State private var showDiagnostics = false
     @State private var showInvites = false
@@ -177,6 +176,9 @@ public struct ChannelListView: View {
             ZStack(alignment: .bottom) {
                 VStack(spacing: 0) {
                     if showsWorkspaceHeader {
+                        Color.clear
+                            .frame(height: MomoWindowChromeLayout.sidebarControlBandHeight)
+                            .accessibilityHidden(true)
                         sidebarHeader(copy: copy)
                     }
 
@@ -198,6 +200,32 @@ public struct ChannelListView: View {
 
                     utilityFooter(copy: copy)
                     profileFooter(copy: copy)
+                        .padding(.bottom, MomoTheme.Sidebar.footerBottomInset)
+                }
+                .accessibilityHidden(showWorkspaceMenu || showProfilePanel)
+
+                if showWorkspaceMenu {
+                    Color.primary.opacity(0.001)
+                        .onTapGesture {
+                            showWorkspaceMenu = false
+                        }
+                        .zIndex(1)
+
+                    workspacePanel(copy: copy)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
+                        .padding(
+                            .top,
+                            MomoWindowChromeLayout.sidebarControlBandHeight
+                                + MomoWindowChromeLayout.integratedHeaderHeight
+                                + MomoTheme.Sidebar.standardSpacing
+                        )
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .transaction { transaction in
+                            transaction.animation = nil
+                            transaction.disablesAnimations = true
+                        }
+                        .zIndex(2)
                 }
 
                 if showProfilePanel {
@@ -212,7 +240,9 @@ public struct ChannelListView: View {
                         .padding(.horizontal, MomoTheme.Sidebar.standardSpacing)
                         .padding(
                             .bottom,
-                            MomoTheme.Sidebar.footerMinimumHeight + MomoTheme.Sidebar.standardSpacing
+                            MomoTheme.Sidebar.footerMinimumHeight
+                                + MomoTheme.Sidebar.footerBottomInset
+                                + MomoTheme.Sidebar.standardSpacing
                         )
                         .zIndex(2)
                 }
@@ -314,6 +344,7 @@ public struct ChannelListView: View {
 
         return VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
             Button {
+                showProfilePanel = false
                 showWorkspaceMenu.toggle()
             } label: {
                 HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
@@ -358,9 +389,7 @@ public struct ChannelListView: View {
         }
         .padding(
             .leading,
-            windowChromeTopInset > 0
-                ? MomoWindowChromeLayout.sidebarHeaderLeadingInset
-                : MomoTheme.Sidebar.contentSpacing
+            MomoWindowChromeLayout.sidebarHeaderLeadingInset
         )
         .padding(
             .trailing,
@@ -372,47 +401,56 @@ public struct ChannelListView: View {
             minHeight: MomoWindowChromeLayout.integratedHeaderHeight,
             alignment: .leading
         )
-        .popover(isPresented: $showWorkspaceMenu, arrowEdge: .trailing) {
-            VStack(alignment: .leading, spacing: MomoTheme.Sidebar.compactSpacing) {
-                workspaceMenuButton(copy.serverSettings, systemImage: "gearshape") {
-                    showWorkspaceMenu = false
-                    openWorkspaceSettings?()
-                }
-                if openPluginMarketplace != nil {
-                    workspaceMenuButton(
-                        language == .korean ? "플러그인" : "Plugins",
-                        systemImage: "puzzlepiece.extension"
-                    ) {
-                        showWorkspaceMenu = false
-                        openPluginMarketplace?()
-                    }
-                }
-                workspaceMenuButton(copy.inviteMembers, systemImage: "person.badge.plus") {
-                    showWorkspaceMenu = false
-                    showMemberInvite = true
-                }
-                Divider()
-                workspaceMenuButton(copy.copyWorkspaceID, systemImage: "doc.on.doc") {
-                    copyWorkspaceID()
-                    showWorkspaceMenu = false
-                }
-                .disabled(viewModel.workspaceId == nil)
-            }
-            .padding(MomoTheme.Sidebar.contentSpacing)
-        }
     }
 
-    private func workspaceMenuButton(
-        _ title: String,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+    private func workspacePanel(copy: MomoWorkspaceCopy) -> some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Sidebar.contentSpacing) {
+            profileAction(copy.serverSettings, systemImage: "gearshape") {
+                showWorkspaceMenu = false
+                openWorkspaceSettings?()
+            }
+            if openPluginMarketplace != nil {
+                profileAction(
+                    language == .korean ? "플러그인" : "Plugins",
+                    systemImage: "puzzlepiece.extension"
+                ) {
+                    showWorkspaceMenu = false
+                    openPluginMarketplace?()
+                }
+            }
+            profileAction(copy.inviteMembers, systemImage: "person.badge.plus") {
+                showWorkspaceMenu = false
+                showMemberInvite = true
+            }
+
+            Divider()
+
+            profileAction(
+                copy.copyWorkspaceID,
+                systemImage: "doc.on.doc",
+                isDisabled: viewModel.workspaceId == nil
+            ) {
+                copyWorkspaceID()
+                showWorkspaceMenu = false
+            }
         }
-        .buttonStyle(.plain)
+        .padding(MomoTheme.Sidebar.sectionSpacing)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .momoSurface(.card, cornerRadius: MomoTheme.cornerLarge)
+        .overlay {
+            Button {
+                showWorkspaceMenu = false
+            } label: {
+                EmptyView()
+            }
+            .keyboardShortcut(.cancelAction)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+        }
+        .accessibilityAddTraits(.isModal)
+        .onExitCommand {
+            showWorkspaceMenu = false
+        }
     }
 
     private func workspaceDisplayName(copy: MomoWorkspaceCopy) -> String {
@@ -451,7 +489,6 @@ public struct ChannelListView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(actionTitle)
-            .help(actionTitle)
             .momoQuickTooltip(actionTitle)
         }
     }
@@ -475,7 +512,6 @@ public struct ChannelListView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(copy.browseMembers)
-            .help(copy.browseMembers)
             .momoQuickTooltip(copy.browseMembers)
 
             Button {
@@ -492,7 +528,6 @@ public struct ChannelListView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(copy.inviteMembers)
-            .help(copy.inviteMembers)
             .momoQuickTooltip(copy.inviteMembers)
         }
     }
@@ -778,7 +813,6 @@ public struct ChannelListView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(label)
-                .help(label)
                 .momoQuickTooltip(label)
             } else {
                 Color.clear
@@ -1005,7 +1039,6 @@ public struct ChannelListView: View {
                         )
                         .background(MomoTheme.costAmber.opacity(0.18), in: Circle())
                         .foregroundStyle(MomoTheme.costAmber)
-                        .help(copy.agentWorkingTitle(member.displayName))
                         .momoQuickTooltip(copy.agentWorkingTitle(member.displayName))
                 }
             }
@@ -1078,7 +1111,6 @@ public struct ChannelListView: View {
         .allowsHitTesting(isVisible)
         .accessibilityLabel(actionLabel)
         .accessibilityHidden(!isVisible)
-        .help(helpText)
         .momoQuickTooltip(helpText)
     }
 
@@ -1108,7 +1140,6 @@ public struct ChannelListView: View {
         .allowsHitTesting(isVisible)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHidden(!isVisible)
-        .help(actionLabel)
         .momoQuickTooltip(actionLabel)
     }
 
@@ -1124,6 +1155,7 @@ public struct ChannelListView: View {
 
     private func profileFooter(copy: MomoWorkspaceCopy) -> some View {
         Button {
+            showWorkspaceMenu = false
             showProfilePanel.toggle()
         } label: {
             HStack(spacing: MomoTheme.Sidebar.standardSpacing) {
@@ -1233,16 +1265,16 @@ public struct ChannelListView: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(role: role, action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: MomoTheme.Sidebar.contentSpacing) {
                 Image(systemName: systemImage)
                     .font(.body.weight(.semibold))
-                    .frame(width: 22)
+                    .frame(width: MomoTheme.Sidebar.actionSize)
                 Text(title)
                     .font(.body)
                 Spacer()
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 9)
+            .padding(.horizontal, MomoTheme.Sidebar.contentSpacing)
+            .padding(.vertical, MomoTheme.Sidebar.standardSpacing)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

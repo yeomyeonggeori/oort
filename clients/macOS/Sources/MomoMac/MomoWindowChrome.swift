@@ -3,21 +3,40 @@ import SwiftUI
 
 struct MomoWindowChromeMetrics: Equatable {
     let topInset: CGFloat
+    let trafficLightTrailingX: CGFloat
+    let trafficLightCenterYFromTop: CGFloat
 
-    static let zero = MomoWindowChromeMetrics(topInset: 0)
+    static let zero = MomoWindowChromeMetrics(
+        topInset: 0,
+        trafficLightTrailingX: 0,
+        trafficLightCenterYFromTop: 0
+    )
 
     static func measure(
         contentViewBounds: CGRect,
         contentLayoutRect: CGRect,
-        contentViewIsFlipped: Bool
+        contentViewIsFlipped: Bool,
+        trafficLightFrames: [CGRect] = []
     ) -> MomoWindowChromeMetrics {
         let topInset = if contentViewIsFlipped {
             contentLayoutRect.minY - contentViewBounds.minY
         } else {
             contentViewBounds.maxY - contentLayoutRect.maxY
         }
+        let trafficLightTrailingX = trafficLightFrames.map(\.maxX).max() ?? 0
+        let trafficLightCenterY = trafficLightFrames.map(\.midY).reduce(0, +)
+            / CGFloat(max(1, trafficLightFrames.count))
+        let trafficLightCenterYFromTop = if trafficLightFrames.isEmpty {
+            CGFloat(0)
+        } else if contentViewIsFlipped {
+            trafficLightCenterY - contentViewBounds.minY
+        } else {
+            contentViewBounds.maxY - trafficLightCenterY
+        }
         return MomoWindowChromeMetrics(
-            topInset: max(0, topInset)
+            topInset: max(0, topInset),
+            trafficLightTrailingX: max(0, trafficLightTrailingX),
+            trafficLightCenterYFromTop: max(0, trafficLightCenterYFromTop)
         )
     }
 }
@@ -46,6 +65,63 @@ enum MomoWindowChromeStyle {
         }
         if !window.isMovableByWindowBackground {
             window.isMovableByWindowBackground = true
+        }
+    }
+
+    @MainActor
+    static func alignTrafficLights(toHeaderBandHeight headerHeight: CGFloat, in window: NSWindow) {
+        // AppKit titlebar controls are only stable after the window is ordered.
+        // Offscreen snapshot hosts intentionally never enter that lifecycle.
+        guard window.isVisible, let contentView = window.contentView else { return }
+        let layoutRect = contentView.convert(window.contentLayoutRect, from: nil)
+        let metrics = MomoWindowChromeMetrics.measure(
+            contentViewBounds: contentView.bounds,
+            contentLayoutRect: layoutRect,
+            contentViewIsFlipped: contentView.isFlipped
+        )
+        let desiredCenterFromTop = trafficLightTargetCenterYFromTop(
+            windowChromeTopInset: metrics.topInset,
+            headerBandHeight: headerHeight
+        )
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window.standardWindowButton($0) }
+            .filter { !$0.isHidden }
+        let frames = buttons.map { $0.convert($0.bounds, to: contentView) }
+        guard !frames.isEmpty else { return }
+        let currentCenterY = frames.map(\.midY).reduce(0, +) / CGFloat(frames.count)
+        let currentCenterFromTop = contentView.isFlipped
+            ? currentCenterY - contentView.bounds.minY
+            : contentView.bounds.maxY - currentCenterY
+        let deltaFromTop = desiredCenterFromTop - currentCenterFromTop
+
+        for button in buttons {
+            guard let container = button.superview else { continue }
+            let deltaY = container.isFlipped ? deltaFromTop : -deltaFromTop
+            button.setFrameOrigin(
+                NSPoint(
+                    x: button.frame.origin.x,
+                    y: button.frame.origin.y + deltaY
+                )
+            )
+        }
+    }
+
+    static func trafficLightTargetCenterYFromTop(
+        windowChromeTopInset: CGFloat,
+        headerBandHeight: CGFloat
+    ) -> CGFloat {
+        (max(0, windowChromeTopInset) + max(0, headerBandHeight)) / 2
+    }
+
+    @MainActor
+    static func repairFlatUnifiedChromeAcrossLifecycle(
+        to window: NSWindow,
+        scheduleDeferredRepair: (@escaping @MainActor () -> Void) -> Void
+    ) {
+        applyFlatUnifiedChrome(to: window)
+        scheduleDeferredRepair { [weak window] in
+            guard let window else { return }
+            applyFlatUnifiedChrome(to: window)
         }
     }
 }
@@ -135,10 +211,10 @@ enum MomoWindowChromeDoubleClickHandler {
 }
 
 public extension Scene {
-    /// Window chrome is applied by `MomoWindowChromeMetricsReader`. Returning
-    /// the scene unchanged prevents SwiftUI from installing a shared toolbar.
+    /// Ask SwiftUI to keep the titlebar hidden across scene activation cycles.
+    /// `MomoWindowChromeMetricsReader` owns the macOS 14 AppKit repair path.
     func momoWindowChromeStyle() -> some Scene {
-        self
+        windowStyle(.hiddenTitleBar)
     }
 }
 
@@ -160,6 +236,7 @@ extension EnvironmentValues {
         get { self[MomoCenterHeaderLeadingInsetKey.self] }
         set { self[MomoCenterHeaderLeadingInsetKey.self] = newValue }
     }
+
 }
 
 struct MomoWindowChromeMetricsReader: NSViewRepresentable {
@@ -209,14 +286,29 @@ final class MomoWindowChromeMetricsView: NSView {
     func publishMetricsIfNeeded() {
         guard let window, let contentView = window.contentView else { return }
         MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+        MomoWindowChromeStyle.alignTrafficLights(
+            toHeaderBandHeight: MomoWindowChromeLayout.integratedHeaderHeight,
+            in: window
+        )
         // NavigationSplitView columns report a zero SwiftUI top safe area in
         // full-size unified windows. NSWindow's contentLayoutRect is the
         // AppKit-owned boundary that also follows fullscreen toolbar changes.
         let layoutRect = contentView.convert(window.contentLayoutRect, from: nil)
+        let trafficLightFrames = [
+            NSWindow.ButtonType.closeButton,
+            .miniaturizeButton,
+            .zoomButton,
+        ].compactMap { type -> CGRect? in
+            guard let button = window.standardWindowButton(type), !button.isHidden else {
+                return nil
+            }
+            return button.convert(button.bounds, to: contentView)
+        }
         let metrics = MomoWindowChromeMetrics.measure(
             contentViewBounds: contentView.bounds,
             contentLayoutRect: layoutRect,
-            contentViewIsFlipped: contentView.isFlipped
+            contentViewIsFlipped: contentView.isFlipped,
+            trafficLightFrames: trafficLightFrames
         )
         guard metrics != lastMetrics else { return }
         lastMetrics = metrics
@@ -240,12 +332,7 @@ final class MomoWindowChromeMetricsView: NSView {
             return nil
         }
 
-        // SwiftUI can install window chrome one run-loop turn after the
-        // representable enters the window. Reapply once after attachment.
-        DispatchQueue.main.async { [weak self, weak window] in
-            guard let self, let window, self.window === window else { return }
-            MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
-        }
+        repairChromeAfterLifecycleTransition()
 
         let names: [Notification.Name] = [
             NSWindow.didResizeNotification,
@@ -262,6 +349,26 @@ final class MomoWindowChromeMetricsView: NSView {
                 object: window
             )
         }
+
+        let activationNames: [Notification.Name] = [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didBecomeMainNotification,
+            NSWindow.didChangeOcclusionStateNotification,
+        ]
+        for name in activationNames {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowActivationDidChange(_:)),
+                name: name,
+                object: window
+            )
+        }
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowActivationDidChange(_:)),
+            name: NSApplication.didBecomeActiveNotification,
+            object: NSApplication.shared
+        )
     }
 
     func stopObservingWindow() {
@@ -273,17 +380,30 @@ final class MomoWindowChromeMetricsView: NSView {
             NSEvent.removeMonitor(mouseDownMonitor)
             self.mouseDownMonitor = nil
         }
-        if let observedWindow {
-            NotificationCenter.default.removeObserver(
-                self,
-                name: nil,
-                object: observedWindow
-            )
-        }
+        NotificationCenter.default.removeObserver(self)
         observedWindow = nil
     }
 
     @objc private func windowMetricsDidChange(_ notification: Notification) {
         publishMetricsIfNeeded()
+    }
+
+    @objc private func windowActivationDidChange(_ notification: Notification) {
+        repairChromeAfterLifecycleTransition()
+    }
+
+    func repairChromeAfterLifecycleTransition() {
+        guard let window, observedWindow === window else { return }
+        MomoWindowChromeStyle.repairFlatUnifiedChromeAcrossLifecycle(to: window) { [weak self, weak window] repair in
+            // SwiftUI may restore its scene chrome after the AppKit activation
+            // notification has already fired. Reassert the contract on the
+            // next main-run-loop turn so returning from another app or Space
+            // cannot expose a native titlebar band.
+            DispatchQueue.main.async { [weak self, weak window] in
+                guard let self, let window, self.window === window else { return }
+                repair()
+                self.publishMetricsIfNeeded()
+            }
+        }
     }
 }

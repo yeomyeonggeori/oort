@@ -22,13 +22,33 @@ public struct MessageBubble: View {
     public let approvalStatus: ApprovalStatus?
     public let isApprovalDecisionInFlight: Bool
     public let onApprovalDecision: ((ApprovalID, Bool) -> Void)?
+    private let reactions: [MomoMessageReaction]
+    private let replyCount: Int
+    private let canModify: Bool
+    private let interactionError: MomoMessageInteractionError?
+    private let onToggleReaction: ((String) -> Void)?
+    private let onOpenThread: (() -> Void)?
+    private let onEdit: ((String) async -> Bool)?
+    private let onDelete: (() -> Void)?
+    private let onDismissInteractionError: (() -> Void)?
     private let groupingStyle: MessageBubbleGroupingStyle
     private let timelineCopy: MomoWorkspaceCopy
     private let presentation: MomoDeveloperModePresentation
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovered = false
     @State private var isBasicCardExpanded = false
-    @FocusState private var isCopyActionFocused: Bool
+    @State private var isEditing = false
+    @State private var editDraft = ""
+    @State private var isSavingEdit = false
+    @State private var showsDeleteConfirmation = false
+    @FocusState private var focusedMessageAction: MessageActionFocus?
+    @FocusState private var isEditFieldFocused: Bool
+
+    private enum MessageActionFocus: Hashable {
+        case reaction(String)
+        case emojiMenu
+        case reply
+        case more
+    }
 
     public init(
         message: Message,
@@ -44,6 +64,15 @@ public struct MessageBubble: View {
         self.approvalStatus = approvalStatus
         self.isApprovalDecisionInFlight = isApprovalDecisionInFlight
         self.onApprovalDecision = onApprovalDecision
+        self.reactions = []
+        self.replyCount = 0
+        self.canModify = false
+        self.interactionError = nil
+        self.onToggleReaction = nil
+        self.onOpenThread = nil
+        self.onEdit = nil
+        self.onDelete = nil
+        self.onDismissInteractionError = nil
         self.groupingStyle = .standalone
         self.timelineCopy = MomoWorkspaceCopy(language: .preferredDefault)
         self.presentation = .standard
@@ -56,6 +85,15 @@ public struct MessageBubble: View {
         approvalStatus: ApprovalStatus? = nil,
         isApprovalDecisionInFlight: Bool = false,
         onApprovalDecision: ((ApprovalID, Bool) -> Void)? = nil,
+        reactions: [MomoMessageReaction] = [],
+        replyCount: Int = 0,
+        canModify: Bool = false,
+        interactionError: MomoMessageInteractionError? = nil,
+        onToggleReaction: ((String) -> Void)? = nil,
+        onOpenThread: (() -> Void)? = nil,
+        onEdit: ((String) async -> Bool)? = nil,
+        onDelete: (() -> Void)? = nil,
+        onDismissInteractionError: (() -> Void)? = nil,
         groupingStyle: MessageBubbleGroupingStyle,
         timelineCopy: MomoWorkspaceCopy,
         presentation: MomoDeveloperModePresentation = .standard
@@ -66,6 +104,15 @@ public struct MessageBubble: View {
         self.approvalStatus = approvalStatus
         self.isApprovalDecisionInFlight = isApprovalDecisionInFlight
         self.onApprovalDecision = onApprovalDecision
+        self.reactions = reactions
+        self.replyCount = replyCount
+        self.canModify = canModify
+        self.interactionError = interactionError
+        self.onToggleReaction = onToggleReaction
+        self.onOpenThread = onOpenThread
+        self.onEdit = onEdit
+        self.onDelete = onDelete
+        self.onDismissInteractionError = onDismissInteractionError
         self.groupingStyle = groupingStyle
         self.timelineCopy = timelineCopy
         self.presentation = presentation
@@ -80,11 +127,16 @@ public struct MessageBubble: View {
                 if groupingStyle != .compact {
                     header
                 } else if message.isPendingAck {
-                    Text(timelineCopy.messageSending)
+                    Text(deliveryStatusText)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(deliveryStatusColor)
                 }
-                content
+                if isEditing {
+                    inlineEditor
+                } else {
+                    content
+                }
+                messageMetadata
             }
             Spacer(minLength: 0)
             if isAgent, presentation.showsCosts, let cost {
@@ -100,19 +152,37 @@ public struct MessageBubble: View {
         .padding(.vertical, groupingStyle == .compact ? 0 : 4)
         .padding(.horizontal, 4)
         .background(isHovered ? Color.primary.opacity(0.04) : .clear)
-        .animation(reduceMotion ? nil : MomoTheme.Motion.hover, value: isHovered)
         .contentShape(Rectangle())
         .overlay(alignment: .topTrailing) {
-            copyAction
+            messageActionBar
                 .padding(.trailing, isAgent && presentation.showsCosts && cost != nil ? 32 : 0)
         }
         .onHover { isHovered = $0 }
         .contextMenu {
+            if onOpenThread != nil {
+                Button(timelineCopy.replyToMessage, systemImage: "arrowshape.turn.up.left", action: openThread)
+            }
             if copyText != nil {
                 Button(timelineCopy.copyMessage, systemImage: "doc.on.doc", action: copyMessage)
             }
+            if canModify, onEdit != nil {
+                Divider()
+                Button(timelineCopy.editMessage, systemImage: "pencil", action: beginEditing)
+            }
+            if canModify, onDelete != nil {
+                Button(timelineCopy.deleteMessage, systemImage: "trash", role: .destructive) {
+                    showsDeleteConfirmation = true
+                }
+            }
         }
         .opacity(message.isDeleted ? 0.45 : 1)
+        .confirmationDialog(
+            timelineCopy.deleteMessageConfirmation,
+            isPresented: $showsDeleteConfirmation
+        ) {
+            Button(timelineCopy.deleteMessage, role: .destructive) { onDelete?() }
+            Button(timelineCopy.cancel, role: .cancel) {}
+        }
     }
 
     // MARK: Parts
@@ -164,18 +234,18 @@ public struct MessageBubble: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         } else {
-            Text("sending…")
+            Text(deliveryStatusText)
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(deliveryStatusColor)
         }
     }
 
     @ViewBuilder
     private var timelineTimestamp: some View {
         if message.isPendingAck {
-            Text(timelineCopy.messageSending)
+            Text(deliveryStatusText)
                 .font(MomoTheme.Typography.supporting)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(deliveryStatusColor)
         } else if let date = timestampDate {
             Text(date, format: .dateTime.hour().minute())
                 .font(MomoTheme.Typography.supporting)
@@ -202,27 +272,240 @@ public struct MessageBubble: View {
         }
     }
 
+    private var deliveryStatusText: String {
+        message.state == .failed
+            ? timelineCopy.messageSendFailed
+            : timelineCopy.messageSending
+    }
+
+    private var deliveryStatusColor: Color {
+        message.state == .failed ? MomoTheme.irreversibleRed : .secondary
+    }
+
     @ViewBuilder
-    private var copyAction: some View {
-        if copyText != nil {
-            Button(action: copyMessage) {
-                Image(systemName: "doc.on.doc")
+    private var messageActionBar: some View {
+        if !message.isDeleted, hasMessageInteractions {
+            // A compact custom bar keeps frequent reactions and reply one click away;
+            // the lower-frequency actions remain inside native Menu/contextMenu controls.
+            HStack(spacing: 0) {
+                if onToggleReaction != nil {
+                    ForEach(["👍", "👀", "🎉"], id: \.self) { emoji in
+                        reactionButton(emoji)
+                    }
+                    Menu {
+                        ForEach(["❤️", "😂", "😮", "😢", "🙏", "✅"], id: \.self) { emoji in
+                            Button(emoji) { onToggleReaction?(emoji) }
+                        }
+                    } label: {
+                        Image(systemName: "face.smiling")
+                    }
+                    .menuStyle(.borderlessButton)
+                    .momoQuickTooltip(timelineCopy.addReaction)
+                    .focused($focusedMessageAction, equals: .emojiMenu)
+                }
+
+                if onOpenThread != nil {
+                    Button(action: openThread) {
+                        Image(systemName: "arrowshape.turn.up.left")
+                    }
+                    .buttonStyle(.borderless)
+                    .momoQuickTooltip(timelineCopy.replyToMessage)
+                    .focused($focusedMessageAction, equals: .reply)
+                }
+
+                Menu {
+                    if onOpenThread != nil {
+                        Button(timelineCopy.replyToMessage, systemImage: "arrowshape.turn.up.left", action: openThread)
+                    }
+                    if copyText != nil {
+                        Button(timelineCopy.copyMessage, systemImage: "doc.on.doc", action: copyMessage)
+                    }
+                    if canModify, onEdit != nil {
+                        Divider()
+                        Button(timelineCopy.editMessage, systemImage: "pencil", action: beginEditing)
+                    }
+                    if canModify, onDelete != nil {
+                        Button(timelineCopy.deleteMessage, systemImage: "trash", role: .destructive) {
+                            showsDeleteConfirmation = true
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.borderlessButton)
+                .momoQuickTooltip(timelineCopy.moreMessageActions)
+                .focused($focusedMessageAction, equals: .more)
             }
-            .buttonStyle(.borderless)
             .controlSize(.small)
-            .focused($isCopyActionFocused)
-            .help(timelineCopy.copyMessage)
-            .accessibilityLabel(timelineCopy.copyMessage)
             .padding(4)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.bubbleCorner))
-            .opacity(isHovered || isCopyActionFocused ? 1 : 0)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
+            .overlay(RoundedRectangle(cornerRadius: MomoTheme.cornerSmall).strokeBorder(.separator, lineWidth: 1))
+            .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+            .opacity(isHovered || focusedMessageAction != nil ? 1 : 0)
+            .padding(.top, -8)
+        }
+    }
+
+    private func reactionButton(_ emoji: String) -> some View {
+        Button(emoji) { onToggleReaction?(emoji) }
+            .buttonStyle(.borderless)
+            .momoQuickTooltip(timelineCopy.reactWith(emoji))
+            .accessibilityLabel(timelineCopy.reactWith(emoji))
+            .frame(
+                minWidth: MomoTheme.MessageInteraction.actionMinimumSize,
+                minHeight: MomoTheme.MessageInteraction.actionMinimumSize
+            )
+            .focused($focusedMessageAction, equals: .reaction(emoji))
+    }
+
+    @ViewBuilder
+    private var messageMetadata: some View {
+        if !reactions.isEmpty || replyCount > 0 || interactionError != nil || message.editedAtMs != nil || message.state == .edited {
+            VStack(alignment: .leading, spacing: 4) {
+                if !reactions.isEmpty || replyCount > 0 {
+                    MomoReactionFlowLayout(spacing: MomoTheme.MessageInteraction.compactSpacing) {
+                        ForEach(reactions) { reaction in
+                            if onToggleReaction != nil {
+                                reactionChip(reaction)
+                            } else {
+                                reactionChipLabel(reaction)
+                            }
+                        }
+
+                        if replyCount > 0 {
+                            if onOpenThread != nil {
+                                Button(action: openThread) {
+                                    Label(timelineCopy.replyCount(replyCount), systemImage: "arrowshape.turn.up.left")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.borderless)
+                            } else {
+                                Label(timelineCopy.replyCount(replyCount), systemImage: "arrowshape.turn.up.left")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                if message.editedAtMs != nil || message.state == .edited {
+                    Text(timelineCopy.editedMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                if let interactionError {
+                    HStack(spacing: 4) {
+                        Label(interactionError.message(copy: timelineCopy), systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(MomoTheme.irreversibleRed)
+                        Button(timelineCopy.dismissMessageFocusFailure) { onDismissInteractionError?() }
+                            .buttonStyle(.borderless)
+                            .controlSize(.mini)
+                    }
+                }
+            }
+        }
+    }
+
+    private var inlineEditor: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextEditor(text: $editDraft)
+                .font(.body)
+                .frame(
+                    minHeight: MomoTheme.MessageInteraction.editorMinimumHeight,
+                    maxHeight: MomoTheme.MessageInteraction.editorMaximumHeight
+                )
+                .padding(8)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: MomoTheme.cornerMedium))
+                .overlay(RoundedRectangle(cornerRadius: MomoTheme.cornerMedium).strokeBorder(.separator, lineWidth: 1))
+                .focused($isEditFieldFocused)
+                .onExitCommand(perform: cancelEditing)
+            HStack(spacing: 8) {
+                Button(timelineCopy.save) {
+                    saveEdit()
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    isSavingEdit
+                        || editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
+                .keyboardShortcut(.return, modifiers: .command)
+                Button(timelineCopy.cancel, action: cancelEditing)
+                Text(timelineCopy.editMessageKeyboardHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var hasMessageInteractions: Bool {
+        onToggleReaction != nil || onOpenThread != nil || copyText != nil || onEdit != nil || onDelete != nil
+    }
+
+    private func reactionChip(_ reaction: MomoMessageReaction) -> some View {
+        Button { onToggleReaction?(reaction.emoji) } label: {
+            reactionChipLabel(reaction)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func reactionChipLabel(_ reaction: MomoMessageReaction) -> some View {
+        Text("\(reaction.emoji) \(reaction.count)")
+            .font(.caption)
+            .monospacedDigit()
+            .padding(.horizontal, MomoTheme.MessageInteraction.standardSpacing)
+            .padding(.vertical, MomoTheme.MessageInteraction.compactSpacing)
+            .background(
+                reaction.isSelectedByCurrentMember
+                    ? MomoTheme.selectionBackground
+                    : Color.primary.opacity(0.05),
+                in: Capsule()
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    reaction.isSelectedByCurrentMember
+                        ? MomoTheme.humanAccent.opacity(0.45)
+                        : Color(nsColor: .separatorColor),
+                    lineWidth: 1
+                )
+            )
+            .accessibilityLabel(timelineCopy.reactionCount(emoji: reaction.emoji, count: reaction.count))
+    }
+
+    private func openThread() { onOpenThread?() }
+
+    private func beginEditing() {
+        editDraft = message.body ?? ""
+        isEditing = true
+        Task { @MainActor in isEditFieldFocused = true }
+    }
+
+    private func cancelEditing() {
+        guard !isSavingEdit else { return }
+        isEditing = false
+        editDraft = ""
+    }
+
+    private func saveEdit() {
+        guard let onEdit, !isSavingEdit else { return }
+        isSavingEdit = true
+        Task {
+            let didSave = await onEdit(editDraft)
+            isSavingEdit = false
+            if didSave {
+                isEditing = false
+                editDraft = ""
+            } else {
+                isEditFieldFocused = true
+            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
         if message.isDeleted {
-            Text("(deleted)")
+            Text(timelineCopy.deletedMessage)
                 .momoTypography(.messageBody)
                 .italic()
                 .foregroundStyle(.secondary)
@@ -484,4 +767,54 @@ enum MessageBubbleGroupingStyle {
     case standalone
     case groupStart
     case compact
+}
+
+private struct MomoReactionFlowLayout: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        layout(proposal: proposal, subviews: subviews).size
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        let result = layout(proposal: ProposedViewSize(width: bounds.width, height: proposal.height), subviews: subviews)
+        for (index, point) in result.points.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                anchor: .topLeading,
+                proposal: .unspecified
+            )
+        }
+    }
+
+    private func layout(proposal: ProposedViewSize, subviews: Subviews) -> (size: CGSize, points: [CGPoint]) {
+        let availableWidth = proposal.width ?? .infinity
+        var points: [CGPoint] = []
+        var cursor = CGPoint.zero
+        var rowHeight: CGFloat = 0
+        var contentWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if cursor.x > 0, cursor.x + size.width > availableWidth {
+                cursor.x = 0
+                cursor.y += rowHeight + spacing
+                rowHeight = 0
+            }
+            points.append(cursor)
+            cursor.x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            contentWidth = max(contentWidth, cursor.x - spacing)
+        }
+        return (CGSize(width: min(contentWidth, availableWidth), height: cursor.y + rowHeight), points)
+    }
 }

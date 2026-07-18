@@ -59,6 +59,20 @@ public enum MomoTheme {
         public static let dropInset: CGFloat = 32
     }
 
+    public enum MessageInteraction {
+        public static let actionMinimumSize: CGFloat = 28
+        public static let editorMinimumHeight: CGFloat = 64
+        public static let editorMaximumHeight: CGFloat = 160
+        public static let threadComposerMaximumHeight: CGFloat = 120
+        public static let threadMinimumWidth: CGFloat = 320
+        public static let threadIdealWidth: CGFloat = 380
+        public static let threadMaximumWidth: CGFloat = 420
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let edgeInset: CGFloat = 16
+    }
+
     public enum PluginMarketplace {
         public static let contentMaximumWidth: CGFloat = 1_080
         public static let scopePickerWidth: CGFloat = 220
@@ -309,6 +323,7 @@ public enum MomoTheme {
         public static let headerMinimumHeight: CGFloat = 44
         public static let rowMinimumHeight: CGFloat = 32
         public static let footerMinimumHeight: CGFloat = 44
+        public static let footerBottomInset: CGFloat = 8
         public static let avatarSize: CGFloat = 24
         public static let logoSize: CGFloat = 28
         public static let toolbarLogoSize: CGFloat = 24
@@ -348,6 +363,7 @@ public enum MomoTheme {
         public static let actionSize: CGFloat = 28
         public static let minimumHeight: CGFloat = 48
         public static let searchUnavailableWidth: CGFloat = 320
+        public static let menuWidth: CGFloat = 320
         public static let settingsSheetWidth: CGFloat = 640
         public static let settingsSheetHeight: CGFloat = 520
 

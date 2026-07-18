@@ -438,6 +438,32 @@ final class MomoChannelCreationTests: XCTestCase {
         }
     }
 
+    func testQuickTooltipPlacementDoesNotCoverTopChromeControls() {
+        let visible = CGRect(x: 0, y: 0, width: 1_180, height: 760)
+        let tooltip = CGSize(width: 132, height: 32)
+        let controls = [
+            CGRect(x: 16, y: 20, width: 32, height: 32),
+            CGRect(x: 1_100, y: 20, width: 32, height: 32),
+        ]
+
+        for control in controls {
+            let origin = MomoQuickTooltipPlacement.origin(
+                anchor: control,
+                tooltipSize: tooltip,
+                visibleFrame: visible
+            )
+            let tooltipFrame = CGRect(origin: origin, size: tooltip)
+
+            XCTAssertFalse(tooltipFrame.intersects(control))
+            XCTAssertEqual(tooltipFrame.minY, control.maxY + MomoTheme.QuickTooltip.anchorGap)
+            XCTAssertGreaterThanOrEqual(tooltipFrame.minX, MomoTheme.QuickTooltip.screenEdgeInset)
+            XCTAssertLessThanOrEqual(
+                tooltipFrame.maxX,
+                visible.maxX - MomoTheme.QuickTooltip.screenEdgeInset
+            )
+        }
+    }
+
     @MainActor
     func testQuickTooltipPresenterRestoresFocusedSourceAfterHoveredSourceLeaves() {
         let presenter = MomoQuickTooltipPresenter()

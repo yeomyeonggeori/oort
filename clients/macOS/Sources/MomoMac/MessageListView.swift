@@ -25,6 +25,21 @@ private struct MomoMentionPanelHeightPreferenceKey: PreferenceKey {
     }
 }
 
+private struct MomoMessageListWidthPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private enum MomoChannelMenuFocusTarget: Hashable {
+    case settings
+    case invite
+    case members
+    case copyID
+}
+
 // MARK: - MessageListView  (seq-ordered)
 //
 // The channel timeline. Ordering authority is Message.seq (L4 §1.2 #3): the
@@ -34,19 +49,29 @@ private struct MomoMentionPanelHeightPreferenceKey: PreferenceKey {
 
 public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @StateObject private var huddleViewModel: MomoHuddleViewModel
     private let onOpenWorkDetail: (RunID) -> Void
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
+    private let onOpenChannelSettings: ((ChannelID) -> Void)?
+    private let onInviteToChannel: ((ChannelID) -> Void)?
     private let focusComposerRequest: UInt64
     private let onOpenPluginMarketplace: () -> Void
     private let serverIdentity: String?
+    private let sidebarToggle: (() -> Void)?
+    private let dismissThreadRequest: UInt64
+    private let onPresentThread: () -> Void
+    private let onDismissThread: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.momoCenterHeaderLeadingInset) private var centerHeaderLeadingInset
     @AppStorage(MomoUILanguage.appStorageKey) private var languageRaw = MomoUILanguage.preferredDefault.rawValue
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
     @FocusState private var isComposerFocused: Bool
+    @FocusState private var channelMenuKeyboardFocus: MomoChannelMenuFocusTarget?
     @AccessibilityFocusState private var accessibilityFocusedMessageID: MessageID?
+    @AccessibilityFocusState private var channelMenuAccessibilityFocus: MomoChannelMenuFocusTarget?
     @State private var isPinnedToTimelineBottom = true
     @State private var isWorkComposerPresented = false
     @State private var initialWorkBrief = ""
@@ -66,22 +91,36 @@ public struct MessageListView: View {
     @State private var pollQuestion = ""
     @State private var pollOptions = ["", ""]
     @State private var highlightedMessageID: MessageID?
+    @State private var isChannelMenuPresented = false
+    @State private var selectedThreadRootID: MessageID?
+    @State private var availableTimelineWidth: CGFloat = 0
 
     public init(
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void = {},
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
+        onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
+        onInviteToChannel: ((ChannelID) -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
-        serverIdentity: String? = nil
+        serverIdentity: String? = nil,
+        sidebarToggle: (() -> Void)? = nil,
+        dismissThreadRequest: UInt64 = 0
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.onOpenChannelSettings = onOpenChannelSettings
+        self.onInviteToChannel = onInviteToChannel
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
+        self.sidebarToggle = sidebarToggle
+        self.dismissThreadRequest = dismissThreadRequest
+        self.onPresentThread = {}
+        self.onDismissThread = {}
         self.onOpenPluginMarketplace = {}
+        _huddleViewModel = StateObject(wrappedValue: .live(serverIdentity: serverIdentity))
     }
 
     init(
@@ -89,64 +128,117 @@ public struct MessageListView: View {
         onOpenWorkDetail: @escaping (RunID) -> Void,
         onRequestLogin: @escaping () -> Void,
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
+        onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
+        onInviteToChannel: ((ChannelID) -> Void)? = nil,
         focusComposerRequest: UInt64 = 0,
         serverIdentity: String? = nil,
+        sidebarToggle: (() -> Void)? = nil,
+        dismissThreadRequest: UInt64 = 0,
+        onPresentThread: @escaping () -> Void = {},
+        onDismissThread: @escaping () -> Void = {},
         onOpenPluginMarketplace: @escaping () -> Void = {}
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
+        self.onOpenChannelSettings = onOpenChannelSettings
+        self.onInviteToChannel = onInviteToChannel
         self.focusComposerRequest = focusComposerRequest
         self.serverIdentity = serverIdentity
+        self.sidebarToggle = sidebarToggle
+        self.dismissThreadRequest = dismissThreadRequest
+        self.onPresentThread = onPresentThread
+        self.onDismissThread = onDismissThread
         self.onOpenPluginMarketplace = onOpenPluginMarketplace
+        _huddleViewModel = StateObject(wrappedValue: .live(serverIdentity: serverIdentity))
     }
 
     public var body: some View {
         let copy = MomoWorkspaceCopy(language: language)
 
-        VStack(spacing: 0) {
-            header(copy: copy)
-            if showQuickStart {
-                quickStartCard(copy: copy)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-            }
-            if let issue = viewModel.connectionIssue {
-                connectionBanner(issue, copy: copy)
-                Divider()
-            }
-            if viewModel.failedMessageFocus != nil {
-                HStack(spacing: 8) {
-                    Label(copy.messageFocusFailedDetail, systemImage: "magnifyingglass")
-                        .font(MomoTheme.Typography.supporting)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button(copy.dismissMessageFocusFailure) {
-                        viewModel.clearFailedMessageFocus()
-                    }
-                    .controlSize(.small)
+        ZStack(alignment: .topLeading) {
+            VStack(spacing: 0) {
+                header(copy: copy)
+                if showQuickStart {
+                    quickStartCard(copy: copy)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 12)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                if let issue = viewModel.connectionIssue {
+                    connectionBanner(issue, copy: copy)
+                    Divider()
+                }
+                if viewModel.failedMessageFocus != nil {
+                    HStack(spacing: 8) {
+                        Label(copy.messageFocusFailedDetail, systemImage: "magnifyingglass")
+                            .font(MomoTheme.Typography.supporting)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(copy.dismissMessageFocusFailure) {
+                            viewModel.clearFailedMessageFocus()
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    Divider()
+                }
+                if let notice = viewModel.mentionNotice {
+                    mentionNoticeBanner(notice)
+                    Divider()
+                }
+                timeline(copy: copy)
                 Divider()
+                composer(copy: copy)
             }
-            if let notice = viewModel.mentionNotice {
-                mentionNoticeBanner(notice)
-                Divider()
+            .accessibilityHidden(isChannelMenuPresented)
+
+            if isChannelMenuPresented, let channel = viewModel.selectedChannel {
+                Color.primary.opacity(0.001)
+                    .onTapGesture {
+                        isChannelMenuPresented = false
+                    }
+                    .zIndex(1)
+
+                // A system Menu cannot provide the requested non-animated attached card.
+                channelActionPanel(channel: channel, copy: copy)
+                    .padding(.top, MomoWindowChromeLayout.integratedHeaderHeight + MomoTheme.ChannelHeader.standardSpacing)
+                    .padding(.leading, channelMenuLeadingInset)
+                    .transaction { transaction in
+                        transaction.animation = nil
+                        transaction.disablesAnimations = true
+                    }
+                    .zIndex(2)
             }
-            timeline(copy: copy)
-            Divider()
-            composer(copy: copy)
         }
         .momoSurface(.background, cornerRadius: 0, extent: .windowChrome)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: MomoMessageListWidthPreferenceKey.self,
+                    value: geometry.size.width
+                )
+            }
+        }
+        .onPreferenceChange(MomoMessageListWidthPreferenceKey.self) {
+            availableTimelineWidth = $0
+        }
         .onChange(of: focusComposerRequest) { _, _ in
             isComposerFocused = true
         }
         .onChange(of: viewModel.selectedChannelId) { _, _ in
+            isChannelMenuPresented = false
+            if selectedThreadRootID != nil { onDismissThread() }
+            selectedThreadRootID = nil
             resetLocalComposerDraftsForChannelChange()
             pruneAttachmentDrafts()
             loadSelectedPlugins()
+        }
+        .onChange(of: dismissThreadRequest) { _, _ in
+            guard selectedThreadRootID != nil else { return }
+            selectedThreadRootID = nil
+            onDismissThread()
         }
         .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
             channelPresentationRevision &+= 1
@@ -175,6 +267,39 @@ public struct MessageListView: View {
         .onChange(of: selectedPlugins) { _, _ in saveSelectedPlugins() }
         .onChange(of: viewModel.workspaceId) { _, _ in loadSelectedPlugins() }
         .onChange(of: viewModel.currentNavigationMemberID) { _, _ in loadSelectedPlugins() }
+        .task(id: huddleActivationID) {
+            guard let channelID = viewModel.selectedChannelId else {
+                await huddleViewModel.shutdown()
+                return
+            }
+            await huddleViewModel.activate(workspace: viewModel.workspaceId, channel: channelID)
+        }
+        .onDisappear {
+            Task { await huddleViewModel.shutdown() }
+        }
+        .safeAreaInset(edge: .trailing, spacing: 0) {
+            if let threadRoot {
+                MomoRightPanelBelowHeader {
+                    MomoMessageThreadPanel(
+                        viewModel: viewModel,
+                        root: threadRoot,
+                        copy: copy,
+                        presentation: presentation,
+                        onClose: {
+                            selectedThreadRootID = nil
+                            onDismissThread()
+                        }
+                    )
+                }
+                .frame(
+                    width: MomoRightPanelLayout.width(
+                        preferredWidth: MomoTheme.MessageInteraction.threadIdealWidth,
+                        availableWidth: availableTimelineWidth
+                    )
+                )
+                .transition(.identity)
+            }
+        }
     }
 
     // MARK: Channel header
@@ -198,20 +323,174 @@ public struct MessageListView: View {
                         Task { await viewModel.retryRealtime() }
                     } : nil,
                     openMemberDirectory: onOpenMemberDirectory,
-                    workspaceID: viewModel.workspaceId,
-                    huddleViewModel: .live(serverIdentity: serverIdentity)
+                    sidebarToggle: sidebarToggle,
+                    isChannelMenuPresented: $isChannelMenuPresented
                 )
             } else {
-                Text(copy.selectChannel)
-                    .font(MomoTheme.Typography.row)
-                    .foregroundStyle(.secondary)
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: MomoWindowChromeLayout.integratedHeaderHeight
-                    )
-                    .momoSurface(.panel, cornerRadius: 0)
+                HStack(spacing: MomoTheme.ChannelHeader.contentSpacing) {
+                    if let sidebarToggle {
+                        Button(action: sidebarToggle) {
+                            Label(copy.toggleSidebar, systemImage: "sidebar.leading")
+                                .labelStyle(.iconOnly)
+                                .frame(
+                                    width: MomoTheme.ChannelHeader.actionSize,
+                                    height: MomoTheme.ChannelHeader.actionSize
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .momoQuickTooltip(copy.toggleSidebar)
+                        .accessibilityLabel(copy.toggleSidebar)
+                        .accessibilityIdentifier("sidebar-toggle")
+                    }
+
+                    Text(copy.selectChannel)
+                        .font(MomoTheme.Typography.row)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, MomoTheme.ChannelHeader.edgeInset + centerHeaderLeadingInset)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: MomoWindowChromeLayout.integratedHeaderHeight
+                )
+                .momoSurface(.panel, cornerRadius: 0)
             }
         }
+    }
+
+    private var channelMenuLeadingInset: CGFloat {
+        MomoTheme.ChannelHeader.edgeInset
+            + centerHeaderLeadingInset
+            + (sidebarToggle == nil
+                ? 0
+                : MomoTheme.ChannelHeader.actionSize + MomoTheme.ChannelHeader.contentSpacing)
+    }
+
+    private func channelActionPanel(
+        channel: Channel,
+        copy: MomoWorkspaceCopy
+    ) -> some View {
+        let canOpenSettings = MomoChannelActionPolicy.canOpenSettings(in: channel)
+            && onOpenChannelSettings != nil
+        let canInvite = MomoChannelActionPolicy.canManageMembers(
+            in: channel,
+            canManageWorkspace: viewModel.canManageWorkspace
+        ) && onInviteToChannel != nil
+        let hasPrimaryActions = canOpenSettings || onOpenMemberDirectory != nil || canInvite
+
+        return VStack(alignment: .leading, spacing: MomoTheme.ChannelHeader.compactSpacing) {
+            if canOpenSettings {
+                channelMenuAction(
+                    copy.channelSettings,
+                    systemImage: "gearshape",
+                    target: .settings
+                ) {
+                    isChannelMenuPresented = false
+                    onOpenChannelSettings?(channel.id)
+                }
+            }
+
+            if let onOpenMemberDirectory {
+                channelMenuAction(
+                    copy.openMemberDirectory,
+                    systemImage: "person.2",
+                    target: .members
+                ) {
+                    isChannelMenuPresented = false
+                    onOpenMemberDirectory()
+                }
+            }
+
+            if canInvite {
+                channelMenuAction(
+                    copy.inviteToChannel,
+                    systemImage: "person.badge.plus",
+                    target: .invite
+                ) {
+                    isChannelMenuPresented = false
+                    onInviteToChannel?(channel.id)
+                }
+            }
+
+            if hasPrimaryActions {
+                Divider()
+            }
+
+            channelMenuAction(
+                copy.copyChannelID,
+                systemImage: "doc.on.doc",
+                target: .copyID
+            ) {
+                copyChannelID(channel.id)
+                isChannelMenuPresented = false
+            }
+        }
+        .padding(MomoTheme.ChannelHeader.edgeInset)
+        .frame(width: MomoTheme.ChannelHeader.menuWidth, alignment: .leading)
+        .momoSurface(.card, cornerRadius: MomoTheme.cornerLarge)
+        .overlay {
+            Button {
+                isChannelMenuPresented = false
+            } label: {
+                EmptyView()
+            }
+            .keyboardShortcut(.cancelAction)
+            .frame(width: 0, height: 0)
+            .accessibilityLabel(copy.closeChannelMenu)
+        }
+        .accessibilityAddTraits(.isModal)
+        .onAppear {
+            let initialTarget: MomoChannelMenuFocusTarget = if canOpenSettings {
+                .settings
+            } else if onOpenMemberDirectory != nil {
+                .members
+            } else if canInvite {
+                .invite
+            } else {
+                .copyID
+            }
+            Task { @MainActor in
+                await Task.yield()
+                channelMenuKeyboardFocus = initialTarget
+                channelMenuAccessibilityFocus = initialTarget
+            }
+        }
+        .onExitCommand {
+            isChannelMenuPresented = false
+        }
+    }
+
+    private func channelMenuAction(
+        _ title: String,
+        systemImage: String,
+        target: MomoChannelMenuFocusTarget,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: MomoTheme.ChannelHeader.contentSpacing) {
+                Image(systemName: systemImage)
+                    .font(.body.weight(.semibold))
+                    .frame(width: MomoTheme.ChannelHeader.actionSize)
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.body)
+                Spacer()
+            }
+            .padding(.horizontal, MomoTheme.ChannelHeader.contentSpacing)
+            .padding(.vertical, MomoTheme.ChannelHeader.standardSpacing)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable()
+        .focused($channelMenuKeyboardFocus, equals: target)
+        .accessibilityFocused($channelMenuAccessibilityFocus, equals: target)
+        .help(title)
+    }
+
+    private func copyChannelID(_ channelID: ChannelID) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(channelID.description, forType: .string)
     }
 
     private func channelPresentation(for channel: Channel) -> MomoChannelPresentation {
@@ -408,7 +687,7 @@ public struct MessageListView: View {
 
     private func timeline(copy: MomoWorkspaceCopy) -> some View {
         let entries = AgentWorkTimelinePolicy.entries(
-            messages: viewModel.visibleMessages,
+            messages: viewModel.visibleMessages.filter { $0.rootId == nil },
             runs: viewModel.visibleWorkRuns
         )
         return GeometryReader { viewport in
@@ -553,6 +832,39 @@ public struct MessageListView: View {
                 onApprovalDecision: { approvalId, approve in
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },
+                reactions: viewModel.reactions(for: item.message),
+                replyCount: viewModel.replies(to: item.message).count,
+                canModify: viewModel.supportsMessageInteractions
+                    && viewModel.isCurrentMemberMessage(item.message),
+                interactionError: viewModel.messageInteractionErrors[item.message.id],
+                onToggleReaction: viewModel.supportsMessageInteractions
+                    ? { emoji in
+                        Task { await viewModel.toggleReaction(emoji, on: item.message) }
+                    }
+                    : nil,
+                onOpenThread: {
+                    onPresentThread()
+                    selectedThreadRootID = item.message.rootId ?? item.message.id
+                },
+                onEdit: viewModel.supportsMessageInteractions
+                    ? { body in
+                        await viewModel.editMessage(item.message, body: body)
+                    }
+                    : nil,
+                onDelete: viewModel.supportsMessageInteractions
+                    ? {
+                        Task {
+                            let didDelete = await viewModel.deleteMessage(item.message)
+                            if didDelete, selectedThreadRootID == item.message.id {
+                                selectedThreadRootID = nil
+                                onDismissThread()
+                            }
+                        }
+                    }
+                    : nil,
+                onDismissInteractionError: {
+                    viewModel.clearMessageInteractionError(item.message.id)
+                },
                 groupingStyle: item.startsGroup ? .groupStart : .compact,
                 timelineCopy: copy,
                 presentation: presentation
@@ -569,6 +881,11 @@ public struct MessageListView: View {
         .onAppear {
             viewModel.messageDidRender(item.message)
         }
+    }
+
+    private var threadRoot: Message? {
+        guard let selectedThreadRootID else { return nil }
+        return viewModel.visibleMessages.first { $0.id == selectedThreadRootID && !$0.isDeleted }
     }
 
     private func workTimelineItem(
@@ -716,6 +1033,12 @@ public struct MessageListView: View {
                     }
             }
 
+            MomoHuddleComposerControl(
+                viewModel: huddleViewModel,
+                copy: MomoHuddleCopy(language: language),
+                isChannelSelected: viewModel.selectedChannelId != nil
+            )
+
             Button(action: presentWorkComposer) { EmptyView() }
                 .keyboardShortcut("w", modifiers: [.command, .shift])
                 .frame(width: 0, height: 0)
@@ -853,6 +1176,10 @@ public struct MessageListView: View {
         case .addPlugin:
             onOpenPluginMarketplace()
         }
+    }
+
+    private var huddleActivationID: String {
+        "\(viewModel.workspaceId?.description ?? "none"):\(viewModel.selectedChannelId?.description ?? "none")"
     }
 
     private func chooseAttachmentFiles() {

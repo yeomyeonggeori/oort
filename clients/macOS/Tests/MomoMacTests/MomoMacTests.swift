@@ -136,6 +136,7 @@ final class MomoMacTests: XCTestCase {
     func testSidebarWidthTokensHaveStableResizeOrder() {
         XCTAssertLessThan(MomoTheme.Sidebar.minimumWidth, MomoTheme.Sidebar.idealWidth)
         XCTAssertLessThan(MomoTheme.Sidebar.idealWidth, MomoTheme.Sidebar.maximumWidth)
+        XCTAssertEqual(MomoTheme.Sidebar.footerBottomInset, 8)
     }
 
     @MainActor
@@ -423,27 +424,32 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(MomoDockUnreadBadgePolicy.totalUnread(overflowStates), Int64.max)
     }
 
-    func testMemberInspectorUsesOverlayBeforeTimelineWouldBecomeTooNarrow() {
-        XCTAssertFalse(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 759))
-        XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 760))
-        XCTAssertTrue(MomoMemberInspectorLayout.usesAttachedInspector(detailWidth: 1_200))
-        XCTAssertTrue(
-            MomoMemberInspectorLayout.blocksTimelineInteraction(
-                isPresented: true,
-                usesAttachedInspector: false
-            )
+    func testRightPanelStaysBelowSharedHeaderWithoutBlockingTimeline() {
+        XCTAssertEqual(
+            MomoRightPanelLayout.headerHeight,
+            MomoWindowChromeLayout.integratedHeaderHeight
         )
-        XCTAssertFalse(
-            MomoMemberInspectorLayout.blocksTimelineInteraction(
-                isPresented: true,
-                usesAttachedInspector: true
-            )
+        XCTAssertFalse(MomoRightPanelLayout.blocksTimelineInteraction)
+        XCTAssertEqual(
+            MomoRightPanelLayout.width(
+                preferredWidth: 440,
+                availableWidth: 700
+            ),
+            340
         )
-        XCTAssertFalse(
-            MomoMemberInspectorLayout.blocksTimelineInteraction(
-                isPresented: false,
-                usesAttachedInspector: false
-            )
+        XCTAssertEqual(
+            MomoRightPanelLayout.width(
+                preferredWidth: 440,
+                availableWidth: 1_200
+            ),
+            440
+        )
+        XCTAssertEqual(
+            MomoRightPanelLayout.width(
+                preferredWidth: 440,
+                availableWidth: 560
+            ),
+            200
         )
     }
 
@@ -4417,6 +4423,40 @@ final class MomoMacTests: XCTestCase {
         let matchingMessages = viewModel.visibleMessages.filter { $0.clientMsgId == allAttempts[0] }
         XCTAssertEqual(matchingMessages.count, 1)
         XCTAssertNotNil(matchingMessages.first?.seq)
+    }
+
+    @MainActor
+    func testFailedReplyRetriesSameIdempotencyKeyWithoutLeavingGhost() async throws {
+        let liveBackend = LiveChatBackend()
+        let seed = await liveBackend.seedDemo()
+        let root = await liveBackend.seedDemoMessage(
+            channel: seed.channels[0].id,
+            author: seed.human.id,
+            body: "답글 루트"
+        )
+        let backend = RetryOnceSendChatBackend(base: liveBackend)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: liveBackend)
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "t")
+
+        XCTAssertFalse(viewModel.supportsMessageInteractions)
+        let firstDidSend = await viewModel.sendReply(body: "동일 답글", to: root)
+        XCTAssertFalse(firstDidSend)
+        let firstAttempts = await backend.attemptedClientMessageIDs()
+        XCTAssertEqual(firstAttempts.count, 1)
+        XCTAssertEqual(
+            viewModel.replies(to: root).filter { $0.clientMsgId == firstAttempts[0] }.first?.state,
+            .failed
+        )
+
+        await viewModel.retryFailedSend()
+        let allAttempts = await backend.attemptedClientMessageIDs()
+        XCTAssertEqual(allAttempts.count, 2)
+        XCTAssertEqual(allAttempts[0], allAttempts[1])
+        let matchingReplies = viewModel.replies(to: root).filter {
+            $0.clientMsgId == allAttempts[0]
+        }
+        XCTAssertEqual(matchingReplies.count, 1)
+        XCTAssertNotNil(matchingReplies.first?.seq)
     }
 
     func testRESTBackendSubscribeUsesRealtimeDriverStartingAfterKnownHistorySeq() async throws {

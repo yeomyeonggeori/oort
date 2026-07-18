@@ -18,8 +18,8 @@ struct MomoChannelHeaderView: View {
     let copy: MomoWorkspaceCopy
     let retryRealtime: (() -> Void)?
     let openMemberDirectory: MomoMemberDirectoryHook?
-    let workspaceID: WorkspaceID?
-    @StateObject private var huddleViewModel: MomoHuddleViewModel
+    let sidebarToggle: (() -> Void)?
+    @Binding var isChannelMenuPresented: Bool
 
     init(
         channel: Channel,
@@ -31,8 +31,8 @@ struct MomoChannelHeaderView: View {
         copy: MomoWorkspaceCopy,
         retryRealtime: (() -> Void)?,
         openMemberDirectory: MomoMemberDirectoryHook?,
-        workspaceID: WorkspaceID? = nil,
-        huddleViewModel: MomoHuddleViewModel = MomoHuddleViewModel(service: nil)
+        sidebarToggle: (() -> Void)? = nil,
+        isChannelMenuPresented: Binding<Bool> = .constant(false)
     ) {
         self.channel = channel
         self.presentation = presentation
@@ -43,14 +43,20 @@ struct MomoChannelHeaderView: View {
         self.copy = copy
         self.retryRealtime = retryRealtime
         self.openMemberDirectory = openMemberDirectory
-        self.workspaceID = workspaceID
-        _huddleViewModel = StateObject(wrappedValue: huddleViewModel)
+        self.sidebarToggle = sidebarToggle
+        _isChannelMenuPresented = isChannelMenuPresented
     }
 
     var body: some View {
         HStack(alignment: .center, spacing: MomoTheme.ChannelHeader.contentSpacing) {
+            if let sidebarToggle {
+                sidebarToggleButton(action: sidebarToggle)
+            }
+
             channelIdentity
                 .frame(minWidth: 0)
+
+            memberCountControl
 
             Spacer(minLength: MomoTheme.ChannelHeader.standardSpacing)
 
@@ -67,12 +73,6 @@ struct MomoChannelHeaderView: View {
                         .fixedSize()
                 }
 
-                MomoHuddleHeaderControl(
-                    viewModel: huddleViewModel,
-                    copy: MomoHuddleCopy(language: copy.language)
-                )
-
-                memberCountControl
             }
             .fixedSize(horizontal: true, vertical: false)
             .layoutPriority(2)
@@ -89,12 +89,22 @@ struct MomoChannelHeaderView: View {
                 .fill(MomoTheme.subtleBorder.opacity(effectiveContrast == .increased ? 1 : 0.65))
                 .frame(height: effectiveContrast == .increased ? 2 : 1)
         }
-        .task(id: "\(workspaceID?.description ?? "none"):\(channel.id.description)") {
-            await huddleViewModel.activate(workspace: workspaceID, channel: channel.id)
+    }
+
+    private func sidebarToggleButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(copy.toggleSidebar, systemImage: "sidebar.leading")
+                .labelStyle(.iconOnly)
+                .frame(
+                    width: MomoTheme.ChannelHeader.actionSize,
+                    height: MomoTheme.ChannelHeader.actionSize
+                )
+                .contentShape(Rectangle())
         }
-        .onDisappear {
-            Task { await huddleViewModel.shutdown() }
-        }
+        .buttonStyle(.plain)
+        .momoQuickTooltip(copy.toggleSidebar)
+        .accessibilityLabel(copy.toggleSidebar)
+        .accessibilityIdentifier("sidebar-toggle")
     }
 
     private var effectiveContrast: ColorSchemeContrast {
@@ -102,24 +112,40 @@ struct MomoChannelHeaderView: View {
     }
 
     private var channelIdentity: some View {
-        HStack(alignment: .center, spacing: MomoTheme.ChannelHeader.standardSpacing) {
-            Image(systemName: channel.kind == .dm ? "person.2.fill" : channel.kind == .privateChannel ? "lock.fill" : "number")
-                .momoTypography(.toolbarTitle)
-                .foregroundStyle(.secondary)
-                .frame(
-                    width: MomoTheme.ChannelHeader.iconSize,
-                    height: MomoTheme.ChannelHeader.iconSize
-                )
+        Button {
+            var transaction = Transaction(animation: nil)
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                isChannelMenuPresented.toggle()
+            }
+        } label: {
+            HStack(alignment: .center, spacing: MomoTheme.ChannelHeader.standardSpacing) {
+                Image(systemName: channel.kind == .dm ? "person.2.fill" : channel.kind == .privateChannel ? "lock.fill" : "number")
+                    .momoTypography(.toolbarTitle)
+                    .foregroundStyle(.secondary)
+                    .frame(
+                        width: MomoTheme.ChannelHeader.iconSize,
+                        height: MomoTheme.ChannelHeader.iconSize
+                    )
 
-            Text(presentation.name)
-                .momoTypography(.screenTitle)
-                .lineLimit(1)
-                .truncationMode(.tail)
+                Text(presentation.name)
+                    .momoTypography(.screenTitle)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(isChannelMenuPresented ? 180 : 0))
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .help(presentation.topic ?? presentation.name)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(presentation.name)
-        .accessibilityHint(presentation.topic ?? "")
+        .accessibilityLabel("\(presentation.name), \(copy.channelMenu)")
+        .accessibilityValue(copy.channelMenuState(isPresented: isChannelMenuPresented))
+        .accessibilityHint(presentation.topic ?? copy.channelSettingsSubtitle)
+        .accessibilityIdentifier("channel-header-menu")
     }
 
     @ViewBuilder
@@ -133,7 +159,6 @@ struct MomoChannelHeaderView: View {
                 label
             }
             .buttonStyle(.borderless)
-            .help(copy.openMemberDirectory)
             .momoQuickTooltip(copy.openMemberDirectory)
             .accessibilityLabel(copy.openMemberDirectory)
             .accessibilityValue(copy.channelMemberCount(memberCount))
