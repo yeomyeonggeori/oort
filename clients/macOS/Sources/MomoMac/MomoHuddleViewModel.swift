@@ -9,7 +9,7 @@ public final class MomoHuddleViewModel: ObservableObject {
     @Published public private(set) var isMicrophoneMuted = false
 
     private let service: (any MomoHuddleService)?
-    private let audioSession: any MomoHuddleAudioSession
+    private var audioSession: (any MomoHuddleAudioSession)?
     private let now: @Sendable () -> Date
     private var workspace: WorkspaceID?
     private var channel: ChannelID?
@@ -21,7 +21,7 @@ public final class MomoHuddleViewModel: ObservableObject {
 
     public init(
         service: (any MomoHuddleService)?,
-        audioSession: any MomoHuddleAudioSession = MomoHuddleLiveKitSession(),
+        audioSession: (any MomoHuddleAudioSession)? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.service = service
@@ -121,6 +121,7 @@ public final class MomoHuddleViewModel: ObservableObject {
         guard isJoined else { return }
         let target = !isMicrophoneMuted
         do {
+            guard let audioSession else { return }
             try await audioSession.setMicrophoneMuted(target)
             isMicrophoneMuted = target
         } catch {
@@ -149,7 +150,7 @@ public final class MomoHuddleViewModel: ObservableObject {
             tokenRefreshTask?.cancel()
             tokenRefreshTask = nil
             joinedHuddleID = nil
-            await audioSession.disconnect()
+            if let audioSession { await audioSession.disconnect() }
             audioParticipants = []
             activeHuddle = nil
             state = .idle
@@ -165,6 +166,8 @@ public final class MomoHuddleViewModel: ObservableObject {
     }
 
     private func connect(to joined: MomoHuddleJoin) async throws {
+        let audioSession = audioSession ?? MomoHuddleLiveKitSession()
+        self.audioSession = audioSession
         try await audioSession.connect(url: joined.liveKitURL, token: joined.token)
         activeHuddle = joined.huddle
         joinedHuddleID = joined.huddle.id
@@ -177,7 +180,7 @@ public final class MomoHuddleViewModel: ObservableObject {
     private func observeParticipants() {
         participantTask?.cancel()
         participantTask = Task { [weak self] in
-            guard let self else { return }
+            guard let self, let audioSession = self.audioSession else { return }
             let updates = await audioSession.participantUpdates()
             for await participants in updates {
                 guard !Task.isCancelled else { return }
@@ -200,8 +203,9 @@ public final class MomoHuddleViewModel: ObservableObject {
                       let workspace = self.workspace
                 else { return }
                 let refreshed = try await service.join(workspace: workspace, huddle: huddleID)
-                try await self.audioSession.connect(url: refreshed.liveKitURL, token: refreshed.token)
-                try await self.audioSession.setMicrophoneMuted(self.isMicrophoneMuted)
+                guard let audioSession = self.audioSession else { return }
+                try await audioSession.connect(url: refreshed.liveKitURL, token: refreshed.token)
+                try await audioSession.setMicrophoneMuted(self.isMicrophoneMuted)
                 self.activeHuddle = refreshed.huddle
                 self.state = .joined
                 self.observeParticipants()
@@ -222,7 +226,7 @@ public final class MomoHuddleViewModel: ObservableObject {
         let huddleID = joinedHuddleID
         joinedHuddleID = nil
 
-        await audioSession.disconnect()
+        if let audioSession { await audioSession.disconnect() }
         audioParticipants = []
 
         var leaveError: Error?
