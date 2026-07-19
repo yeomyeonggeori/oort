@@ -13,6 +13,13 @@ struct MomoMessageThreadPanel: View {
     @FocusState private var isComposerFocused: Bool
 
     private var replies: [Message] { viewModel.replies(to: root) }
+    private var rootID: MessageID { root.rootId ?? root.id }
+    private var isLoadingReplies: Bool {
+        viewModel.threadRepliesLoadingRootIDs.contains(rootID)
+    }
+    private var didFailLoadingReplies: Bool {
+        viewModel.threadRepliesFailedRootIDs.contains(rootID)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,9 +31,14 @@ struct MomoMessageThreadPanel: View {
                     Divider()
                         .padding(.vertical, 4)
 
-                    if viewModel.isSelectedChannelHistoryLoading && replies.isEmpty {
-                        ProgressView(copy.timelineLoading)
-                            .frame(maxWidth: .infinity, minHeight: 120)
+                    if isLoadingReplies && replies.isEmpty {
+                        ProgressView(copy.threadRepliesLoading)
+                            .frame(
+                                maxWidth: .infinity,
+                                minHeight: MomoTheme.MessageInteraction.threadComposerMaximumHeight
+                            )
+                    } else if didFailLoadingReplies && replies.isEmpty {
+                        threadLoadFailure
                     } else if replies.isEmpty {
                         VStack(spacing: MomoTheme.MessageInteraction.standardSpacing) {
                             Text(copy.threadEmpty)
@@ -40,6 +52,7 @@ struct MomoMessageThreadPanel: View {
                         ForEach(replies) { reply in
                             threadMessage(reply, isRoot: false)
                         }
+                        threadPaginationFooter
                     }
                 }
                 .padding(12)
@@ -66,6 +79,9 @@ struct MomoMessageThreadPanel: View {
             maxHeight: .infinity
         )
         .momoSurface(.panel, cornerRadius: 0)
+        .task(id: rootID) {
+            await viewModel.loadThreadReplies(for: root)
+        }
     }
 
     private var header: some View {
@@ -123,6 +139,44 @@ struct MomoMessageThreadPanel: View {
             groupingStyle: .groupStart,
             timelineCopy: copy,
             presentation: presentation
+        )
+    }
+
+    @ViewBuilder
+    private var threadPaginationFooter: some View {
+        if isLoadingReplies {
+            ProgressView(copy.threadRepliesLoading)
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+        } else if didFailLoadingReplies {
+            threadLoadFailure
+        } else if viewModel.canLoadMoreThreadReplies(for: root) {
+            Button {
+                Task { await viewModel.loadMoreThreadReplies(for: root) }
+            } label: {
+                Label(copy.loadMoreThreadReplies, systemImage: "arrow.down.circle")
+            }
+            .buttonStyle(.borderless)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private var threadLoadFailure: some View {
+        VStack(spacing: 8) {
+            Label(copy.threadRepliesLoadFailed, systemImage: "exclamationmark.triangle")
+                .font(MomoTheme.Typography.supporting)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button(copy.retryThreadReplies) {
+                Task { await viewModel.retryThreadReplies(for: root) }
+            }
+            .buttonStyle(.borderless)
+        }
+        .frame(
+            maxWidth: .infinity,
+            minHeight: MomoTheme.MessageInteraction.threadComposerMaximumHeight
         )
     }
 

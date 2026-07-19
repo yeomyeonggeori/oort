@@ -119,6 +119,7 @@ public enum MomoDirectMessageOpenOutcome: Sendable, Equatable {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     private static let maximumMarkReadFailures = 5
+    private static let threadRepliesPageLimit = 50
     private static let workspaceCachePrefix = "momo.workspace.identity."
 
     private struct PendingMessageSend: Sendable {
@@ -157,6 +158,7 @@ public final class ChatViewModel: ObservableObject {
     private let messageInteractionBackend: (any MomoMessageInteractionBackend)?
     private let channelNotificationBackend: (any MomoChannelNotificationBackend)?
     private let workspaceMessageSearchBackend: (any MomoWorkspaceMessageSearchBackend)?
+    private let threadRepliesBackend: (any MomoThreadRepliesBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -201,6 +203,8 @@ public final class ChatViewModel: ObservableObject {
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
     @Published private(set) var historyLoadingChannels: Set<ChannelID> = []
+    @Published public private(set) var threadRepliesLoadingRootIDs: Set<MessageID> = []
+    @Published public private(set) var threadRepliesFailedRootIDs: Set<MessageID> = []
     @Published private var messageReactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
     @Published private(set) var messageInteractionErrors: [MessageID: MomoMessageInteractionError] = [:]
     private var messageMutationOperations: [MessageID: MessageMutationOperation] = [:]
@@ -208,6 +212,9 @@ public final class ChatViewModel: ObservableObject {
     private var reactionSnapshotTokens: [ChannelID: UUID] = [:]
     private var bufferedReactionDeltasByChannel: [ChannelID: [ReactionDelta]] = [:]
     private var bufferedTimelineEventsByChannel: [ChannelID: [RealtimeEvent]] = [:]
+    private var threadRepliesLoadedRootIDs: Set<MessageID> = []
+    private var threadRepliesNextCursors: [MessageID: Int64] = [:]
+    private var threadRepliesLoadTokens: [MessageID: UUID] = [:]
 
     // Live agent state for the selected channel.
     /// In-flight `agent.partial` buffers, keyed by run, for AgentPartialView (L4 §5.2).
@@ -328,6 +335,7 @@ public final class ChatViewModel: ObservableObject {
         self.messageInteractionBackend = chat as? any MomoMessageInteractionBackend
         self.channelNotificationBackend = chat as? any MomoChannelNotificationBackend
         self.workspaceMessageSearchBackend = chat as? any MomoWorkspaceMessageSearchBackend
+        self.threadRepliesBackend = chat as? any MomoThreadRepliesBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -553,6 +561,11 @@ public final class ChatViewModel: ObservableObject {
         activeTimelineChannelId = nil
         messagesByChannel = [:]
         historyLoadingChannels = []
+        threadRepliesLoadingRootIDs = []
+        threadRepliesFailedRootIDs = []
+        threadRepliesLoadedRootIDs = []
+        threadRepliesNextCursors = [:]
+        threadRepliesLoadTokens = [:]
         partials = [:]
         agentStatuses = [:]
         costSnapshots = [:]
@@ -2331,6 +2344,155 @@ public final class ChatViewModel: ObservableObject {
             .sorted(by: Self.seqOrder)
     }
 
+    /// The badge is always driven by the server-owned rollup, never by the
+    /// currently loaded reply slice.
+    public func threadReplyCount(for root: Message) -> Int {
+        root.thread?.replyCount ?? 0
+    }
+
+    public func canLoadMoreThreadReplies(for root: Message) -> Bool {
+        threadRepliesNextCursors[root.rootId ?? root.id] != nil
+    }
+
+    public func loadThreadReplies(for root: Message) async {
+        let rootID = root.rootId ?? root.id
+        guard root.rootId == nil, !root.isDeleted,
+              !threadRepliesLoadedRootIDs.contains(rootID)
+        else { return }
+        await fetchThreadReplies(rootID: rootID, channel: root.channelId, cursor: nil)
+    }
+
+    public func loadMoreThreadReplies(for root: Message) async {
+        let rootID = root.rootId ?? root.id
+        guard let cursor = threadRepliesNextCursors[rootID] else { return }
+        await fetchThreadReplies(rootID: rootID, channel: root.channelId, cursor: cursor)
+    }
+
+    public func retryThreadReplies(for root: Message) async {
+        let rootID = root.rootId ?? root.id
+        let cursor = threadRepliesLoadedRootIDs.contains(rootID)
+            ? threadRepliesNextCursors[rootID]
+            : nil
+        await fetchThreadReplies(rootID: rootID, channel: root.channelId, cursor: cursor)
+    }
+
+    private func fetchThreadReplies(
+        rootID: MessageID,
+        channel: ChannelID,
+        cursor: Int64?
+    ) async {
+        guard let threadRepliesBackend else {
+            threadRepliesLoadedRootIDs.insert(rootID)
+            return
+        }
+        guard !threadRepliesLoadingRootIDs.contains(rootID),
+              let workspaceID = workspaceId,
+              selectedChannelId == channel,
+              activeTimelineChannelId == channel
+        else { return }
+
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let token = UUID()
+        threadRepliesLoadTokens[rootID] = token
+        threadRepliesLoadingRootIDs.insert(rootID)
+        threadRepliesFailedRootIDs.remove(rootID)
+
+        do {
+            let page = try await threadRepliesBackend.threadReplies(
+                channel: channel,
+                root: rootID,
+                cursor: cursor,
+                limit: Self.threadRepliesPageLimit
+            )
+            guard isThreadRepliesLoadCurrent(
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID,
+                channel: channel,
+                rootID: rootID,
+                token: token
+            ) else {
+                finishThreadRepliesLoadIfOwned(rootID: rootID, token: token)
+                return
+            }
+            try Self.validateThreadRepliesPage(
+                page,
+                channel: channel,
+                rootID: rootID,
+                cursor: cursor
+            )
+            for reply in page.messages {
+                _ = upsert(reply, channel: channel)
+            }
+            threadRepliesLoadedRootIDs.insert(rootID)
+            threadRepliesNextCursors[rootID] = page.nextCursor
+            threadRepliesFailedRootIDs.remove(rootID)
+            threadRepliesLoadingRootIDs.remove(rootID)
+            threadRepliesLoadTokens[rootID] = nil
+        } catch {
+            guard isThreadRepliesLoadCurrent(
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID,
+                channel: channel,
+                rootID: rootID,
+                token: token
+            ) else {
+                finishThreadRepliesLoadIfOwned(rootID: rootID, token: token)
+                return
+            }
+            threadRepliesLoadingRootIDs.remove(rootID)
+            threadRepliesLoadTokens[rootID] = nil
+            guard !Self.isCancellation(error) else { return }
+            threadRepliesFailedRootIDs.insert(rootID)
+        }
+    }
+
+    private func finishThreadRepliesLoadIfOwned(rootID: MessageID, token: UUID) {
+        guard threadRepliesLoadTokens[rootID] == token else { return }
+        threadRepliesLoadingRootIDs.remove(rootID)
+        threadRepliesLoadTokens[rootID] = nil
+    }
+
+    private func isThreadRepliesLoadCurrent(
+        sessionGeneration: UInt64,
+        workspaceID: WorkspaceID,
+        channel: ChannelID,
+        rootID: MessageID,
+        token: UUID
+    ) -> Bool {
+        isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceID)
+            && selectedChannelId == channel
+            && activeTimelineChannelId == channel
+            && threadRepliesLoadTokens[rootID] == token
+    }
+
+    private nonisolated static func validateThreadRepliesPage(
+        _ page: MomoThreadRepliesPage,
+        channel: ChannelID,
+        rootID: MessageID,
+        cursor: Int64?
+    ) throws {
+        let repliesAreScoped = page.messages.allSatisfy {
+            $0.channelId == channel
+                && $0.rootId == rootID
+                && $0.seq != nil
+                && (cursor == nil || ($0.seq ?? 0) > (cursor ?? 0))
+        }
+        guard repliesAreScoped,
+              zip(page.messages, page.messages.dropFirst()).allSatisfy({ lhs, rhs in
+                  (lhs.seq ?? 0) < (rhs.seq ?? 0)
+              })
+        else {
+            throw BackendError.decoding("invalid thread replies page")
+        }
+        if let nextCursor = page.nextCursor {
+            guard nextCursor == page.messages.last?.seq,
+                  cursor == nil || nextCursor > (cursor ?? 0)
+            else {
+                throw BackendError.decoding("invalid thread replies cursor")
+            }
+        }
+    }
+
     public func clearMessageInteractionError(_ messageID: MessageID) {
         messageInteractionErrors[messageID] = nil
     }
@@ -2688,6 +2850,10 @@ public final class ChatViewModel: ObservableObject {
             messageReactionMembers[id] = nil
             messageInteractionErrors[id] = nil
         case .threadUpdated(let delta):
+            if reactionSnapshotTokens[channel] != nil {
+                bufferedTimelineEventsByChannel[channel, default: []].append(event)
+                return
+            }
             guard delta.channelId == channel,
                   var messages = messagesByChannel[channel],
                   let index = messages.firstIndex(where: { $0.id == delta.rootId })

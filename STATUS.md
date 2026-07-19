@@ -23,6 +23,11 @@
 - AgentWorker의 durable message INSERT 4곳은 트리거가 답글일 때 같은 `root_id`를 보존하고, 같은 트랜잭션에서 MessageRoutes와 동일한 participant 포함 롤업 upsert 및 `thread.updated`를 기록한다. 톱레벨 트리거는 계속 NULL이며 `message.seq` 추가 발급은 없다.
 - server 111 tests, Core 30 tests, AgentWorker 31 tests, iOS 27 tests와 macOS 전체 컴파일이 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했다. `verify_thread_projection.sh`의 bash/ShellCheck 및 runtime-db 편입은 검증했으며, 격리 Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`다. (후속: 오케스트레이터 실런 verify_thread_projection 전 항목 PASS — BUILD_TICKETS MOMO-479 랜딩 노트)
 
+## UXUI A-4 스레드 롤업·과거 답글 실연동 (2026-07-19)
+
+- macOS는 답글 배지를 서버 `Message.thread.replyCount`로만 표시하고, replies REST의 배타적 seq cursor를 통해 과거 답글을 오름차순 페이지 로드한다. 열린 패널은 `thread.updated`와 실시간 새 답글을 즉시 반영하며 로딩·오류·재시도·추가 로드 상태를 제공한다.
+- tombstone 포함 REST 계약, 롤업과 로드 범위 분리, cursor 페이지, 실패 후 재시도, 실시간 3번째 답글을 집중 검증했다. 전체 macOS 411 tests, 디자인 pre-flight, 스레드 패널 라이트·다크 snapshot이 PASS했다. 실서버 세션의 수동 왕복은 `runtime-unverified`다.
+
 ## UXUI A-8 채널 음소거 + A-9 메시지 상호작용 실연동 (2026-07-19)
 
 - A-8은 채널/DM `muted` 응답을 목록 아이콘·컨텍스트 메뉴·채널 설정 토글에 연결하고, 낙관 갱신 실패/취소 롤백과 세션 전환 격리, unread 불변식을 적용했다. A-9는 macOS REST backend의 수정·삭제·반응 추가/제거·스냅샷 501을 실제 서버 계약으로 교체해 기존 capability-gated UI를 개방했다.

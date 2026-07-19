@@ -835,7 +835,7 @@ public struct MessageListView: View {
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },
                 reactions: viewModel.reactions(for: item.message),
-                replyCount: viewModel.replies(to: item.message).count,
+                replyCount: viewModel.threadReplyCount(for: item.message),
                 canModify: canModify,
                 interactionError: viewModel.messageInteractionErrors[item.message.id],
                 onToggleReaction: canInteract

@@ -3171,6 +3171,110 @@ final class MomoMacTests: XCTestCase {
         XCTAssertTrue(tombstone.isDeleted)
     }
 
+    func testRESTBackendLoadsThreadRepliesWithExclusiveCursorAndTombstones() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000001050")!
+        let firstID = MessageID(uuidString: "00000000-0000-7000-8000-000000001051")!
+        let deletedID = MessageID(uuidString: "00000000-0000-7000-8000-000000001052")!
+        let lastID = MessageID(uuidString: "00000000-0000-7000-8000-000000001053")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages/\(root.description)/replies"
+            )
+            let queryItems = URLComponents(
+                url: try XCTUnwrap(request.url),
+                resolvingAgainstBaseURL: false
+            )?.queryItems ?? []
+            XCTAssertEqual(queryItems.first(where: { $0.name == "limit" })?.value, "2")
+            let cursor = queryItems.first(where: { $0.name == "cursor" })?.value
+            if cursor == nil {
+                return MockHTTPResponse(json: """
+                {
+                  "messages": [
+                    {
+                      "id": "\(firstID.description)",
+                      "channelId": "\(channel.description)",
+                      "rootId": "\(root.description)",
+                      "seq": 41,
+                      "hlcTs": 1700000001000,
+                      "hlcCount": 0,
+                      "authorMemberId": "\(MemberID.demoHuman.description)",
+                      "type": "text",
+                      "body": "첫 답글",
+                      "createdAtMs": 1700000001000,
+                      "state": "sent"
+                    },
+                    {
+                      "id": "\(deletedID.description)",
+                      "channelId": "\(channel.description)",
+                      "rootId": "\(root.description)",
+                      "seq": 42,
+                      "hlcTs": 1700000002000,
+                      "hlcCount": 0,
+                      "authorMemberId": "\(MemberID.demoHuman.description)",
+                      "type": "text",
+                      "body": null,
+                      "createdAtMs": 1700000002000,
+                      "state": "deleted",
+                      "deletedAtMs": 1700000003000
+                    }
+                  ],
+                  "nextCursor": 42
+                }
+                """)
+            }
+            XCTAssertEqual(cursor, "42")
+            return MockHTTPResponse(json: """
+            {
+              "messages": [{
+                "id": "\(lastID.description)",
+                "channelId": "\(channel.description)",
+                "rootId": "\(root.description)",
+                "seq": 43,
+                "hlcTs": 1700000004000,
+                "hlcCount": 0,
+                "authorMemberId": "\(MemberID.demoHuman.description)",
+                "type": "text",
+                "body": "마지막 답글",
+                "createdAtMs": 1700000004000,
+                "state": "sent"
+              }],
+              "nextCursor": null
+            }
+            """)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let firstPage = try await backend.threadReplies(
+            channel: channel,
+            root: root,
+            cursor: nil,
+            limit: 2
+        )
+        XCTAssertEqual(firstPage.messages.map(\.id), [firstID, deletedID])
+        XCTAssertTrue(try XCTUnwrap(firstPage.messages.last).isDeleted)
+        XCTAssertEqual(firstPage.nextCursor, 42)
+
+        let secondPage = try await backend.threadReplies(
+            channel: channel,
+            root: root,
+            cursor: firstPage.nextCursor,
+            limit: 2
+        )
+        XCTAssertEqual(secondPage.messages.map(\.id), [lastID])
+        XCTAssertNil(secondPage.nextCursor)
+    }
+
     func testRESTBackendSearchUsesWorkspaceFTSEndpointAndPreservesHitIdentity() async throws {
         await MockHTTPURLProtocol.reset()
         let workspace = WorkspaceID.demo

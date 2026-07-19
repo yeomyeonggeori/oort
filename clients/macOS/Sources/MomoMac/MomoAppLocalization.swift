@@ -339,6 +339,34 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var threadRepliesLoading: String {
+        switch language {
+        case .korean: return "답글 불러오는 중"
+        case .english: return "Loading replies"
+        }
+    }
+
+    var threadRepliesLoadFailed: String {
+        switch language {
+        case .korean: return "답글을 불러오지 못했습니다. 연결 상태를 확인해 주세요."
+        case .english: return "Replies could not be loaded. Check your connection."
+        }
+    }
+
+    var retryThreadReplies: String {
+        switch language {
+        case .korean: return "답글 다시 불러오기"
+        case .english: return "Reload replies"
+        }
+    }
+
+    var loadMoreThreadReplies: String {
+        switch language {
+        case .korean: return "답글 더 불러오기"
+        case .english: return "Load more replies"
+        }
+    }
+
     var deletedMessage: String {
         switch language {
         case .korean: return "삭제된 메시지"

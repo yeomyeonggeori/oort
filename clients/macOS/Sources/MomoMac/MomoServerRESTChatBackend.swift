@@ -8,7 +8,7 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -256,6 +256,33 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
         rememberLastKnownSeq(messages, channel: channel)
         return messages
+    }
+
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> MomoThreadRepliesPage {
+        guard let workspace else { throw BackendError.notConnected }
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor {
+            items.append(URLQueryItem(name: "cursor", value: String(cursor)))
+        }
+
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages/\(root.description)/replies",
+            queryItems: items,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: ThreadRepliesPageDTO.self
+        )
+        let messages = try page.messages.map { try $0.message() }
+            .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        guard messages.allSatisfy({ $0.channelId == channel && $0.rootId == root }) else {
+            throw BackendError.decoding("thread replies escaped the requested root")
+        }
+        rememberLastKnownSeq(messages, channel: channel)
+        return MomoThreadRepliesPage(messages: messages, nextCursor: page.nextCursor)
     }
 
     public func presence(channel: ChannelID) async throws -> [PresenceEntry] {
@@ -1537,6 +1564,11 @@ private struct SendMessageRequest: Encodable {
 private struct MessagePage: Decodable {
     let messages: [MessageDTO]
     let nextBefore: Int64?
+}
+
+private struct ThreadRepliesPageDTO: Decodable {
+    let messages: [MessageDTO]
+    let nextCursor: Int64?
 }
 
 private struct WorkspaceMessageSearchResponseDTO: Decodable {
