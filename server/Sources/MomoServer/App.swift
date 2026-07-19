@@ -85,6 +85,8 @@ enum AppBuilder {
         if driveArchive.acceptsStubUploads {
             attachmentRoutes.addStubUpload(to: router)
         }
+        let workHostRoutes = WorkHostRoutes(db: db)
+        workHostRoutes.addPublic(to: router)
 
         // Gateway callbacks accept per-agent bearer credentials. The shared
         // secret is available only on this narrow group and only when the
@@ -112,6 +114,7 @@ enum AppBuilder {
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         WorkSessionRoutes(db: db).add(to: authed)
         WorkControlRoutes(db: db).add(to: authed)
+        workHostRoutes.addProtected(to: authed)
         SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)
         AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
