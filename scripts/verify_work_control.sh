@@ -52,6 +52,7 @@ CENT_API_KEY="${CENT_API_KEY:-change-me-cent-api-key}"
 OWNER_ID="$(new_uuid)"
 AGENT_ID="$(new_uuid)"
 HOST_ID="$(new_uuid)"
+HOST_PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
 RUN_APPROVE_ID="$(new_uuid)"
 RUN_AUTO_ID="$(new_uuid)"
 RUN_DENY2_ID="$(new_uuid)"
@@ -173,6 +174,13 @@ curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   --data "$(jq -cn --arg e "$OWNER_EMAIL" --arg p "$OWNER_PASSWORD" --arg w "$WS_ID" \
     '{email:$e,password:$p,workspace:$w}')" >"$TMP_DIR/login.json"
 OWNER_TOKEN="$(jq -er '.accessToken' "$TMP_DIR/login.json")"
+
+api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/work-hosts" \
+  "$(jq -cn --arg key "$HOST_PUBLIC_KEY" \
+    '{scope:"member",type:"app",displayName:"MOMO-484 host",publicKey:$key,
+      capabilities:{"tool.codex":true}}')"
+expect_status 201 "work host registration"
+HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id | ascii_downcase')"
 
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/agents/$AGENT_ID/credentials" \
   '{"label":"MOMO-484 work control verifier"}'
