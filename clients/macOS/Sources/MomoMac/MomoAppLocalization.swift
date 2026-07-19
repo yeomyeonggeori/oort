@@ -220,6 +220,41 @@ struct MomoWorkspaceCopy {
         }
     }
 
+    var downloadAttachment: String {
+        switch language {
+        case .korean: return "첨부파일 다운로드"
+        case .english: return "Download attachment"
+        }
+    }
+
+    var retryAttachmentDownload: String {
+        switch language {
+        case .korean: return "다운로드 다시 시도"
+        case .english: return "Retry download"
+        }
+    }
+
+    var openAttachment: String {
+        switch language {
+        case .korean: return "첨부파일 열기"
+        case .english: return "Open attachment"
+        }
+    }
+
+    var attachmentDownloading: String {
+        switch language {
+        case .korean: return "첨부파일 다운로드 중"
+        case .english: return "Downloading attachment"
+        }
+    }
+
+    var attachmentDownloadFailed: String {
+        switch language {
+        case .korean: return "다운로드 실패"
+        case .english: return "Download failed"
+        }
+    }
+
     var copyMessage: String {
         switch language {
         case .korean: return "메시지 복사"
@@ -2173,15 +2208,15 @@ struct MomoWorkspaceCopy {
 
     var downloadsSubtitle: String {
         switch language {
-        case .korean: return "다운로드 위치와 파일 전송 지원 후 표시될 이력을 확인합니다."
-        case .english: return "Review the download location and the history that will appear when file transfer is available."
+        case .korean: return "채팅 첨부파일의 다운로드 위치와 최근 이력을 확인합니다."
+        case .english: return "Review the download location and recent history for chat attachments."
         }
     }
 
     var downloadsScopeNote: String {
         switch language {
-        case .korean: return "채팅 첨부파일 다운로드는 파일 전송 기능이 연결된 뒤 이곳에 기록됩니다."
-        case .english: return "Chat attachment downloads will appear here after file transfer support is connected."
+        case .korean: return "채팅에서 받은 첨부파일은 선택한 폴더에 저장되고 이곳에 기록됩니다."
+        case .english: return "Chat attachments are saved to the selected folder and recorded here."
         }
     }
 
@@ -2202,7 +2237,7 @@ struct MomoWorkspaceCopy {
     var downloadFolderSubtitle: String {
         switch language {
         case .korean: return "다운로드가 저장될 기본 위치입니다."
-        case .english: return "Default location for downloaded alpha builds."
+        case .english: return "Default location for downloaded files."
         }
     }
 

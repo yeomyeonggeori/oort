@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI A-6 첨부 실업로드·수신·다운로드 완성 (2026-07-19)
+
+- macOS 컴포저는 파일당 100MB·메시지당 20개 경계에서 업로드 세션 발급→capability URL 직송 PUT→complete→`attachmentIds` 메시지 전송을 수행한다. capability URL은 전용 ephemeral 세션 내부에서만 소비하고 인증 헤더·로그·UI·영속 상태에 남기지 않는다.
+- 수신 메시지와 스레드는 서버 `Message.attachments`를 파일 카드로 표시하고 기존 content proxy를 통해 선택한 다운로드 폴더에 저장한다. 진행·실패·재시도·열기 상태, 안전한 파일명/중복 이름, 실제 첨부 이름 검색을 함께 연결했다.
+- macOS 416 tests와 디자인 pre-flight에서 REST 전 계약·capability URL 비노출·라이트/다크/고대비 큰 글자 스냅샷을 검증했다. 실 Google Drive archive를 사용한 서버 왕복은 성재 환경 수동 검수 전까지 `runtime-unverified`다.
+
 ## MOMO-482 첨부 메타데이터 수신 투영 (2026-07-19)
 
 - complete 상태로 메시지에 바인딩된 첨부만 생성순 `{id,name,mime,sizeBytes}`로 send/history 3변형/replies와 같은 트랜잭션의 `message.new`에 가산했다. 0건은 생략하고 모든 목록 경로는 lateral `jsonb_agg` 단일 쿼리를 사용하며 업로드 capability URL과 Drive 식별자는 투영하지 않는다.

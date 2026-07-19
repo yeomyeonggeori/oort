@@ -136,6 +136,16 @@ struct MomoMessageThreadPanel: View {
             onDismissInteractionError: {
                 viewModel.clearMessageInteractionError(message.id)
             },
+            attachmentDownloadStates: viewModel.attachmentDownloadStates,
+            onDownloadAttachment: { attachment in
+                Task {
+                    await viewModel.downloadAttachment(
+                        attachment,
+                        from: message.channelId
+                    )
+                }
+            },
+            onOpenAttachment: viewModel.openDownloadedAttachment,
             groupingStyle: .groupStart,
             timelineCopy: copy,
             presentation: presentation

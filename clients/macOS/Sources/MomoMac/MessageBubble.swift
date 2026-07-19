@@ -31,6 +31,9 @@ public struct MessageBubble: View {
     private let onEdit: ((String) async -> Bool)?
     private let onDelete: (() -> Void)?
     private let onDismissInteractionError: (() -> Void)?
+    private let attachmentDownloadStates: [FileID: MomoAttachmentDownloadState]
+    private let onDownloadAttachment: ((MessageAttachment) -> Void)?
+    private let onOpenAttachment: ((MessageAttachment) -> Void)?
     private let groupingStyle: MessageBubbleGroupingStyle
     private let timelineCopy: MomoWorkspaceCopy
     private let presentation: MomoDeveloperModePresentation
@@ -73,6 +76,9 @@ public struct MessageBubble: View {
         self.onEdit = nil
         self.onDelete = nil
         self.onDismissInteractionError = nil
+        self.attachmentDownloadStates = [:]
+        self.onDownloadAttachment = nil
+        self.onOpenAttachment = nil
         self.groupingStyle = .standalone
         self.timelineCopy = MomoWorkspaceCopy(language: .preferredDefault)
         self.presentation = .standard
@@ -94,6 +100,9 @@ public struct MessageBubble: View {
         onEdit: ((String) async -> Bool)? = nil,
         onDelete: (() -> Void)? = nil,
         onDismissInteractionError: (() -> Void)? = nil,
+        attachmentDownloadStates: [FileID: MomoAttachmentDownloadState] = [:],
+        onDownloadAttachment: ((MessageAttachment) -> Void)? = nil,
+        onOpenAttachment: ((MessageAttachment) -> Void)? = nil,
         groupingStyle: MessageBubbleGroupingStyle,
         timelineCopy: MomoWorkspaceCopy,
         presentation: MomoDeveloperModePresentation = .standard
@@ -113,6 +122,9 @@ public struct MessageBubble: View {
         self.onEdit = onEdit
         self.onDelete = onDelete
         self.onDismissInteractionError = onDismissInteractionError
+        self.attachmentDownloadStates = attachmentDownloadStates
+        self.onDownloadAttachment = onDownloadAttachment
+        self.onOpenAttachment = onOpenAttachment
         self.groupingStyle = groupingStyle
         self.timelineCopy = timelineCopy
         self.presentation = presentation
@@ -511,6 +523,26 @@ public struct MessageBubble: View {
 
     @ViewBuilder
     private var content: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Attachment.standardSpacing) {
+            primaryContent
+            if !message.isDeleted,
+               let attachments = message.attachments,
+               !attachments.isEmpty,
+               let onDownloadAttachment,
+               let onOpenAttachment {
+                MomoMessageAttachmentList(
+                    attachments: attachments,
+                    downloadStates: attachmentDownloadStates,
+                    copy: timelineCopy,
+                    onDownload: onDownloadAttachment,
+                    onOpen: onOpenAttachment
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var primaryContent: some View {
         if message.isDeleted {
             Text(timelineCopy.deletedMessage)
                 .momoTypography(.messageBody)
@@ -524,9 +556,11 @@ public struct MessageBubble: View {
         } else {
             switch message.type {
             case .text, .system:
-                Text(message.body ?? "")
-                    .momoTypography(.messageBody)
-                    .textSelection(.enabled)
+                if let body = message.body, !body.isEmpty {
+                    Text(body)
+                        .momoTypography(.messageBody)
+                        .textSelection(.enabled)
+                }
             case .toolCall:
                 toolCallCard
             case .toolResult:

@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import MomoCore
 
 enum MomoComposerAction: String, CaseIterable, Identifiable {
     case fileUpload
@@ -69,7 +70,20 @@ struct MomoPluginCatalogItem: Identifiable, Hashable {
 }
 
 struct MomoAttachmentDraft: Identifiable, Equatable {
+    enum UploadIssue: Equatable {
+        case fileTooLarge
+        case unavailable
+    }
+
+    enum State: Equatable {
+        case ready
+        case uploading
+        case uploaded(MessageAttachment)
+        case failed(UploadIssue)
+    }
+
     let url: URL
+    var state: State
 
     var id: URL { url.resolvingSymlinksInPath().standardizedFileURL }
     var name: String { url.lastPathComponent }
@@ -84,19 +98,22 @@ struct MomoAttachmentDraft: Identifiable, Equatable {
         return "doc"
     }
 
-    init(url: URL) {
+    init(url: URL, state: State = .ready) {
         self.url = url.resolvingSymlinksInPath().standardizedFileURL
+        self.state = state
     }
 }
 
 enum MomoAttachmentDraftCollection {
+    static let maximumCount = 20
+
     static func merging(
         _ existing: [MomoAttachmentDraft],
         urls: [URL]
     ) -> [MomoAttachmentDraft] {
         var result = existing
         var identifiers = Set(existing.map(\.id))
-        for url in urls where url.isFileURL && !url.hasDirectoryPath {
+        for url in urls where result.count < maximumCount && url.isFileURL && !url.hasDirectoryPath {
             let draft = MomoAttachmentDraft(url: url)
             if identifiers.insert(draft.id).inserted {
                 result.append(draft)
@@ -111,7 +128,7 @@ struct MomoComposerActionCopy {
 
     var launcherTitle: String { localized("추가", "Add") }
     var fileUpload: String { localized("파일 첨부", "Attach files") }
-    var fileUploadDetail: String { localized("이미지, 문서 또는 영상을 로컬 초안에 담습니다", "Add images, documents, or videos to a local draft") }
+    var fileUploadDetail: String { localized("이미지, 문서 또는 영상을 메시지와 함께 보냅니다", "Send images, documents, or videos with the message") }
     var startWork: String { localized("새 작업 시작", "Start new work") }
     var startWorkDetail: String { localized("에이전트에게 실행할 일을 맡깁니다", "Delegate a task to an agent") }
     var createThread: String { localized("스레드 초안", "Thread draft") }
@@ -120,9 +137,14 @@ struct MomoComposerActionCopy {
     var createPollDetail: String { localized("질문과 선택지를 먼저 작성합니다", "Draft a question and its options") }
     var addPlugin: String { localized("플러그인 둘러보기", "Browse plugins") }
     var addPluginDetail: String { localized("연결 전 업무 도구와 권한 화면을 미리 봅니다", "Preview work tools and permissions before connecting") }
-    var localDraft: String { localized("로컬 초안", "Local draft") }
-    var localOnlyStatus: String { localized("로컬 전용 · 전송 안 됨", "Local only · not sent") }
-    var connectionPending: String { localized("이 기기의 로컬 미리보기입니다. 아직 채널에 저장되거나 전송되지 않습니다.", "This is a local preview on this Mac. It is not saved or sent to the channel yet.") }
+    var localDraft: String { localized("첨부 파일", "Attachments") }
+    var localOnlyStatus: String { localized("전송 준비됨", "Ready to send") }
+    var connectionPending: String { localized("전송할 때 채널에 업로드합니다. 파일당 최대 100MB입니다.", "Files upload to the channel when you send. Maximum 100 MB per file.") }
+    var uploading: String { localized("업로드 중", "Uploading") }
+    var uploaded: String { localized("업로드 완료", "Uploaded") }
+    var uploadFailed: String { localized("업로드 실패", "Upload failed") }
+    var fileTooLarge: String { localized("100MB를 초과함", "Over 100 MB") }
+    var retryUpload: String { localized("다시 시도", "Retry") }
     var remove: String { localized("첨부 제거", "Remove attachment") }
     func removeAttachment(_ filename: String) -> String { localized("\(filename) 첨부 제거", "Remove attachment \(filename)") }
     var clearAll: String { localized("모두 지우기", "Clear all") }
@@ -231,7 +253,9 @@ struct MomoAttachmentDraftStrip: View {
     let drafts: [MomoAttachmentDraft]
     let copy: MomoComposerActionCopy
     let onRemove: (MomoAttachmentDraft) -> Void
+    let onRetry: (MomoAttachmentDraft) -> Void
     let onClear: () -> Void
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: MomoTheme.ComposerAction.standardSpacing) {
@@ -241,21 +265,31 @@ struct MomoAttachmentDraftStrip: View {
                 Spacer()
                 Button(copy.clearAll, action: onClear)
                     .buttonStyle(.link)
+                    .disabled(drafts.contains { $0.state == .uploading })
             }
-            ScrollView(.horizontal) {
-                HStack(spacing: MomoTheme.ComposerAction.standardSpacing) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(spacing: MomoTheme.ComposerAction.standardSpacing) {
                     ForEach(drafts) { draft in
                         attachmentChip(draft)
                     }
                 }
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(spacing: MomoTheme.ComposerAction.standardSpacing) {
+                        ForEach(drafts) { draft in
+                            attachmentChip(draft)
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
             Label(copy.connectionPending, systemImage: "info.circle")
                 .font(MomoTheme.Typography.metadata)
                 .foregroundStyle(.secondary)
         }
         .padding(MomoTheme.ComposerAction.contentSpacing)
         .momoSurface(.panel, cornerRadius: MomoTheme.cornerMedium)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func attachmentChip(_ draft: MomoAttachmentDraft) -> some View {
@@ -273,25 +307,56 @@ struct MomoAttachmentDraftStrip: View {
                     .font(MomoTheme.Typography.metadata)
                     .foregroundStyle(.secondary)
             }
-            Button {
-                onRemove(draft)
-            } label: {
-                Label(copy.remove, systemImage: "xmark")
-                    .labelStyle(.iconOnly)
+            if draft.state == .uploading {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(copy.uploading)
+            } else {
+                if case .failed = draft.state {
+                    Button(copy.retryUpload) { onRetry(draft) }
+                        .buttonStyle(.link)
+                        .font(MomoTheme.Typography.metadata.weight(.semibold))
+                }
+                Button {
+                    onRemove(draft)
+                } label: {
+                    Label(copy.remove, systemImage: "xmark")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel(copy.removeAttachment(draft.name))
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel(copy.removeAttachment(draft.name))
         }
         .padding(MomoTheme.ComposerAction.standardSpacing)
-        .frame(width: MomoTheme.ComposerAction.attachmentWidth)
+        .frame(
+            width: dynamicTypeSize.isAccessibilitySize
+                ? nil
+                : MomoTheme.ComposerAction.attachmentWidth
+        )
+        .frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil)
         .momoSurface(.card, cornerRadius: MomoTheme.cornerSmall)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(draft.name)
     }
 
     private func detail(for draft: MomoAttachmentDraft) -> String {
-        copy.localOnlyStatus
+        switch draft.state {
+        case .ready:
+            return copy.localOnlyStatus
+        case .uploading:
+            return copy.uploading
+        case .uploaded(let attachment):
+            let size = ByteCountFormatter.string(
+                fromByteCount: attachment.sizeBytes,
+                countStyle: .file
+            )
+            return "\(copy.uploaded) · \(size)"
+        case .failed(.fileTooLarge):
+            return copy.fileTooLarge
+        case .failed(.unavailable):
+            return copy.uploadFailed
+        }
     }
 }
 
