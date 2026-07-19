@@ -238,7 +238,7 @@ SELECT count(*)
    AND EXISTS (
      SELECT 1 FROM message m
       WHERE m.run_id='$SPAWN_RUN_ID' AND m.author_member_id='$AGENT_ONE_ID'
-        AND m.root_id='$SPAWN_TRIGGER_ID' AND m.body LIKE '%승인 대기%'
+        AND m.root_id IS NULL AND m.body LIKE '%승인 대기%'
    );
 SQL
 SPAWN_CONTROL_ID="$(printf "SELECT target_id FROM audit_log WHERE action='work.control.requested' AND run_id='%s';\n" \
