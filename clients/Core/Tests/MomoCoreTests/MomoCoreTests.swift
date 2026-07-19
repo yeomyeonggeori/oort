@@ -385,6 +385,43 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.lastAppliedSeq, 47)
     }
 
+    func testWorkHostListDecodesRESTProjectionWithoutRealtimeKind() throws {
+        let wire = Data("""
+        {
+          "workHosts": [{
+            "id": "00000000-0000-7000-8000-000000000487",
+            "workspaceId": "00000000-0000-7000-8000-000000000001",
+            "scope": "workspace",
+            "ownerMemberId": "00000000-0000-7000-8000-000000000101",
+            "type": "workd",
+            "displayName": "Team VPS",
+            "publicKey": "11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c=",
+            "capabilities": {"tool.codex": true, "tool.shell": false},
+            "lastSeenAtMs": 1784582400000,
+            "createdAtMs": 1784582300000,
+            "online": true
+          }]
+        }
+        """.utf8)
+        let response = try JSONDecoder.momo.decode(WorkHostListResponse.self, from: wire)
+        let host = try XCTUnwrap(response.workHosts.first)
+        XCTAssertEqual(host.id.description.lowercased(), "00000000-0000-7000-8000-000000000487")
+        XCTAssertEqual(host.scope, .workspace)
+        XCTAssertEqual(host.type, .workd)
+        XCTAssertEqual(host.displayName, "Team VPS")
+        XCTAssertEqual(host.capabilities, ["tool.codex": true, "tool.shell": false])
+        XCTAssertTrue(host.online)
+        XCTAssertFalse(host.isRevoked)
+
+        XCTAssertThrowsError(
+            try RealtimeEnvelope(type: "work.host.updated", ts: 1, payload: [:]).decodeEvent()
+        ) { error in
+            guard case RealtimeEnvelope.DecodeError.unknownType("work.host.updated") = error else {
+                return XCTFail("work hosts must remain REST-polled in v0, got \(error)")
+            }
+        }
+    }
+
     func testWorkSessionEnvelopeKindsRoundTripSnakeCasePayload() throws {
         let sessionID = "00000000-0000-7000-8000-000000000483"
         let channelID = "00000000-0000-7000-8000-000000000201"
