@@ -11,7 +11,8 @@ openapi: 3.0.3
 # scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
 #
 # Scope: web v0 (ADR-0119 D5-A) plus the plugin registry/grant, incoming
-# webhook, and hosted Drive MCP surfaces. Other routes (invite admin,
+# webhook, hosted Drive MCP, and interactive Work Console control surfaces.
+# Other routes (invite admin,
 # workspace identity, agent runs, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
 #
@@ -40,7 +41,8 @@ info:
     seq-cursor pagination and `?after=` backfill), read-state (bulk read +
     cursor advance), direct messages (list/open), and approvals
     (list/decision), plugin registry/grants, incoming webhooks, and the hosted
-    read-only Drive MCP endpoint. Mirrors MomoServer field by field.
+    read-only Drive MCP endpoint, and ADR-0114 Work Console sessions and
+    controls. Mirrors MomoServer field by field.
 
 servers:
   - url: /
@@ -63,6 +65,8 @@ tags:
     description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
+  - name: work-controls
+    description: Agent-requested, human-gated controls dispatched to a user-owned execution host.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
   - name: attachments
@@ -740,6 +744,186 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Session state changed concurrently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-controls:
+    post:
+      tags: [work-controls]
+      operationId: createWorkControl
+      summary: Request a host control from the agent bound to an active run.
+      description: >
+        Agent bearer only and requires the work:control scope. Spawn dispatches
+        immediately only when the human host owner has enabled the exact tool;
+        otherwise it creates the canonical approval_request card. Input and
+        kill require a running session in the same requester lineage, while
+        read requires the lineage but no approval. Host-local paths,
+        environment, process state, and credentials are forbidden payloads.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkControlRequest"
+      responses:
+        "201":
+          description: Control recorded as pending_approval or dispatched.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkControlResponse"
+        "400":
+          description: Invalid kind, identifiers, session shape, or closed payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Human bearer, wrong agent/run lineage, or tenant boundary.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Run or required work session is not running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-controls/{workControlId}/ack:
+    post:
+      tags: [work-controls]
+      operationId: acknowledgeWorkControl
+      summary: Acknowledge one dispatched control from the v0 host owner.
+      description: >
+        Human bearer only. A successful spawn acknowledgement must bind a
+        running work_session owned by the caller with the same channel and host
+        UUID. Pending or denied controls cannot be acknowledged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkControlId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkControlAckRequest"
+      responses:
+        "200":
+          description: Control settled as acked or failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkControlResponse"
+        "400":
+          description: Invalid acknowledgement or spawn session binding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not the v0 host owner.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Control does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Control is pending, denied, settled, or changed concurrently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-auto-approvals/{tool}:
+    put:
+      tags: [work-controls]
+      operationId: enableWorkAutoApproval
+      summary: Allow this human owner's agent spawn requests for one tool.
+      description: >
+        Human bearer only. A real setting change and its audit_log row commit
+        in the same tenant transaction; retries are idempotent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkTool"
+      responses:
+        "200":
+          description: Effective auto-approval setting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkAutoApproveResponse"
+        "400":
+          description: Unsupported tool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive human.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [work-controls]
+      operationId: disableWorkAutoApproval
+      summary: Remove this human owner's spawn auto-approval for one tool.
+      description: >
+        Human bearer only. A real setting change and its audit_log row commit
+        in the same tenant transaction; retries are idempotent.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkTool"
+      responses:
+        "200":
+          description: Effective auto-approval setting.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkAutoApproveResponse"
+        "400":
+          description: Unsupported tool.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive human.
           content:
             application/json:
               schema:
@@ -2182,6 +2366,22 @@ components:
       schema:
         type: string
         format: uuid
+    WorkControlId:
+      name: workControlId
+      in: path
+      required: true
+      description: UUIDv7 work control ledger id.
+      schema:
+        type: string
+        format: uuid
+    WorkTool:
+      name: tool
+      in: path
+      required: true
+      description: Closed execution tool identifier.
+      schema:
+        type: string
+        enum: [claude, codex, opencode, shell]
     AttachmentId:
       name: attachmentId
       in: path
@@ -2876,6 +3076,131 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkSession"
+
+    # ---- Work controls ------------------------------------------------------
+    CreateWorkControlRequest:
+      type: object
+      required: [channelId, runId, targetHostId, kind, payload]
+      properties:
+        channelId:
+          type: string
+          format: uuid
+        runId:
+          type: string
+          format: uuid
+          description: Active run bound to the requesting agent and channel.
+        targetHostId:
+          type: string
+          format: uuid
+          description: Opaque host hook until the ADR-0125 work_host FK lands.
+        sessionId:
+          type: string
+          format: uuid
+          description: Required for input/read/kill and forbidden for spawn.
+        kind:
+          type: string
+          enum: [spawn, input, read, kill]
+        payload:
+          $ref: "#/components/schemas/WorkControlPayload"
+
+    WorkControlPayload:
+      description: >
+        Closed field union selected by kind: spawn requires exactly tool+label,
+        input exactly text, read accepts only optional tail_lines, and kill is
+        empty. No path, cwd, environment, process state, or credential fields
+        are accepted.
+      type: object
+      properties:
+        tool:
+          type: string
+          enum: [claude, codex, opencode, shell]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 120
+        text:
+          type: string
+          minLength: 1
+          maxLength: 32768
+        tail_lines:
+          type: integer
+          minimum: 1
+          maximum: 9999
+
+    WorkControlAckRequest:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+        sessionId:
+          type: string
+          format: uuid
+          description: Required when acknowledging a successful spawn.
+        errorLabel:
+          type: string
+          minLength: 1
+          maxLength: 160
+          description: Optional bounded display label for a failed control.
+
+    WorkControl:
+      type: object
+      required:
+        [id, workspaceId, channelId, requesterMemberId, targetHostId, kind,
+         payload, status, createdAtMs, updatedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        channelId:
+          type: string
+          format: uuid
+        requesterMemberId:
+          type: string
+          format: uuid
+        targetHostId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [spawn, input, read, kill]
+        payload:
+          $ref: "#/components/schemas/WorkControlPayload"
+        status:
+          type: string
+          enum: [pending_approval, approved, denied, dispatched, acked, failed]
+        approvalMessageId:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+
+    WorkControlResponse:
+      type: object
+      required: [workControl]
+      properties:
+        workControl:
+          $ref: "#/components/schemas/WorkControl"
+
+    WorkAutoApproveResponse:
+      type: object
+      required: [tool, enabled]
+      properties:
+        tool:
+          type: string
+          enum: [claude, codex, opencode, shell]
+        enabled:
+          type: boolean
 
     # ---- Huddles ------------------------------------------------------------
     HuddleParticipant:

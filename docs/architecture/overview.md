@@ -155,6 +155,27 @@ card의 기존 `message.seq`를 재사용하므로 `message.new`가 소유한 Ce
 terminal output·provider credential은 계속 host-local이다. `host_id`는 ADR-0125의
 host registry가 Accepted되기 전까지 non-null opaque UUID이며 FK를 두지 않는다.
 
+### Interactive Work Console control gate
+
+ADR-0114 D4/D5의 `work_control`은 agent bearer가 자기 `queued|running` run과 channel에
+결속해 요청하는 closed control 원장이다. `spawn` payload는 `tool+label`, `input`은
+`text`, `read`는 optional `tail_lines`, `kill`은 빈 object만 허용하며 migration CHECK와
+route 검증이 path/cwd/env/process state/provider credential을 함께 거부한다. v0의 opaque
+`target_host_id` owner는 ADR-0125가 land하기 전까지 agent의 `owner_human_id`로 판정한다.
+
+`spawn`은 owner의 tool별 `work_auto_approve` whitelist가 있으면 즉시 dispatch되고,
+없으면 기존 `approval` + `approval_request` system card 경로를 거친다. whitelist 변경과
+audit은 한 tenant transaction이다. linked approval이 pending/denied이면 host ack로
+우회할 수 없고, 승인 decision transaction만 control을 dispatch할 수 있다. `input`과
+`kill`은 같은 requester가 승인·ack한 running session 계보에서만 승인 없이 dispatch되며,
+`read`는 같은 계보 확인만 하고 session 종료 뒤에도 허용한다.
+
+`work.control.dispatched|acked`는 card/message ordering과 독립인 no-version projection이다.
+각 outbox는 control/event별 고유 idempotency key를 가지며 Core replay cursor를 전진시키지
+않는다. 성공한 spawn ack는 owner/channel/host가 일치하는 running `work_session` FK를
+결속한다. 따라서 Postgres가 control/approval/session history의 SoT이고 Centrifugo는
+전송계층으로만 남으며, Relay와 canonical REST message write path는 변경되지 않는다.
+
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
 ```mermaid

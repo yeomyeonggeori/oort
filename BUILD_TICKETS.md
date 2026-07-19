@@ -2249,7 +2249,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - 랜딩: PR #515 squash → **track/engine**(2026-07-19, main 대기). 실런: 확장 verifier PASS + server 113/Core 33 + runtime-db 게이트 실패 0. main 랜딩 시 A-6 ready.
 
 ### ☐ ADR-0114/0125 후속 발급 예약 (엔진 체인 — 483 랜딩 후 순차)
-- [ ] MOMO-484: work.spawn/input/read/kill tool-call + 승인 게이트(auto-approve 화이트리스트) + outbox work.control.* + 호스트 ack `[runtime-db]`
+- [x] MOMO-484: work.spawn/input/read/kill tool-call + 승인 게이트(auto-approve 화이트리스트) + outbox work.control.* + 호스트 ack 구현 완료, PR/오케스트레이터 runtime-db 대기 `[runtime-db]`
 - [ ] MOMO-486: AgentWorker work.* tool 디스패치 + E2E(채팅 요청→spawn 승인→mock CLI→스레드 회신) `[runtime-db]`
 - [ ] MOMO-485(UXUI, A-10 등재 예정): SwiftTerm+Work 서랍+스레드 브리지+스폰 승인 카드 — 엔진 체인 마무리 시 동생 위임, 수동 QA 부채(2기기 상호작용·허들 오디오·첨부 실클릭) 체크리스트/자동화 티켓과 함께 패키징
 - [ ] 0125 파생 487~490(work_host/workd/work_pool/호스트 선택기)은 v0 배치 후
@@ -2266,6 +2266,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `work.session.started|ended`: exact payload, 고유 idempotency key, card seq 재사용 + no-version publish. Core `WorkSessionDelta`는 비순번 pass-through로 두 kind를 전달.
 - [x] 카드 답글은 기존 message/thread 경로 재사용. OpenAPI와 `verify_work_session.sh`를 `runtime-db`에 편입해 history props·Centrifugo 수신·owner/RLS/no-cwd를 단정.
 - 랜딩: PR #517 squash → **track/engine**(2026-07-19, main 대기). 실런: verify_work_session PASS + server 115/Core 35 + runtime-db 게이트 실패 0. 검수 수정 1건(verifier PG 부재 함수 jsonb_object_length).
+
+### ☐ MOMO-484 (`#518`) 수용기준 — Work Console control + approval gate `[runtime-db]` · **PR base=track/engine**
+- [x] migration 020 `work_control`/`work_auto_approve`: uuidv7·work_session FK·closed kind payload CHECK·FORCE RLS. path/cwd/env/process/provider credential은 DB와 route 양쪽에서 거부.
+- [x] human owner PUT/DELETE whitelist와 실제 변경 시 같은 tenant transaction의 audit. agent bearer 전용 POST는 run actor/channel을 결속하고 human bearer를 403으로 거부.
+- [x] spawn whitelist hit 즉시 dispatch/miss 기존 approval_request card 경로, approval decision transaction 재사용. input/kill은 같은 requester의 running session 계보, read는 같은 계보에서 승인 불요. pending/denied ack 우회 불가.
+- [x] no-version `work.control.dispatched|acked` 고유 key outbox와 human host-owner ack. 성공 spawn ack는 owner/channel/host가 일치하는 running work_session에 FK 결속.
+- [x] Core `WorkControlDelta` 2종 kind decode/re-encode + 비순번 replay cursor 불전진. server 117/Core 37 tests PASS.
+- [x] `verify_work_control.sh`(27920~27923, Python >=3.10 탐색, trap cleanup, verifier 내부 rg 미사용)를 `runtime-db`에 편입. human 403, pending ack 409, denial 후 dispatch 부재, non-running input 409, RLS/closed payload를 단정.
+- Worker 상태: 구현·정적/Swift 검증 완료, Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`; PR/리뷰 대기.
 
 ---
 
