@@ -136,7 +136,8 @@ DECLARE missing text;
 BEGIN
   SELECT string_agg(v.relname, ', ' ORDER BY v.relname)
     INTO missing
-    FROM (VALUES ('workspace'), ('member'), ('channel'), ('membership'), ('message'), ('invite_code')) AS v(relname)
+    FROM (VALUES ('workspace'), ('member'), ('channel'), ('membership'), ('message'),
+                 ('invite_code'), ('work_session')) AS v(relname)
     LEFT JOIN pg_class c ON c.relname = v.relname
    WHERE c.oid IS NULL
       OR NOT c.relrowsecurity

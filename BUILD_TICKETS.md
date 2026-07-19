@@ -2264,6 +2264,22 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] (해소) ADR-0114/0125 Accepted(2026-07-19) — Work Console 게이트 해제, MOMO-375는 MOMO-485가 승계·종결 예정.
 - [ ] momo 서버는 user-owned execution host의 process/provider credential을 보관하거나 proxy하지 않음.
 
+### ☑ MOMO-483 (`#516`) 수용기준 — Interactive Work Console session ledger `[runtime-db]` · **PR base=track/engine**
+- [x] migration 019 `work_session`: uuidv7, host_id 예약(no FK), root card 1:1, tool/label/status/lifecycle CHECK, FORCE RLS, cwd/path/process/provider 상태 없음.
+- [x] create/list/owner-end REST: create는 card+ledger+2 outbox 단일 tx, end는 card props+lifecycle outbox 단일 tx이며 기존 card/channel seq 불변, active list는 현재 channel membership로 필터.
+- [x] `work.session.started|ended`: exact payload, 고유 idempotency key, card seq 재사용 + no-version publish. Core `WorkSessionDelta`는 비순번 pass-through로 두 kind를 전달.
+- [x] 카드 답글은 기존 message/thread 경로 재사용. OpenAPI와 `verify_work_session.sh`를 `runtime-db`에 편입해 history props·Centrifugo 수신·owner/RLS/no-cwd를 단정.
+- 랜딩: PR #517 squash → **track/engine**(2026-07-19, main 대기). 실런: verify_work_session PASS + server 115/Core 35 + runtime-db 게이트 실패 0.
+
+### ☑ MOMO-484 (`#518`) 수용기준 — Work Console control + approval gate `[runtime-db]` · **PR base=track/engine**
+- [x] migration 020 `work_control`/`work_auto_approve`: uuidv7·work_session FK·closed kind payload CHECK·FORCE RLS. path/cwd/env/process/provider credential은 DB와 route 양쪽에서 거부.
+- [x] human owner PUT/DELETE whitelist와 실제 변경 시 같은 tenant transaction의 audit. agent bearer 전용 POST는 run actor/channel을 결속하고 human bearer를 403으로 거부.
+- [x] spawn whitelist hit 즉시 dispatch/miss 기존 approval_request card 경로, approval decision transaction 재사용. input/kill은 같은 requester의 running session 계보, read는 같은 계보에서 승인 불요. pending/denied ack 우회 불가.
+- [x] no-version `work.control.dispatched|acked` 고유 key outbox와 human host-owner ack. 성공 spawn ack는 owner/channel/host가 일치하는 running work_session에 FK 결속.
+- [x] Core `WorkControlDelta` 2종 kind decode/re-encode + 비순번 replay cursor 불전진. server 117/Core 37 tests PASS.
+- [x] `verify_work_control.sh`(27920~27923, Python >=3.10 탐색, trap cleanup, verifier 내부 rg 미사용)를 `runtime-db`에 편입. human 403, pending ack 409, denial 후 dispatch 부재, non-running input 409, RLS/closed payload를 단정.
+- 랜딩: PR #519 squash → **track/engine**(2026-07-20, main 대기). 실런: verify_work_control 전 항목 PASS(승인 우회 불가 포함) + server 117/Core 37 + runtime-db 게이트 실패 0. worker capacity 사망 → 오케스트레이터 인수(7커밋 보존, 유실 0).
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.

@@ -14,6 +14,7 @@ struct AgentCredentialRoutes: Sendable {
         "messages:read",
         "messages:write",
         "realtime:subscribe",
+        "work:control",
     ]
     static let maximumRotationGraceSeconds = 7 * 24 * 60 * 60
 

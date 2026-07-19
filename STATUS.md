@@ -1,5 +1,17 @@
 # momo 진행 현황
 
+## MOMO-484 Work Console control + approval gate (2026-07-19)
+
+- ADR-0114 D4/D5에 따라 `work_control`·`work_auto_approve` FORCE RLS 원장과 closed payload CHECK를 추가했다. agent bearer만 자기 active run에서 control을 요청할 수 있고, spawn은 owner의 tool whitelist hit 때만 즉시 dispatch되며 miss는 기존 approval/card decision transaction을 재사용한다. input/kill은 같은 requester의 running session 계보, read는 같은 계보만 요구한다.
+- `work.control.dispatched|acked`는 `message.seq`와 분리된 no-version·고유 idempotency-key outbox다. human host-owner ack가 성공한 spawn을 owner/channel/host가 일치하는 running `work_session` FK에 결속하며 pending/denied ack는 409로 닫힌다. Core는 두 kind를 `WorkControlDelta`로 왕복 디코드하고 replay cursor를 전진시키지 않는다.
+- server 117 tests, Core 37 tests, iOS MomoiOSKit 27 tests, macOS 컴파일과 docs 정적 게이트 17개 항목, OpenAPI/YAML·work-control/OpenAPI verifier bash/ShellCheck 검증은 PASS했다. 격리 `verify_work_control.sh`와 전체 `runtime-db` Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
+## MOMO-483 Interactive Work Console session ledger (2026-07-19)
+
+- ADR-0114의 host-owned 경계를 따라 `work_session` FORCE RLS 원장과 create/active-list/owner-end REST를 추가했다. create는 system card·session·`message.new`·`work.session.started`를 한 tenant transaction에 기록하고, end는 기존 card의 props와 `work.session.ended`만 갱신해 `message.seq`/`channel_seq`를 재발급하지 않는다. cwd/path/process/provider credential은 저장하지 않는다.
+- lifecycle 두 이벤트는 card의 기존 seq를 재사용하되 Centrifugo publish `version` 없이 고유 idempotency key로 발행한다. Core는 두 kind를 `WorkSessionDelta`로 디코드해 replay cursor를 전진시키지 않고 전달하며, 기존 card thread는 일반 답글 API를 그대로 사용한다.
+- server 115 tests, Core 35 tests, iOS MomoiOSKit 27 tests와 macOS 컴파일, OpenAPI/YAML·verifier bash/ShellCheck 정적 검증은 PASS했다. 격리 `verify_work_session.sh`와 전체 `runtime-db` Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## UXUI A-6 첨부 실업로드·수신·다운로드 완성 (2026-07-19)
 
 - macOS 컴포저는 파일당 100MB·메시지당 20개 경계에서 업로드 세션 발급→capability URL 직송 PUT→complete→`attachmentIds` 메시지 전송을 수행한다. capability URL은 전용 ephemeral 세션 내부에서만 소비하고 인증 헤더·로그·UI·영속 상태에 남기지 않는다.

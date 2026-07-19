@@ -279,4 +279,6 @@ public enum RealtimeEvent: Sendable, Hashable {
     case agentPartial(AgentPartial)  // first-class streaming delta
     case approval(ApprovalEvent)
     case huddle(HuddleDelta)
+    case workSession(WorkSessionDelta)
+    case workControl(WorkControlDelta)
 }

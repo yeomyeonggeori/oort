@@ -197,6 +197,18 @@ struct ApprovalDecisionRoutes: Sendable {
             if let expiresAtMs = approval.expiresAtMs,
                expiresAtMs <= Self.epochMs(Date())
             {
+                if let controlID = try WorkControlRoutes.workControlID(
+                    from: approval.payload
+                ) {
+                    try await WorkControlRoutes.applySpawnApprovalDecision(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        approvalID: approval.id,
+                        controlID: controlID,
+                        approved: false
+                    )
+                }
                 let expired = try await Self.recordExpiredClick(
                     conn: conn,
                     logger: db.logger,
@@ -237,6 +249,25 @@ struct ApprovalDecisionRoutes: Sendable {
                 """,
                 logger: db.logger
             )
+
+            if let controlID = try WorkControlRoutes.workControlID(
+                from: approval.payload
+            ) {
+                guard approval.actionType == "work.spawn" else {
+                    throw HTTPError(
+                        .internalServerError,
+                        message: "work control approval action is malformed"
+                    )
+                }
+                try await WorkControlRoutes.applySpawnApprovalDecision(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    approvalID: approval.id,
+                    controlID: controlID,
+                    approved: dto.approve
+                )
+            }
             try await Self.patchApprovalRequestMessage(
                 conn: conn,
                 logger: db.logger,

@@ -49,6 +49,9 @@ public enum ApprovalTag {}
 public enum ReactionTag {}
 public enum FileTag {}
 public enum DeviceTag {}
+public enum WorkSessionTag {}
+public enum WorkHostTag {}
+public enum WorkControlTag {}
 
 public typealias WorkspaceID = Identifier<WorkspaceTag>
 public typealias MemberID = Identifier<MemberTag>
@@ -59,3 +62,6 @@ public typealias ApprovalID = Identifier<ApprovalTag>
 public typealias ReactionID = Identifier<ReactionTag>
 public typealias FileID = Identifier<FileTag>
 public typealias DeviceID = Identifier<DeviceTag>
+public typealias WorkSessionID = Identifier<WorkSessionTag>
+public typealias WorkHostID = Identifier<WorkHostTag>
+public typealias WorkControlID = Identifier<WorkControlTag>

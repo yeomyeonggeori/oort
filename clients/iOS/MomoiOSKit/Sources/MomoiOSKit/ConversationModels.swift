@@ -119,7 +119,8 @@ public enum IOSTimelineReducer {
                   let index = result.firstIndex(where: { $0.id == delta.rootId })
             else { return result }
             result[index].thread = delta.rollup
-        case .reaction, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle:
+        case .reaction, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle,
+             .workSession, .workControl:
             break
         }
         return sorted(result)
