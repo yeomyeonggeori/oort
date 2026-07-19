@@ -185,7 +185,8 @@ public actor RealtimeReplayController {
         // regardless of relay arrival order.
         switch RealtimeEnvelope.EventType(rawValue: envelope.type) {
         case .threadUpdated, .messageEdited, .messageDeleted, .reactionAdded, .reactionRemoved,
-             .workSessionStarted, .workSessionEnded:
+             .workSessionStarted, .workSessionEnded,
+             .workControlDispatched, .workControlAcked:
             return try nonSequencedEvents(from: envelope)
         default:
             break
@@ -220,7 +221,7 @@ public actor RealtimeReplayController {
         switch event {
         case .messageEdited, .messageDeleted, .reaction,
              .agentPartial, .agentStatus, .typing, .presence, .huddle, .threadUpdated,
-             .workSession:
+             .workSession, .workControl:
             return [event]
         case .message, .approval:
             return []
@@ -304,7 +305,7 @@ public actor RealtimeReplayController {
         case .messageEdited(let message):
             seenMessageIDs.insert(message.id)
             return [event]
-        case .messageDeleted, .reaction, .approval, .threadUpdated, .workSession:
+        case .messageDeleted, .reaction, .approval, .threadUpdated, .workSession, .workControl:
             return [event]
         case .agentPartial, .agentStatus, .typing, .presence, .huddle:
             return [event]

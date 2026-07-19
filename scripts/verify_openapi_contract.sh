@@ -111,6 +111,7 @@ JOIN_EMAIL="gate-join-$RUN_ID@momo.local"
 INVITE_CODE="gate-invite-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 APPROVAL_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CONTROL_RUN_UUID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
 
 compose() {
   PORT="$GATE_PORT" \
@@ -272,7 +273,11 @@ INSERT INTO agent_run
   (id, workspace_id, agent_member_id, channel_id, status, input, idempotency_key)
 VALUES ('$RUN_UUID', '$DEMO_WORKSPACE_ID', '$KIM_INTERN_MEMBER_ID',
         '$GENERAL_CHANNEL_ID', 'awaiting_approval',
-        '{"prompt":"openapi drift gate"}'::jsonb, 'openapi-gate-$RUN_ID');
+        '{"prompt":"openapi drift gate"}'::jsonb, 'openapi-gate-$RUN_ID'),
+       ('$CONTROL_RUN_UUID', '$DEMO_WORKSPACE_ID', '$GATE_AGENT_ID',
+        '$GENERAL_CHANNEL_ID', 'running',
+        '{"prompt":"work control contract gate"}'::jsonb,
+        'openapi-work-control-$RUN_ID');
 
 INSERT INTO approval
   (id, workspace_id, run_id, channel_id, requested_by, action_type, payload,
@@ -601,6 +606,48 @@ api post "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" \
   exit 1
 }
 AGENT_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
+
+# Work controls: host-owner whitelist -> agent dispatch -> owner ack -> revoke.
+# Create a fresh running session because the earlier work-session operation
+# sample deliberately exercised its ended response.
+WORK_CONTROL_HOST_ID="$(uuidgen)"
+api post "/v1/workspaces/$WS/work-sessions" \
+  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_CONTROL_HOST_ID" \
+      '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI control host"}')" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || {
+  echo "[openapi] FAIL work control session fixture: expected 201, got $RESPONSE_STATUS" >&2
+  exit 1
+}
+WORK_CONTROL_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
+
+sample work-auto-approval-enable put \
+  "/v1/workspaces/{workspaceId}/work-auto-approvals/{tool}" \
+  "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"
+guard_jq '.tool == "codex" and .enabled == true' "work auto-approval enables codex"
+
+sample work-control-create post "/v1/workspaces/{workspaceId}/work-controls" \
+  "/v1/workspaces/$WS/work-controls" 201 \
+  "$(jq -cn --arg ch "$GENERAL_ID" --arg run "$CONTROL_RUN_UUID" \
+      --arg host "$WORK_CONTROL_HOST_ID" \
+      '{channelId:$ch,runId:$run,targetHostId:$host,kind:"spawn",payload:{tool:"codex",label:"OpenAPI control"}}')" \
+  "$AGENT_ACCESS"
+WORK_CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id')"
+guard_jq '.workControl.kind == "spawn" and .workControl.status == "dispatched"' \
+  "whitelisted spawn dispatches immediately"
+
+sample work-control-ack post \
+  "/v1/workspaces/{workspaceId}/work-controls/{workControlId}/ack" \
+  "/v1/workspaces/$WS/work-controls/$WORK_CONTROL_ID/ack" 200 \
+  "$(jq -cn --arg session "$WORK_CONTROL_SESSION_ID" '{ok:true,sessionId:$session}')" "$ACCESS"
+guard_jq --arg session "$(printf '%s' "$WORK_CONTROL_SESSION_ID" | tr '[:upper:]' '[:lower:]')" \
+  '.workControl.status == "acked" and (.workControl.sessionId | ascii_downcase) == $session' \
+  "spawn ack binds the running work session"
+
+sample work-auto-approval-disable delete \
+  "/v1/workspaces/{workspaceId}/work-auto-approvals/{tool}" \
+  "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"
+guard_jq '.tool == "codex" and .enabled == false' "work auto-approval disables codex"
+
 DELEGATION_QUERY="delegatedMemberId=$GATE_MEMBER_ID&channelId=$GENERAL_ID"
 sample plugins-agent-policy get "/v1/workspaces/{workspaceId}/plugins" \
   "/v1/workspaces/$WS/plugins?$DELEGATION_QUERY" 200 "" "$AGENT_ACCESS"

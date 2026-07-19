@@ -2154,6 +2154,146 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testWorkControlRouteScopeAndClosedPayloadValidation() throws {
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
+                path: "/v1/workspaces/ws/work-controls"
+            ),
+            "work:control"
+        )
+        XCTAssertEqual(
+            AuthMiddleware.requiredAgentScope(
+                method: "POST",
+                path: "/v1/workspaces/ws/work-controls/control/ack"
+            ),
+            "work:control"
+        )
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "PUT",
+            path: "/v1/workspaces/ws/work-auto-approvals/codex"
+        ))
+        XCTAssertTrue(AgentCredentialRoutes.defaultScopes.contains("work:control"))
+
+        let spawn = try WorkControlRoutes.validatedPayload(
+            .object([
+                "tool": .string("codex"),
+                "label": .string("  ship MOMO-484  "),
+            ]),
+            kind: .spawn
+        )
+        XCTAssertEqual(spawn.value, .object([
+            "tool": .string("codex"),
+            "label": .string("ship MOMO-484"),
+        ]))
+        XCTAssertThrowsError(try WorkControlRoutes.validatedPayload(
+            .object([
+                "tool": .string("codex"),
+                "label": .string("unsafe"),
+                "cwd": .string("/tmp/repo"),
+            ]),
+            kind: .spawn
+        ))
+        XCTAssertThrowsError(try WorkControlRoutes.validatedPayload(
+            .object([
+                "text": .string("go"),
+                "env": .object(["TOKEN": .string("secret")]),
+            ]),
+            kind: .input
+        ))
+        XCTAssertEqual(
+            try WorkControlRoutes.validatedPayload(
+                .object(["tail_lines": .int(200)]),
+                kind: .read
+            ).value,
+            .object(["tail_lines": .int(200)])
+        )
+        XCTAssertThrowsError(try WorkControlRoutes.validatedPayload(
+            .object(["tail_lines": .string("200")]),
+            kind: .read
+        ))
+        XCTAssertEqual(
+            try WorkControlRoutes.validatedPayload(.object([:]), kind: .kill).value,
+            .object([:])
+        )
+    }
+
+    func testWorkControlMigrationAndNoVersionEventsKeepApprovalBoundary() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/020_work_control.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE work_control"))
+        XCTAssertTrue(migration.contains("CREATE TABLE work_auto_approve"))
+        XCTAssertTrue(migration.contains("payload - ARRAY['tool', 'label']"))
+        XCTAssertTrue(migration.contains("payload - ARRAY['text']"))
+        XCTAssertTrue(migration.contains("payload - ARRAY['tail_lines']"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+
+        let control = WorkControlDTO(
+            id: "00000000-0000-7000-8000-000000000484",
+            workspaceId: "00000000-0000-7000-8000-000000000001",
+            channelId: "00000000-0000-7000-8000-000000000201",
+            requesterMemberId: "00000000-0000-7000-8000-000000000103",
+            targetHostId: "00000000-0000-7000-8000-000000000901",
+            sessionId: nil,
+            kind: "spawn",
+            payload: .object([
+                "tool": .string("codex"),
+                "label": .string("MOMO-484"),
+            ]),
+            status: "dispatched",
+            approvalMessageId: "00000000-0000-7000-8000-000000000701",
+            createdAtMs: 1_784_452_800_000,
+            updatedAtMs: 1_784_452_801_000
+        )
+        for (eventType, raw) in [
+            ("work.control.dispatched", WorkControlRoutes.dispatchPayload(
+                workspaceID: UUID(uuidString: control.workspaceId)!,
+                control: control
+            )),
+            ("work.control.acked", WorkControlRoutes.ackPayload(
+                workspaceID: UUID(uuidString: control.workspaceId)!,
+                control: control,
+                ok: false,
+                errorLabel: "host_unavailable"
+            )),
+        ] {
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+            )
+            XCTAssertNil(object["version"])
+            XCTAssertNotNil(object["idempotency_key"] as? String)
+            let data = try XCTUnwrap(object["data"] as? [String: Any])
+            XCTAssertNil(data["seq"])
+            XCTAssertEqual(data["type"] as? String, eventType)
+            let payload = try XCTUnwrap(data["payload"] as? [String: Any])
+            XCTAssertEqual(payload["control_id"] as? String, control.id)
+            XCTAssertEqual(payload["target_host_id"] as? String, control.targetHostId)
+            XCTAssertEqual(payload["kind"] as? String, "spawn")
+            let spawnPayload = try XCTUnwrap(payload["payload"] as? [String: Any])
+            XCTAssertEqual(spawnPayload["tool"] as? String, "codex")
+            XCTAssertEqual(spawnPayload["label"] as? String, "MOMO-484")
+        }
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkControlRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("only dispatched controls can be acknowledged"))
+        XCTAssertTrue(routes.contains("wc.status = 'pending_approval'"))
+        XCTAssertTrue(routes.contains("root.status = 'acked'"))
+        XCTAssertTrue(routes.contains("work.auto_approve.enabled"))
+        XCTAssertTrue(routes.contains("work.auto_approve.disabled"))
+        XCTAssertFalse(routes.contains("BYPASSRLS"))
+    }
+
     func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {
         XCTAssertNil(try MessageRoutes.repliesCursor(nil))
         XCTAssertNil(try MessageRoutes.repliesCursor("  "))
