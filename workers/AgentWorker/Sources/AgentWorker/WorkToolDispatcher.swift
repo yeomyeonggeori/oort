@@ -356,8 +356,9 @@ struct WorkControlClient: Sendable {
             payload: call.payload
         )
 
+        let normalizedBaseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         var request = HTTPClientRequest(
-            url: "\(baseURL.trimmingCharacters(in: CharacterSet(charactersIn: \"/\")))/v1/workspaces/\(workspaceID.uuidString)/work-controls"
+            url: "\(normalizedBaseURL)/v1/workspaces/\(workspaceID.uuidString)/work-controls"
         )
         request.method = .POST
         request.headers.add(name: "Content-Type", value: "application/json")
