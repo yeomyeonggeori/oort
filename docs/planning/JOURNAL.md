@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 엔진 트랙) · MOMO-472 스냅샷 flake 근본 수정 (track/engine f74bae2)
+- 원인 확정: MemberInspector·WindowChrome의 NSApp.appearance 전역 변조(비동기 전파)가 인접 무창 스냅샷 렌더를 오염 — 풀스위트 한정·격리 통과·부하 발현·family 고정 관측 전부 정합. worker 위임 불가 유형(게이트 env 재현)이라 오케스트레이터 직접 수정.
+- 전역 변조 3사이트 제거(창/팝오버 외관 기설정 — 잉여 증명: 오염원 자기 스냅샷 18/18 정본 일치). evidence: 유휴 풀스위트 3×405 그린 + macos-ui 게이트 PASS. #495는 재발 감시로 유지, 무재발 확인 후 close.
+- track/engine = main+2(MOMO-482 + 472수정). 잔여 백로그는 성재 필요: C-2(Codex 왕복)·C-4/C-1(2기기·마이크 수동 QA).
+
 ## 2026-07-19 (Fable 엔진 트랙) · MOMO-482 X-4 첨부 투영 랜딩 — X큐 소진
 - 482(#515 → track/engine): history/전송/replies/message.new에 complete 첨부 투영(LATERAL 단일쿼리) + Core Message.attachments/DraftMessage.attachmentIds. 확장 verifier·게이트 실패 0. worker 리뷰 결함 0.
 - 이로써 **UXUI 역요청 X-1~X-5 전량 소진**. track/engine=main+1(482) — 다음 성재 승인 머지 때 A-6 ready 전환.
