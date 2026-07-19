@@ -26,7 +26,13 @@ CREATE TABLE work_host (
   CONSTRAINT work_host_public_key_ck
     CHECK (public_key ~ '^[A-Za-z0-9+/]{43}=$'),
   CONSTRAINT work_host_capabilities_ck
-    CHECK (jsonb_typeof(capabilities) = 'object')
+    CHECK (
+      jsonb_typeof(capabilities) = 'object'
+      AND NOT jsonb_path_exists(
+        capabilities,
+        '$.* ? (@.type() != "boolean")'
+      )
+    )
 );
 
 CREATE INDEX work_host_workspace_created_idx
@@ -38,11 +44,19 @@ CREATE INDEX work_host_owner_active_idx
   ON work_host (owner_member_id, created_at, id)
   WHERE revoked_at IS NULL;
 
-ALTER TABLE work_host ENABLE ROW LEVEL SECURITY;
-ALTER TABLE work_host FORCE ROW LEVEL SECURITY;
-CREATE POLICY ws_isolation ON work_host
-  USING (workspace_id = current_setting('app.workspace_id', true)::uuid)
-  WITH CHECK (workspace_id = current_setting('app.workspace_id', true)::uuid);
+DO $$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['work_host'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY;', t);
+    EXECUTE format($f$
+      CREATE POLICY ws_isolation ON %I
+      USING (workspace_id = current_setting('app.workspace_id', true)::uuid)
+      WITH CHECK (workspace_id = current_setting('app.workspace_id', true)::uuid);
+    $f$, t);
+  END LOOP;
+END $$;
 
 ALTER TABLE work_session
   ADD CONSTRAINT work_session_host_fk
