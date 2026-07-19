@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-483 Interactive Work Console session ledger (2026-07-19)
+
+- ADR-0114의 host-owned 경계를 따라 `work_session` FORCE RLS 원장과 create/active-list/owner-end REST를 추가했다. create는 system card·session·`message.new`·`work.session.started`를 한 tenant transaction에 기록하고, end는 기존 card의 props와 `work.session.ended`만 갱신해 `message.seq`/`channel_seq`를 재발급하지 않는다. cwd/path/process/provider credential은 저장하지 않는다.
+- lifecycle 두 이벤트는 card의 기존 seq를 재사용하되 Centrifugo publish `version` 없이 고유 idempotency key로 발행한다. Core는 두 kind를 `WorkSessionDelta`로 디코드해 replay cursor를 전진시키지 않고 전달하며, 기존 card thread는 일반 답글 API를 그대로 사용한다.
+- server 115 tests, Core 35 tests, iOS MomoiOSKit 27 tests와 macOS 컴파일, OpenAPI/YAML·verifier bash/ShellCheck 정적 검증은 PASS했다. 격리 `verify_work_session.sh`와 전체 `runtime-db` Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-482 첨부 메타데이터 수신 투영 (2026-07-19)
 
 - complete 상태로 메시지에 바인딩된 첨부만 생성순 `{id,name,mime,sizeBytes}`로 send/history 3변형/replies와 같은 트랜잭션의 `message.new`에 가산했다. 0건은 생략하고 모든 목록 경로는 lateral `jsonb_agg` 단일 쿼리를 사용하며 업로드 capability URL과 Drive 식별자는 투영하지 않는다.

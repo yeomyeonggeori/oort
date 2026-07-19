@@ -2250,8 +2250,14 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 
 ### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
-- [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
-- [ ] momo 서버는 user-owned execution host의 process/provider credential을 보관하거나 proxy하지 않음.
+- [x] ADR-0114 Accepted: momo는 session ledger/card/thread만 소유하고 command input·PTY/process·cwd/worktree·provider credential은 user-owned host에 남긴다.
+
+### ☐ MOMO-483 (`#516`) 수용기준 — Interactive Work Console session ledger `[runtime-db]` · **PR base=track/engine**
+- [x] migration 019 `work_session`: uuidv7, host_id 예약(no FK), root card 1:1, tool/label/status/lifecycle CHECK, FORCE RLS, cwd/path/process/provider 상태 없음.
+- [x] create/list/owner-end REST: create는 card+ledger+2 outbox 단일 tx, end는 card props+lifecycle outbox 단일 tx이며 기존 card/channel seq 불변, active list는 현재 channel membership로 필터.
+- [x] `work.session.started|ended`: exact payload, 고유 idempotency key, card seq 재사용 + no-version publish. Core `WorkSessionDelta`는 비순번 pass-through로 두 kind를 전달.
+- [x] 카드 답글은 기존 message/thread 경로 재사용. OpenAPI와 `verify_work_session.sh`를 `runtime-db`에 편입해 history props·Centrifugo 수신·owner/RLS/no-cwd를 단정.
+- worker 정적/Swift 검증 PASS. 격리 Docker verifier와 전체 runtime-db는 오케스트레이터 실런 전까지 `runtime-unverified`; 상세 계약은 issue #516.
 
 ---
 
