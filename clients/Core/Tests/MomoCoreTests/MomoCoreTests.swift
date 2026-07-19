@@ -177,6 +177,7 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(msg.body, "hello")
         XCTAssertEqual(msg.type, .text)
         XCTAssertNil(msg.thread, "legacy payloads without a thread projection stay decodable")
+        XCTAssertNil(msg.attachments, "legacy payloads without attachments stay decodable")
         XCTAssertFalse(msg.isPendingAck)
         XCTAssertFalse(msg.isDeleted)
     }
@@ -215,6 +216,52 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(roundTripped, decoded)
     }
 
+    func testMessageAttachmentMetadataDecodesAndRoundTripsAdditively() throws {
+        let wire = """
+        {
+          "id": "018f8b2c-0000-7000-8000-000000000001",
+          "channel_id": "018f8b2c-0000-7000-8000-000000000002",
+          "seq": 42,
+          "hlc_ts": 1718000000000,
+          "hlc_count": 0,
+          "author_member_id": "018f8b2c-0000-7000-8000-000000000003",
+          "type": "text",
+          "state": "sent",
+          "body": "attachment",
+          "props": {},
+          "created_at_ms": 1718000000123,
+          "attachments": [{
+            "id": "018f8b2c-0000-7000-8000-000000000004",
+            "name": "evidence.txt",
+            "mime": "text/plain",
+            "sizeBytes": 19
+          }]
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder.momo.decode(Message.self, from: wire)
+        let attachment = try XCTUnwrap(decoded.attachments?.first)
+        let expectedID = try XCTUnwrap(
+            FileID(uuidString: "018f8b2c-0000-7000-8000-000000000004")
+        )
+        XCTAssertEqual(attachment.id, expectedID)
+        XCTAssertEqual(attachment.name, "evidence.txt")
+        XCTAssertEqual(attachment.mime, "text/plain")
+        XCTAssertEqual(attachment.sizeBytes, 19)
+
+        let roundTripped = try JSONDecoder.momo.decode(
+            Message.self,
+            from: JSONEncoder.momo.encode(decoded)
+        )
+        XCTAssertEqual(roundTripped, decoded)
+        let encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder.momo.encode(decoded)) as? [String: Any]
+        )
+        let metadata = try XCTUnwrap((encoded["attachments"] as? [[String: Any]])?.first)
+        XCTAssertEqual(metadata["sizeBytes"] as? Int, 19)
+        XCTAssertNil(metadata["uploadUrl"])
+    }
+
     func testOptimisticEchoIsPendingAck() {
         let m = Message(
             id: MessageID(),
@@ -245,6 +292,12 @@ final class MomoCoreTests: XCTestCase {
                 "state": "sent",
                 "body": "hi",
                 "props": [:],
+                "attachments": [[
+                    "id": "018f8b2c-0000-7000-8000-000000000013",
+                    "name": "realtime.txt",
+                    "mime": "text/plain",
+                    "sizeBytes": 8,
+                ]],
             ]
         )
         let event = try envelope.decodeEvent()
@@ -253,6 +306,8 @@ final class MomoCoreTests: XCTestCase {
         }
         XCTAssertEqual(m.seq, 7)
         XCTAssertEqual(m.body, "hi")
+        XCTAssertEqual(m.attachments?.first?.name, "realtime.txt")
+        XCTAssertEqual(m.attachments?.first?.sizeBytes, 8)
     }
 
     func testEnvelopeMapsMessageDeleted() throws {
@@ -781,11 +836,24 @@ final class MomoCoreTests: XCTestCase {
     // MARK: - DraftMessage
 
     func testDraftMessageEncodesSnakeCase() throws {
-        let draft = DraftMessage(channelId: ChannelID(), type: .text, body: "yo")
+        let attachmentID = FileID()
+        let draft = DraftMessage(
+            channelId: ChannelID(),
+            type: .text,
+            body: "yo",
+            attachmentIds: [attachmentID]
+        )
         let data = try JSONEncoder.momo.encode(draft)
         let obj = try JSONSerialization.jsonObject(with: data) as! [String: Any]
         XCTAssertNotNil(obj["channel_id"])
         XCTAssertEqual(obj["body"] as? String, "yo")
+        XCTAssertEqual(obj["attachmentIds"] as? [String], [attachmentID.description])
+        XCTAssertNil(obj["attachment_ids"])
+
+        let legacy = """
+        {"channel_id":"018f8b2c-0000-7000-8000-000000000002","type":"text","body":"old","props":{}}
+        """.data(using: .utf8)!
+        XCTAssertNil(try JSONDecoder.momo.decode(DraftMessage.self, from: legacy).attachmentIds)
     }
 
     private static func message(

@@ -1906,6 +1906,40 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(payload["hlcTs"])
         XCTAssertNil(payload["hlcCount"])
         XCTAssertNil(payload["rootId"])
+        XCTAssertNil(payload["attachments"])
+
+        let attachmentID = UUID(uuidString: "00000000-0000-7000-8000-000000000180")!
+        let withAttachment = MessageRoutes.broadcastPayload(
+            centChannel: centChannel,
+            messageID: messageID,
+            channelID: channelID,
+            seq: 43,
+            type: "text",
+            body: "Realtime contract sample.",
+            authorMemberID: authorID,
+            hlcTs: 1_782_463_260_000,
+            hlcCount: 0,
+            rootID: rootID,
+            attachments: [MessageAttachmentDTO(
+                id: attachmentID.uuidString,
+                name: "evidence.txt",
+                mime: "text/plain",
+                sizeBytes: 19
+            )]
+        )
+        let attachmentObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(withAttachment.utf8)) as? [String: Any]
+        )
+        let attachmentPayload = try XCTUnwrap(
+            (attachmentObject["data"] as? [String: Any])?["payload"] as? [String: Any]
+        )
+        let attachments = try XCTUnwrap(attachmentPayload["attachments"] as? [[String: Any]])
+        XCTAssertEqual(attachments.count, 1)
+        XCTAssertEqual(attachments[0]["id"] as? String, attachmentID.uuidString)
+        XCTAssertEqual(attachments[0]["name"] as? String, "evidence.txt")
+        XCTAssertEqual(attachments[0]["mime"] as? String, "text/plain")
+        XCTAssertEqual(attachments[0]["sizeBytes"] as? Int, 19)
+        XCTAssertNil(attachments[0]["uploadUrl"])
     }
 
     func testThreadRollupProjectionAndRealtimePayloadUseAdditiveSnakeCaseContract() throws {
@@ -1944,6 +1978,7 @@ final class MomoServerTests: XCTestCase {
             state: nil,
             editedAtMs: nil,
             deletedAtMs: nil,
+            attachments: nil,
             thread: rollup
         )
         let encoded = try XCTUnwrap(
@@ -1954,6 +1989,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(thread["last_reply_seq"] as? Int, 43)
         XCTAssertEqual(thread["last_reply_at"] as? Int64, 1_782_463_260_125)
         XCTAssertNil(thread["replyCount"])
+        XCTAssertNil(encoded["attachments"])
 
         let raw = MessageRoutes.threadUpdatedPayload(
             workspaceID: workspaceID,
@@ -2048,11 +2084,53 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(source.contains("messages/:root/replies"))
         XCTAssertTrue(source.contains("withTenantConnection"))
         XCTAssertTrue(source.contains("hasActiveMembership"))
-        XCTAssertTrue(source.contains("AND root_id = \\(rootID)"))
-        XCTAssertTrue(source.contains("ORDER BY seq ASC"))
+        XCTAssertTrue(source.contains("AND m.root_id = \\(rootID)"))
+        XCTAssertTrue(source.contains("ORDER BY m.seq ASC"))
         XCTAssertTrue(source.contains("LEFT JOIN thread t"))
         XCTAssertTrue(source.contains("t.reply_count > 0"))
         XCTAssertFalse(source.contains("BYPASSRLS"))
+    }
+
+    func testMessageAttachmentProjectionIsCompleteOnlyAggregatedAndDownloadSafe() throws {
+        let attachmentID = UUID(uuidString: "00000000-0000-7000-8000-000000000180")!
+        let projection = try XCTUnwrap(MessageRoutes.attachmentProjection(
+            #"[{"id":"00000000-0000-7000-8000-000000000180","name":"evidence.txt","mime":"text/plain","sizeBytes":19}]"#
+        ))
+        XCTAssertEqual(projection, [MessageAttachmentDTO(
+            id: attachmentID.uuidString,
+            name: "evidence.txt",
+            mime: "text/plain",
+            sizeBytes: 19
+        )])
+        XCTAssertNil(try MessageRoutes.attachmentProjection(nil))
+        XCTAssertNil(try MessageRoutes.attachmentProjection("[]"))
+
+        let testFile = URL(fileURLWithPath: #filePath)
+        let serverRoot = testFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MessageRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertEqual(
+            source.components(separatedBy: "LEFT JOIN LATERAL").count - 1,
+            4,
+            "history's three variants and replies must aggregate attachments in their query"
+        )
+        XCTAssertGreaterThanOrEqual(
+            source.components(separatedBy: "jsonb_agg(").count - 1,
+            5,
+            "send plus the four list projections must aggregate without per-message queries"
+        )
+        XCTAssertTrue(source.contains("AND a.status = 'complete'"))
+        XCTAssertTrue(source.contains("AND status = 'complete'"))
+        XCTAssertTrue(source.contains("ORDER BY a.created_at ASC, a.id ASC"))
+        XCTAssertFalse(source.contains("'uploadUrl'"))
+        XCTAssertFalse(source.contains("'upload_url'"))
     }
 
     func testAgentMentionDetectionSupportsDisplayNameHandleAndMemberID() {
