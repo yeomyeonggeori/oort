@@ -39,9 +39,12 @@
 ### D7. 도구 모델
 - **A (권고) — 도구-불가지 프로파일**(이름·명령 템플릿·cwd·env 화이트리스트, 기본 3종 claude/codex/opencode + 임의 셸). interactive 세션 안에서 뭘 돌리든 momo는 불가지. 도구 내부 통합(transcript 파싱·세션 이어받기)은 후속 플러그인.
 
+### D8. 호스트 추상화 훅 (v1 예약 — ADR-0125 연계)
+- **A (권고) — `work_session`·`work.control.*`은 host_id를 필수로 가진다**: v0의 유일 호스트는 맥 앱이지만, 이 필드 하나로 v1의 self-host workd(SSH 부트스트랩·outbound-only 다이얼)와 momo Cloud 샌드박스(유료)가 같은 계약 위에 선다 — 3계층·라우팅·경제 모델은 research/17-work-host-fabric/00 + ADR-0125(기안 예정)로 위임. 본 ADR에서는 이 필드 계약만 결정해 v0 구현이 T2/T3를 막지 않게 한다.
+
 ## Decision (Proposed v2 권고안)
 
-D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 기본·raw 옵트인) · D4-A(원장 경유 control) · D5-A(spawn 승인+화이트리스트) · D6-A(터미널+스레드 병행) · D7-A(도구-불가지 프로파일). 성재 승인 시 Accepted.
+D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 기본·raw 옵트인) · D4-A(원장 경유 control) · D5-A(spawn 승인+화이트리스트) · D6-A(터미널+스레드 병행) · D7-A(도구-불가지 프로파일) · D8-A(host_id 훅). 성재 승인 시 Accepted.
 
 ## 파생 (Accepted 후 발급 예약)
 
