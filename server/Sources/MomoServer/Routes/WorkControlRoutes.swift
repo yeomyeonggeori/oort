@@ -106,6 +106,13 @@ struct WorkControlRoutes: Sendable {
                 runID: requestDTO.runId,
                 agentID: principal.memberID
             )
+            try await Self.requireTargetWorkHost(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                targetHostID: requestDTO.targetHostId,
+                sessionOwnerMemberID: binding.ownerHumanID
+            )
 
             if kind != .spawn {
                 try await Self.requireSessionControlLineage(
@@ -230,14 +237,16 @@ struct WorkControlRoutes: Sendable {
             guard locked.status == "dispatched" else {
                 throw HTTPError(.conflict, message: "only dispatched controls can be acknowledged")
             }
-            guard try await Self.isV0HostOwner(
+            guard let hostOwnerMemberID = try await Self.activeHostOwner(
                 conn: conn,
                 logger: db.logger,
-                requesterMemberID: UUID(uuidString: locked.requesterMemberId)!,
-                humanMemberID: principal.memberID
+                workspaceID: workspaceID,
+                targetHostID: UUID(uuidString: locked.targetHostId)!
             ) else {
-                // TODO(#487): replace agent.owner_human_id with work_host owner binding.
-                throw HTTPError(.forbidden, message: "only the v0 host owner can acknowledge")
+                throw HTTPError(.notFound, message: "work host not found")
+            }
+            guard hostOwnerMemberID == principal.memberID else {
+                throw HTTPError(.forbidden, message: "only the registered host owner can acknowledge")
             }
 
             let ackSessionID: UUID?
@@ -718,6 +727,27 @@ struct WorkControlRoutes: Sendable {
         control: WorkControlDTO
     ) async throws -> WorkControlDTO {
         let controlID = UUID(uuidString: control.id)!
+        let hostID = UUID(uuidString: control.targetHostId)!
+        let activeRows = try await conn.query(
+            """
+            SELECT 1
+              FROM work_host
+             WHERE id = \(hostID)
+               AND workspace_id = \(workspaceID)
+               AND revoked_at IS NULL
+             FOR SHARE
+            """,
+            logger: logger
+        ).collect()
+        guard !activeRows.isEmpty else {
+            return try await failDispatchForRevokedHost(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                controlID: controlID
+            )
+        }
+
         let rows = try await conn.query(
             """
             UPDATE work_control
@@ -746,6 +776,47 @@ struct WorkControlRoutes: Sendable {
             logger: logger
         )
         return dispatched
+    }
+
+    private static func failDispatchForRevokedHost(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        controlID: UUID
+    ) async throws -> WorkControlDTO {
+        let rows = try await conn.query(
+            """
+            UPDATE work_control
+               SET status = 'failed', updated_at = clock_timestamp()
+             WHERE id = \(controlID)
+               AND status = 'approved'
+            RETURNING id, workspace_id, channel_id, requester_member_id,
+                      target_host_id, session_id, kind, payload::text, status,
+                      approval_message_id, created_at, updated_at
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.conflict, message: "work control is not approved for dispatch")
+        }
+        let failed = try decodeControl(row)
+        let payload = ackPayload(
+            workspaceID: workspaceID,
+            control: failed,
+            ok: false,
+            errorLabel: "host_revoked"
+        )
+        _ = try await conn.query(
+            """
+            INSERT INTO outbox
+              (workspace_id, kind, method, payload, partition_key)
+            VALUES
+              (\(workspaceID), 'broadcast', 'publish', \(payload)::jsonb,
+               \(UUID(uuidString: failed.channelId)!))
+            """,
+            logger: logger
+        )
+        return failed
     }
 
     private static func requireRunBinding(
@@ -793,6 +864,74 @@ struct WorkControlRoutes: Sendable {
             throw HTTPError(.conflict, message: "agent run is not eligible for work control")
         }
         return RunBinding(ownerHumanID: owner)
+    }
+
+    private static func requireTargetWorkHost(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        targetHostID: UUID,
+        sessionOwnerMemberID: UUID
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT scope, owner_member_id
+              FROM work_host
+             WHERE id = \(targetHostID)
+               AND workspace_id = \(workspaceID)
+               AND revoked_at IS NULL
+             FOR SHARE
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            // Missing, revoked, and cross-workspace hosts deliberately collapse
+            // to the same non-disclosing response.
+            throw HTTPError(.notFound, message: "work host not found")
+        }
+        let (scope, ownerMemberID) = try row.decode((String, UUID).self)
+        try validateTargetHostScope(
+            scope: scope,
+            ownerMemberID: ownerMemberID,
+            sessionOwnerMemberID: sessionOwnerMemberID
+        )
+    }
+
+    static func validateTargetHostScope(
+        scope: String,
+        ownerMemberID: UUID,
+        sessionOwnerMemberID: UUID
+    ) throws {
+        if scope == "workspace" { return }
+        guard scope == "member" else {
+            throw HTTPError(.internalServerError, message: "work host scope is invalid")
+        }
+        guard ownerMemberID == sessionOwnerMemberID else {
+            throw HTTPError(
+                .forbidden,
+                message: "member-scoped work host belongs to another session owner"
+            )
+        }
+    }
+
+    private static func activeHostOwner(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        targetHostID: UUID
+    ) async throws -> UUID? {
+        let rows = try await conn.query(
+            """
+            SELECT owner_member_id
+              FROM work_host
+             WHERE id = \(targetHostID)
+               AND workspace_id = \(workspaceID)
+               AND revoked_at IS NULL
+             FOR SHARE
+            """,
+            logger: logger
+        ).collect()
+        return try rows.first?.decode(UUID.self)
     }
 
     private static func requireSessionControlLineage(
@@ -875,31 +1014,6 @@ struct WorkControlRoutes: Sendable {
              WHERE workspace_id = \(workspaceID)
                AND host_owner_member_id = \(ownerHumanID)
                AND tool = \(tool)
-             LIMIT 1
-            """,
-            logger: logger
-        ).collect()
-        return !rows.isEmpty
-    }
-
-    private static func isV0HostOwner(
-        conn: PostgresConnection,
-        logger: Logger,
-        requesterMemberID: UUID,
-        humanMemberID: UUID
-    ) async throws -> Bool {
-        let rows = try await conn.query(
-            """
-            SELECT 1
-              FROM agent a
-              JOIN member owner
-                ON owner.id = a.owner_human_id
-               AND owner.workspace_id = a.workspace_id
-               AND owner.kind = 'human'
-               AND owner.status = 'active'
-               AND owner.deleted_at IS NULL
-             WHERE a.member_id = \(requesterMemberID)
-               AND a.owner_human_id = \(humanMemberID)
              LIMIT 1
             """,
             logger: logger

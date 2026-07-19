@@ -392,6 +392,13 @@ guard_jq() {
 
 WS="$DEMO_WORKSPACE_ID"
 
+WORK_HOST_PRIVATE_KEY="$TMP_DIR/work-host-private.pem"
+WORK_HOST_PUBLIC_DER="$TMP_DIR/work-host-public.der"
+openssl genpkey -algorithm ED25519 -out "$WORK_HOST_PRIVATE_KEY" >/dev/null 2>&1
+openssl pkey -in "$WORK_HOST_PRIVATE_KEY" -pubout -outform DER \
+  -out "$WORK_HOST_PUBLIC_DER" >/dev/null 2>&1
+WORK_HOST_PUBLIC_KEY="$(tail -c 32 "$WORK_HOST_PUBLIC_DER" | openssl base64 -A)"
+
 # auth: login -> refresh (rotation) -> realtime-token
 sample login post "/v1/auth/login" "/v1/auth/login" 200 \
   "$(jq -cn --arg e "$GATE_EMAIL" --arg p "$GATE_PASSWORD" --arg w "$WS" \
@@ -426,8 +433,36 @@ guard_jq '.muted == true' "notification preference returns the effective mute st
 sample channel-create post "/v1/workspaces/{workspaceId}/channels" "/v1/workspaces/$WS/channels" 201 \
   "$(jq -cn --arg n "gate-$RUN_EPOCH" '{kind:"public",name:$n,topic:"openapi drift gate"}')" "$ACCESS"
 
+# work hosts: register -> signed heartbeat -> polling list. Revoke is sampled
+# after the work-control operations have consumed the same registered host.
+sample work-host-register post "/v1/workspaces/{workspaceId}/work-hosts" \
+  "/v1/workspaces/$WS/work-hosts" 201 \
+  "$(jq -cn --arg key "$WORK_HOST_PUBLIC_KEY" \
+      '{scope:"member",type:"app",displayName:"OpenAPI gate host",publicKey:$key,
+        capabilities:{"tool.codex":true}}')" "$ACCESS"
+WORK_HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id')"
+WORK_HOST_SENT_AT_MS="$($PYTHON_BIN -c 'import time; print(time.time_ns() // 1_000_000)')"
+WORK_HOST_SIGNING_PAYLOAD="$TMP_DIR/work-host-heartbeat.txt"
+printf 'momo.work_host.heartbeat.v1\n%s\n%s\n%s' \
+  "$(printf '%s' "$WS" | tr '[:upper:]' '[:lower:]')" \
+  "$(printf '%s' "$WORK_HOST_ID" | tr '[:upper:]' '[:lower:]')" \
+  "$WORK_HOST_SENT_AT_MS" >"$WORK_HOST_SIGNING_PAYLOAD"
+WORK_HOST_SIGNATURE="$(openssl pkeyutl -sign -rawin -inkey "$WORK_HOST_PRIVATE_KEY" \
+  -in "$WORK_HOST_SIGNING_PAYLOAD" | openssl base64 -A)"
+sample work-host-heartbeat post \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat" \
+  "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/heartbeat" 200 \
+  "$(jq -cn --argjson sent "$WORK_HOST_SENT_AT_MS" --arg signature "$WORK_HOST_SIGNATURE" \
+      '{sentAtMs:$sent,signature:$signature}')"
+guard_jq '.workHost.online == true and (.workHost.lastSeenAtMs | type == "number")' \
+  "signed work host heartbeat marks the host online"
+sample work-host-list get "/v1/workspaces/{workspaceId}/work-hosts" \
+  "/v1/workspaces/$WS/work-hosts" 200 "" "$ACCESS"
+guard_jq --arg host "$(printf '%s' "$WORK_HOST_ID" | tr '[:upper:]' '[:lower:]')" \
+  'any(.workHosts[]; (.id | ascii_downcase) == $host and .online == true)' \
+  "work host polling list contains the signed-online host"
+
 # work sessions: create card/root -> active list -> owner end
-WORK_HOST_ID="$(uuidgen)"
 sample work-session-create post "/v1/workspaces/{workspaceId}/work-sessions" \
   "/v1/workspaces/$WS/work-sessions" 201 \
   "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
@@ -610,9 +645,8 @@ AGENT_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
 # Work controls: host-owner whitelist -> agent dispatch -> owner ack -> revoke.
 # Create a fresh running session because the earlier work-session operation
 # sample deliberately exercised its ended response.
-WORK_CONTROL_HOST_ID="$(uuidgen)"
 api post "/v1/workspaces/$WS/work-sessions" \
-  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_CONTROL_HOST_ID" \
+  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
       '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI control host"}')" "$ACCESS"
 [ "$RESPONSE_STATUS" = "201" ] || {
   echo "[openapi] FAIL work control session fixture: expected 201, got $RESPONSE_STATUS" >&2
@@ -628,7 +662,7 @@ guard_jq '.tool == "codex" and .enabled == true' "work auto-approval enables cod
 sample work-control-create post "/v1/workspaces/{workspaceId}/work-controls" \
   "/v1/workspaces/$WS/work-controls" 201 \
   "$(jq -cn --arg ch "$GENERAL_ID" --arg run "$CONTROL_RUN_UUID" \
-      --arg host "$WORK_CONTROL_HOST_ID" \
+      --arg host "$WORK_HOST_ID" \
       '{channelId:$ch,runId:$run,targetHostId:$host,kind:"spawn",payload:{tool:"codex",label:"OpenAPI control"}}')" \
   "$AGENT_ACCESS"
 WORK_CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id')"
@@ -647,6 +681,11 @@ sample work-auto-approval-disable delete \
   "/v1/workspaces/{workspaceId}/work-auto-approvals/{tool}" \
   "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"
 guard_jq '.tool == "codex" and .enabled == false' "work auto-approval disables codex"
+
+sample work-host-revoke delete "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}" \
+  "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID" 200 "" "$ACCESS"
+guard_jq '.workHost.online == false and (.workHost.revokedAtMs | type == "number")' \
+  "revoked work host is durably offline"
 
 DELEGATION_QUERY="delegatedMemberId=$GATE_MEMBER_ID&channelId=$GENERAL_ID"
 sample plugins-agent-policy get "/v1/workspaces/{workspaceId}/plugins" \
