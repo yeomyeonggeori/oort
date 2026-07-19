@@ -4,7 +4,7 @@
 
 - ADR-0125 D1/D8에 따라 Ed25519 공개키·member/workspace scope·app/workd/cloud type을 갖는 `work_host` FORCE RLS 원장과 등록/목록/서명 heartbeat/revoke REST를 추가했다. 등록·revoke audit는 같은 tenant transaction에 기록하며 capabilities는 boolean availability flag만 받는다.
 - `work_session.host_id`·`work_control.target_host_id`를 검증된 FK로 묶고, control 생성은 등록·미철회·workspace·scope를 검증해 404/403으로 닫는다. 승인 대기 중 host가 revoke되면 dispatch 대신 control을 `failed`로 전이하고 no-version `work.control.acked(ok=false,error_label=host_revoked)`를 발행한다. Core는 REST `WorkHost`만 디코드하며 신규 realtime kind는 추가하지 않았다.
-- server 120 tests와 Core 38 tests PASS. OpenAPI 및 기존 work-session/control/AgentWorker verifier는 선행 host 등록을 사용하고, 신규 `verify_work_host.sh`를 `runtime-db`에 편입했다. 정적/전체 Swift 게이트는 이 goal에서 수행하며 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+- server 120 tests와 Core 38 tests, relay/worker/LinkShort tests 및 8개 Swift 패키지 `--disable-sandbox` build가 PASS했고 docs local gate는 19/19 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했으며, managed sandbox 안의 `make build`는 중첩 `sandbox-exec`가 거부되어 동일 패키지 build를 직접 검증했다. OpenAPI 및 기존 work-session/control/AgentWorker verifier는 선행 host 등록을 사용하고, 신규 `verify_work_host.sh`를 `runtime-db`에 편입했다. 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
 
 ## MOMO-486 AgentWorker work.* dispatch + chat-to-session E2E (2026-07-20)
 
