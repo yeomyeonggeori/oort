@@ -196,6 +196,9 @@ services:
       RELAY_DATABASE_URL: postgres://momo_worker:momo_worker_dev_pw@postgres:5432/${POSTGRES_DB:-momo}
       CENT_API_URL: http://centrifugo:8000/api
       HERMES_BASE_URL: http://mock-hermes:8088/v1
+      MOMO_API_URL: http://api:8080
+      MOMO_AGENT_TOKEN: ${MOMO_AGENT_TOKEN:-}
+      MOMO_WORK_HOST_ID: ${MOMO_WORK_HOST_ID:-}
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-100}
       MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-1}
     volumes:
