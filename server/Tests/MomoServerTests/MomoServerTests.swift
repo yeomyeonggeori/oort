@@ -2050,6 +2050,110 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testWorkSessionMigrationAndRouteKeepLedgerBoundary() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/019_work_session.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE work_session"))
+        XCTAssertTrue(migration.contains("id               uuid PRIMARY KEY DEFAULT uuidv7()"))
+        XCTAssertTrue(migration.contains("host_id          uuid NOT NULL"))
+        XCTAssertTrue(migration.contains("root_message_id  uuid NOT NULL UNIQUE REFERENCES message(id)"))
+        XCTAssertTrue(migration.contains("tool IN ('claude', 'codex', 'opencode', 'shell')"))
+        XCTAssertTrue(migration.contains("length(btrim(label)) BETWEEN 1 AND 120"))
+        XCTAssertTrue(migration.contains("status IN ('running', 'ended')"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(migration.contains("\n  cwd"), "cwd/path must stay host-local")
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkSessionRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("WITH bumped AS"))
+        XCTAssertTrue(routes.contains("'system'::message_type"))
+        XCTAssertTrue(routes.contains("MessageRoutes.broadcastPayload"))
+        XCTAssertTrue(routes.contains("work.session.started"))
+        XCTAssertTrue(routes.contains("work.session.ended"))
+        XCTAssertTrue(routes.contains("FOR UPDATE OF ws"))
+        XCTAssertTrue(routes.contains("only the session owner can end it"))
+        XCTAssertTrue(routes.contains("JOIN membership ms"))
+        XCTAssertFalse(routes.contains("BYPASSRLS"))
+    }
+
+    func testWorkSessionValidationCardAndNoVersionLifecyclePayload() throws {
+        XCTAssertEqual(try WorkSessionRoutes.validatedTool("codex"), "codex")
+        XCTAssertThrowsError(try WorkSessionRoutes.validatedTool("bash"))
+        XCTAssertEqual(try WorkSessionRoutes.validatedLabel("  ship it  "), "ship it")
+        XCTAssertThrowsError(try WorkSessionRoutes.validatedLabel("   "))
+        XCTAssertThrowsError(
+            try WorkSessionRoutes.validatedLabel(String(repeating: "x", count: 121))
+        )
+        XCTAssertFalse(try WorkSessionRoutes.activeFilter(nil))
+        XCTAssertFalse(try WorkSessionRoutes.activeFilter("0"))
+        XCTAssertTrue(try WorkSessionRoutes.activeFilter("1"))
+        XCTAssertThrowsError(try WorkSessionRoutes.activeFilter("true"))
+
+        let sessionID = UUID(uuidString: "00000000-0000-7000-8000-000000000483")!
+        let props = WorkSessionRoutes.cardProps(
+            sessionID: sessionID,
+            tool: "codex",
+            label: "MOMO-483",
+            status: "running"
+        )
+        XCTAssertEqual(props["kind"] as? String, "work_session")
+        XCTAssertEqual(props["session_id"] as? String, sessionID.uuidString)
+        XCTAssertEqual(props["tool"] as? String, "codex")
+        XCTAssertEqual(props["label"] as? String, "MOMO-483")
+        XCTAssertEqual(props["status"] as? String, "running")
+
+        let session = WorkSessionDTO(
+            id: sessionID.uuidString,
+            workspaceId: "00000000-0000-7000-8000-000000000001",
+            channelId: "00000000-0000-7000-8000-000000000201",
+            memberId: "00000000-0000-7000-8000-000000000101",
+            hostId: "00000000-0000-7000-8000-000000000901",
+            rootMessageId: "00000000-0000-7000-8000-000000000701",
+            tool: "codex",
+            label: "MOMO-483",
+            status: "ended",
+            startedAtMs: 1_782_463_200_000,
+            endedAtMs: 1_782_463_260_000,
+            exitCode: 0
+        )
+        for eventType in ["work.session.started", "work.session.ended"] {
+            let raw = WorkSessionRoutes.lifecyclePayload(
+                eventType: eventType,
+                session: session,
+                rootMessageSeq: 43
+            )
+            let object = try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any]
+            )
+            XCTAssertNil(
+                object["version"],
+                "work session projections reuse the card seq claimed by message.new"
+            )
+            XCTAssertNotNil(object["idempotency_key"] as? String)
+            let data = try XCTUnwrap(object["data"] as? [String: Any])
+            XCTAssertEqual(data["type"] as? String, eventType)
+            XCTAssertEqual(data["seq"] as? Int, 43)
+            let payload = try XCTUnwrap(data["payload"] as? [String: Any])
+            XCTAssertEqual(payload["session_id"] as? String, sessionID.uuidString)
+            XCTAssertEqual(payload["channel_id"] as? String, session.channelId)
+            XCTAssertEqual(payload["root_message_id"] as? String, session.rootMessageId)
+            XCTAssertEqual(payload["member_id"] as? String, session.memberId)
+            XCTAssertEqual(payload["host_id"] as? String, session.hostId)
+            XCTAssertEqual(payload["tool"] as? String, "codex")
+            XCTAssertEqual(payload["label"] as? String, "MOMO-483")
+        }
+    }
+
     func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {
         XCTAssertNil(try MessageRoutes.repliesCursor(nil))
         XCTAssertNil(try MessageRoutes.repliesCursor("  "))

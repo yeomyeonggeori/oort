@@ -385,6 +385,99 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(snapshot.lastAppliedSeq, 47)
     }
 
+    func testWorkSessionEnvelopeKindsRoundTripSnakeCasePayload() throws {
+        let sessionID = "00000000-0000-7000-8000-000000000483"
+        let channelID = "00000000-0000-7000-8000-000000000201"
+        let rootID = "00000000-0000-7000-8000-000000000701"
+        let memberID = "00000000-0000-7000-8000-000000000101"
+        let hostID = "00000000-0000-7000-8000-000000000901"
+        let fixtures: [(String, String, Int64?, Int64?, Int?)] = [
+            ("work.session.started", "started", 1_782_463_200_000, nil, nil),
+            ("work.session.ended", "ended", nil, 1_782_463_260_000, 0),
+        ]
+
+        for (type, action, startedAt, endedAt, exitCode) in fixtures {
+            var payload: [String: JSON] = [
+                "session_id": .string(sessionID),
+                "channel_id": .string(channelID),
+                "root_message_id": .string(rootID),
+                "member_id": .string(memberID),
+                "host_id": .string(hostID),
+                "tool": "codex",
+                "label": "MOMO-483",
+            ]
+            if let startedAt { payload["started_at"] = .int(startedAt) }
+            if let endedAt { payload["ended_at"] = .int(endedAt) }
+            if let exitCode { payload["exit_code"] = .int(Int64(exitCode)) }
+            let encoded = try JSONEncoder.momo.encode(RealtimeEnvelope(
+                type: type,
+                ts: endedAt ?? startedAt ?? 0,
+                seq: 43,
+                payload: .object(payload)
+            ))
+            let decoded = try JSONDecoder.momo.decode(RealtimeEnvelope.self, from: encoded)
+            guard case .workSession(let delta) = try decoded.decodeEvent() else {
+                return XCTFail("expected .workSession")
+            }
+            XCTAssertEqual(delta.action.rawValue, action)
+            XCTAssertEqual(delta.sessionId.description.lowercased(), sessionID)
+            XCTAssertEqual(delta.channelId.description.lowercased(), channelID)
+            XCTAssertEqual(delta.rootMessageId.description.lowercased(), rootID)
+            XCTAssertEqual(delta.memberId.description.lowercased(), memberID)
+            XCTAssertEqual(delta.hostId.description.lowercased(), hostID)
+            XCTAssertEqual(delta.tool, .codex)
+            XCTAssertEqual(delta.label, "MOMO-483")
+            XCTAssertEqual(delta.startedAtMs, startedAt)
+            XCTAssertEqual(delta.endedAtMs, endedAt)
+            XCTAssertEqual(delta.exitCode, exitCode)
+        }
+    }
+
+    func testWorkSessionEventsSharingCardSeqPassThroughWithoutAdvancingReplay() async throws {
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let session = "00000000-0000-7000-8000-000000000483"
+        let root = "00000000-0000-7000-8000-000000000701"
+        let member = "00000000-0000-7000-8000-000000000101"
+        let host = "00000000-0000-7000-8000-000000000901"
+        let controller = RealtimeReplayController(channel: channel, lastAppliedSeq: 43)
+        let base: [String: JSON] = [
+            "session_id": .string(session),
+            "channel_id": .string(channel.description),
+            "root_message_id": .string(root),
+            "member_id": .string(member),
+            "host_id": .string(host),
+            "tool": "shell",
+            "label": "Observe only",
+        ]
+        var started = base
+        started["started_at"] = .int(100)
+        var ended = base
+        ended["ended_at"] = .int(200)
+        ended["exit_code"] = .int(0)
+
+        let envelopes = [
+            RealtimeEnvelope(
+                type: "work.session.started", ts: 100, seq: 43, payload: .object(started)
+            ),
+            RealtimeEnvelope(
+                type: "work.session.ended", ts: 200, seq: 43, payload: .object(ended)
+            ),
+        ]
+        var events: [RealtimeEvent] = []
+        for envelope in envelopes {
+            events += try await controller.process(envelope) { _, _ in [] }
+            let snapshot = await controller.snapshot()
+            XCTAssertEqual(snapshot.lastAppliedSeq, 43)
+        }
+        XCTAssertEqual(events.count, 2)
+        guard case .workSession(let startedDelta) = events[0],
+              case .workSession(let endedDelta) = events[1]
+        else { return XCTFail("both lifecycle kinds must pass through") }
+        XCTAssertEqual(startedDelta.action, .started)
+        XCTAssertEqual(endedDelta.action, .ended)
+        XCTAssertEqual(endedDelta.exitCode, 0)
+    }
+
     func testInteractionEventsSharingAppliedMessageSeqDeliverWithoutAdvancingReplayCursor() async throws {
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000010")!
         let author = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
@@ -947,7 +1040,8 @@ private struct RealtimeProjectionFixture {
             }
             byEmoji[delta.emoji] = members.isEmpty ? nil : members
             reactions[delta.messageId] = byEmoji.isEmpty ? nil : byEmoji
-        case .threadUpdated, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle:
+        case .threadUpdated, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle,
+             .workSession:
             break
         }
     }

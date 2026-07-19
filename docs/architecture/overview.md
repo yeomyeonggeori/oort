@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-17 (ADR-0113 SE-04A) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-19 (ADR-0114 session ledger) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -138,6 +138,23 @@ agent bearer에는 공개되지 않는다. gateway callback은 계속 bearer act
 결속된다. approval callback은 `read_only|workspace_write|network_write` tier를 approval
 payload와 timeline card metadata에 보존하며 danger 상당 값은 400으로 fail-closed한다.
 
+### Interactive Work Console session ledger
+
+ADR-0114의 `work_session`은 user-owned execution host의 프로세스를 실행하거나 복제하는
+개체가 아니라, 채널에 공유할 최소 lifecycle 원장이다. active channel member가
+`POST /v1/workspaces/:ws/work-sessions`로 host ID·tool·label을 보내면 서버는 기존
+`channel_seq`를 한 번 올려 system root card, session row, `message.new`,
+`work.session.started`를 한 tenant transaction에 기록한다. root card의 기존 message
+thread가 협업 표면이므로 별도 session comment 모델은 없다.
+
+owner의 `PATCH .../work-sessions/:session {status:"ended"}`는 session lifecycle과 card
+props를 갱신하고 `work.session.ended`를 같은 transaction에 기록한다. 이 projection은
+card의 기존 `message.seq`를 재사용하므로 `message.new`가 소유한 Centrifugo version과
+경합하지 않도록 publish `version`을 보내지 않으며, Core replay cursor도 전진시키지
+않는다. Postgres가 lifecycle/history의 SoT이고, cwd·worktree/path·PID/process state·
+terminal output·provider credential은 계속 host-local이다. `host_id`는 ADR-0125의
+host registry가 Accepted되기 전까지 non-null opaque UUID이며 FK를 두지 않는다.
+
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
 ```mermaid
@@ -215,6 +232,9 @@ erDiagram
     channel ||--o{ membership : contains
     channel ||--o{ message : contains
     member ||--o{ message : "authors (사람=에이전트 대칭)"
+    channel ||--o{ work_session : "durable lifecycle"
+    member ||--o{ work_session : owns
+    message ||--o| work_session : "system root card"
     message ||--o{ agent_run : triggers
     agent_run ||--o{ approval : requests
     member ||--o{ token : "agent_bearer(Phase 1 사용)·delegation(Phase 2)"
