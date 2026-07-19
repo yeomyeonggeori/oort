@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-19 (Fable 기획+엔진) · ADR-0114 Accepted → MOMO-483 착수 + ADR-0125 기안
+- 성재 "ㄱㄱ"로 0114 v2(D1~D8) Accepted. MOMO-483(#516, work_session 원장+세션 카드/스레드 바인딩) 발급·worker 가동 — no-version 발행·비순번 분기 등 479/480 확립 계약을 패킷에 명시.
+- ADR-0125(Work Host Fabric) Proposed 기안: work_host 레지스트리(scope=member|workspace·outbound-only) · T2 workd(SSH 부트스트랩·원격 로그인 브리지) · T3 재판매 시작(기질-불가지 프로비저너, 자체 Firecracker는 v2) · 3계층 샌드박스 합성 · work_pool 동적 슬롯 · 호스트 선택기(로컬 우선) · 워크스페이스 과금+BYOA · 보안 기본값. 파생 487~490 예약. 성재 승인 대기.
+
 ## 2026-07-19 (Fable 기획) · ADR-0114 v2 재기안 — Warp/Conductor형 에이전트 조종 터미널
 - v1(수명주기만 원장·경로 분리) 기안 직후 성재 방향 보정: 기본 흐름=채팅 요청→에이전트가 CLI 세션 스폰·조종·작업 제공, 세션↔채팅 양방향. v2로 재기안.
 - v2 권고: D1 호스트 세션 매니저(앱 내장, workd v1) · **D2 세션=채널 스레드**(카드 root+진행 답글+개입 답글 — X-3 인프라 재사용) · D3 큐레이션 기본·raw tail 옵트인 · **D4 원장 경유 control**(에이전트 tool-call work.spawn/input/read/kill→승인→outbox→호스트 실행) · **D5 spawn=승인 대상**(프로파일 auto-approve 화이트리스트) · D6 터미널+스레드 병행 · D7 도구-불가지 프로파일.
