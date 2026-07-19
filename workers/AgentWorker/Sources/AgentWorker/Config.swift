@@ -31,6 +31,13 @@ struct Config: Sendable {
     var agentModel: String
     var allowLocalLoopbackExternalHermes: Bool
 
+    // ---- momo control-plane (ADR-0114 / MOMO-486) ----
+    // Raw per-agent bearer remains process-local. The server stores only its
+    // hash; it is never projected into agent_job payloads or Postgres rows.
+    var momoAPIURL: String
+    var momoAgentToken: String?
+    var momoWorkHostID: UUID?
+
     // ---- Worker loop tuning (L4 §3.5) ----
     var pollInterval: Duration   // fallback poll cadence (spec: 300ms)
     var maxAttempts: Int         // give up → status='failed' after this many tries
@@ -84,6 +91,11 @@ struct Config: Sendable {
             allowLocalLoopbackExternalHermes: AgentProviderValidation.boolFlag(
                 ProcessInfo.processInfo.environment["AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK"]
             ),
+            momoAPIURL: env("MOMO_API_URL", "http://localhost:8080"),
+            momoAgentToken: ProcessInfo.processInfo.environment["MOMO_AGENT_TOKEN"]
+                .flatMap { $0.isEmpty ? nil : $0 },
+            momoWorkHostID: ProcessInfo.processInfo.environment["MOMO_WORK_HOST_ID"]
+                .flatMap(UUID.init(uuidString:)),
             pollInterval: .milliseconds(pollMs),
             maxAttempts: envInt("WORKER_MAX_ATTEMPTS", 8),
             // L4 §3.3 defaults (G2/G3, §3.4 depth). Schema default max_run_steps=50;

@@ -42,6 +42,7 @@ struct WorkerService: Service {
     let pg: PostgresClient
     let hermes: HermesTransport
     let centrifugo: CentrifugoClient
+    let workControls: WorkControlClient
     let guards: LoopGuards
     let cost: CostAccounting
     let config: Config
@@ -297,6 +298,7 @@ struct WorkerService: Service {
         var accumulatedText = ""
         var usage: (prompt: Int, completion: Int, cached: Int, reasoning: Int)?
         var sawError: String?
+        var handledWorkTool = false
 
         // Streaming message id: created lazily on the first text delta so the
         // PATCH (streaming mimic) targets one growing message (L4 §6.2).
@@ -320,9 +322,17 @@ struct WorkerService: Service {
                 "maxChars": .stringConvertible(config.maxContextChars),
             ])
         }
-        let messages = assembled.messages
+        var messages = assembled.messages
+        let firstNonSystem = messages.firstIndex { $0.role != "system" } ?? messages.endIndex
+        messages.insert(
+            WorkToolDispatcher.systemInstruction(channelID: p.channelID),
+            at: firstNonSystem
+        )
         let stream = hermes.invoke(
-            model: p.model, messages: messages, tools: p.tools, maxTokens: maxOutputTokens)
+            model: p.model,
+            messages: messages,
+            tools: WorkToolDispatcher.mergedToolDefinitions(into: p.tools),
+            maxTokens: maxOutputTokens)
 
         do {
             for try await event in stream {
@@ -332,6 +342,10 @@ struct WorkerService: Service {
                     await publishStatus(agentRealtime, runID: p.runID, status: s)
 
                 case .textDelta(let delta):
+                    // Once a work control is dispatched, only the deterministic
+                    // ledger result may become the durable reply. Discard any
+                    // provider-authored success claim that follows the tool call.
+                    if handledWorkTool { continue }
                     accumulatedText += delta
                     // agent.partial: 1st-class streaming render (L4 §5.2).
                     await publishPartial(agentRealtime, runID: p.runID, delta: delta,
@@ -342,6 +356,58 @@ struct WorkerService: Service {
                         existing: streamMessageID, job: job, body: accumulatedText)
 
                 case .toolCall(let id, let name, let args):
+                    if handledWorkTool { continue }
+                    if WorkToolDispatcher.recognizes(name) {
+                        handledWorkTool = true
+                        // A model may have emitted prose before its function call.
+                        // It is not authoritative for work-control success.
+                        accumulatedText = ""
+                        await publishToolCall(
+                            agentRealtime,
+                            runID: p.runID,
+                            callID: id,
+                            name: name,
+                            arguments: args
+                        )
+                        do {
+                            let (kind, result) = try await workControls.dispatch(
+                                name: name,
+                                arguments: args,
+                                workspaceID: job.workspaceID,
+                                channelID: p.channelID,
+                                runID: p.runID
+                            )
+                            accumulatedText = WorkToolDispatcher.responseText(
+                                for: result,
+                                kind: kind
+                            ) ?? ""
+                            logger.info("work control dispatched", metadata: [
+                                "name": .string(name),
+                                "controlId": .string(result.controlID.uuidString),
+                                "status": .string(result.status),
+                            ])
+                        } catch {
+                            accumulatedText = WorkToolDispatcher.rejectionText(for: error)
+                            logger.warning("work control rejected", metadata: [
+                                "name": .string(name),
+                                "error": .string(String(describing: error)),
+                            ])
+                        }
+                        if !accumulatedText.isEmpty {
+                            await publishPartial(
+                                agentRealtime,
+                                runID: p.runID,
+                                delta: accumulatedText,
+                                fullText: accumulatedText
+                            )
+                            streamMessageID = await patchStreamingMessage(
+                                existing: streamMessageID,
+                                job: job,
+                                body: accumulatedText
+                            )
+                        }
+                        continue
+                    }
                     // G6 approval gate: prefer Context Packet / Capability Cache
                     // tool grant metadata; missing or ambiguous metadata fails closed.
                     let toolGrant = p.toolGrant(for: name)
