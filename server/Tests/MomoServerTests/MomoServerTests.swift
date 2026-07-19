@@ -2238,6 +2238,26 @@ final class MomoServerTests: XCTestCase {
             try WorkControlRoutes.validatedPayload(.object([:]), kind: .kill).value,
             .object([:])
         )
+
+        let ownerID = UUID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let otherID = UUID(uuidString: "00000000-0000-7000-8000-000000000104")!
+        XCTAssertNoThrow(try WorkControlRoutes.validateTargetHostScope(
+            scope: "workspace",
+            ownerMemberID: otherID,
+            sessionOwnerMemberID: ownerID
+        ))
+        XCTAssertNoThrow(try WorkControlRoutes.validateTargetHostScope(
+            scope: "member",
+            ownerMemberID: ownerID,
+            sessionOwnerMemberID: ownerID
+        ))
+        XCTAssertThrowsError(try WorkControlRoutes.validateTargetHostScope(
+            scope: "member",
+            ownerMemberID: otherID,
+            sessionOwnerMemberID: ownerID
+        )) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .forbidden)
+        }
     }
 
     func testWorkControlMigrationAndNoVersionEventsKeepApprovalBoundary() throws {
@@ -2311,6 +2331,15 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("only dispatched controls can be acknowledged"))
         XCTAssertTrue(routes.contains("wc.status = 'pending_approval'"))
         XCTAssertTrue(routes.contains("root.status = 'acked'"))
+        XCTAssertTrue(routes.contains("work host not found"))
+        XCTAssertTrue(routes.contains("member-scoped work host belongs to another session owner"))
+        XCTAssertTrue(routes.contains("only the registered host owner can acknowledge"))
+        XCTAssertTrue(routes.contains("errorLabel: \"host_revoked\""))
+        XCTAssertTrue(routes.contains("SET status = 'failed'"))
+        XCTAssertGreaterThanOrEqual(
+            routes.components(separatedBy: "AND revoked_at IS NULL").count - 1,
+            3
+        )
         XCTAssertTrue(routes.contains("work.auto_approve.enabled"))
         XCTAssertTrue(routes.contains("work.auto_approve.disabled"))
         XCTAssertFalse(routes.contains("BYPASSRLS"))
