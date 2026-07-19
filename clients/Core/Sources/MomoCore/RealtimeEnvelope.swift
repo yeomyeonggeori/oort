@@ -44,6 +44,8 @@ public struct RealtimeEnvelope: Codable, Sendable, Hashable {
         case huddleStarted = "huddle_started"
         case huddleParticipantsChanged = "huddle_participants_changed"
         case huddleEnded = "huddle_ended"
+        case workSessionStarted = "work.session.started"
+        case workSessionEnded = "work.session.ended"
     }
 
     /// Errors raised while mapping an envelope to a `RealtimeEvent`.
@@ -113,6 +115,16 @@ public struct RealtimeEnvelope: Codable, Sendable, Hashable {
             do {
                 let data = try JSONEncoder.momo.encode(JSON.object(object))
                 return .huddle(try decoder.decode(HuddleDelta.self, from: data))
+            } catch {
+                throw DecodeError.malformedPayload(type, underlying: error)
+            }
+        case .workSessionStarted, .workSessionEnded:
+            let action: String = kind == .workSessionStarted ? "started" : "ended"
+            var object = payload.objectValue ?? [:]
+            object["action"] = .string(action)
+            do {
+                let data = try JSONEncoder.momo.encode(JSON.object(object))
+                return .workSession(try decoder.decode(WorkSessionDelta.self, from: data))
             } catch {
                 throw DecodeError.malformedPayload(type, underlying: error)
             }
