@@ -16,7 +16,27 @@ need() {
 need docker
 need curl
 need jq
-need openssl
+
+# Resolve an OpenSSL that actually supports Ed25519. macOS ships LibreSSL at
+# /usr/bin/openssl (no ED25519 genpkey), and a login shell (gate uses `bash -lc`)
+# can resolve it ahead of Homebrew's OpenSSL 3.x — a bare `openssl` therefore
+# fails silently under set -e. Pick the first candidate that can genpkey Ed25519.
+find_openssl() {
+  local candidate probe
+  probe="$(mktemp "${TMPDIR:-/tmp}/momo-openssl-probe.XXXXXX")"
+  for candidate in openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl /usr/bin/openssl; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" genpkey -algorithm ED25519 -out "$probe" >/dev/null 2>&1; then
+      rm -f "$probe"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  rm -f "$probe"
+  echo "[work-host] no OpenSSL with Ed25519 genpkey support found" >&2
+  exit 1
+}
+OPENSSL_BIN="$(find_openssl)"
 
 find_python() {
   local candidate
@@ -95,9 +115,9 @@ trap 'exit 143' TERM
 
 PRIVATE_KEY="$TMP_DIR/work-host-private.pem"
 PUBLIC_DER="$TMP_DIR/work-host-public.der"
-openssl genpkey -algorithm ED25519 -out "$PRIVATE_KEY" >/dev/null 2>&1
-openssl pkey -in "$PRIVATE_KEY" -pubout -outform DER -out "$PUBLIC_DER" >/dev/null 2>&1
-PUBLIC_KEY="$(tail -c 32 "$PUBLIC_DER" | openssl base64 -A)"
+"$OPENSSL_BIN" genpkey -algorithm ED25519 -out "$PRIVATE_KEY" >/dev/null 2>&1
+"$OPENSSL_BIN" pkey -in "$PRIVATE_KEY" -pubout -outform DER -out "$PUBLIC_DER" >/dev/null 2>&1
+PUBLIC_KEY="$(tail -c 32 "$PUBLIC_DER" | "$OPENSSL_BIN" base64 -A)"
 FORGED_SIGNATURE="$($PYTHON_BIN -c \
   'import base64; print(base64.b64encode(bytes(64)).decode("ascii"))')"
 
@@ -108,8 +128,8 @@ sign_heartbeat() {
     "$(printf '%s' "$WS_ID" | tr '[:upper:]' '[:lower:]')" \
     "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
     "$sent_at_ms" >"$payload"
-  openssl pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" -in "$payload" \
-    | openssl base64 -A
+  "$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" -in "$payload" \
+    | "$OPENSSL_BIN" base64 -A
 }
 
 BASE_URL="http://127.0.0.1:$API_PORT"
