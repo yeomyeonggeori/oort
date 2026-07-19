@@ -122,6 +122,23 @@ struct AuthMiddleware: RouterMiddleware {
             return "realtime:subscribe"
         }
         if method == "POST",
+           segments.count == 4,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "work-controls"
+        {
+            return "work:control"
+        }
+        if method == "POST",
+           segments.count == 6,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "work-controls",
+           segments[5] == "ack"
+        {
+            return "work:control"
+        }
+        if method == "POST",
            segments.count == 6,
            segments[0] == "v1",
            segments[1] == "workspaces",
