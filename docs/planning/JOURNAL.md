@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-20 (Fable 엔진 트랙) · MOMO-487 work_host 레지스트리 랜딩 + 게이트 openssl 함정 해소
+- 487(#523 → track/engine): work_host(scope member|workspace·Ed25519·revoke) + work_session/control FK + 등록/서명 heartbeat/revoke + control 대상 검증(revoke 시 dispatch 차단→failed). verify_work_host + 게이트 실패 0.
+- 검수 실측 2건: ①신규 호스트 online 투영 NULL→false(비옵셔널 디코드 500) ②**게이트 bash -lc 로그인 셸이 /usr/bin/openssl(LibreSSL, ED25519 미지원)을 homebrew보다 먼저 잡아** verify가 무출력 실패(cleanup 무에코→게이트 로그 0줄) — find_openssl 리졸버로 해소. push_relay 동일 패턴 이식은 MOMO-491(#524).
+- Docker 자원 회수(배치 종결 계약): build cache 24.6GB→0. 다음 파일럿 E2(경제)·E5(통합 데모)와 0125 파생 488(workd) 잔여.
+
 ## 2026-07-20 (Fable 엔진 트랙) · ADR-0114 엔진 체인(483·484·486) 완주 — track/engine, main 대기
 - 483 work_session 원장(#517) → 484 work.control+승인 게이트(#519, worker capacity 사망 7커밋 인수) → 486 AgentWorker tool+E2E(#521). 전부 verifier+runtime-db 게이트 실패 0.
 - "채팅 멘션 → 에이전트 work_spawn → 승인 카드 → 호스트 ack+세션 → 스레드 개입"이 mock E2E로 완결. 486이 run-liveness 가드(죽은 run 명의 control 차단)를 추가해 484 verifier를 계약 정합 갱신.
