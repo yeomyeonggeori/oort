@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-486 AgentWorker work.* dispatch + chat-to-session E2E (2026-07-20)
+
+- AgentWorker가 Hermes OpenAI-compatible tool call의 `work_spawn|work_input|work_read|work_kill`을 strict schema로 파싱해 기존 MOMO-484 `POST work-controls`로 per-agent bearer 호출한다. channel/host는 run·프로세스 설정에 고정하고 UUID, label 120자, text 4000자를 worker 경계에서 먼저 검증한다.
+- spawn `pending_approval`은 “승인 대기” thread 응답으로 현재 run을 종료하고, work-control approval은 일반 tool approval의 AgentWorker resume/cancel 흐름을 타지 않는다. input/spawn/kill 성공은 카드·control event만 쓰며 중복 채팅 회신을 만들지 않고, read만 REST 결과를 본문에 포함한다. 계보 밖 input의 서버 403 문구는 HTTP status와 함께 그대로 durable thread 답글에 남긴다.
+- AgentWorker 35 tests와 server 118 tests, mock Hermes Python 문법/fixture, 새 verifier bash/ShellCheck 정적 검증은 PASS했다. `verify_work_agent_e2e.sh`는 27930~27933 격리 포트에서 mention→pending→승인→dispatch→host session/ack→thread input→비계보 403→RLS를 단정하며 `runtime-db`에 편입됐다. Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-484 Work Console control + approval gate (2026-07-19)
 
 - ADR-0114 D4/D5에 따라 `work_control`·`work_auto_approve` FORCE RLS 원장과 closed payload CHECK를 추가했다. agent bearer만 자기 active run에서 control을 요청할 수 있고, spawn은 owner의 tool whitelist hit 때만 즉시 dispatch되며 miss는 기존 approval/card decision transaction을 재사용한다. input/kill은 같은 requester의 running session 계보, read는 같은 계보만 요구한다.

@@ -1814,6 +1814,27 @@ final class MomoServerTests: XCTestCase {
         )
     }
 
+    func testWorkControlApprovalDoesNotResumeAgentRun() throws {
+        let controlID = UUID(uuidString: "00000000-0000-7000-8000-000000000941")!
+        let payload: JSONValue = .object([
+            "source": .string("work_control"),
+            "work_control_id": .string(controlID.uuidString),
+        ])
+
+        let parsedControlID = try WorkControlRoutes.workControlID(from: payload)
+        XCTAssertEqual(parsedControlID, controlID)
+        XCTAssertFalse(
+            ApprovalDecisionRoutes.shouldApplyGenericAgentDecisionFlow(
+                workControlID: parsedControlID
+            )
+        )
+        XCTAssertTrue(
+            ApprovalDecisionRoutes.shouldApplyGenericAgentDecisionFlow(
+                workControlID: nil
+            )
+        )
+    }
+
     func testApprovalProjectionDTOEncodesPendingInboxContract() throws {
         let projection = ApprovalProjectionPageDTO(approvals: [
             ApprovalProjectionDTO(

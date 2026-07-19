@@ -53,6 +53,8 @@ OWNER_ID="$(new_uuid)"
 AGENT_ID="$(new_uuid)"
 HOST_ID="$(new_uuid)"
 RUN_APPROVE_ID="$(new_uuid)"
+RUN_AUTO_ID="$(new_uuid)"
+RUN_DENY2_ID="$(new_uuid)"
 RUN_DENY_ID="$(new_uuid)"
 OWNER_EMAIL="work-control-owner-$RUN_ID@momo.local"
 OWNER_PASSWORD="owner-$(new_uuid)"
@@ -135,6 +137,12 @@ VALUES
   ('$RUN_APPROVE_ID', '$WS_ID', '$AGENT_ID', '$CHANNEL_ID', 'running',
    '{"prompt":"MOMO-484 approve flow"}'::jsonb, 1, 50, 0,
    'momo-484-approve-$RUN_ID'),
+  ('$RUN_AUTO_ID', '$WS_ID', '$AGENT_ID', '$CHANNEL_ID', 'running',
+   '{"prompt":"MOMO-484 auto flow"}'::jsonb, 1, 50, 0,
+   'momo-484-auto-$RUN_ID'),
+  ('$RUN_DENY2_ID', '$WS_ID', '$AGENT_ID', '$CHANNEL_ID', 'running',
+   '{"prompt":"MOMO-484 deny2 flow"}'::jsonb, 1, 50, 0,
+   'momo-484-deny2-$RUN_ID'),
   ('$RUN_DENY_ID', '$WS_ID', '$AGENT_ID', '$CHANNEL_ID', 'running',
    '{"prompt":"MOMO-484 deny flow"}'::jsonb, 1, 50, 0,
    'momo-484-deny-$RUN_ID');
@@ -340,7 +348,8 @@ SQL
   exit 1
 }
 
-api "$AGENT_TOKEN" POST "$CONTROL_PATH" "$(spawn_body "$RUN_APPROVE_ID" auto-approved)"
+# MOMO-486 liveness: approval decisions close the bound run, so reuse would 409.
+api "$AGENT_TOKEN" POST "$CONTROL_PATH" "$(spawn_body "$RUN_AUTO_ID" auto-approved)"
 expect_status 201 "auto-approved spawn"
 printf '%s' "$RESPONSE_BODY" | jq -e \
   '.workControl.status == "dispatched" and .workControl.approvalMessageId == null' >/dev/null
@@ -365,7 +374,7 @@ SQL
   exit 1
 }
 
-api "$AGENT_TOKEN" POST "$CONTROL_PATH" "$(spawn_body "$RUN_DENY_ID" denied-spawn)"
+api "$AGENT_TOKEN" POST "$CONTROL_PATH" "$(spawn_body "$RUN_DENY2_ID" denied-spawn)"
 expect_status 201 "denied scenario pending spawn"
 DENIED_CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id | ascii_downcase')"
 DENIED_MESSAGE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er \

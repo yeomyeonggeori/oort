@@ -63,13 +63,21 @@ struct AgentWorkerMain {
             apiKey: config.centAPIKey,
             logger: logger
         )
+        let workControls = WorkControlClient(
+            httpClient: httpClient,
+            baseURL: config.momoAPIURL,
+            agentToken: config.momoAgentToken,
+            targetHostID: config.momoWorkHostID,
+            logger: logger
+        )
 
         let guards = LoopGuards(config: config, logger: logger)
         let cost = CostAccounting(pg: pg, logger: logger)
 
         let worker = WorkerService(
             pg: pg, hermes: hermes, centrifugo: centrifugo,
-            guards: guards, cost: cost, config: config, logger: logger)
+            workControls: workControls, guards: guards, cost: cost,
+            config: config, logger: logger)
 
         // ServiceGroup ordering: PostgresClient.run() must be live before the worker
         // issues queries; the HTTP client shutdown service tears down on cancel.

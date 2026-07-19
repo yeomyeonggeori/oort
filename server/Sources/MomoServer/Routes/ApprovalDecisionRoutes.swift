@@ -193,13 +193,12 @@ struct ApprovalDecisionRoutes: Sendable {
                     responseStatus: .conflict
                 )
             }
+            let workControlID = try WorkControlRoutes.workControlID(from: approval.payload)
 
             if let expiresAtMs = approval.expiresAtMs,
                expiresAtMs <= Self.epochMs(Date())
             {
-                if let controlID = try WorkControlRoutes.workControlID(
-                    from: approval.payload
-                ) {
+                if let controlID = workControlID {
                     try await WorkControlRoutes.applySpawnApprovalDecision(
                         conn: conn,
                         logger: db.logger,
@@ -250,9 +249,7 @@ struct ApprovalDecisionRoutes: Sendable {
                 logger: db.logger
             )
 
-            if let controlID = try WorkControlRoutes.workControlID(
-                from: approval.payload
-            ) {
+            if let controlID = workControlID {
                 guard approval.actionType == "work.spawn" else {
                     throw HTTPError(
                         .internalServerError,
@@ -302,47 +299,49 @@ struct ApprovalDecisionRoutes: Sendable {
                 logger: db.logger
             )
 
-            let gatewayRun: Bool
-            if approval.payload.objectValue?["source"]?.stringValue == "hermes_gateway" {
-                gatewayRun = true
-            } else {
-                gatewayRun = try await Self.isGatewayRun(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    runID: approval.runID
-                )
-            }
+            if Self.shouldApplyGenericAgentDecisionFlow(workControlID: workControlID) {
+                let gatewayRun: Bool
+                if approval.payload.objectValue?["source"]?.stringValue == "hermes_gateway" {
+                    gatewayRun = true
+                } else {
+                    gatewayRun = try await Self.isGatewayRun(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        runID: approval.runID
+                    )
+                }
 
-            if dto.approve {
-                try await Self.enqueueResume(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    approval: approval,
-                    eventPayload: eventPayload,
-                    gatewayRun: gatewayRun,
-                    decidedAtMs: decidedAtMs
-                )
-            } else {
-                try await Self.cancelRunAndAppendToolResult(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    approval: approval,
-                    principal: principal,
-                    reason: reason,
-                    decidedAtMs: decidedAtMs
-                )
-                if gatewayRun {
-                    try await Self.enqueueGatewayStop(
+                if dto.approve {
+                    try await Self.enqueueResume(
                         conn: conn,
                         logger: db.logger,
                         workspaceID: workspaceID,
                         approval: approval,
                         eventPayload: eventPayload,
+                        gatewayRun: gatewayRun,
                         decidedAtMs: decidedAtMs
                     )
+                } else {
+                    try await Self.cancelRunAndAppendToolResult(
+                        conn: conn,
+                        logger: db.logger,
+                        workspaceID: workspaceID,
+                        approval: approval,
+                        principal: principal,
+                        reason: reason,
+                        decidedAtMs: decidedAtMs
+                    )
+                    if gatewayRun {
+                        try await Self.enqueueGatewayStop(
+                            conn: conn,
+                            logger: db.logger,
+                            workspaceID: workspaceID,
+                            approval: approval,
+                            eventPayload: eventPayload,
+                            decidedAtMs: decidedAtMs
+                        )
+                    }
                 }
             }
 
@@ -357,6 +356,10 @@ struct ApprovalDecisionRoutes: Sendable {
             )
             return DecisionResult(receipt: receipt, responseStatus: nil)
         }
+    }
+
+    static func shouldApplyGenericAgentDecisionFlow(workControlID: UUID?) -> Bool {
+        workControlID == nil
     }
 
     // MARK: - SQL rows

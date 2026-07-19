@@ -2268,6 +2268,13 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `verify_work_control.sh`(27920~27923, Python >=3.10 탐색, trap cleanup, verifier 내부 rg 미사용)를 `runtime-db`에 편입. human 403, pending ack 409, denial 후 dispatch 부재, non-running input 409, RLS/closed payload를 단정.
 - Worker 상태: server 117/Core 37/iOS 27 tests, macOS compile, docs 정적 게이트 17개 항목 PASS. Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`; PR/리뷰 대기.
 
+### ☐ MOMO-486 (`#520`) 수용기준 — AgentWorker work.* dispatch + chat→session E2E `[swift][runtime-db]` · **PR base=track/engine**
+- [x] Hermes tool surface에 strict `work_spawn(tool,label,channel)`·`work_input(session_id,text)`·`work_read(session_id)`·`work_kill(session_id)`를 가산하고 기존 MOMO-484 REST만 per-agent bearer로 호출. UUID/channel, label 120자, text 4000자, closed argument key 검증.
+- [x] pending spawn은 “승인 대기” thread 답글로 run 종료. work-control approval은 generic AgentWorker resume/cancel을 건너뛰고, spawn/input/kill 성공은 카드·event만 전달해 중복 회신 없음. read만 control 결과 본문 포함.
+- [x] 서버의 exact 비계보 input 403을 status/message 그대로 durable thread 답글에 반영하고 성공 control 미생성을 단위/E2E로 단정.
+- [x] `verify_work_agent_e2e.sh`(27930~27933, Python 3.13→3.10/3 탐색, trap cleanup, 내부 rg 미사용)를 `runtime-db`에 편입. mention→spawn→pending→human approve→dispatch→host session/ack→card/event→lineage input→foreign 403→RLS를 검증.
+- [x] AgentWorker 35 tests/server 118 tests PASS. mock Python·verifier bash/ShellCheck 정적 PASS. 격리 Docker verifier/전체 runtime-db는 오케스트레이터 실런 전까지 `runtime-unverified`.
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.

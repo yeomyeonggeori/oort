@@ -175,7 +175,7 @@ cp infra/.env.example .env
 | `HERMES_BASE_URL` | 서버, worker | hermes OpenAI 호환 게이트웨이 베이스(`/v1`). 서버는 health/status projection에 redacted label만 노출. |
 | `HERMES_API_KEY` | 서버, worker | hermes Bearer 토큰. health/status/log/diagnostics에는 원문 노출 금지. |
 | `AGENT_GATEWAY_MODE` | 서버, worker | `worker`(기본) 또는 `gateway`. `gateway`면 `@hermes` mention이 AgentWorker provider call 대신 Hermes native platform adapter로 전달된다. |
-| `MOMO_AGENT_TOKEN` | Hermes adapter | Pairing에서 1회 발급하는 agent-scoped momo bearer. `~/.momo/hermes-gateway.env`에만 저장하며 provider OAuth token과 별개다. |
+| `MOMO_AGENT_TOKEN` | Hermes adapter, AgentWorker work controls | Pairing/credential API에서 1회 발급하는 agent-scoped momo bearer. adapter는 `~/.momo/hermes-gateway.env`, worker는 process-local secret env에만 저장하며 provider OAuth token과 별개다. DB/job payload/log에 원문을 넣지 않는다. |
 | `AGENT_GATEWAY_SECRET` | 서버 | ADR-0101 이관 회귀검증에만 쓰는 deprecated callback 공유 시크릿. 기본 거부되며 아래 flag가 1인 경우에만 수용한다. |
 | `MOMO_ALLOW_LEGACY_GATEWAY_SECRET` | 서버, local alpha runner | `1`일 때만 `AGENT_GATEWAY_SECRET` 병행 수용. 기본 `0`; MOMO-338 adapter는 이 경로를 사용하지 않는다. |
 | `EXTERNAL_AGENT_PROVIDER_ENV_FILE` | `scripts/verify_external_agent_provider.sh` | 선택. 외부 runtime provider credentials만 담은 untracked env 파일. `.env.worktree`의 local stack ports를 유지하면서 provider secret만 override할 때 사용. |
@@ -211,6 +211,8 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `RELAY_MAX_ATTEMPTS` | relay | `8` | 초과 시 `status='failed'`. |
 | `WORKER_POLL_INTERVAL_MS` | worker | `300` | agent_job 폴링 주기. |
 | `WORKER_MAX_ATTEMPTS` | worker | `8` | 초과 시 `status='failed'`. |
+| `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 momo API origin. |
+| `MOMO_WORK_HOST_ID` | worker | (미설정) | ADR-0125 host registry 전 v0 target host UUID. `work_*` 호출 시 UUID가 없거나 잘못되면 fail-closed한다. |
 | `MAX_CONSECUTIVE_AUTO` | worker | `3` | 루프가드 G2(연속 자동응답). |
 | `MAX_STEPS` | worker | `12` | 루프가드 G3(턴당 tool-call 상한, 스키마 50의 v0 오버라이드). |
 | `MAX_DEPTH` | worker | `4` | A2A 홉 깊이 상한(§3.4). |
@@ -356,7 +358,7 @@ POST /v1/workspaces/{workspace}/agents/{agent}/credentials/{credential}/revoke
 ```
 
 기본 scope는 `agent:jobs:read`, `agent:runs:callback`, `messages:read`,
-`messages:write`, `realtime:subscribe`다. agent bearer는 이 scope allowlist에 연결된
+`messages:write`, `realtime:subscribe`, `work:control`이다. agent bearer는 이 scope allowlist에 연결된
 서버 surface 외의 human/admin API에
 사용할 수 없고, callback/pending 대상 agent가 token actor와 다르면 403이다.
 `agentwork:ws<workspace>.<agentMember>` realtime work stream도 connection actor와
@@ -865,6 +867,9 @@ swift run --package-path workers/AgentWorker AgentWorker
 - hermes `POST /v1/chat/completions`(`stream=true`) SSE 중계 → `agent.partial`/`agent.status` publish.
   비스트리밍 폴백 포함(§6.3). 루프가드 G1~G3 + A2A depth(§3.3/§3.4).
 - **hermes 게이트웨이가 떠 있어야** 에이전트 턴이 실제로 동작(D 데모). `HERMES_BASE_URL`/`HERMES_API_KEY`.
+- `work_*`를 쓰는 worker process에는 해당 agent의 `MOMO_AGENT_TOKEN`, momo API의
+  `MOMO_API_URL`, host-owned 실행기의 opaque `MOMO_WORK_HOST_ID`가 필요하다. token은
+  credential 발급 응답에서 한 번만 얻으며 저장소·DB·로그에 남기지 않는다.
 
 > **검증됨/미검증 구분:** MomoServer + OutboxRelay는 MOMO-001/002에서 DB·Centrifugo 실연결 검증됨.
 > AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile은 MOMO-004에서
@@ -885,6 +890,20 @@ make up
 make migrate
 scripts/verify_agent_worker.sh
 ```
+
+MOMO-486의 chat-to-session 경계는 별도 격리 verifier로 확인한다. mock Hermes가 실제
+OpenAI-compatible tool-call delta를 내고 AgentWorker가 기존 work-control REST를 호출한다.
+spawn 승인 뒤에는 run을 재개하지 않고 host가 session 생성/ack를 수행하며, 이어지는 session
+thread input은 같은 requester 계보만 통과한다.
+
+```sh
+# runtime-db profile에도 포함됨. 기본 포트: API 27930, Centrifugo 27931,
+# PostgreSQL 27932, mock Hermes 27933.
+scripts/verify_work_agent_e2e.sh
+```
+
+이 verifier는 per-agent bearer 원문을 evidence에 출력하지 않으며, 계보 밖 agent의 input이
+정확한 HTTP 403 문구로 thread에 회신되고 성공 control을 만들지 않았는지까지 검사한다.
 
 MOMO-202부터 같은 verifier가 MomoServer도 잠깐 띄워
 `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots`를 호출한다. 이 endpoint는
