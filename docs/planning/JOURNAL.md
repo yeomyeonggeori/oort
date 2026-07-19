@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 기획) · ADR-0114 Interactive Work Console 기안 (Proposed)
+- 성재 발제(슈퍼앱 TUI 층 재확인) → L5 갭 진단(docs/planning/SUPERAPP_ENGINE_GAP_2026-07-19.md) → 0114 기안. 권고: D1-A 앱 내장 PTY(데몬 승격 경계 예약)·D2-A 수명주기만 원장(raw 스트림 기기 밖 불출·cwd 라벨만)·D3-A SwiftTerm+Work 서랍(MOMO-375 승계)·D4-A 도구-불가지 프로파일(claude/codex/opencode)·D5-A repo 바인딩 v0 제외·D6 소형 서버 계약(work_session+kind 2).
+- 핵심 논거: 하드 경계(프로세스·자격증명 비유입)상 서버 면적은 테이블 1+REST 2+kind 2가 전부 — interactive(콘솔)와 헤드리스(agent_run) 경로 분리 선언. 파생 예약: MOMO-483(엔진)/484(UXUI).
+- 성재 승인 대기. 병행 후보: S 배치(ADR-0121 install/upgrade — 오픈소스 공개 선행물), C-2.
+
 ## 2026-07-19 (Fable 엔진 트랙) · MOMO-472 스냅샷 flake 근본 수정 (track/engine f74bae2)
 - 원인 확정: MemberInspector·WindowChrome의 NSApp.appearance 전역 변조(비동기 전파)가 인접 무창 스냅샷 렌더를 오염 — 풀스위트 한정·격리 통과·부하 발현·family 고정 관측 전부 정합. worker 위임 불가 유형(게이트 env 재현)이라 오케스트레이터 직접 수정.
 - 전역 변조 3사이트 제거(창/팝오버 외관 기설정 — 잉여 증명: 오염원 자기 스냅샷 18/18 정본 일치). evidence: 유휴 풀스위트 3×405 그린 + macos-ui 게이트 PASS. #495는 재발 감시로 유지, 무재발 확인 후 close.
