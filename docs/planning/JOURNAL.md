@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 기획) · ADR-0114 v2 재기안 — Warp/Conductor형 에이전트 조종 터미널
+- v1(수명주기만 원장·경로 분리) 기안 직후 성재 방향 보정: 기본 흐름=채팅 요청→에이전트가 CLI 세션 스폰·조종·작업 제공, 세션↔채팅 양방향. v2로 재기안.
+- v2 권고: D1 호스트 세션 매니저(앱 내장, workd v1) · **D2 세션=채널 스레드**(카드 root+진행 답글+개입 답글 — X-3 인프라 재사용) · D3 큐레이션 기본·raw tail 옵트인 · **D4 원장 경유 control**(에이전트 tool-call work.spawn/input/read/kill→승인→outbox→호스트 실행) · **D5 spawn=승인 대상**(프로파일 auto-approve 화이트리스트) · D6 터미널+스레드 병행 · D7 도구-불가지 프로파일.
+- 논거: 기존 5자산(mention→run·승인·partial·단일 쓰기경로·BYOA) 재사용 계약이지 새 시스템이 아님. 파생 483(세션 원장)/484(control+승인)/485(UXUI 터미널)/486(AgentWorker tool+E2E). 성재 승인 대기.
+
 ## 2026-07-19 (Fable 엔진 트랙) · MOMO-472 스냅샷 flake 근본 수정 (track/engine f74bae2)
 - 원인 확정: MemberInspector·WindowChrome의 NSApp.appearance 전역 변조(비동기 전파)가 인접 무창 스냅샷 렌더를 오염 — 풀스위트 한정·격리 통과·부하 발현·family 고정 관측 전부 정합. worker 위임 불가 유형(게이트 env 재현)이라 오케스트레이터 직접 수정.
 - 전역 변조 3사이트 제거(창/팝오버 외관 기설정 — 잉여 증명: 오염원 자기 스냅샷 18/18 정본 일치). evidence: 유휴 풀스위트 3×405 그린 + macos-ui 게이트 PASS. #495는 재발 감시로 유지, 무재발 확인 후 close.
