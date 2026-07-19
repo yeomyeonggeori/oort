@@ -25,10 +25,13 @@ final class MomoWorkspaceSearchTests: XCTestCase {
             hlcTs: 1,
             authorMemberId: member.id,
             body: "The rollout checklist is ready.",
-            props: [
-                "attachments": [
-                    ["filename": "rollout-plan.pdf"]
-                ]
+            attachments: [
+                MessageAttachment(
+                    id: FileID(),
+                    name: "rollout-plan.pdf",
+                    mime: "application/pdf",
+                    sizeBytes: 42_000
+                )
             ]
         )
 

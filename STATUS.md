@@ -6,6 +6,12 @@
 - lifecycle 두 이벤트는 card의 기존 seq를 재사용하되 Centrifugo publish `version` 없이 고유 idempotency key로 발행한다. Core는 두 kind를 `WorkSessionDelta`로 디코드해 replay cursor를 전진시키지 않고 전달하며, 기존 card thread는 일반 답글 API를 그대로 사용한다.
 - server 115 tests, Core 35 tests, iOS MomoiOSKit 27 tests와 macOS 컴파일, OpenAPI/YAML·verifier bash/ShellCheck 정적 검증은 PASS했다. 격리 `verify_work_session.sh`와 전체 `runtime-db` Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
 
+## UXUI A-6 첨부 실업로드·수신·다운로드 완성 (2026-07-19)
+
+- macOS 컴포저는 파일당 100MB·메시지당 20개 경계에서 업로드 세션 발급→capability URL 직송 PUT→complete→`attachmentIds` 메시지 전송을 수행한다. capability URL은 전용 ephemeral 세션 내부에서만 소비하고 인증 헤더·로그·UI·영속 상태에 남기지 않는다.
+- 수신 메시지와 스레드는 서버 `Message.attachments`를 파일 카드로 표시하고 기존 content proxy를 통해 선택한 다운로드 폴더에 저장한다. 진행·실패·재시도·열기 상태, 안전한 파일명/중복 이름, 실제 첨부 이름 검색을 함께 연결했다.
+- macOS 416 tests와 디자인 pre-flight에서 REST 전 계약·capability URL 비노출·라이트/다크/고대비 큰 글자 스냅샷을 검증했다. 실 Google Drive archive를 사용한 서버 왕복은 성재 환경 수동 검수 전까지 `runtime-unverified`다.
+
 ## MOMO-482 첨부 메타데이터 수신 투영 (2026-07-19)
 
 - complete 상태로 메시지에 바인딩된 첨부만 생성순 `{id,name,mime,sizeBytes}`로 send/history 3변형/replies와 같은 트랜잭션의 `message.new`에 가산했다. 0건은 생략하고 모든 목록 경로는 lateral `jsonb_agg` 단일 쿼리를 사용하며 업로드 capability URL과 Drive 식별자는 투영하지 않는다.
@@ -28,6 +34,11 @@
 - 톱레벨 메시지 history/멱등 send 응답에 옵셔널 `thread` 롤업을 가산하고, 오래된 답글을 `seq ASC` cursor로 복원하는 멤버십 강제 REST와 `thread.updated` transactional outbox/Core 이벤트를 추가했다. 답글 0건은 필드를 생략하며 교차채널 root는 404, reply-as-root는 400, tombstone은 답글 페이지에 남는다.
 - AgentWorker의 durable message INSERT 4곳은 트리거가 답글일 때 같은 `root_id`를 보존하고, 같은 트랜잭션에서 MessageRoutes와 동일한 participant 포함 롤업 upsert 및 `thread.updated`를 기록한다. 톱레벨 트리거는 계속 NULL이며 `message.seq` 추가 발급은 없다.
 - server 111 tests, Core 30 tests, AgentWorker 31 tests, iOS 27 tests와 macOS 전체 컴파일이 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했다. `verify_thread_projection.sh`의 bash/ShellCheck 및 runtime-db 편입은 검증했으며, 격리 Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`다. (후속: 오케스트레이터 실런 verify_thread_projection 전 항목 PASS — BUILD_TICKETS MOMO-479 랜딩 노트)
+
+## UXUI A-4 스레드 롤업·과거 답글 실연동 (2026-07-19)
+
+- macOS는 답글 배지를 서버 `Message.thread.replyCount`로만 표시하고, replies REST의 배타적 seq cursor를 통해 과거 답글을 오름차순 페이지 로드한다. 열린 패널은 `thread.updated`와 실시간 새 답글을 즉시 반영하며 로딩·오류·재시도·추가 로드 상태를 제공한다.
+- tombstone 포함 REST 계약, 롤업과 로드 범위 분리, cursor 페이지, 실패 후 재시도, 실시간 3번째 답글을 집중 검증했다. 전체 macOS 411 tests, 디자인 pre-flight, 스레드 패널 라이트·다크 snapshot이 PASS했다. 실서버 세션의 수동 왕복은 `runtime-unverified`다.
 
 ## UXUI A-8 채널 음소거 + A-9 메시지 상호작용 실연동 (2026-07-19)
 

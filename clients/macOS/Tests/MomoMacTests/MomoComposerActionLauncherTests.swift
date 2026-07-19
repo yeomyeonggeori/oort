@@ -17,8 +17,8 @@ final class MomoComposerActionLauncherTests: XCTestCase {
         XCTAssertEqual(korean.title(for: .addPlugin), "플러그인 둘러보기")
         XCTAssertEqual(english.title(for: .startWork), "Start new work")
         XCTAssertEqual(english.title(for: .createPoll), "Poll draft")
-        XCTAssertTrue(korean.connectionPending.contains("로컬 미리보기"))
-        XCTAssertTrue(english.connectionPending.contains("local preview"))
+        XCTAssertTrue(korean.connectionPending.contains("100MB"))
+        XCTAssertTrue(english.connectionPending.contains("100 MB"))
     }
 
     func testAttachmentDraftMergeAcceptsFilesAndDeduplicatesStandardizedURLs() {
@@ -35,6 +35,35 @@ final class MomoComposerActionLauncherTests: XCTestCase {
 
         XCTAssertEqual(drafts.map(\.name), ["report.pdf", "demo.mov"])
         XCTAssertEqual(drafts.map(\.systemImage), ["doc.richtext", "video"])
+        XCTAssertTrue(drafts.allSatisfy { $0.state == .ready })
+    }
+
+    func testAttachmentDraftMergeCapsServerContractAtTwentyFiles() {
+        let urls = (0..<25).map {
+            URL(fileURLWithPath: "/tmp/momo-composer/file-\($0).txt")
+        }
+
+        let drafts = MomoAttachmentDraftCollection.merging([], urls: urls)
+
+        XCTAssertEqual(drafts.count, 20)
+        XCTAssertEqual(drafts.last?.name, "file-19.txt")
+    }
+
+    func testAttachmentDownloadDestinationSanitizesLeafAndAvoidsCollision() throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let first = folder.appendingPathComponent("report.pdf")
+        FileManager.default.createFile(atPath: first.path, contents: Data())
+
+        let destination = try MomoAttachmentFileBoundary.destinationURL(
+            named: "../report.pdf",
+            in: folder
+        )
+
+        XCTAssertEqual(destination.lastPathComponent, "report (2).pdf")
+        XCTAssertEqual(destination.deletingLastPathComponent().standardizedFileURL, folder.standardizedFileURL)
     }
 
     func testRecommendedPluginCatalogHasStableUniqueEntriesAndCategories() {

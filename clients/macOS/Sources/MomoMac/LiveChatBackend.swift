@@ -18,7 +18,7 @@ import MomoCore
 //   - REST send/history/auth (AsyncHTTPClient) → POST /v1/.../messages etc.
 //   - SwiftCentrifuge subscribe on ch:/agent: namespaces feeding RealtimeEvent/AgentEvent.
 
-public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend, MomoChannelNotificationBackend {
+public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, OnboardingInviteBackend, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, MomoSessionSensitiveStateClearing, MomoMessageInteractionBackend, MomoChannelNotificationBackend, MomoThreadRepliesBackend {
     // In-memory SoT surrogate.
     private var workspace: WorkspaceID?
     private var workspaceProfile: Workspace?
@@ -405,8 +405,21 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     }
 
     @discardableResult
-    func seedDemoMessage(channel: ChannelID, author: MemberID, body: String) -> Message {
-        appendServerMessage(channel: channel, author: author, type: .text, body: body)
+    func seedDemoMessage(
+        channel: ChannelID,
+        author: MemberID,
+        body: String,
+        rootId: MessageID? = nil,
+        createdAtMs: Int64? = nil
+    ) -> Message {
+        appendServerMessage(
+            channel: channel,
+            author: author,
+            type: .text,
+            body: body,
+            rootId: rootId,
+            createdAtMs: createdAtMs
+        )
     }
 
     // MARK: OnboardingInviteBackend
@@ -554,6 +567,29 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
         let all = (messagesByChannel[channel] ?? []).sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
         let filtered = seq.map { cur in all.filter { ($0.seq ?? 0) > cur } } ?? all
         return Array(filtered.suffix(limit))
+    }
+
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> MomoThreadRepliesPage {
+        guard connected else { throw BackendError.notConnected }
+        guard let rootMessage = messagesByChannel[channel]?.first(where: { $0.id == root }),
+              rootMessage.rootId == nil
+        else {
+            throw BackendError.problem(status: 404, title: "thread not found", detail: nil)
+        }
+        let all = (messagesByChannel[channel] ?? [])
+            .filter { $0.rootId == root }
+            .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        let remaining = cursor.map { value in
+            all.filter { ($0.seq ?? 0) > value }
+        } ?? all
+        let page = Array(remaining.prefix(limit))
+        let nextCursor = remaining.count > page.count ? page.last?.seq : nil
+        return MomoThreadRepliesPage(messages: page, nextCursor: nextCursor)
     }
 
     public func presence(channel: ChannelID) async throws -> [PresenceEntry] {
@@ -1144,11 +1180,12 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
     private func appendServerMessage(
         channel: ChannelID, author: MemberID, type: MessageType, body: String?,
         props: JSON = .object([:]), clientMsgId: UUID? = nil,
-        rootId: MessageID? = nil, replyToId: MessageID? = nil, runId: RunID? = nil
+        rootId: MessageID? = nil, replyToId: MessageID? = nil, runId: RunID? = nil,
+        createdAtMs: Int64? = nil
     ) -> Message {
         let next = (seqByChannel[channel] ?? 0) + 1
         seqByChannel[channel] = next
-        let timestamp = demoSeedBaseTimestampMs.map { $0 + (next * 60_000) }
+        let timestamp = createdAtMs ?? demoSeedBaseTimestampMs.map { $0 + (next * 60_000) }
             ?? Int64(Date().timeIntervalSince1970 * 1000)
         let msg = Message(
             id: MessageID(), channelId: channel, seq: next,
@@ -1158,6 +1195,26 @@ public actor LiveChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, Age
             createdAtMs: timestamp)
         messagesByChannel[channel, default: []].append(msg)
         emit(.message(msg), to: channel)
+        if let rootId,
+           let replySequence = msg.seq,
+           var messages = messagesByChannel[channel],
+           let rootIndex = messages.firstIndex(where: { $0.id == rootId && $0.rootId == nil }) {
+            let replyCount = messages.lazy.filter { $0.rootId == rootId }.count
+            let rollup = ThreadRollup(
+                replyCount: replyCount,
+                lastReplySeq: replySequence,
+                lastReplyAtMs: msg.createdAtMs ?? msg.hlcTs
+            )
+            messages[rootIndex].thread = rollup
+            messagesByChannel[channel] = messages
+            emit(.threadUpdated(ThreadRollupDelta(
+                channelId: channel,
+                rootId: rootId,
+                replyCount: rollup.replyCount,
+                lastReplySeq: rollup.lastReplySeq,
+                lastReplyAtMs: rollup.lastReplyAtMs
+            )), to: channel)
+        }
         return msg
     }
 

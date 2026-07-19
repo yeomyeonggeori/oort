@@ -31,6 +31,9 @@ public struct MessageBubble: View {
     private let onEdit: ((String) async -> Bool)?
     private let onDelete: (() -> Void)?
     private let onDismissInteractionError: (() -> Void)?
+    private let attachmentDownloadStates: [FileID: MomoAttachmentDownloadState]
+    private let onDownloadAttachment: ((MessageAttachment) -> Void)?
+    private let onOpenAttachment: ((MessageAttachment) -> Void)?
     private let groupingStyle: MessageBubbleGroupingStyle
     private let timelineCopy: MomoWorkspaceCopy
     private let presentation: MomoDeveloperModePresentation
@@ -73,6 +76,9 @@ public struct MessageBubble: View {
         self.onEdit = nil
         self.onDelete = nil
         self.onDismissInteractionError = nil
+        self.attachmentDownloadStates = [:]
+        self.onDownloadAttachment = nil
+        self.onOpenAttachment = nil
         self.groupingStyle = .standalone
         self.timelineCopy = MomoWorkspaceCopy(language: .preferredDefault)
         self.presentation = .standard
@@ -94,6 +100,9 @@ public struct MessageBubble: View {
         onEdit: ((String) async -> Bool)? = nil,
         onDelete: (() -> Void)? = nil,
         onDismissInteractionError: (() -> Void)? = nil,
+        attachmentDownloadStates: [FileID: MomoAttachmentDownloadState] = [:],
+        onDownloadAttachment: ((MessageAttachment) -> Void)? = nil,
+        onOpenAttachment: ((MessageAttachment) -> Void)? = nil,
         groupingStyle: MessageBubbleGroupingStyle,
         timelineCopy: MomoWorkspaceCopy,
         presentation: MomoDeveloperModePresentation = .standard
@@ -113,6 +122,9 @@ public struct MessageBubble: View {
         self.onEdit = onEdit
         self.onDelete = onDelete
         self.onDismissInteractionError = onDismissInteractionError
+        self.attachmentDownloadStates = attachmentDownloadStates
+        self.onDownloadAttachment = onDownloadAttachment
+        self.onOpenAttachment = onOpenAttachment
         self.groupingStyle = groupingStyle
         self.timelineCopy = timelineCopy
         self.presentation = presentation
@@ -159,7 +171,7 @@ public struct MessageBubble: View {
         }
         .onHover { isHovered = $0 }
         .contextMenu {
-            if onOpenThread != nil {
+            if !message.isDeleted, onOpenThread != nil {
                 Button(timelineCopy.replyToMessage, systemImage: "arrowshape.turn.up.left", action: openThread)
             }
             if copyText != nil {
@@ -175,7 +187,6 @@ public struct MessageBubble: View {
                 }
             }
         }
-        .opacity(message.isDeleted ? 0.45 : 1)
         .confirmationDialog(
             timelineCopy.deleteMessageConfirmation,
             isPresented: $showsDeleteConfirmation
@@ -360,9 +371,9 @@ public struct MessageBubble: View {
 
     @ViewBuilder
     private var messageMetadata: some View {
-        if !reactions.isEmpty || replyCount > 0 || interactionError != nil || message.editedAtMs != nil || message.state == .edited {
+        if !reactions.isEmpty || showsReplyMetadata || interactionError != nil || showsEditedMetadata {
             VStack(alignment: .leading, spacing: 4) {
-                if !reactions.isEmpty || replyCount > 0 {
+                if !reactions.isEmpty || showsReplyMetadata {
                     MomoReactionFlowLayout(spacing: MomoTheme.MessageInteraction.compactSpacing) {
                         ForEach(reactions) { reaction in
                             if onToggleReaction != nil {
@@ -372,7 +383,7 @@ public struct MessageBubble: View {
                             }
                         }
 
-                        if replyCount > 0 {
+                        if showsReplyMetadata {
                             if onOpenThread != nil {
                                 Button(action: openThread) {
                                     Label(timelineCopy.replyCount(replyCount), systemImage: "arrowshape.turn.up.left")
@@ -388,7 +399,7 @@ public struct MessageBubble: View {
                     }
                 }
 
-                if message.editedAtMs != nil || message.state == .edited {
+                if showsEditedMetadata {
                     Text(timelineCopy.editedMessage)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -406,6 +417,14 @@ public struct MessageBubble: View {
                 }
             }
         }
+    }
+
+    private var showsEditedMetadata: Bool {
+        !message.isDeleted && (message.editedAtMs != nil || message.state == .edited)
+    }
+
+    private var showsReplyMetadata: Bool {
+        !message.isDeleted && replyCount > 0
     }
 
     private var inlineEditor: some View {
@@ -504,6 +523,26 @@ public struct MessageBubble: View {
 
     @ViewBuilder
     private var content: some View {
+        VStack(alignment: .leading, spacing: MomoTheme.Attachment.standardSpacing) {
+            primaryContent
+            if !message.isDeleted,
+               let attachments = message.attachments,
+               !attachments.isEmpty,
+               let onDownloadAttachment,
+               let onOpenAttachment {
+                MomoMessageAttachmentList(
+                    attachments: attachments,
+                    downloadStates: attachmentDownloadStates,
+                    copy: timelineCopy,
+                    onDownload: onDownloadAttachment,
+                    onOpen: onOpenAttachment
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var primaryContent: some View {
         if message.isDeleted {
             Text(timelineCopy.deletedMessage)
                 .momoTypography(.messageBody)
@@ -517,9 +556,11 @@ public struct MessageBubble: View {
         } else {
             switch message.type {
             case .text, .system:
-                Text(message.body ?? "")
-                    .momoTypography(.messageBody)
-                    .textSelection(.enabled)
+                if let body = message.body, !body.isEmpty {
+                    Text(body)
+                        .momoTypography(.messageBody)
+                        .textSelection(.enabled)
+                }
             case .toolCall:
                 toolCallCard
             case .toolResult:

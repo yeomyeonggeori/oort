@@ -1,5 +1,6 @@
 import Foundation
 import MomoCore
+import UniformTypeIdentifiers
 
 // MARK: - MomoServer REST ChatBackend
 
@@ -8,11 +9,12 @@ import MomoCore
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
     private let session: URLSession
+    private let directUploadSession: URLSession
     private var realtimeDriver: (any RealtimeSubscriptionDriver)?
     private var hasExplicitRealtimeDriver: Bool
     private var agentRealtimeTransport: (any AgentRealtimeEnvelopeSubscriptionTransport)?
@@ -33,16 +35,28 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
     public init(
         config: MomoServerRESTChatBackendConfig,
         session: URLSession = .shared,
+        directUploadSession: URLSession? = nil,
         realtimeDriver: (any RealtimeSubscriptionDriver)? = nil
     ) {
         self.config = config
         self.realtimeWebSocketURL = config.centrifugoWebSocketURL
         self.session = session
+        self.directUploadSession = directUploadSession ?? Self.makeDirectUploadSession()
         self.realtimeDriver = realtimeDriver
         self.hasExplicitRealtimeDriver = realtimeDriver != nil
         self.encoder = JSONEncoder()
         self.decoder = JSONDecoder()
         self.decoder.keyDecodingStrategy = .useDefaultKeys
+    }
+
+    private static func makeDirectUploadSession() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.urlCredentialStorage = nil
+        configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
     }
 
     public func connect(workspace: WorkspaceID, accessToken: String) async throws {
@@ -146,7 +160,8 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             body: draft.body,
             props: draft.props.flatStringObject,
             runId: nil,
-            rootId: draft.rootId
+            rootId: draft.rootId,
+            attachmentIds: draft.attachmentIds
         )
         let response = try await post(
             "/v1/workspaces/\(workspace.description)/channels/\(draft.channelId.description)/messages",
@@ -161,6 +176,163 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         message.clientMsgId = clientMsgId
         message.props = draft.props
         return message
+    }
+
+    // MARK: Attachment transfer
+
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        let context = try requireSessionContext()
+        let didAccess = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { fileURL.stopAccessingSecurityScopedResource() }
+        }
+
+        let values: URLResourceValues
+        do {
+            values = try fileURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        } catch {
+            throw MomoAttachmentTransferIssue.invalidFile
+        }
+        guard fileURL.isFileURL,
+              values.isRegularFile == true,
+              let fileSize = values.fileSize,
+              fileSize >= 0 else {
+            throw MomoAttachmentTransferIssue.invalidFile
+        }
+        guard Int64(fileSize) <= MomoAttachmentFileBoundary.maximumSizeBytes else {
+            throw MomoAttachmentTransferIssue.fileTooLarge
+        }
+
+        let name = MomoAttachmentFileBoundary.sanitizedFileName(fileURL.lastPathComponent)
+        let mime = UTType(filenameExtension: fileURL.pathExtension)?.preferredMIMEType
+            ?? "application/octet-stream"
+        let createPath = "/v1/workspaces/\(context.workspace.description)/channels/\(channel.description)/attachments/uploads"
+        let created = try await post(
+            createPath,
+            body: CreateAttachmentUploadRequestDTO(
+                name: name,
+                mime: mime,
+                size: Int64(fileSize)
+            ),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: AttachmentUploadResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard created.status == "pending",
+              let attachmentID = FileID(uuidString: created.id),
+              let capabilityURL = URL(string: created.uploadUrl),
+              isAllowedUploadCapabilityURL(capabilityURL) else {
+            throw BackendError.decoding("invalid attachment upload response")
+        }
+
+        var uploadRequest = URLRequest(
+            url: capabilityURL,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        uploadRequest.httpMethod = "PUT"
+        uploadRequest.setValue(mime, forHTTPHeaderField: "Content-Type")
+        uploadRequest.setValue(String(fileSize), forHTTPHeaderField: "Content-Length")
+        do {
+            let (_, response) = try await directUploadSession.upload(
+                for: uploadRequest,
+                fromFile: fileURL
+            )
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 502
+                throw BackendError.problem(
+                    status: status,
+                    title: "attachment upload failed",
+                    detail: nil
+                )
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch let error as BackendError {
+            throw error
+        } catch {
+            // Capability URLs are secrets. Never include the underlying request
+            // description or localized URLSession error in surfaced diagnostics.
+            throw BackendError.realtime("Attachment upload failed.")
+        }
+        try ensureSessionCurrent(context)
+
+        let completed = try await postEmpty(
+            "/v1/workspaces/\(context.workspace.description)/channels/\(channel.description)/attachments/\(attachmentID.description)/complete",
+            authorized: true,
+            response: AttachmentResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard completed.status == "complete",
+              completed.id.lowercased() == attachmentID.description.lowercased(),
+              completed.channelId.lowercased() == channel.description.lowercased(),
+              completed.name == name,
+              completed.mime == mime,
+              completed.size == Int64(fileSize) else {
+            throw BackendError.decoding("attachment completion response mismatch")
+        }
+        return MessageAttachment(id: attachmentID, name: name, mime: mime, sizeBytes: Int64(fileSize))
+    }
+
+    func downloadAttachment(
+        _ attachment: MessageAttachment,
+        from channel: ChannelID,
+        to destinationURL: URL
+    ) async throws {
+        let context = try requireSessionContext()
+        let path = "/v1/workspaces/\(context.workspace.description)/channels/\(channel.description)/attachments/\(attachment.id.description)/content"
+        var request = URLRequest(
+            url: config.baseURL.appendingPathComponent(path),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        request.httpMethod = "GET"
+        try authorize(&request)
+
+        let temporaryURL: URL
+        let response: URLResponse
+        do {
+            (temporaryURL, response) = try await session.download(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch {
+            throw BackendError.realtime("Attachment download failed.")
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw BackendError.realtime("Attachment download returned a non-HTTP response.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let data = (try? Data(contentsOf: temporaryURL, options: .mappedIfSafe)) ?? Data()
+            throw problemError(status: http.statusCode, data: data)
+        }
+        try ensureSessionCurrent(context)
+
+        let downloadedSize = try temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        guard let downloadedSize,
+              Int64(downloadedSize) == attachment.sizeBytes,
+              Int64(downloadedSize) <= MomoAttachmentFileBoundary.maximumSizeBytes else {
+            throw BackendError.decoding("attachment download size mismatch")
+        }
+        do {
+            try FileManager.default.copyItem(at: temporaryURL, to: destinationURL)
+        } catch {
+            throw MomoAttachmentTransferIssue.unavailable
+        }
+    }
+
+    private func isAllowedUploadCapabilityURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), url.host != nil else { return false }
+        if scheme == "https" { return true }
+        guard scheme == config.baseURL.scheme?.lowercased(),
+              url.host?.lowercased() == config.baseURL.host?.lowercased(),
+              url.port == config.baseURL.port else {
+            return false
+        }
+        return scheme == "http"
     }
 
     public func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
@@ -256,6 +428,33 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
             .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
         rememberLastKnownSeq(messages, channel: channel)
         return messages
+    }
+
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> MomoThreadRepliesPage {
+        guard let workspace else { throw BackendError.notConnected }
+        var items = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor {
+            items.append(URLQueryItem(name: "cursor", value: String(cursor)))
+        }
+
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages/\(root.description)/replies",
+            queryItems: items,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: ThreadRepliesPageDTO.self
+        )
+        let messages = try page.messages.map { try $0.message() }
+            .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+        guard messages.allSatisfy({ $0.channelId == channel && $0.rootId == root }) else {
+            throw BackendError.decoding("thread replies escaped the requested root")
+        }
+        rememberLastKnownSeq(messages, channel: channel)
+        return MomoThreadRepliesPage(messages: messages, nextCursor: page.nextCursor)
     }
 
     public func presence(channel: ChannelID) async throws -> [PresenceEntry] {
@@ -1058,6 +1257,22 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return try await executeData(request)
     }
 
+    private func postEmpty<ResponseBody: Decodable>(
+        _ path: String,
+        authorized: Bool,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(
+            url: config.baseURL.appendingPathComponent(path),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        request.httpMethod = "POST"
+        if authorized {
+            try authorize(&request)
+        }
+        return try await execute(request, response: response)
+    }
+
     private func put<RequestBody: Encodable, ResponseBody: Decodable>(
         _ path: String,
         body: RequestBody,
@@ -1532,11 +1747,38 @@ private struct SendMessageRequest: Encodable {
     let props: [String: String]?
     let runId: UUID?
     let rootId: MessageID?
+    let attachmentIds: [FileID]?
+}
+
+private struct CreateAttachmentUploadRequestDTO: Encodable {
+    let name: String
+    let mime: String
+    let size: Int64
+}
+
+private struct AttachmentUploadResponseDTO: Decodable {
+    let id: String
+    let status: String
+    let uploadUrl: String
+}
+
+private struct AttachmentResponseDTO: Decodable {
+    let id: String
+    let channelId: String
+    let name: String
+    let mime: String
+    let size: Int64
+    let status: String
 }
 
 private struct MessagePage: Decodable {
     let messages: [MessageDTO]
     let nextBefore: Int64?
+}
+
+private struct ThreadRepliesPageDTO: Decodable {
+    let messages: [MessageDTO]
+    let nextCursor: Int64?
 }
 
 private struct WorkspaceMessageSearchResponseDTO: Decodable {
@@ -1755,6 +1997,7 @@ private struct MessageDTO: Decodable {
     let clientMsgId: UUID?
     let createdAtMs: Int64
     let thread: ThreadRollup?
+    let attachments: [MessageAttachment]?
     let state: String?
     let editedAtMs: Int64?
     let deletedAtMs: Int64?
@@ -1807,6 +2050,7 @@ private struct MessageDTO: Decodable {
             props: props ?? .object([:]),
             rootId: decodedRootID,
             thread: thread,
+            attachments: attachments,
             runId: decodedRunID,
             clientMsgId: clientMsgId,
             createdAtMs: createdAtMs,

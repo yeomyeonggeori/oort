@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 import MomoCore
 
 public protocol MomoSessionSensitiveStateClearing: Sendable {
@@ -119,6 +120,7 @@ public enum MomoDirectMessageOpenOutcome: Sendable, Equatable {
 @MainActor
 public final class ChatViewModel: ObservableObject {
     private static let maximumMarkReadFailures = 5
+    private static let threadRepliesPageLimit = 50
     private static let workspaceCachePrefix = "momo.workspace.identity."
 
     private struct PendingMessageSend: Sendable {
@@ -157,6 +159,8 @@ public final class ChatViewModel: ObservableObject {
     private let messageInteractionBackend: (any MomoMessageInteractionBackend)?
     private let channelNotificationBackend: (any MomoChannelNotificationBackend)?
     private let workspaceMessageSearchBackend: (any MomoWorkspaceMessageSearchBackend)?
+    private let threadRepliesBackend: (any MomoThreadRepliesBackend)?
+    private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -201,13 +205,19 @@ public final class ChatViewModel: ObservableObject {
     // Per-channel message store (kept seq-sorted on insert).
     @Published public private(set) var messagesByChannel: [ChannelID: [Message]] = [:]
     @Published private(set) var historyLoadingChannels: Set<ChannelID> = []
+    @Published public private(set) var threadRepliesLoadingRootIDs: Set<MessageID> = []
+    @Published public private(set) var threadRepliesFailedRootIDs: Set<MessageID> = []
     @Published private var messageReactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
     @Published private(set) var messageInteractionErrors: [MessageID: MomoMessageInteractionError] = [:]
+    @Published private(set) var attachmentDownloadStates: [FileID: MomoAttachmentDownloadState] = [:]
     private var messageMutationOperations: [MessageID: MessageMutationOperation] = [:]
     private var reactionMutationTokens: [String: UUID] = [:]
     private var reactionSnapshotTokens: [ChannelID: UUID] = [:]
     private var bufferedReactionDeltasByChannel: [ChannelID: [ReactionDelta]] = [:]
     private var bufferedTimelineEventsByChannel: [ChannelID: [RealtimeEvent]] = [:]
+    private var threadRepliesLoadedRootIDs: Set<MessageID> = []
+    private var threadRepliesNextCursors: [MessageID: Int64] = [:]
+    private var threadRepliesLoadTokens: [MessageID: UUID] = [:]
 
     // Live agent state for the selected channel.
     /// In-flight `agent.partial` buffers, keyed by run, for AgentPartialView (L4 §5.2).
@@ -328,6 +338,8 @@ public final class ChatViewModel: ObservableObject {
         self.messageInteractionBackend = chat as? any MomoMessageInteractionBackend
         self.channelNotificationBackend = chat as? any MomoChannelNotificationBackend
         self.workspaceMessageSearchBackend = chat as? any MomoWorkspaceMessageSearchBackend
+        self.threadRepliesBackend = chat as? any MomoThreadRepliesBackend
+        self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -553,6 +565,11 @@ public final class ChatViewModel: ObservableObject {
         activeTimelineChannelId = nil
         messagesByChannel = [:]
         historyLoadingChannels = []
+        threadRepliesLoadingRootIDs = []
+        threadRepliesFailedRootIDs = []
+        threadRepliesLoadedRootIDs = []
+        threadRepliesNextCursors = [:]
+        threadRepliesLoadTokens = [:]
         partials = [:]
         agentStatuses = [:]
         costSnapshots = [:]
@@ -573,6 +590,7 @@ public final class ChatViewModel: ObservableObject {
         failedReplySends = [:]
         messageReactionMembers = [:]
         messageInteractionErrors = [:]
+        attachmentDownloadStates = [:]
         messageMutationOperations = [:]
         reactionMutationTokens = [:]
         reactionSnapshotTokens = [:]
@@ -2026,6 +2044,100 @@ public final class ChatViewModel: ObservableObject {
         workCreationError = nil
     }
 
+    // MARK: Attachments
+
+    var supportsAttachmentTransfer: Bool {
+        attachmentTransferBackend != nil
+    }
+
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        guard let attachmentTransferBackend else {
+            throw MomoAttachmentTransferIssue.unavailable
+        }
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let sessionWorkspace = workspaceId
+        let attachment = try await attachmentTransferBackend.uploadAttachment(
+            fileURL: fileURL,
+            to: channel
+        )
+        guard isSessionCurrent(sessionGeneration, workspaceID: sessionWorkspace),
+              channels.contains(where: { $0.id == channel }) else {
+            throw CancellationError()
+        }
+        return attachment
+    }
+
+    func downloadAttachment(_ attachment: MessageAttachment, from channel: ChannelID) async {
+        guard attachmentDownloadStates[attachment.id] != .downloading else { return }
+        guard let attachmentTransferBackend else {
+            attachmentDownloadStates[attachment.id] = .failed
+            return
+        }
+
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let sessionWorkspace = workspaceId
+        let downloadsFolder = MomoDownloadsFolderAccess.resolvedURL(
+            storedPath: UserDefaults.standard.string(forKey: MomoDownloadsFolderAccess.pathKey) ?? ""
+        )
+        let didAccess = downloadsFolder.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { downloadsFolder.stopAccessingSecurityScopedResource() }
+        }
+
+        let destination: URL
+        do {
+            destination = try MomoAttachmentFileBoundary.destinationURL(
+                named: attachment.name,
+                in: downloadsFolder
+            )
+        } catch {
+            attachmentDownloadStates[attachment.id] = .failed
+            return
+        }
+
+        attachmentDownloadStates[attachment.id] = .downloading
+        do {
+            try await attachmentTransferBackend.downloadAttachment(
+                attachment,
+                from: channel,
+                to: destination
+            )
+            guard isSessionCurrent(sessionGeneration, workspaceID: sessionWorkspace) else {
+                try? FileManager.default.removeItem(at: destination)
+                return
+            }
+            attachmentDownloadStates[attachment.id] = .completed(destination)
+            MomoDownloadHistoryStore.record(MomoDownloadHistoryRecord(
+                fileName: destination.lastPathComponent,
+                filePath: destination.path,
+                outcome: .completed
+            ))
+        } catch {
+            guard isSessionCurrent(sessionGeneration, workspaceID: sessionWorkspace),
+                  !Self.isCancellation(error) else { return }
+            attachmentDownloadStates[attachment.id] = .failed
+            MomoDownloadHistoryStore.record(MomoDownloadHistoryRecord(
+                fileName: attachment.name,
+                filePath: destination.path,
+                outcome: .failed
+            ))
+        }
+    }
+
+    func openDownloadedAttachment(_ attachment: MessageAttachment) {
+        guard case .completed(let url) = attachmentDownloadStates[attachment.id] else { return }
+        let downloadsFolder = MomoDownloadsFolderAccess.resolvedURL(
+            storedPath: UserDefaults.standard.string(forKey: MomoDownloadsFolderAccess.pathKey) ?? ""
+        )
+        guard let managedURL = MomoDownloadFileBoundary.managedFileURL(
+            recordPath: url.path,
+            downloadsFolder: downloadsFolder
+        ) else { return }
+        _ = MomoDownloadsFolderAccess.withAccess(to: downloadsFolder) {
+            NSWorkspace.shared.open(managedURL)
+        }
+    }
+
     // MARK: Sending
 
     public func composerDraftDidChange(_ draft: String) {
@@ -2039,20 +2151,46 @@ public final class ChatViewModel: ObservableObject {
     }
 
     /// Optimistic send: local echo with nil seq, reconciled by the returned message.
-    public func send(body: String, to channel: ChannelID) async {
+    @discardableResult
+    public func send(
+        body: String,
+        to channel: ChannelID,
+        attachments: [MessageAttachment] = []
+    ) async -> Bool {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return false }
         stopLocalTyping(channel: channel)
-        let clientMsgId = UUID()
-        let draft = DraftMessage(channelId: channel, type: .text, body: trimmed)
-        let mentionedAgent = mentionedAgent(in: trimmed, channel: channel)
-        let optimistic = optimisticMessage(body: trimmed, channel: channel, clientMsgId: clientMsgId)
-        upsert(optimistic, channel: channel)
-        await performSend(PendingMessageSend(
-            draft: draft,
-            clientMsgId: clientMsgId,
-            mentionedAgent: mentionedAgent
-        ))
+        let draft = DraftMessage(
+            channelId: channel,
+            type: .text,
+            body: trimmed.isEmpty ? nil : trimmed,
+            attachmentIds: attachments.isEmpty ? nil : attachments.map(\.id)
+        )
+        let pending: PendingMessageSend
+        if let failedMessageSend, failedMessageSend.draft == draft {
+            pending = failedMessageSend
+            updateOptimisticMessage(
+                clientMsgId: failedMessageSend.clientMsgId,
+                channel: channel,
+                state: .sent
+            )
+        } else {
+            let clientMsgId = UUID()
+            let mentionedAgent = trimmed.isEmpty ? nil : mentionedAgent(in: trimmed, channel: channel)
+            let optimistic = optimisticMessage(
+                body: trimmed.isEmpty ? nil : trimmed,
+                channel: channel,
+                clientMsgId: clientMsgId,
+                attachments: attachments
+            )
+            upsert(optimistic, channel: channel)
+            pending = PendingMessageSend(
+                draft: draft,
+                clientMsgId: clientMsgId,
+                mentionedAgent: mentionedAgent
+            )
+        }
+        return await performSend(pending)
     }
 
     /// Sends a reply through the existing optimistic message path while preserving
@@ -2331,6 +2469,155 @@ public final class ChatViewModel: ObservableObject {
             .sorted(by: Self.seqOrder)
     }
 
+    /// The badge is always driven by the server-owned rollup, never by the
+    /// currently loaded reply slice.
+    public func threadReplyCount(for root: Message) -> Int {
+        root.thread?.replyCount ?? 0
+    }
+
+    public func canLoadMoreThreadReplies(for root: Message) -> Bool {
+        threadRepliesNextCursors[root.rootId ?? root.id] != nil
+    }
+
+    public func loadThreadReplies(for root: Message) async {
+        let rootID = root.rootId ?? root.id
+        guard root.rootId == nil, !root.isDeleted,
+              !threadRepliesLoadedRootIDs.contains(rootID)
+        else { return }
+        await fetchThreadReplies(rootID: rootID, channel: root.channelId, cursor: nil)
+    }
+
+    public func loadMoreThreadReplies(for root: Message) async {
+        let rootID = root.rootId ?? root.id
+        guard let cursor = threadRepliesNextCursors[rootID] else { return }
+        await fetchThreadReplies(rootID: rootID, channel: root.channelId, cursor: cursor)
+    }
+
+    public func retryThreadReplies(for root: Message) async {
+        let rootID = root.rootId ?? root.id
+        let cursor = threadRepliesLoadedRootIDs.contains(rootID)
+            ? threadRepliesNextCursors[rootID]
+            : nil
+        await fetchThreadReplies(rootID: rootID, channel: root.channelId, cursor: cursor)
+    }
+
+    private func fetchThreadReplies(
+        rootID: MessageID,
+        channel: ChannelID,
+        cursor: Int64?
+    ) async {
+        guard let threadRepliesBackend else {
+            threadRepliesLoadedRootIDs.insert(rootID)
+            return
+        }
+        guard !threadRepliesLoadingRootIDs.contains(rootID),
+              let workspaceID = workspaceId,
+              selectedChannelId == channel,
+              activeTimelineChannelId == channel
+        else { return }
+
+        let sessionGeneration = workspaceIdentitySessionGeneration
+        let token = UUID()
+        threadRepliesLoadTokens[rootID] = token
+        threadRepliesLoadingRootIDs.insert(rootID)
+        threadRepliesFailedRootIDs.remove(rootID)
+
+        do {
+            let page = try await threadRepliesBackend.threadReplies(
+                channel: channel,
+                root: rootID,
+                cursor: cursor,
+                limit: Self.threadRepliesPageLimit
+            )
+            guard isThreadRepliesLoadCurrent(
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID,
+                channel: channel,
+                rootID: rootID,
+                token: token
+            ) else {
+                finishThreadRepliesLoadIfOwned(rootID: rootID, token: token)
+                return
+            }
+            try Self.validateThreadRepliesPage(
+                page,
+                channel: channel,
+                rootID: rootID,
+                cursor: cursor
+            )
+            for reply in page.messages {
+                _ = upsert(reply, channel: channel)
+            }
+            threadRepliesLoadedRootIDs.insert(rootID)
+            threadRepliesNextCursors[rootID] = page.nextCursor
+            threadRepliesFailedRootIDs.remove(rootID)
+            threadRepliesLoadingRootIDs.remove(rootID)
+            threadRepliesLoadTokens[rootID] = nil
+        } catch {
+            guard isThreadRepliesLoadCurrent(
+                sessionGeneration: sessionGeneration,
+                workspaceID: workspaceID,
+                channel: channel,
+                rootID: rootID,
+                token: token
+            ) else {
+                finishThreadRepliesLoadIfOwned(rootID: rootID, token: token)
+                return
+            }
+            threadRepliesLoadingRootIDs.remove(rootID)
+            threadRepliesLoadTokens[rootID] = nil
+            guard !Self.isCancellation(error) else { return }
+            threadRepliesFailedRootIDs.insert(rootID)
+        }
+    }
+
+    private func finishThreadRepliesLoadIfOwned(rootID: MessageID, token: UUID) {
+        guard threadRepliesLoadTokens[rootID] == token else { return }
+        threadRepliesLoadingRootIDs.remove(rootID)
+        threadRepliesLoadTokens[rootID] = nil
+    }
+
+    private func isThreadRepliesLoadCurrent(
+        sessionGeneration: UInt64,
+        workspaceID: WorkspaceID,
+        channel: ChannelID,
+        rootID: MessageID,
+        token: UUID
+    ) -> Bool {
+        isWorkspaceIdentitySessionCurrent(sessionGeneration, workspaceID: workspaceID)
+            && selectedChannelId == channel
+            && activeTimelineChannelId == channel
+            && threadRepliesLoadTokens[rootID] == token
+    }
+
+    private nonisolated static func validateThreadRepliesPage(
+        _ page: MomoThreadRepliesPage,
+        channel: ChannelID,
+        rootID: MessageID,
+        cursor: Int64?
+    ) throws {
+        let repliesAreScoped = page.messages.allSatisfy {
+            $0.channelId == channel
+                && $0.rootId == rootID
+                && $0.seq != nil
+                && (cursor == nil || ($0.seq ?? 0) > (cursor ?? 0))
+        }
+        guard repliesAreScoped,
+              zip(page.messages, page.messages.dropFirst()).allSatisfy({ lhs, rhs in
+                  (lhs.seq ?? 0) < (rhs.seq ?? 0)
+              })
+        else {
+            throw BackendError.decoding("invalid thread replies page")
+        }
+        if let nextCursor = page.nextCursor {
+            guard nextCursor == page.messages.last?.seq,
+                  cursor == nil || nextCursor > (cursor ?? 0)
+            else {
+                throw BackendError.decoding("invalid thread replies cursor")
+            }
+        }
+    }
+
     public func clearMessageInteractionError(_ messageID: MessageID) {
         messageInteractionErrors[messageID] = nil
     }
@@ -2351,7 +2638,8 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func performSend(_ pending: PendingMessageSend) async {
+    @discardableResult
+    private func performSend(_ pending: PendingMessageSend) async -> Bool {
         let channel = pending.draft.channelId
         let mentionedAgent = pending.mentionedAgent
         if let mentionedAgent {
@@ -2377,6 +2665,7 @@ public final class ChatViewModel: ObservableObject {
             if let mentionedAgent {
                 await refreshAfterMentionSend(channel: channel, agent: mentionedAgent, triggerSeq: acked.seq)
             }
+            return true
         } catch {
             failedMessageSend = pending
             reportConnectionError(error, as: .sendFailed)
@@ -2385,6 +2674,7 @@ public final class ChatViewModel: ObservableObject {
                 discardFallbackMentionProgress(channel: channel)
                 mentionNotice = nil
             }
+            return false
         }
     }
 
@@ -2688,6 +2978,10 @@ public final class ChatViewModel: ObservableObject {
             messageReactionMembers[id] = nil
             messageInteractionErrors[id] = nil
         case .threadUpdated(let delta):
+            if reactionSnapshotTokens[channel] != nil {
+                bufferedTimelineEventsByChannel[channel, default: []].append(event)
+                return
+            }
             guard delta.channelId == channel,
                   var messages = messagesByChannel[channel],
                   let index = messages.firstIndex(where: { $0.id == delta.rootId })
@@ -3204,9 +3498,10 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func optimisticMessage(
-        body: String,
+        body: String?,
         channel: ChannelID,
         clientMsgId: UUID,
+        attachments: [MessageAttachment] = [],
         rootId: MessageID? = nil,
         replyToId: MessageID? = nil
     ) -> Message {
@@ -3220,6 +3515,7 @@ public final class ChatViewModel: ObservableObject {
             state: .sent,
             body: body,
             rootId: rootId,
+            attachments: attachments.isEmpty ? nil : attachments,
             replyToId: replyToId,
             clientMsgId: clientMsgId,
             createdAtMs: Int64(Date().timeIntervalSince1970 * 1000)

@@ -3095,6 +3095,311 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET", "POST"])
     }
 
+    func testRESTBackendColdHistoryDecodesEditedMessageAndDeletedTombstone() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let editedID = MessageID(uuidString: "00000000-0000-7000-8000-000000001041")!
+        let deletedID = MessageID(uuidString: "00000000-0000-7000-8000-000000001042")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"
+            )
+            XCTAssertEqual(request.url?.query, "limit=50")
+            return MockHTTPResponse(json: """
+            {
+              "messages": [
+                {
+                  "id": "\(editedID.description)",
+                  "channelId": "\(channel.description)",
+                  "rootId": null,
+                  "seq": 40,
+                  "hlcTs": 1700000001000,
+                  "hlcCount": 0,
+                  "authorMemberId": "\(MemberID.demoHuman.description)",
+                  "type": "text",
+                  "body": "수정된 기록",
+                  "createdAtMs": 1700000000000,
+                  "state": "edited",
+                  "editedAtMs": 1700000001000,
+                  "deletedAtMs": null
+                },
+                {
+                  "id": "\(deletedID.description)",
+                  "channelId": "\(channel.description)",
+                  "rootId": null,
+                  "seq": 41,
+                  "hlcTs": 1700000002000,
+                  "hlcCount": 0,
+                  "authorMemberId": "\(MemberID.demoHuman.description)",
+                  "type": "text",
+                  "body": null,
+                  "createdAtMs": 1700000000000,
+                  "state": "deleted",
+                  "editedAtMs": 1700000001000,
+                  "deletedAtMs": 1700000002000
+                }
+              ],
+              "nextBefore": 40
+            }
+            """)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let history = try await backend.history(channel: channel, after: nil, limit: 50)
+        XCTAssertEqual(history.map(\.id), [editedID, deletedID])
+
+        let edited = try XCTUnwrap(history.first)
+        XCTAssertEqual(edited.state, .edited)
+        XCTAssertEqual(edited.body, "수정된 기록")
+        XCTAssertEqual(edited.editedAtMs, 1_700_000_001_000)
+        XCTAssertFalse(edited.isDeleted)
+
+        let tombstone = try XCTUnwrap(history.last)
+        XCTAssertEqual(tombstone.state, .deleted)
+        XCTAssertNil(tombstone.body)
+        XCTAssertEqual(tombstone.editedAtMs, 1_700_000_001_000)
+        XCTAssertEqual(tombstone.deletedAtMs, 1_700_000_002_000)
+        XCTAssertTrue(tombstone.isDeleted)
+    }
+
+    func testRESTBackendUploadsBindsProjectsAndDownloadsAttachmentWithoutBearerOnCapabilityURL() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let attachmentID = FileID(uuidString: "00000000-0000-7000-8000-000000001060")!
+        let messageID = MessageID(uuidString: "00000000-0000-7000-8000-000000001061")!
+        let payload = Data("attachment-contract".utf8)
+        let tempFolder = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+        let source = tempFolder.appendingPathComponent("검수 보고서.txt")
+        let destination = tempFolder.appendingPathComponent("downloaded.txt")
+        try payload.write(to: source)
+
+        await MockHTTPURLProtocol.setHandler { request in
+            let path = request.url?.path ?? ""
+            switch (request.httpMethod, request.url?.host, path) {
+            case ("POST", "momo.test", let path) where path.hasSuffix("/attachments/uploads"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(body["name"] as? String, "검수 보고서.txt")
+                XCTAssertEqual(body["mime"] as? String, "text/plain")
+                XCTAssertEqual((body["size"] as? NSNumber)?.intValue, payload.count)
+                return MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "id":"\(attachmentID.description)",
+                  "status":"pending",
+                  "uploadUrl":"https://upload.test/resumable?token=SECRET_CAPABILITY"
+                }
+                """)
+            case ("PUT", "upload.test", "/resumable"):
+                XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "text/plain")
+                XCTAssertEqual(request.momoBodyData, payload)
+                return MockHTTPResponse(data: Data())
+            case ("POST", "momo.test", let path) where path.hasSuffix("/attachments/\(attachmentID.description)/complete"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(json: """
+                {
+                  "id":"\(attachmentID.description)",
+                  "channelId":"\(channel.description)",
+                  "uploaderMemberId":"\(MemberID.demoHuman.description)",
+                  "name":"검수 보고서.txt",
+                  "mime":"text/plain",
+                  "size":\(payload.count),
+                  "status":"complete",
+                  "createdAtMs":1700000000000
+                }
+                """)
+            case ("POST", "momo.test", let path) where path.hasSuffix("/channels/\(channel.description)/messages"):
+                let data = try XCTUnwrap(request.momoBodyData)
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                XCTAssertEqual(body["attachmentIds"] as? [String], [attachmentID.description])
+                return MockHTTPResponse(statusCode: 201, json: """
+                {
+                  "id":"\(messageID.description)",
+                  "channelId":"\(channel.description)",
+                  "rootId":null,
+                  "seq":61,
+                  "hlcTs":1700000001000,
+                  "hlcCount":0,
+                  "authorMemberId":"\(MemberID.demoHuman.description)",
+                  "type":"text",
+                  "body":"첨부 확인",
+                  "clientMsgId":"\((body["clientMsgId"] as? String) ?? UUID().uuidString)",
+                  "createdAtMs":1700000001000,
+                  "attachments":[{
+                    "id":"\(attachmentID.description)",
+                    "name":"검수 보고서.txt",
+                    "mime":"text/plain",
+                    "sizeBytes":\(payload.count)
+                  }]
+                }
+                """)
+            case ("GET", "momo.test", let path) where path.hasSuffix("/attachments/\(attachmentID.description)/content"):
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer token-123")
+                return MockHTTPResponse(
+                    data: payload,
+                    headers: [
+                        "Content-Type": "text/plain",
+                        "Content-Length": String(payload.count),
+                    ]
+                )
+            default:
+                return MockHTTPResponse(statusCode: 404, json: #"{"title":"unexpected"}"#)
+            }
+        }
+
+        let session = URLSession(configuration: .momoMocked)
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "token-123",
+                workspace: workspace,
+                defaultChannel: channel
+            ),
+            session: session,
+            directUploadSession: session
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let attachment = try await backend.uploadAttachment(fileURL: source, to: channel)
+        XCTAssertEqual(attachment.id, attachmentID)
+        XCTAssertEqual(attachment.sizeBytes, Int64(payload.count))
+
+        let clientMessageID = UUID()
+        let message = try await backend.sendOptimistic(
+            DraftMessage(
+                channelId: channel,
+                body: "첨부 확인",
+                attachmentIds: [attachment.id]
+            ),
+            clientMsgId: clientMessageID
+        )
+        XCTAssertEqual(message.attachments, [attachment])
+
+        try await backend.downloadAttachment(attachment, from: channel, to: destination)
+        XCTAssertEqual(try Data(contentsOf: destination), payload)
+        let requests = await MockHTTPURLProtocol.requests()
+        let capabilityRequest = try XCTUnwrap(requests.first { $0.url?.host == "upload.test" })
+        XCTAssertNil(capabilityRequest.value(forHTTPHeaderField: "Authorization"))
+    }
+
+    func testRESTBackendLoadsThreadRepliesWithExclusiveCursorAndTombstones() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000001050")!
+        let firstID = MessageID(uuidString: "00000000-0000-7000-8000-000000001051")!
+        let deletedID = MessageID(uuidString: "00000000-0000-7000-8000-000000001052")!
+        let lastID = MessageID(uuidString: "00000000-0000-7000-8000-000000001053")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages/\(root.description)/replies"
+            )
+            let queryItems = URLComponents(
+                url: try XCTUnwrap(request.url),
+                resolvingAgainstBaseURL: false
+            )?.queryItems ?? []
+            XCTAssertEqual(queryItems.first(where: { $0.name == "limit" })?.value, "2")
+            let cursor = queryItems.first(where: { $0.name == "cursor" })?.value
+            if cursor == nil {
+                return MockHTTPResponse(json: """
+                {
+                  "messages": [
+                    {
+                      "id": "\(firstID.description)",
+                      "channelId": "\(channel.description)",
+                      "rootId": "\(root.description)",
+                      "seq": 41,
+                      "hlcTs": 1700000001000,
+                      "hlcCount": 0,
+                      "authorMemberId": "\(MemberID.demoHuman.description)",
+                      "type": "text",
+                      "body": "첫 답글",
+                      "createdAtMs": 1700000001000,
+                      "state": "sent"
+                    },
+                    {
+                      "id": "\(deletedID.description)",
+                      "channelId": "\(channel.description)",
+                      "rootId": "\(root.description)",
+                      "seq": 42,
+                      "hlcTs": 1700000002000,
+                      "hlcCount": 0,
+                      "authorMemberId": "\(MemberID.demoHuman.description)",
+                      "type": "text",
+                      "body": null,
+                      "createdAtMs": 1700000002000,
+                      "state": "deleted",
+                      "deletedAtMs": 1700000003000
+                    }
+                  ],
+                  "nextCursor": 42
+                }
+                """)
+            }
+            XCTAssertEqual(cursor, "42")
+            return MockHTTPResponse(json: """
+            {
+              "messages": [{
+                "id": "\(lastID.description)",
+                "channelId": "\(channel.description)",
+                "rootId": "\(root.description)",
+                "seq": 43,
+                "hlcTs": 1700000004000,
+                "hlcCount": 0,
+                "authorMemberId": "\(MemberID.demoHuman.description)",
+                "type": "text",
+                "body": "마지막 답글",
+                "createdAtMs": 1700000004000,
+                "state": "sent"
+              }],
+              "nextCursor": null
+            }
+            """)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let firstPage = try await backend.threadReplies(
+            channel: channel,
+            root: root,
+            cursor: nil,
+            limit: 2
+        )
+        XCTAssertEqual(firstPage.messages.map(\.id), [firstID, deletedID])
+        XCTAssertTrue(try XCTUnwrap(firstPage.messages.last).isDeleted)
+        XCTAssertEqual(firstPage.nextCursor, 42)
+
+        let secondPage = try await backend.threadReplies(
+            channel: channel,
+            root: root,
+            cursor: firstPage.nextCursor,
+            limit: 2
+        )
+        XCTAssertEqual(secondPage.messages.map(\.id), [lastID])
+        XCTAssertNil(secondPage.nextCursor)
+    }
+
     func testRESTBackendSearchUsesWorkspaceFTSEndpointAndPreservesHitIdentity() async throws {
         await MockHTTPURLProtocol.reset()
         let workspace = WorkspaceID.demo
@@ -7657,11 +7962,33 @@ private extension Array where Element == RealtimeEvent {
 private struct MockHTTPResponse {
     let statusCode: Int
     let json: String
+    let data: Data?
+    let headers: [String: String]
     let releaseGate: DispatchSemaphore?
 
-    init(statusCode: Int = 200, json: String, releaseGate: DispatchSemaphore? = nil) {
+    init(
+        statusCode: Int = 200,
+        json: String,
+        headers: [String: String] = ["Content-Type": "application/json"],
+        releaseGate: DispatchSemaphore? = nil
+    ) {
         self.statusCode = statusCode
         self.json = json
+        self.data = nil
+        self.headers = headers
+        self.releaseGate = releaseGate
+    }
+
+    init(
+        statusCode: Int = 200,
+        data: Data,
+        headers: [String: String] = [:],
+        releaseGate: DispatchSemaphore? = nil
+    ) {
+        self.statusCode = statusCode
+        self.json = ""
+        self.data = data
+        self.headers = headers
         self.releaseGate = releaseGate
     }
 }
@@ -7829,12 +8156,12 @@ private final class MockHTTPURLProtocol: URLProtocol, @unchecked Sendable {
         do {
             let mocked = try currentHandler(request)
             let deliver: @Sendable () -> Void = { [self] in
-                let data = Data(mocked.json.utf8)
+                let data = mocked.data ?? Data(mocked.json.utf8)
                 let response = HTTPURLResponse(
                     url: request.url!,
                     statusCode: mocked.statusCode,
                     httpVersion: "HTTP/1.1",
-                    headerFields: ["Content-Type": "application/json"]
+                    headerFields: mocked.headers
                 )!
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 client?.urlProtocol(self, didLoad: data)

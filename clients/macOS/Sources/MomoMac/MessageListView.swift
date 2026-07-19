@@ -85,6 +85,7 @@ public struct MessageListView: View {
     @State private var isActionLauncherPresented = false
     @State private var localDraftSheet: MomoComposerDraftSheet?
     @State private var attachmentDraftsByChannel: [ChannelID: [MomoAttachmentDraft]] = [:]
+    @State private var isSendingComposerMessage = false
     @State private var selectedPlugins: Set<String> = []
     @State private var isFileDropTargeted = false
     @State private var threadTopic = ""
@@ -835,7 +836,7 @@ public struct MessageListView: View {
                     Task { await viewModel.decideApproval(approvalId, approve: approve) }
                 },
                 reactions: viewModel.reactions(for: item.message),
-                replyCount: viewModel.replies(to: item.message).count,
+                replyCount: viewModel.threadReplyCount(for: item.message),
                 canModify: canModify,
                 interactionError: viewModel.messageInteractionErrors[item.message.id],
                 onToggleReaction: canInteract
@@ -866,6 +867,16 @@ public struct MessageListView: View {
                 onDismissInteractionError: {
                     viewModel.clearMessageInteractionError(item.message.id)
                 },
+                attachmentDownloadStates: viewModel.attachmentDownloadStates,
+                onDownloadAttachment: { attachment in
+                    Task {
+                        await viewModel.downloadAttachment(
+                            attachment,
+                            from: item.message.channelId
+                        )
+                    }
+                },
+                onOpenAttachment: viewModel.openDownloadedAttachment,
                 groupingStyle: item.startsGroup ? .groupStart : .compact,
                 timelineCopy: copy,
                 presentation: presentation
@@ -977,6 +988,7 @@ public struct MessageListView: View {
                     drafts: attachmentDrafts,
                     copy: MomoComposerActionCopy(language: language),
                     onRemove: removeAttachmentDraft,
+                    onRetry: retryAttachmentDraft,
                     onClear: clearAttachmentDrafts
                 )
             }
@@ -1088,9 +1100,14 @@ public struct MessageListView: View {
 
             Button(action: submit) {
                 ZStack {
-                    Image(systemName: "paperplane.fill")
-                        .font(.body.weight(.medium))
-                        .offset(y: -1)
+                    if isSendingComposerMessage {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                            .font(.body.weight(.medium))
+                            .offset(y: -1)
+                    }
                 }
                 .frame(width: 32, height: 32)
                     .contentShape(Rectangle())
@@ -1210,12 +1227,55 @@ public struct MessageListView: View {
 
     private func removeAttachmentDraft(_ draft: MomoAttachmentDraft) {
         guard let channelID = viewModel.selectedChannelId else { return }
+        guard draft.state != .uploading else { return }
         attachmentDraftsByChannel[channelID]?.removeAll { $0.id == draft.id }
     }
 
     private func clearAttachmentDrafts() {
         guard let channelID = viewModel.selectedChannelId else { return }
+        guard attachmentDraftsByChannel[channelID]?.contains(where: { $0.state == .uploading }) != true else {
+            return
+        }
         attachmentDraftsByChannel[channelID] = []
+    }
+
+    private func retryAttachmentDraft(_ draft: MomoAttachmentDraft) {
+        guard let channelID = viewModel.selectedChannelId else { return }
+        Task { _ = await uploadAttachmentDraft(draft, in: channelID) }
+    }
+
+    @discardableResult
+    private func uploadAttachmentDraft(
+        _ draft: MomoAttachmentDraft,
+        in channelID: ChannelID
+    ) async -> MessageAttachment? {
+        if case .uploaded(let attachment) = draft.state {
+            return attachment
+        }
+        updateAttachmentDraft(draft.id, in: channelID, state: .uploading)
+        do {
+            let attachment = try await viewModel.uploadAttachment(fileURL: draft.url, to: channelID)
+            updateAttachmentDraft(draft.id, in: channelID, state: .uploaded(attachment))
+            return attachment
+        } catch let issue as MomoAttachmentTransferIssue where issue == .fileTooLarge {
+            updateAttachmentDraft(draft.id, in: channelID, state: .failed(.fileTooLarge))
+        } catch is CancellationError {
+            updateAttachmentDraft(draft.id, in: channelID, state: .ready)
+        } catch {
+            updateAttachmentDraft(draft.id, in: channelID, state: .failed(.unavailable))
+        }
+        return nil
+    }
+
+    private func updateAttachmentDraft(
+        _ id: URL,
+        in channelID: ChannelID,
+        state: MomoAttachmentDraft.State
+    ) {
+        guard let index = attachmentDraftsByChannel[channelID]?.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        attachmentDraftsByChannel[channelID]?[index].state = state
     }
 
     private var attachmentDrafts: [MomoAttachmentDraft] {
@@ -1300,8 +1360,13 @@ public struct MessageListView: View {
     }
 
     private var canSendMessage: Bool {
-        !viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !isSendingComposerMessage
+            && !attachmentDrafts.contains { $0.state == .uploading }
             && viewModel.selectedChannelId != nil
+            && (
+                !viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || !attachmentDrafts.isEmpty
+            )
     }
 
     private func typingIndicator(copy: MomoWorkspaceCopy) -> some View {
@@ -1426,9 +1491,10 @@ public struct MessageListView: View {
     }
 
     private func submit() {
-        guard let channel = viewModel.selectedChannelId else { return }
+        guard canSendMessage, let channel = viewModel.selectedChannelId else { return }
         let body = viewModel.composerDraft
-        if let command = AgentWorkCommandParser.parse(body) {
+        let drafts = attachmentDrafts
+        if drafts.isEmpty, let command = AgentWorkCommandParser.parse(body) {
             initialWorkBrief = command.brief
             workCommandDraftToRestore = command.draftToRestore
             workComposerSessionId = UUID()
@@ -1438,8 +1504,31 @@ public struct MessageListView: View {
             isWorkComposerPresented = true
             return
         }
-        viewModel.composerDraft = ""
-        Task { await viewModel.send(body: body, to: channel) }
+        isSendingComposerMessage = true
+        Task {
+            var attachments: [MessageAttachment] = []
+            for draft in drafts {
+                guard let attachment = await uploadAttachmentDraft(draft, in: channel) else {
+                    isSendingComposerMessage = false
+                    return
+                }
+                attachments.append(attachment)
+            }
+            let didSend = await viewModel.send(
+                body: body,
+                to: channel,
+                attachments: attachments
+            )
+            if didSend {
+                let sentDraftIDs = Set(drafts.map(\.id))
+                attachmentDraftsByChannel[channel]?.removeAll { sentDraftIDs.contains($0.id) }
+                if viewModel.composerDraft == body {
+                    viewModel.composerDraft = ""
+                    viewModel.composerDraftDidChange("")
+                }
+            }
+            isSendingComposerMessage = false
+        }
     }
 
     private func presentWorkComposer() {

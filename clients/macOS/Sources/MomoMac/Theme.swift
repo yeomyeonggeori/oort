@@ -59,6 +59,16 @@ public enum MomoTheme {
         public static let dropInset: CGFloat = 32
     }
 
+    public enum Attachment {
+        public static let minimumWidth: CGFloat = 260
+        public static let maximumWidth: CGFloat = 360
+        public static let iconSize: CGFloat = 36
+        public static let actionSize: CGFloat = 28
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+    }
+
     public enum MessageInteraction {
         public static let actionMinimumSize: CGFloat = 28
         public static let editorMinimumHeight: CGFloat = 64

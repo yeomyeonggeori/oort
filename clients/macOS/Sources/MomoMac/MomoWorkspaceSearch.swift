@@ -106,7 +106,7 @@ enum MomoWorkspaceSearchIndex {
         for (channelID, messages) in messagesByChannel where visibleChannelIDs.contains(channelID) {
             let channelName = channelNames[channelID] ?? "channel"
             for message in messages where !message.isDeleted {
-                for (attachmentIndex, filename) in attachmentNames(in: message.props).enumerated()
+                for (attachmentIndex, filename) in attachmentNames(in: message).enumerated()
                     where matches(needle, values: [filename]) {
                     fileItems.append(MomoWorkspaceSearchItem(
                         id: "file:\(message.id):\(attachmentIndex):\(filename)",
@@ -155,6 +155,15 @@ enum MomoWorkspaceSearchIndex {
         let prefix = start == compact.startIndex ? "" : "…"
         let suffix = end == compact.endIndex ? "" : "…"
         return prefix + String(compact[start..<end]) + suffix
+    }
+
+    private static func attachmentNames(in message: Message) -> [String] {
+        let projectedNames = message.attachments?.map(\.name) ?? []
+        let legacyNames = attachmentNames(in: message.props)
+        return (projectedNames + legacyNames).reduce(into: []) { names, name in
+            guard !names.contains(name) else { return }
+            names.append(name)
+        }
     }
 
     private static func attachmentNames(in json: JSON) -> [String] {

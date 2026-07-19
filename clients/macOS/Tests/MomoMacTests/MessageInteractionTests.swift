@@ -45,6 +45,95 @@ final class MessageInteractionTests: XCTestCase {
         XCTAssertFalse(viewModel.visibleMessages.filter { $0.rootId == nil }.contains { $0.body == "스레드 답글" })
     }
 
+    func testThreadRollupDrivesBadgeAndRepliesLoadOutsideChannelHistorySlice() async throws {
+        let liveBackend = LiveChatBackend()
+        let seed = await liveBackend.seedDemo()
+        let root = await liveBackend.seedDemoMessage(
+            channel: seed.channels[0].id,
+            author: seed.human.id,
+            body: "배포 체크리스트 스레드"
+        )
+        _ = await liveBackend.seedDemoMessage(
+            channel: root.channelId,
+            author: seed.agents[0].id,
+            body: "과거 답글 1",
+            rootId: root.id
+        )
+        _ = await liveBackend.seedDemoMessage(
+            channel: root.channelId,
+            author: seed.human.id,
+            body: "과거 답글 2",
+            rootId: root.id
+        )
+        let backend = RootOnlyHistoryThreadBackend(base: liveBackend, pageLimit: 1)
+        let viewModel = ChatViewModel(chat: backend, agentTransport: liveBackend)
+
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        await viewModel.selectChannel(root.channelId)
+        let loadedRoot = try XCTUnwrap(viewModel.visibleMessages.first { $0.id == root.id })
+        XCTAssertTrue(viewModel.replies(to: loadedRoot).isEmpty)
+        XCTAssertEqual(viewModel.threadReplyCount(for: loadedRoot), 2)
+
+        await viewModel.loadThreadReplies(for: loadedRoot)
+        XCTAssertEqual(viewModel.replies(to: loadedRoot).map(\.body), ["과거 답글 1"])
+        XCTAssertTrue(viewModel.canLoadMoreThreadReplies(for: loadedRoot))
+
+        await viewModel.loadMoreThreadReplies(for: loadedRoot)
+        XCTAssertEqual(viewModel.replies(to: loadedRoot).map(\.body), ["과거 답글 1", "과거 답글 2"])
+        XCTAssertFalse(viewModel.canLoadMoreThreadReplies(for: loadedRoot))
+        XCTAssertFalse(viewModel.threadRepliesFailedRootIDs.contains(root.id))
+
+        _ = await liveBackend.seedDemoMessage(
+            channel: root.channelId,
+            author: seed.agents[0].id,
+            body: "실시간 답글 3",
+            rootId: root.id
+        )
+        for _ in 0..<20 {
+            await Task.yield()
+            guard let realtimeRoot = viewModel.visibleMessages.first(where: { $0.id == root.id }),
+                  viewModel.threadReplyCount(for: realtimeRoot) < 3 else { break }
+        }
+        let realtimeRoot = try XCTUnwrap(viewModel.visibleMessages.first { $0.id == root.id })
+        XCTAssertEqual(viewModel.threadReplyCount(for: realtimeRoot), 3)
+        XCTAssertEqual(viewModel.replies(to: realtimeRoot).last?.body, "실시간 답글 3")
+    }
+
+    func testThreadReplyLoadFailureCanRetryWithoutLosingServerRollup() async throws {
+        let liveBackend = LiveChatBackend()
+        let seed = await liveBackend.seedDemo()
+        let root = await liveBackend.seedDemoMessage(
+            channel: seed.channels[0].id,
+            author: seed.human.id,
+            body: "장애 복구 스레드"
+        )
+        _ = await liveBackend.seedDemoMessage(
+            channel: root.channelId,
+            author: seed.agents[0].id,
+            body: "복구 후 보이는 답글",
+            rootId: root.id
+        )
+        let backend = RootOnlyHistoryThreadBackend(
+            base: liveBackend,
+            threadRepliesFailuresRemaining: 1
+        )
+        let viewModel = ChatViewModel(chat: backend, agentTransport: liveBackend)
+
+        await viewModel.bootstrap(workspace: seed.workspace, accessToken: "local-token")
+        await viewModel.selectChannel(root.channelId)
+        let loadedRoot = try XCTUnwrap(viewModel.visibleMessages.first { $0.id == root.id })
+
+        await viewModel.loadThreadReplies(for: loadedRoot)
+        XCTAssertTrue(viewModel.replies(to: loadedRoot).isEmpty)
+        XCTAssertTrue(viewModel.threadRepliesFailedRootIDs.contains(root.id))
+        XCTAssertEqual(viewModel.threadReplyCount(for: loadedRoot), 1)
+
+        await viewModel.retryThreadReplies(for: loadedRoot)
+        XCTAssertEqual(viewModel.replies(to: loadedRoot).map(\.body), ["복구 후 보이는 답글"])
+        XCTAssertFalse(viewModel.threadRepliesFailedRootIDs.contains(root.id))
+        XCTAssertFalse(viewModel.threadRepliesLoadingRootIDs.contains(root.id))
+    }
+
     func testAuthorCanEditAndDeleteThroughCompleteBackendCapability() async throws {
         let backend = LiveChatBackend()
         let seed = await backend.seedDemo()
@@ -288,6 +377,101 @@ final class MessageInteractionTests: XCTestCase {
         XCTAssertEqual(restoredViewModel.reactions(for: message).first?.count, 1)
         XCTAssertTrue(restoredViewModel.reactions(for: message).first?.isSelectedByCurrentMember == true)
     }
+}
+
+private actor RootOnlyHistoryThreadBackend: ChatBackend, MomoThreadRepliesBackend {
+    private let base: LiveChatBackend
+    private let pageLimit: Int?
+    private var threadRepliesFailuresRemaining: Int
+
+    init(
+        base: LiveChatBackend,
+        pageLimit: Int? = nil,
+        threadRepliesFailuresRemaining: Int = 0
+    ) {
+        self.base = base
+        self.pageLimit = pageLimit
+        self.threadRepliesFailuresRemaining = threadRepliesFailuresRemaining
+    }
+
+    func connect(workspace: WorkspaceID, accessToken: String) async throws {
+        try await base.connect(workspace: workspace, accessToken: accessToken)
+    }
+
+    func sendOptimistic(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        try await base.sendOptimistic(draft, clientMsgId: clientMsgId)
+    }
+
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
+        try await base.subscribe(channel: channel)
+    }
+
+    func history(channel: ChannelID, after seq: Int64?, limit: Int) async throws -> [Message] {
+        try await base.history(channel: channel, after: seq, limit: limit)
+            .filter { $0.rootId == nil }
+    }
+
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> MomoThreadRepliesPage {
+        if threadRepliesFailuresRemaining > 0 {
+            threadRepliesFailuresRemaining -= 1
+            throw ThreadRepliesTestError.unavailable
+        }
+        return try await base.threadReplies(
+            channel: channel,
+            root: root,
+            cursor: cursor,
+            limit: min(limit, pageLimit ?? limit)
+        )
+    }
+
+    func presence(channel: ChannelID) async throws -> [PresenceEntry] {
+        try await base.presence(channel: channel)
+    }
+
+    func members(workspace: WorkspaceID) async throws -> [Member] {
+        try await base.members(workspace: workspace)
+    }
+
+    func channels(workspace: WorkspaceID) async throws -> [Channel] {
+        try await base.channels(workspace: workspace)
+    }
+
+    func costSnapshots(channel: ChannelID) async throws -> [CostSnapshot] {
+        try await base.costSnapshots(channel: channel)
+    }
+
+    func search(workspace: WorkspaceID, query: String) async throws -> [Message] {
+        try await base.search(workspace: workspace, query: query)
+    }
+
+    func setTyping(channel: ChannelID, isTyping: Bool) async {
+        await base.setTyping(channel: channel, isTyping: isTyping)
+    }
+
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        try await base.editMessage(id, body: body)
+    }
+
+    func addReaction(_ id: MessageID, emoji: String) async throws {
+        try await base.addReaction(id, emoji: emoji)
+    }
+
+    func pendingApprovals(workspace: WorkspaceID, status: ApprovalStatus) async throws -> [Approval] {
+        try await base.pendingApprovals(workspace: workspace, status: status)
+    }
+
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        try await base.decideApproval(request)
+    }
+}
+
+private enum ThreadRepliesTestError: Error {
+    case unavailable
 }
 
 private actor ControlledMessageInteractionBackend: ChatBackend, MomoMessageInteractionBackend {
