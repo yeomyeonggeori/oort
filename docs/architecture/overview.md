@@ -176,6 +176,16 @@ audit은 한 tenant transaction이다. linked approval이 pending/denied이면 h
 결속한다. 따라서 Postgres가 control/approval/session history의 SoT이고 Centrifugo는
 전송계층으로만 남으며, Relay와 canonical REST message write path는 변경되지 않는다.
 
+AgentWorker는 Hermes/OpenAI-compatible function surface에 `work_spawn`, `work_input`,
+`work_read`, `work_kill`을 closed schema로 추가하고 MOMO-484의 기존 `POST work-controls`만
+호출한다. 현재 channel과 v0 host ID는 모델이 선택하지 못하며 run context와 worker-local
+설정에 고정된다. 호출 credential도 agent별 raw bearer를 process env로만 받아 DB/job payload에
+복제하지 않는다. pending spawn은 승인 대기 thread 답글로 해당 run을 끝내며, 승인 decision은
+control dispatch만 수행하고 일반 tool approval처럼 worker run을 재개하지 않는다. 이후 상태는
+session card와 `work.control.*`/`work.session.*` event가 담당한다. 성공한 spawn/input/kill은
+채팅 성공 문구를 만들지 않고 `work_read` 결과만 normal response body에 포함하며, 서버가 돌려준
+계보 위반 HTTP 403은 축약하거나 성공으로 바꾸지 않는다.
+
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
 ```mermaid
