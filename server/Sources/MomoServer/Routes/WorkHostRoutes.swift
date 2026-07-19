@@ -458,8 +458,10 @@ struct WorkHostRoutes: Sendable {
                  ELSE floor(extract(epoch from h.revoked_at) * 1000)::bigint END,
           'createdAtMs', floor(extract(epoch from h.created_at) * 1000)::bigint,
           'online', h.revoked_at IS NULL
-                    AND h.last_seen_at >= clock_timestamp()
-                        - make_interval(secs => \(onlineWindowSeconds))
+                    AND COALESCE(
+                      h.last_seen_at >= clock_timestamp()
+                        - make_interval(secs => \(onlineWindowSeconds)),
+                      false)
         )::text
         """
 
