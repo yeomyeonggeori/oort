@@ -2246,7 +2246,8 @@ struct MessageRoutes: Sendable {
     static func broadcastPayload(
         centChannel: String, messageID: UUID, channelID: UUID, seq: Int64,
         type: String, body: String?, authorMemberID: UUID, hlcTs: Int64, hlcCount: Int,
-        rootID: UUID?, attachments: [MessageAttachmentDTO]? = nil
+        rootID: UUID?, attachments: [MessageAttachmentDTO]? = nil,
+        props: [String: Any]? = nil
     ) -> String {
         // Event envelope per L4 §5.2: {type, v, ts, seq, payload:{...}}.
         var messagePayload: [String: Any] = [
@@ -2269,6 +2270,9 @@ struct MessageRoutes: Sendable {
                     "sizeBytes": attachment.sizeBytes,
                 ] as [String: Any]
             }
+        }
+        if let props, !props.isEmpty {
+            messagePayload["props"] = props
         }
         let data: [String: Any] = [
             "type": "message.new",

@@ -421,6 +421,24 @@ guard_jq '.muted == true' "notification preference returns the effective mute st
 sample channel-create post "/v1/workspaces/{workspaceId}/channels" "/v1/workspaces/$WS/channels" 201 \
   "$(jq -cn --arg n "gate-$RUN_EPOCH" '{kind:"public",name:$n,topic:"openapi drift gate"}')" "$ACCESS"
 
+# work sessions: create card/root -> active list -> owner end
+WORK_HOST_ID="$(uuidgen)"
+sample work-session-create post "/v1/workspaces/{workspaceId}/work-sessions" \
+  "/v1/workspaces/$WS/work-sessions" 201 \
+  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
+      '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI drift gate"}')" "$ACCESS"
+WORK_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
+sample work-session-list get "/v1/workspaces/{workspaceId}/work-sessions" \
+  "/v1/workspaces/$WS/work-sessions?active=1" 200 "" "$ACCESS"
+guard_jq --arg id "$(printf '%s' "$WORK_SESSION_ID" | tr '[:upper:]' '[:lower:]')" \
+  'any(.workSessions[]; (.id | ascii_downcase) == $id and .status == "running")' \
+  "active work session list contains the created session"
+sample work-session-end patch "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}" \
+  "/v1/workspaces/$WS/work-sessions/$WORK_SESSION_ID" 200 \
+  '{"status":"ended","exitCode":0}' "$ACCESS"
+guard_jq '.workSession.status == "ended" and .workSession.exitCode == 0 and (.workSession.endedAtMs | type == "number")' \
+  "work session ends with exit status"
+
 # huddles: start -> active badge -> join grant -> last leave/end
 sample huddle-start post "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles" \
   "/v1/workspaces/$WS/channels/$GENERAL_ID/huddles" 201 "" "$ACCESS"
