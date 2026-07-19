@@ -120,13 +120,18 @@ struct WorkControlRoutes: Sendable {
                 )
             }
 
-            let autoApproved = kind == .spawn && (try await Self.isAutoApproved(
-                conn: conn,
-                logger: db.logger,
-                workspaceID: workspaceID,
-                ownerHumanID: binding.ownerHumanID,
-                tool: payload.object["tool"]?.stringValue
-            ))
+            let autoApproved: Bool
+            if kind == .spawn {
+                autoApproved = try await Self.isAutoApproved(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    ownerHumanID: binding.ownerHumanID,
+                    tool: payload.object["tool"]?.stringValue
+                )
+            } else {
+                autoApproved = false
+            }
             let initialStatus = autoApproved || kind != .spawn
                 ? "approved"
                 : "pending_approval"
