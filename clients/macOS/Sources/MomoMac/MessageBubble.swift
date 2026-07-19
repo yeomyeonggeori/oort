@@ -548,6 +548,8 @@ public struct MessageBubble: View {
                 .momoTypography(.messageBody)
                 .italic()
                 .foregroundStyle(.secondary)
+        } else if message.props["kind"]?.stringValue == "work_session" {
+            workSessionCard
         } else if isAgent,
                   !presentation.showsDeveloperDetails,
                   message.type != .text,
@@ -692,6 +694,43 @@ public struct MessageBubble: View {
             }
             if let uri = message.props["uri"]?.stringValue {
                 Text(uri).font(.caption2.monospaced()).foregroundStyle(.tertiary).lineLimit(1)
+            }
+        }
+    }
+
+    private var workSessionCard: some View {
+        let tool = MomoWorkTool(rawValue: message.props["tool"]?.stringValue ?? "") ?? .shell
+        let status = message.props["status"]?.stringValue ?? "running"
+        let isRunning = status == "running"
+        let label = message.props["label"]?.stringValue ?? timelineCopy.workConsole
+
+        return cardFrame(
+            icon: tool.systemImage,
+            tint: isRunning ? MomoTheme.agentAccent : .secondary,
+            title: timelineCopy.workConsole
+        ) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(label)
+                    .momoTypography(.emphasizedRow)
+                Text(timelineCopy.workToolTitle(tool))
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                Text(isRunning ? timelineCopy.workSessionRunning : timelineCopy.workSessionEnded)
+                    .momoTypography(.metadata)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(isRunning ? MomoTheme.agentAccent : .secondary)
+            }
+            if let exitCode = message.props["exit_code"]?.intValue {
+                Text(timelineCopy.workSessionExit(Int(exitCode)))
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+            }
+            if onOpenThread != nil {
+                Button(action: openThread) {
+                    Label(timelineCopy.workSessionOpenThread, systemImage: "arrowshape.turn.up.left")
+                }
+                .buttonStyle(.borderless)
             }
         }
     }

@@ -37,6 +37,9 @@ let package = Package(
         .package(name: "MomoCore", path: "../Core"),
         .package(url: "https://github.com/centrifugal/centrifuge-swift.git", exact: "0.9.0"),
         .package(url: "https://github.com/livekit/client-sdk-swift.git", exact: "2.15.2"),
+        // ADR-0114: the PTY and raw terminal buffer stay on the user's Mac.
+        // SwiftTerm is MIT licensed and embedded only in the macOS client.
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm.git", exact: "1.14.0"),
         // Test-only: deterministic light/dark image snapshots of the SwiftUI surface
         // (MOMO-318). MIT-licensed; only the `SnapshotTesting` product is imported,
         // whose target has no transitive build dependencies (swift-syntax is pulled by
@@ -50,6 +53,7 @@ let package = Package(
                 .product(name: "MomoCore", package: "MomoCore"),
                 .product(name: "SwiftCentrifuge", package: "centrifuge-swift"),
                 .product(name: "LiveKit", package: "client-sdk-swift"),
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

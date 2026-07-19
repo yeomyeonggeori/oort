@@ -241,6 +241,12 @@ public struct MessageListView: View {
             selectedThreadRootID = nil
             onDismissThread()
         }
+        .onChange(of: viewModel.requestedThreadRootID) { _, rootID in
+            guard let rootID else { return }
+            selectedThreadRootID = rootID
+            onPresentThread()
+            viewModel.consumeRequestedThread(rootID)
+        }
         .onReceive(NotificationCenter.default.publisher(for: MomoLocalChannelPresentationStore.didChangeNotification)) { _ in
             channelPresentationRevision &+= 1
         }

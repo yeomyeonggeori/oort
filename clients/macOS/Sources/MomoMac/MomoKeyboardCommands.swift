@@ -21,6 +21,7 @@ enum MomoKeyboardShortcutCatalog {
             MomoKeyboardShortcutItem(key: "⇧⌘I", label: copy.inviteToChannel),
             MomoKeyboardShortcutItem(key: "⇧⌘,", label: copy.channelSettings),
             MomoKeyboardShortcutItem(key: "⇧⌘D", label: copy.appDownloads),
+            MomoKeyboardShortcutItem(key: "⌃`", label: copy.openWorkConsole),
             MomoKeyboardShortcutItem(key: "⇧⌘W", label: copy.startWork),
             MomoKeyboardShortcutItem(key: "⌘1…⌘9", label: copy.quickSwitcherChannelShortcuts),
             MomoKeyboardShortcutItem(
@@ -113,6 +114,7 @@ public struct MomoMacCommandActions {
     var presentChannelSettings: () -> Void
     var inviteToChannel: () -> Void
     var openDownloads: () -> Void
+    var toggleWorkConsole: () -> Void
     var selectChannel: (Int) -> Void
     var navigateBackward: () -> Void
     var navigateForward: () -> Void
@@ -134,6 +136,7 @@ public struct MomoMacCommandActions {
         presentChannelSettings: @escaping () -> Void,
         inviteToChannel: @escaping () -> Void,
         openDownloads: @escaping () -> Void,
+        toggleWorkConsole: @escaping () -> Void,
         selectChannel: @escaping (Int) -> Void,
         navigateBackward: @escaping () -> Void,
         navigateForward: @escaping () -> Void,
@@ -154,6 +157,7 @@ public struct MomoMacCommandActions {
         self.presentChannelSettings = presentChannelSettings
         self.inviteToChannel = inviteToChannel
         self.openDownloads = openDownloads
+        self.toggleWorkConsole = toggleWorkConsole
         self.selectChannel = selectChannel
         self.navigateBackward = navigateBackward
         self.navigateForward = navigateForward
@@ -205,6 +209,12 @@ public struct MomoMacCommands: Commands {
                 actions?.openDownloads()
             }
             .keyboardShortcut("d", modifiers: [.command, .shift])
+            .disabled(actions == nil)
+
+            Button(copy.openWorkConsole) {
+                actions?.toggleWorkConsole()
+            }
+            .keyboardShortcut("`", modifiers: .control)
             .disabled(actions == nil)
 
             Divider()

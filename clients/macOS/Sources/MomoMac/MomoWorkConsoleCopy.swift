@@ -1,0 +1,128 @@
+import Foundation
+
+extension MomoWorkspaceCopy {
+    var workConsole: String { language == .korean ? "Work Console" : "Work Console" }
+    var workConsoleSubtitle: String {
+        language == .korean ? "이 Mac에서 실행되는 로컬 작업 세션" : "Local work sessions running on this Mac"
+    }
+    var openWorkConsole: String { language == .korean ? "Work Console 열기" : "Open Work Console" }
+    var closeWorkConsole: String { language == .korean ? "Work Console 닫기" : "Close Work Console" }
+    var newWorkSession: String { language == .korean ? "새 세션" : "New session" }
+    var workSessions: String { language == .korean ? "세션" : "Sessions" }
+    var workSessionLoading: String { language == .korean ? "세션 불러오는 중" : "Loading sessions" }
+    var workSessionEmptyTitle: String { language == .korean ? "아직 세션이 없습니다" : "No sessions yet" }
+    var workSessionEmptyBody: String {
+        language == .korean
+            ? "새 세션을 시작하면 채널에 카드가 생기고 같은 스레드에서 협업할 수 있습니다."
+            : "Start a session to create a channel card and collaborate in its thread."
+    }
+    var workSessionDetachedTitle: String {
+        language == .korean ? "이 터미널은 현재 앱에 연결되어 있지 않습니다" : "This terminal is not attached to the current app"
+    }
+    var workSessionDetachedBody: String {
+        language == .korean
+            ? "다른 호스트에서 시작했거나 앱을 다시 연 세션입니다. 스레드 기록은 계속 볼 수 있습니다."
+            : "It was started on another host or before the app reopened. The thread history remains available."
+    }
+    var workSessionRunning: String { language == .korean ? "실행 중" : "Running" }
+    var workSessionEnded: String { language == .korean ? "종료됨" : "Ended" }
+    func workSessionExit(_ code: Int) -> String {
+        language == .korean ? "종료 코드 \(code)" : "Exit \(code)"
+    }
+    var workSessionOpenThread: String { language == .korean ? "세션 스레드 열기" : "Open session thread" }
+    var workSessionEnd: String { language == .korean ? "세션 종료" : "End session" }
+    var workSessionFocusTerminal: String { language == .korean ? "터미널에 포커스" : "Focus terminal" }
+    var workSessionShareExcerpt: String { language == .korean ? "발췌 공유" : "Share excerpt" }
+    var workSessionLocalOnly: String {
+        language == .korean
+            ? "전체 출력과 입력은 이 Mac에만 남습니다. 공유를 누른 발췌만 스레드에 전송됩니다."
+            : "Full output and input stay on this Mac. Only excerpts you share are sent to the thread."
+    }
+    var workSessionProfile: String { language == .korean ? "도구" : "Tool" }
+    var workSessionLabel: String { language == .korean ? "표시 이름" : "Display name" }
+    var workSessionLabelPlaceholder: String {
+        language == .korean ? "예: 결제 모듈 점검" : "Example: Review payment module"
+    }
+    var workSessionFolder: String { language == .korean ? "작업 폴더" : "Working folder" }
+    var workSessionDefaultFolder: String { language == .korean ? "기본 폴더" : "Default folder" }
+    var workSessionChooseFolder: String { language == .korean ? "폴더 선택" : "Choose folder" }
+    var workSessionFolderPrivacy: String {
+        language == .korean
+            ? "서버에는 표시 이름만 저장되며 실제 경로는 전송되지 않습니다."
+            : "Only the display name is stored on the server. The actual path is never sent."
+    }
+    var startWorkSession: String { language == .korean ? "세션 시작" : "Start session" }
+    var workConsoleSettings: String { language == .korean ? "Work 설정" : "Work settings" }
+    var workHostIdentifier: String { language == .korean ? "이 Mac의 호스트 ID" : "Host ID for this Mac" }
+    var copyWorkHostIdentifier: String { language == .korean ? "호스트 ID 복사" : "Copy host ID" }
+    var workAutoApprove: String { language == .korean ? "도구별 자동 승인" : "Auto-approve by tool" }
+    var workAutoApproveUnknown: String {
+        language == .korean
+            ? "서버에 조회 API가 없어 현재 값은 변경 후에만 표시됩니다."
+            : "The server has no read API, so a value appears only after you change it."
+    }
+    var workAutoApproveEnable: String { language == .korean ? "자동 승인 켜기" : "Enable auto-approve" }
+    var workAutoApproveDisable: String { language == .korean ? "매번 승인받기" : "Require approval" }
+    var workAutoApproveEnabled: String { language == .korean ? "자동 승인" : "Auto-approved" }
+    var workAutoApproveDisabled: String { language == .korean ? "승인 필요" : "Approval required" }
+    var workAutoApproveUpdating: String { language == .korean ? "변경 중" : "Updating" }
+    var workAutoApproveFailed: String { language == .korean ? "변경 실패" : "Update failed" }
+    var workReadRequestTitle: String { language == .korean ? "에이전트가 출력 발췌를 요청했습니다" : "An agent requested an output excerpt" }
+    func workReadRequestBody(lines: Int) -> String {
+        language == .korean
+            ? "최근 \(lines)줄을 검토한 뒤 공유할 수 있습니다. 자동 전송하지 않습니다."
+            : "Review the last \(lines) lines before sharing. Nothing is sent automatically."
+    }
+    var workReadReview: String { language == .korean ? "검토 후 공유" : "Review and share" }
+    var workReadDecline: String { language == .korean ? "공유 안 함" : "Do not share" }
+    var workExcerptTitle: String { language == .korean ? "세션 발췌 공유" : "Share session excerpt" }
+    var workExcerptWarning: String {
+        language == .korean
+            ? "토큰, 비밀번호, 개인 경로가 없는지 확인하세요. 공유하면 채널 스레드 원장에 저장됩니다."
+            : "Check for tokens, passwords, and personal paths. Shared text is stored in the channel thread ledger."
+    }
+    var workExcerptSend: String { language == .korean ? "스레드에 공유" : "Share to thread" }
+    var workConsoleRefresh: String { language == .korean ? "세션 새로고침" : "Refresh sessions" }
+    var workConsoleSandboxTitle: String {
+        language == .korean ? "이 빌드에서는 로컬 CLI가 제한됩니다" : "Local CLI is restricted in this build"
+    }
+    var workConsoleSandboxBody: String {
+        language == .korean
+            ? "배포용 앱의 App Sandbox 정책을 별도로 승인해 전환해야 터미널 세션을 시작할 수 있습니다."
+            : "The packaged app needs an approved App Sandbox policy change before it can start terminal sessions."
+    }
+
+    func workToolTitle(_ tool: MomoWorkTool) -> String {
+        switch (tool, language) {
+        case (.claude, _): return "Claude"
+        case (.codex, _): return "Codex"
+        case (.opencode, _): return "OpenCode"
+        case (.shell, .korean): return "셸"
+        case (.shell, .english): return "Shell"
+        }
+    }
+
+    func workToolSubtitle(_ tool: MomoWorkTool) -> String {
+        switch (tool, language) {
+        case (.claude, .korean): return "Claude Code 로컬 세션"
+        case (.claude, .english): return "Local Claude Code session"
+        case (.codex, .korean): return "Codex CLI 로컬 세션"
+        case (.codex, .english): return "Local Codex CLI session"
+        case (.opencode, .korean): return "OpenCode 로컬 세션"
+        case (.opencode, .english): return "Local OpenCode session"
+        case (.shell, .korean): return "로그인 셸 세션"
+        case (.shell, .english): return "Login shell session"
+        }
+    }
+}
+
+extension MomoWorkTool {
+    var systemImage: String {
+        switch self {
+        case .claude: return "c.circle"
+        case .codex: return "terminal"
+        case .opencode: return "chevron.left.forwardslash.chevron.right"
+        case .shell: return "apple.terminal"
+        }
+    }
+}

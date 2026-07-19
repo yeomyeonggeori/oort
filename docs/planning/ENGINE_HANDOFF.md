@@ -16,9 +16,8 @@
 | A-6 | `done` | **파일 첨부 실업로드 완성** | 컴포저의 파일 선택을 세션 발급→capability URL 직송 PUT→complete→`attachmentIds` 전송에 연결하고, `Message.attachments` 카드·다운로드/열기·실패 재시도와 파일 검색을 완성. capability URL은 backend 호출 안에서만 소비하고 로그·UI·영속 상태에 노출하지 않음 | AttachmentRoutes.swift, Core `MessageAttachment.swift`, `verify_attachment_upload.sh` 계약 + macOS REST/스냅샷 테스트 (2026-07-19) |
 | A-7 | `done` | **검색 서버 승격** | 기존 destination 심을 유지하면서 서버 FTS, 300ms debounce, 최신순 cursor pagination, 오류/빈 상태와 정확한 과거 메시지 이동을 연결 | `GET /v1/workspaces/:ws/search/messages?q=&cursor=` — 멤버십 필터 서버 강제·snippet+matchOffset 제공, SearchRoutes.swift |
 | A-8 | `done` | **채널 음소거 설정 UI** | 채널 목록 `muted` 투영·음소거 아이콘·컨텍스트/설정 토글·낙관 갱신/롤백을 연결. 멘션 포함 전면 억제·unread 무영향(ADR-0124)을 UI에 명시 | ChannelRoutes/DTOs, verify_notification_mute.sh가 계약 예시 |
-| A-10 | `ready` | **Work 서랍 — SwiftTerm 터미널 + 세션 스레드 브리지 (MOMO-485)** | ADR-0114 엔진 체인 main 랜딩으로 개방: ①SwiftTerm(MIT) 임베드 + Control+backtick Work 서랍(세션 목록·활성 터미널·프로파일 3종 claude/codex/opencode+셸) ②세션 시작/종료를 483 REST로(카드는 서버가 생성 — `work.session.*` 이벤트 소비) ③스폰 승인 카드(484 approval_request 재사용)와 auto-approve 설정 UI ④세션 스레드 브리지(발췌 공유·스레드 답글=work_input) ⑤`work.control.dispatched` 소비→로컬 PTY 실행→ack REST(앱=v0 호스트). raw 스트림은 로컬 전용(D3), cwd는 라벨만 | ADR-0114(D1~D8), WorkSessionRoutes/WorkControlRoutes, verify_work_session/control/agent_e2e.sh가 계약 예시, MOMO-375 승계·종결 |
+| A-10 | `done`(track/uxui 검수 완료, main 리뷰 대기) | **Work 서랍 — SwiftTerm 터미널 + 세션 스레드 브리지 (MOMO-485)** | SwiftTerm(MIT) 임베드 + Control+backtick Work 서랍, 4종 로컬 프로파일, 세션 REST/카드·realtime 투영, 기존 approval 카드 재사용, auto-approve 변경 UI, 명시 발췌/스레드 브리지, `work.control.dispatched` 로컬 실행과 ack를 연결했다. PTY raw·실제 cwd·환경 자격증명은 서버 요청/로그/영속 상태에 넣지 않으며 `work.read`도 사용자 검토·편집 전에는 전송하지 않는다. Xcode 배포 빌드의 App Sandbox는 보안 경계 변경 없이 유지해 로컬 CLI를 fail-closed하고, SwiftPM 개발 빌드에서만 PTY를 허용한다. | ADR-0114(D1~D8), WorkSessionRoutes/WorkControlRoutes, macOS 420 tests + unsigned Xcode build + `macos-ui` gate. 실 Codex 왕복은 C-2, auto-approve 초기 snapshot은 X-6 |
 | A-9 | `done`(X-5 main 랜딩으로 완성 — 2기기 수동 QA는 C-4) | **반응/수정/삭제 UI 개방** | REST/로컬 UI(A-9 배치) + 엔진 X-5(브로커·Core replay·history 복원)로 교차 클라 realtime·재시작 복원까지 보장. UXUI 추가 작업 불요 — tombstone이 이제 history에 내려오므로 목록 렌더만 재확인 권장 | PATCH·DELETE /v1/workspaces/:ws/messages/:id, PUT·DELETE .../reactions/:emoji, GET .../channels/:ch/reactions — openapi 명세·verify_message_interaction.sh 계약 예시 |
-| A-10 | `ready` | **Interactive Work Console session + control UI (MOMO-485)** | session create/active-list/owner-end와 agent control surface를 연결하고 `kind=work_session` running/ended card·기존 thread를 렌더. spawn 승인 카드는 기존 approval UI를 재사용하며, `WorkSessionDelta`와 no-version `WorkControlDelta` dispatched/acked를 cursor 불전진으로 소비. auto-approve는 tool별 owner 설정으로만 노출하고 command/PTY/cwd/env/provider credential은 momo 앱·서버에 영속하지 않음 | MOMO-483 (`#516`) track/engine 랜딩 + MOMO-484 (`#518`) PR 대기: WorkSessionRoutes.swift, WorkControlRoutes.swift, Core WorkSession.swift/WorkControl.swift, openapi, verify_work_{session,control}.sh |
 
 ## X. UXUI → 엔진 역방향 로그
 
@@ -29,6 +28,7 @@
 | X-3 | `done`(MOMO-479 `#508`, main 랜딩) | A-4 잔여였던 정확한 롤업·과거 답글 조회·AgentWorker thread 문맥 보존 | 톱레벨 `thread` 투영, ASC cursor replies REST, `thread.updated` realtime, Worker INSERT 4곳 root_id·롤업 보존 완료. main 랜딩 시 **A-4 ready 전환**(UI: 배지 실데이터·과거 답글 로드·thread.updated 소비) | MessageRoutes.swift, Core ThreadRollup.swift, verify_thread_projection.sh (2026-07-19) |
 | X-4 | `done`(MOMO-482 `#515`, main 랜딩) | A-6 잔여: 첨부 수신 투영 부재 | history/전송/replies/`message.new`에 complete 첨부 `{id,name,mime,sizeBytes}` 투영 + Core `Message.attachments`·`DraftMessage.attachmentIds` 가산. 다운로드는 기존 content proxy, 업로드 URL 비노출 유지. **A-6 ready 전환 완료**(UI: 컴포저 실업로드 연결 + 수신 첨부 카드/다운로드) | `verify_attachment_upload.sh`(투영 단정 포함), Core `MessageAttachment.swift` (2026-07-19) |
 | X-5 | `done`(MOMO-480 `#511`+MOMO-481 `#513`, main 랜딩) | A-9 잔여: 상호작용 이벤트 브로커/Core 드랍 + history 복원 부재 | ①브로커: 투영 이벤트 no-version 발행(Centrifugo version 게이팅 실측 해소) ②Core replay: 4종 type 분기로 커서 불전진 전달 ③history: tombstone 포함+`state/editedAtMs/deletedAtMs` 투영. main 랜딩 시 **A-9 done 전환 가능**(교차 클라 realtime·재시작 복원 보장). 실 2클라 ws E2E는 C-4 검증 부채 | verify_message_interaction.sh(회귀 가드+재시작 수렴), RealtimeSubscriptionDriver.swift (2026-07-19) |
+| X-6 | `ready` | A-10 auto-approve 현재값 조회 계약 부재 | owner가 워크스페이스의 tool별 auto-approve 현재값을 앱 시작 시 복원할 수 있는 GET/snapshot 계약 추가. 응답은 tool+enabled만 포함하고 호스트·경로·자격증명은 포함하지 않음. 현재 UXUI는 거짓 기본값을 표시하지 않고 `unknown`에서 사용자의 PUT/DELETE 성공 후에만 상태를 확정한다. | WorkControlRoutes는 현재 PUT/DELETE만 제공, `work_auto_approve` 원장은 이미 존재 (2026-07-20) |
 
 ## B. 엔진 역요청 — 전량 완료 (main)
 
@@ -39,7 +39,7 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
 | # | 항목 | 상태 |
 |---|---|---|
 | C-1 | 허들 2-클라 실오디오 왕복 | 성재 마이크 필요 — A-5와 함께 |
-| C-2 | Work 실 Codex↔momo 왕복 | 엔진 트랙 후보(성재 Codex 환경 잠깐 필요) |
+| C-2 | Work 실 Codex↔momo 왕복 | UXUI 자동 계약 검수 완료. 실제 서버·Codex CLI·승인 카드·로컬 PTY·스레드 발췌의 한 사이클은 성재 환경 수동 검수 전까지 `runtime-unverified` |
 | C-3 | iOS deep link 실기기 재확인 | 케이블 Run 1회 |
 | C-4 | 상호작용 실 WebSocket 2-클라이언트 E2E | X-5는 history API 실수신+Core 회귀 테스트로 검증됨 — 실 ws 구독 2클라 왕복은 미실증(맥+아이폰 수동 QA로도 대체 가능) |
 

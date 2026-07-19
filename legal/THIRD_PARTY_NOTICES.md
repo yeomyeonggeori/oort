@@ -15,6 +15,7 @@
 | jwt-kit | https://github.com/vapor/jwt-kit | MIT | server 인증 |
 | postgres-nio | https://github.com/vapor/postgres-nio | Apache-2.0 | DB 드라이버 |
 | centrifuge-swift / SwiftCentrifuge | https://github.com/centrifugal/centrifuge-swift | MIT(검증됨, 0.9.0 LICENSE) | macOS Centrifugo live subscription |
+| SwiftTerm | https://github.com/migueldeicaza/SwiftTerm | MIT(검증됨, 1.14.0 LICENSE) | macOS Interactive Work Console 로컬 PTY |
 | swift-protobuf | https://github.com/apple/swift-protobuf | Apache-2.0(검증 필요) | SwiftCentrifuge 전이 의존성 |
 | swift-snapshot-testing / SnapshotTesting | https://github.com/pointfreeco/swift-snapshot-testing | MIT(검증됨, 1.19.2 LICENSE) | **테스트 전용** — macOS MessageBubble light/dark 스냅샷(MOMO-318). 배포 앱 번들 미포함 |
 
