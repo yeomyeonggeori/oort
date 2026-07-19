@@ -3009,7 +3009,7 @@ public final class ChatViewModel: ObservableObject {
             } else {
                 applyReaction(delta, channel: channel)
             }
-        case .presence, .huddle:
+        case .presence, .huddle, .workSession:
             // Rendered elsewhere / not material to the v0 demo surfaces.
             break
         }
