@@ -1,6 +1,6 @@
 # ADR-0114: Interactive Work Console — 에이전트가 조종하는 앱 내 터미널 (Warp/Conductor형)
 
-- Status: **Proposed v2** (2026-07-19, Fable 기안 — 성재 방향 보정 반영: "사람이 채팅에서 요청하면 에이전트가 Claude Code/Codex CLI 세션을 만들고 작업해 제공, 세션 내용은 채팅과 양방향". 성재 승인 대기)
+- Status: **Accepted** (2026-07-19, 성재 — v2 권고안 D1~D8 전체 승인 "ㄱㄱ". 파생 MOMO-483부터 순차 발급, Host Fabric은 ADR-0125로)
 - 관련: ADR-0102(실행 경로 — interactive 반쪽), ADR-0111(BYOA — 실행 호스트 모델의 원형), ADR-0004·MOMO-234(provider credential 비유입 하드 경계), MOMO-375(Control+backtick 표면 승계), docs/planning/SUPERAPP_ENGINE_GAP_2026-07-19.md
 - 참고 지형: **Warp**(에이전트가 명령 실행, 사람이 관찰·개입), **Conductor**(다중 Claude Code 세션 병렬 관리), Orca. 공통: 터미널은 에이전트의 작업 공간이고 사람은 감독자다.
 
@@ -44,7 +44,7 @@
 
 ## Decision (Proposed v2 권고안)
 
-D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 기본·raw 옵트인) · D4-A(원장 경유 control) · D5-A(spawn 승인+화이트리스트) · D6-A(터미널+스레드 병행) · D7-A(도구-불가지 프로파일) · D8-A(host_id 훅). 성재 승인 시 Accepted.
+D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 기본·raw 옵트인) · D4-A(원장 경유 control) · D5-A(spawn 승인+화이트리스트) · D6-A(터미널+스레드 병행) · D7-A(도구-불가지 프로파일) · D8-A(host_id 훅) — **2026-07-19 성재 승인, Accepted.**
 
 ## 파생 (Accepted 후 발급 예약)
 
