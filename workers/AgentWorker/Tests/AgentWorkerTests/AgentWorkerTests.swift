@@ -568,6 +568,9 @@ final class AgentWorkerTests: XCTestCase {
             hermesAPIKey: "dev",
             agentModel: "hermes-agent",
             allowLocalLoopbackExternalHermes: false,
+            momoAPIURL: "http://localhost:8080",
+            momoAgentToken: nil,
+            momoWorkHostID: nil,
             pollInterval: .milliseconds(300),
             maxAttempts: 3,
             maxConsecutiveAuto: 3,
@@ -576,6 +579,160 @@ final class AgentWorkerTests: XCTestCase {
             maxConcurrentRuns: 1,
             maxContextChars: 24000
         )
+    }
+
+    // MARK: - MOMO-486 work tool dispatch
+
+    func testWorkToolSchemasExposeCanonicalFourTools() throws {
+        let merged = WorkToolDispatcher.mergedToolDefinitions(into: .array([]))
+        guard case .array(let definitions) = merged else {
+            return XCTFail("work tools must be an OpenAI tools array")
+        }
+        let names = definitions.compactMap { definition in
+            definition.objectValue?["function"]?.objectValue?["name"]?.stringValue
+        }
+        XCTAssertEqual(names, ["work_spawn", "work_input", "work_read", "work_kill"])
+
+        let input = try XCTUnwrap(definitions.first { definition in
+            definition.objectValue?["function"]?.objectValue?["name"]?.stringValue == "work_input"
+        })
+        let maxLength = input.objectValue?["function"]?.objectValue?["parameters"]?
+            .objectValue?["properties"]?.objectValue?["text"]?.objectValue?["maxLength"]
+        XCTAssertEqual(maxLength, .int(4_000))
+    }
+
+    func testWorkToolParserAcceptsAllFourCalls() throws {
+        let runID = UUID(uuidString: "00000000-0000-7000-8000-000000000486")!
+        let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let sessionID = UUID(uuidString: "00000000-0000-7000-8000-000000000902")!
+
+        let spawn = try WorkToolDispatcher.parse(
+            name: "work_spawn",
+            arguments: #"{"tool":"codex","label":"  Fix MOMO-486  ","channel":"00000000-0000-7000-8000-000000000201"}"#,
+            currentChannelID: channelID,
+            runID: runID,
+            targetHostID: hostID
+        )
+        XCTAssertEqual(spawn.kind, .spawn)
+        XCTAssertEqual(spawn.payload["label"]?.stringValue, "Fix MOMO-486")
+        XCTAssertNil(spawn.sessionID)
+
+        let input = try WorkToolDispatcher.parse(
+            name: "work_input",
+            arguments: #"{"session_id":"00000000-0000-7000-8000-000000000902","text":"continue"}"#,
+            currentChannelID: channelID,
+            runID: runID,
+            targetHostID: hostID
+        )
+        XCTAssertEqual(input.kind, .input)
+        XCTAssertEqual(input.sessionID, sessionID)
+        XCTAssertEqual(input.payload["text"]?.stringValue, "continue")
+
+        for name in ["work_read", "work_kill"] {
+            let call = try WorkToolDispatcher.parse(
+                name: name,
+                arguments: #"{"session_id":"00000000-0000-7000-8000-000000000902"}"#,
+                currentChannelID: channelID,
+                runID: runID,
+                targetHostID: hostID
+            )
+            XCTAssertEqual(call.sessionID, sessionID)
+            XCTAssertEqual(call.payload, .object([:]))
+        }
+    }
+
+    func testWorkToolParserRejectsUUIDLengthAndUnexpectedArguments() throws {
+        let runID = UUID()
+        let channelID = UUID()
+        let hostID = UUID()
+
+        XCTAssertThrowsError(try WorkToolDispatcher.parse(
+            name: "work_read",
+            arguments: #"{"session_id":"not-a-uuid"}"#,
+            currentChannelID: channelID,
+            runID: runID,
+            targetHostID: hostID
+        )) { error in
+            XCTAssertEqual(
+                error as? WorkToolDispatcher.ValidationError,
+                .invalidUUID(field: "session_id")
+            )
+        }
+
+        let tooLongText = String(repeating: "가", count: 4_001)
+        let inputJSON = try JSONSerialization.data(withJSONObject: [
+            "session_id": UUID().uuidString,
+            "text": tooLongText,
+        ])
+        XCTAssertThrowsError(try WorkToolDispatcher.parse(
+            name: "work_input",
+            arguments: String(decoding: inputJSON, as: UTF8.self),
+            currentChannelID: channelID,
+            runID: runID,
+            targetHostID: hostID
+        )) { error in
+            XCTAssertEqual(error as? WorkToolDispatcher.ValidationError, .invalidText)
+        }
+
+        let tooLongLabel = String(repeating: "x", count: 121)
+        let spawnJSON = try JSONSerialization.data(withJSONObject: [
+            "tool": "codex",
+            "label": tooLongLabel,
+            "channel": channelID.uuidString,
+        ])
+        XCTAssertThrowsError(try WorkToolDispatcher.parse(
+            name: "work_spawn",
+            arguments: String(decoding: spawnJSON, as: UTF8.self),
+            currentChannelID: channelID,
+            runID: runID,
+            targetHostID: hostID
+        )) { error in
+            XCTAssertEqual(error as? WorkToolDispatcher.ValidationError, .invalidLabel)
+        }
+
+        XCTAssertThrowsError(try WorkToolDispatcher.parse(
+            name: "work_kill",
+            arguments: #"{"session_id":"00000000-0000-7000-8000-000000000902","force":true}"#,
+            currentChannelID: channelID,
+            runID: runID,
+            targetHostID: hostID
+        )) { error in
+            XCTAssertEqual(
+                error as? WorkToolDispatcher.ValidationError,
+                .unsupportedFields(kind: .kill)
+            )
+        }
+    }
+
+    func testWorkToolPendingAndForbiddenResponsesAreTruthful() {
+        let pending = WorkControlClient.Result(
+            controlID: UUID(),
+            status: "pending_approval",
+            responseBody: #"{"status":"pending_approval"}"#
+        )
+        XCTAssertTrue(
+            WorkToolDispatcher.responseText(for: pending, kind: .spawn)?
+                .contains("승인 대기") == true
+        )
+        XCTAssertNil(WorkToolDispatcher.responseText(
+            for: .init(controlID: UUID(), status: "dispatched", responseBody: "{}"),
+            kind: .input
+        ))
+        XCTAssertTrue(WorkToolDispatcher.responseText(
+            for: .init(controlID: UUID(), status: "dispatched", responseBody: #"{"tail":"ok"}"#),
+            kind: .read
+        )?.contains(#"{"tail":"ok"}"#) == true)
+
+        let forbidden = WorkToolDispatcher.rejectionText(for:
+            WorkControlClient.Failure.http(
+                status: 403,
+                message: "session is outside the approved requester lineage"
+            )
+        )
+        XCTAssertTrue(forbidden.contains("HTTP 403"))
+        XCTAssertTrue(forbidden.contains("outside the approved requester lineage"))
+        XCTAssertFalse(forbidden.lowercased().contains("success"))
     }
 
     private func resumePayload(

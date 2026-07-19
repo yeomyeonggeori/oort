@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -34,6 +35,7 @@ MOCK_TOOL_ARGS = {
     "limit": 2,
 }
 EQUIVALENCE_TOOL_ARGS = {"message": "MOMO-352 approved hello"}
+UUID_PATTERN = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
 
 
 class MockHermesHandler(BaseHTTPRequestHandler):
@@ -94,7 +96,8 @@ class MockHermesHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
-        chunks = [
+        _, tool_name, _ = self._tool_fixture(request)
+        chunks = [] if tool_name.startswith("work_") else [
             "김인턴 mock reply: ",
             "MOMO-004 SSE ",
             "path verified.",
@@ -189,6 +192,33 @@ class MockHermesHandler(BaseHTTPRequestHandler):
             for message in messages
             if isinstance(message, dict)
         )
+        channel_match = re.search(
+            rf"current channel UUID is ({UUID_PATTERN})", combined, re.IGNORECASE
+        )
+        input_match = re.search(
+            rf"MOMO-486 INPUT session=({UUID_PATTERN}) text=([^\n]+)",
+            combined,
+            re.IGNORECASE,
+        )
+        if input_match:
+            return (
+                "call_momo_486_input",
+                "work_input",
+                {
+                    "session_id": input_match.group(1),
+                    "text": input_match.group(2).strip(),
+                },
+            )
+        if "MOMO-486 SPAWN" in combined and channel_match:
+            return (
+                "call_momo_486_spawn",
+                "work_spawn",
+                {
+                    "tool": "codex",
+                    "label": "MOMO-486 agent spawned session",
+                    "channel": channel_match.group(1),
+                },
+            )
         if "MOMO-352" in combined:
             return "call_momo_352_echo", "momo.mock.echo", EQUIVALENCE_TOOL_ARGS
         return "call_momo_201_search", "github.search_issues", MOCK_TOOL_ARGS
@@ -217,6 +247,7 @@ class MockHermesHandler(BaseHTTPRequestHandler):
 
     def _non_stream_response(self, request: dict[str, Any]) -> dict[str, Any]:
         tool_id, tool_name, tool_args = self._tool_fixture(request)
+        content = None if tool_name.startswith("work_") else MOCK_TEXT
         return {
             "id": "chatcmpl-momo-004-mock",
             "object": "chat.completion",
@@ -227,7 +258,7 @@ class MockHermesHandler(BaseHTTPRequestHandler):
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": MOCK_TEXT,
+                        "content": content,
                         "tool_calls": [
                             {
                                 "id": tool_id,

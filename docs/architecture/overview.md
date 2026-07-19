@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-17 (ADR-0113 SE-04A) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-19 (ADR-0114 session ledger) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -138,6 +138,54 @@ agent bearer에는 공개되지 않는다. gateway callback은 계속 bearer act
 결속된다. approval callback은 `read_only|workspace_write|network_write` tier를 approval
 payload와 timeline card metadata에 보존하며 danger 상당 값은 400으로 fail-closed한다.
 
+### Interactive Work Console session ledger
+
+ADR-0114의 `work_session`은 user-owned execution host의 프로세스를 실행하거나 복제하는
+개체가 아니라, 채널에 공유할 최소 lifecycle 원장이다. active channel member가
+`POST /v1/workspaces/:ws/work-sessions`로 host ID·tool·label을 보내면 서버는 기존
+`channel_seq`를 한 번 올려 system root card, session row, `message.new`,
+`work.session.started`를 한 tenant transaction에 기록한다. root card의 기존 message
+thread가 협업 표면이므로 별도 session comment 모델은 없다.
+
+owner의 `PATCH .../work-sessions/:session {status:"ended"}`는 session lifecycle과 card
+props를 갱신하고 `work.session.ended`를 같은 transaction에 기록한다. 이 projection은
+card의 기존 `message.seq`를 재사용하므로 `message.new`가 소유한 Centrifugo version과
+경합하지 않도록 publish `version`을 보내지 않으며, Core replay cursor도 전진시키지
+않는다. Postgres가 lifecycle/history의 SoT이고, cwd·worktree/path·PID/process state·
+terminal output·provider credential은 계속 host-local이다. `host_id`는 ADR-0125의
+host registry가 Accepted되기 전까지 non-null opaque UUID이며 FK를 두지 않는다.
+
+### Interactive Work Console control gate
+
+ADR-0114 D4/D5의 `work_control`은 agent bearer가 자기 `queued|running` run과 channel에
+결속해 요청하는 closed control 원장이다. `spawn` payload는 `tool+label`, `input`은
+`text`, `read`는 optional `tail_lines`, `kill`은 빈 object만 허용하며 migration CHECK와
+route 검증이 path/cwd/env/process state/provider credential을 함께 거부한다. v0의 opaque
+`target_host_id` owner는 ADR-0125가 land하기 전까지 agent의 `owner_human_id`로 판정한다.
+
+`spawn`은 owner의 tool별 `work_auto_approve` whitelist가 있으면 즉시 dispatch되고,
+없으면 기존 `approval` + `approval_request` system card 경로를 거친다. whitelist 변경과
+audit은 한 tenant transaction이다. linked approval이 pending/denied이면 host ack로
+우회할 수 없고, 승인 decision transaction만 control을 dispatch할 수 있다. `input`과
+`kill`은 같은 requester가 승인·ack한 running session 계보에서만 승인 없이 dispatch되며,
+`read`는 같은 계보 확인만 하고 session 종료 뒤에도 허용한다.
+
+`work.control.dispatched|acked`는 card/message ordering과 독립인 no-version projection이다.
+각 outbox는 control/event별 고유 idempotency key를 가지며 Core replay cursor를 전진시키지
+않는다. 성공한 spawn ack는 owner/channel/host가 일치하는 running `work_session` FK를
+결속한다. 따라서 Postgres가 control/approval/session history의 SoT이고 Centrifugo는
+전송계층으로만 남으며, Relay와 canonical REST message write path는 변경되지 않는다.
+
+AgentWorker는 Hermes/OpenAI-compatible function surface에 `work_spawn`, `work_input`,
+`work_read`, `work_kill`을 closed schema로 추가하고 MOMO-484의 기존 `POST work-controls`만
+호출한다. 현재 channel과 v0 host ID는 모델이 선택하지 못하며 run context와 worker-local
+설정에 고정된다. 호출 credential도 agent별 raw bearer를 process env로만 받아 DB/job payload에
+복제하지 않는다. pending spawn은 승인 대기 thread 답글로 해당 run을 끝내며, 승인 decision은
+control dispatch만 수행하고 일반 tool approval처럼 worker run을 재개하지 않는다. 이후 상태는
+session card와 `work.control.*`/`work.session.*` event가 담당한다. 성공한 spawn/input/kill은
+채팅 성공 문구를 만들지 않고 `work_read` 결과만 normal response body에 포함하며, 서버가 돌려준
+계보 위반 HTTP 403은 축약하거나 성공으로 바꾸지 않는다.
+
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
 ```mermaid
@@ -215,6 +263,9 @@ erDiagram
     channel ||--o{ membership : contains
     channel ||--o{ message : contains
     member ||--o{ message : "authors (사람=에이전트 대칭)"
+    channel ||--o{ work_session : "durable lifecycle"
+    member ||--o{ work_session : owns
+    message ||--o| work_session : "system root card"
     message ||--o{ agent_run : triggers
     agent_run ||--o{ approval : requests
     member ||--o{ token : "agent_bearer(Phase 1 사용)·delegation(Phase 2)"
