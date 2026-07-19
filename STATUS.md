@@ -4,7 +4,7 @@
 
 - ADR-0114 D4/D5에 따라 `work_control`·`work_auto_approve` FORCE RLS 원장과 closed payload CHECK를 추가했다. agent bearer만 자기 active run에서 control을 요청할 수 있고, spawn은 owner의 tool whitelist hit 때만 즉시 dispatch되며 miss는 기존 approval/card decision transaction을 재사용한다. input/kill은 같은 requester의 running session 계보, read는 같은 계보만 요구한다.
 - `work.control.dispatched|acked`는 `message.seq`와 분리된 no-version·고유 idempotency-key outbox다. human host-owner ack가 성공한 spawn을 owner/channel/host가 일치하는 running `work_session` FK에 결속하며 pending/denied ack는 409로 닫힌다. Core는 두 kind를 `WorkControlDelta`로 왕복 디코드하고 replay cursor를 전진시키지 않는다.
-- server 117 tests와 Core 37 tests, OpenAPI/YAML·work-control/OpenAPI verifier bash/ShellCheck 정적 검증은 PASS했다. 격리 `verify_work_control.sh`와 전체 `runtime-db` Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+- server 117 tests, Core 37 tests, iOS MomoiOSKit 27 tests, macOS 컴파일과 docs 정적 게이트 17개 항목, OpenAPI/YAML·work-control/OpenAPI verifier bash/ShellCheck 검증은 PASS했다. 격리 `verify_work_control.sh`와 전체 `runtime-db` Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
 
 ## MOMO-483 Interactive Work Console session ledger (2026-07-19)
 

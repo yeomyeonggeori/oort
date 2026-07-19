@@ -2274,7 +2274,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] no-version `work.control.dispatched|acked` 고유 key outbox와 human host-owner ack. 성공 spawn ack는 owner/channel/host가 일치하는 running work_session에 FK 결속.
 - [x] Core `WorkControlDelta` 2종 kind decode/re-encode + 비순번 replay cursor 불전진. server 117/Core 37 tests PASS.
 - [x] `verify_work_control.sh`(27920~27923, Python >=3.10 탐색, trap cleanup, verifier 내부 rg 미사용)를 `runtime-db`에 편입. human 403, pending ack 409, denial 후 dispatch 부재, non-running input 409, RLS/closed payload를 단정.
-- Worker 상태: 구현·정적/Swift 검증 완료, Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`; PR/리뷰 대기.
+- Worker 상태: server 117/Core 37/iOS 27 tests, macOS compile, docs 정적 게이트 17개 항목 PASS. Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`; PR/리뷰 대기.
 
 ---
 
