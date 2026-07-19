@@ -3095,6 +3095,82 @@ final class MomoMacTests: XCTestCase {
         XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["POST", "GET", "POST"])
     }
 
+    func testRESTBackendColdHistoryDecodesEditedMessageAndDeletedTombstone() async throws {
+        await MockHTTPURLProtocol.reset()
+        let workspace = WorkspaceID.demo
+        let channel = ChannelID.demoGeneral
+        let editedID = MessageID(uuidString: "00000000-0000-7000-8000-000000001041")!
+        let deletedID = MessageID(uuidString: "00000000-0000-7000-8000-000000001042")!
+
+        await MockHTTPURLProtocol.setHandler { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(
+                request.url?.path,
+                "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/messages"
+            )
+            XCTAssertEqual(request.url?.query, "limit=50")
+            return MockHTTPResponse(json: """
+            {
+              "messages": [
+                {
+                  "id": "\(editedID.description)",
+                  "channelId": "\(channel.description)",
+                  "rootId": null,
+                  "seq": 40,
+                  "hlcTs": 1700000001000,
+                  "hlcCount": 0,
+                  "authorMemberId": "\(MemberID.demoHuman.description)",
+                  "type": "text",
+                  "body": "수정된 기록",
+                  "createdAtMs": 1700000000000,
+                  "state": "edited",
+                  "editedAtMs": 1700000001000,
+                  "deletedAtMs": null
+                },
+                {
+                  "id": "\(deletedID.description)",
+                  "channelId": "\(channel.description)",
+                  "rootId": null,
+                  "seq": 41,
+                  "hlcTs": 1700000002000,
+                  "hlcCount": 0,
+                  "authorMemberId": "\(MemberID.demoHuman.description)",
+                  "type": "text",
+                  "body": null,
+                  "createdAtMs": 1700000000000,
+                  "state": "deleted",
+                  "editedAtMs": 1700000001000,
+                  "deletedAtMs": 1700000002000
+                }
+              ],
+              "nextBefore": 40
+            }
+            """)
+        }
+
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(baseURL: URL(string: "https://momo.test")!),
+            session: URLSession(configuration: .momoMocked)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "token-123")
+
+        let history = try await backend.history(channel: channel, after: nil, limit: 50)
+        XCTAssertEqual(history.map(\.id), [editedID, deletedID])
+
+        let edited = try XCTUnwrap(history.first)
+        XCTAssertEqual(edited.state, .edited)
+        XCTAssertEqual(edited.body, "수정된 기록")
+        XCTAssertEqual(edited.editedAtMs, 1_700_000_001_000)
+        XCTAssertFalse(edited.isDeleted)
+
+        let tombstone = try XCTUnwrap(history.last)
+        XCTAssertEqual(tombstone.state, .deleted)
+        XCTAssertNil(tombstone.body)
+        XCTAssertEqual(tombstone.editedAtMs, 1_700_000_001_000)
+        XCTAssertEqual(tombstone.deletedAtMs, 1_700_000_002_000)
+        XCTAssertTrue(tombstone.isDeleted)
+    }
+
     func testRESTBackendSearchUsesWorkspaceFTSEndpointAndPreservesHitIdentity() async throws {
         await MockHTTPURLProtocol.reset()
         let workspace = WorkspaceID.demo

@@ -69,6 +69,84 @@ final class MessageBubbleSnapshotTests: XCTestCase {
         return image
     }
 
+    private func editedAndDeletedFixture(_ scheme: ColorScheme) -> some View {
+        let workspace = WorkspaceID()
+        let channel = ChannelID()
+        let author = Member(
+            id: MemberID(),
+            workspaceId: workspace,
+            kind: .human,
+            displayName: "상준",
+            handle: "sangjun"
+        )
+        let edited = Message(
+            id: MessageID(),
+            channelId: channel,
+            seq: 128,
+            hlcTs: 1_720_000_000_000,
+            authorMemberId: author.id,
+            state: .edited,
+            body: "배포 체크리스트를 최신 내용으로 수정했어요.",
+            createdAtMs: 1_720_000_000_000,
+            editedAtMs: 1_720_000_001_000
+        )
+        let deletedAfterEdit = Message(
+            id: MessageID(),
+            channelId: channel,
+            seq: 129,
+            hlcTs: 1_720_000_002_000,
+            authorMemberId: author.id,
+            state: .deleted,
+            body: nil,
+            createdAtMs: 1_720_000_000_000,
+            editedAtMs: 1_720_000_001_000,
+            deletedAtMs: 1_720_000_002_000
+        )
+        let copy = MomoWorkspaceCopy(language: .korean)
+
+        return VStack(alignment: .leading, spacing: 8) {
+            MessageBubble(
+                message: edited,
+                author: author,
+                groupingStyle: .standalone,
+                timelineCopy: copy
+            )
+            Divider()
+            MessageBubble(
+                message: deletedAfterEdit,
+                author: author,
+                replyCount: 3,
+                onOpenThread: {},
+                groupingStyle: .standalone,
+                timelineCopy: copy
+            )
+        }
+        .frame(width: 480, alignment: .leading)
+        .padding(16)
+        .background(Color(nsColor: .textBackgroundColor))
+        .environment(\.colorScheme, scheme)
+    }
+
+    private func renderEditedAndDeletedFixture(_ scheme: ColorScheme) throws -> NSImage {
+        let renderer = ImageRenderer(content: editedAndDeletedFixture(scheme))
+        renderer.proposedSize = ProposedViewSize(width: 480, height: 240)
+        renderer.scale = 2
+
+        let appearanceName: NSAppearance.Name = (scheme == .dark) ? .darkAqua : .aqua
+        var image: NSImage?
+        if let appearance = NSAppearance(named: appearanceName) {
+            appearance.performAsCurrentDrawingAppearance {
+                image = renderer.nsImage
+            }
+        } else {
+            image = renderer.nsImage
+        }
+        guard let image else {
+            throw XCTSkip("ImageRenderer produced no NSImage on this host")
+        }
+        return image
+    }
+
     func testMessageBubbleLightSnapshot() throws {
         assertSnapshot(
             of: try render(.light),
@@ -82,6 +160,23 @@ final class MessageBubbleSnapshotTests: XCTestCase {
             of: try render(.dark),
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: "dark"
+        )
+    }
+
+    func testEditedAndDeletedTombstoneSnapshot() throws {
+        let recordMode: SnapshotTestingConfiguration.Record? =
+            ProcessInfo.processInfo.environment["MOMO_RECORD_SNAPSHOTS"] == "1" ? .all : nil
+        assertSnapshot(
+            of: try renderEditedAndDeletedFixture(.light),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "light",
+            record: recordMode
+        )
+        assertSnapshot(
+            of: try renderEditedAndDeletedFixture(.dark),
+            as: .image(precision: 0.98, perceptualPrecision: 0.98),
+            named: "dark",
+            record: recordMode
         )
     }
 }

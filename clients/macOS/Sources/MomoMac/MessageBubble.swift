@@ -159,7 +159,7 @@ public struct MessageBubble: View {
         }
         .onHover { isHovered = $0 }
         .contextMenu {
-            if onOpenThread != nil {
+            if !message.isDeleted, onOpenThread != nil {
                 Button(timelineCopy.replyToMessage, systemImage: "arrowshape.turn.up.left", action: openThread)
             }
             if copyText != nil {
@@ -175,7 +175,6 @@ public struct MessageBubble: View {
                 }
             }
         }
-        .opacity(message.isDeleted ? 0.45 : 1)
         .confirmationDialog(
             timelineCopy.deleteMessageConfirmation,
             isPresented: $showsDeleteConfirmation
@@ -360,9 +359,9 @@ public struct MessageBubble: View {
 
     @ViewBuilder
     private var messageMetadata: some View {
-        if !reactions.isEmpty || replyCount > 0 || interactionError != nil || message.editedAtMs != nil || message.state == .edited {
+        if !reactions.isEmpty || showsReplyMetadata || interactionError != nil || showsEditedMetadata {
             VStack(alignment: .leading, spacing: 4) {
-                if !reactions.isEmpty || replyCount > 0 {
+                if !reactions.isEmpty || showsReplyMetadata {
                     MomoReactionFlowLayout(spacing: MomoTheme.MessageInteraction.compactSpacing) {
                         ForEach(reactions) { reaction in
                             if onToggleReaction != nil {
@@ -372,7 +371,7 @@ public struct MessageBubble: View {
                             }
                         }
 
-                        if replyCount > 0 {
+                        if showsReplyMetadata {
                             if onOpenThread != nil {
                                 Button(action: openThread) {
                                     Label(timelineCopy.replyCount(replyCount), systemImage: "arrowshape.turn.up.left")
@@ -388,7 +387,7 @@ public struct MessageBubble: View {
                     }
                 }
 
-                if message.editedAtMs != nil || message.state == .edited {
+                if showsEditedMetadata {
                     Text(timelineCopy.editedMessage)
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
@@ -406,6 +405,14 @@ public struct MessageBubble: View {
                 }
             }
         }
+    }
+
+    private var showsEditedMetadata: Bool {
+        !message.isDeleted && (message.editedAtMs != nil || message.state == .edited)
+    }
+
+    private var showsReplyMetadata: Bool {
+        !message.isDeleted && replyCount > 0
     }
 
     private var inlineEditor: some View {
