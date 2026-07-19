@@ -280,4 +280,5 @@ public enum RealtimeEvent: Sendable, Hashable {
     case approval(ApprovalEvent)
     case huddle(HuddleDelta)
     case workSession(WorkSessionDelta)
+    case workControl(WorkControlDelta)
 }

@@ -120,7 +120,7 @@ public enum IOSTimelineReducer {
             else { return result }
             result[index].thread = delta.rollup
         case .reaction, .typing, .presence, .agentStatus, .agentPartial, .approval, .huddle,
-             .workSession:
+             .workSession, .workControl:
             break
         }
         return sorted(result)
