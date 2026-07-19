@@ -2252,12 +2252,16 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] 019_work_session migration(RLS FORCE·cwd 컬럼 의도적 부재·host_id FK는 0125 예약) + POST(같은 tx: row+세션 카드 메시지+outbox started)/PATCH(소유자만·props 갱신·seq 불변)/GET ?active=1.
 - [ ] outbox 2 kind no-version 발행 + Core WorkSessionDelta·비순번 분기 + verify_work_session.sh(카드 history/이벤트 실수신/스레드 답글/403/RLS/cwd 부재) + runtime-db 편입. 상세: issue #516 본문(패킷 겸용).
 
-### ☐ ADR-0114/0125 후속 발급 예약 (엔진 체인 — 483 랜딩 후 순차)
-- [ ] MOMO-484: work.spawn/input/read/kill tool-call + 승인 게이트(auto-approve 화이트리스트) + outbox work.control.* + 호스트 ack `[runtime-db]`
-- [ ] MOMO-486: AgentWorker work.* tool 디스패치 + E2E(채팅 요청→spawn 승인→mock CLI→스레드 회신) `[runtime-db]`
-- [ ] MOMO-485(UXUI, A-10 등재 예정): SwiftTerm+Work 서랍+스레드 브리지+스폰 승인 카드 — 엔진 체인 마무리 시 동생 위임, 수동 QA 부채(2기기 상호작용·허들 오디오·첨부 실클릭) 체크리스트/자동화 티켓과 함께 패키징
-- [ ] 0125 파생 487~490(work_host/workd/work_pool/호스트 선택기)은 v0 배치 후
-- [ ] 소형: orphan 첨부 GC(complete-미귀속 행 정리 — UXUI 제기, 474는 pending만 커버) + C-4 자동화(실 ws 2-클라 verifier)
+### ☑ MOMO-486 (`#520`) 수용기준 — AgentWorker work.* tool + 채팅→spawn→스레드 E2E (ADR-0114 엔진 3) `[runtime-db]` · **PR base=track/engine**
+- [x] work_spawn/input/read/kill tool 4종 — Hermes tool call 파싱 → 484 REST(agent bearer) 디스패치, 서버 신규 API 없음. pending 시 "승인 대기" 응답·중복 회신 금지.
+- [x] run-liveness 가드(queued/running run만 control 발급 — 죽은 run 명의 차단) + 승인-후-run-재개 차단 + 계보 403 정직 반영·인자 검증.
+- [x] verify_work_agent_e2e.sh(멘션→spawn→승인→dispatched→호스트 ack+세션→스레드 input→비계보 403→RLS) + runtime-db 편입. 상세: issue #520.
+- 랜딩: PR #521 squash → **track/engine**(2026-07-20, main 대기). 실런: E2E verifier PASS + AgentWorker 35/server 118 + runtime-db 게이트 실패 0. 검수 수정 2건(verifier의 479 계약 모순 단정·484 verifier liveness 정합). **ADR-0114 엔진 체인(483·484·486) 완주.**
+
+### ☐ ADR-0114/0125 후속 발급 예약
+- [ ] MOMO-485(UXUI, A-10 등재): SwiftTerm+Work 서랍+스레드 브리지+스폰 승인 카드 — main 랜딩 시 동생 위임(QA 패키지 동봉)
+- [ ] 0125 파생 487~490(work_host/workd/work_pool/호스트 선택기) — T3 파일럿(research/17-01)과 병행
+- [ ] 소형: orphan 첨부 GC(complete-미귀속 행 — UXUI 제기) + C-4 자동화(실 ws 2-클라 verifier)
 
 ### ☐ ADR-gated 후속 — Multi-workspace
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.

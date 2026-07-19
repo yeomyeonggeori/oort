@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-07-20 (Fable 엔진 트랙) · ADR-0114 엔진 체인(483·484·486) 완주 — track/engine, main 대기
+- 483 work_session 원장(#517) → 484 work.control+승인 게이트(#519, worker capacity 사망 7커밋 인수) → 486 AgentWorker tool+E2E(#521). 전부 verifier+runtime-db 게이트 실패 0.
+- "채팅 멘션 → 에이전트 work_spawn → 승인 카드 → 호스트 ack+세션 → 스레드 개입"이 mock E2E로 완결. 486이 run-liveness 가드(죽은 run 명의 control 차단)를 추가해 484 verifier를 계약 정합 갱신.
+- 다음: 성재 승인 시 엔진→main 머지 → A-10(MOMO-485 SwiftTerm) 동생 위임+QA 패키지 → T3 파일럿(17-01) 착수 → 0125 파생 487~490.
+
+---
+
 ## 2026-07-19 (Fable 통합) · UXUI A-4/A-6 배치 → main ff (성재 승인)
 - track/uxui@37bcd12(+2,252) 최종 리뷰 Blocker/High 0: capability URL 무유출(ephemeral 직송·Authorization 원천 부재)·complete 6필드 대조·tombstone 첨부 가드·replies root 탈출 검증·경로 방어 2중 전수 코드 대조. main 동기화 후 게이트 재실행 PASS(416/416) → main=8607580 fast-forward.
 - A큐 전 항목 done — 핸드오프 UI 큐 완전 소진(A-1~A-9). 잔여: 동생 제기 orphan 첨부 GC(complete-미귀속 행) 엔진 티켓화 예정, Drive 실자격 E2E·2기기 수동 QA는 검증 부채 유지.
