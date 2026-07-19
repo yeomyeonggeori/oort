@@ -199,13 +199,13 @@ got="$(sql_value <<SQL
 SELECT count(*) FROM outbox
  WHERE payload->'data'->>'type'='work.session.started'
    AND payload->'data'->'payload'->>'session_id' ILIKE '$SESSION_ID'
-   AND jsonb_object_length(payload)=3
+   AND (SELECT count(*) FROM jsonb_object_keys(payload))=3
    AND NOT (payload ? 'version')
-   AND jsonb_object_length(payload->'data')=5
+   AND (SELECT count(*) FROM jsonb_object_keys(payload->'data'))=5
    AND payload->'data'->>'v'='1'
    AND (payload->'data'->>'seq')::bigint=$CARD_SEQ
    AND (payload->'data'->>'ts')::bigint=$STARTED_AT_MS
-   AND jsonb_object_length(payload->'data'->'payload')=8
+   AND (SELECT count(*) FROM jsonb_object_keys(payload->'data'->'payload'))=8
    AND payload->'data'->'payload'->>'channel_id' ILIKE '$CHANNEL_ID'
    AND payload->'data'->'payload'->>'root_message_id' ILIKE '$ROOT_MESSAGE_ID'
    AND payload->'data'->'payload'->>'member_id' ILIKE '$OWNER_ID'
@@ -342,13 +342,13 @@ got="$(sql_value <<SQL
 SELECT count(*) FROM outbox
  WHERE payload->'data'->>'type'='work.session.ended'
    AND payload->'data'->'payload'->>'session_id' ILIKE '$SESSION_ID'
-   AND jsonb_object_length(payload)=3
+   AND (SELECT count(*) FROM jsonb_object_keys(payload))=3
    AND NOT (payload ? 'version')
-   AND jsonb_object_length(payload->'data')=5
+   AND (SELECT count(*) FROM jsonb_object_keys(payload->'data'))=5
    AND payload->'data'->>'v'='1'
    AND (payload->'data'->>'seq')::bigint=$CARD_SEQ
    AND (payload->'data'->>'ts')::bigint=$ENDED_AT_MS
-   AND jsonb_object_length(payload->'data'->'payload')=9
+   AND (SELECT count(*) FROM jsonb_object_keys(payload->'data'->'payload'))=9
    AND payload->'data'->'payload'->>'channel_id' ILIKE '$CHANNEL_ID'
    AND payload->'data'->'payload'->>'root_message_id' ILIKE '$ROOT_MESSAGE_ID'
    AND payload->'data'->'payload'->>'member_id' ILIKE '$OWNER_ID'
