@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-19 (Fable 통합) · UXUI A-4/A-6 배치 → main ff (성재 승인)
+- track/uxui@37bcd12(+2,252) 최종 리뷰 Blocker/High 0: capability URL 무유출(ephemeral 직송·Authorization 원천 부재)·complete 6필드 대조·tombstone 첨부 가드·replies root 탈출 검증·경로 방어 2중 전수 코드 대조. main 동기화 후 게이트 재실행 PASS(416/416) → main=8607580 fast-forward.
+- A큐 전 항목 done — 핸드오프 UI 큐 완전 소진(A-1~A-9). 잔여: 동생 제기 orphan 첨부 GC(complete-미귀속 행) 엔진 티켓화 예정, Drive 실자격 E2E·2기기 수동 QA는 검증 부채 유지.
+- 트랙 재정렬(engine=uxui=main). 다음: MOMO-483 랜딩 시 A-10(Work 서랍/SwiftTerm — MOMO-485)이 UXUI 다음 소비물로 등재 예정.
+
 ## 2026-07-19 (Fable 기획+엔진) · ADR-0114 Accepted → MOMO-483 착수 + ADR-0125 기안
 - 성재 "ㄱㄱ"로 0114 v2(D1~D8) Accepted. MOMO-483(#516, work_session 원장+세션 카드/스레드 바인딩) 발급·worker 가동 — no-version 발행·비순번 분기 등 479/480 확립 계약을 패킷에 명시.
 - ADR-0125(Work Host Fabric) Proposed 기안: work_host 레지스트리(scope=member|workspace·outbound-only) · T2 workd(SSH 부트스트랩·원격 로그인 브리지) · T3 재판매 시작(기질-불가지 프로비저너, 자체 Firecracker는 v2) · 3계층 샌드박스 합성 · work_pool 동적 슬롯 · 호스트 선택기(로컬 우선) · 워크스페이스 과금+BYOA · 보안 기본값. 파생 487~490 예약. 성재 승인 대기.
