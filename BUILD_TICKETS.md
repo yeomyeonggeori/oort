@@ -2259,6 +2259,15 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] 카드 답글은 기존 message/thread 경로 재사용. OpenAPI와 `verify_work_session.sh`를 `runtime-db`에 편입해 history props·Centrifugo 수신·owner/RLS/no-cwd를 단정.
 - worker 정적/Swift 검증 PASS. 격리 Docker verifier와 전체 runtime-db는 오케스트레이터 실런 전까지 `runtime-unverified`; 상세 계약은 issue #516.
 
+### ☐ MOMO-484 (`#518`) 수용기준 — Work Console control + approval gate `[runtime-db]` · **PR base=track/engine**
+- [x] migration 020 `work_control`/`work_auto_approve`: uuidv7·work_session FK·closed kind payload CHECK·FORCE RLS. path/cwd/env/process/provider credential은 DB와 route 양쪽에서 거부.
+- [x] human owner PUT/DELETE whitelist와 실제 변경 시 같은 tenant transaction의 audit. agent bearer 전용 POST는 run actor/channel을 결속하고 human bearer를 403으로 거부.
+- [x] spawn whitelist hit 즉시 dispatch/miss 기존 approval_request card 경로, approval decision transaction 재사용. input/kill은 같은 requester의 running session 계보, read는 같은 계보에서 승인 불요. pending/denied ack 우회 불가.
+- [x] no-version `work.control.dispatched|acked` 고유 key outbox와 human host-owner ack. 성공 spawn ack는 owner/channel/host가 일치하는 running work_session에 FK 결속.
+- [x] Core `WorkControlDelta` 2종 kind decode/re-encode + 비순번 replay cursor 불전진. server 117/Core 37 tests PASS.
+- [x] `verify_work_control.sh`(27920~27923, Python >=3.10 탐색, trap cleanup, verifier 내부 rg 미사용)를 `runtime-db`에 편입. human 403, pending ack 409, denial 후 dispatch 부재, non-running input 409, RLS/closed payload를 단정.
+- Worker 상태: 구현·정적/Swift 검증 완료, Docker 실런은 오케스트레이터 담당이라 `runtime-unverified`; PR/리뷰 대기.
+
 ---
 
 > **정합 원칙:** 이전 티켓이 만든 파일/패키지를 깨지 말 것. 스펙·`schema_v0.sql`과 정합.
