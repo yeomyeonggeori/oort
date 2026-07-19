@@ -2923,8 +2923,34 @@ components:
           type: integer
           format: int64
           description: Epoch milliseconds of deletion; populated for history tombstones.
+        attachments:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/MessageAttachment"
+          description: >
+            Completed attachments bound to this message, ordered by creation time.
+            Omitted when empty. Upload capability URLs and archive provider identifiers
+            are never included; download bytes through the authenticated content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
+
+    MessageAttachment:
+      type: object
+      required: [id, name, mime, sizeBytes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        mime:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 104857600
 
     ThreadRollup:
       type: object
