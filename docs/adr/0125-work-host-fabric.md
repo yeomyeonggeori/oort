@@ -1,6 +1,6 @@
 # ADR-0125: Work Host Fabric — 세션이 앱 수명을 넘는다 (self-host workd + momo Cloud)
 
-- Status: **Proposed** (2026-07-19, Fable 기안 — 성재 승인 대기)
+- Status: **Accepted** (2026-07-19, 성재 — D1~D8 권고안 전체 승인. 파생 487~490은 0114 v0 배치(483~486) 랜딩 후 순차 발급)
 - 관련: ADR-0114(Accepted — D8 host_id 훅이 본 ADR의 접합점), ADR-0121(Accepted — D1-C momo Cloud 범위 제외분을 본 ADR이 인수, D5-A "운영을 판다" BM 승계), ADR-0004·MOMO-234(자격증명 비유입 — 전 계층 불변), ADR-0120(PushRelay — 호스트 등록·outbound 다이얼 패턴의 원형), research/17-work-host-fabric/00(레퍼런스 실사·비용 모델·성재 보정 2건)
 - 발단: 성재 숙원 — "0114 v0 한계(세션=맥 앱 수명)를 뚫는다. 셀프호스팅 또는 유료 cloud, SSH 베이스, 로컬 있으면 물어보고 로컬."
 
@@ -40,7 +40,7 @@
 
 ## Decision (Proposed 권고안)
 
-D1-A(레지스트리·outbound-only) · D2-A(workd+SSH 부트스트랩+로그인 브리지) · D3-A(재판매 시작, 기질-불가지 프로비저너) · D4-A(3계층 합성) · D5-A(풀 원장) · D6-A(호스트 선택기·로컬 우선) · D7-A(워크스페이스 과금·BYOA) · D8-A(보안 기본값). 성재 승인 시 Accepted.
+D1-A(레지스트리·outbound-only) · D2-A(workd+SSH 부트스트랩+로그인 브리지) · D3-A(재판매 시작, 기질-불가지 프로비저너) · D4-A(3계층 합성) · D5-A(풀 원장) · D6-A(호스트 선택기·로컬 우선) · D7-A(워크스페이스 과금·BYOA) · D8-A(보안 기본값) — **2026-07-19 성재 승인, Accepted.**
 
 ## 파생 (Accepted 후 발급 예약 — 0114 파생 483~486 랜딩 후 순차)
 

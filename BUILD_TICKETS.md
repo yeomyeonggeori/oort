@@ -2248,9 +2248,20 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] verify_attachment_upload 확장(history+realtime 투영·pending/failed 미노출·RLS). 상세: issue #514 본문(패킷 겸용).
 - 랜딩: PR #515 squash → **track/engine**(2026-07-19, main 대기). 실런: 확장 verifier PASS + server 113/Core 33 + runtime-db 게이트 실패 0. main 랜딩 시 A-6 ready.
 
-### ☐ ADR-gated 후속 — Multi-workspace + Interactive Work Console
+### ☐ MOMO-483 (`#516`) 수용기준 — work_session 원장 + 세션 카드/스레드 바인딩 (ADR-0114 엔진 1) `[runtime-db]` · **PR base=track/engine**
+- [ ] 019_work_session migration(RLS FORCE·cwd 컬럼 의도적 부재·host_id FK는 0125 예약) + POST(같은 tx: row+세션 카드 메시지+outbox started)/PATCH(소유자만·props 갱신·seq 불변)/GET ?active=1.
+- [ ] outbox 2 kind no-version 발행 + Core WorkSessionDelta·비순번 분기 + verify_work_session.sh(카드 history/이벤트 실수신/스레드 답글/403/RLS/cwd 부재) + runtime-db 편입. 상세: issue #516 본문(패킷 겸용).
+
+### ☐ ADR-0114/0125 후속 발급 예약 (엔진 체인 — 483 랜딩 후 순차)
+- [ ] MOMO-484: work.spawn/input/read/kill tool-call + 승인 게이트(auto-approve 화이트리스트) + outbox work.control.* + 호스트 ack `[runtime-db]`
+- [ ] MOMO-486: AgentWorker work.* tool 디스패치 + E2E(채팅 요청→spawn 승인→mock CLI→스레드 회신) `[runtime-db]`
+- [ ] MOMO-485(UXUI, A-10 등재 예정): SwiftTerm+Work 서랍+스레드 브리지+스폰 승인 카드 — 엔진 체인 마무리 시 동생 위임, 수동 QA 부채(2기기 상호작용·허들 오디오·첨부 실클릭) 체크리스트/자동화 티켓과 함께 패키징
+- [ ] 0125 파생 487~490(work_host/workd/work_pool/호스트 선택기)은 v0 배치 후
+- [ ] 소형: orphan 첨부 GC(complete-미귀속 행 정리 — UXUI 제기, 474는 pending만 커버) + C-4 자동화(실 ws 2-클라 verifier)
+
+### ☐ ADR-gated 후속 — Multi-workspace
 - [ ] ADR-0117이 account/session/token/server identity persistence와 switch semantics를 Accepted로 결정하기 전 multi-workspace rail 구현 금지.
-- [ ] MOMO-375는 `Control+backtick` transcript/activity drawer까지만 계획. command input·PTY/process·cwd/worktree·Codex/Claude/OpenCode session은 ADR-0114 Accepted 후 새 numeric builder로 발급.
+- [ ] (해소) ADR-0114/0125 Accepted(2026-07-19) — Work Console 게이트 해제, MOMO-375는 MOMO-485가 승계·종결 예정.
 - [ ] momo 서버는 user-owned execution host의 process/provider credential을 보관하거나 proxy하지 않음.
 
 ---
