@@ -31,6 +31,8 @@
 | X-5 | `done`(MOMO-480 `#511`+MOMO-481 `#513`, main 랜딩) | A-9 잔여: 상호작용 이벤트 브로커/Core 드랍 + history 복원 부재 | ①브로커: 투영 이벤트 no-version 발행(Centrifugo version 게이팅 실측 해소) ②Core replay: 4종 type 분기로 커서 불전진 전달 ③history: tombstone 포함+`state/editedAtMs/deletedAtMs` 투영. main 랜딩 시 **A-9 done 전환 가능**(교차 클라 realtime·재시작 복원 보장). 실 2클라 ws E2E는 C-4 검증 부채 | verify_message_interaction.sh(회귀 가드+재시작 수렴), RealtimeSubscriptionDriver.swift (2026-07-19) |
 | X-6 | `done`(MOMO-493 #529 → track/engine, main 대기) | A-10 auto-approve 현재값 조회 계약 부재 | owner가 워크스페이스의 tool별 auto-approve 현재값을 앱 시작 시 복원할 수 있는 GET/snapshot 계약 추가. 응답은 tool+enabled만 포함하고 호스트·경로·자격증명은 포함하지 않음. 현재 UXUI는 거짓 기본값을 표시하지 않고 `unknown`에서 사용자의 PUT/DELETE 성공 후에만 상태를 확정한다. | WorkControlRoutes는 현재 PUT/DELETE만 제공, `work_auto_approve` 원장은 이미 존재 (2026-07-20) |
 
+| X-7 | `needs-engine-contract` | fresh DB에서 앱의 "에이전트 초대"가 실패 — UXUI `inviteDogfoodAgent()`는 기존 `@hermes` 멤버 탐색만 하고 서버에 에이전트 생성 API가 없음(이번 실 Hermes E2E는 fixture 우회) | 관리자용 에이전트 생성 또는 원자적 pairing API(생성→채널 초대→credential 발급→gateway 연결) + UXUI가 이를 호출하도록 교체. 수용: fresh DB에서 앱만으로 완주 | UXUI 발견(2026-07-20, 실 Hermes E2E 중), AgentCredentialRoutes·pairing wizard(MOMO-262) 연계 |
+
 ## B. 엔진 역요청 — 전량 완료 (main)
 
 B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개방(MOMO-476) · B-4 알림 음소거(ADR-0124, MOMO-477) — 2026-07-18 종결.
