@@ -81,6 +81,7 @@ public struct MessageListView: View {
     @State private var selectedMentionCandidateID: MemberID?
     @State private var hoveredMentionCandidateID: MemberID?
     @State private var measuredMentionPanelHeight: CGFloat = 0
+    @State private var composerEditorHeight = MomoTheme.composerMinimumHeight
     @State private var suppressedMentionDraft: String?
     @State private var isActionLauncherPresented = false
     @State private var localDraftSheet: MomoComposerDraftSheet?
@@ -985,10 +986,6 @@ public struct MessageListView: View {
             ? []
             : Array(viewModel.mentionAutocompleteCandidates().prefix(MomoTheme.mentionAutocompleteMaximumRows))
         return VStack(alignment: .leading, spacing: 8) {
-            if !viewModel.visibleTypingMembers.isEmpty {
-                typingIndicator(copy: copy)
-            }
-
             if !attachmentDrafts.isEmpty {
                 MomoAttachmentDraftStrip(
                     drafts: attachmentDrafts,
@@ -1066,43 +1063,52 @@ public struct MessageListView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
 
-            TextField(copy.messagePlaceholder, text: $viewModel.composerDraft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...5)
-                .font(.body)
-                .padding(.vertical, 12)
-                .focused($isComposerFocused)
-                .accessibilityIdentifier("momo-message-composer")
-                .onSubmit {
-                    if candidates.isEmpty {
-                        submit()
-                    } else {
+            ZStack(alignment: .topLeading) {
+                MomoMessageComposerTextView(
+                    text: $viewModel.composerDraft,
+                    height: $composerEditorHeight,
+                    isFocused: Binding(
+                        get: { isComposerFocused },
+                        set: { isComposerFocused = $0 }
+                    ),
+                    accessibilityLabel: copy.messagePlaceholder,
+                    hasMentionCandidates: !candidates.isEmpty,
+                    onSubmit: {
+                        if candidates.isEmpty {
+                            submit()
+                        } else {
+                            completeSelectedMention(from: candidates)
+                        }
+                    },
+                    onMoveMentionSelection: { offset in
+                        _ = moveMentionSelection(in: candidates, offset: offset)
+                    },
+                    onCompleteMention: {
                         completeSelectedMention(from: candidates)
+                    },
+                    onDismissMention: {
+                        suppressedMentionDraft = viewModel.composerDraft
+                        selectedMentionCandidateID = nil
                     }
+                )
+                .frame(height: composerEditorHeight)
+                .accessibilityIdentifier("momo-message-composer")
+
+                if viewModel.composerDraft.isEmpty {
+                    Text(copy.messagePlaceholder)
+                        .font(.body)
+                        .foregroundStyle(.tertiary)
+                        .padding(.vertical, MomoTheme.ComposerAction.contentSpacing)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .onKeyPress(.upArrow) {
-                    moveMentionSelection(in: candidates, offset: -1)
+            }
+            .onChange(of: viewModel.composerDraft) { _, draft in
+                if draft != suppressedMentionDraft {
+                    suppressedMentionDraft = nil
                 }
-                .onKeyPress(.downArrow) {
-                    moveMentionSelection(in: candidates, offset: 1)
-                }
-                .onKeyPress(.tab) {
-                    guard !candidates.isEmpty else { return .ignored }
-                    completeSelectedMention(from: candidates)
-                    return .handled
-                }
-                .onKeyPress(.escape) {
-                    guard !candidates.isEmpty else { return .ignored }
-                    suppressedMentionDraft = viewModel.composerDraft
-                    selectedMentionCandidateID = nil
-                    return .handled
-                }
-                .onChange(of: viewModel.composerDraft) { _, draft in
-                    if draft != suppressedMentionDraft {
-                        suppressedMentionDraft = nil
-                    }
-                    viewModel.composerDraftDidChange(draft)
-                }
+                viewModel.composerDraftDidChange(draft)
+            }
 
             Button(action: submit) {
                 ZStack {
@@ -1373,23 +1379,6 @@ public struct MessageListView: View {
                 !viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || !attachmentDrafts.isEmpty
             )
-    }
-
-    private func typingIndicator(copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "ellipsis.bubble.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(MomoTheme.humanAccent)
-            Text(copy.typingIndicator(viewModel.visibleTypingMembers.map(\.displayName)))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(MomoTheme.humanAccent.opacity(0.08), in: Capsule())
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func mentionAutocomplete(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
