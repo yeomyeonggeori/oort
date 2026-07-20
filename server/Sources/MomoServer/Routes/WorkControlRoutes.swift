@@ -213,8 +213,8 @@ struct WorkControlRoutes: Sendable {
     @Sendable
     func acknowledge(_ request: Request, context: AppRequestContext) async throws -> Response {
         let principal = try context.requirePrincipal()
-        guard principal.kind == .human else {
-            throw HTTPError(.forbidden, message: "work control ack requires the host app")
+        guard principal.kind == .human || principal.kind == .workHost else {
+            throw HTTPError(.forbidden, message: "work control ack requires the execution host")
         }
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let controlID = try Self.controlID(context)
@@ -245,8 +245,14 @@ struct WorkControlRoutes: Sendable {
             ) else {
                 throw HTTPError(.notFound, message: "work host not found")
             }
-            guard hostOwnerMemberID == principal.memberID else {
-                throw HTTPError(.forbidden, message: "only the registered host owner can acknowledge")
+            if principal.kind == .workHost {
+                guard UUID(uuidString: locked.targetHostId) == principal.tokenID else {
+                    throw HTTPError(.forbidden, message: "work host cannot acknowledge another host control")
+                }
+            } else {
+                guard hostOwnerMemberID == principal.memberID else {
+                    throw HTTPError(.forbidden, message: "only the registered host owner can acknowledge")
+                }
             }
 
             let ackSessionID: UUID?
@@ -258,8 +264,7 @@ struct WorkControlRoutes: Sendable {
                     conn: conn,
                     logger: db.logger,
                     control: locked,
-                    sessionID: sessionID,
-                    hostOwnerMemberID: principal.memberID
+                    sessionID: sessionID
                 )
                 ackSessionID = sessionID
             } else {
@@ -977,19 +982,27 @@ struct WorkControlRoutes: Sendable {
         conn: PostgresConnection,
         logger: Logger,
         control: WorkControlDTO,
-        sessionID: UUID,
-        hostOwnerMemberID: UUID
+        sessionID: UUID
     ) async throws {
         let rows = try await conn.query(
             """
             SELECT 1
-              FROM work_session
-             WHERE id = \(sessionID)
-               AND workspace_id = \(UUID(uuidString: control.workspaceId)!)
-               AND channel_id = \(UUID(uuidString: control.channelId)!)
-               AND member_id = \(hostOwnerMemberID)
-               AND host_id = \(UUID(uuidString: control.targetHostId)!)
-               AND status = 'running'
+              FROM work_session ws
+              JOIN member requester
+                ON requester.id = \(UUID(uuidString: control.requesterMemberId)!)
+               AND requester.workspace_id = ws.workspace_id
+               AND requester.kind = 'agent'
+               AND requester.status = 'active'
+               AND requester.deleted_at IS NULL
+              JOIN agent a
+                ON a.member_id = requester.id
+               AND a.workspace_id = requester.workspace_id
+             WHERE ws.id = \(sessionID)
+               AND ws.workspace_id = \(UUID(uuidString: control.workspaceId)!)
+               AND ws.channel_id = \(UUID(uuidString: control.channelId)!)
+               AND ws.member_id = a.owner_human_id
+               AND ws.host_id = \(UUID(uuidString: control.targetHostId)!)
+               AND ws.status = 'running'
              LIMIT 1
             """,
             logger: logger
@@ -1078,7 +1091,7 @@ struct WorkControlRoutes: Sendable {
         return try rows.first.map(decodeControl)
     }
 
-    private static func decodeControl(_ row: PostgresRow) throws -> WorkControlDTO {
+    static func decodeControl(_ row: PostgresRow) throws -> WorkControlDTO {
         let decoded = try row.decode(
             (UUID, UUID, UUID, UUID, UUID, UUID?, String, String,
              String, UUID?, Date, Date).self

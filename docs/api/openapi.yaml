@@ -727,6 +727,36 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/pending-controls:
+    get:
+      tags: [work-hosts, work-controls]
+      operationId: listPendingWorkHostControls
+      summary: Poll dispatched controls targeted at this execution host.
+      description: >
+        ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8
+        bytes `momo.work_host.request.v1\nGET\n<path>\n<lowercase workspace
+        UUID>\n<lowercase host UUID>\n<sentAtMs>` with its registered Ed25519
+        key. Only unrevoked status=dispatched controls targeted at that host
+        are returned; no human or agent bearer is accepted.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+      responses:
+        "200":
+          description: Bounded oldest-first dispatched controls for this host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingWorkControlsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/work-hosts/{workHostId}:
     delete:
       tags: [work-hosts]
@@ -783,6 +813,7 @@ paths:
         deliberately absent.
       security:
         - bearerAuth: []
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       requestBody:
@@ -853,11 +884,13 @@ paths:
       operationId: endWorkSession
       summary: End a running session without changing its card message seq.
       description: >
-        Only the creating member may end the session. The ledger row and card
-        props update beside a no-version work.session.ended outbox; the message
-        row is not edited and no channel seq is minted.
+        The creating member, or the MomoHost-signed execution host bound to the
+        session, may end it. The ledger row and card props update beside a
+        no-version work.session.ended outbox; the message row is not edited and
+        no channel seq is minted.
       security:
         - bearerAuth: []
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkSessionId"
@@ -968,13 +1001,15 @@ paths:
     post:
       tags: [work-controls]
       operationId: acknowledgeWorkControl
-      summary: Acknowledge one dispatched control from its registered host owner.
+      summary: Acknowledge one dispatched control from its registered execution host.
       description: >
-        Human bearer only. A successful spawn acknowledgement must bind a
-        running work_session owned by the caller with the same channel and host
-        UUID. Pending or denied controls cannot be acknowledged.
+        The registering human owner or the MomoHost-signed execution host may
+        acknowledge. A successful spawn acknowledgement must bind a running
+        work_session owned by the requesting agent's human owner with the same
+        channel and host UUID. Pending or denied controls cannot be acknowledged.
       security:
         - bearerAuth: []
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkControlId"
@@ -2491,6 +2526,14 @@ components:
         App access token (15m TTL) from login/join/refresh, sent as
         `Authorization: Bearer <accessToken>`. Tokens are hash-persisted
         server-side and revocable (MOMO-300).
+    workHostAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: >
+        `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At
+        and X-Momo-Work-Host-Signature. This is an Ed25519 request signature,
+        not a durable bearer credential.
 
   parameters:
     WorkspaceId:
@@ -2535,6 +2578,21 @@ components:
       schema:
         type: string
         format: uuid
+    WorkHostSentAt:
+      name: X-Momo-Work-Host-Sent-At
+      in: header
+      required: true
+      description: Unix epoch milliseconds inside the five-minute clock-skew window.
+      schema:
+        type: integer
+        format: int64
+    WorkHostSignature:
+      name: X-Momo-Work-Host-Signature
+      in: header
+      required: true
+      description: Raw 64-byte Ed25519 signature in standard base64.
+      schema:
+        type: string
     WorkControlId:
       name: workControlId
       in: path
@@ -3246,6 +3304,15 @@ components:
           items:
             $ref: "#/components/schemas/WorkHost"
 
+    PendingWorkControlsResponse:
+      type: object
+      required: [workControls]
+      properties:
+        workControls:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkControl"
+
     # ---- Work sessions ------------------------------------------------------
     CreateWorkSessionRequest:
       type: object
@@ -3266,6 +3333,12 @@ components:
           minLength: 1
           maxLength: 120
           description: Display-only label. Filesystem cwd/path is never stored.
+        controlId:
+          type: string
+          format: uuid
+          description: >
+            Required only for MomoHost-signed spawn dispatch. The server binds
+            host, channel, tool, label, and session owner to this dispatched control.
 
     EndWorkSessionRequest:
       type: object

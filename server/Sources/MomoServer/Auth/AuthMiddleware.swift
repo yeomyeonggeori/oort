@@ -21,15 +21,18 @@ struct AuthMiddleware: RouterMiddleware {
     let jwt: JWTService
     let tokenStore: TokenStore
     let legacyGatewayConfig: AgentGatewayConfig?
+    let workHostAuthenticator: WorkHostAuthenticator?
 
     init(
         jwt: JWTService,
         tokenStore: TokenStore,
-        legacyGatewayConfig: AgentGatewayConfig? = nil
+        legacyGatewayConfig: AgentGatewayConfig? = nil,
+        workHostAuthenticator: WorkHostAuthenticator? = nil
     ) {
         self.jwt = jwt
         self.tokenStore = tokenStore
         self.legacyGatewayConfig = legacyGatewayConfig
+        self.workHostAuthenticator = workHostAuthenticator
     }
 
     func handle(
@@ -37,6 +40,27 @@ struct AuthMiddleware: RouterMiddleware {
         context: Context,
         next: (Request, Context) async throws -> Response
     ) async throws -> Response {
+        if let authorization = request.headers[.authorization],
+           WorkHostAuthenticator.hostID(fromAuthorization: authorization) != nil
+        {
+            guard let workHostAuthenticator else {
+                throw WorkHostAuthenticator.unauthorized()
+            }
+            let identity = try await workHostAuthenticator.authenticate(
+                authorization: authorization,
+                request: request
+            )
+            var context = context
+            context.principal = AuthPrincipal(
+                memberID: identity.ownerMemberID,
+                workspaceID: identity.workspaceID,
+                scopes: [],
+                kind: .workHost,
+                tokenID: identity.hostID
+            )
+            return try await next(request, context)
+        }
+
         guard let header = request.headers[.authorization],
               header.lowercased().hasPrefix("bearer ")
         else {

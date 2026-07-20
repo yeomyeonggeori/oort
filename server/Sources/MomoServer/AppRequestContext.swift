@@ -15,8 +15,8 @@ import NIOCore
 struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
     var coreContext: CoreRequestContextStorage
 
-    /// Authenticated principal, populated by `AuthMiddleware` when a valid app
-    /// JWT or agent bearer is present. nil on public routes.
+    /// Authenticated principal, populated by `AuthMiddleware` for a valid app
+    /// JWT, agent bearer, or allowlisted work-host signature. nil on public routes.
     var principal: AuthPrincipal?
 
     /// True only for the explicitly enabled shared-secret migration path on
@@ -39,10 +39,12 @@ struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
 enum AuthPrincipalKind: String, Sendable {
     case human
     case agent
+    case workHost
 }
 
-/// The authenticated caller. Human principals come from App JWTs; agent
-/// principals come from `token(kind='agent_bearer')` after a sha256 lookup.
+/// The authenticated caller. Human principals come from App JWTs, agent
+/// principals from `token(kind='agent_bearer')`, and work hosts from an
+/// allowlisted Ed25519 request signature over their registry identity.
 struct AuthPrincipal: Sendable {
     let memberID: UUID
     let workspaceID: UUID

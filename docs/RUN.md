@@ -51,6 +51,7 @@ backup/restore, image-based deploy/rollback, `scripts/aws_internal_alpha_preflig
 (4) swift run … MomoServer       →  Hummingbird API :8080  # REST + JWT + publish proxy
 (5) swift run … OutboxRelay      →  outbox → Centrifugo    # 쓰기경로 fan-out
     swift run … AgentWorker      →  agent_job → hermes     # 에이전트 턴 (D 데모)
+    swift run … momo-workd       →  signed REST poll        # 선택: 사용자 실행 호스트
 (6) make build  /  swift run MomoMacDevApp                 # macOS 클라(개발용 window)
 ```
 
@@ -978,6 +979,58 @@ credentialed profile은 send 전에 Kim Intern이 active agent member로 `#agent
 ```sh
 python3 scripts/mock_hermes.py --host 127.0.0.1 --port "${HERMES_PORT:-8088}"
 ```
+
+### 5.4 Work Host Daemon — `momo-workd` (ADR-0125 D2)
+
+`momo-workd`는 인바운드 포트를 열지 않고 MomoServer로만 outbound 연결한다. 최초 등록에만
+human access token이 필요하고, 등록 뒤 heartbeat/poll/session/control action은 로컬 Ed25519
+키로 서명한다. raw stdout/stderr, command path, environment, provider credential은 서버로
+보내지 않고 기본 `~/.momo/workd-output/` 아래 mode `0600` 파일로 보관한다.
+
+```sh
+swift build --package-path workers/WorkHostDaemon
+
+mkdir -p "$HOME/.momo"
+chmod 700 "$HOME/.momo"
+printf '%s\n' "$ONE_TIME_HUMAN_ACCESS_TOKEN" >"$HOME/.momo/workd-registration.token"
+chmod 600 "$HOME/.momo/workd-registration.token"
+
+MOMO_WORKD_SERVER_URL=https://momo.example.com \
+MOMO_WORKD_WORKSPACE_ID=00000000-0000-7000-8000-000000000001 \
+MOMO_WORKD_REGISTRATION_TOKEN_FILE="$HOME/.momo/workd-registration.token" \
+swift run --package-path workers/WorkHostDaemon momo-workd
+```
+
+등록이 성공하고 host ID가 로컬에 저장되면 token 파일은 삭제된다. 원격 HTTP는 거부하며,
+`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. command
+profile은 `MOMO_WORKD_PROFILE_{CLAUDE|CODEX|OPENCODE|SHELL}_EXECUTABLE` 절대경로와
+`..._ARGUMENTS_JSON` 문자열 배열로 로컬에서만 설정한다. 서버 payload가 실행 경로나 인자를
+선택하지 않는다.
+
+동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
+
+```sh
+chmod 600 /path/to/registration.token
+scripts/momo host add ssh://user@host \
+  --binary /path/to/target/momo-workd \
+  --server-url https://momo.example.com \
+  --workspace 00000000-0000-7000-8000-000000000001 \
+  --token-file /path/to/registration.token
+```
+
+Linux는 systemd user service, macOS는 LaunchAgent로 설치한다. Linux에서 SSH logout 뒤에도
+계속 실행하려면 운영자가 필요에 따라 `loginctl enable-linger <user>`를 승인해야 한다.
+target binary 배포/서명, cross-compile, 자동 update, 원격 도구 로그인 bridge, 완전 PTY는 후속이다.
+
+```sh
+# runtime-db profile에도 포함됨. 기본 포트: API 27950, Centrifugo 27951,
+# PostgreSQL 27952, Hermes 예약 27953.
+scripts/verify_workd.sh
+```
+
+verifier는 workd 등록과 signed heartbeat/poll, auto-approved mock echo spawn, control ack,
+`work_session` started→ended, 위조 poll 401, FORCE RLS, raw marker의 서버 원장 부재를 단정한다.
+격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행한다.
 
 ---
 

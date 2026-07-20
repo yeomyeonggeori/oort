@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-19 (ADR-0114 session ledger) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-20 (ADR-0125 D2 workd) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -27,6 +27,7 @@ flowchart LR
     RELAY["OutboxRelay<br/>(별도 패키지)"]
     CENT["Centrifugo v6<br/>전송 전용<br/>subscribe proxy → 서버 재검증"]
     AW["AgentWorker + provider (SSE)<br/>managed 공식 경로"]
+    WD["momo-workd<br/>사용자 소유 호스트 · Process/pipe"]
 
     MAC -->|REST 읽기/쓰기| API
     HG -->|"pending 재조회·events/complete<br/>(per-agent bearer)"| API
@@ -37,6 +38,7 @@ flowchart LR
     CENT -->|"private agentwork: wake-up"| HG
     PG -->|"agent_job claim<br/>AGENT_GATEWAY_MODE=worker"| AW
     AW -->|"momo-owned state transitions<br/>progress·approval·usage/outbox"| PG
+    WD -->|"서명 heartbeat · pending poll<br/>session/control REST"| API
 ```
 
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
@@ -153,15 +155,16 @@ card의 기존 `message.seq`를 재사용하므로 `message.new`가 소유한 Ce
 경합하지 않도록 publish `version`을 보내지 않으며, Core replay cursor도 전진시키지
 않는다. Postgres가 lifecycle/history의 SoT이고, cwd·worktree/path·PID/process state·
 terminal output·provider credential은 계속 host-local이다. `host_id`는 ADR-0125의
-host registry가 Accepted되기 전까지 non-null opaque UUID이며 FK를 두지 않는다.
+`work_host` registry FK이며, 활성·미철회 host와 tenant/scope 결속을 REST 경계에서 검증한다.
 
 ### Interactive Work Console control gate
 
 ADR-0114 D4/D5의 `work_control`은 agent bearer가 자기 `queued|running` run과 channel에
 결속해 요청하는 closed control 원장이다. `spawn` payload는 `tool+label`, `input`은
 `text`, `read`는 optional `tail_lines`, `kill`은 빈 object만 허용하며 migration CHECK와
-route 검증이 path/cwd/env/process state/provider credential을 함께 거부한다. v0의 opaque
-`target_host_id` owner는 ADR-0125가 land하기 전까지 agent의 `owner_human_id`로 판정한다.
+route 검증이 path/cwd/env/process state/provider credential을 함께 거부한다.
+`target_host_id`는 등록·활성·미철회 `work_host` FK다. member scope는 owner의 세션만,
+workspace scope는 같은 workspace 멤버의 세션을 수용하며 control 생성 시 이를 검증한다.
 
 `spawn`은 owner의 tool별 `work_auto_approve` whitelist가 있으면 즉시 dispatch되고,
 없으면 기존 `approval` + `approval_request` system card 경로를 거친다. whitelist 변경과
@@ -185,6 +188,22 @@ control dispatch만 수행하고 일반 tool approval처럼 worker run을 재개
 session card와 `work.control.*`/`work.session.*` event가 담당한다. 성공한 spawn/input/kill은
 채팅 성공 문구를 만들지 않고 `work_read` 결과만 normal response body에 포함하며, 서버가 돌려준
 계보 위반 HTTP 403은 축약하거나 성공으로 바꾸지 않는다.
+
+### Work Host Fabric v0 daemon
+
+ADR-0125 D1/D2의 `momo-workd`는 사용자 호스트에서 실행되는 outbound-only 프로세스다.
+최초 실행은 로컬에 mode `0600` Ed25519 raw private key를 만들고, 일회성 human bearer로
+`type=workd` host를 등록한 뒤 bearer 파일을 삭제한다. 이후 heartbeat는
+`momo.work_host.heartbeat.v1` 바이트 계약을, pending poll·session 생성/종료·control ack는
+`momo.work_host.request.v1`의 method/path/workspace/host/timestamp 계약을 서명한다. 서버는
+이 서명 주체에 정확히 네 REST action만 허용하며 revoke와 owner 활성 상태를 요청마다 재검증한다.
+
+데몬은 `GET .../work-hosts/:id/pending-controls`로 자기 앞 `dispatched` 행만 polling한다.
+`spawn`은 기존 session REST를 먼저 기록한 뒤 local `Foundation.Process`를 시작하고,
+`input`은 해당 pipe stdin, `kill`은 terminate와 session end REST로 처리한다. effect 뒤 ack 응답이
+유실돼도 같은 control을 중복 실행하지 않도록 로컬 control/session 결속을 유지한다. command
+template, environment, key/path/PID와 stdout/stderr는 host-local이며 raw 출력은 mode `0600`
+파일에만 남는다. 완전 PTY와 Centrifugo control subscription은 v1 범위다.
 
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
