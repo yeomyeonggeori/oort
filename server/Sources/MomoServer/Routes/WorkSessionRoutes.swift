@@ -108,6 +108,12 @@ struct WorkSessionRoutes: Sendable {
                 channelID: channelID,
                 memberID: sessionOwnerMemberID
             )
+            try await WorkPoolRoutes.acquireSlot(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                memberID: sessionOwnerMemberID
+            )
 
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
             guard let idRow = idRows.first else {
