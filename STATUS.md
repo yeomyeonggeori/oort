@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-511 원격 인터랙티브 터미널 attach 서버 계약 (2026-07-20)
+
+- ADR-0125 D10에 따라 running `work_session`에 remote `pty_id`·credential-free HTTPS/WSS endpoint를 결속하고, 세션 소유자 human bearer 전용 `POST .../terminal-attach`가 exact `{attach_endpoint,capability_token,pty_id}` 60초 grant를 발급한다. capability 원장은 SHA-256 digest와 발급·만료·소유자만 저장·audit하며 raw token은 남기지 않는다.
+- host의 Ed25519-signed validation은 매 요청 capability 만료, running session, PTY binding, `work_host.revoked_at`을 다시 확인해 이미 발급된 grant도 revoke 즉시 무효화한다. E2B-compatible `create/connect/send_stdin/resize/kill` 추상 계약만 서버에 고정했고 실제 host adapter·SwiftTerm UX는 후속이다. MomoServer/relay에는 터미널 stream/outbox/publish route가 없어 raw는 client↔host 직결이다.
+- server 124 tests, OpenAPI/YAML, verifier bash·ShellCheck(error) 정적 검증이 PASS했다. `verify_terminal_attach.sh`는 27980~27983 전용 포트에서 발급·만료·비소유자/agent 403·revoke·digest/audit/RLS·raw/token 무유입을 검사하며 runtime-db에 편입했다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-509 관리자 에이전트 생성 API (2026-07-20)
 
 - human owner/admin 전용 `POST /v1/workspaces/:ws/agents`를 추가했다. 기존 `001_init.sql` 계약만 재사용해 `member(kind=agent)`·`agent`·`agent.created` audit를 한 tenant transaction에서 생성하며, workspace handle 중복은 partial row 없이 409로 닫는다. `baseUrl`은 HTTPS 기본·명시적 local loopback opt-in만 허용하고 userinfo/query/fragment 및 config의 credential형 키를 거부해 ADR-0004 provider credential 비유입 경계를 유지한다.

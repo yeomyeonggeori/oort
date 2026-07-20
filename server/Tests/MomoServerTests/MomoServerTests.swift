@@ -2238,6 +2238,107 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testTerminalAttachBindingCapabilityAndWireShape() throws {
+        XCTAssertEqual(
+            try RemotePTYBinding.validated(
+                ptyID: "pty-511:primary",
+                attachEndpoint: "wss://workd.momo.test/v1/pty"
+            ),
+            RemotePTYBinding(
+                ptyID: "pty-511:primary",
+                attachEndpoint: "wss://workd.momo.test/v1/pty"
+            )
+        )
+        XCTAssertNil(try RemotePTYBinding.validated(ptyID: nil, attachEndpoint: nil))
+        XCTAssertThrowsError(try RemotePTYBinding.validated(
+            ptyID: "pty-511",
+            attachEndpoint: nil
+        ))
+        XCTAssertThrowsError(try RemotePTYBinding.validated(
+            ptyID: "../pty",
+            attachEndpoint: "wss://workd.momo.test/v1/pty"
+        ))
+        for unsafeEndpoint in [
+            "ws://workd.momo.test/v1/pty",
+            "wss://user:secret@workd.momo.test/v1/pty",
+            "wss://workd.momo.test/v1/pty?token=raw",
+            "wss://workd.momo.test/v1/pty#secret",
+        ] {
+            XCTAssertThrowsError(try RemotePTYBinding.validated(
+                ptyID: "pty-511",
+                attachEndpoint: unsafeEndpoint
+            ))
+        }
+
+        let token = TerminalAttachRoutes.mintCapabilityToken()
+        XCTAssertNoThrow(try TerminalAttachRoutes.validatedCapabilityToken(token))
+        XCTAssertThrowsError(try TerminalAttachRoutes.validatedCapabilityToken(
+            "momo_terminal_attach_v1.not-a-token"
+        )) { error in
+            XCTAssertEqual((error as? HTTPError)?.status, .unauthorized)
+        }
+
+        let response = TerminalAttachCapabilityResponse(
+            attachEndpoint: "wss://workd.momo.test/v1/pty",
+            capabilityToken: token,
+            ptyID: "pty-511"
+        )
+        let encoded = try JSONEncoder().encode(response)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        XCTAssertEqual(object["attach_endpoint"] as? String, response.attachEndpoint)
+        XCTAssertEqual(object["capability_token"] as? String, token)
+        XCTAssertEqual(object["pty_id"] as? String, response.ptyID)
+        XCTAssertNil(object["attachEndpoint"])
+        XCTAssertNil(object["capabilityToken"])
+        XCTAssertNil(object["expires_at"], "issue response stays the exact D10 three-field grant")
+    }
+
+    func testTerminalAttachMigrationAndRoutesKeepDirectStreamBoundary() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/023_terminal_attach.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("ADD COLUMN pty_id text"))
+        XCTAssertTrue(migration.contains("ADD COLUMN attach_endpoint text"))
+        XCTAssertTrue(migration.contains("CREATE TABLE terminal_attach_capability"))
+        XCTAssertTrue(migration.contains("token_hash       bytea NOT NULL UNIQUE"))
+        XCTAssertTrue(migration.contains("expires_at       timestamptz NOT NULL"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(migration.contains("capability_token"))
+        XCTAssertFalse(migration.contains("stdout"))
+        XCTAssertFalse(migration.contains("stderr"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/TerminalAttachRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("digest(\\(token), 'sha256')"))
+        XCTAssertTrue(routes.contains("c.expires_at > clock_timestamp()"))
+        XCTAssertTrue(routes.contains("h.revoked_at IS NULL"))
+        XCTAssertTrue(routes.contains("ws.status = 'running'"))
+        XCTAssertTrue(routes.contains("only the session owner can attach"))
+        XCTAssertTrue(routes.contains("terminal attach requires a human bearer"))
+        XCTAssertTrue(routes.contains("work.terminal_attach.issued"))
+        XCTAssertFalse(routes.contains("CentrifugoClient"))
+        XCTAssertFalse(routes.contains("INSERT INTO outbox"))
+        XCTAssertFalse(routes.contains("/api/publish"))
+        XCTAssertFalse(routes.contains("router.websocket"))
+
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000511")!
+        let validatePath = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/terminal-attach/validate"
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "POST", path: validatePath))
+        XCTAssertEqual(WorkHostAuthenticator.scopedHostID(fromPath: validatePath), hostID)
+    }
+
     func testWorkControlRouteScopeAndClosedPayloadValidation() throws {
         XCTAssertEqual(
             AuthMiddleware.requiredAgentScope(

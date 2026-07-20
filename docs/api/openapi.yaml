@@ -817,6 +817,60 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/terminal-attach/validate:
+    post:
+      tags: [work-hosts, work-sessions]
+      operationId: validateTerminalAttachCapability
+      summary: Validate a direct terminal attach capability as its target host.
+      description: >
+        MomoHost-signed control-plane check performed immediately before the
+        direct PTY host accepts a client connection. The opaque bearer is
+        matched by SHA-256 digest; the raw token is never persisted or logged.
+        Validation joins the running work_session and unrevoked work_host on
+        every call, so expiry, session end, and host revoke take effect
+        immediately. This endpoint returns binding metadata only: terminal
+        bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ValidateTerminalAttachRequest"
+      responses:
+        "200":
+          description: Capability is live and bound to this host and PTY.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalAttachValidationResponse"
+        "400":
+          description: Invalid path identifier or request body shape.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Invalid host signature or unknown, expired, ended, or revoked capability.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: A human or agent bearer attempted host-side validation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/work-hosts/{workHostId}:
     delete:
       tags: [work-hosts]
@@ -1070,6 +1124,60 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Session state changed concurrently.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
+    post:
+      tags: [work-sessions]
+      operationId: issueTerminalAttachCapability
+      summary: Issue an ephemeral capability for direct remote PTY attach.
+      description: >
+        Human bearer and session owner only. The running session must carry a
+        MomoHost-signed remote PTY binding and its work_host must be unrevoked.
+        The raw capability is returned exactly once, while PostgreSQL stores
+        only its SHA-256 digest and timestamptz expiry. The same transaction
+        audits only owner, issue time, and expiry. attach_endpoint contains no
+        bearer or credential; the client connects there directly with the
+        separate capability_token. MomoServer and relay expose no PTY stream.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      responses:
+        "200":
+          description: Exact three-field direct attach grant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TerminalAttachCapabilityResponse"
+        "400":
+          description: Invalid work session identifier.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not human, owner, or active workspace member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Session does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Session ended, lacks a remote PTY binding, or host is revoked.
           content:
             application/json:
               schema:
@@ -3625,6 +3733,20 @@ components:
           description: >
             Required only for MomoHost-signed spawn dispatch. The server binds
             host, channel, tool, label, and session owner to this dispatched control.
+        ptyId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+          description: >
+            MomoHost-signed remote PTY binding only; must appear together with
+            attachEndpoint. create returns this id, while connect, send_stdin,
+            resize, and kill target the same id. Human-created local sessions
+            omit both fields.
+        attachEndpoint:
+          type: string
+          maxLength: 2048
+          description: >
+            Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query,
+            and fragment are forbidden. MomoServer never proxies this stream.
 
     EndWorkSessionRequest:
       type: object
@@ -3698,6 +3820,45 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/WorkSession"
+
+    TerminalAttachCapabilityResponse:
+      type: object
+      required: [attach_endpoint, capability_token, pty_id]
+      properties:
+        attach_endpoint:
+          type: string
+          description: Credential-free direct HTTPS or WSS host endpoint.
+        capability_token:
+          type: string
+          description: >
+            Opaque 60-second bearer returned once. Only its SHA-256 digest is
+            persisted; host-side validation also requires a live host signature.
+        pty_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+
+    ValidateTerminalAttachRequest:
+      type: object
+      required: [capability_token]
+      properties:
+        capability_token:
+          type: string
+          description: Opaque grant presented by the direct client to its target host.
+
+    TerminalAttachValidationResponse:
+      type: object
+      required: [work_session_id, pty_id, expires_at]
+      properties:
+        work_session_id:
+          type: string
+          format: uuid
+        pty_id:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
+        expires_at:
+          type: string
+          format: date-time
+          description: PostgreSQL timestamptz capability expiry.
 
     # ---- Work controls ------------------------------------------------------
     CreateWorkControlRequest:

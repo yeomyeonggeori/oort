@@ -196,14 +196,50 @@ ADR-0125 D1/D2의 `momo-workd`는 사용자 호스트에서 실행되는 outboun
 `type=workd` host를 등록한 뒤 bearer 파일을 삭제한다. 이후 heartbeat는
 `momo.work_host.heartbeat.v1` 바이트 계약을, pending poll·session 생성/종료·control ack는
 `momo.work_host.request.v1`의 method/path/workspace/host/timestamp 계약을 서명한다. 서버는
-이 서명 주체에 정확히 네 REST action만 허용하며 revoke와 owner 활성 상태를 요청마다 재검증한다.
+이 서명 주체에 pending poll·session 생성/종료·control ack·terminal attach validation의
+정확히 다섯 REST action만 허용하며 revoke와 owner 활성 상태를 요청마다 재검증한다.
 
 데몬은 `GET .../work-hosts/:id/pending-controls`로 자기 앞 `dispatched` 행만 polling한다.
 `spawn`은 기존 session REST를 먼저 기록한 뒤 local `Foundation.Process`를 시작하고,
 `input`은 해당 pipe stdin, `kill`은 terminate와 session end REST로 처리한다. effect 뒤 ack 응답이
 유실돼도 같은 control을 중복 실행하지 않도록 로컬 control/session 결속을 유지한다. command
 template, environment, key/path/PID와 stdout/stderr는 host-local이며 raw 출력은 mode `0600`
-파일에만 남는다. 완전 PTY와 Centrifugo control subscription은 v1 범위다.
+파일에만 남는다. 현재 daemon의 완전 PTY adapter와 Centrifugo control subscription은 후속 범위다.
+
+### Remote PTY attach control plane
+
+ADR-0125 D10에서 원격 host/workd/provisioner는 도구를 PTY로 `create`하고 안정적인
+`pty_id`와 credential-free HTTPS/WSS `attach_endpoint`를 signed `work_session` 생성 요청에
+결속한다. 같은 `pty_id`에 대한 `connect`, `send_stdin`, `resize`, `kill`이 하나의 세션을
+조작한다는 것이 E2B-compatible 추상 계약이며, 실제 host PTY adapter는 후속 구현이다.
+
+세션 소유자의 human bearer만
+`POST /v1/workspaces/:ws/work-sessions/:id/terminal-attach`를 호출할 수 있다. 서버는 60초
+ephemeral capability를 발급해 `{attach_endpoint, capability_token, pty_id}`를 한 번 응답하고,
+DB에는 SHA-256 digest와 발급·만료·소유자만 남긴다. audit에도 raw token은 없으며 host의
+signed validation은 capability 만료, running session, PTY binding, `work_host.revoked_at`을
+매 요청 다시 확인한다. 따라서 이미 발급된 capability도 host revoke 즉시 무효다.
+
+```mermaid
+sequenceDiagram
+    participant C as macOS / SwiftTerm
+    participant S as MomoServer
+    participant P as PostgreSQL
+    participant H as Remote PTY host
+    C->>S: POST terminal-attach (human owner)
+    S->>P: token digest + issued/expires/owner audit
+    S-->>C: endpoint + raw capability + pty_id
+    C->>H: direct WSS/HTTPS connect (capability, pty_id)
+    H->>S: signed capability validation
+    S->>P: expiry/session/revoke check
+    S-->>H: validated pty_id + expires_at
+    H-->>C: PTY output bytes (direct only)
+    C->>H: stdin / resize (direct only)
+```
+
+MomoServer에는 terminal WebSocket, stdin/stdout, resize, publish, outbox route가 없고 Relay와
+Centrifugo도 이 데이터 경로에 참여하지 않는다. 서버는 capability control plane만 담당하며
+터미널 raw 바이트는 client↔host 직결로만 흐른다.
 
 ## 에이전트 1회 응답의 수명주기 (이중 경로)
 
