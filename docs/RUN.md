@@ -254,10 +254,10 @@ macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded
 internal alpha 사용자에게 `Local mock` / `Internal host mock` / `External Hermes`, key 준비 여부,
 redacted endpoint/diagnostic hint를 구분해 보여준다.
 
-Provider status는 연결 가능성만 뜻한다. 내부 알파에서 "김인턴 초대됨"은 별도 precondition이다:
-demo workspace의 `김인턴`은 `member.kind='agent'`, `member.status='active'`, handle
-`kim-intern`인 기존 agent member이고, `#agent-lab`
-(`00000000-0000-7000-8000-000000000202`) active membership을 가져야 한다. macOS는
+Provider status는 연결 가능성만 뜻한다. 내부 알파에서 "김인턴 초대됨"은 별도 precondition이다.
+fresh persistent/local-alpha DB에는 agent member가 없으므로 owner/admin이 아래 생성 API로
+`member.kind='agent'`, `member.status='active'` identity를 먼저 만든다. 그 다음 `#agent-lab`
+(`00000000-0000-7000-8000-000000000202`) membership과 credential을 각각 명시적으로 추가한다. macOS는
 선택 채널 Members 섹션의 `AGENT` badge와 sidebar Kim Intern chip을 함께 보여주고, server/API
 path는 `/v1/workspaces/{ws}/members?kind=agent`와
 `POST /v1/workspaces/{ws}/channels/{ch}/members`로 기존 agent member를 채널에 추가한다.
@@ -347,6 +347,29 @@ scripts/momo hermes-gateway-smoke --real
 AGENT_GATEWAY_MODE=gateway
 # token-only 서버 경로는 공유 시크릿이 필요하지 않다.
 ```
+
+#### Fresh DB 에이전트 pairing 순서
+
+에이전트 생성·채널 초대·credential 발급은 서로 다른 보안 결정을 나타내므로 한 요청으로
+합치지 않는다. owner/admin human bearer로 아래 순서를 지킨다.
+
+```text
+1. POST /v1/workspaces/{workspace}/agents
+   {displayName, handle, model, baseUrl, systemPrompt?, config?, ownerHumanId?}
+   -> {agent:{id,handle,displayName}}
+2. POST /v1/workspaces/{workspace}/channels/{channel}/members
+   {memberId:<agent.id>, role:"member"}
+3. POST /v1/workspaces/{workspace}/agents/{agent.id}/credentials
+   -> 원문 token 1회 반환
+```
+
+1번은 `member(kind='agent')`·`agent`·`agent.created` audit만 같은 tenant transaction으로
+커밋하며 **채널을 자동 추가하지 않는다**. 2번은 기존 human/agent 공용 membership 경로를
+그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 momo-facing agent
+credential이며 서버에는 sha256만 저장된다. `baseUrl`/`config`에는 Codex/OpenAI OAuth token,
+provider API key, userinfo/query/fragment credential을 넣을 수 없다. non-loopback은 HTTPS만,
+loopback HTTP는 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`과 명시적 포트가 있을 때만
+허용된다(ADR-0004).
 
 MOMO-337부터 human workspace owner/admin은 agent credential을 발급한다. 응답의
 `token` 원문은 이 응답에서만 노출되고 서버에는 sha256만 저장된다. 같은 POST를
@@ -1031,6 +1054,32 @@ scripts/verify_workd.sh
 verifier는 workd 등록과 signed heartbeat/poll, auto-approved mock echo spawn, control ack,
 `work_session` started→ended, 위조 poll 401, FORCE RLS, raw marker의 서버 원장 부재를 단정한다.
 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행한다.
+
+### 5.5 Remote terminal attach capability (ADR-0125 D10)
+
+원격 host/workd/provisioner는 도구를 PTY로 실행하고, signed `POST .../work-sessions` 요청에
+`ptyId`와 credential-free HTTPS/WSS `attachEndpoint`를 함께 보낸다. MomoServer는 remote
+PTY를 생성하거나 터미널 byte stream을 중계하지 않는다. owner human은
+`POST /v1/workspaces/:ws/work-sessions/:id/terminal-attach`에서 60초 capability를 받고,
+클라이언트가 반환 endpoint에 직접 연결한다. host는 연결을 수락하기 전에
+`POST /v1/workspaces/:ws/work-hosts/:host/terminal-attach/validate`를 `MomoHost` 서명으로
+호출해 capability·`pty_id`·session lifecycle·host revoke를 검증한다.
+
+서버 DB에는 raw capability가 아닌 SHA-256 digest만 있고 audit에는 owner와 issued/expires만
+남는다. terminal stdout/stderr/stdin/resize는 MomoServer, OutboxRelay, Centrifugo를 통과하지
+않는다. 실제 workd/provisioner PTY adapter와 SwiftTerm direct attach는 후속 goal이다.
+
+```sh
+# runtime-db profile에도 포함됨. 기본 전용 포트: API 27970,
+# Centrifugo 27971, PostgreSQL 27972, Hermes 예약 27973.
+scripts/verify_terminal_attach.sh
+```
+
+verifier는 네 포트가 비어 있는지 먼저 검사한 뒤 owner 발급, agent·비소유자 403, 만료 후
+401, revoke 즉시 무효, exact response, digest-only 원장, audit, FORCE RLS와 raw/token의
+서버·relay 원장/로그 부재를 단정한다. Ed25519 서명에는 `find_openssl` 방식으로 실제 지원
+binary를 고른다. 이 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행하며,
+그 전까지 terminal attach runtime은 `runtime-unverified`다.
 
 ---
 

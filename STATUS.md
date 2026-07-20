@@ -11,6 +11,23 @@
 - MOMO-497은 시스템 TabView 기반 홈·검색·활동·Work·프로필 5탭과 탭별 독립 NavigationStack을 도입했다. 홈은 Threads·채널·DM, unread/mention, 음소거, 읽음 처리, 실제 값이 있을 때만 보이는 DM presence를 제공하며 기존 타임라인·답장·승인·허들 경로를 재사용한다. 푸시는 다른 탭에서 수신해도 Home 경로로 전환한다.
 - iPhone 17 시뮬레이터 build/run, `scripts/verify_ios_build.sh` build-for-testing/test-without-building, MomoiOSKit 37 tests, 디자인 재리뷰 Blocker/High 0이 PASS했다. 인증 후 홈·5탭 라이트/다크·Dynamic Type 스냅샷과 실기기 아이콘 표면은 Fable/성재 수동 게이트로 남는다. 현재 roster REST는 presence를 투영하지 않으므로 실데이터 DM 점은 엔진 realtime/REST 계약이 열릴 때까지 `runtime-unverified`이며, 앱은 거짓 offline 상태를 표시하지 않는다.
 
+## MOMO-511 원격 인터랙티브 터미널 attach 서버 계약 (2026-07-20)
+
+- ADR-0125 D10에 따라 running `work_session`에 remote `pty_id`·credential-free HTTPS/WSS endpoint를 결속하고, 세션 소유자 human bearer 전용 `POST .../terminal-attach`가 exact `{attach_endpoint,capability_token,pty_id}` 60초 grant를 발급한다. capability 원장은 SHA-256 digest와 발급·만료·소유자만 저장·audit하며 raw token은 남기지 않는다.
+- host의 Ed25519-signed validation은 매 요청 capability 만료, running session, PTY binding, `work_host.revoked_at`을 다시 확인해 이미 발급된 grant도 revoke 즉시 무효화한다. E2B-compatible `create/connect/send_stdin/resize/kill` 추상 계약만 서버에 고정했고 실제 host adapter·SwiftTerm UX는 후속이다. MomoServer/relay에는 터미널 stream/outbox/publish route가 없어 raw는 client↔host 직결이다.
+- server 124 tests, OpenAPI/YAML, verifier bash·ShellCheck(error) 정적 검증이 PASS했다. `verify_terminal_attach.sh`는 27980~27983 전용 포트에서 발급·만료·비소유자/agent 403·revoke·digest/audit/RLS·raw/token 무유입을 검사하며 runtime-db에 편입했다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
+## MOMO-509 관리자 에이전트 생성 API (2026-07-20)
+
+- human owner/admin 전용 `POST /v1/workspaces/:ws/agents`를 추가했다. 기존 `001_init.sql` 계약만 재사용해 `member(kind=agent)`·`agent`·`agent.created` audit를 한 tenant transaction에서 생성하며, workspace handle 중복은 partial row 없이 409로 닫는다. `baseUrl`은 HTTPS 기본·명시적 local loopback opt-in만 허용하고 userinfo/query/fragment 및 config의 credential형 키를 거부해 ADR-0004 provider credential 비유입 경계를 유지한다.
+- 생성 API는 채널 membership과 credential을 자동 발급하지 않는다. OpenAPI와 RUN 문서에 기존 `POST .../channels/:channel/members` → `POST .../agents/:agent/credentials`를 명시적인 pairing 후속 흐름으로 기록했다. 공유 Core 계약 변경은 필요하지 않았다.
+- server 124 tests, OpenAPI/YAML·bash/ShellCheck·local-gate drift 정적 검증이 PASS했다. `verify_agent_create.sh`는 seed-none fresh DB와 충돌 사전검사한 27970~27973 격리 포트에서 생성·중복 409·비admin 403·pairing/credential·audit·FORCE RLS를 단정하며 runtime-db에 편입했다. 지시대로 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
+## MOMO-491 PushRelay OpenSSL 리졸버 하드닝 (2026-07-20)
+
+- `verify_work_host.sh`의 Ed25519 capability probe를 `verify_push_relay.sh`와 `push_relay_keygen.sh`에 이식하고, 두 스크립트의 모든 `genpkey`/`pkey`/`pkeyutl`/`base64` 호출을 리졸브된 `OPENSSL_BIN`으로 통일했다.
+- 로그인 셸이 `/usr/bin/openssl` LibreSSL 3.3.6을 우선하는 실제 환경에서 keygen과 `bash -lc 'scripts/verify_push_relay.sh'`가 PASS했고 docs local gate 21/21도 PASS했다. Docker를 포함한 전체 `runtime-relay` 프로필은 지시대로 오케스트레이터 실행 대상으로 남겼다.
+
 ## UXUI A-11 Work Host 자기등록 (2026-07-20)
 
 - macOS 앱이 로그인한 workspace/member별 로컬 Ed25519 신원을 생성해 개인키를 Application Support에 0600으로 보관하고, 공개키만 `work-hosts` 등록 REST에 전달한다. 동일 공개키의 활성 app host는 재사용하며 revoke되었거나 없을 때만 새로 등록해 서버가 반환한 `host_id`를 Work Console의 유일한 라우팅 ID로 채택한다.
