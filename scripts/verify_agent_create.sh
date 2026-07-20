@@ -222,8 +222,8 @@ api "$ADMIN_TOKEN" POST "$AGENTS_PATH" \
 expect_status 400 "baseUrl userinfo credential rejection"
 
 api "$ADMIN_TOKEN" POST "$AGENTS_PATH" \
-  "$(printf '%s' "$VALID_BODY" | jq '.config.openai_api_key="must-not-enter"')"
-expect_status 400 "config credential field rejection"
+  "$(printf '%s' "$VALID_BODY" | jq '.config.provider.apiKey="must-not-enter"')"
+expect_status 400 "camelCase config credential field rejection"
 
 api "$ADMIN_TOKEN" POST "$AGENTS_PATH" \
   "$(printf '%s' "$VALID_BODY" | jq '.baseUrl="http://provider.example/v1"')"

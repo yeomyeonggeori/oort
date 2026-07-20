@@ -11,9 +11,9 @@ import PostgresNIO
 /// explicit follow-up decisions.
 struct AgentRoutes: Sendable {
     private static let forbiddenConfigKeyFragments = [
-        "credential", "access_token", "refresh_token", "oauth_token", "authorization",
-        "client_secret", "private_key", "password", "bearer_token", "api_key",
-        "codex_access", "codex_refresh", "openai_oauth",
+        "credential", "accesstoken", "refreshtoken", "oauthtoken", "authorization",
+        "clientsecret", "privatekey", "password", "bearertoken", "apikey",
+        "codexaccess", "codexrefresh", "openaioauth",
     ]
 
     let db: Database
@@ -231,7 +231,9 @@ struct AgentRoutes: Sendable {
         switch value {
         case .object(let object):
             for (key, child) in object {
-                let normalized = key.lowercased()
+                // Canonicalize snake_case, kebab-case, and camelCase to the
+                // same comparison space so `apiKey` cannot bypass `api_key`.
+                let normalized = key.lowercased().filter { $0.isLetter || $0.isNumber }
                 if forbiddenConfigKeyFragments.contains(where: normalized.contains) {
                     throw HTTPError(
                         .badRequest,

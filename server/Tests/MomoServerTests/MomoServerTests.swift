@@ -832,6 +832,12 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try AgentRoutes.validatedConfig([
             "nested": .object(["openai_api_key": .string("never-ingest")]),
         ]))
+        XCTAssertThrowsError(try AgentRoutes.validatedConfig([
+            "provider": .object(["apiKey": .string("never-ingest")]),
+        ]))
+        XCTAssertThrowsError(try AgentRoutes.validatedConfig([
+            "provider": .object(["refresh-token": .string("never-ingest")]),
+        ]))
         XCTAssertNoThrow(try AgentRoutes.validatedConfig([
             "temperature": .double(0.2),
             "max_tokens": .int(2048),
