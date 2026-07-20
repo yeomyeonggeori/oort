@@ -31,6 +31,11 @@ enum MomoMacPrimaryDestination: Equatable {
     case plugins
 }
 
+private struct MomoWorkHostActivationKey: Hashable {
+    let workspace: WorkspaceID?
+    let member: MemberID?
+}
+
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var workConsoleController: MomoWorkConsoleController
@@ -119,6 +124,10 @@ public struct MomoMacRootView: View {
 
     public var body: some View {
         let copy = MomoWorkspaceCopy(language: language)
+        let workHostActivation = MomoWorkHostActivationKey(
+            workspace: viewModel.workspaceId,
+            member: viewModel.currentNavigationMemberID
+        )
 
         windowShell(copy: copy)
         // The three surfaces own the window from its top edge. AppKit keeps
@@ -173,8 +182,11 @@ public struct MomoMacRootView: View {
         .onChange(of: viewModel.selectedChannelId) { _, _ in
             primaryDestination = .channel
         }
-        .task(id: viewModel.workspaceId) {
-            await workConsoleController.activate()
+        .task(id: workHostActivation) {
+            await workConsoleController.activate(
+                workspace: workHostActivation.workspace,
+                member: workHostActivation.member
+            )
         }
         .onChange(of: viewModel.latestWorkConsoleRealtimeEvent) { _, event in
             guard let event else { return }

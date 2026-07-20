@@ -16,6 +16,10 @@ struct MomoWorkConsoleDrawer: View {
                 sandboxNotice
                 Divider()
             }
+            if showsHostRegistrationNotice {
+                hostRegistrationNotice
+                Divider()
+            }
             if let issue = controller.lastIssue {
                 issueBanner(issue)
                 Divider()
@@ -75,6 +79,7 @@ struct MomoWorkConsoleDrawer: View {
             .disabled(
                 controller.isStarting
                     || !controller.supportsWorkConsole
+                    || !controller.isHostReady
                     || MomoWorkHostRuntime.isAppSandboxed
             )
 
@@ -107,6 +112,53 @@ struct MomoWorkConsoleDrawer: View {
         .padding(.horizontal, MomoTheme.WorkConsole.edgeInset)
         .padding(.vertical, MomoTheme.WorkConsole.standardSpacing)
         .background(MomoTheme.costAmber.opacity(0.08))
+    }
+
+    private var showsHostRegistrationNotice: Bool {
+        switch controller.hostRegistrationState {
+        case .ready(let host): return !host.online
+        case .waitingForSession, .registering, .failed: return true
+        }
+    }
+
+    @ViewBuilder
+    private var hostRegistrationNotice: some View {
+        HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+            switch controller.hostRegistrationState {
+            case .waitingForSession, .registering:
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+                Text(copy.workHostPreparing)
+                    .momoTypography(.supporting)
+                Spacer(minLength: 0)
+            case .failed(let issue):
+                Image(systemName: "exclamationmark.shield")
+                    .foregroundStyle(MomoTheme.irreversibleRed)
+                Text(issue.message(copy: copy))
+                    .momoTypography(.supporting)
+                Spacer(minLength: 0)
+                Button(copy.workHostRetry) {
+                    Task { await controller.retryWorkHostRegistration() }
+                }
+                .buttonStyle(.bordered)
+            case .ready:
+                Image(systemName: "network.slash")
+                    .foregroundStyle(MomoTheme.costAmber)
+                Text(copy.workHostOffline)
+                    .momoTypography(.supporting)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.horizontal, MomoTheme.WorkConsole.edgeInset)
+        .padding(.vertical, MomoTheme.WorkConsole.standardSpacing)
+        .background(hostRegistrationNoticeColor.opacity(0.06))
+    }
+
+    private var hostRegistrationNoticeColor: Color {
+        if case .failed = controller.hostRegistrationState {
+            return MomoTheme.irreversibleRed
+        }
+        return MomoTheme.costAmber
     }
 
     private func issueBanner(_ issue: MomoWorkConsoleError) -> some View {
@@ -155,6 +207,7 @@ struct MomoWorkConsoleDrawer: View {
                     Button(copy.newWorkSession) { showsNewSession = true }
                         .disabled(
                             !controller.supportsWorkConsole
+                                || !controller.isHostReady
                                 || MomoWorkHostRuntime.isAppSandboxed
                         )
                 }
@@ -526,7 +579,7 @@ private struct MomoNewWorkSessionSheet: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(controller.isStarting)
+                .disabled(controller.isStarting || !controller.isHostReady)
             }
         }
         .padding(MomoTheme.WorkConsole.edgeInset)
@@ -545,7 +598,7 @@ private struct MomoNewWorkSessionSheet: View {
     }
 }
 
-private struct MomoWorkConsoleSettingsView: View {
+struct MomoWorkConsoleSettingsView: View {
     @ObservedObject var controller: MomoWorkConsoleController
     let copy: MomoWorkspaceCopy
 
@@ -557,18 +610,59 @@ private struct MomoWorkConsoleSettingsView: View {
                 Text(copy.workHostIdentifier)
                     .momoTypography(.supporting)
                     .fontWeight(.medium)
-                HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
-                    Text(controller.hostId.description)
-                        .font(.caption.monospaced())
-                        .textSelection(.enabled)
-                    Button {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(controller.hostId.description, forType: .string)
-                    } label: {
-                        Label(copy.copyWorkHostIdentifier, systemImage: "doc.on.doc")
-                            .labelStyle(.iconOnly)
+                switch controller.hostRegistrationState {
+                case .waitingForSession, .registering:
+                    HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(.secondary)
+                        Text(copy.workHostPreparing)
+                            .momoTypography(.metadata)
+                            .foregroundStyle(.secondary)
                     }
-                    .momoQuickTooltip(copy.copyWorkHostIdentifier)
+                case .failed(let issue):
+                    VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                        HStack(alignment: .firstTextBaseline, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                            Image(systemName: "exclamationmark.shield")
+                                .foregroundStyle(MomoTheme.irreversibleRed)
+                            Text(issue.message(copy: copy))
+                                .momoTypography(.metadata)
+                                .foregroundStyle(.primary)
+                        }
+                        Button(copy.workHostRetry) {
+                            Task { await controller.retryWorkHostRegistration() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                case .ready(let host):
+                    HStack(spacing: MomoTheme.WorkConsole.compactSpacing) {
+                        Circle()
+                            .fill(host.online ? MomoTheme.reversibleGreen : Color.secondary)
+                            .frame(width: 8, height: 8)
+                        Text(host.online ? copy.workHostOnline : copy.workHostRegistered)
+                            .momoTypography(.metadata)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+                        Text(host.id.description)
+                            .font(.caption.monospaced())
+                            .textSelection(.enabled)
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(host.id.description, forType: .string)
+                        } label: {
+                            Label(copy.copyWorkHostIdentifier, systemImage: "doc.on.doc")
+                                .labelStyle(.iconOnly)
+                        }
+                        .momoQuickTooltip(copy.copyWorkHostIdentifier)
+                    }
+                    Text(copy.workHostAgentWorkerHelp)
+                        .momoTypography(.metadata)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(copy.workHostPrivateKeyHelp)
+                        .momoTypography(.metadata)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Divider()
@@ -597,7 +691,7 @@ private struct MomoWorkConsoleSettingsView: View {
             }
         }
         .padding(MomoTheme.WorkConsole.edgeInset)
-        .frame(width: 360)
+        .frame(width: MomoTheme.WorkConsole.settingsWidth)
     }
 
     private func autoApproveLabel(for tool: MomoWorkTool) -> String {

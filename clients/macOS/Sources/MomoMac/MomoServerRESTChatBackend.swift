@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -1117,6 +1117,76 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
 
     // MARK: Interactive Work Console
 
+    func workHosts(workspace requestedWorkspace: WorkspaceID) async throws -> [WorkHost] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-hosts",
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkHostListResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.workHosts
+    }
+
+    func registerWorkHost(
+        workspace requestedWorkspace: WorkspaceID,
+        displayName: String,
+        publicKey: String,
+        capabilities: [String: Bool]
+    ) async throws -> WorkHost {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-hosts",
+            body: MomoRegisterWorkHostRequestDTO(
+                scope: "member",
+                type: "app",
+                displayName: displayName,
+                publicKey: publicKey,
+                capabilities: capabilities
+            ),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkHostResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.workHost
+    }
+
+    func heartbeatWorkHost(
+        workspace requestedWorkspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        signature: String
+    ) async throws -> WorkHost {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-hosts/\(host.description)/heartbeat",
+            body: MomoWorkHostHeartbeatRequestDTO(
+                sentAtMs: sentAtMs,
+                signature: signature
+            ),
+            authorized: false,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkHostResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workHost.id == host,
+              response.workHost.workspaceId == requestedWorkspace,
+              response.workHost.revokedAtMs == nil
+        else { throw BackendError.decoding("work host heartbeat response mismatch") }
+        return response.workHost
+    }
+
     func workSessions(
         workspace requestedWorkspace: WorkspaceID,
         activeOnly: Bool
@@ -2207,6 +2277,27 @@ private struct AgentRuntimeStatusDTO: Decodable {
 
 private struct MomoWorkSessionListResponseDTO: Decodable {
     let workSessions: [MomoWorkSession]
+}
+
+private struct MomoWorkHostListResponseDTO: Decodable {
+    let workHosts: [WorkHost]
+}
+
+private struct MomoWorkHostResponseDTO: Decodable {
+    let workHost: WorkHost
+}
+
+private struct MomoRegisterWorkHostRequestDTO: Encodable {
+    let scope: String
+    let type: String
+    let displayName: String
+    let publicKey: String
+    let capabilities: [String: Bool]
+}
+
+private struct MomoWorkHostHeartbeatRequestDTO: Encodable {
+    let sentAtMs: Int64
+    let signature: String
 }
 
 private struct MomoWorkSessionResponseDTO: Decodable {

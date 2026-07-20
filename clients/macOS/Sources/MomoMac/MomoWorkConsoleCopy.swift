@@ -55,6 +55,25 @@ extension MomoWorkspaceCopy {
     var workConsoleSettings: String { language == .korean ? "Work 설정" : "Work settings" }
     var workHostIdentifier: String { language == .korean ? "이 Mac의 호스트 ID" : "Host ID for this Mac" }
     var copyWorkHostIdentifier: String { language == .korean ? "호스트 ID 복사" : "Copy host ID" }
+    var workHostPreparing: String { language == .korean ? "이 Mac을 Work 호스트로 등록하는 중" : "Registering this Mac as a Work host" }
+    var workHostRegistered: String { language == .korean ? "등록됨, 연결 확인 중" : "Registered, checking connection" }
+    var workHostOnline: String { language == .korean ? "온라인" : "Online" }
+    var workHostOffline: String {
+        language == .korean
+            ? "호스트 연결 상태를 확인하지 못했습니다. 등록 상태를 다시 확인합니다."
+            : "Host presence could not be confirmed. Registration will be checked again."
+    }
+    var workHostRetry: String { language == .korean ? "호스트 등록 다시 시도" : "Retry host registration" }
+    var workHostAgentWorkerHelp: String {
+        language == .korean
+            ? "AgentWorker의 MOMO_WORK_HOST_ID를 이 값으로 설정하면 에이전트 요청이 이 Mac으로 연결됩니다."
+            : "Set AgentWorker MOMO_WORK_HOST_ID to this value to route agent requests to this Mac."
+    }
+    var workHostPrivateKeyHelp: String {
+        language == .korean
+            ? "서명용 개인키는 이 Mac에만 저장되며 서버로 전송되지 않습니다."
+            : "The signing private key stays on this Mac and is never sent to the server."
+    }
     var workAutoApprove: String { language == .korean ? "도구별 자동 승인" : "Auto-approve by tool" }
     var workAutoApproveUnknown: String {
         language == .korean

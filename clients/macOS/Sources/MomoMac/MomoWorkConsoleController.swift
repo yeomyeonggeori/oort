@@ -9,30 +9,8 @@ struct MomoPendingWorkRead: Identifiable, Equatable {
     let lineCount: Int
 }
 
-enum MomoWorkHostIdentity {
-    static let defaultsKey = "momo.work.host.id.v1"
-
-    static func resolve(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        defaults: UserDefaults = .standard
-    ) -> WorkHostID {
-        if let raw = environment["MOMO_WORK_HOST_ID"],
-           let configured = WorkHostID(uuidString: raw) {
-            return configured
-        }
-        if let raw = defaults.string(forKey: defaultsKey),
-           let persisted = WorkHostID(uuidString: raw) {
-            return persisted
-        }
-        let generated = WorkHostID()
-        defaults.set(generated.description, forKey: defaultsKey)
-        return generated
-    }
-}
-
 @MainActor
 final class MomoWorkConsoleController: ObservableObject {
-    let hostId: WorkHostID
     @Published private(set) var sessions: [MomoWorkSession] = []
     @Published var selectedSessionId: WorkSessionID?
     @Published private(set) var localSessions: [WorkSessionID: MomoLocalTerminalSession] = [:]
@@ -41,24 +19,35 @@ final class MomoWorkConsoleController: ObservableObject {
     @Published private(set) var isStarting = false
     @Published private(set) var lastIssue: MomoWorkConsoleError?
     @Published private(set) var autoApproveStates: [MomoWorkTool: MomoWorkAutoApproveState] = [:]
+    @Published private(set) var hostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession
+    @Published private(set) var hostHeartbeatIssue: MomoWorkConsoleError?
 
     private let viewModel: ChatViewModel
+    private let workHostRegistrar: MomoWorkHostRegistrar
     private var workspaceId: WorkspaceID?
+    private var memberId: MemberID?
     private var handledControlIds: Set<WorkControlID> = []
     private var endingSessionIds: Set<WorkSessionID> = []
+    private var heartbeatTask: Task<Void, Never>?
 
     init(
         viewModel: ChatViewModel,
-        hostId: WorkHostID = MomoWorkHostIdentity.resolve()
+        workHostRegistrar: MomoWorkHostRegistrar = MomoWorkHostRegistrar(),
+        initialHostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession
     ) {
         self.viewModel = viewModel
-        self.hostId = hostId
+        self.workHostRegistrar = workHostRegistrar
+        self.hostRegistrationState = initialHostRegistrationState
         for tool in MomoWorkTool.allCases {
             autoApproveStates[tool] = .unknown
         }
     }
 
     var supportsWorkConsole: Bool { viewModel.supportsWorkConsole }
+
+    var hostId: WorkHostID? { hostRegistrationState.host?.id }
+
+    var isHostReady: Bool { hostRegistrationState.host != nil }
 
     var selectedSession: MomoWorkSession? {
         guard let selectedSessionId else { return nil }
@@ -73,9 +62,10 @@ final class MomoWorkConsoleController: ObservableObject {
         session.memberId == viewModel.currentNavigationMemberID
     }
 
-    func activate() async {
-        let nextWorkspace = viewModel.workspaceId
-        if workspaceId != nextWorkspace {
+    func activate(workspace nextWorkspace: WorkspaceID?, member nextMember: MemberID?) async {
+        if workspaceId != nextWorkspace || memberId != nextMember {
+            heartbeatTask?.cancel()
+            heartbeatTask = nil
             localSessions.values.forEach { $0.terminate() }
             localSessions = [:]
             pendingReads = [:]
@@ -83,8 +73,21 @@ final class MomoWorkConsoleController: ObservableObject {
             sessions = []
             selectedSessionId = nil
             workspaceId = nextWorkspace
+            memberId = nextMember
+            hostRegistrationState = .waitingForSession
+            hostHeartbeatIssue = nil
         }
+        guard let nextWorkspace, let nextMember else {
+            if nextWorkspace == nil { lastIssue = .noWorkspace }
+            return
+        }
+        await reconcileWorkHost(workspace: nextWorkspace, member: nextMember)
         await refresh()
+    }
+
+    func retryWorkHostRegistration() async {
+        guard let workspaceId, let memberId else { return }
+        await reconcileWorkHost(workspace: workspaceId, member: memberId)
     }
 
     func refresh() async {
@@ -121,6 +124,10 @@ final class MomoWorkConsoleController: ObservableObject {
         directory: URL?
     ) async -> Bool {
         guard !isStarting else { return false }
+        guard isHostReady else {
+            lastIssue = .hostRegistrationFailed
+            return false
+        }
         guard let channel = viewModel.selectedChannelId else {
             lastIssue = .noChannel
             return false
@@ -171,6 +178,7 @@ final class MomoWorkConsoleController: ObservableObject {
         case .session(let delta):
             apply(delta)
         case .control(let delta):
+            guard let hostId else { return }
             guard delta.action == .dispatched,
                   delta.targetHostId == hostId,
                   !handledControlIds.contains(delta.controlId)
@@ -267,6 +275,8 @@ final class MomoWorkConsoleController: ObservableObject {
     }
 
     func shutdown() async {
+        heartbeatTask?.cancel()
+        heartbeatTask = nil
         let running = sessions.filter { $0.isRunning && localSessions[$0.id] != nil }
         let runningIDs = Set(running.map(\.id))
         endingSessionIds.formUnion(runningIDs)
@@ -285,6 +295,7 @@ final class MomoWorkConsoleController: ObservableObject {
         label: String,
         directory: URL?
     ) async throws -> MomoWorkSession {
+        guard let hostId else { throw MomoWorkConsoleError.hostRegistrationFailed }
         let session = try await viewModel.createWorkSession(
             channel: channel,
             host: hostId,
@@ -488,5 +499,125 @@ final class MomoWorkConsoleController: ObservableObject {
     private static func sessionOrder(_ lhs: MomoWorkSession, _ rhs: MomoWorkSession) -> Bool {
         if lhs.isRunning != rhs.isRunning { return lhs.isRunning }
         return (lhs.startedAtMs, lhs.id.description) > (rhs.startedAtMs, rhs.id.description)
+    }
+
+    private func reconcileWorkHost(
+        workspace: WorkspaceID,
+        member: MemberID,
+        heartbeatImmediately: Bool = true
+    ) async {
+        guard supportsWorkConsole else {
+            hostRegistrationState = .failed(.unavailable)
+            return
+        }
+        hostRegistrationState = .registering
+        hostHeartbeatIssue = nil
+        do {
+            let backend = try viewModel.workHostBackendForCurrentSession()
+            let host = try await workHostRegistrar.reconcile(
+                workspace: workspace,
+                member: member,
+                displayName: Self.workHostDisplayName,
+                capabilities: Self.workHostCapabilities,
+                backend: backend
+            )
+            guard workspaceId == workspace, memberId == member else { return }
+            hostRegistrationState = .ready(host)
+            if lastIssue == .hostRegistrationFailed || lastIssue == .hostIdentityUnavailable {
+                lastIssue = nil
+            }
+            startHeartbeatLoop(
+                workspace: workspace,
+                member: member,
+                backend: backend,
+                sendImmediately: heartbeatImmediately
+            )
+        } catch is CancellationError {
+            return
+        } catch let issue as MomoWorkConsoleError {
+            guard workspaceId == workspace, memberId == member else { return }
+            hostRegistrationState = .failed(issue)
+        } catch {
+            guard workspaceId == workspace, memberId == member else { return }
+            hostRegistrationState = .failed(.hostRegistrationFailed)
+        }
+    }
+
+    private func startHeartbeatLoop(
+        workspace: WorkspaceID,
+        member: MemberID,
+        backend: any MomoWorkHostBackend,
+        sendImmediately: Bool
+    ) {
+        heartbeatTask?.cancel()
+        heartbeatTask = Task { [weak self] in
+            if sendImmediately {
+                guard let self else { return }
+                await self.sendHeartbeat(workspace: workspace, member: member, backend: backend)
+            }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .seconds(30))
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                await self.sendHeartbeat(workspace: workspace, member: member, backend: backend)
+            }
+        }
+    }
+
+    private func sendHeartbeat(
+        workspace: WorkspaceID,
+        member: MemberID,
+        backend: any MomoWorkHostBackend
+    ) async {
+        guard workspaceId == workspace,
+              memberId == member,
+              let hostId
+        else { return }
+        do {
+            let sentAtMs = Int64(Date().timeIntervalSince1970 * 1_000)
+            let host = try await workHostRegistrar.heartbeat(
+                workspace: workspace,
+                host: hostId,
+                sentAtMs: sentAtMs,
+                backend: backend
+            )
+            guard workspaceId == workspace, memberId == member else { return }
+            hostRegistrationState = .ready(host)
+            hostHeartbeatIssue = nil
+        } catch is CancellationError {
+            return
+        } catch let BackendError.problem(status, _, _) where status == 401 {
+            guard workspaceId == workspace, memberId == member else { return }
+            await reconcileWorkHost(
+                workspace: workspace,
+                member: member,
+                heartbeatImmediately: false
+            )
+        } catch {
+            guard workspaceId == workspace, memberId == member,
+                  let host = hostRegistrationState.host
+            else { return }
+            hostRegistrationState = .ready(host.momoWithOnline(false))
+            hostHeartbeatIssue = .hostHeartbeatFailed
+        }
+    }
+
+    private static var workHostDisplayName: String {
+        let deviceName = Host.current().localizedName?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let deviceName, !deviceName.isEmpty else { return "Momo for Mac" }
+        return String("Momo on \(deviceName)".prefix(80))
+    }
+
+    private static var workHostCapabilities: [String: Bool] {
+        var capabilities = ["work.control.realtime": true]
+        for tool in MomoWorkTool.allCases {
+            capabilities["tool.\(tool.rawValue)"] =
+                (try? MomoWorkLaunchSpec.resolve(tool: tool)) != nil
+        }
+        return capabilities
     }
 }

@@ -57,6 +57,30 @@ struct MomoWorkConsoleRealtimeEvent: Identifiable, Hashable {
     let payload: Payload
 }
 
+extension WorkHost {
+    var momoIsActiveAppHost: Bool {
+        scope == .member && type == .app && !isRevoked
+    }
+
+    func momoWithOnline(_ online: Bool) -> WorkHost {
+        var copy = self
+        copy.online = online
+        return copy
+    }
+}
+
+enum MomoWorkHostRegistrationState: Equatable {
+    case waitingForSession
+    case registering
+    case ready(WorkHost)
+    case failed(MomoWorkConsoleError)
+
+    var host: WorkHost? {
+        guard case .ready(let host) = self else { return nil }
+        return host
+    }
+}
+
 enum MomoWorkAutoApproveState: Equatable {
     case unknown
     case updating
@@ -100,10 +124,31 @@ protocol MomoWorkConsoleBackend: Sendable {
     ) async throws -> Bool
 }
 
-enum MomoWorkConsoleError: Error, Equatable {
+protocol MomoWorkHostBackend: Sendable {
+    func workHosts(workspace: WorkspaceID) async throws -> [WorkHost]
+
+    func registerWorkHost(
+        workspace: WorkspaceID,
+        displayName: String,
+        publicKey: String,
+        capabilities: [String: Bool]
+    ) async throws -> WorkHost
+
+    func heartbeatWorkHost(
+        workspace: WorkspaceID,
+        host: WorkHostID,
+        sentAtMs: Int64,
+        signature: String
+    ) async throws -> WorkHost
+}
+
+enum MomoWorkConsoleError: Error, Equatable, Sendable {
     case unavailable
     case noWorkspace
     case noChannel
+    case hostIdentityUnavailable
+    case hostRegistrationFailed
+    case hostHeartbeatFailed
     case executableUnavailable(MomoWorkTool)
     case sandboxRestricted
     case localLaunchFailed
@@ -125,6 +170,18 @@ enum MomoWorkConsoleError: Error, Equatable {
             return "세션 카드를 남길 채널을 먼저 선택하세요."
         case (.noChannel, .english):
             return "Select a channel for the session card first."
+        case (.hostIdentityUnavailable, .korean):
+            return "이 Mac의 안전한 Work 신원을 준비하지 못했습니다."
+        case (.hostIdentityUnavailable, .english):
+            return "A secure Work identity could not be prepared on this Mac."
+        case (.hostRegistrationFailed, .korean):
+            return "호스트 등록에 실패했습니다. 등록 전에는 Work Console을 시작할 수 없습니다."
+        case (.hostRegistrationFailed, .english):
+            return "Host registration failed. Work Console stays unavailable until registration succeeds."
+        case (.hostHeartbeatFailed, .korean):
+            return "호스트 연결 상태를 확인하지 못했습니다. 등록은 유지되며 다시 확인합니다."
+        case (.hostHeartbeatFailed, .english):
+            return "Host presence could not be confirmed. Registration remains active and will be checked again."
         case (.executableUnavailable(let tool), .korean):
             return "이 Mac에서 \(tool.rawValue) 실행 파일을 찾지 못했습니다."
         case (.executableUnavailable(let tool), .english):
