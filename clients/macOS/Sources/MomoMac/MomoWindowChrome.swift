@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import SwiftUI
 
 struct MomoWindowChromeMetrics: Equatable {
@@ -66,6 +67,10 @@ enum MomoWindowChromeStyle {
         if !window.isMovableByWindowBackground {
             window.isMovableByWindowBackground = true
         }
+        alignTrafficLights(
+            toHeaderBandHeight: MomoWindowChromeLayout.integratedHeaderHeight,
+            in: window
+        )
     }
 
     @MainActor
@@ -123,6 +128,49 @@ enum MomoWindowChromeStyle {
             guard let window else { return }
             applyFlatUnifiedChrome(to: window)
         }
+    }
+}
+
+enum MomoWindowChromeLifecycle {
+    private static let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "momo.macOS",
+        category: "WindowChrome"
+    )
+
+    /// Live resize already drives view layout continuously, so it only needs
+    /// an immediate metrics pass. Lifecycle transitions below also get a
+    /// deferred repair because AppKit or SwiftUI can mutate titlebar geometry
+    /// after their notification has been delivered.
+    static let metricsNotifications: [Notification.Name] = [
+        NSWindow.didResizeNotification,
+    ]
+
+    static let windowRepairNotifications: [Notification.Name] = [
+        NSWindow.didEndLiveResizeNotification,
+        NSWindow.didEnterFullScreenNotification,
+        NSWindow.didExitFullScreenNotification,
+        NSWindow.didChangeScreenNotification,
+        NSWindow.didChangeBackingPropertiesNotification,
+        NSWindow.didDeminiaturizeNotification,
+        NSWindow.didBecomeKeyNotification,
+        NSWindow.didBecomeMainNotification,
+        NSWindow.didResignKeyNotification,
+        NSWindow.didResignMainNotification,
+        NSWindow.didChangeOcclusionStateNotification,
+        NSWindow.willBeginSheetNotification,
+        NSWindow.didEndSheetNotification,
+    ]
+
+    static let applicationRepairNotifications: [Notification.Name] = [
+        NSApplication.didBecomeActiveNotification,
+        NSApplication.didResignActiveNotification,
+        NSApplication.didChangeScreenParametersNotification,
+    ]
+
+    static func logRepair(triggeredBy notification: Notification) {
+        logger.debug(
+            "Reapplying flat unified chrome after \(notification.name.rawValue, privacy: .public)"
+        )
     }
 }
 
@@ -286,10 +334,6 @@ final class MomoWindowChromeMetricsView: NSView {
     func publishMetricsIfNeeded() {
         guard let window, let contentView = window.contentView else { return }
         MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
-        MomoWindowChromeStyle.alignTrafficLights(
-            toHeaderBandHeight: MomoWindowChromeLayout.integratedHeaderHeight,
-            in: window
-        )
         // NavigationSplitView columns report a zero SwiftUI top safe area in
         // full-size unified windows. NSWindow's contentLayoutRect is the
         // AppKit-owned boundary that also follows fullscreen toolbar changes.
@@ -334,14 +378,7 @@ final class MomoWindowChromeMetricsView: NSView {
 
         repairChromeAfterLifecycleTransition()
 
-        let names: [Notification.Name] = [
-            NSWindow.didResizeNotification,
-            NSWindow.didEndLiveResizeNotification,
-            NSWindow.didEnterFullScreenNotification,
-            NSWindow.didExitFullScreenNotification,
-            NSWindow.didChangeScreenNotification,
-        ]
-        for name in names {
+        for name in MomoWindowChromeLifecycle.metricsNotifications {
             NotificationCenter.default.addObserver(
                 self,
                 selector: #selector(windowMetricsDidChange(_:)),
@@ -350,25 +387,22 @@ final class MomoWindowChromeMetricsView: NSView {
             )
         }
 
-        let activationNames: [Notification.Name] = [
-            NSWindow.didBecomeKeyNotification,
-            NSWindow.didBecomeMainNotification,
-            NSWindow.didChangeOcclusionStateNotification,
-        ]
-        for name in activationNames {
+        for name in MomoWindowChromeLifecycle.windowRepairNotifications {
             NotificationCenter.default.addObserver(
                 self,
-                selector: #selector(windowActivationDidChange(_:)),
+                selector: #selector(windowLifecycleDidChange(_:)),
                 name: name,
                 object: window
             )
         }
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(windowActivationDidChange(_:)),
-            name: NSApplication.didBecomeActiveNotification,
-            object: NSApplication.shared
-        )
+        for name in MomoWindowChromeLifecycle.applicationRepairNotifications {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowLifecycleDidChange(_:)),
+                name: name,
+                object: NSApplication.shared
+            )
+        }
     }
 
     func stopObservingWindow() {
@@ -388,7 +422,8 @@ final class MomoWindowChromeMetricsView: NSView {
         publishMetricsIfNeeded()
     }
 
-    @objc private func windowActivationDidChange(_ notification: Notification) {
+    @objc private func windowLifecycleDidChange(_ notification: Notification) {
+        MomoWindowChromeLifecycle.logRepair(triggeredBy: notification)
         repairChromeAfterLifecycleTransition()
     }
 

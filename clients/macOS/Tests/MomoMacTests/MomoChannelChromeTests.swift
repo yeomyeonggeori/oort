@@ -242,38 +242,102 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertEqual(window.titlebarSeparatorStyle, .none)
         XCTAssertNil(window.toolbar)
         XCTAssertTrue(window.isMovableByWindowBackground)
+
+        let trafficLightFrames = [
+            NSWindow.ButtonType.closeButton,
+            .miniaturizeButton,
+            .zoomButton,
+        ].compactMap { window.standardWindowButton($0)?.frame }
+
+        MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
+
+        XCTAssertEqual(
+            [
+                NSWindow.ButtonType.closeButton,
+                .miniaturizeButton,
+                .zoomButton,
+            ].compactMap { window.standardWindowButton($0)?.frame },
+            trafficLightFrames,
+            "reapplying the complete chrome contract must be idempotent"
+        )
     }
 
     @MainActor
-    func testFlatUnifiedChromeRepairsLateSceneMutationAfterAppReactivation() {
+    func testLifecycleRepairSequenceRepairsLateSceneChromeMutation() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
-        var deferredRepair: (@MainActor () -> Void)?
-        MomoWindowChromeStyle.repairFlatUnifiedChromeAcrossLifecycle(to: window) { repair in
-            deferredRepair = repair
+        let triggers = [
+            NSWindow.didExitFullScreenNotification,
+            NSWindow.didChangeScreenNotification,
+            NSWindow.didChangeBackingPropertiesNotification,
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.willBeginSheetNotification,
+            NSWindow.didEndSheetNotification,
+            NSWindow.didResignKeyNotification,
+            NSWindow.didBecomeKeyNotification,
+            NSApplication.didChangeScreenParametersNotification,
+        ]
+
+        for trigger in triggers {
+            var deferredRepair: (@MainActor () -> Void)?
+            MomoWindowChromeStyle.repairFlatUnifiedChromeAcrossLifecycle(to: window) { repair in
+                deferredRepair = repair
+            }
+
+            // Reproduce SwiftUI/AppKit replacing chrome after the notification
+            // callback but before the next main-run-loop turn.
+            window.titleVisibility = .visible
+            window.titlebarAppearsTransparent = false
+            window.titlebarSeparatorStyle = .line
+            window.toolbar = NSToolbar(identifier: "MomoChannelChromeTests.lifecycle")
+            window.isMovableByWindowBackground = false
+
+            XCTAssertNotNil(deferredRepair, trigger.rawValue)
+            deferredRepair?()
+
+            XCTAssertTrue(window.styleMask.contains(.fullSizeContentView), trigger.rawValue)
+            XCTAssertEqual(window.titleVisibility, .hidden, trigger.rawValue)
+            XCTAssertTrue(window.titlebarAppearsTransparent, trigger.rawValue)
+            XCTAssertEqual(window.titlebarSeparatorStyle, .none, trigger.rawValue)
+            XCTAssertNil(window.toolbar, trigger.rawValue)
+            XCTAssertTrue(window.isMovableByWindowBackground, trigger.rawValue)
         }
+    }
 
-        // Reproduce SwiftUI restoring native scene chrome after AppKit has
-        // already delivered its activation notification.
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
-        window.titlebarSeparatorStyle = .line
-        window.toolbar = NSToolbar(identifier: "MomoChannelChromeTests.reactivation")
-        window.isMovableByWindowBackground = false
+    func testLifecycleRepairPolicyCoversLateTitlebarMutationEvents() {
+        let requiredWindowEvents: Set<Notification.Name> = [
+            NSWindow.didEndLiveResizeNotification,
+            NSWindow.didExitFullScreenNotification,
+            NSWindow.didChangeScreenNotification,
+            NSWindow.didChangeBackingPropertiesNotification,
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didResignKeyNotification,
+            NSWindow.willBeginSheetNotification,
+            NSWindow.didEndSheetNotification,
+        ]
+        let requiredApplicationEvents: Set<Notification.Name> = [
+            NSApplication.didBecomeActiveNotification,
+            NSApplication.didResignActiveNotification,
+            NSApplication.didChangeScreenParametersNotification,
+        ]
 
-        XCTAssertNotNil(deferredRepair)
-        deferredRepair?()
-
-        XCTAssertTrue(window.styleMask.contains(.fullSizeContentView))
-        XCTAssertEqual(window.titleVisibility, .hidden)
-        XCTAssertTrue(window.titlebarAppearsTransparent)
-        XCTAssertEqual(window.titlebarSeparatorStyle, .none)
-        XCTAssertNil(window.toolbar)
-        XCTAssertTrue(window.isMovableByWindowBackground)
+        XCTAssertTrue(
+            Set(MomoWindowChromeLifecycle.windowRepairNotifications)
+                .isSuperset(of: requiredWindowEvents)
+        )
+        XCTAssertTrue(
+            Set(MomoWindowChromeLifecycle.applicationRepairNotifications)
+                .isSuperset(of: requiredApplicationEvents)
+        )
+        XCTAssertEqual(
+            MomoWindowChromeLifecycle.metricsNotifications,
+            [NSWindow.didResizeNotification]
+        )
     }
 
     @MainActor
