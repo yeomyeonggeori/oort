@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-21 (Fable 통합) · 이중트랙 main 머지 완료 — 512 차단 해소, 엔진 파이프라인 재개
+- 성재 위임("너가 해…검수한다음에 작업재개까지"). 547(512 focus fix)를 546 워크트리에서 real-window 직접 확증(실디스플레이 XDR — testComposerFocusRequestRestoresKeyboardFocusInRealWindow 등 real-window 4/4 PASS, XCTSkip 아님) → track/uxui 랜딩(e297dd3). 543(iOS 타임라인 v2)은 541 워크트리 시뮬레이터 게이트 PASS(BUILD/TEST SUCCEEDED·41 tests). iOS Archive CI fail은 main에서도 action_required = pre-existing 서명 이슈(코드 회귀 아님) 확증.
+- **이중트랙 main 머지**: track/uxui(496·497·536·547) + track/engine(491·509·511) → main c953322. 충돌은 docs만(STATUS union·ADR-0125 keep-ours, 코드 충돌 0). 머지 결과 게이트: real-window 4/4 PASS + server swift build 완료. 세 ref(main·track/engine·track/uxui) c953322 정렬(ff 재동기화). **성재 맥 real-window 재실행 불요**(Fable가 실디스플레이로 확증함).
+- 남음: 543 시각 QA(라이트/다크·Dynamic Type·한국어 3줄·200+ 스크롤) 후 track/uxui 랜딩 / 509·511 docker 런타임 verifier(runtime-unverified→verified) / 엔진 다음 큐.
+
 ## 2026-07-21 (Fable 검수) · MOMO-512 focus 회귀 수정(#547) 검수 CLEAN + 이중트랙 main 머지 시퀀스 준비
 - 동생 PR #547(track/uxui) 검수: 근본원인=`@FocusState`가 NativeTextView(NSViewRepresentable)가 준 적 없는 focus 진실을 소유. 수정=`@State` 전환 + `viewDidMoveToWindow` 재동기화(rootView 교체 타이밍) + stale async firstResponder 탈취 방지(`textView.window === window`) + `onChange(initial:true, guard request>0)`(mention 오버레이 직접 focus 경로 보존). **결정타**: `textDidBeginEditing/EndEditing`가 바인딩 set으로 @State를 되써서 blur 시 stale-true 없음 → focus 재탈취 회귀 없음. 445/445·macos-ui 31/31·real-window 반복 PASS(동생).
 - 준비: 동생 → 547·543(498) track/uxui 랜딩(자기 트랙, 승인함). **성재 승인 대기 이중트랙 main 머지**: track/uxui(496·497·536·498·512fix) + track/engine(491·509·511)을 원자적으로 함께 → main real-window 즉시 green. 최종 확인=성재 맥에서 `swift test --filter MemberInspectorSnapshotTests/testComposerFocusRequestRestoresKeyboardFocusInRealWindow` 1회(clients/macOS, 실 디스플레이) → 512 종결·509/511 런타임 검증.
