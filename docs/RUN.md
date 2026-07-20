@@ -254,10 +254,10 @@ macOS sidebar의 Kim Intern chip은 이 projection으로 `Available` / `Degraded
 internal alpha 사용자에게 `Local mock` / `Internal host mock` / `External Hermes`, key 준비 여부,
 redacted endpoint/diagnostic hint를 구분해 보여준다.
 
-Provider status는 연결 가능성만 뜻한다. 내부 알파에서 "김인턴 초대됨"은 별도 precondition이다:
-demo workspace의 `김인턴`은 `member.kind='agent'`, `member.status='active'`, handle
-`kim-intern`인 기존 agent member이고, `#agent-lab`
-(`00000000-0000-7000-8000-000000000202`) active membership을 가져야 한다. macOS는
+Provider status는 연결 가능성만 뜻한다. 내부 알파에서 "김인턴 초대됨"은 별도 precondition이다.
+fresh persistent/local-alpha DB에는 agent member가 없으므로 owner/admin이 아래 생성 API로
+`member.kind='agent'`, `member.status='active'` identity를 먼저 만든다. 그 다음 `#agent-lab`
+(`00000000-0000-7000-8000-000000000202`) membership과 credential을 각각 명시적으로 추가한다. macOS는
 선택 채널 Members 섹션의 `AGENT` badge와 sidebar Kim Intern chip을 함께 보여주고, server/API
 path는 `/v1/workspaces/{ws}/members?kind=agent`와
 `POST /v1/workspaces/{ws}/channels/{ch}/members`로 기존 agent member를 채널에 추가한다.
@@ -347,6 +347,29 @@ scripts/momo hermes-gateway-smoke --real
 AGENT_GATEWAY_MODE=gateway
 # token-only 서버 경로는 공유 시크릿이 필요하지 않다.
 ```
+
+#### Fresh DB 에이전트 pairing 순서
+
+에이전트 생성·채널 초대·credential 발급은 서로 다른 보안 결정을 나타내므로 한 요청으로
+합치지 않는다. owner/admin human bearer로 아래 순서를 지킨다.
+
+```text
+1. POST /v1/workspaces/{workspace}/agents
+   {displayName, handle, model, baseUrl, systemPrompt?, config?, ownerHumanId?}
+   -> {agent:{id,handle,displayName}}
+2. POST /v1/workspaces/{workspace}/channels/{channel}/members
+   {memberId:<agent.id>, role:"member"}
+3. POST /v1/workspaces/{workspace}/agents/{agent.id}/credentials
+   -> 원문 token 1회 반환
+```
+
+1번은 `member(kind='agent')`·`agent`·`agent.created` audit만 같은 tenant transaction으로
+커밋하며 **채널을 자동 추가하지 않는다**. 2번은 기존 human/agent 공용 membership 경로를
+그대로 재사용한다. 3번의 원문 bearer는 provider OAuth/API key가 아니라 momo-facing agent
+credential이며 서버에는 sha256만 저장된다. `baseUrl`/`config`에는 Codex/OpenAI OAuth token,
+provider API key, userinfo/query/fragment credential을 넣을 수 없다. non-loopback은 HTTPS만,
+loopback HTTP는 `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`과 명시적 포트가 있을 때만
+허용된다(ADR-0004).
 
 MOMO-337부터 human workspace owner/admin은 agent credential을 발급한다. 응답의
 `token` 원문은 이 응답에서만 노출되고 서버에는 sha256만 저장된다. 같은 POST를
