@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-21 (Fable 재개) · 509·511 런타임 verifier 종결 + 543 track/uxui 랜딩
+- main c953322에서 오케스트레이터 docker 실런: `verify_agent_create.sh`(509) — fresh DB 생성·409/403·pairing·credential·audit·RLS PASS / `verify_terminal_attach.sh`(511) — 발급·만료·소유자·revoke·raw 직결 우회·audit/RLS PASS. STATUS의 두 항목 `runtime-unverified`→`runtime-verified` 갱신(엔진 deviation 종결).
+- 543(iOS 타임라인 v2): base 전진으로 STATUS 충돌 → 541 워크트리에서 union 해소·push → track/uxui 랜딩(a06d050). 컴파일+41 tests PASS. **남은 것=498 "인증 실데이터 육안"**(라이트/다크·Dynamic Type·한국어 3줄·200+ 스크롤) — STATUS에 runtime-unverified 명시(496/497 선례와 동일 수동 게이트). 성재 기기 확인 또는 Fable 실데이터 시드 캡처 택1.
+
 ## 2026-07-21 (Fable 통합) · 이중트랙 main 머지 완료 — 512 차단 해소, 엔진 파이프라인 재개
 - 성재 위임("너가 해…검수한다음에 작업재개까지"). 547(512 focus fix)를 546 워크트리에서 real-window 직접 확증(실디스플레이 XDR — testComposerFocusRequestRestoresKeyboardFocusInRealWindow 등 real-window 4/4 PASS, XCTSkip 아님) → track/uxui 랜딩(e297dd3). 543(iOS 타임라인 v2)은 541 워크트리 시뮬레이터 게이트 PASS(BUILD/TEST SUCCEEDED·41 tests). iOS Archive CI fail은 main에서도 action_required = pre-existing 서명 이슈(코드 회귀 아님) 확증.
 - **이중트랙 main 머지**: track/uxui(496·497·536·547) + track/engine(491·509·511) → main c953322. 충돌은 docs만(STATUS union·ADR-0125 keep-ours, 코드 충돌 0). 머지 결과 게이트: real-window 4/4 PASS + server swift build 완료. 세 ref(main·track/engine·track/uxui) c953322 정렬(ff 재동기화). **성재 맥 real-window 재실행 불요**(Fable가 실디스플레이로 확증함).
