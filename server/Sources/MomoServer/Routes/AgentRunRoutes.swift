@@ -319,6 +319,8 @@ struct AgentRunRoutes: Sendable {
             return true
         case .agent:
             return runAgentMemberID == principalMemberID
+        case .workHost:
+            return false
         }
     }
 
