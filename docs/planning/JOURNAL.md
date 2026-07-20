@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-20 (Fable 엔진 트랙) · X-6(493)+work_pool(489) 랜딩 — 0125 파생 3/4 완료
+- 493(#529): auto-approve GET(human 전용·자기것만·tool만) — A-11 소비 짝. 489(#531): work_pool 슬롯 원장(FOR UPDATE 직렬화·구조화 409·집계 회복·admin audit). 둘 다 verifier+게이트 실패 0.
+- 검수 실측 결함 1건(489): 기본행 included_active_hours=NULL이 audit jsonb_build_object 바인딩에서 타입 미상 PSQLError→빈 본문 500 — 스택 유지 재현으로 확정, ::int 캐스트 수정. **jsonb 내 nullable 바인딩은 명시 캐스트** 교훈.
+- track/engine = main+2(493·489). 0125 파생 잔여: 490(UXUI 호스트 선택기 — A-11 뒤 동생 큐)·momo Cloud 프로비저너(T3 파일럿 후). 다음: 동생 A-11 검수 대기, 491(openssl 이식) 소형 정리 후보.
+
 ## 2026-07-20 (Fable 통합) · A-10 Work Console 검수 완료 + QA 팔로업 트래커 개설
 - track/uxui@940369e(5169ef5, +2,311) A-10 검수: 코드 결함 0. SwiftTerm 1.14.0(MIT, exact pin·macOS 전용)·환경 allowlist(PATH/SHELL/TMPDIR만·TOKEN/cwd/PWD 배제 테스트)·host 필터·control dedup·세션종료 dedup·raw 로컬 파일 전용·샌드박스 fail-closed. macos-ui 게이트+420 tests PASS(동생 보고).
 - **머지 미실행**(성재 명시 승인 대기 — TRACKS 규칙). App Sandbox 배포 정책은 blocker 아님으로 판정: dev 빌드 동작+샌드박스 fail-closed 안전, 배포판은 momo-workd(T2) 위임이 정답 → ADR-0114 보강.
