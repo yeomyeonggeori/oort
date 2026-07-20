@@ -1,6 +1,12 @@
 import Foundation
 import Logging
 
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
+
 @main
 struct WorkHostDaemonMain {
     static func main() async {
@@ -53,6 +59,7 @@ struct WorkHostDaemonMain {
             logger.error("momo-workd stopped", metadata: [
                 "error_label": .string(WorkDaemon.label(for: error)),
             ])
+            exit(EXIT_FAILURE)
         }
     }
 }
