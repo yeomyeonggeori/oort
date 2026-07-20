@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MOMO-484 / ADR-0114 work-control approval, dispatch, ack, and RLS gate.
+# MOMO-484/MOMO-493 / ADR-0114 work-control approval, dispatch, ack, snapshot, and RLS gate.
 set -euo pipefail
 umask 077
 
@@ -50,6 +50,7 @@ CROSS_TENANT_ID="48400000-0000-7000-8000-000000000099"
 CENT_CHANNEL="ch:ws${WS_ID}.${CHANNEL_ID}"
 CENT_API_KEY="${CENT_API_KEY:-change-me-cent-api-key}"
 OWNER_ID="$(new_uuid)"
+OTHER_OWNER_ID="$(new_uuid)"
 AGENT_ID="$(new_uuid)"
 HOST_ID="$(new_uuid)"
 HOST_PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
@@ -59,6 +60,8 @@ RUN_DENY2_ID="$(new_uuid)"
 RUN_DENY_ID="$(new_uuid)"
 OWNER_EMAIL="work-control-owner-$RUN_ID@momo.local"
 OWNER_PASSWORD="owner-$(new_uuid)"
+OTHER_OWNER_EMAIL="work-control-other-$RUN_ID@momo.local"
+OTHER_OWNER_PASSWORD="other-$(new_uuid)"
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" \
@@ -118,10 +121,14 @@ SET LOCAL row_security = off;
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES
   ('$OWNER_ID', '$WS_ID', 'human', 'active', 'Work Control Owner', 'wco-$RUN_ID'),
+  ('$OTHER_OWNER_ID', '$WS_ID', 'human', 'active', 'Other Work Control Owner', 'wco-other-$RUN_ID'),
   ('$AGENT_ID', '$WS_ID', 'agent', 'active', 'Work Control Agent', 'wca-$RUN_ID');
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
-VALUES ('$OWNER_ID', '$WS_ID', '$OWNER_EMAIL', true,
-        momo_password_hash('$OWNER_PASSWORD'), 'UTC');
+VALUES
+  ('$OWNER_ID', '$WS_ID', '$OWNER_EMAIL', true,
+   momo_password_hash('$OWNER_PASSWORD'), 'UTC'),
+  ('$OTHER_OWNER_ID', '$WS_ID', '$OTHER_OWNER_EMAIL', true,
+   momo_password_hash('$OTHER_OWNER_PASSWORD'), 'UTC');
 INSERT INTO agent
   (member_id, workspace_id, model, base_url, system_prompt, owner_human_id)
 VALUES
@@ -130,6 +137,7 @@ VALUES
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$CHANNEL_ID', '$OTHER_OWNER_ID', 'member'),
   ('$WS_ID', '$CHANNEL_ID', '$AGENT_ID', 'member');
 INSERT INTO agent_run
   (id, workspace_id, agent_member_id, channel_id, status, input,
@@ -174,6 +182,13 @@ curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   --data "$(jq -cn --arg e "$OWNER_EMAIL" --arg p "$OWNER_PASSWORD" --arg w "$WS_ID" \
     '{email:$e,password:$p,workspace:$w}')" >"$TMP_DIR/login.json"
 OWNER_TOKEN="$(jq -er '.accessToken' "$TMP_DIR/login.json")"
+
+curl -fsS -X POST "$BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  --data "$(jq -cn --arg e "$OTHER_OWNER_EMAIL" --arg p "$OTHER_OWNER_PASSWORD" \
+    --arg w "$WS_ID" '{email:$e,password:$p,workspace:$w}')" \
+  >"$TMP_DIR/other-login.json"
+OTHER_OWNER_TOKEN="$(jq -er '.accessToken' "$TMP_DIR/other-login.json")"
 
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/work-hosts" \
   "$(jq -cn --arg key "$HOST_PUBLIC_KEY" \
@@ -336,10 +351,27 @@ SQL
   exit 1
 }
 
+# Auto-approve snapshots are human-only even when the agent bearer has the
+# work:control scope used for control creation.
+api "$AGENT_TOKEN" GET "/v1/workspaces/$WS_ID/work-auto-approvals"
+expect_status 403 "agent auto-approve snapshot"
+
 # Self-owned auto-approve configuration and its audit row commit together.
 api "$OWNER_TOKEN" PUT "/v1/workspaces/$WS_ID/work-auto-approvals/codex"
 expect_status 200 "enable auto approve"
 printf '%s' "$RESPONSE_BODY" | jq -e '.tool == "codex" and .enabled == true' >/dev/null
+api "$OWNER_TOKEN" PUT "/v1/workspaces/$WS_ID/work-auto-approvals/shell"
+expect_status 200 "enable shell auto approve"
+api "$OWNER_TOKEN" PUT "/v1/workspaces/$WS_ID/work-auto-approvals/claude"
+expect_status 200 "enable claude auto approve"
+
+api "$OWNER_TOKEN" GET "/v1/workspaces/$WS_ID/work-auto-approvals"
+expect_status 200 "list auto approvals after enable"
+printf '%s' "$RESPONSE_BODY" | jq -e '
+  keys == ["tools"] and
+  .tools == ["claude", "codex", "shell"] and
+  all(.tools[]; type == "string")
+' >/dev/null
 got="$(sql_value <<SQL
 SELECT
   (SELECT count(*) FROM work_auto_approve
@@ -364,7 +396,12 @@ printf '%s' "$RESPONSE_BODY" | jq -e \
 AUTO_CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id | ascii_downcase')"
 wait_for_control_event "work.control.dispatched" "$AUTO_CONTROL_ID"
 
-# Remove the whitelist before the denial scenario; DELETE is audited too.
+# A second human has an independent setting. The caller-owned GET must not
+# expose it before or after the first owner's DELETE.
+api "$OTHER_OWNER_TOKEN" PUT "/v1/workspaces/$WS_ID/work-auto-approvals/opencode"
+expect_status 200 "enable other member auto approve"
+
+# Remove the codex whitelist before the denial scenario; DELETE is audited too.
 api "$OWNER_TOKEN" DELETE "/v1/workspaces/$WS_ID/work-auto-approvals/codex"
 expect_status 200 "disable auto approve"
 got="$(sql_value <<SQL
@@ -381,6 +418,20 @@ SQL
   echo "[work-control] FAIL auto-approve delete/audit transaction evidence: $got" >&2
   exit 1
 }
+
+api "$OWNER_TOKEN" GET "/v1/workspaces/$WS_ID/work-auto-approvals"
+expect_status 200 "list auto approvals after delete"
+printf '%s' "$RESPONSE_BODY" | jq -e '
+  keys == ["tools"] and
+  .tools == ["claude", "shell"] and
+  (.tools | index("codex")) == null and
+  (.tools | index("opencode")) == null
+' >/dev/null
+
+api "$OTHER_OWNER_TOKEN" GET "/v1/workspaces/$WS_ID/work-auto-approvals"
+expect_status 200 "other member auto-approve isolation"
+printf '%s' "$RESPONSE_BODY" | jq -e \
+  'keys == ["tools"] and .tools == ["opencode"]' >/dev/null
 
 api "$AGENT_TOKEN" POST "$CONTROL_PATH" "$(spawn_body "$RUN_DENY2_ID" denied-spawn)"
 expect_status 201 "denied scenario pending spawn"
@@ -479,4 +530,4 @@ SQL
   exit 1
 }
 
-echo "MOMO-484 work-control approval/auto-approve + no-version dispatch/ack + bypass/RLS PASS"
+echo "MOMO-484/493 work-control approval/auto-approve snapshot + no-version dispatch/ack + bypass/RLS PASS"

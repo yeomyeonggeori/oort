@@ -5,6 +5,17 @@
 - macOS 앱이 로그인한 workspace/member별 로컬 Ed25519 신원을 생성해 개인키를 Application Support에 0600으로 보관하고, 공개키만 `work-hosts` 등록 REST에 전달한다. 동일 공개키의 활성 app host는 재사용하며 revoke되었거나 없을 때만 새로 등록해 서버가 반환한 `host_id`를 Work Console의 유일한 라우팅 ID로 채택한다.
 - Work Console은 등록 전·실패 시 세션 시작과 원격 control 소비를 fail-closed한다. 설정에는 등록/online 상태와 복사 가능한 host ID, AgentWorker `MOMO_WORK_HOST_ID` 조율 안내를 표시하며, 정확한 heartbeat payload를 로컬 키로 서명한다. private key·capability URL·cwd·자격증명은 서버 요청·로그·UI·커밋에 포함하지 않는다.
 - macOS 전체 테스트, 디자인 pre-flight·라이트/다크/고대비 큰 글자 및 실패/offline raster 검수, `macos-ui` local gate를 검증 대상으로 한다. 실제 서버 로그인→등록→AgentWorker spawn/control→ack 한 사이클은 성재 환경 수동 QA 전까지 `runtime-unverified`다.
+## MOMO-489 work_pool 동적 세션 슬롯·쿼터 원장 (2026-07-20)
+
+- ADR-0125 D5에 따라 workspace PK의 `work_pool` FORCE RLS 설정 원장과 멤버 GET/admin PUT REST를 추가했다. 사용량은 `work_session.status='running'` 집계만 사용하며 PUT과 `work.pool.updated` 감사는 한 tenant transaction에서 커밋한다.
+- `POST /work-sessions`는 같은 트랜잭션에서 work_pool 행을 `FOR UPDATE` 잠그고 workspace hard cap과 member soft limit을 검사한다. 초과는 세션·카드·outbox 없이 `pool_exhausted`/`member_limit` 409만 반환하며, 종료는 집계에서 자동 회복한다. 자동 대기열 시작·대기 카드는 UXUI 후속이고 웜 인스턴스 풀은 프로비저너 후속이다.
+- server 122 tests와 OpenAPI/YAML·verifier bash 정적 검증이 PASS했다. `verify_work_pool.sh`는 27960~27963 격리 포트에서 기본행/acquire/두 한도/동시 경쟁/종료 회복/admin audit/RLS를 단정하며 runtime-db에 편입했다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
+## MOMO-493 auto-approve 현재값 조회 계약 (2026-07-20)
+
+- human active member만 호출할 수 있는 `GET /v1/workspaces/:ws/work-auto-approvals`를 추가했다. 응답은 호출자 자신의 tool 문자열만 사전순으로 반환하며 host·경로·프로세스 환경·자격증명은 포함하지 않는다.
+- OpenAPI operation/closed response를 가산하고 drift sample을 연결했다. `verify_work_control.sh`는 PUT→GET 정렬 snapshot→DELETE→GET 부재, agent 거부, 다른 human 설정 격리와 기존 cross-tenant FORCE RLS를 한 시나리오로 단정한다.
+- server 121 tests와 docs local gate 20/20가 PASS했다. 격리 `verify_work_control.sh`와 전체 `runtime-db` Docker 실런은 지시대로 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
 
 ## UXUI A-10 Interactive Work Console (2026-07-20)
 

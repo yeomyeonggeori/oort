@@ -2106,6 +2106,7 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("only the session owner can end it"))
         XCTAssertTrue(routes.contains("controlId is reserved for work host dispatch"))
         XCTAssertTrue(routes.contains("requireDispatchedSpawnControl"))
+        XCTAssertTrue(routes.contains("WorkPoolRoutes.acquireSlot"))
         XCTAssertTrue(routes.contains("wc.payload->>'tool'"))
         XCTAssertTrue(routes.contains("work host cannot end another host session"))
         XCTAssertTrue(routes.contains("JOIN membership ms"))
@@ -2198,6 +2199,10 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(AuthMiddleware.requiredAgentScope(
             method: "PUT",
             path: "/v1/workspaces/ws/work-auto-approvals/codex"
+        ))
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "GET",
+            path: "/v1/workspaces/ws/work-auto-approvals"
         ))
         XCTAssertTrue(AgentCredentialRoutes.defaultScopes.contains("work:control"))
 
@@ -2404,6 +2409,74 @@ final class MomoServerTests: XCTestCase {
             ["tool.codex": true]
         )
         XCTAssertThrowsError(try WorkHostRoutes.validatedCapabilities(["tool/codex": true]))
+    }
+
+    func testWorkPoolMigrationRoutesAndSettingsKeepDerivedUsageBoundary() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/022_work_pool.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE work_pool"))
+        XCTAssertTrue(migration.contains("workspace_id              uuid PRIMARY KEY"))
+        XCTAssertTrue(migration.contains("max_active                int NOT NULL DEFAULT 5"))
+        XCTAssertTrue(migration.contains("included_active_hours     int"))
+        XCTAssertTrue(migration.contains("per_member_soft_limit     int NOT NULL DEFAULT 5"))
+        XCTAssertTrue(migration.contains("SELECT id FROM workspace"))
+        XCTAssertTrue(migration.contains("ON CONFLICT (workspace_id) DO NOTHING"))
+        XCTAssertTrue(migration.contains("WHERE status = 'running'"))
+        XCTAssertTrue(migration.contains("ALTER TABLE work_pool FORCE ROW LEVEL SECURITY"))
+        XCTAssertFalse(migration.contains("active_count"))
+        XCTAssertFalse(migration.contains("active_sessions int"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/WorkPoolRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("work-pool\", use: get"))
+        XCTAssertTrue(routes.contains("work-pool\", use: update"))
+        XCTAssertTrue(routes.contains("FROM work_session"))
+        XCTAssertTrue(routes.contains("status = 'running'"))
+        XCTAssertTrue(routes.contains("FOR UPDATE"))
+        XCTAssertTrue(routes.contains("pool_exhausted"))
+        XCTAssertTrue(routes.contains("member_limit"))
+        XCTAssertTrue(routes.contains("work.pool.updated"))
+        XCTAssertTrue(routes.contains("max_active_increased"))
+        XCTAssertTrue(routes.contains("Automatic queue"))
+        XCTAssertFalse(routes.contains("BYPASSRLS"))
+
+        XCTAssertEqual(
+            try WorkPoolRoutes.validatedSettings(
+                maxActive: 8,
+                includedActiveHours: 120,
+                perMemberSoftLimit: 3
+            ),
+            WorkPoolRoutes.Settings(
+                maxActive: 8,
+                includedActiveHours: 120,
+                perMemberSoftLimit: 3
+            )
+        )
+        XCTAssertThrowsError(try WorkPoolRoutes.validatedSettings(
+            maxActive: 0,
+            includedActiveHours: nil,
+            perMemberSoftLimit: 1
+        ))
+        XCTAssertThrowsError(try WorkPoolRoutes.validatedSettings(
+            maxActive: 5,
+            includedActiveHours: -1,
+            perMemberSoftLimit: 1
+        ))
+        XCTAssertThrowsError(try WorkPoolRoutes.validatedSettings(
+            maxActive: 5,
+            includedActiveHours: nil,
+            perMemberSoftLimit: 6
+        ))
     }
 
     func testWorkHostEd25519HeartbeatBindsWorkspaceHostAndTimestamp() throws {

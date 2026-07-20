@@ -42,11 +42,16 @@ struct WorkAutoApproveResponse: ResponseEncodable {
     let enabled: Bool
 }
 
+struct WorkAutoApprovalsResponse: ResponseEncodable {
+    let tools: [String]
+}
+
 /// ADR-0114 D4/D5 control ledger. The server validates, records, approves, and
 /// delivers controls; host-local processes and credentials never cross this API.
 ///
 /// POST   /v1/workspaces/{ws}/work-controls                 (agent only)
 /// POST   /v1/workspaces/{ws}/work-controls/{control}/ack   (v0 host app)
+/// GET    /v1/workspaces/{ws}/work-auto-approvals           (human owner)
 /// PUT    /v1/workspaces/{ws}/work-auto-approvals/{tool}    (human owner)
 /// DELETE /v1/workspaces/{ws}/work-auto-approvals/{tool}    (human owner)
 struct WorkControlRoutes: Sendable {
@@ -76,6 +81,7 @@ struct WorkControlRoutes: Sendable {
     func add(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/work-controls", use: create)
         group.post("/v1/workspaces/:ws/work-controls/:control/ack", use: acknowledge)
+        group.get("/v1/workspaces/:ws/work-auto-approvals", use: listAutoApprovals)
         group.put("/v1/workspaces/:ws/work-auto-approvals/:tool", use: enableAutoApprove)
         group.delete("/v1/workspaces/:ws/work-auto-approvals/:tool", use: disableAutoApprove)
     }
@@ -329,6 +335,40 @@ struct WorkControlRoutes: Sendable {
     @Sendable
     func disableAutoApprove(_ request: Request, context: AppRequestContext) async throws -> Response {
         try await mutateAutoApprove(request, context: context, enabled: false)
+    }
+
+    @Sendable
+    func listAutoApprovals(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .human else {
+            throw HTTPError(.forbidden, message: "auto-approve settings require a human owner")
+        }
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+
+        let tools = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+            guard try await Self.isActiveHuman(
+                conn: conn,
+                logger: db.logger,
+                memberID: principal.memberID
+            ) else {
+                throw HTTPError(.forbidden, message: "active human membership required")
+            }
+
+            let rows = try await conn.query(
+                """
+                SELECT tool
+                  FROM work_auto_approve
+                 WHERE workspace_id = \(workspaceID)
+                   AND host_owner_member_id = \(principal.memberID)
+                 ORDER BY tool ASC
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.map { try $0.decode(String.self) }
+        }
+
+        return try WorkAutoApprovalsResponse(tools: tools)
+            .response(from: request, context: context)
     }
 
     private func mutateAutoApprove(

@@ -476,6 +476,12 @@ guard_jq '.muted == true' "notification preference returns the effective mute st
 sample channel-create post "/v1/workspaces/{workspaceId}/channels" "/v1/workspaces/$WS/channels" 201 \
   "$(jq -cn --arg n "gate-$RUN_EPOCH" '{kind:"public",name:$n,topic:"openapi drift gate"}')" "$ACCESS"
 
+sample work-pool-get get "/v1/workspaces/{workspaceId}/work-pool" \
+  "/v1/workspaces/$WS/work-pool" 200 "" "$ACCESS"
+sample work-pool-put put "/v1/workspaces/{workspaceId}/work-pool" \
+  "/v1/workspaces/$WS/work-pool" 200 \
+  '{"maxActive":5,"includedActiveHours":120,"perMemberSoftLimit":5}' "$ACCESS"
+
 # work hosts: register -> signed heartbeat -> polling list. Revoke is sampled
 # after the work-control operations have consumed the same registered host.
 sample work-host-register post "/v1/workspaces/{workspaceId}/work-hosts" \
@@ -706,6 +712,11 @@ sample work-auto-approval-enable put \
   "/v1/workspaces/{workspaceId}/work-auto-approvals/{tool}" \
   "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"
 guard_jq '.tool == "codex" and .enabled == true' "work auto-approval enables codex"
+
+sample work-auto-approvals-list get \
+  "/v1/workspaces/{workspaceId}/work-auto-approvals" \
+  "/v1/workspaces/$WS/work-auto-approvals" 200 "" "$ACCESS"
+guard_jq '.tools == ["codex"]' "work auto-approval snapshot contains only codex"
 
 sample work-control-create post "/v1/workspaces/{workspaceId}/work-controls" \
   "/v1/workspaces/$WS/work-controls" 201 \
