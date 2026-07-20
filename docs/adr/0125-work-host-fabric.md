@@ -42,12 +42,25 @@
 
 D1-A(레지스트리·outbound-only) · D2-A(workd+SSH 부트스트랩+로그인 브리지) · D3-A(재판매 시작, 기질-불가지 프로비저너) · D4-A(3계층 합성) · D5-A(풀 원장) · D6-A(호스트 선택기·로컬 우선) · D7-A(워크스페이스 과금·BYOA) · D8-A(보안 기본값) — **2026-07-19 성재 승인, Accepted.**
 
+## D10. 원격 인터랙티브 터미널 attach — T3 세션은 실제 TUI를 스트리밍한다 (2026-07-20 성재 지적 — T3 급소)
+
+- **문제**: T1(로컬 맥)은 SwiftTerm이 로컬 PTY를 직접 spawn하지만, T3(클라우드 샌드박스)에서 claude/codex를 앱에서 보려면 헤드리스가 아니라 **실제 TUI(alternate screen·전체 인터랙션)를 하나의 터미널에서 양방향으로** 봐야 한다. E3에서 겪은 "TTY 스크랩 불가"가 정확히 이 문제. 헤드리스 명령 실행으로는 TUI 도구를 못 쓴다.
+- **A (권고) — 원격 PTY attach(직결 스트림, 서버 raw 비경유)**: 
+  1. 호스트(클라우드 샌드박스, workd/프로비저너)가 도구를 **원격 PTY**로 실행(E2B pty create — create/connect(pid)/send_stdin/resize/kill 검증됨 2026-07-20). 
+  2. momo 서버는 **attach capability**(bearer·ephemeral, A-6 첨부 capability URL과 동일 패턴)만 발급하고, **클라이언트(SwiftTerm)가 샌드박스 PTY 스트림에 직접 연결**한다 — 원격 PTY 바이트는 momo 서버/relay를 경유하지 않는다(D3·ADR-0004 유지: 서버는 raw 무경유·전송전용). 
+  3. SwiftTerm이 원격 PTY의 stdout을 렌더하고 키입력을 send_stdin으로 전달, resize 동기화. 로컬 T1과 동일한 뷰, 백엔드만 원격 attach.
+  4. work_session 원장(483)은 그대로(수명주기·라벨만), 에이전트 조종(484 work.control)도 그대로 — attach는 "사람이 그 세션 터미널을 직접 본다"의 전송 계층 추가.
+- **부수 효과 — E3 자동 해소**: 실제 인터랙티브 터미널이 붙으면 구독 로그인은 "터미널에 URL 뜨고 코드 붙여넣기"가 사용자 손에서 자연히 일어난다(D9의 스크랩 캡처 불필요 — 헤드리스일 때만 D9 카드가 대신). 즉 D10이 서면 D9는 "비-attach(모바일 관전 전용) 폴백"으로 축소된다.
+- **경계·주의**: capability는 만료·세션 소유자 바인딩·revoke 즉시 무효(work_host revoke 연동). 클라이언트↔샌드박스 직결이 불가한 망(엄격 방화벽)에서는 서버 중계 폴백이 필요할 수 있으나 그 경우에도 **E2E 암호화로 서버가 평문 raw를 못 보게**(후속 결정). iOS는 v1에서 터미널 attach 대신 세션 스레드 관전(506)이 기본, 실 터미널 attach는 후속.
+- B — 서버 중계 스트림(momo relay가 PTY 바이트 프록시): D3(전송전용·raw 비경유) 위반. **기각**(직결 불가 폴백에서만, 암호화 전제).
+
 ## 파생 (Accepted 후 발급 예약 — 0114 파생 483~486 랜딩 후 순차)
 
 - **MOMO-487** (엔진): `work_host` 레지스트리 migration+REST 등록/revoke+Ed25519 검증+control 라우팅(host_id 필터) + verifier
 - **MOMO-488** (엔진): momo-workd v0 — 단일 바이너리·outbound 다이얼·PTY 세션 매니저(앱 세션 매니저와 프로토콜 공유)·launchd/systemd 유닛 + `momo host add` SSH 부트스트랩
 - **MOMO-489** (엔진): `work_pool` 원장 + slot acquire/release + 대기열 이벤트 + verifier
 - **MOMO-490** (UXUI): 호스트 선택기(승인 카드)·호스트 관리 설정·대기열 카드·원격 로그인 브리지 UX
+- **MOMO-511** (엔진+UXUI): 원격 인터랙티브 터미널 attach — 호스트 원격 PTY(E2B pty) + 서버 attach capability 발급 + SwiftTerm 원격 attach(stdout 렌더·키입력 send_stdin·resize) + revoke 연동. 서버 raw 비경유. macOS Work 서랍 먼저, iOS는 후속. E3/E4 파일럿이 기질 레퍼런스.
 - momo Cloud 프로비저너(기질 선정·과금 연동)는 위 4장 랜딩 후 별도 배치(S 배치 install.sh 자동화 승격과 합류)
 
 ## Consequences
