@@ -1,0 +1,307 @@
+import Foundation
+import Hummingbird
+import Logging
+import PostgresNIO
+
+struct RemotePTYBinding: Sendable, Equatable {
+    let ptyID: String
+    let attachEndpoint: String
+
+    /// Host-side semantic contract (ADR-0125 D10):
+    ///
+    /// - `create` starts the tool inside a PTY and returns this stable binding.
+    /// - `connect(ptyID)` attaches without spawning another tool process.
+    /// - `send_stdin`, `resize`, and `kill` target the same `ptyID`.
+    /// - stdout/stderr bytes flow only between the client and this endpoint.
+    ///
+    /// MomoServer persists and authorizes the binding; it never implements any
+    /// byte-stream operation. Real workd/provisioner PTY adapters are follow-up.
+    static func validated(ptyID: String?, attachEndpoint: String?) throws -> Self? {
+        guard ptyID != nil || attachEndpoint != nil else { return nil }
+        guard let ptyID, let attachEndpoint else {
+            throw HTTPError(
+                .badRequest,
+                message: "ptyId and attachEndpoint must be provided together"
+            )
+        }
+        guard ptyID.wholeMatch(of: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/) != nil else {
+            throw HTTPError(.badRequest, message: "ptyId is invalid")
+        }
+        guard attachEndpoint.count <= 2_048,
+              !attachEndpoint.contains("\0"),
+              let components = URLComponents(string: attachEndpoint),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "https" || scheme == "wss",
+              components.host != nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil
+        else {
+            throw HTTPError(
+                .badRequest,
+                message: "attachEndpoint must be a credential-free HTTPS or WSS URL"
+            )
+        }
+        return Self(ptyID: ptyID, attachEndpoint: attachEndpoint)
+    }
+}
+
+struct TerminalAttachCapabilityResponse: ResponseEncodable, Codable, Sendable, Equatable {
+    let attachEndpoint: String
+    let capabilityToken: String
+    let ptyID: String
+
+    enum CodingKeys: String, CodingKey {
+        case attachEndpoint = "attach_endpoint"
+        case capabilityToken = "capability_token"
+        case ptyID = "pty_id"
+    }
+}
+
+struct ValidateTerminalAttachRequest: Decodable, Sendable {
+    let capabilityToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case capabilityToken = "capability_token"
+    }
+}
+
+struct TerminalAttachValidationResponse: ResponseEncodable, Codable, Sendable, Equatable {
+    let workSessionID: String
+    let ptyID: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case workSessionID = "work_session_id"
+        case ptyID = "pty_id"
+        case expiresAt = "expires_at"
+    }
+}
+
+/// ADR-0125 D10 capability control plane.
+///
+/// MomoServer issues an opaque, short-lived bearer to the human session owner.
+/// The direct PTY host validates that bearer through its existing MomoHost
+/// signature before accepting a client connection. Validation joins the live
+/// work_host and running work_session on every call, making expiry, session end,
+/// and host revocation immediately authoritative. There is intentionally no
+/// stream, websocket, stdin, stdout, resize, or relay route in this server.
+struct TerminalAttachRoutes: Sendable {
+    static let capabilityTTLSeconds: Int64 = 60
+    static let capabilityPrefix = "momo_terminal_attach_v1"
+
+    let db: Database
+
+    func add(to group: RouterGroup<AppRequestContext>) {
+        group.post(
+            "/v1/workspaces/:ws/work-sessions/:session/terminal-attach",
+            use: issue
+        )
+        group.post(
+            "/v1/workspaces/:ws/work-hosts/:host/terminal-attach/validate",
+            use: validate
+        )
+    }
+
+    @Sendable
+    func issue(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .human else {
+            throw HTTPError(.forbidden, message: "terminal attach requires a human bearer")
+        }
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let sessionID = try Self.sessionID(context)
+        let token = Self.mintCapabilityToken()
+
+        let binding: RemotePTYBinding = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            try await InviteRoutes.requireWorkspaceMember(
+                conn: conn,
+                logger: db.logger,
+                principal: principal
+            )
+            let rows = try await conn.query(
+                """
+                SELECT ws.member_id, ws.host_id, ws.pty_id, ws.attach_endpoint,
+                       ws.status, h.revoked_at
+                  FROM work_session ws
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
+                 WHERE ws.id = \(sessionID)
+                 FOR SHARE OF ws, h
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let (ownerMemberID, hostID, ptyID, attachEndpoint, status, revokedAt) =
+                try row.decode((UUID, UUID, String?, String?, String, Date?).self)
+            guard ownerMemberID == principal.memberID else {
+                throw HTTPError(.forbidden, message: "only the session owner can attach")
+            }
+            guard status == "running", revokedAt == nil,
+                  let binding = try RemotePTYBinding.validated(
+                    ptyID: ptyID,
+                    attachEndpoint: attachEndpoint
+                  )
+            else {
+                throw HTTPError(.conflict, message: "terminal attach is unavailable")
+            }
+
+            let issuedRows = try await conn.query(
+                """
+                WITH issued AS (
+                  INSERT INTO terminal_attach_capability
+                    (workspace_id, work_session_id, host_id, owner_member_id,
+                     token_hash, expires_at)
+                  VALUES
+                    (\(workspaceID), \(sessionID), \(hostID), \(ownerMemberID),
+                     digest(\(token), 'sha256'),
+                     clock_timestamp() + interval '\(unescaped: String(Self.capabilityTTLSeconds)) seconds')
+                  RETURNING issued_at, expires_at
+                ), audited AS (
+                  INSERT INTO audit_log
+                    (workspace_id, actor_member_id, subject_member_id, action,
+                     target_type, target_id, via_token_id, detail)
+                  SELECT \(workspaceID), \(principal.memberID), \(ownerMemberID),
+                         'work.terminal_attach.issued', 'work_session', \(sessionID),
+                         \(principal.tokenID),
+                         jsonb_build_object(
+                           'schema', 'momo.work.terminal_attach.issued.v1',
+                           'owner_member_id', \(ownerMemberID),
+                           'issued_at', issued_at,
+                           'expires_at', expires_at
+                         )
+                    FROM issued
+                  RETURNING id
+                )
+                SELECT issued.issued_at, issued.expires_at, audited.id
+                  FROM issued CROSS JOIN audited
+                """,
+                logger: db.logger
+            ).collect()
+            guard issuedRows.first != nil else {
+                throw HTTPError(
+                    .internalServerError,
+                    message: "terminal attach capability was not issued"
+                )
+            }
+            return binding
+        }
+
+        return try TerminalAttachCapabilityResponse(
+            attachEndpoint: binding.attachEndpoint,
+            capabilityToken: token,
+            ptyID: binding.ptyID
+        ).response(from: request, context: context)
+    }
+
+    @Sendable
+    func validate(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .workHost else {
+            throw HTTPError(.forbidden, message: "terminal attach validation requires work host signature")
+        }
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let hostID = try Self.hostID(context)
+        guard hostID == principal.tokenID else { throw Self.invalidCapability() }
+        let requestDTO = try await request.decode(
+            as: ValidateTerminalAttachRequest.self,
+            context: context
+        )
+        let token = try Self.validatedCapabilityToken(requestDTO.capabilityToken)
+
+        let validated: TerminalAttachValidationResponse? = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT c.work_session_id, ws.pty_id, c.expires_at
+                  FROM terminal_attach_capability c
+                  JOIN work_session ws
+                    ON ws.id = c.work_session_id
+                   AND ws.workspace_id = c.workspace_id
+                   AND ws.host_id = c.host_id
+                   AND ws.member_id = c.owner_member_id
+                  JOIN work_host h
+                    ON h.id = c.host_id
+                   AND h.workspace_id = c.workspace_id
+                 WHERE c.workspace_id = \(workspaceID)
+                   AND c.host_id = \(hostID)
+                   AND c.token_hash = digest(\(token), 'sha256')
+                   AND c.expires_at > clock_timestamp()
+                   AND ws.status = 'running'
+                   AND ws.pty_id IS NOT NULL
+                   AND ws.attach_endpoint IS NOT NULL
+                   AND h.revoked_at IS NULL
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else { return nil }
+            let (workSessionID, ptyID, expiresAt) = try row.decode(
+                (UUID, String, Date).self
+            )
+            return TerminalAttachValidationResponse(
+                workSessionID: workSessionID.uuidString,
+                ptyID: ptyID,
+                expiresAt: Self.iso8601(expiresAt)
+            )
+        }
+        guard let validated else { throw Self.invalidCapability() }
+        return try validated.response(from: request, context: context)
+    }
+
+    static func mintCapabilityToken() -> String {
+        "\(capabilityPrefix).\(WebhookCrypto.randomReference())"
+    }
+
+    static func validatedCapabilityToken(_ raw: String) throws -> String {
+        let parts = raw.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+              parts[0] == Substring(capabilityPrefix),
+              parts[1].wholeMatch(of: /^[A-Za-z0-9_-]{43}$/) != nil
+        else { throw invalidCapability() }
+        return raw
+    }
+
+    private func withTenantTransactionUnwrapped<Result: Sendable>(
+        workspaceID: UUID,
+        _ body: @Sendable (PostgresConnection) async throws -> Result
+    ) async throws -> Result {
+        do {
+            return try await db.withTenantTransaction(workspaceID: workspaceID, body)
+        } catch let error as PostgresTransactionError {
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
+        }
+    }
+
+    private static func sessionID(_ context: AppRequestContext) throws -> UUID {
+        let raw = try context.parameters.require("session")
+        guard let id = UUID(uuidString: raw) else {
+            throw HTTPError(.badRequest, message: "invalid work session id")
+        }
+        return id
+    }
+
+    private static func hostID(_ context: AppRequestContext) throws -> UUID {
+        let raw = try context.parameters.require("host")
+        guard let id = UUID(uuidString: raw) else { throw invalidCapability() }
+        return id
+    }
+
+    private static func invalidCapability() -> HTTPError {
+        HTTPError(.unauthorized, message: "invalid terminal attach capability")
+    }
+
+    private static func iso8601(_ date: Date) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.string(from: date)
+    }
+}

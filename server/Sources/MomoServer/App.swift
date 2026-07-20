@@ -117,6 +117,7 @@ enum AppBuilder {
         authRoutes.addProtected(to: authed)
         MessageRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
         WorkSessionRoutes(db: db).add(to: authed)
+        TerminalAttachRoutes(db: db).add(to: authed)
         WorkPoolRoutes(db: db).add(to: authed)
         WorkControlRoutes(db: db).add(to: authed)
         workHostRoutes.addProtected(to: authed)

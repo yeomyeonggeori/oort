@@ -37,7 +37,7 @@ struct WorkHostAuthenticator: Sendable {
         }
         try Self.validateTimestamp(sentAtMs)
 
-        if let pathHostID = Self.pendingControlsHostID(fromPath: request.uri.path),
+        if let pathHostID = Self.scopedHostID(fromPath: request.uri.path),
            pathHostID != hostID
         {
             throw Self.unauthorized()
@@ -144,6 +144,16 @@ struct WorkHostAuthenticator: Sendable {
             return true
         }
         if method == "POST",
+           segments.count == 7,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "work-hosts",
+           segments[5] == "terminal-attach",
+           segments[6] == "validate"
+        {
+            return true
+        }
+        if method == "POST",
            segments.count == 4,
            segments[0] == "v1",
            segments[1] == "workspaces",
@@ -186,11 +196,10 @@ struct WorkHostAuthenticator: Sendable {
         return UUID(uuidString: String(segments[2]))
     }
 
-    static func pendingControlsHostID(fromPath path: String) -> UUID? {
+    static func scopedHostID(fromPath path: String) -> UUID? {
         let segments = path.split(separator: "/")
-        guard segments.count == 6,
-              segments[3] == "work-hosts",
-              segments[5] == "pending-controls"
+        guard segments.count >= 5,
+              segments[3] == "work-hosts"
         else { return nil }
         return UUID(uuidString: String(segments[4]))
     }

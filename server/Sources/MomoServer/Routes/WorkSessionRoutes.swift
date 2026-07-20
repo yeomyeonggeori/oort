@@ -9,6 +9,8 @@ struct CreateWorkSessionRequest: Decodable {
     let tool: String
     let label: String
     let controlId: UUID?
+    let ptyId: String?
+    let attachEndpoint: String?
 }
 
 struct EndWorkSessionRequest: Decodable {
@@ -73,8 +75,15 @@ struct WorkSessionRoutes: Sendable {
         let label = try Self.validatedLabel(requestDTO.label)
         let channelID = requestDTO.channelId
         let hostID = requestDTO.hostId
+        let remotePTY = try RemotePTYBinding.validated(
+            ptyID: requestDTO.ptyId,
+            attachEndpoint: requestDTO.attachEndpoint
+        )
         if principal.kind == .human, requestDTO.controlId != nil {
             throw HTTPError(.badRequest, message: "controlId is reserved for work host dispatch")
+        }
+        if principal.kind == .human, remotePTY != nil {
+            throw HTTPError(.badRequest, message: "remote PTY binding requires work host signature")
         }
         if principal.kind == .workHost {
             guard hostID == principal.tokenID, requestDTO.controlId != nil else {
@@ -100,6 +109,14 @@ struct WorkSessionRoutes: Sendable {
                 )
             } else {
                 sessionOwnerMemberID = principal.memberID
+            }
+            if remotePTY != nil {
+                try await Self.requireRemotePTYCapableHost(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    hostID: hostID
+                )
             }
             try await Self.requireChannelMember(
                 conn: conn,
@@ -159,10 +176,11 @@ struct WorkSessionRoutes: Sendable {
                 """
                 INSERT INTO work_session
                   (id, workspace_id, channel_id, member_id, host_id,
-                   root_message_id, tool, label, started_at)
+                   root_message_id, tool, label, pty_id, attach_endpoint, started_at)
                 VALUES
                   (\(sessionID), \(workspaceID), \(channelID), \(sessionOwnerMemberID),
-                   \(hostID), \(rootMessageID), \(tool), \(label), \(startedAt))
+                   \(hostID), \(rootMessageID), \(tool), \(label),
+                   \(remotePTY?.ptyID), \(remotePTY?.attachEndpoint), \(startedAt))
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
                           root_message_id, tool, label, status, started_at,
                           ended_at, exit_code
@@ -498,6 +516,32 @@ struct WorkSessionRoutes: Sendable {
         ).collect()
         guard rows.first != nil else {
             throw HTTPError(.forbidden, message: "active channel membership required")
+        }
+    }
+
+    private static func requireRemotePTYCapableHost(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        hostID: UUID
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT revoked_at IS NULL AS active,
+                   COALESCE((capabilities->>'terminal_attach')::boolean, false) AS supported
+              FROM work_host
+             WHERE id = \(hostID)
+               AND workspace_id = \(workspaceID)
+             FOR SHARE
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.forbidden, message: "work host not found")
+        }
+        let (active, supported) = try row.decode((Bool, Bool).self)
+        guard active, supported else {
+            throw HTTPError(.forbidden, message: "work host does not support terminal attach")
         }
     }
 
