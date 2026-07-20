@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI A-11 Work Host 자기등록 (2026-07-20)
+
+- macOS 앱이 로그인한 workspace/member별 로컬 Ed25519 신원을 생성해 개인키를 Application Support에 0600으로 보관하고, 공개키만 `work-hosts` 등록 REST에 전달한다. 동일 공개키의 활성 app host는 재사용하며 revoke되었거나 없을 때만 새로 등록해 서버가 반환한 `host_id`를 Work Console의 유일한 라우팅 ID로 채택한다.
+- Work Console은 등록 전·실패 시 세션 시작과 원격 control 소비를 fail-closed한다. 설정에는 등록/online 상태와 복사 가능한 host ID, AgentWorker `MOMO_WORK_HOST_ID` 조율 안내를 표시하며, 정확한 heartbeat payload를 로컬 키로 서명한다. private key·capability URL·cwd·자격증명은 서버 요청·로그·UI·커밋에 포함하지 않는다.
+- macOS 전체 테스트, 디자인 pre-flight·라이트/다크/고대비 큰 글자 및 실패/offline raster 검수, `macos-ui` local gate를 검증 대상으로 한다. 실제 서버 로그인→등록→AgentWorker spawn/control→ack 한 사이클은 성재 환경 수동 QA 전까지 `runtime-unverified`다.
+
 ## UXUI A-10 Interactive Work Console (2026-07-20)
 
 - macOS 중앙 패널 하단에 Control+backtick으로 여는 Work 서랍을 추가했다. SwiftTerm(MIT) 기반 로컬 PTY에서 Claude Code·Codex CLI·OpenCode·로그인 셸을 실행하고, 세션 목록/상태/종료, 서버가 만든 채널 카드, 세션 스레드 열기, 사용자가 검토한 출력 발췌 공유를 연결했다.

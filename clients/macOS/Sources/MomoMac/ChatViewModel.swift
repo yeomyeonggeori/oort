@@ -162,6 +162,7 @@ public final class ChatViewModel: ObservableObject {
     private let threadRepliesBackend: (any MomoThreadRepliesBackend)?
     private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
     private let workConsoleBackend: (any MomoWorkConsoleBackend)?
+    private let workHostBackend: (any MomoWorkHostBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -178,7 +179,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public var supportsWorkConsole: Bool {
-        workConsoleBackend != nil
+        workConsoleBackend != nil && workHostBackend != nil
     }
 
     public var allowsLocalProfileEditing: Bool {
@@ -293,7 +294,7 @@ public final class ChatViewModel: ObservableObject {
     private var markReadFailureCounts: [ChannelID: Int] = [:]
     private var channelNavigationHistory: [ChannelID] = []
     private var channelNavigationIndex: Int?
-    private var authenticatedMemberId: MemberID?
+    @Published private var authenticatedMemberId: MemberID?
     private var authoritativeInteractionMemberId: MemberID?
     private var activeTimelineChannelId: ChannelID?
     private var pendingFallbackMentionRuns: [ChannelID: Set<RunID>] = [:]
@@ -348,6 +349,7 @@ public final class ChatViewModel: ObservableObject {
         self.threadRepliesBackend = chat as? any MomoThreadRepliesBackend
         self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
         self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
+        self.workHostBackend = chat as? any MomoWorkHostBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -2209,6 +2211,12 @@ public final class ChatViewModel: ObservableObject {
             tool: tool,
             enabled: enabled
         )
+    }
+
+    func workHostBackendForCurrentSession() throws -> any MomoWorkHostBackend {
+        guard workspaceId != nil else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workHostBackend else { throw MomoWorkConsoleError.unavailable }
+        return workHostBackend
     }
 
     func shareWorkExcerpt(

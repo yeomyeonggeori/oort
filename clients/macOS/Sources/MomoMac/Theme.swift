@@ -504,6 +504,7 @@ public enum MomoTheme {
         public static let headerHeight: CGFloat = 48
         public static let rowMinimumHeight: CGFloat = 56
         public static let newSessionWidth: CGFloat = 420
+        public static let settingsWidth: CGFloat = 360
         public static let excerptWidth: CGFloat = 560
         public static let excerptHeight: CGFloat = 420
         public static let compactSpacing: CGFloat = 4
