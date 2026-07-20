@@ -42,12 +42,19 @@
 
 D1-A(레지스트리·outbound-only) · D2-A(workd+SSH 부트스트랩+로그인 브리지) · D3-A(재판매 시작, 기질-불가지 프로비저너) · D4-A(3계층 합성) · D5-A(풀 원장) · D6-A(호스트 선택기·로컬 우선) · D7-A(워크스페이스 과금·BYOA) · D8-A(보안 기본값) — **2026-07-19 성재 승인, Accepted.**
 
+## D9. 구독 자격증명 연결 UX (2026-07-20 성재 지시 — E3 파일럿 실증 반영)
+
+- **A (권고) — 세션 스레드 인라인 "연결 카드"**: T2/T3에서 사용자가 처음 claude/codex를 쓰려 하면 세션 카드 스레드(0114 D2)에 provider별 연결 카드가 인라인으로 뜬다. 흐름: ①"연결하기" → 호스트/샌드박스가 `setup-token`(또는 `login`)을 **momo 세션 매니저가 소유한 PTY**로 실행 ②매니저가 OAuth URL을 카드에 렌더(E3에서 script+FIFO로 검증한 그 URL) ③사용자가 URL 탭→폰에서 구독 인증→코드 복사 ④카드의 코드 입력 필드에 붙여넣기→매니저가 PTY stdin으로 주입→**토큰을 결정론적으로 캡처**해 호스트 로컬(T2)/샌드박스 볼륨(T3)에 영속 ⑤카드가 "connected · @user"로 전환.
+- **경계**: 토큰·URL은 momo 서버/UI/로그/원장에 절대 미유입 — 사용자가 보는 것은 연결 상태(connected/expired/disconnected)뿐(ADR-0004 + 0114 D3). provider별 연결 상태는 프로필/설정에 배지로(Discord 연동 목록 문법), 만료 시 경고색·재연결 CTA.
+- **E3 교훈**: TUI 스크랩(script+FIFO)은 라이브 인증엔 되나 토큰 영속이 불안정 — momo 세션 매니저가 PTY를 1급으로 소유해 토큰 캡처를 결정론화하는 것이 이 UX의 핵심 구현 요건. `setup-token`(헤드리스 CLAUDE_CODE_OAUTH_TOKEN) vs `login`(세션 크레덴셜) 선택은 구현 시 실측 확정.
+
 ## 파생 (Accepted 후 발급 예약 — 0114 파생 483~486 랜딩 후 순차)
 
 - **MOMO-487** (엔진): `work_host` 레지스트리 migration+REST 등록/revoke+Ed25519 검증+control 라우팅(host_id 필터) + verifier
 - **MOMO-488** (엔진): momo-workd v0 — 단일 바이너리·outbound 다이얼·PTY 세션 매니저(앱 세션 매니저와 프로토콜 공유)·launchd/systemd 유닛 + `momo host add` SSH 부트스트랩
 - **MOMO-489** (엔진): `work_pool` 원장 + slot acquire/release + 대기열 이벤트 + verifier
 - **MOMO-490** (UXUI): 호스트 선택기(승인 카드)·호스트 관리 설정·대기열 카드·원격 로그인 브리지 UX
+- **MOMO-510** (엔진+UXUI): 구독 연결 카드 — 세션 매니저 PTY OAuth 캡처(호스트/샌드박스) + provider 연결 상태 배지(프로필/설정) + 세션 스레드 인라인 연결 카드(iOS 506·macOS Work 서랍). E3 파일럿 스크립트가 메커니즘 레퍼런스.
 - momo Cloud 프로비저너(기질 선정·과금 연동)는 위 4장 랜딩 후 별도 배치(S 배치 install.sh 자동화 승격과 합류)
 
 ## Consequences
