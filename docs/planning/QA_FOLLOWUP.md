@@ -19,6 +19,7 @@
 - **수동 워크어라운드(A-11 전 즉시 테스트용)**: ① API로 host 1개 등록(curl `POST /work-hosts` type=app + 임의 Ed25519 pubkey) → host_id H ② 앱을 `MOMO_WORK_HOST_ID=H`로 실행 ③ AgentWorker를 `MOMO_WORK_HOST_ID=H`로 실행 ④ 채팅 멘션→spawn→승인→PTY→ack→발췌. Fable가 등록 curl·env 셋업 스크립트 제공.
 - **트리거**: (권장) A-11 랜딩 후 / (즉시) 위 워크어라운드로 성재+Fable 함께.
 - **수용**: 1왕복 전 단계 성공 + 서버 원장/스레드에 raw·cwd·토큰 미유입 육안 확인.
+- **✅ 경로 A PASS (2026-07-20)**: 성재 실사용 — Work 서랍에서 Codex 세션("momo test") 시작·PTY 대화·gpt-5.6-sol 응답 육안 확인. Fable 서버 대조: work_session 원장 정확(label만 저장·host 바인딩·running), 세션 카드 존재, **경로/cwd 유출 0**. A-10+A-11+483/487 실사용 증명. 파생 피드백 5건 → MOMO-495(UX 4건)+E5(클라우드). 경로 B는 Q1c.
 
 ## Q1b. Work Console 경로 구분 (2026-07-20 스택 실측)
 - **경로 A — 사람 직접 세션** [함께, 지금 가능]: Work 서랍에서 사람이 codex/claude 프로파일로 세션 시작(`startSession` → work_session 생성 + 로컬 PTY). 에이전트·work_control 불필요. **현재 gateway-mode 스택(28180)에서 즉시 검증 가능** — A-10/A-11/483/487/489의 핵심 경로.
