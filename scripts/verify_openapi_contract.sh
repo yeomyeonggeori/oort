@@ -50,7 +50,25 @@ need() {
 need curl
 need jq
 need uuidgen
-need openssl
+
+# Login shells on macOS can resolve /usr/bin/openssl (LibreSSL) before
+# Homebrew OpenSSL 3. Pick a binary that actually supports Ed25519.
+find_openssl() {
+  local candidate probe
+  probe="$(mktemp "${TMPDIR:-/tmp}/momo-openapi-openssl.XXXXXX")"
+  for candidate in openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl /usr/bin/openssl; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" genpkey -algorithm ED25519 -out "$probe" >/dev/null 2>&1; then
+      rm -f "$probe"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  rm -f "$probe"
+  echo "[openapi] no OpenSSL with Ed25519 genpkey support found" >&2
+  return 1
+}
+OPENSSL_BIN="$(find_openssl)"
 # openapi_shape_check uses modern Python syntax/contracts. The gate PATH may
 # prefer Xcode's Python 3.9, so select Python >= 3.10 explicitly (MOMO-458).
 PYTHON_BIN=""
@@ -364,10 +382,10 @@ native_webhook_sample() {
   local name="$1" template="$2" path="$3" body="$4" key_id="$5" secret="$6" delivery_id="$7"
   local timestamp body_hash signature_base signature out="$TMP_DIR/last-response.json"
   timestamp="$(date -u +%s)"
-  body_hash="$(printf '%s' "$body" | openssl dgst -sha256 | awk '{print $NF}')"
+  body_hash="$(printf '%s' "$body" | "$OPENSSL_BIN" dgst -sha256 | awk '{print $NF}')"
   signature_base="$(printf 'v1\nPOST\n%s\n%s\n%s\n%s\n%s' \
     "$path" "${path##*/}" "$timestamp" "$delivery_id" "$body_hash")"
-  signature="$(printf '%s' "$signature_base" | openssl dgst -sha256 -hmac "$secret" | awk '{print $NF}')"
+  signature="$(printf '%s' "$signature_base" | "$OPENSSL_BIN" dgst -sha256 -hmac "$secret" | awk '{print $NF}')"
   RESPONSE_STATUS="$(curl -sS -o "$out" -w "%{http_code}" -X POST "$BASE_URL$path" \
     -H 'Content-Type: application/json' \
     -H 'X-Momo-Signature-Version: v1' \
@@ -378,6 +396,31 @@ native_webhook_sample() {
     --data-binary "$body")"
   RESPONSE_BODY="$(cat "$out")"
   record_sample "$name" post "$template" 201
+}
+
+work_host_signed_sample() {
+  local name="$1" method="$2" template="$3" path="$4" expected="$5"
+  local host_id="$6" private_key="$7" body="${8:-}"
+  local sent_at payload signature out="$TMP_DIR/last-response.json" verb
+  sent_at="$($PYTHON_BIN -c 'import time; print(time.time_ns() // 1_000_000)')"
+  verb="$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')"
+  payload="$TMP_DIR/work-host-request-$name.txt"
+  printf 'momo.work_host.request.v1\n%s\n%s\n%s\n%s\n%s' \
+    "$verb" "$path" \
+    "$(printf '%s' "$WS" | tr '[:upper:]' '[:lower:]')" \
+    "$(printf '%s' "$host_id" | tr '[:upper:]' '[:lower:]')" \
+    "$sent_at" >"$payload"
+  signature="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$private_key" \
+    -in "$payload" | "$OPENSSL_BIN" base64 -A)"
+  local -a args=(-sS -o "$out" -w "%{http_code}" -X "$verb"
+    -H 'Content-Type: application/json'
+    -H "Authorization: MomoHost $host_id"
+    -H "X-Momo-Work-Host-Sent-At: $sent_at"
+    -H "X-Momo-Work-Host-Signature: $signature")
+  [ -n "$body" ] && args+=(--data "$body")
+  RESPONSE_STATUS="$(curl "${args[@]}" "$BASE_URL$path")"
+  RESPONSE_BODY="$(cat "$out")"
+  record_sample "$name" "$method" "$template" "$expected"
 }
 
 guard_jq() {
@@ -394,10 +437,10 @@ WS="$DEMO_WORKSPACE_ID"
 
 WORK_HOST_PRIVATE_KEY="$TMP_DIR/work-host-private.pem"
 WORK_HOST_PUBLIC_DER="$TMP_DIR/work-host-public.der"
-openssl genpkey -algorithm ED25519 -out "$WORK_HOST_PRIVATE_KEY" >/dev/null 2>&1
-openssl pkey -in "$WORK_HOST_PRIVATE_KEY" -pubout -outform DER \
+"$OPENSSL_BIN" genpkey -algorithm ED25519 -out "$WORK_HOST_PRIVATE_KEY" >/dev/null 2>&1
+"$OPENSSL_BIN" pkey -in "$WORK_HOST_PRIVATE_KEY" -pubout -outform DER \
   -out "$WORK_HOST_PUBLIC_DER" >/dev/null 2>&1
-WORK_HOST_PUBLIC_KEY="$(tail -c 32 "$WORK_HOST_PUBLIC_DER" | openssl base64 -A)"
+WORK_HOST_PUBLIC_KEY="$(tail -c 32 "$WORK_HOST_PUBLIC_DER" | "$OPENSSL_BIN" base64 -A)"
 
 # auth: login -> refresh (rotation) -> realtime-token
 sample login post "/v1/auth/login" "/v1/auth/login" 200 \
@@ -447,8 +490,8 @@ printf 'momo.work_host.heartbeat.v1\n%s\n%s\n%s' \
   "$(printf '%s' "$WS" | tr '[:upper:]' '[:lower:]')" \
   "$(printf '%s' "$WORK_HOST_ID" | tr '[:upper:]' '[:lower:]')" \
   "$WORK_HOST_SENT_AT_MS" >"$WORK_HOST_SIGNING_PAYLOAD"
-WORK_HOST_SIGNATURE="$(openssl pkeyutl -sign -rawin -inkey "$WORK_HOST_PRIVATE_KEY" \
-  -in "$WORK_HOST_SIGNING_PAYLOAD" | openssl base64 -A)"
+WORK_HOST_SIGNATURE="$("$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$WORK_HOST_PRIVATE_KEY" \
+  -in "$WORK_HOST_SIGNING_PAYLOAD" | "$OPENSSL_BIN" base64 -A)"
 sample work-host-heartbeat post \
   "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat" \
   "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/heartbeat" 200 \
@@ -461,6 +504,11 @@ sample work-host-list get "/v1/workspaces/{workspaceId}/work-hosts" \
 guard_jq --arg host "$(printf '%s' "$WORK_HOST_ID" | tr '[:upper:]' '[:lower:]')" \
   'any(.workHosts[]; (.id | ascii_downcase) == $host and .online == true)' \
   "work host polling list contains the signed-online host"
+work_host_signed_sample work-host-pending-controls get \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/pending-controls" \
+  "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/pending-controls" 200 \
+  "$WORK_HOST_ID" "$WORK_HOST_PRIVATE_KEY"
+guard_jq '.workControls == []' "new host has no dispatched controls"
 
 # work sessions: create card/root -> active list -> owner end
 sample work-session-create post "/v1/workspaces/{workspaceId}/work-sessions" \

@@ -39,6 +39,7 @@ struct AppRequestContext: RequestContext, RemoteAddressRequestContext {
 enum AuthPrincipalKind: String, Sendable {
     case human
     case agent
+    case workHost
 }
 
 /// The authenticated caller. Human principals come from App JWTs; agent

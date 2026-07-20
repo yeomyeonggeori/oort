@@ -106,7 +106,11 @@ enum AppBuilder {
         // applies AuthMiddleware (JWT + MOMO-300 revocation check), then the
         // per-member rate limit (needs the authenticated principal).
         let authed = router.group()
-            .add(middleware: AuthMiddleware(jwt: jwt, tokenStore: tokenStore))
+            .add(middleware: AuthMiddleware(
+                jwt: jwt,
+                tokenStore: tokenStore,
+                workHostAuthenticator: WorkHostAuthenticator(db: db)
+            ))
             .add(middleware: MemberRateLimitMiddleware(
                 limiter: rateLimiter, config: config.rateLimit, db: db, logger: logger
             ))

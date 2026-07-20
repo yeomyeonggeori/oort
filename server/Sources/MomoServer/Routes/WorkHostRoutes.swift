@@ -40,12 +40,19 @@ struct WorkHostListResponse: ResponseEncodable {
     let workHosts: [WorkHostDTO]
 }
 
+struct PendingWorkControlsResponse: ResponseEncodable {
+    let workControls: [WorkControlDTO]
+}
+
 /// ADR-0125 D1/D8 durable work-host identity registry.
 ///
 /// Protected human routes:
 ///   POST   /v1/workspaces/{ws}/work-hosts
 ///   GET    /v1/workspaces/{ws}/work-hosts
 ///   DELETE /v1/workspaces/{ws}/work-hosts/{host}
+///
+/// Protected host-signature route (MomoHost authorization, never bearer):
+///   GET    /v1/workspaces/{ws}/work-hosts/{host}/pending-controls
 ///
 /// Public signature-authenticated route (no durable bearer on the host):
 ///   POST   /v1/workspaces/{ws}/work-hosts/{host}/heartbeat
@@ -62,6 +69,10 @@ struct WorkHostRoutes: Sendable {
     func addProtected(to group: RouterGroup<AppRequestContext>) {
         group.post("/v1/workspaces/:ws/work-hosts", use: register)
         group.get("/v1/workspaces/:ws/work-hosts", use: list)
+        group.get(
+            "/v1/workspaces/:ws/work-hosts/:host/pending-controls",
+            use: pendingControls
+        )
         group.delete("/v1/workspaces/:ws/work-hosts/:host", use: revoke)
     }
 
@@ -226,6 +237,50 @@ struct WorkHostRoutes: Sendable {
         }
 
         return try WorkHostResponse(workHost: host)
+            .response(from: request, context: context)
+    }
+
+    @Sendable
+    func pendingControls(
+        _ request: Request,
+        context: AppRequestContext
+    ) async throws -> Response {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .workHost else {
+            throw HTTPError(.forbidden, message: "pending controls require work host signature")
+        }
+        let workspaceID = try Self.publicWorkspaceID(context)
+        let hostID = try Self.hostID(context)
+        guard workspaceID == principal.workspaceID, hostID == principal.tokenID else {
+            throw Self.heartbeatUnauthorized()
+        }
+
+        let controls: [WorkControlDTO] = try await db.withTenantConnection(
+            workspaceID: workspaceID
+        ) { conn in
+            let rows = try await conn.query(
+                """
+                SELECT wc.id, wc.workspace_id, wc.channel_id,
+                       wc.requester_member_id, wc.target_host_id, wc.session_id,
+                       wc.kind, wc.payload::text, wc.status,
+                       wc.approval_message_id, wc.created_at, wc.updated_at
+                  FROM work_control wc
+                  JOIN work_host h
+                    ON h.id = wc.target_host_id
+                   AND h.workspace_id = wc.workspace_id
+                   AND h.revoked_at IS NULL
+                 WHERE wc.workspace_id = \(workspaceID)
+                   AND wc.target_host_id = \(hostID)
+                   AND wc.status = 'dispatched'
+                 ORDER BY wc.created_at, wc.id
+                 LIMIT 100
+                """,
+                logger: db.logger
+            ).collect()
+            return try rows.map(WorkControlRoutes.decodeControl)
+        }
+
+        return try PendingWorkControlsResponse(workControls: controls)
             .response(from: request, context: context)
     }
 
