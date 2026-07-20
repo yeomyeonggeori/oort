@@ -33,6 +33,12 @@
 - **트리거**: 경로 A(Q1b) 통과 후, Fable가 worker-mode 스택 구성.
 - **수용**: 멘션→spawn tool→승인 카드→dispatched→PTY→ack→스레드, 실 provider로 1왕복.
 
+## Q1c 갱신 (2026-07-20 수동 재현 시도 결론)
+- **경로 A(사람 직접)는 PASS** — 성재 실사용+서버 대조 완료(위 Q1). 이게 A-10/A-11의 실제 제품 경로다.
+- **경로 B(에이전트-발원)의 스크립트 mock 수동 재현은 비신뢰** — mock Hermes(python)는 정확한 E2E 시퀀스 문구에만 반응하고, KEEP 모드 재사용 스택은 옛 `MOMO-486 INPUT` 히스토리가 컨텍스트를 오염시켜 SPAWN보다 INPUT을 먼저 매칭(→lineage 403). work_control 계약 자체는 정상(원장에 spawn/input acked). 
+- **결론**: 경로 B 실계약은 `verify_work_agent_e2e` PASS가 정본 검증. 실 provider(tool-calling) 수동 데모는 Hermes gateway에 work tool을 노출하는 엔진 후속(X-7 계열, 별도 티켓) 이후로 이관. 스크립트 mock 수동 재현은 더 진행하지 않음.
+- 수동 QA 우선순위 재정렬: ①경로 A(완료) ②Hermes 멘션 메신저 플로우 ③경로 B는 실 provider 준비 후.
+
 ## Q2. App Sandbox 배포 정책 결정 [Fable 기안 → 성재 결정]
 - **무엇**: dev(SwiftPM) 빌드는 PTY 동작, 배포(Xcode App Sandbox) 빌드는 fail-closed. 배포판에서 PTY를 열려면 ①App Sandbox 해제(App Store 불가·공증 직접배포 가능) 또는 ②비샌드박스 로컬 helper 경유 중 택1 — 보안 결정.
 - **검증/판단 방법**: 이건 테스트가 아니라 **ADR 결정**. Fable 분석: **②가 우리 로드맵과 정합** — ADR-0125의 momo-workd(T2, MOMO-488)가 정확히 "비샌드박스 로컬 호스트"다. 즉 배포판 앱은 샌드박스 유지 + PTY는 workd에 위임하면 App Store 경로도 열린다. dev 빌드는 앱 내장 PTY(T1) 그대로.
