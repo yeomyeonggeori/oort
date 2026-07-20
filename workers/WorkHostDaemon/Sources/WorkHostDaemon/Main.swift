@@ -20,6 +20,11 @@ struct WorkHostDaemonMain {
                 hostID = try await client.register(registrationToken: token)
                 try SecureLocalStore.saveHostID(hostID, at: config.hostIDURL)
             }
+            if let tokenURL = config.registrationTokenURL {
+                // A surviving token file after an interrupted prior bootstrap
+                // is consumed once a durable local host id exists as well.
+                try SecureLocalStore.removeConsumedSecret(at: tokenURL)
+            }
             // Registration bearer is one-shot bootstrap material. It is never
             // persisted and is dropped before any tool process can be spawned.
             config.registrationToken = nil

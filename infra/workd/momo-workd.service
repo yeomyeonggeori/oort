@@ -1,0 +1,19 @@
+[Unit]
+Description=momo outbound work host daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@WORKD_HOME@/.local/libexec/momo-workd-run @WORKD_HOME@/.config/momo/workd.env @WORKD_HOME@/.local/bin/momo-workd
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@WORKD_HOME@/.local/share/momo @WORKD_HOME@/.config/momo
+UMask=0077
+
+[Install]
+WantedBy=default.target
