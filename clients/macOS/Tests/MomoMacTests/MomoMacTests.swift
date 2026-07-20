@@ -81,10 +81,6 @@ final class MomoMacTests: XCTestCase {
             MomoWorkspaceCopy(language: .korean).agentWorkingTitle("하루"),
             "하루가 작업 중"
         )
-        XCTAssertEqual(
-            MomoWorkspaceCopy(language: .korean).typingIndicator(["빌드봇", "Hermes"]),
-            "빌드봇, Hermes가 입력 중..."
-        )
     }
 
     // MARK: sidebar shell policy (MOMO-357)
@@ -1717,7 +1713,7 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
-    func testRealtimeTypingEventDrivesVisibleTypingIndicator() async throws {
+    func testRealtimeTypingEventMaintainsCompatibilityState() async throws {
         let workspace = WorkspaceID()
         let channel = ChannelID()
         let human = MemberID()
@@ -1746,7 +1742,7 @@ final class MomoMacTests: XCTestCase {
     }
 
     @MainActor
-    func testComposerDraftPublishesLocalTypingIndicator() async throws {
+    func testComposerDraftPublishesLocalTypingState() async throws {
         let workspace = WorkspaceID()
         let channel = ChannelID()
         let human = MemberID()
