@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-20 (Fable 엔진 트랙) · 엔진 배치 랜딩 + 508 real-window 회귀(파이프라인 차단자)
+- 랜딩(track/engine): MOMO-491 openssl 이식(#540)·509 X-7 에이전트 생성 API(#542)·511-E D10 attach capability(#545). 파일럿 E2-A 경제·E5 GitHub 사이클·E3 부분 완료. ADR-0125 D9(구독연결 UX)·D10(원격 attach) 기안.
+- **차단자**: MOMO-508(컴포저 TextField→NativeTextView)이 real-window focus 복원 테스트를 결정적으로 깸. 헤드리스 게이트는 XCTSkip이라 508 통과했으나 실 디스플레이(성재 맥·runtime-db make test)에서 드러남 — 509·511 게이트 둘 다 걸림. 서버 전용이라 각 verifier 격리 PASS 확인 후 deviation 랜딩, MOMO-512로 동생 이관+정밀 진단(focusComposerRequest→isFocused 브리지).
+- 검수 성과: 509/511 무죄(엔진 베이스 재현), 두 worker 포트 충돌(27970) 선제 수정(511→27980), 부하 게이팅 24 거부 준수. track/engine=main+3. 다음: 512 수정이 엔진 게이트 정상화 선결.
+
 ## 2026-07-20 (Fable 기획) · iOS v1 모바일 개편 계획 기안 (성재 승인 대기)
 - 성재 발제(Discord·Mattermost·Claude 앱 레퍼런스 스크린샷) → docs/planning/handoffs/2026-07-20-ios-v1-mobile-plan.md. MOMO-496~506 예약: A(아이콘·탭 셸) → B(타임라인 v2·상호작용·스레드·첨부·검색) → C(푸시 v2 — 엔진 E-1 포함·C-3 딥링크 종결) → D(Work 탭·세션 상세 관전/개입 — Claude 앱 모델, 모바일 E2E 수용).
 - 원칙: 모바일=관전과 개입(실행은 호스트). 엔진 의존은 E-1(푸시 페이로드 v2)만 신설 — 나머지는 전부 main 기랜딩 소비. codex iOS plugin worker 규율(컴파일=오케스트레이터) 명문화.
