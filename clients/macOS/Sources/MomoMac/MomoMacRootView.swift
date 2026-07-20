@@ -1235,11 +1235,11 @@ struct MomoRightPanelBelowHeader<Content: View>: View {
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MomoTheme.Surface.style(.panel, colorScheme: colorScheme).fill)
-                .overlay(alignment: .leading) {
-                    MomoPaneDivider()
-                }
         }
         .frame(maxHeight: .infinity)
+        .overlay(alignment: .leading) {
+            MomoPaneDivider()
+        }
     }
 }
 
