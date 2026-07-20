@@ -127,11 +127,12 @@ final class MomoMessageComposerTextViewTests: XCTestCase {
         XCTAssertTrue(coordinator.textView(textView, doCommandBy: #selector(NSResponder.insertTab(_:))))
         XCTAssertTrue(coordinator.textView(textView, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
         XCTAssertFalse(coordinator.textView(textView, doCommandBy: #selector(NSTextView.copy(_:))))
+        XCTAssertTrue(coordinator.textView(textView, doCommandBy: #selector(NSResponder.insertNewline(_:))))
 
         XCTAssertEqual(movement, [1])
         XCTAssertTrue(completed)
         XCTAssertTrue(dismissed)
-        XCTAssertFalse(submitted)
+        XCTAssertTrue(submitted)
     }
 
     private func makeTextView() -> MomoMessageComposerNativeTextView {
