@@ -204,3 +204,127 @@ public enum IOSTimelineReducer {
         }
     }
 }
+
+struct IOSMessageBodySegment: Identifiable, Sendable, Equatable {
+    enum Kind: Sendable, Equatable {
+        case prose
+        case code(language: String?)
+    }
+
+    let id: Int
+    let kind: Kind
+    let text: String
+}
+
+enum IOSMessageBodyParser {
+    static func segments(in body: String) -> [IOSMessageBodySegment] {
+        let parts = body.components(separatedBy: "```")
+        var segments: [IOSMessageBodySegment] = []
+        segments.reserveCapacity(parts.count)
+
+        for (partIndex, part) in parts.enumerated() where !part.isEmpty {
+            let isCode = partIndex.isMultiple(of: 2) == false
+            let parsed = isCode ? codeBlock(from: part) : (nil, part)
+            let text = parsed.1.trimmingCharacters(in: .newlines)
+            guard !text.isEmpty else { continue }
+            segments.append(IOSMessageBodySegment(
+                id: segments.count,
+                kind: isCode ? .code(language: parsed.0) : .prose,
+                text: text
+            ))
+        }
+
+        if segments.isEmpty, !body.isEmpty {
+            return [IOSMessageBodySegment(id: 0, kind: .prose, text: body)]
+        }
+        return segments
+    }
+
+    private static func codeBlock(from raw: String) -> (String?, String) {
+        guard let newline = raw.firstIndex(of: "\n") else { return (nil, raw) }
+        let candidate = raw[..<newline].trimmingCharacters(in: .whitespaces)
+        let languageCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "_+-"))
+        let isLanguage = !candidate.isEmpty
+            && candidate.count <= 24
+            && candidate.unicodeScalars.allSatisfy(languageCharacters.contains)
+        guard isLanguage else { return (nil, raw) }
+        return (candidate, String(raw[raw.index(after: newline)...]))
+    }
+}
+
+struct IOSTimelineDisplayRow: Identifiable, Sendable, Equatable {
+    enum ID: Hashable, Sendable {
+        case date(Int64)
+        case message(MessageID)
+    }
+
+    enum Content: Sendable, Equatable {
+        case date(dayStartMs: Int64)
+        case message(
+            Message,
+            startsAuthorGroup: Bool,
+            mentionsCurrentMember: Bool,
+            bodySegments: [IOSMessageBodySegment]
+        )
+    }
+
+    let id: ID
+    let content: Content
+}
+
+enum IOSTimelineLayout {
+    static let authorGroupWindowMs: Int64 = 5 * 60 * 1_000
+
+    static func rows(
+        for messages: [Message],
+        currentMemberID: MemberID,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> [IOSTimelineDisplayRow] {
+        var rows: [IOSTimelineDisplayRow] = []
+        rows.reserveCapacity(messages.count + max(1, messages.count / 20))
+        var previousMessage: Message?
+        var previousDayStartMs: Int64?
+
+        for message in messages {
+            let timestamp = messageTimestamp(message)
+            let date = Date(timeIntervalSince1970: Double(timestamp) / 1_000)
+            let dayStartMs = Int64(calendar.startOfDay(for: date).timeIntervalSince1970 * 1_000)
+
+            if dayStartMs != previousDayStartMs {
+                rows.append(IOSTimelineDisplayRow(
+                    id: .date(dayStartMs),
+                    content: .date(dayStartMs: dayStartMs)
+                ))
+            }
+
+            let startsAuthorGroup = previousMessage.map { previous in
+                let gap = timestamp - messageTimestamp(previous)
+                return previous.authorMemberId != message.authorMemberId
+                    || gap < 0
+                    || gap > authorGroupWindowMs
+                    || dayStartMs != previousDayStartMs
+            } ?? true
+            let mentionedMemberIDs = message.props["mention_member_ids"]?.arrayValue ?? []
+            let mentionsCurrentMember = mentionedMemberIDs.contains { value in
+                value.stringValue == currentMemberID.description
+            }
+            let bodySegments = message.body.map(IOSMessageBodyParser.segments) ?? []
+            rows.append(IOSTimelineDisplayRow(
+                id: .message(message.id),
+                content: .message(
+                    message,
+                    startsAuthorGroup: startsAuthorGroup,
+                    mentionsCurrentMember: mentionsCurrentMember,
+                    bodySegments: bodySegments
+                )
+            ))
+            previousMessage = message
+            previousDayStartMs = dayStartMs
+        }
+        return rows
+    }
+
+    private static func messageTimestamp(_ message: Message) -> Int64 {
+        message.createdAtMs ?? message.hlcTs
+    }
+}
