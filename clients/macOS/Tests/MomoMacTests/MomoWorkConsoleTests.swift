@@ -172,6 +172,7 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testAutomaticTerminalLabelsFillFirstAvailableSlot() {
         XCTAssertEqual(
             MomoWorkConsoleController.automaticTerminalLabel(
