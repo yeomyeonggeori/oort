@@ -54,6 +54,13 @@ D1-A(호스트 세션 매니저) · D2-A(세션=스레드) · D3-A(큐레이션 
 - **MOMO-486** (엔진 3): AgentWorker tool 노출 — 에이전트가 work.* tool을 인지·호출하는 프롬프트/디스패치 + E2E verifier(채팅 요청→spawn 승인→mock CLI 세션→스레드 회신).
 - 후속 예약: momo-workd 데몬(원격/상시 호스트), 채널↔repo 바인딩, 팀 공용 러너 ADR, 도구별 플러그인.
 
+## 배포판 App Sandbox 경계 (2026-07-20 A-10 구현 중 발견, 보강)
+
+- **dev(SwiftPM) 빌드**: 앱 내장 PTY(D1-A) 동작 — 현재 dogfood 경로.
+- **배포(Xcode App Sandbox) 빌드**: App Sandbox가 임의 자식 프로세스/PTY를 제약 → A-10은 샌드박스에서 **fail-closed**(안전 기본값, 머지 blocker 아님).
+- **배포판에서 PTY를 여는 결정**: 로드맵상 답은 이미 있다 — **배포판 앱은 샌드박스 유지 + PTY는 비샌드박스 로컬 helper(ADR-0125 momo-workd, T2)에 위임**. 이러면 App Store 경로도 열린다. App Sandbox 해제(직접배포 전용)는 대안이나 스토어 경로를 닫으므로 비권장.
+- 확정 시점: M8 스토어 배포 또는 배포판 dogfood 선행. 그 전까지 dev 빌드로 A-10 사용. 추적: `docs/planning/QA_FOLLOWUP.md` Q2.
+
 ## Consequences
 
 - (+) "채팅에서 시키면 에이전트가 내 맥에서 CLI를 돌려 일한다"가 기존 원장 불변식 안에서 성립 — 서버는 여전히 프로세스·자격증명·raw 무접촉.

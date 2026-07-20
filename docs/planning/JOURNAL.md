@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-20 (Fable 통합) · A-10 Work Console 검수 완료 + QA 팔로업 트래커 개설
+- track/uxui@940369e(5169ef5, +2,311) A-10 검수: 코드 결함 0. SwiftTerm 1.14.0(MIT, exact pin·macOS 전용)·환경 allowlist(PATH/SHELL/TMPDIR만·TOKEN/cwd/PWD 배제 테스트)·host 필터·control dedup·세션종료 dedup·raw 로컬 파일 전용·샌드박스 fail-closed. macos-ui 게이트+420 tests PASS(동생 보고).
+- **머지 미실행**(성재 명시 승인 대기 — TRACKS 규칙). App Sandbox 배포 정책은 blocker 아님으로 판정: dev 빌드 동작+샌드박스 fail-closed 안전, 배포판은 momo-workd(T2) 위임이 정답 → ADR-0114 보강.
+- **QA_FOLLOWUP.md 개설**: Q1~Q8(A-10 실사용·샌드박스 결정·X-6·C-4·C-1·C-3·T3 E2/E3/E5·491)을 [자동]/[함께]/[성재] 분류·검증방법·트리거·수용조건으로 정리. 필요 시점에 함께 진행.
+- X-6(auto-approve snapshot) ready 역핸드오프 확인. 다음: A-10 머지 여부 성재 결정 대기, 엔진 488 게이트 진행 중.
+
 ## 2026-07-20 (Fable 엔진 트랙) · MOMO-488 momo-workd v0 구현 완료 — verifier/게이트 대기(성재 지시 일시중단)
 - 488(#525, PR 미생성) worker 완주·전량 push(goal `feat/525-momo-workd-v0-adr-0125-d2` @8cb2fe2, origin 동기화, 워크트리 clean). 신규 workers/WorkHostDaemon(momo-workd) + 서버 poll 엔드포인트(GET .../work-hosts/:id/pending-controls, 호스트 서명 인증) + infra/workd 배포 아티팩트.
 - Fable 검수 완료(코드 결함 0): poll=호스트 서명 전용(bearer 불가)·host≠agent 경계·ack 페이로드 raw 미포함·process 출력 로컬 파일 전용(D3 정합). server 121/workd 6 통과. verify_workd는 openssl 미사용(내부 Crypto)이라 LibreSSL 게이트 함정 없음.
