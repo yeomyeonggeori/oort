@@ -149,12 +149,14 @@ struct WorkPoolRoutes: Sendable {
                     'schema', 'momo.work_pool.updated.v1',
                     'previous', jsonb_build_object(
                       'max_active', \(previous.0),
-                      'included_active_hours', \(previous.1),
+                      -- Explicit cast: a NULL optional bound inside
+                      -- jsonb_build_object has no inferable type and 500s.
+                      'included_active_hours', \(previous.1)::int,
                       'per_member_soft_limit', \(previous.2)
                     ),
                     'new', jsonb_build_object(
                       'max_active', \(settings.maxActive),
-                      'included_active_hours', \(settings.includedActiveHours),
+                      'included_active_hours', \(settings.includedActiveHours)::int,
                       'per_member_soft_limit', \(settings.perMemberSoftLimit)
                     ),
                     'max_active_increased', \(settings.maxActive > previous.0)
