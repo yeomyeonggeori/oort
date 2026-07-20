@@ -112,10 +112,8 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
         }
         terminalView.processDelegate = processBridge
         terminalView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
-        terminalView.nativeForegroundColor = .textColor
-        terminalView.nativeBackgroundColor = .textBackgroundColor
-        terminalView.selectedTextBackgroundColor = .selectedTextBackgroundColor
         terminalView.optionAsMetaKey = true
+        applyTheme(.defaultPreset)
     }
 
     func start(tool: MomoWorkTool, directory: URL?) throws {
@@ -147,6 +145,10 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
 
     func focus() {
         terminalView.window?.makeFirstResponder(terminalView)
+    }
+
+    func applyTheme(_ preset: MomoTerminalThemePreset) {
+        preset.theme.apply(to: terminalView)
     }
 
     func tail(lineCount: Int) -> String {
@@ -187,10 +189,14 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
 
 struct MomoSwiftTermView: NSViewRepresentable {
     @ObservedObject var session: MomoLocalTerminalSession
+    let theme: MomoTerminalThemePreset
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
-        session.terminalView
+        session.applyTheme(theme)
+        return session.terminalView
     }
 
-    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {}
+    func updateNSView(_ nsView: LocalProcessTerminalView, context: Context) {
+        session.applyTheme(theme)
+    }
 }

@@ -11,6 +11,7 @@ final class MomoWorkConsolePreferences: ObservableObject {
     @Published private(set) var drawerHeight: CGFloat
     @Published private(set) var sessionListWidth: CGFloat
     @Published private(set) var rightPanelWidth: CGFloat
+    @Published private(set) var terminalTheme: MomoTerminalThemePreset
 
     private let defaults: UserDefaults
 
@@ -37,6 +38,9 @@ final class MomoWorkConsolePreferences: ObservableObject {
             maximum: MomoTheme.WorkConsole.rightPanelMaximumWidth,
             defaults: defaults
         )
+        terminalTheme = defaults.string(forKey: MomoTerminalThemePreset.storageKey)
+            .flatMap(MomoTerminalThemePreset.init(rawValue:))
+            ?? .defaultPreset
     }
 
     func setDrawerHeight(_ value: CGFloat) {
@@ -76,6 +80,11 @@ final class MomoWorkConsolePreferences: ObservableObject {
 
     func resetRightPanelWidth() {
         setRightPanelWidth(MomoTheme.WorkConsole.rightPanelWidth)
+    }
+
+    func setTerminalTheme(_ preset: MomoTerminalThemePreset) {
+        terminalTheme = preset
+        defaults.set(preset.rawValue, forKey: MomoTerminalThemePreset.storageKey)
     }
 
     private func persistDimension(

@@ -190,6 +190,37 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testTerminalThemePreferencePersists() throws {
+        let suiteName = "MomoTerminalThemePreferencesTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(preferences.terminalTheme, .dark)
+        preferences.setTerminalTheme(.colorBlindSafe)
+
+        let reloaded = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.terminalTheme, .colorBlindSafe)
+    }
+
+    func testTerminalThemePresetsProvideCompleteANSI16Palettes() {
+        for preset in MomoTerminalThemePreset.allCases {
+            XCTAssertEqual(preset.theme.ansi16.count, 16, preset.rawValue)
+        }
+    }
+
+    func testLightTerminalThemeMeetsAAForForegroundAndANSIColors() {
+        let theme = MomoTerminalThemePreset.light.theme
+        XCTAssertGreaterThanOrEqual(theme.foregroundBackgroundContrast, 4.5)
+        for color in theme.ansi16 {
+            XCTAssertGreaterThanOrEqual(
+                color.contrastRatio(with: theme.background),
+                4.5
+            )
+        }
+    }
+
     func testRESTWorkConsoleContractNeverSendsLocalRuntimeData() async throws {
         WorkConsoleURLProtocol.reset()
         defer { WorkConsoleURLProtocol.reset() }

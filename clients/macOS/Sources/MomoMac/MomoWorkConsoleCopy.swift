@@ -80,6 +80,24 @@ extension MomoWorkspaceCopy {
     }
     var startWorkSession: String { language == .korean ? "세션 시작" : "Start session" }
     var workConsoleSettings: String { language == .korean ? "Work 설정" : "Work settings" }
+    var terminalTheme: String { language == .korean ? "터미널 테마" : "Terminal theme" }
+    var terminalThemeHelp: String {
+        language == .korean
+            ? "앱 화면 모드와 별도로 모든 로컬 터미널에 적용됩니다."
+            : "Applies to every local terminal independently of the app appearance."
+    }
+    func terminalThemeTitle(_ preset: MomoTerminalThemePreset) -> String {
+        switch (preset, language) {
+        case (.dark, .korean): "다크, 기본"
+        case (.dark, .english): "Dark, default"
+        case (.light, .korean): "라이트"
+        case (.light, .english): "Light"
+        case (.highContrast, .korean): "고대비"
+        case (.highContrast, .english): "High contrast"
+        case (.colorBlindSafe, .korean): "색약 친화"
+        case (.colorBlindSafe, .english): "Color vision friendly"
+        }
+    }
     var workHostIdentifier: String { language == .korean ? "이 Mac의 호스트 ID" : "Host ID for this Mac" }
     var copyWorkHostIdentifier: String { language == .korean ? "호스트 ID 복사" : "Copy host ID" }
     var workHostPreparing: String { language == .korean ? "이 Mac을 Work 호스트로 등록하는 중" : "Registering this Mac as a Work host" }

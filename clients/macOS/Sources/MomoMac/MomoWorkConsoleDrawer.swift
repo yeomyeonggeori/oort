@@ -273,7 +273,12 @@ struct MomoWorkConsoleDrawer: View {
     @ViewBuilder
     private var sessionDetail: some View {
         if let session = controller.selectedSession {
-            MomoWorkSessionDetail(controller: controller, session: session, copy: copy)
+            MomoWorkSessionDetail(
+                controller: controller,
+                session: session,
+                terminalTheme: preferences.terminalTheme,
+                copy: copy
+            )
                 .id(session.id)
         } else {
             VStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
@@ -335,6 +340,7 @@ private struct MomoWorkSessionRow: View {
 private struct MomoWorkSessionDetail: View {
     @ObservedObject var controller: MomoWorkConsoleController
     let session: MomoWorkSession
+    let terminalTheme: MomoTerminalThemePreset
     let copy: MomoWorkspaceCopy
     @State private var excerptDraft: MomoWorkExcerptDraft?
 
@@ -347,8 +353,7 @@ private struct MomoWorkSessionDetail: View {
                 Divider()
             }
             if let local = controller.localSessions[session.id] {
-                MomoSwiftTermView(session: local)
-                    .background(Color(nsColor: .textBackgroundColor))
+                MomoSwiftTermView(session: local, theme: terminalTheme)
                     .overlay(alignment: .bottomLeading) {
                         Text(copy.workSessionLocalOnly)
                             .momoTypography(.metadata)
@@ -643,6 +648,29 @@ struct MomoWorkConsoleSettingsView: View {
         VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.sectionSpacing) {
             Text(copy.workConsoleSettings)
                 .font(.headline)
+            VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.standardSpacing) {
+                Text(copy.terminalTheme)
+                    .momoTypography(.supporting)
+                    .fontWeight(.medium)
+                Picker(
+                    copy.terminalTheme,
+                    selection: Binding(
+                        get: { preferences.terminalTheme },
+                        set: { preferences.setTerminalTheme($0) }
+                    )
+                ) {
+                    ForEach(MomoTerminalThemePreset.allCases) { preset in
+                        Text(copy.terminalThemeTitle(preset))
+                            .tag(preset)
+                    }
+                }
+                .labelsHidden()
+                Text(copy.terminalThemeHelp)
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider()
             VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.compactSpacing) {
                 Text(copy.workHostIdentifier)
                     .momoTypography(.supporting)
