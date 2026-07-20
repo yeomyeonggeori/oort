@@ -985,10 +985,6 @@ public struct MessageListView: View {
             ? []
             : Array(viewModel.mentionAutocompleteCandidates().prefix(MomoTheme.mentionAutocompleteMaximumRows))
         return VStack(alignment: .leading, spacing: 8) {
-            if !viewModel.visibleTypingMembers.isEmpty {
-                typingIndicator(copy: copy)
-            }
-
             if !attachmentDrafts.isEmpty {
                 MomoAttachmentDraftStrip(
                     drafts: attachmentDrafts,
@@ -1373,23 +1369,6 @@ public struct MessageListView: View {
                 !viewModel.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     || !attachmentDrafts.isEmpty
             )
-    }
-
-    private func typingIndicator(copy: MomoWorkspaceCopy) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "ellipsis.bubble.fill")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(MomoTheme.humanAccent)
-            Text(copy.typingIndicator(viewModel.visibleTypingMembers.map(\.displayName)))
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(MomoTheme.humanAccent.opacity(0.08), in: Capsule())
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func mentionAutocomplete(candidates: [Member], copy: MomoWorkspaceCopy) -> some View {
