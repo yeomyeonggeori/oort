@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-489 work_pool 동적 세션 슬롯·쿼터 원장 (2026-07-20)
+
+- ADR-0125 D5에 따라 workspace PK의 `work_pool` FORCE RLS 설정 원장과 멤버 GET/admin PUT REST를 추가했다. 사용량은 `work_session.status='running'` 집계만 사용하며 PUT과 `work.pool.updated` 감사는 한 tenant transaction에서 커밋한다.
+- `POST /work-sessions`는 같은 트랜잭션에서 work_pool 행을 `FOR UPDATE` 잠그고 workspace hard cap과 member soft limit을 검사한다. 초과는 세션·카드·outbox 없이 `pool_exhausted`/`member_limit` 409만 반환하며, 종료는 집계에서 자동 회복한다. 자동 대기열 시작·대기 카드는 UXUI 후속이고 웜 인스턴스 풀은 프로비저너 후속이다.
+- server 122 tests와 OpenAPI/YAML·verifier bash 정적 검증이 PASS했다. `verify_work_pool.sh`는 27960~27963 격리 포트에서 기본행/acquire/두 한도/동시 경쟁/종료 회복/admin audit/RLS를 단정하며 runtime-db에 편입했다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-493 auto-approve 현재값 조회 계약 (2026-07-20)
 
 - human active member만 호출할 수 있는 `GET /v1/workspaces/:ws/work-auto-approvals`를 추가했다. 응답은 호출자 자신의 tool 문자열만 사전순으로 반환하며 host·경로·프로세스 환경·자격증명은 포함하지 않는다.
