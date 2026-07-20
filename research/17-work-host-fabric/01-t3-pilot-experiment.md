@@ -77,6 +77,14 @@ momo L-base 템플릿(swift:6.2 + server/Core 소스 + 웜 .build, 4vCPU/4GB —
 - 부수 소득: E2B 샌드박스 기본 유저가 비특권(root 소유 템플릿 산출물 삭제 불가로 확인) — **0125 D8 보안 기본값이 기질에서 공짜로 성립**.
 - 잔여 캐비앳: 웜 첫 회 40.8s(2회차부터 21s)는 타임스탬프 기반 재검사로 추정 — cp -Rp류 보정 여지. 스토리지 델타는 E2B가 CoW를 내부화해 미노출 — 과금 관점은 E2에서.
 
+## 4c. E5 실측 — 클라우드 GitHub 사이클 (2026-07-20 PASS)
+
+E2B 샌드박스에서 GitHub in/out 왕복 실증(dawn-cut 전용 스크래치 브랜치, 기본 브랜치 무접촉):
+- sandbox_create 0.32s → git clone(depth 1) → 브랜치 생성 → 파일 생성·커밋(e6caaa0) → **토큰 URL push 성공** → GitHub API로 브랜치·파일(MOMO_E5_CLOUD.md 49B) 실재 확인 → 데모 브랜치 정리.
+- 판정: **"에이전트가 클라우드에서 GitHub 받아 작업하고 push"의 인프라 경로 PASS**. 토큰은 샌드박스 env로만 전달·로그 비출력. (스크립트 commit 단정은 오탐 — GitHub 실재로 반증.)
+- 잔여: ①에이전트 control 배선(work_control→cloud host — 후속) ②샌드박스 내 구독 CLI(claude/codex) 로그인 E3 ③momo 원장 연동. 이 3개가 붙으면 "채팅 요청→클라우드 세션→PR" 완전판.
+- 스크립트: pilot/e5_e2b_github_cycle.py.
+
 ## 5. 산출물·판정
 
 - 본 문서에 실측표 추가 → **ADR-0125 D3 기질 확정**(1개 선정) + 요금제 숫자 보정(17-00 §4) + momo Cloud 프로비저너 티켓(S 배치 합류) 발급 입력.
