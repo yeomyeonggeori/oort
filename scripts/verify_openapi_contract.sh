@@ -707,6 +707,11 @@ sample work-auto-approval-enable put \
   "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"
 guard_jq '.tool == "codex" and .enabled == true' "work auto-approval enables codex"
 
+sample work-auto-approvals-list get \
+  "/v1/workspaces/{workspaceId}/work-auto-approvals" \
+  "/v1/workspaces/$WS/work-auto-approvals" 200 "" "$ACCESS"
+guard_jq '.tools == ["codex"]' "work auto-approval snapshot contains only codex"
+
 sample work-control-create post "/v1/workspaces/{workspaceId}/work-controls" \
   "/v1/workspaces/$WS/work-controls" 201 \
   "$(jq -cn --arg ch "$GENERAL_ID" --arg run "$CONTROL_RUN_UUID" \

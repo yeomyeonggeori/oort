@@ -2199,6 +2199,10 @@ final class MomoServerTests: XCTestCase {
             method: "PUT",
             path: "/v1/workspaces/ws/work-auto-approvals/codex"
         ))
+        XCTAssertNil(AuthMiddleware.requiredAgentScope(
+            method: "GET",
+            path: "/v1/workspaces/ws/work-auto-approvals"
+        ))
         XCTAssertTrue(AgentCredentialRoutes.defaultScopes.contains("work:control"))
 
         let spawn = try WorkControlRoutes.validatedPayload(

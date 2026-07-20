@@ -1055,6 +1055,37 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-auto-approvals:
+    get:
+      tags: [work-controls]
+      operationId: listWorkAutoApprovals
+      summary: List this human owner's enabled spawn auto-approval tools.
+      description: >
+        Human bearer only. Returns only the caller's enabled tool identifiers,
+        sorted lexicographically. Host identifiers, paths, process environment,
+        and credentials are never included.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Deterministically ordered auto-approval snapshot for the caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkAutoApprovalsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive human.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/work-auto-approvals/{tool}:
     put:
       tags: [work-controls]
@@ -3537,6 +3568,18 @@ components:
           enum: [claude, codex, opencode, shell]
         enabled:
           type: boolean
+
+    WorkAutoApprovalsResponse:
+      type: object
+      required: [tools]
+      properties:
+        tools:
+          type: array
+          uniqueItems: true
+          description: Enabled tool identifiers sorted lexicographically.
+          items:
+            type: string
+            enum: [claude, codex, opencode, shell]
 
     # ---- Huddles ------------------------------------------------------------
     HuddleParticipant:
