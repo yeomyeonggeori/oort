@@ -171,6 +171,7 @@ final class MemberInspectorSnapshotTests: XCTestCase {
             backing: .buffered,
             defer: false
         )
+        window.isMovableByWindowBackground = true
         window.contentViewController = hostingController
         window.isReleasedWhenClosed = false
         window.makeKeyAndOrderFront(nil)
@@ -184,13 +185,14 @@ final class MemberInspectorSnapshotTests: XCTestCase {
         .frame(width: 760, height: 620)
         try await Task.sleep(for: .milliseconds(250))
 
-        let fieldEditor = try XCTUnwrap(window.firstResponder as? NSTextView)
-        let textField = try XCTUnwrap(fieldEditor.delegate as? NSTextField)
+        let textView = try XCTUnwrap(window.firstResponder as? MomoMessageComposerNativeTextView)
         XCTAssertTrue(
             [MomoUILanguage.korean, .english]
                 .map { MomoWorkspaceCopy(language: $0).messagePlaceholder }
-                .contains(textField.placeholderString ?? "")
+                .contains(textView.accessibilityLabel() ?? "")
         )
+        XCTAssertEqual(textView.accessibilityIdentifier(), "momo-message-composer")
+        XCTAssertFalse(textView.mouseDownCanMoveWindow)
     }
 
     private func captureMentionAutocomplete(

@@ -432,23 +432,6 @@ struct MomoWorkspaceCopy {
         }
     }
 
-    func typingIndicator(_ names: [String]) -> String {
-        let visible = names.prefix(2).joined(separator: ", ")
-        let remainder = max(0, names.count - 2)
-        switch language {
-        case .korean:
-            if remainder > 0 {
-                return "\(visible) 외 \(remainder)명이 입력 중..."
-            }
-            return "\(MomoKoreanParticle.attach(.subject, to: visible)) 입력 중..."
-        case .english:
-            if remainder > 0 {
-                return "\(visible) and \(remainder) more are typing..."
-            }
-            return names.count == 1 ? "\(visible) is typing..." : "\(visible) are typing..."
-        }
-    }
-
     func agentWorkingTitle(_ name: String) -> String {
         switch language {
         case .korean: return "\(MomoKoreanParticle.attach(.subject, to: name)) 작업 중"
