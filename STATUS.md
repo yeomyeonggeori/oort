@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-491 PushRelay OpenSSL 리졸버 하드닝 (2026-07-20)
+
+- `verify_work_host.sh`의 Ed25519 capability probe를 `verify_push_relay.sh`와 `push_relay_keygen.sh`에 이식하고, 두 스크립트의 모든 `genpkey`/`pkey`/`pkeyutl`/`base64` 호출을 리졸브된 `OPENSSL_BIN`으로 통일했다.
+- 로그인 셸이 `/usr/bin/openssl` LibreSSL 3.3.6을 우선하는 실제 환경에서 keygen과 `bash -lc 'scripts/verify_push_relay.sh'`가 PASS했고 docs local gate 21/21도 PASS했다. Docker를 포함한 전체 `runtime-relay` 프로필은 지시대로 오케스트레이터 실행 대상으로 남겼다.
+
 ## UXUI A-11 Work Host 자기등록 (2026-07-20)
 
 - macOS 앱이 로그인한 workspace/member별 로컬 Ed25519 신원을 생성해 개인키를 Application Support에 0600으로 보관하고, 공개키만 `work-hosts` 등록 REST에 전달한다. 동일 공개키의 활성 app host는 재사용하며 revoke되었거나 없을 때만 새로 등록해 서버가 반환한 `host_id`를 Work Console의 유일한 라우팅 ID로 채택한다.
