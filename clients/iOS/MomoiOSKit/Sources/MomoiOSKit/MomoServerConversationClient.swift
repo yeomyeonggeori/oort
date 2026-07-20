@@ -37,12 +37,26 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         async let membersData = get(workspacePath + "/roster")
         async let readStatesData = get(workspacePath + "/read-state")
         do {
-            let channels = try decoder.decode(IOSChannelsResponse.self, from: try await channelsData)
-                .channels.map { try $0.value() }
-            let members = try decoder.decode(IOSRosterResponse.self, from: try await membersData)
-                .members.map { try $0.value() }
+            let channelDTOs = try decoder.decode(IOSChannelsResponse.self, from: try await channelsData).channels
+            let channels = try channelDTOs.map { try $0.value() }
+            let memberDTOs = try decoder.decode(IOSRosterResponse.self, from: try await membersData).members
+            let members = try memberDTOs.map { try $0.value() }
             let states = try decoder.decode(IOSReadStateResponse.self, from: try await readStatesData).readStates
-            return IOSConversationSnapshot(channels: channels, members: members, readStates: states)
+            let muteStates = try Dictionary(uniqueKeysWithValues: channelDTOs.map { dto in
+                (try dto.channelID(), dto.muted)
+            })
+            let presencePairs: [(MemberID, Presence)] = try memberDTOs.compactMap { dto in
+                guard let presence = dto.presence.flatMap(Presence.init(rawValue:)) else { return nil }
+                return (try dto.memberID(), presence)
+            }
+            let presenceStates = Dictionary(uniqueKeysWithValues: presencePairs)
+            return IOSConversationSnapshot(
+                channels: channels,
+                members: members,
+                readStates: states,
+                channelMuteStates: muteStates,
+                memberPresenceStates: presenceStates
+            )
         } catch let error as SessionError {
             throw error
         } catch {
@@ -79,14 +93,43 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         }
     }
 
-    public func markRead(channel: ChannelID, through sequence: Int64) async throws {
+    public func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
         let path = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/read-state"
         var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
         request.httpMethod = "PUT"
         request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(IOSMarkReadRequest(lastReadSequence: sequence))
-        _ = try await execute(request: request)
+        do {
+            return try decoder.decode(ChannelReadState.self, from: try await execute(request: request))
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned an invalid read state.")
+        }
+    }
+
+    public func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool {
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/notification-pref"
+        var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
+        request.httpMethod = "PUT"
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(IOSUpdateNotificationPreferenceRequest(muted: muted))
+        do {
+            let response = try decoder.decode(
+                IOSNotificationPreferenceResponse.self,
+                from: try await execute(request: request)
+            )
+            guard response.muted == muted else {
+                throw SessionError.decoding("The server returned a different channel notification setting.")
+            }
+            return response.muted
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned an invalid channel notification setting.")
+        }
     }
 
     public func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
@@ -445,6 +488,8 @@ private struct IOSMarkReadRequest: Encodable {
     let lastReadSequence: Int64
     private enum CodingKeys: String, CodingKey { case lastReadSequence = "last_read_seq" }
 }
+private struct IOSUpdateNotificationPreferenceRequest: Encodable { let muted: Bool }
+private struct IOSNotificationPreferenceResponse: Decodable { let muted: Bool }
 private struct IOSProblemResponse: Decodable { let title: String?; let detail: String?; let message: String? }
 private struct IOSReadStateResponse: Decodable {
     let readStates: [ChannelReadState]
@@ -464,15 +509,22 @@ private struct IOSChannelDTO: Decodable {
     let memberIds: [String]?
     let createdBy: String?
     let archivedAtMs: Int64?
+    let muted: Bool
+
+    func channelID() throws -> ChannelID {
+        guard let id = ChannelID(uuidString: id) else {
+            throw SessionError.decoding("The server returned an invalid channel identity.")
+        }
+        return id
+    }
 
     func value() throws -> Channel {
-        guard let id = ChannelID(uuidString: id),
-              let workspaceID = WorkspaceID(uuidString: workspaceId),
+        guard let workspaceID = WorkspaceID(uuidString: workspaceId),
               let kind = ChannelKind(rawValue: kind) else {
             throw SessionError.decoding("The server returned an invalid channel.")
         }
         return Channel(
-            id: id,
+            id: try channelID(),
             workspaceId: workspaceID,
             kind: kind,
             name: name,
@@ -496,14 +548,21 @@ private struct IOSMemberDTO: Decodable {
     let role: String?
     let channelIds: [String]?
     let capabilities: [String]?
+    let presence: String?
+
+    func memberID() throws -> MemberID {
+        guard let id = MemberID(uuidString: id) else {
+            throw SessionError.decoding("The server returned an invalid member identity.")
+        }
+        return id
+    }
 
     func value() throws -> Member {
-        guard let id = MemberID(uuidString: id),
-              let workspaceID = WorkspaceID(uuidString: workspaceId) else {
+        guard let workspaceID = WorkspaceID(uuidString: workspaceId) else {
             throw SessionError.decoding("The server returned an invalid member.")
         }
         return Member(
-            id: id,
+            id: try memberID(),
             workspaceId: workspaceID,
             kind: MemberKind(rawValue: kind) ?? .human,
             status: status.flatMap(MemberStatus.init(rawValue:)) ?? .active,
@@ -513,7 +572,7 @@ private struct IOSMemberDTO: Decodable {
             workspaceRole: role.flatMap(MembershipRole.init(rawValue:)),
             channelIds: (channelIds ?? []).compactMap { ChannelID(uuidString: $0) },
             capabilities: capabilities ?? [],
-            presence: .online
+            presence: presence.flatMap(Presence.init(rawValue:)) ?? .offline
         )
     }
 }
