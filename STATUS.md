@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-509 관리자 에이전트 생성 API (2026-07-20)
+
+- human owner/admin 전용 `POST /v1/workspaces/:ws/agents`를 추가했다. 기존 `001_init.sql` 계약만 재사용해 `member(kind=agent)`·`agent`·`agent.created` audit를 한 tenant transaction에서 생성하며, workspace handle 중복은 partial row 없이 409로 닫는다. `baseUrl`은 HTTPS 기본·명시적 local loopback opt-in만 허용하고 userinfo/query/fragment 및 config의 credential형 키를 거부해 ADR-0004 provider credential 비유입 경계를 유지한다.
+- 생성 API는 채널 membership과 credential을 자동 발급하지 않는다. OpenAPI와 RUN 문서에 기존 `POST .../channels/:channel/members` → `POST .../agents/:agent/credentials`를 명시적인 pairing 후속 흐름으로 기록했다. 공유 Core 계약 변경은 필요하지 않았다.
+- server 124 tests, OpenAPI/YAML·bash/ShellCheck·local-gate drift 정적 검증이 PASS했다. `verify_agent_create.sh`는 seed-none fresh DB와 충돌 사전검사한 27970~27973 격리 포트에서 생성·중복 409·비admin 403·pairing/credential·audit·FORCE RLS를 단정하며 runtime-db에 편입했다. 지시대로 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## UXUI A-11 Work Host 자기등록 (2026-07-20)
 
 - macOS 앱이 로그인한 workspace/member별 로컬 Ed25519 신원을 생성해 개인키를 Application Support에 0600으로 보관하고, 공개키만 `work-hosts` 등록 REST에 전달한다. 동일 공개키의 활성 app host는 재사용하며 revoke되었거나 없을 때만 새로 등록해 서버가 반환한 `host_id`를 Work Console의 유일한 라우팅 ID로 채택한다.
