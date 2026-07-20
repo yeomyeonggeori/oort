@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## UXUI MOMO-512 NativeTextView 포커스 복원 (2026-07-20)
+
+- MOMO-508 네이티브 컴포저의 포커스 상태를 SwiftUI `.focused`와 연결되지 않은 `@FocusState` 대신 representable 갱신을 보장하는 `@State`로 소유하게 했다. 루트 뷰 교체 시 들어온 최초 focus 요청도 소비하고, AppKit window 부착 시 재동기화하며 제거된 text view의 지연 콜백은 first responder를 탈취하지 못한다.
+- 실제 WindowServer에서 rootView 교체 후 `MomoMessageComposerNativeTextView` first responder 복원 테스트를 반복 PASS했고, 컴포저 집중 4 tests·real-window 주변 4 tests·macOS 전체 445 tests가 PASS했다.
+
 ## UXUI iOS v1 모바일 기반 MOMO-496/497 (2026-07-20)
 
 - MOMO-496은 macOS 브랜드 원본과 정렬한 iOS AppIcon 일반·다크·틴트 1024 자산, 적응형 AccentColor·런치 배경, 재현 가능한 CoreGraphics 생성기를 추가했다. 세 PNG는 sRGB·불투명 1024 정사각형이며 asset catalog 컴파일이 PASS했다.
