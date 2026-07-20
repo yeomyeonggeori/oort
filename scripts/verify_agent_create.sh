@@ -35,13 +35,15 @@ PYTHON_BIN="$(find_python)"
 new_uuid() { "$PYTHON_BIN" -c 'import uuid; print(uuid.uuid4())'; }
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
-PROJECT="${AGENT_CREATE_GATE_PROJECT:-momo509agentcreate}"
+RUN_TAG="$(date -u +%s)-$$"
+# A unique default project gives every invocation a new named volume, so the
+# seed-none assertion always starts from a genuinely fresh PostgreSQL cluster.
+PROJECT="${AGENT_CREATE_GATE_PROJECT:-momo509agentcreate-$RUN_TAG}"
 API_PORT="${AGENT_CREATE_GATE_API_PORT:-27970}"
 CENT_PORT_HOST="${AGENT_CREATE_GATE_CENTRIFUGO_PORT:-27971}"
 PG_PORT="${AGENT_CREATE_GATE_POSTGRES_PORT:-27972}"
 HERMES_PORT_HOST="${AGENT_CREATE_GATE_HERMES_PORT:-27973}"
 BOOT_TIMEOUT="${AGENT_CREATE_GATE_BOOT_TIMEOUT:-2400}"
-RUN_TAG="$(date -u +%s)-$$"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-agent-create.XXXXXX")"
 OVERRIDE_FILE="$TMP_DIR/agent-create.override.yml"
 
