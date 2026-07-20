@@ -103,6 +103,7 @@ struct MomoKeyboardShortcutsView: View {
 public struct MomoMacCommandActions {
     var language: MomoUILanguage
     var channelCount: Int
+    var targetsWorkSessions: Bool
     var canNavigateBackward: Bool
     var canNavigateForward: Bool
     var canNavigateUnreadChannels: Bool
@@ -125,6 +126,7 @@ public struct MomoMacCommandActions {
     public init(
         language: MomoUILanguage,
         channelCount: Int,
+        targetsWorkSessions: Bool,
         canNavigateBackward: Bool,
         canNavigateForward: Bool,
         canNavigateUnreadChannels: Bool,
@@ -146,6 +148,7 @@ public struct MomoMacCommandActions {
     ) {
         self.language = language
         self.channelCount = channelCount
+        self.targetsWorkSessions = targetsWorkSessions
         self.canNavigateBackward = canNavigateBackward
         self.canNavigateForward = canNavigateForward
         self.canNavigateUnreadChannels = canNavigateUnreadChannels
@@ -234,7 +237,7 @@ public struct MomoMacCommands: Commands {
             Divider()
 
             ForEach(1...9, id: \.self) { number in
-                Button(copy.quickSwitcherChannelShortcut(number)) {
+                Button(numberedShortcutLabel(number)) {
                     actions?.selectChannel(number)
                 }
                 .keyboardShortcut(KeyEquivalent(Character(String(number))), modifiers: .command)
@@ -281,6 +284,12 @@ public struct MomoMacCommands: Commands {
 
     private var copy: MomoWorkspaceCopy {
         MomoWorkspaceCopy(language: actions?.language ?? .preferredDefault)
+    }
+
+    private func numberedShortcutLabel(_ number: Int) -> String {
+        actions?.targetsWorkSessions == true
+            ? copy.workSessionShortcut(number)
+            : copy.quickSwitcherChannelShortcut(number)
     }
 }
 
@@ -346,7 +355,9 @@ extension MomoWorkspaceCopy {
     }
 
     var quickSwitcherChannelShortcuts: String {
-        language == .korean ? "채널 1부터 9까지 열기" : "Open channels 1 through 9"
+        language == .korean
+            ? "채널 또는 열린 Work 세션 1부터 9까지 열기"
+            : "Open channels or visible Work sessions 1 through 9"
     }
 
     func quickSwitcherChannelShortcut(_ number: Int) -> String {

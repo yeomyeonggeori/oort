@@ -142,6 +142,128 @@ final class MomoWorkConsoleTests: XCTestCase {
             copy: MomoWorkspaceCopy(language: .korean)
         )
         XCTAssertTrue(items.contains { $0.key == "⌃`" && $0.label == "Work Console 열기" })
+        XCTAssertTrue(items.contains { $0.key == "⌘1…⌘9" && $0.label.contains("Work 세션") })
+    }
+
+    func testTerminalCopyPasteKeyCommandsRequirePlainCommandModifier() {
+        XCTAssertEqual(
+            MomoTerminalKeyCommand.resolve(characters: "c", modifiers: .command),
+            .copy
+        )
+        XCTAssertEqual(
+            MomoTerminalKeyCommand.resolve(characters: "V", modifiers: .command),
+            .paste
+        )
+        XCTAssertNil(
+            MomoTerminalKeyCommand.resolve(
+                characters: "c",
+                modifiers: [.command, .shift]
+            )
+        )
+        XCTAssertNil(MomoTerminalKeyCommand.resolve(characters: "c", modifiers: .control))
+    }
+
+    @MainActor
+    func testLocalTerminalUsesExtendedScrollback() {
+        let session = MomoLocalTerminalSession { _ in }
+        XCTAssertEqual(
+            session.terminalView.terminal.options.scrollback,
+            MomoTheme.WorkConsole.terminalScrollbackLines
+        )
+    }
+
+    @MainActor
+    func testAutomaticTerminalLabelsFillFirstAvailableSlot() {
+        XCTAssertEqual(
+            MomoWorkConsoleController.automaticTerminalLabel(
+                existingLabels: ["Terminal 1", "Payment review", "TERMINAL 3"]
+            ),
+            "Terminal 2"
+        )
+    }
+
+    func testWorkSessionNumberShortcutsAreBoundedToNine() {
+        XCTAssertEqual(MomoWorkSessionShortcut.index(number: 1, sessionCount: 2), 0)
+        XCTAssertEqual(MomoWorkSessionShortcut.index(number: 2, sessionCount: 2), 1)
+        XCTAssertNil(MomoWorkSessionShortcut.index(number: 3, sessionCount: 2))
+        XCTAssertNil(MomoWorkSessionShortcut.index(number: 10, sessionCount: 10))
+    }
+
+    @MainActor
+    func testWorkConsoleDimensionsPersistClampAndReset() throws {
+        let suiteName = "MomoWorkConsolePreferencesTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = MomoWorkConsolePreferences(defaults: defaults)
+        preferences.setDrawerHeight(1)
+        preferences.setSessionListWidth(9_999)
+        preferences.setRightPanelWidth(9_999)
+
+        let reloaded = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.drawerHeight, MomoTheme.WorkConsole.drawerMinimumHeight)
+        XCTAssertEqual(reloaded.sessionListWidth, MomoTheme.WorkConsole.sessionListMaximumWidth)
+        XCTAssertEqual(reloaded.rightPanelWidth, MomoTheme.WorkConsole.rightPanelMaximumWidth)
+
+        reloaded.resetDrawerHeight()
+        reloaded.resetSessionListWidth()
+        reloaded.resetRightPanelWidth()
+        let reset = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(reset.drawerHeight, MomoTheme.WorkConsole.drawerHeight)
+        XCTAssertEqual(reset.sessionListWidth, MomoTheme.WorkConsole.sessionListWidth)
+        XCTAssertEqual(reset.rightPanelWidth, MomoTheme.WorkConsole.rightPanelWidth)
+    }
+
+    func testWorkConsoleLayoutPreservesPrimaryAndTerminalMinimums() {
+        XCTAssertEqual(
+            MomoWorkConsoleLayout.drawerHeight(
+                preferredHeight: MomoTheme.WorkConsole.drawerMaximumHeight,
+                availableHeight: 600
+            ),
+            360
+        )
+        XCTAssertEqual(
+            MomoWorkConsoleLayout.sessionListWidth(
+                preferredWidth: MomoTheme.WorkConsole.sessionListMaximumWidth,
+                availableWidth: 600
+            ),
+            240
+        )
+        XCTAssertEqual(
+            MomoRightPanelLayout.width(preferredWidth: 640, availableWidth: 800),
+            440
+        )
+    }
+
+    @MainActor
+    func testTerminalThemePreferencePersists() throws {
+        let suiteName = "MomoTerminalThemePreferencesTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(preferences.terminalTheme, .dark)
+        preferences.setTerminalTheme(.colorBlindSafe)
+
+        let reloaded = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.terminalTheme, .colorBlindSafe)
+    }
+
+    func testTerminalThemePresetsProvideCompleteANSI16Palettes() {
+        for preset in MomoTerminalThemePreset.allCases {
+            XCTAssertEqual(preset.theme.ansi16.count, 16, preset.rawValue)
+        }
+    }
+
+    func testLightTerminalThemeMeetsAAForForegroundAndANSIColors() {
+        let theme = MomoTerminalThemePreset.light.theme
+        XCTAssertGreaterThanOrEqual(theme.foregroundBackgroundContrast, 4.5)
+        for color in theme.ansi16 {
+            XCTAssertGreaterThanOrEqual(
+                color.contrastRatio(with: theme.background),
+                4.5
+            )
+        }
     }
 
     func testRESTWorkConsoleContractNeverSendsLocalRuntimeData() async throws {
@@ -496,6 +618,7 @@ final class MomoWorkConsoleTests: XCTestCase {
         let size = CGSize(width: 400, height: 560)
         let content = MomoWorkConsoleSettingsView(
             controller: controller,
+            preferences: MomoWorkConsolePreferences(),
             copy: MomoWorkspaceCopy(language: .korean)
         )
         .frame(width: size.width, height: size.height, alignment: .topLeading)
