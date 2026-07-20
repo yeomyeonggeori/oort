@@ -1,5 +1,12 @@
 # momo 진행 현황
 
+## UXUI A-10 Interactive Work Console (2026-07-20)
+
+- macOS 중앙 패널 하단에 Control+backtick으로 여는 Work 서랍을 추가했다. SwiftTerm(MIT) 기반 로컬 PTY에서 Claude Code·Codex CLI·OpenCode·로그인 셸을 실행하고, 세션 목록/상태/종료, 서버가 만든 채널 카드, 세션 스레드 열기, 사용자가 검토한 출력 발췌 공유를 연결했다.
+- MOMO-483/484 REST와 `work.session.*`·`work.control.dispatched`를 소비해 로컬 spawn/input/read/kill 및 ack를 처리한다. 기존 `approval_request` 카드를 그대로 사용하고 tool별 auto-approve PUT/DELETE UI를 제공한다. 서버에 현재 설정을 읽는 계약은 없어 앱 시작 시 거짓 기본값 대신 `unknown`을 표시하며 X-6 역핸드오프로 기록했다.
+- ADR-0114 D3 경계를 따라 PTY raw·실제 cwd·프로세스 환경/자격증명은 서버 요청, 로그, UI 상태, 영속 상태에 넣지 않는다. `work.read`는 자동 전송하지 않고 사람이 발췌를 검토·편집·승인한 뒤에만 일반 thread reply로 보낸다. REST 계약 테스트는 `/Users`, `PATH`, `TOKEN`, terminal output이 요청에 없음을 단정한다.
+- macOS 420 tests, unsigned Xcode build, 디자인 pre-flight와 `macos-ui` local gate를 검증한다. 실제 서버에서 Codex↔momo 승인/제어/스레드 한 사이클은 C-2 수동 QA 전까지 `runtime-unverified`다. Xcode 배포 타깃의 App Sandbox는 별도 보안 승인 없이 변경하지 않았으며, 해당 빌드에서는 로컬 CLI 시작을 fail-closed하고 SwiftPM 개발 빌드에서만 PTY를 허용한다.
+
 ## MOMO-486 AgentWorker work.* dispatch + chat-to-session E2E (2026-07-20)
 
 - AgentWorker가 Hermes OpenAI-compatible tool call의 `work_spawn|work_input|work_read|work_kill`을 strict schema로 파싱해 기존 MOMO-484 `POST work-controls`로 per-agent bearer 호출한다. channel/host는 run·프로세스 설정에 고정하고 UUID, label 120자, text 4000자를 worker 경계에서 먼저 검증한다.

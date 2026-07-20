@@ -497,6 +497,21 @@ public enum MomoTheme {
         public static let contentSpacing: CGFloat = 12
         public static let sectionSpacing: CGFloat = 16
     }
+
+    public enum WorkConsole {
+        public static let drawerHeight: CGFloat = 360
+        public static let sessionListWidth: CGFloat = 224
+        public static let headerHeight: CGFloat = 48
+        public static let rowMinimumHeight: CGFloat = 56
+        public static let newSessionWidth: CGFloat = 420
+        public static let excerptWidth: CGFloat = 560
+        public static let excerptHeight: CGFloat = 420
+        public static let compactSpacing: CGFloat = 4
+        public static let standardSpacing: CGFloat = 8
+        public static let contentSpacing: CGFloat = 12
+        public static let sectionSpacing: CGFloat = 16
+        public static let edgeInset: CGFloat = 16
+    }
 }
 
 public extension View {

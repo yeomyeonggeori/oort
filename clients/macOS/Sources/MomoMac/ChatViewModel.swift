@@ -161,6 +161,7 @@ public final class ChatViewModel: ObservableObject {
     private let workspaceMessageSearchBackend: (any MomoWorkspaceMessageSearchBackend)?
     private let threadRepliesBackend: (any MomoThreadRepliesBackend)?
     private let attachmentTransferBackend: (any MomoAttachmentTransferBackend)?
+    private let workConsoleBackend: (any MomoWorkConsoleBackend)?
     private let onboarding: (any OnboardingInviteBackend)?
     private let agentCredentialBackend: (any MomoAgentCredentialBackend)?
     private let localContextCopilot: LocalContextCopilotService
@@ -176,12 +177,18 @@ public final class ChatViewModel: ObservableObject {
         channelNotificationBackend != nil
     }
 
+    public var supportsWorkConsole: Bool {
+        workConsoleBackend != nil
+    }
+
     public var allowsLocalProfileEditing: Bool {
         !usesServerRosterSourceOfTruth
     }
 
     @Published public private(set) var requestedMessageFocus: MessageID?
     @Published public private(set) var failedMessageFocus: MessageID?
+    @Published private(set) var requestedThreadRootID: MessageID?
+    @Published private(set) var latestWorkConsoleRealtimeEvent: MomoWorkConsoleRealtimeEvent?
     private var workspaceSearchHits: [MessageID: Message] = [:]
 
     // Workspace context.
@@ -340,6 +347,7 @@ public final class ChatViewModel: ObservableObject {
         self.workspaceMessageSearchBackend = chat as? any MomoWorkspaceMessageSearchBackend
         self.threadRepliesBackend = chat as? any MomoThreadRepliesBackend
         self.attachmentTransferBackend = chat as? any MomoAttachmentTransferBackend
+        self.workConsoleBackend = chat as? any MomoWorkConsoleBackend
         self.onboarding = onboarding
         self.agentCredentialBackend = chat as? any MomoAgentCredentialBackend
         self.usesServerRosterSourceOfTruth = chat is any ServerRosterSourceOfTruth
@@ -2138,6 +2146,104 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    // MARK: Interactive Work Console
+
+    func loadWorkSessions(activeOnly: Bool = false) async throws -> [MomoWorkSession] {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.workSessions(
+            workspace: workspaceId,
+            activeOnly: activeOnly
+        )
+    }
+
+    func createWorkSession(
+        channel: ChannelID,
+        host: WorkHostID,
+        tool: MomoWorkTool,
+        label: String
+    ) async throws -> MomoWorkSession {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.createWorkSession(
+            workspace: workspaceId,
+            channel: channel,
+            host: host,
+            tool: tool,
+            label: label
+        )
+    }
+
+    func endWorkSession(_ session: WorkSessionID, exitCode: Int?) async throws -> MomoWorkSession {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.endWorkSession(
+            workspace: workspaceId,
+            session: session,
+            exitCode: exitCode
+        )
+    }
+
+    func acknowledgeWorkControl(
+        _ control: WorkControlID,
+        ok: Bool,
+        session: WorkSessionID?,
+        errorLabel: String?
+    ) async throws {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        try await workConsoleBackend.acknowledgeWorkControl(
+            workspace: workspaceId,
+            control: control,
+            ok: ok,
+            session: session,
+            errorLabel: errorLabel
+        )
+    }
+
+    func setWorkAutoApprove(tool: MomoWorkTool, enabled: Bool) async throws -> Bool {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.setWorkAutoApprove(
+            workspace: workspaceId,
+            tool: tool,
+            enabled: enabled
+        )
+    }
+
+    func shareWorkExcerpt(
+        _ excerpt: String,
+        session: MomoWorkSession,
+        requestingMember: MemberID? = nil
+    ) async -> Bool {
+        let trimmed = excerpt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let bounded = String(trimmed.prefix(24_000))
+        let mention = requestingMember.flatMap { member($0)?.handle }.map { "@\($0) " } ?? ""
+        let body = "\(mention)Work excerpt\n\n\(bounded)"
+        let root = messagesByChannel[session.channelId]?.first {
+            $0.id == session.rootMessageId
+        } ?? Message(
+            id: session.rootMessageId,
+            channelId: session.channelId,
+            hlcTs: Int64(Date().timeIntervalSince1970 * 1_000),
+            authorMemberId: authenticatedMemberId ?? MemberID(),
+            type: .system,
+            body: nil
+        )
+        return await sendReply(body: body, to: root)
+    }
+
+    func requestWorkSessionThread(_ session: MomoWorkSession) async {
+        await selectChannel(session.channelId)
+        requestedThreadRootID = session.rootMessageId
+    }
+
+    func consumeRequestedThread(_ rootID: MessageID) {
+        guard requestedThreadRootID == rootID else { return }
+        requestedThreadRootID = nil
+    }
+
     // MARK: Sending
 
     public func composerDraftDidChange(_ draft: String) {
@@ -3009,10 +3115,37 @@ public final class ChatViewModel: ObservableObject {
             } else {
                 applyReaction(delta, channel: channel)
             }
-        case .presence, .huddle, .workSession, .workControl:
+        case .workSession(let delta):
+            guard delta.channelId == channel else { return }
+            applyWorkSessionDeltaToCard(delta, channel: channel)
+            latestWorkConsoleRealtimeEvent = MomoWorkConsoleRealtimeEvent(
+                payload: .session(delta)
+            )
+        case .workControl(let delta):
+            guard delta.channelId == channel else { return }
+            latestWorkConsoleRealtimeEvent = MomoWorkConsoleRealtimeEvent(
+                payload: .control(delta)
+            )
+        case .presence, .huddle:
             // Rendered elsewhere / not material to the v0 demo surfaces.
             break
         }
+    }
+
+    private func applyWorkSessionDeltaToCard(_ delta: WorkSessionDelta, channel: ChannelID) {
+        guard var messages = messagesByChannel[channel],
+              let index = messages.firstIndex(where: { $0.id == delta.rootMessageId }),
+              case .object(var props) = messages[index].props
+        else { return }
+        props["status"] = .string(delta.action == .started ? "running" : "ended")
+        if let endedAtMs = delta.endedAtMs {
+            props["ended_at"] = .int(endedAtMs)
+        }
+        if let exitCode = delta.exitCode {
+            props["exit_code"] = .int(Int64(exitCode))
+        }
+        messages[index].props = .object(props)
+        messagesByChannel[channel] = messages
     }
 
     private func applyReaction(_ delta: ReactionDelta, channel: ChannelID) {

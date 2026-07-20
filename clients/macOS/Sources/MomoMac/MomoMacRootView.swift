@@ -33,6 +33,7 @@ enum MomoMacPrimaryDestination: Equatable {
 
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
+    @StateObject private var workConsoleController: MomoWorkConsoleController
     @StateObject private var quickTooltipPresenter = MomoQuickTooltipPresenter()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -49,6 +50,7 @@ public struct MomoMacRootView: View {
     @State private var memberInspectorAudience = MomoMemberInspectorAudience.channel
     @State private var composerFocusRequest: UInt64 = 0
     @State private var showDownloadsPanel = false
+    @State private var showWorkConsole = false
     @State private var isThreadPresented = false
     @State private var threadDismissRequest: UInt64 = 0
     @State private var primaryDestination = MomoMacPrimaryDestination.channel
@@ -66,7 +68,11 @@ public struct MomoMacRootView: View {
         viewModel: @autoclosure @escaping () -> ChatViewModel,
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
     ) {
-        _viewModel = StateObject(wrappedValue: viewModel())
+        let resolvedViewModel = viewModel()
+        _viewModel = StateObject(wrappedValue: resolvedViewModel)
+        _workConsoleController = StateObject(
+            wrappedValue: MomoWorkConsoleController(viewModel: resolvedViewModel)
+        )
         self.sessionChrome = nil
         self.onOpenMemberDirectory = onOpenMemberDirectory
     }
@@ -78,6 +84,9 @@ public struct MomoMacRootView: View {
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        _workConsoleController = StateObject(
+            wrappedValue: MomoWorkConsoleController(viewModel: viewModel)
+        )
         self.sessionChrome = nil
         self.onOpenMemberDirectory = onOpenMemberDirectory
     }
@@ -91,6 +100,9 @@ public struct MomoMacRootView: View {
         initialPrimaryDestination: MomoMacPrimaryDestination = .channel
     ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        _workConsoleController = StateObject(
+            wrappedValue: MomoWorkConsoleController(viewModel: viewModel)
+        )
         _splitViewVisibility = State(initialValue: initialSplitViewVisibility)
         _primaryDestination = State(initialValue: initialPrimaryDestination)
         self.sessionChrome = sessionChrome
@@ -161,8 +173,16 @@ public struct MomoMacRootView: View {
         .onChange(of: viewModel.selectedChannelId) { _, _ in
             primaryDestination = .channel
         }
+        .task(id: viewModel.workspaceId) {
+            await workConsoleController.activate()
+        }
+        .onChange(of: viewModel.latestWorkConsoleRealtimeEvent) { _, event in
+            guard let event else { return }
+            Task { await workConsoleController.consume(event) }
+        }
         .onDisappear {
             MomoDockUnreadBadgeController.clear()
+            Task { await workConsoleController.shutdown() }
         }
         .onChange(of: developerMode) { _, isEnabled in
             if !isEnabled, detailPane == .alpha {
@@ -237,16 +257,29 @@ public struct MomoMacRootView: View {
                 ZStack {
                     MomoTheme.Surface.style(.background, colorScheme: colorScheme).fill
 
-                    primaryContent(
-                        copy: copy,
-                        sidebarToggle: MomoSidebarTogglePlacementPolicy.showsInChannelHeader(
-                            sidebarVisible: !showsSidebarToggle,
-                            destination: primaryDestination,
-                            hasSelectedChannel: viewModel.selectedChannel != nil
+                    VStack(spacing: 0) {
+                        primaryContent(
+                            copy: copy,
+                            sidebarToggle: MomoSidebarTogglePlacementPolicy.showsInChannelHeader(
+                                sidebarVisible: !showsSidebarToggle,
+                                destination: primaryDestination,
+                                hasSelectedChannel: viewModel.selectedChannel != nil
+                            )
+                                ? { toggleSidebar() }
+                                : nil
                         )
-                            ? { toggleSidebar() }
-                            : nil
-                    )
+
+                        if showWorkConsole {
+                            Divider()
+                            MomoWorkConsoleDrawer(
+                                controller: workConsoleController,
+                                copy: copy,
+                                onClose: { setWorkConsolePresented(false) }
+                            )
+                            .frame(height: MomoTheme.WorkConsole.drawerHeight)
+                            .transition(.identity)
+                        }
+                    }
                     .environment(
                         \.momoCenterHeaderLeadingInset,
                         MomoWindowChromeLayout.centerHeaderLeadingInset(
@@ -492,6 +525,21 @@ public struct MomoMacRootView: View {
             .accessibilityLabel(copy.appDownloads)
             .accessibilityHint(copy.downloadsScopeNote)
             .accessibilityIdentifier("app-downloads-entry")
+
+            Button {
+                setWorkConsolePresented(!showWorkConsole)
+            } label: {
+                Label(copy.openWorkConsole, systemImage: "terminal")
+                    .labelStyle(.iconOnly)
+                    .frame(
+                        width: MomoTheme.ChannelHeader.actionSize,
+                        height: MomoTheme.ChannelHeader.actionSize
+                    )
+                    .contentShape(Rectangle())
+            }
+            .momoQuickTooltip(copy.openWorkConsole)
+            .accessibilityLabel(copy.openWorkConsole)
+            .accessibilityIdentifier("work-console-entry")
         }
         .buttonStyle(.plain)
         .padding(.horizontal, 12)
@@ -520,6 +568,21 @@ public struct MomoMacRootView: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             showDownloadsPanel = isPresented
+        }
+    }
+
+    private func setWorkConsolePresented(_ isPresented: Bool) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            if isPresented {
+                primaryDestination = .channel
+                detailPanePresentation.close()
+                showWorkConsole = true
+                Task { await workConsoleController.refresh() }
+            } else {
+                showWorkConsole = false
+            }
         }
     }
 
@@ -808,6 +871,10 @@ public struct MomoMacRootView: View {
             openDownloads: {
                 quickSwitcherPresentation.dismiss()
                 setDownloadsPanelPresented(true)
+            },
+            toggleWorkConsole: {
+                quickSwitcherPresentation.dismiss()
+                setWorkConsolePresented(!showWorkConsole)
             },
             selectChannel: { number in
                 quickSwitcherPresentation.dismiss()

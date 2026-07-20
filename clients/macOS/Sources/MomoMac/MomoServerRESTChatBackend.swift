@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -1115,6 +1115,123 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         ).receipt
     }
 
+    // MARK: Interactive Work Console
+
+    func workSessions(
+        workspace requestedWorkspace: WorkspaceID,
+        activeOnly: Bool
+    ) async throws -> [MomoWorkSession] {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await get(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-sessions",
+            queryItems: activeOnly ? [URLQueryItem(name: "active", value: "1")] : [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkSessionListResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.workSessions
+    }
+
+    func createWorkSession(
+        workspace requestedWorkspace: WorkspaceID,
+        channel: ChannelID,
+        host: WorkHostID,
+        tool: MomoWorkTool,
+        label: String
+    ) async throws -> MomoWorkSession {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-sessions",
+            body: MomoCreateWorkSessionRequestDTO(
+                channelId: channel,
+                hostId: host,
+                tool: tool,
+                label: label
+            ),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkSessionResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.workSession
+    }
+
+    func endWorkSession(
+        workspace requestedWorkspace: WorkspaceID,
+        session workSessionID: WorkSessionID,
+        exitCode: Int?
+    ) async throws -> MomoWorkSession {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await patch(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-sessions/\(workSessionID.description)",
+            body: MomoEndWorkSessionRequestDTO(status: "ended", exitCode: exitCode),
+            response: MomoWorkSessionResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        return response.workSession
+    }
+
+    func acknowledgeWorkControl(
+        workspace requestedWorkspace: WorkspaceID,
+        control: WorkControlID,
+        ok: Bool,
+        session workSessionID: WorkSessionID?,
+        errorLabel: String?
+    ) async throws {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        _ = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-controls/\(control.description)/ack",
+            body: MomoWorkControlAckRequestDTO(
+                ok: ok,
+                sessionId: workSessionID,
+                errorLabel: errorLabel
+            ),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkControlAckResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+    }
+
+    func setWorkAutoApprove(
+        workspace requestedWorkspace: WorkspaceID,
+        tool: MomoWorkTool,
+        enabled: Bool
+    ) async throws -> Bool {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let path = "/v1/workspaces/\(requestedWorkspace.description)/work-auto-approvals/\(tool.rawValue)"
+        let response: MomoWorkAutoApproveResponseDTO
+        if enabled {
+            response = try await putEmpty(path, response: MomoWorkAutoApproveResponseDTO.self)
+        } else {
+            response = try await delete(
+                path,
+                authorized: true,
+                response: MomoWorkAutoApproveResponseDTO.self
+            )
+        }
+        try ensureSessionCurrent(context)
+        guard response.tool == tool, response.enabled == enabled else {
+            throw BackendError.decoding("work auto-approve response mismatch")
+        }
+        return response.enabled
+    }
+
     // MARK: AgentTransport compatibility
 
     public func observe(agent: MemberID, channel: ChannelID) async throws -> AsyncStream<AgentEvent> {
@@ -2086,6 +2203,45 @@ private struct AgentRuntimeStatusDTO: Decodable {
             diagnostics: diagnostics
         )
     }
+}
+
+private struct MomoWorkSessionListResponseDTO: Decodable {
+    let workSessions: [MomoWorkSession]
+}
+
+private struct MomoWorkSessionResponseDTO: Decodable {
+    let workSession: MomoWorkSession
+}
+
+private struct MomoCreateWorkSessionRequestDTO: Encodable {
+    let channelId: ChannelID
+    let hostId: WorkHostID
+    let tool: MomoWorkTool
+    let label: String
+}
+
+private struct MomoEndWorkSessionRequestDTO: Encodable {
+    let status: String
+    let exitCode: Int?
+}
+
+private struct MomoWorkControlAckRequestDTO: Encodable {
+    let ok: Bool
+    let sessionId: WorkSessionID?
+    let errorLabel: String?
+}
+
+private struct MomoWorkControlAckResponseDTO: Decodable {
+    struct WorkControl: Decodable {
+        let status: String
+    }
+
+    let workControl: WorkControl
+}
+
+private struct MomoWorkAutoApproveResponseDTO: Decodable {
+    let tool: MomoWorkTool
+    let enabled: Bool
 }
 
 private struct ApprovalDecisionRequestDTO: Encodable {
