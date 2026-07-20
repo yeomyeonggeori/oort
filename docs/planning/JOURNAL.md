@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-21 (Fable 검수) · MOMO-512 focus 회귀 수정(#547) 검수 CLEAN + 이중트랙 main 머지 시퀀스 준비
+- 동생 PR #547(track/uxui) 검수: 근본원인=`@FocusState`가 NativeTextView(NSViewRepresentable)가 준 적 없는 focus 진실을 소유. 수정=`@State` 전환 + `viewDidMoveToWindow` 재동기화(rootView 교체 타이밍) + stale async firstResponder 탈취 방지(`textView.window === window`) + `onChange(initial:true, guard request>0)`(mention 오버레이 직접 focus 경로 보존). **결정타**: `textDidBeginEditing/EndEditing`가 바인딩 set으로 @State를 되써서 blur 시 stale-true 없음 → focus 재탈취 회귀 없음. 445/445·macos-ui 31/31·real-window 반복 PASS(동생).
+- 준비: 동생 → 547·543(498) track/uxui 랜딩(자기 트랙, 승인함). **성재 승인 대기 이중트랙 main 머지**: track/uxui(496·497·536·498·512fix) + track/engine(491·509·511)을 원자적으로 함께 → main real-window 즉시 green. 최종 확인=성재 맥에서 `swift test --filter MemberInspectorSnapshotTests/testComposerFocusRequestRestoresKeyboardFocusInRealWindow` 1회(clients/macOS, 실 디스플레이) → 512 종결·509/511 런타임 검증.
+- 남음: 543(498)은 성재 육안 QA(라이트/다크·Dynamic Type·한국어 3줄·200+ 스크롤) 선결. 엔진 새 기능은 머지 전까지 보류(미머지 스택 억제).
+
 ## 2026-07-20 (Fable 엔진 트랙) · 엔진 배치 랜딩 + 508 real-window 회귀(파이프라인 차단자)
 - 랜딩(track/engine): MOMO-491 openssl 이식(#540)·509 X-7 에이전트 생성 API(#542)·511-E D10 attach capability(#545). 파일럿 E2-A 경제·E5 GitHub 사이클·E3 부분 완료. ADR-0125 D9(구독연결 UX)·D10(원격 attach) 기안.
 - **차단자**: MOMO-508(컴포저 TextField→NativeTextView)이 real-window focus 복원 테스트를 결정적으로 깸. 헤드리스 게이트는 XCTSkip이라 508 통과했으나 실 디스플레이(성재 맥·runtime-db make test)에서 드러남 — 509·511 게이트 둘 다 걸림. 서버 전용이라 각 verifier 격리 PASS 확인 후 deviation 랜딩, MOMO-512로 동생 이관+정밀 진단(focusComposerRequest→isFocused 브리지).
