@@ -4,30 +4,38 @@ import SwiftUI
 import UIKit
 
 @MainActor
-public struct IOSWorkspaceView: View {
+struct IOSChannelHomeView: View {
     private let session: IOSSession
     private let bootstrap: WorkspaceBootstrap
-    private let signOut: @MainActor () async -> Void
     private let backend: any IOSConversationBackend
     private let huddleService: any IOSHuddleService
-    @State private var model: IOSChannelListModel
+    let model: IOSChannelListModel
 
-    public init(
+    init(
         session: IOSSession,
         bootstrap: WorkspaceBootstrap,
-        signOut: @escaping @MainActor () async -> Void
+        model: IOSChannelListModel,
+        backend: any IOSConversationBackend,
+        huddleService: any IOSHuddleService
     ) {
-        let backend = MomoServerConversationClient(authenticated: session)
         self.session = session
         self.bootstrap = bootstrap
-        self.signOut = signOut
+        self.model = model
         self.backend = backend
-        self.huddleService = IOSHuddleRESTService(authenticated: session)
-        _model = State(initialValue: IOSChannelListModel(currentMemberID: session.member.id, backend: backend))
+        self.huddleService = huddleService
     }
 
-    public var body: some View {
+    var body: some View {
         List {
+            Section {
+                NavigationLink {
+                    IOSThreadsPlaceholderView()
+                } label: {
+                    Label("Threads", systemImage: "bubble.left.and.text.bubble.right")
+                        .font(.body.weight(.medium))
+                }
+                .accessibilityIdentifier("threadsEntry")
+            }
             switch model.phase {
             case .loading:
                 loadingRows
@@ -40,28 +48,30 @@ public struct IOSWorkspaceView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(bootstrap.workspace.name)
         .refreshable { await model.refresh() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    LabeledContent("Signed in as", value: session.member.displayName)
-                    Button("Sign out") { Task { await signOut() } }
-                } label: {
-                    Label("Workspace menu", systemImage: "person.crop.circle")
-                }
-                .accessibilityIdentifier("workspaceMenu")
-            }
-        }
-        .task { await model.load() }
         .onAppear {
             if model.phase == .loaded {
                 Task { await model.refresh() }
             }
         }
+        .alert(
+            "Channel update failed",
+            isPresented: Binding(
+                get: { model.actionFailureMessage != nil },
+                set: { isPresented in
+                    if !isPresented { model.clearActionFailure() }
+                }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) { model.clearActionFailure() }
+        } message: {
+            Text(model.actionFailureMessage ?? "Try again.")
+        }
         .navigationDestination(for: IOSPushDeepLink.self) { link in
             if let item = deepLinkedItem(channelID: link.channelID) {
-                IOSTimelineView(
+                IOSConversationDestination(
                     item: item,
                     members: model.membersByID,
+                    channelListModel: model,
                     currentMemberID: session.member.id,
                     backend: backend,
                     workspace: session.workspaceID,
@@ -92,11 +102,13 @@ public struct IOSWorkspaceView: View {
     private var loadedSections: some View {
         if model.sections.channels.isEmpty && model.sections.directMessages.isEmpty {
             Section {
-                ContentUnavailableView(
-                    "No conversations yet",
-                    systemImage: "bubble.left.and.bubble.right",
-                    description: Text("Create a channel or start a direct message in momo on Mac.")
-                )
+                ContentUnavailableView {
+                    Label("No conversations yet", systemImage: "bubble.left.and.bubble.right")
+                } description: {
+                    Text("Create a channel or start a direct message in momo on Mac.")
+                } actions: {
+                    Button("Refresh conversations") { Task { await model.refresh() } }
+                }
             }
         } else {
             Section("Channels") {
@@ -136,11 +148,13 @@ public struct IOSWorkspaceView: View {
         }
     }
 
+    @ViewBuilder
     private func channelLink(_ item: IOSChannelListItem) -> some View {
-        NavigationLink {
-            IOSTimelineView(
+        let link = NavigationLink {
+            IOSConversationDestination(
                 item: item,
                 members: model.membersByID,
+                channelListModel: model,
                 currentMemberID: session.member.id,
                 backend: backend,
                 workspace: session.workspaceID,
@@ -149,7 +163,36 @@ public struct IOSWorkspaceView: View {
         } label: {
             IOSChannelRow(item: item)
         }
+        .contextMenu {
+            Button {
+                Task { await model.setChannelMuted(item.id, muted: !item.isMuted) }
+            } label: {
+                Label(
+                    item.isMuted ? "Unmute notifications" : "Mute notifications",
+                    systemImage: item.isMuted ? "bell" : "bell.slash"
+                )
+            }
+            .disabled(model.isMutating(item.id))
+
+            Button {
+                Task { await model.markRead(item.id) }
+            } label: {
+                Label("Mark as read", systemImage: "checkmark.circle")
+            }
+            .disabled(!item.hasUnread || model.isMutating(item.id))
+        }
+        .accessibilityAction(named: item.isMuted ? "Unmute notifications" : "Mute notifications") {
+            Task { await model.setChannelMuted(item.id, muted: !item.isMuted) }
+        }
         .accessibilityIdentifier("channel.\(item.id.description)")
+
+        if item.hasUnread {
+            link.accessibilityAction(named: "Mark as read") {
+                Task { await model.markRead(item.id) }
+            }
+        } else {
+            link
+        }
     }
 
     private func deepLinkedItem(channelID: ChannelID) -> IOSChannelListItem? {
@@ -167,18 +210,24 @@ public struct IOSWorkspaceView: View {
     }
 }
 
-private struct IOSChannelRow: View {
+struct IOSChannelRow: View {
     let item: IOSChannelListItem
+    @ScaledMetric(relativeTo: .body) private var avatarSize = 32.0
+    @ScaledMetric(relativeTo: .caption) private var presenceSize = 8.0
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: item.isDirectMessage ? "person.crop.circle" : channelIcon)
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+            leadingIcon
             Text(item.title)
                 .font(.body.weight(item.hasUnread ? .semibold : .regular))
                 .lineLimit(2)
             Spacer(minLength: 8)
+            if item.isMuted {
+                Image(systemName: "bell.slash")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
             if let badge = item.badgeLabel {
                 Text(badge)
                     .font(.caption.weight(.semibold))
@@ -194,21 +243,67 @@ private struct IOSChannelRow: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
+    @ViewBuilder
+    private var leadingIcon: some View {
+        if item.isDirectMessage {
+            ZStack(alignment: .bottomTrailing) {
+                Circle()
+                    .fill(.quaternary)
+                    .frame(width: avatarSize, height: avatarSize)
+                    .overlay {
+                        Text(String(item.title.prefix(1)).uppercased())
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                if let presence = item.directMessagePresence {
+                    Circle()
+                        .fill(presenceColor(presence))
+                        .frame(width: presenceSize, height: presenceSize)
+                }
+            }
+            .accessibilityHidden(true)
+        } else {
+            Image(systemName: channelIcon)
+                .frame(width: 24)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func presenceColor(_ presence: Presence) -> Color {
+        switch presence {
+        case .online:
+            return .green
+        case .away:
+            return .orange
+        case .working:
+            return .accentColor
+        case .offline:
+            return .secondary
+        }
+    }
+
     private var channelIcon: String {
         item.channel.kind == .privateChannel ? "lock" : "number"
     }
 
     private var accessibilityLabel: String {
-        guard item.unreadCount > 0 else { return item.title }
-        if item.mentionCount > 0 {
-            return "\(item.title), \(item.unreadCount) unread, \(item.mentionCount) mentions"
+        var parts = [item.title]
+        if item.isDirectMessage, let presence = item.directMessagePresence {
+            parts.append(presence == .working ? "working" : presence.rawValue)
         }
-        return "\(item.title), \(item.unreadCount) unread"
+        if item.isMuted { parts.append("notifications muted") }
+        guard item.unreadCount > 0 else { return parts.joined(separator: ", ") }
+        parts.append("\(item.unreadCount) unread")
+        if item.mentionCount > 0 {
+            parts.append("\(item.mentionCount) mentions")
+        }
+        return parts.joined(separator: ", ")
     }
 }
 
 @MainActor
-private struct IOSTimelineView: View {
+struct IOSTimelineView: View {
     let item: IOSChannelListItem
     let members: [MemberID: Member]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -223,7 +318,8 @@ private struct IOSTimelineView: View {
         currentMemberID: MemberID,
         backend: any IOSConversationBackend,
         workspace: WorkspaceID,
-        huddleService: any IOSHuddleService
+        huddleService: any IOSHuddleService,
+        onReadState: ((ChannelReadState) -> Void)? = nil
     ) {
         self.item = item
         self.members = members
@@ -232,7 +328,8 @@ private struct IOSTimelineView: View {
             currentMemberID: currentMemberID,
             backend: backend,
             workspace: workspace,
-            huddleService: huddleService
+            huddleService: huddleService,
+            onReadState: onReadState
         ))
     }
 

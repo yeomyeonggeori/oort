@@ -317,13 +317,16 @@ struct ConversationTests {
                     workspaceId: fixtureWorkspaceID,
                     kind: .agent,
                     displayName: "김인턴 Research Agent",
-                    handle: "hermes"
+                    handle: "hermes",
+                    presence: .working
                 ),
             ],
             readStates: [
                 ChannelReadState(channelId: channel.id, lastReadSeq: 8, latestSeq: 13, unreadCount: 5, mentionCount: 2),
                 ChannelReadState(channelId: dmID, lastReadSeq: 3, latestSeq: 10, unreadCount: 7, mentionCount: 1),
-            ]
+            ],
+            channelMuteStates: [channel.id: true],
+            memberPresenceStates: [teammateID: .working]
         )
         let model = IOSChannelListModel(
             currentMemberID: fixtureMemberID,
@@ -335,8 +338,389 @@ struct ConversationTests {
         #expect(model.phase == .loaded)
         #expect(model.sections.channels.first?.badgeLabel == "2")
         #expect(model.sections.channels.first?.unreadCount == 5)
+        #expect(model.sections.channels.first?.latestSequence == 13)
+        #expect(model.sections.channels.first?.isMuted == true)
         #expect(model.sections.directMessages.first?.title == "김인턴 Research Agent")
         #expect(model.sections.directMessages.first?.badgeLabel == "7")
+        #expect(model.sections.directMessages.first?.directMessagePresence == .working)
+        #expect(model.totalMentionCount == 3)
+    }
+
+    @Test("channel search filters channels and direct messages without changing source order")
+    func channelSearch() {
+        let directMessage = IOSChannelListItem(
+            channel: Channel(
+                id: ChannelID(),
+                workspaceId: fixtureWorkspaceID,
+                kind: .dm
+            ),
+            title: "김인턴 Research Agent",
+            unreadCount: 0,
+            mentionCount: 0
+        )
+        let general = IOSChannelListItem(
+            channel: fixtureChannel(),
+            title: "general",
+            unreadCount: 0,
+            mentionCount: 0
+        )
+
+        #expect(IOSChannelSearch.filter([general, directMessage], query: "  research ") == [directMessage])
+        #expect(IOSChannelSearch.filter([general, directMessage], query: "") == [general, directMessage])
+        #expect(IOSAppTab.allCases == [.home, .search, .activity, .work, .profile])
+    }
+
+    @Test("channel mute and mark-read actions use server projections")
+    @MainActor
+    func channelActions() async {
+        let channel = fixtureChannel()
+        let snapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: channel.id,
+                    lastReadSeq: 8,
+                    latestSeq: 13,
+                    unreadCount: 5,
+                    mentionCount: 2
+                ),
+            ]
+        )
+        let backend = RecordingConversationBackend(snapshot: snapshot)
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        await model.setChannelMuted(channel.id, muted: true)
+        await model.markRead(channel.id)
+
+        #expect(model.sections.channels.first?.isMuted == true)
+        #expect(model.sections.channels.first?.unreadCount == 0)
+        #expect(model.sections.channels.first?.mentionCount == 0)
+        #expect(await backend.muteCalls == [.init(channel: channel.id, muted: true)])
+        #expect(await backend.markReadCalls == [.init(channel: channel.id, sequence: 13)])
+        #expect(model.actionFailureMessage == nil)
+    }
+
+    @Test("failed channel action restores the projected state")
+    @MainActor
+    func channelActionRollback() async {
+        let channel = fixtureChannel()
+        let snapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [],
+            channelMuteStates: [channel.id: false]
+        )
+        let backend = RecordingConversationBackend(snapshot: snapshot, failFirstMute: true)
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        await model.setChannelMuted(channel.id, muted: true)
+
+        #expect(model.sections.channels.first?.isMuted == false)
+        #expect(model.actionFailureMessage != nil)
+    }
+
+    @Test("failed mark-read restores unread and mention counts")
+    @MainActor
+    func markReadRollback() async {
+        let channel = fixtureChannel()
+        let snapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: channel.id,
+                    lastReadSeq: 8,
+                    latestSeq: 13,
+                    unreadCount: 5,
+                    mentionCount: 2
+                ),
+            ]
+        )
+        let backend = RecordingConversationBackend(snapshot: snapshot, failFirstRead: true)
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        await model.markRead(channel.id)
+
+        #expect(model.sections.channels.first?.unreadCount == 5)
+        #expect(model.sections.channels.first?.mentionCount == 2)
+        #expect(await backend.markReadCalls == [.init(channel: channel.id, sequence: 13)])
+        #expect(model.actionFailureMessage != nil)
+    }
+
+    @Test("failed mark-read keeps a newer read projection received during the request")
+    @MainActor
+    func markReadFailureAfterRefresh() async {
+        let channel = fixtureChannel()
+        let initialSnapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: channel.id,
+                    lastReadSeq: 8,
+                    latestSeq: 13,
+                    unreadCount: 5,
+                    mentionCount: 2
+                ),
+            ]
+        )
+        let refreshedSnapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: channel.id,
+                    lastReadSeq: 8,
+                    latestSeq: 14,
+                    unreadCount: 6,
+                    mentionCount: 3
+                ),
+            ]
+        )
+        let backend = SuspendedReadConversationBackend(
+            initialSnapshot: initialSnapshot,
+            refreshedSnapshot: refreshedSnapshot
+        )
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        let mutation = Task { await model.markRead(channel.id) }
+        await backend.waitUntilReadStarts()
+        await model.refresh()
+
+        #expect(model.sections.channels.first?.latestSequence == 13)
+        #expect(model.sections.channels.first?.unreadCount == 0)
+
+        await backend.failRead()
+        await mutation.value
+
+        #expect(model.sections.channels.first?.latestSequence == 14)
+        #expect(model.sections.channels.first?.unreadCount == 6)
+        #expect(model.sections.channels.first?.mentionCount == 3)
+        #expect(model.actionFailureMessage != nil)
+    }
+
+    @Test("channel list ignores stale read responses that arrive out of order")
+    @MainActor
+    func staleReadResponseIsIgnored() async {
+        let channel = fixtureChannel()
+        let model = IOSChannelListModel(
+            currentMemberID: fixtureMemberID,
+            backend: MockConversationBackend(
+                snapshot: IOSConversationSnapshot(
+                    channels: [channel],
+                    members: [],
+                    readStates: [
+                        ChannelReadState(
+                            channelId: channel.id,
+                            lastReadSeq: 8,
+                            latestSeq: 13,
+                            unreadCount: 5,
+                            mentionCount: 2
+                        ),
+                    ]
+                )
+            )
+        )
+        await model.load()
+
+        model.applyReadState(ChannelReadState(
+            channelId: channel.id,
+            lastReadSeq: 14,
+            latestSeq: 14,
+            unreadCount: 0,
+            mentionCount: 0
+        ))
+        model.applyReadState(ChannelReadState(
+            channelId: channel.id,
+            lastReadSeq: 13,
+            latestSeq: 13,
+            unreadCount: 1,
+            mentionCount: 1
+        ))
+
+        #expect(model.sections.channels.first?.latestSequence == 14)
+        #expect(model.sections.channels.first?.unreadCount == 0)
+        #expect(model.sections.channels.first?.mentionCount == 0)
+    }
+
+    @Test("a newer refresh wins over a read callback received while refresh was waiting")
+    @MainActor
+    func newerRefreshWinsOverCallback() async {
+        let channel = fixtureChannel()
+        let initialSnapshot = readSnapshot(
+            channel: channel,
+            lastRead: 8,
+            latest: 13,
+            unread: 5,
+            mentions: 2
+        )
+        let refreshedSnapshot = readSnapshot(
+            channel: channel,
+            lastRead: 13,
+            latest: 14,
+            unread: 1,
+            mentions: 1
+        )
+        let backend = SuspendedMuteConversationBackend(
+            initialSnapshot: initialSnapshot,
+            refreshedSnapshot: refreshedSnapshot,
+            suspendsRefresh: true
+        )
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        let refresh = Task { await model.refresh() }
+        await backend.waitUntilRefreshStarts()
+        model.applyReadState(ChannelReadState(
+            channelId: channel.id,
+            lastReadSeq: 13,
+            latestSeq: 13,
+            unreadCount: 0,
+            mentionCount: 0
+        ))
+        await backend.finishRefresh()
+        await refresh.value
+
+        #expect(model.sections.channels.first?.latestSequence == 14)
+        #expect(model.sections.channels.first?.unreadCount == 1)
+        #expect(model.sections.channels.first?.mentionCount == 1)
+    }
+
+    @Test("crossed read projections trigger one canonical refresh")
+    @MainActor
+    func crossedReadProjectionReconciles() async {
+        let channel = fixtureChannel()
+        let backend = SuspendedMuteConversationBackend(
+            initialSnapshot: readSnapshot(
+                channel: channel,
+                lastRead: 8,
+                latest: 13,
+                unread: 5,
+                mentions: 2
+            ),
+            refreshedSnapshot: readSnapshot(
+                channel: channel,
+                lastRead: 8,
+                latest: 14,
+                unread: 6,
+                mentions: 3
+            ),
+            reconciliationSnapshot: readSnapshot(
+                channel: channel,
+                lastRead: 13,
+                latest: 14,
+                unread: 1,
+                mentions: 1
+            ),
+            suspendsRefresh: true
+        )
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        let refresh = Task { await model.refresh() }
+        await backend.waitUntilRefreshStarts()
+        model.applyReadState(ChannelReadState(
+            channelId: channel.id,
+            lastReadSeq: 13,
+            latestSeq: 13,
+            unreadCount: 0,
+            mentionCount: 0
+        ))
+        await backend.finishRefresh()
+        await refresh.value
+
+        #expect(await backend.snapshotCalls == 3)
+        #expect(model.sections.channels.first?.latestSequence == 14)
+        #expect(model.sections.channels.first?.unreadCount == 1)
+        #expect(model.sections.channels.first?.mentionCount == 1)
+    }
+
+    @Test("refresh preserves an in-flight mute until the server response arrives")
+    @MainActor
+    func refreshDuringMute() async {
+        let channel = fixtureChannel()
+        let initialSnapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: channel.id,
+                    lastReadSeq: 0,
+                    latestSeq: 1,
+                    unreadCount: 1,
+                    mentionCount: 0
+                ),
+            ],
+            channelMuteStates: [channel.id: false]
+        )
+        let refreshedSnapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [
+                ChannelReadState(
+                    channelId: channel.id,
+                    lastReadSeq: 0,
+                    latestSeq: 7,
+                    unreadCount: 7,
+                    mentionCount: 2
+                ),
+            ],
+            channelMuteStates: [channel.id: false]
+        )
+        let backend = SuspendedMuteConversationBackend(
+            initialSnapshot: initialSnapshot,
+            refreshedSnapshot: refreshedSnapshot
+        )
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        let mutation = Task { await model.setChannelMuted(channel.id, muted: true) }
+        await backend.waitUntilMuteStarts()
+        await model.refresh()
+
+        #expect(model.sections.channels.first?.isMuted == true)
+        #expect(model.sections.channels.first?.unreadCount == 7)
+        #expect(model.sections.channels.first?.mentionCount == 2)
+
+        await backend.finishMute()
+        await mutation.value
+        #expect(model.sections.channels.first?.isMuted == true)
+    }
+
+    @Test("a late refresh cannot overwrite a completed mute")
+    @MainActor
+    func lateRefreshAfterMute() async {
+        let channel = fixtureChannel()
+        let snapshot = IOSConversationSnapshot(
+            channels: [channel],
+            members: [],
+            readStates: [],
+            channelMuteStates: [channel.id: false]
+        )
+        let backend = SuspendedMuteConversationBackend(
+            initialSnapshot: snapshot,
+            refreshedSnapshot: snapshot,
+            suspendsRefresh: true
+        )
+        let model = IOSChannelListModel(currentMemberID: fixtureMemberID, backend: backend)
+        await model.load()
+
+        let refresh = Task { await model.refresh() }
+        await backend.waitUntilRefreshStarts()
+        let mutation = Task { await model.setChannelMuted(channel.id, muted: true) }
+        await backend.waitUntilMuteStarts()
+        await backend.finishMute()
+        await mutation.value
+
+        await backend.finishRefresh()
+        await refresh.value
+
+        #expect(model.sections.channels.first?.isMuted == true)
     }
 
     @Test("timeline history from mock backend is ordered by seq")
@@ -705,7 +1089,17 @@ private struct MockConversationBackend: IOSConversationBackend {
         historyValue
     }
 
-    func markRead(channel: ChannelID, through sequence: Int64) async throws {}
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        ChannelReadState(
+            channelId: channel,
+            lastReadSeq: sequence,
+            latestSeq: sequence,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool { muted }
 
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> {
         AsyncStream { $0.finish() }
@@ -733,23 +1127,64 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         let clientMsgId: UUID
     }
 
+    struct MarkReadCall: Sendable, Equatable {
+        let channel: ChannelID
+        let sequence: Int64
+    }
+
+    struct MuteCall: Sendable, Equatable {
+        let channel: ChannelID
+        let muted: Bool
+    }
+
     private var historyValue: [Message] = []
+    private let snapshotValue: IOSConversationSnapshot
     private let failFirstSend: Bool
     private let failFirstApproval: Bool
+    private let failFirstMute: Bool
+    private let failFirstRead: Bool
     private(set) var sendCalls: [SendCall] = []
     private(set) var approvalCalls: [ApprovalDecisionRequest] = []
+    private(set) var markReadCalls: [MarkReadCall] = []
+    private(set) var muteCalls: [MuteCall] = []
 
-    init(failFirstSend: Bool = false, failFirstApproval: Bool = false) {
+    init(
+        snapshot: IOSConversationSnapshot? = nil,
+        failFirstSend: Bool = false,
+        failFirstApproval: Bool = false,
+        failFirstMute: Bool = false,
+        failFirstRead: Bool = false
+    ) {
+        self.snapshotValue = snapshot ?? IOSConversationSnapshot(
+            channels: [fixtureChannel()],
+            members: [],
+            readStates: []
+        )
         self.failFirstSend = failFirstSend
         self.failFirstApproval = failFirstApproval
+        self.failFirstMute = failFirstMute
+        self.failFirstRead = failFirstRead
     }
 
     func setHistory(_ messages: [Message]) { historyValue = messages }
-    func snapshot() async throws -> IOSConversationSnapshot {
-        IOSConversationSnapshot(channels: [fixtureChannel()], members: [], readStates: [])
-    }
+    func snapshot() async throws -> IOSConversationSnapshot { snapshotValue }
     func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { historyValue }
-    func markRead(channel: ChannelID, through sequence: Int64) async throws {}
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        markReadCalls.append(MarkReadCall(channel: channel, sequence: sequence))
+        if failFirstRead, markReadCalls.count == 1 { throw SessionError.transport("offline") }
+        return ChannelReadState(
+            channelId: channel,
+            lastReadSeq: sequence,
+            latestSeq: sequence,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool {
+        muteCalls.append(MuteCall(channel: channel, muted: muted))
+        if failFirstMute, muteCalls.count == 1 { throw SessionError.transport("offline") }
+        return muted
+    }
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
     func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
         AsyncStream { $0.finish() }
@@ -776,6 +1211,180 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         approvalCalls.append(request)
         if failFirstApproval, approvalCalls.count == 1 { throw SessionError.transport("offline") }
         return ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
+}
+
+private actor SuspendedMuteConversationBackend: IOSConversationBackend {
+    private let initialSnapshot: IOSConversationSnapshot
+    private let refreshedSnapshot: IOSConversationSnapshot
+    private let reconciliationSnapshot: IOSConversationSnapshot?
+    private let suspendsRefresh: Bool
+    private var snapshotCallCount = 0
+    private var muteDidStart = false
+    private var refreshDidStart = false
+    private var muteStartWaiter: CheckedContinuation<Void, Never>?
+    private var muteFinishWaiter: CheckedContinuation<Void, Never>?
+    private var refreshStartWaiter: CheckedContinuation<Void, Never>?
+    private var refreshFinishWaiter: CheckedContinuation<Void, Never>?
+
+    init(
+        initialSnapshot: IOSConversationSnapshot,
+        refreshedSnapshot: IOSConversationSnapshot,
+        reconciliationSnapshot: IOSConversationSnapshot? = nil,
+        suspendsRefresh: Bool = false
+    ) {
+        self.initialSnapshot = initialSnapshot
+        self.refreshedSnapshot = refreshedSnapshot
+        self.reconciliationSnapshot = reconciliationSnapshot
+        self.suspendsRefresh = suspendsRefresh
+    }
+
+    var snapshotCalls: Int { snapshotCallCount }
+
+    func snapshot() async throws -> IOSConversationSnapshot {
+        snapshotCallCount += 1
+        guard snapshotCallCount > 1 else { return initialSnapshot }
+        if suspendsRefresh, snapshotCallCount == 2 {
+            refreshDidStart = true
+            refreshStartWaiter?.resume()
+            refreshStartWaiter = nil
+            await withCheckedContinuation { continuation in
+                refreshFinishWaiter = continuation
+            }
+        }
+        if snapshotCallCount > 2, let reconciliationSnapshot {
+            return reconciliationSnapshot
+        }
+        return refreshedSnapshot
+    }
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { [] }
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        ChannelReadState(
+            channelId: channel,
+            lastReadSeq: sequence,
+            latestSeq: sequence,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool {
+        muteDidStart = true
+        muteStartWaiter?.resume()
+        muteStartWaiter = nil
+        await withCheckedContinuation { continuation in
+            muteFinishWaiter = continuation
+        }
+        return muted
+    }
+    func waitUntilMuteStarts() async {
+        guard !muteDidStart else { return }
+        await withCheckedContinuation { continuation in
+            muteStartWaiter = continuation
+        }
+    }
+    func finishMute() {
+        muteFinishWaiter?.resume()
+        muteFinishWaiter = nil
+    }
+    func waitUntilRefreshStarts() async {
+        guard !refreshDidStart else { return }
+        await withCheckedContinuation { continuation in
+            refreshStartWaiter = continuation
+        }
+    }
+    func finishRefresh() {
+        refreshFinishWaiter?.resume()
+        refreshFinishWaiter = nil
+    }
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { $0.finish() }
+    }
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        fixtureMessage(sequence: 1)
+    }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
+}
+
+private func readSnapshot(
+    channel: Channel,
+    lastRead: Int64,
+    latest: Int64,
+    unread: Int64,
+    mentions: Int
+) -> IOSConversationSnapshot {
+    IOSConversationSnapshot(
+        channels: [channel],
+        members: [],
+        readStates: [
+            ChannelReadState(
+                channelId: channel.id,
+                lastReadSeq: lastRead,
+                latestSeq: latest,
+                unreadCount: unread,
+                mentionCount: mentions
+            ),
+        ]
+    )
+}
+
+private actor SuspendedReadConversationBackend: IOSConversationBackend {
+    private let initialSnapshot: IOSConversationSnapshot
+    private let refreshedSnapshot: IOSConversationSnapshot
+    private var snapshotCallCount = 0
+    private var readDidStart = false
+    private var readStartWaiter: CheckedContinuation<Void, Never>?
+    private var readFinishWaiter: CheckedContinuation<Void, Never>?
+
+    init(
+        initialSnapshot: IOSConversationSnapshot,
+        refreshedSnapshot: IOSConversationSnapshot
+    ) {
+        self.initialSnapshot = initialSnapshot
+        self.refreshedSnapshot = refreshedSnapshot
+    }
+
+    func snapshot() async throws -> IOSConversationSnapshot {
+        snapshotCallCount += 1
+        return snapshotCallCount == 1 ? initialSnapshot : refreshedSnapshot
+    }
+
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { [] }
+
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        readDidStart = true
+        readStartWaiter?.resume()
+        readStartWaiter = nil
+        await withCheckedContinuation { continuation in
+            readFinishWaiter = continuation
+        }
+        throw SessionError.transport("offline")
+    }
+
+    func waitUntilReadStarts() async {
+        guard !readDidStart else { return }
+        await withCheckedContinuation { continuation in
+            readStartWaiter = continuation
+        }
+    }
+
+    func failRead() {
+        readFinishWaiter?.resume()
+        readFinishWaiter = nil
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool { muted }
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { $0.finish() }
+    }
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
+        fixtureMessage(sequence: 1)
+    }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
     }
 }
 

@@ -110,7 +110,8 @@ public final class MomoiOSAppModel {
 @MainActor
 public struct MomoiOSRootView: View {
     @State private var model: MomoiOSAppModel
-    @State private var navigationPath: [IOSPushDeepLink] = []
+    @State private var selectedTab: IOSAppTab = .home
+    @State private var homePath: [IOSPushDeepLink] = []
     @State private var deepLinkRouter: IOSPushDeepLinkRouter
 
     public init(
@@ -122,17 +123,23 @@ public struct MomoiOSRootView: View {
     }
 
     public var body: some View {
-        NavigationStack(path: $navigationPath) {
+        Group {
             switch model.phase {
             case .signedOut:
-                LoginView(model: model)
+                NavigationStack {
+                    LoginView(model: model)
+                }
             case .connecting:
-                ProgressView("Connecting to momo")
-                    .navigationTitle("momo")
+                NavigationStack {
+                    ProgressView("Connecting to momo")
+                        .navigationTitle("momo")
+                }
             case .signedIn(let session, let bootstrap):
                 IOSWorkspaceView(
                     session: session,
                     bootstrap: bootstrap,
+                    selectedTab: $selectedTab,
+                    homePath: $homePath,
                     signOut: model.signOut
                 )
             }
@@ -143,7 +150,13 @@ public struct MomoiOSRootView: View {
             guard let link = deepLinkRouter.consumePending(
                 for: deepLinkRouteTrigger.signedInWorkspaceID
             ) else { return }
-            navigationPath = [link]
+            selectedTab = .home
+            homePath = [link]
+        }
+        .onChange(of: deepLinkRouteTrigger.signedInWorkspaceID) { previousWorkspace, workspace in
+            guard previousWorkspace != workspace else { return }
+            selectedTab = .home
+            homePath = []
         }
     }
 

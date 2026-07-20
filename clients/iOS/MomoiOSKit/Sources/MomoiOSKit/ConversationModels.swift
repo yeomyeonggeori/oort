@@ -5,19 +5,53 @@ public struct IOSConversationSnapshot: Sendable, Equatable {
     public var channels: [Channel]
     public var members: [Member]
     public var readStates: [ChannelReadState]
+    public var channelMuteStates: [ChannelID: Bool]
+    public var memberPresenceStates: [MemberID: Presence]
 
-    public init(channels: [Channel], members: [Member], readStates: [ChannelReadState]) {
+    public init(
+        channels: [Channel],
+        members: [Member],
+        readStates: [ChannelReadState],
+        channelMuteStates: [ChannelID: Bool] = [:],
+        memberPresenceStates: [MemberID: Presence] = [:]
+    ) {
         self.channels = channels
         self.members = members
         self.readStates = readStates
+        self.channelMuteStates = channelMuteStates
+        self.memberPresenceStates = memberPresenceStates
     }
 }
 
 public struct IOSChannelListItem: Identifiable, Sendable, Equatable {
     public let channel: Channel
     public let title: String
-    public let unreadCount: Int64
-    public let mentionCount: Int
+    public var unreadCount: Int64
+    public var mentionCount: Int
+    public var latestSequence: Int64
+    public var isMuted: Bool
+    public let directMessageMemberID: MemberID?
+    public let directMessagePresence: Presence?
+
+    public init(
+        channel: Channel,
+        title: String,
+        unreadCount: Int64,
+        mentionCount: Int,
+        latestSequence: Int64 = 0,
+        isMuted: Bool = false,
+        directMessageMemberID: MemberID? = nil,
+        directMessagePresence: Presence? = nil
+    ) {
+        self.channel = channel
+        self.title = title
+        self.unreadCount = unreadCount
+        self.mentionCount = mentionCount
+        self.latestSequence = latestSequence
+        self.isMuted = isMuted
+        self.directMessageMemberID = directMessageMemberID
+        self.directMessagePresence = directMessagePresence
+    }
 
     public var id: ChannelID { channel.id }
     public var isDirectMessage: Bool { channel.kind == .dm }
@@ -47,17 +81,26 @@ public enum IOSChannelListMapper {
         channels: [Channel],
         members: [Member],
         readStates: [ChannelReadState],
+        channelMuteStates: [ChannelID: Bool] = [:],
+        memberPresenceStates: [MemberID: Presence] = [:],
         currentMemberID: MemberID
     ) -> IOSChannelSections {
         let states = Dictionary(uniqueKeysWithValues: readStates.map { ($0.channelId, $0) })
-        let memberNames = Dictionary(uniqueKeysWithValues: members.map { ($0.id, $0.displayName) })
+        let membersByID = Dictionary(uniqueKeysWithValues: members.map { ($0.id, $0) })
         let items = channels.filter { !$0.isArchived }.map { channel in
             let state = states[channel.id]
+            let directMessageMemberID = channel.kind == .dm
+                ? channel.dmMemberIds.first(where: { $0 != currentMemberID })
+                : nil
             return IOSChannelListItem(
                 channel: channel,
-                title: displayName(for: channel, memberNames: memberNames, currentMemberID: currentMemberID),
+                title: displayName(for: channel, membersByID: membersByID, currentMemberID: currentMemberID),
                 unreadCount: state?.unreadCount ?? 0,
-                mentionCount: state?.mentionCount ?? 0
+                mentionCount: state?.mentionCount ?? 0,
+                latestSequence: state?.latestSeq ?? 0,
+                isMuted: channelMuteStates[channel.id] ?? false,
+                directMessageMemberID: directMessageMemberID,
+                directMessagePresence: directMessageMemberID.flatMap { memberPresenceStates[$0] }
             )
         }
         let standard = items.filter { !$0.isDirectMessage }.sorted(by: itemOrder)
@@ -67,12 +110,12 @@ public enum IOSChannelListMapper {
 
     private static func displayName(
         for channel: Channel,
-        memberNames: [MemberID: String],
+        membersByID: [MemberID: Member],
         currentMemberID: MemberID
     ) -> String {
         if channel.kind == .dm,
            let counterpart = channel.dmMemberIds.first(where: { $0 != currentMemberID }),
-           let name = memberNames[counterpart],
+           let name = membersByID[counterpart]?.displayName,
            !name.isEmpty {
             return name
         }
@@ -83,6 +126,26 @@ public enum IOSChannelListMapper {
     private static func itemOrder(_ lhs: IOSChannelListItem, _ rhs: IOSChannelListItem) -> Bool {
         let order = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
         return order == .orderedSame ? lhs.id.description < rhs.id.description : order == .orderedAscending
+    }
+}
+
+public enum IOSAppTab: String, CaseIterable, Sendable, Hashable, Identifiable {
+    case home
+    case search
+    case activity
+    case work
+    case profile
+
+    public var id: String { rawValue }
+}
+
+public enum IOSChannelSearch {
+    public static func filter(_ items: [IOSChannelListItem], query: String) -> [IOSChannelListItem] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return items }
+        return items.filter { item in
+            item.title.localizedCaseInsensitiveContains(normalized)
+        }
     }
 }
 
