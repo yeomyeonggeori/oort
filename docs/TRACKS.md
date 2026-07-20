@@ -12,8 +12,8 @@
 
 | 트랙 | 소유 파일군 | 트랙 브랜치 | 트랙 워크트리 |
 |---|---|---|---|
-| **UXUI** | `clients/macOS/**`(뷰·뷰모델·스냅샷), 웹 UI 표면 | `track/uxui` | `~/projects/momo-tracks/uxui` |
-| **엔진** | `server/**`, `relay/**`, `workers/**`, `services/**`, `adapters/**`, `infra/**`, `scripts/**`, `clients/Core/**`, `clients/iOS/**` | `track/engine` | `~/projects/momo-tracks/engine` |
+| **UXUI** | `clients/macOS/**`(뷰·뷰모델·스냅샷), `clients/iOS/**`(2026-07-20 성재 지시 — 모바일 v1은 UXUI 소유, iOS 컴파일·시뮬레이터 게이트는 오케스트레이터 수행), 웹 UI 표면 | `track/uxui` | `~/projects/momo-tracks/uxui` |
+| **엔진** | `server/**`, `relay/**`, `workers/**`, `services/**`, `adapters/**`, `infra/**`, `scripts/**`, `clients/Core/**` | `track/engine` | `~/projects/momo-tracks/engine` |
 
 - `clients/Core`(공유 계약)는 엔진 소유 — **가산 변경 원칙**. UXUI가 계약 변경이 필요하면 ENGINE_HANDOFF에 요청 항목으로 남긴다.
 - goal 단위 세부 워크트리(codex worker 격리)는 지금처럼 만들어도 된다. 단 **PR/머지 대상은 main이 아니라 자기 트랙 브랜치다.**
