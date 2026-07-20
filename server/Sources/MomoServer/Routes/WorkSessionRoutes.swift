@@ -8,6 +8,7 @@ struct CreateWorkSessionRequest: Decodable {
     let hostId: UUID
     let tool: String
     let label: String
+    let controlId: UUID?
 }
 
 struct EndWorkSessionRequest: Decodable {
@@ -60,6 +61,9 @@ struct WorkSessionRoutes: Sendable {
     @Sendable
     func create(_ request: Request, context: AppRequestContext) async throws -> Response {
         let principal = try context.requirePrincipal()
+        guard principal.kind == .human || principal.kind == .workHost else {
+            throw HTTPError(.forbidden, message: "work sessions require a human or work host")
+        }
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let requestDTO = try await request.decode(
             as: CreateWorkSessionRequest.self,
@@ -69,17 +73,40 @@ struct WorkSessionRoutes: Sendable {
         let label = try Self.validatedLabel(requestDTO.label)
         let channelID = requestDTO.channelId
         let hostID = requestDTO.hostId
+        if principal.kind == .human, requestDTO.controlId != nil {
+            throw HTTPError(.badRequest, message: "controlId is reserved for work host dispatch")
+        }
+        if principal.kind == .workHost {
+            guard hostID == principal.tokenID, requestDTO.controlId != nil else {
+                throw HTTPError(.forbidden, message: "work host session binding is invalid")
+            }
+        }
         let hlcTs = Int64(Date().timeIntervalSince1970 * 1000)
 
         let session = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
+            let sessionOwnerMemberID: UUID
+            if principal.kind == .workHost {
+                sessionOwnerMemberID = try await Self.requireDispatchedSpawnControl(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    controlID: requestDTO.controlId!,
+                    channelID: channelID,
+                    hostID: hostID,
+                    tool: tool,
+                    label: label
+                )
+            } else {
+                sessionOwnerMemberID = principal.memberID
+            }
             try await Self.requireChannelMember(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
                 channelID: channelID,
-                memberID: principal.memberID
+                memberID: sessionOwnerMemberID
             )
 
             let idRows = try await conn.query("SELECT uuidv7()", logger: db.logger).collect()
@@ -108,7 +135,7 @@ struct WorkSessionRoutes: Sendable {
                   (workspace_id, channel_id, seq, hlc_ts, hlc_count,
                    author_member_id, type, body, props, client_msg_id)
                 SELECT \(workspaceID), \(channelID), b.seq, \(hlcTs), 0,
-                       \(principal.memberID), 'system'::message_type, NULL,
+                       \(sessionOwnerMemberID), 'system'::message_type, NULL,
                        \(propsJSON)::jsonb, \(sessionID)
                   FROM bumped b
                 RETURNING id, seq, created_at
@@ -128,7 +155,7 @@ struct WorkSessionRoutes: Sendable {
                   (id, workspace_id, channel_id, member_id, host_id,
                    root_message_id, tool, label, started_at)
                 VALUES
-                  (\(sessionID), \(workspaceID), \(channelID), \(principal.memberID),
+                  (\(sessionID), \(workspaceID), \(channelID), \(sessionOwnerMemberID),
                    \(hostID), \(rootMessageID), \(tool), \(label), \(startedAt))
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
                           root_message_id, tool, label, status, started_at,
@@ -149,7 +176,7 @@ struct WorkSessionRoutes: Sendable {
                 seq: rootMessageSeq,
                 type: "system",
                 body: nil,
-                authorMemberID: principal.memberID,
+                authorMemberID: sessionOwnerMemberID,
                 hlcTs: hlcTs,
                 hlcCount: 0,
                 rootID: nil,
@@ -218,15 +245,21 @@ struct WorkSessionRoutes: Sendable {
                  String, Date, Date?, Int?, Int64).self
             )
             let ownerMemberID = decoded.3
-            guard ownerMemberID == principal.memberID else {
-                throw HTTPError(.forbidden, message: "only the session owner can end it")
+            if principal.kind == .workHost {
+                guard decoded.4 == principal.tokenID else {
+                    throw HTTPError(.forbidden, message: "work host cannot end another host session")
+                }
+            } else {
+                guard ownerMemberID == principal.memberID else {
+                    throw HTTPError(.forbidden, message: "only the session owner can end it")
+                }
             }
             try await Self.requireChannelMember(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
                 channelID: decoded.2,
-                memberID: principal.memberID
+                memberID: ownerMemberID
             )
 
             if decoded.8 == "ended" {
@@ -460,6 +493,57 @@ struct WorkSessionRoutes: Sendable {
         guard rows.first != nil else {
             throw HTTPError(.forbidden, message: "active channel membership required")
         }
+    }
+
+    /// A signed work host may create only the session described by a dispatched
+    /// spawn control targeted at that host. The session owner is derived from
+    /// the requesting agent's human owner, never from host-supplied identity.
+    private static func requireDispatchedSpawnControl(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        controlID: UUID,
+        channelID: UUID,
+        hostID: UUID,
+        tool: String,
+        label: String
+    ) async throws -> UUID {
+        let rows = try await conn.query(
+            """
+            SELECT a.owner_human_id
+              FROM work_control wc
+              JOIN member requester
+                ON requester.id = wc.requester_member_id
+               AND requester.workspace_id = wc.workspace_id
+               AND requester.kind = 'agent'
+               AND requester.status = 'active'
+               AND requester.deleted_at IS NULL
+              JOIN agent a
+                ON a.member_id = requester.id
+               AND a.workspace_id = requester.workspace_id
+              JOIN member owner
+                ON owner.id = a.owner_human_id
+               AND owner.workspace_id = wc.workspace_id
+               AND owner.kind = 'human'
+               AND owner.status = 'active'
+               AND owner.deleted_at IS NULL
+             WHERE wc.id = \(controlID)
+               AND wc.workspace_id = \(workspaceID)
+               AND wc.channel_id = \(channelID)
+               AND wc.target_host_id = \(hostID)
+               AND wc.kind = 'spawn'
+               AND wc.status = 'dispatched'
+               AND wc.session_id IS NULL
+               AND wc.payload->>'tool' = \(tool)
+               AND wc.payload->>'label' = \(label)
+             FOR SHARE OF wc
+            """,
+            logger: logger
+        ).collect()
+        guard let ownerMemberID = try rows.first?.decode(UUID.self) else {
+            throw HTTPError(.conflict, message: "spawn control is not dispatchable by this host")
+        }
+        return ownerMemberID
     }
 
     private static func decodeSession(_ row: PostgresRow) throws -> WorkSessionDTO {

@@ -2104,6 +2104,10 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("work.session.ended"))
         XCTAssertTrue(routes.contains("FOR UPDATE OF ws"))
         XCTAssertTrue(routes.contains("only the session owner can end it"))
+        XCTAssertTrue(routes.contains("controlId is reserved for work host dispatch"))
+        XCTAssertTrue(routes.contains("requireDispatchedSpawnControl"))
+        XCTAssertTrue(routes.contains("wc.payload->>'tool'"))
+        XCTAssertTrue(routes.contains("work host cannot end another host session"))
         XCTAssertTrue(routes.contains("JOIN membership ms"))
         XCTAssertFalse(routes.contains("BYPASSRLS"))
     }
@@ -2334,6 +2338,8 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("work host not found"))
         XCTAssertTrue(routes.contains("member-scoped work host belongs to another session owner"))
         XCTAssertTrue(routes.contains("only the registered host owner can acknowledge"))
+        XCTAssertTrue(routes.contains("work host cannot acknowledge another host control"))
+        XCTAssertTrue(routes.contains("ws.member_id = a.owner_human_id"))
         XCTAssertTrue(routes.contains("errorLabel: \"host_revoked\""))
         XCTAssertTrue(routes.contains("SET status = 'failed'"))
         XCTAssertGreaterThanOrEqual(
@@ -2376,6 +2382,8 @@ final class MomoServerTests: XCTestCase {
             encoding: .utf8
         )
         XCTAssertTrue(routes.contains("work-hosts/:host/heartbeat"))
+        XCTAssertTrue(routes.contains("work-hosts/:host/pending-controls"))
+        XCTAssertTrue(routes.contains("wc.status = 'dispatched'"))
         XCTAssertTrue(routes.contains("work.host.registered"))
         XCTAssertTrue(routes.contains("work.host.revoked"))
         XCTAssertTrue(routes.contains("capabilities: [String: Bool]"))
@@ -2443,6 +2451,66 @@ final class MomoServerTests: XCTestCase {
         )) { error in
             XCTAssertEqual((error as? HTTPError)?.status, .unauthorized)
         }
+    }
+
+    func testWorkHostSignedRequestBindsMethodPathTenantHostAndTimestamp() throws {
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000488")!
+        let sentAtMs: Int64 = 1_784_582_400_000
+        let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/pending-controls"
+        let privateKey = Curve25519.Signing.PrivateKey()
+        let publicKey = privateKey.publicKey.rawRepresentation.base64EncodedString()
+        let payload = WorkHostAuthenticator.requestSigningPayload(
+            method: "GET",
+            path: path,
+            workspaceID: workspaceID,
+            hostID: hostID,
+            sentAtMs: sentAtMs
+        )
+        XCTAssertEqual(
+            String(decoding: payload, as: UTF8.self),
+            "momo.work_host.request.v1\nGET\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
+        )
+        let signature = try privateKey.signature(for: payload).base64EncodedString()
+        XCTAssertTrue(WorkHostAuthenticator.verifySignature(
+            publicKey: publicKey,
+            signature: signature,
+            method: "GET",
+            path: path,
+            workspaceID: workspaceID,
+            hostID: hostID,
+            sentAtMs: sentAtMs
+        ))
+        XCTAssertFalse(WorkHostAuthenticator.verifySignature(
+            publicKey: publicKey,
+            signature: signature,
+            method: "POST",
+            path: path,
+            workspaceID: workspaceID,
+            hostID: hostID,
+            sentAtMs: sentAtMs
+        ))
+        XCTAssertEqual(
+            WorkHostAuthenticator.hostID(
+                fromAuthorization: "MomoHost \(hostID.uuidString.lowercased())"
+            ),
+            hostID
+        )
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "GET", path: path))
+        XCTAssertTrue(WorkHostAuthenticator.isAllowed(
+            method: "POST",
+            path: "/v1/workspaces/\(workspaceID)/work-sessions"
+        ))
+        XCTAssertFalse(WorkHostAuthenticator.isAllowed(
+            method: "POST",
+            path: "/v1/workspaces/\(workspaceID)/channels/\(UUID())/messages"
+        ))
+        let now = Date(timeIntervalSince1970: Double(sentAtMs) / 1_000)
+        XCTAssertNoThrow(try WorkHostAuthenticator.validateTimestamp(sentAtMs, now: now))
+        XCTAssertThrowsError(try WorkHostAuthenticator.validateTimestamp(
+            sentAtMs + WorkHostRoutes.heartbeatClockSkewMs + 1,
+            now: now
+        ))
     }
 
     func testThreadRepliesBoundaryCursorMembershipAndRLSContracts() throws {
