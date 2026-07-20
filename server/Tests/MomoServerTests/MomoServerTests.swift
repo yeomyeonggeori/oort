@@ -795,6 +795,57 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(try AgentCredentialRoutes.normalizedLabel(nil), "agent bearer")
     }
 
+    func testAgentCreationValidationReusesProviderAndCredentialBoundary() throws {
+        XCTAssertEqual(try AgentRoutes.normalizedModel("  hermes-agent  "), "hermes-agent")
+        XCTAssertThrowsError(try AgentRoutes.normalizedModel("   "))
+        XCTAssertEqual(
+            try AgentRoutes.validatedBaseURL(
+                " http://127.0.0.1:28188/v1 ",
+                environmentName: "local",
+                allowLocalLoopback: true
+            ),
+            "http://127.0.0.1:28188/v1"
+        )
+        XCTAssertEqual(
+            try AgentRoutes.validatedBaseURL(
+                "https://hermes.example.net/v1",
+                environmentName: "prod",
+                allowLocalLoopback: false
+            ),
+            "https://hermes.example.net/v1"
+        )
+        XCTAssertThrowsError(try AgentRoutes.validatedBaseURL(
+            "http://hermes.example.net/v1",
+            environmentName: "local",
+            allowLocalLoopback: true
+        ))
+        XCTAssertThrowsError(try AgentRoutes.validatedBaseURL(
+            "http://127.0.0.1/v1",
+            environmentName: "local",
+            allowLocalLoopback: true
+        ))
+        XCTAssertThrowsError(try AgentRoutes.validatedBaseURL(
+            "https://user:secret@hermes.example.net/v1?api_key=secret",
+            environmentName: "prod",
+            allowLocalLoopback: false
+        ))
+        XCTAssertThrowsError(try AgentRoutes.validatedConfig([
+            "nested": .object(["openai_api_key": .string("never-ingest")]),
+        ]))
+        XCTAssertNoThrow(try AgentRoutes.validatedConfig([
+            "temperature": .double(0.2),
+            "max_tokens": .int(2048),
+        ]))
+    }
+
+    func testAgentCreationRequestRejectsUnknownCredentialFields() throws {
+        let valid = Data(#"{"displayName":"Hermes","handle":"hermes","model":"hermes-agent","baseUrl":"https://hermes.example.net/v1"}"#.utf8)
+        XCTAssertNoThrow(try JSONDecoder().decode(CreateAgentRequest.self, from: valid))
+
+        let providerKey = Data(#"{"displayName":"Hermes","handle":"hermes","model":"hermes-agent","baseUrl":"https://hermes.example.net/v1","apiKey":"must-stay-provider-owned"}"#.utf8)
+        XCTAssertThrowsError(try JSONDecoder().decode(CreateAgentRequest.self, from: providerKey))
+    }
+
     func testAgentGatewayErrorSanitizerRedactsSecretsAndCredentialShapedText() {
         XCTAssertNil(AgentGatewayRoutes.sanitizedGatewayError("   ", gatewaySecret: "secret"))
         XCTAssertEqual(
