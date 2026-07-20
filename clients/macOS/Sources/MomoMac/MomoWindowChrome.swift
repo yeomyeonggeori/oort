@@ -97,11 +97,14 @@ enum MomoWindowChromeStyle {
         let currentCenterFromTop = contentView.isFlipped
             ? currentCenterY - contentView.bounds.minY
             : contentView.bounds.maxY - currentCenterY
-        let deltaFromTop = desiredCenterFromTop - currentCenterFromTop
 
         for button in buttons {
             guard let container = button.superview else { continue }
-            let deltaY = container.isFlipped ? deltaFromTop : -deltaFromTop
+            let deltaY = trafficLightFrameDeltaY(
+                desiredCenterFromTop: desiredCenterFromTop,
+                currentCenterFromTop: currentCenterFromTop,
+                containerIsFlipped: container.isFlipped
+            )
             button.setFrameOrigin(
                 NSPoint(
                     x: button.frame.origin.x,
@@ -109,6 +112,15 @@ enum MomoWindowChromeStyle {
                 )
             )
         }
+    }
+
+    static func trafficLightFrameDeltaY(
+        desiredCenterFromTop: CGFloat,
+        currentCenterFromTop: CGFloat,
+        containerIsFlipped: Bool
+    ) -> CGFloat {
+        let deltaFromTop = desiredCenterFromTop - currentCenterFromTop
+        return containerIsFlipped ? deltaFromTop : -deltaFromTop
     }
 
     static func trafficLightTargetCenterYFromTop(

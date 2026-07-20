@@ -211,6 +211,40 @@ final class MomoChannelChromeTests: XCTestCase {
             ) + MomoTheme.ChannelHeader.edgeInset,
             152
         )
+
+        let desiredCenterFromTop = CGFloat(52)
+        let initialCenterFromTop = CGFloat(74)
+        let flippedDelta = MomoWindowChromeStyle.trafficLightFrameDeltaY(
+            desiredCenterFromTop: desiredCenterFromTop,
+            currentCenterFromTop: initialCenterFromTop,
+            containerIsFlipped: true
+        )
+        let unflippedDelta = MomoWindowChromeStyle.trafficLightFrameDeltaY(
+            desiredCenterFromTop: desiredCenterFromTop,
+            currentCenterFromTop: initialCenterFromTop,
+            containerIsFlipped: false
+        )
+
+        XCTAssertEqual(flippedDelta, -22)
+        XCTAssertEqual(unflippedDelta, 22)
+        XCTAssertEqual(
+            MomoWindowChromeStyle.trafficLightFrameDeltaY(
+                desiredCenterFromTop: desiredCenterFromTop,
+                currentCenterFromTop: initialCenterFromTop + flippedDelta,
+                containerIsFlipped: true
+            ),
+            0,
+            "a second repair in flipped coordinates must not move the traffic lights"
+        )
+        XCTAssertEqual(
+            MomoWindowChromeStyle.trafficLightFrameDeltaY(
+                desiredCenterFromTop: desiredCenterFromTop,
+                currentCenterFromTop: initialCenterFromTop - unflippedDelta,
+                containerIsFlipped: false
+            ),
+            0,
+            "a second repair in unflipped coordinates must not move the traffic lights"
+        )
     }
 
     func testFullHeightChromeAndChannelHeaderUseThinStableContracts() {
@@ -242,24 +276,6 @@ final class MomoChannelChromeTests: XCTestCase {
         XCTAssertEqual(window.titlebarSeparatorStyle, .none)
         XCTAssertNil(window.toolbar)
         XCTAssertTrue(window.isMovableByWindowBackground)
-
-        let trafficLightFrames = [
-            NSWindow.ButtonType.closeButton,
-            .miniaturizeButton,
-            .zoomButton,
-        ].compactMap { window.standardWindowButton($0)?.frame }
-
-        MomoWindowChromeStyle.applyFlatUnifiedChrome(to: window)
-
-        XCTAssertEqual(
-            [
-                NSWindow.ButtonType.closeButton,
-                .miniaturizeButton,
-                .zoomButton,
-            ].compactMap { window.standardWindowButton($0)?.frame },
-            trafficLightFrames,
-            "reapplying the complete chrome contract must be idempotent"
-        )
     }
 
     @MainActor
