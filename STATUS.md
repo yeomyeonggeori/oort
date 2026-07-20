@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI iOS v1 모바일 기반 MOMO-496/497 (2026-07-20)
+
+- MOMO-496은 macOS 브랜드 원본과 정렬한 iOS AppIcon 일반·다크·틴트 1024 자산, 적응형 AccentColor·런치 배경, 재현 가능한 CoreGraphics 생성기를 추가했다. 세 PNG는 sRGB·불투명 1024 정사각형이며 asset catalog 컴파일이 PASS했다.
+- MOMO-497은 시스템 TabView 기반 홈·검색·활동·Work·프로필 5탭과 탭별 독립 NavigationStack을 도입했다. 홈은 Threads·채널·DM, unread/mention, 음소거, 읽음 처리, 실제 값이 있을 때만 보이는 DM presence를 제공하며 기존 타임라인·답장·승인·허들 경로를 재사용한다. 푸시는 다른 탭에서 수신해도 Home 경로로 전환한다.
+- iPhone 17 시뮬레이터 build/run, `scripts/verify_ios_build.sh` build-for-testing/test-without-building, MomoiOSKit 37 tests, 디자인 재리뷰 Blocker/High 0이 PASS했다. 인증 후 홈·5탭 라이트/다크·Dynamic Type 스냅샷과 실기기 아이콘 표면은 Fable/성재 수동 게이트로 남는다. 현재 roster REST는 presence를 투영하지 않으므로 실데이터 DM 점은 엔진 realtime/REST 계약이 열릴 때까지 `runtime-unverified`이며, 앱은 거짓 offline 상태를 표시하지 않는다.
+
 ## UXUI A-11 Work Host 자기등록 (2026-07-20)
 
 - macOS 앱이 로그인한 workspace/member별 로컬 Ed25519 신원을 생성해 개인키를 Application Support에 0600으로 보관하고, 공개키만 `work-hosts` 등록 REST에 전달한다. 동일 공개키의 활성 app host는 재사용하며 revoke되었거나 없을 때만 새로 등록해 서버가 반환한 `host_id`를 Work Console의 유일한 라우팅 ID로 채택한다.
