@@ -456,6 +456,18 @@ REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -r '.refreshToken')"
 
 sample realtime-token post "/v1/auth/realtime-token" "/v1/auth/realtime-token" 200 "" "$ACCESS"
 
+sample agent-create post "/v1/workspaces/{workspaceId}/agents" \
+  "/v1/workspaces/$WS/agents" 201 \
+  "$(jq -cn --arg handle "openapi-agent-$RUN_EPOCH" \
+      '{displayName:"OpenAPI Created Agent",handle:$handle,model:"openapi-gate",
+        baseUrl:"https://hermes.openapi.example.test/v1",
+        systemPrompt:"OpenAPI drift gate",config:{temperature:0.2,max_tokens:2048}}')" \
+  "$ACCESS"
+guard_jq --arg handle "openapi-agent-$RUN_EPOCH" \
+  '.agent.handle == $handle and .agent.displayName == "OpenAPI Created Agent"
+   and (.agent.id | type == "string")' \
+  "agent creation returns only the created member identity"
+
 # roster + compat alias
 sample roster get "/v1/workspaces/{workspaceId}/roster" "/v1/workspaces/$WS/roster" 200 "" "$ACCESS"
 guard_jq '(.members | length) >= 1' "roster returns at least one member"
@@ -488,7 +500,7 @@ sample work-host-register post "/v1/workspaces/{workspaceId}/work-hosts" \
   "/v1/workspaces/$WS/work-hosts" 201 \
   "$(jq -cn --arg key "$WORK_HOST_PUBLIC_KEY" \
       '{scope:"member",type:"app",displayName:"OpenAPI gate host",publicKey:$key,
-        capabilities:{"tool.codex":true}}')" "$ACCESS"
+        capabilities:{"tool.codex":true,"terminal_attach":true}}')" "$ACCESS"
 WORK_HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id')"
 WORK_HOST_SENT_AT_MS="$($PYTHON_BIN -c 'import time; print(time.time_ns() // 1_000_000)')"
 WORK_HOST_SIGNING_PAYLOAD="$TMP_DIR/work-host-heartbeat.txt"
@@ -696,18 +708,8 @@ api post "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" \
 }
 AGENT_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
 
-# Work controls: host-owner whitelist -> agent dispatch -> owner ack -> revoke.
-# Create a fresh running session because the earlier work-session operation
-# sample deliberately exercised its ended response.
-api post "/v1/workspaces/$WS/work-sessions" \
-  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
-      '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI control host"}')" "$ACCESS"
-[ "$RESPONSE_STATUS" = "201" ] || {
-  echo "[openapi] FAIL work control session fixture: expected 201, got $RESPONSE_STATUS" >&2
-  exit 1
-}
-WORK_CONTROL_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
-
+# Work controls + terminal attach: dispatch -> MomoHost remote PTY binding ->
+# owner capability -> signed host validation -> ack -> revoke.
 sample work-auto-approval-enable put \
   "/v1/workspaces/{workspaceId}/work-auto-approvals/{tool}" \
   "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"
@@ -727,6 +729,40 @@ sample work-control-create post "/v1/workspaces/{workspaceId}/work-controls" \
 WORK_CONTROL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workControl.id')"
 guard_jq '.workControl.kind == "spawn" and .workControl.status == "dispatched"' \
   "whitelisted spawn dispatches immediately"
+
+REMOTE_PTY_ID="openapi-pty-$RUN_EPOCH"
+REMOTE_ATTACH_ENDPOINT="wss://workd.momo.test/v1/terminal"
+work_host_signed_sample work-session-remote-create post \
+  "/v1/workspaces/{workspaceId}/work-sessions" \
+  "/v1/workspaces/$WS/work-sessions" 201 \
+  "$WORK_HOST_ID" "$WORK_HOST_PRIVATE_KEY" \
+  "$(jq -cn --arg ch "$GENERAL_ID" --arg host "$WORK_HOST_ID" \
+      --arg control "$WORK_CONTROL_ID" --arg pty "$REMOTE_PTY_ID" \
+      --arg endpoint "$REMOTE_ATTACH_ENDPOINT" \
+      '{channelId:$ch,hostId:$host,tool:"codex",label:"OpenAPI remote PTY",
+        controlId:$control,ptyId:$pty,attachEndpoint:$endpoint}')"
+WORK_CONTROL_SESSION_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workSession.id')"
+
+sample terminal-attach-issue post \
+  "/v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach" \
+  "/v1/workspaces/$WS/work-sessions/$WORK_CONTROL_SESSION_ID/terminal-attach" 200 \
+  "" "$ACCESS"
+TERMINAL_ATTACH_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.capability_token')"
+guard_jq --arg endpoint "$REMOTE_ATTACH_ENDPOINT" --arg pty "$REMOTE_PTY_ID" \
+  '.attach_endpoint == $endpoint and .pty_id == $pty and
+   ((keys | sort) == ["attach_endpoint","capability_token","pty_id"])' \
+  "owner receives the exact direct attach grant without embedded token URL"
+
+work_host_signed_sample terminal-attach-validate post \
+  "/v1/workspaces/{workspaceId}/work-hosts/{workHostId}/terminal-attach/validate" \
+  "/v1/workspaces/$WS/work-hosts/$WORK_HOST_ID/terminal-attach/validate" 200 \
+  "$WORK_HOST_ID" "$WORK_HOST_PRIVATE_KEY" \
+  "$(jq -cn --arg token "$TERMINAL_ATTACH_TOKEN" '{capability_token:$token}')"
+guard_jq --arg session "$(printf '%s' "$WORK_CONTROL_SESSION_ID" | tr '[:upper:]' '[:lower:]')" \
+  --arg pty "$REMOTE_PTY_ID" \
+  '(.work_session_id | ascii_downcase) == $session and .pty_id == $pty and
+   (.expires_at | type == "string")' \
+  "signed target host validates the live PTY binding"
 
 sample work-control-ack post \
   "/v1/workspaces/{workspaceId}/work-controls/{workControlId}/ack" \

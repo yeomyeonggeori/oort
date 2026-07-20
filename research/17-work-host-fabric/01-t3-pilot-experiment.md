@@ -85,6 +85,16 @@ E2B 샌드박스에서 GitHub in/out 왕복 실증(dawn-cut 전용 스크래치 
 - 잔여: ①에이전트 control 배선(work_control→cloud host — 후속) ②샌드박스 내 구독 CLI(claude/codex) 로그인 E3 ③momo 원장 연동. 이 3개가 붙으면 "채팅 요청→클라우드 세션→PR" 완전판.
 - 스크립트: pilot/e5_e2b_github_cycle.py.
 
+## 4d. E3 실측 — 구독 OAuth 클라우드 로그인 (2026-07-20, 부분 PASS)
+
+성재와 라이브로 진행하며 **하드한 사용자 대면 단계 전부 실증**:
+- ✅ E2B 샌드박스에 Claude Code CLI(npm) 설치
+- ✅ `claude setup-token`이 구독 OAuth URL 발급 → `script`(강제 pty) + FIFO stdin으로 캡처
+- ✅ 성재 폰/브라우저 인증 → 코드를 momo(Fable) 통해 FIFO로 샌드박스에 주입 → setup-token이 코드 수락
+- ⚠️ **미해결**: 발급 토큰을 `claude -p`가 쓰는 형태로 신뢰성 있게 영속·추출하지 못함. setup-token은 헤드리스용 `CLAUDE_CODE_OAUTH_TOKEN`을 TUI로 출력하는데 리드로우로 스크랩 소실. `claude -p`는 "Not logged in".
+- **결론**: 스크랩 방식의 한계. **이 흐름은 productize 대상**(§ 아래 in-messenger UX) — 터미널을 제대로 소유하는 momo 세션 매니저가 토큰을 결정론적으로 캡처해야 함. 대안 경로도 조사 필요: `claude login`(세션 크레덴셜, `claude -p`용) vs `setup-token`(CI 토큰) 중 클라우드 자동화엔 어느 쪽이 맞는지 productize 시 확정.
+- 파일럿 총평: E1·E4·E5 PASS, E2 설계완료(실행 대기), E3 부분 PASS(메커니즘 증명·영속 productize 필요). **T3 기술 타당성 충분히 입증** → ADR-0125 D3 기질=E2B 유력.
+
 ## 5. 산출물·판정
 
 - 본 문서에 실측표 추가 → **ADR-0125 D3 기질 확정**(1개 선정) + 요금제 숫자 보정(17-00 §4) + momo Cloud 프로비저너 티켓(S 배치 합류) 발급 입력.

@@ -121,6 +121,11 @@ struct MomoMessageComposerTextView: NSViewRepresentable {
             guard let coordinator, let scrollView else { return }
             coordinator.recalculateHeight(in: scrollView)
         }
+        scrollView.onMoveToWindow = { [weak coordinator = context.coordinator, weak scrollView] in
+            guard let coordinator,
+                  let textView = scrollView?.documentView as? MomoMessageComposerNativeTextView else { return }
+            coordinator.synchronizeFocus(in: textView)
+        }
         context.coordinator.recalculateHeight(in: scrollView)
         return scrollView
     }
@@ -234,7 +239,11 @@ struct MomoMessageComposerTextView: NSViewRepresentable {
             guard let window = textView.window else { return }
             if parent.isFocused, window.firstResponder !== textView {
                 DispatchQueue.main.async { [weak self, weak textView, weak window] in
-                    guard let self, self.parent.isFocused, let textView, let window else { return }
+                    guard let self,
+                          self.parent.isFocused,
+                          let textView,
+                          let window,
+                          textView.window === window else { return }
                     window.makeFirstResponder(textView)
                 }
             } else if !parent.isFocused, window.firstResponder === textView {
@@ -246,8 +255,14 @@ struct MomoMessageComposerTextView: NSViewRepresentable {
 
 final class MomoMessageComposerScrollView: NSScrollView {
     var onLayout: (() -> Void)?
+    var onMoveToWindow: (() -> Void)?
 
     override var mouseDownCanMoveWindow: Bool { false }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onMoveToWindow?()
+    }
 
     override func layout() {
         super.layout()
