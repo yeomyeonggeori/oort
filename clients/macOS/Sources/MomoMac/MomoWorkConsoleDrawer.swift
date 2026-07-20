@@ -101,17 +101,21 @@ struct MomoWorkConsoleDrawer: View {
             }
 
             Button {
+                Task { await controller.startDefaultShell() }
+            } label: {
+                Label(copy.newTerminal, systemImage: "plus.rectangle.on.rectangle")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(disablesSessionStart)
+
+            Button {
                 showsNewSession = true
             } label: {
                 Label(copy.newWorkSession, systemImage: "plus")
+                    .labelStyle(.iconOnly)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(
-                controller.isStarting
-                    || !controller.supportsWorkConsole
-                    || !controller.isHostReady
-                    || MomoWorkHostRuntime.isAppSandboxed
-            )
+            .momoQuickTooltip(copy.newWorkSession)
+            .disabled(disablesSessionStart)
 
             Button(action: onClose) {
                 Label(copy.closeWorkConsole, systemImage: "xmark")
@@ -123,6 +127,13 @@ struct MomoWorkConsoleDrawer: View {
         .buttonStyle(.plain)
         .padding(.horizontal, MomoTheme.WorkConsole.edgeInset)
         .frame(height: MomoTheme.WorkConsole.headerHeight)
+    }
+
+    private var disablesSessionStart: Bool {
+        controller.isStarting
+            || !controller.supportsWorkConsole
+            || !controller.isHostReady
+            || MomoWorkHostRuntime.isAppSandboxed
     }
 
     private func updateLayout(_ update: () -> Void) {

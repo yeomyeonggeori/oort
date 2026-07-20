@@ -904,7 +904,10 @@ public struct MomoMacRootView: View {
     private var commandActions: MomoMacCommandActions {
         MomoMacCommandActions(
             language: language,
-            channelCount: viewModel.sidebarChannelOrder.orderedChannels.count,
+            channelCount: showWorkConsole
+                ? workConsoleController.sessions.count
+                : viewModel.sidebarChannelOrder.orderedChannels.count,
+            targetsWorkSessions: showWorkConsole,
             canNavigateBackward: viewModel.canNavigateChannelHistoryBackward,
             canNavigateForward: viewModel.canNavigateChannelHistoryForward,
             canNavigateUnreadChannels: viewModel.canNavigateUnreadChannels,
@@ -945,6 +948,10 @@ public struct MomoMacRootView: View {
             },
             selectChannel: { number in
                 quickSwitcherPresentation.dismiss()
+                if showWorkConsole {
+                    workConsoleController.selectSession(shortcutNumber: number)
+                    return
+                }
                 activateChannelSurface()
                 Task { await viewModel.selectChannel(shortcutNumber: number) }
             },

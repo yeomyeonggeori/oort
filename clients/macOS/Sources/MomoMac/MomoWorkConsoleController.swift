@@ -1,6 +1,13 @@
 import Foundation
 import MomoCore
 
+enum MomoWorkSessionShortcut {
+    static func index(number: Int, sessionCount: Int) -> Int? {
+        guard (1...9).contains(number), number <= sessionCount else { return nil }
+        return number - 1
+    }
+}
+
 struct MomoPendingWorkRead: Identifiable, Equatable {
     var id: WorkControlID { controlId }
     let controlId: WorkControlID
@@ -156,6 +163,30 @@ final class MomoWorkConsoleController: ObservableObject {
             lastIssue = .localLaunchFailed
             return false
         }
+    }
+
+    func startDefaultShell() async -> Bool {
+        let started = await startSession(
+            tool: .shell,
+            label: Self.automaticTerminalLabel(existingLabels: sessions.map(\.label)),
+            directory: nil
+        )
+        if started, let selectedSessionId {
+            focusSession(selectedSessionId)
+        }
+        return started
+    }
+
+    @discardableResult
+    func selectSession(shortcutNumber: Int) -> Bool {
+        guard let index = MomoWorkSessionShortcut.index(
+            number: shortcutNumber,
+            sessionCount: sessions.count
+        ) else { return false }
+        let session = sessions[index]
+        selectedSessionId = session.id
+        focusSession(session.id)
+        return true
     }
 
     func endSession(_ session: MomoWorkSession) async {
@@ -494,6 +525,22 @@ final class MomoWorkConsoleController: ObservableObject {
             if !name.isEmpty { return String(name.prefix(120)) }
         }
         return tool.rawValue
+    }
+
+    static func automaticTerminalLabel(existingLabels: [String]) -> String {
+        let normalized = Set(existingLabels.map { $0.lowercased() })
+        for number in 1...9_999 {
+            let candidate = "Terminal \(number)"
+            if !normalized.contains(candidate.lowercased()) { return candidate }
+        }
+        return "Terminal"
+    }
+
+    private func focusSession(_ sessionId: WorkSessionID) {
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            self?.localSessions[sessionId]?.focus()
+        }
     }
 
     private static func sessionOrder(_ lhs: MomoWorkSession, _ rhs: MomoWorkSession) -> Bool {

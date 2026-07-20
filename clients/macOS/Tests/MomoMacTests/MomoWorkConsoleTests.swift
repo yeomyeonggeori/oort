@@ -142,6 +142,50 @@ final class MomoWorkConsoleTests: XCTestCase {
             copy: MomoWorkspaceCopy(language: .korean)
         )
         XCTAssertTrue(items.contains { $0.key == "⌃`" && $0.label == "Work Console 열기" })
+        XCTAssertTrue(items.contains { $0.key == "⌘1…⌘9" && $0.label.contains("Work 세션") })
+    }
+
+    func testTerminalCopyPasteKeyCommandsRequirePlainCommandModifier() {
+        XCTAssertEqual(
+            MomoTerminalKeyCommand.resolve(characters: "c", modifiers: .command),
+            .copy
+        )
+        XCTAssertEqual(
+            MomoTerminalKeyCommand.resolve(characters: "V", modifiers: .command),
+            .paste
+        )
+        XCTAssertNil(
+            MomoTerminalKeyCommand.resolve(
+                characters: "c",
+                modifiers: [.command, .shift]
+            )
+        )
+        XCTAssertNil(MomoTerminalKeyCommand.resolve(characters: "c", modifiers: .control))
+    }
+
+    @MainActor
+    func testLocalTerminalUsesExtendedScrollback() {
+        let session = MomoLocalTerminalSession { _ in }
+        XCTAssertEqual(
+            session.terminalView.terminal.options.scrollback,
+            MomoTheme.WorkConsole.terminalScrollbackLines
+        )
+    }
+
+    func testAutomaticTerminalLabelsFillFirstAvailableSlot() {
+        XCTAssertEqual(
+            MomoWorkConsoleController.automaticTerminalLabel(
+                existingLabels: ["Terminal 1", "Payment review", "TERMINAL 3"]
+            ),
+            "Terminal 2"
+        )
+    }
+
+    func testWorkSessionNumberShortcutsAreBoundedToNine() {
+        XCTAssertEqual(MomoWorkSessionShortcut.index(number: 1, sessionCount: 2), 0)
+        XCTAssertEqual(MomoWorkSessionShortcut.index(number: 2, sessionCount: 2), 1)
+        XCTAssertNil(MomoWorkSessionShortcut.index(number: 3, sessionCount: 2))
+        XCTAssertNil(MomoWorkSessionShortcut.index(number: 10, sessionCount: 10))
     }
 
     @MainActor

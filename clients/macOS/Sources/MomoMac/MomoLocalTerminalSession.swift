@@ -9,6 +9,43 @@ enum MomoWorkHostRuntime {
     }
 }
 
+enum MomoTerminalKeyCommand: Equatable {
+    case copy
+    case paste
+
+    static func resolve(
+        characters: String?,
+        modifiers: NSEvent.ModifierFlags
+    ) -> MomoTerminalKeyCommand? {
+        let relevantModifiers = modifiers.intersection([.command, .control, .option, .shift])
+        guard relevantModifiers == .command else { return nil }
+        return switch characters?.lowercased() {
+        case "c": .copy
+        case "v": .paste
+        default: nil
+        }
+    }
+}
+
+@MainActor
+final class MomoLocalProcessTerminalView: LocalProcessTerminalView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        switch MomoTerminalKeyCommand.resolve(
+            characters: event.charactersIgnoringModifiers,
+            modifiers: event.modifierFlags
+        ) {
+        case .copy where selectionActive:
+            copy(self)
+            return true
+        case .paste:
+            paste(self)
+            return true
+        case .copy, nil:
+            return super.performKeyEquivalent(with: event)
+        }
+    }
+}
+
 struct MomoWorkLaunchSpec: Equatable {
     let executable: String
     let arguments: [String]
@@ -92,7 +129,7 @@ struct MomoWorkLaunchSpec: Equatable {
 @MainActor
 final class MomoLocalTerminalSession: ObservableObject, Identifiable {
     let id = UUID()
-    let terminalView: LocalProcessTerminalView
+    let terminalView: MomoLocalProcessTerminalView
     @Published private(set) var isRunning = false
     @Published private(set) var exitCode: Int?
 
@@ -102,7 +139,7 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
 
     init(onTermination: @escaping @MainActor (Int?) -> Void) {
         self.onTermination = onTermination
-        terminalView = LocalProcessTerminalView(frame: .zero)
+        terminalView = MomoLocalProcessTerminalView(frame: .zero)
         processBridge = ProcessBridge { [weak self] code in
             guard let self, !self.didReportTermination else { return }
             self.didReportTermination = true
@@ -113,6 +150,7 @@ final class MomoLocalTerminalSession: ObservableObject, Identifiable {
         terminalView.processDelegate = processBridge
         terminalView.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         terminalView.optionAsMetaKey = true
+        terminalView.changeScrollback(MomoTheme.WorkConsole.terminalScrollbackLines)
         applyTheme(.defaultPreset)
     }
 
@@ -193,6 +231,10 @@ struct MomoSwiftTermView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> LocalProcessTerminalView {
         session.applyTheme(theme)
+        Task { @MainActor [weak session] in
+            await Task.yield()
+            session?.focus()
+        }
         return session.terminalView
     }
 

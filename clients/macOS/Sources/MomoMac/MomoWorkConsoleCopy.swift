@@ -35,6 +35,7 @@ extension MomoWorkspaceCopy {
         language == .korean ? "너비 \(Int(width))포인트" : "\(Int(width)) points wide"
     }
     var newWorkSession: String { language == .korean ? "새 세션" : "New session" }
+    var newTerminal: String { language == .korean ? "새 터미널" : "New terminal" }
     var workSessions: String { language == .korean ? "세션" : "Sessions" }
     var workSessionLoading: String { language == .korean ? "세션 불러오는 중" : "Loading sessions" }
     var workSessionEmptyTitle: String { language == .korean ? "아직 세션이 없습니다" : "No sessions yet" }
@@ -58,6 +59,9 @@ extension MomoWorkspaceCopy {
     }
     var workSessionOpenThread: String { language == .korean ? "세션 스레드 열기" : "Open session thread" }
     var workSessionEnd: String { language == .korean ? "세션 종료" : "End session" }
+    func workSessionShortcut(_ number: Int) -> String {
+        language == .korean ? "세션 \(number) 열기" : "Open session \(number)"
+    }
     var workSessionFocusTerminal: String { language == .korean ? "터미널에 포커스" : "Focus terminal" }
     var workSessionShareExcerpt: String { language == .korean ? "발췌 공유" : "Share excerpt" }
     var workSessionLocalOnly: String {

@@ -514,6 +514,7 @@ public enum MomoTheme {
         public static let rowMinimumHeight: CGFloat = 56
         public static let resizeHandleExtent: CGFloat = 8
         public static let resizeAdjustmentStep: CGFloat = 16
+        public static let terminalScrollbackLines = 10_000
         public static let newSessionWidth: CGFloat = 420
         public static let settingsWidth: CGFloat = 360
         public static let excerptWidth: CGFloat = 560
