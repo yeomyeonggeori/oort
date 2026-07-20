@@ -7,7 +7,35 @@ extension MomoWorkspaceCopy {
     }
     var openWorkConsole: String { language == .korean ? "Work Console 열기" : "Open Work Console" }
     var closeWorkConsole: String { language == .korean ? "Work Console 닫기" : "Close Work Console" }
+    var resizeWorkConsoleDrawer: String {
+        language == .korean ? "Work Console 높이 조절" : "Resize Work Console height"
+    }
+    var resetWorkConsoleDrawerSize: String {
+        language == .korean ? "Work Console 높이 초기화" : "Reset Work Console height"
+    }
+    func workConsoleHeightValue(_ height: CGFloat) -> String {
+        language == .korean ? "높이 \(Int(height))포인트" : "\(Int(height)) points high"
+    }
+    var resizeWorkSessionList: String {
+        language == .korean ? "세션 목록 너비 조절" : "Resize session list"
+    }
+    var resetWorkSessionListSize: String {
+        language == .korean ? "세션 목록 너비 초기화" : "Reset session list width"
+    }
+    func workSessionListWidthValue(_ width: CGFloat) -> String {
+        language == .korean ? "너비 \(Int(width))포인트" : "\(Int(width)) points wide"
+    }
+    var resizeRightDetailPanel: String {
+        language == .korean ? "우측 패널 너비 조절" : "Resize right panel"
+    }
+    var resetRightDetailPanelSize: String {
+        language == .korean ? "우측 패널 너비 초기화" : "Reset right panel width"
+    }
+    func rightDetailPanelWidthValue(_ width: CGFloat) -> String {
+        language == .korean ? "너비 \(Int(width))포인트" : "\(Int(width)) points wide"
+    }
     var newWorkSession: String { language == .korean ? "새 세션" : "New session" }
+    var newTerminal: String { language == .korean ? "새 터미널" : "New terminal" }
     var workSessions: String { language == .korean ? "세션" : "Sessions" }
     var workSessionLoading: String { language == .korean ? "세션 불러오는 중" : "Loading sessions" }
     var workSessionEmptyTitle: String { language == .korean ? "아직 세션이 없습니다" : "No sessions yet" }
@@ -31,6 +59,9 @@ extension MomoWorkspaceCopy {
     }
     var workSessionOpenThread: String { language == .korean ? "세션 스레드 열기" : "Open session thread" }
     var workSessionEnd: String { language == .korean ? "세션 종료" : "End session" }
+    func workSessionShortcut(_ number: Int) -> String {
+        language == .korean ? "세션 \(number) 열기" : "Open session \(number)"
+    }
     var workSessionFocusTerminal: String { language == .korean ? "터미널에 포커스" : "Focus terminal" }
     var workSessionShareExcerpt: String { language == .korean ? "발췌 공유" : "Share excerpt" }
     var workSessionLocalOnly: String {
@@ -53,6 +84,24 @@ extension MomoWorkspaceCopy {
     }
     var startWorkSession: String { language == .korean ? "세션 시작" : "Start session" }
     var workConsoleSettings: String { language == .korean ? "Work 설정" : "Work settings" }
+    var terminalTheme: String { language == .korean ? "터미널 테마" : "Terminal theme" }
+    var terminalThemeHelp: String {
+        language == .korean
+            ? "앱 화면 모드와 별도로 모든 로컬 터미널에 적용됩니다."
+            : "Applies to every local terminal independently of the app appearance."
+    }
+    func terminalThemeTitle(_ preset: MomoTerminalThemePreset) -> String {
+        switch (preset, language) {
+        case (.dark, .korean): "다크, 기본"
+        case (.dark, .english): "Dark, default"
+        case (.light, .korean): "라이트"
+        case (.light, .english): "Light"
+        case (.highContrast, .korean): "고대비"
+        case (.highContrast, .english): "High contrast"
+        case (.colorBlindSafe, .korean): "색약 친화"
+        case (.colorBlindSafe, .english): "Color vision friendly"
+        }
+    }
     var workHostIdentifier: String { language == .korean ? "이 Mac의 호스트 ID" : "Host ID for this Mac" }
     var copyWorkHostIdentifier: String { language == .korean ? "호스트 ID 복사" : "Copy host ID" }
     var workHostPreparing: String { language == .korean ? "이 Mac을 Work 호스트로 등록하는 중" : "Registering this Mac as a Work host" }
