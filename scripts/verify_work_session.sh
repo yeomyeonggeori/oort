@@ -15,7 +15,22 @@ need() {
 need docker
 need curl
 need jq
-need uuidgen
+
+find_python() {
+  local candidate
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+        >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  echo "[work-session] Python 3.10+ not found (tried python3.13 through python3)" >&2
+  return 1
+}
+PYTHON_BIN="$(find_python)"
+new_uuid() { "$PYTHON_BIN" -c 'import uuid; print(uuid.uuid4())'; }
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 PROJECT="${WORK_SESSION_GATE_PROJECT:-momo483worksession}"
@@ -33,13 +48,14 @@ CHANNEL_ID="00000000-0000-7000-8000-000000000201"
 CROSS_TENANT_ID="48300000-0000-7000-8000-000000000099"
 CENT_CHANNEL="ch:ws${WS_ID}.${CHANNEL_ID}"
 CENT_API_KEY="${CENT_API_KEY:-change-me-cent-api-key}"
-OWNER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-OTHER_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-HOST_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+OWNER_ID="$(new_uuid)"
+OTHER_ID="$(new_uuid)"
+HOST_ID="$(new_uuid)"
+HOST_PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
 OWNER_EMAIL="work-session-owner-$RUN_ID@momo.local"
 OTHER_EMAIL="work-session-other-$RUN_ID@momo.local"
-OWNER_PASSWORD="owner-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-OTHER_PASSWORD="other-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+OWNER_PASSWORD="owner-$(new_uuid)"
+OTHER_PASSWORD="other-$(new_uuid)"
 LABEL="MOMO-483 interactive work console"
 
 compose() {
@@ -140,6 +156,13 @@ expect_status() {
     exit 1
   }
 }
+
+api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/work-hosts" \
+  "$(jq -cn --arg key "$HOST_PUBLIC_KEY" \
+    '{scope:"member",type:"app",displayName:"MOMO-483 host",publicKey:$key,
+      capabilities:{"tool.codex":true}}')"
+expect_status 201 "work host registration"
+HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id | ascii_downcase')"
 
 WORK_SESSION_PATH="/v1/workspaces/$WS_ID/work-sessions"
 api "$OWNER_TOKEN" POST "$WORK_SESSION_PATH" \
@@ -267,7 +290,7 @@ wait_for_lifecycle() {
 # projection must still be visible because its publish request has no version.
 wait_for_lifecycle "work.session.started" "started_at" "$STARTED_AT_MS"
 
-REPLY_CLIENT_ID="$(uuidgen)"
+REPLY_CLIENT_ID="$(new_uuid)"
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/channels/$CHANNEL_ID/messages" \
   "$(jq -cn --arg client "$REPLY_CLIENT_ID" --arg root "$ROOT_MESSAGE_ID" \
     '{clientMsgId:$client,body:"MOMO-483 collaboration reply",rootId:$root}')"

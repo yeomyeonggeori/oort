@@ -6,6 +6,17 @@
 - MOMO-483/484 REST와 `work.session.*`·`work.control.dispatched`를 소비해 로컬 spawn/input/read/kill 및 ack를 처리한다. 기존 `approval_request` 카드를 그대로 사용하고 tool별 auto-approve PUT/DELETE UI를 제공한다. 서버에 현재 설정을 읽는 계약은 없어 앱 시작 시 거짓 기본값 대신 `unknown`을 표시하며 X-6 역핸드오프로 기록했다.
 - ADR-0114 D3 경계를 따라 PTY raw·실제 cwd·프로세스 환경/자격증명은 서버 요청, 로그, UI 상태, 영속 상태에 넣지 않는다. `work.read`는 자동 전송하지 않고 사람이 발췌를 검토·편집·승인한 뒤에만 일반 thread reply로 보낸다. REST 계약 테스트는 `/Users`, `PATH`, `TOKEN`, terminal output이 요청에 없음을 단정한다.
 - macOS 420 tests, unsigned Xcode build, 디자인 pre-flight와 `macos-ui` local gate를 검증한다. 실제 서버에서 Codex↔momo 승인/제어/스레드 한 사이클은 C-2 수동 QA 전까지 `runtime-unverified`다. Xcode 배포 타깃의 App Sandbox는 별도 보안 승인 없이 변경하지 않았으며, 해당 빌드에서는 로컬 CLI 시작을 fail-closed하고 SwiftPM 개발 빌드에서만 PTY를 허용한다.
+## MOMO-488 momo-workd v0 사용자 호스트 데몬 (2026-07-20)
+
+- ADR-0125 D2에 따라 macOS/Linux Swift 실행 패키지 `workers/WorkHostDaemon`(`momo-workd`)을 추가했다. 데몬은 로컬 0600 Ed25519 신원으로 workd host를 1회 등록하고 heartbeat 및 허용된 REST action을 서명하며, 자기 앞 dispatched control만 outbound poll한다.
+- spawn/input/kill은 기존 work_session/work_control REST를 통해 Foundation.Process·stdin pipe·terminate에 연결된다. 명령 템플릿과 raw stdout/stderr는 호스트 로컬에만 있고, 실패 ack는 고정 error label만 보낸다. launchd/systemd 사용자 서비스, SSH `scripts/momo host add` 초안, prod `--with-workd` 예약 훅을 추가했다.
+- server 121 tests와 WorkHostDaemon 6 tests, bootstrap/verifier bash·ShellCheck·plist 정적 검증이 PASS했다. `verify_workd.sh`는 27950~27953에서 등록/heartbeat→spawn echo→ack→running/ended→위조 401→RLS→raw 서버 미유입을 단정하며 runtime-db에 편입됐다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
+## MOMO-487 work_host 레지스트리 + control 라우팅 (2026-07-20)
+
+- ADR-0125 D1/D8에 따라 Ed25519 공개키·member/workspace scope·app/workd/cloud type을 갖는 `work_host` FORCE RLS 원장과 등록/목록/서명 heartbeat/revoke REST를 추가했다. 등록·revoke audit는 같은 tenant transaction에 기록하며 capabilities는 boolean availability flag만 받는다.
+- `work_session.host_id`·`work_control.target_host_id`를 검증된 FK로 묶고, control 생성은 등록·미철회·workspace·scope를 검증해 404/403으로 닫는다. 승인 대기 중 host가 revoke되면 dispatch 대신 control을 `failed`로 전이하고 no-version `work.control.acked(ok=false,error_label=host_revoked)`를 발행한다. Core는 REST `WorkHost`만 디코드하며 신규 realtime kind는 추가하지 않았다.
+- server 120 tests와 Core 38 tests, relay/worker/LinkShort tests 및 8개 Swift 패키지 `--disable-sandbox` build가 PASS했고 docs local gate는 19/19 PASS했다. macOS test runner는 선재 AppKit snapshot의 `NSImage` nil 강제 언랩(signal 5)으로 종료했으며, managed sandbox 안의 `make build`는 중첩 `sandbox-exec`가 거부되어 동일 패키지 build를 직접 검증했다. OpenAPI 및 기존 work-session/control/AgentWorker verifier는 선행 host 등록을 사용하고, 신규 `verify_work_host.sh`를 `runtime-db`에 편입했다. 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
 
 ## MOMO-486 AgentWorker work.* dispatch + chat-to-session E2E (2026-07-20)
 

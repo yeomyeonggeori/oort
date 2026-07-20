@@ -77,3 +77,6 @@ write_deploy_state
 deploy_log "install complete; TLS, backup/PITR, and external Hermes still require host evidence"
 # ADR-0120 P-3 / ADR-0121 S-5 placeholder: optional Dawn relay registration
 # belongs here later. Its failure must never make an otherwise healthy install fail.
+# ADR-0125 D2 placeholder: a future `--with-workd` option will invoke the
+# infra/workd bootstrap/install contract after the server is healthy. MOMO-488
+# reserves the hook only; production binary distribution is not enabled here.

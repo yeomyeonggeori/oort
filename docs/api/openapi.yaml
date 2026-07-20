@@ -63,6 +63,8 @@ tags:
     description: Workspace channels.
   - name: huddles
     description: Channel-bound ephemeral voice huddle lifecycle and LiveKit room grants.
+  - name: work-hosts
+    description: Registered execution hosts authenticated by Ed25519 heartbeats.
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
   - name: work-controls
@@ -619,6 +621,186 @@ paths:
         "503":
           $ref: "#/components/responses/HuddleNotConfigured"
 
+  /v1/workspaces/{workspaceId}/work-hosts:
+    post:
+      tags: [work-hosts]
+      operationId: registerWorkHost
+      summary: Register an execution host for a member or workspace.
+      description: >
+        Human bearer only. Any active workspace member may register either
+        scope; ownerMemberId is always the registering member. The row and
+        work.host.registered audit event commit in one tenant transaction.
+        Capabilities are boolean tool-availability flags only.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterWorkHostRequest"
+      responses:
+        "201":
+          description: Host registered offline until its first signed heartbeat.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: Invalid scope, type, display name, public key, or capabilities.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, workspace mismatch, or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      tags: [work-hosts]
+      operationId: listWorkHosts
+      summary: List registered and revoked hosts in the workspace.
+      description: >
+        Human members poll this v0 projection. Online is server-computed from
+        the signed lastSeenAtMs window and is always false for revoked hosts.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Hosts ordered oldest-first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/heartbeat:
+    post:
+      tags: [work-hosts]
+      operationId: heartbeatWorkHost
+      summary: Refresh host liveness with an Ed25519 signature.
+      description: >
+        Public signature-authenticated endpoint. The host signs the exact UTF-8
+        bytes `momo.work_host.heartbeat.v1\\n<lowercase workspace UUID>\\n<lowercase
+        host UUID>\\n<sentAtMs>`. Timestamps outside the five-minute clock-skew
+        window, forged signatures, unknown hosts, and revoked hosts return 401.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkHostHeartbeatRequest"
+      responses:
+        "200":
+          description: Host liveness refreshed with server time.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: Invalid path identifiers or request body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/pending-controls:
+    get:
+      tags: [work-hosts, work-controls]
+      operationId: listPendingWorkHostControls
+      summary: Poll dispatched controls targeted at this execution host.
+      description: >
+        ADR-0125 D2 outbound-only transport. The host signs the exact UTF-8
+        bytes `momo.work_host.request.v1\nGET\n<path>\n<lowercase workspace
+        UUID>\n<lowercase host UUID>\n<sentAtMs>` with its registered Ed25519
+        key. Only unrevoked status=dispatched controls targeted at that host
+        are returned; no human or agent bearer is accepted.
+      security:
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+        - $ref: "#/components/parameters/WorkHostSentAt"
+        - $ref: "#/components/parameters/WorkHostSignature"
+      responses:
+        "200":
+          description: Bounded oldest-first dispatched controls for this host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingWorkControlsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-hosts/{workHostId}:
+    delete:
+      tags: [work-hosts]
+      operationId: revokeWorkHost
+      summary: Revoke a host and block future control dispatch.
+      description: >
+        The registering owner or a workspace owner/admin may revoke. Revocation
+        is durable and audited in the same tenant transaction; pending approval
+        controls can no longer dispatch and settle failed with host_revoked.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkHostId"
+      responses:
+        "200":
+          description: Revoked host projection; repeat revoke is idempotent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkHostResponse"
+        "400":
+          description: Invalid host identifier.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is neither the registering owner nor workspace admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Host does not exist in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/work-sessions:
     post:
       tags: [work-sessions]
@@ -631,6 +813,7 @@ paths:
         deliberately absent.
       security:
         - bearerAuth: []
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
       requestBody:
@@ -701,11 +884,13 @@ paths:
       operationId: endWorkSession
       summary: End a running session without changing its card message seq.
       description: >
-        Only the creating member may end the session. The ledger row and card
-        props update beside a no-version work.session.ended outbox; the message
-        row is not edited and no channel seq is minted.
+        The creating member, or the MomoHost-signed execution host bound to the
+        session, may end it. The ledger row and card props update beside a
+        no-version work.session.ended outbox; the message row is not edited and
+        no channel seq is minted.
       security:
         - bearerAuth: []
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkSessionId"
@@ -761,7 +946,10 @@ paths:
         immediately only when the human host owner has enabled the exact tool;
         otherwise it creates the canonical approval_request card. Input and
         kill require a running session in the same requester lineage, while
-        read requires the lineage but no approval. Host-local paths,
+        read requires the lineage but no approval. The target must be a
+        registered, unrevoked host in this workspace. Member-scoped hosts must
+        belong to the session owner; workspace-scoped hosts accept all members.
+        Host-local paths,
         environment, process state, and credentials are forbidden payloads.
       security:
         - bearerAuth: []
@@ -789,7 +977,13 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Human bearer, wrong agent/run lineage, or tenant boundary.
+          description: Human bearer, wrong agent/run lineage, or member-host owner mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Target host is missing, revoked, or belongs to another workspace.
           content:
             application/json:
               schema:
@@ -807,13 +1001,15 @@ paths:
     post:
       tags: [work-controls]
       operationId: acknowledgeWorkControl
-      summary: Acknowledge one dispatched control from the v0 host owner.
+      summary: Acknowledge one dispatched control from its registered execution host.
       description: >
-        Human bearer only. A successful spawn acknowledgement must bind a
-        running work_session owned by the caller with the same channel and host
-        UUID. Pending or denied controls cannot be acknowledged.
+        The registering human owner or the MomoHost-signed execution host may
+        acknowledge. A successful spawn acknowledgement must bind a running
+        work_session owned by the requesting agent's human owner with the same
+        channel and host UUID. Pending or denied controls cannot be acknowledged.
       security:
         - bearerAuth: []
+        - workHostAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkControlId"
@@ -839,7 +1035,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Caller is not the v0 host owner.
+          description: Caller is not the registered host owner.
           content:
             application/json:
               schema:
@@ -2330,6 +2526,14 @@ components:
         App access token (15m TTL) from login/join/refresh, sent as
         `Authorization: Bearer <accessToken>`. Tokens are hash-persisted
         server-side and revocable (MOMO-300).
+    workHostAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: >
+        `Authorization: MomoHost <workHostId>` plus X-Momo-Work-Host-Sent-At
+        and X-Momo-Work-Host-Signature. This is an Ed25519 request signature,
+        not a durable bearer credential.
 
   parameters:
     WorkspaceId:
@@ -2366,6 +2570,29 @@ components:
       schema:
         type: string
         format: uuid
+    WorkHostId:
+      name: workHostId
+      in: path
+      required: true
+      description: UUIDv7 registered execution host id.
+      schema:
+        type: string
+        format: uuid
+    WorkHostSentAt:
+      name: X-Momo-Work-Host-Sent-At
+      in: header
+      required: true
+      description: Unix epoch milliseconds inside the five-minute clock-skew window.
+      schema:
+        type: integer
+        format: int64
+    WorkHostSignature:
+      name: X-Momo-Work-Host-Signature
+      in: header
+      required: true
+      description: Raw 64-byte Ed25519 signature in standard base64.
+      schema:
+        type: string
     WorkControlId:
       name: workControlId
       in: path
@@ -2983,6 +3210,109 @@ components:
       type: string
       enum: [owner, admin, member, guest]
 
+    # ---- Work hosts ---------------------------------------------------------
+    RegisterWorkHostRequest:
+      type: object
+      required: [scope, type, displayName, publicKey]
+      properties:
+        scope:
+          type: string
+          enum: [member, workspace]
+        type:
+          type: string
+          enum: [app, workd, cloud]
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        publicKey:
+          type: string
+          minLength: 44
+          maxLength: 44
+          description: Raw 32-byte Ed25519 public key in standard base64.
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+          description: Boolean tool-availability flags only.
+
+    WorkHostHeartbeatRequest:
+      type: object
+      required: [sentAtMs, signature]
+      properties:
+        sentAtMs:
+          type: integer
+          format: int64
+        signature:
+          type: string
+          description: Raw 64-byte Ed25519 signature in standard base64.
+
+    WorkHost:
+      type: object
+      required:
+        [id, workspaceId, scope, ownerMemberId, type, displayName, publicKey,
+         capabilities, createdAtMs, online]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [member, workspace]
+        ownerMemberId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [app, workd, cloud]
+        displayName:
+          type: string
+        publicKey:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties:
+            type: boolean
+        lastSeenAtMs:
+          type: integer
+          format: int64
+        revokedAtMs:
+          type: integer
+          format: int64
+        createdAtMs:
+          type: integer
+          format: int64
+        online:
+          type: boolean
+
+    WorkHostResponse:
+      type: object
+      required: [workHost]
+      properties:
+        workHost:
+          $ref: "#/components/schemas/WorkHost"
+
+    WorkHostListResponse:
+      type: object
+      required: [workHosts]
+      properties:
+        workHosts:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkHost"
+
+    PendingWorkControlsResponse:
+      type: object
+      required: [workControls]
+      properties:
+        workControls:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkControl"
+
     # ---- Work sessions ------------------------------------------------------
     CreateWorkSessionRequest:
       type: object
@@ -2994,7 +3324,7 @@ components:
         hostId:
           type: string
           format: uuid
-          description: Reserved host identity hook; the work_host FK lands with ADR-0125.
+          description: Registered work_host identity enforced by a database FK.
         tool:
           type: string
           enum: [claude, codex, opencode, shell]
@@ -3003,6 +3333,12 @@ components:
           minLength: 1
           maxLength: 120
           description: Display-only label. Filesystem cwd/path is never stored.
+        controlId:
+          type: string
+          format: uuid
+          description: >
+            Required only for MomoHost-signed spawn dispatch. The server binds
+            host, channel, tool, label, and session owner to this dispatched control.
 
     EndWorkSessionRequest:
       type: object
@@ -3092,7 +3428,7 @@ components:
         targetHostId:
           type: string
           format: uuid
-          description: Opaque host hook until the ADR-0125 work_host FK lands.
+          description: Registered, unrevoked work_host in this workspace.
         sessionId:
           type: string
           format: uuid
