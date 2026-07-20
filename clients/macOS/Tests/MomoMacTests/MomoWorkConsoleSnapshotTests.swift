@@ -66,7 +66,8 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: named,
-            record: snapshotRecordMode
+            record: snapshotRecordMode,
+            testName: canonicalName
         )
     }
 
@@ -99,7 +100,8 @@ final class MomoWorkConsoleSnapshotTests: XCTestCase {
             of: image,
             as: .image(precision: 0.98, perceptualPrecision: 0.98),
             named: named,
-            record: snapshotRecordMode
+            record: snapshotRecordMode,
+            testName: canonicalName
         )
     }
 
