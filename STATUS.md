@@ -4,7 +4,7 @@
 
 - ADR-0125 D10에 따라 running `work_session`에 remote `pty_id`·credential-free HTTPS/WSS endpoint를 결속하고, 세션 소유자 human bearer 전용 `POST .../terminal-attach`가 exact `{attach_endpoint,capability_token,pty_id}` 60초 grant를 발급한다. capability 원장은 SHA-256 digest와 발급·만료·소유자만 저장·audit하며 raw token은 남기지 않는다.
 - host의 Ed25519-signed validation은 매 요청 capability 만료, running session, PTY binding, `work_host.revoked_at`을 다시 확인해 이미 발급된 grant도 revoke 즉시 무효화한다. E2B-compatible `create/connect/send_stdin/resize/kill` 추상 계약만 서버에 고정했고 실제 host adapter·SwiftTerm UX는 후속이다. MomoServer/relay에는 터미널 stream/outbox/publish route가 없어 raw는 client↔host 직결이다.
-- server 124 tests, OpenAPI/YAML, verifier bash·ShellCheck(error) 정적 검증이 PASS했다. `verify_terminal_attach.sh`는 27970~27973 전용 포트에서 발급·만료·비소유자/agent 403·revoke·digest/audit/RLS·raw/token 무유입을 검사하며 runtime-db에 편입했다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+- server 124 tests, OpenAPI/YAML, verifier bash·ShellCheck(error) 정적 검증이 PASS했다. `verify_terminal_attach.sh`는 27980~27983 전용 포트에서 발급·만료·비소유자/agent 403·revoke·digest/audit/RLS·raw/token 무유입을 검사하며 runtime-db에 편입했다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
 
 ## MOMO-509 관리자 에이전트 생성 API (2026-07-20)
 
