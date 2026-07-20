@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-20 (Fable 엔진 트랙) · MOMO-488 momo-workd v0 구현 완료 — verifier/게이트 대기(성재 지시 일시중단)
+- 488(#525, PR 미생성) worker 완주·전량 push(goal `feat/525-momo-workd-v0-adr-0125-d2` @8cb2fe2, origin 동기화, 워크트리 clean). 신규 workers/WorkHostDaemon(momo-workd) + 서버 poll 엔드포인트(GET .../work-hosts/:id/pending-controls, 호스트 서명 인증) + infra/workd 배포 아티팩트.
+- Fable 검수 완료(코드 결함 0): poll=호스트 서명 전용(bearer 불가)·host≠agent 경계·ack 페이로드 raw 미포함·process 출력 로컬 파일 전용(D3 정합). server 121/workd 6 통과. verify_workd는 openssl 미사용(내부 Crypto)이라 LibreSSL 게이트 함정 없음.
+- **재개 지점(다음 작업 = verifier부터)**: ① goal 워크트리(feat/525…)에서 `bash -lc scripts/verify_workd.sh`(포트 27950대) → ② `scripts/local_gate.sh --profile runtime-db` → ③ PASS 시 PR 생성·squash→track/engine·이슈 #525 close·워크트리 회수 → ④ 다음 엔진 = MOMO-489(work_pool). 배치 종료 시 docker reclaim.
+- 참고: 게이트 반복+파일럿으로 Docker 압박 → 이번 세션 build cache 24.6GB 회수 완료. 파일럿 E2/E3/E5·MOMO-491(push_relay openssl 이식) 잔여.
+
 ## 2026-07-20 (Fable 엔진 트랙) · MOMO-487 work_host 레지스트리 랜딩 + 게이트 openssl 함정 해소
 - 487(#523 → track/engine): work_host(scope member|workspace·Ed25519·revoke) + work_session/control FK + 등록/서명 heartbeat/revoke + control 대상 검증(revoke 시 dispatch 차단→failed). verify_work_host + 게이트 실패 0.
 - 검수 실측 2건: ①신규 호스트 online 투영 NULL→false(비옵셔널 디코드 500) ②**게이트 bash -lc 로그인 셸이 /usr/bin/openssl(LibreSSL, ED25519 미지원)을 homebrew보다 먼저 잡아** verify가 무출력 실패(cleanup 무에코→게이트 로그 0줄) — find_openssl 리졸버로 해소. push_relay 동일 패턴 이식은 MOMO-491(#524).
