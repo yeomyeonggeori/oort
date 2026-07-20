@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-488 momo-workd v0 사용자 호스트 데몬 (2026-07-20)
+
+- ADR-0125 D2에 따라 macOS/Linux Swift 실행 패키지 `workers/WorkHostDaemon`(`momo-workd`)을 추가했다. 데몬은 로컬 0600 Ed25519 신원으로 workd host를 1회 등록하고 heartbeat 및 허용된 REST action을 서명하며, 자기 앞 dispatched control만 outbound poll한다.
+- spawn/input/kill은 기존 work_session/work_control REST를 통해 Foundation.Process·stdin pipe·terminate에 연결된다. 명령 템플릿과 raw stdout/stderr는 호스트 로컬에만 있고, 실패 ack는 고정 error label만 보낸다. launchd/systemd 사용자 서비스, SSH `scripts/momo host add` 초안, prod `--with-workd` 예약 훅을 추가했다.
+- server 121 tests와 WorkHostDaemon 6 tests, bootstrap/verifier bash·ShellCheck·plist 정적 검증이 PASS했다. `verify_workd.sh`는 27950~27953에서 등록/heartbeat→spawn echo→ack→running/ended→위조 401→RLS→raw 서버 미유입을 단정하며 runtime-db에 편입됐다. 지시대로 격리 Docker 실런은 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-487 work_host 레지스트리 + control 라우팅 (2026-07-20)
 
 - ADR-0125 D1/D8에 따라 Ed25519 공개키·member/workspace scope·app/workd/cloud type을 갖는 `work_host` FORCE RLS 원장과 등록/목록/서명 heartbeat/revoke REST를 추가했다. 등록·revoke audit는 같은 tenant transaction에 기록하며 capabilities는 boolean availability flag만 받는다.
