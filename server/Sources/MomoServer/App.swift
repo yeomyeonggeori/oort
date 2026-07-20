@@ -122,6 +122,11 @@ enum AppBuilder {
         workHostRoutes.addProtected(to: authed)
         SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)
         AgentRunRoutes(db: db, agentGateway: config.agentGateway).add(to: authed)
+        AgentRoutes(
+            db: db,
+            environmentName: config.momoEnvironment,
+            allowLocalLoopback: config.agentProvider.allowLocalLoopback
+        ).add(to: authed)
         AgentCredentialRoutes(db: db).add(to: authed)
         WorkspaceRoutes(db: db).add(to: authed)
         RosterRoutes(db: db).add(to: authed)
