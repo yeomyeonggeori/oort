@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-20 (Fable 통합) · A-11+Hermes(uxui) + X-6+489(engine) 동시 main 랜딩 — Q1 개방
+- uxui@9ac0bd7(A-11 자기등록·실 Hermes E2E) 검수 결함 0 → main. engine(X-6·work_pool) → main a96f9c8. 3트리 정렬.
+- 동생 발견 갭 X-7(에이전트 생성/pairing API — fresh DB 완주 불가) 등재·MOMO-494(#532) 발급. QA 판단: Hermes 멘션 QA는 즉시(트랙 스택), Q1 풀 사이클은 main 랜딩 후 — 지금 충족.
+- 다음: Q1 실사용 QA(성재+Fable, AgentWorker MOMO_WORK_HOST_ID 조율) → 490(호스트 선택기)·X-7·491.
+
 ## 2026-07-20 (Fable 엔진 트랙) · X-6(493)+work_pool(489) 랜딩 — 0125 파생 3/4 완료
 - 493(#529): auto-approve GET(human 전용·자기것만·tool만) — A-11 소비 짝. 489(#531): work_pool 슬롯 원장(FOR UPDATE 직렬화·구조화 409·집계 회복·admin audit). 둘 다 verifier+게이트 실패 0.
 - 검수 실측 결함 1건(489): 기본행 included_active_hours=NULL이 audit jsonb_build_object 바인딩에서 타입 미상 PSQLError→빈 본문 500 — 스택 유지 재현으로 확정, ::int 캐스트 수정. **jsonb 내 nullable 바인딩은 명시 캐스트** 교훈.

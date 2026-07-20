@@ -15,7 +15,7 @@
 - **무엇**: 채팅 멘션 → 에이전트 spawn → 승인 카드 → control dispatch → 로컬 PTY 실행(claude/codex) → input/read/kill → ack → 발췌 스레드 공유. A-10 UI + 483/484/486 엔진 + 실 Codex의 전 경로.
 - **검증 방법**: self-hosted 서버 로그인 상태의 dev 앱(SwiftPM 빌드 — 샌드박스 아님)에서 Work 서랍 열기. Fable가 단계별 체크리스트 제공, 성재가 실 Codex로 1왕복, 각 단계 산출물(승인 카드·세션 카드·스레드 발췌) 스크린샷으로 판정.
 - **현재 상태**: 엔진 483/484/486/487/488 + A-10 전량 main 랜딩(09dcb07). **단 선행 갭 발견(2026-07-20)**: A-10은 로컬 hostId를 서버에 등록하지 않는데 MOMO-487이 'control 대상=등록 work_host'를 강제 → 제대로 된 UX 경로는 **A-11(MOMO-492) 랜딩이 선행조건**.
-- **선행조건**: MOMO-492(A-11 자기등록) 랜딩 → 그 후 앱 UX만으로 Q1 가능.
+- **선행조건 충족(2026-07-20)**: A-11(MOMO-492)+X-6+work_pool까지 main `a96f9c8` 랜딩 — 앱 UX만으로 Q1 가능. 잔여 요구: AgentWorker를 앱 설정에 표시된 host_id로 `MOMO_WORK_HOST_ID` 지정해 기동(v0 수동 조율).
 - **수동 워크어라운드(A-11 전 즉시 테스트용)**: ① API로 host 1개 등록(curl `POST /work-hosts` type=app + 임의 Ed25519 pubkey) → host_id H ② 앱을 `MOMO_WORK_HOST_ID=H`로 실행 ③ AgentWorker를 `MOMO_WORK_HOST_ID=H`로 실행 ④ 채팅 멘션→spawn→승인→PTY→ack→발췌. Fable가 등록 curl·env 셋업 스크립트 제공.
 - **트리거**: (권장) A-11 랜딩 후 / (즉시) 위 워크어라운드로 성재+Fable 함께.
 - **수용**: 1왕복 전 단계 성공 + 서버 원장/스레드에 raw·cwd·토큰 미유입 육안 확인.
