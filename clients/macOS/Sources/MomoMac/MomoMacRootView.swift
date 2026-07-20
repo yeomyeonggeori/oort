@@ -345,10 +345,12 @@ public struct MomoMacRootView: View {
                     MomoRightPanelBelowHeader {
                         memberInspectorView(copy: copy, isAttached: true)
                     }
-                    .frame(width: rightPanelWidth)
-                    .overlay(alignment: .leading) {
-                        rightPanelResizeHandle(width: rightPanelWidth, copy: copy)
-                    }
+                    .frame(
+                        width: MomoRightPanelLayout.width(
+                            preferredWidth: MomoTheme.MemberInspector.attachedWidth,
+                            availableWidth: availableDetailWidth
+                        )
+                    )
                     .transition(.identity)
                 }
             }
