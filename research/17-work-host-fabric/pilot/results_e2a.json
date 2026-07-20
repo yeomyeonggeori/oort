@@ -1,0 +1,31 @@
+{
+  "summary": {
+    "create_s": {
+      "n": 3,
+      "p50": 0.258,
+      "mean": 0.276
+    },
+    "exec_s": {
+      "n": 18,
+      "p50": 0.143,
+      "mean": 0.167
+    },
+    "pause_s": {
+      "n": 18,
+      "p50": 0.226,
+      "mean": 0.317
+    },
+    "resume_s": {
+      "n": 15,
+      "p50": 0.189,
+      "mean": 0.219
+    }
+  },
+  "errors": [],
+  "extrapolation": {
+    "measured_active_h": 0.004,
+    "2day_midscenario_active_h": 18,
+    "2day_compute_usd_est": 1.8,
+    "note": "스탠바이 과금은 대시보드 실청구액과 measured_active_h 대조로 확증"
+  }
+}
