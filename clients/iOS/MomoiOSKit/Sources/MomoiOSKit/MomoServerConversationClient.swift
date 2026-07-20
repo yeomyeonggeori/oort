@@ -577,7 +577,7 @@ private struct IOSMemberDTO: Decodable {
     }
 }
 
-private struct IOSMessageDTO: Decodable {
+struct IOSMessageDTO: Decodable {
     let id: String
     let channelId: String
     let seq: Int64
@@ -591,12 +591,24 @@ private struct IOSMessageDTO: Decodable {
     let clientMsgId: UUID?
     let createdAtMs: Int64
     let thread: ThreadRollup?
+    let state: String?
+    let editedAtMs: Int64?
+    let deletedAtMs: Int64?
 
     func value() throws -> Message {
         guard let id = MessageID(uuidString: id),
               let channelID = ChannelID(uuidString: channelId),
               let authorID = MemberID(uuidString: authorMemberId) else {
             throw SessionError.decoding("The server returned an invalid message identity.")
+        }
+        let decodedState: MessageState
+        if let state {
+            guard let messageState = MessageState(rawValue: state) else {
+                throw SessionError.decoding("The server returned an invalid message state.")
+            }
+            decodedState = messageState
+        } else {
+            decodedState = .sent
         }
         return Message(
             id: id,
@@ -606,12 +618,15 @@ private struct IOSMessageDTO: Decodable {
             hlcCount: hlcCount,
             authorMemberId: authorID,
             type: MessageType(rawValue: type) ?? .text,
+            state: decodedState,
             body: body,
             props: props ?? .object([:]),
             thread: thread,
             runId: runId.flatMap { RunID(uuidString: $0) },
             clientMsgId: clientMsgId,
-            createdAtMs: createdAtMs
+            createdAtMs: createdAtMs,
+            editedAtMs: editedAtMs,
+            deletedAtMs: deletedAtMs
         )
     }
 }

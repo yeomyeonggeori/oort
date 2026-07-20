@@ -408,7 +408,15 @@ public final class IOSTimelineModel {
     }
 
     public private(set) var phase: Phase = .loading
-    public private(set) var messages: [Message] = []
+    public private(set) var messages: [Message] = [] {
+        didSet {
+            presentationRows = IOSTimelineLayout.rows(
+                for: messages,
+                currentMemberID: currentMemberID
+            )
+        }
+    }
+    private(set) var presentationRows: [IOSTimelineDisplayRow] = []
     public private(set) var realtimeStatus: RealtimeConnectionStatus
     public var composerDraft = ""
     public private(set) var replyTarget: Message?

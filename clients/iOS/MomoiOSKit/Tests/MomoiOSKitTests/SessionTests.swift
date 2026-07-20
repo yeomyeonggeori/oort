@@ -760,6 +760,153 @@ struct ConversationTests {
         #expect(messages.count == 3)
     }
 
+    @Test("timeline layout groups adjacent authors within five minutes and inserts dates")
+    func timelineV2Layout() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let base = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 12
+        )))
+        let baseMs = Int64(base.timeIntervalSince1970 * 1_000)
+        let otherMemberID = try #require(MemberID(uuidString: "00000000-0000-0000-0000-000000000099"))
+
+        var first = fixtureMessage(sequence: 1)
+        first.createdAtMs = baseMs
+        var continuation = fixtureMessage(sequence: 2)
+        continuation.createdAtMs = baseMs + 4 * 60 * 1_000
+        continuation.props = [
+            "mention_member_ids": .array([.string(fixtureMemberID.description)])
+        ]
+        var outsideWindow = fixtureMessage(sequence: 3)
+        outsideWindow.createdAtMs = continuation.createdAtMs! + 6 * 60 * 1_000
+        var otherAuthor = fixtureMessage(sequence: 4)
+        otherAuthor.createdAtMs = outsideWindow.createdAtMs! + 60 * 1_000
+        otherAuthor.authorMemberId = otherMemberID
+        var nextDay = fixtureMessage(sequence: 5)
+        nextDay.createdAtMs = baseMs + 24 * 60 * 60 * 1_000
+
+        let rows = IOSTimelineLayout.rows(
+            for: [first, continuation, outsideWindow, otherAuthor, nextDay],
+            currentMemberID: fixtureMemberID,
+            calendar: calendar
+        )
+        let messageRows = rows.compactMap { row -> (MessageID, Bool, Bool)? in
+            guard case .message(let message, let startsGroup, let mentionsMember, _) = row.content else {
+                return nil
+            }
+            return (message.id, startsGroup, mentionsMember)
+        }
+
+        #expect(rows.filter { if case .date = $0.content { true } else { false } }.count == 2)
+        #expect(messageRows.map(\.1) == [true, false, true, true, true])
+        #expect(messageRows.map(\.2) == [false, true, false, false, false])
+        #expect(Set(messageRows.map(\.0)).count == 5)
+    }
+
+    @Test("timeline presentation precomputes stable rows for more than two hundred messages")
+    func timelineV2LargeHistory() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let base = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20,
+            hour: 9
+        )))
+        let baseMs = Int64(base.timeIntervalSince1970 * 1_000)
+        let messages = (1...205).map { sequence -> Message in
+            var message = fixtureMessage(sequence: Int64(sequence))
+            message.createdAtMs = baseMs + Int64(sequence) * 10_000
+            return message
+        }
+
+        let rows = IOSTimelineLayout.rows(
+            for: messages,
+            currentMemberID: fixtureMemberID,
+            calendar: calendar
+        )
+        let messageIDs = rows.compactMap { row -> MessageID? in
+            guard case .message(let message, _, _, _) = row.content else { return nil }
+            return message.id
+        }
+
+        #expect(rows.count == 206)
+        #expect(messageIDs.count == 205)
+        #expect(Set(messageIDs).count == 205)
+    }
+
+    @Test("timeline body separates fenced code from link prose")
+    func timelineV2BodyParsing() throws {
+        let segments = IOSMessageBodyParser.segments(in: """
+        Review the [message contract](https://momo.example/docs).
+        ```swift
+        let state = MessageState.edited
+        ```
+        """)
+
+        #expect(segments.count == 2)
+        #expect(segments[0].kind == .prose)
+        #expect(segments[0].text.contains("https://momo.example/docs"))
+        #expect(segments[1].kind == .code(language: "swift"))
+        #expect(segments[1].text == "let state = MessageState.edited")
+    }
+
+    @Test("iOS history DTO preserves edited and deleted projections")
+    func timelineV2HistoryProjection() throws {
+        let editedData = Data("""
+        {
+          "id": "00000000-0000-0000-0001-000000000071",
+          "channelId": "00000000-0000-0000-0000-000000000010",
+          "seq": 71,
+          "hlcTs": 1710000000000,
+          "hlcCount": 0,
+          "authorMemberId": "00000000-0000-0000-0000-000000000002",
+          "type": "text",
+          "body": "Updated deployment note",
+          "props": {},
+          "clientMsgId": null,
+          "createdAtMs": 1710000000000,
+          "thread": null,
+          "state": "edited",
+          "editedAtMs": 1710000005000,
+          "deletedAtMs": null
+        }
+        """.utf8)
+        let deletedData = Data("""
+        {
+          "id": "00000000-0000-0000-0001-000000000072",
+          "channelId": "00000000-0000-0000-0000-000000000010",
+          "seq": 72,
+          "hlcTs": 1710000001000,
+          "hlcCount": 0,
+          "authorMemberId": "00000000-0000-0000-0000-000000000002",
+          "type": "text",
+          "body": null,
+          "props": {},
+          "clientMsgId": null,
+          "createdAtMs": 1710000001000,
+          "thread": null,
+          "state": "deleted",
+          "editedAtMs": null,
+          "deletedAtMs": 1710000006000
+        }
+        """.utf8)
+
+        let edited = try JSONDecoder().decode(IOSMessageDTO.self, from: editedData).value()
+        let deleted = try JSONDecoder().decode(IOSMessageDTO.self, from: deletedData).value()
+
+        #expect(edited.state == .edited)
+        #expect(edited.editedAtMs == 1_710_000_005_000)
+        #expect(!edited.isDeleted)
+        #expect(deleted.state == .deleted)
+        #expect(deleted.deletedAtMs == 1_710_000_006_000)
+        #expect(deleted.isDeleted)
+        #expect(deleted.body == nil)
+    }
+
     @Test("unread badge caps large server counts")
     func unreadBadgeCap() {
         let sections = IOSChannelListMapper.sections(

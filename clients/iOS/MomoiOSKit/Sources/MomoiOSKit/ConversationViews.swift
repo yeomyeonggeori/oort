@@ -1,4 +1,5 @@
 #if os(iOS)
+import Foundation
 import MomoCore
 import SwiftUI
 import UIKit
@@ -356,39 +357,8 @@ struct IOSTimelineView: View {
                         )
                     }
                 case .loaded:
-                    ForEach(model.messages) { message in
-                        IOSMessageRow(
-                            message: message,
-                            member: members[message.authorMemberId],
-                            quotedBody: quotedBody(for: message),
-                            model: model
-                        )
-                            .id(message.id)
-                            .listRowSeparator(.hidden)
-                            .accessibilityIdentifier("message.\(message.id.description)")
-                            .onAppear { visibleMessageIDs.insert(message.id) }
-                            .onDisappear { visibleMessageIDs.remove(message.id) }
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                if !message.isDeleted {
-                                    Button {
-                                        model.selectReply(to: message)
-                                    } label: {
-                                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
-                                    }
-                                    .tint(.accentColor)
-                                    .accessibilityIdentifier("reply.\(message.id.description)")
-                                }
-                            }
-                            .contextMenu {
-                                if !message.isDeleted {
-                                    Button {
-                                        model.selectReply(to: message)
-                                    } label: {
-                                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
-                                    }
-                                    .accessibilityIdentifier("replyMenu.\(message.id.description)")
-                                }
-                            }
+                    ForEach(model.presentationRows) { row in
+                        timelineRow(row)
                     }
                 }
             }
@@ -435,6 +405,52 @@ struct IOSTimelineView: View {
             }
         }
         .onDisappear { Task { await model.shutdown() } }
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ row: IOSTimelineDisplayRow) -> some View {
+        switch row.content {
+        case .date(let dayStartMs):
+            IOSMessageDateDivider(dayStartMs: dayStartMs)
+                .listRowSeparator(.hidden)
+        case .message(let message, let startsAuthorGroup, let mentionsCurrentMember, let bodySegments):
+            IOSMessageRow(
+                message: message,
+                member: members[message.authorMemberId],
+                quotedBody: quotedBody(for: message),
+                startsAuthorGroup: startsAuthorGroup,
+                mentionsCurrentMember: mentionsCurrentMember,
+                bodySegments: bodySegments,
+                model: model
+            )
+            .id(message.id)
+            .listRowSeparator(.hidden)
+            .listRowBackground(mentionsCurrentMember ? Color.accentColor.opacity(0.10) : Color.clear)
+            .accessibilityIdentifier("message.\(message.id.description)")
+            .onAppear { visibleMessageIDs.insert(message.id) }
+            .onDisappear { visibleMessageIDs.remove(message.id) }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                if !message.isDeleted {
+                    Button {
+                        model.selectReply(to: message)
+                    } label: {
+                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
+                    }
+                    .tint(.accentColor)
+                    .accessibilityIdentifier("reply.\(message.id.description)")
+                }
+            }
+            .contextMenu {
+                if !message.isDeleted {
+                    Button {
+                        model.selectReply(to: message)
+                    } label: {
+                        Label("Reply to message", systemImage: "arrowshape.turn.up.left")
+                    }
+                    .accessibilityIdentifier("replyMenu.\(message.id.description)")
+                }
+            }
+        }
     }
 
     private func huddleBanner(_ huddle: IOSHuddle) -> some View {
@@ -662,10 +678,39 @@ private struct IOSHuddleSheet: View {
     }
 }
 
+private struct IOSMessageDateDivider: View {
+    let dayStartMs: Int64
+    @Environment(\.calendar) private var calendar
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Divider()
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Divider()
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var title: String {
+        let date = Date(timeIntervalSince1970: Double(dayStartMs) / 1_000)
+        if calendar.isDateInToday(date) { return "Today" }
+        if calendar.isDateInYesterday(date) { return "Yesterday" }
+        return date.formatted(.dateTime.month(.abbreviated).day().weekday(.abbreviated))
+    }
+}
+
 private struct IOSMessageRow: View {
     let message: Message
     let member: Member?
     let quotedBody: String?
+    let startsAuthorGroup: Bool
+    let mentionsCurrentMember: Bool
+    let bodySegments: [IOSMessageBodySegment]
     let model: IOSTimelineModel
 
     var body: some View {
@@ -673,17 +718,23 @@ private struct IOSMessageRow: View {
             Image(systemName: "person.crop.circle.fill")
                 .font(.title3)
                 .foregroundStyle(member?.kind == .agent ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                .opacity(startsAuthorGroup ? 1 : 0)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(member?.displayName ?? "Unknown member")
-                        .font(.body.weight(.semibold))
-                    Spacer(minLength: 8)
-                    if let createdAt = message.createdAtMs {
-                        Text(Date(timeIntervalSince1970: Double(createdAt) / 1_000), format: .dateTime.hour().minute())
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
+                if startsAuthorGroup {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(member?.displayName ?? "Unknown member")
+                            .font(.body.weight(.semibold))
+                        Spacer(minLength: 8)
+                        if let createdAt = message.createdAtMs {
+                            Text(
+                                Date(timeIntervalSince1970: Double(createdAt) / 1_000),
+                                format: .dateTime.hour().minute()
+                            )
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
                     }
                 }
                 if let quotedBody {
@@ -708,25 +759,39 @@ private struct IOSMessageRow: View {
                 }
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, startsAuthorGroup ? 8 : 4)
         .accessibilityElement(children: message.type == .approvalRequest ? .contain : .combine)
+        .accessibilityLabel(accessibilitySummary)
+        .accessibilityHint(mentionsCurrentMember ? "Mentions you" : "")
     }
 
     @ViewBuilder
     private var messageContent: some View {
         if message.isDeleted {
-            Text("Message deleted")
+            Label("메시지 삭제됨", systemImage: "trash")
                 .font(.body)
                 .foregroundStyle(.secondary)
         } else if message.type == .approvalRequest {
             IOSApprovalDecisionCard(message: message, model: model)
         } else {
-            Text(message.body ?? fallbackText)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            VStack(alignment: .leading, spacing: 4) {
+                IOSMessageBody(bodySegments: bodySegments, fallbackText: fallbackText)
+                if message.editedAtMs != nil || message.state == .edited {
+                    Text("Edited")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+    }
+
+    private var accessibilitySummary: String {
+        let author = member?.displayName ?? "Unknown member"
+        let body = message.isDeleted ? "메시지 삭제됨" : (message.body ?? fallbackText)
+        let edited = !message.isDeleted && (message.editedAtMs != nil || message.state == .edited)
+            ? ", edited"
+            : ""
+        return "\(author), \(body)\(edited)"
     }
 
     private var fallbackText: String {
@@ -738,6 +803,57 @@ private struct IOSMessageRow: View {
         case .system: "System message"
         case .text, .approvalRequest: "Message"
         }
+    }
+}
+
+private struct IOSMessageBody: View {
+    let bodySegments: [IOSMessageBodySegment]
+    let fallbackText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if bodySegments.isEmpty {
+                Text(fallbackText)
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                ForEach(bodySegments) { segment in
+                    switch segment.kind {
+                    case .prose:
+                        Text(attributedProse(segment.text))
+                            .font(.body)
+                            .foregroundStyle(.primary)
+                            .tint(.accentColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    case .code(let language):
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let language {
+                                Text(language)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            ScrollView(.horizontal) {
+                                Text(segment.text)
+                                    .font(.callout.monospaced())
+                                    .foregroundStyle(.primary)
+                                    .textSelection(.enabled)
+                                    .padding(12)
+                            }
+                            .scrollIndicators(.hidden)
+                            .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func attributedProse(_ prose: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: prose, options: options)) ?? AttributedString(prose)
     }
 }
 

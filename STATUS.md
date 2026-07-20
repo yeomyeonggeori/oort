@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI iOS 타임라인 v2 MOMO-498 (2026-07-20)
+
+- iOS 타임라인에 동일 작성자 5분 단위 그룹핑, 날짜 구분선, 서버 `mention_member_ids` 기반 내 멘션 강조, 수정 배지와 삭제 tombstone, Markdown 링크 및 가로 스크롤 코드 블록 렌더를 추가했다. 메시지는 각각 독립적인 List 행과 안정 ID를 유지해 답장 스와이프·컨텍스트 메뉴·200건 이상 지연 렌더 경계를 보존한다.
+- iOS history DTO가 엔진 X-5의 `state`·`editedAtMs`·`deletedAtMs`를 버리던 갭을 닫아 cold load에서도 수정/삭제 상태가 복원된다. realtime `message.edited`·`message.deleted`는 기존 reducer를 그대로 소비하며 삭제 본문은 UI에 노출하지 않는다.
+- MomoiOSKit 41 tests와 iPhone Simulator 무서명 build, build-for-testing, test-without-building이 PASS했다. 인증 실데이터를 사용한 라이트/다크·접근성 Dynamic Type·한국어 장문 스냅샷과 200건 스크롤 육안 판정은 Fable/성재 수동 게이트 전까지 `runtime-unverified`다.
+
 ## UXUI iOS v1 모바일 기반 MOMO-496/497 (2026-07-20)
 
 - MOMO-496은 macOS 브랜드 원본과 정렬한 iOS AppIcon 일반·다크·틴트 1024 자산, 적응형 AccentColor·런치 배경, 재현 가능한 CoreGraphics 생성기를 추가했다. 세 PNG는 sRGB·불투명 1024 정사각형이며 asset catalog 컴파일이 PASS했다.
