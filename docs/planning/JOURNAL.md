@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-20 (Fable 기획) · iOS v1 모바일 개편 계획 기안 (성재 승인 대기)
+- 성재 발제(Discord·Mattermost·Claude 앱 레퍼런스 스크린샷) → docs/planning/handoffs/2026-07-20-ios-v1-mobile-plan.md. MOMO-496~506 예약: A(아이콘·탭 셸) → B(타임라인 v2·상호작용·스레드·첨부·검색) → C(푸시 v2 — 엔진 E-1 포함·C-3 딥링크 종결) → D(Work 탭·세션 상세 관전/개입 — Claude 앱 모델, 모바일 E2E 수용).
+- 원칙: 모바일=관전과 개입(실행은 호스트). 엔진 의존은 E-1(푸시 페이로드 v2)만 신설 — 나머지는 전부 main 기랜딩 소비. codex iOS plugin worker 규율(컴파일=오케스트레이터) 명문화.
+- 병행 상태: Q1c 스택 부팅 중, 495 랜딩 완료(a37026b).
+
 ## 2026-07-20 (Fable 통합) · A-11+Hermes(uxui) + X-6+489(engine) 동시 main 랜딩 — Q1 개방
 - uxui@9ac0bd7(A-11 자기등록·실 Hermes E2E) 검수 결함 0 → main. engine(X-6·work_pool) → main a96f9c8. 3트리 정렬.
 - 동생 발견 갭 X-7(에이전트 생성/pairing API — fresh DB 완주 불가) 등재·MOMO-494(#532) 발급. QA 판단: Hermes 멘션 QA는 즉시(트랙 스택), Q1 풀 사이클은 main 랜딩 후 — 지금 충족.
