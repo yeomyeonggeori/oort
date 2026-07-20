@@ -39,6 +39,7 @@ private struct MomoWorkHostActivationKey: Hashable {
 public struct MomoMacRootView: View {
     @StateObject private var viewModel: ChatViewModel
     @StateObject private var workConsoleController: MomoWorkConsoleController
+    @StateObject private var workConsolePreferences = MomoWorkConsolePreferences()
     @StateObject private var quickTooltipPresenter = MomoQuickTooltipPresenter()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -66,7 +67,6 @@ public struct MomoMacRootView: View {
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     private let sessionChrome: MomoSessionChrome?
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
-    private static let inspectorWidth: CGFloat = 440
 
     /// Inject a configured ViewModel (e.g. backed by LiveChatBackend).
     public init(
@@ -245,6 +245,7 @@ public struct MomoMacRootView: View {
                 detailLayout(
                     copy: copy,
                     availableDetailWidth: detailWidth,
+                    availableHeight: geometry.size.height,
                     showsSidebarToggle: sidebarWidth == 0
                 )
                 .frame(width: detailWidth)
@@ -260,9 +261,18 @@ public struct MomoMacRootView: View {
     private func detailLayout(
         copy: MomoWorkspaceCopy,
         availableDetailWidth: CGFloat,
+        availableHeight: CGFloat,
         showsSidebarToggle: Bool
     ) -> some View {
         let showsMemberInspector = showMemberInspector && !showDetailPane
+        let workDrawerHeight = MomoWorkConsoleLayout.drawerHeight(
+            preferredHeight: workConsolePreferences.drawerHeight,
+            availableHeight: availableHeight
+        )
+        let rightPanelWidth = MomoRightPanelLayout.width(
+            preferredWidth: workConsolePreferences.rightPanelWidth,
+            availableWidth: availableDetailWidth
+        )
 
         return ZStack(alignment: .topTrailing) {
             HStack(spacing: 0) {
@@ -285,10 +295,30 @@ public struct MomoMacRootView: View {
                             Divider()
                             MomoWorkConsoleDrawer(
                                 controller: workConsoleController,
+                                preferences: workConsolePreferences,
                                 copy: copy,
                                 onClose: { setWorkConsolePresented(false) }
                             )
-                            .frame(height: MomoTheme.WorkConsole.drawerHeight)
+                            .frame(height: workDrawerHeight)
+                            .overlay(alignment: .top) {
+                                MomoWorkConsoleResizeHandle(
+                                    value: workDrawerHeight,
+                                    direction: .up,
+                                    onResize: { proposedHeight in
+                                        updateWorkConsoleLayout {
+                                            workConsolePreferences.setDrawerHeight(proposedHeight)
+                                        }
+                                    },
+                                    onReset: {
+                                        updateWorkConsoleLayout {
+                                            workConsolePreferences.resetDrawerHeight()
+                                        }
+                                    },
+                                    accessibilityLabel: copy.resizeWorkConsoleDrawer,
+                                    accessibilityValue: copy.workConsoleHeightValue(workDrawerHeight),
+                                    resetLabel: copy.resetWorkConsoleDrawerSize
+                                )
+                            }
                             .transition(.identity)
                         }
                     }
@@ -306,23 +336,19 @@ public struct MomoMacRootView: View {
                     MomoRightPanelBelowHeader {
                         detailPaneView(copy: copy, presentation: .attached)
                     }
-                    .frame(
-                        width: MomoRightPanelLayout.width(
-                            preferredWidth: Self.inspectorWidth,
-                            availableWidth: availableDetailWidth
-                        )
-                    )
+                    .frame(width: rightPanelWidth)
+                    .overlay(alignment: .leading) {
+                        rightPanelResizeHandle(width: rightPanelWidth, copy: copy)
+                    }
                     .transition(.identity)
                 } else if showsMemberInspector {
                     MomoRightPanelBelowHeader {
                         memberInspectorView(copy: copy, isAttached: true)
                     }
-                    .frame(
-                        width: MomoRightPanelLayout.width(
-                            preferredWidth: MomoTheme.MemberInspector.attachedWidth,
-                            availableWidth: availableDetailWidth
-                        )
-                    )
+                    .frame(width: rightPanelWidth)
+                    .overlay(alignment: .leading) {
+                        rightPanelResizeHandle(width: rightPanelWidth, copy: copy)
+                    }
                     .transition(.identity)
                 }
             }
@@ -596,6 +622,35 @@ public struct MomoMacRootView: View {
                 showWorkConsole = false
             }
         }
+    }
+
+    private func updateWorkConsoleLayout(_ update: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, update)
+    }
+
+    private func rightPanelResizeHandle(
+        width: CGFloat,
+        copy: MomoWorkspaceCopy
+    ) -> some View {
+        MomoWorkConsoleResizeHandle(
+            value: width,
+            direction: .left,
+            onResize: { proposedWidth in
+                updateWorkConsoleLayout {
+                    workConsolePreferences.setRightPanelWidth(proposedWidth)
+                }
+            },
+            onReset: {
+                updateWorkConsoleLayout {
+                    workConsolePreferences.resetRightPanelWidth()
+                }
+            },
+            accessibilityLabel: copy.resizeRightDetailPanel,
+            accessibilityValue: copy.rightDetailPanelWidthValue(width),
+            resetLabel: copy.resetRightDetailPanelSize
+        )
     }
 
     private func toggleSidebar() {
@@ -1210,7 +1265,12 @@ enum MomoRightPanelLayout {
         availableWidth: CGFloat
     ) -> CGFloat {
         guard availableWidth > 0 else { return preferredWidth }
-        return max(0, min(preferredWidth, availableWidth - minimumTimelineWidth))
+        let availableMaximum = max(0, availableWidth - minimumTimelineWidth)
+        let maximum = min(MomoTheme.WorkConsole.rightPanelMaximumWidth, availableMaximum)
+        return min(
+            maximum,
+            max(MomoTheme.WorkConsole.rightPanelMinimumWidth, preferredWidth)
+        )
     }
 }
 

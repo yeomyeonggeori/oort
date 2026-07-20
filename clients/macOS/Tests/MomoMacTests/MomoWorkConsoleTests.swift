@@ -144,6 +144,52 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertTrue(items.contains { $0.key == "⌃`" && $0.label == "Work Console 열기" })
     }
 
+    @MainActor
+    func testWorkConsoleDimensionsPersistClampAndReset() throws {
+        let suiteName = "MomoWorkConsolePreferencesTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let preferences = MomoWorkConsolePreferences(defaults: defaults)
+        preferences.setDrawerHeight(1)
+        preferences.setSessionListWidth(9_999)
+        preferences.setRightPanelWidth(9_999)
+
+        let reloaded = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(reloaded.drawerHeight, MomoTheme.WorkConsole.drawerMinimumHeight)
+        XCTAssertEqual(reloaded.sessionListWidth, MomoTheme.WorkConsole.sessionListMaximumWidth)
+        XCTAssertEqual(reloaded.rightPanelWidth, MomoTheme.WorkConsole.rightPanelMaximumWidth)
+
+        reloaded.resetDrawerHeight()
+        reloaded.resetSessionListWidth()
+        reloaded.resetRightPanelWidth()
+        let reset = MomoWorkConsolePreferences(defaults: defaults)
+        XCTAssertEqual(reset.drawerHeight, MomoTheme.WorkConsole.drawerHeight)
+        XCTAssertEqual(reset.sessionListWidth, MomoTheme.WorkConsole.sessionListWidth)
+        XCTAssertEqual(reset.rightPanelWidth, MomoTheme.WorkConsole.rightPanelWidth)
+    }
+
+    func testWorkConsoleLayoutPreservesPrimaryAndTerminalMinimums() {
+        XCTAssertEqual(
+            MomoWorkConsoleLayout.drawerHeight(
+                preferredHeight: MomoTheme.WorkConsole.drawerMaximumHeight,
+                availableHeight: 600
+            ),
+            360
+        )
+        XCTAssertEqual(
+            MomoWorkConsoleLayout.sessionListWidth(
+                preferredWidth: MomoTheme.WorkConsole.sessionListMaximumWidth,
+                availableWidth: 600
+            ),
+            240
+        )
+        XCTAssertEqual(
+            MomoRightPanelLayout.width(preferredWidth: 640, availableWidth: 800),
+            440
+        )
+    }
+
     func testRESTWorkConsoleContractNeverSendsLocalRuntimeData() async throws {
         WorkConsoleURLProtocol.reset()
         defer { WorkConsoleURLProtocol.reset() }
@@ -496,6 +542,7 @@ final class MomoWorkConsoleTests: XCTestCase {
         let size = CGSize(width: 400, height: 560)
         let content = MomoWorkConsoleSettingsView(
             controller: controller,
+            preferences: MomoWorkConsolePreferences(),
             copy: MomoWorkspaceCopy(language: .korean)
         )
         .frame(width: size.width, height: size.height, alignment: .topLeading)

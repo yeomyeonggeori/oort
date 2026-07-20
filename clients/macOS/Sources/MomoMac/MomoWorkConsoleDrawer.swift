@@ -3,6 +3,7 @@ import SwiftUI
 
 struct MomoWorkConsoleDrawer: View {
     @ObservedObject var controller: MomoWorkConsoleController
+    @ObservedObject var preferences: MomoWorkConsolePreferences
     let copy: MomoWorkspaceCopy
     let onClose: () -> Void
     @State private var showsNewSession = false
@@ -24,12 +25,37 @@ struct MomoWorkConsoleDrawer: View {
                 issueBanner(issue)
                 Divider()
             }
-            HStack(spacing: 0) {
-                sessionList
-                    .frame(width: MomoTheme.WorkConsole.sessionListWidth)
-                Divider()
-                sessionDetail
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            GeometryReader { geometry in
+                let sessionListWidth = MomoWorkConsoleLayout.sessionListWidth(
+                    preferredWidth: preferences.sessionListWidth,
+                    availableWidth: geometry.size.width
+                )
+                HStack(spacing: 0) {
+                    sessionList
+                        .frame(width: sessionListWidth)
+                        .overlay(alignment: .trailing) {
+                            MomoWorkConsoleResizeHandle(
+                                value: sessionListWidth,
+                                direction: .right,
+                                onResize: { proposedWidth in
+                                    updateLayout {
+                                        preferences.setSessionListWidth(proposedWidth)
+                                    }
+                                },
+                                onReset: {
+                                    updateLayout {
+                                        preferences.resetSessionListWidth()
+                                    }
+                                },
+                                accessibilityLabel: copy.resizeWorkSessionList,
+                                accessibilityValue: copy.workSessionListWidthValue(sessionListWidth),
+                                resetLabel: copy.resetWorkSessionListSize
+                            )
+                        }
+                    Divider()
+                    sessionDetail
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
         .momoFlatSurface(.panel)
@@ -67,7 +93,11 @@ struct MomoWorkConsoleDrawer: View {
             }
             .momoQuickTooltip(copy.workConsoleSettings)
             .popover(isPresented: $showsSettings, arrowEdge: .bottom) {
-                MomoWorkConsoleSettingsView(controller: controller, copy: copy)
+                MomoWorkConsoleSettingsView(
+                    controller: controller,
+                    preferences: preferences,
+                    copy: copy
+                )
             }
 
             Button {
@@ -93,6 +123,12 @@ struct MomoWorkConsoleDrawer: View {
         .buttonStyle(.plain)
         .padding(.horizontal, MomoTheme.WorkConsole.edgeInset)
         .frame(height: MomoTheme.WorkConsole.headerHeight)
+    }
+
+    private func updateLayout(_ update: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, update)
     }
 
     private var sandboxNotice: some View {
@@ -600,6 +636,7 @@ private struct MomoNewWorkSessionSheet: View {
 
 struct MomoWorkConsoleSettingsView: View {
     @ObservedObject var controller: MomoWorkConsoleController
+    @ObservedObject var preferences: MomoWorkConsolePreferences
     let copy: MomoWorkspaceCopy
 
     var body: some View {

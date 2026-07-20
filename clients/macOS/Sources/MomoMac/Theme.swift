@@ -500,9 +500,20 @@ public enum MomoTheme {
 
     public enum WorkConsole {
         public static let drawerHeight: CGFloat = 360
+        public static let drawerMinimumHeight: CGFloat = 240
+        public static let drawerMaximumHeight: CGFloat = 720
+        public static let primaryContentMinimumHeight: CGFloat = 240
         public static let sessionListWidth: CGFloat = 224
+        public static let sessionListMinimumWidth: CGFloat = 176
+        public static let sessionListMaximumWidth: CGFloat = 360
+        public static let terminalMinimumWidth: CGFloat = 360
+        public static let rightPanelWidth: CGFloat = 440
+        public static let rightPanelMinimumWidth: CGFloat = 320
+        public static let rightPanelMaximumWidth: CGFloat = 640
         public static let headerHeight: CGFloat = 48
         public static let rowMinimumHeight: CGFloat = 56
+        public static let resizeHandleExtent: CGFloat = 8
+        public static let resizeAdjustmentStep: CGFloat = 16
         public static let newSessionWidth: CGFloat = 420
         public static let settingsWidth: CGFloat = 360
         public static let excerptWidth: CGFloat = 560

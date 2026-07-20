@@ -7,6 +7,33 @@ extension MomoWorkspaceCopy {
     }
     var openWorkConsole: String { language == .korean ? "Work Console 열기" : "Open Work Console" }
     var closeWorkConsole: String { language == .korean ? "Work Console 닫기" : "Close Work Console" }
+    var resizeWorkConsoleDrawer: String {
+        language == .korean ? "Work Console 높이 조절" : "Resize Work Console height"
+    }
+    var resetWorkConsoleDrawerSize: String {
+        language == .korean ? "Work Console 높이 초기화" : "Reset Work Console height"
+    }
+    func workConsoleHeightValue(_ height: CGFloat) -> String {
+        language == .korean ? "높이 \(Int(height))포인트" : "\(Int(height)) points high"
+    }
+    var resizeWorkSessionList: String {
+        language == .korean ? "세션 목록 너비 조절" : "Resize session list"
+    }
+    var resetWorkSessionListSize: String {
+        language == .korean ? "세션 목록 너비 초기화" : "Reset session list width"
+    }
+    func workSessionListWidthValue(_ width: CGFloat) -> String {
+        language == .korean ? "너비 \(Int(width))포인트" : "\(Int(width)) points wide"
+    }
+    var resizeRightDetailPanel: String {
+        language == .korean ? "우측 패널 너비 조절" : "Resize right panel"
+    }
+    var resetRightDetailPanelSize: String {
+        language == .korean ? "우측 패널 너비 초기화" : "Reset right panel width"
+    }
+    func rightDetailPanelWidthValue(_ width: CGFloat) -> String {
+        language == .korean ? "너비 \(Int(width))포인트" : "\(Int(width)) points wide"
+    }
     var newWorkSession: String { language == .korean ? "새 세션" : "New session" }
     var workSessions: String { language == .korean ? "세션" : "Sessions" }
     var workSessionLoading: String { language == .korean ? "세션 불러오는 중" : "Loading sessions" }
