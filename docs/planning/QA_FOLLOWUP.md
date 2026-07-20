@@ -20,6 +20,18 @@
 - **트리거**: (권장) A-11 랜딩 후 / (즉시) 위 워크어라운드로 성재+Fable 함께.
 - **수용**: 1왕복 전 단계 성공 + 서버 원장/스레드에 raw·cwd·토큰 미유입 육안 확인.
 
+## Q1b. Work Console 경로 구분 (2026-07-20 스택 실측)
+- **경로 A — 사람 직접 세션** [함께, 지금 가능]: Work 서랍에서 사람이 codex/claude 프로파일로 세션 시작(`startSession` → work_session 생성 + 로컬 PTY). 에이전트·work_control 불필요. **현재 gateway-mode 스택(28180)에서 즉시 검증 가능** — A-10/A-11/483/487/489의 핵심 경로.
+- **경로 B — 에이전트 spawn** [블록, 스택 조건 필요]: `@hermes ...` → 에이전트가 `work_spawn` tool 호출 → 승인 → PTY. **work_* tool은 Swift AgentWorker(486)에만 존재**하는데 현 스택은 gateway-mode(Hermes python gateway가 에이전트 역할, work tool 미보유)라 트리거 불가. 경로 B 검증엔 ①Swift AgentWorker 기동 + ②tool-calling 지원 provider가 필요. → **Q1c로 분리**.
+- 조치: Q1 수용을 A(사람 직접, 지금)와 B(에이전트, 별도 스택)로 분리. A 통과가 A-10/A-11 실사용의 1차 증명.
+
+## Q1c. 에이전트-발원 Work spawn (경로 B) [함께, 스택 셋업 필요]
+- **무엇**: Q1 경로 B — 채팅 멘션으로 에이전트가 세션을 스폰하는 ADR-0114 핵심 시나리오.
+- **선행**: Swift AgentWorker(worker-mode)를 `MOMO_WORK_HOST_ID=019f7e69…`로 기동 + work_spawn tool을 이해하는 tool-calling provider(현 Hermes gateway가 tool call을 낼 수 있는지 확인 필요, 없으면 loopback tool-capable provider). Fable가 스택 셋업.
+- **현재 상태**: 엔진 486(E2E verifier로 mock 레벨 PASS) 랜딩됨 — 실 provider 왕복만 미검증.
+- **트리거**: 경로 A(Q1b) 통과 후, Fable가 worker-mode 스택 구성.
+- **수용**: 멘션→spawn tool→승인 카드→dispatched→PTY→ack→스레드, 실 provider로 1왕복.
+
 ## Q2. App Sandbox 배포 정책 결정 [Fable 기안 → 성재 결정]
 - **무엇**: dev(SwiftPM) 빌드는 PTY 동작, 배포(Xcode App Sandbox) 빌드는 fail-closed. 배포판에서 PTY를 열려면 ①App Sandbox 해제(App Store 불가·공증 직접배포 가능) 또는 ②비샌드박스 로컬 helper 경유 중 택1 — 보안 결정.
 - **검증/판단 방법**: 이건 테스트가 아니라 **ADR 결정**. Fable 분석: **②가 우리 로드맵과 정합** — ADR-0125의 momo-workd(T2, MOMO-488)가 정확히 "비샌드박스 로컬 호스트"다. 즉 배포판 앱은 샌드박스 유지 + PTY는 workd에 위임하면 App Store 경로도 열린다. dev 빌드는 앱 내장 PTY(T1) 그대로.
