@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-493 auto-approve 현재값 조회 계약 (2026-07-20)
+
+- human active member만 호출할 수 있는 `GET /v1/workspaces/:ws/work-auto-approvals`를 추가했다. 응답은 호출자 자신의 tool 문자열만 사전순으로 반환하며 host·경로·프로세스 환경·자격증명은 포함하지 않는다.
+- OpenAPI operation/closed response를 가산하고 drift sample을 연결했다. `verify_work_control.sh`는 PUT→GET 정렬 snapshot→DELETE→GET 부재, agent 거부, 다른 human 설정 격리와 기존 cross-tenant FORCE RLS를 한 시나리오로 단정한다.
+- server 121 tests와 docs local gate 20/20가 PASS했다. 격리 `verify_work_control.sh`와 전체 `runtime-db` Docker 실런은 지시대로 오케스트레이터 담당이라 실행 전까지 `runtime-unverified`다.
+
 ## UXUI A-10 Interactive Work Console (2026-07-20)
 
 - macOS 중앙 패널 하단에 Control+backtick으로 여는 Work 서랍을 추가했다. SwiftTerm(MIT) 기반 로컬 PTY에서 Claude Code·Codex CLI·OpenCode·로그인 셸을 실행하고, 세션 목록/상태/종료, 서버가 만든 채널 카드, 세션 스레드 열기, 사용자가 검토한 출력 발췌 공유를 연결했다.
