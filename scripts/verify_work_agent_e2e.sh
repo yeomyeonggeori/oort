@@ -53,6 +53,7 @@ OWNER_ID="$(new_uuid)"
 AGENT_ONE_ID="$(new_uuid)"
 AGENT_TWO_ID="$(new_uuid)"
 HOST_ID="$(new_uuid)"
+HOST_PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
 OWNER_EMAIL="work-agent-owner-$RUN_TAG@momo.local"
 OWNER_PASSWORD="owner-$(new_uuid)"
 ACTIVE_AGENT_TOKEN=""
@@ -179,6 +180,13 @@ curl -fsS -X POST "$BASE_URL/v1/auth/login" \
   --data "$(jq -cn --arg e "$OWNER_EMAIL" --arg p "$OWNER_PASSWORD" --arg w "$WS_ID" \
     '{email:$e,password:$p,workspace:$w}')" >"$TMP_DIR/login.json"
 OWNER_TOKEN="$(jq -er '.accessToken' "$TMP_DIR/login.json")"
+
+api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/work-hosts" \
+  "$(jq -cn --arg key "$HOST_PUBLIC_KEY" \
+    '{scope:"member",type:"app",displayName:"MOMO-486 host",publicKey:$key,
+      capabilities:{"tool.codex":true}}')"
+expect_status 201 "work host registration"
+HOST_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workHost.id | ascii_downcase')"
 
 mint_agent_token() {
   local agent_id="$1" label="$2"
