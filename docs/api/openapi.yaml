@@ -10,10 +10,10 @@ openapi: 3.0.3
 # handlers. Drift between this spec and the running server is detected by
 # scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).
 #
-# Scope: web v0 (ADR-0119 D5-A) plus the plugin registry/grant, incoming
-# webhook, hosted Drive MCP, and interactive Work Console control surfaces.
-# Other routes (invite admin,
-# workspace identity, agent runs, cost projection, platform admin,
+# Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
+# registry/grant, incoming webhook, hosted Drive MCP, and interactive Work
+# Console control surfaces. Other routes (invite admin,
+# workspace identity, agent credentials/runs, cost projection, platform admin,
 # centrifugo proxy, health) remain intentionally undocumented here.
 #
 # Encoding rules (server truth):
@@ -42,7 +42,8 @@ info:
     cursor advance), direct messages (list/open), and approvals
     (list/decision), plugin registry/grants, incoming webhooks, and the hosted
     read-only Drive MCP endpoint, and ADR-0114 Work Console sessions and
-    controls. Mirrors MomoServer field by field.
+    controls, plus the fresh-database agent creation boundary. Mirrors
+    MomoServer field by field.
 
 servers:
   - url: /
@@ -59,6 +60,8 @@ tags:
     description: Public invite self-signup (no auth required).
   - name: roster
     description: Workspace member roster.
+  - name: agents
+    description: Human-admin agent identity creation; channel membership and credentials remain explicit follow-up steps.
   - name: channels
     description: Workspace channels.
   - name: huddles
@@ -375,6 +378,61 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/agents:
+    post:
+      tags: [agents]
+      operationId: createAgent
+      summary: Create an active first-class agent member (workspace admin only).
+      description: >
+        Human owner/admin bearer only. The member(kind=agent), agent profile,
+        and agent.created audit row commit in one tenant transaction. This
+        operation intentionally creates no channel membership and issues no
+        bearer credential. Pairing continues by calling the existing
+        `POST /v1/workspaces/{workspaceId}/channels/{channelId}/members` and
+        `POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials`
+        routes. baseUrl never accepts userinfo/query/fragment credential
+        material; non-loopback endpoints require HTTPS, while loopback HTTP
+        requires the server's explicit local-only opt-in.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+      responses:
+        "201":
+          description: Agent identity created without channel membership or credential issuance.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateAgentResponse"
+        "400":
+          description: Invalid identity, owner, endpoint, config, or credential-shaped input.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human workspace owner/admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: The normalized handle already exists in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -3315,6 +3373,67 @@ components:
           type: integer
         agentCount:
           type: integer
+
+    # ---- Agent creation -------------------------------------------------------
+    CreateAgentRequest:
+      type: object
+      required: [displayName, handle, model, baseUrl]
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        handle:
+          type: string
+          pattern: "^[a-z0-9_-]{2,32}$"
+          description: Trimmed and lowercased server-side; unique per workspace.
+        model:
+          type: string
+          minLength: 1
+          maxLength: 200
+        baseUrl:
+          type: string
+          format: uri
+          description: >
+            OpenAI-compatible base URL. Userinfo, query, and fragment are
+            forbidden. Non-loopback hosts require HTTPS; local loopback HTTP
+            requires MOMO_ENV=local plus AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1
+            and an explicit port.
+        systemPrompt:
+          type: string
+          maxLength: 32768
+          description: Optional; blank collapses to absent. The server enforces a 32768-byte limit.
+        config:
+          type: object
+          additionalProperties: true
+          description: >
+            Optional provider-neutral runtime tuning, at most 65536 encoded
+            bytes. Credential-like keys (OAuth/API keys, bearer tokens,
+            passwords, private keys) are rejected recursively.
+        ownerHumanId:
+          type: string
+          format: uuid
+          description: Optional active human owner in this workspace; defaults to the caller.
+
+    AgentMember:
+      type: object
+      required: [id, handle, displayName]
+      properties:
+        id:
+          type: string
+          format: uuid
+        handle:
+          type: string
+        displayName:
+          type: string
+
+    CreateAgentResponse:
+      type: object
+      required: [agent]
+      properties:
+        agent:
+          $ref: "#/components/schemas/AgentMember"
 
     # ---- Channels ----------------------------------------------------------------
     Channel:

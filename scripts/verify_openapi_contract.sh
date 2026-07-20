@@ -456,6 +456,18 @@ REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -r '.refreshToken')"
 
 sample realtime-token post "/v1/auth/realtime-token" "/v1/auth/realtime-token" 200 "" "$ACCESS"
 
+sample agent-create post "/v1/workspaces/{workspaceId}/agents" \
+  "/v1/workspaces/$WS/agents" 201 \
+  "$(jq -cn --arg handle "openapi-agent-$RUN_EPOCH" \
+      '{displayName:"OpenAPI Created Agent",handle:$handle,model:"openapi-gate",
+        baseUrl:"https://hermes.openapi.example.test/v1",
+        systemPrompt:"OpenAPI drift gate",config:{temperature:0.2,max_tokens:2048}}')" \
+  "$ACCESS"
+guard_jq --arg handle "openapi-agent-$RUN_EPOCH" \
+  '.agent.handle == $handle and .agent.displayName == "OpenAPI Created Agent"
+   and (.agent.id | type == "string")' \
+  "agent creation returns only the created member identity"
+
 # roster + compat alias
 sample roster get "/v1/workspaces/{workspaceId}/roster" "/v1/workspaces/$WS/roster" 200 "" "$ACCESS"
 guard_jq '(.members | length) >= 1' "roster returns at least one member"

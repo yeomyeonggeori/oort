@@ -3,6 +3,28 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${PUSH_RELAY_VERIFY_PORT:-28195}"
+
+# Resolve an OpenSSL that actually supports Ed25519. macOS ships LibreSSL at
+# /usr/bin/openssl (no ED25519 genpkey), and a login shell (gate uses `bash -lc`)
+# can resolve it ahead of Homebrew's OpenSSL 3.x — a bare `openssl` therefore
+# fails silently under set -e. Pick the first candidate that can genpkey Ed25519.
+find_openssl() {
+  local candidate probe
+  probe="$(mktemp "${TMPDIR:-/tmp}/momo-openssl-probe.XXXXXX")"
+  for candidate in openssl /opt/homebrew/bin/openssl /usr/local/bin/openssl /usr/bin/openssl; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" genpkey -algorithm ED25519 -out "$probe" >/dev/null 2>&1; then
+      rm -f "$probe"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  rm -f "$probe"
+  echo "[push-relay] no OpenSSL with Ed25519 genpkey support found" >&2
+  exit 1
+}
+OPENSSL_BIN="$(find_openssl)"
+
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/momo-push-relay.XXXXXX")"
 RELAY_PID=""
 
@@ -27,7 +49,7 @@ printf '%s' '{"schema":"momo.push.dispatch.v1","server_id":"verify-server","work
 sed 's/"badge":1/"badge":2/' "$BODY" >"$TAMPERED"
 
 sign_body() {
-  openssl pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" -in "$1" | openssl base64 -A
+  "$OPENSSL_BIN" pkeyutl -sign -rawin -inkey "$PRIVATE_KEY" -in "$1" | "$OPENSSL_BIN" base64 -A
 }
 
 MOMO_RELAY_SERVERS="{\"verify-server\":\"$PUBLIC_B64\"}" \
