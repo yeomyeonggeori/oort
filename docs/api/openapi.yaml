@@ -67,6 +67,8 @@ tags:
     description: Registered execution hosts authenticated by Ed25519 heartbeats.
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
+  - name: work-pool
+    description: Workspace-shared concurrent work-session quota and current derived usage.
   - name: work-controls
     description: Agent-requested, human-gated controls dispatched to a user-owned execution host.
   - name: messages
@@ -801,6 +803,78 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-pool:
+    get:
+      tags: [work-pool]
+      operationId: getWorkPool
+      summary: Read workspace work-pool settings and current derived usage.
+      description: >
+        Available to active human workspace members. Usage is counted from
+        running work_session rows; no mutable active counter exists. A missing
+        settings row is created with v0 defaults in the same tenant transaction.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Pool settings, workspace usage, and caller usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkPoolResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human workspace membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [work-pool]
+      operationId: updateWorkPool
+      summary: Replace workspace work-pool settings as an owner or admin.
+      description: >
+        The settings update and work.pool.updated audit row commit in the same
+        tenant transaction. Lowering a cap does not preempt running sessions;
+        subsequent creates remain rejected until derived usage is below it.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkPoolRequest"
+      responses:
+        "200":
+          description: Updated settings and current derived usage.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkPoolResponse"
+        "400":
+          description: Invalid cap, included hours, or per-member soft limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin role required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/work-sessions:
     post:
       tags: [work-sessions]
@@ -839,6 +913,15 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            No session was created. error.message is the stable machine-readable
+            reason pool_exhausted or member_limit. v0 does not enqueue or emit an
+            outbox event; automatic queue start and waiting-card UX are follow-ups.
           content:
             application/json:
               schema:
@@ -3345,6 +3428,59 @@ components:
             $ref: "#/components/schemas/WorkControl"
 
     # ---- Work sessions ------------------------------------------------------
+    UpdateWorkPoolRequest:
+      type: object
+      required: [maxActive, perMemberSoftLimit]
+      properties:
+        maxActive:
+          type: integer
+          minimum: 1
+          maximum: 1000
+        includedActiveHours:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 1000000
+          description: Omitted or null means no included-hours setting.
+        perMemberSoftLimit:
+          type: integer
+          minimum: 1
+          maximum: 1000
+          description: Must not exceed maxActive.
+
+    WorkPool:
+      type: object
+      required:
+        - workspaceId
+        - maxActive
+        - perMemberSoftLimit
+        - activeSessions
+        - memberActiveSessions
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        maxActive:
+          type: integer
+        includedActiveHours:
+          type: integer
+          nullable: true
+        perMemberSoftLimit:
+          type: integer
+        activeSessions:
+          type: integer
+          description: Workspace running work_session count.
+        memberActiveSessions:
+          type: integer
+          description: Calling member's running work_session count.
+
+    WorkPoolResponse:
+      type: object
+      required: [workPool]
+      properties:
+        workPool:
+          $ref: "#/components/schemas/WorkPool"
+
     CreateWorkSessionRequest:
       type: object
       required: [channelId, hostId, tool, label]
