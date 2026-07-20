@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>app.momo.workd</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@WORKD_HOME@/.local/libexec/momo-workd-run</string>
+    <string>@WORKD_HOME@/.config/momo/workd.env</string>
+    <string>@WORKD_HOME@/.local/bin/momo-workd</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>NetworkState</key>
+    <true/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>@WORKD_HOME@/.local/share/momo/workd-service.log</string>
+  <key>StandardErrorPath</key>
+  <string>@WORKD_HOME@/.local/share/momo/workd-service.log</string>
+</dict>
+</plist>

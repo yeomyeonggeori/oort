@@ -65,6 +65,25 @@ final class WorkHostDaemonTests: XCTestCase {
         XCTAssertNil(config.registrationToken)
     }
 
+    func testRegistrationTokenFileMustBePrivateAndCanBeConsumed() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let tokenURL = directory.appendingPathComponent("registration.token")
+        try Data("one-time-token\n".utf8).write(to: tokenURL)
+        try SecureLocalStore.setMode(0o600, at: tokenURL)
+        let config = try WorkdConfig.load(environment: [
+            "MOMO_WORKD_SERVER_URL": "http://127.0.0.1:27950",
+            "MOMO_WORKD_ALLOW_INSECURE_HTTP": "1",
+            "MOMO_WORKD_WORKSPACE_ID": UUID().uuidString,
+            "MOMO_WORKD_REGISTRATION_TOKEN_FILE": tokenURL.path,
+        ])
+        XCTAssertEqual(config.registrationToken, "one-time-token")
+        XCTAssertEqual(config.registrationTokenURL, tokenURL)
+        try SecureLocalStore.removeConsumedSecret(at: tokenURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tokenURL.path))
+    }
+
     func testUnexpectedErrorsNeverBecomeServerFacingDetails() {
         let localFailure = NSError(
             domain: "/Users/private/project/.env",

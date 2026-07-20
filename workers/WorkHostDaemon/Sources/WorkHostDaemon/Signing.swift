@@ -86,6 +86,27 @@ enum SecureLocalStore {
         try secureWrite(Data((hostID.uuidString.lowercased() + "\n").utf8), to: url)
     }
 
+    static func readOptionalSecret(at url: URL) throws -> String? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let permissions = attributes[.posixPermissions] as? NSNumber,
+              permissions.uint16Value & 0o077 == 0
+        else { throw WorkdFailure.keyStore }
+        let value = try String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { throw WorkdFailure.keyStore }
+        return value
+    }
+
+    static func removeConsumedSecret(at url: URL) throws {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            throw WorkdFailure.keyStore
+        }
+    }
+
     static func ensurePrivateDirectory(_ url: URL) throws {
         try FileManager.default.createDirectory(
             at: url,

@@ -16,6 +16,7 @@ struct WorkdConfig: Sendable {
     let pollInterval: Duration
     let heartbeatInterval: Duration
     let commandTemplates: [String: CommandTemplate]
+    let registrationTokenURL: URL?
     var registrationToken: String?
 
     static func load(
@@ -67,6 +68,17 @@ struct WorkdConfig: Sendable {
             templates[tool] = try commandTemplate(tool: tool, environment: environment)
         }
 
+        let directRegistrationToken = nonempty(environment["MOMO_WORKD_REGISTRATION_TOKEN"])
+        let registrationTokenURL = nonempty(
+            environment["MOMO_WORKD_REGISTRATION_TOKEN_FILE"]
+        ).map(URL.init(fileURLWithPath:))
+        guard directRegistrationToken == nil || registrationTokenURL == nil else {
+            throw WorkdFailure.configuration
+        }
+        let registrationToken = try registrationTokenURL.map {
+            try SecureLocalStore.readOptionalSecret(at: $0)
+        } ?? directRegistrationToken
+
         return WorkdConfig(
             serverURL: serverURL,
             workspaceID: workspaceID,
@@ -78,7 +90,8 @@ struct WorkdConfig: Sendable {
             pollInterval: .milliseconds(pollMs),
             heartbeatInterval: .milliseconds(heartbeatMs),
             commandTemplates: templates,
-            registrationToken: nonempty(environment["MOMO_WORKD_REGISTRATION_TOKEN"])
+            registrationTokenURL: registrationTokenURL,
+            registrationToken: registrationToken
         )
     }
 

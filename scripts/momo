@@ -41,6 +41,8 @@ Commands:
               Link/copy adapters/hermes into the local Hermes plugin directory.
   hermes-gateway-smoke
               Run mock smoke, or pass --real [--trigger] for real Hermes evidence.
+  host add ssh://user@host [options]
+              Copy a target-compatible momo-workd and install its user service.
   cleanup-seeded-agents
               Retire historical dogfood seed agents; requires explicit --yes.
   stop        Stop the app and the local alpha stack when it can be identified.
@@ -55,6 +57,7 @@ Defaults:
 Examples:
   scripts/momo start
   scripts/momo status
+  scripts/momo host add ssh://user@host --help
   scripts/momo stop
 
 Environment overrides:
@@ -934,6 +937,24 @@ hermes_gateway_real_smoke() {
   "$REPO_ROOT/scripts/verify_hermes_gateway_real_smoke.sh" "$@"
 }
 
+host_command() {
+  local subcommand="${1:-help}"
+  shift || true
+  case "$subcommand" in
+    add)
+      "$REPO_ROOT/infra/workd/bootstrap.sh" "$@"
+      ;;
+    help|-h|--help)
+      "$REPO_ROOT/infra/workd/bootstrap.sh" --help
+      ;;
+    *)
+      warn "unknown host command: $subcommand"
+      echo "Usage: scripts/momo host add ssh://user@host [options]" >&2
+      return 2
+      ;;
+  esac
+}
+
 command="${1:-help}"
 case "$command" in
   start)
@@ -974,6 +995,10 @@ case "$command" in
   hermes-gateway-real-smoke)
     shift || true
     hermes_gateway_real_smoke "$@"
+    ;;
+  host)
+    shift || true
+    host_command "$@"
     ;;
   cleanup-seeded-agents)
     shift || true
