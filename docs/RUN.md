@@ -1032,6 +1032,32 @@ verifier는 workd 등록과 signed heartbeat/poll, auto-approved mock echo spawn
 `work_session` started→ended, 위조 poll 401, FORCE RLS, raw marker의 서버 원장 부재를 단정한다.
 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행한다.
 
+### 5.5 Remote terminal attach capability (ADR-0125 D10)
+
+원격 host/workd/provisioner는 도구를 PTY로 실행하고, signed `POST .../work-sessions` 요청에
+`ptyId`와 credential-free HTTPS/WSS `attachEndpoint`를 함께 보낸다. MomoServer는 remote
+PTY를 생성하거나 터미널 byte stream을 중계하지 않는다. owner human은
+`POST /v1/workspaces/:ws/work-sessions/:id/terminal-attach`에서 60초 capability를 받고,
+클라이언트가 반환 endpoint에 직접 연결한다. host는 연결을 수락하기 전에
+`POST /v1/workspaces/:ws/work-hosts/:host/terminal-attach/validate`를 `MomoHost` 서명으로
+호출해 capability·`pty_id`·session lifecycle·host revoke를 검증한다.
+
+서버 DB에는 raw capability가 아닌 SHA-256 digest만 있고 audit에는 owner와 issued/expires만
+남는다. terminal stdout/stderr/stdin/resize는 MomoServer, OutboxRelay, Centrifugo를 통과하지
+않는다. 실제 workd/provisioner PTY adapter와 SwiftTerm direct attach는 후속 goal이다.
+
+```sh
+# runtime-db profile에도 포함됨. 기본 전용 포트: API 27970,
+# Centrifugo 27971, PostgreSQL 27972, Hermes 예약 27973.
+scripts/verify_terminal_attach.sh
+```
+
+verifier는 네 포트가 비어 있는지 먼저 검사한 뒤 owner 발급, agent·비소유자 403, 만료 후
+401, revoke 즉시 무효, exact response, digest-only 원장, audit, FORCE RLS와 raw/token의
+서버·relay 원장/로그 부재를 단정한다. Ed25519 서명에는 `find_openssl` 방식으로 실제 지원
+binary를 고른다. 이 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행하며,
+그 전까지 terminal attach runtime은 `runtime-unverified`다.
+
 ---
 
 ## 6. macOS 클라이언트 (데모 surface: D / B / C)

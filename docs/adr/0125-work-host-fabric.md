@@ -45,9 +45,9 @@ D1-A(레지스트리·outbound-only) · D2-A(workd+SSH 부트스트랩+로그인
 ## D10. 원격 인터랙티브 터미널 attach — T3 세션은 실제 TUI를 스트리밍한다 (2026-07-20 성재 지적 — T3 급소)
 
 - **문제**: T1(로컬 맥)은 SwiftTerm이 로컬 PTY를 직접 spawn하지만, T3(클라우드 샌드박스)에서 claude/codex를 앱에서 보려면 헤드리스가 아니라 **실제 TUI(alternate screen·전체 인터랙션)를 하나의 터미널에서 양방향으로** 봐야 한다. E3에서 겪은 "TTY 스크랩 불가"가 정확히 이 문제. 헤드리스 명령 실행으로는 TUI 도구를 못 쓴다.
-- **A (권고) — 원격 PTY attach(직결 스트림, 서버 raw 비경유)**: 
-  1. 호스트(클라우드 샌드박스, workd/프로비저너)가 도구를 **원격 PTY**로 실행(E2B pty create — create/connect(pid)/send_stdin/resize/kill 검증됨 2026-07-20). 
-  2. momo 서버는 **attach capability**(bearer·ephemeral, A-6 첨부 capability URL과 동일 패턴)만 발급하고, **클라이언트(SwiftTerm)가 샌드박스 PTY 스트림에 직접 연결**한다 — 원격 PTY 바이트는 momo 서버/relay를 경유하지 않는다(D3·ADR-0004 유지: 서버는 raw 무경유·전송전용). 
+- **A (권고) — 원격 PTY attach(직결 스트림, 서버 raw 비경유)**:
+  1. 호스트(클라우드 샌드박스, workd/프로비저너)가 도구를 **원격 PTY**로 실행(E2B pty create — create/connect(pid)/send_stdin/resize/kill 검증됨 2026-07-20).
+  2. momo 서버는 **attach capability**(bearer·ephemeral, A-6 첨부 capability URL과 동일 패턴)만 발급하고, **클라이언트(SwiftTerm)가 샌드박스 PTY 스트림에 직접 연결**한다 — 원격 PTY 바이트는 momo 서버/relay를 경유하지 않는다(D3·ADR-0004 유지: 서버는 raw 무경유·전송전용).
   3. SwiftTerm이 원격 PTY의 stdout을 렌더하고 키입력을 send_stdin으로 전달, resize 동기화. 로컬 T1과 동일한 뷰, 백엔드만 원격 attach.
   4. work_session 원장(483)은 그대로(수명주기·라벨만), 에이전트 조종(484 work.control)도 그대로 — attach는 "사람이 그 세션 터미널을 직접 본다"의 전송 계층 추가.
 - **부수 효과 — E3 자동 해소**: 실제 인터랙티브 터미널이 붙으면 구독 로그인은 "터미널에 URL 뜨고 코드 붙여넣기"가 사용자 손에서 자연히 일어난다(D9의 스크랩 캡처 불필요 — 헤드리스일 때만 D9 카드가 대신). 즉 D10이 서면 D9는 "비-attach(모바일 관전 전용) 폴백"으로 축소된다.
