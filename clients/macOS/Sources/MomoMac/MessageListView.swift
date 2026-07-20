@@ -68,7 +68,7 @@ public struct MessageListView: View {
     @AppStorage("momo.workspace.showQuickStart") private var showQuickStart = true
     @AppStorage(MomoDeveloperModePresentation.developerModeKey) private var developerMode = false
     @AppStorage(MomoDeveloperModePresentation.costDisplayKey) private var showCosts = false
-    @FocusState private var isComposerFocused: Bool
+    @State private var isComposerFocused = false
     @FocusState private var channelMenuKeyboardFocus: MomoChannelMenuFocusTarget?
     @AccessibilityFocusState private var accessibilityFocusedMessageID: MessageID?
     @AccessibilityFocusState private var channelMenuAccessibilityFocus: MomoChannelMenuFocusTarget?
@@ -226,7 +226,8 @@ public struct MessageListView: View {
         .onPreferenceChange(MomoMessageListWidthPreferenceKey.self) {
             availableTimelineWidth = $0
         }
-        .onChange(of: focusComposerRequest) { _, _ in
+        .onChange(of: focusComposerRequest, initial: true) { _, request in
+            guard request > 0 else { return }
             isComposerFocused = true
         }
         .onChange(of: viewModel.selectedChannelId) { _, _ in
