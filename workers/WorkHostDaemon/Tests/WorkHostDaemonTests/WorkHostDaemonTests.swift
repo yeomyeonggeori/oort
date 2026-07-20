@@ -1,0 +1,207 @@
+@preconcurrency import Crypto
+import Foundation
+import Logging
+import XCTest
+@testable import WorkHostDaemon
+
+final class WorkHostDaemonTests: XCTestCase {
+    func testKeyStoreCreatesReloadsAndHardens0600() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let keyURL = directory.appendingPathComponent("identity.key")
+        let first = try SecureLocalStore.loadOrCreateSigner(at: keyURL)
+        let second = try SecureLocalStore.loadOrCreateSigner(at: keyURL)
+        XCTAssertEqual(first.publicKeyBase64, second.publicKeyBase64)
+        XCTAssertEqual(try Data(contentsOf: keyURL).count, 32)
+        let attributes = try FileManager.default.attributesOfItem(atPath: keyURL.path)
+        let mode = try XCTUnwrap(attributes[.posixPermissions] as? NSNumber).uint16Value
+        XCTAssertEqual(mode & 0o077, 0)
+    }
+
+    func testSigningPayloadsMatchServerByteContracts() throws {
+        let key = Curve25519.Signing.PrivateKey()
+        let signer = try WorkHostSigner(rawRepresentation: key.rawRepresentation)
+        let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let hostID = UUID(uuidString: "00000000-0000-7000-8000-000000000488")!
+        let sentAtMs: Int64 = 1_784_582_400_000
+        XCTAssertEqual(
+            String(decoding: signer.heartbeatPayload(
+                workspaceID: workspaceID,
+                hostID: hostID,
+                sentAtMs: sentAtMs
+            ), as: UTF8.self),
+            "momo.work_host.heartbeat.v1\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
+        )
+        let path = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-sessions"
+        XCTAssertEqual(
+            String(decoding: signer.requestPayload(
+                method: "post",
+                path: path,
+                workspaceID: workspaceID,
+                hostID: hostID,
+                sentAtMs: sentAtMs
+            ), as: UTF8.self),
+            "momo.work_host.request.v1\nPOST\n\(path)\n\(workspaceID.uuidString.lowercased())\n\(hostID.uuidString.lowercased())\n\(sentAtMs)"
+        )
+    }
+
+    func testConfigRejectsRemotePlaintextAndParsesLocalTemplates() throws {
+        let workspaceID = UUID()
+        XCTAssertThrowsError(try WorkdConfig.load(environment: [
+            "MOMO_WORKD_SERVER_URL": "http://example.com",
+            "MOMO_WORKD_WORKSPACE_ID": workspaceID.uuidString,
+        ]))
+        let config = try WorkdConfig.load(environment: [
+            "MOMO_WORKD_SERVER_URL": "http://127.0.0.1:27950",
+            "MOMO_WORKD_ALLOW_INSECURE_HTTP": "1",
+            "MOMO_WORKD_WORKSPACE_ID": workspaceID.uuidString,
+            "MOMO_WORKD_PROFILE_SHELL_EXECUTABLE": "/bin/cat",
+            "MOMO_WORKD_PROFILE_SHELL_ARGUMENTS_JSON": "[]",
+        ])
+        XCTAssertEqual(config.commandTemplates["shell"], CommandTemplate(
+            executable: "/bin/cat",
+            arguments: []
+        ))
+        XCTAssertNil(config.registrationToken)
+    }
+
+    func testUnexpectedErrorsNeverBecomeServerFacingDetails() {
+        let localFailure = NSError(
+            domain: "/Users/private/project/.env",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "OPENAI_API_KEY=secret"]
+        )
+        XCTAssertEqual(WorkDaemon.label(for: localFailure), "internal_failure")
+    }
+
+    func testSpawnInputKillDispatchKeepsRawOutputLocal() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let hostID = UUID()
+        let workspaceID = UUID()
+        let channelID = UUID()
+        let sessionID = UUID()
+        let spawn = Self.control(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            hostID: hostID,
+            kind: "spawn",
+            payload: .object(["tool": .string("shell"), "label": .string("mock echo")])
+        )
+        let input = Self.control(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            hostID: hostID,
+            sessionID: sessionID,
+            kind: "input",
+            payload: .object(["text": .string("momo-workd-echo\n")])
+        )
+        let kill = Self.control(
+            workspaceID: workspaceID,
+            channelID: channelID,
+            hostID: hostID,
+            sessionID: sessionID,
+            kind: "kill",
+            payload: .object([:])
+        )
+        let api = MockWorkHostAPI(
+            controls: [[spawn], [input], [kill]],
+            session: WorkSession(
+                id: sessionID,
+                workspaceId: workspaceID,
+                channelId: channelID,
+                memberId: UUID(),
+                hostId: hostID,
+                rootMessageId: UUID(),
+                tool: "shell",
+                label: "mock echo",
+                status: "running",
+                startedAtMs: 1,
+                endedAtMs: nil,
+                exitCode: nil
+            )
+        )
+        let manager = ProcessManager(
+            templates: ["shell": CommandTemplate(executable: "/bin/cat", arguments: [])],
+            outputDirectory: directory
+        )
+        let daemon = WorkDaemon(
+            hostID: hostID,
+            api: api,
+            processes: manager,
+            pollInterval: .milliseconds(10),
+            heartbeatInterval: .seconds(30),
+            logger: Logger(label: "test")
+        )
+        await daemon.pollOnce()
+        await daemon.pollOnce()
+        try await Task.sleep(for: .milliseconds(100))
+        await daemon.pollOnce()
+
+        let events = await api.events
+        XCTAssertTrue(events.contains("ack:\(spawn.id):true:\(sessionID)"))
+        XCTAssertTrue(events.contains("ack:\(input.id):true:\(sessionID)"))
+        XCTAssertTrue(events.contains("ack:\(kill.id):true:\(sessionID)"))
+        XCTAssertTrue(events.contains(where: { $0.hasPrefix("end:\(sessionID):") }))
+        let output = try String(contentsOf: await manager.outputURL(for: sessionID), encoding: .utf8)
+        XCTAssertTrue(output.contains("momo-workd-echo"))
+        XCTAssertFalse(events.contains(where: { $0.contains("momo-workd-echo") }))
+    }
+
+    private static func control(
+        workspaceID: UUID,
+        channelID: UUID,
+        hostID: UUID,
+        sessionID: UUID? = nil,
+        kind: String,
+        payload: JSONValue
+    ) -> WorkControl {
+        WorkControl(
+            id: UUID(),
+            workspaceId: workspaceID,
+            channelId: channelID,
+            requesterMemberId: UUID(),
+            targetHostId: hostID,
+            sessionId: sessionID,
+            kind: kind,
+            payload: payload,
+            status: "dispatched",
+            approvalMessageId: nil,
+            createdAtMs: 1,
+            updatedAtMs: 1
+        )
+    }
+}
+
+actor MockWorkHostAPI: WorkHostAPI {
+    private var controlBatches: [[WorkControl]]
+    private let session: WorkSession
+    private(set) var events: [String] = []
+
+    init(controls: [[WorkControl]], session: WorkSession) {
+        controlBatches = controls
+        self.session = session
+    }
+
+    func heartbeat(hostID: UUID) async throws { events.append("heartbeat:\(hostID)") }
+    func pendingControls(hostID: UUID) async throws -> [WorkControl] {
+        guard !controlBatches.isEmpty else { return [] }
+        return controlBatches.removeFirst()
+    }
+    func createSession(hostID: UUID, control: WorkControl) async throws -> WorkSession {
+        events.append("create:\(control.id)")
+        return session
+    }
+    func acknowledge(
+        hostID: UUID,
+        controlID: UUID,
+        ok: Bool,
+        sessionID: UUID?,
+        errorLabel: String?
+    ) async throws {
+        events.append("ack:\(controlID):\(ok):\(sessionID?.uuidString ?? "nil")")
+    }
+    func endSession(hostID: UUID, sessionID: UUID, exitCode: Int?) async throws {
+        events.append("end:\(sessionID):\(exitCode.map(String.init) ?? "nil")")
+    }
+}
