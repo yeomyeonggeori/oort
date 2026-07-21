@@ -54,7 +54,6 @@ final class MemoryExtractionTests: XCTestCase {
             message("[memory:add id=\(memoryID)] invalid add"),
             message("[memory:update] missing target"),
             message("[memory:invalidate] missing target"),
-            message("[memory:noop id=\(memoryID)] invalid noop"),
         ]
         let result = try await MockMemoryExtractor().extract(batch(messages: messages))
         XCTAssertTrue(result.isEmpty)
@@ -85,9 +84,7 @@ final class MemoryExtractionTests: XCTestCase {
           {"operation":"UPDATE","kind":"fact","body":"missing target","confidence":0.8,
            "sourceMessageIds":["\(messageID.uuidString)"]},
           {"operation":"INVALIDATE","kind":"fact","body":"missing target","confidence":0.8,
-           "sourceMessageIds":["\(messageID.uuidString)"]},
-          {"operation":"NOOP","targetMemoryId":"\(memoryID.uuidString)","kind":"fact",
-           "body":"invalid noop","confidence":0.8,"sourceMessageIds":["\(messageID.uuidString)"]}
+           "sourceMessageIds":["\(messageID.uuidString)"]}
         ]
         """
         let result = try HermesMemoryExtractor.decode(json, allowedSources: [messageID])

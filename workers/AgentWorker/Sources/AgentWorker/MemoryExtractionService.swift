@@ -38,10 +38,12 @@ private func hasValidMemoryTarget(
     targetMemoryID: UUID?
 ) -> Bool {
     switch operation {
-    case .add, .noop:
+    case .add:
         return targetMemoryID == nil
     case .update, .invalidate:
         return targetMemoryID != nil
+    case .noop:
+        return true
     }
 }
 
