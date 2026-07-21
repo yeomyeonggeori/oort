@@ -11,10 +11,6 @@ import LoginPage from "./ui/LoginPage";
 import ChatPage from "./ui/ChatPage";
 import { inviteCodeFromUrl } from "./join/model";
 
-// Read the bearer invite once. The address is cleaned only after a successful
-// join, as required by the W-5 handoff; the code is never logged.
-const initialJoinCode = inviteCodeFromUrl(new URL(window.location.href));
-
 export default function App() {
   const session = useSyncExternalStore(subscribeSession, getSession);
   const authExpired = useSyncExternalStore(subscribeSession, getAuthExpired);
@@ -23,7 +19,11 @@ export default function App() {
   const [resuming, setResuming] = useState(
     () => getSession() !== null && getAccessToken() === null
   );
-  const [joinCode, setJoinCode] = useState<string | null>(initialJoinCode);
+  // Read the bearer invite once into component state so clearing the state
+  // also releases the app's last long-lived reference to the code.
+  const [joinCode, setJoinCode] = useState<string | null>(() =>
+    inviteCodeFromUrl(new URL(window.location.href))
+  );
   const [loginPrefillEmail, setLoginPrefillEmail] = useState<
     string | undefined
   >(undefined);
