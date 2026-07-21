@@ -440,6 +440,13 @@ public struct MomoMacRootView: View {
                 selectedWorkRunID = runId
                 openDetailPane(.work)
             },
+            canOpenWorkTerminal: { sessionId in
+                workConsoleController.canOpenRemoteTerminal(sessionId: sessionId)
+            },
+            onOpenWorkTerminal: { sessionId in
+                setWorkConsolePresented(true)
+                Task { await workConsoleController.openRemoteTerminal(sessionId: sessionId) }
+            },
             onRequestLogin: {
                 sessionChrome?.switchSession()
             },

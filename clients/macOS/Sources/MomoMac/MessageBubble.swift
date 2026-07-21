@@ -28,6 +28,7 @@ public struct MessageBubble: View {
     private let interactionError: MomoMessageInteractionError?
     private let onToggleReaction: ((String) -> Void)?
     private let onOpenThread: (() -> Void)?
+    private let onOpenWorkTerminal: (() -> Void)?
     private let onEdit: ((String) async -> Bool)?
     private let onDelete: (() -> Void)?
     private let onDismissInteractionError: (() -> Void)?
@@ -73,6 +74,7 @@ public struct MessageBubble: View {
         self.interactionError = nil
         self.onToggleReaction = nil
         self.onOpenThread = nil
+        self.onOpenWorkTerminal = nil
         self.onEdit = nil
         self.onDelete = nil
         self.onDismissInteractionError = nil
@@ -97,6 +99,7 @@ public struct MessageBubble: View {
         interactionError: MomoMessageInteractionError? = nil,
         onToggleReaction: ((String) -> Void)? = nil,
         onOpenThread: (() -> Void)? = nil,
+        onOpenWorkTerminal: (() -> Void)? = nil,
         onEdit: ((String) async -> Bool)? = nil,
         onDelete: (() -> Void)? = nil,
         onDismissInteractionError: (() -> Void)? = nil,
@@ -119,6 +122,7 @@ public struct MessageBubble: View {
         self.interactionError = interactionError
         self.onToggleReaction = onToggleReaction
         self.onOpenThread = onOpenThread
+        self.onOpenWorkTerminal = onOpenWorkTerminal
         self.onEdit = onEdit
         self.onDelete = onDelete
         self.onDismissInteractionError = onDismissInteractionError
@@ -729,6 +733,12 @@ public struct MessageBubble: View {
             if onOpenThread != nil {
                 Button(action: openThread) {
                     Label(timelineCopy.workSessionOpenThread, systemImage: "arrowshape.turn.up.left")
+                }
+                .buttonStyle(.borderless)
+            }
+            if isRunning, let onOpenWorkTerminal {
+                Button(action: onOpenWorkTerminal) {
+                    Label(timelineCopy.workSessionOpenRemoteTerminal, systemImage: "terminal")
                 }
                 .buttonStyle(.borderless)
             }

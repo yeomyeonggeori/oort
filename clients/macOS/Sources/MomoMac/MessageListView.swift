@@ -51,6 +51,8 @@ public struct MessageListView: View {
     @ObservedObject var viewModel: ChatViewModel
     @StateObject private var huddleViewModel: MomoHuddleViewModel
     private let onOpenWorkDetail: (RunID) -> Void
+    private let canOpenWorkTerminal: (WorkSessionID) -> Bool
+    private let onOpenWorkTerminal: (WorkSessionID) -> Void
     private let onRequestLogin: () -> Void
     private let onOpenMemberDirectory: MomoMemberDirectoryHook?
     private let onOpenChannelSettings: ((ChannelID) -> Void)?
@@ -100,6 +102,8 @@ public struct MessageListView: View {
     public init(
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void = { _ in },
+        canOpenWorkTerminal: @escaping (WorkSessionID) -> Bool = { _ in false },
+        onOpenWorkTerminal: @escaping (WorkSessionID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void = {},
         onOpenMemberDirectory: MomoMemberDirectoryHook? = nil,
         onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
@@ -111,6 +115,8 @@ public struct MessageListView: View {
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
+        self.canOpenWorkTerminal = canOpenWorkTerminal
+        self.onOpenWorkTerminal = onOpenWorkTerminal
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.onOpenChannelSettings = onOpenChannelSettings
@@ -128,6 +134,8 @@ public struct MessageListView: View {
     init(
         viewModel: ChatViewModel,
         onOpenWorkDetail: @escaping (RunID) -> Void,
+        canOpenWorkTerminal: @escaping (WorkSessionID) -> Bool = { _ in false },
+        onOpenWorkTerminal: @escaping (WorkSessionID) -> Void = { _ in },
         onRequestLogin: @escaping () -> Void,
         onOpenMemberDirectory: MomoMemberDirectoryHook?,
         onOpenChannelSettings: ((ChannelID) -> Void)? = nil,
@@ -142,6 +150,8 @@ public struct MessageListView: View {
     ) {
         self.viewModel = viewModel
         self.onOpenWorkDetail = onOpenWorkDetail
+        self.canOpenWorkTerminal = canOpenWorkTerminal
+        self.onOpenWorkTerminal = onOpenWorkTerminal
         self.onRequestLogin = onRequestLogin
         self.onOpenMemberDirectory = onOpenMemberDirectory
         self.onOpenChannelSettings = onOpenChannelSettings
@@ -856,6 +866,7 @@ public struct MessageListView: View {
                     onPresentThread()
                     selectedThreadRootID = item.message.rootId ?? item.message.id
                 },
+                onOpenWorkTerminal: workTerminalAction(for: item.message),
                 onEdit: canModify
                     ? { body in
                         await viewModel.editMessage(item.message, body: body)
@@ -901,6 +912,15 @@ public struct MessageListView: View {
         .onAppear {
             viewModel.messageDidRender(item.message)
         }
+    }
+
+    private func workTerminalAction(for message: Message) -> (() -> Void)? {
+        guard message.props["kind"]?.stringValue == "work_session",
+              let rawSessionId = message.props["session_id"]?.stringValue,
+              let sessionId = WorkSessionID(uuidString: rawSessionId),
+              canOpenWorkTerminal(sessionId)
+        else { return nil }
+        return { onOpenWorkTerminal(sessionId) }
     }
 
     private var threadRoot: Message? {

@@ -173,6 +173,28 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
     }
 
+    func testRemoteAttachAvailabilityRequiresExplicitPTYBinding() {
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let member = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let host = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000000701")!
+
+        let unbound = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: member, hostId: host, rootMessageId: root, tool: .codex,
+            label: "No remote PTY", status: .running, startedAtMs: 1
+        )
+        let bound = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: member, hostId: host, rootMessageId: root, tool: .codex,
+            label: "Remote PTY", status: .running, startedAtMs: 1, ptyId: "pty-511"
+        )
+
+        XCTAssertFalse(unbound.isRemotePTYBound)
+        XCTAssertTrue(bound.isRemotePTYBound)
+    }
+
     func testRemoteTerminalFramesUseOnlyThePTYContractFields() throws {
         let ptyID = "pty:remote-511"
         let input = Data("echo 안녕\n".utf8)

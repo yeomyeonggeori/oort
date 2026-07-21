@@ -408,6 +408,8 @@ private struct MomoWorkSessionDetail: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(session.label)
                     .momoTypography(.emphasizedRow)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 HStack(spacing: MomoTheme.WorkConsole.compactSpacing) {
                     Text(copy.workToolTitle(session.tool))
                     Text("•")
@@ -420,11 +422,14 @@ private struct MomoWorkSessionDetail: View {
                 .momoTypography(.metadata)
                 .foregroundStyle(.secondary)
             }
-            if controller.canOpenRemoteTerminal(session),
+            if session.isRemotePTYBound,
                let hostName = controller.hostDisplayName(for: session) {
                 Text(hostName)
                     .momoTypography(.metadata)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 160)
                     .padding(.horizontal, MomoTheme.WorkConsole.standardSpacing)
                     .padding(.vertical, MomoTheme.WorkConsole.compactSpacing)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
@@ -554,7 +559,6 @@ private struct MomoRemoteWorkTerminalDetail: View {
                 Divider()
             }
             MomoRemoteSwiftTermView(session: session, theme: terminalTheme)
-                .allowsHitTesting(!session.isReadOnly)
         }
     }
 

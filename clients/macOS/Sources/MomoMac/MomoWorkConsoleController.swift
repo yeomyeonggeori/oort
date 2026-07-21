@@ -328,7 +328,11 @@ final class MomoWorkConsoleController: ObservableObject {
         session.isRunning
             && owns(session)
             && localSessions[session.id] == nil
-            && (session.isRemotePTYBound || session.hostId != hostId)
+            && session.isRemotePTYBound
+    }
+
+    func canOpenRemoteTerminal(sessionId: WorkSessionID) -> Bool {
+        sessions.first(where: { $0.id == sessionId }).map(canOpenRemoteTerminal) ?? false
     }
 
     func hostDisplayName(for session: MomoWorkSession) -> String? {
@@ -351,6 +355,11 @@ final class MomoWorkConsoleController: ObservableObject {
         remoteSessions[session.id] = remote
         selectedSessionId = session.id
         await remote.start()
+    }
+
+    func openRemoteTerminal(sessionId: WorkSessionID) async {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else { return }
+        await openRemoteTerminal(session)
     }
 
     func disconnectRemoteTerminals() {
