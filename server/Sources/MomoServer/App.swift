@@ -146,6 +146,7 @@ enum AppBuilder {
         HuddleRoutes(db: db, liveKit: config.liveKit).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
         DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
+        MemoryRoutes(db: db).add(to: authed)
         attachmentRoutes.addProtected(to: authed)
         let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)
         webhookRoutes.addPublic(to: router)

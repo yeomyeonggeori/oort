@@ -5,12 +5,22 @@
 - 웹에 credential-free Work 세션 목록, 기존 Timeline 기반 root thread read-only 관전, 메모리 전용 observer capability를 HTTPS direct stream에만 전달하는 lazy xterm 터미널을 추가했다. 입력·resize·kill UI/전송은 없으며 WSS-only·query-bearing·비HTTPS 원격 endpoint는 fail-closed한다.
 - MomoCore와 같은 `artifact_kind=diff|commit|pr` 우선순위·상한·안전한 HTTPS 링크 규칙으로 웹 타입드 카드를 렌더한다. Vitest 71 tests(artifact 11, observer 상태기계 13), eslint, typecheck, Vite build, npm permissive license gate가 PASS했다.
 - 실제 server→remote host observer HTTPS stream, CORS/CSP, capability 만료·회수 왕복은 지시대로 Docker·브라우저를 실행하지 않아 오케스트레이터 검증 전까지 `runtime-unverified`다.
+## MOMO-526 Memory Plane 스키마·추출 워커 v0 (#596, 2026-07-21)
+
+- ADR-0129 D1·D2·D5에 따라 migration 027에 Memory Plane 원장·채널 워터마크·정책 스위치를 FORCE RLS로 추가하고, source_ref는 message/channel 식별자만 저장한다. 메모리 CRUD·무효화·admin 정책-off 일괄 삭제 REST와 `memory.updated` transactional outbox를 OpenAPI 정본에 반영했다.
+- AgentWorker는 기존 BYOA Hermes transport 또는 결정적 mock으로 후보 추출→기존 유사 대조→ADD/UPDATE/INVALIDATE/NOOP를 수행하며 후보·메모리·lifecycle·audit·outbox·watermark를 한 트랜잭션에 반영한다. server 141 tests·AgentWorker 41 tests와 전 9개 Swift 패키지 build, OpenAPI YAML, verifier bash/ShellCheck 정적 검증은 PASS했다.
+- `verify_memory_plane.sh`의 28030~28033 격리 PG18 왕복과 `runtime-db` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`다. 실제 external Hermes 추출은 repo 밖 credential opt-in 전까지 `runtime-unverified`이며 provider 자격증명은 worker process 밖으로 유입하지 않는다.
 
 ## W-5 초대 링크 웹 합류 (#593, 2026-07-21)
 
 - `/join?code=...`와 `/i/<code>` SPA 폴백이 같은 가입 폼을 사용하고, 표시명·handle·이메일·비밀번호를 현재 오리진의 `POST /v1/join`으로만 보낸다. 만료·소진·차단 403을 종결 카피로 구분하고 가입 성공 후 `history.replaceState`로 초대 코드 URL을 제거한다.
 - pinned `momo-linkshort` 이미지를 prod install/upgrade·rollback에 편입하고 Caddy `/i/*`를 SPA보다 먼저 LinkShort로 프록시했다. LinkShort는 `https://${APP_DOMAIN}/join?code=...`만 조립하며 코드를 저장·검증하지 않는다.
 - 웹 47 tests(신규 초대 파싱·검증·오류 9), lint, typecheck, build와 LinkShort 5 tests, publish/install 정적 계약 및 bash 문법은 PASS했다. Docker/Caddy/브라우저는 지시대로 실행하지 않았으며 초대 생성→단축링크→가입→메시지 1건 실왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
+## MOMO-530 gateway work tool 원장 경로 (2026-07-21)
+
+- Gateway BYOA adapter가 host 설정 시 `work.spawn|input|read|kill` 닫힌 스키마를 provider에 노출하고, 서버는 `status=tool_call` callback의 run/lease/actor/`work:control` scope를 재검증한 뒤 기존 `WorkControlRoutes` 승인·auto-approve·host·lineage·audit/outbox 트랜잭션을 그대로 재사용한다. host UUID는 provider arguments 밖의 adapter 설정에서만 주입하며 call_id 재시도는 멱등, 다른 입력 재사용은 409다.
+- server 138 tests, AgentWorker 35 tests, Hermes adapter 56 tests, Python compile, verifier bash 정적 검증은 PASS했다. `verify_hermes_gateway_adapter.sh`의 gateway spawn→승인→dispatch→ack 실왕복과 기존 worker runtime 경로 회귀는 Docker 실행 금지 지시에 따라 오케스트레이터 게이트 전까지 `runtime-unverified`다.
 
 ## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
 

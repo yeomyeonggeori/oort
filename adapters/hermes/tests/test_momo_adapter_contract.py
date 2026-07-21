@@ -71,6 +71,14 @@ class CaptureAdapter(momo_adapter.MomoAdapter):
         call = {"method": "POST", "path": path, "body": dict(body)}
         if "/gateway/" in path:
             self.gateway_posts.append(call)
+            if body.get("status") == "tool_call":
+                return {
+                    "status": "accepted",
+                    "workControl": {
+                        "id": "00000000-0000-7530-8000-000000000001",
+                        "status": "pending_approval",
+                    },
+                }
             return {"status": "accepted"}
         self.posts.append(call)
         if path.endswith("/invoke"):
@@ -446,6 +454,80 @@ class HermesAdapterContractTests(unittest.TestCase):
                 {
                     "status": "approval_required",
                     "tool_call": {"name": "create_github_issue", "arguments": {}},
+                },
+                {},
+            )
+
+    def test_gateway_work_tool_uses_configured_host_and_stops_for_approval(self):
+        host_id = "00000000-0000-7530-8000-000000000530"
+
+        class Runtime:
+            def run_momo_job(self, payload):
+                names = {
+                    tool["function"]["name"]
+                    for tool in payload["tools"]
+                    if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+                }
+                self.names = names
+                return {
+                    "tool_call": {
+                        "id": "call-work-spawn-1",
+                        "name": "work.spawn",
+                        "arguments": {"tool": "codex", "label": "Fix gateway parity"},
+                    }
+                }
+
+        runtime = Runtime()
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        adapter.cfg.work_host_id = host_id
+        adapter.runtime = runtime
+        event = {
+            "channel": "agentwork:wsworkspace-1.agent-1",
+            "type": "agent.job",
+            "payload": {
+                "run_id": "run-1",
+                "workspace_id": "workspace-1",
+                "channel_id": "channel-1",
+                "agent_member_id": "agent-1",
+            },
+        }
+
+        asyncio.run(adapter.handle_message(event))
+
+        self.assertEqual(
+            runtime.names,
+            {"work.spawn", "work.input", "work.read", "work.kill"},
+        )
+        self.assertEqual(len(adapter.gateway_posts), 2)
+        callback = adapter.gateway_posts[-1]["body"]
+        self.assertEqual(callback["status"], "tool_call")
+        self.assertEqual(callback["tool_call"]["target_host_id"], host_id)
+        self.assertEqual(callback["tool_call"]["name"], "work.spawn")
+        self.assertNotIn("target_host_id", callback["tool_call"]["arguments"])
+        self.assertNotIn("run-1", adapter._pending_gateway_results)
+
+    def test_gateway_work_tools_fail_closed_without_configured_host(self):
+        adapter = CaptureAdapter(
+            workspace_id="workspace-1",
+            agent_member_id="agent-1",
+            run_id="run-1",
+            final_text="unused",
+        )
+        payload = adapter._with_gateway_work_tools({"tools": []})
+        self.assertEqual(payload["tools"], [])
+        with self.assertRaises(momo_adapter.MomoApprovalContractError):
+            adapter._normalize_gateway_result(
+                {
+                    "tool_call": {
+                        "id": "call-work-spawn-1",
+                        "name": "work.spawn",
+                        "arguments": {"tool": "codex", "label": "Fix"},
+                    }
                 },
                 {},
             )

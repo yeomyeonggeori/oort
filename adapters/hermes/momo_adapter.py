@@ -218,6 +218,11 @@ class MomoConfig:
     agent_handle: str = field(
         default_factory=lambda: os.environ.get("MOMO_AGENT_HANDLE", "hermes")
     )
+    # Host selection is adapter-owned, never provider-authored. Work tools are
+    # exposed to the gateway runtime only when this opaque registry UUID is set.
+    work_host_id: str = field(
+        default_factory=lambda: os.environ.get("MOMO_WORK_HOST_ID", "")
+    )
     allow_insecure_http: bool = field(
         default_factory=lambda: os.environ.get(
             "MOMO_AGENT_ALLOW_INSECURE_HTTP", "0"
@@ -332,6 +337,10 @@ def _momo_config_from(config: Any) -> MomoConfig:
         _extra_value(extra, "MOMO_AGENT_HANDLE", "momo_agent_handle", "agent_handle")
         or cfg.agent_handle
     )
+    cfg.work_host_id = (
+        _extra_value(extra, "MOMO_WORK_HOST_ID", "momo_work_host_id", "work_host_id")
+        or cfg.work_host_id
+    )
     insecure_flag = _extra_value(
         extra,
         "MOMO_AGENT_ALLOW_INSECURE_HTTP",
@@ -352,6 +361,7 @@ def _platform_config_from_momo(cfg: MomoConfig) -> Any:
         "MOMO_WORKSPACE_ID": cfg.workspace_id,
         "MOMO_AGENT_MEMBER_ID": cfg.agent_member_id,
         "MOMO_AGENT_HANDLE": cfg.agent_handle,
+        "MOMO_WORK_HOST_ID": cfg.work_host_id,
         "MOMO_AGENT_TOKEN": cfg.agent_token,
         "MOMO_AGENT_ALLOW_INSECURE_HTTP": "1" if cfg.allow_insecure_http else "0",
     }
@@ -557,7 +567,103 @@ class MomoAdapter(BasePlatformAdapter):
         packet = dict(raw_packet) if isinstance(raw_packet, Mapping) else {}
         packet["tool_policy"] = policy
         assembled["context_packet_projection"] = packet
+        return self._with_gateway_work_tools(assembled)
+
+    def _with_gateway_work_tools(
+        self, payload: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Add the closed ADR-0130 work surface only for a configured host.
+
+        The provider can choose a verb and bounded arguments, but never the
+        execution host. MOMO_WORK_HOST_ID is attached only to the authenticated
+        callback and is deliberately absent from the provider tool schema.
+        """
+        assembled = dict(payload)
+        try:
+            uuid.UUID(self.cfg.work_host_id)
+        except (ValueError, TypeError, AttributeError):
+            return assembled
+
+        raw_tools = assembled.get("tools")
+        tools = list(raw_tools) if isinstance(raw_tools, Sequence) and not isinstance(
+            raw_tools, (str, bytes, bytearray)
+        ) else []
+        work_names = {definition["function"]["name"] for definition in self._work_tool_definitions()}
+        tools = [
+            tool
+            for tool in tools
+            if not (
+                isinstance(tool, Mapping)
+                and isinstance(tool.get("function"), Mapping)
+                and tool["function"].get("name") in work_names
+            )
+        ]
+        tools.extend(self._work_tool_definitions())
+        assembled["tools"] = tools
         return assembled
+
+    @staticmethod
+    def _work_tool_definitions() -> list[dict[str, Any]]:
+        uuid_schema = {"type": "string", "format": "uuid"}
+
+        def function(
+            name: str,
+            description: str,
+            properties: Mapping[str, Any],
+            required: Sequence[str],
+        ) -> dict[str, Any]:
+            return {
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": dict(properties),
+                        "required": list(required),
+                    },
+                },
+            }
+
+        return [
+            function(
+                "work.spawn",
+                "Request a host-owned CLI session. Human approval may be required.",
+                {
+                    "tool": {
+                        "type": "string",
+                        "enum": ["claude", "codex", "opencode", "shell"],
+                    },
+                    "label": {"type": "string", "minLength": 1, "maxLength": 120},
+                },
+                ["tool", "label"],
+            ),
+            function(
+                "work.input",
+                "Send text to a running session in this agent's approved lineage.",
+                {
+                    "session_id": uuid_schema,
+                    "text": {"type": "string", "minLength": 1, "maxLength": 32768},
+                },
+                ["session_id", "text"],
+            ),
+            function(
+                "work.read",
+                "Request bounded host-local output for an approved session.",
+                {
+                    "session_id": uuid_schema,
+                    "tail_lines": {"type": "integer", "minimum": 1, "maximum": 9999},
+                },
+                ["session_id"],
+            ),
+            function(
+                "work.kill",
+                "Stop a running session in this agent's approved lineage.",
+                {"session_id": uuid_schema},
+                ["session_id"],
+            ),
+        ]
 
     @classmethod
     def _normalize_plugin_tool_policy(
@@ -1573,6 +1679,42 @@ class MomoAdapter(BasePlatformAdapter):
             )
             return
 
+        work_tool_call = self._work_tool_call_from_result(result)
+        if work_tool_call is not None:
+            response = await self._report_gateway_work_tool_call(
+                workspace_id, run_id, work_tool_call
+            )
+            control = response.get("workControl")
+            if not isinstance(control, Mapping):
+                raise MomoApprovalContractError(
+                    "gateway work tool response is missing workControl"
+                )
+            status = str(control.get("status") or "").strip()
+            if status == "pending_approval":
+                self._pending_gateway_results.pop(run_id, None)
+                self._schedule_pending_recovery(
+                    reason="gateway-work-approval-slot-released", delay_s=0.1
+                )
+                return
+            control_id = str(control.get("id") or "unknown")
+            await self._complete_gateway_job(
+                workspace_id,
+                run_id,
+                {
+                    "status": "succeeded",
+                    "body": (
+                        f"Work control {control_id} is {status or 'accepted'}; "
+                        "the host acknowledgement remains authoritative."
+                    ),
+                    "usage": result.get("usage") or self._zero_usage(payload),
+                },
+            )
+            self._pending_gateway_results.pop(run_id, None)
+            self._schedule_pending_recovery(
+                reason="gateway-work-result-slot-released", delay_s=0.1
+            )
+            return
+
         await self._complete_gateway_job(workspace_id, run_id, result)
         self._pending_gateway_results.pop(run_id, None)
         self._schedule_pending_recovery(
@@ -1611,6 +1753,24 @@ class MomoAdapter(BasePlatformAdapter):
             self._gateway_callback_body(str(run_id), {
                 "status": "approval_request",
                 "approval_request": dict(approval_request),
+            }),
+        )
+
+    async def _report_gateway_work_tool_call(
+        self,
+        workspace_id: str,
+        run_id: str,
+        tool_call: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        path = f"/v1/workspaces/{workspace_id}/agent-runs/{run_id}/gateway/events"
+        return await self._post(
+            path,
+            self._gateway_callback_body(str(run_id), {
+                "status": "tool_call",
+                "tool_call": {
+                    **dict(tool_call),
+                    "target_host_id": self.cfg.work_host_id,
+                },
             }),
         )
 
@@ -2009,6 +2169,13 @@ class MomoAdapter(BasePlatformAdapter):
 
     def _normalize_gateway_result(self, result: Any, payload: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(result, Mapping):
+            work_tool_call = self._normalize_work_tool_call(result)
+            if work_tool_call is not None:
+                return {
+                    "status": "work_tool_call",
+                    "work_tool_call": work_tool_call,
+                    "usage": result.get("usage") or self._zero_usage(payload),
+                }
             approval_request = self._normalize_approval_request(result)
             if approval_request is not None:
                 return {
@@ -2036,15 +2203,7 @@ class MomoAdapter(BasePlatformAdapter):
             error = None
 
         if usage is None:
-            usage = {
-                "model": payload.get("model") or "hermes-agent",
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "cached_tokens": 0,
-                "reasoning_tokens": 0,
-                "cost_micro_usd": 0,
-                "was_estimated": True,
-            }
+            usage = self._zero_usage(payload)
         return {
             "status": status,
             "body": body,
@@ -2068,6 +2227,52 @@ class MomoAdapter(BasePlatformAdapter):
     ) -> Optional[dict[str, Any]]:
         value = result.get("approval_request")
         return dict(value) if isinstance(value, Mapping) else None
+
+    @staticmethod
+    def _work_tool_call_from_result(
+        result: Mapping[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        value = result.get("work_tool_call")
+        return dict(value) if isinstance(value, Mapping) else None
+
+    def _normalize_work_tool_call(
+        self, result: Mapping[str, Any]
+    ) -> Optional[dict[str, Any]]:
+        raw = result.get("tool_call")
+        if not isinstance(raw, Mapping):
+            return None
+        name = str(raw.get("name") or "").strip().lower()
+        if name not in {"work.spawn", "work.input", "work.read", "work.kill"}:
+            return None
+        try:
+            uuid.UUID(self.cfg.work_host_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise MomoApprovalContractError(
+                "gateway work tool requires MOMO_WORK_HOST_ID"
+            ) from exc
+        call_id = str(raw.get("call_id") or raw.get("id") or "").strip()
+        arguments = raw.get("arguments")
+        if not call_id or not isinstance(arguments, Mapping):
+            raise MomoApprovalContractError(
+                "gateway work tool requires a bounded call_id and object arguments"
+            )
+        return {
+            "call_id": call_id,
+            "name": name,
+            "arguments": dict(arguments),
+        }
+
+    @staticmethod
+    def _zero_usage(payload: Mapping[str, Any]) -> dict[str, Any]:
+        return {
+            "model": payload.get("model") or "hermes-agent",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+            "reasoning_tokens": 0,
+            "cost_micro_usd": 0,
+            "was_estimated": True,
+        }
 
     @staticmethod
     def _normalize_approval_request(

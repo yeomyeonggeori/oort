@@ -72,6 +72,7 @@ Adapter contract:
 - The adapter renews the lease while provider work and callbacks are in flight. `events`/`complete`, renew, and release bind the exact job id + lease id + bearer actor; an expired/non-owner capability fails closed, and an expired pending row can be taken over.
 - `send(channel, blocks)` writes through REST `POST /messages` only for an explicit momo `run_id`, with `client_msg_id` idempotency. Unbound Hermes lifecycle/setup/command notices are local-log-only; the native gateway final response is committed by `/gateway/complete`.
 - For a server-created job, the adapter reports status/tool proposals/partial output through `POST .../gateway/events` and final output/usage through `POST .../gateway/complete`. The server commits all user-visible state.
+- A configured gateway work host adds the closed `work.spawn|input|read|kill` tool definitions to the per-job provider payload. The provider returns `{call_id,name,arguments}` only; the adapter-owned `MOMO_WORK_HOST_ID` is attached outside `arguments` when posting `status=tool_call`. The server revalidates the exact run/lease/actor, requires the bearer to also hold `work:control`, derives the channel from `agent_run`, and enters the same `WorkControlRoutes` transaction used by the managed worker. `call_id` retries are idempotent and conflicting reuse is rejected. Missing/invalid host configuration exposes no work tools.
 - Legacy `handle_message(evt)` interop still acts only on `mention` and `dm.signal`, ignores self-authored events, derives an idempotent trigger key, and writes through REST.
 
 Adapter hard boundaries:
@@ -83,6 +84,7 @@ Adapter hard boundaries:
 - It must not forward Codex OAuth tokens into momo REST requests, message props,
   audit payloads, diagnostics, or adapter evidence.
 - It authenticates realtime-token, pending recovery, callbacks, and message writes with the same scoped `agent_bearer`; token actor must equal the job/run agent.
+- It never accepts provider-authored workspace/channel/run/host authority in work-tool arguments. Host selection stays in adapter configuration and raw PTY/process output still never crosses this callback.
 
 The fixture `fixtures/hermes-adapter-contract-v0/platform_adapter_event_mapping.json` fixes the minimum event mapping for this path.
 
