@@ -854,6 +854,19 @@ private struct IOSMessageInteractionSheet: View {
             }
         }
         .presentationDetents([.medium, .large])
+        .alert(
+            "메시지 동작 실패 / Message action failed",
+            isPresented: Binding(
+                get: { model.interactionFailureMessage != nil },
+                set: { isPresented in
+                    if !isPresented { model.clearInteractionFailure() }
+                }
+            )
+        ) {
+            Button("닫기 / Dismiss", role: .cancel) { model.clearInteractionFailure() }
+        } message: {
+            Text(model.interactionFailureMessage ?? "다시 시도하세요. / Try again.")
+        }
     }
 
     private func actionList(_ message: Message) -> some View {

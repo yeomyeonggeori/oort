@@ -458,6 +458,8 @@ public final class IOSTimelineModel {
     private let onReadState: ((ChannelReadState) -> Void)?
     private var eventTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
+    private var isLoadingTimelineProjection = false
+    private var bufferedRealtimeEvents: [RealtimeEvent] = []
     private var failedSend: IOSPendingMessageSend?
     private var pendingApprovalDecisions: [ApprovalID: IOSPendingApprovalDecision] = [:]
 
@@ -512,23 +514,35 @@ public final class IOSTimelineModel {
     public func load() async {
         guard !isSending else { return }
         phase = .loading
+        isLoadingTimelineProjection = true
+        bufferedRealtimeEvents = []
+        subscribe()
         do {
             async let historyRequest = backend.history(channel: channel, after: nil, limit: 200)
             async let reactionRequest = backend.reactionSnapshot(channel: channel)
             let (history, reactions) = try await (historyRequest, reactionRequest)
             messages = IOSTimelineReducer.sorted(history)
             reactionMembers = reactions
+            let bufferedEvents = bufferedRealtimeEvents
+            bufferedRealtimeEvents = []
+            isLoadingTimelineProjection = false
+            for event in bufferedEvents {
+                await applyRealtimeEvent(event)
+            }
             phase = .loaded
             if let sequence = messages.compactMap(\.seq).max() {
                 if let state = try? await backend.markRead(channel: channel, through: sequence) {
                     onReadState?(state)
                 }
             }
-            subscribe()
             await huddle.activate()
         } catch is CancellationError {
+            isLoadingTimelineProjection = false
+            bufferedRealtimeEvents = []
             return
         } catch {
+            isLoadingTimelineProjection = false
+            bufferedRealtimeEvents = []
             let isOffline = (error as? SessionError).map {
                 if case .transport = $0 { return true }
                 return false
@@ -560,6 +574,14 @@ public final class IOSTimelineModel {
     }
 
     func consumeRealtimeEvent(_ event: RealtimeEvent) async {
+        if isLoadingTimelineProjection {
+            bufferedRealtimeEvents.append(event)
+            return
+        }
+        await applyRealtimeEvent(event)
+    }
+
+    private func applyRealtimeEvent(_ event: RealtimeEvent) async {
         if case .huddle(let delta) = event {
             await huddle.apply(delta)
         }
