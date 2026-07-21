@@ -24,7 +24,7 @@ struct MomoServerMain {
             environmentName: config.momoEnvironment,
             environment: ProcessInfo.processInfo.environment
         )
-        try DriveArchiveClientFactory.validateForBoot(
+        try ArchiveClientFactory.validateForBoot(
             environmentName: config.momoEnvironment,
             environment: ProcessInfo.processInfo.environment
         )

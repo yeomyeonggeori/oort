@@ -199,8 +199,12 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `POSTGRES_HOST` | 서버/relay/worker | `localhost` | `DATABASE_URL` 미설정 시 폴백 호스트. |
 | `LOG_LEVEL` | 서버 | (info) | 로그 레벨. |
 | `MOMO_DRIVE_BACKEND` | 서버 | (미설정) | `stub`은 verifier/local 명시 opt-in 전용이며 staging/prod/internal-host 부팅에서 거부된다. 실백엔드는 `google` 또는 `sa`. |
+| `MOMO_ARCHIVE_BACKEND` | 서버 | `drive` | ADR-0127 첨부 저장 선택. `drive`는 기존 Google/검증 stub 경로, `s3`는 S3 호환 presigned PUT/GET 경로다. 알 수 없는 값이나 불완전한 S3 자격은 `UnavailableDriveArchiveClient`로 fail-closed한다. |
 | `MOMO_DRIVE_ARCHIVE_BACKEND` | 서버 | (`MOMO_DRIVE_BACKEND` 폴백) | 첨부 archive 백엔드. `google`/`sa`는 `drive.file`로 `channels/<channel_id>/` 폴더와 resumable 세션을 만들며, `stub`은 verifier/local 전용이고 strict 환경에서 부팅 거부된다. |
 | `MOMO_DRIVE_ARCHIVE_STUB_BASE_URL` | 서버 | `http://127.0.0.1:$PORT` | stub이 반환할 직접 PUT base URL. verifier 전용이며 Google 모드에서는 사용하지 않는다. |
+| `MOMO_S3_ENDPOINT` / `MOMO_S3_REGION` / `MOMO_S3_BUCKET` | 서버 | (미설정) | S3 호환 공개 endpoint, SigV4 region, bucket. `s3` 선택 시 셋 모두 필수다. 실제 클라이언트가 presigned URL에 직접 접근하므로 운영 endpoint는 HTTPS여야 한다. |
+| `MOMO_S3_ACCESS_KEY` / `MOMO_S3_SECRET_KEY` | 서버 | (미설정) | S3 SigV4 자격. 응답 URL 서명에만 사용하고 로그·DB·감사 원장에 저장하지 않는다. |
+| `MOMO_S3_FORCE_PATH_STYLE` | 서버 | `0` | `1`이면 `<endpoint>/<bucket>/<key>` path-style. compose MinIO에서는 필수이며 AWS/R2/B2는 제공자 endpoint 정책에 맞춘다. |
 | `MOMO_DRIVE_SA_KEY_PATH` | 서버 | (미설정) | repo 밖 SA JSON 파일 경로. 키 바이트는 로그·응답·DB에 저장하지 않는다. |
 | `MOMO_DRIVE_SHARED_DRIVE_ID` | 서버 | (미설정) | 경로 C가 접근할 공유 드라이브 1개의 ID. 미설정이면 `tools/call`이 fail-closed 오류를 반환한다. |
 | `PUBLIC_BASE_URL` | 서버 | (요청 origin) | momo-hosted MCP 상대 endpoint를 descriptor의 절대 URL로 조립할 public HTTPS origin. localhost HTTP만 개발 fallback 허용. |
