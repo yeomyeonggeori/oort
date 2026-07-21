@@ -3,7 +3,7 @@
 ## W-6 웹 Work 관전 v0 (#605, 2026-07-21)
 
 - 웹에 credential-free Work 세션 목록, 기존 Timeline 기반 root thread read-only 관전, 메모리 전용 observer capability를 HTTPS direct stream에만 전달하는 lazy xterm 터미널을 추가했다. 입력·resize·kill UI/전송은 없으며 WSS-only·query-bearing·비HTTPS 원격 endpoint는 fail-closed한다.
-- MomoCore와 같은 `artifact_kind=diff|commit|pr` 우선순위·상한·안전한 HTTPS 링크 규칙으로 웹 타입드 카드를 렌더한다. Vitest 62 tests(artifact 11, observer 상태기계 13), eslint, typecheck, Vite build, npm permissive license gate가 PASS했다.
+- MomoCore와 같은 `artifact_kind=diff|commit|pr` 우선순위·상한·안전한 HTTPS 링크 규칙으로 웹 타입드 카드를 렌더한다. Vitest 71 tests(artifact 11, observer 상태기계 13), eslint, typecheck, Vite build, npm permissive license gate가 PASS했다.
 - 실제 server→remote host observer HTTPS stream, CORS/CSP, capability 만료·회수 왕복은 지시대로 Docker·브라우저를 실행하지 않아 오케스트레이터 검증 전까지 `runtime-unverified`다.
 
 ## W-5 초대 링크 웹 합류 (#593, 2026-07-21)
