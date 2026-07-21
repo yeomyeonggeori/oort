@@ -224,6 +224,12 @@ gateway_probe "$SUSPEND_TOKEN" "$SUSPEND_AGENT_ID"
 expect 200 "pre-suspend gateway authentication"
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/members/$SUSPEND_AGENT_ID/suspend"
 expect 200 "agent suspend"
+[ "$(sql_value <<SQL
+SELECT count(*) FROM token
+ WHERE workspace_id='$WS_ID' AND actor_member_id='$SUSPEND_AGENT_ID'
+   AND kind='agent_bearer' AND revoked_at IS NOT NULL;
+SQL
+)" = 1 ] || { echo "[lifecycle-completion] suspend did not revoke agent credential" >&2; exit 1; }
 gateway_probe "$SUSPEND_TOKEN" "$SUSPEND_AGENT_ID"
 expect 401 "suspended agent gateway authentication"
 api "$OWNER_TOKEN" POST "/v1/workspaces/$WS_ID/members/$SUSPEND_AGENT_ID/reinstate"
@@ -237,6 +243,12 @@ issue_credential
 REMOVE_TOKEN="$AGENT_TOKEN"
 api "$OWNER_TOKEN" DELETE "/v1/workspaces/$WS_ID/members/$REMOVE_AGENT_ID"
 expect 200 "agent remove"
+[ "$(sql_value <<SQL
+SELECT count(*) FROM token
+ WHERE workspace_id='$WS_ID' AND actor_member_id='$REMOVE_AGENT_ID'
+   AND kind='agent_bearer' AND revoked_at IS NOT NULL;
+SQL
+)" = 1 ] || { echo "[lifecycle-completion] remove did not revoke agent credential" >&2; exit 1; }
 gateway_probe "$REMOVE_TOKEN" "$REMOVE_AGENT_ID"
 expect 401 "removed agent gateway authentication"
 
@@ -261,7 +273,7 @@ expect 403 "banned agent pairing"
 # and UUID keyset cursor all work without crossing the RLS tenant boundary.
 api "$VIEWER_TOKEN" GET "/v1/workspaces/$WS_ID/audit"
 expect 403 "non-admin audit access"
-NOW_MS="$(( $(date -u +%s) * 1000 ))"
+NOW_MS="$(( $(date -u +%s) * 1000 + 60000 ))"
 api "$OWNER_TOKEN" GET "/v1/workspaces/$WS_ID/audit?actions=member.&target_member_id=$SUSPEND_AGENT_ID&from_ms=0&to_ms=$NOW_MS&limit=1"
 expect 200 "filtered audit page"
 [ "$(printf '%s' "$RESPONSE_BODY" | jq '.events | length')" = 1 ] || exit 1
@@ -282,7 +294,7 @@ SQL
 rls_hidden="$(run_sql -tA <<SQL | tr -d '[:space:]'
 BEGIN;
 SET LOCAL ROLE momo_app;
-SELECT set_config('app.workspace_id','$WS_ID',true);
+SET LOCAL app.workspace_id = '$WS_ID';
 SELECT count(*) FROM audit_log WHERE workspace_id='$RLS_WORKSPACE';
 ROLLBACK;
 SQL
