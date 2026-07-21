@@ -545,6 +545,7 @@ struct MemoryExtractionService: Service {
                 """
                 UPDATE memory_item
                    SET body = \(proposal.body), confidence = \(proposal.confidence),
+                       embedding = NULL,
                        updated_at = clock_timestamp()
                  WHERE workspace_id = \(claim.workspaceID)
                    AND id = \(targetID)::uuid

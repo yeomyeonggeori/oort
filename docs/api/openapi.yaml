@@ -3190,6 +3190,7 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
+
     post:
       tags: [memories]
       operationId: createMemory
@@ -3236,6 +3237,46 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/MemoryPolicyResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/memories/search:
+    get:
+      tags: [memories]
+      operationId: searchMemories
+      summary: Search active memories with FTS and vector reciprocal-rank fusion.
+      description: >
+        Runs through the caller's normal FORCE RLS tenant path and current
+        source-channel membership. Items without embeddings remain eligible
+        through FTS. Query embedding failure degrades to FTS-only retrieval.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: q
+          in: query
+          required: true
+          schema: {type: string, minLength: 2}
+        - name: scope
+          in: query
+          schema: {$ref: "#/components/schemas/MemoryScope"}
+        - name: agent
+          in: query
+          schema: {type: string, format: uuid}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 50, default: 20}
+      responses:
+        "200":
+          description: RRF-ranked memory hits; FTS-only and vector-only hits are valid.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MemorySearchResponse"}
+        "400":
+          description: Query, scope, agent, or limit is malformed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "429": {$ref: "#/components/responses/RateLimited"}
@@ -3713,6 +3754,26 @@ components:
         memories:
           type: array
           items: {$ref: "#/components/schemas/MemoryItem"}
+
+    MemorySearchHit:
+      type: object
+      additionalProperties: false
+      required: [memory, score]
+      properties:
+        memory: {$ref: "#/components/schemas/MemoryItem"}
+        score: {type: number, format: double, minimum: 0}
+        ftsRank: {type: integer, minimum: 1}
+        vectorRank: {type: integer, minimum: 1}
+        vectorDistance: {type: number, format: double, minimum: 0}
+
+    MemorySearchResponse:
+      type: object
+      additionalProperties: false
+      required: [hits]
+      properties:
+        hits:
+          type: array
+          items: {$ref: "#/components/schemas/MemorySearchHit"}
 
     MemoryPolicy:
       type: object
