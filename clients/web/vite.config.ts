@@ -16,6 +16,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      "/health": {
+        target: process.env.MOMO_DEV_API_URL ?? "http://127.0.0.1:8080",
+        changeOrigin: true,
+      },
       "/v1": {
         target: process.env.MOMO_DEV_API_URL ?? "http://127.0.0.1:8080",
         changeOrigin: true,

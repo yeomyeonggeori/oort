@@ -59,7 +59,14 @@ export default function ChannelList({
                 aria-current={selected ? "true" : undefined}
                 onClick={() => onSelect(channel.id)}
               >
-                <span className="channel-item-label">{labelFor(channel)}</span>
+                <span className="channel-item-label">
+                  {labelFor(channel)}
+                  {channel.muted && (
+                    <svg className="muted-icon" viewBox="0 0 16 16" role="img" aria-label="알림 음소거됨">
+                      <path d="M3 6.5h2L8 4v8L5 9.5H3zM11 6l3 3m0-3-3 3" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </span>
                 {showBadge && (
                   <span
                     className={

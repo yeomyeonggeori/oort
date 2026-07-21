@@ -4,6 +4,7 @@ import {
   AUTHOR_GROUP_WINDOW_MS,
   mentionsMember,
   mergeMessages,
+  removeMessageReactions,
   startsAuthorGroup,
   type TimelineMessage,
 } from "./model";
@@ -108,5 +109,14 @@ describe("reaction reducer", () => {
       }
     );
     expect(result).toEqual({});
+  });
+
+  it("drops all reactions when a message is deleted", () => {
+    expect(
+      removeMessageReactions(
+        { "message-1": { "👍": ["member-a"] } },
+        "MESSAGE-1"
+      )
+    ).toEqual({});
   });
 });

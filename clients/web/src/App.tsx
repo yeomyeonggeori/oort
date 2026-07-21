@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { refreshSession } from "./api/client";
 import {
   getAccessToken,
+  getAuthExpired,
   getSession,
   subscribeSession,
 } from "./auth/session";
@@ -31,6 +32,7 @@ const initialJoinCode = captureJoinCode();
 
 export default function App() {
   const session = useSyncExternalStore(subscribeSession, getSession);
+  const authExpired = useSyncExternalStore(subscribeSession, getAuthExpired);
   // A persisted session (refresh token) needs one rotation to mint the
   // in-memory access token before the chat surface can load.
   const [resuming, setResuming] = useState(
@@ -64,7 +66,7 @@ export default function App() {
   // needs email+password, which a signed-in user should not re-enter. See
   // clients/web/README.md known limits.
   if (session !== null && getAccessToken() !== null) {
-    return <ChatPage session={session} />;
+    return <ChatPage session={session} authExpired={authExpired} />;
   }
 
   if (joinCode !== null) {

@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## W-2 웹 read-only 클라이언트 정비 (#557, 2026-07-21)
+
+- 기존 `clients/web` 위에 서버 URL `/health` 확인, HTTPS/localhost 정책, 메모리 access·회전 refresh 인증, 채널 unread/mention·muted, 200건 타임라인과 과거 cursor, 5분 저자 그룹·날짜·멘션·edited/tombstone·링크/코드·반응 snapshot을 가산했다. `message.new/edited/deleted`와 `reaction.added/removed`는 cold-load 버퍼 뒤 적용하며 Centrifugo recovery를 요청한다.
+- empty/loading/error/offline과 세션 만료 인라인 상태를 추가했고, 만료 시 기존 메시지를 유지한다. Vitest 18 tests, eslint, TypeScript typecheck, Vite build는 PASS했다. Docker·브라우저 라이트/다크·한국어 장문·200+ 스크롤 육안은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-511-U macOS 원격 터미널 attach (2026-07-21)
 
 - macOS Work 서랍이 owner의 running 원격 `work_session`에서 exact 3-field attach grant를 메모리에서만 소비하고, capability를 Authorization header로 전달해 SwiftTerm과 remote PTY를 직접 연결한다. stdout 렌더, byte stdin, 문자 단위 resize, kill 프레임은 `connect/send_stdin/resize/kill` 최소 계약만 사용하며 capability와 endpoint를 URL query, UserDefaults, 로그, 원장에 남기지 않는다.

@@ -117,3 +117,16 @@ export function applyReactionDelta(
   else next[messageKey] = nextMessage;
   return next;
 }
+
+export function removeMessageReactions(
+  snapshot: ReactionSnapshot,
+  messageId: string
+): ReactionSnapshot {
+  const key = Object.keys(snapshot).find(
+    (candidate) => candidate.toLowerCase() === messageId.toLowerCase()
+  );
+  if (key === undefined) return snapshot;
+  const next = { ...snapshot };
+  delete next[key];
+  return next;
+}

@@ -5,12 +5,18 @@
 
 :root {
   color-scheme: light dark;
-  --bg: #f7f6f3;
-  --bg-raised: #ffffff;
-  --bg-sidebar: #efece6;
-  --text: #24211c;
-  --text-muted: #77716a;
-  --accent: #4f46e5;
+  --color-bg-primary: #f7f6f3;
+  --color-bg-raised: #ffffff;
+  --color-bg-sidebar: #efece6;
+  --color-text-primary: #24211c;
+  --color-text-secondary: #77716a;
+  --color-accent: #4f46e5;
+  --bg: var(--color-bg-primary);
+  --bg-raised: var(--color-bg-raised);
+  --bg-sidebar: var(--color-bg-sidebar);
+  --text: var(--color-text-primary);
+  --text-muted: var(--color-text-secondary);
+  --accent: var(--color-accent);
   --accent-contrast: #ffffff;
   --border: #dcd8d0;
   --danger: #b3261e;
@@ -24,12 +30,12 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #17161a;
-    --bg-raised: #201f24;
-    --bg-sidebar: #1b1a1f;
-    --text: #ececf1;
-    --text-muted: #9b98a3;
-    --accent: #818cf8;
+    --color-bg-primary: #17161a;
+    --color-bg-raised: #201f24;
+    --color-bg-sidebar: #1b1a1f;
+    --color-text-primary: #ececf1;
+    --color-text-secondary: #9b98a3;
+    --color-accent: #818cf8;
     --accent-contrast: #17161a;
     --border: #34323b;
     --danger: #f2b8b5;
@@ -103,6 +109,11 @@ body {
 .field-label {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.field-help {
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .field input {
@@ -201,6 +212,12 @@ body {
 .workspace-name {
   font-weight: 700;
   font-size: 16px;
+}
+
+.workspace-id {
+  color: var(--text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
 }
 
 .realtime-status {
@@ -357,11 +374,58 @@ body {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
 .message-row {
   max-width: 760px;
+  padding: 2px 8px;
+  border-radius: 8px;
+  position: relative;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+}
+
+.message-group-start {
+  margin-top: 12px;
+  padding-top: 4px;
+}
+
+.message-group-continuation {
+  padding-left: 52px;
+}
+
+.message-mentioned {
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.message-time-continuation {
+  position: absolute;
+  left: 8px;
+  top: 4px;
+  opacity: 0;
+}
+
+.message-row:hover .message-time-continuation,
+.message-time-continuation:focus {
+  opacity: 1;
+}
+
+.date-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.date-divider::before,
+.date-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: var(--border);
 }
 
 .message-meta {
@@ -395,6 +459,51 @@ body {
   margin: 2px 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.message-text {
+  white-space: pre-wrap;
+}
+
+.message-body pre {
+  overflow-x: auto;
+  margin: 8px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
+
+.message-body a {
+  color: var(--color-accent);
+}
+
+.message-tombstone {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.edited-badge {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.reaction-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.reaction-pill {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  font-size: 12px;
 }
 
 .timeline-footer {
@@ -464,9 +573,36 @@ body {
 }
 
 .channel-item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.muted-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.status-banner,
+.inline-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.status-banner-auth {
+  color: var(--warn);
 }
 
 .unread-badge {

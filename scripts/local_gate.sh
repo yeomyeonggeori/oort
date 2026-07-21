@@ -739,13 +739,14 @@ add_local_alpha_commands() {
 
 add_web_commands() {
   # MOMO-391 (ADR-0119 W-2): clients/web quality + e2e gate.
-  # install -> lint -> typecheck -> generated-types sync -> build -> license
+  # install -> lint -> unit tests -> typecheck -> generated-types sync -> build -> license
   # gate -> serving smoke (MOMO-390 regression: APP_DOMAIN sentinel
   # fail-closed + strict CSP) -> browser login/timeline smoke (e2e compose)
   # -> OpenAPI runtime drift gate (spec vs live server, MOMO-389).
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
   add_cmd "web install (npm ci)" '(cd clients/web && npm ci --no-audit --no-fund)'
   add_cmd "web lint (eslint)" '(cd clients/web && npm run lint)'
+  add_cmd "web unit tests (vitest)" '(cd clients/web && npm run test)'
   add_cmd "web typecheck (tsc --noEmit)" '(cd clients/web && npm run typecheck)'
   add_cmd "web generated API types in sync with docs/api/openapi.yaml" '(cd clients/web && npm run generate:types && git diff --exit-code -- src/api/schema.d.ts) || { echo "src/api/schema.d.ts is stale — run (cd clients/web && npm run generate:types) and commit the result"; exit 1; }'
   add_cmd "web build (vite, CSP-safe output)" '(cd clients/web && npm run build)'
@@ -753,7 +754,7 @@ add_web_commands() {
   add_cmd "web serving smoke (Caddy APP_DOMAIN edge + sentinel fail-closed)" 'scripts/web_serving_smoke.sh'
   add_cmd "web login -> timeline browser smoke (e2e compose)" 'scripts/verify_web_login_smoke.sh'
   add_cmd "OpenAPI contract drift gate (spec vs live server)" 'scripts/verify_openapi_contract.sh'
-  add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
+  add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, Vitest unit tests, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
   add_note_once coverage "MOMO-390 serving regression via scripts/web_serving_smoke.sh: prod Caddyfile parse matrix (APP_DOMAIN set/unset/empty), SPA deep-link fallback, /v1 proxy wiring, /v1/centrifugo edge 403, strict SPA CSP headers, and APP_DOMAIN-unset sentinel fail-closed ordering (guard before proxy)."
   add_note_once coverage "MOMO-391 browser smoke via scripts/verify_web_login_smoke.sh: isolated e2e compose stack (project momo391web, loopback ports 18990-18995) serving the built SPA through the real prod Caddyfile; real Chromium login (workspace empty -> demo fallback), channel list, seeded timeline display, wss realtime subscribe under the strict CSP, REST-sent message rendered live through REST -> PG -> outbox -> relay -> Centrifugo, REST ?after= catch-up on subscribe, and zero CSP console violations."
   add_note_once coverage "MOMO-400 (ADR-0119 W-4) inside the same browser smoke: composer clientMsgId idempotency (first send forwarded then answered 500; retry must reuse the SAME clientMsgId; exactly one DOM render and one committed row), read-state rail (bulk GET badge init, external cursor PUT reflected through the user:read-state#<member-id> push with zero extra GETs, strictly monotonic browser cursor PUTs), ADR-0112 approval cards (no tool JSON/cost leakage; in-browser approve receipt 200; externally pre-decided 409 receipt handled as a card state transition), and DM open via POST /dms + composer round-trip + GET /dms listing."

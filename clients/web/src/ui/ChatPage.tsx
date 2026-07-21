@@ -19,6 +19,7 @@ import Timeline from "./Timeline";
 
 interface ChatPageProps {
   session: SessionData;
+  authExpired: boolean;
 }
 
 const STATUS_LABEL: Record<RealtimeStatus, string> = {
@@ -27,7 +28,7 @@ const STATUS_LABEL: Record<RealtimeStatus, string> = {
   disconnected: "연결 끊김",
 };
 
-export default function ChatPage({ session }: ChatPageProps) {
+export default function ChatPage({ session, authExpired }: ChatPageProps) {
   const workspaceId = session.member.workspaceId;
   const [channels, setChannels] = useState<Channel[]>([]);
   const [dms, setDms] = useState<Channel[]>([]);
@@ -38,6 +39,9 @@ export default function ChatPage({ session }: ChatPageProps) {
   const [view, setView] = useState<"channel" | "approvals">("channel");
   const [dmPickerOpen, setDmPickerOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadingWorkspace, setLoadingWorkspace] = useState(true);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [online, setOnline] = useState(() => navigator.onLine);
   const [realtimeStatus, setRealtimeStatus] =
     useState<RealtimeStatus>("connecting");
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
@@ -56,6 +60,17 @@ export default function ChatPage({ session }: ChatPageProps) {
     };
   }, [session.realtimeWebSocketUrl]);
 
+  useEffect(() => {
+    const handleOnline = () => setOnline(true);
+    const handleOffline = () => setOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   const readStates = useReadStates(workspaceId, session.member.id, realtime);
   const approvals = useApprovals(workspaceId);
   const refreshPending = approvals.refreshPending;
@@ -68,6 +83,7 @@ export default function ChatPage({ session }: ChatPageProps) {
   useEffect(() => {
     let cancelled = false;
     async function loadWorkspace() {
+      setLoadingWorkspace(true);
       try {
         const [channelsResponse, dmsResponse, rosterResponse] =
           await Promise.all([
@@ -88,17 +104,20 @@ export default function ChatPage({ session }: ChatPageProps) {
           (current) =>
             current ?? regular[0]?.id ?? dmsResponse.channels[0]?.id ?? null
         );
+        setLoadError(null);
       } catch {
         if (!cancelled) {
           setLoadError("워크스페이스 정보를 불러오지 못했습니다.");
         }
+      } finally {
+        if (!cancelled) setLoadingWorkspace(false);
       }
     }
     void loadWorkspace();
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [loadAttempt, workspaceId]);
 
   const memberNames = useMemo(() => {
     const names = new Map<string, string>();
@@ -175,7 +194,8 @@ export default function ChatPage({ session }: ChatPageProps) {
     <div className="chat-layout">
       <aside className="sidebar">
         <header className="sidebar-header">
-          <span className="workspace-name">momo</span>
+          <span className="workspace-name">momo 워크스페이스</span>
+          <span className="workspace-id">{workspaceId.slice(0, 8)}</span>
           <span
             className={`realtime-status realtime-${realtimeStatus}`}
             data-testid="realtime-status"
@@ -240,7 +260,32 @@ export default function ChatPage({ session }: ChatPageProps) {
       </aside>
 
       <main className="main-pane">
-        {loadError !== null && <p className="load-error">{loadError}</p>}
+        {!online && (
+          <div className="status-banner" role="status">
+            오프라인입니다. 기존 메시지는 계속 볼 수 있으며, 연결되면 새 내용을 동기화합니다.
+          </div>
+        )}
+        {online && realtimeStatus === "disconnected" && (
+          <div className="status-banner" role="status">
+            실시간 연결이 끊겼습니다. REST 복구를 시도하고 있습니다.
+          </div>
+        )}
+        {authExpired && (
+          <div className="status-banner status-banner-auth" role="alert">
+            세션이 만료되었습니다. 기존 메시지는 유지됩니다. 다시 로그인해 새 내용을 불러오세요.
+            <button type="button" className="ghost-button" onClick={() => void logout()}>
+              다시 로그인
+            </button>
+          </div>
+        )}
+        {loadError !== null && (
+          <div className="inline-state" role="alert">
+            <p className="load-error">{loadError} 서버 연결을 확인하고 다시 시도해 주세요.</p>
+            <button type="button" className="ghost-button" onClick={() => setLoadAttempt((value) => value + 1)}>
+              워크스페이스 다시 불러오기
+            </button>
+          </div>
+        )}
         {view === "approvals" ? (
           <ApprovalsPanel
             approvals={approvals}
@@ -253,13 +298,14 @@ export default function ChatPage({ session }: ChatPageProps) {
             workspaceId={workspaceId}
             channel={selectedChannel}
             channelLabel={channelLabelFor(selectedChannel)}
+            currentMemberId={session.member.id}
             displayNameFor={displayNameFor}
             realtime={realtime}
             approvals={approvals}
             onLatestSeq={readStates.reportViewedSeq}
           />
         ) : (
-          loadError === null && (
+          loadError === null && loadingWorkspace && (
             <div className="screen-center">
               <p className="muted">채널을 불러오는 중…</p>
             </div>
