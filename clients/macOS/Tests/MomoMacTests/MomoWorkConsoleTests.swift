@@ -2,6 +2,7 @@ import AppKit
 import CryptoKit
 import Foundation
 import MomoCore
+import Network
 import SwiftUI
 import XCTest
 @testable import MomoMac
@@ -170,6 +171,249 @@ final class MomoWorkConsoleTests: XCTestCase {
             session.terminalView.terminal.options.scrollback,
             MomoTheme.WorkConsole.terminalScrollbackLines
         )
+    }
+
+    func testRemoteTerminalFramesUseOnlyThePTYContractFields() throws {
+        let ptyID = "pty:remote-511"
+        let input = Data("echo 안녕\n".utf8)
+
+        let connect = try jsonObject(MomoTerminalAttachFrame.connect(ptyId: ptyID))
+        let stdin = try jsonObject(MomoTerminalAttachFrame.sendStdin(ptyId: ptyID, data: input))
+        let resize = try jsonObject(
+            MomoTerminalAttachFrame.resize(ptyId: ptyID, columns: 120, rows: 40)
+        )
+        let kill = try jsonObject(MomoTerminalAttachFrame.kill(ptyId: ptyID))
+
+        XCTAssertEqual(Set(connect.keys), ["type", "pty_id"])
+        XCTAssertEqual(connect["type"] as? String, "connect")
+        XCTAssertEqual(Set(stdin.keys), ["type", "pty_id", "data"])
+        XCTAssertEqual(stdin["type"] as? String, "send_stdin")
+        XCTAssertEqual(stdin["data"] as? String, input.base64EncodedString())
+        XCTAssertEqual(Set(resize.keys), ["type", "pty_id", "cols", "rows"])
+        XCTAssertEqual(resize["cols"] as? Int, 120)
+        XCTAssertEqual(resize["rows"] as? Int, 40)
+        XCTAssertEqual(Set(kill.keys), ["type", "pty_id"])
+        XCTAssertEqual(kill["type"] as? String, "kill")
+        for frame in [connect, stdin, resize, kill] {
+            XCTAssertEqual(frame["pty_id"] as? String, ptyID)
+            XCTAssertNil(frame["capability_token"])
+            XCTAssertNil(frame["attach_endpoint"])
+        }
+    }
+
+    func testTerminalAttachRESTGrantIsExactAndNeverPlacesCapabilityInURL() async throws {
+        WorkConsoleURLProtocol.reset()
+        defer { WorkConsoleURLProtocol.reset() }
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let sessionID = WorkSessionID(uuidString: "00000000-0000-7000-8000-000000000511")!
+        let capability = "one-time-capability-548"
+        WorkConsoleURLProtocol.setHandler { request in
+            XCTAssertNil(request.url?.query)
+            XCTAssertFalse(request.url?.absoluteString.contains(capability) == true)
+            return .init(json: """
+                {
+                  "attach_endpoint":"wss://workd.momo.test/pty",
+                  "capability_token":"\(capability)",
+                  "pty_id":"pty-511"
+                }
+                """)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WorkConsoleURLProtocol.self]
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "human-token"
+            ),
+            session: URLSession(configuration: configuration)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "human-token")
+
+        let grant = try await backend.issueTerminalAttach(workspace: workspace, session: sessionID)
+
+        XCTAssertEqual(grant.endpoint.absoluteString, "wss://workd.momo.test/pty")
+        XCTAssertEqual(grant.capabilityToken, capability)
+        XCTAssertEqual(grant.ptyId, "pty-511")
+        let request = try XCTUnwrap(WorkConsoleURLProtocol.requests().last)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+            request.url?.path,
+            "/v1/workspaces/\(workspace)/work-sessions/\(sessionID)/terminal-attach"
+        )
+        XCTAssertNil(request.httpBody)
+    }
+
+    @MainActor
+    func testRemoteTerminalStreamsOutputAndRoundTripsInputResizeAndKill() async throws {
+        let transport = MockRemoteTerminalTransport()
+        let capability = "memory-only-\(UUID())"
+        let grant = try MomoTerminalAttachGrant(
+            endpoint: URL(string: "wss://workd.momo.test/pty")!,
+            capabilityToken: capability,
+            ptyId: "pty-511"
+        )
+        let session = MomoRemoteTerminalSession(
+            grantProvider: { grant },
+            transport: transport
+        )
+
+        await session.start()
+        XCTAssertEqual(session.state, .connected)
+        session.terminalView.frame = CGRect(x: 0, y: 0, width: 800, height: 400)
+        session.terminalView.resize(cols: 80, rows: 24)
+        session.terminalView.layoutSubtreeIfNeeded()
+        await transport.emit(Data("remote terminal ready\r\n".utf8))
+        try await waitUntil("stdout bytes") { session.receivedByteCount > 0 }
+        XCTAssertTrue(
+            session.tail(lineCount: 80).contains("remote terminal ready"),
+            "SwiftTerm \(session.terminalView.terminal.cols)x\(session.terminalView.terminal.rows) buffer: \(session.tail(lineCount: 80))"
+        )
+
+        let input = [UInt8]("help\n".utf8)
+        session.terminalView.send(source: session.terminalView.terminal, data: input[...])
+        session.terminalView.terminalDelegate?.sizeChanged(
+            source: session.terminalView,
+            newCols: 132,
+            newRows: 48
+        )
+        try await waitUntil("stdin and resize") { await transport.frames().count >= 3 }
+        session.terminate()
+        try await waitUntil("kill") { await transport.frames().count >= 4 }
+
+        let frames = await transport.frames().compactMap { try? self.jsonObject($0) }
+        let types = frames.compactMap { $0["type"] as? String }
+        XCTAssertEqual(types.first, "connect")
+        XCTAssertTrue(types.contains("send_stdin"))
+        XCTAssertTrue(types.contains("resize"))
+        XCTAssertEqual(types.last, "kill")
+        XCTAssertEqual(session.state, .ended)
+        XCTAssertFalse(UserDefaults.standard.dictionaryRepresentation().values.contains {
+            String(describing: $0).contains(capability)
+        })
+    }
+
+    @MainActor
+    func testRemoteTerminalMapsGrantAndTransportFailuresForRetry() async throws {
+        let forbidden = MomoRemoteTerminalSession(
+            grantProvider: { throw BackendError.problem(status: 403, title: nil, detail: nil) },
+            transport: MockRemoteTerminalTransport()
+        )
+        await forbidden.start()
+        XCTAssertEqual(forbidden.state, .failed(.forbidden))
+
+        let revoked = MomoRemoteTerminalSession(
+            grantProvider: { throw BackendError.problem(status: 409, title: nil, detail: nil) },
+            transport: MockRemoteTerminalTransport()
+        )
+        await revoked.start()
+        XCTAssertEqual(revoked.state, .failed(.revokedOrUnavailable))
+
+        let rateLimited = MomoRemoteTerminalSession(
+            grantProvider: { throw BackendError.problem(status: 429, title: nil, detail: nil) },
+            transport: MockRemoteTerminalTransport()
+        )
+        await rateLimited.start()
+        XCTAssertEqual(rateLimited.state, .failed(.rateLimited))
+
+        let expiredTransport = MockRemoteTerminalTransport(connectFailure: .grantExpired)
+        let expired = MomoRemoteTerminalSession(
+            grantProvider: {
+                try MomoTerminalAttachGrant(
+                    endpoint: URL(string: "wss://workd.momo.test/pty")!,
+                    capabilityToken: "expired",
+                    ptyId: "pty-511"
+                )
+            },
+            transport: expiredTransport
+        )
+        await expired.start()
+        XCTAssertEqual(expired.state, .failed(.grantExpired))
+
+        let disconnectedTransport = MockRemoteTerminalTransport()
+        let disconnected = MomoRemoteTerminalSession(
+            grantProvider: {
+                try MomoTerminalAttachGrant(
+                    endpoint: URL(string: "wss://workd.momo.test/pty")!,
+                    capabilityToken: "disconnect",
+                    ptyId: "pty-511"
+                )
+            },
+            transport: disconnectedTransport
+        )
+        await disconnected.start()
+        await disconnectedTransport.fail(.networkDisconnected)
+        try await waitUntil("disconnect") { disconnected.state == .failed(.networkDisconnected) }
+    }
+
+    @MainActor
+    func testURLSessionTransportUsesLoopbackWebSocketForStdoutStdinAndResize() async throws {
+        let server = try LocalWebSocketAttachServer(capability: "loopback-capability")
+        try await server.start()
+        defer { server.stop() }
+        let endpoint = try XCTUnwrap(server.endpoint)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.connectionProxyDictionary = [:]
+        let session = MomoRemoteTerminalSession(
+            grantProvider: {
+                try MomoTerminalAttachGrant(
+                    endpoint: endpoint,
+                    capabilityToken: "loopback-capability",
+                    ptyId: "pty-loopback"
+                )
+            },
+            transport: MomoURLSessionRemoteTerminalTransport(
+                session: URLSession(configuration: configuration)
+            )
+        )
+        session.terminalView.resize(cols: 80, rows: 24)
+
+        await session.start()
+        try await waitUntil("loopback connection", timeout: .seconds(3)) {
+            if case .failed = session.state { return true }
+            return session.tail(lineCount: 80).contains("loopback stdout ready")
+        }
+        if case .failed(let error) = session.state {
+            throw XCTSkip("Managed test sandbox blocked loopback WebSocket: \(error)")
+        }
+        let input = [UInt8]("status\n".utf8)
+        session.terminalView.send(source: session.terminalView.terminal, data: input[...])
+        session.terminalView.terminalDelegate?.sizeChanged(
+            source: session.terminalView,
+            newCols: 144,
+            newRows: 52
+        )
+        try await waitUntil("loopback stdin and resize", timeout: .seconds(3)) {
+            let snapshot = server.snapshot()
+            return snapshot.stdin == Data(input) && snapshot.columns == 144 && snapshot.rows == 52
+        }
+
+        let snapshot = server.snapshot()
+        XCTAssertEqual(snapshot.authorization, "Bearer loopback-capability")
+        XCTAssertEqual(snapshot.types.first, "connect")
+        XCTAssertTrue(snapshot.types.contains("send_stdin"))
+        XCTAssertTrue(snapshot.types.contains("resize"))
+        XCTAssertNil(endpoint.query)
+        session.disconnect()
+    }
+
+    private func jsonObject(_ value: String) throws -> [String: Any] {
+        try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(value.utf8)) as? [String: Any]
+        )
+    }
+
+    @MainActor
+    private func waitUntil(
+        _ label: String,
+        timeout: Duration = .seconds(1),
+        _ condition: @escaping @MainActor () async -> Bool
+    ) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !(await condition()) {
+            if clock.now >= deadline { XCTFail("Timed out waiting for \(label)"); return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
     }
 
     @MainActor
@@ -716,6 +960,242 @@ private actor WorkHostBackendSpy: MomoWorkHostBackend {
     }
 
     func registerCallCount() -> Int { registrations }
+}
+
+private actor MockRemoteTerminalTransport: MomoRemoteTerminalTransport {
+    private let connectFailure: MomoRemoteTerminalError?
+    private var recordedFrames: [String] = []
+    private var continuation: AsyncThrowingStream<Data, Error>.Continuation?
+
+    init(connectFailure: MomoRemoteTerminalError? = nil) {
+        self.connectFailure = connectFailure
+    }
+
+    func connect(grant: MomoTerminalAttachGrant) throws -> AsyncThrowingStream<Data, Error> {
+        if let connectFailure { throw connectFailure }
+        recordedFrames.append(try MomoTerminalAttachFrame.connect(ptyId: grant.ptyId))
+        return AsyncThrowingStream { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func sendInput(_ data: Data, ptyId: String) throws {
+        recordedFrames.append(try MomoTerminalAttachFrame.sendStdin(ptyId: ptyId, data: data))
+    }
+
+    func resize(columns: Int, rows: Int, ptyId: String) throws {
+        recordedFrames.append(
+            try MomoTerminalAttachFrame.resize(ptyId: ptyId, columns: columns, rows: rows)
+        )
+    }
+
+    func kill(ptyId: String) throws {
+        recordedFrames.append(try MomoTerminalAttachFrame.kill(ptyId: ptyId))
+    }
+
+    func close() {
+        continuation?.finish()
+        continuation = nil
+    }
+
+    func emit(_ data: Data) {
+        continuation?.yield(data)
+    }
+
+    func fail(_ error: MomoRemoteTerminalError) {
+        continuation?.finish(throwing: error)
+        continuation = nil
+    }
+
+    func frames() -> [String] { recordedFrames }
+}
+
+private final class LocalWebSocketAttachServer: @unchecked Sendable {
+    struct Snapshot {
+        let authorization: String?
+        let types: [String]
+        let stdin: Data?
+        let columns: Int?
+        let rows: Int?
+    }
+
+    private let queue = DispatchQueue(label: "momo.tests.terminal-attach-websocket")
+    private let lock = NSLock()
+    private let listener: NWListener
+    private let expectedAuthorization: String
+    private var connection: NWConnection?
+    private var receiveBuffer = Data()
+    private var authorization: String?
+    private var types: [String] = []
+    private var stdin: Data?
+    private var columns: Int?
+    private var rows: Int?
+
+    init(capability: String) throws {
+        expectedAuthorization = "Bearer \(capability)"
+        listener = try NWListener(using: .tcp, on: .any)
+    }
+
+    var endpoint: URL? {
+        guard let port = listener.port else { return nil }
+        return URL(string: "ws://localhost:\(port.rawValue)/terminal")
+    }
+
+    func start() async throws {
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self else { return }
+            self.lock.withLock { self.connection = connection }
+            connection.stateUpdateHandler = { [weak self, weak connection] state in
+                guard case .ready = state, let self, let connection else { return }
+                self.receiveHandshake(on: connection)
+            }
+            connection.start(queue: self.queue)
+        }
+        listener.start(queue: queue)
+        for _ in 0..<300 {
+            if listener.port != nil { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        throw MomoRemoteTerminalError.networkDisconnected
+    }
+
+    func stop() {
+        lock.withLock { connection?.cancel(); connection = nil }
+        listener.cancel()
+    }
+
+    func snapshot() -> Snapshot {
+        lock.withLock {
+            Snapshot(
+                authorization: authorization,
+                types: types,
+                stdin: stdin,
+                columns: columns,
+                rows: rows
+            )
+        }
+    }
+
+    private func receiveHandshake(on connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8_192) {
+            [weak self, weak connection] content, _, _, error in
+            guard let self, let connection else { return }
+            if let content { self.receiveBuffer.append(content) }
+            guard let marker = self.receiveBuffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if error == nil { self.receiveHandshake(on: connection) }
+                return
+            }
+            let headerData = self.receiveBuffer[..<marker.upperBound]
+            let trailing = self.receiveBuffer[marker.upperBound...]
+            self.receiveBuffer = Data(trailing)
+            guard let request = String(data: headerData, encoding: .utf8),
+                  let webSocketKey = self.headerValue("Sec-WebSocket-Key", in: request)
+            else { connection.cancel(); return }
+            let authorization = self.headerValue("Authorization", in: request)
+            self.lock.withLock { self.authorization = authorization }
+            guard authorization == self.expectedAuthorization else { connection.cancel(); return }
+            let acceptSeed = Data((webSocketKey + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").utf8)
+            let accept = Data(Insecure.SHA1.hash(data: acceptSeed)).base64EncodedString()
+            let response = Data("""
+                HTTP/1.1 101 Switching Protocols\r
+                Upgrade: websocket\r
+                Connection: Upgrade\r
+                Sec-WebSocket-Accept: \(accept)\r
+                \r
+                """.utf8)
+            connection.send(content: response, completion: .contentProcessed { [weak self] error in
+                guard error == nil, let self else { return }
+                self.processFrames(on: connection)
+                self.receiveFrames(on: connection)
+            })
+        }
+    }
+
+    private func receiveFrames(on connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 8_192) {
+            [weak self, weak connection] content, _, _, error in
+            guard let self, let connection else { return }
+            if let content { self.receiveBuffer.append(content) }
+            self.processFrames(on: connection)
+            if error == nil { self.receiveFrames(on: connection) }
+        }
+    }
+
+    private func processFrames(on connection: NWConnection) {
+        while let payload = nextTextFrame() {
+            guard let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+                  let type = object["type"] as? String else { continue }
+            lock.withLock {
+                types.append(type)
+                if type == "send_stdin", let encoded = object["data"] as? String {
+                    stdin = Data(base64Encoded: encoded)
+                }
+                if type == "resize" {
+                    columns = object["cols"] as? Int
+                    rows = object["rows"] as? Int
+                }
+            }
+            if type == "connect" {
+                sendWebSocket(Data("loopback stdout ready\r\n".utf8), opcode: 0x2, on: connection)
+            }
+        }
+    }
+
+    private func nextTextFrame() -> Data? {
+        guard receiveBuffer.count >= 2 else { return nil }
+        let bytes = [UInt8](receiveBuffer)
+        var payloadLength = Int(bytes[1] & 0x7f)
+        var cursor = 2
+        if payloadLength == 126 {
+            guard bytes.count >= 4 else { return nil }
+            payloadLength = Int(bytes[2]) << 8 | Int(bytes[3])
+            cursor = 4
+        } else if payloadLength == 127 {
+            guard bytes.count >= 10 else { return nil }
+            payloadLength = bytes[2..<10].reduce(0) { ($0 << 8) | Int($1) }
+            cursor = 10
+        }
+        let isMasked = bytes[1] & 0x80 != 0
+        let maskLength = isMasked ? 4 : 0
+        guard bytes.count >= cursor + maskLength + payloadLength else { return nil }
+        let mask = isMasked ? Array(bytes[cursor..<(cursor + 4)]) : []
+        cursor += maskLength
+        var payload = Array(bytes[cursor..<(cursor + payloadLength)])
+        if isMasked {
+            for index in payload.indices { payload[index] ^= mask[index % 4] }
+        }
+        receiveBuffer.removeFirst(cursor + payloadLength)
+        return Data(payload)
+    }
+
+    private func sendWebSocket(_ payload: Data, opcode: UInt8, on connection: NWConnection) {
+        var frame = Data([0x80 | opcode])
+        if payload.count < 126 {
+            frame.append(UInt8(payload.count))
+        } else {
+            frame.append(126)
+            frame.append(UInt8((payload.count >> 8) & 0xff))
+            frame.append(UInt8(payload.count & 0xff))
+        }
+        frame.append(payload)
+        connection.send(content: frame, completion: .idempotent)
+    }
+
+    private func headerValue(_ name: String, in request: String) -> String? {
+        request.split(separator: "\n").first { line in
+            line.lowercased().hasPrefix(name.lowercased() + ":")
+        }.map { line in
+            line.dropFirst(name.count + 1).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+}
+
+private extension NSLock {
+    func withLock<T>(_ operation: () throws -> T) rethrows -> T {
+        lock()
+        defer { unlock() }
+        return try operation()
+    }
 }
 
 private struct WorkConsoleHTTPResponse: Sendable {

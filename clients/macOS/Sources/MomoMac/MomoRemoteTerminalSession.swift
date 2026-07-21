@@ -201,6 +201,7 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     let id = UUID()
     let terminalView: TerminalView
     @Published private(set) var state: State = .idle
+    @Published private(set) var receivedByteCount = 0
 
     private let grantProvider: @MainActor @Sendable () async throws -> MomoTerminalAttachGrant
     private let transport: any MomoRemoteTerminalTransport
@@ -245,6 +246,7 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
                 guard let self else { return }
                 do {
                     for try await data in output {
+                        self.receivedByteCount += data.count
                         self.terminalView.feed(byteArray: [UInt8](data)[...])
                     }
                     if self.state == .connected { self.state = .failed(.networkDisconnected) }

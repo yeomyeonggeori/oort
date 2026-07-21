@@ -271,9 +271,6 @@ struct MomoWorkConsoleDrawer: View {
                                 session: session,
                                 isSelected: controller.selectedSessionId == session.id,
                                 isLocal: controller.localSessions[session.id] != nil,
-                                remoteHostName: controller.canOpenRemoteTerminal(session)
-                                    ? controller.hostDisplayName(for: session)
-                                    : nil,
                                 copy: copy
                             ) {
                                 controller.selectedSessionId = session.id
@@ -314,7 +311,6 @@ private struct MomoWorkSessionRow: View {
     let session: MomoWorkSession
     let isSelected: Bool
     let isLocal: Bool
-    let remoteHostName: String?
     let copy: MomoWorkspaceCopy
     let action: () -> Void
 
@@ -336,10 +332,6 @@ private struct MomoWorkSessionRow: View {
                         if isLocal {
                             Image(systemName: "macbook")
                                 .accessibilityLabel(copy.workSessionLocalOnly)
-                        }
-                        if let remoteHostName {
-                            Text(remoteHostName)
-                                .lineLimit(1)
                         }
                     }
                     .momoTypography(.metadata)
