@@ -14,6 +14,12 @@ import PostgresNIO
 /// through PostgreSQL pgcrypto (`momo_password_verify`). Issued tokens are
 /// persisted (hashed) in the `token` table so `revoked_at` can kill them.
 struct AuthRoutes: Sendable {
+    private enum LoginResolution: Sendable {
+        case active(MemberDTO)
+        case suspended
+        case invalid
+    }
+
     let db: Database
     let jwt: JWTService
     let tokenStore: TokenStore
@@ -50,10 +56,11 @@ struct AuthRoutes: Sendable {
 
         // Resolve the human member by email within the tenant (RLS-scoped) and
         // verify the password inside Postgres so v0 does not add Swift crypto deps.
-        let member: MemberDTO? = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+        let login = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
             let rows = try await conn.query(
                 """
                 SELECT m.id, m.workspace_id, m.kind::text, m.display_name, m.handle,
+                       m.status::text,
                        momo_password_verify(\(dto.password), h.password_hash) AS password_ok
                   FROM human h
                   JOIN member m ON m.id = h.member_id
@@ -61,17 +68,23 @@ struct AuthRoutes: Sendable {
                 """,
                 logger: db.logger
             ).collect()
-            guard let row = rows.first else { return nil }
-            let (id, ws, kind, displayName, handle, passwordOK) =
-                try row.decode((UUID, UUID, String, String, String, Bool).self)
-            guard passwordOK else { return nil }
-            return MemberDTO(
+            guard let row = rows.first else { return LoginResolution.invalid }
+            let (id, ws, kind, displayName, handle, status, passwordOK) =
+                try row.decode((UUID, UUID, String, String, String, String, Bool).self)
+            guard passwordOK else { return LoginResolution.invalid }
+            if status == "suspended" { return LoginResolution.suspended }
+            guard status == "active" else { return LoginResolution.invalid }
+            return LoginResolution.active(MemberDTO(
                 id: id.uuidString, workspaceId: ws.uuidString, kind: kind,
                 displayName: displayName, handle: handle
-            )
+            ))
         }
 
-        guard let member, let memberID = UUID(uuidString: member.id) else {
+        if case .suspended = login {
+            throw HTTPError(.forbidden, message: "member is suspended")
+        }
+        guard case .active(let member) = login,
+              let memberID = UUID(uuidString: member.id) else {
             throw HTTPError(.unauthorized, message: "invalid credentials")
         }
 
@@ -358,6 +371,7 @@ struct AuthRoutes: Sendable {
                  WHERE id = \(memberID)
                    AND workspace_id = \(workspaceID)
                    AND status = 'active'
+                   AND deleted_at IS NULL
                  LIMIT 1
                 """,
                 logger: db.logger
@@ -365,4 +379,5 @@ struct AuthRoutes: Sendable {
             return !rows.isEmpty
         }
     }
+
 }

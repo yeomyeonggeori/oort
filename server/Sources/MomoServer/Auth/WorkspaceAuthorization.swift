@@ -77,6 +77,19 @@ enum WorkspaceAuthorization {
         return WorkspaceRole(rawValue: raw)
     }
 
+    /// Serializes role/status/removal mutations within one workspace so the
+    /// application-level "at least one active owner" invariant cannot race.
+    static func lockMembershipMutation(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID
+    ) async throws {
+        _ = try await conn.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended(\(workspaceID)::text, 128))",
+            logger: logger
+        )
+    }
+
     @discardableResult
     static func requireMember(
         conn: PostgresConnection,

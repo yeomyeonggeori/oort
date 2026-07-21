@@ -27,6 +27,9 @@ struct MemberLifecycleRoutes: Sendable {
             try await request.decode(as: ChangeMembershipRoleRequest.self, context: context).role
         )
         let response: MembershipRoleResponse = try await transaction(workspaceID) { conn in
+            try await WorkspaceAuthorization.lockMembershipMutation(
+                conn: conn, logger: db.logger, workspaceID: workspaceID
+            )
             let actorRole = try await WorkspaceAuthorization.requireAdmin(
                 conn: conn, logger: db.logger, principal: principal, forUpdate: true
             )
@@ -71,6 +74,9 @@ struct MemberLifecycleRoutes: Sendable {
             try await request.decode(as: ChangeMembershipRoleRequest.self, context: context).role
         )
         let response: MembershipRoleResponse = try await transaction(workspaceID) { conn in
+            try await WorkspaceAuthorization.lockMembershipMutation(
+                conn: conn, logger: db.logger, workspaceID: workspaceID
+            )
             let workspaceRole = try await WorkspaceAuthorization.requireMember(
                 conn: conn, logger: db.logger, principal: principal, forUpdate: true
             )
@@ -154,6 +160,9 @@ struct MemberLifecycleRoutes: Sendable {
     ) async throws -> Response {
         let (principal, workspaceID, targetID) = try Self.scope(context)
         let response: MembershipLifecycleResponse = try await transaction(workspaceID) { conn in
+            try await WorkspaceAuthorization.lockMembershipMutation(
+                conn: conn, logger: db.logger, workspaceID: workspaceID
+            )
             let actorRole = try await WorkspaceAuthorization.requireAdmin(
                 conn: conn, logger: db.logger, principal: principal, forUpdate: true
             )
@@ -197,6 +206,9 @@ struct MemberLifecycleRoutes: Sendable {
         let dto = try? await request.decode(as: RemoveWorkspaceMemberRequest.self, context: context)
         let reason = Self.normalizedReason(dto?.reason)
         let response: MembershipLifecycleResponse = try await transaction(workspaceID) { conn in
+            try await WorkspaceAuthorization.lockMembershipMutation(
+                conn: conn, logger: db.logger, workspaceID: workspaceID
+            )
             let actorRole = try await WorkspaceAuthorization.requireAdmin(
                 conn: conn, logger: db.logger, principal: principal, forUpdate: true
             )

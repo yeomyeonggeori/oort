@@ -293,9 +293,8 @@ struct WorkHostRoutes: Sendable {
         let host = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
-            let membershipRole = try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
+            let membershipRole = try await WorkspaceAuthorization.activeRole(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
                 memberID: principal.memberID
             )
             guard let membershipRole else {
@@ -315,7 +314,7 @@ struct WorkHostRoutes: Sendable {
                 throw HTTPError(.notFound, message: "work host not found")
             }
             let (ownerMemberID, alreadyRevoked) = try row.decode((UUID, Bool).self)
-            let isAdmin = membershipRole == "owner" || membershipRole == "admin"
+            let isAdmin = membershipRole.isAdmin
             guard ownerMemberID == principal.memberID || isAdmin else {
                 throw HTTPError(.forbidden, message: "work host revoke requires owner or workspace admin")
             }

@@ -34,9 +34,8 @@ struct DMRoutes: Sendable {
         let result: (isMember: Bool, channels: [ChannelDTO]) = try await db.withTenantConnection(
             workspaceID: workspaceID
         ) { conn in
-            let role = try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
+            let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
                 memberID: principal.memberID
             )
             guard role != nil else { return (false, []) }
@@ -73,9 +72,8 @@ struct DMRoutes: Sendable {
         let result: OpenResult = try await db.withTenantTransaction(
             workspaceID: workspaceID
         ) { conn in
-            let role = try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
+            let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
                 memberID: principal.memberID
             )
             guard role != nil else {

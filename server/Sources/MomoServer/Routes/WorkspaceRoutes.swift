@@ -203,13 +203,12 @@ struct WorkspaceRoutes: Sendable {
                           AND w.deleted_at IS NULL
                           AND EXISTS (
                             SELECT 1
-                              FROM membership AS ms
+                              FROM workspace_membership AS wm
                               JOIN member AS m
-                                ON m.id = ms.member_id
-                               AND m.workspace_id = ms.workspace_id
-                             WHERE ms.workspace_id = w.id
-                               AND ms.member_id = \(memberID)
-                               AND ms.left_at IS NULL
+                                ON m.id = wm.member_id
+                               AND m.workspace_id = wm.workspace_id
+                             WHERE wm.workspace_id = w.id
+                               AND wm.member_id = \(memberID)
                                AND m.status = 'active'
                                AND m.deleted_at IS NULL
                           )
@@ -240,56 +239,10 @@ struct WorkspaceRoutes: Sendable {
         memberID: UUID,
         lockAuthorization: Bool
     ) async throws -> String? {
-        let rows: [PostgresRow]
-        if lockAuthorization {
-            rows = try await conn.query(
-                """
-                SELECT ms.role::text
-                  FROM membership AS ms
-                  JOIN member AS m
-                    ON m.id = ms.member_id
-                   AND m.workspace_id = ms.workspace_id
-                 WHERE ms.workspace_id = \(workspaceID)
-                   AND ms.member_id = \(memberID)
-                   AND ms.left_at IS NULL
-                   AND m.status = 'active'
-                   AND m.deleted_at IS NULL
-                 ORDER BY CASE ms.role::text
-                            WHEN 'owner' THEN 0
-                            WHEN 'admin' THEN 1
-                            WHEN 'member' THEN 2
-                            ELSE 3
-                          END
-                 LIMIT 1
-                 FOR UPDATE OF ms, m
-                """,
-                logger: logger
-            ).collect()
-        } else {
-            rows = try await conn.query(
-                """
-                SELECT ms.role::text
-                  FROM membership AS ms
-                  JOIN member AS m
-                    ON m.id = ms.member_id
-                   AND m.workspace_id = ms.workspace_id
-                 WHERE ms.workspace_id = \(workspaceID)
-                   AND ms.member_id = \(memberID)
-                   AND ms.left_at IS NULL
-                   AND m.status = 'active'
-                   AND m.deleted_at IS NULL
-                 ORDER BY CASE ms.role::text
-                            WHEN 'owner' THEN 0
-                            WHEN 'admin' THEN 1
-                            WHEN 'member' THEN 2
-                            ELSE 3
-                          END
-                 LIMIT 1
-                """,
-                logger: logger
-            ).collect()
-        }
-        return try rows.first?.decode(String.self)
+        try await WorkspaceAuthorization.activeRole(
+            conn: conn, logger: logger, workspaceID: workspaceID,
+            memberID: memberID, forUpdate: lockAuthorization
+        )?.rawValue
     }
 
     private static func decodeWorkspace(_ json: String) throws -> WorkspaceDTO {

@@ -425,7 +425,7 @@ final class MomoServerTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("readWorkspaceForActiveMember"))
         XCTAssertTrue(source.contains("'workspaceExists', EXISTS"))
-        XCTAssertTrue(source.contains("AND EXISTS (\n                            SELECT 1\n                              FROM membership AS ms"))
+        XCTAssertTrue(source.contains("AND EXISTS (\n                            SELECT 1\n                              FROM workspace_membership AS wm"))
     }
 
     func testJoinIdentityValidationNormalizesInputs() throws {
@@ -1685,7 +1685,7 @@ final class MomoServerTests: XCTestCase {
 
         XCTAssertTrue(routeSource.contains("withTenantConnection"))
         XCTAssertTrue(routeSource.contains("withTenantTransaction"))
-        XCTAssertTrue(routeSource.contains("activeWorkspaceRole"))
+        XCTAssertTrue(routeSource.contains("WorkspaceAuthorization.activeRole"))
         XCTAssertTrue(routeSource.contains("m.workspace_id ="))
         XCTAssertTrue(routeSource.contains("m.status = 'active'"))
         XCTAssertTrue(routeSource.contains("return .targetNotFound"))
@@ -3734,5 +3734,67 @@ final class MomoServerTests: XCTestCase {
             ),
             "messages:read"
         )
+    }
+
+    func testWorkspaceRoleValidationAndHierarchyRanks() throws {
+        XCTAssertEqual(try WorkspaceRole.parse(" OWNER "), .owner)
+        XCTAssertEqual(try WorkspaceRole.parse("guest"), .guest)
+        XCTAssertLessThan(WorkspaceRole.owner.rank, WorkspaceRole.admin.rank)
+        XCTAssertLessThan(WorkspaceRole.admin.rank, WorkspaceRole.member.rank)
+        XCTAssertThrowsError(try WorkspaceRole.parse("platform_admin"))
+    }
+
+    func testMembershipLifecycleMigrationAndRoutesStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/026_workspace_membership_lifecycle.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE IF NOT EXISTS workspace_membership"))
+        XCTAssertTrue(migration.contains("CREATE TABLE IF NOT EXISTS workspace_ban"))
+        XCTAssertTrue(migration.contains("ON CONFLICT (workspace_id, member_id) DO NOTHING"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("CREATE POLICY ws_isolation"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MemberLifecycleRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        for path in ["/role", "/suspend", "/reinstate", "/bans"] {
+            XCTAssertTrue(routes.contains(path))
+        }
+        for action in [
+            "role.changed", "member.suspended", "member.reinstated",
+            "member.removed", "ban.created", "ban.deleted",
+        ] {
+            XCTAssertTrue(routes.contains(action))
+        }
+        XCTAssertTrue(routes.contains("workspace must retain at least one owner"))
+        XCTAssertTrue(routes.contains("UPDATE token SET revoked_at"))
+        XCTAssertTrue(routes.contains("DELETE FROM membership"))
+        XCTAssertFalse(routes.contains("BYPASSRLS"))
+    }
+
+    func testWorkspaceAuthorizationIsCentralizedOnWorkspaceMembership() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let authorization = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Auth/WorkspaceAuthorization.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(authorization.contains("FROM workspace_membership wm"))
+        XCTAssertFalse(authorization.contains("FROM membership ms"))
+        XCTAssertTrue(authorization.contains("m.status = 'active'"))
     }
 }

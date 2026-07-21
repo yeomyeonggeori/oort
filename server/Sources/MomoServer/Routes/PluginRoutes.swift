@@ -775,28 +775,9 @@ struct PluginRoutes: Sendable {
         logger: Logger,
         principal: AuthPrincipal
     ) async throws -> String {
-        let rows = try await conn.query(
-            """
-            SELECT ms.role::text
-              FROM membership ms
-              JOIN member m
-                ON m.id = ms.member_id AND m.workspace_id = ms.workspace_id
-             WHERE ms.member_id = \(principal.memberID)
-               AND ms.left_at IS NULL
-               AND m.status = 'active'
-               AND m.deleted_at IS NULL
-             ORDER BY CASE ms.role::text
-                        WHEN 'owner' THEN 0 WHEN 'admin' THEN 1
-                        WHEN 'member' THEN 2 ELSE 3
-                      END
-             LIMIT 1
-            """,
-            logger: logger
-        ).collect()
-        guard let role = try rows.first?.decode(String.self) else {
-            throw HTTPError(.forbidden, message: "not an active workspace member")
-        }
-        return role
+        try await WorkspaceAuthorization.requireMember(
+            conn: conn, logger: logger, principal: principal
+        ).rawValue
     }
 
     @discardableResult
@@ -805,11 +786,9 @@ struct PluginRoutes: Sendable {
         logger: Logger,
         principal: AuthPrincipal
     ) async throws -> String {
-        let role = try await requireWorkspaceRole(conn: conn, logger: logger, principal: principal)
-        guard role == "owner" || role == "admin" else {
-            throw HTTPError(.forbidden, message: "workspace admin required")
-        }
-        return role
+        try await WorkspaceAuthorization.requireAdmin(
+            conn: conn, logger: logger, principal: principal
+        ).rawValue
     }
 
     private static func lockMutation(
