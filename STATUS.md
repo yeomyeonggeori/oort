@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-501 iOS 첨부 송수신 (#587, 2026-07-21)
+
+- iOS 컴포저 `+` 메뉴에 사진 보관함·파일·카메라를 연결하고, 100MB 경계 검증 뒤 서버 upload session 발급 → capability URL 직접 PUT → complete → 메시지 `attachmentIds` 전송을 구현했다. 업로드 상태·개별 실패·재시도·삭제를 유지하며 첨부만 있는 메시지도 보낼 수 있고, 메시지 REST 실패는 같은 idempotency key와 완료된 첨부 ID로 재시도한다.
+- 수신 `Message.attachments`는 이미지를 인증 content proxy로 내려받아 인라인 미리보기하고, 일반 파일은 진행·실패·재시도 카드에서 Quick Look을 연다. 완료 파일은 iOS 공유 시트로 저장/공유할 수 있다. upload capability는 ephemeral URLSession의 지역 변수에서만 소비하고 Authorization header·URL query·로그·UserDefaults·메시지 모델에 넣지 않으며, 완료 응답 UUID 비교는 소문자로 정규화한다.
+- MomoiOSKit 64 tests(신규 첨부 전송·실패 재시도 2)가 PASS했고, generic iOS Simulator 무서명 `xcodebuild build`가 PASS했다. 실제 iPhone→Mac 사진, Mac→iPhone 일반 파일, 카메라 권한·Quick Look/저장, 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-500 iOS 스레드 1급 (#585, 2026-07-21)
 
 - 채널 타임라인은 서버 `Message.thread`의 답글 수를 실제 롤업으로 표시하고, replies REST 첫 페이지에서 확인한 실제 참여자만 아바타로 노출한다. 롤업을 열면 root 원문과 cursor 답글 전 페이지를 한 화면에 복원하며 `thread.updated`를 즉시 반영하고, 컴포저는 일반 메시지 REST에 동일 `rootId`·`reply_to_id`를 보존한다. 상위 타임라인에는 답글 realtime 행이 별도 메시지처럼 섞이지 않는다.

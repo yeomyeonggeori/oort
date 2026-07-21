@@ -10,6 +10,8 @@ public protocol IOSConversationBackend: Sendable {
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent>
     func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus>
     func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment
+    func downloadAttachment(_ attachment: MessageAttachment, from channel: ChannelID) async throws -> URL
     func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]]
     func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta
     func removeReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta
@@ -35,6 +37,12 @@ public struct IOSThreadRepliesPage: Sendable, Hashable {
 }
 
 public extension IOSConversationBackend {
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        throw IOSAttachmentTransferIssue.unavailable
+    }
+    func downloadAttachment(_ attachment: MessageAttachment, from channel: ChannelID) async throws -> URL {
+        throw IOSAttachmentTransferIssue.unavailable
+    }
     func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] { [:] }
     func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
         throw SessionError.server(status: 501, message: "Message reactions are unavailable.")
@@ -65,6 +73,7 @@ public extension IOSConversationBackend {
 struct IOSPendingMessageSend: Sendable, Equatable {
     let draft: DraftMessage
     let clientMsgId: UUID
+    let attachments: [MessageAttachment]
 }
 
 struct IOSPendingApprovalDecision: Sendable, Equatable {
@@ -592,6 +601,9 @@ public final class IOSTimelineModel {
     public private(set) var replyTarget: Message?
     public private(set) var isSending = false
     public private(set) var sendFailureMessage: String?
+    public private(set) var attachmentFailureMessage: String?
+    public private(set) var attachmentDrafts: [IOSAttachmentDraft] = []
+    public private(set) var attachmentDownloadStates: [FileID: IOSAttachmentDownloadState] = [:]
     public private(set) var reactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
     public private(set) var reactionMutationsInFlight: Set<String> = []
     public private(set) var messageMutationsInFlight: Set<MessageID> = []
@@ -953,16 +965,89 @@ public final class IOSTimelineModel {
         replyTarget = nil
     }
 
+    public func stageAttachment(fileURL: URL) throws {
+        let draft = try IOSAttachmentFileBoundary.draft(for: fileURL)
+        guard !attachmentDrafts.contains(where: { $0.fileURL.standardizedFileURL == fileURL.standardizedFileURL }) else {
+            return
+        }
+        attachmentDrafts.append(draft)
+        attachmentFailureMessage = nil
+    }
+
+    public func removeAttachmentDraft(_ id: UUID) {
+        guard attachmentDrafts.first(where: { $0.id == id })?.state != .uploading else { return }
+        attachmentDrafts.removeAll { $0.id == id }
+        if !attachmentDrafts.contains(where: { if case .failed = $0.state { return true }; return false }) {
+            attachmentFailureMessage = nil
+        }
+    }
+
+    public func retryAttachmentDraft(_ id: UUID) async {
+        guard !isSending,
+              let index = attachmentDrafts.firstIndex(where: { $0.id == id }),
+              case .failed = attachmentDrafts[index].state else { return }
+        isSending = true
+        defer { isSending = false }
+        attachmentDrafts[index].state = .uploading
+        do {
+            let uploaded = try await backend.uploadAttachment(fileURL: attachmentDrafts[index].fileURL, to: channel)
+            guard let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) else { return }
+            attachmentDrafts[currentIndex].state = .uploaded(uploaded)
+            if !attachmentDrafts.contains(where: { if case .failed = $0.state { return true }; return false }) {
+                attachmentFailureMessage = nil
+            }
+        } catch is CancellationError {
+            if let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) {
+                attachmentDrafts[currentIndex].state = .ready
+            }
+        } catch {
+            markAttachmentDraftFailed(id, error: error)
+        }
+    }
+
+    public func attachmentDownloadState(for attachment: MessageAttachment) -> IOSAttachmentDownloadState? {
+        attachmentDownloadStates[attachment.id]
+    }
+
+    public func cachedAttachmentURL(for attachment: MessageAttachment) -> URL? {
+        guard case .completed(let url) = attachmentDownloadStates[attachment.id] else { return nil }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    @discardableResult
+    public func downloadAttachment(_ attachment: MessageAttachment) async -> URL? {
+        if let cached = cachedAttachmentURL(for: attachment) { return cached }
+        guard attachmentDownloadStates[attachment.id] != .downloading else { return nil }
+        attachmentDownloadStates[attachment.id] = .downloading
+        do {
+            let url = try await backend.downloadAttachment(attachment, from: channel)
+            attachmentDownloadStates[attachment.id] = .completed(url)
+            return url
+        } catch is CancellationError {
+            attachmentDownloadStates[attachment.id] = nil
+            return nil
+        } catch {
+            attachmentDownloadStates[attachment.id] = .failed
+            return nil
+        }
+    }
+
     /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
     /// Adds a local echo and reconciles it through the IOS-2 clientMsgId guard.
     public func sendComposerDraft() async {
         let body = composerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard phase == .loaded, !body.isEmpty, !isSending, failedSend == nil else { return }
+        guard phase == .loaded,
+              !isSending,
+              failedSend == nil,
+              !body.isEmpty || !attachmentDrafts.isEmpty else { return }
         guard workSessionID == nil || workAgentHandle != nil else {
             sendFailureMessage = "Choose the agent that owns this Work session before sending input."
             return
         }
-        let preparedBody = workInstructionBody(for: body, requestsRead: nextWorkCommandIsRead)
+        isSending = true
+        defer { isSending = false }
+        guard let uploadedAttachments = await uploadPendingAttachments() else { return }
+        let preparedBody = body.isEmpty ? nil : workInstructionBody(for: body, requestsRead: nextWorkCommandIsRead)
         nextWorkCommandIsRead = false
         let replyToID = replyTarget?.id ?? threadRoot
         var props: [String: JSON] = [:]
@@ -976,12 +1061,15 @@ public final class IOSTimelineModel {
                 body: preparedBody,
                 props: .object(props),
                 rootId: threadRoot,
-                replyToId: replyToID
+                replyToId: replyToID,
+                attachmentIds: uploadedAttachments.map(\.id)
             ),
-            clientMsgId: UUID()
+            clientMsgId: UUID(),
+            attachments: uploadedAttachments
         )
         composerDraft = ""
         replyTarget = nil
+        attachmentDrafts = []
         messages = IOSTimelineReducer.applying(
             .message(optimisticMessage(for: pending)),
             to: messages,
@@ -999,6 +1087,8 @@ public final class IOSTimelineModel {
 
     public func retryFailedSend() async {
         guard let failedSend, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
         updateOptimisticMessage(clientMsgId: failedSend.clientMsgId, state: .sent)
         await performSend(failedSend)
     }
@@ -1034,14 +1124,15 @@ public final class IOSTimelineModel {
     }
 
     private func performSend(_ pending: IOSPendingMessageSend) async {
-        isSending = true
         sendFailureMessage = nil
-        defer { isSending = false }
         do {
             var acknowledged = try await backend.send(pending.draft, clientMsgId: pending.clientMsgId)
             acknowledged.clientMsgId = pending.clientMsgId
             acknowledged.rootId = pending.draft.rootId
             acknowledged.replyToId = pending.draft.replyToId
+            if acknowledged.attachments == nil || acknowledged.attachments?.isEmpty == true {
+                acknowledged.attachments = pending.attachments
+            }
             messages = IOSTimelineReducer.applying(.message(acknowledged), to: messages, channel: channel)
             failedSend = nil
             if let sequence = acknowledged.seq {
@@ -1055,6 +1146,48 @@ public final class IOSTimelineModel {
             failedSend = pending
             updateOptimisticMessage(clientMsgId: pending.clientMsgId, state: .failed)
             sendFailureMessage = "Message not sent. Retry sending it."
+        }
+    }
+
+    private func uploadPendingAttachments() async -> [MessageAttachment]? {
+        attachmentFailureMessage = nil
+        var uploaded: [MessageAttachment] = []
+        for id in attachmentDrafts.map(\.id) {
+            guard let index = attachmentDrafts.firstIndex(where: { $0.id == id }) else { continue }
+            if case .uploaded(let attachment) = attachmentDrafts[index].state {
+                uploaded.append(attachment)
+                continue
+            }
+            attachmentDrafts[index].state = .uploading
+            do {
+                let attachment = try await backend.uploadAttachment(
+                    fileURL: attachmentDrafts[index].fileURL,
+                    to: channel
+                )
+                guard let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) else { return nil }
+                attachmentDrafts[currentIndex].state = .uploaded(attachment)
+                uploaded.append(attachment)
+            } catch is CancellationError {
+                if let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) {
+                    attachmentDrafts[currentIndex].state = .ready
+                }
+                return nil
+            } catch {
+                markAttachmentDraftFailed(id, error: error)
+                return nil
+            }
+        }
+        return uploaded
+    }
+
+    private func markAttachmentDraftFailed(_ id: UUID, error: Error) {
+        guard let index = attachmentDrafts.firstIndex(where: { $0.id == id }) else { return }
+        if let issue = error as? IOSAttachmentTransferIssue, issue == .fileTooLarge {
+            attachmentDrafts[index].state = .failed(.fileTooLarge)
+            attachmentFailureMessage = "Attachments must be 100 MB or smaller. Remove this file or choose another."
+        } else {
+            attachmentDrafts[index].state = .failed(.unavailable)
+            attachmentFailureMessage = "Attachment upload failed. Retry the failed file."
         }
     }
 
@@ -1086,6 +1219,7 @@ public final class IOSTimelineModel {
             body: pending.draft.body,
             props: pending.draft.props,
             rootId: pending.draft.rootId,
+            attachments: pending.attachments,
             replyToId: pending.draft.replyToId,
             clientMsgId: pending.clientMsgId,
             createdAtMs: now

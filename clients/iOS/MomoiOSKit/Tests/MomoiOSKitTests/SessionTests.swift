@@ -1047,6 +1047,68 @@ struct ConversationTests {
         #expect(model.sendFailureMessage == nil)
     }
 
+    @Test("attachment-only send uploads first and binds completed IDs")
+    @MainActor
+    func attachmentOnlySend() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-ios-attachment-\(UUID().uuidString).txt")
+        try Data("attachment body".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let backend = RecordingConversationBackend()
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        try model.stageAttachment(fileURL: fileURL)
+
+        await model.sendComposerDraft()
+
+        let uploadCalls = await backend.uploadCalls
+        let sendCall = await backend.sendCalls.first
+        #expect(uploadCalls == [fileURL])
+        #expect(sendCall?.draft.body == nil)
+        #expect(sendCall?.draft.attachmentIds?.count == 1)
+        #expect(model.messages.first?.attachments?.first?.name == fileURL.lastPathComponent)
+        #expect(model.attachmentDrafts.isEmpty)
+    }
+
+    @Test("failed attachment remains retryable without dropping the message draft")
+    @MainActor
+    func failedAttachmentRetry() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-ios-attachment-retry-\(UUID().uuidString).txt")
+        try Data("retry attachment".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let backend = RecordingConversationBackend(failFirstUpload: true)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        model.composerDraft = "Keep this text"
+        try model.stageAttachment(fileURL: fileURL)
+
+        await model.sendComposerDraft()
+
+        #expect(model.composerDraft == "Keep this text")
+        #expect(model.attachmentFailureMessage != nil)
+        let draft = try #require(model.attachmentDrafts.first)
+        guard case .failed = draft.state else {
+            Issue.record("Expected the failed attachment to remain in the composer")
+            return
+        }
+        await model.retryAttachmentDraft(draft.id)
+        await model.sendComposerDraft()
+
+        #expect(await backend.uploadCalls.count == 2)
+        #expect(await backend.sendCalls.count == 1)
+        #expect(model.composerDraft.isEmpty)
+        #expect(model.attachmentDrafts.isEmpty)
+    }
+
     @Test("failed send retries with the same idempotency key")
     @MainActor
     func failedSendRetry() async {
@@ -1616,11 +1678,13 @@ private actor RecordingConversationBackend: IOSConversationBackend {
     private var historyValue: [Message] = []
     private let snapshotValue: IOSConversationSnapshot
     private let failFirstSend: Bool
+    private let failFirstUpload: Bool
     private let failFirstApproval: Bool
     private let failFirstMute: Bool
     private let failFirstRead: Bool
     private let threadPages: [IOSThreadRepliesPage]
     private(set) var sendCalls: [SendCall] = []
+    private(set) var uploadCalls: [URL] = []
     private(set) var approvalCalls: [ApprovalDecisionRequest] = []
     private(set) var markReadCalls: [MarkReadCall] = []
     private(set) var muteCalls: [MuteCall] = []
@@ -1629,6 +1693,7 @@ private actor RecordingConversationBackend: IOSConversationBackend {
     init(
         snapshot: IOSConversationSnapshot? = nil,
         failFirstSend: Bool = false,
+        failFirstUpload: Bool = false,
         failFirstApproval: Bool = false,
         failFirstMute: Bool = false,
         failFirstRead: Bool = false,
@@ -1640,6 +1705,7 @@ private actor RecordingConversationBackend: IOSConversationBackend {
             readStates: []
         )
         self.failFirstSend = failFirstSend
+        self.failFirstUpload = failFirstUpload
         self.failFirstApproval = failFirstApproval
         self.failFirstMute = failFirstMute
         self.failFirstRead = failFirstRead
@@ -1698,6 +1764,16 @@ private actor RecordingConversationBackend: IOSConversationBackend {
             replyToId: draft.replyToId,
             clientMsgId: clientMsgId,
             createdAtMs: now
+        )
+    }
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        uploadCalls.append(fileURL)
+        if failFirstUpload, uploadCalls.count == 1 { throw SessionError.transport("offline") }
+        return MessageAttachment(
+            id: FileID(uuidString: "00000000-0000-0000-0001-000000000099")!,
+            name: fileURL.lastPathComponent,
+            mime: "text/plain",
+            sizeBytes: Int64((try? Data(contentsOf: fileURL).count) ?? 0)
         )
     }
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {

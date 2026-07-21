@@ -1,19 +1,26 @@
 import Foundation
 import MomoCore
 import SwiftCentrifuge
+import UniformTypeIdentifiers
 
 /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
 /// REST writes and Centrifugo reads for the iOS companion.
 public actor MomoServerConversationClient: IOSConversationBackend {
     let authenticated: IOSSession
     private let urlSession: URLSession
+    private let directUploadSession: URLSession
     let decoder = JSONDecoder()
     private let realtimeDriver: (any RealtimeSubscriptionDriver)?
     private var lastKnownSequenceByChannel: [ChannelID: Int64] = [:]
 
-    public init(authenticated: IOSSession, urlSession: URLSession = .shared) {
+    public init(
+        authenticated: IOSSession,
+        urlSession: URLSession = .shared,
+        directUploadSession: URLSession? = nil
+    ) {
         self.authenticated = authenticated
         self.urlSession = urlSession
+        self.directUploadSession = directUploadSession ?? URLSession(configuration: .ephemeral)
         if let endpoint = authenticated.realtimeWebSocketURL {
             let tokenProvider = IOSRealtimeTokenProvider(
                 baseURL: authenticated.baseURL,
@@ -183,6 +190,143 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         } catch {
             throw SessionError.decoding("The server returned a sent message this app could not read.")
         }
+    }
+
+    public func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        let didAccess = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if didAccess { fileURL.stopAccessingSecurityScopedResource() }
+        }
+        let draft = try IOSAttachmentFileBoundary.draft(for: fileURL)
+        let basePath = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/attachments"
+        var createRequest = URLRequest(
+            url: authenticated.baseURL.appendingPathComponent(basePath + "/uploads"),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        createRequest.httpMethod = "POST"
+        createRequest.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        createRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        createRequest.httpBody = try JSONEncoder().encode(IOSCreateAttachmentUploadRequest(
+            name: draft.name,
+            mime: draft.mime,
+            size: draft.sizeBytes
+        ))
+        let created = try decoder.decode(
+            IOSAttachmentUploadResponse.self,
+            from: try await execute(request: createRequest)
+        )
+        guard created.status == "pending",
+              let attachmentID = FileID(uuidString: created.id),
+              let capabilityURL = URL(string: created.uploadUrl),
+              isAllowedUploadCapabilityURL(capabilityURL) else {
+            throw SessionError.decoding("The server returned an invalid attachment upload session.")
+        }
+
+        var uploadRequest = URLRequest(url: capabilityURL, cachePolicy: .reloadIgnoringLocalCacheData)
+        uploadRequest.httpMethod = "PUT"
+        uploadRequest.setValue(draft.mime, forHTTPHeaderField: "Content-Type")
+        uploadRequest.setValue(String(draft.sizeBytes), forHTTPHeaderField: "Content-Length")
+        do {
+            let (_, response) = try await directUploadSession.upload(for: uploadRequest, fromFile: fileURL)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else {
+                throw IOSAttachmentTransferIssue.unavailable
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let issue as IOSAttachmentTransferIssue {
+            throw issue
+        } catch {
+            // Capability URLs are secrets. Do not surface the request or the underlying URLSession error.
+            throw IOSAttachmentTransferIssue.unavailable
+        }
+
+        var completeRequest = URLRequest(
+            url: authenticated.baseURL.appendingPathComponent(basePath + "/\(attachmentID.description)/complete"),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        completeRequest.httpMethod = "POST"
+        completeRequest.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        let completed = try decoder.decode(
+            IOSAttachmentResponse.self,
+            from: try await execute(request: completeRequest)
+        )
+        guard completed.status == "complete",
+              completed.id.lowercased() == attachmentID.description.lowercased(),
+              completed.channelId.lowercased() == channel.description.lowercased(),
+              completed.name == draft.name,
+              completed.mime == draft.mime,
+              completed.size == draft.sizeBytes else {
+            throw SessionError.decoding("The attachment completion response did not match the upload.")
+        }
+        return MessageAttachment(
+            id: attachmentID,
+            name: draft.name,
+            mime: draft.mime,
+            sizeBytes: draft.sizeBytes
+        )
+    }
+
+    public func downloadAttachment(_ attachment: MessageAttachment, from channel: ChannelID) async throws -> URL {
+        guard attachment.sizeBytes >= 0,
+              attachment.sizeBytes <= IOSAttachmentFileBoundary.maximumSizeBytes else {
+            throw IOSAttachmentTransferIssue.fileTooLarge
+        }
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/attachments/\(attachment.id.description)/content"
+        var request = URLRequest(
+            url: authenticated.baseURL.appendingPathComponent(path),
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+
+        let temporaryURL: URL
+        let response: URLResponse
+        do {
+            (temporaryURL, response) = try await urlSession.download(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw IOSAttachmentTransferIssue.unavailable
+        }
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            throw IOSAttachmentTransferIssue.unavailable
+        }
+        let actualSize = try temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize
+        guard let actualSize,
+              Int64(actualSize) == attachment.sizeBytes,
+              Int64(actualSize) <= IOSAttachmentFileBoundary.maximumSizeBytes else {
+            throw SessionError.decoding("The downloaded attachment size did not match its metadata.")
+        }
+
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-attachment-previews", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let destination = folder.appendingPathComponent(
+                "\(attachment.id.description.lowercased())-\(IOSAttachmentFileBoundary.sanitizedFileName(attachment.name))",
+                isDirectory: false
+            )
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try FileManager.default.removeItem(at: destination)
+            }
+            try FileManager.default.copyItem(at: temporaryURL, to: destination)
+            return destination
+        } catch {
+            throw IOSAttachmentTransferIssue.unavailable
+        }
+    }
+
+    private func isAllowedUploadCapabilityURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), url.host != nil else { return false }
+        if scheme == "https" { return true }
+        guard scheme == authenticated.baseURL.scheme?.lowercased(),
+              url.host?.lowercased() == authenticated.baseURL.host?.lowercased(),
+              url.port == authenticated.baseURL.port else {
+            return false
+        }
+        return scheme == "http"
     }
 
     public func threadReplies(
@@ -584,6 +728,24 @@ private struct IOSSendMessageRequest: Encodable {
         case runId = "run_id"
         case attachmentIds
     }
+}
+private struct IOSCreateAttachmentUploadRequest: Encodable {
+    let name: String
+    let mime: String
+    let size: Int64
+}
+private struct IOSAttachmentUploadResponse: Decodable {
+    let id: String
+    let status: String
+    let uploadUrl: String
+}
+private struct IOSAttachmentResponse: Decodable {
+    let id: String
+    let channelId: String
+    let name: String
+    let mime: String
+    let size: Int64
+    let status: String
 }
 private struct IOSEditMessageRequest: Encodable { let body: String }
 struct IOSReactionDeltaDTO: Decodable {
