@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# MOMO-474/482 Drive archive attachment upload + receive projection verifier
-# (stub only; no Google calls).
+# MOMO-474/482/521 attachment archive upload + receive projection verifier.
+# Default is the existing Drive stub; ATTACHMENT_GATE_BACKEND=s3 adds MinIO.
 set -euo pipefail
+umask 077
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-REPO_ROOT="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "[attachment] missing $1" >&2; exit 1; }; }
 need docker
 need curl
 need jq
-need uuidgen
 PYTHON_BIN=""
 for cand in python3.13 python3.12 python3.11 python3.10 python3; do
   if command -v "$cand" >/dev/null 2>&1 && "$cand" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
@@ -19,34 +19,85 @@ for cand in python3.13 python3.12 python3.11 python3.10 python3; do
   fi
 done
 [ -n "$PYTHON_BIN" ] || { echo "[attachment] missing python >= 3.10" >&2; exit 1; }
+new_uuid() { "$PYTHON_BIN" -c 'import uuid; print(uuid.uuid4())'; }
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 PROJECT="${ATTACHMENT_GATE_PROJECT:-momo474attachment}"
-API_PORT="${ATTACHMENT_GATE_PORT:-19870}"
-PG_PORT="${ATTACHMENT_GATE_POSTGRES_PORT:-19871}"
-CENT_PORT_HOST="${ATTACHMENT_GATE_CENT_PORT:-19872}"
-HERMES_PORT_HOST="${ATTACHMENT_GATE_HERMES_PORT:-19873}"
+BACKEND="${ATTACHMENT_GATE_BACKEND:-drive}"
+API_PORT="${ATTACHMENT_GATE_PORT:-28040}"
+PG_PORT="${ATTACHMENT_GATE_POSTGRES_PORT:-28041}"
+CENT_PORT_HOST="${ATTACHMENT_GATE_CENT_PORT:-28042}"
+HERMES_PORT_HOST="${ATTACHMENT_GATE_HERMES_PORT:-28043}"
+MINIO_PORT_HOST="${ATTACHMENT_GATE_MINIO_PORT:-28044}"
 BOOT_TIMEOUT="${ATTACHMENT_GATE_BOOT_TIMEOUT:-2400}"
 ASSERT_TIMEOUT="${ATTACHMENT_GATE_ASSERT_TIMEOUT:-240}"
 RUN_ID="$(date -u +%s)-$$"
-TMP_DIR="${TMPDIR:-/tmp}/momo-attachment-$RUN_ID"
-mkdir -p "$TMP_DIR"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-attachment.XXXXXX")"
+
+case "$BACKEND" in
+  drive|s3) ;;
+  *) echo "[attachment] ATTACHMENT_GATE_BACKEND must be drive or s3" >&2; exit 1 ;;
+esac
+
+check_reserved_ports() {
+  "$PYTHON_BIN" - "$API_PORT" "$PG_PORT" "$CENT_PORT_HOST" \
+    "$HERMES_PORT_HOST" "$MINIO_PORT_HOST" <<'PY'
+import socket
+import sys
+
+for raw in sys.argv[1:]:
+    port = int(raw)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", port))
+    except OSError as exc:
+        raise SystemExit(f"[attachment] reserved port {port} is unavailable: {exc}")
+    finally:
+        sock.close()
+PY
+}
+check_reserved_ports
 
 BASE_URL="http://127.0.0.1:$API_PORT"
 CENT_API_URL="http://127.0.0.1:$CENT_PORT_HOST/api"
 CENT_API_KEY="${CENT_API_KEY:-change-me-cent-api-key}"
-COMPOSE_OVERRIDE="$TMP_DIR/drive-archive-stub.yml"
-cat >"$COMPOSE_OVERRIDE" <<YAML
+COMPOSE_OVERRIDE="$TMP_DIR/archive-backend.yml"
+COMPOSE_PROFILE_ARGS=()
+S3_ACCESS_KEY="momo-minio-$RUN_ID"
+S3_SECRET_KEY="$(new_uuid)$(new_uuid)"
+if [ "$BACKEND" = "s3" ]; then
+  COMPOSE_PROFILE_ARGS=(--profile s3)
+  cat >"$COMPOSE_OVERRIDE" <<YAML
+services:
+  api:
+    environment:
+      MOMO_ARCHIVE_BACKEND: s3
+      MOMO_S3_ENDPOINT: http://minio:9000
+      MOMO_S3_REGION: us-east-1
+      MOMO_S3_BUCKET: momo-attachments
+      MOMO_S3_ACCESS_KEY: "$S3_ACCESS_KEY"
+      MOMO_S3_SECRET_KEY: "$S3_SECRET_KEY"
+      MOMO_S3_FORCE_PATH_STYLE: "1"
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+YAML
+else
+  cat >"$COMPOSE_OVERRIDE" <<YAML
 services:
   api:
     environment:
       MOMO_DRIVE_ARCHIVE_BACKEND: stub
       MOMO_DRIVE_ARCHIVE_STUB_BASE_URL: "$BASE_URL"
 YAML
+fi
 
 compose() {
-  PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" HERMES_PORT="$HERMES_PORT_HOST" \
-    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$COMPOSE_OVERRIDE" "$@"
+  PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT_HOST" \
+    HERMES_PORT="$HERMES_PORT_HOST" MINIO_PORT="$MINIO_PORT_HOST" \
+    MOMO_S3_ACCESS_KEY="$S3_ACCESS_KEY" MOMO_S3_SECRET_KEY="$S3_SECRET_KEY" \
+    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$COMPOSE_OVERRIDE" \
+      "${COMPOSE_PROFILE_ARGS[@]}" "$@"
 }
 
 cleanup() {
@@ -54,8 +105,13 @@ cleanup() {
   trap - EXIT INT TERM
   if [ "${ATTACHMENT_GATE_KEEP:-0}" = "1" ]; then
     echo "[attachment] leaving compose project '$PROJECT' up"
+    echo "[attachment] temporary evidence: $TMP_DIR"
   else
     compose down -v --remove-orphans >/dev/null 2>&1 || true
+    case "$TMP_DIR" in
+      "${TMPDIR:-/tmp}"/momo-attachment.*) rm -r -- "$TMP_DIR" ;;
+      *) echo "[attachment] refusing unexpected temp path: $TMP_DIR" >&2 ;;
+    esac
   fi
   exit "$rc"
 }
@@ -63,7 +119,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "[attachment] booting isolated stub-only API/relay stack '$PROJECT'"
+echo "[attachment] booting isolated $BACKEND API/relay stack '$PROJECT' on 28040-28044"
 compose up -d api relay
 deadline=$(( $(date -u +%s) + BOOT_TIMEOUT ))
 until curl -fsS "$BASE_URL/health" >/dev/null 2>&1; do
@@ -88,12 +144,12 @@ sql_scalar() { run_sql -tA | tr -d '[:space:]'; }
 
 WS_A="00000000-0000-7000-8000-000000000001"
 CH_A="00000000-0000-7000-8000-000000000201"
-M1_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
-M2_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+M1_ID="$(new_uuid)"
+M2_ID="$(new_uuid)"
 M1_EMAIL="attachment-one-$RUN_ID@momo.local"
 M2_EMAIL="attachment-two-$RUN_ID@momo.local"
-M1_PASSWORD="attachment-$(uuidgen | tr '[:upper:]' '[:lower:]')"
-M2_PASSWORD="attachment-$(uuidgen | tr '[:upper:]' '[:lower:]')"
+M1_PASSWORD="attachment-$(new_uuid)"
+M2_PASSWORD="attachment-$(new_uuid)"
 
 WS_B="47400000-0000-7000-8000-000000000001"
 CH_B="47400000-0000-7000-8000-000000000201"
@@ -168,13 +224,21 @@ expect_status 201 "create resumable session"
 ATTACHMENT_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
 UPLOAD_URL="$(printf '%s' "$RESPONSE_BODY" | jq -er '.uploadUrl')"
 printf '%s' "$RESPONSE_BODY" | jq -e '.status == "pending"' >/dev/null
-case "$UPLOAD_URL" in
-  "$BASE_URL"/__momo_stub/drive/uploads/*) ;;
-  *) echo "[attachment] FAIL unsafe/unexpected stub upload URL" >&2; exit 1 ;;
-esac
-
-status="$(curl -sS -o "$TMP_DIR/upload-response" -w '%{http_code}' -X PUT \
-  -H 'Content-Type: text/plain' --data-binary "@$PAYLOAD" "$UPLOAD_URL")"
+if [ "$BACKEND" = "s3" ]; then
+  case "$UPLOAD_URL" in
+    http://minio:9000/momo-attachments/*X-Amz-Signature=*) ;;
+    *) echo "[attachment] FAIL unsafe/unexpected S3 upload URL" >&2; exit 1 ;;
+  esac
+  status="$(compose exec -T api curl -sS -o /tmp/momo-s3-upload-response -w '%{http_code}' \
+    -X PUT -H 'Content-Type: text/plain' --data-binary @- "$UPLOAD_URL" <"$PAYLOAD")"
+else
+  case "$UPLOAD_URL" in
+    "$BASE_URL"/__momo_stub/drive/uploads/*) ;;
+    *) echo "[attachment] FAIL unsafe/unexpected stub upload URL" >&2; exit 1 ;;
+  esac
+  status="$(curl -sS -o "$TMP_DIR/upload-response" -w '%{http_code}' -X PUT \
+    -H 'Content-Type: text/plain' --data-binary "@$PAYLOAD" "$UPLOAD_URL")"
+fi
 [ "$status" = "200" ] || { echo "[attachment] FAIL stub upload HTTP $status" >&2; exit 1; }
 
 COMPLETE_PATH="/v1/workspaces/$WS_A/channels/$CH_A/attachments/$ATTACHMENT_ID/complete"
@@ -182,7 +246,7 @@ api POST "$COMPLETE_PATH" "$M1_TOKEN"
 expect_status 200 "complete metadata verification"
 printf '%s' "$RESPONSE_BODY" | jq -e '.status == "complete" and .mime == "text/plain"' >/dev/null
 
-CLIENT_MSG_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+CLIENT_MSG_ID="$(new_uuid)"
 MESSAGE_PATH="/v1/workspaces/$WS_A/channels/$CH_A/messages"
 api POST "$MESSAGE_PATH" "$M1_TOKEN" \
   "$(jq -cn --arg c "$CLIENT_MSG_ID" --arg a "$ATTACHMENT_ID" '{clientMsgId:$c,body:"attachment gate",attachmentIds:[$a]}')"
@@ -206,9 +270,21 @@ printf '%s' "$RESPONSE_BODY" | jq -e \
 }
 
 CONTENT_PATH="/v1/workspaces/$WS_A/channels/$CH_A/attachments/$ATTACHMENT_ID/content"
-status="$(curl -sS -o "$TMP_DIR/downloaded" -w '%{http_code}' \
-  -H "Authorization: Bearer $M1_TOKEN" "$BASE_URL$CONTENT_PATH")"
-[ "$status" = "200" ] || { echo "[attachment] FAIL content proxy HTTP $status" >&2; exit 1; }
+if [ "$BACKEND" = "s3" ]; then
+  status="$(curl -sS -D "$TMP_DIR/content-headers" -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $M1_TOKEN" "$BASE_URL$CONTENT_PATH")"
+  [ "$status" = "307" ] || { echo "[attachment] FAIL content redirect HTTP $status" >&2; exit 1; }
+  DOWNLOAD_URL="$(grep -i '^location:' "$TMP_DIR/content-headers" | head -1 | cut -d' ' -f2- | tr -d '\r')"
+  case "$DOWNLOAD_URL" in
+    http://minio:9000/momo-attachments/*X-Amz-Signature=*) ;;
+    *) echo "[attachment] FAIL unsafe/unexpected S3 download URL" >&2; exit 1 ;;
+  esac
+  compose exec -T api curl -fsS "$DOWNLOAD_URL" >"$TMP_DIR/downloaded"
+else
+  status="$(curl -sS -o "$TMP_DIR/downloaded" -w '%{http_code}' \
+    -H "Authorization: Bearer $M1_TOKEN" "$BASE_URL$CONTENT_PATH")"
+  [ "$status" = "200" ] || { echo "[attachment] FAIL content proxy HTTP $status" >&2; exit 1; }
+fi
 cmp -s "$PAYLOAD" "$TMP_DIR/downloaded" || { echo "[attachment] FAIL content bytes" >&2; exit 1; }
 
 api GET "$CONTENT_PATH" "$M2_TOKEN"
@@ -219,15 +295,15 @@ api POST "$UPLOAD_PATH" "$M1_TOKEN" \
 expect_status 201 "abandoned pending session"
 PENDING_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')"
 
-got="$(printf "SELECT status || ':' || coalesce(message_id::text, 'null') FROM attachment WHERE id='$PENDING_ID';\n" | sql_scalar)"
+got="$(printf "SELECT status || ':' || coalesce(message_id::text, 'null') FROM attachment WHERE id='%s';\n" "$PENDING_ID" | sql_scalar)"
 [ "$got" = "pending:null" ] || { echo "[attachment] FAIL abandoned state: $got" >&2; exit 1; }
-got="$(printf "SELECT message_id::text FROM attachment WHERE id='$ATTACHMENT_ID';\n" | sql_scalar | tr '[:upper:]' '[:lower:]')"
+got="$(printf "SELECT message_id::text FROM attachment WHERE id='%s';\n" "$ATTACHMENT_ID" | sql_scalar | tr '[:upper:]' '[:lower:]')"
 [ "$got" = "$(printf '%s' "$MESSAGE_ID" | tr '[:upper:]' '[:lower:]')" ] || {
   echo "[attachment] FAIL message binding: $got" >&2; exit 1; }
 
-got="$(printf "SELECT count(*) FROM audit_log WHERE workspace_id='$WS_A' AND target_id IN ('$ATTACHMENT_ID','$PENDING_ID') AND action='attachment.upload_started';\n" | sql_scalar)"
+got="$(printf "SELECT count(*) FROM audit_log WHERE workspace_id='%s' AND target_id IN ('%s','%s') AND action='attachment.upload_started';\n" "$WS_A" "$ATTACHMENT_ID" "$PENDING_ID" | sql_scalar)"
 [ "$got" = "2" ] || { echo "[attachment] FAIL upload audit count: $got" >&2; exit 1; }
-got="$(printf "SELECT count(*) FROM audit_log WHERE workspace_id='$WS_A' AND target_id='$ATTACHMENT_ID' AND action IN ('attachment.upload_completed','attachment.message_linked');\n" | sql_scalar)"
+got="$(printf "SELECT count(*) FROM audit_log WHERE workspace_id='%s' AND target_id='%s' AND action IN ('attachment.upload_completed','attachment.message_linked');\n" "$WS_A" "$ATTACHMENT_ID" | sql_scalar)"
 [ "$got" = "2" ] || { echo "[attachment] FAIL complete/link audit count: $got" >&2; exit 1; }
 
 # Create a second upload row, then force pending/failed rows onto the message as
@@ -321,13 +397,33 @@ done
   exit 1
 }
 
-got="$(printf "BEGIN; SET LOCAL ROLE momo_app; SET LOCAL app.workspace_id='$WS_A'; SELECT count(*) FROM attachment WHERE workspace_id='$WS_B'; COMMIT;\n" | sql_scalar)"
+got="$(printf "BEGIN; SET LOCAL ROLE momo_app; SET LOCAL app.workspace_id='%s'; SELECT count(*) FROM attachment WHERE workspace_id='%s'; COMMIT;\n" "$WS_A" "$WS_B" | sql_scalar)"
 [ "$got" = "0" ] || { echo "[attachment] FAIL RLS isolation: $got" >&2; exit 1; }
 got="$(printf "SELECT count(*) FROM pg_class WHERE relname='attachment' AND relrowsecurity AND relforcerowsecurity;\n" | sql_scalar)"
 [ "$got" = "1" ] || { echo "[attachment] FAIL FORCE RLS metadata: $got" >&2; exit 1; }
+
+# Presigned URLs are response-only capabilities. Neither structured logs nor
+# PostgreSQL ledgers may retain their query parameters or S3 credentials.
+compose logs --no-color api relay >"$TMP_DIR/service.log"
+run_sql -tA >"$TMP_DIR/ledger.txt" <<SQL
+SELECT coalesce(string_agg(value, E'\n'), '')
+  FROM (
+    SELECT coalesce(drive_file_id, '') AS value FROM attachment
+    UNION ALL
+    SELECT coalesce(detail::text, '') FROM audit_log
+    UNION ALL
+    SELECT coalesce(payload::text, '') FROM outbox
+  ) ledger;
+SQL
+for evidence in "$TMP_DIR/service.log" "$TMP_DIR/ledger.txt"; do
+  if grep -F -e 'X-Amz-Signature' -e "$S3_ACCESS_KEY" -e "$S3_SECRET_KEY" "$evidence" >/dev/null; then
+    echo "[attachment] FAIL capability URL or credential leaked into $(basename "$evidence")" >&2
+    exit 1
+  fi
+done
 
 api POST "$UPLOAD_PATH" "$M1_TOKEN" \
   "$(jq -cn '{name:"too-large.bin",mime:"application/octet-stream",size:104857601}')"
 expect_status 413 "100 MB limit"
 
-echo "MOMO-482 attachment upload + send/history/realtime projection + content/RLS/audit PASS"
+echo "MOMO-521 $BACKEND attachment upload + send/history/realtime + content/RLS/audit/redaction PASS"
