@@ -37,9 +37,10 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
     var endedAtMs: Int64?
     var exitCode: Int?
     let ptyId: String?
+    let remoteAttachAvailable: Bool?
 
     var isRunning: Bool { status == .running }
-    var isRemotePTYBound: Bool { ptyId != nil }
+    var isRemotePTYBound: Bool { remoteAttachAvailable == true || ptyId != nil }
 
     init(
         id: WorkSessionID,
@@ -54,7 +55,8 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
         startedAtMs: Int64,
         endedAtMs: Int64? = nil,
         exitCode: Int? = nil,
-        ptyId: String? = nil
+        ptyId: String? = nil,
+        remoteAttachAvailable: Bool? = nil
     ) {
         self.id = id
         self.workspaceId = workspaceId
@@ -69,6 +71,7 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
         self.endedAtMs = endedAtMs
         self.exitCode = exitCode
         self.ptyId = ptyId
+        self.remoteAttachAvailable = remoteAttachAvailable
     }
 
     mutating func apply(_ delta: WorkSessionDelta) {
