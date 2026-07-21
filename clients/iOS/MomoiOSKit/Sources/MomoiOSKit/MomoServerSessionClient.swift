@@ -10,11 +10,13 @@ public protocol SessionBackend: Sendable {
 /// The copy is intentionally local to MomoiOSKit; MomoCore and MomoMac stay untouched.
 public actor MomoServerSessionClient: SessionBackend {
     private let session: URLSession
+    private let store: SessionStore
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init(session: URLSession = .shared) {
+    public init(session: URLSession = .shared, store: SessionStore = .shared) {
         self.session = session
+        self.store = store
     }
 
     public func authenticate(form: SessionForm) async throws -> IOSSession {
@@ -28,13 +30,16 @@ public actor MomoServerSessionClient: SessionBackend {
     public func bootstrap(session authenticated: IOSSession) async throws -> WorkspaceBootstrap {
         let workspacePath = "/v1/workspaces/\(authenticated.workspaceID.description)"
         let channelsPath = workspacePath + "/channels"
+        let executor = IOSAuthenticatedRequestExecutor(
+            authenticated: authenticated,
+            store: store,
+            urlSession: session
+        )
         async let workspaceData = get(
-            authenticated.baseURL.appendingPathComponent(workspacePath),
-            accessToken: authenticated.accessToken
+            authenticated.baseURL.appendingPathComponent(workspacePath), executor: executor
         )
         async let channelsData = get(
-            authenticated.baseURL.appendingPathComponent(channelsPath),
-            accessToken: authenticated.accessToken
+            authenticated.baseURL.appendingPathComponent(channelsPath), executor: executor
         )
         return try Self.mapBootstrap(
             workspaceData: try await workspaceData,
@@ -93,10 +98,10 @@ public actor MomoServerSessionClient: SessionBackend {
         return try await execute(request)
     }
 
-    private func get(_ url: URL, accessToken: String) async throws -> Data {
+    private func get(_ url: URL, executor: IOSAuthenticatedRequestExecutor) async throws -> Data {
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        return try await executeData(request)
+        request.httpMethod = "GET"
+        return try await executor.data(for: request)
     }
 
     private func execute<Response: Decodable>(_ request: URLRequest) async throws -> Response {

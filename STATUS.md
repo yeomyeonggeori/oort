@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-514 iOS 토큰 자동 리프레시·비파괴 오류 UX (#554, 2026-07-21)
+
+- iOS의 인증 REST·realtime token·다운로드·허들 요청을 하나의 actor executor로 통합했다. 401은 single-use refresh token을 단 한 번 회전한 뒤 원 요청을 한 번만 재시도하며, 이미 회전된 뒤 늦게 도착한 401은 새 access token으로만 재시도해 refresh replay를 만들지 않는다. 회전 실패 또는 재시도 401만 `sessionExpired`로 분류한다.
+- access/refresh token과 NSE fetch session을 App/NSE 공유 `AfterFirstUnlockThisDeviceOnly` Keychain으로 옮겼다. 기존 App Group·legacy UserDefaults의 평문 세션은 1회 migration 후 성공 여부와 무관하게 삭제하고, Keychain 일부 쓰기 실패는 두 값을 모두 제거해 fail-closed한다. 토큰은 URL query·로그·UserDefaults에 새로 기록하지 않는다.
+- 이미 표시한 타임라인의 history 갱신이 실패해도 기존 메시지와 갱신 중 수신한 realtime 이벤트를 유지하고 인라인 재시도 배너만 표시한다. session refresh가 실제로 실패한 경우에만 Profile 재로그인 안내를 노출한다. MomoiOSKit 69 tests(보안 저장·migration·staggered 401 single-flight·비파괴 타임라인 신규 4)가 PASS했고, 앱+Notification Service generic iOS Simulator 무서명 `xcodebuild build`가 PASS했다. 실제 15분 만료·토큰 회전, 서명된 실기기의 App↔NSE 공유 Keychain, 라이트/다크·Dynamic Type 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-502 iOS 검색·활동 실데이터화 (#589, 2026-07-21)
 
 - Search 탭을 채널명 로컬 필터와 서버 FTS `GET /search/messages`의 300ms debounce·opaque cursor 결과로 통합했다. 서버 snippet의 문자 offset을 Unicode-safe하게 강조하고, 결과의 channel/message/seq를 사용해 `before=seq+1` history를 불러온 뒤 정확한 메시지 행으로 이동·강조한다. 검색 갱신 실패는 기존 결과를 지우지 않고 인라인 오류와 재시도를 제공한다.

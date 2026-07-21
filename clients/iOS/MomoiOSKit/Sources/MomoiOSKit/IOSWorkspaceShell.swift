@@ -29,12 +29,19 @@ public struct IOSWorkspaceView: View {
         workPath: Binding<[IOSPushDeepLink]>,
         signOut: @escaping @MainActor () async -> Void
     ) {
-        let backend = MomoServerConversationClient(authenticated: session)
+        let requestExecutor = IOSAuthenticatedRequestExecutor(authenticated: session)
+        let backend = MomoServerConversationClient(
+            authenticated: session,
+            requestExecutor: requestExecutor
+        )
         self.session = session
         self.bootstrap = bootstrap
         self.signOut = signOut
         self.backend = backend
-        self.huddleService = IOSHuddleRESTService(authenticated: session)
+        self.huddleService = IOSHuddleRESTService(
+            authenticated: session,
+            requestExecutor: requestExecutor
+        )
         _selectedTab = selectedTab
         _homePath = homePath
         _workPath = workPath

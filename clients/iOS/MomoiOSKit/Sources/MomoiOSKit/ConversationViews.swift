@@ -381,6 +381,9 @@ struct IOSTimelineView: View {
                 if model.realtimeStatus.isFallbackActive, model.phase == .loaded {
                     offlineBanner
                 }
+                if let refreshFailure = model.refreshFailure, model.phase == .loaded {
+                    historyRefreshBanner(refreshFailure)
+                }
                 switch model.phase {
                 case .loading:
                     loadingMessages
@@ -613,6 +616,27 @@ struct IOSTimelineView: View {
             .padding(.vertical, 8)
         }
         .accessibilityIdentifier("offlineBanner")
+    }
+
+    private func historyRefreshBanner(_ failure: IOSTimelineModel.Failure) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(
+                    failure.requiresSignIn ? "Session expired" : "Messages may be out of date",
+                    systemImage: failure.requiresSignIn ? "person.crop.circle.badge.exclamationmark" : "arrow.clockwise"
+                )
+                .font(.callout.weight(.semibold))
+                Text(failure.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button(failure.requiresSignIn ? "Try refreshing session" : "Retry message refresh") {
+                    Task { await model.retry() }
+                }
+                .accessibilityIdentifier("retryMessageRefresh")
+            }
+            .padding(.vertical, 8)
+        }
+        .accessibilityIdentifier("messageRefreshBanner")
     }
 
     private var loadingMessages: some View {
