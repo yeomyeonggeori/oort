@@ -74,11 +74,31 @@ export interface ReactionEvent {
   };
 }
 
+/** Channel-scoped approval decision/expiry broadcast. */
+type ApprovalEventType =
+  | "approval.decided"
+  | "approval.approved"
+  | "approval.rejected"
+  | "approval.expired";
+export type ApprovalEvent = {
+  [Type in ApprovalEventType]: {
+    type: Type;
+    v: number;
+    ts: number;
+    payload: {
+      approval_id: string;
+      channel_id: string;
+      status: string;
+    };
+  };
+}[ApprovalEventType];
+
 export type ChannelRealtimeEvent =
   | MessageNewEvent
   | MessageEditedEvent
   | MessageDeletedEvent
-  | ReactionEvent;
+  | ReactionEvent
+  | ApprovalEvent;
 
 export interface ChannelSubscriptionHandlers {
   /** Fired on (re)subscribe; `recovered:false` requires a REST backfill. */
@@ -157,6 +177,9 @@ export function createRealtime(
 ): RealtimeHandle {
   const client = new Centrifuge(realtimeWebSocketUrl, {
     getToken: fetchRealtimeToken,
+    // centrifuge-js uses jittered exponential backoff inside these bounds.
+    minReconnectDelay: 500,
+    maxReconnectDelay: 20_000,
   });
 
   client.on("connecting", () => onStatus("connecting"));
@@ -185,7 +208,11 @@ export function createRealtime(
           event.type === "message.edited" ||
           event.type === "message.deleted" ||
           event.type === "reaction.added" ||
-          event.type === "reaction.removed") &&
+          event.type === "reaction.removed" ||
+          event.type === "approval.decided" ||
+          event.type === "approval.approved" ||
+          event.type === "approval.rejected" ||
+          event.type === "approval.expired") &&
         event.payload
       ) {
         handlers.onPublication(event);

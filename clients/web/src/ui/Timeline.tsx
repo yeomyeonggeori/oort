@@ -9,6 +9,10 @@ import type {
 } from "../realtime/realtime";
 import type { ApprovalsStore } from "../state/approvals";
 import {
+  approvalCardModel,
+  resolveApprovalStatus,
+} from "../state/approvalModel";
+import {
   applyReactionDelta,
   fromRestMessage,
   isSameLocalDate,
@@ -79,58 +83,6 @@ function fromRealtime(
   return ui;
 }
 
-/**
- * approval_request messages carry the linkage in props (approval_id plus the
- * plain-language title/summary the server wrote). Only those prose strings
- * are read — tool JSON/arguments/cost stay unrendered (ADR-0112 basic mode).
- */
-function approvalCardProps(message: TimelineMessage): {
-  approvalId: string;
-  title: string;
-  summary?: string;
-  propsStatus?: string;
-} | null {
-  const props = message.props;
-  if (!props) return null;
-  const approvalId = props["approval_id"];
-  if (typeof approvalId !== "string" || approvalId === "") return null;
-  const title = props["title"];
-  const summary = props["summary"];
-  const status = props["status"];
-  const result: {
-    approvalId: string;
-    title: string;
-    summary?: string;
-    propsStatus?: string;
-  } = {
-    approvalId,
-    title:
-      typeof title === "string" && title !== ""
-        ? title
-        : (message.body ?? "승인 요청"),
-  };
-  if (typeof summary === "string" && summary !== "") result.summary = summary;
-  if (typeof status === "string" && status !== "") result.propsStatus = status;
-  return result;
-}
-
-/**
- * Card status resolution: the session-local receipt/projection state and the
- * server-patched message props are both authoritative snapshots; whichever
- * side carries a SETTLED status wins (a decision elsewhere reaches props on
- * reload before this session's pending list refreshes, and vice versa).
- */
-function resolveApprovalStatus(
-  storeStatus: string | null,
-  propsStatus: string | undefined
-): string | null {
-  if (storeStatus !== null && storeStatus !== "pending") return storeStatus;
-  if (propsStatus !== undefined && propsStatus !== "pending") {
-    return propsStatus;
-  }
-  return storeStatus ?? propsStatus ?? null;
-}
-
 const timeFormat = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit",
   minute: "2-digit",
@@ -193,6 +145,18 @@ export default function Timeline({
 
   const applyRealtimeEvent = useCallback(
     (event: ChannelRealtimeEvent) => {
+      if (
+        event.type === "approval.decided" ||
+        event.type === "approval.approved" ||
+        event.type === "approval.rejected" ||
+        event.type === "approval.expired"
+      ) {
+        approvals.applyRealtimeStatus(
+          event.payload.approval_id,
+          event.payload.status
+        );
+        return;
+      }
       if (event.type === "message.new" || event.type === "message.edited") {
         appendMessages([fromRealtime(event)]);
         return;
@@ -224,7 +188,7 @@ export default function Timeline({
         })
       );
     },
-    [appendMessages]
+    [appendMessages, approvals]
   );
 
   /**
@@ -317,7 +281,10 @@ export default function Timeline({
           bufferedEventsRef.current.push(event);
           return;
         }
-        if (event.seq > lastSeqRef.current + 1) {
+        if (
+          "seq" in event &&
+          event.seq > lastSeqRef.current + 1
+        ) {
           // Gap: never render around a hole — REST backfill closes it first.
           void catchUp();
         }
@@ -417,10 +384,7 @@ export default function Timeline({
             const reactionEntries = Object.entries(
               Object.entries(reactions).find(([messageId]) => messageId.toLowerCase() === message.id.toLowerCase())?.[1] ?? {}
             );
-            const approvalCard =
-              message.type === "approval_request"
-                ? approvalCardProps(message)
-                : null;
+            const approvalCard = approvalCardModel(message);
             return (
               <Fragment key={message.seq}>
               {showDate && <li className="date-divider"><span>{dateFormat.format(new Date(message.createdAtMs))}</span></li>}
@@ -446,14 +410,17 @@ export default function Timeline({
                   <p className="message-body message-tombstone">메시지 삭제됨</p>
                 ) : approvalCard !== null ? (
                   <ApprovalCard
-                    approvalId={approvalCard.approvalId}
+                    approvalId={approvalCard.approvalId ?? message.id}
                     title={approvalCard.title}
                     summary={approvalCard.summary}
                     requesterName={displayNameFor(message.authorMemberId)}
                     status={resolveApprovalStatus(
-                      approvals.statusFor(approvalCard.approvalId),
-                      approvalCard.propsStatus
+                      approvalCard.approvalId === null
+                        ? null
+                        : approvals.statusFor(approvalCard.approvalId),
+                      approvalCard.status
                     )}
+                    isResumeOffer={approvalCard.isResumeOffer}
                     decide={approvals.decide}
                   />
                 ) : (

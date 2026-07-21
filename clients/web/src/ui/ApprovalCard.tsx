@@ -10,6 +10,7 @@ interface ApprovalCardProps {
   requesterName: string;
   /** Authoritative status as far as this client knows; null = pending. */
   status: string | null;
+  isResumeOffer?: boolean;
   decide: (
     approvalId: string,
     approve: boolean,
@@ -39,6 +40,7 @@ export default function ApprovalCard({
   summary,
   requesterName,
   status,
+  isResumeOffer = false,
   decide,
 }: ApprovalCardProps) {
   const [busy, setBusy] = useState(false);
@@ -92,7 +94,11 @@ export default function ApprovalCard({
       )}
       <p className="approval-requester muted">{requesterName}의 승인 요청</p>
 
-      {status !== null && status !== "pending" ? (
+      {isResumeOffer ? (
+        <p className="approval-resume-note" data-testid="resume-offer-note">
+          데스크톱에서 재개하세요.
+        </p>
+      ) : status !== null && status !== "pending" ? (
         <p className="approval-state" data-testid="approval-state">
           {STATUS_LABEL[status] ?? status}
           {note !== null && (
