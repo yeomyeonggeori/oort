@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-528 Context Packet v0 불변 승격 (#598, 2026-07-22)
+
+- migration 030에 불변 `context_packet` 원장·FORCE RLS와 기본 actor/agent/workspace 스코프 ∪ 유효 visibility grant 검색 필터를 추가하고, mention 트랜잭션이 profile 상시+fact/episode 질의 memory refs와 실제 plugin capability grant를 동결한다.
+- worker/gateway 공통 payload에 `context_packet_id`·`context_packet`·`memory_refs`를 가산하고 기존 projection alias를 유지했으며, 현재 run-channel 멤버만 저장 packet을 열람하는 GET과 OpenAPI/런타임 스펙을 추가했다.
+- 전 9개 Swift 패키지 `swift build --disable-sandbox`와 Core 38·server 145·OutboxRelay 2·PushRelay 6·AgentWorker 44·WorkHostDaemon 6·NotifierWorker 4·LinkShort 5 unit, docs local gate, `verify_context_packet.sh` bash 문법과 `git diff --check`가 PASS했다. 일반 Swift local gate는 관리형 환경의 중첩 `sandbox-exec` 거부로 코드 컴파일 전에 실패해 동일 패키지를 `--disable-sandbox`로 검증했다. 28100~28103 격리 Docker의 불변성·만료 재발급·grant revoke·scope·RLS 실제 왕복은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## MOMO-531 momo-acp-host v0 (#601, 2026-07-22)
 
 - 재사용 가능한 `MomoACPHost`가 ACP JSON-RPC/stdio `initialize`→`session/new`→`session/prompt`, `session/update`의 `agent.partial`/`agent.status` 카드 투영, `_meta.acp` host-local 보존, `session/request_permission` 승인 정지점과 `terminal/*` PTY 위임을 구현했다. 앱 세션 매니저는 기존 승인 카드 결정과 PTY 소유자를 주입하며, 결정 전 continuation을 보류하고 누락·잘못된 option은 거부한다.

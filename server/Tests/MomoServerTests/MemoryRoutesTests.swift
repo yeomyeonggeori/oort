@@ -150,4 +150,45 @@ final class MemoryRoutesTests: XCTestCase {
             XCTAssertTrue(openAPI.contains(operation))
         }
     }
+
+    func testContextPacketMigrationAndRoutesKeepImmutableGrantAwareContract() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/030_context_packet.sql"),
+            encoding: .utf8
+        )
+        for contract in [
+            "CREATE TABLE context_packet", "packet_id    uuid PRIMARY KEY DEFAULT uuidv7()",
+            "ENABLE ROW LEVEL SECURITY", "FORCE ROW LEVEL SECURITY",
+            "CREATE POLICY ws_isolation", "context_packet_immutable",
+            "memory_visibility_grant", "revoked_at IS NULL",
+            "grantee_kind = 'member'", "grantee_kind = 'agent'",
+            "CREATE OR REPLACE FUNCTION memory_search_hybrid",
+        ] {
+            XCTAssertTrue(migration.contains(contract), "missing \(contract)")
+        }
+        XCTAssertFalse(migration.contains("SECURITY DEFINER"))
+        XCTAssertFalse(migration.contains("BYPASSRLS"))
+
+        let messageRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MessageRoutes.swift"
+            ), encoding: .utf8
+        )
+        XCTAssertTrue(messageRoutes.contains("plugin_capability_projection"))
+        XCTAssertTrue(messageRoutes.contains("memory_search_hybrid("))
+        XCTAssertTrue(messageRoutes.contains("actor_channel_member"))
+        XCTAssertTrue(messageRoutes.contains("\"memory_refs\": issuedPacket.memoryRefs"))
+        XCTAssertFalse(messageRoutes.contains("mock-github@"))
+
+        let openAPI = try String(
+            contentsOf: serverRoot.deletingLastPathComponent()
+                .appendingPathComponent("docs/api/openapi.yaml"), encoding: .utf8
+        )
+        XCTAssertTrue(openAPI.contains("operationId: getContextPacket"))
+        XCTAssertTrue(openAPI.contains("ContextPacketResponse:"))
+    }
 }

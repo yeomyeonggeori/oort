@@ -183,6 +183,7 @@ services:
       HERMES_BASE_URL: http://mock-hermes:8088/v1
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
       MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
+      CONTEXT_PACKET_TTL_SECONDS: ${CONTEXT_PACKET_TTL_SECONDS:-900}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
