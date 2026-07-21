@@ -1,6 +1,6 @@
 # ADR-0129: Memory Plane & Context Fabric 런타임 — 메신저가 에이전트의 컨텍스트를 핸들링한다
 
-- Status: **Proposed** (2026-07-21, Fable 기안 — 성재 승인 대기)
+- Status: **Accepted** (2026-07-21, 성재 — "위 내용을 main에 설계 기반으로 아주 상세하게 풀어내고 트랙으로 실행" 지시로 권고안 D1~D6 전부 A 승인. 실행 정본: `docs/planning/handoffs/2026-07-21-agent-native-fabric-batch.md`)
 - 관련: research/11-agent-runtime/04·05·06(Context Packet/Memory Plane/Capability Cache v0 규범 스펙 — 본 ADR은 그 **런타임 실장 결정**), research/19-agent-native-fabric/00(내부 실사)·03(메모리 OSS 지형), ADR-0102(실행 경로), ADR-0113(Capability projection), research/14 gap-audit(크리티컬 패스: "승인된 보안 ADR → Capability/Context/Memory foundation")
 - 발단: 성재(CTO 대화, 2026-07-21) — "메신저 레벨에서 codex/claude code가 해주는 것 같은 에이전트 컨텍스트 핸들링. 회사 단위로 관리되는 컨텍스트·메모리를 사용자가 가시적으로 보고, 에이전트에게 서빙한다. 메모리·데이터·컨텍스트 최적화가 핵심 화두."
 

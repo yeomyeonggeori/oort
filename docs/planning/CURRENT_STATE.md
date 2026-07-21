@@ -51,7 +51,7 @@
 | `ADR-0121` | 셀프호스팅 배포판·온보딩 — install/upgrade, universal link 초대, BM 경계 | Fable | **`accepted`** (2026-07-15) | 성재 ✓ | S 배치는 웹 배치 랜딩 후 순차 발급 |
 | `PLN-20260716-01` | 플러그인 플랫폼 제품화 + Slack/MM 호환 표면 | Fable (engine planner) | **`adr-accepted → building`** | 성재 ✓ | **SE-04A·04B 종결**(registry `1809551` / webhook `5ff5161` — ADR-0115 Accepted). 다음: GitHub grant 왕복→Drive 경로C(SA 포장). UI는 Codex handoff 대기 · 리소스 거버넌스 §9 + MOMO-411 gate --down 정착 |
 | `ADR-0122` | 음성 허들 + 회의 지능 — LiveKit 미디어, 임시 허들 모델, 전사 파이프라인, 요약=에이전트 Work | Fable | **`proposed`** | 성재 | 성재 발제(2026-07-15) 리서치 완료(15-05). option 승인 대기 — Accepted≠즉시 착수(웹/푸시 뒤) |
-| `PLN-20260721-01` | 에이전트-네이티브 비전(CTO 피드백 4대 고민+Blaxel) 리서치·설계 고도화 | Fable | **`research-complete → adr-proposed`** | 성재 | research/19-agent-native-fabric/00~04 + 진단(2026-07-21-agent-native-vision-diagnosis.md) 완료. **ADR-0129**(Memory/Context 런타임, MOMO-526~529 예약)·**ADR-0130**(외부 에이전트 멤버십·ACP, MOMO-530~533 예약) Proposed — 옵션 승인 대기. 우선순위 제안=진단 §7 |
+| `PLN-20260721-01` | 에이전트-네이티브 비전(CTO 피드백 4대 고민+Blaxel) 리서치·설계 고도화 | Fable | **`adr-accepted → handoff-ready`** | 성재 ✓ | **ADR-0129·0130 Accepted**(2026-07-21 성재 지시 승인). **Blaxel 캔슬·E2B 확정**. 실행 정본: `handoffs/2026-07-21-agent-native-fabric-batch.md`(MOMO-518·526~533, Wave M/A/U + 오케스트레이터 인수 프롬프트 §8). 트랙 진단: 2트랙 유지+함정 규율 승격(2026-07-21-track-structure-diagnosis.md). 티켓 발급·정본 통합=오케스트레이터 인수 대기 |
 | `ADR-0103` | 로드맵 정렬: 멀티팀 알파 vs 로컬 솔로 dogfood | unclaimed | `queued` | 성재 | 내부 팀 알파를 현재 실행 가정으로 검토하되, 확정 표기는 성재 승인과 ADR 정본화 이후로 제한 |
 | `ADR-0104` | 에이전트 presence/typing/streaming 이벤트 | unclaimed | `queued` | 성재 | MOMO-350(status/partial) 결과를 전제로 검토 |
 | `ADR-0105..0108` | 검색·정체성·CI·서버 스택 | unclaimed | `queued` | 성재 | `docs/architecture/overview.md` 결정 큐 순서 준수 |

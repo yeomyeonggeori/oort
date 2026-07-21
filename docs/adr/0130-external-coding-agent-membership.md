@@ -1,6 +1,6 @@
 # ADR-0130: 외부 코딩 에이전트 멤버십 — ACP 클라이언트로 임의 에이전트를 1급 멤버로
 
-- Status: **Proposed** (2026-07-21, Fable 기안 — 성재 승인 대기)
+- Status: **Accepted** (2026-07-21, 성재 — "위 내용을 main에 설계 기반으로 아주 상세하게 풀어내고 트랙으로 실행" 지시로 권고안(D1-A·D2-A·D3-A·D4=v0 B/Card 2단계·D5-A) 승인. 실행 정본: `docs/planning/handoffs/2026-07-21-agent-native-fabric-batch.md`)
 - 관련: research/19-agent-native-fabric/01(연동 표면 실사)·02(프로토콜 지형), ADR-0101(bearer)·0102(이중 경로)·0111(BYOA)·0114(Work Console, D7 도구-불가지 프로파일)·0125(Host Fabric)·0126(관전 D4 워크스페이스 소유 세션), research/13-redesign(MCP/A2A/AG-UI 삼각 채택 — 본 ADR은 그 공개-표면화 1단계), MOMO-313(A2A Agent Card, blocked — D4가 승계)
 - 발단: 성재(CTO 대화, 2026-07-21) — "opencode·codex·grok build·kimi code·pi 같은 코딩 에이전트도 광의의 에이전트다. 호스팅해서 연동하고 사용할 구멍이 있지 않을까. 핵심은 에이전트와 소통하는 방식 — 기존 에이전트들도 더 잘 쓸 수 있는 느슨한 규격."
 

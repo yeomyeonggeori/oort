@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-21 (Fable 기획 2차) · PLN-20260721-01 승인 처리 — ADR-0129·0130 Accepted + 패브릭 배치 패킷 + Blaxel 캔슬
+- 성재 지시(모바일) 5건 처리: ①노션 정리(인증 URL 발급 — 성재 승인 대기) ②UXUI 레퍼런스 분석(research/19-05, 에이전트 진행 중→도착 시 커밋) ③**Blaxel 콜라보 캔슬**(오픈소스화 전 credential 제공 불가 — E2B 베이스 확정, 진단 §5 반영) ④상세 실행 설계 main 랜딩 ⑤트랙 구조 진단.
+- **ADR-0129·0130 → Accepted**("main에 설계 기반 상세 전개+트랙 실행" 지시 근거). 실행 정본 **handoffs/2026-07-21-agent-native-fabric-batch.md**: Wave M(526→527→528 메모리/pgvector/packet)·Wave A(530→533→531 gateway tool/도구원장/ACP host)·Wave U(518→529→532), 티켓 계약 원문·공통 함정(검수 축적분)·검증 규율·**오케스트레이터 인수 프롬프트(§8)** 포함.
+- **트랙 진단**(2026-07-21-track-structure-diagnosis.md): 3~4트랙 세분화 기각 — 2트랙 유지+함정 체크리스트 HANDOFF_TEMPLATE 승격+정비 배치 정례화+공개 시 한시 release 트랙. 전환 트리거 4종 명시.
+- **다음**: 성재가 패킷 §8 프롬프트를 오케스트레이터 세션에 전달 → momo-main 통합(BUILD_TICKETS 이관·Issue 발급·ENGINE_HANDOFF 갱신). 노션은 인증 완료 시 이 세션이 페이지 생성.
+
 ## 2026-07-21 (Fable 4차) · 웹 완성 배치(W-3·W-4) + 이중트랙 main 머지(53c457a)
 - **W-3**(#581): Caddy `{$APP_DOMAIN}` 서빙 — web-init named volume·같은오리진 프록시·centrifugo 403·CSP. `verify_web_serving.sh` docker 6단정 PASS(web-serving infra 프로파일 신설). **W-4**(#580): 웹 승인 카드(멱등 결정)·read-state debounce·recovery reconcile·재연결 배너 — vitest 38·lint·build PASS. **"서버 URL이 곧 웹 주소" 완성**(prod TLS/DNS만 실배포 시 검증).
 - **이중트랙 main 머지**(성재 사전 승인 "작업 마무리 되는대로"): engine(574 수명주기완결·580·581) + uxui(511-U 개방·505·506 — 동생 ①②) → main 53c457a. 게이트: server build + real-window 4/4. 동생은 그새 **③(517 관전 터미널 #575)까지 track/uxui 랜딩** — 페이스 탁월.
