@@ -44,6 +44,12 @@ jobs:
             build_args: |
               PACKAGE_PATH=workers/AgentWorker
               PRODUCT=AgentWorker
+          - component: linkshort
+            image: momo-linkshort
+            dockerfile: infra/prod/docker/swift-service.Dockerfile
+            build_args: |
+              PACKAGE_PATH=services/LinkShort
+              PRODUCT=LinkShort
           - component: migrate
             image: momo-migrate
             dockerfile: infra/prod/docker/internal-smoke-migrate.Dockerfile

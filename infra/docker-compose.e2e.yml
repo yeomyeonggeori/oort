@@ -298,6 +298,29 @@ services:
     volumes:
       - e2e-web-static:/srv/momo-web
 
+  # Goal #593: LinkShort runs on the private compose network; the host verifier
+  # reaches it only through Caddy /i/*, so no extra host port is required.
+  linkshort:
+    image: momo-linkshort:e2e
+    profiles: ["web"]
+    build:
+      context: ..
+      dockerfile: infra/prod/docker/swift-service.Dockerfile
+      args:
+        PACKAGE_PATH: services/LinkShort
+        PRODUCT: LinkShort
+    restart: "no"
+    environment:
+      MOMO_LINKSHORT_HOST: 0.0.0.0
+      MOMO_LINKSHORT_PORT: 28190
+      MOMO_LINKSHORT_TARGET_BASE_URL: http://${WEB_SERVING_APP_DOMAIN:-app.localhost}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:28190/healthz >/dev/null"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 2s
+
   # HTTP-only serving verifier edge. The verifier names this service
   # explicitly, so the legacy HTTPS browser-smoke edge above remains isolated.
   # APP_DOMAIN includes the scheme to disable Caddy automatic HTTPS for this
@@ -321,6 +344,8 @@ services:
         condition: service_started
       web-init:
         condition: service_completed_successfully
+      linkshort:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
       interval: 2s

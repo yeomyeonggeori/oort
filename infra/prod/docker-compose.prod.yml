@@ -44,6 +44,8 @@ services:
         condition: service_started
       centrifugo:
         condition: service_started
+      linkshort:
+        condition: service_started
     networks:
       - public
       - private
@@ -239,6 +241,19 @@ services:
     restart: "no"
     volumes:
       - momo-web-static:/srv/momo-web
+
+  # ADR-0121 D2: stateless invite redirector. The code is never stored or
+  # validated here; Caddy forwards /i/* and LinkShort sends the browser back
+  # to this installation's same-origin /join landing.
+  linkshort:
+    image: ${MOMO_LINKSHORT_IMAGE:?set MOMO_LINKSHORT_IMAGE}
+    restart: unless-stopped
+    environment:
+      MOMO_LINKSHORT_HOST: 0.0.0.0
+      MOMO_LINKSHORT_PORT: 28190
+      MOMO_LINKSHORT_TARGET_BASE_URL: https://${APP_DOMAIN:-momo-app-domain-unset.localhost}
+    networks:
+      - private
 
   # ADR-0127 self-host option. Select with `--profile s3`; Dawn-hosted
   # deployments keep the default Drive archive and never start these services.
