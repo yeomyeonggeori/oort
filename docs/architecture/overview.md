@@ -42,7 +42,7 @@ flowchart LR
 ```
 
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
-- 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 판정(DM/멘션/승인) 후 id-only 페이로드를 push relay(mock — 실발송은 P-3)로 dispatch한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
+- 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 기존 판정(DM/멘션/승인, 채널 음소거·자기 메시지 억제) 후 id-only v2 페이로드를 PushRelay로 dispatch한다. v2는 `thread_id=root_id ?? channel_id`, `momo.message|mention|approval|work` category, 승인에만 `approval_id`, ADR-0109 unread 합계 badge를 싣고 PushRelay가 APNs `thread-id`/`category`로 변환한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
 - 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = momo 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
 - 플러그인 경계(ADR-0113): momo 서버는 검증된 3층 manifest, workspace install 정책, `(workspace, member, plugin, scope)` grant와 Capability Cache projection, audit만 보유한다. provider OAuth/raw credential은 사용자 소유 BYOA 호스트에만 있고 서버 테이블·로그·응답에 들어오지 않는다. install revoke와 grant revoke는 projection을 같은 transaction에서 제거하고, Hermes adapter는 Context Packet마다 위임 사용자와 agent가 함께 속한 채널을 서버에 재검증한 뒤 유효 projection의 MCP 접속 기술자만 tool policy로 조립한다. 조회·manifest가 하나라도 잘못되면 해당 범위를 기본 거부하며 장기 캐시하지 않는다.
 

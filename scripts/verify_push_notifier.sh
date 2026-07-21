@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # =============================================================================
-# scripts/verify_push_notifier.sh — MOMO-404 (ADR-0120 P-2) notifier worker +
-# 판정 v0 + mock relay runtime gate.
+# scripts/verify_push_notifier.sh — MOMO-404/MOMO-503 notifier judgment +
+# id-only push payload v2 mock-relay runtime gate.
 #
 # Boots an ISOLATED e2e compose stack (infra/docker-compose.e2e.yml +
 # infra/e2e/push-notifier.overlay.yml, `--profile push`) under its own compose
-# project on loopback ports (19600s) and drives the full server-side push
+# project on dedicated loopback ports (27990-27994) and drives the full server-side push
 # pipeline end to end:
 #
 #   MOMO-403 REST device registration (the canonical path — no SQL-inserted
-#   devices) -> DM / mention / approval-request events raised via REST ->
+#   devices) -> message / mention / approval / work events ->
 #   011 trigger enqueues outbox kind='push_candidate' in the same tx ->
 #   NotifierWorker (BYPASSRLS momo_notifier) claims with SKIP LOCKED, judges
 #   v0 (DM 전건 + server-recomputed mention projection + approval request),
@@ -17,7 +17,9 @@
 #   scripts/mock_push_relay.py -> verifier asserts:
 #
 #   - dispatch_log contract rows (member/token/collapse_id/apns_status=200)
-#   - author exclusion (the sender's own registered device gets NOTHING)
+#   - all four APNs categories, root-aware thread_id, approval-only approval_id,
+#     and exact ADR-0109 unread-sum badge
+#   - author exclusion and channel-mute suppression regression
 #   - mock relay received payloads are id-only: message bodies, display
 #     names, and handles are ABSENT (ADR-0120 D2 hard contract) and every
 #     payload key is in the allowed routing/identity set
@@ -41,17 +43,17 @@
 # builds): api first (health green = build done), then relay (log marker),
 # then notifier (log marker). mock-hermes / mock-push-relay are instant.
 #
-# Isolation: dedicated COMPOSE_PROJECT_NAME (default momo404notif), loopback
-# host ports 19600-19604, teardown removes only this project's containers and
+# Isolation: dedicated COMPOSE_PROJECT_NAME (default momo550pushv2), loopback
+# host ports 27990-27994, teardown removes only this project's containers and
 # volumes. It never touches other compose projects or host momo processes.
 #
 # Environment overrides:
-#   PUSH_NOTIF_PROJECT         compose project    (default: momo404notif)
-#   PUSH_NOTIF_PORT            api host port      (default: 19600)
-#   PUSH_NOTIF_POSTGRES_PORT   postgres host port (default: 19601)
-#   PUSH_NOTIF_CENT_PORT       centrifugo port    (default: 19602)
-#   PUSH_NOTIF_HERMES_PORT     mock-hermes port   (default: 19603)
-#   PUSH_NOTIF_RELAY_PORT      mock push relay    (default: 19604)
+#   PUSH_NOTIF_PROJECT         compose project    (default: momo550pushv2)
+#   PUSH_NOTIF_PORT            api host port      (default: 27990)
+#   PUSH_NOTIF_POSTGRES_PORT   postgres host port (default: 27991)
+#   PUSH_NOTIF_CENT_PORT       centrifugo port    (default: 27992)
+#   PUSH_NOTIF_RELAY_PORT      mock push relay    (default: 27993)
+#   PUSH_NOTIF_HERMES_PORT     mock-hermes port   (default: 27994; internal fixture)
 #   PUSH_NOTIF_BOOT_TIMEOUT    seconds per cold Swift build (default: 2400)
 #   PUSH_NOTIF_WAIT_TIMEOUT    seconds for runtime assertions (default: 120)
 #   PUSH_NOTIF_KEEP=1          keep the stack up for debugging
@@ -73,16 +75,28 @@ need docker
 need curl
 need jq
 need uuidgen
-need python3
+find_python() {
+  local candidate
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))' \
+      >/dev/null 2>&1 || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  echo "[push-notif] Python 3.10+ not found" >&2
+  exit 1
+}
+PYTHON_BIN="$(find_python)"
 
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 OVERLAY_FILE="$REPO_ROOT/infra/e2e/push-notifier.overlay.yml"
-PROJECT="${PUSH_NOTIF_PROJECT:-momo404notif}"
-API_PORT="${PUSH_NOTIF_PORT:-19600}"
-PG_PORT="${PUSH_NOTIF_POSTGRES_PORT:-19601}"
-CENT_PORT_HOST="${PUSH_NOTIF_CENT_PORT:-19602}"
-HERMES_PORT_HOST="${PUSH_NOTIF_HERMES_PORT:-19603}"
-RELAY_PORT_HOST="${PUSH_NOTIF_RELAY_PORT:-19604}"
+PROJECT="${PUSH_NOTIF_PROJECT:-momo550pushv2}"
+API_PORT="${PUSH_NOTIF_PORT:-27990}"
+PG_PORT="${PUSH_NOTIF_POSTGRES_PORT:-27991}"
+CENT_PORT_HOST="${PUSH_NOTIF_CENT_PORT:-27992}"
+RELAY_PORT_HOST="${PUSH_NOTIF_RELAY_PORT:-27993}"
+HERMES_PORT_HOST="${PUSH_NOTIF_HERMES_PORT:-27994}"
 BOOT_TIMEOUT="${PUSH_NOTIF_BOOT_TIMEOUT:-2400}"
 WAIT_TIMEOUT="${PUSH_NOTIF_WAIT_TIMEOUT:-120}"
 
@@ -227,6 +241,29 @@ sql_scalar() { # one -tA scalar query on stdin
   run_sql -tA | tr -d '[:space:]'
 }
 
+reset_read_state() { # member id — make every current membership read at its head
+  run_sql <<SQL
+INSERT INTO read_state
+  (workspace_id, member_id, channel_id, last_read_seq, last_read_at, mention_count)
+SELECT ms.workspace_id, ms.member_id, ms.channel_id, cs.last_seq, now(), 0
+  FROM membership ms
+  JOIN channel_seq cs
+    ON cs.workspace_id = ms.workspace_id AND cs.channel_id = ms.channel_id
+ WHERE ms.workspace_id = '$DEMO_WORKSPACE_ID'
+   AND ms.member_id = '$1'
+   AND ms.left_at IS NULL
+ON CONFLICT (channel_id, member_id) DO UPDATE
+  SET last_read_seq = EXCLUDED.last_read_seq,
+      last_read_at = EXCLUDED.last_read_at,
+      mention_count = 0,
+      updated_at = now();
+SQL
+}
+
+server_unread_badge() { # member id — exact ADR-0109 sum used by NotifierWorker
+  printf "SELECT COALESCE(SUM(GREATEST(cs.last_seq - COALESCE(rs.last_read_seq, 0), 0)), 0)::int FROM membership ms JOIN channel c ON c.id = ms.channel_id AND c.workspace_id = '$DEMO_WORKSPACE_ID' AND c.archived_at IS NULL JOIN channel_seq cs ON cs.channel_id = c.id AND cs.workspace_id = '$DEMO_WORKSPACE_ID' LEFT JOIN read_state rs ON rs.workspace_id = '$DEMO_WORKSPACE_ID' AND rs.channel_id = ms.channel_id AND rs.member_id = ms.member_id WHERE ms.workspace_id = '$DEMO_WORKSPACE_ID' AND ms.member_id = '$1' AND ms.left_at IS NULL;\n" | sql_scalar
+}
+
 wait_sql_eq() { # expected label; query on stdin
   local expected="$1" label="$2" query got
   query="$(cat)"
@@ -348,6 +385,7 @@ api POST "/v1/workspaces/$DEMO_WORKSPACE_ID/dms" "$(jq -cn --arg m "$M2_ID" '{me
 DM_CHANNEL_ID="$(printf '%s' "$RESPONSE_BODY" | jq -r '.channel.id | ascii_downcase')"
 [ -n "$DM_CHANNEL_ID" ] && [ "$DM_CHANNEL_ID" != "null" ] || {
   echo "[push-notif] FAIL: DM open returned no channel id" >&2; exit 1; }
+reset_read_state "$M2_ID"
 MSG_DM="$(send_message "$DM_CHANNEL_ID" "dm smoke $DM_SECRET" "$M1_ACCESS")"
 
 wait_sql_eq "1" "DM dispatch settled for M2 (apns_status=200)" <<SQL
@@ -360,13 +398,16 @@ got="$(printf "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MSG_D
 [ "$got" = "1" ] || { echo "[push-notif] FAIL: DM expected exactly 1 dispatch row, got $got (author must be excluded)" >&2; exit 1; }
 got="$(relay_received | jq -r --arg m "$MSG_DM" '[.received[] | select(.message_id == $m)] | length')"
 [ "$got" = "1" ] || { echo "[push-notif] FAIL: mock relay expected 1 DM dispatch, got $got" >&2; exit 1; }
-got="$(relay_received | jq -r --arg m "$MSG_DM" '[.received[] | select(.message_id == $m)][0] | "\(.reason)/\(.apns_token)/\(.channel_id)"')"
-[ "$got" = "dm/$TOKEN2/$DM_CHANNEL_ID" ] || {
+got="$(relay_received | jq -r --arg m "$MSG_DM" '[.received[] | select(.message_id == $m)][0] | "\(.reason)/\(.category)/\(.thread_id)/\(.apns_token)/\(.channel_id)/\(.badge)"')"
+[ "$got" = "dm/momo.message/$DM_CHANNEL_ID/$TOKEN2/$DM_CHANNEL_ID/1" ] || {
   echo "[push-notif] FAIL: DM relay payload routing mismatch: $got" >&2; exit 1; }
-echo "[push-notif] ok: DM dispatch targets the recipient token with reason=dm"
+echo "[push-notif] ok: message category uses channel thread-id and exact unread badge=1"
 
 # ---- leg 2: 멘션 (server-recomputed projection) -----------------------------------
 echo "[push-notif] leg 2: mention in #general -> single dispatch to the mentioned member"
+reset_read_state "$M2_ID"
+NOISE_ONE="$(send_message "$GENERAL_CHANNEL_ID" "badge noise one" "$M1_ACCESS")"
+NOISE_TWO="$(send_message "$GENERAL_CHANNEL_ID" "badge noise two" "$M1_ACCESS")"
 MSG_MENTION="$(send_message "$GENERAL_CHANNEL_ID" "heads up @$M2_HANDLE $MENTION_SECRET" "$M1_ACCESS")"
 
 wait_sql_eq "1" "mention dispatch settled for M2" <<SQL
@@ -376,9 +417,13 @@ SELECT count(*) FROM push_dispatch_log
 SQL
 got="$(printf "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MSG_MENTION';\n" | sql_scalar)"
 [ "$got" = "1" ] || { echo "[push-notif] FAIL: mention expected exactly 1 dispatch row, got $got" >&2; exit 1; }
-got="$(relay_received | jq -r --arg m "$MSG_MENTION" '[.received[] | select(.message_id == $m)][0].reason')"
-[ "$got" = "mention" ] || { echo "[push-notif] FAIL: mention relay payload reason=$got" >&2; exit 1; }
-echo "[push-notif] ok: mention dispatch reuses the server mention projection (reason=mention)"
+EXPECTED_MENTION_BADGE="$(server_unread_badge "$M2_ID")"
+[ "$EXPECTED_MENTION_BADGE" = "3" ] || {
+  echo "[push-notif] FAIL: expected unread sum 3 after two noise messages + mention, got $EXPECTED_MENTION_BADGE" >&2; exit 1; }
+got="$(relay_received | jq -r --arg m "$MSG_MENTION" '[.received[] | select(.message_id == $m)][0] | "\(.reason)/\(.category)/\(.thread_id)/\(.badge)"')"
+[ "$got" = "mention/momo.mention/$GENERAL_CHANNEL_ID/$EXPECTED_MENTION_BADGE" ] || {
+  echo "[push-notif] FAIL: mention relay payload v2 mismatch: $got" >&2; exit 1; }
+echo "[push-notif] ok: mention category reuses projection; badge=3 proves unread-message sum, not unread-channel count"
 
 # ---- leg 3: 승인 요청 (gateway REST -> approval_request message) --------------------
 echo "[push-notif] leg 3: approval request via agent gateway REST"
@@ -447,9 +492,66 @@ SELECT count(*) FROM push_dispatch_log
 SQL
 got="$(printf "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MSG_APPROVAL';\n" | sql_scalar)"
 [ "$got" = "2" ] || { echo "[push-notif] FAIL: approval expected exactly 2 dispatch rows, got $got" >&2; exit 1; }
-got="$(relay_received | jq -r --arg m "$MSG_APPROVAL" '[.received[] | select(.message_id == $m) | .reason] | unique | join(",")')"
-[ "$got" = "approval_request" ] || { echo "[push-notif] FAIL: approval relay payload reasons=$got" >&2; exit 1; }
-echo "[push-notif] ok: approval request notifies deciding humans (reason=approval_request)"
+APPROVAL_ID="$(printf "SELECT lower(id::text) FROM approval WHERE request_message_id = '$MSG_APPROVAL';\n" | sql_scalar)"
+[ -n "$APPROVAL_ID" ] || { echo "[push-notif] FAIL: approval id missing" >&2; exit 1; }
+EXPECTED_M1_BADGE="$(server_unread_badge "$M1_ID")"
+EXPECTED_M2_BADGE="$(server_unread_badge "$M2_ID")"
+got="$(relay_received | jq -r --arg m "$MSG_APPROVAL" --arg a "$APPROVAL_ID" --arg ch "$GENERAL_CHANNEL_ID" \
+  --arg d1 "$DEVICE1_ID" --arg d2 "$DEVICE2_ID" --argjson b1 "$EXPECTED_M1_BADGE" --argjson b2 "$EXPECTED_M2_BADGE" \
+  '[.received[] | select(.message_id == $m)] | if length == 2 and all(.[]; .reason == "approval_request" and .category == "momo.approval" and .approval_id == $a and .thread_id == $ch and ((.device_id == $d1 and .badge == $b1) or (.device_id == $d2 and .badge == $b2))) then "ok" else . end')"
+[ "$got" = "ok" ] || { echo "[push-notif] FAIL: approval payload v2 mismatch: $got" >&2; exit 1; }
+echo "[push-notif] ok: approval category carries the ledger id and recipient-specific unread badges"
+
+# ---- leg 4: work event card in a DM thread -------------------------------------------
+# WorkSessionRoutes persists this exact server-owned `props.kind=work_session`
+# card shape. Insert the committed event fixture directly so this notifier gate
+# stays independent of work-host setup while still exercising the real message
+# trigger and existing DM recipient judgment.
+echo "[push-notif] leg 4: work event card -> work category, root-message thread grouping"
+reset_read_state "$M2_ID"
+WORK_SESSION_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+MSG_WORK="$(run_sql -tA <<SQL | tr -d '[:space:]'
+WITH bumped AS (
+  UPDATE channel_seq SET last_seq = last_seq + 1
+   WHERE workspace_id = '$DEMO_WORKSPACE_ID' AND channel_id = '$DM_CHANNEL_ID'
+  RETURNING last_seq
+)
+INSERT INTO message
+  (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id,
+   type, body, props, root_id, client_msg_id)
+SELECT '$DEMO_WORKSPACE_ID', '$DM_CHANNEL_ID', last_seq,
+       (extract(epoch FROM clock_timestamp()) * 1000)::bigint, 0, '$M1_ID',
+       'system'::message_type, NULL,
+       jsonb_build_object('kind', 'work_session', 'session_id', '$WORK_SESSION_ID',
+                          'status', 'running', 'tool', 'codex', 'label', 'push gate'),
+       '$MSG_DM', '$WORK_SESSION_ID'
+  FROM bumped
+RETURNING lower(id::text);
+SQL
+)"
+[ -n "$MSG_WORK" ] || { echo "[push-notif] FAIL: work event message insert returned no id" >&2; exit 1; }
+wait_sql_eq "1" "work dispatch settled for M2" <<SQL
+SELECT count(*) FROM push_dispatch_log
+ WHERE message_id = '$MSG_WORK' AND member_id = '$M2_ID' AND apns_status = 200;
+SQL
+got="$(relay_received | jq -r --arg m "$MSG_WORK" '[.received[] | select(.message_id == $m)][0] | "\(.reason)/\(.category)/\(.thread_id)/\(.badge)/\(has("approval_id"))"')"
+[ "$got" = "dm/momo.work/$MSG_DM/1/false" ] || {
+  echo "[push-notif] FAIL: work payload v2 mismatch: $got" >&2; exit 1; }
+echo "[push-notif] ok: work category groups the reply under its root and carries no approval_id"
+
+# ---- suppression regression: channel mute still wins before dispatch -----------------
+echo "[push-notif] suppression regression: muted DM produces no dispatch"
+api PUT "/v1/workspaces/$DEMO_WORKSPACE_ID/channels/$DM_CHANNEL_ID/notification-pref" \
+  '{"muted":true}' "$M2_ACCESS"
+expect_status 200 "M2 mutes the DM"
+MSG_MUTED="$(send_message "$DM_CHANNEL_ID" "muted payload regression" "$M1_ACCESS")"
+wait_sql_eq "done" "muted candidate consumed without dispatch" <<SQL
+SELECT status::text FROM outbox
+ WHERE kind = 'push_candidate' AND lower(payload->>'message_id') = '$MSG_MUTED';
+SQL
+got="$(printf "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MSG_MUTED';\n" | sql_scalar)"
+[ "$got" = "0" ] || { echo "[push-notif] FAIL: muted message created $got dispatch rows" >&2; exit 1; }
+echo "[push-notif] ok: channel mute still suppresses before dispatch-log insertion"
 
 # The @hermes trigger mention targets only an agent — agents have no devices,
 # so judgment must produce ZERO dispatches for that message.
@@ -457,11 +559,12 @@ got="$(printf "SELECT count(*) FROM push_dispatch_log WHERE message_id = '$MSG_T
 [ "$got" = "0" ] || { echo "[push-notif] FAIL: agent mention must not dispatch (got $got)" >&2; exit 1; }
 echo "[push-notif] ok: agent-only mention produced no dispatches"
 
-wait_sql_eq "4" "all four push candidates consumed to done" <<SQL
+wait_sql_eq "8" "all category/noise/muted push candidates consumed to done" <<SQL
 SELECT count(*) FROM outbox
  WHERE kind = 'push_candidate' AND status = 'done'
    AND lower(payload->>'message_id') IN
-       ('$MSG_DM', '$MSG_MENTION', '$MSG_TRIGGER', '$MSG_APPROVAL');
+       ('$MSG_DM', '$NOISE_ONE', '$NOISE_TWO', '$MSG_MENTION', '$MSG_TRIGGER',
+        '$MSG_APPROVAL', '$MSG_WORK', '$MSG_MUTED');
 SQL
 
 # ---- id-only hard contract (ADR-0120 D2) -------------------------------------------
@@ -469,7 +572,7 @@ echo "[push-notif] asserting the id-only hard contract on every relay-received p
 RECEIVED_JSON="$TMP_DIR/received.json"
 relay_received >"$RECEIVED_JSON"
 got="$(jq -r '.count' "$RECEIVED_JSON")"
-[ "$got" = "4" ] || { echo "[push-notif] FAIL: mock relay expected exactly 4 dispatches total, got $got" >&2; exit 1; }
+[ "$got" = "5" ] || { echo "[push-notif] FAIL: mock relay expected exactly 5 dispatches total, got $got" >&2; exit 1; }
 
 for marker in "$DM_SECRET" "$MENTION_SECRET" "$APPROVAL_SECRET" \
               "$M1_NAME" "$M2_NAME" "$M1_HANDLE" "$M2_HANDLE" \
@@ -481,25 +584,29 @@ for marker in "$DM_SECRET" "$MENTION_SECRET" "$APPROVAL_SECRET" \
 done
 echo "[push-notif] ok: no message body, display name, handle, or approval summary in any payload"
 
-python3 - "$RECEIVED_JSON" <<'PY'
+"$PYTHON_BIN" - "$RECEIVED_JSON" <<'PY'
 import json, sys
 
 allowed = {
     "schema", "server_id", "workspace_id", "device_id", "device_platform",
     "apns_token", "apns_env", "apns_topic", "collapse_id", "badge", "reason",
-    "channel_id", "message_id",
+    "thread_id", "category", "approval_id", "channel_id", "message_id",
 }
 reasons = {"dm", "mention", "approval_request"}
+categories = {"momo.message", "momo.mention", "momo.approval", "momo.work"}
 data = json.load(open(sys.argv[1]))
 payloads = data["received"]
 assert payloads, "no payloads received"
 for p in payloads:
     extra = set(p) - allowed
     assert not extra, f"non-id-only keys in relay payload: {sorted(extra)}"
-    assert p["schema"] == "momo.push.dispatch.v1", p["schema"]
+    assert p["schema"] == "momo.push.dispatch.v2", p["schema"]
     assert p["reason"] in reasons, p["reason"]
-    assert isinstance(p["badge"], int) and p["badge"] >= 1, p["badge"]
+    assert p["category"] in categories, p["category"]
+    assert isinstance(p["badge"], int) and p["badge"] >= 0, p["badge"]
+    assert p.get("approval_id") is not None if p["category"] == "momo.approval" else "approval_id" not in p
     assert len(p["collapse_id"].encode()) <= 64, p["collapse_id"]
+assert {p["category"] for p in payloads} == categories
 print(f"[push-notif] ok: {len(payloads)} payloads carry ONLY the allowed id-only key set")
 PY
 
@@ -577,6 +684,6 @@ SQL
 echo "[push-notif] ok: push_dispatch_log stays tenant-scoped for momo_app (FORCE RLS)"
 
 echo
-echo "MOMO-404 push notifier verification PASS"
+echo "MOMO-503 push payload v2 notifier verification PASS"
 echo "- stack: compose project '$PROJECT' (api :$API_PORT, relay, notifier, mock-push-relay :$RELAY_PORT_HOST), torn down on exit"
-echo "- verified: MOMO-403 REST device registration feeding dispatch targeting; DM 전건 (1 dispatch, author excluded), 멘션 (server projection reuse, 1 dispatch), 승인 요청 via gateway REST (2 human dispatches, requesting agent excluded), agent-only mention = 0 dispatches; push_dispatch_log contract rows (member/token/collapse_id/apns_status=200); id-only hard contract on all 4 relay payloads (no body/display name/handle/summary; allowed key set only); notifier restart sweep + live redelivery with ZERO duplicate dispatches; relay broadcast fully drained + agent_job rows byte-stable across restart (kind-scoped mutual exclusion); momo_notifier BYPASSRLS session; 011 enum/trigger/index presence; momo_app FORCE RLS on push_dispatch_log"
+echo "- verified: four categories (momo.message/mention/approval/work); channel/root thread_id; approval-only approval_id; exact ADR-0109 unread-sum badges including a 3-unread/1-channel proof; author and channel-mute suppression; id-only closed v2 payload; settled-dispatch dedupe; kind-scoped consumers; BYPASSRLS notifier and FORCE-RLS dispatch log"

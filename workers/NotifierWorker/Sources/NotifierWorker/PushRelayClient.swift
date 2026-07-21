@@ -12,15 +12,16 @@ import NIOFoundationCompat
 ///   - server/workspace/device/token identity + APNs env/topic (routing)
 ///   - channel_id/message_id (the client fetches content from ITS OWN server
 ///     to complete the notification — iOS Notification Service Extension, P-4)
-///   - collapse_id (APNs dedup/replace key) + badge (approximate count)
+///   - collapse_id (APNs dedup/replace key) + exact server unread badge
 ///   - reason ("dm" | "mention" | "approval_request") — judgment metadata
+///   - thread_id/category/approval_id — APNs grouping and action routing ids
 ///
 /// Conversation content — message body, sender display name/handle, channel
 /// name, approval summary — MUST NEVER be added here. The runtime gate
 /// (scripts/verify_push_notifier.sh) asserts body/display-name absence on the
 /// relay's received payloads; treat any new field as an ADR-0120 change.
 struct PushDispatch: Encodable, Sendable {
-    let schema = "momo.push.dispatch.v1"
+    let schema = "momo.push.dispatch.v2"
     let serverId: String
     let workspaceId: String
     let deviceId: String
@@ -31,6 +32,9 @@ struct PushDispatch: Encodable, Sendable {
     let collapseId: String
     let badge: Int
     let reason: String
+    let threadId: String
+    let category: String
+    let approvalId: String?
     let channelId: String
     let messageId: String
 
@@ -46,6 +50,9 @@ struct PushDispatch: Encodable, Sendable {
         case collapseId = "collapse_id"
         case badge
         case reason
+        case threadId = "thread_id"
+        case category
+        case approvalId = "approval_id"
         case channelId = "channel_id"
         case messageId = "message_id"
     }

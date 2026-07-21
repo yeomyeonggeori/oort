@@ -235,6 +235,9 @@ struct NotifierService: Service {
         let apnsEnv: String
         let apnsTopic: String
         let reason: String
+        let threadID: UUID
+        let category: String
+        let approvalID: UUID?
     }
 
     private static let decoder = JSONDecoder()
@@ -244,6 +247,13 @@ struct NotifierService: Service {
     /// ("m:" + 36-char UUID = 38 bytes).
     static func collapseID(for messageID: UUID) -> String {
         "m:\(messageID.uuidString.lowercased())"
+    }
+
+    static func category(messageType: String, propsKind: String?, reason: String) -> String {
+        if messageType == "approval_request" { return "momo.approval" }
+        if propsKind == "work_session" { return "momo.work" }
+        if reason == "mention" { return "momo.mention" }
+        return "momo.message"
     }
 
     private func processClaimed(_ row: ClaimedCandidate) async {
@@ -318,6 +328,8 @@ struct NotifierService: Service {
               SELECT m.id, m.channel_id, m.author_member_id,
                      m.type::text AS message_type,
                      COALESCE(m.props->'mention_member_ids', '[]'::jsonb) AS mention_ids,
+                     m.props->>'kind' AS props_kind,
+                     m.root_id,
                      c.kind::text AS channel_kind
                 FROM message m
                 JOIN channel c ON c.id = m.channel_id
@@ -349,7 +361,10 @@ struct NotifierService: Service {
                  AND ms.member_id <> (SELECT author_member_id FROM msg)
             )
             SELECT r.member_id, t.id, d.id, d.platform::text,
-                   t.apns_token, t.env::text, t.topic, r.reason
+                   t.apns_token, t.env::text, t.topic, r.reason,
+                   COALESCE((SELECT root_id FROM msg), (SELECT channel_id FROM msg)),
+                   (SELECT message_type FROM msg), (SELECT props_kind FROM msg),
+                   a.id
               FROM recipients r
               JOIN push_token t
                 ON t.member_id = r.member_id
@@ -361,6 +376,9 @@ struct NotifierService: Service {
                 ON np.workspace_id = \(workspaceID)
                AND np.channel_id = (SELECT channel_id FROM msg)
                AND np.member_id = r.member_id
+              LEFT JOIN approval a
+                ON a.workspace_id = \(workspaceID)
+               AND a.request_message_id = \(payload.messageID)
              WHERE r.reason IS NOT NULL
                AND (
                  np.member_id IS NULL
@@ -372,41 +390,57 @@ struct NotifierService: Service {
         ).collect()
 
         return try rows.map { row in
-            let (memberID, tokenID, deviceID, platform, apnsToken, env, topic, reason) =
-                try row.decode((UUID, UUID, UUID, String, String, String, String, String).self)
+            let (memberID, tokenID, deviceID, platform, apnsToken, env, topic,
+                 reason, threadID, messageType, propsKind, approvalID) = try row.decode(
+                    (UUID, UUID, UUID, String, String, String, String, String,
+                     UUID, String, String?, UUID?).self)
             return Target(
                 memberID: memberID, tokenID: tokenID, deviceID: deviceID,
                 devicePlatform: platform, apnsToken: apnsToken,
-                apnsEnv: env, apnsTopic: topic, reason: reason)
+                apnsEnv: env, apnsTopic: topic, reason: reason,
+                threadID: threadID,
+                category: Self.category(
+                    messageType: messageType, propsKind: propsKind, reason: reason),
+                approvalID: messageType == "approval_request" ? approvalID : nil)
         }
     }
 
-    /// v0 approximate badge: channels where the member still has unread
-    /// messages (channel_seq ahead of read_state). Precision (read_state
-    /// deltas, per-device semantics) is revisited before P-3 (ADR-0120
-    /// context delta — approximation explicitly allowed for v0).
-    private func approximateBadge(workspaceID: UUID, memberID: UUID) async -> Int {
+    /// ADR-0109 badge: sum the server-owned unread projection across every
+    /// active channel membership. This deliberately uses the same
+    /// channel_seq/read_state formula as GET /read-state; clients and the
+    /// notifier never derive unread from local message caches.
+    private func unreadBadge(workspaceID: UUID, memberID: UUID) async -> Int {
         do {
             let rows = try await pg.query(
                 """
-                SELECT count(*)::int
+                SELECT COALESCE(SUM(GREATEST(
+                         COALESCE(cs.last_seq, 0) - COALESCE(rs.last_read_seq, 0),
+                         0
+                       )), 0)::int
                   FROM membership ms
-                  JOIN channel_seq cs ON cs.channel_id = ms.channel_id
+                  JOIN channel c
+                    ON c.id = ms.channel_id
+                   AND c.workspace_id = \(workspaceID)
+                   AND c.archived_at IS NULL
+                  JOIN channel_seq cs
+                    ON cs.channel_id = c.id
+                   AND cs.workspace_id = \(workspaceID)
                   LEFT JOIN read_state rs
-                    ON rs.channel_id = ms.channel_id AND rs.member_id = ms.member_id
+                    ON rs.channel_id = ms.channel_id
+                   AND rs.member_id = ms.member_id
+                   AND rs.workspace_id = \(workspaceID)
                  WHERE ms.workspace_id = \(workspaceID)
                    AND ms.member_id = \(memberID)
                    AND ms.left_at IS NULL
-                   AND cs.last_seq > COALESCE(rs.last_read_seq, 0)
                 """,
                 logger: logger
             ).collect()
-            return (try rows.first?.decode(Int.self)) ?? 1
+            return (try rows.first?.decode(Int.self)) ?? 0
         } catch {
-            logger.warning("badge approximation failed; defaulting to 1", metadata: [
+            logger.warning("unread badge calculation failed; defaulting to zero", metadata: [
                 "error": .string(String(describing: error)),
             ])
-            return 1
+            return 0
         }
     }
 
@@ -475,7 +509,7 @@ struct NotifierService: Service {
             return nil
         }
 
-        let badge = await approximateBadge(
+        let badge = await unreadBadge(
             workspaceID: workspaceID, memberID: target.memberID)
         let dispatch = PushDispatch(
             serverId: config.serverID,
@@ -488,6 +522,9 @@ struct NotifierService: Service {
             collapseId: collapseID,
             badge: badge,
             reason: target.reason,
+            threadId: target.threadID.uuidString.lowercased(),
+            category: target.category,
+            approvalId: target.approvalID?.uuidString.lowercased(),
             channelId: channelID.uuidString.lowercased(),
             messageId: messageID.uuidString.lowercased()
         )
