@@ -45,7 +45,7 @@ CAPTURE="$TMP_ROOT/apns-capture.jsonl"
 BODY="$TMP_ROOT/dispatch.json"
 TAMPERED="$TMP_ROOT/tampered.json"
 
-printf '%s' '{"schema":"momo.push.dispatch.v1","server_id":"verify-server","workspace_id":"11111111-1111-1111-1111-111111111111","device_id":"22222222-2222-2222-2222-222222222222","device_platform":"ios","apns_token":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","apns_env":"sandbox","apns_topic":"com.momo.app","collapse_id":"message-4444","badge":1,"reason":"mention","channel_id":"33333333-3333-3333-3333-333333333333","message_id":"44444444-4444-4444-4444-444444444444"}' >"$BODY"
+printf '%s' '{"schema":"momo.push.dispatch.v2","server_id":"verify-server","workspace_id":"11111111-1111-1111-1111-111111111111","device_id":"22222222-2222-2222-2222-222222222222","device_platform":"ios","apns_token":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef","apns_env":"sandbox","apns_topic":"com.momo.app","collapse_id":"message-4444","badge":1,"reason":"mention","thread_id":"33333333-3333-3333-3333-333333333333","category":"momo.mention","channel_id":"33333333-3333-3333-3333-333333333333","message_id":"44444444-4444-4444-4444-444444444444"}' >"$BODY"
 sed 's/"badge":1/"badge":2/' "$BODY" >"$TAMPERED"
 
 sign_body() {
@@ -124,14 +124,17 @@ test "$STATUS" = 429
 test -s "$CAPTURE"
 head -n 1 "$CAPTURE" >"$TMP_ROOT/captured.json"
 test "$(jq -r 'keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "aps,momo"
-test "$(jq -r '.aps | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "alert,badge,content-available,mutable-content"
+test "$(jq -r '.aps | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "alert,badge,category,content-available,mutable-content,thread-id"
 test "$(jq -r '.aps.alert | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "body,title"
 test "$(jq -r '.aps.alert.title' "$TMP_ROOT/captured.json")" = "momo"
 test "$(jq -r '.aps.alert.body' "$TMP_ROOT/captured.json")" = "새 알림"
+test "$(jq -r '.aps.category' "$TMP_ROOT/captured.json")" = "momo.mention"
+test "$(jq -r '.aps[\"thread-id\"]' "$TMP_ROOT/captured.json")" = "33333333-3333-3333-3333-333333333333"
 test "$(jq -r '.momo | keys | sort | join(",")' "$TMP_ROOT/captured.json")" = "channel_id,collapse_id,message_id,reason,schema,server_id,workspace_id"
+test "$(jq -r '.momo.schema' "$TMP_ROOT/captured.json")" = "momo.push.notification.v2"
 if grep -Eiq 'message_body|display_name|handle|channel_name|apns_token' "$TMP_ROOT/captured.json"; then
   echo "id-only APNs payload widened with conversation/token content" >&2
   exit 1
 fi
 
-echo "PASS: signed dispatch HTTP 200 + APNs 410 passthrough + static placeholder alert, bad signature 403, unregistered 403, rate limit 429, id-only momo envelope"
+echo "PASS: signed v2 dispatch + APNs category/thread-id + 410 passthrough + static placeholder alert, bad signature 403, unregistered 403, rate limit 429, id-only momo envelope"

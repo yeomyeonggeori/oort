@@ -1,9 +1,14 @@
 # PushRelay v0 운영 런북
 
 PushRelay는 ADR-0120의 Dawn 운영 APNs 경계다. 셀프호스트 `NotifierWorker`가
-`momo.push.dispatch.v1` raw body를 Ed25519로 서명하고, relay는 등록 공개키를
+`momo.push.dispatch.v2` raw body를 Ed25519로 서명하고, relay는 등록 공개키를
 검증한 뒤 APNs에 id-only payload만 보낸다. 대화 본문·보낸 사람 표시명·채널명은
 relay 또는 APNs payload에 포함되지 않는다.
+
+v2는 APNs `thread-id`(`root_id ?? channel_id`)와 `category`
+(`momo.message|mention|approval|work`)를 `aps`에 추가한다. 승인 알림만 NSE/액션의
+REST 대상인 `approval_id`를 `momo` 봉투에 싣고, `badge`는 ADR-0109의 활성 채널별
+unread 수 합계를 서버가 계산한다. 이 메타데이터는 모두 id-only 경계 안에 있다.
 
 ## 환경 변수
 
