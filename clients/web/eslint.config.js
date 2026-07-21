@@ -20,6 +20,9 @@ export default tseslint.config(
       ecmaVersion: 2022,
       globals: globals.browser,
     },
+    rules: {
+      "@typescript-eslint/no-explicit-any": "error",
+    },
   },
   {
     files: ["*.config.{js,ts}", "scripts/**/*.mjs", "smoke/**/*.mjs"],

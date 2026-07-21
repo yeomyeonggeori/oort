@@ -68,7 +68,9 @@ struct PushDispatch: Codable, Sendable {
             throw DispatchValidationError.devicePlatform
         }
         guard APNSEnvironment(rawValue: apnsEnv) != nil else { throw DispatchValidationError.apnsEnvironment }
-        guard ["dm", "mention", "approval_request"].contains(reason) else { throw DispatchValidationError.reason }
+        guard ["dm", "mention", "approval_request", "resume_offer"].contains(reason) else {
+            throw DispatchValidationError.reason
+        }
         guard ["momo.message", "momo.mention", "momo.approval", "momo.work"].contains(category)
         else { throw DispatchValidationError.category }
         guard (category == "momo.approval") == (approvalId != nil),

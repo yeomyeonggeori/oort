@@ -828,7 +828,9 @@ paths:
         matched by SHA-256 digest; the raw token is never persisted or logged.
         Validation joins the running work_session and unrevoked work_host on
         every call, so expiry, session end, and host revoke take effect
-        immediately. This endpoint returns binding metadata only: terminal
+        immediately. The returned mode is authoritative: observer connections
+        may receive output but the host must reject send_stdin, resize, and kill.
+        This endpoint returns binding metadata only: terminal
         bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
       security:
         - workHostAuth: []
@@ -1073,16 +1075,117 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-tier-policy:
+    get:
+      tags: [work-sessions]
+      operationId: getWorkspaceWorkTierPolicy
+      summary: Read the workspace-default host-loss fallback policy.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Stored default, or the virtual ask default when no row exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin role required.
+    put:
+      tags: [work-sessions]
+      operationId: putWorkspaceWorkTierPolicy
+      summary: Replace the workspace-default host-loss fallback policy.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutWorkTierPolicyRequest"
+      responses:
+        "200":
+          description: Updated policy and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "400":
+          description: Invalid mode or auto target.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin role required.
+        "409":
+          description: Concrete auto target is unavailable or not workspace-scoped.
+
+  /v1/workspaces/{workspaceId}/work-tier-policy/me:
+    get:
+      tags: [work-sessions]
+      operationId: getMyWorkTierPolicy
+      summary: Read the caller's effective fallback policy and inheritance state.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Member override, inherited workspace default, or virtual ask default.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+    put:
+      tags: [work-sessions]
+      operationId: putMyWorkTierPolicy
+      summary: Replace the caller's member-specific fallback policy override.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutWorkTierPolicyRequest"
+      responses:
+        "200":
+          description: Updated member override and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "400":
+          description: Invalid mode or auto target.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+        "409":
+          description: Concrete auto target is unavailable or outside the member scope.
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}:
     patch:
       tags: [work-sessions]
       operationId: endWorkSession
-      summary: End a running session without changing its card message seq.
+      summary: End a running session or change its observation policy.
       description: >
         The creating member, or the MomoHost-signed execution host bound to the
         session, may end it. The ledger row and card props update beside a
         no-version work.session.ended outbox; the message row is not edited and
-        no channel seq is minted.
+        no channel seq is minted. A human session owner may instead set
+        observation to open or owner_only; owner_only invalidates live observer
+        grants and blocks new ones.
       security:
         - bearerAuth: []
         - workHostAuth: []
@@ -1094,7 +1197,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EndWorkSessionRequest"
+              $ref: "#/components/schemas/UpdateWorkSessionRequest"
       responses:
         "200":
           description: Ended session, or its prior result on an idempotent retry.
@@ -1131,17 +1234,63 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume:
+    post:
+      tags: [work-sessions]
+      operationId: resumeWorkSession
+      summary: Resume an orphaned session on another registered host.
+      description: >
+        Human session owner only. The source becomes ended(resumed), while a
+        new running work_session reuses the same root thread, records
+        resumedFromSessionId, and emits the existing spawn dispatch in one
+        tenant transaction. Host paths, credentials, and process state are not
+        accepted or persisted.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResumeWorkSessionRequest"
+      responses:
+        "201":
+          description: New running session with durable lineage and dispatched spawn control.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSessionResponse"
+        "400":
+          description: Invalid source session or target host identifier.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Human caller is not the source session owner.
+        "404":
+          description: Source session does not exist in this workspace.
+        "409":
+          description: >
+            Source is not orphaned, target host is revoked/unavailable/outside
+            policy, or the workspace/member pool has no available slot.
+
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
     post:
       tags: [work-sessions]
       operationId: issueTerminalAttachCapability
       summary: Issue an ephemeral capability for direct remote PTY attach.
       description: >
-        Human bearer and session owner only. The running session must carry a
+        Human bearer only. mode defaults to controller, which remains session
+        owner-only. observer requires active workspace and session-channel
+        membership while observation=open. The running session must carry a
         MomoHost-signed remote PTY binding and its work_host must be unrevoked.
         The raw capability is returned exactly once, while PostgreSQL stores
         only its SHA-256 digest and timestamptz expiry. The same transaction
-        audits only owner, issue time, and expiry. attach_endpoint contains no
+        audits only owner, mode, issue time, and expiry. Observer issuance also
+        enqueues work.session.observer with a count-only projection.
+        attach_endpoint contains no
         bearer or credential; the client connects there directly with the
         separate capability_token. MomoServer and relay expose no PTY stream.
       security:
@@ -1149,6 +1298,12 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueTerminalAttachRequest"
       responses:
         "200":
           description: Exact three-field direct attach grant.
@@ -1165,7 +1320,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Caller is not human, owner, or active workspace member.
+          description: Caller is not an authorized active human/channel member, or observation is owner_only.
           content:
             application/json:
               schema:
@@ -3748,9 +3903,15 @@ components:
             Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query,
             and fragment are forbidden. MomoServer never proxies this stream.
 
+    UpdateWorkSessionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/EndWorkSessionRequest"
+        - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
+
     EndWorkSessionRequest:
       type: object
       required: [status]
+      additionalProperties: false
       properties:
         status:
           type: string
@@ -3759,11 +3920,74 @@ components:
           type: integer
           format: int32
 
+    ResumeWorkSessionRequest:
+      type: object
+      required: [targetHostId]
+      properties:
+        targetHostId:
+          type: string
+          format: uuid
+          description: Active registered host allowed by the effective tier policy.
+
+    PutWorkTierPolicyRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [t1_only, ask, auto]
+          default: ask
+        autoTarget:
+          type: string
+          description: Required only for auto; a work_host UUID or the reserved cloud selector.
+          pattern: '^(cloud|[0-9a-fA-F-]{36})$'
+
+    WorkTierPolicy:
+      type: object
+      required: [workspaceId, mode, inherited]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+          description: Present for a member override or inherited effective member policy.
+        mode:
+          type: string
+          enum: [t1_only, ask, auto]
+        autoTarget:
+          type: string
+          description: Concrete work_host UUID or the reserved cloud selector in auto mode.
+        inherited:
+          type: boolean
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: Absent for the virtual ask default.
+
+    WorkTierPolicyResponse:
+      type: object
+      required: [workTierPolicy]
+      properties:
+        workTierPolicy:
+          $ref: "#/components/schemas/WorkTierPolicy"
+
+    UpdateWorkSessionObservationRequest:
+      type: object
+      required: [observation]
+      additionalProperties: false
+      properties:
+        observation:
+          type: string
+          enum: [open, owner_only]
+
     WorkSession:
       type: object
       required:
         [id, workspaceId, channelId, memberId, hostId, rootMessageId,
-         tool, label, status, startedAtMs]
+         tool, label, status, observation, observerGrantCount,
+         remoteAttachAvailable, startedAtMs]
       properties:
         id:
           type: string
@@ -3792,7 +4016,18 @@ components:
           maxLength: 120
         status:
           type: string
-          enum: [running, ended]
+          enum: [running, orphaned, ended]
+        observation:
+          type: string
+          enum: [open, owner_only]
+        observerGrantCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Currently valid observer capabilities only; expired or invalid grants are excluded.
+        remoteAttachAvailable:
+          type: boolean
+          description: True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected.
         startedAtMs:
           type: integer
           format: int64
@@ -3804,6 +4039,14 @@ components:
           type: integer
           format: int32
           description: Present only when the ending host reports an exit code.
+        endReason:
+          type: string
+          enum: [orphaned, resumed]
+          description: Terminal host-loss or resume reason when applicable.
+        resumedFromSessionId:
+          type: string
+          format: uuid
+          description: Source orphaned session; the root thread remains unchanged.
 
     WorkSessionResponse:
       type: object
@@ -3837,6 +4080,15 @@ components:
           type: string
           pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
 
+    IssueTerminalAttachRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [controller, observer]
+          default: controller
+
     ValidateTerminalAttachRequest:
       type: object
       required: [capability_token]
@@ -3847,7 +4099,7 @@ components:
 
     TerminalAttachValidationResponse:
       type: object
-      required: [work_session_id, pty_id, expires_at]
+      required: [work_session_id, pty_id, expires_at, mode]
       properties:
         work_session_id:
           type: string
@@ -3859,6 +4111,10 @@ components:
           type: string
           format: date-time
           description: PostgreSQL timestamptz capability expiry.
+        mode:
+          type: string
+          enum: [controller, observer]
+          description: Host authorization grade; observer forbids send_stdin, resize, and kill.
 
     # ---- Work controls ------------------------------------------------------
     CreateWorkControlRequest:

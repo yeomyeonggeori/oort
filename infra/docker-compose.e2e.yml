@@ -295,6 +295,7 @@ services:
       PUSH_RELAY_URL: http://mock-push-relay:8090/v1/push
       PUSH_RELAY_SERVER_ID: momo-e2e
       NOTIFIER_POLL_INTERVAL_MS: ${NOTIFIER_POLL_INTERVAL_MS:-100}
+      MOMO_HOST_OFFLINE_GRACE_S: ${MOMO_HOST_OFFLINE_GRACE_S:-90}
     volumes:
       - *source-mount
     depends_on:
