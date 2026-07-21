@@ -1160,6 +1160,17 @@ if [ "$MESSAGE_ID" = "" ] || [ "$MESSAGE_ID" = "null" ] || [ "$MESSAGE_ID" != "$
   exit 1
 fi
 
+# message.new must carry the same server-owned mention projection as the REST
+# response. Live clients cannot wait for a history reload to recover props.
+MENTION_PROJECTION_OK=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'id')=lower('$MESSAGE_ID') AND payload->'data'->'payload'->'props'->'mention_member_ids' @> jsonb_build_array(lower('$AGENT_ID'));")
+REST_MENTION_OK=$(printf '%s' "$SEND_JSON" | jq -r --arg agent "$(printf '%s' "$AGENT_ID" | tr '[:upper:]' '[:lower:]')" '[.props.mention_member_ids[]? | ascii_downcase] | index($agent) != null')
+if [ "$MENTION_PROJECTION_OK" != "1" ] || [ "$REST_MENTION_OK" != "true" ]; then
+  echo "[agent-worker] message.new realtime props diverged from REST mention projection" >&2
+  printf 'message=%s realtime=%s rest=%s\n' \
+    "$MESSAGE_ID" "$MENTION_PROJECTION_OK" "$REST_MENTION_OK" >&2
+  exit 1
+fi
+
 RUN_ID=$(psql_scalar "SELECT upper(id::text) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$MESSAGE_ID' AND agent_member_id='$AGENT_ID' AND lower(idempotency_key)=lower('mention:${MESSAGE_ID}:${AGENT_ID}');")
 JOB_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='$WORKSPACE_ID' AND kind='agent_job' AND lower(payload->>'trigger_message_id')=lower('$MESSAGE_ID') AND lower(payload->>'agent_member_id')=lower('$AGENT_ID');")
 TOTAL_RUN_COUNT=$(psql_scalar "SELECT count(*) FROM agent_run WHERE workspace_id='$WORKSPACE_ID' AND trigger_message_id='$MESSAGE_ID';")
