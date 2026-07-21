@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI iOS 메시지 상호작용 MOMO-499 (2026-07-21)
+
+- iOS 타임라인의 확정 `seq` 메시지 롱프레스에 시스템 시트를 연결하고 최근 반응·반응 피커, 기존 답글 경로, 작성자 전용 수정·삭제 확인, 복사를 추가했다. 반응 pill은 그룹 경계와 무관하게 해당 메시지 행에 귀속되며 서버 응답 전에는 화면을 바꾸지 않는다.
+- iOS REST 클라이언트가 반응 스냅샷, 반응 PUT/DELETE, 메시지 PATCH/DELETE를 소비하고 `reaction.added/removed`·`message.edited/deleted`를 reducer에 반영한다. cold load 중 realtime 이벤트는 스냅샷 위에 순서대로 재적용하며 삭제 시 반응 projection도 제거한다.
+- MomoiOSKit 47 tests가 PASS했다(기존 41 + 상호작용 6). 지시대로 `xcodebuild`·시뮬레이터·실기기 왕복은 실행하지 않았으며, 시뮬레이터 스냅샷과 맥→폰 반응 실시간 반영은 오케스트레이터/성재 게이트 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-512 NativeTextView 포커스 복원 (2026-07-20)
 
 - MOMO-508 네이티브 컴포저의 포커스 상태를 SwiftUI `.focused`와 연결되지 않은 `@FocusState` 대신 representable 갱신을 보장하는 `@State`로 소유하게 했다. 루트 뷰 교체 시 들어온 최초 focus 요청도 소비하고, AppKit window 부착 시 재동기화하며 제거된 text view의 지연 콜백은 first responder를 탈취하지 못한다.

@@ -1132,6 +1132,30 @@ struct ConversationTests {
         #expect(delta.emoji == "👍")
     }
 
+    @Test("cold load restores the server reaction snapshot")
+    @MainActor
+    func reactionColdLoad() async throws {
+        let message = fixtureMessage(sequence: 55)
+        let teammateID = MemberID(uuidString: "00000000-0000-0000-0000-000000000099")!
+        let backend = InteractionConversationBackend(
+            message: message,
+            reactionSnapshot: [message.id: ["👀": [fixtureMemberID, teammateID]]]
+        )
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+
+        await model.load()
+
+        let reaction = try #require(model.reactions(for: message).first)
+        #expect(reaction.emoji == "👀")
+        #expect(reaction.count == 2)
+        #expect(reaction.isSelectedByCurrentMember)
+        model.stop()
+    }
+
     @Test("author edit and delete apply only server-returned messages")
     @MainActor
     func editAndDeleteRoundTrip() async throws {
@@ -1495,6 +1519,7 @@ private actor RecordingConversationBackend: IOSConversationBackend {
 
 private actor InteractionConversationBackend: IOSConversationBackend {
     private var storedMessage: Message
+    private let reactionSnapshotValue: [MessageID: [String: Set<MemberID>]]
     private let suspendsReaction: Bool
     private var reactionDidStart = false
     private var reactionStartWaiter: CheckedContinuation<Void, Never>?
@@ -1503,8 +1528,13 @@ private actor InteractionConversationBackend: IOSConversationBackend {
     private(set) var editCallCount = 0
     private(set) var deleteCallCount = 0
 
-    init(message: Message, suspendsReaction: Bool = false) {
+    init(
+        message: Message,
+        reactionSnapshot: [MessageID: [String: Set<MemberID>]] = [:],
+        suspendsReaction: Bool = false
+    ) {
         self.storedMessage = message
+        self.reactionSnapshotValue = reactionSnapshot
         self.suspendsReaction = suspendsReaction
     }
 
@@ -1516,7 +1546,9 @@ private actor InteractionConversationBackend: IOSConversationBackend {
         [storedMessage]
     }
 
-    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] { [:] }
+    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] {
+        reactionSnapshotValue
+    }
 
     func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
         reactionCallCount += 1
