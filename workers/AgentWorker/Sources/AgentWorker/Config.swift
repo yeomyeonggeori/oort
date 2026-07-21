@@ -57,6 +57,11 @@ struct Config: Sendable {
     // ---- Context assembly window (MOMO-302) ----
     var maxContextChars: Int     // char-approx budget for the assembled history
 
+    // ---- Memory Plane extraction (MOMO-526 / ADR-0129 D2) ----
+    var memoryExtractionEnabled: Bool = true
+    var memoryExtractionPollInterval: Duration = .seconds(5)
+    var memoryExtractionBatchSize: Int = 50
+
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
     }
@@ -106,7 +111,16 @@ struct Config: Sendable {
             maxConcurrentRuns: envInt("MAX_CONCURRENT_RUNS", 1),
             g1StaleRunningSeconds: envInt("G1_STALE_RUNNING_SECONDS", 600),
             // MOMO-302: char-approx history budget; drop oldest over this cap.
-            maxContextChars: max(envInt("AGENT_CONTEXT_MAX_CHARS", 24000), 1)
+            maxContextChars: max(envInt("AGENT_CONTEXT_MAX_CHARS", 24000), 1),
+            memoryExtractionEnabled: AgentProviderValidation.boolFlag(
+                ProcessInfo.processInfo.environment["MEMORY_EXTRACTION_ENABLED"] ?? "1"
+            ),
+            memoryExtractionPollInterval: .milliseconds(
+                max(envInt("MEMORY_EXTRACTION_POLL_INTERVAL_MS", 5_000), 100)
+            ),
+            memoryExtractionBatchSize: min(
+                max(envInt("MEMORY_EXTRACTION_BATCH_SIZE", 50), 1), 200
+            )
         )
     }
 

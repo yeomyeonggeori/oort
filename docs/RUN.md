@@ -216,6 +216,9 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `RELAY_MAX_ATTEMPTS` | relay | `8` | 초과 시 `status='failed'`. |
 | `WORKER_POLL_INTERVAL_MS` | worker | `300` | agent_job 폴링 주기. |
 | `WORKER_MAX_ATTEMPTS` | worker | `8` | 초과 시 `status='failed'`. |
+| `MEMORY_EXTRACTION_ENABLED` | worker | `1` | ADR-0129 채널 워터마크 기반 메모리 추출 루프. `0`이면 신규 추출만 멈추며 기존 원장은 보존한다. 정책-off 삭제는 관리자 REST가 수행한다. |
+| `MEMORY_EXTRACTION_POLL_INTERVAL_MS` | worker | `5000` | 추출 가능한 채널을 다시 찾는 주기(최소 100ms). |
+| `MEMORY_EXTRACTION_BATCH_SIZE` | worker | `50` | 채널별 한 번에 읽는 메시지 수(1..200). |
 | `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 momo API origin. |
 | `MOMO_WORK_HOST_ID` | worker | (미설정) | ADR-0125 host registry 전 v0 target host UUID. `work_*` 호출 시 UUID가 없거나 잘못되면 fail-closed한다. |
 | `MAX_CONSECUTIVE_AUTO` | worker | `3` | 루프가드 G2(연속 자동응답). |
