@@ -20,6 +20,7 @@ API_PORT="${TIER_FALLBACK_GATE_API_PORT:-28020}"
 PG_PORT="${TIER_FALLBACK_GATE_POSTGRES_PORT:-28021}"
 CENT_PORT="${TIER_FALLBACK_GATE_CENTRIFUGO_PORT:-28022}"
 PUSH_PORT="${TIER_FALLBACK_GATE_PUSH_PORT:-28023}"
+HERMES_PORT_HOST="${TIER_FALLBACK_GATE_HERMES_PORT:-28024}"
 BOOT_TIMEOUT="${TIER_FALLBACK_GATE_BOOT_TIMEOUT:-2400}"
 ASSERT_TIMEOUT="${TIER_FALLBACK_GATE_ASSERT_TIMEOUT:-120}"
 GRACE_SECONDS="${MOMO_HOST_OFFLINE_GRACE_S:-2}"
@@ -52,7 +53,7 @@ PUBLIC_KEY="11qYAYLef0dU8/7tqW5Wc4MJio5SdxwIe3nHLzG2N9c="
 
 compose() {
   PORT="$API_PORT" POSTGRES_PORT="$PG_PORT" CENT_PORT="$CENT_PORT" \
-    HERMES_PORT="$PUSH_PORT" PUSH_RELAY_PORT="$PUSH_PORT" \
+    HERMES_PORT="$HERMES_PORT_HOST" PUSH_RELAY_PORT="$PUSH_PORT" \
     MOMO_HOST_OFFLINE_GRACE_S="$GRACE_SECONDS" NOTIFIER_POLL_INTERVAL_MS=100 \
     docker compose -p "$PROJECT" -f "$COMPOSE_FILE" --profile push "$@"
 }
@@ -126,16 +127,16 @@ WITH bumped AS (
 INSERT INTO message
   (id, workspace_id, channel_id, seq, hlc_ts, hlc_count,
    author_member_id, type, props)
-SELECT '$ASK_ROOT_ID', '$WS_ID', '$CHANNEL_ID', last_seq-1,
-       1, 0, '$OWNER_ID', 'system', '{"kind":"work_session","status":"running"}'
+SELECT '$ASK_ROOT_ID'::uuid, '$WS_ID'::uuid, '$CHANNEL_ID'::uuid, last_seq-1,
+       1, 0, '$OWNER_ID'::uuid, 'system'::message_type, '{"kind":"work_session","status":"running"}'::jsonb
   FROM bumped
 UNION ALL
-SELECT '$T1_ROOT_ID', '$WS_ID', '$CHANNEL_ID', last_seq,
-       2, 0, '$OWNER_ID', 'system', '{"kind":"work_session","status":"running"}'
+SELECT '$T1_ROOT_ID'::uuid, '$WS_ID'::uuid, '$CHANNEL_ID'::uuid, last_seq,
+       2, 0, '$OWNER_ID'::uuid, 'system'::message_type, '{"kind":"work_session","status":"running"}'::jsonb
   FROM bumped
 UNION ALL
-SELECT '$AUTO_ROOT_ID', '$WS_ID', '$CHANNEL_ID', last_seq-2,
-       3, 0, '$OWNER_ID', 'system', '{"kind":"work_session","status":"running"}'
+SELECT '$AUTO_ROOT_ID'::uuid, '$WS_ID'::uuid, '$CHANNEL_ID'::uuid, last_seq-2,
+       3, 0, '$OWNER_ID'::uuid, 'system'::message_type, '{"kind":"work_session","status":"running"}'::jsonb
   FROM bumped;
 INSERT INTO work_session
   (id, workspace_id, channel_id, member_id, host_id, root_message_id, tool, label, status)
