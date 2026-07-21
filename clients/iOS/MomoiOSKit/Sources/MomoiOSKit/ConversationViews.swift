@@ -30,7 +30,13 @@ struct IOSChannelHomeView: View {
         List {
             Section {
                 NavigationLink {
-                    IOSThreadsPlaceholderView()
+                    IOSThreadInboxView(
+                        session: session,
+                        channelListModel: model,
+                        backend: backend,
+                        workspace: session.workspaceID,
+                        huddleService: huddleService
+                    )
                 } label: {
                     Label("Threads", systemImage: "bubble.left.and.text.bubble.right")
                         .font(.body.weight(.medium))
@@ -309,6 +315,12 @@ struct IOSChannelRow: View {
 struct IOSTimelineView: View {
     let item: IOSChannelListItem
     let members: [MemberID: Member]
+    private let currentMemberID: MemberID
+    private let backend: any IOSConversationBackend
+    private let workspace: WorkspaceID
+    private let huddleService: any IOSHuddleService
+    private let threadRoot: MessageID?
+    private let onReadState: ((ChannelReadState) -> Void)?
     private let focusMessageID: MessageID?
     private let showsComposer: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -326,12 +338,19 @@ struct IOSTimelineView: View {
         workspace: WorkspaceID,
         huddleService: any IOSHuddleService,
         threadRoot: MessageID? = nil,
+        initialThreadRootMessage: Message? = nil,
         focusMessageID: MessageID? = nil,
         showsComposer: Bool = true,
         onReadState: ((ChannelReadState) -> Void)? = nil
     ) {
         self.item = item
         self.members = members
+        self.currentMemberID = currentMemberID
+        self.backend = backend
+        self.workspace = workspace
+        self.huddleService = huddleService
+        self.threadRoot = threadRoot
+        self.onReadState = onReadState
         self.focusMessageID = focusMessageID
         self.showsComposer = showsComposer
         _model = State(initialValue: IOSTimelineModel(
@@ -341,6 +360,7 @@ struct IOSTimelineView: View {
             workspace: workspace,
             huddleService: huddleService,
             threadRoot: threadRoot,
+            initialThreadRootMessage: initialThreadRootMessage,
             onReadState: onReadState
         ))
     }
@@ -450,15 +470,46 @@ struct IOSTimelineView: View {
             IOSMessageDateDivider(dayStartMs: dayStartMs)
                 .listRowSeparator(.hidden)
         case .message(let message, let startsAuthorGroup, let mentionsCurrentMember, let bodySegments):
-            IOSMessageRow(
-                message: message,
-                member: members[message.authorMemberId],
-                quotedBody: quotedBody(for: message),
-                startsAuthorGroup: startsAuthorGroup,
-                mentionsCurrentMember: mentionsCurrentMember,
-                bodySegments: bodySegments,
-                model: model
-            )
+            VStack(alignment: .leading, spacing: 4) {
+                IOSMessageRow(
+                    message: message,
+                    member: members[message.authorMemberId],
+                    quotedBody: quotedBody(for: message),
+                    startsAuthorGroup: startsAuthorGroup,
+                    mentionsCurrentMember: mentionsCurrentMember,
+                    bodySegments: bodySegments,
+                    model: model
+                )
+                if threadRoot == nil,
+                   let rollup = message.thread,
+                   rollup.replyCount > 0
+                {
+                    NavigationLink {
+                        IOSThreadDetailView(
+                            item: item,
+                            rootMessage: message,
+                            members: members,
+                            currentMemberID: currentMemberID,
+                            backend: backend,
+                            workspace: workspace,
+                            huddleService: huddleService,
+                            onReadState: onReadState
+                        )
+                    } label: {
+                        IOSThreadRollupLabel(
+                            rollup: rollup,
+                            participantMemberIDs: model.threadParticipantIDs[message.id] ?? [],
+                            members: members
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 32)
+                    .task(id: rollup.replyCount) {
+                        await model.loadThreadParticipants(for: message)
+                    }
+                    .accessibilityIdentifier("thread.\(message.id.description)")
+                }
+            }
             .id(message.id)
             .listRowSeparator(.hidden)
             .listRowBackground(rowBackground(message: message, mentionsCurrentMember: mentionsCurrentMember))
@@ -586,6 +637,87 @@ struct IOSTimelineView: View {
                 .accessibilityIdentifier("retryMessages")
             }
         }
+    }
+}
+
+@MainActor
+private struct IOSThreadDetailView: View {
+    let item: IOSChannelListItem
+    let rootMessage: Message
+    let members: [MemberID: Member]
+    let currentMemberID: MemberID
+    let backend: any IOSConversationBackend
+    let workspace: WorkspaceID
+    let huddleService: any IOSHuddleService
+    let onReadState: ((ChannelReadState) -> Void)?
+
+    var body: some View {
+        IOSTimelineView(
+            item: item,
+            members: members,
+            currentMemberID: currentMemberID,
+            backend: backend,
+            workspace: workspace,
+            huddleService: huddleService,
+            threadRoot: rootMessage.id,
+            initialThreadRootMessage: rootMessage,
+            showsComposer: true,
+            onReadState: onReadState
+        )
+        .navigationTitle("Thread")
+    }
+}
+
+private struct IOSThreadRollupLabel: View {
+    let rollup: ThreadRollup
+    let participantMemberIDs: [MemberID]
+    let members: [MemberID: Member]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if participantMemberIDs.isEmpty {
+                Image(systemName: "bubble.left.and.text.bubble.right")
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(Array(participantMemberIDs.prefix(3)), id: \.self) { memberID in
+                        Text(initial(for: members[memberID]))
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 24, height: 24)
+                            .background(Color.accentColor, in: Circle())
+                            .overlay(Circle().stroke(.background, lineWidth: 2))
+                    }
+                }
+            }
+            Text(replyLabel)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.tint)
+            if participantMemberIDs.count > 3 {
+                Text("+\(participantMemberIDs.count - 3)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .contentShape(Rectangle())
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(replyLabel)
+        .accessibilityHint("Open thread")
+    }
+
+    private var replyLabel: String {
+        rollup.replyCount == 1 ? "1 reply" : "\(rollup.replyCount) replies"
+    }
+
+    private func initial(for member: Member?) -> String {
+        let name = member?.displayName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.first.map { String($0).uppercased() } ?? "?"
     }
 }
 
@@ -1385,6 +1517,143 @@ struct IOSMessageComposer: View {
     private func submit() {
         guard canSend else { return }
         Task { await model.sendComposerDraft() }
+    }
+}
+
+@MainActor
+private struct IOSThreadInboxView: View {
+    let channelListModel: IOSChannelListModel
+    let backend: any IOSConversationBackend
+    let workspace: WorkspaceID
+    let huddleService: any IOSHuddleService
+    private let currentMemberID: MemberID
+    @State private var model: IOSThreadInboxModel
+
+    init(
+        session: IOSSession,
+        channelListModel: IOSChannelListModel,
+        backend: any IOSConversationBackend,
+        workspace: WorkspaceID,
+        huddleService: any IOSHuddleService
+    ) {
+        self.channelListModel = channelListModel
+        self.backend = backend
+        self.workspace = workspace
+        self.huddleService = huddleService
+        self.currentMemberID = session.member.id
+        _model = State(initialValue: IOSThreadInboxModel(
+            currentMemberID: session.member.id,
+            backend: backend
+        ))
+    }
+
+    var body: some View {
+        List {
+            if let refreshFailureMessage = model.refreshFailureMessage {
+                Section {
+                    Label(refreshFailureMessage, systemImage: "wifi.exclamationmark")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("threadsRefreshFailure")
+            }
+            switch model.phase {
+            case .loading:
+                Section {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Label("Loading thread", systemImage: "bubble.left.and.text.bubble.right")
+                            .redacted(reason: .placeholder)
+                    }
+                }
+            case .failed(let failure):
+                Section {
+                    ContentUnavailableView {
+                        Label(
+                            failure.isOffline ? "Threads unavailable offline" : "Could not load threads",
+                            systemImage: failure.isOffline ? "wifi.slash" : "exclamationmark.triangle"
+                        )
+                    } description: {
+                        Text(failure.message)
+                    } actions: {
+                        Button("Retry loading threads") { refresh() }
+                    }
+                }
+            case .loaded where model.items.isEmpty:
+                Section {
+                    ContentUnavailableView {
+                        Label("No thread activity", systemImage: "bubble.left.and.text.bubble.right")
+                    } description: {
+                        Text("Threads you start or reply to will appear here.")
+                    }
+                    .accessibilityIdentifier("threadsEmpty")
+                }
+            case .loaded:
+                Section {
+                    ForEach(model.items) { thread in
+                        NavigationLink {
+                            IOSThreadDetailView(
+                                item: thread.channel,
+                                rootMessage: thread.rootMessage,
+                                members: channelListModel.membersByID,
+                                currentMemberID: currentMemberID,
+                                backend: backend,
+                                workspace: workspace,
+                                huddleService: huddleService,
+                                onReadState: channelListModel.applyReadState
+                            )
+                        } label: {
+                            threadRow(thread)
+                        }
+                        .accessibilityIdentifier("threadInbox.\(thread.id.description)")
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Threads")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            await model.load(channels: channelListModel.allItems)
+        }
+        .task(id: channelIDs) {
+            await model.load(channels: channelListModel.allItems)
+        }
+    }
+
+    private var channelIDs: [ChannelID] {
+        channelListModel.allItems.map(\.id)
+    }
+
+    private func refresh() {
+        Task { await model.load(channels: channelListModel.allItems) }
+    }
+
+    private func threadRow(_ thread: IOSThreadListItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Text(thread.channel.isDirectMessage ? thread.channel.title : "#\(thread.channel.title)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text(
+                    Date(timeIntervalSince1970: Double(thread.lastReplyAtMs) / 1_000),
+                    format: .relative(presentation: .named)
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Text(thread.rootMessage.body ?? "Message")
+                .font(.body)
+                .lineLimit(2)
+            if let rollup = thread.rootMessage.thread {
+                IOSThreadRollupLabel(
+                    rollup: rollup,
+                    participantMemberIDs: thread.participantMemberIDs,
+                    members: channelListModel.membersByID
+                )
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

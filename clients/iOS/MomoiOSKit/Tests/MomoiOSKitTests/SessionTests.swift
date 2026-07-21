@@ -1094,6 +1094,80 @@ struct ConversationTests {
         #expect(model.messages.first?.replyToId == quoted.id)
     }
 
+    @Test("thread detail loads cursor pages, consumes rollups, and sends to the root")
+    @MainActor
+    func firstClassThreadFlow() async throws {
+        var root = fixtureMessage(sequence: 7)
+        root.thread = ThreadRollup(replyCount: 2, lastReplySeq: 9, lastReplyAtMs: 9)
+        var firstReply = fixtureMessage(sequence: 8, idSeed: 108)
+        firstReply.rootId = root.id
+        var secondReply = fixtureMessage(sequence: 9, idSeed: 109)
+        secondReply.rootId = root.id
+        let backend = RecordingConversationBackend(threadPages: [
+            IOSThreadRepliesPage(messages: [firstReply], nextCursor: 8),
+            IOSThreadRepliesPage(messages: [secondReply], nextCursor: nil),
+        ])
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend,
+            threadRoot: root.id,
+            initialThreadRootMessage: root
+        )
+
+        await model.load()
+
+        #expect(model.messages.map(\.id) == [root.id, firstReply.id, secondReply.id])
+        let replyCursors = await backend.threadReplyCursors
+        #expect(replyCursors == [nil, 8])
+
+        await model.consumeRealtimeEvent(.threadUpdated(ThreadRollupDelta(
+            channelId: fixtureChannel().id,
+            rootId: root.id,
+            replyCount: 3,
+            lastReplySeq: 10,
+            lastReplyAtMs: 10
+        )))
+        #expect(model.messages.first(where: { $0.id == root.id })?.thread?.replyCount == 3)
+
+        model.composerDraft = "Thread reply from iPhone"
+        await model.sendComposerDraft()
+        let call = await backend.sendCalls.last
+        #expect(call?.draft.rootId == root.id)
+        #expect(call?.draft.replyToId == root.id)
+        #expect(call?.draft.props["reply_to_id"]?.stringValue == root.id.description)
+    }
+
+    @Test("thread inbox keeps only threads the current member participates in")
+    func threadInboxAggregation() throws {
+        let otherMemberID = try #require(MemberID(uuidString: "00000000-0000-0000-0000-000000000099"))
+        let channel = IOSChannelListItem(
+            channel: fixtureChannel(),
+            title: "general",
+            unreadCount: 0,
+            mentionCount: 0
+        )
+        var participated = fixtureMessage(sequence: 11, idSeed: 211)
+        participated.authorMemberId = otherMemberID
+        participated.thread = ThreadRollup(replyCount: 2, lastReplySeq: 13, lastReplyAtMs: 13)
+        var unrelated = fixtureMessage(sequence: 12, idSeed: 212)
+        unrelated.authorMemberId = otherMemberID
+        unrelated.thread = ThreadRollup(replyCount: 1, lastReplySeq: 14, lastReplyAtMs: 14)
+
+        let result = IOSThreadListAggregator.participatingThreads(
+            channel: channel,
+            messages: [unrelated, participated],
+            participantsByRoot: [
+                participated.id: [fixtureMemberID, fixtureMemberID],
+                unrelated.id: [otherMemberID],
+            ],
+            currentMemberID: fixtureMemberID
+        )
+
+        #expect(result.map(\.id) == [participated.id])
+        #expect(result.first?.participantMemberIDs == [fixtureMemberID])
+    }
+
     @Test("approval retry preserves decision ID and updates card status")
     @MainActor
     func approvalDecisionRetry() async {
@@ -1545,17 +1619,20 @@ private actor RecordingConversationBackend: IOSConversationBackend {
     private let failFirstApproval: Bool
     private let failFirstMute: Bool
     private let failFirstRead: Bool
+    private let threadPages: [IOSThreadRepliesPage]
     private(set) var sendCalls: [SendCall] = []
     private(set) var approvalCalls: [ApprovalDecisionRequest] = []
     private(set) var markReadCalls: [MarkReadCall] = []
     private(set) var muteCalls: [MuteCall] = []
+    private(set) var threadReplyCursors: [Int64?] = []
 
     init(
         snapshot: IOSConversationSnapshot? = nil,
         failFirstSend: Bool = false,
         failFirstApproval: Bool = false,
         failFirstMute: Bool = false,
-        failFirstRead: Bool = false
+        failFirstRead: Bool = false,
+        threadPages: [IOSThreadRepliesPage] = []
     ) {
         self.snapshotValue = snapshot ?? IOSConversationSnapshot(
             channels: [fixtureChannel()],
@@ -1566,11 +1643,25 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         self.failFirstApproval = failFirstApproval
         self.failFirstMute = failFirstMute
         self.failFirstRead = failFirstRead
+        self.threadPages = threadPages
     }
 
     func setHistory(_ messages: [Message]) { historyValue = messages }
     func snapshot() async throws -> IOSConversationSnapshot { snapshotValue }
     func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { historyValue }
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> IOSThreadRepliesPage {
+        threadReplyCursors.append(cursor)
+        let index = threadReplyCursors.count - 1
+        guard index < threadPages.count else {
+            return IOSThreadRepliesPage(messages: [], nextCursor: nil)
+        }
+        return threadPages[index]
+    }
     func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
         markReadCalls.append(MarkReadCall(channel: channel, sequence: sequence))
         if failFirstRead, markReadCalls.count == 1 { throw SessionError.transport("offline") }

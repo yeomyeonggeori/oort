@@ -458,6 +458,113 @@ public final class IOSChannelListModel {
 
 @MainActor
 @Observable
+public final class IOSThreadInboxModel {
+    public struct Failure: Equatable {
+        public let message: String
+        public let isOffline: Bool
+    }
+
+    public enum Phase: Equatable {
+        case loading
+        case loaded
+        case failed(Failure)
+    }
+
+    public private(set) var phase: Phase = .loading
+    public private(set) var items: [IOSThreadListItem] = []
+    public private(set) var refreshFailureMessage: String?
+
+    private let currentMemberID: MemberID
+    private let backend: any IOSConversationBackend
+
+    public init(currentMemberID: MemberID, backend: any IOSConversationBackend) {
+        self.currentMemberID = currentMemberID
+        self.backend = backend
+    }
+
+    public func load(channels: [IOSChannelListItem]) async {
+        if items.isEmpty { phase = .loading }
+        refreshFailureMessage = nil
+        do {
+            var collected: [IOSThreadListItem] = []
+            for channel in channels {
+                try Task.checkCancellation()
+                let history = try await backend.history(channel: channel.id, after: nil, limit: 200)
+                let roots = history.filter {
+                    $0.rootId == nil && !$0.isDeleted && ($0.thread?.replyCount ?? 0) > 0
+                }
+                var participantsByRoot: [MessageID: [MemberID]] = [:]
+                for root in roots {
+                    participantsByRoot[root.id] = try await participantMemberIDs(
+                        channel: channel.id,
+                        root: root.id
+                    )
+                }
+                collected.append(contentsOf: IOSThreadListAggregator.participatingThreads(
+                    channel: channel,
+                    messages: roots,
+                    participantsByRoot: participantsByRoot,
+                    currentMemberID: currentMemberID
+                ))
+            }
+            items = IOSThreadListAggregator.sorted(collected)
+            phase = .loaded
+        } catch is CancellationError {
+            return
+        } catch {
+            let failure = Self.failure(for: error)
+            if items.isEmpty {
+                phase = .failed(failure)
+            } else {
+                phase = .loaded
+                refreshFailureMessage = failure.message
+            }
+        }
+    }
+
+    public func clearRefreshFailure() {
+        refreshFailureMessage = nil
+    }
+
+    private func participantMemberIDs(channel: ChannelID, root: MessageID) async throws -> [MemberID] {
+        var result: [MemberID] = []
+        var seenMembers = Set<MemberID>()
+        var cursor: Int64?
+        var seenCursors = Set<Int64>()
+        for _ in 0..<20 {
+            let page = try await backend.threadReplies(
+                channel: channel,
+                root: root,
+                cursor: cursor,
+                limit: 200
+            )
+            for message in page.messages where seenMembers.insert(message.authorMemberId).inserted {
+                result.append(message.authorMemberId)
+            }
+            guard let next = page.nextCursor,
+                  next != cursor,
+                  seenCursors.insert(next).inserted else { break }
+            cursor = next
+        }
+        return result
+    }
+
+    private static func failure(for error: Error) -> Failure {
+        let isOffline = (error as? SessionError).map {
+            if case .transport = $0 { return true }
+            return false
+        } ?? false
+        return Failure(
+            message: isOffline
+                ? "Threads could not be refreshed while offline. Existing results are preserved."
+                : "Threads could not be refreshed. Existing results are preserved.",
+            isOffline: isOffline
+        )
+    }
+}
+
+@MainActor
+@Observable
 public final class IOSTimelineModel {
     public struct Failure: Equatable {
         public let message: String
@@ -493,12 +600,14 @@ public final class IOSTimelineModel {
     public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     public private(set) var approvalDecisionFailures: Set<ApprovalID> = []
     public private(set) var agentPartials: [IOSAgentPartialProjection] = []
+    public private(set) var threadParticipantIDs: [MessageID: [MemberID]] = [:]
     public let huddle: IOSHuddleModel
 
     private let channel: ChannelID
     private let currentMemberID: MemberID
     private let backend: any IOSConversationBackend
     private let threadRoot: MessageID?
+    private let initialThreadRootMessage: Message?
     private var workAgentMemberID: MemberID?
     private var workAgentHandle: String?
     private let workSessionID: WorkSessionID?
@@ -522,6 +631,7 @@ public final class IOSTimelineModel {
         huddleAudioSession: (any IOSHuddleAudioSession)? = nil,
         microphonePermission: (any IOSMicrophonePermissionAuthorizing)? = nil,
         threadRoot: MessageID? = nil,
+        initialThreadRootMessage: Message? = nil,
         workAgentMemberID: MemberID? = nil,
         workAgentHandle: String? = nil,
         workSessionID: WorkSessionID? = nil,
@@ -531,6 +641,7 @@ public final class IOSTimelineModel {
         self.currentMemberID = currentMemberID
         self.backend = backend
         self.threadRoot = threadRoot
+        self.initialThreadRootMessage = initialThreadRootMessage
         self.workAgentMemberID = workAgentMemberID
         self.workAgentHandle = workAgentHandle
         self.workSessionID = workSessionID
@@ -657,6 +768,16 @@ public final class IOSTimelineModel {
             await huddle.apply(delta)
         }
         applyAgentProjection(event)
+        if threadRoot == nil,
+           case .message(let message) = event,
+           let rootID = message.rootId
+        {
+            var participants = threadParticipantIDs[rootID] ?? []
+            if !participants.contains(message.authorMemberId) {
+                participants.append(message.authorMemberId)
+                threadParticipantIDs[rootID] = participants
+            }
+        }
         guard belongsToCurrentTimeline(event) else { return }
         messages = IOSTimelineReducer.applying(event, to: messages, channel: channel)
         switch event {
@@ -805,6 +926,29 @@ public final class IOSTimelineModel {
         replyTarget = message
     }
 
+    public func loadThreadParticipants(for message: Message) async {
+        guard message.rootId == nil,
+              (message.thread?.replyCount ?? 0) > 0,
+              threadParticipantIDs[message.id] == nil
+        else { return }
+        do {
+            let page = try await backend.threadReplies(
+                channel: channel,
+                root: message.id,
+                cursor: nil,
+                limit: 50
+            )
+            var seen = Set<MemberID>()
+            threadParticipantIDs[message.id] = page.messages
+                .map(\.authorMemberId)
+                .filter { seen.insert($0).inserted }
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
     public func cancelReply() {
         replyTarget = nil
     }
@@ -814,7 +958,7 @@ public final class IOSTimelineModel {
     public func sendComposerDraft() async {
         let body = composerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard phase == .loaded, !body.isEmpty, !isSending, failedSend == nil else { return }
-        guard threadRoot == nil || (workAgentHandle != nil && workSessionID != nil) else {
+        guard workSessionID == nil || workAgentHandle != nil else {
             sendFailureMessage = "Choose the agent that owns this Work session before sending input."
             return
         }
@@ -976,8 +1120,9 @@ public final class IOSTimelineModel {
     private func initialMessages() async throws -> [Message] {
         guard let threadRoot else {
             return try await backend.history(channel: channel, after: nil, limit: 200)
+                .filter { $0.rootId == nil }
         }
-        var messages: [Message] = []
+        var messages: [Message] = initialThreadRootMessage.map { [$0] } ?? []
         var cursor: Int64?
         var seenCursors: Set<Int64> = []
         for _ in 0..<20 {
@@ -997,10 +1142,21 @@ public final class IOSTimelineModel {
     }
 
     private func belongsToCurrentTimeline(_ event: RealtimeEvent) -> Bool {
-        guard let threadRoot else { return true }
+        guard let threadRoot else {
+            switch event {
+            case .message(let message), .messageEdited(let message):
+                return message.rootId == nil
+            case .messageDeleted(let id):
+                return messages.contains(where: { $0.id == id })
+            case .reaction(let delta):
+                return messages.contains(where: { $0.id == delta.messageId })
+            default:
+                return true
+            }
+        }
         switch event {
         case .message(let message), .messageEdited(let message):
-            return message.rootId == threadRoot
+            return message.id == threadRoot || message.rootId == threadRoot
         case .messageDeleted(let id):
             return messages.contains(where: { $0.id == id })
         case .reaction(let delta):
@@ -1009,7 +1165,9 @@ public final class IOSTimelineModel {
             return messages.contains(where: { Self.approvalID(for: $0) == approval.approvalId })
         case .agentStatus, .agentPartial:
             return false
-        case .threadUpdated, .typing, .presence, .huddle, .workSession, .workControl:
+        case .threadUpdated(let delta):
+            return delta.rootId == threadRoot
+        case .typing, .presence, .huddle, .workSession, .workControl:
             return false
         }
     }

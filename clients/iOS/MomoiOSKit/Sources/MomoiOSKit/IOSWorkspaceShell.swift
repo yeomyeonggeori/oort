@@ -1,5 +1,6 @@
 #if os(iOS)
 import MomoCore
+import MomoiOSPushKit
 import SwiftUI
 import UIKit
 
@@ -190,7 +191,7 @@ struct IOSConversationDestination: View {
             huddleService: huddleService,
             threadRoot: pushLink?.threadRootID,
             focusMessageID: pushLink?.messageID,
-            showsComposer: pushLink?.threadRootID == nil,
+            showsComposer: true,
             onReadState: channelListModel.applyReadState
         )
     }
@@ -488,20 +489,4 @@ private struct IOSNotificationSettingsView: View {
     }
 }
 
-struct IOSThreadsPlaceholderView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("No thread activity", systemImage: "bubble.left.and.text.bubble.right")
-        } description: {
-            Text("Replies to conversations you participate in will appear here.")
-        } actions: {
-            Button("Browse channels") { dismiss() }
-        }
-        .navigationTitle("Threads")
-        .navigationBarTitleDisplayMode(.inline)
-        .accessibilityIdentifier("threadsEmpty")
-    }
-}
 #endif
