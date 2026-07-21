@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## UXUI 511-U remoteAttachAvailable 실데이터 개방 (#567, 2026-07-21)
+
+- macOS `MomoWorkSession`이 서버의 credential-free `remoteAttachAvailable` projection을 소비한다. owner의 running 세션이 `true`일 때만 기존 SwiftTerm 터미널 액션을 열고, `false` 또는 필드 누락은 fail-closed하며 기존 명시적 `ptyId` fixture는 후방 호환한다. capability와 attach endpoint의 메모리 전용 경계는 변경하지 않았다.
+- Work Console focused 24 tests(실패 0, managed sandbox loopback 1 skip), 터미널 테마 스냅샷 suite를 제외한 macOS 445 tests(실패 0, 동일 1 skip), 디자인 pre-flight가 PASS했다. 전체 451 tests의 terminal color-vision/high-contrast snapshot 2건은 변경 전 clean `track/uxui@4e41132`에서도 같은 pixel ratio로 재현되는 선재 기준 이미지 드리프트이며, Fable 오케스트레이터의 snapshot/design-review 재기록 전까지 해당 2건만 `runtime-unverified`다.
+
 ## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
 
 - ADR-0125 D11에 따라 workspace 기본/member override `work_tier_policy`(t1_only/ask/auto), stale heartbeat의 orphan 전이, ask `resume_offer` 카드와 `momo.work` 알림, t1_only terminal 정리, auto 재디스패치를 기존 PG→outbox 및 Notifier 폴링 경로에 추가했다.

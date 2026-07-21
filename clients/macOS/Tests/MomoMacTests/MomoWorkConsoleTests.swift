@@ -173,7 +173,7 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
     }
 
-    func testRemoteAttachAvailabilityRequiresExplicitPTYBinding() {
+    func testRemoteAttachAvailabilityUsesServerProjectionAndLegacyPTYBinding() {
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
         let member = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
@@ -185,14 +185,28 @@ final class MomoWorkConsoleTests: XCTestCase {
             memberId: member, hostId: host, rootMessageId: root, tool: .codex,
             label: "No remote PTY", status: .running, startedAtMs: 1
         )
-        let bound = MomoWorkSession(
+        let projectedBound = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: member, hostId: host, rootMessageId: root, tool: .codex,
+            label: "Projected remote PTY", status: .running, startedAtMs: 1,
+            remoteAttachAvailable: true
+        )
+        let projectedUnbound = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: member, hostId: host, rootMessageId: root, tool: .codex,
+            label: "Unavailable remote PTY", status: .running, startedAtMs: 1,
+            remoteAttachAvailable: false
+        )
+        let legacyBound = MomoWorkSession(
             id: WorkSessionID(), workspaceId: workspace, channelId: channel,
             memberId: member, hostId: host, rootMessageId: root, tool: .codex,
             label: "Remote PTY", status: .running, startedAtMs: 1, ptyId: "pty-511"
         )
 
         XCTAssertFalse(unbound.isRemotePTYBound)
-        XCTAssertTrue(bound.isRemotePTYBound)
+        XCTAssertTrue(projectedBound.isRemotePTYBound)
+        XCTAssertFalse(projectedUnbound.isRemotePTYBound)
+        XCTAssertTrue(legacyBound.isRemotePTYBound)
     }
 
     func testRemoteTerminalFramesUseOnlyThePTYContractFields() throws {
@@ -555,6 +569,7 @@ final class MomoWorkConsoleTests: XCTestCase {
               "tool":"codex",
               "label":"MOMO-485",
               "status":"running",
+              "remoteAttachAvailable":true,
               "startedAtMs":1784452800000,
               "endedAtMs":null,
               "exitCode":null
@@ -608,7 +623,9 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
         try await backend.connect(workspace: workspace, accessToken: "token-123")
 
-        _ = try await backend.workSessions(workspace: workspace, activeOnly: true)
+        let sessions = try await backend.workSessions(workspace: workspace, activeOnly: true)
+        XCTAssertEqual(sessions.first?.remoteAttachAvailable, true)
+        XCTAssertEqual(sessions.first?.isRemotePTYBound, true)
         _ = try await backend.createWorkSession(
             workspace: workspace,
             channel: channel,
