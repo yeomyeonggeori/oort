@@ -173,7 +173,7 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
     }
 
-    func testRemoteAttachAvailabilityRequiresExplicitPTYBinding() {
+    func testRemoteAttachAvailabilityUsesServerProjectionAndLegacyPTYBinding() {
         let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
         let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
         let member = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
@@ -185,14 +185,78 @@ final class MomoWorkConsoleTests: XCTestCase {
             memberId: member, hostId: host, rootMessageId: root, tool: .codex,
             label: "No remote PTY", status: .running, startedAtMs: 1
         )
-        let bound = MomoWorkSession(
+        let projectedBound = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: member, hostId: host, rootMessageId: root, tool: .codex,
+            label: "Projected remote PTY", status: .running, startedAtMs: 1,
+            remoteAttachAvailable: true
+        )
+        let projectedUnbound = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: member, hostId: host, rootMessageId: root, tool: .codex,
+            label: "Unavailable remote PTY", status: .running, startedAtMs: 1,
+            remoteAttachAvailable: false
+        )
+        let legacyBound = MomoWorkSession(
             id: WorkSessionID(), workspaceId: workspace, channelId: channel,
             memberId: member, hostId: host, rootMessageId: root, tool: .codex,
             label: "Remote PTY", status: .running, startedAtMs: 1, ptyId: "pty-511"
         )
 
         XCTAssertFalse(unbound.isRemotePTYBound)
-        XCTAssertTrue(bound.isRemotePTYBound)
+        XCTAssertTrue(projectedBound.isRemotePTYBound)
+        XCTAssertFalse(projectedUnbound.isRemotePTYBound)
+        XCTAssertTrue(legacyBound.isRemotePTYBound)
+    }
+
+    func testTerminalAttachPolicySeparatesOwnerControlFromReadOnlyObservation() {
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let owner = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let teammate = MemberID(uuidString: "00000000-0000-7000-8000-000000000102")!
+        let host = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000000701")!
+        var session = MomoWorkSession(
+            id: WorkSessionID(), workspaceId: workspace, channelId: channel,
+            memberId: owner, hostId: host, rootMessageId: root, tool: .codex,
+            label: "Observe only", status: .running, startedAtMs: 1,
+            remoteAttachAvailable: true, observation: .open
+        )
+
+        XCTAssertEqual(
+            MomoTerminalAttachPolicy.mode(
+                for: session, currentMemberID: owner, hasLocalTerminal: false
+            ),
+            .controller
+        )
+        XCTAssertEqual(
+            MomoTerminalAttachPolicy.mode(
+                for: session, currentMemberID: teammate, hasLocalTerminal: false
+            ),
+            .observer
+        )
+        XCTAssertNil(MomoTerminalAttachPolicy.mode(
+            for: session, currentMemberID: teammate, hasLocalTerminal: true
+        ))
+
+        session.observation = .ownerOnly
+        XCTAssertNil(MomoTerminalAttachPolicy.mode(
+            for: session, currentMemberID: teammate, hasLocalTerminal: false
+        ))
+        XCTAssertEqual(
+            MomoTerminalAttachPolicy.mode(
+                for: session, currentMemberID: owner, hasLocalTerminal: false
+            ),
+            .controller
+        )
+
+        session.status = .ended
+        XCTAssertNil(MomoTerminalAttachPolicy.mode(
+            for: session, currentMemberID: owner, hasLocalTerminal: false
+        ))
+        XCTAssertNil(MomoTerminalAttachPolicy.mode(
+            for: session, currentMemberID: nil, hasLocalTerminal: false
+        ))
     }
 
     func testRemoteTerminalFramesUseOnlyThePTYContractFields() throws {
@@ -252,17 +316,94 @@ final class MomoWorkConsoleTests: XCTestCase {
         try await backend.connect(workspace: workspace, accessToken: "human-token")
 
         let grant = try await backend.issueTerminalAttach(workspace: workspace, session: sessionID)
+        _ = try await backend.issueTerminalAttach(
+            workspace: workspace,
+            session: sessionID,
+            mode: .observer
+        )
 
         XCTAssertEqual(grant.endpoint.absoluteString, "wss://workd.momo.test/pty")
         XCTAssertEqual(grant.capabilityToken, capability)
         XCTAssertEqual(grant.ptyId, "pty-511")
-        let request = try XCTUnwrap(WorkConsoleURLProtocol.requests().last)
+        let requests = WorkConsoleURLProtocol.requests()
+        XCTAssertEqual(requests.count, 2)
+        let request = try XCTUnwrap(requests.first)
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(
             request.url?.path,
             "/v1/workspaces/\(workspace)/work-sessions/\(sessionID)/terminal-attach"
         )
-        XCTAssertNil(request.httpBody)
+        let controllerBody = try XCTUnwrap(request.workConsoleBodyData)
+        let controllerObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: controllerBody) as? [String: String]
+        )
+        XCTAssertEqual(controllerObject, ["mode": "controller"])
+        let observerBody = try XCTUnwrap(requests.last?.workConsoleBodyData)
+        let observerObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: observerBody) as? [String: String]
+        )
+        XCTAssertEqual(observerObject, ["mode": "observer"])
+    }
+
+    func testWorkSessionObservationPATCHUsesExactOwnerPolicyContract() async throws {
+        WorkConsoleURLProtocol.reset()
+        defer { WorkConsoleURLProtocol.reset() }
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let member = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let host = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000901")!
+        let sessionID = WorkSessionID(uuidString: "00000000-0000-7000-8000-000000000517")!
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000000701")!
+        WorkConsoleURLProtocol.setHandler { request in
+            XCTAssertNil(request.url?.query)
+            return .init(json: """
+                {"workSession":{
+                  "id":"\(sessionID)",
+                  "workspaceId":"\(workspace)",
+                  "channelId":"\(channel)",
+                  "memberId":"\(member)",
+                  "hostId":"\(host)",
+                  "rootMessageId":"\(root)",
+                  "tool":"codex",
+                  "label":"MOMO-517",
+                  "status":"running",
+                  "remoteAttachAvailable":true,
+                  "observation":"owner_only",
+                  "observerGrantCount":0,
+                  "startedAtMs":1784452800000
+                }}
+                """)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WorkConsoleURLProtocol.self]
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "human-token"
+            ),
+            session: URLSession(configuration: configuration)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "human-token")
+
+        let updated = try await backend.setWorkSessionObservation(
+            workspace: workspace,
+            session: sessionID,
+            observation: .ownerOnly
+        )
+
+        XCTAssertEqual(updated.observation, .ownerOnly)
+        XCTAssertEqual(updated.observerGrantCount, 0)
+        let request = try XCTUnwrap(WorkConsoleURLProtocol.requests().first)
+        XCTAssertEqual(request.httpMethod, "PATCH")
+        XCTAssertEqual(
+            request.url?.path,
+            "/v1/workspaces/\(workspace)/work-sessions/\(sessionID)"
+        )
+        let body = try XCTUnwrap(request.workConsoleBodyData)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: body) as? [String: String]
+        )
+        XCTAssertEqual(object, ["observation": "owner_only"])
     }
 
     @MainActor
@@ -312,6 +453,41 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertFalse(UserDefaults.standard.dictionaryRepresentation().values.contains {
             String(describing: $0).contains(capability)
         })
+    }
+
+    @MainActor
+    func testObserverRemoteTerminalIsReadOnlyAndNeverSendsInputResizeOrKill() async throws {
+        let transport = MockRemoteTerminalTransport()
+        let session = MomoRemoteTerminalSession(
+            mode: .observer,
+            grantProvider: {
+                try MomoTerminalAttachGrant(
+                    endpoint: URL(string: "wss://workd.momo.test/pty")!,
+                    capabilityToken: "observer-memory-only",
+                    ptyId: "pty-observer-517"
+                )
+            },
+            transport: transport
+        )
+
+        await session.start()
+        XCTAssertEqual(session.state, .connected)
+        XCTAssertTrue(session.isReadOnly)
+        XCTAssertTrue(session.isObserver)
+
+        let input = [UInt8]("must-not-send\n".utf8)
+        session.terminalView.send(source: session.terminalView.terminal, data: input[...])
+        session.terminalView.terminalDelegate?.sizeChanged(
+            source: session.terminalView,
+            newCols: 160,
+            newRows: 60
+        )
+        session.terminate()
+        try await Task.sleep(for: .milliseconds(50))
+
+        let frames = await transport.frames().compactMap { try? self.jsonObject($0) }
+        XCTAssertEqual(frames.compactMap { $0["type"] as? String }, ["connect"])
+        XCTAssertEqual(session.state, .ended)
     }
 
     @MainActor
@@ -555,6 +731,7 @@ final class MomoWorkConsoleTests: XCTestCase {
               "tool":"codex",
               "label":"MOMO-485",
               "status":"running",
+              "remoteAttachAvailable":true,
               "startedAtMs":1784452800000,
               "endedAtMs":null,
               "exitCode":null
@@ -608,7 +785,9 @@ final class MomoWorkConsoleTests: XCTestCase {
         )
         try await backend.connect(workspace: workspace, accessToken: "token-123")
 
-        _ = try await backend.workSessions(workspace: workspace, activeOnly: true)
+        let sessions = try await backend.workSessions(workspace: workspace, activeOnly: true)
+        XCTAssertEqual(sessions.first?.remoteAttachAvailable, true)
+        XCTAssertEqual(sessions.first?.isRemotePTYBound, true)
         _ = try await backend.createWorkSession(
             workspace: workspace,
             channel: channel,

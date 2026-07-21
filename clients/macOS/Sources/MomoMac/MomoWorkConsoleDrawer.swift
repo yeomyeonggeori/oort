@@ -418,6 +418,10 @@ private struct MomoWorkSessionDetail: View {
                         Text("•")
                         Text(copy.workSessionExit(exitCode))
                     }
+                    if let count = session.observerGrantCount, count > 0 {
+                        Text("•")
+                        Label(copy.workSessionObservers(count), systemImage: "person.2")
+                    }
                 }
                 .momoTypography(.metadata)
                 .foregroundStyle(.secondary)
@@ -433,6 +437,30 @@ private struct MomoWorkSessionDetail: View {
                     .padding(.horizontal, MomoTheme.WorkConsole.standardSpacing)
                     .padding(.vertical, MomoTheme.WorkConsole.compactSpacing)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
+            }
+            if controller.owns(session), session.isRunning {
+                Menu {
+                    Button {
+                        Task { await controller.setObservation(.open, for: session) }
+                    } label: {
+                        Label(copy.workSessionObservationOpen, systemImage: session.observation == .open ? "checkmark" : "eye")
+                    }
+                    Button {
+                        Task { await controller.setObservation(.ownerOnly, for: session) }
+                    } label: {
+                        Label(copy.workSessionObservationOwnerOnly, systemImage: session.observation == .ownerOnly ? "checkmark" : "eye.slash")
+                    }
+                } label: {
+                    Label(
+                        session.observation == .ownerOnly
+                            ? copy.workSessionObservationOwnerOnly
+                            : copy.workSessionObservationOpen,
+                        systemImage: session.observation == .ownerOnly ? "eye.slash" : "eye"
+                    )
+                    .labelStyle(.iconOnly)
+                }
+                .momoQuickTooltip(copy.workSessionObservationMenu)
+                .disabled(controller.observationUpdatesInFlight.contains(session.id))
             }
             Spacer(minLength: 0)
             if let local = controller.localSessions[session.id] {
@@ -514,7 +542,11 @@ private struct MomoWorkSessionDetail: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
             if controller.canOpenRemoteTerminal(session) {
-                Button(copy.workSessionOpenRemoteTerminal) {
+                Button(
+                    controller.owns(session)
+                        ? copy.workSessionOpenRemoteTerminal
+                        : copy.workSessionObserveTerminal
+                ) {
                     Task { await controller.openRemoteTerminal(session) }
                 }
                 .buttonStyle(.borderedProminent)
@@ -537,6 +569,25 @@ private struct MomoRemoteWorkTerminalDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if session.isObserver {
+                HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+                    Image(systemName: "eye")
+                        .foregroundStyle(MomoTheme.agentAccent)
+                    VStack(alignment: .leading, spacing: MomoTheme.WorkConsole.compactSpacing) {
+                        Text(copy.workSessionObserverTitle)
+                            .momoTypography(.supporting)
+                            .fontWeight(.semibold)
+                        Text(copy.workSessionObserverBody)
+                            .momoTypography(.metadata)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, MomoTheme.WorkConsole.contentSpacing)
+                .padding(.vertical, MomoTheme.WorkConsole.standardSpacing)
+                .background(MomoTheme.agentAccent.opacity(0.06))
+                Divider()
+            }
             if let presentation = bannerPresentation {
                 HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
                     Image(systemName: presentation.systemImage)

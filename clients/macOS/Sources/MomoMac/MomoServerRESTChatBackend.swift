@@ -1252,19 +1252,44 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
 
     func issueTerminalAttach(
         workspace requestedWorkspace: WorkspaceID,
-        session workSessionID: WorkSessionID
+        session workSessionID: WorkSessionID,
+        mode: MomoTerminalAttachMode
     ) async throws -> MomoTerminalAttachGrant {
         let context = try requireSessionContext()
         guard context.workspace == requestedWorkspace else {
             throw BackendError.notConnected
         }
-        let response = try await postEmpty(
+        let response = try await post(
             "/v1/workspaces/\(requestedWorkspace.description)/work-sessions/\(workSessionID.description)/terminal-attach",
+            body: MomoTerminalAttachRequestDTO(mode: mode),
             authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
             response: MomoTerminalAttachCapabilityDTO.self
         )
         try ensureSessionCurrent(context)
         return try response.grant
+    }
+
+    func setWorkSessionObservation(
+        workspace requestedWorkspace: WorkspaceID,
+        session workSessionID: WorkSessionID,
+        observation: MomoWorkSessionObservation
+    ) async throws -> MomoWorkSession {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await patch(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-sessions/\(workSessionID.description)",
+            body: MomoUpdateWorkSessionObservationRequestDTO(observation: observation),
+            response: MomoWorkSessionResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workSession.id == workSessionID,
+              response.workSession.workspaceId == requestedWorkspace,
+              response.workSession.observation == observation
+        else { throw BackendError.decoding("work session observation response mismatch") }
+        return response.workSession
     }
 
     func acknowledgeWorkControl(
@@ -2346,6 +2371,10 @@ private struct MomoTerminalAttachCapabilityDTO: Decodable {
     }
 }
 
+private struct MomoTerminalAttachRequestDTO: Encodable {
+    let mode: MomoTerminalAttachMode
+}
+
 private struct MomoCreateWorkSessionRequestDTO: Encodable {
     let channelId: ChannelID
     let hostId: WorkHostID
@@ -2356,6 +2385,10 @@ private struct MomoCreateWorkSessionRequestDTO: Encodable {
 private struct MomoEndWorkSessionRequestDTO: Encodable {
     let status: String
     let exitCode: Int?
+}
+
+private struct MomoUpdateWorkSessionObservationRequestDTO: Encodable {
+    let observation: MomoWorkSessionObservation
 }
 
 private struct MomoWorkControlAckRequestDTO: Encodable {

@@ -65,6 +65,27 @@ extension MomoWorkspaceCopy {
     var workSessionFocusTerminal: String { language == .korean ? "터미널에 포커스" : "Focus terminal" }
     var workSessionShareExcerpt: String { language == .korean ? "발췌 공유" : "Share excerpt" }
     var workSessionOpenRemoteTerminal: String { language == .korean ? "터미널 열기" : "Open terminal" }
+    var workSessionObserveTerminal: String { language == .korean ? "터미널 관전" : "Watch terminal" }
+    func workSessionObservers(_ count: Int64) -> String {
+        language == .korean ? "관전 \(count)" : "\(count) watching"
+    }
+    var workSessionObservationMenu: String {
+        language == .korean ? "터미널 관전 범위" : "Terminal observation access"
+    }
+    var workSessionObservationOpen: String {
+        language == .korean ? "팀원 관전 허용" : "Allow team observation"
+    }
+    var workSessionObservationOwnerOnly: String {
+        language == .korean ? "소유자만 보기" : "Owner only"
+    }
+    var workSessionObserverTitle: String {
+        language == .korean ? "읽기 전용 관전 중" : "Watching read-only"
+    }
+    var workSessionObserverBody: String {
+        language == .korean
+            ? "출력만 이 Mac으로 직접 전송됩니다. 입력, 크기 조절, 종료는 사용할 수 없습니다."
+            : "Only output is sent directly to this Mac. Input, resize, and terminate controls are unavailable."
+    }
     var workSessionRemoteRetry: String { language == .korean ? "다시 연결" : "Reconnect" }
     var workSessionRemoteGrantLoading: String {
         language == .korean ? "원격 터미널 연결 권한을 받는 중" : "Requesting remote terminal access"

@@ -23,6 +23,32 @@ enum MomoWorkSessionStatus: String, Codable, Sendable, Hashable {
     case ended
 }
 
+enum MomoWorkSessionObservation: String, Codable, Sendable, Hashable {
+    case open
+    case ownerOnly = "owner_only"
+}
+
+enum MomoTerminalAttachMode: String, Codable, Sendable, Hashable {
+    case controller
+    case observer
+}
+
+enum MomoTerminalAttachPolicy {
+    static func mode(
+        for session: MomoWorkSession,
+        currentMemberID: MemberID?,
+        hasLocalTerminal: Bool
+    ) -> MomoTerminalAttachMode? {
+        guard session.isRunning,
+              !hasLocalTerminal,
+              session.isRemotePTYBound,
+              let currentMemberID else { return nil }
+        if session.memberId == currentMemberID { return .controller }
+        guard session.observation == .open else { return nil }
+        return .observer
+    }
+}
+
 struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
     let id: WorkSessionID
     let workspaceId: WorkspaceID
@@ -37,9 +63,12 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
     var endedAtMs: Int64?
     var exitCode: Int?
     let ptyId: String?
+    let remoteAttachAvailable: Bool?
+    var observation: MomoWorkSessionObservation?
+    var observerGrantCount: Int64?
 
     var isRunning: Bool { status == .running }
-    var isRemotePTYBound: Bool { ptyId != nil }
+    var isRemotePTYBound: Bool { remoteAttachAvailable == true || ptyId != nil }
 
     init(
         id: WorkSessionID,
@@ -54,7 +83,10 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
         startedAtMs: Int64,
         endedAtMs: Int64? = nil,
         exitCode: Int? = nil,
-        ptyId: String? = nil
+        ptyId: String? = nil,
+        remoteAttachAvailable: Bool? = nil,
+        observation: MomoWorkSessionObservation? = .open,
+        observerGrantCount: Int64? = 0
     ) {
         self.id = id
         self.workspaceId = workspaceId
@@ -69,6 +101,9 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
         self.endedAtMs = endedAtMs
         self.exitCode = exitCode
         self.ptyId = ptyId
+        self.remoteAttachAvailable = remoteAttachAvailable
+        self.observation = observation
+        self.observerGrantCount = observerGrantCount
     }
 
     mutating func apply(_ delta: WorkSessionDelta) {
@@ -143,8 +178,15 @@ protocol MomoWorkConsoleBackend: Sendable {
 
     func issueTerminalAttach(
         workspace: WorkspaceID,
-        session: WorkSessionID
+        session: WorkSessionID,
+        mode: MomoTerminalAttachMode
     ) async throws -> MomoTerminalAttachGrant
+
+    func setWorkSessionObservation(
+        workspace: WorkspaceID,
+        session: WorkSessionID,
+        observation: MomoWorkSessionObservation
+    ) async throws -> MomoWorkSession
 
     func acknowledgeWorkControl(
         workspace: WorkspaceID,
@@ -159,6 +201,19 @@ protocol MomoWorkConsoleBackend: Sendable {
         tool: MomoWorkTool,
         enabled: Bool
     ) async throws -> Bool
+}
+
+extension MomoWorkConsoleBackend {
+    func issueTerminalAttach(
+        workspace: WorkspaceID,
+        session: WorkSessionID
+    ) async throws -> MomoTerminalAttachGrant {
+        try await issueTerminalAttach(
+            workspace: workspace,
+            session: session,
+            mode: .controller
+        )
+    }
 }
 
 protocol MomoWorkHostBackend: Sendable {

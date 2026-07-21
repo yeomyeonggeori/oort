@@ -24,6 +24,28 @@
 - ADR-0127에 따라 `MOMO_ARCHIVE_BACKEND=drive|s3` 부팅 선택과 SDK 없는 AWS SigV4 `S3ArchiveClient`를 추가했다. S3는 15분 presigned PUT/GET, signed HEAD 메타 확정, signed DELETE를 지원하며 불완전한 자격은 기존 unavailable 구현으로 fail-closed한다.
 - e2e/prod compose에 opt-in `s3` MinIO+bucket init 프로파일과 public HTTPS Caddy data plane을 추가했다. REST/OpenAPI/클라이언트와 `schema_v0.sql`은 변경하지 않았다.
 - AWS 공식 SigV4 vector·presign 만료·path-style 집중 테스트와 server 130 tests, verifier bash/ShellCheck·compose YAML 정적 검증이 PASS했다. 지시대로 Docker를 실행하지 않아 Drive stub 및 MinIO 28040~28044 실제 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+## UXUI MOMO-517 macOS 관전 터미널 (#575, 2026-07-21)
+
+- 비소유 채널 멤버는 서버 projection이 `remoteAttachAvailable=true`, `observation=open`인 running 세션에서만 observer capability를 발급받아 기존 SwiftTerm을 읽기 전용으로 연다. observer 세션은 입력·resize·kill을 네트워크로 보내지 않고, 화면 상단에 관전 모드와 제어 불가를 명시한다. owner 세션은 기존 controller 모드를 유지한다.
+- 세션 상세에 `관전 N` projection과 소유자 전용 `팀 관전 허용`/`소유자만` 토글을 추가했다. `owner_only`, ended, 미결속, 로컬 PTY, 현재 멤버 미확정 상태는 fail-closed하며 열린 observer 연결도 다음 projection 갱신에서 즉시 정리한다. attach capability는 메모리의 Authorization header에만 머물고 URL query·로그·UserDefaults에 저장하지 않는다.
+- macOS 전체 454 tests와 Work Console 집중 27 tests가 PASS했다(관리형 sandbox loopback WebSocket 1 skip). observer 정책, controller/observer attach body, observation PATCH, observer stdin·resize·kill 0건을 자동 검증한다. 실제 2계정 owner↔observer PTY, real-window 라이트/다크·접근성 육안 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-506 iOS Work 세션 상세 (#571, 2026-07-21)
+
+- iOS Work 세션 카드에서 서버의 root thread replies cursor를 끝까지 읽어 중간보고·결과를 기존 타임라인 문법으로 표시하고, 선택한 active agent에게 공개 스레드 답글로 `work_input`·`work_read`를 요청한다. 세션 ID는 소문자로 정규화하며 human iOS가 agent 전용 `work-controls`를 직접 호출하지 않는다.
+- pending `work_control_approval` 카드를 Work 탭에 모아 기존 승인/거부 UI를 재사용하고, 도구별 auto-approve GET/PUT/DELETE 현재값과 최초 조회 실패·재시도를 명시했다. 선택한 agent와 현재 channel의 active run에만 `AgentPartial` 텍스트·tool 이름·비용을 메모리 투영하고 tool args는 버리며, durable thread message 또는 terminal status가 도착하면 임시 카드를 제거한다.
+- MomoiOSKit 55 tests(신규 Work 상세 5)가 PASS했고 디자인 pre-flight도 PASS했다. `scripts/verify_ios_build.sh`는 Xcode 26.5가 generic Simulator build description에서 10분간 CPU 0%로 멈춰 중단했으며 소스 컴파일 오류는 출력되지 않았다. 인증된 폰 승인→Mac PTY 실행→폰 개입→검토 발췌 1왕복, iOS Xcode 게이트 재실행, 시뮬레이터 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI MOMO-505 iOS Work 세션 관제 (#569, 2026-07-21)
+
+- iOS Work 탭이 `work-sessions`·`work-hosts`·`work-pool` REST projection과 채널별 `work.session.*` realtime hint를 소비한다. 진행 세션 우선 목록, 전체/진행 중 필터, 정적 상태 칩, 도구 아이콘, host 표시명·online, 시작·경과 시간, pool 사용량을 추가했으며 realtime 수신 뒤에는 REST를 다시 읽어 정본 projection을 유지한다.
+- 프로필의 Developer Mode가 꺼져 있으면 진행/완료 수만 보여주는 요약 카드로 축소하고, 켰을 때만 host·pool·개별 세션을 노출한다. Work 탭이 활성일 때만 realtime 구독을 유지하며 모델에는 PTY raw 출력·로컬 경로·attach capability/endpoint를 포함하지 않는다. 초기 실패는 명시적 empty/error, 갱신 실패는 기존 데이터를 유지한 인라인 배너로 처리한다.
+- `scripts/verify_ios_build.sh`의 generic Simulator build, build-for-testing, 부팅된 iPhone 17 Pro test-without-building과 MomoiOSKit 50 tests(신규 Work 3)가 PASS했고 디자인 pre-flight도 PASS했다. 인증 실데이터의 Mac→iPhone realtime 반영, 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
+## UXUI 511-U remoteAttachAvailable 실데이터 개방 (#567, 2026-07-21)
+
+- macOS `MomoWorkSession`이 서버의 credential-free `remoteAttachAvailable` projection을 소비한다. owner의 running 세션이 `true`일 때만 기존 SwiftTerm 터미널 액션을 열고, `false` 또는 필드 누락은 fail-closed하며 기존 명시적 `ptyId` fixture는 후방 호환한다. capability와 attach endpoint의 메모리 전용 경계는 변경하지 않았다.
+- Work Console focused 24 tests(실패 0, managed sandbox loopback 1 skip), 터미널 테마 스냅샷 suite를 제외한 macOS 445 tests(실패 0, 동일 1 skip), 디자인 pre-flight가 PASS했다. 전체 451 tests의 terminal color-vision/high-contrast snapshot 2건은 변경 전 clean `track/uxui@4e41132`에서도 같은 pixel ratio로 재현되는 선재 기준 이미지 드리프트이며, Fable 오케스트레이터의 snapshot/design-review 재기록 전까지 해당 2건만 `runtime-unverified`다.
 
 ## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
 
