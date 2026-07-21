@@ -30,6 +30,7 @@ final class MomoWorkConsoleController: ObservableObject {
     @Published private(set) var autoApproveStates: [MomoWorkTool: MomoWorkAutoApproveState] = [:]
     @Published private(set) var hostRegistrationState: MomoWorkHostRegistrationState = .waitingForSession
     @Published private(set) var hostHeartbeatIssue: MomoWorkConsoleError?
+    @Published private(set) var observationUpdatesInFlight: Set<WorkSessionID> = []
 
     private let viewModel: ChatViewModel
     private let workHostRegistrar: MomoWorkHostRegistrar
@@ -128,6 +129,7 @@ final class MomoWorkConsoleController: ObservableObject {
             for session in sessions where !session.isRunning {
                 remoteSessions[session.id]?.markEnded()
             }
+            reconcileObserverAccess()
             await refreshWorkHosts()
             if let selectedSessionId,
                !sessions.contains(where: { $0.id == selectedSessionId }) {
@@ -325,10 +327,7 @@ final class MomoWorkConsoleController: ObservableObject {
     }
 
     func canOpenRemoteTerminal(_ session: MomoWorkSession) -> Bool {
-        session.isRunning
-            && owns(session)
-            && localSessions[session.id] == nil
-            && session.isRemotePTYBound
+        terminalAttachMode(for: session) != nil
     }
 
     func canOpenRemoteTerminal(sessionId: WorkSessionID) -> Bool {
@@ -339,22 +338,59 @@ final class MomoWorkConsoleController: ObservableObject {
         workHosts[session.hostId]?.displayName
     }
 
+    func terminalAttachMode(for session: MomoWorkSession) -> MomoTerminalAttachMode? {
+        MomoTerminalAttachPolicy.mode(
+            for: session,
+            currentMemberID: viewModel.currentNavigationMemberID,
+            hasLocalTerminal: localSessions[session.id] != nil
+        )
+    }
+
+    func setObservation(
+        _ observation: MomoWorkSessionObservation,
+        for session: MomoWorkSession
+    ) async {
+        guard owns(session), !observationUpdatesInFlight.contains(session.id) else { return }
+        observationUpdatesInFlight.insert(session.id)
+        defer { observationUpdatesInFlight.remove(session.id) }
+        do {
+            upsert(try await viewModel.setWorkSessionObservation(
+                session.id,
+                observation: observation
+            ))
+            lastIssue = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            lastIssue = .sessionUnavailable
+        }
+    }
+
     func openRemoteTerminal(_ session: MomoWorkSession) async {
-        guard canOpenRemoteTerminal(session) else { return }
+        guard let mode = terminalAttachMode(for: session) else { return }
         if let existing = remoteSessions[session.id] {
+            guard existing.mode == mode else {
+                existing.disconnect()
+                remoteSessions[session.id] = nil
+                return await openRemoteTerminal(session)
+            }
             await existing.retry()
             return
         }
         let remote = MomoRemoteTerminalSession(
+            mode: mode,
             grantProvider: { [weak viewModel] in
                 guard let viewModel else { throw MomoWorkConsoleError.unavailable }
-                return try await viewModel.issueTerminalAttach(session.id)
+                return try await viewModel.issueTerminalAttach(session.id, mode: mode)
             },
             transport: remoteTransportFactory()
         )
         remoteSessions[session.id] = remote
         selectedSessionId = session.id
         await remote.start()
+        if mode == .observer, remote.isConnected {
+            await refresh()
+        }
     }
 
     func openRemoteTerminal(sessionId: WorkSessionID) async {
@@ -580,6 +616,24 @@ final class MomoWorkConsoleController: ObservableObject {
         sessions.sort(by: Self.sessionOrder)
         if !session.isRunning {
             remoteSessions[session.id]?.markEnded()
+        } else if session.observation != .open,
+                  remoteSessions[session.id]?.mode == .observer {
+            remoteSessions[session.id]?.disconnect()
+            remoteSessions[session.id] = nil
+        }
+    }
+
+    private func reconcileObserverAccess() {
+        let unavailableObserverIDs: [WorkSessionID] = remoteSessions.compactMap { entry in
+            let (sessionID, remote) = entry
+            guard remote.mode == .observer else { return nil }
+            guard let session = sessions.first(where: { $0.id == sessionID }),
+                  terminalAttachMode(for: session) == .observer else { return sessionID }
+            return nil
+        }
+        for sessionID in unavailableObserverIDs {
+            remoteSessions[sessionID]?.disconnect()
+            remoteSessions[sessionID] = nil
         }
     }
 

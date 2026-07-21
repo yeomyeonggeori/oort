@@ -199,6 +199,7 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     }
 
     let id = UUID()
+    let mode: MomoTerminalAttachMode
     let terminalView: TerminalView
     @Published private(set) var state: State = .idle
     @Published private(set) var receivedByteCount = 0
@@ -210,9 +211,11 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     private var terminalBridge: TerminalBridge!
 
     init(
+        mode: MomoTerminalAttachMode = .controller,
         grantProvider: @escaping @MainActor @Sendable () async throws -> MomoTerminalAttachGrant,
         transport: any MomoRemoteTerminalTransport = MomoURLSessionRemoteTerminalTransport()
     ) {
+        self.mode = mode
         self.grantProvider = grantProvider
         self.transport = transport
         terminalView = TerminalView(frame: .zero)
@@ -228,7 +231,8 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     }
 
     var isConnected: Bool { state == .connected }
-    var isReadOnly: Bool { state == .ended }
+    var isReadOnly: Bool { mode == .observer || state == .ended }
+    var isObserver: Bool { mode == .observer }
 
     func start() async {
         guard state != .issuingGrant, state != .connecting, state != .connected else { return }
@@ -281,7 +285,9 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
         ptyId = nil
         state = .ended
         Task {
-            if let activePTY { try? await transport.kill(ptyId: activePTY) }
+            if mode == .controller, let activePTY {
+                try? await transport.kill(ptyId: activePTY)
+            }
             await transport.close()
         }
     }
@@ -314,7 +320,7 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     }
 
     private func sendInput(_ data: Data) {
-        guard state == .connected, let ptyId else { return }
+        guard mode == .controller, state == .connected, let ptyId else { return }
         Task { [weak self] in
             do {
                 try await self?.transport.sendInput(data, ptyId: ptyId)
@@ -325,7 +331,7 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     }
 
     private func resize(columns: Int, rows: Int) {
-        guard state == .connected, let ptyId else { return }
+        guard mode == .controller, state == .connected, let ptyId else { return }
         Task { [weak self] in
             do {
                 try await self?.transport.resize(columns: columns, rows: rows, ptyId: ptyId)

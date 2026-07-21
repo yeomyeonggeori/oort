@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-517 macOS 관전 터미널 (#575, 2026-07-21)
+
+- 비소유 채널 멤버는 서버 projection이 `remoteAttachAvailable=true`, `observation=open`인 running 세션에서만 observer capability를 발급받아 기존 SwiftTerm을 읽기 전용으로 연다. observer 세션은 입력·resize·kill을 네트워크로 보내지 않고, 화면 상단에 관전 모드와 제어 불가를 명시한다. owner 세션은 기존 controller 모드를 유지한다.
+- 세션 상세에 `관전 N` projection과 소유자 전용 `팀 관전 허용`/`소유자만` 토글을 추가했다. `owner_only`, ended, 미결속, 로컬 PTY, 현재 멤버 미확정 상태는 fail-closed하며 열린 observer 연결도 다음 projection 갱신에서 즉시 정리한다. attach capability는 메모리의 Authorization header에만 머물고 URL query·로그·UserDefaults에 저장하지 않는다.
+- macOS 전체 454 tests와 Work Console 집중 27 tests가 PASS했다(관리형 sandbox loopback WebSocket 1 skip). observer 정책, controller/observer attach body, observation PATCH, observer stdin·resize·kill 0건을 자동 검증한다. 실제 2계정 owner↔observer PTY, real-window 라이트/다크·접근성 육안 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-506 iOS Work 세션 상세 (#571, 2026-07-21)
 
 - iOS Work 세션 카드에서 서버의 root thread replies cursor를 끝까지 읽어 중간보고·결과를 기존 타임라인 문법으로 표시하고, 선택한 active agent에게 공개 스레드 답글로 `work_input`·`work_read`를 요청한다. 세션 ID는 소문자로 정규화하며 human iOS가 agent 전용 `work-controls`를 직접 호출하지 않는다.
