@@ -10,10 +10,17 @@ struct PushTests {
     func payloadParsing() throws {
         let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
 
-        #expect(envelope.schema == "momo.push.notification.v1")
+        #expect(envelope.schema == "momo.push.notification.v2")
         #expect(envelope.channelID == "00000000-0000-0000-0000-000000000010")
-        #expect(envelope.deepLinkURL?.absoluteString == "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020")
-        #expect(IOSPushDeepLink(envelope: envelope)?.channelID == fixtureChannel().id)
+        #expect(envelope.category == .approval)
+        #expect(envelope.badge == 7)
+        #expect(envelope.threadRootID == "00000000-0000-0000-0000-000000000030")
+        #expect(envelope.approvalID == "00000000-0000-0000-0000-000000000040")
+        #expect(envelope.deepLinkURL?.absoluteString == "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020?category=momo.approval&thread=00000000-0000-0000-0000-000000000030")
+        let link = try #require(IOSPushDeepLink(envelope: envelope))
+        #expect(link.channelID == fixtureChannel().id)
+        #expect(link.threadRootID == MessageID(uuidString: "00000000-0000-0000-0000-000000000030"))
+        #expect(link.category == .approval)
     }
 
     @MainActor
@@ -42,6 +49,98 @@ struct PushTests {
         #expect(router.pending == link)
         #expect(router.consumePending(for: link.workspaceID) == link)
         #expect(router.pending == nil)
+    }
+
+    @Test("approval ID is accepted only for the approval category")
+    func approvalBoundary() throws {
+        let outsideApproval = Self.payload.replacingOccurrences(
+            of: "momo.approval", with: "momo.mention"
+        )
+        #expect(throws: MomoPushError.self) {
+            try MomoPushParser.parse(data: Data(outsideApproval.utf8))
+        }
+
+        let missingApproval = Self.payload.replacingOccurrences(
+            of: ",\"approval_id\":\"00000000-0000-0000-0000-000000000040\"",
+            with: ""
+        )
+        #expect(throws: MomoPushError.self) {
+            try MomoPushParser.parse(data: Data(missingApproval.utf8))
+        }
+    }
+
+    @Test("duplicate deep-link query keys fail closed")
+    func duplicateDeepLinkQueryFailsClosed() {
+        let duplicated = URL(string: Self.deepLinkURL.absoluteString + "?category=momo.work&category=momo.message")!
+        #expect(IOSPushDeepLink(url: duplicated) == nil)
+        let unknownCategory = URL(string: Self.deepLinkURL.absoluteString + "?category=momo.unknown")!
+        #expect(IOSPushDeepLink(url: unknownCategory) == nil)
+        let credentialLikeQuery = URL(string: Self.deepLinkURL.absoluteString + "?token=not-allowed")!
+        #expect(IOSPushDeepLink(url: credentialLikeQuery) == nil)
+    }
+
+    @Test("quick reply targets the pushed thread and message")
+    func quickReplyAction() async throws {
+        let backend = RecordingConversationBackend()
+        let envelope = MomoPushEnvelope(
+            schema: "momo.push.notification.v2",
+            serverID: "server-a",
+            workspaceID: fixtureWorkspaceID.description.uppercased(),
+            channelID: fixtureChannel().id.description.uppercased(),
+            messageID: "00000000-0000-0000-0000-000000000020",
+            collapseID: "message-20",
+            reason: "mention",
+            approvalID: nil,
+            threadID: "00000000-0000-0000-0000-000000000030",
+            category: .mention,
+            badge: 2
+        )
+
+        try await IOSPushActionExecutor(backend: backend).perform(
+            .quickReply("  확인했습니다.  "),
+            envelope: envelope,
+            signedInWorkspaceID: fixtureWorkspaceID
+        )
+
+        let call = try #require(await backend.sendCalls.first)
+        #expect(call.draft.channelId == fixtureChannel().id)
+        #expect(call.draft.body == "확인했습니다.")
+        #expect(call.draft.rootId == MessageID(uuidString: "00000000-0000-0000-0000-000000000030"))
+        #expect(call.draft.replyToId == MessageID(uuidString: "00000000-0000-0000-0000-000000000020"))
+    }
+
+    @Test("approval action reuses the signed-in approval REST contract")
+    func approvalAction() async throws {
+        let backend = RecordingConversationBackend()
+        let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
+
+        try await IOSPushActionExecutor(backend: backend).perform(
+            .decideApproval(false),
+            envelope: envelope,
+            signedInWorkspaceID: fixtureWorkspaceID
+        )
+
+        let call = try #require(await backend.approvalCalls.first)
+        #expect(call.approvalId == ApprovalID(uuidString: "00000000-0000-0000-0000-000000000040"))
+        #expect(call.approve == false)
+    }
+
+    @Test("notification action preferences persist without credentials")
+    func actionPreferenceRoundTrip() throws {
+        let suite = "MomoiOSPushTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = IOSNotificationActionPreferenceStore(defaults: defaults, key: "preferences")
+        let expected = IOSNotificationActionPreferences(
+            message: false,
+            mention: true,
+            approval: false,
+            work: true
+        )
+
+        store.save(expected)
+
+        #expect(store.load() == expected)
     }
 
     @Test("NSE resolver replaces placeholder after fetch")
@@ -115,7 +214,7 @@ struct PushTests {
         }
     }
 
-    private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":1,"mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v1","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request"}}"#
+    private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":7,"thread-id":"00000000-0000-0000-0000-000000000030","category":"momo.approval","mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v2","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request","approval_id":"00000000-0000-0000-0000-000000000040"}}"#
     private static let deepLinkURL = URL(
         string: "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020"
     )!

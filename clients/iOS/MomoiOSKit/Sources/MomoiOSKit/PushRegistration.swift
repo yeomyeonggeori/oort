@@ -126,15 +126,23 @@ public struct IOSPushDeepLink: Hashable, Sendable {
     public let workspaceID: WorkspaceID
     public let channelID: ChannelID
     public let messageID: MessageID
+    public let threadRootID: MessageID?
+    public let category: MomoPushCategory
+
+    public var opensWorkSession: Bool { category == .work }
 
     public init?(envelope: MomoPushEnvelope) {
-        guard let workspaceID = WorkspaceID(uuidString: envelope.workspaceID),
-              let channelID = ChannelID(uuidString: envelope.channelID),
-              let messageID = MessageID(uuidString: envelope.messageID)
+        guard let workspaceID = WorkspaceID(uuidString: envelope.workspaceID.lowercased()),
+              let channelID = ChannelID(uuidString: envelope.channelID.lowercased()),
+              let messageID = MessageID(uuidString: envelope.messageID.lowercased())
         else { return nil }
         self.workspaceID = workspaceID
         self.channelID = channelID
         self.messageID = messageID
+        self.threadRootID = envelope.threadRootID.flatMap {
+            MessageID(uuidString: $0.lowercased())
+        }
+        self.category = envelope.category
     }
 
     public init?(url: URL) {
@@ -142,13 +150,31 @@ public struct IOSPushDeepLink: Hashable, Sendable {
         let parts = url.pathComponents.filter { $0 != "/" }
         guard parts.count == 6,
               parts[0] == "workspaces", parts[2] == "channels", parts[4] == "messages",
-              let workspaceID = WorkspaceID(uuidString: parts[1]),
-              let channelID = ChannelID(uuidString: parts[3]),
-              let messageID = MessageID(uuidString: parts[5])
+              let workspaceID = WorkspaceID(uuidString: parts[1].lowercased()),
+              let channelID = ChannelID(uuidString: parts[3].lowercased()),
+              let messageID = MessageID(uuidString: parts[5].lowercased())
         else { return nil }
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        let queryItems = components?.queryItems ?? []
+        guard Set(queryItems.map(\.name)).count == queryItems.count else { return nil }
+        let allowedQueryNames: Set<String> = ["category", "thread"]
+        guard Set(queryItems.map(\.name)).isSubset(of: allowedQueryNames) else { return nil }
+        let values = queryItems.reduce(into: [String: String]()) { values, item in
+            if let value = item.value { values[item.name] = value }
+        }
+        let rawCategory = values["category"]
+        let parsedCategory = rawCategory.flatMap(MomoPushCategory.init(rawValue:))
+        if rawCategory != nil, parsedCategory == nil { return nil }
+        let category = parsedCategory ?? .message
+        let threadRootID = values["thread"].flatMap {
+            MessageID(uuidString: $0.lowercased())
+        }
+        if values["thread"] != nil, threadRootID == nil { return nil }
         self.workspaceID = workspaceID
         self.channelID = channelID
         self.messageID = messageID
+        self.threadRootID = threadRootID
+        self.category = category
     }
 }
 

@@ -76,7 +76,8 @@ struct IOSChannelHomeView: View {
                     currentMemberID: session.member.id,
                     backend: backend,
                     workspace: session.workspaceID,
-                    huddleService: huddleService
+                    huddleService: huddleService,
+                    pushLink: link
                 )
             } else {
                 ContentUnavailableView(
@@ -159,7 +160,8 @@ struct IOSChannelHomeView: View {
                 currentMemberID: session.member.id,
                 backend: backend,
                 workspace: session.workspaceID,
-                huddleService: huddleService
+                huddleService: huddleService,
+                pushLink: nil
             )
         } label: {
             IOSChannelRow(item: item)
@@ -307,6 +309,8 @@ struct IOSChannelRow: View {
 struct IOSTimelineView: View {
     let item: IOSChannelListItem
     let members: [MemberID: Member]
+    private let focusMessageID: MessageID?
+    private let showsComposer: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var model: IOSTimelineModel
@@ -321,16 +325,22 @@ struct IOSTimelineView: View {
         backend: any IOSConversationBackend,
         workspace: WorkspaceID,
         huddleService: any IOSHuddleService,
+        threadRoot: MessageID? = nil,
+        focusMessageID: MessageID? = nil,
+        showsComposer: Bool = true,
         onReadState: ((ChannelReadState) -> Void)? = nil
     ) {
         self.item = item
         self.members = members
+        self.focusMessageID = focusMessageID
+        self.showsComposer = showsComposer
         _model = State(initialValue: IOSTimelineModel(
             channel: item.id,
             currentMemberID: currentMemberID,
             backend: backend,
             workspace: workspace,
             huddleService: huddleService,
+            threadRoot: threadRoot,
             onReadState: onReadState
         ))
     }
@@ -377,9 +387,18 @@ struct IOSTimelineView: View {
                     }
                 }
             }
+            .task(id: focusMessageTrigger) {
+                guard let focusMessageID,
+                      model.messages.contains(where: { $0.id == focusMessageID })
+                else { return }
+                await Task.yield()
+                proxy.scrollTo(focusMessageID, anchor: .center)
+            }
         }
         .safeAreaInset(edge: .bottom) {
-            IOSMessageComposer(model: model)
+            if showsComposer {
+                IOSMessageComposer(model: model)
+            }
         }
         .listStyle(.plain)
         .scrollDismissesKeyboard(.interactively)
@@ -442,7 +461,7 @@ struct IOSTimelineView: View {
             )
             .id(message.id)
             .listRowSeparator(.hidden)
-            .listRowBackground(mentionsCurrentMember ? Color.accentColor.opacity(0.10) : Color.clear)
+            .listRowBackground(rowBackground(message: message, mentionsCurrentMember: mentionsCurrentMember))
             .accessibilityIdentifier("message.\(message.id.description)")
             .onAppear { visibleMessageIDs.insert(message.id) }
             .onDisappear { visibleMessageIDs.remove(message.id) }
@@ -462,6 +481,20 @@ struct IOSTimelineView: View {
                 }
             }
         }
+    }
+
+    private var focusMessageTrigger: MessageID? {
+        guard let focusMessageID,
+              model.phase == .loaded,
+              model.messages.contains(where: { $0.id == focusMessageID })
+        else { return nil }
+        return focusMessageID
+    }
+
+    private func rowBackground(message: Message, mentionsCurrentMember: Bool) -> Color {
+        if message.id == focusMessageID { return Color.accentColor.opacity(0.16) }
+        if mentionsCurrentMember { return Color.accentColor.opacity(0.10) }
+        return .clear
     }
 
     private func huddleBanner(_ huddle: IOSHuddle) -> some View {

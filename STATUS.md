@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-504 iOS 알림 UX v2 (#583, 2026-07-21)
+
+- `momo.push.notification.v2`의 APNs `thread-id`, 4개 category, 승인 전용 `approval_id`, 서버 badge를 닫힌 파서로 소비한다. 잠금화면 빠른 답장은 기존 메시지 REST에 같은 root/reply 대상을 유지하고, 승인·거부는 기존 approval decision REST를 재사용한다. UUID는 비교·딥링크·요청 경계에서 소문자로 정규화하며 NSE의 id-only 본문 fetch 경계는 넓히지 않았다.
+- 알림 탭은 정확한 채널·메시지·스레드로 이동하고 Work category는 Work 탭의 동일 root 세션 상세로 이동한다. Profile에는 잠금화면 액션 등록 설정과 서버 채널 음소거를 분리해 제공하며, 후자는 멘션 포함 전달만 억제하고 unread는 바꾸지 않음을 명시했다. 카테고리별 서버 전달 억제 API는 없어 거짓 토글을 만들지 않고 ENGINE_HANDOFF X-10으로 역요청했다.
+- MomoiOSKit 60 tests(신규 v2 파서·승인 경계·중복 쿼리 거부·빠른 답장·승인 결정·비자격 설정 5건)가 PASS했다. `verify_ios_build.sh`와 package-resolution 고정 재시도는 모두 Xcode build service의 package-loading 단계에서 산출물 갱신 없이 정체돼 중단했으며, 실 APNs 빠른답장·승인·딥링크·badge, iOS 앱 타깃 재빌드 및 시뮬레이터 육안은 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-520 macOS 호스트 상실 전환·티어 정책 (#579, 2026-07-21)
 
 - Work Console이 서버의 `orphaned`·`endReason`·`resumedFromSessionId` projection을 소비하고, `resume_offer` 메시지를 일반 승인과 구분된 전환 카드로 렌더한다. 카드에서 Work 서랍의 원 세션으로 이동해 online·미revoke이면서 본인 또는 workspace 소유인 다른 host를 선택하고 resume REST로 새 세션을 만든다. 새 세션은 같은 root thread와 이전 세션 계보를 카드·상세에 표시한다.
