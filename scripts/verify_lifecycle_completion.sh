@@ -22,9 +22,18 @@ HERMES_PORT="${LIFECYCLE_COMPLETION_HERMES_PORT:-28063}"
 BOOT_TIMEOUT="${LIFECYCLE_COMPLETION_BOOT_TIMEOUT:-2400}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-lifecycle-completion.XXXXXX")"
 
+# agent 대칭 검증은 gateway 인증 probe가 필요 — e2e compose 기본값은 gateway 비활성이라 override로 켠다.
+GATEWAY_OVERRIDE="$TMP_DIR/gateway-mode.yml"
+cat >"$GATEWAY_OVERRIDE" <<'YAML'
+services:
+  api:
+    environment:
+      AGENT_GATEWAY_MODE: gateway
+YAML
+
 compose() {
   PORT="$API_PORT" CENT_PORT="$CENT_PORT" POSTGRES_PORT="$PG_PORT" HERMES_PORT="$HERMES_PORT" \
-    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
+    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$GATEWAY_OVERRIDE" "$@"
 }
 
 if [ -n "$(compose ps -aq 2>/dev/null)" ]; then
@@ -182,7 +191,7 @@ SQL
 api "$LEAVER_TOKEN" POST "/v1/workspaces/$WS_ID/channels/$DM_CH/messages" \
   "$(jq -cn --arg id "$(uuid)" '{clientMsgId:$id,type:"text",body:"m524 preserved history"}')"
 expect 201 "pre-leave message"
-MESSAGE_ID="$(lower "$(printf '%s' "$RESPONSE_BODY" | jq -er '.message.id')")"
+MESSAGE_ID="$(lower "$(printf '%s' "$RESPONSE_BODY" | jq -er '.id')")"
 api "$OWNER_TOKEN" DELETE "/v1/workspaces/$WS_ID/members/me"
 expect 409 "last owner self-leave"
 api "$LEAVER_TOKEN" DELETE "/v1/workspaces/$WS_ID/members/me"
