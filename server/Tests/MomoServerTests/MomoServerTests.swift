@@ -933,6 +933,46 @@ final class MomoServerTests: XCTestCase {
         XCTAssertThrowsError(try JSONDecoder().decode(CreateAgentRequest.self, from: providerKey))
     }
 
+    func testLifecycleCompletionRoutesKeepSelfLeaveAndAgentSymmetryAtomic() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let lifecycle = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MemberLifecycleRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(lifecycle.contains("channels/:ch/members/me"))
+        XCTAssertTrue(lifecycle.contains("members/me"))
+        XCTAssertTrue(lifecycle.contains("direct message channels cannot be left"))
+        XCTAssertTrue(lifecycle.contains("SET archived_at = COALESCE(archived_at, now())"))
+        XCTAssertTrue(lifecycle.contains("WorkspaceAuthorization.requireMember"))
+        XCTAssertTrue(lifecycle.contains("WorkspaceAuthorization.lockMembershipMutation"))
+        XCTAssertTrue(lifecycle.contains("workspace must retain at least one owner"))
+        XCTAssertTrue(lifecycle.contains("RETURNING kind::text"))
+        XCTAssertTrue(lifecycle.contains("agent_credentials_revoked"))
+        XCTAssertTrue(lifecycle.contains("credentials_restored"))
+        XCTAssertFalse(lifecycle.contains("BYPASSRLS"))
+
+        let agentRoutes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/AgentRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        let credentials = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/AgentCredentialRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(agentRoutes.contains("JoinRoutes.requireNotBanned"))
+        XCTAssertTrue(credentials.contains("requireUnbannedHandle: true"))
+        XCTAssertTrue(credentials.contains("JoinRoutes.requireNotBanned"))
+    }
+
     func testAgentGatewayErrorSanitizerRedactsSecretsAndCredentialShapedText() {
         XCTAssertNil(AgentGatewayRoutes.sanitizedGatewayError("   ", gatewaySecret: "secret"))
         XCTAssertEqual(
