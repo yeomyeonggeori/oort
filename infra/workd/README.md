@@ -5,6 +5,12 @@ momo REST API for controls addressed to its registered Ed25519 identity. Tool
 stdout/stderr is written under `~/.local/share/momo/workd-output/` with mode
 `0600`; it is not sent to the momo server.
 
+After registration, workd reads the enabled workspace `work_tool_profile`
+projection with its signed host identity. The server provides only a portable
+command key and arguments. Executable paths and optional
+`MOMO_WORKD_PROFILE_<TOOL_KEY>_{EXECUTABLE,ARGUMENTS_JSON}` overrides remain in
+the host's private environment; credentials are never catalog fields.
+
 The checked-in launchd and systemd files are templates consumed by
 `bootstrap.sh`. The bootstrap expects a binary compiled for the target OS and
 architecture, an HTTPS momo server, workspace UUID, and a one-time human access

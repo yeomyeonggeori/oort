@@ -347,7 +347,7 @@ sops exec-env infra/prod/secrets.sops.env \
 
 Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
 `API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
-`MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `MOMO_LINKSHORT_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
 `CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
 `HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
@@ -447,6 +447,7 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 |---|---|---|
 | `APP_DOMAIN` | (unset) | 웹 SPA 공개 도메인(예: `momo.example.com`). unset이면 웹 서빙 비활성. |
 | `MOMO_WEB_IMAGE` | (required) | `clients/web`의 production `dist`를 담은 immutable digest image. install/upgrade가 `web-init`으로 실행한다. |
+| `MOMO_LINKSHORT_IMAGE` | (required) | `services/LinkShort`의 immutable digest image. `/i/*`를 `/join?code=...`로 리다이렉트한다. |
 | `WEB_STATIC_VOLUME_NAME` | `momo-web-static` | `web-init`이 채우고 Caddy가 read-only로 마운트하는 named volume 이름. |
 
 **DNS/TLS:** `APP_DOMAIN`을 쓰려면 해당 이름의 A/AAAA 레코드를 VPS IP로 추가한다(§2와 동일, Caddy ACME 자동 발급). `rt.<domain>`/`api.<domain>`과 **다른 이름**이어야 한다 — `prod_env_preflight.sh`가 strict 모드에서 APP_DOMAIN 설정 시 public DNS 형태·placeholder 금지·API/REALTIME과의 중복을 fail-fast로 검사한다(unset은 항상 허용).
@@ -459,7 +460,9 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 
 **웹 realtime Origin 허용 — MOMO-398:** Centrifugo v6는 `client.allowed_origins`가 정의되지 않으면 `Origin` 헤더가 요청 Host와 다른 브라우저 websocket 연결을 403으로 거부한다(PR #407 재현: `request Origin is not authorized due to empty allowed_origins`). 이를 위해 prod compose가 centrifugo 서비스에 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS=${APP_DOMAIN:+https://${APP_DOMAIN}}`를 주입한다 — **operator가 별도 env를 설정하지 않으며, 허용 오리진은 언제나 `https://<APP_DOMAIN>` 단 하나로 파생된다.** `APP_DOMAIN` unset(또는 빈 값) 시 이 env는 빈 문자열로 렌더되는데, Centrifugo v6는 빈 env를 unset으로 간주하므로("Empty environment variables are considered unset (!) and will fall back to the next configuration source" — centrifugal.dev/docs/server/configuration) `centrifugo.prod.json` 그대로 = 기존 동작 완전 무변화(브라우저 realtime fail-closed 유지). 네이티브 클라이언트는 어느 모드에서든 무영향 — Centrifugo는 `Origin` 헤더가 없는 연결을 검사 없이 통과시킨다("Connection requests without `Origin` header set are passing through without any checks", 같은 문서 `client.allowed_origins`). realtime은 `rt.` 도메인(교차 오리진)이므로 SPA의 CSP `connect-src wss://{$REALTIME_DOMAIN}` 허용과 이 allowed_origins 허용이 함께 있어야 브라우저 연결이 열린다. env 파일에 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS`를 직접 넣지 말 것 — compose 보간은 그 값을 읽지 않으며, `prod_env_preflight.sh` strict 모드가 파생값과 모순되는 설정(예: APP_DOMAIN unset인데 origins 설정, 또는 파생값과 다른 origins)을 fail-fast로 차단한다.
 
-**검증:** `scripts/local_gate.sh --profile web-serving` — e2e compose `web` 프로파일의 `web-init`과 HTTP-only Caddy edge를 28070~28074 격리 포트에서 기동한다. 실제 `dist`의 `/`와 SPA 폴백, API login 프록시, Centrifugo callback 403, CSP/X-Frame-Options, `/health` 200을 호스트 curl로 검사한다. 공인 DNS·ACME·production TLS는 이 로컬 게이트 범위 밖이다. 기존 `scripts/web_serving_smoke.sh`는 APP_DOMAIN unset sentinel 회귀를 계속 담당한다.
+**초대 관통:** owner/admin이 `POST /v1/workspaces/<workspace-id>/invites`로 초대를 만들면 raw code는 응답에서 한 번만 다룬다. 공유 링크는 `https://<APP_DOMAIN>/i/<code>`다. Caddy가 SPA 폴백보다 먼저 private `linkshort:28190`으로 프록시하고, LinkShort는 compose가 `https://${APP_DOMAIN}`에서 파생한 `MOMO_LINKSHORT_TARGET_BASE_URL`을 사용해 `/join?code=<code>`로 302 응답한다. SPA는 표시명·handle·이메일·비밀번호를 받아 같은 오리진 `POST /v1/join`으로 가입하고, JoinResponse 세션을 저장해 홈으로 진입한 뒤 `history.replaceState`로 코드가 든 URL을 제거한다. LinkShort는 코드를 저장·검증·로그하지 않으며 실제 만료·소진·차단 판정은 대상 서버의 JoinRoutes가 담당한다.
+
+**검증:** `scripts/local_gate.sh --profile web-serving` — e2e compose `web` 프로파일의 `web-init`, LinkShort와 HTTP-only Caddy edge를 28070~28074 격리 포트에서 기동한다. 실제 `dist`의 `/`, 일반 SPA 폴백, `/join` 폴백, `/i/*` LinkShort 프록시, API login 프록시, Centrifugo callback 403, CSP/X-Frame-Options, `/health` 200을 호스트 curl로 검사한다. 공인 DNS·ACME·production TLS와 초대 생성→링크→가입→메시지 실왕복은 이 로컬 게이트 범위 밖이다. 기존 `scripts/web_serving_smoke.sh`는 APP_DOMAIN unset sentinel 회귀를 계속 담당한다.
 
 ---
 

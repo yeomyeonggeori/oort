@@ -7,8 +7,10 @@ enum ConfigError: Error, Equatable {
 
 struct Config: Sendable, Equatable {
     static let defaultPort = 28_190
+    static let defaultHost = "127.0.0.1"
 
     let targetBaseURL: String
+    let host: String
     let port: Int
 
     static func load(
@@ -38,6 +40,12 @@ struct Config: Sendable, Equatable {
             port = defaultPort
         }
 
-        return Config(targetBaseURL: target, port: port)
+        let host = environment["MOMO_LINKSHORT_HOST"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Config(
+            targetBaseURL: target,
+            host: host.flatMap { $0.isEmpty ? nil : $0 } ?? defaultHost,
+            port: port
+        )
     }
 }

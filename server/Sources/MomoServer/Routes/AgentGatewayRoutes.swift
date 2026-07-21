@@ -247,6 +247,45 @@ struct AgentGatewayRoutes: Sendable {
         guard let lease = dto.leaseBinding else { try Self.rejectGatewayLease() }
         let normalizedStatus = Self.normalizedStatus(dto.status ?? "running")
 
+        if normalizedStatus == "tool_call" {
+            guard let principal, principal.kind == .agent else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "gateway work tools require an agent bearer"
+                )
+            }
+            guard principal.scopes.contains("work:control") else {
+                throw HTTPError(
+                    .forbidden,
+                    message: "gateway work tools require work:control scope"
+                )
+            }
+            guard let workToolCall = dto.toolCall else {
+                throw HTTPError(.badRequest, message: "tool_call payload is required")
+            }
+            let validated = try workToolCall.validated()
+            let verdict = await progressLimiter.check(
+                key: "gateway-progress:\(workspaceID.uuidString):\(runID.uuidString)",
+                limit: Self.maximumProgressEventsPerWindow,
+                windowSeconds: Self.progressRateWindowSeconds
+            )
+            guard verdict.allowed else {
+                throw HTTPError(.tooManyRequests, message: "gateway event rate limit exceeded")
+            }
+            let control = try await recordWorkToolCall(
+                principal: principal,
+                workspaceID: workspaceID,
+                runID: runID,
+                request: validated,
+                lease: lease
+            )
+            return AgentGatewayEventResponse(
+                status: "accepted",
+                runId: runID.uuidString,
+                workControl: control
+            )
+        }
+
         if normalizedStatus == "approval_request" {
             guard let approvalRequest = dto.approvalRequest else {
                 throw HTTPError(.badRequest, message: "approval_request payload is required")
@@ -269,7 +308,11 @@ struct AgentGatewayRoutes: Sendable {
             case .accepted:
                 break
             }
-            return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
+            return AgentGatewayEventResponse(
+                status: "accepted",
+                runId: runID.uuidString,
+                workControl: nil
+            )
         }
 
         let progress = try dto.validatedProgress(status: normalizedStatus)
@@ -443,7 +486,129 @@ struct AgentGatewayRoutes: Sendable {
         case .accepted:
             break
         }
-        return AgentGatewayEventResponse(status: "accepted", runId: runID.uuidString)
+        return AgentGatewayEventResponse(
+            status: "accepted",
+            runId: runID.uuidString,
+            workControl: nil
+        )
+    }
+
+    private func recordWorkToolCall(
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        runID: UUID,
+        request: AgentGatewayWorkToolCall,
+        lease: AgentGatewayLeaseBinding
+    ) async throws -> WorkControlDTO {
+        try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            guard let run = try await Self.lockGatewayRun(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID
+            ) else {
+                throw HTTPError(.notFound, message: "agent run not found")
+            }
+
+            let requestJSON = request.auditRequestJSON
+            let existingRows = try await conn.query(
+                """
+                SELECT target_id, detail->'request' = \(requestJSON)::jsonb
+                  FROM audit_log
+                 WHERE workspace_id = \(workspaceID)
+                   AND run_id = \(runID)
+                   AND action = 'agent.gateway.work_tool'
+                   AND target_type = 'work_control'
+                   AND detail->>'call_id' = \(request.callId)
+                 ORDER BY created_at DESC
+                 LIMIT 1
+                """,
+                logger: db.logger
+            ).collect()
+            if let existingRow = existingRows.first {
+                let (controlID, sameRequest) = try existingRow.decode((UUID, Bool).self)
+                guard sameRequest else {
+                    throw HTTPError(
+                        .conflict,
+                        message: "gateway work tool call_id was reused with different input"
+                    )
+                }
+                guard try await Self.gatewayLeaseIsAuthorized(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    runID: runID,
+                    agentID: run.agentMemberID,
+                    lease: lease,
+                    allowSettled: true
+                ) else { try Self.rejectGatewayLease() }
+                guard let existing = try await WorkControlRoutes.fetchControl(
+                    conn: conn,
+                    logger: db.logger,
+                    controlID: controlID
+                ) else {
+                    throw HTTPError(
+                        .internalServerError,
+                        message: "gateway work control audit binding is missing"
+                    )
+                }
+                return existing
+            }
+
+            guard try await Self.gatewayLeaseIsAuthorized(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                runID: runID,
+                agentID: run.agentMemberID,
+                lease: lease,
+                allowSettled: false
+            ) else { try Self.rejectGatewayLease() }
+            guard run.status == "queued" || run.status == "running" else {
+                throw HTTPError(
+                    .conflict,
+                    message: "agent run is not eligible for a gateway work tool"
+                )
+            }
+
+            let control = try await WorkControlRoutes.createControl(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                principal: principal,
+                request: try request.createRequest(channelID: run.channelID, runID: runID)
+            )
+            let controlID = UUID(uuidString: control.id)!
+            let detail = Self.jsonString([
+                "schema": "momo.agent_gateway.work_tool.v1",
+                "call_id": request.callId,
+                "source": "hermes_gateway",
+                "request": Self.jsonObject(requestJSON),
+                "control_status": control.status,
+            ])
+            _ = try await conn.query(
+                """
+                INSERT INTO audit_log
+                  (workspace_id, actor_member_id, action, target_type,
+                   target_id, via_token_id, run_id, detail)
+                VALUES
+                  (\(workspaceID), \(principal.memberID),
+                   'agent.gateway.work_tool', 'work_control', \(controlID),
+                   \(principal.tokenID), \(runID), \(detail)::jsonb)
+                """,
+                logger: db.logger
+            )
+            if control.status == "pending_approval" {
+                try await Self.settleGatewayJobForApproval(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    runID: runID,
+                    lease: lease
+                )
+            }
+            return control
+        }
     }
 
     private func recordApprovalRequest(
@@ -1627,6 +1792,7 @@ struct AgentGatewayEventRequest: Decodable {
     let detail: String?
     let textDelta: String?
     let approvalRequest: AgentGatewayApprovalRequest?
+    let toolCall: AgentGatewayWorkToolCall?
 
     private enum CodingKeys: String, CodingKey {
         case eventID = "event_id"
@@ -1636,6 +1802,7 @@ struct AgentGatewayEventRequest: Decodable {
         case detail
         case textDelta = "text_delta"
         case approvalRequest = "approval_request"
+        case toolCall = "tool_call"
     }
 
     func validatedLease() throws -> AgentGatewayLeaseBinding {
@@ -1680,6 +1847,135 @@ struct AgentGatewayEventRequest: Decodable {
             throw HTTPError(.badRequest, message: "\(field) is too large")
         }
         return raw
+    }
+}
+
+struct AgentGatewayWorkToolCall: Decodable, Equatable, Sendable {
+    static let supportedNames = ["work.spawn", "work.input", "work.read", "work.kill"]
+
+    let callId: String
+    let name: String
+    let targetHostId: UUID
+    let arguments: JSONValue
+
+    private enum CodingKeys: String, CodingKey {
+        case callId = "call_id"
+        case name
+        case targetHostId = "target_host_id"
+        case arguments
+    }
+
+    private init(callId: String, name: String, targetHostId: UUID, arguments: JSONValue) {
+        self.callId = callId
+        self.name = name
+        self.targetHostId = targetHostId
+        self.arguments = arguments
+    }
+
+    func validated() throws -> AgentGatewayWorkToolCall {
+        let callId = callId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !callId.isEmpty, callId.count <= 512 else {
+            throw HTTPError(
+                .badRequest,
+                message: "tool_call.call_id must contain 1...512 characters"
+            )
+        }
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard Self.supportedNames.contains(name) else {
+            throw HTTPError(
+                .badRequest,
+                message: "gateway work tool must be work.spawn, work.input, work.read, or work.kill"
+            )
+        }
+        guard arguments.objectValue != nil else {
+            throw HTTPError(.badRequest, message: "tool_call.arguments must be an object")
+        }
+        guard (try? JSONEncoder().encode(arguments).count).map({ $0 <= 65_536 }) == true else {
+            throw HTTPError(.badRequest, message: "tool_call.arguments is too large")
+        }
+        return AgentGatewayWorkToolCall(
+            callId: callId,
+            name: name,
+            targetHostId: targetHostId,
+            arguments: arguments
+        )
+    }
+
+    func createRequest(channelID: UUID, runID: UUID) throws -> CreateWorkControlRequest {
+        guard let object = arguments.objectValue else {
+            throw HTTPError(.badRequest, message: "tool_call.arguments must be an object")
+        }
+        let kind: WorkControlRoutes.Kind
+        let sessionID: UUID?
+        let payload: JSONValue
+
+        func requiredSessionID(_ value: JSONValue?) throws -> UUID {
+            guard let raw = value?.stringValue, let id = UUID(uuidString: raw) else {
+                throw HTTPError(.badRequest, message: "tool_call.arguments.session_id must be a UUID")
+            }
+            return id
+        }
+
+        switch name {
+        case "work.spawn":
+            guard Set(object.keys) == ["tool", "label"] else {
+                throw HTTPError(.badRequest, message: "work.spawn accepts only tool and label")
+            }
+            kind = .spawn
+            sessionID = nil
+            payload = arguments
+        case "work.input":
+            guard Set(object.keys) == ["session_id", "text"] else {
+                throw HTTPError(.badRequest, message: "work.input accepts only session_id and text")
+            }
+            kind = .input
+            sessionID = try requiredSessionID(object["session_id"])
+            payload = .object(["text": object["text"] ?? .null])
+        case "work.read":
+            guard Set(object.keys).isSubset(of: ["session_id", "tail_lines"]),
+                  object["session_id"] != nil
+            else {
+                throw HTTPError(
+                    .badRequest,
+                    message: "work.read requires session_id and accepts optional tail_lines"
+                )
+            }
+            kind = .read
+            sessionID = try requiredSessionID(object["session_id"])
+            payload = .object(object.filter { $0.key == "tail_lines" })
+        case "work.kill":
+            guard Set(object.keys) == ["session_id"] else {
+                throw HTTPError(.badRequest, message: "work.kill accepts only session_id")
+            }
+            kind = .kill
+            sessionID = try requiredSessionID(object["session_id"])
+            payload = .object([:])
+        default:
+            throw HTTPError(.badRequest, message: "unknown gateway work tool")
+        }
+        _ = try WorkControlRoutes.validatedPayload(payload, kind: kind)
+        return CreateWorkControlRequest(
+            channelId: channelID,
+            runId: runID,
+            targetHostId: targetHostId,
+            sessionId: sessionID,
+            kind: kind.rawValue,
+            payload: payload
+        )
+    }
+
+    var auditRequestJSON: String {
+        let value = JSONValue.object([
+            "name": .string(name),
+            "target_host_id": .string(targetHostId.uuidString.lowercased()),
+            "arguments": arguments,
+        ])
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value),
+              let json = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return json
     }
 }
 
@@ -1949,6 +2245,7 @@ struct AgentGatewayUsage: Decodable {
 struct AgentGatewayEventResponse: ResponseEncodable {
     let status: String
     let runId: String
+    let workControl: WorkControlDTO?
 }
 
 struct AgentGatewayCompleteResponse: ResponseEncodable {

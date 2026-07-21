@@ -6,7 +6,7 @@ final class LinkShortTests: XCTestCase {
         let redirector = Redirector(targetBaseURL: "https://chat.example.test")
         XCTAssertEqual(
             try redirector.location(for: "Abc_123-xy.z~"),
-            "https://chat.example.test/join/Abc_123-xy.z~"
+            "https://chat.example.test/join?code=Abc_123-xy.z~"
         )
     }
 
@@ -28,6 +28,15 @@ final class LinkShortTests: XCTestCase {
             "MOMO_LINKSHORT_TARGET_BASE_URL": "https://chat.example.test///"
         ])
         XCTAssertEqual(config.targetBaseURL, "https://chat.example.test")
+        XCTAssertEqual(config.host, "127.0.0.1")
         XCTAssertEqual(config.port, 28_190)
+    }
+
+    func testContainerBindHostCanBeConfigured() throws {
+        let config = try Config.load(environment: [
+            "MOMO_LINKSHORT_TARGET_BASE_URL": "https://chat.example.test",
+            "MOMO_LINKSHORT_HOST": "0.0.0.0",
+        ])
+        XCTAssertEqual(config.host, "0.0.0.0")
     }
 }

@@ -20,13 +20,17 @@ actor ProcessManager {
         let exitCode: Int
     }
 
-    private let templates: [String: CommandTemplate]
+    private var templates: [String: CommandTemplate]
     private let outputDirectory: URL
     private var sessions: [UUID: ManagedProcess] = [:]
 
     init(templates: [String: CommandTemplate], outputDirectory: URL) {
         self.templates = templates
         self.outputDirectory = outputDirectory
+    }
+
+    func replaceTemplates(_ templates: [String: CommandTemplate]) {
+        self.templates = templates
     }
 
     func start(sessionID: UUID, tool: String) throws {

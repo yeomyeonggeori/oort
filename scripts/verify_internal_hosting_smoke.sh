@@ -56,7 +56,7 @@ docker compose \
 pass "compose config renders for prod + internal-smoke layering: $CONFIG_OUT"
 
 section "image-based app service boundary"
-for service in api relay worker; do
+for service in api relay worker linkshort; do
   grep -Eq "^[[:space:]]{2}${service}:" "$PROD_COMPOSE" || fail "prod compose missing service: $service"
   awk -v service="$service" '
     $0 ~ "^  " service ":" { inside = 1; next }
@@ -69,6 +69,7 @@ for service in api relay worker; do
     api) expected_image="momo-api:internal-smoke" ;;
     relay) expected_image="momo-outbox-relay:internal-smoke" ;;
     worker) expected_image="momo-agent-worker:internal-smoke" ;;
+    linkshort) expected_image="momo-linkshort:internal-smoke" ;;
   esac
   grep -Fq "$expected_image" "$SMOKE_ENV" || fail "internal smoke env missing local image fallback for $service"
 done
@@ -78,7 +79,7 @@ grep -Fq "pull_policy: never" "$CONFIG_OUT" || fail "internal smoke override mus
 if grep -Fq "target: /workspace" "$CONFIG_OUT" || grep -Fq "source: ../.." "$CONFIG_OUT"; then
   fail "internal smoke runtime overlay must not bind-mount the source checkout"
 fi
-pass "api/relay/worker/migrate/mock-hermes remain image-based with local image fallback tags for smoke"
+pass "api/relay/worker/linkshort/migrate/mock-hermes remain image-based with local image fallback tags for smoke"
 
 section "Caddy and public/private network boundary"
 # shellcheck disable=SC2016 # Caddy placeholders are intentionally literal.

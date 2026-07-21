@@ -78,6 +78,10 @@ services:
       mock-hermes:
         condition: service_healthy
 
+  linkshort:
+    image: ${MOMO_LINKSHORT_IMAGE:-momo-linkshort:internal-smoke}
+    pull_policy: never
+
   migrate:
     image: ${MOMO_MIGRATE_IMAGE:-momo-migrate:internal-smoke}
     pull_policy: never

@@ -7,7 +7,7 @@ import {
   getRefreshToken,
   markAuthExpired,
 } from "../auth/session";
-import { apiUrl } from "../config/server";
+import { apiUrl, saveServerUrl } from "../config/server";
 
 // =============================================================================
 // REST client for the web v0 surface (docs/api/openapi.yaml is the canonical
@@ -31,6 +31,7 @@ export type Member = components["schemas"]["Member"];
 export type Channel = components["schemas"]["Channel"];
 export type Message = components["schemas"]["Message"];
 export type MessagePage = components["schemas"]["MessagePage"];
+export type ThreadRepliesPage = components["schemas"]["ThreadRepliesPage"];
 export type ReactionSnapshot = components["schemas"]["ReactionSnapshot"];
 export type RosterMember = components["schemas"]["RosterMember"];
 export type WorkspaceRosterResponse =
@@ -51,6 +52,11 @@ export type ApprovalProjectionPage =
 export type ApprovalDecisionReceipt =
   components["schemas"]["ApprovalDecisionReceipt"];
 export type ApprovalDecision = components["schemas"]["ApprovalDecisionRequest"];
+export type WorkSession = components["schemas"]["WorkSession"];
+export type WorkSessionListResponse =
+  components["schemas"]["WorkSessionListResponse"];
+export type TerminalAttachCapabilityResponse =
+  components["schemas"]["TerminalAttachCapabilityResponse"];
 type RefreshResponse = components["schemas"]["RefreshResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 
@@ -83,12 +89,14 @@ async function parseError(response: Response): Promise<ApiError> {
 async function rawRequest(
   path: string,
   init: RequestInit,
-  token: string | null
+  token: string | null,
+  baseUrl?: string
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(apiUrl(path), { ...init, headers });
+  const url = baseUrl === undefined ? apiUrl(path) : new URL(path, `${baseUrl}/`).toString();
+  return fetch(url, { ...init, headers });
 }
 
 // ---- refresh rotation (single flight) ---------------------------------------
@@ -179,10 +187,9 @@ export async function login(
 
 /**
  * Public invite redemption (MOMO-401, ADR-0121 D2-B web landing). No auth:
- * the invite code is the only credential, and it travels ONLY in this
- * request body — never in a query string, never in a log line (bearer-secret
- * handling; the /join/<code> path segment is stripped from the address bar
- * before this call can happen, see App.tsx).
+ * the invite code is the only credential, and the API receives it only in
+ * this request body. The landing route may receive it in the URL, but it is
+ * never logged and App removes it from browser history after success.
  *
  * 201 creates a member, 200 re-joins an existing one (same email). Both
  * return a session token pair per the canonical contract — openapi.yaml
@@ -194,10 +201,12 @@ export async function joinInvite(request: JoinRequest): Promise<JoinResponse> {
   const response = await rawRequest(
     "/v1/join",
     { method: "POST", body: JSON.stringify(request) },
-    null
+    null,
+    window.location.origin
   );
   if (!response.ok) throw await parseError(response);
   const joinResponse = (await response.json()) as JoinResponse;
+  saveServerUrl(window.location.origin);
   applyLogin(joinResponse);
   return joinResponse;
 }
@@ -286,12 +295,51 @@ export function fetchMessages(
   );
 }
 
+export function fetchThreadReplies(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+  cursor?: number,
+  limit = 200
+): Promise<ThreadRepliesPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor !== undefined) params.set("cursor", String(cursor));
+  return apiFetch<ThreadRepliesPage>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(rootId)}/replies?${params.toString()}`
+  );
+}
+
 export function fetchReactionSnapshot(
   workspaceId: string,
   channelId: string
 ): Promise<ReactionSnapshot> {
   return apiFetch<ReactionSnapshot>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/reactions`
+  );
+}
+
+// ---- Work observer (Goal #605 / W-6) ------------------------------------------
+
+/** Read-only projection; raw host endpoints and capabilities are never listed. */
+export function listWorkSessions(
+  workspaceId: string
+): Promise<WorkSessionListResponse> {
+  return apiFetch<WorkSessionListResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions`
+  );
+}
+
+/**
+ * Issues the one-use observer grant. Callers must keep the returned value in
+ * memory and pass it directly to the attach transport; never persist or log it.
+ */
+export function issueObserverTerminalAttach(
+  workspaceId: string,
+  workSessionId: string
+): Promise<TerminalAttachCapabilityResponse> {
+  return apiFetch<TerminalAttachCapabilityResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/${encodeURIComponent(workSessionId)}/terminal-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "observer" }) }
   );
 }
 

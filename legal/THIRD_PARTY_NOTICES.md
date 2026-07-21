@@ -33,6 +33,7 @@
 |---|---|---|---|
 | react / react-dom / scheduler | https://github.com/facebook/react | MIT | 웹 UI |
 | centrifuge (centrifuge-js) | https://github.com/centrifugal/centrifuge-js | MIT | 웹 Centrifugo live subscription |
+| @xterm/xterm (xterm.js) | https://github.com/xtermjs/xterm.js | MIT | 웹 Work observer 터미널 read-only 렌더러 |
 | protobufjs + @protobufjs/* | https://github.com/protobufjs/protobuf.js | BSD-3-Clause | centrifuge-js 전이(protobuf 코덱; JSON 사용이라 번들에서 tree-shake 대상) |
 | long | https://github.com/dcodeIO/long.js | Apache-2.0 | protobufjs 전이 |
 | events | https://github.com/browserify/events | MIT | centrifuge-js 전이 |
@@ -42,6 +43,7 @@
 |---|---|---|
 | Centrifugo v6 | MIT/OSS(검증) | 메시지 전송계층(셀프호스트) |
 | PostgreSQL 18 | PostgreSQL License(permissive) | DB |
+| pgvector 0.8.5 | PostgreSQL License(검증됨, upstream LICENSE) | PostgreSQL 벡터 타입·HNSW 검색 확장 |
 
 ## Apache 2.0 NOTICE 집계
 - 각 Apache-2.0 의존성의 NOTICE 파일 내용을 리포 루트 `NOTICE`에 집계(있는 것만).
