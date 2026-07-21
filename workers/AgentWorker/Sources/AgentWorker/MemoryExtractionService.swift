@@ -33,6 +33,18 @@ struct MemoryProposal: Sendable, Equatable {
     let sourceMessageIDs: [UUID]
 }
 
+private func hasValidMemoryTarget(
+    operation: MemoryOperation,
+    targetMemoryID: UUID?
+) -> Bool {
+    switch operation {
+    case .add, .noop:
+        return targetMemoryID == nil
+    case .update, .invalidate:
+        return targetMemoryID != nil
+    }
+}
+
 struct MemoryExtractionBatch: Sendable {
     let workspaceID: UUID
     let channelID: UUID
@@ -84,6 +96,7 @@ struct MockMemoryExtractor: MemoryExtracting {
             if pair.count == 2 { values[pair[0]] = pair[1] }
         }
         let target = values["id"].flatMap(UUID.init(uuidString:))
+        guard hasValidMemoryTarget(operation: op, targetMemoryID: target) else { return nil }
         let kind = values["kind"] ?? "fact"
         guard ["profile", "fact", "episode", "procedure"].contains(kind) else { return nil }
         let confidence = values["confidence"].flatMap(Double.init) ?? 0.8
@@ -97,6 +110,7 @@ struct MockMemoryExtractor: MemoryExtracting {
             sourceMessageIDs: [message.id]
         )
     }
+
 }
 
 /// Existing AgentWorker Hermes transport reused for the extraction call. The
@@ -180,7 +194,11 @@ struct HermesMemoryExtractor: MemoryExtracting {
         let decoded = try decoder.decode([ProposalJSON].self, from: Data(value.utf8))
         return decoded.prefix(32).compactMap { proposal in
             let sources = proposal.sourceMessageIds.filter(allowedSources.contains)
-            guard !sources.isEmpty,
+            guard hasValidMemoryTarget(
+                      operation: proposal.operation,
+                      targetMemoryID: proposal.targetMemoryId
+                  ),
+                  !sources.isEmpty,
                   ["profile", "fact", "episode", "procedure"].contains(proposal.kind),
                   proposal.confidence.isFinite,
                   (0...1).contains(proposal.confidence)

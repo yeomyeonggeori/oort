@@ -49,6 +49,17 @@ final class MemoryExtractionTests: XCTestCase {
         XCTAssertEqual(result[0].targetMemoryID, memoryID)
     }
 
+    func testMockExtractorRejectsOperationTargetShapeMismatch() async throws {
+        let messages = [
+            message("[memory:add id=\(memoryID)] invalid add"),
+            message("[memory:update] missing target"),
+            message("[memory:invalidate] missing target"),
+            message("[memory:noop id=\(memoryID)] invalid noop"),
+        ]
+        let result = try await MockMemoryExtractor().extract(batch(messages: messages))
+        XCTAssertTrue(result.isEmpty)
+    }
+
     func testHermesDecoderRejectsUnknownSourcesAndInvalidKind() throws {
         let unknown = UUID()
         let json = """
@@ -64,6 +75,23 @@ final class MemoryExtractionTests: XCTestCase {
         let result = try HermesMemoryExtractor.decode(json, allowedSources: [messageID])
         XCTAssertEqual(result.count, 1)
         XCTAssertEqual(result[0].body, "bounded")
+    }
+
+    func testHermesDecoderRejectsOperationTargetShapeMismatch() throws {
+        let json = """
+        [
+          {"operation":"ADD","targetMemoryId":"\(memoryID.uuidString)","kind":"fact",
+           "body":"invalid add","confidence":0.8,"sourceMessageIds":["\(messageID.uuidString)"]},
+          {"operation":"UPDATE","kind":"fact","body":"missing target","confidence":0.8,
+           "sourceMessageIds":["\(messageID.uuidString)"]},
+          {"operation":"INVALIDATE","kind":"fact","body":"missing target","confidence":0.8,
+           "sourceMessageIds":["\(messageID.uuidString)"]},
+          {"operation":"NOOP","targetMemoryId":"\(memoryID.uuidString)","kind":"fact",
+           "body":"invalid noop","confidence":0.8,"sourceMessageIds":["\(messageID.uuidString)"]}
+        ]
+        """
+        let result = try HermesMemoryExtractor.decode(json, allowedSources: [messageID])
+        XCTAssertTrue(result.isEmpty)
     }
 
     func testMemoryUpdatedPayloadContainsNoRawTextOrCredential() throws {
