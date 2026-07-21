@@ -40,14 +40,13 @@ struct WorkHostDaemonMain {
                 "workspace_id": .string(config.workspaceID.uuidString.lowercased()),
                 "host_id": .string(hostID.uuidString.lowercased()),
             ])
-            if CommandLine.arguments.contains("--bootstrap-only") { return }
-
             let profiles = try await runtimeClient.workToolProfiles(hostID: hostID)
             let templates = try WorkdConfig.commandTemplates(
                 profiles: profiles,
                 localOverrides: config.localCommandOverrides
             )
             let processes = ProcessManager(templates: templates, outputDirectory: config.outputDirectory)
+            if CommandLine.arguments.contains("--bootstrap-only") { return }
             let daemon = WorkDaemon(
                 hostID: hostID,
                 api: runtimeClient,

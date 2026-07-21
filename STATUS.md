@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-533 work_tool_profile 원장 (#600, 2026-07-22)
+
+- ADR-0130 D3에 따라 migration 028에 workspace별 `work_tool_profile` FORCE RLS 원장과 기본 4종 시드를 추가하고, 관리자 CRUD·audit 및 spawn/승인 dispatch/session/resume의 미등재·disabled fail-closed 검증을 OpenAPI와 서버에 반영했다. launch template은 command key+인자만 허용하며 절대경로·credential 형태를 거부한다.
+- workd는 하드코딩 프로파일 대신 signed GET enabled 투영을 소비해 호스트 로컬에서 executable을 해석하고 spawn 직전 투영을 갱신한다. server·workd focused tests와 OpenAPI/YAML·bash 정적 검증은 PASS했으며, `verify_work_tool_profile.sh`의 사전검사된 28080~28083 PG18 실왕복 및 `runtime-db` 회귀는 Docker 실행 금지 지시에 따라 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## W-6 웹 Work 관전 v0 (#605, 2026-07-21)
 
 - 웹에 credential-free Work 세션 목록, 기존 Timeline 기반 root thread read-only 관전, 메모리 전용 observer capability를 HTTPS direct stream에만 전달하는 lazy xterm 터미널을 추가했다. 입력·resize·kill UI/전송은 없으며 WSS-only·query-bearing·비HTTPS 원격 endpoint는 fail-closed한다.
