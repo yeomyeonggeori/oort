@@ -59,6 +59,15 @@ struct TerminalAttachCapabilityResponse: ResponseEncodable, Codable, Sendable, E
     }
 }
 
+enum TerminalAttachMode: String, Codable, Sendable, CaseIterable {
+    case controller
+    case observer
+}
+
+struct IssueTerminalAttachRequest: Decodable, Sendable {
+    let mode: TerminalAttachMode?
+}
+
 struct ValidateTerminalAttachRequest: Decodable, Sendable {
     let capabilityToken: String
 
@@ -71,17 +80,19 @@ struct TerminalAttachValidationResponse: ResponseEncodable, Codable, Sendable, E
     let workSessionID: String
     let ptyID: String
     let expiresAt: String
+    let mode: TerminalAttachMode
 
     enum CodingKeys: String, CodingKey {
         case workSessionID = "work_session_id"
         case ptyID = "pty_id"
         case expiresAt = "expires_at"
+        case mode
     }
 }
 
 /// ADR-0125 D10 capability control plane.
 ///
-/// MomoServer issues an opaque, short-lived bearer to the human session owner.
+/// MomoServer issues an opaque, short-lived bearer to an authorized human.
 /// The direct PTY host validates that bearer through its existing MomoHost
 /// signature before accepting a client connection. Validation joins the live
 /// work_host and running work_session on every call, making expiry, session end,
@@ -112,6 +123,7 @@ struct TerminalAttachRoutes: Sendable {
         }
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let sessionID = try Self.sessionID(context)
+        let mode = try await Self.issueMode(request, context: context)
         let token = Self.mintCapabilityToken()
 
         let binding: RemotePTYBinding = try await withTenantTransactionUnwrapped(
@@ -124,24 +136,40 @@ struct TerminalAttachRoutes: Sendable {
             )
             let rows = try await conn.query(
                 """
-                SELECT ws.member_id, ws.host_id, ws.pty_id, ws.attach_endpoint,
-                       ws.status, h.revoked_at
+                SELECT ws.member_id, ws.host_id, ws.channel_id, ws.pty_id,
+                       ws.attach_endpoint, ws.status, ws.observation, h.revoked_at
                   FROM work_session ws
                   JOIN work_host h
                     ON h.id = ws.host_id
                    AND h.workspace_id = ws.workspace_id
                  WHERE ws.id = \(sessionID)
-                 FOR SHARE OF ws, h
+                 FOR UPDATE OF ws, h
                 """,
                 logger: db.logger
             ).collect()
             guard let row = rows.first else {
                 throw HTTPError(.notFound, message: "work session not found")
             }
-            let (ownerMemberID, hostID, ptyID, attachEndpoint, status, revokedAt) =
-                try row.decode((UUID, UUID, String?, String?, String, Date?).self)
-            guard ownerMemberID == principal.memberID else {
-                throw HTTPError(.forbidden, message: "only the session owner can attach")
+            let (ownerMemberID, hostID, channelID, ptyID, attachEndpoint,
+                 status, observation, revokedAt) = try row.decode(
+                    (UUID, UUID, UUID, String?, String?, String, String, Date?).self
+                 )
+            switch mode {
+            case .controller:
+                guard ownerMemberID == principal.memberID else {
+                    throw HTTPError(.forbidden, message: "only the session owner can attach as controller")
+                }
+            case .observer:
+                guard observation == WorkSessionObservation.open.rawValue else {
+                    throw HTTPError(.forbidden, message: "session observation is owner-only")
+                }
+                try await WorkSessionRoutes.requireChannelMember(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    memberID: principal.memberID
+                )
             }
             guard status == "running", revokedAt == nil,
                   let binding = try RemotePTYBinding.validated(
@@ -152,42 +180,79 @@ struct TerminalAttachRoutes: Sendable {
                 throw HTTPError(.conflict, message: "terminal attach is unavailable")
             }
 
+            _ = try await conn.query(
+                "DELETE FROM terminal_attach_capability WHERE work_session_id = \(sessionID) AND mode = 'observer' AND expires_at <= clock_timestamp()",
+                logger: db.logger
+            )
             let issuedRows = try await conn.query(
                 """
                 WITH issued AS (
                   INSERT INTO terminal_attach_capability
                     (workspace_id, work_session_id, host_id, owner_member_id,
-                     token_hash, expires_at)
+                     token_hash, expires_at, mode)
                   VALUES
-                    (\(workspaceID), \(sessionID), \(hostID), \(ownerMemberID),
+                    (\(workspaceID), \(sessionID), \(hostID), \(principal.memberID),
                      digest(\(token), 'sha256'),
-                     clock_timestamp() + interval '\(unescaped: String(Self.capabilityTTLSeconds)) seconds')
-                  RETURNING issued_at, expires_at
+                     clock_timestamp() + interval '\(unescaped: String(Self.capabilityTTLSeconds)) seconds',
+                     \(mode.rawValue))
+                  RETURNING id, issued_at, expires_at
                 ), audited AS (
                   INSERT INTO audit_log
                     (workspace_id, actor_member_id, subject_member_id, action,
                      target_type, target_id, via_token_id, detail)
-                  SELECT \(workspaceID), \(principal.memberID), \(ownerMemberID),
+                  SELECT \(workspaceID), \(principal.memberID), \(principal.memberID),
                          'work.terminal_attach.issued', 'work_session', \(sessionID),
                          \(principal.tokenID),
                          jsonb_build_object(
                            'schema', 'momo.work.terminal_attach.issued.v1',
                            'owner_member_id', \(ownerMemberID),
+                           'mode', \(mode.rawValue),
                            'issued_at', issued_at,
                            'expires_at', expires_at
                          )
                     FROM issued
                   RETURNING id
                 )
-                SELECT issued.issued_at, issued.expires_at, audited.id
+                SELECT issued.id, issued.issued_at, issued.expires_at, audited.id
                   FROM issued CROSS JOIN audited
                 """,
                 logger: db.logger
             ).collect()
-            guard issuedRows.first != nil else {
+            guard let issuedRow = issuedRows.first else {
                 throw HTTPError(
                     .internalServerError,
                     message: "terminal attach capability was not issued"
+                )
+            }
+            let grantID = try issuedRow.decode((UUID, Date, Date, UUID).self).0
+            if mode == .observer {
+                let countRows = try await conn.query(
+                    """
+                    SELECT count(*)
+                      FROM terminal_attach_capability
+                     WHERE work_session_id = \(sessionID)
+                       AND mode = 'observer'
+                       AND expires_at > clock_timestamp()
+                    """,
+                    logger: db.logger
+                ).collect()
+                let observerCount = try countRows.first?.decode(Int64.self) ?? 0
+                let payload = Self.observerPayload(
+                    workspaceID: workspaceID,
+                    channelID: channelID,
+                    sessionID: sessionID,
+                    observerCount: observerCount,
+                    grantID: grantID
+                )
+                _ = try await conn.query(
+                    """
+                    INSERT INTO outbox
+                      (workspace_id, kind, method, payload, partition_key)
+                    VALUES
+                      (\(workspaceID), 'broadcast', 'publish',
+                       \(payload)::jsonb, \(channelID))
+                    """,
+                    logger: db.logger
                 )
             }
             return binding
@@ -220,16 +285,21 @@ struct TerminalAttachRoutes: Sendable {
         ) { conn in
             let rows = try await conn.query(
                 """
-                SELECT c.work_session_id, ws.pty_id, c.expires_at
+                SELECT c.work_session_id, ws.pty_id, c.expires_at, c.mode
                   FROM terminal_attach_capability c
                   JOIN work_session ws
                     ON ws.id = c.work_session_id
                    AND ws.workspace_id = c.workspace_id
                    AND ws.host_id = c.host_id
-                   AND ws.member_id = c.owner_member_id
                   JOIN work_host h
                     ON h.id = c.host_id
                    AND h.workspace_id = c.workspace_id
+                  JOIN member grantee
+                    ON grantee.id = c.owner_member_id
+                   AND grantee.workspace_id = c.workspace_id
+                   AND grantee.kind = 'human'
+                   AND grantee.status = 'active'
+                   AND grantee.deleted_at IS NULL
                  WHERE c.workspace_id = \(workspaceID)
                    AND c.host_id = \(hostID)
                    AND c.token_hash = digest(\(token), 'sha256')
@@ -238,18 +308,35 @@ struct TerminalAttachRoutes: Sendable {
                    AND ws.pty_id IS NOT NULL
                    AND ws.attach_endpoint IS NOT NULL
                    AND h.revoked_at IS NULL
+                   AND (
+                     (c.mode = 'controller' AND c.owner_member_id = ws.member_id)
+                     OR (
+                       c.mode = 'observer'
+                       AND ws.observation = 'open'
+                       AND EXISTS (
+                         SELECT 1
+                           FROM membership ms
+                          WHERE ms.workspace_id = c.workspace_id
+                            AND ms.channel_id = ws.channel_id
+                            AND ms.member_id = c.owner_member_id
+                            AND ms.left_at IS NULL
+                       )
+                     )
+                   )
                  LIMIT 1
                 """,
                 logger: db.logger
             ).collect()
             guard let row = rows.first else { return nil }
-            let (workSessionID, ptyID, expiresAt) = try row.decode(
-                (UUID, String, Date).self
+            let (workSessionID, ptyID, expiresAt, modeRaw) = try row.decode(
+                (UUID, String, Date, String).self
             )
+            guard let mode = TerminalAttachMode(rawValue: modeRaw) else { return nil }
             return TerminalAttachValidationResponse(
                 workSessionID: workSessionID.uuidString,
                 ptyID: ptyID,
-                expiresAt: Self.iso8601(expiresAt)
+                expiresAt: Self.iso8601(expiresAt),
+                mode: mode
             )
         }
         guard let validated else { throw Self.invalidCapability() }
@@ -267,6 +354,45 @@ struct TerminalAttachRoutes: Sendable {
               parts[1].wholeMatch(of: /^[A-Za-z0-9_-]{43}$/) != nil
         else { throw invalidCapability() }
         return raw
+    }
+
+    static func observerPayload(
+        workspaceID: UUID,
+        channelID: UUID,
+        sessionID: UUID,
+        observerCount: Int64,
+        grantID: UUID,
+        timestampMs: Int64 = Int64(Date().timeIntervalSince1970 * 1_000)
+    ) -> String {
+        let channel = "ch:ws\(workspaceID.uuidString).\(channelID.uuidString)"
+        return jsonString([
+            "channel": channel,
+            "data": [
+                "type": "work.session.observer",
+                "v": 1,
+                "ts": timestampMs,
+                "payload": [
+                    "session_id": sessionID.uuidString,
+                    "observer_count": observerCount,
+                ],
+            ],
+            "idempotency_key": "\(channel):work.session.observer:\(grantID.uuidString)",
+        ])
+    }
+
+    private static func issueMode(
+        _ request: Request,
+        context _: AppRequestContext
+    ) async throws -> TerminalAttachMode {
+        var buffer = try await request.body.collect(upTo: 128)
+        guard buffer.readableBytes > 0 else { return .controller }
+        let data = buffer.readData(length: buffer.readableBytes) ?? Data()
+        do {
+            return try JSONDecoder().decode(IssueTerminalAttachRequest.self, from: data).mode
+                ?? .controller
+        } catch {
+            throw HTTPError(.badRequest, message: "mode must be controller or observer")
+        }
     }
 
     private func withTenantTransactionUnwrapped<Result: Sendable>(
@@ -303,5 +429,16 @@ struct TerminalAttachRoutes: Sendable {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: date)
+    }
+
+    private static func jsonString(_ object: Any) -> String {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+              ),
+              let json = String(data: data, encoding: .utf8)
+        else { return "{}" }
+        return json
     }
 }

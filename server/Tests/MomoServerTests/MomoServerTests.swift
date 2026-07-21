@@ -2217,12 +2217,24 @@ final class MomoServerTests: XCTestCase {
             tool: "codex",
             label: "MOMO-483",
             status: "ended",
+            observation: .open,
+            observerGrantCount: 0,
+            remoteAttachAvailable: true,
             startedAtMs: 1_782_463_200_000,
             endedAtMs: 1_782_463_260_000,
             exitCode: 0,
             endReason: nil,
             resumedFromSessionId: nil
         )
+        let sessionObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(session))
+                as? [String: Any]
+        )
+        XCTAssertEqual(sessionObject["observation"] as? String, "open")
+        XCTAssertEqual(sessionObject["observerGrantCount"] as? Int, 0)
+        XCTAssertEqual(sessionObject["remoteAttachAvailable"] as? Bool, true)
+        XCTAssertNil(sessionObject["attachEndpoint"])
+        XCTAssertNil(sessionObject["capabilityToken"])
         for eventType in ["work.session.started", "work.session.ended"] {
             let raw = WorkSessionRoutes.lifecyclePayload(
                 eventType: eventType,
@@ -2353,6 +2365,29 @@ final class MomoServerTests: XCTestCase {
         XCTAssertNil(object["attachEndpoint"])
         XCTAssertNil(object["capabilityToken"])
         XCTAssertNil(object["expires_at"], "issue response stays the exact D10 three-field grant")
+
+        let defaultRequest = try JSONDecoder().decode(
+            IssueTerminalAttachRequest.self,
+            from: Data("{}".utf8)
+        )
+        XCTAssertNil(defaultRequest.mode)
+        let observerRequest = try JSONDecoder().decode(
+            IssueTerminalAttachRequest.self,
+            from: Data(#"{"mode":"observer"}"#.utf8)
+        )
+        XCTAssertEqual(observerRequest.mode, .observer)
+
+        let validation = TerminalAttachValidationResponse(
+            workSessionID: UUID().uuidString,
+            ptyID: "pty-511",
+            expiresAt: "2026-07-21T00:00:00.000Z",
+            mode: .observer
+        )
+        let validationObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(validation))
+                as? [String: Any]
+        )
+        XCTAssertEqual(validationObject["mode"] as? String, "observer")
     }
 
     func testTerminalAttachMigrationAndRoutesKeepDirectStreamBoundary() throws {
@@ -2374,6 +2409,17 @@ final class MomoServerTests: XCTestCase {
         XCTAssertFalse(migration.contains("stdout"))
         XCTAssertFalse(migration.contains("stderr"))
 
+        let observerMigration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/024_observer_attach.sql"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(observerMigration.contains("ADD COLUMN observation text NOT NULL DEFAULT 'open'"))
+        XCTAssertTrue(observerMigration.contains("CHECK (observation IN ('open', 'owner_only'))"))
+        XCTAssertTrue(observerMigration.contains("ADD COLUMN mode text NOT NULL DEFAULT 'controller'"))
+        XCTAssertTrue(observerMigration.contains("CHECK (mode IN ('controller', 'observer'))"))
+        XCTAssertFalse(observerMigration.contains("stdout"))
+        XCTAssertFalse(observerMigration.contains("capability_token"))
+
         let routes = try String(
             contentsOf: serverRoot.appendingPathComponent(
                 "Sources/MomoServer/Routes/TerminalAttachRoutes.swift"
@@ -2387,8 +2433,11 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(routes.contains("only the session owner can attach"))
         XCTAssertTrue(routes.contains("terminal attach requires a human bearer"))
         XCTAssertTrue(routes.contains("work.terminal_attach.issued"))
+        XCTAssertTrue(routes.contains("work.session.observer"))
+        XCTAssertTrue(routes.contains("c.mode = 'observer'"))
+        XCTAssertTrue(routes.contains("ws.observation = 'open'"))
         XCTAssertFalse(routes.contains("CentrifugoClient"))
-        XCTAssertFalse(routes.contains("INSERT INTO outbox"))
+        XCTAssertTrue(routes.contains("INSERT INTO outbox"), "count-only observer projection uses the relay")
         XCTAssertFalse(routes.contains("/api/publish"))
         XCTAssertFalse(routes.contains("router.websocket"))
 
@@ -2397,6 +2446,24 @@ final class MomoServerTests: XCTestCase {
         let validatePath = "/v1/workspaces/\(workspaceID.uuidString.lowercased())/work-hosts/\(hostID.uuidString.lowercased())/terminal-attach/validate"
         XCTAssertTrue(WorkHostAuthenticator.isAllowed(method: "POST", path: validatePath))
         XCTAssertEqual(WorkHostAuthenticator.scopedHostID(fromPath: validatePath), hostID)
+
+        let observerPayload = TerminalAttachRoutes.observerPayload(
+            workspaceID: workspaceID,
+            channelID: UUID(uuidString: "00000000-0000-7000-8000-000000000201")!,
+            sessionID: UUID(uuidString: "00000000-0000-7000-8000-000000000516")!,
+            observerCount: 3,
+            grantID: UUID(uuidString: "00000000-0000-7000-8000-000000000558")!,
+            timestampMs: 1_783_000_000_000
+        )
+        let observerObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(observerPayload.utf8)) as? [String: Any]
+        )
+        XCTAssertNil(observerObject["version"])
+        let observerData = try XCTUnwrap(observerObject["data"] as? [String: Any])
+        XCTAssertEqual(observerData["type"] as? String, "work.session.observer")
+        let observerBody = try XCTUnwrap(observerData["payload"] as? [String: Any])
+        XCTAssertEqual(observerBody["observer_count"] as? Int, 3)
+        XCTAssertEqual(Set(observerBody.keys), ["session_id", "observer_count"])
     }
 
     func testWorkControlRouteScopeAndClosedPayloadValidation() throws {

@@ -5,7 +5,9 @@ import {
   clearSession,
   getAccessToken,
   getRefreshToken,
+  markAuthExpired,
 } from "../auth/session";
+import { apiUrl } from "../config/server";
 
 // =============================================================================
 // REST client for the web v0 surface (docs/api/openapi.yaml is the canonical
@@ -29,6 +31,7 @@ export type Member = components["schemas"]["Member"];
 export type Channel = components["schemas"]["Channel"];
 export type Message = components["schemas"]["Message"];
 export type MessagePage = components["schemas"]["MessagePage"];
+export type ReactionSnapshot = components["schemas"]["ReactionSnapshot"];
 export type RosterMember = components["schemas"]["RosterMember"];
 export type WorkspaceRosterResponse =
   components["schemas"]["WorkspaceRosterResponse"];
@@ -84,7 +87,7 @@ async function rawRequest(
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(path, { ...init, headers });
+  return fetch(apiUrl(path), { ...init, headers });
 }
 
 // ---- refresh rotation (single flight) ---------------------------------------
@@ -106,7 +109,7 @@ export function refreshSession(): Promise<boolean> {
         null
       );
       if (!response.ok) {
-        clearSession();
+        markAuthExpired();
         return false;
       }
       const pair = (await response.json()) as RefreshResponse;
@@ -137,7 +140,7 @@ async function authorizedFetch(
       response = await rawRequest(path, init, getAccessToken());
     }
   }
-  if (response.status === 401) clearSession();
+  if (response.status === 401) markAuthExpired();
   return response;
 }
 
@@ -279,6 +282,15 @@ export function fetchMessages(
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return apiFetch<MessagePage>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
+  );
+}
+
+export function fetchReactionSnapshot(
+  workspaceId: string,
+  channelId: string
+): Promise<ReactionSnapshot> {
+  return apiFetch<ReactionSnapshot>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/reactions`
   );
 }
 

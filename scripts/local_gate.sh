@@ -494,6 +494,7 @@ add_static_commands() {
   add_cmd_once "work pool verifier shell syntax" "bash -n scripts/verify_work_pool.sh"
   add_cmd_once "tier fallback verifier shell syntax" "bash -n scripts/verify_tier_fallback.sh"
   add_cmd_once "terminal attach verifier shell syntax" "bash -n scripts/verify_terminal_attach.sh"
+  add_cmd_once "observer attach verifier shell syntax" "bash -n scripts/verify_observer_attach.sh"
   add_cmd_once "agent creation verifier shell syntax" "bash -n scripts/verify_agent_create.sh"
   add_cmd_once "deploy bundle synthetic fixture" 'scripts/tests/test_make_deploy_bundle.sh'
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
@@ -618,6 +619,8 @@ add_runtime_db_commands() {
   add_note_once coverage "MOMO-519 tier fallback via scripts/verify_tier_fallback.sh: isolated API/relay/notifier/mock-push stack on reserved 28020-28023 ports and 2-second grace verifies stale-heartbeat orphan transition, ask resume_offer card plus momo.work push dispatch, t1_only terminal cleanup without card, owner-only manual resume, revoked-host conflict, same-thread lineage and spawn dispatch, auto cloud resume with audit, and FORCE RLS isolation."
   add_cmd "Terminal attach capability verification (MOMO-511)" "scripts/verify_terminal_attach.sh"
   add_note_once coverage "MOMO-511 terminal attach via scripts/verify_terminal_attach.sh: isolated e2e API/relay stack on reserved 27980-27983 ports verifies MomoHost remote PTY binding, exact owner-only ephemeral grant, signed host validation, expiry rejection, immediate host-revoke invalidation, digest-only storage, audit shape, FORCE RLS, and absence of terminal raw bytes or capability values from server/relay ledgers and logs."
+  add_cmd "Observer attach capability verification (MOMO-516)" "scripts/verify_observer_attach.sh"
+  add_note_once coverage "MOMO-516 observer attach via scripts/verify_observer_attach.sh: preflight-checked isolated API/relay stack on reserved 28010-28013 ports verifies default controller compatibility, active channel-member observer issue, non-member and agent denial, owner_only invalidation, validation mode, immediate host revoke, valid-grant count plus remote PTY projection, count-only realtime outbox, and FORCE RLS isolation."
   add_cmd "Fresh-DB admin agent creation verification (MOMO-509)" "scripts/verify_agent_create.sh"
   add_note_once coverage "MOMO-509 agent creation via scripts/verify_agent_create.sh: isolated seed-none e2e API stack on preflight-checked reserved 27970-27973 ports verifies admin atomic member(kind=agent)+agent+audit creation, no automatic channel membership, workspace handle duplicate 409 without partial rows, non-admin 403, ADR-0004 endpoint/config credential rejection, explicit existing membership-path reuse, sha256-only agent credential issuance, and member/agent/membership/token/audit FORCE RLS isolation."
   add_note_once coverage "MOMO-449/458 grant roundtrip via scripts/verify_plugin_grant_roundtrip.sh: isolated e2e compose API stack, GitHub+Notion+Linear simultaneous grants with exact three-descriptor tool policy equality, per-plugin revoke set-difference assertions, adapter normalization credential-shape scan, and empty policy after final revoke; no external vendor network call."
@@ -742,13 +745,14 @@ add_local_alpha_commands() {
 
 add_web_commands() {
   # MOMO-391 (ADR-0119 W-2): clients/web quality + e2e gate.
-  # install -> lint -> typecheck -> generated-types sync -> build -> license
+  # install -> lint -> unit tests -> typecheck -> generated-types sync -> build -> license
   # gate -> serving smoke (MOMO-390 regression: APP_DOMAIN sentinel
   # fail-closed + strict CSP) -> browser login/timeline smoke (e2e compose)
   # -> OpenAPI runtime drift gate (spec vs live server, MOMO-389).
   add_cmd_once "worktree clean" 'if [ "${LOCAL_GATE_ALLOW_DIRTY:-0}" = "1" ]; then echo "LOCAL_GATE_ALLOW_DIRTY=1; dirty state is recorded but not failed"; git status --short; else test -z "$(git status --porcelain)" || { echo "worktree has uncommitted changes"; git status --short; exit 1; }; fi'
   add_cmd "web install (npm ci)" '(cd clients/web && npm ci --no-audit --no-fund)'
   add_cmd "web lint (eslint)" '(cd clients/web && npm run lint)'
+  add_cmd "web unit tests (vitest)" '(cd clients/web && npm run test)'
   add_cmd "web typecheck (tsc --noEmit)" '(cd clients/web && npm run typecheck)'
   add_cmd "web generated API types in sync with docs/api/openapi.yaml" '(cd clients/web && npm run generate:types && git diff --exit-code -- src/api/schema.d.ts) || { echo "src/api/schema.d.ts is stale — run (cd clients/web && npm run generate:types) and commit the result"; exit 1; }'
   add_cmd "web build (vite, CSP-safe output)" '(cd clients/web && npm run build)'
@@ -756,7 +760,7 @@ add_web_commands() {
   add_cmd "web serving smoke (Caddy APP_DOMAIN edge + sentinel fail-closed)" 'scripts/web_serving_smoke.sh'
   add_cmd "web login -> timeline browser smoke (e2e compose)" 'scripts/verify_web_login_smoke.sh'
   add_cmd "OpenAPI contract drift gate (spec vs live server)" 'scripts/verify_openapi_contract.sh'
-  add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
+  add_note_once coverage "MOMO-391 web client gate: npm ci install, eslint, Vitest unit tests, tsc typecheck, openapi-typescript generated types verified in sync with docs/api/openapi.yaml, vite production build, and a permissive-only license gate over the full installed transitive closure (markdown inventory written to the gate output dir)."
   add_note_once coverage "MOMO-390 serving regression via scripts/web_serving_smoke.sh: prod Caddyfile parse matrix (APP_DOMAIN set/unset/empty), SPA deep-link fallback, /v1 proxy wiring, /v1/centrifugo edge 403, strict SPA CSP headers, and APP_DOMAIN-unset sentinel fail-closed ordering (guard before proxy)."
   add_note_once coverage "MOMO-391 browser smoke via scripts/verify_web_login_smoke.sh: isolated e2e compose stack (project momo391web, loopback ports 18990-18995) serving the built SPA through the real prod Caddyfile; real Chromium login (workspace empty -> demo fallback), channel list, seeded timeline display, wss realtime subscribe under the strict CSP, REST-sent message rendered live through REST -> PG -> outbox -> relay -> Centrifugo, REST ?after= catch-up on subscribe, and zero CSP console violations."
   add_note_once coverage "MOMO-400 (ADR-0119 W-4) inside the same browser smoke: composer clientMsgId idempotency (first send forwarded then answered 500; retry must reuse the SAME clientMsgId; exactly one DOM render and one committed row), read-state rail (bulk GET badge init, external cursor PUT reflected through the user:read-state#<member-id> push with zero extra GETs, strictly monotonic browser cursor PUTs), ADR-0112 approval cards (no tool JSON/cost leakage; in-browser approve receipt 200; externally pre-decided 409 receipt handled as a card state transition), and DM open via POST /dms + composer round-trip + GET /dms listing."

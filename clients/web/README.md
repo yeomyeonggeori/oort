@@ -13,8 +13,16 @@ read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 
   정적 서빙하고 같은 오리진의 `/v1/*`를 api로 프록시한다(`infra/prod/Caddyfile`).
   CORS 없음, 서버 코드 무변경.
 - REST 계약: `docs/api/openapi.yaml`이 정본. `src/api/schema.d.ts`는
-  `npm run generate:types`(openapi-typescript)로 생성해 **커밋**한다 — web 게이트가
+  `npm run gen:api`(openapi-typescript)로 생성해 **커밋**한다 — web 게이트가
   스펙과의 동기화를 diff로 강제한다.
+
+## 서버 연결
+
+첫 화면에서 서버 URL을 입력하면 로그인 전에 `GET /health`를 확인하고
+`localStorage`에 저장한다. 원격 서버는 HTTPS만 허용하며 로컬 개발은
+`http://localhost`와 loopback 주소를 예외로 허용한다. access token은 서버 URL과
+함께 저장되지 않고 계속 메모리에만 존재한다. 초대 코드는 URL이나 로그에 넣지
+않고 메모리에서 가입 폼으로 전달한다.
 
 ## 토큰 정책 (ADR-0119 D3-A — 내부 알파 한정)
 
@@ -114,16 +122,25 @@ read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 
 ## 개발
 
 ```bash
+# 저장소 루트: 격리 로컬 서버 준비(실행은 오케스트레이터 게이트에서 수행)
+docker compose -f infra/docker-compose.e2e.yml up -d --wait
+
 cd clients/web
 npm ci
 npm run dev            # http://localhost:5173, /v1 -> 127.0.0.1:8080 프록시
                        # (MOMO_DEV_API_URL로 대상 변경)
 npm run lint
+npm run test           # Vitest: 그룹핑/reducer·토큰 회전·멘션 판정
 npm run typecheck
-npm run generate:types # docs/api/openapi.yaml -> src/api/schema.d.ts (커밋 대상)
+npm run gen:api        # docs/api/openapi.yaml -> src/api/schema.d.ts (커밋 대상)
 npm run build          # dist/ (Caddy가 서빙; inline script/style 금지 유지)
 npm run check:licenses # permissive-only 라이선스 게이트 + 인벤토리 출력
 ```
+
+개발 화면의 서버 입력값은 `http://localhost:5173`로 둔다. Vite가 `/health`와
+`/v1` 요청을 `MOMO_DEV_API_URL`(기본 `http://127.0.0.1:8080`)로 프록시하므로
+CORS 설정은 필요 없다. 작업이 끝나면 위 compose 프로젝트는 오케스트레이터가
+내린다.
 
 - `node_modules/`, `dist/`는 커밋 금지(루트 .gitignore), `package-lock.json`은
   커밋한다.

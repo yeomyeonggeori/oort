@@ -15,6 +15,7 @@ extension NotifierService {
         let mode: String
         let autoTarget: String?
         let rootMessageSeq: Int64
+        let observation: String
     }
 
     /// ADR-0125 D11 reuses the notifier's existing bounded poll rather than
@@ -29,7 +30,7 @@ extension NotifierService {
                     SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
                            ws.host_id, ws.root_message_id, ws.tool, ws.label,
                            COALESCE(policy.mode, 'ask') AS mode,
-                           policy.auto_target, root.seq
+                           policy.auto_target, root.seq, ws.observation
                       FROM work_session ws
                       JOIN work_host h
                         ON h.id = ws.host_id
@@ -56,7 +57,7 @@ extension NotifierService {
                 let sessions = try rows.map { row -> StaleWorkSession in
                     let value = try row.decode(
                         (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                         String, String?, Int64).self
+                         String, String?, Int64, String).self
                     )
                     return StaleWorkSession(
                         id: value.0,
@@ -69,7 +70,8 @@ extension NotifierService {
                         label: value.7,
                         mode: value.8,
                         autoTarget: value.9,
-                        rootMessageSeq: value.10
+                        rootMessageSeq: value.10,
+                        observation: value.11
                     )
                 }
                 for session in sessions {
@@ -260,11 +262,13 @@ extension NotifierService {
             """
             INSERT INTO work_session
               (id, workspace_id, channel_id, member_id, host_id,
-               root_message_id, tool, label, status, resumed_from_session_id)
+               root_message_id, tool, label, status, observation,
+               resumed_from_session_id)
             VALUES
               (\(resumedID), \(session.workspaceID), \(session.channelID),
                \(session.memberID), \(targetHostID), \(session.rootMessageID),
-               \(session.tool), \(session.label), 'running', \(session.id))
+               \(session.tool), \(session.label), 'running', \(session.observation),
+               \(session.id))
             RETURNING started_at
             """,
             logger: logger
