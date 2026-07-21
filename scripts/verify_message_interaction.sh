@@ -131,13 +131,18 @@ expect_status() {
   }
 }
 send_message() {
-  local body="$1"
+  local body="$1" props="${2:-null}"
   api "$AUTHOR_TOKEN" POST "/v1/workspaces/$WS_A/channels/$CH_A/messages" \
-    "$(jq -cn --arg c "$(uuidgen)" --arg b "$body" '{clientMsgId:$c,body:$b}')"
+    "$(jq -cn --arg c "$(uuidgen)" --arg b "$body" --argjson p "$props" \
+      '{clientMsgId:$c,body:$b} + if $p == null then {} else {props:$p} end')"
   expect_status 201 "message fixture send"
 }
 
-send_message "private original body"
+REPLY_TO_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+APPROVAL_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+MESSAGE_PROPS="$(jq -cn --arg reply "$REPLY_TO_ID" --arg approval "$APPROVAL_ID" \
+  '{reply_to_id:$reply,approval_status:"pending",approval_id:$approval}')"
+send_message "private original body" "$MESSAGE_PROPS"
 MESSAGE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.id' | tr '[:upper:]' '[:lower:]')"
 MESSAGE_SEQ="$(printf '%s' "$RESPONSE_BODY" | jq -er '.seq')"
 MESSAGE_PATH="/v1/workspaces/$WS_A/messages/$MESSAGE_ID"
@@ -153,11 +158,15 @@ while [ "$(date -u +%s)" -lt "$deadline" ]; do
     -d "$(jq -cn --arg ch "$CENT_CHANNEL" '{channel:$ch,limit:100,reverse:true}')" \
     "$CENT_API_URL/history" 2>/dev/null || printf '{}')"
   matches="$(printf '%s' "$history" | jq -r \
-    --arg message "$MESSAGE_ID" --argjson seq "$MESSAGE_SEQ" '
+    --arg message "$MESSAGE_ID" --argjson seq "$MESSAGE_SEQ" \
+    --arg reply "$REPLY_TO_ID" --arg approval "$APPROVAL_ID" '
       [.result.publications[]?.data
        | select(.type == "message.new")
        | select(((.payload.id // "") | ascii_downcase) == $message)
-       | select(.seq == $seq)] | length
+       | select(.seq == $seq)
+       | select(.payload.props.reply_to_id == $reply)
+       | select(.payload.props.approval_status == "pending")
+       | select(.payload.props.approval_id == $approval)] | length
     ' 2>/dev/null || printf '0')"
   if [ "$matches" != "0" ]; then
     MESSAGE_NEW_OK=1
@@ -364,7 +373,10 @@ SELECT count(*) FROM outbox
    AND payload->'data'->'payload'->>'id' ILIKE '$MESSAGE_ID'
    AND (payload->'data'->>'seq')::bigint=$MESSAGE_SEQ
    AND payload->'data'->'payload'->>'state'='edited'
-   AND payload->'data'->'payload'->>'body'='edited private body';
+   AND payload->'data'->'payload'->>'body'='edited private body'
+   AND payload->'data'->'payload'->'props'->>'reply_to_id'='$REPLY_TO_ID'
+   AND payload->'data'->'payload'->'props'->>'approval_status'='pending'
+   AND payload->'data'->'payload'->'props'->>'approval_id'='$APPROVAL_ID';
 SQL
 )"
 [ "$got" = "1" ] || { echo "[interaction] FAIL edited payload shape: $got" >&2; exit 1; }

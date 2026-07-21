@@ -6,11 +6,22 @@
 - 로컬·원격 터미널은 같은 SwiftTerm 표면을 사용한다. 원격 호스트 표시명 배지 하나, 발급/연결/만료/403/409/429/네트워크 단절 인라인 상태와 재연결, ended read-only 출력 선택·스크롤, 카드→서랍 진입, 서랍·앱 종료 소켓 정리를 추가했다. 서버 목록 응답은 remote PTY 결속 여부를 투영하지 않으므로 액션은 `ptyId`가 명시된 세션에만 fail-closed한다. 정확한 사전 판별용 `remoteAttachAvailable` 또는 `ptyId` read projection은 엔진 후속 요청이며, 랜딩 전 실데이터 액션 노출은 `runtime-unverified`다.
 - Design Read: Work 서랍 terminal surface for internal team users on macOS, HIG-first, density 7/10, motion 2/10. 정적 디자인 리뷰는 Blocker 0으로 PASS했고 High 2건(ended 출력 상호작용, 미결속 세션 액션)을 반영했다.
 - `swift build --disable-sandbox`와 Work Console 24 tests(실패 0)가 PASS했다. in-process mock은 grant→stdout/stdin/resize/kill 및 오류 상태를 검증했다. 실제 URLSession loopback WebSocket은 managed sandbox가 연결을 차단해 1 test skip이며, 실 E2B/원격 host와 loopback socket 재실행은 오케스트레이터 수동 게이트 전까지 `runtime-unverified`다.
+
 ## UXUI iOS 메시지 상호작용 MOMO-499 (2026-07-21)
 
 - iOS 타임라인의 확정 `seq` 메시지 롱프레스에 시스템 시트를 연결하고 최근 반응·반응 피커, 기존 답글 경로, 작성자 전용 수정·삭제 확인, 복사를 추가했다. 반응 pill은 그룹 경계와 무관하게 해당 메시지 행에 귀속되며 서버 응답 전에는 화면을 바꾸지 않는다.
 - iOS REST 클라이언트가 반응 스냅샷, 반응 PUT/DELETE, 메시지 PATCH/DELETE를 소비하고 `reaction.added/removed`·`message.edited/deleted`를 reducer에 반영한다. cold load 중 realtime 이벤트는 스냅샷 위에 순서대로 재적용하며 삭제 시 반응 projection도 제거한다.
 - MomoiOSKit 47 tests가 PASS했다(기존 41 + 상호작용 6). 지시대로 `xcodebuild`·시뮬레이터·실기기 왕복은 실행하지 않았으며, 시뮬레이터 스냅샷과 맥→폰 반응 실시간 반영은 오케스트레이터/성재 게이트 전까지 `runtime-unverified`다.
+## MOMO-513 message.new realtime props 정합 (#553, 2026-07-21)
+
+- 메시지 전송 REST 응답과 같은 최종 props(서버가 투영한 `mention_member_ids` 포함)를 transactional outbox의 `message.new` payload에도 전달해 라이브 수신과 콜드 로드의 멘션·답장·승인 표시를 일치시켰다.
+- `message.edited`가 기존 props를 보존하는 경로를 상호작용 verifier로 재확인하고, 멘션 verifier에 REST↔outbox props 일치 단정을 추가했다. Swift 테스트와 verifier 정적 검증은 PASS했으며 Docker runtime verifier는 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
+## MOMO-503 푸시 페이로드 v2 (2026-07-21)
+
+- NotifierWorker→PushRelay 닫힌 계약을 `momo.push.dispatch.v2`로 올리고, APNs `thread-id`(`root_id ?? channel_id`)·4개 category(`momo.message|mention|approval|work`)·승인 전용 `approval_id`를 id-only 경계 안에서 가산했다. 기존 DM/멘션/승인 수신자 판정, 자기 메시지·채널 음소거 억제는 바꾸지 않았다.
+- badge는 unread 채널 수 근사치 대신 ADR-0109의 채널별 `max(latest_seq-last_read_seq, 0)` 합계를 수신자별 계산한다. server 126 tests·NotifierWorker 4 tests·PushRelay 5 tests와 verifier bash/ShellCheck 정적 검증은 PASS했다.
+- `verify_push_notifier.sh`는 전용 27990~27994 포트에서 4 category, channel/root 그룹핑, 승인 ID 단독 노출, unread 합계 일치, 음소거 회귀를 검사한다. Docker 실런은 오케스트레이터 담당이라 현재 `runtime-unverified`다.
 
 ## UXUI MOMO-512 NativeTextView 포커스 복원 (2026-07-20)
 

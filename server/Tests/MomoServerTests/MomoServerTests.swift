@@ -1960,7 +1960,13 @@ final class MomoServerTests: XCTestCase {
             authorMemberID: authorID,
             hlcTs: 1_782_463_260_000,
             hlcCount: 0,
-            rootID: rootID
+            rootID: rootID,
+            props: [
+                "mention_member_ids": [authorID.uuidString],
+                "reply_to_id": rootID.uuidString,
+                "approval_status": "pending",
+                "approval_id": messageID.uuidString,
+            ]
         )
 
         let object = try XCTUnwrap(
@@ -1980,6 +1986,11 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(payload["hlc_ts"] as? Int, 1_782_463_260_000)
         XCTAssertEqual(payload["hlc_count"] as? Int, 0)
         XCTAssertEqual(payload["root_id"] as? String, rootID.uuidString)
+        let props = try XCTUnwrap(payload["props"] as? [String: Any])
+        XCTAssertEqual(props["mention_member_ids"] as? [String], [authorID.uuidString])
+        XCTAssertEqual(props["reply_to_id"] as? String, rootID.uuidString)
+        XCTAssertEqual(props["approval_status"] as? String, "pending")
+        XCTAssertEqual(props["approval_id"] as? String, messageID.uuidString)
         XCTAssertNil(payload["channelId"])
         XCTAssertNil(payload["authorMemberId"])
         XCTAssertNil(payload["hlcTs"])

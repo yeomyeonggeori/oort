@@ -61,7 +61,7 @@ enum PushRelayApp {
             do {
                 dispatch = try PushDispatch.decodeClosed(rawBody)
             } catch {
-                throw HTTPError(.badRequest, message: "invalid momo.push.dispatch.v1 payload")
+                throw HTTPError(.badRequest, message: "invalid momo.push.dispatch.v2 payload")
             }
             guard dispatch.serverId == serverID else {
                 throw HTTPError(.forbidden, message: "signed server_id does not match request header")
