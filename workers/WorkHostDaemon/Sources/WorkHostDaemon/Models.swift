@@ -99,6 +99,8 @@ struct WorkSession: Codable, Sendable, Equatable {
     let startedAtMs: Int64
     let endedAtMs: Int64?
     let exitCode: Int?
+    let endReason: String?
+    let resumedFromSessionId: UUID?
 }
 
 protocol WorkHostAPI: Sendable {

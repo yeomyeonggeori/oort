@@ -2219,7 +2219,9 @@ final class MomoServerTests: XCTestCase {
             status: "ended",
             startedAtMs: 1_782_463_200_000,
             endedAtMs: 1_782_463_260_000,
-            exitCode: 0
+            exitCode: 0,
+            endReason: nil,
+            resumedFromSessionId: nil
         )
         for eventType in ["work.session.started", "work.session.ended"] {
             let raw = WorkSessionRoutes.lifecyclePayload(
