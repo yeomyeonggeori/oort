@@ -219,6 +219,10 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `MEMORY_EXTRACTION_ENABLED` | worker | `1` | ADR-0129 채널 워터마크 기반 메모리 추출 루프. `0`이면 신규 추출만 멈추며 기존 원장은 보존한다. 정책-off 삭제는 관리자 REST가 수행한다. |
 | `MEMORY_EXTRACTION_POLL_INTERVAL_MS` | worker | `5000` | 추출 가능한 채널을 다시 찾는 주기(최소 100ms). |
 | `MEMORY_EXTRACTION_BATCH_SIZE` | worker | `50` | 채널별 한 번에 읽는 메시지 수(1..200). |
+| `MEMORY_EMBEDDING_ENABLED` | worker | `1` | `embedding IS NULL`인 활성 memory_item의 비동기 임베딩 생성. `0`이면 FTS 검색은 계속 동작한다. |
+| `MEMORY_EMBEDDING_MODEL` | worker/api | `text-embedding-3-small` | external-hermes `/embeddings` 모델. local-mock은 이 값과 무관한 결정적 384차원 벡터를 사용한다. |
+| `MEMORY_EMBEDDING_POLL_INTERVAL_MS` | worker | `5000` | 임베딩 대기 항목 재탐색 주기(최소 100ms). |
+| `MEMORY_EMBEDDING_BATCH_SIZE` | worker | `50` | 한 poll에서 임베딩할 최대 항목 수(1..200). |
 | `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 momo API origin. |
 | `MOMO_WORK_HOST_ID` | worker/gateway adapter | (미설정) | ADR-0125 host registry target UUID. worker의 `work_*` 및 gateway의 `work.*`는 이 호스트를 provider 인자 밖에서 주입한다. UUID가 없거나 잘못되면 worker는 호출을 거부하고 gateway adapter는 work tool 4종을 provider에 노출하지 않는다. |
 | `MAX_CONSECUTIVE_AUTO` | worker | `3` | 루프가드 G2(연속 자동응답). |
@@ -574,7 +578,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 make up            # = docker compose -f infra/docker-compose.yml up -d
 ```
 
-- `postgres` (image `postgres:18`): SoT. native `uuidv7()`. healthcheck = `pg_isready`.
+- `postgres` (image `pgvector/pgvector:0.8.5-pg18`, digest pinned): SoT. native `uuidv7()` + pgvector. healthcheck = `pg_isready`.
 - `centrifugo` (image `centrifugo/centrifugo:v6`): transport only(메모리 엔진). `infra/centrifugo.json` 마운트.
   subscribe proxy 콜백 = `http://api:8080/v1/centrifugo/subscribe`, 채널 = `ch:ws<workspaceUUID>.<channelUUID>`.
 
@@ -584,6 +588,8 @@ make up            # = docker compose -f infra/docker-compose.yml up -d
 docker compose -f infra/docker-compose.yml ps        # 두 서비스 모두 healthy 대기
 docker compose -f infra/docker-compose.yml logs -f
 ```
+
+MOMO-527 이전 구성에서 업그레이드할 때는 새 이미지를 pull한 뒤 `postgres` 컨테이너를 재생성하고 `make migrate`를 실행한다. named volume 데이터는 유지되지만, 기존 컨테이너를 재시작만 하면 변경된 이미지가 적용되지 않는다.
 
 중지: `make down`. 데이터까지 지우려면 `docker compose -f infra/docker-compose.yml down -v`
 (볼륨 `momo-pgdata` 삭제).

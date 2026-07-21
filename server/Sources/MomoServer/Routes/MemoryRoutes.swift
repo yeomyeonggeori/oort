@@ -66,6 +66,18 @@ struct MemoryPageResponse: ResponseEncodable {
     let memories: [MemoryItemDTO]
 }
 
+struct MemorySearchHitDTO: ResponseEncodable, Codable, Sendable, Equatable {
+    let memory: MemoryItemDTO
+    let score: Double
+    let ftsRank: Int?
+    let vectorRank: Int?
+    let vectorDistance: Double?
+}
+
+struct MemorySearchResponse: ResponseEncodable {
+    let hits: [MemorySearchHitDTO]
+}
+
 struct MemoryPolicyDTO: ResponseEncodable, Codable, Sendable, Equatable {
     let workspaceId: String
     let enabled: Bool
@@ -86,9 +98,15 @@ struct MemoryPolicyResponse: ResponseEncodable {
 /// removal is an invalidation, while workspace administrators can disable the
 /// policy and purge the entire projection in one transaction.
 struct MemoryRoutes: Sendable {
+    static let searchRequestLimit = 30
+    static let searchWindowSeconds = 60
+
     let db: Database
+    let limiter: SlidingWindowRateLimiter
+    let queryEmbedding: any MemoryQueryEmbedding
 
     func add(to group: RouterGroup<AppRequestContext>) {
+        group.get("/v1/workspaces/:ws/memories/search", use: search)
         group.get("/v1/workspaces/:ws/memories", use: list)
         group.post("/v1/workspaces/:ws/memories", use: create)
         group.patch("/v1/workspaces/:ws/memories/:memory", use: update)
@@ -96,6 +114,84 @@ struct MemoryRoutes: Sendable {
         group.delete("/v1/workspaces/:ws/memories", use: disableAndDeleteAll)
         group.get("/v1/workspaces/:ws/memory-policy", use: getPolicy)
         group.put("/v1/workspaces/:ws/memory-policy", use: putPolicy)
+    }
+
+    @Sendable
+    func search(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let (principal, workspaceID) = try Self.scope(context)
+        let parameters = request.uri.queryParameters
+        let query = try SearchRoutes.normalizedQuery(parameters["q"].map(String.init))
+        let scope = try Self.optionalEnum(
+            parameters["scope"].map(String.init), allowed: Self.scopes, label: "scope"
+        )
+        let agentID = try Self.optionalUUID(parameters["agent"].map(String.init), label: "agent")
+        let limit = min(max(parameters["limit"].flatMap { Int($0) } ?? 20, 1), 50)
+
+        let verdict = await limiter.check(
+            key: "memory-search:member:\(principal.memberID.uuidString)",
+            limit: Self.searchRequestLimit,
+            windowSeconds: Self.searchWindowSeconds
+        )
+        guard verdict.allowed else {
+            return RateLimitSupport.tooManyRequests(retryAfterSeconds: verdict.retryAfterSeconds)
+        }
+
+        let vectorLiteral: String?
+        do {
+            let embedded = try await queryEmbedding.embed(query)
+            vectorLiteral = try MemoryEmbedding.vectorLiteral(embedded)
+        } catch {
+            db.logger.warning("memory query embedding unavailable; falling back to FTS", metadata: [
+                "workspaceID": .string(workspaceID.uuidString),
+                "errorType": .string(String(describing: type(of: error))),
+            ])
+            vectorLiteral = nil
+        }
+
+        let hits = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            _ = try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal
+            )
+            let rows = try await conn.query(
+                """
+                SELECT search.memory_id, search.fts_rank, search.vector_rank,
+                       search.vector_distance, search.rrf_score
+                  FROM memory_search_hybrid(
+                         \(workspaceID), \(principal.memberID), \(query),
+                         \(vectorLiteral)::vector(384), \(scope)::text,
+                         \(agentID)::uuid, \(limit)::integer, 60
+                       ) search
+                 ORDER BY search.rrf_score DESC, search.memory_id
+                """,
+                logger: db.logger
+            ).collect()
+            return try await rows.asyncMap { row -> MemorySearchHitDTO in
+                let scoreColumns = try row.decode((UUID, Int?, Int?, Double?, Double).self)
+                let itemRows = try await conn.query(
+                    """
+                    SELECT mi.id, mi.scope, mi.subject_member_id, mi.agent_member_id,
+                           mi.channel_id, mi.kind, mi.body, mi.confidence, mi.valid_at,
+                           mi.invalid_at, mi.invalidated_by_memory_id, mi.created_by_kind,
+                           mi.created_by_member_id, mi.created_at, mi.updated_at
+                      FROM memory_item mi
+                     WHERE mi.workspace_id = \(workspaceID) AND mi.id = \(scoreColumns.0)
+                    """,
+                    logger: db.logger
+                ).collect()
+                guard let itemRow = itemRows.first else {
+                    throw HTTPError(.internalServerError, message: "memory search projection missing")
+                }
+                let memory = try await Self.decode(
+                    itemRow, conn: conn, logger: db.logger, workspaceID: workspaceID
+                )
+                return MemorySearchHitDTO(
+                    memory: memory, score: scoreColumns.4,
+                    ftsRank: scoreColumns.1, vectorRank: scoreColumns.2,
+                    vectorDistance: scoreColumns.3
+                )
+            }
+        }
+        return try MemorySearchResponse(hits: hits).response(from: request, context: context)
     }
 
     @Sendable
@@ -278,6 +374,7 @@ struct MemoryRoutes: Sendable {
                 UPDATE memory_item
                    SET body = coalesce(\(body)::text, body),
                        confidence = coalesce(\(confidence)::double precision, confidence),
+                       embedding = CASE WHEN \(body)::text IS NULL THEN embedding ELSE NULL END,
                        updated_at = clock_timestamp()
                  WHERE workspace_id = \(workspaceID)
                    AND id = \(memoryID)

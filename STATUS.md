@@ -1,10 +1,18 @@
 # momo 진행 현황
 
+## MOMO-527 pgvector·FTS·RRF 하이브리드 메모리 검색 (#597, 2026-07-22)
+
+- dev/e2e/prod PostgreSQL 서비스를 digest 고정 `pgvector/pgvector:0.8.5-pg18` 이미지로 통일하고, migration 028에 `vector` extension·384차원 embedding/HNSW·generated `tsv`/GIN·SECURITY INVOKER RRF 함수를 추가했다. 기존 컨테이너는 새 이미지를 pull한 뒤 재생성이 필요하다.
+- `GET /v1/workspaces/:ws/memories/search`는 정상 tenant connection에서 membership·source channel 가시성을 fail-closed 재검증하고 scope/agent 필터와 전용 30/60초 rate limit을 적용한다. 임베딩 실패·미생성 항목은 FTS-only로 계속 검색되며, AgentWorker가 결정적 mock 또는 기존 Hermes BYOA `/embeddings` 경계로 비동기 벡터를 채운다.
+- 전 9개 Swift 패키지 `swift build --disable-sandbox`가 PASS했고 Core 42·server 144·OutboxRelay 2·PushRelay 6·AgentWorker 42·WorkHostDaemon 6·NotifierWorker 4·LinkShort 5 tests가 실패 0이다. macOS 테스트 코드는 컴파일됐으나 headless 환경의 첫 NSImage snapshot nil unwrap으로 xctest signal 5가 발생했다. 일반 `make build`는 관리형 환경의 중첩 `sandbox-exec` 거부로 코드 컴파일 전에 실패해 동일 패키지를 `--disable-sandbox`로 검증했다.
+- `verify_pgvector_contract.sh`, OpenAPI YAML parse, verifier bash 문법과 `git diff --check`는 PASS했다. 지시대로 Docker를 실행하지 않아 `verify_memory_search.sh`의 FTS-only·vector-only·RRF·scope·RLS·rate-limit 실제 PG18 왕복과 `runtime-db` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`이며, external Hermes embedding도 credential opt-in 전까지 `runtime-unverified`다.
+
 ## W-6 웹 Work 관전 v0 (#605, 2026-07-21)
 
 - 웹에 credential-free Work 세션 목록, 기존 Timeline 기반 root thread read-only 관전, 메모리 전용 observer capability를 HTTPS direct stream에만 전달하는 lazy xterm 터미널을 추가했다. 입력·resize·kill UI/전송은 없으며 WSS-only·query-bearing·비HTTPS 원격 endpoint는 fail-closed한다.
 - MomoCore와 같은 `artifact_kind=diff|commit|pr` 우선순위·상한·안전한 HTTPS 링크 규칙으로 웹 타입드 카드를 렌더한다. Vitest 71 tests(artifact 11, observer 상태기계 13), eslint, typecheck, Vite build, npm permissive license gate가 PASS했다.
 - 실제 server→remote host observer HTTPS stream, CORS/CSP, capability 만료·회수 왕복은 지시대로 Docker·브라우저를 실행하지 않아 오케스트레이터 검증 전까지 `runtime-unverified`다.
+
 ## MOMO-526 Memory Plane 스키마·추출 워커 v0 (#596, 2026-07-21)
 
 - ADR-0129 D1·D2·D5에 따라 migration 027에 Memory Plane 원장·채널 워터마크·정책 스위치를 FORCE RLS로 추가하고, source_ref는 message/channel 식별자만 저장한다. 메모리 CRUD·무효화·admin 정책-off 일괄 삭제 REST와 `memory.updated` transactional outbox를 OpenAPI 정본에 반영했다.
