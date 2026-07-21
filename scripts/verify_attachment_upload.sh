@@ -97,7 +97,7 @@ compose() {
     HERMES_PORT="$HERMES_PORT_HOST" MINIO_PORT="$MINIO_PORT_HOST" \
     MOMO_S3_ACCESS_KEY="$S3_ACCESS_KEY" MOMO_S3_SECRET_KEY="$S3_SECRET_KEY" \
     docker compose -p "$PROJECT" -f "$COMPOSE_FILE" -f "$COMPOSE_OVERRIDE" \
-      "${COMPOSE_PROFILE_ARGS[@]}" "$@"
+      ${COMPOSE_PROFILE_ARGS[@]+"${COMPOSE_PROFILE_ARGS[@]}"} "$@"
 }
 
 cleanup() {
@@ -229,8 +229,18 @@ if [ "$BACKEND" = "s3" ]; then
     http://minio:9000/momo-attachments/*X-Amz-Signature=*) ;;
     *) echo "[attachment] FAIL unsafe/unexpected S3 upload URL" >&2; exit 1 ;;
   esac
-  status="$(compose exec -T api curl -sS -o /tmp/momo-s3-upload-response -w '%{http_code}' \
-    -X PUT -H 'Content-Type: text/plain' --data-binary @- "$UPLOAD_URL" <"$PAYLOAD")"
+  # api 컨테이너(swift 이미지)에는 curl이 없다 — 같은 네트워크의 mock-hermes(python)로 PUT.
+  status="$(compose exec -T mock-hermes python3 -c '
+import sys, urllib.request
+data = sys.stdin.buffer.read()
+req = urllib.request.Request(sys.argv[1], data=data, method="PUT",
+                             headers={"Content-Type": "text/plain"})
+try:
+    with urllib.request.urlopen(req) as resp:
+        print(resp.status, end="")
+except urllib.error.HTTPError as e:
+    print(e.code, end="")
+' "$UPLOAD_URL" <"$PAYLOAD")"
 else
   case "$UPLOAD_URL" in
     "$BASE_URL"/__momo_stub/drive/uploads/*) ;;
@@ -279,7 +289,11 @@ if [ "$BACKEND" = "s3" ]; then
     http://minio:9000/momo-attachments/*X-Amz-Signature=*) ;;
     *) echo "[attachment] FAIL unsafe/unexpected S3 download URL" >&2; exit 1 ;;
   esac
-  compose exec -T api curl -fsS "$DOWNLOAD_URL" >"$TMP_DIR/downloaded"
+  compose exec -T mock-hermes python3 -c '
+import sys, urllib.request
+with urllib.request.urlopen(sys.argv[1]) as resp:
+    sys.stdout.buffer.write(resp.read())
+' "$DOWNLOAD_URL" >"$TMP_DIR/downloaded"
 else
   status="$(curl -sS -o "$TMP_DIR/downloaded" -w '%{http_code}' \
     -H "Authorization: Bearer $M1_TOKEN" "$BASE_URL$CONTENT_PATH")"
