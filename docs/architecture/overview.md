@@ -27,7 +27,7 @@ flowchart LR
     RELAY["OutboxRelay<br/>(별도 패키지)"]
     CENT["Centrifugo v6<br/>전송 전용<br/>subscribe proxy → 서버 재검증"]
     AW["AgentWorker + provider (SSE)<br/>managed 공식 경로"]
-    WD["momo-workd<br/>사용자 소유 호스트 · Process/pipe"]
+    WD["momo-workd<br/>사용자 소유 호스트 · PTY/ACP stdio"]
 
     MAC -->|REST 읽기/쓰기| API
     HG -->|"pending 재조회·events/complete<br/>(per-agent bearer)"| API
@@ -239,11 +239,13 @@ ADR-0125 D1/D2의 `momo-workd`는 사용자 호스트에서 실행되는 outboun
 정확히 다섯 REST action만 허용하며 revoke와 owner 활성 상태를 요청마다 재검증한다.
 
 데몬은 `GET .../work-hosts/:id/pending-controls`로 자기 앞 `dispatched` 행만 polling한다.
-`spawn`은 기존 session REST를 먼저 기록한 뒤 local `Foundation.Process`를 시작하고,
-`input`은 해당 pipe stdin, `kill`은 terminate와 session end REST로 처리한다. effect 뒤 ack 응답이
+`spawn`은 기존 session REST를 먼저 기록한 뒤 profile의 host-local PTY 또는 ACP stdio
+subprocess를 시작하고, `input`은 PTY stdin 또는 ACP `session/prompt`, `kill`은 terminate와 session end REST로 처리한다. effect 뒤 ack 응답이
 유실돼도 같은 control을 중복 실행하지 않도록 로컬 control/session 결속을 유지한다. command
 template, environment, key/path/PID와 stdout/stderr는 host-local이며 raw 출력은 mode `0600`
-파일에만 남는다. 현재 daemon의 완전 PTY adapter와 Centrifugo control subscription은 후속 범위다.
+파일에만 남는다. ACP `session/update`는 카드 최소 공통분모로만 투영하고 extension은 `_meta`
+host-local 저장이며, permission은 human decision 전 fail-closed한다. Centrifugo control
+subscription은 후속 범위다.
 
 ### Remote PTY attach control plane
 
