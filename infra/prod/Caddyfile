@@ -37,6 +37,23 @@
     reverse_proxy centrifugo:8000
 }
 
+# ADR-0127: optional public S3-compatible data plane. Presigned PUT/GET URLs
+# must be reachable by clients over HTTPS, while MinIO itself remains only on
+# the private compose network. Unset deployments keep a reserved .localhost
+# sentinel that answers 404 and never contacts the absent profile service.
+{$MINIO_PUBLIC_DOMAIN:momo-minio-domain-unset.localhost} {
+    import security_headers
+
+    @s3_endpoint_unset host momo-minio-domain-unset.localhost
+    handle @s3_endpoint_unset {
+        respond "MINIO_PUBLIC_DOMAIN is not configured" 404
+    }
+
+    handle {
+        reverse_proxy minio:9000
+    }
+}
+
 # MOMO-390 (ADR-0119 D1-A): the workspace representative domain serves the web
 # SPA and proxies /v1/* to the api container on the same origin, so the browser
 # client needs no CORS and the server stays unchanged. The api container never

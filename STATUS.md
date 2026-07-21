@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-521 S3 호환 첨부 archive + MinIO 프로파일 (#563, 2026-07-21)
+
+- ADR-0127에 따라 `MOMO_ARCHIVE_BACKEND=drive|s3` 부팅 선택과 SDK 없는 AWS SigV4 `S3ArchiveClient`를 추가했다. S3는 15분 presigned PUT/GET, signed HEAD 메타 확정, signed DELETE를 지원하며 불완전한 자격은 기존 unavailable 구현으로 fail-closed한다.
+- e2e/prod compose에 opt-in `s3` MinIO+bucket init 프로파일과 public HTTPS Caddy data plane을 추가했다. REST/OpenAPI/클라이언트와 `schema_v0.sql`은 변경하지 않았다.
+- AWS 공식 SigV4 vector·presign 만료·path-style 집중 테스트와 server 130 tests, verifier bash/ShellCheck·compose YAML 정적 검증이 PASS했다. 지시대로 Docker를 실행하지 않아 Drive stub 및 MinIO 28040~28044 실제 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
 
 - ADR-0125 D11에 따라 workspace 기본/member override `work_tier_policy`(t1_only/ask/auto), stale heartbeat의 orphan 전이, ask `resume_offer` 카드와 `momo.work` 알림, t1_only terminal 정리, auto 재디스패치를 기존 PG→outbox 및 Notifier 폴링 경로에 추가했다.

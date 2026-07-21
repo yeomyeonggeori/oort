@@ -24,6 +24,9 @@ services:
       # web serving is disabled (the sentinel site only answers 404) and the
       # existing 2-site deploy behavior is unchanged.
       APP_DOMAIN: ${APP_DOMAIN:-momo-app-domain-unset.localhost}
+      # ADR-0127: optional public MinIO host, separate from the API's generic
+      # S3 endpoint so AWS/R2/B2 deployments never become Caddy sites.
+      MINIO_PUBLIC_DOMAIN: ${MINIO_PUBLIC_DOMAIN:-momo-minio-domain-unset.localhost}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
