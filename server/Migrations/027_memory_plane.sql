@@ -24,6 +24,8 @@ CREATE TABLE memory_item (
   agent_member_id            uuid,
   channel_id                 uuid,
   kind                       text NOT NULL,
+  -- 델타 3: v1 추출원 확장(첨부·Drive·웹훅) 대비 — v0는 'message' 고정.
+  source_kind                text NOT NULL DEFAULT 'message',
   body                       text NOT NULL,
   confidence                 double precision NOT NULL DEFAULT 0.5,
   valid_at                   timestamptz NOT NULL DEFAULT now(),
@@ -105,6 +107,28 @@ CREATE TABLE memory_source_ref (
 );
 CREATE INDEX memory_source_ref_message_idx
   ON memory_source_ref (workspace_id, channel_id, message_id);
+
+-- 델타 1(2026-07-21 비전 정합 검토): 스코프 기본을 넘는 명시 접근 권한.
+-- v0는 스키마+RLS만 — 서빙 필터 소비는 MOMO-528, 관리 UI는 MOMO-529.
+CREATE TABLE memory_visibility_grant (
+  id            uuid PRIMARY KEY DEFAULT uuidv7(),
+  workspace_id  uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  memory_id     uuid NOT NULL,
+  grantee_kind  text NOT NULL,
+  grantee_id    uuid NOT NULL,
+  granted_by    uuid NOT NULL,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  revoked_at    timestamptz,
+  CONSTRAINT memory_visibility_grant_kind_ck
+    CHECK (grantee_kind IN ('member', 'agent')),
+  CONSTRAINT memory_visibility_grant_uniq UNIQUE (memory_id, grantee_kind, grantee_id),
+  CONSTRAINT memory_visibility_grant_memory_fk
+    FOREIGN KEY (workspace_id, memory_id)
+    REFERENCES memory_item(workspace_id, id) ON DELETE CASCADE
+);
+CREATE INDEX memory_visibility_grant_grantee_idx
+  ON memory_visibility_grant (workspace_id, grantee_kind, grantee_id)
+  WHERE revoked_at IS NULL;
 
 CREATE TABLE memory_lifecycle_event (
   id                uuid PRIMARY KEY DEFAULT uuidv7(),
@@ -224,7 +248,8 @@ DECLARE t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY[
     'memory_item', 'memory_source_ref', 'memory_lifecycle_event',
-    'memory_candidate', 'memory_extraction_cursor', 'workspace_memory_policy'
+    'memory_candidate', 'memory_extraction_cursor', 'workspace_memory_policy',
+    'memory_visibility_grant'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY;', t);
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY;', t);
