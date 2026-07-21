@@ -407,6 +407,42 @@ paths:
         "404": {description: Workspace member not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "409": {description: The change would remove the last owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/members/me:
+    delete:
+      tags: [membership]
+      operationId: leaveWorkspace
+      summary: Leave the workspace and revoke the caller's sessions.
+      description: >
+        Human active members only. Removes all channel memberships and the
+        workspace membership, transitions the caller to deleted, revokes every
+        token, and preserves authored messages. The final active owner must
+        transfer ownership before leaving.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200": {description: Workspace left and all caller tokens revoked, content: {application/json: {schema: {$ref: "#/components/schemas/MembershipLifecycleResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: Caller is the last active owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
+    delete:
+      tags: [membership]
+      operationId: leaveChannel
+      summary: Leave a public or private channel.
+      description: >
+        Direct-message channels cannot be left. A private channel is archived
+        atomically when its final active member leaves.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "200": {description: Channel membership ended, content: {application/json: {schema: {$ref: "#/components/schemas/ChannelLeaveResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Direct-message leave is forbidden, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Active channel membership not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role:
     patch:
       tags: [membership-admin]
@@ -526,6 +562,32 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: Ban not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/audit:
+    get:
+      tags: [membership-admin]
+      operationId: listWorkspaceAudit
+      summary: Read the tenant audit ledger (owner/admin only).
+      description: >
+        Stable newest-first keyset pagination over `(created_at, id)`. `actions`
+        is a comma-separated list of action prefixes. The target member filter
+        applies to `subject_member_id`; time bounds are inclusive epoch
+        milliseconds. Snake-case filter aliases are canonical, with camelCase
+        aliases accepted by the server.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: actions, in: query, schema: {type: string}, description: Comma-separated action prefixes.}
+        - {name: target_member_id, in: query, schema: {type: string, format: uuid}}
+        - {name: from_ms, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: to_ms, in: query, schema: {type: integer, format: int64, minimum: 0}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        "200": {description: Filtered audit page, content: {application/json: {schema: {$ref: "#/components/schemas/AuditPageResponse"}}}}
+        "400": {description: Invalid filter or cursor, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
 
   /v1/workspaces/{workspaceId}/agents:
     post:
@@ -3699,6 +3761,38 @@ components:
         memberId: {type: string, format: uuid}
         status: {type: string, enum: [active, suspended, deleted]}
 
+    ChannelLeaveResponse:
+      type: object
+      required: [channelId, memberId, archived]
+      properties:
+        channelId: {type: string, format: uuid}
+        memberId: {type: string, format: uuid}
+        archived: {type: boolean}
+
+    AuditEvent:
+      type: object
+      required: [id, action, detail, createdAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        actorMemberId: {type: string, format: uuid}
+        subjectMemberId: {type: string, format: uuid}
+        action: {type: string}
+        targetType: {type: string}
+        targetId: {type: string, format: uuid}
+        viaTokenId: {type: string, format: uuid}
+        runId: {type: string, format: uuid}
+        detail: {type: object, additionalProperties: true}
+        createdAtMs: {type: integer, format: int64}
+
+    AuditPageResponse:
+      type: object
+      required: [events]
+      properties:
+        events:
+          type: array
+          items: {$ref: "#/components/schemas/AuditEvent"}
+        nextCursor: {type: string, format: uuid}
+
     RemoveWorkspaceMemberRequest:
       type: object
       additionalProperties: false
@@ -3756,7 +3850,7 @@ components:
         handle:
           type: string
           pattern: "^[a-z0-9_-]{2,32}$"
-          description: Trimmed and lowercased server-side; unique per workspace.
+          description: Trimmed and lowercased server-side; unique and not banned per workspace.
         model:
           type: string
           minLength: 1
