@@ -1,6 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Channel } from "../api/client";
-import { fetchMessages, fetchReactionSnapshot } from "../api/client";
+import {
+  fetchMessages,
+  fetchReactionSnapshot,
+  fetchThreadReplies,
+} from "../api/client";
 import type {
   ChannelRealtimeEvent,
   MessageEditedEvent,
@@ -49,6 +53,7 @@ interface TimelineProps {
 const HEAD_PAGE_LIMIT = 200;
 const BACKFILL_LIMIT = 200;
 const MAX_BACKFILL_PAGES = 10;
+const MAX_THREAD_PAGES = 20;
 
 // ADR-0112 basic mode: non-text message types render as a one-line summary
 // label; tool JSON / props / cost details are intentionally not shown.
@@ -278,12 +283,42 @@ export default function Timeline({
     bufferedEventsRef.current = [];
     async function loadHead() {
       try {
-        const [response, reactionSnapshot] = await Promise.all([
+        const threadPromise = (async () => {
+          if (focusRootMessageId === undefined) return [];
+          const replies: TimelineMessage[] = [];
+          let cursor: number | undefined;
+          const seen = new Set<number>();
+          for (let pageIndex = 0; pageIndex < MAX_THREAD_PAGES; pageIndex += 1) {
+            const page = await fetchThreadReplies(
+              workspaceId,
+              channelId,
+              focusRootMessageId,
+              cursor,
+              HEAD_PAGE_LIMIT
+            );
+            replies.push(...page.messages.map(fromRestMessage));
+            if (
+              page.nextCursor === undefined ||
+              page.nextCursor === cursor ||
+              seen.has(page.nextCursor)
+            ) {
+              break;
+            }
+            seen.add(page.nextCursor);
+            cursor = page.nextCursor;
+          }
+          return replies;
+        })();
+        const [response, reactionSnapshot, threadReplies] = await Promise.all([
           fetchMessages(workspaceId, channelId, { limit: HEAD_PAGE_LIMIT }),
           fetchReactionSnapshot(workspaceId, channelId),
+          threadPromise,
         ]);
         if (cancelled) return;
-        appendMessages(response.messages.map(fromRestMessage));
+        appendMessages([
+          ...response.messages.map(fromRestMessage),
+          ...threadReplies,
+        ]);
         setReactions(reactionSnapshot);
         setOldestCursor(response.nextBefore ?? null);
         setLoaded(true);
@@ -321,7 +356,7 @@ export default function Timeline({
     return () => {
       cancelled = true;
     };
-  }, [appendMessages, applyRealtimeEvent, catchUp, channelId, loadAttempt, workspaceId]);
+  }, [appendMessages, applyRealtimeEvent, catchUp, channelId, focusRootMessageId, loadAttempt, workspaceId]);
 
   // Realtime subscription; server-side subscribe proxy authorizes it.
   useEffect(() => {

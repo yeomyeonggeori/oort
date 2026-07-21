@@ -31,6 +31,7 @@ export type Member = components["schemas"]["Member"];
 export type Channel = components["schemas"]["Channel"];
 export type Message = components["schemas"]["Message"];
 export type MessagePage = components["schemas"]["MessagePage"];
+export type ThreadRepliesPage = components["schemas"]["ThreadRepliesPage"];
 export type ReactionSnapshot = components["schemas"]["ReactionSnapshot"];
 export type RosterMember = components["schemas"]["RosterMember"];
 export type WorkspaceRosterResponse =
@@ -291,6 +292,20 @@ export function fetchMessages(
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
   return apiFetch<MessagePage>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages${suffix}`
+  );
+}
+
+export function fetchThreadReplies(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+  cursor?: number,
+  limit = 200
+): Promise<ThreadRepliesPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor !== undefined) params.set("cursor", String(cursor));
+  return apiFetch<ThreadRepliesPage>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(rootId)}/replies?${params.toString()}`
   );
 }
 
