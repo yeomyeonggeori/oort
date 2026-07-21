@@ -17,7 +17,7 @@ final class WorkToolProfileRoutesTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let sql = try String(
-            contentsOf: root.appendingPathComponent("Migrations/028_work_tool_profile.sql"),
+            contentsOf: root.appendingPathComponent("Migrations/029_work_tool_profile.sql"),
             encoding: .utf8
         )
         XCTAssertTrue(sql.contains("CREATE TABLE work_tool_profile"))

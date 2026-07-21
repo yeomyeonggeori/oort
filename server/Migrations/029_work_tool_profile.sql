@@ -1,5 +1,5 @@
 -- =============================================================================
--- 028_work_tool_profile.sql — MOMO-533 / ADR-0130 D3
+-- 029_work_tool_profile.sql — MOMO-533 / ADR-0130 D3
 --
 -- Workspace-owned work tool catalog. The server stores only a portable tool key
 -- and argument template. Executable paths and credentials remain host-local.
