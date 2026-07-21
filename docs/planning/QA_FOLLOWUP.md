@@ -84,9 +84,15 @@
 ## Q8. MOMO-491 push_relay Ed25519 openssl 이식 [자동]
 - **무엇**: verify_push_relay/push_relay_keygen이 verify_work_host와 동일 openssl ED25519 패턴 → relay 프로파일 게이트를 bash -l로 돌리면 LibreSSL 함정 재발.
 - **검증 방법**: find_openssl 리졸버 이식 + relay 프로파일 게이트를 bash -l로 1회. Fable 완결.
-- **현재 상태**: 이슈 #524 `ready`.
-- **트리거**: 엔진 배치 여유 시(소형).
-- **수용**: relay 프로파일 게이트 bash -l PASS.
+- **현재 상태**: **완료** — main c953322 랜딩.
+- **수용**: relay 프로파일 게이트 bash -l PASS. ✅
+
+## Q9. MOMO-498(543) iOS 타임라인 v2 육안 QA [완료 — 2026-07-21 Fable ⓑ 방식]
+- **방식**: 격리 스택(momo543qa :28000) + 실 REST 시드 213건(한국어 장문·코드블록·링크·멘션·수정·삭제·어제 배치 시프트) + 시뮬레이터 실로그인(iPhone 17 Pro). 성재 육안 대체 증거 세트 전달됨(캡처 6종+스크롤 영상).
+- **판정: PASS** — ①라이트/다크 일관 ②Dynamic Type XXXL 무결 ③한국어 3줄+ 잘림 없음 ④200+ 스크롤 ⑤그룹핑·날짜구분선("Yesterday")·edited·tombstone·코드블록(swift 라벨+가로스크롤)·링크 ⑥멘션 하이라이트(accent 10%, cold load) ⑦realtime 수신.
+- **발견 A(엔진, MOMO-513 #553)**: send() outbox 브로드캐스트 props 미탑재 → 라이브 멘션 하이라이트/답장 인용/승인 props 누락. 콜드/라이브 A/B로 격리 — 543 무죄. worker 수정 진행.
+- **발견 B(iOS, MOMO-514 #554)**: 액세스 토큰 만료 시 타임라인 전체가 에러 화면으로 대체 + Retry가 만료 토큰 재사용 → 영구 실패. 재실행 시 재로그인 유도는 양호. 자동 리프레시+기존 메시지 보존 필요.
+- **도구 확립**: applesimutils(권한 CLI)·idb(시뮬 탭/스와이프 — 형 화면 무침범 자동화). iOS 육안 QA 반복 가능해짐.
 
 ---
 

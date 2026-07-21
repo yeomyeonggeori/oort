@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-21 (Fable fleet) · 이중트랙 위임 배치 — 499·503·511-U 랜딩 + 543 육안 QA PASS + 결함 2건 발견
+- 성재 위임("UXUI트랙 fleet + 엔진 + 543 ⓑ"). worker 3기(548=511-U·549=499·550=503, 5.6-sol medium) 스폰 → 전기 PR 완주. 검수+게이트(오케스트레이터): 549 시뮬레이터 게이트 PASS(47/47)→#551 / 550 docker verifier PASS(4카테고리·thread_id·approval_id·ADR-0109 badge·억제0)→#552 / 548 build green+real-window 4/4+스냅샷 2실패=선재 flake 베이스라인 재현 확정→#555. **track/uxui=main+4(543·551·555), track/engine=main+1(552)** — 성재 승인 시 main.
+- **543 육안 QA ⓑ 완료(PASS)**: 격리 스택+실 REST 시드 213건+시뮬 실로그인. 증거 세트(캡처6+영상) 성재 전달. 상세 QA_FOLLOWUP Q9.
+- **발견**: A=MOMO-513(#553) send() outbox props 미탑재(라이브 멘션/인용/승인 props 누락 — 콜드/라이브 A/B 격리, MessageRoutes.swift:242) worker 수정 중 / B=MOMO-514(#554) 토큰 만료 시 타임라인 전체 에러+Retry 무효. X-8(ptyId 투영)·X-9 ENGINE_HANDOFF 등재.
+- 도구: applesimutils+idb 확립(시뮬 자동 QA, 형 화면 무침범). QA 스택 momo543qa(:28000)는 513 검수 재현용으로 유지 — 종료 시 `docker compose -p momo543qa -f infra/docker-compose.e2e.yml down -v`.
+
 ## 2026-07-21 (Fable 재개) · 509·511 런타임 verifier 종결 + 543 track/uxui 랜딩
 - main c953322에서 오케스트레이터 docker 실런: `verify_agent_create.sh`(509) — fresh DB 생성·409/403·pairing·credential·audit·RLS PASS / `verify_terminal_attach.sh`(511) — 발급·만료·소유자·revoke·raw 직결 우회·audit/RLS PASS. STATUS의 두 항목 `runtime-unverified`→`runtime-verified` 갱신(엔진 deviation 종결).
 - 543(iOS 타임라인 v2): base 전진으로 STATUS 충돌 → 541 워크트리에서 union 해소·push → track/uxui 랜딩(a06d050). 컴파일+41 tests PASS. **남은 것=498 "인증 실데이터 육안"**(라이트/다크·Dynamic Type·한국어 3줄·200+ 스크롤) — STATUS에 runtime-unverified 명시(496/497 선례와 동일 수동 게이트). 성재 기기 확인 또는 Fable 실데이터 시드 캡처 택1.
