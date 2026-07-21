@@ -58,7 +58,7 @@ final class WorkHostDaemonTests: XCTestCase {
             "MOMO_WORKD_PROFILE_SHELL_EXECUTABLE": "/bin/cat",
             "MOMO_WORKD_PROFILE_SHELL_ARGUMENTS_JSON": "[]",
         ])
-        XCTAssertEqual(config.commandTemplates["shell"], CommandTemplate(
+        XCTAssertEqual(config.localCommandOverrides["shell"], LocalCommandOverride(
             executable: "/bin/cat",
             arguments: []
         ))
@@ -125,6 +125,7 @@ final class WorkHostDaemonTests: XCTestCase {
         )
         let api = MockWorkHostAPI(
             controls: [[spawn], [input], [kill]],
+            profiles: [Self.profile(workspaceID: workspaceID, toolKey: "shell", command: "sh")],
             session: WorkSession(
                 id: sessionID,
                 workspaceId: workspaceID,
@@ -152,6 +153,9 @@ final class WorkHostDaemonTests: XCTestCase {
             processes: manager,
             pollInterval: .milliseconds(10),
             heartbeatInterval: .seconds(30),
+            localCommandOverrides: [
+                "shell": LocalCommandOverride(executable: "/bin/cat", arguments: [])
+            ],
             logger: Logger(label: "test")
         )
         await daemon.pollOnce()
@@ -192,19 +196,64 @@ final class WorkHostDaemonTests: XCTestCase {
             updatedAtMs: 1
         )
     }
+
+    private static func profile(
+        workspaceID: UUID,
+        toolKey: String,
+        command: String
+    ) -> WorkToolProfile {
+        WorkToolProfile(
+            id: UUID(),
+            workspaceId: workspaceID,
+            toolKey: toolKey,
+            displayName: toolKey,
+            launchTemplate: WorkToolLaunchTemplate(command: command, arguments: []),
+            tierDefaults: .object([:]),
+            enabled: true,
+            createdBy: UUID(),
+            updatedBy: UUID(),
+            createdAtMs: 1,
+            updatedAtMs: 1
+        )
+    }
+
+    func testServerProfilesResolveThroughHostLocalCommands() throws {
+        let workspaceID = UUID()
+        let profiles = [
+            Self.profile(workspaceID: workspaceID, toolKey: "shell", command: "sh"),
+            Self.profile(workspaceID: workspaceID, toolKey: "kimi", command: "kimi"),
+        ]
+        let templates = try WorkdConfig.commandTemplates(
+            profiles: profiles,
+            localOverrides: [
+                "shell": LocalCommandOverride(executable: "/bin/cat", arguments: [])
+            ]
+        )
+        XCTAssertEqual(
+            templates["shell"],
+            CommandTemplate(executable: "/bin/cat", arguments: [])
+        )
+        XCTAssertEqual(
+            templates["kimi"],
+            CommandTemplate(executable: "/usr/bin/env", arguments: ["kimi"])
+        )
+    }
 }
 
 actor MockWorkHostAPI: WorkHostAPI {
     private var controlBatches: [[WorkControl]]
+    private let profiles: [WorkToolProfile]
     private let session: WorkSession
     private(set) var events: [String] = []
 
-    init(controls: [[WorkControl]], session: WorkSession) {
+    init(controls: [[WorkControl]], profiles: [WorkToolProfile], session: WorkSession) {
         controlBatches = controls
+        self.profiles = profiles
         self.session = session
     }
 
     func heartbeat(hostID: UUID) async throws { events.append("heartbeat:\(hostID)") }
+    func workToolProfiles(hostID: UUID) async throws -> [WorkToolProfile] { profiles }
     func pendingControls(hostID: UUID) async throws -> [WorkControl] {
         guard !controlBatches.isEmpty else { return [] }
         return controlBatches.removeFirst()

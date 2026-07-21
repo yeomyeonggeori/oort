@@ -1057,10 +1057,12 @@ swift run --package-path workers/WorkHostDaemon momo-workd
 ```
 
 등록이 성공하고 host ID가 로컬에 저장되면 token 파일은 삭제된다. 원격 HTTP는 거부하며,
-`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. command
-profile은 `MOMO_WORKD_PROFILE_{CLAUDE|CODEX|OPENCODE|SHELL}_EXECUTABLE` 절대경로와
-`..._ARGUMENTS_JSON` 문자열 배열로 로컬에서만 설정한다. 서버 payload가 실행 경로나 인자를
-선택하지 않는다.
+`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. workd는
+signed `GET /v1/workspaces/:ws/work-tool-profiles`의 enabled 투영(command key+인자)을 읽고,
+command key는 호스트의 `PATH`에서 로컬 해석한다. 필요하면
+`MOMO_WORKD_PROFILE_<TOOL_KEY>_EXECUTABLE` 절대경로와 `..._ARGUMENTS_JSON` 문자열 배열로
+도구별 로컬 override를 둔다(`TOOL_KEY`의 `-`는 `_`로 표기). 원장과 control payload에는
+실행 경로·환경 값·provider 자격증명을 넣지 않는다.
 
 동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
 

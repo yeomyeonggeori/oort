@@ -714,6 +714,26 @@ AGENT_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
 
 # Work controls + terminal attach: dispatch -> MomoHost remote PTY binding ->
 # owner capability -> signed host validation -> ack -> revoke.
+sample work-tool-profile-list get \
+  "/v1/workspaces/{workspaceId}/work-tool-profiles" \
+  "/v1/workspaces/$WS/work-tool-profiles" 200 "" "$ACCESS"
+guard_jq '([.workToolProfiles[].toolKey] | index("codex")) != null' \
+  "work tool profile catalog contains the codex default"
+
+sample work-tool-profile-create post \
+  "/v1/workspaces/{workspaceId}/work-tool-profiles" \
+  "/v1/workspaces/$WS/work-tool-profiles" 201 \
+  '{"toolKey":"openapi-cli","displayName":"OpenAPI CLI","launchTemplate":{"command":"openapi-cli","arguments":[]}}' \
+  "$ACCESS"
+sample work-tool-profile-update put \
+  "/v1/workspaces/{workspaceId}/work-tool-profiles/{tool}" \
+  "/v1/workspaces/$WS/work-tool-profiles/openapi-cli" 200 \
+  '{"enabled":false}' "$ACCESS"
+guard_jq '.workToolProfile.enabled == false' "work tool profile update disables projection"
+sample work-tool-profile-delete delete \
+  "/v1/workspaces/{workspaceId}/work-tool-profiles/{tool}" \
+  "/v1/workspaces/$WS/work-tool-profiles/openapi-cli" 200 "" "$ACCESS"
+
 sample work-auto-approval-enable put \
   "/v1/workspaces/{workspaceId}/work-auto-approvals/{tool}" \
   "/v1/workspaces/$WS/work-auto-approvals/codex" 200 "" "$ACCESS"

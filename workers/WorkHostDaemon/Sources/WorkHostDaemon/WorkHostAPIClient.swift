@@ -22,6 +22,9 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
     private struct RegisterResponse: Decodable { let workHost: RegisteredHost }
     private struct HeartbeatRequest: Encodable { let sentAtMs: Int64; let signature: String }
     private struct PendingResponse: Decodable { let workControls: [WorkControl] }
+    private struct WorkToolProfilesResponse: Decodable {
+        let workToolProfiles: [WorkToolProfile]
+    }
     private struct SessionResponse: Decodable { let workSession: WorkSession }
     private struct CreateSessionRequest: Encodable {
         let channelId: UUID
@@ -63,9 +66,7 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             scope: config.scope,
             displayName: config.displayName,
             publicKey: signer.publicKeyBase64,
-            capabilities: Dictionary(
-                uniqueKeysWithValues: config.commandTemplates.keys.map { ("tool.\($0)", true) }
-            )
+            capabilities: [:]
         )
         let response: RegisterResponse = try await send(
             method: "POST",
@@ -105,6 +106,22 @@ final class WorkHostAPIClient: @unchecked Sendable, WorkHostAPI {
             body: Optional<String>.none
         )
         return response.workControls
+    }
+
+    func workToolProfiles(hostID: UUID) async throws -> [WorkToolProfile] {
+        let path = "/v1/workspaces/\(config.workspaceID.uuidString.lowercased())/work-tool-profiles"
+        let response: WorkToolProfilesResponse = try await sendSigned(
+            method: "GET",
+            path: path,
+            hostID: hostID,
+            body: Optional<String>.none
+        )
+        guard response.workToolProfiles.allSatisfy({
+            $0.workspaceId == config.workspaceID && $0.enabled
+        }) else {
+            throw WorkdFailure.invalidResponse
+        }
+        return response.workToolProfiles
     }
 
     func createSession(hostID: UUID, control: WorkControl) async throws -> WorkSession {

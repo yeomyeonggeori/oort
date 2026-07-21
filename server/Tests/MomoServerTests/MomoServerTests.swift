@@ -2453,7 +2453,8 @@ final class MomoServerTests: XCTestCase {
 
     func testWorkSessionValidationCardAndNoVersionLifecyclePayload() throws {
         XCTAssertEqual(try WorkSessionRoutes.validatedTool("codex"), "codex")
-        XCTAssertThrowsError(try WorkSessionRoutes.validatedTool("bash"))
+        XCTAssertEqual(try WorkSessionRoutes.validatedTool("bash"), "bash")
+        XCTAssertThrowsError(try WorkSessionRoutes.validatedTool("/bin/bash"))
         XCTAssertEqual(try WorkSessionRoutes.validatedLabel("  ship it  "), "ship it")
         XCTAssertThrowsError(try WorkSessionRoutes.validatedLabel("   "))
         XCTAssertThrowsError(
