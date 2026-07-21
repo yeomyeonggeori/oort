@@ -429,7 +429,7 @@ private struct MomoWorkSessionDetail: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .frame(maxWidth: 160)
+                    .frame(maxWidth: MomoTheme.WorkConsole.remoteHostBadgeMaximumWidth)
                     .padding(.horizontal, MomoTheme.WorkConsole.standardSpacing)
                     .padding(.vertical, MomoTheme.WorkConsole.compactSpacing)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
