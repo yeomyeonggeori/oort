@@ -5,6 +5,10 @@
 
 ---
 
+## 2026-07-21 (Fable fleet 완결) · MOMO-513 수정 랜딩 — 위임 배치 4/4 종결
+- 553 worker(#556): outbox broadcastPayload에 `props: responsePropsJSON` 1줄 + 서버 테스트·verifier 양면 단정(mention REST↔outbox 일치, edited props 보존). 오케스트레이터 docker 실런 `verify_message_interaction.sh` PASS(실 Centrifugo 발행 props 단정) → track/engine e53c24d. **X-9 종결**. QA 스택 momo543qa teardown 완료.
+- **최종 대기 상태**: track/uxui=main+4(543·499·511-U), track/engine=main+2(503·513) — 성재 main 머지 승인 대기. 다음 큐: X-8(ptyId 투영), MOMO-514(iOS 토큰 UX), iOS 500~/504~506, 490.
+
 ## 2026-07-21 (Fable fleet) · 이중트랙 위임 배치 — 499·503·511-U 랜딩 + 543 육안 QA PASS + 결함 2건 발견
 - 성재 위임("UXUI트랙 fleet + 엔진 + 543 ⓑ"). worker 3기(548=511-U·549=499·550=503, 5.6-sol medium) 스폰 → 전기 PR 완주. 검수+게이트(오케스트레이터): 549 시뮬레이터 게이트 PASS(47/47)→#551 / 550 docker verifier PASS(4카테고리·thread_id·approval_id·ADR-0109 badge·억제0)→#552 / 548 build green+real-window 4/4+스냅샷 2실패=선재 flake 베이스라인 재현 확정→#555. **track/uxui=main+4(543·551·555), track/engine=main+1(552)** — 성재 승인 시 main.
 - **543 육안 QA ⓑ 완료(PASS)**: 격리 스택+실 REST 시드 213건+시뮬 실로그인. 증거 세트(캡처6+영상) 성재 전달. 상세 QA_FOLLOWUP Q9.

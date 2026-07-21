@@ -34,7 +34,7 @@
 
 | X-7 | `done`(MOMO-494 #542 → main 랜딩·runtime-verified) | fresh DB에서 앱의 "에이전트 초대"가 실패 — UXUI `inviteDogfoodAgent()`는 기존 `@hermes` 멤버 탐색만 하고 서버에 에이전트 생성 API가 없음(이번 실 Hermes E2E는 fixture 우회) | 관리자용 에이전트 생성 REST 랜딩(POST .../agents, pairing 후속 흐름 문서화). UXUI 호출 교체는 후속 | 2026-07-21 main c953322 랜딩, verify_agent_create docker PASS |
 | X-8 | `needs-engine-contract` | 511-U(맥 원격 attach)가 세션 목록에서 원격 PTY 결속 여부를 사전 판별 불가 — 현재 GET work-sessions 응답에 remote PTY 결속 투영이 없어 액션 노출이 `ptyId` 명시 세션에만 fail-closed | GET work-sessions(목록·단건)에 `remoteAttachAvailable`(bool) 또는 `ptyId` read projection 가산. capability/endpoint는 계속 비투영(발급 REST 전용) | UXUI 발견(2026-07-21, MOMO-511-U #555), TerminalAttachRoutes 결속 원장 재사용 |
-| X-9 | `fix-in-flight`(MOMO-513 #553 worker 진행) | 라이브 수신 메시지에 멘션 하이라이트/답장 인용/승인 props 부재 — `send()` outbox 브로드캐스트 페이로드에 props 미탑재(REST/history는 정상) | message.new(·edited 점검) outbox 페이로드에 최종 props(멘션 투영 포함) 탑재 + verifier 단정 | Fable 발견(2026-07-21, 543 육안 QA — 콜드/라이브 A/B로 격리), MessageRoutes.swift:242 |
+| X-9 | `done`(MOMO-513 #556 → track/engine, main 대기) | 라이브 수신 메시지에 멘션 하이라이트/답장 인용/승인 props 부재 — `send()` outbox 브로드캐스트 페이로드에 props 미탑재(REST/history는 정상) | message.new 페이로드에 최종 props(멘션 투영 포함) 탑재 + edited 보존 verifier 단정 + agent_worker REST↔outbox 일치 단정. docker verifier PASS(2026-07-21) | Fable 발견(543 육안 QA — 콜드/라이브 A/B 격리), MessageRoutes.swift:242 |
 
 ## B. 엔진 역요청 — 전량 완료 (main)
 
