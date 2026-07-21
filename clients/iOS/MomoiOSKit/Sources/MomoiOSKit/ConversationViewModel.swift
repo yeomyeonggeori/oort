@@ -10,7 +10,28 @@ public protocol IOSConversationBackend: Sendable {
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent>
     func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus>
     func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message
+    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]]
+    func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta
+    func removeReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta
+    func editMessage(_ id: MessageID, body: String) async throws -> Message
+    func deleteMessage(_ id: MessageID) async throws -> Message
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt
+}
+
+public extension IOSConversationBackend {
+    func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] { [:] }
+    func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
+        throw SessionError.server(status: 501, message: "Message reactions are unavailable.")
+    }
+    func removeReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
+        throw SessionError.server(status: 501, message: "Message reactions are unavailable.")
+    }
+    func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        throw SessionError.server(status: 501, message: "Message editing is unavailable.")
+    }
+    func deleteMessage(_ id: MessageID) async throws -> Message {
+        throw SessionError.server(status: 501, message: "Message deletion is unavailable.")
+    }
 }
 
 struct IOSPendingMessageSend: Sendable, Equatable {
@@ -422,6 +443,11 @@ public final class IOSTimelineModel {
     public private(set) var replyTarget: Message?
     public private(set) var isSending = false
     public private(set) var sendFailureMessage: String?
+    public private(set) var reactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
+    public private(set) var reactionMutationsInFlight: Set<String> = []
+    public private(set) var messageMutationsInFlight: Set<MessageID> = []
+    public private(set) var interactionFailureMessage: String?
+    public private(set) var recentReactionEmojis = ["👍", "❤️", "😂", "🎉", "👀"]
     public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     public private(set) var approvalDecisionFailures: Set<ApprovalID> = []
     public let huddle: IOSHuddleModel
@@ -487,8 +513,11 @@ public final class IOSTimelineModel {
         guard !isSending else { return }
         phase = .loading
         do {
-            let history = try await backend.history(channel: channel, after: nil, limit: 200)
+            async let historyRequest = backend.history(channel: channel, after: nil, limit: 200)
+            async let reactionRequest = backend.reactionSnapshot(channel: channel)
+            let (history, reactions) = try await (historyRequest, reactionRequest)
             messages = IOSTimelineReducer.sorted(history)
+            reactionMembers = reactions
             phase = .loaded
             if let sequence = messages.compactMap(\.seq).max() {
                 if let state = try? await backend.markRead(channel: channel, through: sequence) {
@@ -535,6 +564,141 @@ public final class IOSTimelineModel {
             await huddle.apply(delta)
         }
         messages = IOSTimelineReducer.applying(event, to: messages, channel: channel)
+        switch event {
+        case .reaction(let delta):
+            guard messages.contains(where: { $0.id == delta.messageId && !$0.isDeleted }) else { return }
+            reactionMembers = IOSReactionReducer.applying(delta, to: reactionMembers)
+        case .messageDeleted(let id):
+            reactionMembers[id] = nil
+        default:
+            break
+        }
+    }
+
+    public func availableInteractionActions(for message: Message) -> Set<IOSMessageInteractionAction> {
+        guard canPresentInteractionSheet(for: message) else { return [] }
+        var actions: Set<IOSMessageInteractionAction> = [.react, .reply, .copy]
+        if message.authorMemberId == currentMemberID {
+            actions.formUnion([.edit, .delete])
+        }
+        return actions
+    }
+
+    public func canPresentInteractionSheet(for message: Message) -> Bool {
+        message.channelId == channel && message.seq != nil && !message.isDeleted
+    }
+
+    public func reactions(for message: Message) -> [IOSMessageReaction] {
+        (reactionMembers[message.id] ?? [:])
+            .map { emoji, memberIDs in
+                IOSMessageReaction(
+                    emoji: emoji,
+                    memberIDs: memberIDs,
+                    isSelectedByCurrentMember: memberIDs.contains(currentMemberID)
+                )
+            }
+            .filter { $0.count > 0 }
+            .sorted { lhs, rhs in
+                lhs.count == rhs.count ? lhs.emoji < rhs.emoji : lhs.count > rhs.count
+            }
+    }
+
+    public func message(id: MessageID) -> Message? {
+        messages.first(where: { $0.id == id })
+    }
+
+    public func isReactionMutationInFlight(message: Message, emoji: String) -> Bool {
+        reactionMutationsInFlight.contains(reactionMutationKey(message: message, emoji: emoji))
+    }
+
+    public func toggleReaction(_ emoji: String, on message: Message) async {
+        let normalized = emoji.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canPresentInteractionSheet(for: message), !normalized.isEmpty else { return }
+        let key = reactionMutationKey(message: message, emoji: normalized)
+        guard !reactionMutationsInFlight.contains(key), !messageMutationsInFlight.contains(message.id) else { return }
+        reactionMutationsInFlight.insert(key)
+        interactionFailureMessage = nil
+        defer { reactionMutationsInFlight.remove(key) }
+
+        do {
+            let selected = reactionMembers[message.id]?[normalized]?.contains(currentMemberID) == true
+            let delta = if selected {
+                try await backend.removeReaction(message.id, emoji: normalized)
+            } else {
+                try await backend.addReaction(message.id, emoji: normalized)
+            }
+            guard delta.messageId == message.id,
+                  delta.memberId == currentMemberID,
+                  delta.emoji == normalized,
+                  delta.action == (selected ? .removed : .added),
+                  messages.contains(where: { $0.id == message.id && !$0.isDeleted })
+            else {
+                throw SessionError.decoding("The server returned a different message reaction.")
+            }
+            reactionMembers = IOSReactionReducer.applying(delta, to: reactionMembers)
+            rememberReaction(normalized)
+        } catch is CancellationError {
+            return
+        } catch {
+            interactionFailureMessage = "반응을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요. / Could not save the reaction. Check your connection and try again."
+        }
+    }
+
+    public func editMessage(_ message: Message, body: String) async -> Bool {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard availableInteractionActions(for: message).contains(.edit),
+              !trimmed.isEmpty,
+              !messageMutationsInFlight.contains(message.id)
+        else { return false }
+        messageMutationsInFlight.insert(message.id)
+        interactionFailureMessage = nil
+        defer { messageMutationsInFlight.remove(message.id) }
+        do {
+            let updated = try await backend.editMessage(message.id, body: trimmed)
+            guard updated.id == message.id,
+                  updated.channelId == channel,
+                  updated.authorMemberId == currentMemberID,
+                  !updated.isDeleted,
+                  updated.body == trimmed
+            else { throw SessionError.decoding("The server returned a different edited message.") }
+            messages = IOSTimelineReducer.applying(.messageEdited(updated), to: messages, channel: channel)
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            interactionFailureMessage = "메시지를 수정하지 못했습니다. 다시 시도하세요. / Could not edit the message. Try again."
+            return false
+        }
+    }
+
+    public func deleteMessage(_ message: Message) async -> Bool {
+        guard availableInteractionActions(for: message).contains(.delete),
+              !messageMutationsInFlight.contains(message.id)
+        else { return false }
+        messageMutationsInFlight.insert(message.id)
+        interactionFailureMessage = nil
+        defer { messageMutationsInFlight.remove(message.id) }
+        do {
+            let tombstone = try await backend.deleteMessage(message.id)
+            guard tombstone.id == message.id,
+                  tombstone.channelId == channel,
+                  tombstone.authorMemberId == currentMemberID,
+                  tombstone.isDeleted,
+                  tombstone.body == nil
+            else { throw SessionError.decoding("The server returned a different deleted message.") }
+            messages = IOSTimelineReducer.applying(.messageEdited(tombstone), to: messages, channel: channel)
+            reactionMembers[message.id] = nil
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            interactionFailureMessage = "메시지를 삭제하지 못했습니다. 다시 시도하세요. / Could not delete the message. Try again."
+            return false
+        }
+    }
+
+    public func clearInteractionFailure() {
+        interactionFailureMessage = nil
     }
 
     public func selectReply(to message: Message) {
@@ -679,6 +843,18 @@ public final class IOSTimelineModel {
             var props = messages[index].props.objectValue ?? [:]
             props["approval_status"] = .string(status.rawValue)
             messages[index].props = .object(props)
+        }
+    }
+
+    private func reactionMutationKey(message: Message, emoji: String) -> String {
+        "\(message.id.description):\(emoji)"
+    }
+
+    private func rememberReaction(_ emoji: String) {
+        recentReactionEmojis.removeAll(where: { $0 == emoji })
+        recentReactionEmojis.insert(emoji, at: 0)
+        if recentReactionEmojis.count > 5 {
+            recentReactionEmojis.removeLast(recentReactionEmojis.count - 5)
         }
     }
 
