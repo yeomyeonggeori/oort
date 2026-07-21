@@ -87,9 +87,15 @@ else
   OLD_WEB="$MOMO_WEB_IMAGE"
   deploy_log "legacy deploy state has no web image; first web-enabled rollback will retain the requested pinned web assets"
 fi
+if grep -q '^MOMO_LINKSHORT_IMAGE=' "$STATE_TO_READ"; then
+  OLD_LINKSHORT="$(read_state_value "$STATE_TO_READ" MOMO_LINKSHORT_IMAGE)"
+else
+  OLD_LINKSHORT="$MOMO_LINKSHORT_IMAGE"
+  deploy_log "legacy deploy state has no LinkShort image; first LinkShort-enabled rollback will retain the requested pinned image"
+fi
 
 rollback_apps() {
-  deploy_log "ROLLBACK: restoring previous api/relay/worker/web image digests"
+  deploy_log "ROLLBACK: restoring previous api/relay/worker/web/LinkShort image digests"
   deploy_log "ROLLBACK: database migrations remain forward-only; stop for operator review if an old image is not forward-compatible"
   MOMO_API_IMAGE="$OLD_API" MOMO_RELAY_IMAGE="$OLD_RELAY" MOMO_WORKER_IMAGE="$OLD_WORKER" \
     "${COMPOSE[@]}" up -d --no-deps --force-recreate api || return 1
@@ -98,16 +104,17 @@ rollback_apps() {
   MOMO_API_IMAGE="$OLD_API" MOMO_RELAY_IMAGE="$OLD_RELAY" MOMO_WORKER_IMAGE="$OLD_WORKER" \
     "${COMPOSE[@]}" up -d --no-deps --force-recreate worker || return 1
   MOMO_WEB_IMAGE="$OLD_WEB" "${COMPOSE[@]}" run --rm --no-deps web-init || return 1
+  MOMO_LINKSHORT_IMAGE="$OLD_LINKSHORT" "${COMPOSE[@]}" up -d --no-deps --force-recreate linkshort || return 1
   "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy || return 1
-  wait_service_running api && wait_service_running relay && wait_service_running worker && wait_service_running caddy
+  wait_service_running api && wait_service_running relay && wait_service_running worker && wait_service_running linkshort && wait_service_running caddy
 }
 
 if [ "$DRY_RUN" = "1" ]; then
   if [ "$ROLLBACK_ONLY" = "1" ]; then
-    deploy_log "DRY RUN rollback plan: restore previous api/relay/worker/web digests; do not reverse migrations; verify health"
+    deploy_log "DRY RUN rollback plan: restore previous api/relay/worker/web/LinkShort digests; do not reverse migrations; verify health"
   else
-    deploy_log "DRY RUN upgrade plan: preserve current image state -> pull new digests -> run forward migration and web-init -> restart api/relay/worker/caddy -> health check"
-    deploy_log "DRY RUN failure plan: automatically restore previous api/relay/worker/web digests; database remains forward-only"
+    deploy_log "DRY RUN upgrade plan: preserve current image state -> pull new digests -> run forward migration and web-init -> restart api/relay/worker/linkshort/caddy -> health check"
+    deploy_log "DRY RUN failure plan: automatically restore previous api/relay/worker/web/LinkShort digests; database remains forward-only"
   fi
   deploy_log "DRY RUN complete; no containers or state were changed"
   exit 0
@@ -129,7 +136,8 @@ if [ -f "$CURRENT_STATE" ] \
   && grep -Fq "MOMO_API_IMAGE=$MOMO_API_IMAGE" "$CURRENT_STATE" \
   && grep -Fq "MOMO_RELAY_IMAGE=$MOMO_RELAY_IMAGE" "$CURRENT_STATE" \
   && grep -Fq "MOMO_WORKER_IMAGE=$MOMO_WORKER_IMAGE" "$CURRENT_STATE" \
-  && grep -Fq "MOMO_WEB_IMAGE=$MOMO_WEB_IMAGE" "$CURRENT_STATE"; then
+  && grep -Fq "MOMO_WEB_IMAGE=$MOMO_WEB_IMAGE" "$CURRENT_STATE" \
+  && grep -Fq "MOMO_LINKSHORT_IMAGE=$MOMO_LINKSHORT_IMAGE" "$CURRENT_STATE"; then
   deploy_log "requested image set matches the current deploy state; keeping the existing rollback target"
 else
 cp "$CURRENT_STATE" "${CURRENT_STATE}.previous"
@@ -139,7 +147,7 @@ deploy_log "preserved the current image set for rollback"
 
 upgrade_failed=0
 deploy_log "pulling new pinned images"
-"${COMPOSE[@]}" pull api relay worker migrate web-init || upgrade_failed=1
+"${COMPOSE[@]}" pull api relay worker migrate web-init linkshort || upgrade_failed=1
 if [ "$upgrade_failed" = "0" ]; then
   deploy_log "running forward-only migrations before app restart"
   "${COMPOSE[@]}" run --rm --no-deps migrate || upgrade_failed=1
@@ -149,7 +157,7 @@ if [ "$upgrade_failed" = "0" ]; then
   "${COMPOSE[@]}" run --rm --no-deps web-init || upgrade_failed=1
 fi
 if [ "$upgrade_failed" = "0" ]; then
-  for service in api relay worker; do
+  for service in api relay worker linkshort; do
     deploy_log "restarting $service with the new digest"
     "${COMPOSE[@]}" up -d --no-deps --force-recreate "$service" || { upgrade_failed=1; break; }
     wait_service_running "$service" || { upgrade_failed=1; break; }

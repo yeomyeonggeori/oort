@@ -79,7 +79,8 @@ validate_momo_image_digests() {
   validate_digest_ref MOMO_WORKER_IMAGE
   validate_digest_ref MOMO_MIGRATE_IMAGE
   validate_digest_ref MOMO_WEB_IMAGE
-  deploy_log "validated five immutable momo image digests"
+  validate_digest_ref MOMO_LINKSHORT_IMAGE
+  deploy_log "validated six immutable momo image digests"
 }
 
 configure_compose() {
@@ -163,6 +164,7 @@ write_deploy_state() {
     printf 'MOMO_WORKER_IMAGE=%s\n' "$MOMO_WORKER_IMAGE"
     printf 'MOMO_MIGRATE_IMAGE=%s\n' "$MOMO_MIGRATE_IMAGE"
     printf 'MOMO_WEB_IMAGE=%s\n' "$MOMO_WEB_IMAGE"
+    printf 'MOMO_LINKSHORT_IMAGE=%s\n' "$MOMO_LINKSHORT_IMAGE"
   } > "$temp_file"
   chmod 600 "$temp_file"
   mv -f "$temp_file" "$state_file"
@@ -212,5 +214,5 @@ print_failure_diagnostics() {
   deploy_log "diagnostics: docker compose ps"
   "${COMPOSE[@]}" ps >&2 || true
   deploy_log "diagnostics: inspect redacted service logs locally; do not paste secrets"
-  deploy_log "run: docker compose -f infra/prod/docker-compose.prod.yml logs --tail=200 caddy api migrate web-init relay worker"
+  deploy_log "run: docker compose -f infra/prod/docker-compose.prod.yml logs --tail=200 caddy api migrate web-init linkshort relay worker"
 }

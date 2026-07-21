@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-21 (Fable 4차) · 웹 완성 배치(W-3·W-4) + 이중트랙 main 머지(53c457a)
+- **W-3**(#581): Caddy `{$APP_DOMAIN}` 서빙 — web-init named volume·같은오리진 프록시·centrifugo 403·CSP. `verify_web_serving.sh` docker 6단정 PASS(web-serving infra 프로파일 신설). **W-4**(#580): 웹 승인 카드(멱등 결정)·read-state debounce·recovery reconcile·재연결 배너 — vitest 38·lint·build PASS. **"서버 URL이 곧 웹 주소" 완성**(prod TLS/DNS만 실배포 시 검증).
+- **이중트랙 main 머지**(성재 사전 승인 "작업 마무리 되는대로"): engine(574 수명주기완결·580·581) + uxui(511-U 개방·505·506 — 동생 ①②) → main 53c457a. 게이트: server build + real-window 4/4. 동생은 그새 **③(517 관전 터미널 #575)까지 track/uxui 랜딩** — 페이스 탁월.
+- 남은 게이트 부채(runtime-unverified 누적): iOS 505/506 시뮬 스냅샷·모바일 E2E 1왕복, 517 2계정 owner↔observer 실증, 웹 승인 실왕복, 511-U 선재 스냅샷 드리프트 2건 재기록. 다음 내 큐: W-5(초대 웹 합류)·LICENSE+ghcr(공개 게이트)·ADR-0117 기안.
+
 ## 2026-07-21 (Fable 기획) · PLN-20260721-01 에이전트-네이티브 비전 리서치 완료 + ADR-0129/0130 기안
 - 성재 발제(CTO 대화 4대 고민+Blaxel cofounder 접촉) → 병렬 리서치 5기(내부 실사 2+외부 3) 완료, **research/19-agent-native-fabric/00~04** 저장(컨텍스트/메모리 실사·연동 표면 실사·프로토콜 지형·메모리 OSS·샌드박스 유휴 경제/Blaxel).
 - 진단 정본 **docs/planning/2026-07-21-agent-native-vision-diagnosis.md**: cowork=0126 잔여 실행만(518 승격 권고) / 에이전트 호스팅=막힘 3곳, ACP 클라이언트로 40+ 에이전트 즉시 호환 / 규격 공백 실재("구현→스펙 추출" 순서, 창 12~18개월) / 메모리=최대 갭(PG-native 유일 경로, pgvector 도입) / Blaxel=명시 기각 아님·2nd 기질 후보+협상 카드, CTO 유휴 질문 직답 포함(E2B·Blaxel 메모리+FS 보존 재개 가능, 보관비 E2B 미명문화 vs Blaxel $0.20/GB-월).

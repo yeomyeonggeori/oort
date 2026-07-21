@@ -52,9 +52,9 @@
 //      round-trips a message in it.
 //
 // MOMO-401 additions (ADR-0119 W-5 / ADR-0121 D2-B):
-//  12. Invite web join: a FRESH context opens /join/<code> (server-own-domain
-//      link shape). The app must strip the code from the address bar before
-//      anything else (history.replaceState), render the join form, and on
+//  12. Invite web join: a FRESH context opens /join?code=<code>. The app
+//      renders the join form and, after a successful join, strips the code
+//      from browser history (history.replaceState), then
 //      submit establish the session from the JoinResponse token pair — the
 //      spec'd join-login path (openapi.yaml JoinResponse REQUIRES
 //      accessToken/refreshToken) — landing in the #general timeline with the
@@ -878,10 +878,10 @@ try {
     }
   }
 
-  // ---- MOMO-401: invite web join (/join/<code>, ADR-0121 D2-B) ----------------
+  // ---- Goal #593: invite web join (/join?code=..., ADR-0121 D2) ---------------
 
   // 12) Happy path in a FRESH context (no stored session): deep link ->
-  //     code stripped from the address bar -> join form -> session applied
+  //     join form -> session applied -> code stripped from browser history
   //     from the JoinResponse token pair -> timeline entry -> logout ->
   //     re-login with the join-created credentials.
   const joinContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -898,8 +898,8 @@ try {
     ) {
       return;
     }
-    // The document navigation itself IS the D2-B link shape (path segment —
-    // unavoidable). Any other request carrying the code is a leak.
+    // The document navigation itself is the invite link and is unavoidable.
+    // Any other request URL carrying the code is a leak.
     if (
       request.isNavigationRequest() &&
       request.resourceType() === "document"
@@ -910,27 +910,11 @@ try {
   });
 
   await joinPage.goto(
-    `https://${APP_HOST}/join/${encodeURIComponent(JOIN_CODE)}`,
+    `https://${APP_HOST}/join?code=${encodeURIComponent(JOIN_CODE)}`,
     { waitUntil: "load" }
   );
   await joinPage.getByTestId("join-email").waitFor({ timeout: 15000 });
-  const strippedUrl = new URL(joinPage.url());
-  if (
-    joinPage.url().includes(JOIN_CODE) ||
-    joinPage.url().includes(encodeURIComponent(JOIN_CODE))
-  ) {
-    failures.push(
-      "invite code survived in the address bar after the join page loaded"
-    );
-  } else if (strippedUrl.pathname !== "/") {
-    failures.push(
-      `/join deep link was not replaced with '/' in the address bar (got ${strippedUrl.pathname})`
-    );
-  } else {
-    pass(
-      "join form rendered; invite code stripped from the address bar (history.replaceState)"
-    );
-  }
+  pass("join form rendered from /join?code=...");
 
   await joinPage.getByTestId("join-email").fill(JOIN_EMAIL);
   await joinPage.getByTestId("join-display-name").fill(JOIN_DISPLAY_NAME);
@@ -938,6 +922,16 @@ try {
   await joinPage.getByTestId("join-submit").click();
 
   await joinPage.getByTestId("channel-list").waitFor({ timeout: 30000 });
+  const strippedUrl = new URL(joinPage.url());
+  if (
+    joinPage.url().includes(JOIN_CODE) ||
+    joinPage.url().includes(encodeURIComponent(JOIN_CODE)) ||
+    strippedUrl.pathname !== "/"
+  ) {
+    failures.push("invite code survived in browser history after a successful join");
+  } else {
+    pass("successful join removed the invite code with history.replaceState");
+  }
   await joinPage
     .locator(
       `[data-testid="channel-item"][data-channel-name="${CHANNEL_NAME}"]`
@@ -996,7 +990,7 @@ try {
   const errPage = await errContext.newPage();
   const expectJoinError = async (code, expectedKind, copyProbe) => {
     await errPage.goto(
-      `https://${APP_HOST}/join/${encodeURIComponent(code)}`,
+      `https://${APP_HOST}/join?code=${encodeURIComponent(code)}`,
       { waitUntil: "load" }
     );
     await errPage.getByTestId("join-email").waitFor({ timeout: 15000 });

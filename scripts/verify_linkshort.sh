@@ -58,7 +58,7 @@ redirect_status="$(curl -sS -o /dev/null -D "$HEADER_FILE" -w '%{http_code}' "ht
   echo "verify_linkshort: /i/abc returned $redirect_status, expected 302" >&2
   exit 1
 }
-tr -d '\r' <"$HEADER_FILE" | grep -Fqi "location: ${TARGET_BASE_URL}/join/abc" || {
+tr -d '\r' <"$HEADER_FILE" | grep -Fqi "location: ${TARGET_BASE_URL}/join?code=abc" || {
   echo "verify_linkshort: redirect Location mismatch" >&2
   exit 1
 }

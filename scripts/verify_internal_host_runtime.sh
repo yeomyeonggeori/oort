@@ -107,6 +107,7 @@ PY
 API_IMAGE="momo-api:internal-smoke-${TAG_SUFFIX}"
 RELAY_IMAGE="momo-outbox-relay:internal-smoke-${TAG_SUFFIX}"
 WORKER_IMAGE="momo-agent-worker:internal-smoke-${TAG_SUFFIX}"
+LINKSHORT_IMAGE="momo-linkshort:internal-smoke-${TAG_SUFFIX}"
 MIGRATE_IMAGE="momo-migrate:internal-smoke-${TAG_SUFFIX}"
 MOCK_IMAGE="momo-mock-hermes:internal-smoke-${TAG_SUFFIX}"
 
@@ -125,6 +126,7 @@ MOMO_RELAY_IMAGE=${RELAY_IMAGE}
 MOMO_WORKER_IMAGE=${WORKER_IMAGE}
 MOMO_MIGRATE_IMAGE=${MIGRATE_IMAGE}
 MOMO_WEB_IMAGE=momo-web:internal-smoke
+MOMO_LINKSHORT_IMAGE=${LINKSHORT_IMAGE}
 MOMO_MOCK_HERMES_IMAGE=${MOCK_IMAGE}
 POSTGRES_DB=momo
 POSTGRES_USER=momo
@@ -182,7 +184,7 @@ compose config > "$CONFIG_FILE"
 if grep -Fq "target: /workspace" "$CONFIG_FILE"; then
   fail "rendered internal host-runtime config must not bind-mount the source checkout"
 fi
-for image in "$API_IMAGE" "$RELAY_IMAGE" "$WORKER_IMAGE" "$MIGRATE_IMAGE" "$MOCK_IMAGE"; do
+for image in "$API_IMAGE" "$RELAY_IMAGE" "$WORKER_IMAGE" "$LINKSHORT_IMAGE" "$MIGRATE_IMAGE" "$MOCK_IMAGE"; do
   grep -Fq "image: ${image}" "$CONFIG_FILE" || fail "rendered compose config missing local image: $image"
 done
 
@@ -205,6 +207,12 @@ docker build \
   --build-arg PRODUCT=AgentWorker \
   -t "$WORKER_IMAGE" \
   . 2>&1 | tee "$TMP_ROOT/build-worker-${RUN_SLUG}.log"
+docker build \
+  -f "$SWIFT_DOCKERFILE" \
+  --build-arg PACKAGE_PATH=services/LinkShort \
+  --build-arg PRODUCT=LinkShort \
+  -t "$LINKSHORT_IMAGE" \
+  . 2>&1 | tee "$TMP_ROOT/build-linkshort-${RUN_SLUG}.log"
 docker build -f "$MIGRATE_DOCKERFILE" -t "$MIGRATE_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-migrate-${RUN_SLUG}.log"
 docker build -f "$MOCK_DOCKERFILE" -t "$MOCK_IMAGE" . 2>&1 | tee "$TMP_ROOT/build-mock-hermes-${RUN_SLUG}.log"
 

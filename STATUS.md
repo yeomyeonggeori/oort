@@ -1,9 +1,15 @@
 # momo 진행 현황
 
+## W-5 초대 링크 웹 합류 (#593, 2026-07-21)
+
+- `/join?code=...`와 `/i/<code>` SPA 폴백이 같은 가입 폼을 사용하고, 표시명·handle·이메일·비밀번호를 현재 오리진의 `POST /v1/join`으로만 보낸다. 만료·소진·차단 403을 종결 카피로 구분하고 가입 성공 후 `history.replaceState`로 초대 코드 URL을 제거한다.
+- pinned `momo-linkshort` 이미지를 prod install/upgrade·rollback에 편입하고 Caddy `/i/*`를 SPA보다 먼저 LinkShort로 프록시했다. LinkShort는 `https://${APP_DOMAIN}/join?code=...`만 조립하며 코드를 저장·검증하지 않는다.
+- 웹 47 tests(신규 초대 파싱·검증·오류 9), lint, typecheck, build와 LinkShort 5 tests, publish/install 정적 계약 및 bash 문법은 PASS했다. Docker/Caddy/브라우저는 지시대로 실행하지 않았으며 초대 생성→단축링크→가입→메시지 1건 실왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
 
-- ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. LinkShort `/i/*`는 prod compose 서비스가 없어 후속 프록시 위치만 주석으로 예약했다.
-- npm production build와 YAML/bash 정적 검증은 PASS했다. `verify_web_serving.sh`는 28070~28074 격리 포트에서 6개 HTTP 단정을 수행하도록 `web-serving` infra profile에 편입했으며, 지시대로 Docker/Caddy runtime과 공인 DNS·ACME·prod TLS는 오케스트레이터 검증 전까지 `runtime-unverified`다.
+- ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. 당시 예약한 LinkShort `/i/*` 위치는 W-5 #593에서 실행됐다.
+- npm production build와 YAML/bash 정적 검증은 PASS했다. `verify_web_serving.sh`는 W-5에서 `/join`·`/i/*`를 더해 8개 HTTP 단정으로 확장됐으며, 지시대로 Docker/Caddy runtime과 공인 DNS·ACME·prod TLS는 오케스트레이터 검증 전까지 `runtime-unverified`다.
 ## W-4 웹 승인·read-state·recovery 왕복 (#577, 2026-07-21)
 
 - 웹 타임라인 승인 카드는 `props.approval_status`와 `approval.*` 이벤트를 소비하고, pending/approved/rejected/expired 상태 칩과 멱등 결정 재시도를 제공한다. `resume_offer`는 결정 버튼 없이 데스크톱 재개 안내만 표시한다.
