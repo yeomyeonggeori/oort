@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337/349/350 Hermes gateway path
+# scripts/verify_hermes_gateway_adapter.sh — MOMO-325/337/349/350/530 Hermes gateway path
 #
 # Verifies the product direction where Hermes treats momo as a messaging
 # platform, while momo keeps the execution ledger SoT:
@@ -119,6 +119,10 @@ REJECTION_BODY='@hermes MOMO-349 approval rejection smoke'
 REJECTION_DECISION_ID=00000000-0000-7349-8000-000000349102
 TAKEOVER_CLIENT_MSG_ID=00000000-0000-7341-8000-000000341001
 TAKEOVER_BODY='@hermes MOMO-341 crash lease takeover smoke'
+WORK_CLIENT_MSG_ID=00000000-0000-7530-8000-000000530001
+WORK_BODY='@hermes MOMO-530 gateway work spawn smoke'
+WORK_HOST_ID=00000000-0000-7530-8000-000000530010
+WORK_APPROVAL_DECISION_ID=00000000-0000-7530-8000-000000530101
 
 TMP_ROOT=${TMPDIR:-/tmp}
 SERVER_LOG=${TMP_ROOT}/momo-hermes-gateway-server-$$.log
@@ -485,6 +489,24 @@ post_gateway_approval_request() {
     "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"approval_request\",\"approval_request\":{\"action_type\":\"tool_call\",\"title\":\"Create release issue\",\"summary\":\"Review the issue before Hermes creates it.\",\"tool_call\":{\"call_id\":\"call-momo-349\",\"name\":\"create_github_issue\",\"arguments\":{\"title\":\"MOMO-349 release checklist\"},\"tool_grant\":{\"tool_name\":\"create_github_issue\",\"approval_policy\":\"require_approval\"}},\"estimated_micro_usd\":1200,\"is_reversible\":false}}" >/dev/null
 }
 
+post_gateway_work_spawn() {
+  token=$1
+  run_id=$2
+  call_id=$3
+  label=$4
+  body=$(jq -cn \
+    --argjson job "$CURRENT_JOB_ID" \
+    --arg lease "$CURRENT_LEASE_ID" \
+    --arg call "$call_id" \
+    --arg host "$WORK_HOST_ID" \
+    --arg label "$label" \
+    '{job_id:$job,lease_id:$lease,status:"tool_call",tool_call:{
+      call_id:$call,name:"work.spawn",target_host_id:$host,
+      arguments:{tool:"codex",label:$label}}}')
+  api_request POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${run_id}/gateway/events" \
+    "$token" "$body"
+}
+
 post_gateway_cancelled() {
   token=$1
   run_id=$2
@@ -770,6 +792,18 @@ VALUES
    '${CHANNEL_ID}', '${AGENT_ID}', 'member', NULL)
 ON CONFLICT (channel_id, member_id)
 DO UPDATE SET role = EXCLUDED.role, left_at = NULL;
+
+INSERT INTO work_host
+  (id, workspace_id, scope, owner_member_id, type, display_name,
+   public_key, capabilities, last_seen_at)
+VALUES
+  ('${WORK_HOST_ID}', '${WORKSPACE_ID}', 'member', '${HUMAN_MEMBER_ID}',
+   'app', 'MOMO-530 verifier host',
+   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+   '{"codex":true}'::jsonb, now())
+ON CONFLICT (id) DO UPDATE
+  SET revoked_at = NULL,
+      last_seen_at = now();
 
 COMMIT;
 SQL
@@ -1145,6 +1179,49 @@ APPROVAL_FINAL_MESSAGE_COUNT=$(psql_scalar "SELECT count(*) FROM message WHERE w
 assert_equals "1" "$APPROVAL_FINAL_MESSAGE_COUNT" "approved run durable final message"
 APPROVAL_FINAL_BROADCAST_COUNT=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->'data'->>'type'='message.new' AND lower(payload->'data'->'payload'->>'run_id')=lower('${APPROVAL_RUN_ID}') AND payload->'data'->'payload'->>'body'='${APPROVAL_FINAL_BODY}' AND (payload->>'version')::bigint=(payload->'data'->>'seq')::bigint AND last_error IS NULL")
 assert_equals "1" "$APPROVAL_FINAL_BROADCAST_COUNT" "approved run realtime publication outbox"
+
+WORK_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$WORK_CLIENT_MSG_ID" "$WORK_BODY")
+WORK_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${WORK_CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
+if [ "$WORK_RUN_ID" = "" ]; then
+  echo "[hermes-gateway] work mention did not create agent_run" >&2
+  printf '%s\n' "$WORK_SEND_JSON" >&2
+  exit 1
+fi
+WORK_PENDING_JSON=$(fetch_pending_jobs "$AGENT_TOKEN" "$AGENT_ID")
+set_current_claim "$WORK_PENDING_JSON" "$WORK_RUN_ID"
+post_gateway_event "$AGENT_TOKEN" "$WORK_RUN_ID"
+WORK_CALL_ID=call-momo-530-spawn
+WORK_TOOL_JSON=$(post_gateway_work_spawn "$AGENT_TOKEN" "$WORK_RUN_ID" "$WORK_CALL_ID" "MOMO-530 gateway session")
+WORK_CONTROL_ID=$(printf '%s' "$WORK_TOOL_JSON" | jq -er '.workControl.id | ascii_downcase')
+assert_equals "pending_approval" "$(printf '%s' "$WORK_TOOL_JSON" | jq -r '.workControl.status')" "gateway work spawn enters canonical approval"
+WORK_TOOL_RETRY_JSON=$(post_gateway_work_spawn "$AGENT_TOKEN" "$WORK_RUN_ID" "$WORK_CALL_ID" "MOMO-530 gateway session")
+assert_equals "$WORK_CONTROL_ID" "$(printf '%s' "$WORK_TOOL_RETRY_JSON" | jq -r '.workControl.id | ascii_downcase')" "gateway work tool call_id retry is idempotent"
+WORK_TOOL_CONFLICT_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-runs/${WORK_RUN_ID}/gateway/events" "$AGENT_TOKEN" \
+  "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"tool_call\",\"tool_call\":{\"call_id\":\"${WORK_CALL_ID}\",\"name\":\"work.spawn\",\"target_host_id\":\"${WORK_HOST_ID}\",\"arguments\":{\"tool\":\"codex\",\"label\":\"mismatched retry\"}}}")
+assert_equals "409" "$WORK_TOOL_CONFLICT_CODE" "gateway work call_id cannot widen on retry"
+
+WORK_APPROVAL_ID=$(psql_scalar "SELECT id FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${WORK_RUN_ID}' AND payload->>'work_control_id'='${WORK_CONTROL_ID}' LIMIT 1")
+[ "$WORK_APPROVAL_ID" != "" ] || fail "gateway work spawn did not create linked approval"
+WORK_INITIAL_JOB_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE id=${CURRENT_JOB_ID}")
+assert_equals "done" "$WORK_INITIAL_JOB_STATUS" "pending gateway work spawn settles claimed job"
+WORK_AUDIT_COUNT=$(psql_scalar "SELECT count(*) FROM audit_log WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${WORK_RUN_ID}' AND action='agent.gateway.work_tool' AND target_id='${WORK_CONTROL_ID}' AND via_token_id='${AGENT_TOKEN_ID}'")
+assert_equals "1" "$WORK_AUDIT_COUNT" "gateway work tool audit is actor and token bound"
+
+WORK_DECISION_JSON=$(decide_approval "$ACCESS_TOKEN" "$WORK_APPROVAL_ID" true "$WORK_APPROVAL_DECISION_ID")
+assert_equals "approved" "$(printf '%s' "$WORK_DECISION_JSON" | jq -r '.status')" "gateway work spawn approval"
+WORK_DISPATCHED=$(psql_scalar "SELECT count(*) FROM work_control WHERE id='${WORK_CONTROL_ID}' AND status='dispatched' AND target_host_id='${WORK_HOST_ID}'")
+assert_equals "1" "$WORK_DISPATCHED" "approved gateway work spawn dispatches to configured host"
+WORK_DISPATCH_OUTBOX=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->'data'->>'type'='work.control.dispatched' AND lower(payload->'data'->'payload'->>'control_id')=lower('${WORK_CONTROL_ID}')")
+assert_equals "1" "$WORK_DISPATCH_OUTBOX" "gateway work dispatch uses canonical outbox"
+
+WORK_SESSION_JSON=$(api_request POST "/v1/workspaces/${WORKSPACE_ID}/work-sessions" "$ACCESS_TOKEN" \
+  "{\"channelId\":\"${CHANNEL_ID}\",\"hostId\":\"${WORK_HOST_ID}\",\"tool\":\"codex\",\"label\":\"MOMO-530 gateway session\"}")
+WORK_SESSION_ID=$(printf '%s' "$WORK_SESSION_JSON" | jq -er '.workSession.id | ascii_downcase')
+WORK_ACK_JSON=$(api_request POST "/v1/workspaces/${WORKSPACE_ID}/work-controls/${WORK_CONTROL_ID}/ack" "$ACCESS_TOKEN" \
+  "{\"ok\":true,\"sessionId\":\"${WORK_SESSION_ID}\"}")
+assert_equals "acked" "$(printf '%s' "$WORK_ACK_JSON" | jq -r '.workControl.status')" "gateway work spawn host acknowledgement"
+WORK_ACK_OUTBOX=$(psql_scalar "SELECT count(*) FROM outbox WHERE workspace_id='${WORKSPACE_ID}' AND kind='broadcast' AND payload->'data'->>'type'='work.control.acked' AND lower(payload->'data'->'payload'->>'control_id')=lower('${WORK_CONTROL_ID}') AND lower(payload->'data'->'payload'->>'session_id')=lower('${WORK_SESSION_ID}')")
+assert_equals "1" "$WORK_ACK_OUTBOX" "gateway work ack uses canonical outbox"
 
 REJECTION_SEND_JSON=$(send_message "$ACCESS_TOKEN" "$REJECTION_CLIENT_MSG_ID" "$REJECTION_BODY")
 REJECTION_RUN_ID=$(psql_scalar "SELECT id FROM agent_run WHERE workspace_id='${WORKSPACE_ID}' AND trigger_message_id=(SELECT id FROM message WHERE client_msg_id='${REJECTION_CLIENT_MSG_ID}' LIMIT 1) LIMIT 1")
