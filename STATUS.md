@@ -9,7 +9,7 @@
 ## MOMO-530 gateway work tool 원장 경로 (2026-07-21)
 
 - Gateway BYOA adapter가 host 설정 시 `work.spawn|input|read|kill` 닫힌 스키마를 provider에 노출하고, 서버는 `status=tool_call` callback의 run/lease/actor/`work:control` scope를 재검증한 뒤 기존 `WorkControlRoutes` 승인·auto-approve·host·lineage·audit/outbox 트랜잭션을 그대로 재사용한다. host UUID는 provider arguments 밖의 adapter 설정에서만 주입하며 call_id 재시도는 멱등, 다른 입력 재사용은 409다.
-- server 138 tests와 Hermes adapter 56 tests, Python compile, verifier bash 정적 검증은 PASS했다. `verify_hermes_gateway_adapter.sh`의 gateway spawn→승인→dispatch→ack 및 worker 경로 실회귀는 Docker 실행 금지 지시에 따라 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+- server 138 tests, AgentWorker 35 tests, Hermes adapter 56 tests, Python compile, verifier bash 정적 검증은 PASS했다. `verify_hermes_gateway_adapter.sh`의 gateway spawn→승인→dispatch→ack 실왕복과 기존 worker runtime 경로 회귀는 Docker 실행 금지 지시에 따라 오케스트레이터 게이트 전까지 `runtime-unverified`다.
 
 ## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
 
