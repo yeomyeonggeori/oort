@@ -213,12 +213,22 @@ ADR-0125 D10에서 원격 host/workd/provisioner는 도구를 PTY로 `create`하
 결속한다. 같은 `pty_id`에 대한 `connect`, `send_stdin`, `resize`, `kill`이 하나의 세션을
 조작한다는 것이 E2B-compatible 추상 계약이며, 실제 host PTY adapter는 후속 구현이다.
 
-세션 소유자의 human bearer만
-`POST /v1/workspaces/:ws/work-sessions/:id/terminal-attach`를 호출할 수 있다. 서버는 60초
+human bearer는 `POST /v1/workspaces/:ws/work-sessions/:id/terminal-attach`에
+`mode=controller|observer`를 요청한다. 기본 controller는 기존처럼 세션 소유자 전용이고,
+observer는 같은 workspace의 active human이면서 세션 채널 멤버이고 세션
+`observation=open`일 때만 발급된다. 소유자는 PATCH로 observation을 `open|owner_only`로
+바꿀 수 있으며 owner_only 전환은 기존 observer grant도 즉시 무효화한다. 서버는 60초
 ephemeral capability를 발급해 `{attach_endpoint, capability_token, pty_id}`를 한 번 응답하고,
-DB에는 SHA-256 digest와 발급·만료·소유자만 남긴다. audit에도 raw token은 없으며 host의
-signed validation은 capability 만료, running session, PTY binding, `work_host.revoked_at`을
-매 요청 다시 확인한다. 따라서 이미 발급된 capability도 host revoke 즉시 무효다.
+DB에는 SHA-256 digest와 발급·만료·수령 human·mode만 남긴다. audit에도 raw token은 없다.
+
+host의 signed validation은 capability 만료, running session, PTY binding,
+`work_host.revoked_at`, 수령 human의 active/channel membership, observation과 mode를 매 요청
+다시 확인하고 mode를 응답한다. host는 observer 연결에서 stdout만 허용하며 send_stdin,
+resize, kill을 거부한다. 따라서 이미 발급된 capability도 host revoke나 observer 권한 상실에
+즉시 무효다. 세션 read projection은 raw endpoint/token 없이 `observation`, 현재 유효한
+`observerGrantCount`, PTY 결속 여부인 `remoteAttachAvailable`만 제공한다. observer 발급 시
+count-only `work.session.observer` 이벤트가 transactional outbox를 거치며 terminal raw는
+여전히 이 이벤트에 포함되지 않는다.
 
 ```mermaid
 sequenceDiagram
@@ -226,15 +236,17 @@ sequenceDiagram
     participant S as MomoServer
     participant P as PostgreSQL
     participant H as Remote PTY host
-    C->>S: POST terminal-attach (human owner)
-    S->>P: token digest + issued/expires/owner audit
+    C->>S: POST terminal-attach (human, controller|observer)
+    S->>P: token digest + issued/expires/grantee/mode audit
     S-->>C: endpoint + raw capability + pty_id
     C->>H: direct WSS/HTTPS connect (capability, pty_id)
     H->>S: signed capability validation
     S->>P: expiry/session/revoke check
-    S-->>H: validated pty_id + expires_at
+    S-->>H: validated pty_id + expires_at + mode
     H-->>C: PTY output bytes (direct only)
-    C->>H: stdin / resize (direct only)
+    opt controller only
+        C->>H: stdin / resize / kill (direct only)
+    end
 ```
 
 MomoServer에는 terminal WebSocket, stdin/stdout, resize, publish, outbox route가 없고 Relay와
