@@ -525,8 +525,8 @@ struct JoinRoutes: Sendable {
             """
             SELECT EXISTS (
               SELECT 1 FROM workspace_ban
-               WHERE (\(email) IS NOT NULL AND email_norm = lower(\(email)))
-                  OR (\(handle) IS NOT NULL AND handle_norm = lower(\(handle)))
+               WHERE (\(email)::text IS NOT NULL AND email_norm = lower(\(email)::text))
+                  OR (\(handle)::text IS NOT NULL AND handle_norm = lower(\(handle)::text))
             )
             """,
             logger: logger

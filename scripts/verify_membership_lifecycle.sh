@@ -151,6 +151,9 @@ INSERT INTO workspace_membership (workspace_id,member_id,role) VALUES
 INSERT INTO membership (workspace_id,channel_id,member_id,role) VALUES
  ('$WS_ID','$PUBLIC_CH','$ADMIN_ID','admin'),('$WS_ID','$PUBLIC_CH','$MEMBER_ID','member'),
  ('$WS_ID','$PUBLIC_CH','$GUEST_ID','guest');
+-- 002_seed의 demo 계정은 password_hash가 NULL이라 로그인 불가 — 게이트 전용 비밀번호 부여
+UPDATE human SET password_hash=momo_password_hash('$PASSWORD')
+ WHERE workspace_id='$WS_ID' AND email='demo@momo.local';
 COMMIT;
 SQL
 

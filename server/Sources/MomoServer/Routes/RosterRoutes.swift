@@ -160,7 +160,7 @@ struct RosterRoutes: Sendable {
                       ) ch ON true
                      WHERE m.deleted_at IS NULL
                        AND m.status = 'active'
-                       AND (\(kindFilter) IS NULL OR m.kind::text = \(kindFilter))
+                       AND (\(kindFilter)::text IS NULL OR m.kind::text = \(kindFilter)::text)
                        AND (NOT \(viewerIsGuest) OR m.id = \(viewerID) OR EXISTS (
                          SELECT 1
                            FROM membership target_ms

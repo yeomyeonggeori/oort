@@ -473,8 +473,8 @@ struct MemberLifecycleRoutes: Sendable {
             SELECT EXISTS (
               SELECT 1 FROM workspace_ban
                WHERE workspace_id = \(workspaceID)
-                 AND ((\(email) IS NOT NULL AND email_norm = \(email))
-                   OR (\(handle) IS NOT NULL AND handle_norm = \(handle)))
+                 AND ((\(email)::text IS NOT NULL AND email_norm = \(email)::text)
+                   OR (\(handle)::text IS NOT NULL AND handle_norm = \(handle)::text))
             )
             """,
             logger: logger
