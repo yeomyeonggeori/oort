@@ -1292,6 +1292,93 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return response.workSession
     }
 
+    func resumeWorkSession(
+        workspace requestedWorkspace: WorkspaceID,
+        session workSessionID: WorkSessionID,
+        targetHost: WorkHostID
+    ) async throws -> MomoWorkSession {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await post(
+            "/v1/workspaces/\(requestedWorkspace.description)/work-sessions/\(workSessionID.description)/resume",
+            body: MomoResumeWorkSessionRequestDTO(targetHostId: targetHost),
+            authorized: true,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkSessionResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workSession.workspaceId == requestedWorkspace,
+              response.workSession.resumedFromSessionId == workSessionID,
+              response.workSession.hostId == targetHost,
+              response.workSession.isRunning
+        else { throw BackendError.decoding("resumed work session response mismatch") }
+        return response.workSession
+    }
+
+    func workTierPolicy(
+        workspace requestedWorkspace: WorkspaceID,
+        scope: MomoWorkTierPolicyScope
+    ) async throws -> MomoWorkTierPolicy {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let response = try await get(
+            workTierPolicyPath(workspace: requestedWorkspace, scope: scope),
+            queryItems: [],
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: MomoWorkTierPolicyResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workTierPolicy.workspaceId == requestedWorkspace else {
+            throw BackendError.decoding("work tier policy workspace mismatch")
+        }
+        return response.workTierPolicy
+    }
+
+    func setWorkTierPolicy(
+        workspace requestedWorkspace: WorkspaceID,
+        scope: MomoWorkTierPolicyScope,
+        mode: MomoWorkTierPolicyMode,
+        autoTarget: String?
+    ) async throws -> MomoWorkTierPolicy {
+        let context = try requireSessionContext()
+        guard context.workspace == requestedWorkspace else {
+            throw BackendError.notConnected
+        }
+        let normalizedTarget = autoTarget?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard (mode == .auto) == (normalizedTarget?.isEmpty == false) else {
+            throw BackendError.problem(
+                status: 400,
+                title: "invalid work tier policy",
+                detail: "auto mode requires one target and other modes forbid it"
+            )
+        }
+        let response = try await put(
+            workTierPolicyPath(workspace: requestedWorkspace, scope: scope),
+            body: MomoPutWorkTierPolicyRequestDTO(
+                mode: mode,
+                autoTarget: mode == .auto ? normalizedTarget : nil
+            ),
+            response: MomoWorkTierPolicyResponseDTO.self
+        )
+        try ensureSessionCurrent(context)
+        guard response.workTierPolicy.workspaceId == requestedWorkspace,
+              response.workTierPolicy.mode == mode
+        else { throw BackendError.decoding("work tier policy response mismatch") }
+        return response.workTierPolicy
+    }
+
+    private func workTierPolicyPath(
+        workspace: WorkspaceID,
+        scope: MomoWorkTierPolicyScope
+    ) -> String {
+        let base = "/v1/workspaces/\(workspace.description)/work-tier-policy"
+        return scope == .member ? "\(base)/me" : base
+    }
+
     func acknowledgeWorkControl(
         workspace requestedWorkspace: WorkspaceID,
         control: WorkControlID,
@@ -2389,6 +2476,19 @@ private struct MomoEndWorkSessionRequestDTO: Encodable {
 
 private struct MomoUpdateWorkSessionObservationRequestDTO: Encodable {
     let observation: MomoWorkSessionObservation
+}
+
+private struct MomoResumeWorkSessionRequestDTO: Encodable {
+    let targetHostId: WorkHostID
+}
+
+private struct MomoPutWorkTierPolicyRequestDTO: Encodable {
+    let mode: MomoWorkTierPolicyMode
+    let autoTarget: String?
+}
+
+private struct MomoWorkTierPolicyResponseDTO: Decodable {
+    let workTierPolicy: MomoWorkTierPolicy
 }
 
 private struct MomoWorkControlAckRequestDTO: Encodable {

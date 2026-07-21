@@ -29,6 +29,7 @@ public struct MessageBubble: View {
     private let onToggleReaction: ((String) -> Void)?
     private let onOpenThread: (() -> Void)?
     private let onOpenWorkTerminal: (() -> Void)?
+    private let onOpenWorkSession: (() -> Void)?
     private let onEdit: ((String) async -> Bool)?
     private let onDelete: (() -> Void)?
     private let onDismissInteractionError: (() -> Void)?
@@ -75,6 +76,7 @@ public struct MessageBubble: View {
         self.onToggleReaction = nil
         self.onOpenThread = nil
         self.onOpenWorkTerminal = nil
+        self.onOpenWorkSession = nil
         self.onEdit = nil
         self.onDelete = nil
         self.onDismissInteractionError = nil
@@ -100,6 +102,7 @@ public struct MessageBubble: View {
         onToggleReaction: ((String) -> Void)? = nil,
         onOpenThread: (() -> Void)? = nil,
         onOpenWorkTerminal: (() -> Void)? = nil,
+        onOpenWorkSession: (() -> Void)? = nil,
         onEdit: ((String) async -> Bool)? = nil,
         onDelete: (() -> Void)? = nil,
         onDismissInteractionError: (() -> Void)? = nil,
@@ -123,6 +126,7 @@ public struct MessageBubble: View {
         self.onToggleReaction = onToggleReaction
         self.onOpenThread = onOpenThread
         self.onOpenWorkTerminal = onOpenWorkTerminal
+        self.onOpenWorkSession = onOpenWorkSession
         self.onEdit = onEdit
         self.onDelete = onDelete
         self.onDismissInteractionError = onDismissInteractionError
@@ -552,6 +556,8 @@ public struct MessageBubble: View {
                 .momoTypography(.messageBody)
                 .italic()
                 .foregroundStyle(.secondary)
+        } else if message.props["kind"]?.stringValue == "resume_offer" {
+            resumeOfferCard
         } else if message.props["kind"]?.stringValue == "work_session" {
             workSessionCard
         } else if isAgent,
@@ -704,13 +710,18 @@ public struct MessageBubble: View {
 
     private var workSessionCard: some View {
         let tool = MomoWorkTool(rawValue: message.props["tool"]?.stringValue ?? "") ?? .shell
-        let status = message.props["status"]?.stringValue ?? "running"
-        let isRunning = status == "running"
+        let status = MomoWorkSessionStatus(
+            rawValue: message.props["status"]?.stringValue ?? "running"
+        ) ?? .running
+        let isRunning = status == .running
         let label = message.props["label"]?.stringValue ?? timelineCopy.workConsole
+        let tint: Color = status == .orphaned
+            ? MomoTheme.costAmber
+            : (isRunning ? MomoTheme.agentAccent : .secondary)
 
         return cardFrame(
             icon: tool.systemImage,
-            tint: isRunning ? MomoTheme.agentAccent : .secondary,
+            tint: tint,
             title: timelineCopy.workConsole
         ) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -720,10 +731,16 @@ public struct MessageBubble: View {
                     .momoTypography(.metadata)
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
-                Text(isRunning ? timelineCopy.workSessionRunning : timelineCopy.workSessionEnded)
+                Text(timelineCopy.workSessionStatus(status))
                     .momoTypography(.metadata)
                     .fontWeight(.semibold)
-                    .foregroundStyle(isRunning ? MomoTheme.agentAccent : .secondary)
+                    .foregroundStyle(tint)
+            }
+            if let rawSourceID = message.props["resumed_from_session_id"]?.stringValue,
+               let sourceID = WorkSessionID(uuidString: rawSourceID.lowercased()) {
+                Text("\(timelineCopy.workSessionLineage) \(timelineCopy.workSessionShortID(sourceID))")
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
             }
             if let exitCode = message.props["exit_code"]?.intValue {
                 Text(timelineCopy.workSessionExit(Int(exitCode)))
@@ -741,6 +758,28 @@ public struct MessageBubble: View {
                     Label(timelineCopy.workSessionOpenRemoteTerminal, systemImage: "terminal")
                 }
                 .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private var resumeOfferCard: some View {
+        cardFrame(
+            icon: "arrow.trianglehead.2.clockwise.rotate.90",
+            tint: MomoTheme.costAmber,
+            title: timelineCopy.workResumeOfferTitle
+        ) {
+            Text(message.body?.isEmpty == false ? message.body ?? timelineCopy.workResumeOfferBody : timelineCopy.workResumeOfferBody)
+                .momoTypography(.messageBody)
+                .fixedSize(horizontal: false, vertical: true)
+            Label(timelineCopy.workResumeLossWarning, systemImage: "exclamationmark.triangle")
+                .momoTypography(.metadata)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let onOpenWorkSession {
+                Button(action: onOpenWorkSession) {
+                    Label(timelineCopy.workResumeOpenConsole, systemImage: "terminal")
+                }
+                .buttonStyle(.bordered)
             }
         }
     }
