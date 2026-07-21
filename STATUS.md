@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
+
+- ADR-0125 D11에 따라 workspace 기본/member override `work_tier_policy`(t1_only/ask/auto), stale heartbeat의 orphan 전이, ask `resume_offer` 카드와 `momo.work` 알림, t1_only terminal 정리, auto 재디스패치를 기존 PG→outbox 및 Notifier 폴링 경로에 추가했다.
+- human owner의 resume REST는 같은 root thread를 유지한 새 running session과 `resumed_from_session_id` 계보·기존 spawn control을 한 tenant transaction에 기록하고 원 세션을 ended(resumed)로 닫는다. 경로·자격증명·PTY/프로세스 상태는 유입하지 않는다.
+- server 127 tests·NotifierWorker 4 tests·PushRelay 6 tests·WorkHostDaemon 6 tests와 OpenAPI YAML/operationId·verifier bash/ShellCheck 정적 검증이 PASS했다. `verify_tier_fallback.sh`의 28020~28023 격리 Docker 런타임은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-511-U macOS 원격 터미널 attach (2026-07-21)
 
 - macOS Work 서랍이 owner의 running 원격 `work_session`에서 exact 3-field attach grant를 메모리에서만 소비하고, capability를 Authorization header로 전달해 SwiftTerm과 remote PTY를 직접 연결한다. stdout 렌더, byte stdin, 문자 단위 resize, kill 프레임은 `connect/send_stdin/resize/kill` 최소 계약만 사용하며 capability와 endpoint를 URL query, UserDefaults, 로그, 원장에 남기지 않는다.

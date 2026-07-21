@@ -1073,6 +1073,105 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-tier-policy:
+    get:
+      tags: [work-sessions]
+      operationId: getWorkspaceWorkTierPolicy
+      summary: Read the workspace-default host-loss fallback policy.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Stored default, or the virtual ask default when no row exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin role required.
+    put:
+      tags: [work-sessions]
+      operationId: putWorkspaceWorkTierPolicy
+      summary: Replace the workspace-default host-loss fallback policy.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutWorkTierPolicyRequest"
+      responses:
+        "200":
+          description: Updated policy and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "400":
+          description: Invalid mode or auto target.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin role required.
+        "409":
+          description: Concrete auto target is unavailable or not workspace-scoped.
+
+  /v1/workspaces/{workspaceId}/work-tier-policy/me:
+    get:
+      tags: [work-sessions]
+      operationId: getMyWorkTierPolicy
+      summary: Read the caller's effective fallback policy and inheritance state.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Member override, inherited workspace default, or virtual ask default.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+    put:
+      tags: [work-sessions]
+      operationId: putMyWorkTierPolicy
+      summary: Replace the caller's member-specific fallback policy override.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutWorkTierPolicyRequest"
+      responses:
+        "200":
+          description: Updated member override and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkTierPolicyResponse"
+        "400":
+          description: Invalid mode or auto target.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required.
+        "409":
+          description: Concrete auto target is unavailable or outside the member scope.
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}:
     patch:
       tags: [work-sessions]
@@ -1130,6 +1229,48 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/resume:
+    post:
+      tags: [work-sessions]
+      operationId: resumeWorkSession
+      summary: Resume an orphaned session on another registered host.
+      description: >
+        Human session owner only. The source becomes ended(resumed), while a
+        new running work_session reuses the same root thread, records
+        resumedFromSessionId, and emits the existing spawn dispatch in one
+        tenant transaction. Host paths, credentials, and process state are not
+        accepted or persisted.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResumeWorkSessionRequest"
+      responses:
+        "201":
+          description: New running session with durable lineage and dispatched spawn control.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkSessionResponse"
+        "400":
+          description: Invalid source session or target host identifier.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Human caller is not the source session owner.
+        "404":
+          description: Source session does not exist in this workspace.
+        "409":
+          description: >
+            Source is not orphaned, target host is revoked/unavailable/outside
+            policy, or the workspace/member pool has no available slot.
 
   /v1/workspaces/{workspaceId}/work-sessions/{workSessionId}/terminal-attach:
     post:
@@ -3759,6 +3900,59 @@ components:
           type: integer
           format: int32
 
+    ResumeWorkSessionRequest:
+      type: object
+      required: [targetHostId]
+      properties:
+        targetHostId:
+          type: string
+          format: uuid
+          description: Active registered host allowed by the effective tier policy.
+
+    PutWorkTierPolicyRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [t1_only, ask, auto]
+          default: ask
+        autoTarget:
+          type: string
+          description: Required only for auto; a work_host UUID or the reserved cloud selector.
+          pattern: '^(cloud|[0-9a-fA-F-]{36})$'
+
+    WorkTierPolicy:
+      type: object
+      required: [workspaceId, mode, inherited]
+      properties:
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+          description: Present for a member override or inherited effective member policy.
+        mode:
+          type: string
+          enum: [t1_only, ask, auto]
+        autoTarget:
+          type: string
+          description: Concrete work_host UUID or the reserved cloud selector in auto mode.
+        inherited:
+          type: boolean
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: Absent for the virtual ask default.
+
+    WorkTierPolicyResponse:
+      type: object
+      required: [workTierPolicy]
+      properties:
+        workTierPolicy:
+          $ref: "#/components/schemas/WorkTierPolicy"
+
     WorkSession:
       type: object
       required:
@@ -3792,7 +3986,7 @@ components:
           maxLength: 120
         status:
           type: string
-          enum: [running, ended]
+          enum: [running, orphaned, ended]
         startedAtMs:
           type: integer
           format: int64
@@ -3804,6 +3998,14 @@ components:
           type: integer
           format: int32
           description: Present only when the ending host reports an exit code.
+        endReason:
+          type: string
+          enum: [orphaned, resumed]
+          description: Terminal host-loss or resume reason when applicable.
+        resumedFromSessionId:
+          type: string
+          format: uuid
+          description: Source orphaned session; the root thread remains unchanged.
 
     WorkSessionResponse:
       type: object

@@ -157,6 +157,16 @@ card의 기존 `message.seq`를 재사용하므로 `message.new`가 소유한 Ce
 terminal output·provider credential은 계속 host-local이다. `host_id`는 ADR-0125의
 `work_host` registry FK이며, 활성·미철회 host와 tenant/scope 결속을 REST 경계에서 검증한다.
 
+ADR-0125 D11의 host-loss fallback은 NotifierWorker의 기존 bounded polling에만 가산된다.
+`MOMO_HOST_OFFLINE_GRACE_S`(기본 90초)를 넘긴 running session은 같은 transaction에서
+`work.session.orphaned` outbox와 감사 원장을 남긴다. 유효 정책은 member override→workspace
+default→`ask` 순이다. `ask`는 같은 root thread에 기존 `approval_request` 문법의
+`resume_offer`를 쓰고 notifier가 `momo.work` id-only push를 만든다. `t1_only`는 카드 없이
+ended(orphaned)로 닫고, `auto`는 허용된 active target에 새 session과 기존 spawn control을
+직접 기록한다. human owner의 `POST .../work-sessions/:id/resume`도 같은 경로를 재사용하며,
+새 row의 `resumed_from_session_id`와 동일 `root_message_id`만으로 git 재개 계보·스레드 지속을
+표현한다. clone/prompt/process/PTY와 경로·자격증명 이전은 host 책임이며 서버 원장에 없다.
+
 ### Interactive Work Console control gate
 
 ADR-0114 D4/D5의 `work_control`은 agent bearer가 자기 `queued|running` run과 channel에

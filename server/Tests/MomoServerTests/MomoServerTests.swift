@@ -2251,6 +2251,53 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testTierFallbackPolicyAndResumeProjectionContracts() throws {
+        XCTAssertEqual(try WorkTierPolicyRoutes.validatedMode("t1_only"), "t1_only")
+        XCTAssertEqual(try WorkTierPolicyRoutes.validatedMode("ask"), "ask")
+        XCTAssertEqual(try WorkTierPolicyRoutes.validatedMode("auto"), "auto")
+        XCTAssertThrowsError(try WorkTierPolicyRoutes.validatedMode("always"))
+        XCTAssertNil(try WorkTierPolicyRoutes.validatedAutoTarget(nil, mode: "ask"))
+        XCTAssertEqual(
+            try WorkTierPolicyRoutes.validatedAutoTarget(" CLOUD ", mode: "auto"),
+            "cloud"
+        )
+        XCTAssertThrowsError(
+            try WorkTierPolicyRoutes.validatedAutoTarget("cloud", mode: "ask")
+        )
+        XCTAssertThrowsError(
+            try WorkTierPolicyRoutes.validatedAutoTarget(nil, mode: "auto")
+        )
+
+        let sourceID = UUID(uuidString: "00000000-0000-7000-8000-000000000519")!
+        let resumedID = UUID(uuidString: "00000000-0000-7000-8000-000000000520")!
+        let props = WorkSessionRoutes.cardProps(
+            sessionID: resumedID,
+            tool: "codex",
+            label: "resume",
+            status: "running",
+            resumedFromSessionID: sourceID
+        )
+        XCTAssertEqual(props["resumed_from_session_id"] as? String, sourceID.uuidString)
+
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/025_work_tier_fallback.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE work_tier_policy"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("resumed_from_session_id"))
+        XCTAssertTrue(migration.contains("'orphaned'"))
+        for forbidden in ["cwd", "attach_endpoint", "capability_token", "provider_credential"] {
+            XCTAssertFalse(migration.contains(forbidden))
+        }
+    }
+
     func testTerminalAttachBindingCapabilityAndWireShape() throws {
         XCTAssertEqual(
             try RemotePTYBinding.validated(
