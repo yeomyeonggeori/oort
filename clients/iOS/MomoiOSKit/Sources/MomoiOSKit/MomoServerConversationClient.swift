@@ -311,7 +311,10 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
-        let delta = try decoder.decode(ReactionDelta.self, from: try await execute(request: request))
+        let delta = try decoder.decode(
+            IOSReactionDeltaDTO.self,
+            from: try await execute(request: request)
+        ).value()
         guard delta.action == expectedAction, delta.messageId == id, delta.emoji == emoji else {
             throw SessionError.decoding("The server returned a different message reaction.")
         }
@@ -541,6 +544,23 @@ private struct IOSSendMessageRequest: Encodable {
     }
 }
 private struct IOSEditMessageRequest: Encodable { let body: String }
+struct IOSReactionDeltaDTO: Decodable {
+    let action: String
+    let messageId: String
+    let memberId: String
+    let emoji: String
+
+    func value() throws -> ReactionDelta {
+        guard let action = ReactionDelta.Action(rawValue: action),
+              let messageID = MessageID(uuidString: messageId),
+              let memberID = MemberID(uuidString: memberId),
+              !emoji.isEmpty
+        else {
+            throw SessionError.decoding("The server returned an invalid message reaction.")
+        }
+        return ReactionDelta(action: action, messageId: messageID, memberId: memberID, emoji: emoji)
+    }
+}
 private struct IOSApprovalDecisionReceiptDTO: Decodable {
     let approvalId: String
     let status: String
