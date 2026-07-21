@@ -261,7 +261,7 @@ struct MemberLifecycleRoutes: Sendable {
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let dto = try await request.decode(as: CreateWorkspaceBanRequest.self, context: context)
         let email = try dto.email.map(JoinRoutes.normalizedEmail)
-        let handle = try dto.handle.map { try JoinRoutes.normalizedRequestedHandle($0)! }
+        let handle = try JoinRoutes.normalizedRequestedHandle(dto.handle)
         guard email != nil || handle != nil else {
             throw HTTPError(.badRequest, message: "email or handle is required")
         }

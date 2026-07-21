@@ -3796,5 +3796,6 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(authorization.contains("FROM workspace_membership wm"))
         XCTAssertFalse(authorization.contains("FROM membership ms"))
         XCTAssertTrue(authorization.contains("m.status = 'active'"))
+        XCTAssertTrue(authorization.contains("pg_advisory_xact_lock"))
     }
 }

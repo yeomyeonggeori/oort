@@ -139,6 +139,11 @@ VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
   ('$WS_ID', '$CHANNEL_ID', '$OTHER_OWNER_ID', 'member'),
   ('$WS_ID', '$CHANNEL_ID', '$AGENT_ID', 'member');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$OTHER_OWNER_ID', 'member'),
+  ('$WS_ID', '$AGENT_ID', 'member');
 INSERT INTO agent_run
   (id, workspace_id, agent_member_id, channel_id, status, input,
    step_count, max_steps, depth, idempotency_key)

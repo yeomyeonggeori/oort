@@ -110,6 +110,10 @@ INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
   ('$WS_ID', '$CHANNEL_ID', '$OTHER_ID', 'member');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$OTHER_ID', 'member');
 INSERT INTO work_host
   (id, workspace_id, scope, owner_member_id, type, display_name, public_key,
    capabilities, last_seen_at, revoked_at)

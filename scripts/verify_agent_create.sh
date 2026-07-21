@@ -168,6 +168,10 @@ VALUES
    momo_password_hash('$ADMIN_PASSWORD'), 'UTC'),
   ('$MEMBER_ID', '$WS_ID', '$MEMBER_EMAIL', true,
    momo_password_hash('$MEMBER_PASSWORD'), 'UTC');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$ADMIN_ID', 'admin'),
+  ('$WS_ID', '$MEMBER_ID', 'member');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$ADMIN_ID', 'admin'),
@@ -267,6 +271,8 @@ SELECT
         AND tool_schema='[]'::jsonb
         AND config='{"temperature":0.2,"max_tokens":2048}'::jsonb
         AND owner_human_id='$ADMIN_ID')
+  * (SELECT count(*) FROM workspace_membership
+      WHERE workspace_id='$WS_ID' AND member_id='$AGENT_ID' AND role='member')
   * (SELECT count(*) FROM audit_log
       WHERE workspace_id='$WS_ID' AND actor_member_id='$ADMIN_ID'
         AND subject_member_id='$AGENT_ID' AND action='agent.created'
@@ -354,6 +360,7 @@ SET LOCAL app.workspace_id = '$CROSS_WS_ID';
 SELECT
   (SELECT count(*) FROM member WHERE id='$AGENT_ID')
   + (SELECT count(*) FROM agent WHERE member_id='$AGENT_ID')
+  + (SELECT count(*) FROM workspace_membership WHERE member_id='$AGENT_ID')
   + (SELECT count(*) FROM membership WHERE member_id='$AGENT_ID')
   + (SELECT count(*) FROM token WHERE id='$CREDENTIAL_ID')
   + (SELECT count(*) FROM audit_log WHERE subject_member_id='$AGENT_ID');

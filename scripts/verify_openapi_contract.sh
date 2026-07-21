@@ -276,6 +276,10 @@ INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$GATE_MEMBER_ID', 'admin'),
        ('$DEMO_WORKSPACE_ID', '$GENERAL_CHANNEL_ID', '$GATE_AGENT_ID', 'member');
 
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$DEMO_WORKSPACE_ID', '$GATE_MEMBER_ID', 'admin'),
+       ('$DEMO_WORKSPACE_ID', '$GATE_AGENT_ID', 'member');
+
 INSERT INTO agent (member_id, workspace_id, model, base_url, system_prompt, owner_human_id)
 VALUES ('$GATE_AGENT_ID', '$DEMO_WORKSPACE_ID', 'openapi-gate',
         'http://localhost:8088/v1', 'MOMO-459 OpenAPI gate', '$GATE_MEMBER_ID');
@@ -819,6 +823,36 @@ guard_jq '.error.code == -32003 and .error.data.code == "momo.drive.grant_requir
   "Drive MCP grant-required code"
 sample plugin-install-revoke delete "/v1/workspaces/{workspaceId}/plugins/{pluginId}/install" \
   "$DRIVE_PATH/install" 200 "" "$ACCESS"
+
+# Workspace membership lifecycle: role hierarchy, status transitions, removal,
+# and the durable ban ledger. The disposable gate agent is no longer needed by
+# later samples, so removal cannot invalidate another operation's fixture.
+MEMBERSHIP_PATH="/v1/workspaces/$WS/members/$GATE_AGENT_ID"
+sample workspace-member-role patch \
+  "/v1/workspaces/{workspaceId}/members/{memberId}/role" \
+  "$MEMBERSHIP_PATH/role" 200 '{"role":"guest"}' "$ACCESS"
+sample channel-member-role patch \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role" \
+  "/v1/workspaces/$WS/channels/$GENERAL_ID/members/$GATE_AGENT_ID/role" \
+  200 '{"role":"guest"}' "$ACCESS"
+sample workspace-member-suspend post \
+  "/v1/workspaces/{workspaceId}/members/{memberId}/suspend" \
+  "$MEMBERSHIP_PATH/suspend" 200 "" "$ACCESS"
+sample workspace-member-reinstate post \
+  "/v1/workspaces/{workspaceId}/members/{memberId}/reinstate" \
+  "$MEMBERSHIP_PATH/reinstate" 200 "" "$ACCESS"
+sample workspace-member-remove delete \
+  "/v1/workspaces/{workspaceId}/members/{memberId}" \
+  "$MEMBERSHIP_PATH" 200 '{}' "$ACCESS"
+
+BAN_PATH="/v1/workspaces/$WS/bans"
+sample workspace-ban-create post "/v1/workspaces/{workspaceId}/bans" \
+  "$BAN_PATH" 201 '{"email":"openapi-ban@momo.local","reason":"contract sample"}' "$ACCESS"
+BAN_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.ban.id' | tr '[:upper:]' '[:lower:]')"
+sample workspace-ban-list get "/v1/workspaces/{workspaceId}/bans" \
+  "$BAN_PATH" 200 "" "$ACCESS"
+sample workspace-ban-delete delete "/v1/workspaces/{workspaceId}/bans/{banId}" \
+  "$BAN_PATH/$BAN_ID" 200 "" "$ACCESS"
 
 # webhooks: management, native signed ingress, Slack-compatible ingress.
 WEBHOOKS_PATH="/v1/workspaces/$WS/webhooks"

@@ -176,6 +176,11 @@ INSERT INTO agent
 VALUES
   ('$AGENT_ID', '$WS_ID', 'hermes-agent', 'http://localhost:8088/v1',
    'MOMO-487 verifier', '$OWNER_ID');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$OTHER_ID', 'member'),
+  ('$WS_ID', '$AGENT_ID', 'member');
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
@@ -203,6 +208,8 @@ VALUES ('$CROSS_WS_ID', 'momo-487-cross-$RUN_TAG', 'MOMO-487 Cross Workspace');
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES ('$CROSS_MEMBER_ID', '$CROSS_WS_ID', 'human', 'active',
         'Cross Host Owner', 'whx-$RUN_TAG');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('$CROSS_WS_ID', '$CROSS_MEMBER_ID', 'owner');
 INSERT INTO work_host
   (id, workspace_id, scope, owner_member_id, type, display_name, public_key)
 VALUES

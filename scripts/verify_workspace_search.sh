@@ -126,6 +126,12 @@ VALUES
   ('$WS_A', '$CH_DM', '$SEARCH_MEMBER', 'member'),
   ('$WS_A', '$CH_DM', '$AUTHOR_MEMBER', 'member'),
   ('$WS_B', '$CH_B', '$MEMBER_B', 'owner');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_A', '$SEARCH_MEMBER', 'member'),
+  ('$WS_A', '$RATE_MEMBER', 'member'),
+  ('$WS_A', '$AUTHOR_MEMBER', 'member'),
+  ('$WS_B', '$MEMBER_B', 'owner');
 
 INSERT INTO message
   (id, workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body, deleted_at, created_at)
