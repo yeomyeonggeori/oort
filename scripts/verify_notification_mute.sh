@@ -189,6 +189,11 @@ VALUES
   ('$WORKSPACE_ID', '$CHANNEL_ID', '$SENDER_ID', 'member'),
   ('$WORKSPACE_ID', '$CHANNEL_ID', '$MUTED_ID', 'member'),
   ('$WORKSPACE_ID', '$CHANNEL_ID', '$PEER_ID', 'member');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WORKSPACE_ID', '$SENDER_ID', 'member'),
+  ('$WORKSPACE_ID', '$MUTED_ID', 'member'),
+  ('$WORKSPACE_ID', '$PEER_ID', 'member');
 COMMIT;
 SQL
 

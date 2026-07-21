@@ -1,6 +1,6 @@
 # ADR-0128: 멤버십·권한 수명주기 v1 — 역할 분리, 승격/강등, 정지/추방/차단
 
-- Status: **Proposed** (2026-07-21, Fable 기안 — 성재 승인 대기)
+- Status: **Accepted** (2026-07-21, 성재 승인 — 파생 MOMO-523/524/525 발급)
 - 관련: docs/planning/2026-07-21-permissions-workspace-diagnosis.md(진단 정본), research/18-permissions-workspaces/(업계 조사), ADR-0121(셀프호스트 — 관리자 기능이 신뢰 전제), ADR-0117(멀티 워크스페이스 — 후속 예약, 이 ADR이 선행)
 - 발단: 성재(2026-07-21) — "owner/admin이 초대·권한 부여·회수·내보내기까지 되는지. 메신저 설계 핵심은 권한과 워크스페이스."
 

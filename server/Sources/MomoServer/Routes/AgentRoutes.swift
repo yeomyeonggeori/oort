@@ -50,14 +50,11 @@ struct AgentRoutes: Sendable {
         let result: AgentCreationResult = try await db.withTenantTransaction(
             workspaceID: workspaceID
         ) { conn in
-            let role = try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
+            let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
                 memberID: principal.memberID
             )
-            guard role == "owner" || role == "admin" else {
-                return .forbidden
-            }
+            guard role?.isAdmin == true else { return .forbidden }
 
             let ownerRows = try await conn.query(
                 """
@@ -96,6 +93,14 @@ struct AgentRoutes: Sendable {
                 VALUES
                   (\(agentID), \(workspaceID), \(model), \(baseURL), \(systemPrompt),
                    '[]'::jsonb, \(configJSON)::jsonb, \(ownerHumanID))
+                """,
+                logger: db.logger
+            )
+
+            _ = try await conn.query(
+                """
+                INSERT INTO workspace_membership (workspace_id, member_id, role)
+                VALUES (\(workspaceID), \(agentID), 'member')
                 """,
                 logger: db.logger
             )

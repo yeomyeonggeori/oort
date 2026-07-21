@@ -49,9 +49,8 @@ struct ChannelRoutes: Sendable {
         let result: (isMember: Bool, channels: [ChannelDTO]) = try await db.withTenantConnection(
             workspaceID: workspaceID
         ) { conn in
-            let role = try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
+            let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
                 memberID: principal.memberID
             )
             guard role != nil else { return (false, []) }
@@ -190,6 +189,9 @@ struct ChannelRoutes: Sendable {
                      AND m.id = \(dto.memberId)
                      AND m.status = 'active'
                      AND m.deleted_at IS NULL
+                    JOIN workspace_membership wm
+                      ON wm.workspace_id = m.workspace_id
+                     AND wm.member_id = m.id
                    WHERE c.id = \(channelID)
                      AND c.workspace_id = \(workspaceID)
                      AND c.kind IN ('public', 'private')
@@ -379,18 +381,10 @@ struct ChannelRoutes: Sendable {
         workspaceID: UUID,
         principal: AuthPrincipal
     ) async throws {
-        let role = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
-            try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
-                memberID: principal.memberID
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            _ = try await WorkspaceAuthorization.requireAdmin(
+                conn: conn, logger: db.logger, principal: principal
             )
-        }
-        guard let role else {
-            throw HTTPError(.forbidden, message: "not a workspace member")
-        }
-        guard role == "owner" || role == "admin" else {
-            throw HTTPError(.forbidden, message: "workspace admin required")
         }
     }
 

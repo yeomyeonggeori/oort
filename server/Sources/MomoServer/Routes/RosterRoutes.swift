@@ -32,17 +32,17 @@ struct RosterRoutes: Sendable {
         let result: (isMember: Bool, members: [RosterMemberDTO]) = try await db.withTenantConnection(
             workspaceID: workspaceID
         ) { conn in
-            let role = try await InviteRoutes.activeWorkspaceRole(
-                conn: conn,
-                logger: db.logger,
+            guard let role = try await WorkspaceAuthorization.activeRole(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
                 memberID: principal.memberID
-            )
-            guard role != nil else { return (false, []) }
+            ) else { return (false, []) }
 
             if let kindFilter {
                 let members = try await Self.fetchRoster(
                     conn: conn,
                     logger: db.logger,
+                    viewerID: principal.memberID,
+                    viewerIsGuest: role == .guest,
                     kindFilter: kindFilter,
                     limit: limit
                 )
@@ -51,6 +51,8 @@ struct RosterRoutes: Sendable {
             let members = try await Self.fetchRoster(
                 conn: conn,
                 logger: db.logger,
+                viewerID: principal.memberID,
+                viewerIsGuest: role == .guest,
                 limit: limit
             )
             return (true, members)
@@ -84,13 +86,13 @@ struct RosterRoutes: Sendable {
     private static func fetchRoster(
         conn: PostgresConnection,
         logger: Logger,
+        viewerID: UUID,
+        viewerIsGuest: Bool,
         kindFilter: String? = nil,
         limit: Int
     ) async throws -> [RosterMemberDTO] {
-        let rows: [PostgresRow]
-        if let kindFilter {
-            rows = try await conn.query(
-                """
+        let rows = try await conn.query(
+            """
                 SELECT COALESCE(json_agg(row_json ORDER BY row_json->>'kind', row_json->>'handle')::text, '[]') AS payload
                   FROM (
                     SELECT json_build_object(
@@ -101,7 +103,7 @@ struct RosterRoutes: Sendable {
                              'displayName', m.display_name,
                              'handle', m.handle,
                              'avatarUrl', m.avatar_url,
-                             'role', r.role,
+                             'role', wm.role::text,
                              'channelCount', COALESCE(cc.channel_count, 0),
                              'channelIds', COALESCE(ch.channel_ids, ARRAY[]::uuid[]),
                              'capabilities', COALESCE((
@@ -128,128 +130,52 @@ struct RosterRoutes: Sendable {
                              'updatedAtMs', floor(extract(epoch from m.updated_at) * 1000)::bigint
                            ) AS row_json
                       FROM member m
+                      JOIN workspace_membership wm
+                        ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id
                       LEFT JOIN human h ON h.member_id = m.id
                       LEFT JOIN agent a ON a.member_id = m.id
-                      LEFT JOIN LATERAL (
-                        SELECT role::text
-                          FROM membership ms
-                         WHERE ms.member_id = m.id
-                           AND ms.left_at IS NULL
-                         ORDER BY CASE role::text
-                                    WHEN 'owner' THEN 0
-                                    WHEN 'admin' THEN 1
-                                    WHEN 'member' THEN 2
-                                    ELSE 3
-                                  END
-                         LIMIT 1
-                      ) r ON true
                       LEFT JOIN LATERAL (
                         SELECT count(*)::int AS channel_count
                           FROM membership ms
                          WHERE ms.member_id = m.id
                            AND ms.left_at IS NULL
+                           AND (NOT \(viewerIsGuest) OR EXISTS (
+                             SELECT 1 FROM membership viewer_ms
+                              WHERE viewer_ms.channel_id = ms.channel_id
+                                AND viewer_ms.member_id = \(viewerID)
+                                AND viewer_ms.left_at IS NULL
+                           ))
                       ) cc ON true
                       LEFT JOIN LATERAL (
                         SELECT COALESCE(array_agg(ms.channel_id ORDER BY ms.joined_at, ms.channel_id), ARRAY[]::uuid[]) AS channel_ids
                           FROM membership ms
                          WHERE ms.member_id = m.id
                            AND ms.left_at IS NULL
+                           AND (NOT \(viewerIsGuest) OR EXISTS (
+                             SELECT 1 FROM membership viewer_ms
+                              WHERE viewer_ms.channel_id = ms.channel_id
+                                AND viewer_ms.member_id = \(viewerID)
+                                AND viewer_ms.left_at IS NULL
+                           ))
                       ) ch ON true
                      WHERE m.deleted_at IS NULL
                        AND m.status = 'active'
-                       AND m.kind = \(kindFilter)::member_kind
-                       AND EXISTS (
+                       AND (\(kindFilter)::text IS NULL OR m.kind::text = \(kindFilter)::text)
+                       AND (NOT \(viewerIsGuest) OR m.id = \(viewerID) OR EXISTS (
                          SELECT 1
-                           FROM membership active_ms
-                          WHERE active_ms.member_id = m.id
-                            AND active_ms.left_at IS NULL
-                       )
+                           FROM membership target_ms
+                           JOIN membership viewer_ms
+                             ON viewer_ms.channel_id = target_ms.channel_id
+                            AND viewer_ms.member_id = \(viewerID)
+                            AND viewer_ms.left_at IS NULL
+                          WHERE target_ms.member_id = m.id
+                            AND target_ms.left_at IS NULL
+                       ))
                      LIMIT \(limit)
                   ) rows
-                """,
-                logger: logger
-            ).collect()
-        } else {
-            rows = try await conn.query(
-                """
-                SELECT COALESCE(json_agg(row_json ORDER BY row_json->>'kind', row_json->>'handle')::text, '[]') AS payload
-                  FROM (
-                    SELECT json_build_object(
-                             'id', m.id,
-                             'workspaceId', m.workspace_id,
-                             'kind', m.kind::text,
-                             'status', m.status::text,
-                             'displayName', m.display_name,
-                             'handle', m.handle,
-                             'avatarUrl', m.avatar_url,
-                             'role', r.role,
-                             'channelCount', COALESCE(cc.channel_count, 0),
-                             'channelIds', COALESCE(ch.channel_ids, ARRAY[]::uuid[]),
-                             'capabilities', COALESCE((
-                               SELECT jsonb_agg(
-                                        capability.value #>> '{}'
-                                        ORDER BY capability.ordinality
-                                      )
-                                 FROM jsonb_array_elements(
-                                   CASE
-                                     WHEN jsonb_typeof(a.config->'capabilities') = 'array'
-                                       THEN a.config->'capabilities'
-                                     ELSE '[]'::jsonb
-                                   END
-                                 ) WITH ORDINALITY AS capability(value, ordinality)
-                                WHERE jsonb_typeof(capability.value) = 'string'
-                             ), '[]'::jsonb),
-                             'email', h.email,
-                             'timeZone', h.tz,
-                             'agentModel', a.model,
-                             'ownerHumanId', a.owner_human_id,
-                             'maxConcurrentRuns', a.max_concurrent_runs,
-                             'maxRunSteps', a.max_run_steps,
-                             'createdAtMs', floor(extract(epoch from m.created_at) * 1000)::bigint,
-                             'updatedAtMs', floor(extract(epoch from m.updated_at) * 1000)::bigint
-                           ) AS row_json
-                      FROM member m
-                      LEFT JOIN human h ON h.member_id = m.id
-                      LEFT JOIN agent a ON a.member_id = m.id
-                      LEFT JOIN LATERAL (
-                        SELECT role::text
-                          FROM membership ms
-                         WHERE ms.member_id = m.id
-                           AND ms.left_at IS NULL
-                         ORDER BY CASE role::text
-                                    WHEN 'owner' THEN 0
-                                    WHEN 'admin' THEN 1
-                                    WHEN 'member' THEN 2
-                                    ELSE 3
-                                  END
-                         LIMIT 1
-                      ) r ON true
-                      LEFT JOIN LATERAL (
-                        SELECT count(*)::int AS channel_count
-                          FROM membership ms
-                         WHERE ms.member_id = m.id
-                           AND ms.left_at IS NULL
-                      ) cc ON true
-                      LEFT JOIN LATERAL (
-                        SELECT COALESCE(array_agg(ms.channel_id ORDER BY ms.joined_at, ms.channel_id), ARRAY[]::uuid[]) AS channel_ids
-                          FROM membership ms
-                         WHERE ms.member_id = m.id
-                           AND ms.left_at IS NULL
-                      ) ch ON true
-                     WHERE m.deleted_at IS NULL
-                       AND m.status = 'active'
-                       AND EXISTS (
-                         SELECT 1
-                           FROM membership active_ms
-                          WHERE active_ms.member_id = m.id
-                            AND active_ms.left_at IS NULL
-                       )
-                     LIMIT \(limit)
-                  ) rows
-                """,
-                logger: logger
-            ).collect()
-        }
+            """,
+            logger: logger
+        ).collect()
         return try decodeRosterList(from: rows.first)
     }
 

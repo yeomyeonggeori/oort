@@ -126,6 +126,11 @@ VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
   ('$WS_ID', '$CHANNEL_ID', '$ADMIN_ID', 'admin'),
   ('$WS_ID', '$CHANNEL_ID', '$OTHER_ID', 'member');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$ADMIN_ID', 'admin'),
+  ('$WS_ID', '$OTHER_ID', 'member');
 INSERT INTO workspace (id, slug, name)
 VALUES ('$CROSS_WS_ID', 'momo-489-cross-$RUN_TAG', 'MOMO-489 Cross Workspace');
 INSERT INTO work_pool

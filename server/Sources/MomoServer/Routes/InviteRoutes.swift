@@ -346,6 +346,24 @@ struct InviteRoutes: Sendable {
             workspaceID: workspaceID
         ) { conn in
             try await Self.requireWorkspaceMember(conn: conn, logger: db.logger, principal: principal)
+            let identityRows = try await conn.query(
+                """
+                SELECT h.email, m.handle
+                  FROM member m
+                  LEFT JOIN human h
+                    ON h.workspace_id = m.workspace_id AND h.member_id = m.id
+                 WHERE m.workspace_id = \(workspaceID) AND m.id = \(principal.memberID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let identityRow = identityRows.first else {
+                throw HTTPError(.forbidden, message: "not a workspace member")
+            }
+            let (storedEmail, handle) = try identityRow.decode((String?, String).self)
+            try await JoinRoutes.requireNotBanned(
+                conn: conn, logger: db.logger,
+                email: storedEmail ?? email, handle: handle
+            )
             let rows = try await conn.query(
                 """
                 WITH matched AS (
@@ -484,13 +502,9 @@ struct InviteRoutes: Sendable {
         logger: Logger,
         principal: AuthPrincipal
     ) async throws {
-        let role = try await activeWorkspaceRole(conn: conn, logger: logger, memberID: principal.memberID)
-        guard let role else {
-            throw HTTPError(.forbidden, message: "not a workspace member")
-        }
-        guard role == "owner" || role == "admin" else {
-            throw HTTPError(.forbidden, message: "workspace admin required")
-        }
+        _ = try await WorkspaceAuthorization.requireAdmin(
+            conn: conn, logger: logger, principal: principal
+        )
     }
 
     static func requireWorkspaceMember(
@@ -498,33 +512,9 @@ struct InviteRoutes: Sendable {
         logger: Logger,
         principal: AuthPrincipal
     ) async throws {
-        guard try await activeWorkspaceRole(conn: conn, logger: logger, memberID: principal.memberID) != nil else {
-            throw HTTPError(.forbidden, message: "not a workspace member")
-        }
-    }
-
-    static func activeWorkspaceRole(
-        conn: PostgresConnection,
-        logger: Logger,
-        memberID: UUID
-    ) async throws -> String? {
-        let rows = try await conn.query(
-            """
-            SELECT role::text
-              FROM membership
-             WHERE member_id = \(memberID)
-               AND left_at IS NULL
-             ORDER BY CASE role::text
-                        WHEN 'owner' THEN 0
-                        WHEN 'admin' THEN 1
-                        WHEN 'member' THEN 2
-                        ELSE 3
-                      END
-             LIMIT 1
-            """,
-            logger: logger
-        ).collect()
-        return try rows.first?.decode(String.self)
+        _ = try await WorkspaceAuthorization.requireMember(
+            conn: conn, logger: logger, principal: principal
+        )
     }
 
     // MARK: - JSON mapping

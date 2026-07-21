@@ -98,6 +98,10 @@ INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$DEMO_WS', '$GENERAL_CHANNEL', '$OWNER_ID', 'owner'),
   ('$DEMO_WS', '$GENERAL_CHANNEL', '$MEMBER_ID', 'member');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$DEMO_WS', '$OWNER_ID', 'owner'),
+  ('$DEMO_WS', '$MEMBER_ID', 'member');
 
 INSERT INTO workspace (id, slug, name)
 VALUES ('$WS_B', 'momo-webhook-b-$RUN_EPOCH', 'Webhook Gate B');

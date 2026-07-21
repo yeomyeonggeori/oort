@@ -334,6 +334,51 @@ struct WorkspaceRosterResponse: ResponseEncodable {
     let agentCount: Int
 }
 
+// ---- Membership lifecycle (ADR-0128) ----
+
+struct ChangeMembershipRoleRequest: Decodable {
+    let role: String
+}
+
+struct MembershipRoleResponse: ResponseEncodable, Codable, Sendable {
+    let memberId: String
+    let scope: String
+    let role: String
+}
+
+struct MembershipLifecycleResponse: ResponseEncodable, Codable, Sendable {
+    let memberId: String
+    let status: String
+}
+
+struct RemoveWorkspaceMemberRequest: Decodable {
+    let ban: Bool?
+    let reason: String?
+}
+
+struct CreateWorkspaceBanRequest: Decodable {
+    let email: String?
+    let handle: String?
+    let reason: String?
+}
+
+struct WorkspaceBanDTO: ResponseEncodable, Codable, Sendable {
+    let id: String
+    let email: String?
+    let handle: String?
+    let createdBy: String
+    let reason: String?
+    let createdAtMs: Int64
+}
+
+struct WorkspaceBanResponse: ResponseEncodable, Codable, Sendable {
+    let ban: WorkspaceBanDTO
+}
+
+struct WorkspaceBanListResponse: ResponseEncodable, Codable, Sendable {
+    let bans: [WorkspaceBanDTO]
+}
+
 // ---- Workspace channels ----
 
 /// Workspace channel entry visible to the authenticated member.

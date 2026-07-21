@@ -316,10 +316,9 @@ struct WorkTierPolicyRoutes: Sendable {
         logger: Logger,
         principal: AuthPrincipal
     ) async throws {
-        let role = try await InviteRoutes.activeWorkspaceRole(
-            conn: conn, logger: logger, memberID: principal.memberID
-        )
-        guard role == "owner" || role == "admin" else {
+        guard (try? await WorkspaceAuthorization.requireAdmin(
+            conn: conn, logger: logger, principal: principal
+        )) != nil else {
             throw HTTPError(.forbidden, message: "workspace tier policy requires owner or admin")
         }
     }

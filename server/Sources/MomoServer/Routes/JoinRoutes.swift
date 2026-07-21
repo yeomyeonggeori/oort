@@ -34,6 +34,11 @@ struct JoinRoutes: Sendable {
 
         let lookup = try await findInvite(code: code)
         try Self.throwIfInviteStatusFailed(lookup.status)
+        try await assertNotBanned(
+            workspaceID: lookup.workspaceID,
+            email: email,
+            handle: requestedHandle ?? fallbackHandle
+        )
         try await assertNotDuplicateJoin(
             workspaceID: lookup.workspaceID,
             inviteID: lookup.inviteID,
@@ -55,6 +60,10 @@ struct JoinRoutes: Sendable {
             )
             try Self.throwIfInviteStatusFailed(lockedInvite.status)
             try Self.assertPublicJoinRole(lockedInvite.role)
+            try await Self.requireNotBanned(
+                conn: conn, logger: db.logger,
+                email: email, handle: requestedHandle ?? fallbackHandle
+            )
 
             let existing = try await Self.findExistingHuman(
                 conn: conn,
@@ -64,7 +73,14 @@ struct JoinRoutes: Sendable {
             let memberState: MemberState
             if let existing {
                 try Self.assertReusableMember(existing)
-                memberState = .existing(existing)
+                if existing.status == "deleted" {
+                    memberState = .existing(try await Self.reactivateDeletedHuman(
+                        conn: conn, logger: db.logger, member: existing,
+                        displayName: displayName, password: password, timeZone: timeZone
+                    ))
+                } else {
+                    memberState = .existing(existing)
+                }
             } else {
                 memberState = .created(try await Self.createHumanMember(
                     conn: conn,
@@ -91,6 +107,11 @@ struct JoinRoutes: Sendable {
                 logger: db.logger,
                 memberID: member.id,
                 inviteRole: lockedInvite.role
+            )
+
+            try await Self.ensureWorkspaceMembership(
+                conn: conn, logger: db.logger, workspaceID: lookup.workspaceID,
+                memberID: member.id, role: lockedInvite.role
             )
 
             let memberships = try await Self.createPublicChannelMemberships(
@@ -255,6 +276,18 @@ struct JoinRoutes: Sendable {
         }
     }
 
+    private func assertNotBanned(
+        workspaceID: UUID,
+        email: String,
+        handle: String
+    ) async throws {
+        try await db.withTenantConnection(workspaceID: workspaceID) { conn in
+            try await Self.requireNotBanned(
+                conn: conn, logger: db.logger, email: email, handle: handle
+            )
+        }
+    }
+
     private func assertNoPublicRoleEscalation(
         workspaceID: UUID,
         email: String,
@@ -263,17 +296,11 @@ struct JoinRoutes: Sendable {
         let currentRole = try await db.withTenantConnection(workspaceID: workspaceID) { conn in
             let rows = try await conn.query(
                 """
-                SELECT ms.role::text
+                SELECT wm.role::text
                   FROM human h
-                  JOIN membership ms ON ms.member_id = h.member_id
+                  JOIN workspace_membership wm
+                    ON wm.workspace_id = h.workspace_id AND wm.member_id = h.member_id
                  WHERE h.email = \(email)
-                   AND ms.left_at IS NULL
-                 ORDER BY CASE ms.role::text
-                            WHEN 'owner' THEN 0
-                            WHEN 'admin' THEN 1
-                            WHEN 'member' THEN 2
-                            ELSE 3
-                          END
                  LIMIT 1
                 """,
                 logger: db.logger
@@ -397,6 +424,36 @@ struct JoinRoutes: Sendable {
         )
     }
 
+    private static func reactivateDeletedHuman(
+        conn: PostgresConnection,
+        logger: Logger,
+        member: JoinMember,
+        displayName: String,
+        password: String,
+        timeZone: String
+    ) async throws -> JoinMember {
+        _ = try await conn.query(
+            """
+            UPDATE member
+               SET status = 'active', display_name = \(displayName), updated_at = now()
+             WHERE id = \(member.id) AND status = 'deleted'
+            """,
+            logger: logger
+        )
+        _ = try await conn.query(
+            """
+            UPDATE human
+               SET password_hash = momo_password_hash(\(password)), tz = \(timeZone)
+             WHERE member_id = \(member.id)
+            """,
+            logger: logger
+        )
+        return JoinMember(
+            id: member.id, workspaceID: member.workspaceID, kind: member.kind,
+            status: "active", displayName: displayName, handle: member.handle
+        )
+    }
+
     private static func assertNotDuplicateRedemption(
         conn: PostgresConnection,
         logger: Logger,
@@ -429,15 +486,8 @@ struct JoinRoutes: Sendable {
         let rows = try await conn.query(
             """
             SELECT role::text
-              FROM membership
+              FROM workspace_membership
              WHERE member_id = \(memberID)
-               AND left_at IS NULL
-             ORDER BY CASE role::text
-                        WHEN 'owner' THEN 0
-                        WHEN 'admin' THEN 1
-                        WHEN 'member' THEN 2
-                        ELSE 3
-                      END
              LIMIT 1
             """,
             logger: logger
@@ -445,6 +495,44 @@ struct JoinRoutes: Sendable {
         guard let currentRole = try rows.first?.decode(String.self) else { return }
         if roleRank(inviteRole) < roleRank(currentRole) {
             throw HTTPError(.forbidden, message: "public join cannot escalate an existing member role")
+        }
+    }
+
+    private static func ensureWorkspaceMembership(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        memberID: UUID,
+        role: String
+    ) async throws {
+        _ = try await conn.query(
+            """
+            INSERT INTO workspace_membership (workspace_id, member_id, role)
+            VALUES (\(workspaceID), \(memberID), \(role)::membership_role)
+            ON CONFLICT (workspace_id, member_id) DO NOTHING
+            """,
+            logger: logger
+        )
+    }
+
+    static func requireNotBanned(
+        conn: PostgresConnection,
+        logger: Logger,
+        email: String?,
+        handle: String?
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM workspace_ban
+               WHERE (\(email)::text IS NOT NULL AND email_norm = lower(\(email)::text))
+                  OR (\(handle)::text IS NOT NULL AND handle_norm = lower(\(handle)::text))
+            )
+            """,
+            logger: logger
+        ).collect()
+        if try rows.first?.decode(Bool.self) == true {
+            throw HTTPError(.forbidden, message: "member is banned from this workspace")
         }
     }
 
@@ -704,7 +792,7 @@ struct JoinRoutes: Sendable {
         guard member.kind == "human" else {
             throw HTTPError(.forbidden, message: "invite can only join human members")
         }
-        guard member.status == "active" || member.status == "invited" else {
+        guard member.status == "active" || member.status == "invited" || member.status == "deleted" else {
             throw HTTPError(.forbidden, message: "human is not eligible to join")
         }
     }

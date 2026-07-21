@@ -86,13 +86,21 @@ struct Database: Sendable {
         workspaceID: UUID,
         _ body: @Sendable (PostgresConnection) async throws -> Result
     ) async throws -> Result {
-        try await client.withTransaction(logger: logger) { conn in
-            // set_config(..., is_local=true) == SET LOCAL, but parameterizable.
-            _ = try await conn.query(
-                "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
-                logger: logger
-            )
-            return try await body(conn)
+        do {
+            return try await client.withTransaction(logger: logger) { conn in
+                // set_config(..., is_local=true) == SET LOCAL, but parameterizable.
+                _ = try await conn.query(
+                    "SELECT set_config('app.workspace_id', \(workspaceID.uuidString), true)",
+                    logger: logger
+                )
+                return try await body(conn)
+            }
+        } catch let error as PostgresTransactionError {
+            // withTransaction wraps closure throws; surface intentional HTTP
+            // statuses (403/409/...) instead of a 500 "Unrecognised Error".
+            // Routes used to unwrap this ad hoc — centralized here (MOMO-523).
+            if let http = error.closureError as? HTTPError { throw http }
+            throw error
         }
     }
 
