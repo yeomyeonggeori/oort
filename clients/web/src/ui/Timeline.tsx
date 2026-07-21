@@ -378,7 +378,7 @@ export default function Timeline({
           else visible.delete(sequence);
         }
         const highest = highestVisibleSequence(visible);
-        if (highest > 0) onLatestSeq(channelId, highest);
+        if (online && highest > 0) onLatestSeq(channelId, highest);
       },
       { root: list, threshold: 0.5 }
     );
@@ -386,7 +386,7 @@ export default function Timeline({
       observer.observe(row);
     }
     return () => observer.disconnect();
-  }, [channelId, messages.length, onLatestSeq]);
+  }, [channelId, messages.length, onLatestSeq, online]);
 
   function handleScroll() {
     const list = listRef.current;
