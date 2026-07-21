@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-505 iOS Work 세션 관제 (#569, 2026-07-21)
+
+- iOS Work 탭이 `work-sessions`·`work-hosts`·`work-pool` REST projection과 채널별 `work.session.*` realtime hint를 소비한다. 진행 세션 우선 목록, 전체/진행 중 필터, 정적 상태 칩, 도구 아이콘, host 표시명·online, 시작·경과 시간, pool 사용량을 추가했으며 realtime 수신 뒤에는 REST를 다시 읽어 정본 projection을 유지한다.
+- 프로필의 Developer Mode가 꺼져 있으면 진행/완료 수만 보여주는 요약 카드로 축소하고, 켰을 때만 host·pool·개별 세션을 노출한다. Work 탭이 활성일 때만 realtime 구독을 유지하며 모델에는 PTY raw 출력·로컬 경로·attach capability/endpoint를 포함하지 않는다. 초기 실패는 명시적 empty/error, 갱신 실패는 기존 데이터를 유지한 인라인 배너로 처리한다.
+- `scripts/verify_ios_build.sh`의 generic Simulator build, build-for-testing, 부팅된 iPhone 17 Pro test-without-building과 MomoiOSKit 50 tests(신규 Work 3)가 PASS했고 디자인 pre-flight도 PASS했다. 인증 실데이터의 Mac→iPhone realtime 반영, 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI 511-U remoteAttachAvailable 실데이터 개방 (#567, 2026-07-21)
 
 - macOS `MomoWorkSession`이 서버의 credential-free `remoteAttachAvailable` projection을 소비한다. owner의 running 세션이 `true`일 때만 기존 SwiftTerm 터미널 액션을 열고, `false` 또는 필드 누락은 fail-closed하며 기존 명시적 `ptyId` fixture는 후방 호환한다. capability와 attach endpoint의 메모리 전용 경계는 변경하지 않았다.
