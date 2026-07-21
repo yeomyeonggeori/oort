@@ -205,7 +205,7 @@ printf '%s' "$GET_ONE" | jq -e --arg agent "$AGENT_ID" '
   and ([.content.memory_refs[] | select(.excerpt|contains("actor fact"))] | length == 1)
   and ([.content.memory_refs[] | select(.excerpt|contains("agent episode"))] | length == 1)
   and ([.content.memory_refs[] | select(.excerpt|contains("unrelated fact"))] | length == 0)
-  and ([.content.memory_refs[] | select(.excerpt|contains("explicit grant") and .permission_snapshot=="active_visibility_grant")] | length == 1)
+  and ([.content.memory_refs[] | select((.excerpt|contains("explicit grant")) and .permission_snapshot=="active_visibility_grant")] | length == 1)
   and ([.content.tool_grants[] | select(.tool_name=="github.list_repositories")] | length == 1)
   and ([.content.tool_grants[] | .capability_version | contains("mock")] | any | not)
 ' >/dev/null || fail "memory/tool/permission packet projection mismatch"

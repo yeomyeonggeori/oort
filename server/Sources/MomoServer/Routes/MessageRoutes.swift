@@ -2194,6 +2194,12 @@ struct MessageRoutes: Sendable {
         query: String,
         expiresAt: Date
     ) async throws -> [[String: Any]] {
+        // websearch_to_tsquery is AND-combined: leaving the @handle mention in the
+        // query text makes every retrieval demand the handle tokens and match nothing.
+        let query = query
+            .split(separator: " ")
+            .filter { !$0.hasPrefix("@") }
+            .joined(separator: " ")
         let rows = try await conn.query(
             """
             WITH profiles AS (
