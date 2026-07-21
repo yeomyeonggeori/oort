@@ -32,6 +32,7 @@ export interface SessionData {
 
 let accessToken: string | null = null;
 let session: SessionData | null = loadPersisted();
+let authExpired = false;
 const listeners = new Set<() => void>();
 
 function loadPersisted(): SessionData | null {
@@ -88,9 +89,26 @@ export function getRefreshToken(): string | null {
   return session?.refreshToken ?? null;
 }
 
+export function getAuthExpired(): boolean {
+  return authExpired;
+}
+
+export function markAuthExpired(): void {
+  authExpired = true;
+  notify();
+}
+
+export function rotateSessionData(
+  current: SessionData,
+  newRefresh: string
+): SessionData {
+  return { ...current, refreshToken: newRefresh };
+}
+
 /** Full login response -> session (access stays in memory only). */
 export function applyLogin(response: LoginResponse): void {
   accessToken = response.accessToken;
+  authExpired = false;
   session = {
     refreshToken: response.refreshToken,
     realtimeWebSocketUrl: response.realtimeWebSocketUrl,
@@ -104,13 +122,15 @@ export function applyLogin(response: LoginResponse): void {
 export function applyRotation(newAccess: string, newRefresh: string): void {
   if (!session) return;
   accessToken = newAccess;
-  session = { ...session, refreshToken: newRefresh };
+  authExpired = false;
+  session = rotateSessionData(session, newRefresh);
   persist();
   notify();
 }
 
 export function clearSession(): void {
   accessToken = null;
+  authExpired = false;
   session = null;
   persist();
   notify();

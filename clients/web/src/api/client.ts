@@ -5,7 +5,9 @@ import {
   clearSession,
   getAccessToken,
   getRefreshToken,
+  markAuthExpired,
 } from "../auth/session";
+import { apiUrl } from "../config/server";
 
 // =============================================================================
 // REST client for the web v0 surface (docs/api/openapi.yaml is the canonical
@@ -84,7 +86,7 @@ async function rawRequest(
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(path, { ...init, headers });
+  return fetch(apiUrl(path), { ...init, headers });
 }
 
 // ---- refresh rotation (single flight) ---------------------------------------
@@ -106,7 +108,7 @@ export function refreshSession(): Promise<boolean> {
         null
       );
       if (!response.ok) {
-        clearSession();
+        markAuthExpired();
         return false;
       }
       const pair = (await response.json()) as RefreshResponse;
@@ -137,7 +139,7 @@ async function authorizedFetch(
       response = await rawRequest(path, init, getAccessToken());
     }
   }
-  if (response.status === 401) clearSession();
+  if (response.status === 401) markAuthExpired();
   return response;
 }
 

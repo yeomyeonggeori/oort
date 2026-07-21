@@ -80,5 +80,10 @@ export default function App() {
     );
   }
 
-  return <LoginPage initialEmail={loginPrefillEmail} />;
+  return (
+    <LoginPage
+      initialEmail={loginPrefillEmail}
+      onUseInviteCode={setJoinCode}
+    />
+  );
 }

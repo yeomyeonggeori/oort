@@ -1,16 +1,20 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { ApiError, login } from "../api/client";
+import { getServerUrl, verifyServer } from "../config/server";
 
 interface LoginPageProps {
   /** Prefill from the /join/<code> landing (MOMO-401) — email only, never a secret. */
   initialEmail?: string | undefined;
+  onUseInviteCode: (code: string) => void;
 }
 
-export default function LoginPage({ initialEmail }: LoginPageProps) {
+export default function LoginPage({ initialEmail, onUseInviteCode }: LoginPageProps) {
+  const [serverUrl, setServerUrl] = useState(getServerUrl);
   const [email, setEmail] = useState(initialEmail ?? "");
   const [password, setPassword] = useState("");
   const [workspace, setWorkspace] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -20,6 +24,11 @@ export default function LoginPage({ initialEmail }: LoginPageProps) {
     setSubmitting(true);
     setError(null);
     try {
+      await verifyServer(serverUrl);
+      if (inviteCode.trim() !== "") {
+        onUseInviteCode(inviteCode.trim());
+        return;
+      }
       await login(email.trim(), password, workspace);
       // Success: the session store notifies App, which swaps to ChatPage.
     } catch (cause) {
@@ -42,6 +51,20 @@ export default function LoginPage({ initialEmail }: LoginPageProps) {
         <p className="login-subtitle">워크스페이스에 로그인</p>
 
         <label className="field">
+          <span className="field-label">서버</span>
+          <input
+            data-testid="login-server"
+            type="url"
+            inputMode="url"
+            autoComplete="url"
+            required
+            value={serverUrl}
+            onChange={(event) => setServerUrl(event.target.value)}
+          />
+          <span className="field-help">HTTPS 주소를 사용하세요. localhost는 HTTP도 됩니다.</span>
+        </label>
+
+        <label className="field">
           <span className="field-label">이메일</span>
           <input
             data-testid="login-email"
@@ -51,6 +74,18 @@ export default function LoginPage({ initialEmail }: LoginPageProps) {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
+        </label>
+
+        <label className="field">
+          <span className="field-label">초대 코드 (선택)</span>
+          <input
+            data-testid="login-invite-code"
+            type="password"
+            autoComplete="off"
+            value={inviteCode}
+            onChange={(event) => setInviteCode(event.target.value)}
+          />
+          <span className="field-help">입력하면 로그인 대신 초대 가입으로 이동합니다.</span>
         </label>
 
         <label className="field">
