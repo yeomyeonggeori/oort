@@ -220,7 +220,7 @@ unlink는 provider 내부에서만 처리하고, momo app/API/DB/diagnostics/loc
 | `MEMORY_EXTRACTION_POLL_INTERVAL_MS` | worker | `5000` | 추출 가능한 채널을 다시 찾는 주기(최소 100ms). |
 | `MEMORY_EXTRACTION_BATCH_SIZE` | worker | `50` | 채널별 한 번에 읽는 메시지 수(1..200). |
 | `MOMO_API_URL` | worker | `http://localhost:8080` | `work_*` tool이 기존 `/v1/workspaces/:ws/work-controls`를 호출할 momo API origin. |
-| `MOMO_WORK_HOST_ID` | worker | (미설정) | ADR-0125 host registry 전 v0 target host UUID. `work_*` 호출 시 UUID가 없거나 잘못되면 fail-closed한다. |
+| `MOMO_WORK_HOST_ID` | worker/gateway adapter | (미설정) | ADR-0125 host registry target UUID. worker의 `work_*` 및 gateway의 `work.*`는 이 호스트를 provider 인자 밖에서 주입한다. UUID가 없거나 잘못되면 worker는 호출을 거부하고 gateway adapter는 work tool 4종을 provider에 노출하지 않는다. |
 | `MAX_CONSECUTIVE_AUTO` | worker | `3` | 루프가드 G2(연속 자동응답). |
 | `MAX_STEPS` | worker | `12` | 루프가드 G3(턴당 tool-call 상한, 스키마 50의 v0 오버라이드). |
 | `MAX_DEPTH` | worker | `4` | A2A 홉 깊이 상한(§3.4). |
@@ -915,6 +915,11 @@ swift run --package-path workers/AgentWorker AgentWorker
 - `work_*`를 쓰는 worker process에는 해당 agent의 `MOMO_AGENT_TOKEN`, momo API의
   `MOMO_API_URL`, host-owned 실행기의 opaque `MOMO_WORK_HOST_ID`가 필요하다. token은
   credential 발급 응답에서 한 번만 얻으며 저장소·DB·로그에 남기지 않는다.
+- gateway/BYOA adapter도 같은 `MOMO_WORK_HOST_ID`를 사용한다. 설정되면 provider에는
+  `work.spawn|input|read|kill`의 닫힌 인자 스키마만 보이고, host UUID는 adapter가
+  인증된 `gateway/events` callback에 별도로 붙인다. 서버는 callback bearer에
+  `agent:runs:callback`과 `work:control`이 모두 있는지, run/lease/host/lineage를 다시
+  확인한다. 미설정 시 work tool은 fail-closed로 미노출된다.
 
 > **검증됨/미검증 구분:** MomoServer + OutboxRelay는 MOMO-001/002에서 DB·Centrifugo 실연결 검증됨.
 > AgentWorker↔OpenAI-compatible SSE + 비용 reserve/reconcile은 MOMO-004에서

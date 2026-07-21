@@ -97,123 +97,144 @@ struct WorkControlRoutes: Sendable {
             as: CreateWorkControlRequest.self,
             context: context
         )
-        let kind = try Self.validatedKind(requestDTO.kind)
-        let payload = try Self.validatedPayload(requestDTO.payload, kind: kind)
-        try Self.validateSessionShape(kind: kind, sessionID: requestDTO.sessionId)
-
-        let control = try await withTenantTransactionUnwrapped(
-            workspaceID: workspaceID
-        ) { conn in
-            let binding = try await Self.requireRunBinding(
+        let control = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
+            try await Self.createControl(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
-                channelID: requestDTO.channelId,
-                runID: requestDTO.runId,
-                agentID: principal.memberID
+                principal: principal,
+                request: requestDTO
             )
-            try await Self.requireTargetWorkHost(
-                conn: conn,
-                logger: db.logger,
-                workspaceID: workspaceID,
-                targetHostID: requestDTO.targetHostId,
-                sessionOwnerMemberID: binding.ownerHumanID
-            )
-
-            if kind != .spawn {
-                try await Self.requireSessionControlLineage(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    channelID: requestDTO.channelId,
-                    sessionID: requestDTO.sessionId!,
-                    targetHostID: requestDTO.targetHostId,
-                    requesterMemberID: principal.memberID,
-                    requireRunning: kind == .input || kind == .kill
-                )
-            }
-
-            let autoApproved: Bool
-            if kind == .spawn {
-                autoApproved = try await Self.isAutoApproved(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    ownerHumanID: binding.ownerHumanID,
-                    tool: payload.object["tool"]?.stringValue
-                )
-            } else {
-                autoApproved = false
-            }
-            let initialStatus = autoApproved || kind != .spawn
-                ? "approved"
-                : "pending_approval"
-            let rows = try await conn.query(
-                """
-                INSERT INTO work_control
-                  (workspace_id, channel_id, requester_member_id, target_host_id,
-                   session_id, kind, payload, status)
-                VALUES
-                  (\(workspaceID), \(requestDTO.channelId), \(principal.memberID),
-                   \(requestDTO.targetHostId), \(requestDTO.sessionId), \(kind.rawValue),
-                   \(payload.json)::jsonb, \(initialStatus))
-                RETURNING id, workspace_id, channel_id, requester_member_id,
-                          target_host_id, session_id, kind, payload::text, status,
-                          approval_message_id, created_at, updated_at
-                """,
-                logger: db.logger
-            ).collect()
-            guard let row = rows.first else {
-                throw HTTPError(.internalServerError, message: "work control insert failed")
-            }
-            var created = try Self.decodeControl(row)
-
-            let auditDetail = Self.jsonString([
-                "schema": "momo.work_control.requested.v1",
-                "control_id": created.id,
-                "run_id": requestDTO.runId.uuidString,
-                "kind": kind.rawValue,
-                "target_host_id": requestDTO.targetHostId.uuidString,
-                "auto_approved": autoApproved,
-            ])
-            _ = try await conn.query(
-                """
-                INSERT INTO audit_log
-                  (workspace_id, actor_member_id, subject_member_id, action,
-                   target_type, target_id, via_token_id, run_id, detail)
-                VALUES
-                  (\(workspaceID), \(principal.memberID), \(binding.ownerHumanID),
-                   'work.control.requested', 'work_control', \(UUID(uuidString: created.id)!),
-                   \(principal.tokenID), \(requestDTO.runId), \(auditDetail)::jsonb)
-                """,
-                logger: db.logger
-            )
-
-            if autoApproved || kind != .spawn {
-                created = try await Self.enqueueDispatch(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    control: created
-                )
-            } else {
-                created = try await Self.createSpawnApproval(
-                    conn: conn,
-                    logger: db.logger,
-                    workspaceID: workspaceID,
-                    runID: requestDTO.runId,
-                    ownerHumanID: binding.ownerHumanID,
-                    control: created,
-                    tokenID: principal.tokenID
-                )
-            }
-            return created
         }
 
         var response = try WorkControlResponse(workControl: control)
             .response(from: request, context: context)
         response.status = .created
         return response
+    }
+
+    /// Canonical work-control ledger mutation shared by the direct agent REST
+    /// route and the gateway BYOA callback. Callers must already be inside the
+    /// tenant transaction; all approval, host, lineage, audit, and outbox rules
+    /// remain centralized here.
+    static func createControl(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        principal: AuthPrincipal,
+        request requestDTO: CreateWorkControlRequest
+    ) async throws -> WorkControlDTO {
+        guard principal.kind == .agent, principal.workspaceID == workspaceID else {
+            throw HTTPError(.forbidden, message: "work controls require an agent bearer")
+        }
+        let kind = try validatedKind(requestDTO.kind)
+        let payload = try validatedPayload(requestDTO.payload, kind: kind)
+        try validateSessionShape(kind: kind, sessionID: requestDTO.sessionId)
+
+        let binding = try await requireRunBinding(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            channelID: requestDTO.channelId,
+            runID: requestDTO.runId,
+            agentID: principal.memberID
+        )
+        try await requireTargetWorkHost(
+            conn: conn,
+            logger: logger,
+            workspaceID: workspaceID,
+            targetHostID: requestDTO.targetHostId,
+            sessionOwnerMemberID: binding.ownerHumanID
+        )
+
+        if kind != .spawn {
+            try await requireSessionControlLineage(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                channelID: requestDTO.channelId,
+                sessionID: requestDTO.sessionId!,
+                targetHostID: requestDTO.targetHostId,
+                requesterMemberID: principal.memberID,
+                requireRunning: kind == .input || kind == .kill
+            )
+        }
+
+        let autoApproved: Bool
+        if kind == .spawn {
+            autoApproved = try await isAutoApproved(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                ownerHumanID: binding.ownerHumanID,
+                tool: payload.object["tool"]?.stringValue
+            )
+        } else {
+            autoApproved = false
+        }
+        let initialStatus = autoApproved || kind != .spawn
+            ? "approved"
+            : "pending_approval"
+        let rows = try await conn.query(
+            """
+            INSERT INTO work_control
+              (workspace_id, channel_id, requester_member_id, target_host_id,
+               session_id, kind, payload, status)
+            VALUES
+              (\(workspaceID), \(requestDTO.channelId), \(principal.memberID),
+               \(requestDTO.targetHostId), \(requestDTO.sessionId), \(kind.rawValue),
+               \(payload.json)::jsonb, \(initialStatus))
+            RETURNING id, workspace_id, channel_id, requester_member_id,
+                      target_host_id, session_id, kind, payload::text, status,
+                      approval_message_id, created_at, updated_at
+            """,
+            logger: logger
+        ).collect()
+        guard let row = rows.first else {
+            throw HTTPError(.internalServerError, message: "work control insert failed")
+        }
+        var created = try decodeControl(row)
+
+        let auditDetail = jsonString([
+            "schema": "momo.work_control.requested.v1",
+            "control_id": created.id,
+            "run_id": requestDTO.runId.uuidString,
+            "kind": kind.rawValue,
+            "target_host_id": requestDTO.targetHostId.uuidString,
+            "auto_approved": autoApproved,
+        ])
+        _ = try await conn.query(
+            """
+            INSERT INTO audit_log
+              (workspace_id, actor_member_id, subject_member_id, action,
+               target_type, target_id, via_token_id, run_id, detail)
+            VALUES
+              (\(workspaceID), \(principal.memberID), \(binding.ownerHumanID),
+               'work.control.requested', 'work_control', \(UUID(uuidString: created.id)!),
+               \(principal.tokenID), \(requestDTO.runId), \(auditDetail)::jsonb)
+            """,
+            logger: logger
+        )
+
+        if autoApproved || kind != .spawn {
+            created = try await enqueueDispatch(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                control: created
+            )
+        } else {
+            created = try await createSpawnApproval(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                runID: requestDTO.runId,
+                ownerHumanID: binding.ownerHumanID,
+                control: created,
+                tokenID: principal.tokenID
+            )
+        }
+        return created
     }
 
     @Sendable
@@ -230,7 +251,7 @@ struct WorkControlRoutes: Sendable {
         )
         let errorLabel = try Self.validatedErrorLabel(requestDTO.errorLabel)
 
-        let control = try await withTenantTransactionUnwrapped(
+        let control = try await db.withTenantTransaction(
             workspaceID: workspaceID
         ) { conn in
             guard var locked = try await Self.lockControl(
@@ -345,7 +366,7 @@ struct WorkControlRoutes: Sendable {
         }
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
 
-        let tools = try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        let tools = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             guard try await Self.isActiveHuman(
                 conn: conn,
                 logger: db.logger,
@@ -383,7 +404,7 @@ struct WorkControlRoutes: Sendable {
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let tool = try Self.validatedTool(try context.parameters.require("tool"))
 
-        try await withTenantTransactionUnwrapped(workspaceID: workspaceID) { conn in
+        try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
             guard try await Self.isActiveHuman(
                 conn: conn,
                 logger: db.logger,
@@ -1103,7 +1124,7 @@ struct WorkControlRoutes: Sendable {
         return !rows.isEmpty
     }
 
-    private static func fetchControl(
+    static func fetchControl(
         conn: PostgresConnection,
         logger: Logger,
         controlID: UUID
@@ -1186,18 +1207,6 @@ struct WorkControlRoutes: Sendable {
             throw HTTPError(.badRequest, message: "invalid work control id")
         }
         return id
-    }
-
-    private func withTenantTransactionUnwrapped<Result: Sendable>(
-        workspaceID: UUID,
-        _ body: @Sendable (PostgresConnection) async throws -> Result
-    ) async throws -> Result {
-        do {
-            return try await db.withTenantTransaction(workspaceID: workspaceID, body)
-        } catch let error as PostgresTransactionError {
-            if let http = error.closureError as? HTTPError { throw http }
-            throw error
-        }
     }
 
     private static func controlEventBody(_ control: WorkControlDTO) -> [String: Any] {

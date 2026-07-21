@@ -1126,6 +1126,92 @@ final class MomoServerTests: XCTestCase {
         XCTAssertEqual(streaming.textDelta, "안녕")
     }
 
+    func testAgentGatewayWorkToolCallBuildsCanonicalControlRequest() throws {
+        let targetHostID = UUID()
+        let channelID = UUID()
+        let runID = UUID()
+        let data = Data(
+            """
+            {
+              "job_id": 341,
+              "lease_id": "00000000-0000-7350-8000-000000000341",
+              "status": "tool_call",
+              "tool_call": {
+                "call_id": "call-work-spawn-1",
+                "name": "work.spawn",
+                "target_host_id": "\(targetHostID.uuidString)",
+                "arguments": {"tool":"codex","label":"Fix gateway parity"}
+              }
+            }
+            """.utf8
+        )
+        let event = try JSONDecoder().decode(AgentGatewayEventRequest.self, from: data)
+        let call = try XCTUnwrap(event.toolCall).validated()
+        let request = try call.createRequest(channelID: channelID, runID: runID)
+
+        XCTAssertEqual(call.callId, "call-work-spawn-1")
+        XCTAssertEqual(call.name, "work.spawn")
+        XCTAssertEqual(request.channelId, channelID)
+        XCTAssertEqual(request.runId, runID)
+        XCTAssertEqual(request.targetHostId, targetHostID)
+        XCTAssertNil(request.sessionId)
+        XCTAssertEqual(request.kind, "spawn")
+        XCTAssertEqual(
+            request.payload,
+            .object(["tool": .string("codex"), "label": .string("Fix gateway parity")])
+        )
+    }
+
+    func testAgentGatewayWorkToolCallMapsSessionControlsAndRejectsWidening() throws {
+        let targetHostID = UUID()
+        let sessionID = UUID()
+        let channelID = UUID()
+        let runID = UUID()
+
+        func call(name: String, arguments: String) throws -> AgentGatewayWorkToolCall {
+            let data = Data(
+                """
+                {
+                  "call_id":"call-1",
+                  "name":"\(name)",
+                  "target_host_id":"\(targetHostID.uuidString)",
+                  "arguments":\(arguments)
+                }
+                """.utf8
+            )
+            return try JSONDecoder().decode(AgentGatewayWorkToolCall.self, from: data)
+                .validated()
+        }
+
+        let input = try call(
+            name: "work.input",
+            arguments: "{\"session_id\":\"\(sessionID.uuidString)\",\"text\":\"continue\"}"
+        ).createRequest(channelID: channelID, runID: runID)
+        XCTAssertEqual(input.kind, "input")
+        XCTAssertEqual(input.sessionId, sessionID)
+        XCTAssertEqual(input.payload, .object(["text": .string("continue")]))
+
+        let read = try call(
+            name: "work.read",
+            arguments: "{\"session_id\":\"\(sessionID.uuidString)\",\"tail_lines\":80}"
+        ).createRequest(channelID: channelID, runID: runID)
+        XCTAssertEqual(read.kind, "read")
+        XCTAssertEqual(read.payload, .object(["tail_lines": .int(80)]))
+
+        XCTAssertThrowsError(
+            try call(
+                name: "work.kill",
+                arguments: "{\"session_id\":\"\(sessionID.uuidString)\",\"signal\":\"KILL\"}"
+            ).createRequest(channelID: channelID, runID: runID)
+        )
+        XCTAssertThrowsError(
+            try call(name: "shell", arguments: "{}").createRequest(
+                channelID: channelID,
+                runID: runID
+            )
+        )
+    }
+
     func testAgentGatewayCallbacksRequireExactJobLeaseBinding() throws {
         let leaseID = UUID(uuidString: "00000000-0000-7341-8000-000000000341")!
         let event = try JSONDecoder().decode(
