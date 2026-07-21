@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-520 macOS 호스트 상실 전환·티어 정책 (#579, 2026-07-21)
+
+- Work Console이 서버의 `orphaned`·`endReason`·`resumedFromSessionId` projection을 소비하고, `resume_offer` 메시지를 일반 승인과 구분된 전환 카드로 렌더한다. 카드에서 Work 서랍의 원 세션으로 이동해 online·미revoke이면서 본인 또는 workspace 소유인 다른 host를 선택하고 resume REST로 새 세션을 만든다. 새 세션은 같은 root thread와 이전 세션 계보를 카드·상세에 표시한다.
+- Work 설정에 본인 override와 owner/admin용 workspace 기본 `t1_only`/`ask`/`auto` 정책을 추가했다. auto target은 `cloud` 또는 서버가 허용하는 등록 host만 전송하고 UUID는 소문자로 정규화한다. 재개 UI에는 v0가 마지막 push commit부터 새 세션을 만들며 PTY·프로세스·미커밋 변경을 옮기지 않는다는 손실 경계를 명시한다.
+- 선재 terminal color-vision/high-contrast 기준 이미지 드리프트 2건을 제외한 macOS 전체 455 tests와 Work Console 집중 29 tests가 PASS했다(관리형 sandbox loopback WebSocket 1 skip). policy GET/PUT, resume POST, UUID 정규화, orphan/reason/lineage decode 및 `resume_offer` light/dark 카드와 설정 light/dark snapshot을 자동 검증한다. ask 카드 실왕복, t1_only 카드 미생성, auto 재디스패치, 실제 host 전환·동일 스레드 계보, real-window 라이트/다크·접근성 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-517 macOS 관전 터미널 (#575, 2026-07-21)
 
 - 비소유 채널 멤버는 서버 projection이 `remoteAttachAvailable=true`, `observation=open`인 running 세션에서만 observer capability를 발급받아 기존 SwiftTerm을 읽기 전용으로 연다. observer 세션은 입력·resize·kill을 네트워크로 보내지 않고, 화면 상단에 관전 모드와 제어 불가를 명시한다. owner 세션은 기존 controller 모드를 유지한다.
