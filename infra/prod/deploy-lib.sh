@@ -212,5 +212,5 @@ print_failure_diagnostics() {
   deploy_log "diagnostics: docker compose ps"
   "${COMPOSE[@]}" ps >&2 || true
   deploy_log "diagnostics: inspect redacted service logs locally; do not paste secrets"
-  deploy_log "run: docker compose -f infra/prod/docker-compose.prod.yml logs --tail=200 caddy api migrate relay worker"
+  deploy_log "run: docker compose -f infra/prod/docker-compose.prod.yml logs --tail=200 caddy api migrate web-init relay worker"
 }

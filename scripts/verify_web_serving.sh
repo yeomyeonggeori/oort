@@ -32,6 +32,7 @@ CENT_PORT_HOST="${WEB_SERVING_CENT_PORT:-28072}"
 HERMES_PORT_HOST="${WEB_SERVING_HERMES_PORT:-28073}"
 API_PORT="${WEB_SERVING_API_PORT:-28074}"
 APP_HOST="${WEB_SERVING_APP_DOMAIN:-app.localhost}"
+RT_HOST="${WEB_SERVING_REALTIME_DOMAIN:-rt.localhost}"
 BOOT_TIMEOUT="${WEB_SERVING_BOOT_TIMEOUT:-2400}"
 BASE_URL="http://127.0.0.1:$EDGE_PORT"
 
@@ -42,6 +43,7 @@ compose() {
   fi
   WEB_SERVING_PORT="$EDGE_PORT" \
   WEB_SERVING_APP_DOMAIN="$APP_HOST" \
+  WEB_SERVING_REALTIME_DOMAIN="$RT_HOST" \
   PORT="$API_PORT" \
   POSTGRES_PORT="$PG_PORT" \
   CENT_PORT="$CENT_PORT_HOST" \
@@ -120,7 +122,7 @@ pass "4/6 internal Centrifugo callback is edge-denied"
 headers="$(curl -fsSI -H "Host: $APP_HOST" "$BASE_URL/" | tr '[:upper:]' '[:lower:]')" || fail "SPA header request failed"
 case "$headers" in *'content-security-policy:'*) ;; *) fail "missing Content-Security-Policy" ;; esac
 case "$headers" in *'x-frame-options: deny'*) ;; *) fail "missing X-Frame-Options DENY" ;; esac
-case "$headers" in *"connect-src 'self' wss://rt.localhost https://rt.localhost"*) ;; *) fail "CSP realtime connect-src is incomplete" ;; esac
+case "$headers" in *"connect-src 'self' wss://$RT_HOST https://$RT_HOST"*) ;; *) fail "CSP realtime connect-src is incomplete" ;; esac
 pass "5/6 CSP and X-Frame-Options headers are present"
 
 health_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: $APP_HOST" "$BASE_URL/health")" || fail "health proxy request failed"
