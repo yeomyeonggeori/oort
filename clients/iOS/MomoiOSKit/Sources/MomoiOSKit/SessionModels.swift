@@ -102,6 +102,8 @@ public enum SessionError: LocalizedError, Equatable, Sendable {
     case server(status: Int, message: String)
     case decoding(String)
     case transport(String)
+    case sessionExpired
+    case secureStorage
 
     public var errorDescription: String? {
         switch self {
@@ -109,6 +111,10 @@ public enum SessionError: LocalizedError, Equatable, Sendable {
             return message
         case .server(_, let message):
             return message
+        case .sessionExpired:
+            return "Your session expired. Sign in again to continue."
+        case .secureStorage:
+            return "Your session could not be stored securely. Sign in again."
         }
     }
 }

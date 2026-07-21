@@ -44,9 +44,14 @@ public actor MomoPushRegistrationClient {
     }
 
     private let urlSession: URLSession
+    private let store: SessionStore
 
-    public init(urlSession: URLSession = .shared) {
+    public init(
+        urlSession: URLSession = .shared,
+        store: SessionStore = .shared
+    ) {
         self.urlSession = urlSession
+        self.store = store
     }
 
     public func register(
@@ -63,11 +68,14 @@ public actor MomoPushRegistrationClient {
             appBuild: appBuild,
             environment: environment
         )
-        try await execute(request)
+        try await execute(request, authenticated: session)
     }
 
     public func revoke(session: IOSSession, deviceID: UUID) async throws {
-        try await execute(Self.revocationRequest(session: session, deviceID: deviceID))
+        try await execute(
+            Self.revocationRequest(session: session, deviceID: deviceID),
+            authenticated: session
+        )
     }
 
     static func registrationRequest(
@@ -101,17 +109,13 @@ public actor MomoPushRegistrationClient {
         return request
     }
 
-    private func execute(_ request: URLRequest) async throws {
+    private func execute(_ request: URLRequest, authenticated: IOSSession) async throws {
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw SessionError.transport("The server did not return an HTTP response.")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let message = String(data: data, encoding: .utf8)
-                    ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
-                throw SessionError.server(status: http.statusCode, message: message)
-            }
+            _ = try await IOSAuthenticatedRequestExecutor(
+                authenticated: authenticated,
+                store: store,
+                urlSession: urlSession
+            ).data(for: request)
         } catch let error as SessionError {
             throw error
         } catch is CancellationError {

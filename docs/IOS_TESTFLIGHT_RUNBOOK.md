@@ -33,7 +33,7 @@
 
 현재 Release 구성에도 아래 개발 편의 기능이 들어 있다. internal TestFlight에서는 의도적으로 동작하지만 App Store 제출 전 별도 이슈에서 교체해야 한다.
 
-- 세션 form, access token, refresh token을 App Group `UserDefaults`에 평문 저장한다. 스토어 제출 전 Keychain 기반 저장과 기존 값 migration으로 교체한다.
+- access token, refresh token, NSE fetch session은 두 iOS target이 공유하는 `ThisDeviceOnly` Keychain에 저장하고, 기존 App Group `UserDefaults` 평문 값은 1회 migration 뒤 삭제한다. 로그인 form에는 internal-alpha 개발 편의용 서버 URL·email·password가 계속 App Group `UserDefaults`에 남으므로 스토어 제출 전 production 기본값과 자격증명 입력 정책으로 교체한다.
 - 기본 로그인 form에 localhost URL과 개발용 예시 계정이 들어 있다. 스토어 제출 전 production 기본값과 안전한 초기 설정 흐름으로 교체한다.
 - `NSAllowsLocalNetworking`과 로컬 네트워크 사용 설명은 LAN dogfood를 허용한다. 스토어 제출 전 HTTPS production endpoint를 기본으로 하고 필요한 ATS 범위만 남긴다.
 - 계정 삭제, privacy manifest, UGC 신고·차단·운영 정책은 ADR-0123에서 M8로 이월됐다. 이 항목이 없으면 App Store 제출 준비 완료로 판정하지 않는다.
@@ -41,13 +41,15 @@
 ## 2. App ID와 App Group 등록
 
 1. `[manual]` [Apple Developer](https://developer.apple.com/account/) → Certificates, Identifiers & Profiles → Identifiers에서 App IDs를 연다.
-2. `[manual]` 명시적 App ID `app.momo.ios`를 등록한다. Capabilities에서 **Push Notifications**와 **App Groups**를 켠다.
-   - 스크린샷: Identifier, Team, Push Notifications, App Groups가 한 화면에 보이게 캡처한다.
-3. `[manual]` 명시적 App ID `app.momo.ios.NotificationService`를 등록하고 **App Groups**를 켠다.
-   - 스크린샷: NSE Identifier와 App Groups 상태를 캡처한다.
+2. `[manual]` 명시적 App ID `app.momo.ios`를 등록한다. Capabilities에서 **Push Notifications**, **App Groups**, **Keychain Sharing**을 켠다.
+   - 스크린샷: Identifier, Team, Push Notifications, App Groups, Keychain Sharing이 한 화면에 보이게 캡처한다.
+3. `[manual]` 명시적 App ID `app.momo.ios.NotificationService`를 등록하고 **App Groups**와 **Keychain Sharing**을 켠다.
+   - 스크린샷: NSE Identifier와 App Groups·Keychain Sharing 상태를 캡처한다.
 4. `[manual]` Identifiers → App Groups에서 `group.app.momo.ios`를 등록한다.
 5. `[manual]` App Group 설정에서 `app.momo.ios`와 `app.momo.ios.NotificationService` 두 App ID가 모두 연결됐는지 확인한다.
    - 스크린샷: App Group ID와 연결된 두 Identifier를 캡처한다.
+6. `[manual]` 두 App ID의 Keychain Sharing group이 모두 `$(AppIdentifierPrefix)app.momo.ios.shared`로 서명되는지 확인한다. 실제 entitlement에는 Team prefix가 확장된 동일 access group이 들어가야 한다.
+   - 스크린샷: 원문 token이나 Keychain item 값 없이 두 target의 동일 access group 설정만 캡처한다.
 
 이미 같은 Identifier가 있으면 새로 만들지 말고 Team과 capability를 대조한다. 다른 Team이 소유하거나 capability 계약이 다르면 임의로 suffix를 바꾸지 말고 작업을 중단한다.
 
@@ -55,8 +57,8 @@
 
 1. `[manual]` `clients/iOS/MomoiOS.xcodeproj`를 Xcode 26으로 연다.
 2. `[manual]` `MomoiOS` target → Signing & Capabilities에서 **Automatically manage signing**을 켜고 Team `YWQQFQM38J`를 선택한다.
-3. `[manual]` bundle ID가 `app.momo.ios`, App Groups가 `group.app.momo.ios`, Push Notifications capability가 활성인지 확인한다.
-4. `[manual]` `MomoiOSNotificationService` target에서도 자동 서명과 같은 Team을 선택한다. bundle ID는 `app.momo.ios.NotificationService`, App Group은 `group.app.momo.ios`여야 한다.
+3. `[manual]` bundle ID가 `app.momo.ios`, App Groups가 `group.app.momo.ios`, Keychain Sharing이 `$(AppIdentifierPrefix)app.momo.ios.shared`, Push Notifications capability가 활성인지 확인한다.
+4. `[manual]` `MomoiOSNotificationService` target에서도 자동 서명과 같은 Team을 선택한다. bundle ID는 `app.momo.ios.NotificationService`, App Group은 `group.app.momo.ios`, Keychain Sharing은 앱과 동일한 `$(AppIdentifierPrefix)app.momo.ios.shared`여야 한다.
 5. `[manual]` General에서 앱과 NSE의 Version을 맞추고, 이번 업로드의 Build를 이전 App Store Connect build보다 크게 올린다.
    - 스크린샷: 각 target의 Team, bundle ID, 자동 서명 체크, capabilities를 각각 캡처한다. provisioning profile UUID는 캡처하지 않는다.
 

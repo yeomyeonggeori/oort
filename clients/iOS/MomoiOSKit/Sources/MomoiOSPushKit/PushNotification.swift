@@ -1,10 +1,78 @@
 import Foundation
+import Security
 
 public enum MomoPushContract {
     public static let appGroupIdentifier = "group.app.momo.ios"
+    public static let keychainAccessGroupInfoKey = "MomoKeychainAccessGroup"
+    public static let secureSessionService = "app.momo.ios.session"
+    public static let authenticatedSessionAccount = "authenticated-session"
+    public static let pushFetchSessionAccount = "push-fetch-session"
+    /// Legacy App Group key. Read only during the one-time Keychain migration.
     public static let sessionKey = "momo.ios.dev.session.push-fetch"
     public static let placeholderTitle = "momo"
     public static let placeholderBody = "새 알림"
+}
+
+/// Narrow secure-value boundary shared by the app and notification extension.
+/// Session credentials never use UserDefaults, URLs, or diagnostic output.
+public protocol MomoSecureValueStoring: Sendable {
+    func data(for account: String) -> Data?
+    @discardableResult func set(_ data: Data, for account: String) -> Bool
+    func removeValue(for account: String)
+}
+
+public struct MomoKeychainValueStore: MomoSecureValueStoring, Sendable {
+    private let service: String
+    private let accessGroup: String?
+
+    public init(
+        service: String = MomoPushContract.secureSessionService,
+        accessGroup: String? = Bundle.main.object(
+            forInfoDictionaryKey: MomoPushContract.keychainAccessGroupInfoKey
+        ) as? String
+    ) {
+        self.service = service
+        self.accessGroup = accessGroup?.isEmpty == false ? accessGroup : nil
+    }
+
+    public func data(for account: String) -> Data? {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
+            return nil
+        }
+        return result as? Data
+    }
+
+    @discardableResult
+    public func set(_ data: Data, for account: String) -> Bool {
+        let query = baseQuery(account: account)
+        let attributes = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        guard updateStatus == errSecItemNotFound else { return false }
+        var addition = query
+        addition[kSecValueData as String] = data
+        addition[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(addition as CFDictionary, nil) == errSecSuccess
+    }
+
+    public func removeValue(for account: String) {
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
+    }
+
+    private func baseQuery(account: String) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: false,
+        ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        return query
+    }
 }
 
 public enum MomoPushCategory: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {

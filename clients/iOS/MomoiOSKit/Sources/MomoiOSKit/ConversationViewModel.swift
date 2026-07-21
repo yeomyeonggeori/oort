@@ -594,6 +594,7 @@ public final class IOSTimelineModel {
     public struct Failure: Equatable {
         public let message: String
         public let isOffline: Bool
+        public let requiresSignIn: Bool
     }
 
     public enum Phase: Equatable {
@@ -624,6 +625,7 @@ public final class IOSTimelineModel {
     public private(set) var reactionMutationsInFlight: Set<String> = []
     public private(set) var messageMutationsInFlight: Set<MessageID> = []
     public private(set) var interactionFailureMessage: String?
+    public private(set) var refreshFailure: Failure?
     public private(set) var recentReactionEmojis = ["👍", "❤️", "😂", "🎉", "👀"]
     public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     public private(set) var approvalDecisionFailures: Set<ApprovalID> = []
@@ -726,7 +728,8 @@ public final class IOSTimelineModel {
 
     public func load() async {
         guard !isSending else { return }
-        phase = .loading
+        if messages.isEmpty { phase = .loading }
+        refreshFailure = nil
         isLoadingTimelineProjection = true
         bufferedRealtimeEvents = []
         subscribe()
@@ -755,17 +758,16 @@ public final class IOSTimelineModel {
             return
         } catch {
             isLoadingTimelineProjection = false
+            let bufferedEvents = bufferedRealtimeEvents
             bufferedRealtimeEvents = []
-            let isOffline = (error as? SessionError).map {
-                if case .transport = $0 { return true }
-                return false
-            } ?? false
-            phase = .failed(Failure(
-                message: isOffline
-                    ? "Message history is unavailable while offline. Check your connection and try again."
-                    : "Could not load message history. Try again.",
-                isOffline: isOffline
-            ))
+            for event in bufferedEvents { await applyRealtimeEvent(event) }
+            let failure = Self.historyFailure(for: error)
+            if messages.isEmpty {
+                phase = .failed(failure)
+            } else {
+                phase = .loaded
+                refreshFailure = failure
+            }
         }
     }
 
@@ -773,6 +775,28 @@ public final class IOSTimelineModel {
         eventTask?.cancel()
         statusTask?.cancel()
         await load()
+    }
+
+    private static func historyFailure(for error: Error) -> Failure {
+        let sessionError = error as? SessionError
+        let isOffline = sessionError.map {
+            if case .transport = $0 { return true }
+            return false
+        } ?? false
+        let requiresSignIn = sessionError.map {
+            if case .sessionExpired = $0 { return true }
+            if case .secureStorage = $0 { return true }
+            return false
+        } ?? false
+        let message: String
+        if requiresSignIn {
+            message = "Your session expired. Existing messages are preserved; sign in again from Profile."
+        } else if isOffline {
+            message = "Message history could not be refreshed while offline. Existing messages are preserved."
+        } else {
+            message = "Message history could not be refreshed. Existing messages are preserved."
+        }
+        return Failure(message: message, isOffline: isOffline, requiresSignIn: requiresSignIn)
     }
 
     public func resume() async {

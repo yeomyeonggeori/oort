@@ -30,11 +30,11 @@ public final class MomoiOSAppModel {
 
     public init(
         store: SessionStore = .shared,
-        backend: any SessionBackend = MomoServerSessionClient(),
+        backend: (any SessionBackend)? = nil,
         pushLifecycle: any IOSPushLifecycle = NoopIOSPushLifecycle.shared
     ) {
         self.store = store
-        self.backend = backend
+        self.backend = backend ?? MomoServerSessionClient(store: store)
         self.pushLifecycle = pushLifecycle
         self.form = store.loadForm()
         self.phase = .signedOut
@@ -54,14 +54,16 @@ public final class MomoiOSAppModel {
         do {
             _ = try form.validated()
             let session = try await backend.authenticate(form: form)
+            guard store.save(session: session) else { throw SessionError.secureStorage }
             let bootstrap = try await backend.bootstrap(session: session)
+            let currentSession = store.loadSession() ?? session
             store.save(form: form)
-            store.save(session: session)
-            phase = .signedIn(session, bootstrap)
-            await pushLifecycle.activate(session: session)
+            phase = .signedIn(currentSession, bootstrap)
+            await pushLifecycle.activate(session: currentSession)
         } catch is CancellationError {
             phase = .signedOut
         } catch {
+            store.clearSession()
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             failureKind = Self.failureKind(for: error)
             phase = .signedOut
@@ -85,8 +87,9 @@ public final class MomoiOSAppModel {
         do {
             let bootstrap = try await backend.bootstrap(session: session)
             if saveForm { store.save(form: form) }
-            phase = .signedIn(session, bootstrap)
-            await pushLifecycle.activate(session: session)
+            let currentSession = store.loadSession() ?? session
+            phase = .signedIn(currentSession, bootstrap)
+            await pushLifecycle.activate(session: currentSession)
         } catch is CancellationError {
             phase = .signedOut
         } catch {

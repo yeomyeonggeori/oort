@@ -7,8 +7,8 @@ import UniformTypeIdentifiers
 /// REST writes and Centrifugo reads for the iOS companion.
 public actor MomoServerConversationClient: IOSConversationBackend {
     let authenticated: IOSSession
-    private let urlSession: URLSession
     private let directUploadSession: URLSession
+    private let requestExecutor: IOSAuthenticatedRequestExecutor
     let decoder = JSONDecoder()
     private let realtimeDriver: (any RealtimeSubscriptionDriver)?
     private var lastKnownSequenceByChannel: [ChannelID: Int64] = [:]
@@ -16,16 +16,20 @@ public actor MomoServerConversationClient: IOSConversationBackend {
     public init(
         authenticated: IOSSession,
         urlSession: URLSession = .shared,
-        directUploadSession: URLSession? = nil
+        directUploadSession: URLSession? = nil,
+        requestExecutor: IOSAuthenticatedRequestExecutor? = nil
     ) {
+        let executor = requestExecutor ?? IOSAuthenticatedRequestExecutor(
+            authenticated: authenticated,
+            urlSession: urlSession
+        )
         self.authenticated = authenticated
-        self.urlSession = urlSession
         self.directUploadSession = directUploadSession ?? URLSession(configuration: .ephemeral)
+        self.requestExecutor = executor
         if let endpoint = authenticated.realtimeWebSocketURL {
             let tokenProvider = IOSRealtimeTokenProvider(
                 baseURL: authenticated.baseURL,
-                accessToken: authenticated.accessToken,
-                urlSession: urlSession
+                requestExecutor: executor
             )
             let transport = IOSCentrifugoTransport(
                 endpoint: endpoint,
@@ -348,7 +352,7 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         let temporaryURL: URL
         let response: URLResponse
         do {
-            (temporaryURL, response) = try await urlSession.download(for: request)
+            (temporaryURL, response) = try await requestExecutor.download(for: request)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -518,17 +522,7 @@ public actor MomoServerConversationClient: IOSConversationBackend {
 
     func execute(request: URLRequest) async throws -> Data {
         do {
-            let (data, response) = try await urlSession.data(for: request)
-            guard let http = response as? HTTPURLResponse else {
-                throw SessionError.transport("The server did not return an HTTP response.")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let problem = try? decoder.decode(IOSProblemResponse.self, from: data)
-                let message = problem?.detail ?? problem?.message ?? problem?.title
-                    ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
-                throw SessionError.server(status: http.statusCode, message: message)
-            }
-            return data
+            return try await requestExecutor.data(for: request)
         } catch let error as SessionError {
             throw error
         } catch is CancellationError {
@@ -575,23 +569,17 @@ private protocol IOSRealtimeConnectionTokenProvider: Sendable {
 
 private actor IOSRealtimeTokenProvider: IOSRealtimeConnectionTokenProvider {
     private let baseURL: URL
-    private let accessToken: String
-    private let urlSession: URLSession
+    private let requestExecutor: IOSAuthenticatedRequestExecutor
 
-    init(baseURL: URL, accessToken: String, urlSession: URLSession) {
+    init(baseURL: URL, requestExecutor: IOSAuthenticatedRequestExecutor) {
         self.baseURL = baseURL
-        self.accessToken = accessToken
-        self.urlSession = urlSession
+        self.requestExecutor = requestExecutor
     }
 
     func token() async throws -> String {
         var request = URLRequest(url: baseURL.appendingPathComponent("/v1/auth/realtime-token"))
         request.httpMethod = "POST"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await urlSession.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw SessionError.transport("Could not connect to realtime updates.")
-        }
+        let data = try await requestExecutor.data(for: request)
         return try JSONDecoder().decode(IOSRealtimeTokenResponse.self, from: data).token
     }
 }
@@ -865,7 +853,6 @@ private struct IOSMarkReadRequest: Encodable {
 }
 private struct IOSUpdateNotificationPreferenceRequest: Encodable { let muted: Bool }
 private struct IOSNotificationPreferenceResponse: Decodable { let muted: Bool }
-private struct IOSProblemResponse: Decodable { let title: String?; let detail: String?; let message: String? }
 private struct IOSReadStateResponse: Decodable {
     let readStates: [ChannelReadState]
     private enum CodingKeys: String, CodingKey { case readStates = "read_states" }

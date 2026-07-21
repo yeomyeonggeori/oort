@@ -45,6 +45,8 @@
 	<string>Join huddles and speak with your momo workspace using your microphone.</string>
 	<key>MomoAPNSEnvironment</key>
 	<string>$(APS_ENVIRONMENT)</string>
+	<key>MomoKeychainAccessGroup</key>
+	<string>$(AppIdentifierPrefix)app.momo.ios.shared</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -291,19 +291,26 @@ struct SessionTests {
         }
     }
 
-    @Test("UserDefaults form and session round trip")
+    @Test("form stays in defaults while session tokens round trip through secure storage")
     func storeRoundTrip() throws {
         let suiteName = "MomoiOSKitTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = SessionStore(defaults: defaults, prefix: "test.")
+        let secureStore = InMemorySecureValueStore()
+        let store = SessionStore(
+            defaults: defaults,
+            prefix: "test.",
+            secureStore: secureStore
+        )
         let form = SessionForm(serverURL: "https://momo.example", email: "dev@momo.local", password: "plain-dev", inviteCode: "CODE")
         let session = fixtureSession()
 
         store.save(form: form)
-        store.save(session: session)
+        #expect(store.save(session: session))
         #expect(store.loadForm() == form)
         #expect(store.loadSession() == session)
+        #expect(defaults.data(forKey: "test.authenticated") == nil)
+        #expect(defaults.data(forKey: MomoPushContract.sessionKey) == nil)
 
         store.clearSession()
         #expect(store.loadSession() == nil)
@@ -324,16 +331,29 @@ struct SessionTests {
         let session = fixtureSession()
         legacy.set(try JSONEncoder().encode(form), forKey: "momo.ios.dev.session.form")
         legacy.set(try JSONEncoder().encode(session), forKey: "momo.ios.dev.session.authenticated")
-        let store = SessionStore(defaults: group, legacyDefaults: legacy)
+        let secureStore = InMemorySecureValueStore()
+        let store = SessionStore(
+            defaults: group,
+            legacyDefaults: legacy,
+            secureStore: secureStore
+        )
 
         #expect(store.loadForm() == form)
-        let pushData = try #require(group.data(forKey: MomoPushContract.sessionKey))
+        #expect(store.loadSession() == session)
+        let pushData = try #require(secureStore.data(for: MomoPushContract.pushFetchSessionAccount))
         let pushSession = try JSONDecoder().decode(PushFetchSession.self, from: pushData)
         #expect(pushSession.baseURL == session.baseURL)
         #expect(pushSession.workspaceID == session.workspaceID.description)
         #expect(pushSession.accessToken == session.accessToken)
+        #expect(group.data(forKey: "momo.ios.dev.session.authenticated") == nil)
+        #expect(group.data(forKey: MomoPushContract.sessionKey) == nil)
+        #expect(legacy.data(forKey: "momo.ios.dev.session.authenticated") == nil)
         legacy.set(try JSONEncoder().encode(SessionForm()), forKey: "momo.ios.dev.session.form")
-        let second = SessionStore(defaults: group, legacyDefaults: legacy)
+        let second = SessionStore(
+            defaults: group,
+            legacyDefaults: legacy,
+            secureStore: secureStore
+        )
         #expect(second.loadForm() == form)
     }
 
@@ -357,7 +377,11 @@ struct SessionTests {
         let suiteName = "MomoiOSKitTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = SessionStore(defaults: defaults, prefix: "model.")
+        let store = SessionStore(
+            defaults: defaults,
+            prefix: "model.",
+            secureStore: InMemorySecureValueStore()
+        )
         let bootstrap = WorkspaceBootstrap(
             workspace: Workspace(id: fixtureWorkspaceID, slug: "momo", name: "momo Team"),
             channels: [fixtureChannel()]
@@ -382,7 +406,11 @@ struct SessionTests {
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let model = MomoiOSAppModel(
-            store: SessionStore(defaults: defaults, prefix: "offline."),
+            store: SessionStore(
+                defaults: defaults,
+                prefix: "offline.",
+                secureStore: InMemorySecureValueStore()
+            ),
             backend: OfflineBackend()
         )
 
@@ -390,6 +418,39 @@ struct SessionTests {
 
         #expect(model.phase == .signedOut)
         #expect(model.failureKind == .offline)
+    }
+
+    @Test("concurrent 401 responses rotate the single-use refresh token once and retry")
+    func automaticRefreshIsSingleFlight() async throws {
+        let suiteName = "MomoiOSKitTests.refresh.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let secureStore = InMemorySecureValueStore()
+        let store = SessionStore(
+            defaults: defaults,
+            prefix: "refresh.",
+            secureStore: secureStore
+        )
+        let initial = fixtureSession()
+        #expect(store.save(session: initial))
+        let transport = RefreshingHTTPTransport()
+        let executor = IOSAuthenticatedRequestExecutor(
+            authenticated: initial,
+            store: store,
+            transport: transport
+        )
+        let request = URLRequest(url: initial.baseURL.appendingPathComponent("/v1/test-resource"))
+
+        async let first = executor.data(for: request)
+        async let second = executor.data(for: request)
+        let payloads = try await [first, second]
+
+        #expect(payloads == [Data("ok".utf8), Data("ok".utf8)])
+        #expect(await transport.refreshCount == 1)
+        #expect(await transport.expiredRequestCount == 2)
+        #expect(await transport.rotatedRequestCount == 2)
+        #expect(store.loadSession()?.accessToken == "rotated-access")
+        #expect(store.loadSession()?.refreshToken == "rotated-refresh")
     }
 }
 
@@ -911,6 +972,23 @@ struct ConversationTests {
 
         #expect(model.phase == .loaded)
         #expect(model.messages.compactMap(\.seq) == [2, 4])
+        model.stop()
+    }
+
+    @Test("timeline preserves loaded messages and exposes an inline session banner after refresh fails")
+    @MainActor
+    func timelineRefreshFailurePreservesMessages() async {
+        let channel = fixtureChannel()
+        let backend = ExpiringHistoryBackend(messages: [fixtureMessage(sequence: 1)])
+        let model = IOSTimelineModel(channel: channel.id, currentMemberID: fixtureMemberID, backend: backend)
+
+        await model.load()
+        await model.retry()
+
+        #expect(model.phase == .loaded)
+        #expect(model.messages.compactMap(\.seq) == [1])
+        #expect(model.refreshFailure?.requiresSignIn == true)
+        #expect(model.refreshFailure?.message.contains("Existing messages are preserved") == true)
         model.stop()
     }
 
@@ -2150,6 +2228,107 @@ private actor SuspendedReadConversationBackend: IOSConversationBackend {
     func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
         fixtureMessage(sequence: 1)
     }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
+}
+
+private final class InMemorySecureValueStore: MomoSecureValueStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Data] = [:]
+
+    func data(for account: String) -> Data? {
+        lock.withLock { values[account] }
+    }
+
+    @discardableResult
+    func set(_ data: Data, for account: String) -> Bool {
+        lock.withLock { values[account] = data }
+        return true
+    }
+
+    func removeValue(for account: String) {
+        lock.withLock { values[account] = nil }
+    }
+}
+
+private actor RefreshingHTTPTransport: IOSHTTPDataTransport {
+    private(set) var refreshCount = 0
+    private(set) var expiredRequestCount = 0
+    private(set) var rotatedRequestCount = 0
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let url = try #require(request.url)
+        if url.path == "/v1/auth/refresh" {
+            refreshCount += 1
+            let body = try #require(request.httpBody)
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: String])
+            #expect(json["refreshToken"] == "refresh")
+            try await Task.sleep(for: .milliseconds(40))
+            return (
+                Data(#"{"accessToken":"rotated-access","refreshToken":"rotated-refresh"}"#.utf8),
+                response(url: url, status: 200)
+            )
+        }
+        switch request.value(forHTTPHeaderField: "Authorization") {
+        case "Bearer access":
+            expiredRequestCount += 1
+            if expiredRequestCount == 2 {
+                // Arrive after the first request already rotated the pair. The
+                // executor must retry with the new access token, not rotate again.
+                try await Task.sleep(for: .milliseconds(80))
+            }
+            return (Data(), response(url: url, status: 401))
+        case "Bearer rotated-access":
+            rotatedRequestCount += 1
+            return (Data("ok".utf8), response(url: url, status: 200))
+        default:
+            return (Data(), response(url: url, status: 403))
+        }
+    }
+
+    private func response(url: URL, status: Int) -> HTTPURLResponse {
+        HTTPURLResponse(
+            url: url,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+    }
+}
+
+private actor ExpiringHistoryBackend: IOSConversationBackend {
+    private let messages: [Message]
+    private var historyCalls = 0
+
+    init(messages: [Message]) { self.messages = messages }
+
+    func snapshot() async throws -> IOSConversationSnapshot {
+        IOSConversationSnapshot(channels: [fixtureChannel()], members: [], readStates: [])
+    }
+
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] {
+        historyCalls += 1
+        if historyCalls == 1 { return messages }
+        throw SessionError.sessionExpired
+    }
+
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        ChannelReadState(
+            channelId: channel,
+            lastReadSeq: sequence,
+            latestSeq: sequence,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool { muted }
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { $0.finish() }
+    }
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message { messages[0] }
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
     }
