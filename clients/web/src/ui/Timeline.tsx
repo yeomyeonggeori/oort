@@ -9,11 +9,16 @@ import type {
 } from "../realtime/realtime";
 import type { ApprovalsStore } from "../state/approvals";
 import {
+  approvalCardModel,
+  resolveApprovalStatus,
+} from "../state/approvalModel";
+import { highestVisibleSequence } from "../state/readStates";
+import {
   applyReactionDelta,
   fromRestMessage,
   isSameLocalDate,
   mentionsMember,
-  mergeMessages,
+  reconcileMessages,
   removeMessageReactions,
   startsAuthorGroup,
   type ReactionSnapshot,
@@ -33,6 +38,7 @@ interface TimelineProps {
   approvals: ApprovalsStore;
   /** Highest committed seq rendered — drives the read-state cursor PUT. */
   onLatestSeq: (channelId: string, seq: number) => void;
+  online: boolean;
 }
 
 const HEAD_PAGE_LIMIT = 200;
@@ -79,58 +85,6 @@ function fromRealtime(
   return ui;
 }
 
-/**
- * approval_request messages carry the linkage in props (approval_id plus the
- * plain-language title/summary the server wrote). Only those prose strings
- * are read — tool JSON/arguments/cost stay unrendered (ADR-0112 basic mode).
- */
-function approvalCardProps(message: TimelineMessage): {
-  approvalId: string;
-  title: string;
-  summary?: string;
-  propsStatus?: string;
-} | null {
-  const props = message.props;
-  if (!props) return null;
-  const approvalId = props["approval_id"];
-  if (typeof approvalId !== "string" || approvalId === "") return null;
-  const title = props["title"];
-  const summary = props["summary"];
-  const status = props["status"];
-  const result: {
-    approvalId: string;
-    title: string;
-    summary?: string;
-    propsStatus?: string;
-  } = {
-    approvalId,
-    title:
-      typeof title === "string" && title !== ""
-        ? title
-        : (message.body ?? "승인 요청"),
-  };
-  if (typeof summary === "string" && summary !== "") result.summary = summary;
-  if (typeof status === "string" && status !== "") result.propsStatus = status;
-  return result;
-}
-
-/**
- * Card status resolution: the session-local receipt/projection state and the
- * server-patched message props are both authoritative snapshots; whichever
- * side carries a SETTLED status wins (a decision elsewhere reaches props on
- * reload before this session's pending list refreshes, and vice versa).
- */
-function resolveApprovalStatus(
-  storeStatus: string | null,
-  propsStatus: string | undefined
-): string | null {
-  if (storeStatus !== null && storeStatus !== "pending") return storeStatus;
-  if (propsStatus !== undefined && propsStatus !== "pending") {
-    return propsStatus;
-  }
-  return storeStatus ?? propsStatus ?? null;
-}
-
 const timeFormat = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit",
   minute: "2-digit",
@@ -155,6 +109,7 @@ export default function Timeline({
   realtime,
   approvals,
   onLatestSeq,
+  online,
 }: TimelineProps) {
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [reactions, setReactions] = useState<ReactionSnapshot>({});
@@ -169,6 +124,7 @@ export default function Timeline({
   // read it outside of React's render cycle.
   const lastSeqRef = useRef(0);
   const catchUpRunningRef = useRef(false);
+  const recoveryEventsRef = useRef<ChannelRealtimeEvent[]>([]);
   // Until the head page establishes a seq baseline, catch-up must not run:
   // `after=0` would page the whole channel history oldest-first (up to
   // MAX_BACKFILL_PAGES * BACKFILL_LIMIT) and can stop short, leaving a seq
@@ -179,20 +135,31 @@ export default function Timeline({
   const loadingProjectionRef = useRef(true);
   const bufferedEventsRef = useRef<ChannelRealtimeEvent[]>([]);
   const channelId = channel.id;
+  const applyApprovalRealtimeStatus = approvals.applyRealtimeStatus;
 
   const appendMessages = useCallback((incoming: TimelineMessage[]) => {
+    for (const message of incoming) {
+      lastSeqRef.current = Math.max(lastSeqRef.current, message.seq);
+    }
     setMessages((current) => {
-      const merged = mergeMessages(current, incoming);
-      const last = merged[merged.length - 1];
-      if (last && last.seq > lastSeqRef.current) {
-        lastSeqRef.current = last.seq;
-      }
-      return merged;
+      return reconcileMessages(current, incoming);
     });
   }, []);
 
   const applyRealtimeEvent = useCallback(
     (event: ChannelRealtimeEvent) => {
+      if (
+        event.type === "approval.decided" ||
+        event.type === "approval.approved" ||
+        event.type === "approval.rejected" ||
+        event.type === "approval.expired"
+      ) {
+        applyApprovalRealtimeStatus(
+          event.payload.approval_id,
+          event.payload.status
+        );
+        return;
+      }
       if (event.type === "message.new" || event.type === "message.edited") {
         appendMessages([fromRealtime(event)]);
         return;
@@ -224,7 +191,7 @@ export default function Timeline({
         })
       );
     },
-    [appendMessages]
+    [appendMessages, applyApprovalRealtimeStatus]
   );
 
   /**
@@ -239,24 +206,42 @@ export default function Timeline({
       pendingCatchUpRef.current = true;
       return;
     }
-    if (catchUpRunningRef.current) return;
+    if (catchUpRunningRef.current) {
+      pendingCatchUpRef.current = true;
+      return;
+    }
     catchUpRunningRef.current = true;
+    let recovered = false;
     try {
+      let cursor = lastSeqRef.current;
       for (let page = 0; page < MAX_BACKFILL_PAGES; page += 1) {
         const response = await fetchMessages(workspaceId, channelId, {
-          after: lastSeqRef.current,
+          after: cursor,
           limit: BACKFILL_LIMIT,
         });
         const incoming = response.messages.map(fromRestMessage);
-        if (incoming.length > 0) appendMessages(incoming);
+        if (incoming.length > 0) {
+          appendMessages(incoming);
+          cursor = Math.max(cursor, ...incoming.map((message) => message.seq));
+        }
         if (incoming.length < BACKFILL_LIMIT) break;
       }
+      recovered = true;
     } catch {
       // Transient; the next subscribe/publication cycle retries.
     } finally {
       catchUpRunningRef.current = false;
     }
-  }, [appendMessages, channelId, workspaceId]);
+    if (recovered) {
+      const queued = recoveryEventsRef.current;
+      recoveryEventsRef.current = [];
+      for (const event of queued) applyRealtimeEvent(event);
+    }
+    if (pendingCatchUpRef.current) {
+      pendingCatchUpRef.current = false;
+      void catchUp();
+    }
+  }, [appendMessages, applyRealtimeEvent, channelId, workspaceId]);
 
   // Initial head load: history and reactions establish one cold-load baseline.
   // Publications received before both snapshots land are buffered, matching
@@ -284,10 +269,19 @@ export default function Timeline({
         loadingProjectionRef.current = false;
         const buffered = bufferedEventsRef.current;
         bufferedEventsRef.current = [];
-        for (const event of buffered) applyRealtimeEvent(event);
-        if (pendingCatchUpRef.current) {
+        const needsRecovery =
+          pendingCatchUpRef.current ||
+          buffered.some(
+            (event) =>
+              event.type === "message.new" &&
+              event.payload.seq > lastSeqRef.current + 1
+          );
+        if (needsRecovery) {
+          recoveryEventsRef.current.push(...buffered);
           pendingCatchUpRef.current = false;
           void catchUp();
+        } else {
+          for (const event of buffered) applyRealtimeEvent(event);
         }
       } catch {
         if (!cancelled) {
@@ -317,9 +311,24 @@ export default function Timeline({
           bufferedEventsRef.current.push(event);
           return;
         }
-        if (event.seq > lastSeqRef.current + 1) {
-          // Gap: never render around a hole — REST backfill closes it first.
+        if (catchUpRunningRef.current) {
+          recoveryEventsRef.current.push(event);
+          return;
+        }
+        if (recoveryEventsRef.current.length > 0) {
+          recoveryEventsRef.current.push(event);
           void catchUp();
+          return;
+        }
+        if (
+          event.type === "message.new" &&
+          event.payload.seq > lastSeqRef.current + 1
+        ) {
+          // Queue the publication until REST closes the hole. Existing rows
+          // remain rendered throughout recovery.
+          recoveryEventsRef.current.push(event);
+          void catchUp();
+          return;
         }
         applyRealtimeEvent(event);
       },
@@ -352,13 +361,32 @@ export default function Timeline({
     }
   }, [messages]);
 
-  // Viewing this channel = reading it: report the highest COMMITTED seq so
-  // the read-state store can advance the cursor (monotonic PUT; the store
-  // dedupes and never regresses).
+  // A message counts as read only after at least half of its row enters the
+  // scroll viewport. Visibility churn is debounced by the read-state store.
   useEffect(() => {
-    const last = messages[messages.length - 1];
-    if (last) onLatestSeq(channelId, last.seq);
-  }, [channelId, messages, onLatestSeq]);
+    const list = listRef.current;
+    if (!list || typeof IntersectionObserver === "undefined") return;
+    const visible = new Set<number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const sequence = Number(
+            (entry.target as HTMLElement).dataset["seq"] ?? "0"
+          );
+          if (sequence <= 0) continue;
+          if (entry.isIntersecting) visible.add(sequence);
+          else visible.delete(sequence);
+        }
+        const highest = highestVisibleSequence(visible);
+        if (online && highest > 0) onLatestSeq(channelId, highest);
+      },
+      { root: list, threshold: 0.5 }
+    );
+    for (const row of list.querySelectorAll<HTMLElement>("[data-seq]")) {
+      observer.observe(row);
+    }
+    return () => observer.disconnect();
+  }, [channelId, messages.length, onLatestSeq, online]);
 
   function handleScroll() {
     const list = listRef.current;
@@ -417,10 +445,7 @@ export default function Timeline({
             const reactionEntries = Object.entries(
               Object.entries(reactions).find(([messageId]) => messageId.toLowerCase() === message.id.toLowerCase())?.[1] ?? {}
             );
-            const approvalCard =
-              message.type === "approval_request"
-                ? approvalCardProps(message)
-                : null;
+            const approvalCard = approvalCardModel(message);
             return (
               <Fragment key={message.seq}>
               {showDate && <li className="date-divider"><span>{dateFormat.format(new Date(message.createdAtMs))}</span></li>}
@@ -446,14 +471,17 @@ export default function Timeline({
                   <p className="message-body message-tombstone">메시지 삭제됨</p>
                 ) : approvalCard !== null ? (
                   <ApprovalCard
-                    approvalId={approvalCard.approvalId}
+                    approvalId={approvalCard.approvalId ?? message.id}
                     title={approvalCard.title}
                     summary={approvalCard.summary}
                     requesterName={displayNameFor(message.authorMemberId)}
                     status={resolveApprovalStatus(
-                      approvals.statusFor(approvalCard.approvalId),
-                      approvalCard.propsStatus
+                      approvalCard.approvalId === null
+                        ? null
+                        : approvals.statusFor(approvalCard.approvalId),
+                      approvalCard.status
                     )}
+                    isResumeOffer={approvalCard.isResumeOffer}
                     decide={approvals.decide}
                   />
                 ) : (
@@ -492,6 +520,7 @@ export default function Timeline({
           workspaceId={workspaceId}
           channelId={channelId}
           placeholder={`${channelLabel}에 메시지 보내기`}
+          online={online}
           onSent={(message) => appendMessages([fromRestMessage(message)])}
         />
       </footer>

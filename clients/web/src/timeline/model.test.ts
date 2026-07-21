@@ -5,6 +5,7 @@ import {
   mentionsMember,
   mergeMessages,
   removeMessageReactions,
+  reconcileMessages,
   startsAuthorGroup,
   type TimelineMessage,
 } from "./model";
@@ -58,6 +59,30 @@ describe("timeline grouping reducer", () => {
     );
     expect(result.map((item) => item.seq)).toEqual([1, 2, 3]);
     expect(result[1]?.body).toBe("수정됨");
+  });
+});
+
+describe("REST recovery reconciliation", () => {
+  it("removes duplicate sequences and lets REST replace a partial row", () => {
+    const result = reconcileMessages(
+      [message(7, { body: "실시간 임시 본문" })],
+      [message(7, { body: "REST 정본 본문" })]
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]?.body).toBe("REST 정본 본문");
+  });
+
+  it("preserves strict sequence order across an out-of-order page", () => {
+    expect(
+      reconcileMessages([message(4)], [message(7), message(5), message(6)]).map(
+        (item) => item.seq
+      )
+    ).toEqual([4, 5, 6, 7]);
+  });
+
+  it("keeps the existing projection when recovery returns no rows", () => {
+    const existing = [message(1), message(2)];
+    expect(reconcileMessages(existing, [])).toBe(existing);
   });
 });
 

@@ -7,6 +7,7 @@ interface ComposerProps {
   workspaceId: string;
   channelId: string;
   placeholder: string;
+  online: boolean;
   /** Server echo (committed message with authoritative seq). */
   onSent: (message: Message) => void;
 }
@@ -27,6 +28,7 @@ export default function Composer({
   workspaceId,
   channelId,
   placeholder,
+  online,
   onSent,
 }: ComposerProps) {
   const [draft, setDraft] = useState("");
@@ -42,7 +44,7 @@ export default function Composer({
 
   async function send() {
     const body = draft.trim();
-    if (body === "" || sending) return;
+    if (body === "" || sending || !online) return;
     if (attemptRef.current === null || attemptRef.current.body !== body) {
       attemptRef.current = { clientMsgId: crypto.randomUUID(), body };
     }
@@ -80,6 +82,11 @@ export default function Composer({
 
   return (
     <form className="composer" onSubmit={handleSubmit}>
+      {!online && (
+        <p className="composer-offline" data-testid="composer-offline" role="status">
+          연결을 확인하세요. 오프라인에서는 메시지를 보낼 수 없습니다.
+        </p>
+      )}
       {sendFailed && (
         <p className="composer-error" data-testid="composer-error" role="alert">
           메시지를 보내지 못했습니다. 네트워크 상태를 확인해 주세요.
@@ -102,13 +109,14 @@ export default function Composer({
           value={draft}
           placeholder={placeholder}
           maxLength={4000}
+          disabled={!online || sending}
           onChange={(event) => handleDraftChange(event.target.value)}
         />
         <button
           type="submit"
           className="primary-button composer-send"
           data-testid="composer-send"
-          disabled={sending || draft.trim() === ""}
+          disabled={!online || sending || draft.trim() === ""}
         >
           {sending ? "보내는 중…" : "보내기"}
         </button>

@@ -81,11 +81,12 @@ read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 
   Web Locks)은 미구현 — 내부 알파에서 실제로 문제가 되면 이탈 보고 후 후속
   티켓으로 다룬다(핸드오프 패킷 §9의 열린 질문).
 - **낙관적 렌더링 없음(v0 의도)**: composer는 서버 echo(POST 201 응답/
-  브로드캐스트/backfill)만 렌더한다. 커밋 전에 화면에 나타나는 행은 없다 —
-  오프라인/재시도 UX 고도화는 재기획 질문(핸드오프 패킷 §9).
-- 승인 카드 상태는 receipt 기반 전이다: 타 기기에서 먼저 결정된 승인은 이
-  탭에서 결정 시도 시 409 receipt로 교정된다(실시간 approval 이벤트 rail은
-  비구현 — ADR 게이트 대상).
+  브로드캐스트/backfill)만 렌더한다. 실패한 전송은 같은 `clientMsgId`로
+  재시도하고, 본문을 고치면 새 키를 만든다. 오프라인에서는 입력과 전송을
+  비활성화하되 기존 타임라인은 유지한다.
+- 승인 카드는 `props.approval_status`, decision receipt, `approval.*` 실시간
+  이벤트를 한 상태로 합친다. `resume_offer`는 웹에서 결정하지 않고 데스크톱
+  재개 안내만 표시한다.
 - 파일/웹훅/presence/멀티 워크스페이스 rail 비구현(각 ADR 게이트,
   ADR-0119 D5-A non-goals).
 
@@ -117,7 +118,12 @@ read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 
   `readStateChannelName`은 member id를 `toUpperCase()`한다.
 - read-state cursor는 단조 전진: 서버가 `max(current, min(requested,
   latestSeq))`로 보장하고, 클라(`src/state/readStates.ts`)도 후퇴 PUT을
-  보내지 않는다. unread 계산의 권위는 서버 projection이다.
+  보내지 않는다. 50% 이상 보이는 메시지 중 가장 높은 seq를 300ms debounce로
+  전송한다. 비활성 채널 `message.new`는 배지를 즉시 갱신하고 REST projection을
+  다시 조회한다. unread 계산의 최종 권위는 서버 projection이다.
+- recovery 실패(`recovered:false`)나 seq gap은 현재 메시지를 지우지 않고
+  `?after=<seq>` REST 페이지로 복구한다. 같은 seq는 하나로 합치고 순서를
+  보존한 뒤 대기 중인 실시간 이벤트를 재생한다.
 
 ## 개발
 

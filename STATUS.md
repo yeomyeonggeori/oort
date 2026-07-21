@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## W-4 웹 승인·read-state·recovery 왕복 (#577, 2026-07-21)
+
+- 웹 타임라인 승인 카드는 `props.approval_status`와 `approval.*` 이벤트를 소비하고, pending/approved/rejected/expired 상태 칩과 멱등 결정 재시도를 제공한다. `resume_offer`는 결정 버튼 없이 데스크톱 재개 안내만 표시한다.
+- 가시 메시지 기반 300ms read-state debounce, 비활성 채널 unread/mention 즉시 갱신과 REST 재조회, `recovered:false`·seq gap REST reconcile, 지수 백오프 재연결 배너, 오프라인 컴포저 비활성화를 추가했다.
+- Vitest 38 tests, eslint, TypeScript typecheck, Vite build는 PASS했다. 승인 결정 상태 전이와 2탭 read-state의 실서버 왕복은 지시대로 Docker·브라우저를 실행하지 않아 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## MOMO-524 self-leave·에이전트 대칭·audit 조회 (2026-07-21)
 
 - ADR-0128 D4~D6에 따라 public/private 채널과 workspace self-leave, private 최종 멤버 archive, 마지막 owner 409, agent suspend/remove credential 즉시 revoke와 banned-handle 생성/pairing 차단, owner/admin audit 필터·cursor REST를 기존 FORCE RLS 원장 위에 가산했다. migration과 `schema_v0.sql` 변경은 없다.

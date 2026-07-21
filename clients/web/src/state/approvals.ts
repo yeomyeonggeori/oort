@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ApprovalProjection } from "../api/client";
 import { decideApproval, listApprovals } from "../api/client";
+import { parseApprovalStatus } from "./approvalModel";
 
 // =============================================================================
 // Approvals store (MOMO-400, ADR-0112 basic mode).
@@ -45,6 +46,8 @@ export interface ApprovalsStore {
   /** Locally known status for an approval id; null = not known here. */
   statusFor: (approvalId: string) => string | null;
   refreshPending: () => Promise<void>;
+  /** Apply an approval.* channel event immediately to every card surface. */
+  applyRealtimeStatus: (approvalId: string, status: string) => void;
   /**
    * Decide an approval. `clientDecisionId` is the caller-held idempotency
    * key: reuse it to retry the SAME decision after a network failure.
@@ -167,5 +170,28 @@ export function useApprovals(workspaceId: string): ApprovalsStore {
     [statusById]
   );
 
-  return { pending, pendingLoaded, statusFor, refreshPending, decide };
+  const applyRealtimeStatus = useCallback(
+    (approvalId: string, status: string) => {
+      const parsed = parseApprovalStatus(status);
+      if (parsed === null) return;
+      noteStatus(approvalId, parsed);
+      if (parsed !== "pending") {
+        setPending((current) =>
+          current.filter(
+            (approval) => approval.id.toLowerCase() !== approvalId.toLowerCase()
+          )
+        );
+      }
+    },
+    [noteStatus]
+  );
+
+  return {
+    pending,
+    pendingLoaded,
+    statusFor,
+    refreshPending,
+    applyRealtimeStatus,
+    decide,
+  };
 }
