@@ -2186,12 +2186,29 @@ public final class ChatViewModel: ObservableObject {
         )
     }
 
-    func issueTerminalAttach(_ session: WorkSessionID) async throws -> MomoTerminalAttachGrant {
+    func issueTerminalAttach(
+        _ session: WorkSessionID,
+        mode: MomoTerminalAttachMode = .controller
+    ) async throws -> MomoTerminalAttachGrant {
         guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
         guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
         return try await workConsoleBackend.issueTerminalAttach(
             workspace: workspaceId,
-            session: session
+            session: session,
+            mode: mode
+        )
+    }
+
+    func setWorkSessionObservation(
+        _ session: WorkSessionID,
+        observation: MomoWorkSessionObservation
+    ) async throws -> MomoWorkSession {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.setWorkSessionObservation(
+            workspace: workspaceId,
+            session: session,
+            observation: observation
         )
     }
 
