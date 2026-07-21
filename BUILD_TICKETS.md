@@ -2288,7 +2288,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 > 체인: Wave M(526→527→528)·Wave A(530→533→531)=track/engine 병렬(내부 순차) · Wave U(518→529→532)=track/uxui.
 
 ### MOMO-526 수용기준 — Memory Plane 스키마+수명주기+추출 워커 v0 `[runtime]`
-- [ ] migration 027+: memory_item/memory_source_ref/memory_lifecycle_event/memory_candidate — 전부 RLS ENABLE+FORCE+ws_isolation
+- [ ] migration 027+: memory_item/memory_source_ref/memory_lifecycle_event/memory_candidate/**memory_visibility_grant**(델타 1) — 전부 RLS ENABLE+FORCE+ws_isolation. memory_item.source_kind='message' 선반영(델타 3)
 - [ ] 삭제 대신 무효화(invalid_at+lifecycle) — DELETE는 admin 정책 스위치(일괄)만
 - [ ] 추출 워커 v0: 워터마크 배치→2-phase(ADD/UPDATE/무효화/NOOP, mem0 문법)→단일 쓰기경로+`memory.updated` outbox. LLM은 BYOA 재사용(mock 추출기 게이트)
 - [ ] 원문 중복 저장 금지 — source_ref 링크만. `verify_memory_plane.sh` docker PASS
@@ -2299,7 +2299,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] `verify_memory_search.sh` PASS + 전 게이트 회귀(이미지 교체 영향)
 
 ### MOMO-528 수용기준 — Context Packet v0 승격 `[runtime]`
-- [ ] context_packet 불변 저장(RLS FORCE)·만료 재발급 / memory_refs(profile 상시·fact/episode 질의)
+- [ ] context_packet 불변 저장(RLS FORCE)·만료 재발급 / memory_refs(profile 상시·fact/episode 질의 — 검색 범위=기본 스코프 ∪ 유효 visibility grant, 델타 2)
 - [ ] mock tool_grants 제거→plugin_capability 실주입(부재=빈 배열 fail-closed, R2) / permission_basis 실검증(R1)
 - [ ] AgentJobPayload memory_refs 가산(기존 필드 불변 — 양 경로 호환). `verify_context_packet.sh` PASS
 
@@ -2320,7 +2320,7 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [ ] work.read 발췌 경로 유지(0114 D3)·서버 무변경. research/19-05 §2 반영. design-review Blocker 0
 
 ### MOMO-529 수용기준 — 메모리 브라우저+서빙 인스펙터 (UXUI, 527·528 후) `[runtime]`
-- [ ] "에이전트가 아는 것" 뷰(필터·열람·편집·무효화·출처 역링크·정책 스위치) + run packet 인스펙터
+- [ ] "에이전트가 아는 것" 뷰(필터·열람·편집·무효화·출처 역링크·정책 스위치·**grant 목록/회수** — 델타 3절) + run packet 인스펙터
 - [ ] 편집/무효화 REST 경유(0129 D6), 실서버 왕복, design-review Blocker 0
 
 ### MOMO-532 수용기준 — 도구 관리+ACP 카드 (UXUI, 533·531 후) `[runtime]`

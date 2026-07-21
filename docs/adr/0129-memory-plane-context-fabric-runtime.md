@@ -45,4 +45,5 @@ D1-A(PG-native) · D2-A(outbox 2-phase+무효화) · D3-A(pgvector+FTS+RRF) · D
 - (+) 불변식 무변경: PG=SoT·RLS FORCE·단일 쓰기경로·자격증명 비유입 전부 기존 경로 재사용.
 - (−) pgvector는 스택 가산(이미지·마이그레이션·운영 지식) — 셀프호스트 배포판(0121)에 확장 동봉 필요.
 - (−) 추출 품질은 튜닝 반복이 필요(공개 프롬프트·mem0 논문으로 시작점은 확보).
+- 후속(v1, 2026-07-21 정합 검토): **추출원 확장** — 첨부 텍스트·Drive 문서·웹훅 payload를 메모리 소스로("회사 단위 데이터"의 잔여 절반). v0는 `memory_item.source_kind='message'` 고정 컬럼으로 확장 여지만 선반영.
 - 파생(Accepted 시 발급 예약): **MOMO-526**(엔진 — memory 스키마+RLS+수명주기 원장+추출 워커 v0) · **MOMO-527**(엔진 — pgvector/FTS/RRF 검색 + retrieval 게이트) · **MOMO-528**(엔진 — Context Packet v0 승격: 불변화·memory_refs·budget·mock grant 제거·실 projection 주입) · **MOMO-529**(UXUI — 메모리 브라우저+출처 역링크+정책 스위치+서빙 인스펙터).

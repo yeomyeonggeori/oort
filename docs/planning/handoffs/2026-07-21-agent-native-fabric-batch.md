@@ -145,3 +145,10 @@ main 최신에 PLN-20260721-01 산출물이 랜딩됐다. 다음 순서로 인�
 5. worker 전달은 3줄 규율(레포 경로+패킷 경로+goal 번호) + 패킷 §4 함정 포함.
    research/19-05(UXUI 레퍼런스)는 518/529/532 이슈 본문에 참조로 연결.
 ```
+
+## 9. 델타 (2026-07-21 비전 정합 검토 — docs/planning/2026-07-21-vision-conformance-review.md)
+
+1. **MOMO-526 스키마 가산**: `memory_visibility_grant(id, workspace_id, memory_id FK, grantee_kind ∈ member|agent, grantee_id, granted_by, created_at, revoked_at?)` + RLS FORCE — 스펙(research/11 05 §15)·0129 D1에 있던 테이블의 §2 누락 복원(성재 원문 "1급 멤버지만 권한은 있을 수도"의 데이터 기반). `memory_item`에 `source_kind text NOT NULL DEFAULT 'message'` 선반영(v1 추출원 확장 대비 — memory_source_ref 재작업 방지).
+2. **MOMO-528 서빙 필터 가산**: memory_refs 검색 범위 = "기본 스코프(해당 agent+요청 member+workspace) ∪ 유효 visibility grant(revoked_at IS NULL)".
+3. **MOMO-529 범위 가산**: grant 목록·회수 UI(관리자/소유자) 1절.
+4. **W-6(웹 Work 관전 v0) 백로그 신설**: 세션 리스트(read-only)+스레드 관전+observer 터미널(516 capability)+diff 카드 웹 렌더(518 props 공용). 착수=518 랜딩 후, track/engine 소관. CTO 원문 "다양한 직군이 하나의 화면"의 브라우저 전제 — 진단 §1-4 권고의 큐 등재 유실 복원.
