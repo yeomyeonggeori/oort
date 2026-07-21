@@ -2224,6 +2224,15 @@ final class MomoServerTests: XCTestCase {
             endedAtMs: 1_782_463_260_000,
             exitCode: 0
         )
+        let sessionObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(session))
+                as? [String: Any]
+        )
+        XCTAssertEqual(sessionObject["observation"] as? String, "open")
+        XCTAssertEqual(sessionObject["observerGrantCount"] as? Int, 0)
+        XCTAssertEqual(sessionObject["remoteAttachAvailable"] as? Bool, true)
+        XCTAssertNil(sessionObject["attachEndpoint"])
+        XCTAssertNil(sessionObject["capabilityToken"])
         for eventType in ["work.session.started", "work.session.ended"] {
             let raw = WorkSessionRoutes.lifecyclePayload(
                 eventType: eventType,

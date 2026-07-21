@@ -143,7 +143,7 @@ struct TerminalAttachRoutes: Sendable {
                     ON h.id = ws.host_id
                    AND h.workspace_id = ws.workspace_id
                  WHERE ws.id = \(sessionID)
-                 FOR SHARE OF ws, h
+                 FOR UPDATE OF ws, h
                 """,
                 logger: db.logger
             ).collect()
