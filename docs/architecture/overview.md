@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-21 (ADR-0128 D1~D3 membership lifecycle) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-21 (ADR-0128 D1~D6 membership lifecycle) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -60,6 +60,16 @@ member 상태 전이와 모든 actor/subject token revoke를, remove는 전 채�
 workspace membership 삭제·deleted 전이를 한 tenant transaction에서 audit과 함께
 커밋한다. `workspace_ban`은 정규화 email/handle을 보관하고 authenticated invite redeem과
 public join 양쪽에서 재합류를 막는다.
+
+self-leave도 같은 경계를 쓴다. channel leave는 DM을 거부하고 private 최종 멤버가 나가면
+membership `left_at`과 channel archive를 한 tenant transaction에서 커밋한다. workspace leave는
+마지막 owner를 409로 막고 전 channel/workspace membership 삭제, deleted 전이, 본인 token
+revoke를 audit과 함께 커밋하되 authored message는 보존한다. agent suspend/remove의 token revoke는
+`agent_bearer`를 포함하므로 gateway의 다음 pending/callback/dispatch 인증이 즉시 실패한다.
+reinstate는 폐기 credential을 복구하지 않으며 human admin의 명시적 재발급이 필요하다. agent
+생성과 credential pairing은 모두 정규화 handle ban을 재검사한다. owner/admin 전용
+`GET /v1/workspaces/:ws/audit`은 기존 FORCE RLS `audit_log`를 action prefix, subject member,
+시간 범위와 `(created_at,id)` cursor로만 투영한다.
 
 macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 active
 `channelIds`의 유일한 권위로 사용한다(ADR-0110). 일반 멤버는 active workspace member

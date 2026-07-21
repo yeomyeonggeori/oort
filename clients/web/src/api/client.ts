@@ -50,6 +50,7 @@ export type ApprovalProjectionPage =
   components["schemas"]["ApprovalProjectionPage"];
 export type ApprovalDecisionReceipt =
   components["schemas"]["ApprovalDecisionReceipt"];
+export type ApprovalDecision = components["schemas"]["ApprovalDecisionRequest"];
 type RefreshResponse = components["schemas"]["RefreshResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 
@@ -393,15 +394,16 @@ export async function decideApproval(
   approve: boolean,
   clientDecisionId: string
 ): Promise<ApprovalDecisionResult> {
+  const decision: ApprovalDecision = {
+    approval_id: approvalId,
+    approve,
+    client_decision_id: clientDecisionId,
+  };
   const response = await authorizedFetch(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/approvals/${encodeURIComponent(approvalId)}/decision`,
     {
       method: "POST",
-      body: JSON.stringify({
-        approval_id: approvalId,
-        approve,
-        client_decision_id: clientDecisionId,
-      }),
+      body: JSON.stringify(decision),
     }
   );
   if (

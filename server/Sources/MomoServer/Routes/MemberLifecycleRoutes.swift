@@ -10,6 +10,8 @@ struct MemberLifecycleRoutes: Sendable {
     let db: Database
 
     func add(to group: RouterGroup<AppRequestContext>) {
+        group.delete("/v1/workspaces/:ws/channels/:ch/members/me", use: leaveChannel)
+        group.delete("/v1/workspaces/:ws/members/me", use: leaveWorkspace)
         group.patch("/v1/workspaces/:ws/members/:member/role", use: changeWorkspaceRole)
         group.patch("/v1/workspaces/:ws/channels/:ch/members/:member/role", use: changeChannelRole)
         group.post("/v1/workspaces/:ws/members/:member/suspend", use: suspend)
@@ -151,6 +153,133 @@ struct MemberLifecycleRoutes: Sendable {
         try await setStatus(request, context: context, expected: "suspended", next: "active", action: "member.reinstated")
     }
 
+    @Sendable
+    func leaveChannel(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try Self.requireHumanPrincipal(context)
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let channelID = try ChannelRoutes.channelID(context)
+        let result: ChannelLeaveResponse = try await transaction(workspaceID) { conn in
+            _ = try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal, forUpdate: true
+            )
+            let rows = try await conn.query(
+                """
+                SELECT ms.id, c.kind::text
+                  FROM membership ms
+                  JOIN channel c
+                    ON c.id = ms.channel_id
+                   AND c.workspace_id = ms.workspace_id
+                 WHERE ms.workspace_id = \(workspaceID)
+                   AND ms.channel_id = \(channelID)
+                   AND ms.member_id = \(principal.memberID)
+                   AND ms.left_at IS NULL
+                   AND c.archived_at IS NULL
+                 FOR UPDATE OF ms, c
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "active channel membership not found")
+            }
+            let (membershipID, kind) = try row.decode((UUID, String).self)
+            guard kind != "dm" else {
+                throw HTTPError(.forbidden, message: "direct message channels cannot be left")
+            }
+
+            _ = try await conn.query(
+                "UPDATE membership SET left_at = now() WHERE id = \(membershipID)",
+                logger: db.logger
+            )
+            var archived = false
+            if kind == "private" {
+                let remaining = try await conn.query(
+                    """
+                    SELECT EXISTS (
+                      SELECT 1 FROM membership
+                       WHERE workspace_id = \(workspaceID)
+                         AND channel_id = \(channelID)
+                         AND left_at IS NULL
+                    )
+                    """,
+                    logger: db.logger
+                ).collect()
+                if try remaining.first?.decode(Bool.self) != true {
+                    _ = try await conn.query(
+                        """
+                        UPDATE channel
+                           SET archived_at = COALESCE(archived_at, now()), updated_at = now()
+                         WHERE workspace_id = \(workspaceID) AND id = \(channelID)
+                        """,
+                        logger: db.logger
+                    )
+                    archived = true
+                }
+            }
+            try await Self.audit(
+                conn: conn, logger: db.logger, workspaceID: workspaceID, principal: principal,
+                subjectID: principal.memberID, action: "channel.left", targetType: "channel",
+                targetID: channelID,
+                detail: ["kind": kind, "membership_id": membershipID.uuidString, "archived": String(archived)]
+            )
+            return ChannelLeaveResponse(
+                channelId: channelID.uuidString,
+                memberId: principal.memberID.uuidString,
+                archived: archived
+            )
+        }
+        return try result.response(from: request, context: context)
+    }
+
+    @Sendable
+    func leaveWorkspace(_ request: Request, context: AppRequestContext) async throws -> Response {
+        let principal = try Self.requireHumanPrincipal(context)
+        let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
+        let response: MembershipLifecycleResponse = try await transaction(workspaceID) { conn in
+            try await WorkspaceAuthorization.lockMembershipMutation(
+                conn: conn, logger: db.logger, workspaceID: workspaceID
+            )
+            let role = try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal, forUpdate: true
+            )
+            if role == .owner {
+                try await Self.requireAnotherOwner(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    excluding: principal.memberID
+                )
+            }
+            let revoked = try await Self.revokeTokens(
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                memberID: principal.memberID
+            )
+            _ = try await conn.query(
+                "DELETE FROM membership WHERE workspace_id = \(workspaceID) AND member_id = \(principal.memberID)",
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                "DELETE FROM workspace_membership WHERE workspace_id = \(workspaceID) AND member_id = \(principal.memberID)",
+                logger: db.logger
+            )
+            _ = try await conn.query(
+                "UPDATE member SET status = 'deleted', updated_at = now() WHERE id = \(principal.memberID)",
+                logger: db.logger
+            )
+            try await Self.audit(
+                conn: conn, logger: db.logger, workspaceID: workspaceID, principal: principal,
+                subjectID: principal.memberID, action: "workspace.left", targetType: "member",
+                targetID: principal.memberID,
+                detail: [
+                    "old": "active", "new": "deleted",
+                    "tokens_revoked": String(revoked.total),
+                    "agent_credentials_revoked": String(revoked.agentBearers),
+                ]
+            )
+            return MembershipLifecycleResponse(
+                memberId: principal.memberID.uuidString, status: "deleted"
+            )
+        }
+        return try response.response(from: request, context: context)
+    }
+
     private func setStatus(
         _ request: Request,
         context: AppRequestContext,
@@ -185,15 +314,21 @@ struct MemberLifecycleRoutes: Sendable {
                 "UPDATE member SET status = \(next)::member_status, updated_at = now() WHERE id = \(targetID)",
                 logger: db.logger
             )
+            var revoked = RevokedTokenCounts(total: 0, agentBearers: 0)
             if next == "suspended" {
-                try await Self.revokeTokens(
+                revoked = try await Self.revokeTokens(
                     conn: conn, logger: db.logger, workspaceID: workspaceID, memberID: targetID
                 )
             }
             try await Self.audit(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, principal: principal,
                 subjectID: targetID, action: action, targetType: "member", targetID: targetID,
-                detail: ["old": expected, "new": next]
+                detail: [
+                    "old": expected, "new": next,
+                    "tokens_revoked": String(revoked.total),
+                    "agent_credentials_revoked": String(revoked.agentBearers),
+                    "credentials_restored": "false",
+                ]
             )
             return MembershipLifecycleResponse(memberId: targetID.uuidString, status: next)
         }
@@ -230,7 +365,7 @@ struct MemberLifecycleRoutes: Sendable {
                     principal: principal, email: target.email, handle: target.handle, reason: reason
                 )
             }
-            try await Self.revokeTokens(
+            let revoked = try await Self.revokeTokens(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, memberID: targetID
             )
             _ = try await conn.query(
@@ -248,7 +383,12 @@ struct MemberLifecycleRoutes: Sendable {
             try await Self.audit(
                 conn: conn, logger: db.logger, workspaceID: workspaceID, principal: principal,
                 subjectID: targetID, action: "member.removed", targetType: "member", targetID: targetID,
-                detail: ["old": target.status, "new": "deleted", "ban": dto?.ban == true ? "true" : "false"]
+                detail: [
+                    "old": target.status, "new": "deleted",
+                    "ban": dto?.ban == true ? "true" : "false",
+                    "tokens_revoked": String(revoked.total),
+                    "agent_credentials_revoked": String(revoked.agentBearers),
+                ]
             )
             return MembershipLifecycleResponse(memberId: targetID.uuidString, status: "deleted")
         }
@@ -350,16 +490,21 @@ struct MemberLifecycleRoutes: Sendable {
     }
 
     private static func scope(_ context: AppRequestContext) throws -> (AuthPrincipal, UUID, UUID) {
-        let principal = try context.requirePrincipal()
-        guard principal.kind == .human else {
-            throw HTTPError(.forbidden, message: "membership management requires a human member")
-        }
+        let principal = try requireHumanPrincipal(context)
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let raw = try context.parameters.require("member")
         guard let memberID = UUID(uuidString: raw) else {
             throw HTTPError(.badRequest, message: "invalid member id")
         }
         return (principal, workspaceID, memberID)
+    }
+
+    private static func requireHumanPrincipal(_ context: AppRequestContext) throws -> AuthPrincipal {
+        let principal = try context.requirePrincipal()
+        guard principal.kind == .human else {
+            throw HTTPError(.forbidden, message: "membership management requires a human member")
+        }
+        return principal
     }
 
     private struct Target: Sendable {
@@ -442,20 +587,31 @@ struct MemberLifecycleRoutes: Sendable {
         }
     }
 
+    private struct RevokedTokenCounts: Sendable {
+        let total: Int
+        let agentBearers: Int
+    }
+
     private static func revokeTokens(
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
         memberID: UUID
-    ) async throws {
-        _ = try await conn.query(
+    ) async throws -> RevokedTokenCounts {
+        let rows = try await conn.query(
             """
             UPDATE token SET revoked_at = COALESCE(revoked_at, now())
              WHERE workspace_id = \(workspaceID)
                AND (actor_member_id = \(memberID) OR subject_member_id = \(memberID))
                AND revoked_at IS NULL
+            RETURNING kind::text
             """,
             logger: logger
+        ).collect()
+        let kinds = try rows.map { try $0.decode(String.self) }
+        return RevokedTokenCounts(
+            total: kinds.count,
+            agentBearers: kinds.filter { $0 == "agent_bearer" }.count
         )
     }
 

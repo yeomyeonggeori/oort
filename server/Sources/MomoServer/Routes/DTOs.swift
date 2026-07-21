@@ -218,6 +218,12 @@ struct WorkspaceMessageSearchResponse: ResponseEncodable, Codable, Sendable, Equ
     let nextCursor: String?
 }
 
+struct ChannelLeaveResponse: ResponseEncodable, Codable, Sendable, Equatable {
+    let channelId: String
+    let memberId: String
+    let archived: Bool
+}
+
 // ---- Read state ----
 
 /// PUT .../read-state request. The actor member id intentionally does not exist
