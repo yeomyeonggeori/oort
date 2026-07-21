@@ -49,7 +49,8 @@ struct AgentCredentialRoutes: Sendable {
         guard try await Self.activeAgentExists(
             db: db,
             workspaceID: workspaceID,
-            agentID: agentID
+            agentID: agentID,
+            requireUnbannedHandle: true
         ) else {
             throw HTTPError(.notFound, message: "active agent not found")
         }
@@ -369,15 +370,28 @@ struct AgentCredentialRoutes: Sendable {
     private static func activeAgentExists(
         db: Database,
         workspaceID: UUID,
-        agentID: UUID
+        agentID: UUID,
+        requireUnbannedHandle: Bool = false
     ) async throws -> Bool {
         try await db.withTenantConnection(workspaceID: workspaceID) { conn in
-            try await isActiveAgent(
+            let active = try await isActiveAgent(
                 conn: conn,
                 logger: db.logger,
                 workspaceID: workspaceID,
                 agentID: agentID
             )
+            guard active else { return false }
+            if requireUnbannedHandle {
+                let rows = try await conn.query(
+                    "SELECT handle FROM member WHERE workspace_id = \(workspaceID) AND id = \(agentID)",
+                    logger: db.logger
+                ).collect()
+                guard let handle = try rows.first?.decode(String.self) else { return false }
+                try await JoinRoutes.requireNotBanned(
+                    conn: conn, logger: db.logger, email: nil, handle: handle
+                )
+            }
+            return true
         }
     }
 

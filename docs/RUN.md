@@ -379,6 +379,12 @@ MOMO-337부터 human workspace owner/admin은 agent credential을 발급한다. 
 `token` 원문은 이 응답에서만 노출되고 서버에는 sha256만 저장된다. 같은 POST를
 다시 호출하면 기존 active credential은 기본 24시간 overlap 후 만료된다.
 
+agent handle이 workspace ban 원장에 있으면 신규 agent 생성과 credential pairing 모두 403으로
+중단된다. agent suspend/remove는 기존 `token(kind='agent_bearer')`를 즉시 revoke하므로 진행 중
+run의 다음 pending/callback/dispatch 인증은 401로 fail-closed한다. reinstate는 폐기된 credential을
+자동 복구하지 않는다. 운영자는 멤버 상태를 active로 되돌린 뒤 아래 credential POST로 새 bearer를
+명시적으로 발급하고 BYOA gateway env를 교체해야 한다.
+
 ```text
 POST /v1/workspaces/{workspace}/agents/{agent}/credentials
 GET  /v1/workspaces/{workspace}/agents/{agent}/credentials
