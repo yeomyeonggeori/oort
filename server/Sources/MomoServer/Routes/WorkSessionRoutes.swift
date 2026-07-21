@@ -64,10 +64,6 @@ struct WorkSessionListResponse: ResponseEncodable {
 /// POST  /v1/workspaces/{ws}/work-sessions/{session}/resume
 /// GET   /v1/workspaces/{ws}/work-sessions?active=1
 struct WorkSessionRoutes: Sendable {
-    private enum Tool: String, CaseIterable {
-        case claude, codex, opencode, shell
-    }
-
     struct EffectiveTierPolicy: Sendable, Equatable {
         let mode: String
         let autoTarget: String?
@@ -117,6 +113,12 @@ struct WorkSessionRoutes: Sendable {
         let session = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
+            try await WorkToolProfileRoutes.requireEnabled(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                toolKey: tool
+            )
             let sessionOwnerMemberID: UUID
             if principal.kind == .workHost {
                 sessionOwnerMemberID = try await Self.requireDispatchedSpawnControl(
@@ -534,6 +536,12 @@ struct WorkSessionRoutes: Sendable {
                 (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
                  String, String, Date, Date?, Int?, String?, UUID?, Int64).self
             )
+            try await WorkToolProfileRoutes.requireEnabled(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                toolKey: source.6
+            )
             guard source.3 == principal.memberID else {
                 throw HTTPError(.forbidden, message: "only the session owner can resume it")
             }
@@ -779,13 +787,7 @@ struct WorkSessionRoutes: Sendable {
     }
 
     static func validatedTool(_ raw: String) throws -> String {
-        guard Tool(rawValue: raw) != nil else {
-            throw HTTPError(
-                .badRequest,
-                message: "tool must be one of: claude, codex, opencode, shell"
-            )
-        }
-        return raw
+        try WorkToolProfileRoutes.validatedToolKey(raw)
     }
 
     static func validatedLabel(_ raw: String) throws -> String {

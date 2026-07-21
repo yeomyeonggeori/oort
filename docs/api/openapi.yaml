@@ -76,6 +76,8 @@ tags:
     description: Workspace-shared concurrent work-session quota and current derived usage.
   - name: work-controls
     description: Agent-requested, human-gated controls dispatched to a user-owned execution host.
+  - name: work-tool-profiles
+    description: Workspace-admin tool catalog and enabled host launch projection.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
   - name: attachments
@@ -1772,6 +1774,128 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/work-tool-profiles:
+    get:
+      tags: [work-tool-profiles]
+      operationId: listWorkToolProfiles
+      summary: List the workspace tool catalog or its enabled work-host projection.
+      description: >
+        Human callers require workspace owner/admin authority and receive all
+        profiles. A MomoHost-signed caller receives enabled profiles only.
+        Launch templates contain a portable command key and arguments; no
+        executable path, environment value, provider credential, or token is
+        accepted or returned.
+      security:
+        - bearerAuth: []
+        - workHostAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Deterministically ordered profile projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfilesResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace admin or signed work-host authority required.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    post:
+      tags: [work-tool-profiles]
+      operationId: createWorkToolProfile
+      summary: Register a workspace work tool profile.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkToolProfileRequest"
+      responses:
+        "201":
+          description: Profile and same-transaction audit record created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfileResponse"
+        "400":
+          description: Invalid profile or credential/path-shaped launch template.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin required.
+        "409":
+          description: Tool key is already registered.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/work-tool-profiles/{tool}:
+    put:
+      tags: [work-tool-profiles]
+      operationId: updateWorkToolProfile
+      summary: Replace supplied fields of a registered work tool profile.
+      description: >
+        Disabling a profile also clears its auto-approval rows. New spawn,
+        approval dispatch, session creation, and resume all fail closed while
+        the profile is disabled.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkTool"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkToolProfileRequest"
+      responses:
+        "200":
+          description: Updated profile and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfileResponse"
+        "400":
+          description: Empty or invalid update.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin required.
+        "404":
+          description: Tool profile not found.
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [work-tool-profiles]
+      operationId: deleteWorkToolProfile
+      summary: Delete a workspace work tool profile and clear auto-approval rows.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/WorkTool"
+      responses:
+        "200":
+          description: Deleted profile snapshot and same-transaction audit record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkToolProfileResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Workspace owner or admin required.
+        "404":
+          description: Tool profile not found.
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/uploads:
     post:
       tags: [attachments]
@@ -3526,10 +3650,10 @@ components:
       name: tool
       in: path
       required: true
-      description: Closed execution tool identifier.
+      description: Workspace-registered execution tool key.
       schema:
         type: string
-        enum: [claude, codex, opencode, shell]
+        pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
     AttachmentId:
       name: attachmentId
       in: path
@@ -4633,7 +4757,7 @@ components:
           description: Registered work_host identity enforced by a database FK.
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         label:
           type: string
           minLength: 1
@@ -4766,7 +4890,7 @@ components:
           format: uuid
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         label:
           type: string
           minLength: 1
@@ -4909,7 +5033,7 @@ components:
       properties:
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         label:
           type: string
           minLength: 1
@@ -4994,7 +5118,7 @@ components:
       properties:
         tool:
           type: string
-          enum: [claude, codex, opencode, shell]
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
         enabled:
           type: boolean
 
@@ -5008,7 +5132,115 @@ components:
           description: Enabled tool identifiers sorted lexicographically.
           items:
             type: string
-            enum: [claude, codex, opencode, shell]
+            pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+
+    WorkToolLaunchTemplate:
+      type: object
+      additionalProperties: false
+      required: [command, arguments]
+      description: Portable host-local command key plus arguments; never an executable path or credential.
+      properties:
+        command:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'
+        arguments:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+            maxLength: 4096
+
+    WorkToolProfile:
+      type: object
+      required:
+        [id, workspaceId, toolKey, displayName, launchTemplate, tierDefaults,
+         enabled, createdBy, updatedBy, createdAtMs, updatedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        workspaceId:
+          type: string
+          format: uuid
+        toolKey:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        launchTemplate:
+          $ref: "#/components/schemas/WorkToolLaunchTemplate"
+        tierDefaults:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+        createdBy:
+          type: string
+          format: uuid
+        updatedBy:
+          type: string
+          format: uuid
+        createdAtMs:
+          type: integer
+          format: int64
+        updatedAtMs:
+          type: integer
+          format: int64
+
+    CreateWorkToolProfileRequest:
+      type: object
+      additionalProperties: false
+      required: [toolKey, displayName, launchTemplate]
+      properties:
+        toolKey:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9._-]{1,63}$'
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        launchTemplate:
+          $ref: "#/components/schemas/WorkToolLaunchTemplate"
+        tierDefaults:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+          default: true
+
+    UpdateWorkToolProfileRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 80
+        launchTemplate:
+          $ref: "#/components/schemas/WorkToolLaunchTemplate"
+        tierDefaults:
+          type: object
+          additionalProperties: true
+        enabled:
+          type: boolean
+
+    WorkToolProfileResponse:
+      type: object
+      required: [workToolProfile]
+      properties:
+        workToolProfile:
+          $ref: "#/components/schemas/WorkToolProfile"
+
+    WorkToolProfilesResponse:
+      type: object
+      required: [workToolProfiles]
+      properties:
+        workToolProfiles:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkToolProfile"
 
     # ---- Huddles ------------------------------------------------------------
     HuddleParticipant:

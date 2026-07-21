@@ -1057,10 +1057,12 @@ swift run --package-path workers/WorkHostDaemon momo-workd
 ```
 
 등록이 성공하고 host ID가 로컬에 저장되면 token 파일은 삭제된다. 원격 HTTP는 거부하며,
-`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. command
-profile은 `MOMO_WORKD_PROFILE_{CLAUDE|CODEX|OPENCODE|SHELL}_EXECUTABLE` 절대경로와
-`..._ARGUMENTS_JSON` 문자열 배열로 로컬에서만 설정한다. 서버 payload가 실행 경로나 인자를
-선택하지 않는다.
+`MOMO_WORKD_ALLOW_INSECURE_HTTP=1`은 loopback verifier/local 개발에서만 허용한다. workd는
+signed `GET /v1/workspaces/:ws/work-tool-profiles`의 enabled 투영(command key+인자)을 읽고,
+command key는 호스트의 `PATH`에서 로컬 해석한다. 필요하면
+`MOMO_WORKD_PROFILE_<TOOL_KEY>_EXECUTABLE` 절대경로와 `..._ARGUMENTS_JSON` 문자열 배열로
+도구별 로컬 override를 둔다(`TOOL_KEY`의 `-`는 `_`로 표기). 원장과 control payload에는
+실행 경로·환경 값·provider 자격증명을 넣지 않는다.
 
 동일 OS/architecture용 binary가 준비된 경우 SSH 사용자 서비스 초안을 사용할 수 있다.
 
@@ -1086,6 +1088,29 @@ scripts/verify_workd.sh
 verifier는 workd 등록과 signed heartbeat/poll, auto-approved mock echo spawn, control ack,
 `work_session` started→ended, 위조 poll 401, FORCE RLS, raw marker의 서버 원장 부재를 단정한다.
 격리 Docker 실런은 momo-main 오케스트레이터 merge gate에서 수행한다.
+
+#### ACP agent mode (MOMO-531)
+
+enabled `work_tool_profile`의 `tierDefaults.transport`가 `acp`일 때 workd와 앱 세션
+매니저는 launch template의 command/arguments를 ACP stdio subprocess로 실행한다. marker가
+없으면 기존 도구는 PTY mode이며, 알 수 없는 transport는 spawn 전에 fail-closed한다.
+
+ACP lifecycle은 `initialize` → `session/new` → `session/prompt` 순서다. 진행 텍스트, plan,
+tool-call은 기존 `agent.partial`/`agent.status` 어휘의 host-local event로 투영되고 확장 필드는
+`_meta.acp` 아래 mode 0600 JSONL에만 보존된다. `session/request_permission`은 앱의 기존 승인
+카드 결정이 돌아오기 전 응답하지 않으며, handler 부재·중복·알 수 없는 option은
+`cancelled`로 답한다. workd 단독 daemon에는 사람 결정 권한이 없으므로 같은 fail-closed
+기본값을 쓴다. `terminal/create|output|wait_for_exit|kill|release`는 host PTY manager가 맡고
+raw bytes는 서버·relay·DB·로그로 보내지 않는다.
+
+```sh
+scripts/verify_acp_host.sh
+MOMO_ACP_REQUIRE_REAL=1 scripts/verify_acp_host.sh
+```
+
+실 opencode와 claude-agent-acp prompt는 각 도구의 host-local credential login 뒤 수행한다.
+그 전까지는 `runtime-unverified(external ACP agent credentials)`다. verifier나 evidence에
+provider OAuth token/API key를 전달하지 않는다.
 
 ### 5.5 Remote terminal attach capability (ADR-0125 D10)
 

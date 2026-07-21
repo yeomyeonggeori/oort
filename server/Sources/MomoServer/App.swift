@@ -121,6 +121,7 @@ enum AppBuilder {
         TerminalAttachRoutes(db: db).add(to: authed)
         WorkPoolRoutes(db: db).add(to: authed)
         WorkControlRoutes(db: db).add(to: authed)
+        WorkToolProfileRoutes(db: db).add(to: authed)
         WorkTierPolicyRoutes(db: db).add(to: authed)
         workHostRoutes.addProtected(to: authed)
         SearchRoutes(db: db, limiter: rateLimiter).add(to: authed)

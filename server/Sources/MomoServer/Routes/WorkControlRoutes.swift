@@ -146,6 +146,14 @@ struct WorkControlRoutes: Sendable {
             targetHostID: requestDTO.targetHostId,
             sessionOwnerMemberID: binding.ownerHumanID
         )
+        if kind == .spawn, let tool = payload.object["tool"]?.stringValue {
+            try await WorkToolProfileRoutes.requireEnabled(
+                conn: conn,
+                logger: logger,
+                workspaceID: workspaceID,
+                toolKey: tool
+            )
+        }
 
         if kind != .spawn {
             try await requireSessionControlLineage(
@@ -377,11 +385,15 @@ struct WorkControlRoutes: Sendable {
 
             let rows = try await conn.query(
                 """
-                SELECT tool
-                  FROM work_auto_approve
-                 WHERE workspace_id = \(workspaceID)
-                   AND host_owner_member_id = \(principal.memberID)
-                 ORDER BY tool ASC
+                SELECT waa.tool
+                  FROM work_auto_approve waa
+                  JOIN work_tool_profile wtp
+                    ON wtp.workspace_id = waa.workspace_id
+                   AND wtp.tool_key = waa.tool
+                   AND wtp.enabled
+                 WHERE waa.workspace_id = \(workspaceID)
+                   AND waa.host_owner_member_id = \(principal.memberID)
+                 ORDER BY waa.tool ASC
                 """,
                 logger: db.logger
             ).collect()
@@ -411,6 +423,14 @@ struct WorkControlRoutes: Sendable {
                 memberID: principal.memberID
             ) else {
                 throw HTTPError(.forbidden, message: "active human membership required")
+            }
+            if enabled {
+                try await WorkToolProfileRoutes.requireEnabled(
+                    conn: conn,
+                    logger: db.logger,
+                    workspaceID: workspaceID,
+                    toolKey: tool
+                )
             }
 
             let rows: [PostgresRow]
@@ -496,11 +516,18 @@ struct WorkControlRoutes: Sendable {
             throw HTTPError(.conflict, message: "linked work control is not pending approval")
         }
         if approved {
+            let control = try decodeControl(row)
+            guard let tool = control.payload.objectValue?["tool"]?.stringValue else {
+                throw HTTPError(.internalServerError, message: "spawn control tool is malformed")
+            }
+            try await WorkToolProfileRoutes.requireEnabled(
+                conn: conn, logger: logger, workspaceID: workspaceID, toolKey: tool
+            )
             _ = try await enqueueDispatch(
                 conn: conn,
                 logger: logger,
                 workspaceID: workspaceID,
-                control: try decodeControl(row)
+                control: control
             )
         }
     }
@@ -525,10 +552,7 @@ struct WorkControlRoutes: Sendable {
     }
 
     static func validatedTool(_ raw: String) throws -> String {
-        guard ["claude", "codex", "opencode", "shell"].contains(raw) else {
-            throw HTTPError(.badRequest, message: "unsupported work tool")
-        }
-        return raw
+        try WorkToolProfileRoutes.validatedToolKey(raw)
     }
 
     static func validatedPayload(_ raw: JSONValue, kind: Kind) throws -> ValidatedPayload {
@@ -1093,10 +1117,14 @@ struct WorkControlRoutes: Sendable {
         let rows = try await conn.query(
             """
             SELECT 1
-              FROM work_auto_approve
-             WHERE workspace_id = \(workspaceID)
-               AND host_owner_member_id = \(ownerHumanID)
-               AND tool = \(tool)
+              FROM work_auto_approve waa
+              JOIN work_tool_profile wtp
+                ON wtp.workspace_id = waa.workspace_id
+               AND wtp.tool_key = waa.tool
+               AND wtp.enabled
+             WHERE waa.workspace_id = \(workspaceID)
+               AND waa.host_owner_member_id = \(ownerHumanID)
+               AND waa.tool = \(tool)
              LIMIT 1
             """,
             logger: logger
