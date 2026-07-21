@@ -18,7 +18,7 @@ import {
   fromRestMessage,
   isSameLocalDate,
   mentionsMember,
-  mergeMessages,
+  reconcileMessages,
   removeMessageReactions,
   startsAuthorGroup,
   type ReactionSnapshot,
@@ -124,6 +124,7 @@ export default function Timeline({
   // read it outside of React's render cycle.
   const lastSeqRef = useRef(0);
   const catchUpRunningRef = useRef(false);
+  const recoveryEventsRef = useRef<ChannelRealtimeEvent[]>([]);
   // Until the head page establishes a seq baseline, catch-up must not run:
   // `after=0` would page the whole channel history oldest-first (up to
   // MAX_BACKFILL_PAGES * BACKFILL_LIMIT) and can stop short, leaving a seq
@@ -137,13 +138,11 @@ export default function Timeline({
   const applyApprovalRealtimeStatus = approvals.applyRealtimeStatus;
 
   const appendMessages = useCallback((incoming: TimelineMessage[]) => {
+    for (const message of incoming) {
+      lastSeqRef.current = Math.max(lastSeqRef.current, message.seq);
+    }
     setMessages((current) => {
-      const merged = mergeMessages(current, incoming);
-      const last = merged[merged.length - 1];
-      if (last && last.seq > lastSeqRef.current) {
-        lastSeqRef.current = last.seq;
-      }
-      return merged;
+      return reconcileMessages(current, incoming);
     });
   }, []);
 
@@ -207,24 +206,42 @@ export default function Timeline({
       pendingCatchUpRef.current = true;
       return;
     }
-    if (catchUpRunningRef.current) return;
+    if (catchUpRunningRef.current) {
+      pendingCatchUpRef.current = true;
+      return;
+    }
     catchUpRunningRef.current = true;
+    let recovered = false;
     try {
+      let cursor = lastSeqRef.current;
       for (let page = 0; page < MAX_BACKFILL_PAGES; page += 1) {
         const response = await fetchMessages(workspaceId, channelId, {
-          after: lastSeqRef.current,
+          after: cursor,
           limit: BACKFILL_LIMIT,
         });
         const incoming = response.messages.map(fromRestMessage);
-        if (incoming.length > 0) appendMessages(incoming);
+        if (incoming.length > 0) {
+          appendMessages(incoming);
+          cursor = Math.max(cursor, ...incoming.map((message) => message.seq));
+        }
         if (incoming.length < BACKFILL_LIMIT) break;
       }
+      recovered = true;
     } catch {
       // Transient; the next subscribe/publication cycle retries.
     } finally {
       catchUpRunningRef.current = false;
     }
-  }, [appendMessages, channelId, workspaceId]);
+    if (recovered) {
+      const queued = recoveryEventsRef.current;
+      recoveryEventsRef.current = [];
+      for (const event of queued) applyRealtimeEvent(event);
+    }
+    if (pendingCatchUpRef.current) {
+      pendingCatchUpRef.current = false;
+      void catchUp();
+    }
+  }, [appendMessages, applyRealtimeEvent, channelId, workspaceId]);
 
   // Initial head load: history and reactions establish one cold-load baseline.
   // Publications received before both snapshots land are buffered, matching
@@ -252,10 +269,19 @@ export default function Timeline({
         loadingProjectionRef.current = false;
         const buffered = bufferedEventsRef.current;
         bufferedEventsRef.current = [];
-        for (const event of buffered) applyRealtimeEvent(event);
-        if (pendingCatchUpRef.current) {
+        const needsRecovery =
+          pendingCatchUpRef.current ||
+          buffered.some(
+            (event) =>
+              event.type === "message.new" &&
+              event.payload.seq > lastSeqRef.current + 1
+          );
+        if (needsRecovery) {
+          recoveryEventsRef.current.push(...buffered);
           pendingCatchUpRef.current = false;
           void catchUp();
+        } else {
+          for (const event of buffered) applyRealtimeEvent(event);
         }
       } catch {
         if (!cancelled) {
@@ -285,12 +311,24 @@ export default function Timeline({
           bufferedEventsRef.current.push(event);
           return;
         }
-        if (
-          "seq" in event &&
-          event.seq > lastSeqRef.current + 1
-        ) {
-          // Gap: never render around a hole — REST backfill closes it first.
+        if (catchUpRunningRef.current) {
+          recoveryEventsRef.current.push(event);
+          return;
+        }
+        if (recoveryEventsRef.current.length > 0) {
+          recoveryEventsRef.current.push(event);
           void catchUp();
+          return;
+        }
+        if (
+          event.type === "message.new" &&
+          event.payload.seq > lastSeqRef.current + 1
+        ) {
+          // Queue the publication until REST closes the hole. Existing rows
+          // remain rendered throughout recovery.
+          recoveryEventsRef.current.push(event);
+          void catchUp();
+          return;
         }
         applyRealtimeEvent(event);
       },

@@ -559,6 +559,10 @@ body {
   gap: 8px;
 }
 
+.composer-offline {
+  color: var(--text-muted);
+}
+
 .composer-retry {
   flex-shrink: 0;
 }
@@ -750,6 +754,12 @@ body {
 .approval-note {
   font-weight: 400;
   color: var(--text-muted);
+}
+
+.approval-resume-note {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 .approval-error {

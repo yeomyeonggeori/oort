@@ -45,6 +45,7 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
   const [online, setOnline] = useState(() => navigator.onLine);
   const [realtimeStatus, setRealtimeStatus] =
     useState<RealtimeStatus>("connecting");
+  const [reconnecting, setReconnecting] = useState(false);
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const selectedChannelIdRef = useRef(selectedChannelId);
   selectedChannelIdRef.current = selectedChannelId;
@@ -54,7 +55,11 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
   useEffect(() => {
     const handle = createRealtime(
       session.realtimeWebSocketUrl,
-      setRealtimeStatus
+      (status) => {
+        setRealtimeStatus(status);
+        if (status === "disconnected") setReconnecting(true);
+        if (status === "connected") setReconnecting(false);
+      }
     );
     setRealtime(handle);
     return () => {
@@ -326,9 +331,9 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
             오프라인입니다. 기존 메시지는 계속 볼 수 있으며, 연결되면 새 내용을 동기화합니다.
           </div>
         )}
-        {online && realtimeStatus === "disconnected" && (
+        {online && reconnecting && realtimeStatus !== "connected" && (
           <div className="status-banner" role="status">
-            실시간 연결이 끊겼습니다. REST 복구를 시도하고 있습니다.
+            실시간 연결이 끊겼습니다. 재연결 중입니다.
           </div>
         )}
         {authExpired && (
