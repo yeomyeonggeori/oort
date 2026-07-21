@@ -973,6 +973,69 @@ final class MomoServerTests: XCTestCase {
         XCTAssertTrue(credentials.contains("JoinRoutes.requireNotBanned"))
     }
 
+    func testAuditFiltersValidatePrefixesMemberTimeCursorAndLimit() throws {
+        let memberID = UUID(uuidString: "00000000-0000-7000-8000-000000000104")!
+        let cursorID = UUID(uuidString: "00000000-0000-7000-8000-000000000572")!
+        let filters = try AuditRoutes.filters(
+            actions: " member., ban.created ",
+            targetMember: memberID.uuidString,
+            fromMs: "1000",
+            toMs: "2000",
+            cursor: cursorID.uuidString,
+            limit: "25"
+        )
+        XCTAssertEqual(filters.actionPrefixes, ["member.", "ban.created"])
+        XCTAssertEqual(filters.targetMember, memberID)
+        XCTAssertEqual(filters.fromMs, 1000)
+        XCTAssertEqual(filters.toMs, 2000)
+        XCTAssertEqual(filters.cursor, cursorID)
+        XCTAssertEqual(filters.limit, 25)
+        XCTAssertEqual(
+            try AuditRoutes.filters(
+                actions: nil, targetMember: nil, fromMs: nil, toMs: nil,
+                cursor: nil, limit: nil
+            ).limit,
+            50
+        )
+        XCTAssertThrowsError(try AuditRoutes.filters(
+            actions: "member.,", targetMember: nil, fromMs: nil, toMs: nil,
+            cursor: nil, limit: nil
+        ))
+        XCTAssertThrowsError(try AuditRoutes.filters(
+            actions: nil, targetMember: "bad", fromMs: nil, toMs: nil,
+            cursor: nil, limit: nil
+        ))
+        XCTAssertThrowsError(try AuditRoutes.filters(
+            actions: nil, targetMember: nil, fromMs: "2000", toMs: "1000",
+            cursor: nil, limit: nil
+        ))
+        XCTAssertThrowsError(try AuditRoutes.filters(
+            actions: nil, targetMember: nil, fromMs: nil, toMs: nil,
+            cursor: "bad", limit: "201"
+        ))
+    }
+
+    func testAuditRouteUsesCentralAdminRLSAndStableKeysetCursor() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/AuditRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(routes.contains("WorkspaceAuthorization.requireAdmin"))
+        XCTAssertTrue(routes.contains("withTenantConnection"))
+        XCTAssertTrue(routes.contains("ORDER BY a.created_at DESC, a.id DESC"))
+        XCTAssertTrue(routes.contains("a.subject_member_id"))
+        XCTAssertTrue(routes.contains("unnest(\\(filters.actionPrefixes)::text[])"))
+        XCTAssertTrue(routes.contains("\\(filters.targetMember)::uuid"))
+        XCTAssertTrue(routes.contains("\\(filters.cursor)::uuid"))
+        XCTAssertFalse(routes.contains("BYPASSRLS"))
+    }
+
     func testAgentGatewayErrorSanitizerRedactsSecretsAndCredentialShapedText() {
         XCTAssertNil(AgentGatewayRoutes.sanitizedGatewayError("   ", gatewaySecret: "secret"))
         XCTAssertEqual(
