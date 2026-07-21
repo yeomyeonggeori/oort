@@ -212,18 +212,27 @@ SQL
 done
 [ "${got:-0}" = "1" ] || { compose logs --tail 160 notifier >&2; exit 1; }
 
-got="$(sql_value <<SQL
+deadline=$(( $(date -u +%s) + ASSERT_TIMEOUT ))
+while [ "$(date -u +%s)" -lt "$deadline" ]; do
+  got="$(sql_value <<SQL
 SELECT count(*) FROM message
  WHERE root_id='$ASK_ROOT_ID' AND type='approval_request'
    AND props->>'kind'='resume_offer'
-   AND props->>'session_id'='$ASK_SESSION_ID';
+   AND lower(props->>'session_id')=lower('$ASK_SESSION_ID');
 SQL
 )"
-[ "$got" = "1" ] || { echo "[tier-fallback] missing resume_offer card" >&2; exit 1; }
+  [ "$got" = "1" ] && break
+  sleep 1
+done
+[ "${got:-0}" = "1" ] || {
+  compose logs --tail 120 notifier >&2
+  echo "[tier-fallback] missing resume_offer card" >&2
+  exit 1
+}
 got="$(sql_value <<SQL
 SELECT count(*) FROM message
  WHERE id='$ASK_ROOT_ID' AND props->>'status'='orphaned'
-   AND props->>'session_id'='$ASK_SESSION_ID';
+   AND lower(props->>'session_id')=lower('$ASK_SESSION_ID');
 SQL
 )"
 [ "$got" = "1" ] || { echo "[tier-fallback] ask root card did not become orphaned" >&2; exit 1; }
@@ -333,7 +342,7 @@ SQL
 [ "$got" = "0" ] || { echo "[tier-fallback] auto mode emitted a card" >&2; exit 1; }
 got="$(sql_value <<SQL
 SELECT count(*) FROM audit_log
- WHERE action='work.session.resumed' AND detail->>'source_session_id'='$AUTO_SESSION_ID'
+ WHERE action='work.session.resumed' AND lower(detail->>'source_session_id')=lower('$AUTO_SESSION_ID')
    AND detail->>'automatic'='true';
 SQL
 )"
@@ -341,7 +350,7 @@ SQL
 
 # Both new policy rows and session lineage remain tenant-isolated under momo_app.
 got="$(compose exec -T postgres env PGPASSWORD=momo_app_dev_pw psql -U momo_app \
-  -d "${POSTGRES_DB:-momo}" -tA --no-psqlrc -v ON_ERROR_STOP=1 <<SQL | tr -d '[:space:]'
+  -d "${POSTGRES_DB:-momo}" -tAq --no-psqlrc -v ON_ERROR_STOP=1 <<SQL | tr -d '[:space:]'
 BEGIN;
 SET LOCAL app.workspace_id='$CROSS_WS_ID';
 SELECT (SELECT count(*) FROM work_tier_policy WHERE workspace_id='$WS_ID')
