@@ -64,6 +64,15 @@ describe("observer terminal state machine", () => {
     ).toBe("error");
   });
 
+  it("surfaces a stream failure after connection", () => {
+    expect(
+      step(
+        { status: "connected" },
+        { type: "failed", message: "스트림이 끊겼습니다." }
+      )
+    ).toEqual({ status: "error", message: "스트림이 끊겼습니다." });
+  });
+
   it("can retry after disconnect", () => {
     expect(step({ status: "disconnected" }, { type: "request" }).status).toBe(
       "requesting"

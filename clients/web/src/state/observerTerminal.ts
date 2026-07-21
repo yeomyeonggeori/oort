@@ -49,7 +49,9 @@ export function reduceObserverTerminal(
           }
         : state;
     case "failed":
-      return state.status === "requesting" || state.status === "connecting"
+      return state.status === "requesting" ||
+        state.status === "connecting" ||
+        state.status === "connected"
         ? { status: "error", message: event.message }
         : state;
     case "reset":
@@ -98,7 +100,12 @@ export function connectObserverTerminal(
     queueMicrotask(() => callbacks.onError("안전하지 않은 터미널 연결 정보입니다."));
     return { close: () => abort.abort() };
   }
-  if (endpoint.protocol !== "https:" && endpoint.protocol !== "http:") {
+  const loopbackHttp =
+    endpoint.protocol === "http:" &&
+    (endpoint.hostname === "localhost" ||
+      endpoint.hostname === "127.0.0.1" ||
+      endpoint.hostname === "[::1]");
+  if (endpoint.protocol !== "https:" && !loopbackHttp) {
     queueMicrotask(() =>
       callbacks.onError(
         "이 호스트는 웹용 HTTPS 관전 스트림을 제공하지 않습니다."
