@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
+
+- ADR-0125 D11에 따라 workspace 기본/member override `work_tier_policy`(t1_only/ask/auto), stale heartbeat의 orphan 전이, ask `resume_offer` 카드와 `momo.work` 알림, t1_only terminal 정리, auto 재디스패치를 기존 PG→outbox 및 Notifier 폴링 경로에 추가했다.
+- human owner의 resume REST는 같은 root thread를 유지한 새 running session과 `resumed_from_session_id` 계보·기존 spawn control을 한 tenant transaction에 기록하고 원 세션을 ended(resumed)로 닫는다. 경로·자격증명·PTY/프로세스 상태는 유입하지 않는다.
+- server 127 tests·NotifierWorker 4 tests·PushRelay 6 tests·WorkHostDaemon 6 tests와 OpenAPI YAML/operationId·verifier bash/ShellCheck 정적 검증이 PASS했다. `verify_tier_fallback.sh`의 28020~28023 격리 Docker 런타임은 오케스트레이터 실행 전까지 `runtime-unverified`다.
+
 ## W-2 웹 read-only 클라이언트 정비 (#557, 2026-07-21)
 
 - 기존 `clients/web` 위에 서버 URL `/health` 확인, HTTPS/localhost 정책, 메모리 access·회전 refresh 인증, 채널 unread/mention·muted, 200건 타임라인과 과거 cursor, 5분 저자 그룹·날짜·멘션·edited/tombstone·링크/코드·반응 snapshot을 가산했다. `message.new/edited/deleted`와 `reaction.added/removed`는 cold-load 버퍼 뒤 적용하며 Centrifugo recovery를 요청한다.

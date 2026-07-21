@@ -29,6 +29,7 @@ struct Config: Sendable {
     var pollInterval: Duration   // fallback poll cadence
     var claimBatchSize: Int      // candidate rows claimed per iteration
     var maxAttempts: Int         // give up → status='failed' after this many tries
+    var hostOfflineGraceSeconds: Int // ADR-0125 D11 stale heartbeat grace
 
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
@@ -61,7 +62,8 @@ struct Config: Sendable {
             ],
             pollInterval: .milliseconds(pollMs),
             claimBatchSize: envInt("NOTIFIER_CLAIM_BATCH", 32),
-            maxAttempts: envInt("NOTIFIER_MAX_ATTEMPTS", 8)
+            maxAttempts: envInt("NOTIFIER_MAX_ATTEMPTS", 8),
+            hostOfflineGraceSeconds: max(1, envInt("MOMO_HOST_OFFLINE_GRACE_S", 90))
         )
     }
 

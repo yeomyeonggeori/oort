@@ -137,7 +137,9 @@ final class WorkHostDaemonTests: XCTestCase {
                 status: "running",
                 startedAtMs: 1,
                 endedAtMs: nil,
-                exitCode: nil
+                exitCode: nil,
+                endReason: nil,
+                resumedFromSessionId: nil
             )
         )
         let manager = ProcessManager(

@@ -68,6 +68,13 @@ final class PushRelayTests: XCTestCase {
         XCTAssertThrowsError(try PushDispatch.decodeClosed(Data(invalid.utf8)))
     }
 
+    func testResumeOfferIsAnAllowedWorkDispatch() throws {
+        let json = Self.dispatchJSON
+            .replacingOccurrences(of: "\"reason\":\"mention\"", with: "\"reason\":\"resume_offer\"")
+            .replacingOccurrences(of: "\"category\":\"momo.mention\"", with: "\"category\":\"momo.work\"")
+        XCTAssertNoThrow(try PushDispatch.decodeClosed(Data(json.utf8)))
+    }
+
     func testSlidingWindowIsPerServer() async {
         let limiter = ServerRateLimiter(limit: 2)
         let now = Date(timeIntervalSince1970: 1_000)

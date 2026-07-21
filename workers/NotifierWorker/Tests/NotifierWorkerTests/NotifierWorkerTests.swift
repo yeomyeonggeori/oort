@@ -73,6 +73,11 @@ final class NotifierWorkerTests: XCTestCase {
             NotifierService.category(
                 messageType: "system", propsKind: "work_session", reason: "dm"),
             "momo.work")
+        XCTAssertEqual(
+            NotifierService.category(
+                messageType: "approval_request", propsKind: "resume_offer",
+                reason: "resume_offer"),
+            "momo.work")
     }
 
     /// The collapse id doubles as the 011 dedupe index key AND the APNs

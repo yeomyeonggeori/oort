@@ -1024,6 +1024,7 @@ struct WorkControlRoutes: Sendable {
         control: WorkControlDTO,
         sessionID: UUID
     ) async throws {
+        let preallocatedSessionID = control.sessionId.flatMap(UUID.init(uuidString:))
         let rows = try await conn.query(
             """
             SELECT 1
@@ -1031,18 +1032,26 @@ struct WorkControlRoutes: Sendable {
               JOIN member requester
                 ON requester.id = \(UUID(uuidString: control.requesterMemberId)!)
                AND requester.workspace_id = ws.workspace_id
-               AND requester.kind = 'agent'
+               AND requester.kind IN ('agent', 'human')
                AND requester.status = 'active'
                AND requester.deleted_at IS NULL
-              JOIN agent a
+              LEFT JOIN agent a
                 ON a.member_id = requester.id
                AND a.workspace_id = requester.workspace_id
              WHERE ws.id = \(sessionID)
                AND ws.workspace_id = \(UUID(uuidString: control.workspaceId)!)
                AND ws.channel_id = \(UUID(uuidString: control.channelId)!)
-               AND ws.member_id = a.owner_human_id
                AND ws.host_id = \(UUID(uuidString: control.targetHostId)!)
                AND ws.status = 'running'
+               AND (\(preallocatedSessionID) IS NULL OR ws.id = \(preallocatedSessionID))
+               AND (
+                 (requester.kind = 'agent' AND ws.member_id = a.owner_human_id)
+                 OR (
+                   requester.kind = 'human'
+                   AND ws.member_id = requester.id
+                   AND ws.resumed_from_session_id IS NOT NULL
+                 )
+               )
              LIMIT 1
             """,
             logger: logger

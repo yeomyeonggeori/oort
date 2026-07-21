@@ -88,31 +88,46 @@ final class WorkDaemon: Sendable {
             return
         }
 
-        let session: WorkSession
-        do {
-            session = try await api.createSession(hostID: hostID, control: control)
-        } catch {
-            await acknowledgeFailure(controlID: control.id, label: "session_create_failed")
-            return
+        let sessionID: UUID
+        let tool: String
+        if let preallocatedSessionID = control.sessionId,
+           let payload = control.payload.objectValue,
+           let preallocatedTool = payload["tool"]?.stringValue
+        {
+            // Tier fallback allocates the durable lineage before dispatch so
+            // the resume REST can atomically return the new session. The host
+            // reuses that id and performs no second session-create write.
+            sessionID = preallocatedSessionID
+            tool = preallocatedTool
+        } else {
+            let session: WorkSession
+            do {
+                session = try await api.createSession(hostID: hostID, control: control)
+            } catch {
+                await acknowledgeFailure(controlID: control.id, label: "session_create_failed")
+                return
+            }
+            sessionID = session.id
+            tool = session.tool
         }
         do {
-            try await processes.start(sessionID: session.id, tool: session.tool)
+            try await processes.start(sessionID: sessionID, tool: tool)
         } catch {
-            try? await api.endSession(hostID: hostID, sessionID: session.id, exitCode: -1)
+            try? await api.endSession(hostID: hostID, sessionID: sessionID, exitCode: -1)
             await acknowledgeFailure(controlID: control.id, label: "process_start_failed")
             return
         }
-        await spawnedSessions.insert(session.id, for: control.id)
+        await spawnedSessions.insert(sessionID, for: control.id)
         // The process may finish while the ack response is in flight. Mark it
         // locally before the network call so natural completion is still
         // reported when an ack response is lost after the server commits it.
-        await processes.markAcknowledged(session.id)
+        await processes.markAcknowledged(sessionID)
         do {
             try await api.acknowledge(
                 hostID: hostID,
                 controlID: control.id,
                 ok: true,
-                sessionID: session.id,
+                sessionID: sessionID,
                 errorLabel: nil
             )
         } catch {
