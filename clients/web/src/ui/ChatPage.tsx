@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Channel, RosterMember } from "../api/client";
 import {
   fetchRoster,
@@ -13,6 +13,7 @@ import type { RealtimeHandle, RealtimeStatus } from "../realtime/realtime";
 import { createRealtime } from "../realtime/realtime";
 import { useApprovals } from "../state/approvals";
 import { useReadStates } from "../state/readStates";
+import { mentionsMember } from "../timeline/model";
 import ApprovalsPanel from "./ApprovalsPanel";
 import ChannelList from "./ChannelList";
 import Timeline from "./Timeline";
@@ -45,6 +46,8 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
   const [realtimeStatus, setRealtimeStatus] =
     useState<RealtimeStatus>("connecting");
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
+  const selectedChannelIdRef = useRef(selectedChannelId);
+  selectedChannelIdRef.current = selectedChannelId;
 
   // One realtime connection per session. The websocket address comes only
   // from the login response (ADR-0110).
@@ -74,6 +77,9 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
   const readStates = useReadStates(workspaceId, session.member.id, realtime);
   const approvals = useApprovals(workspaceId);
   const refreshPending = approvals.refreshPending;
+  const applyApprovalRealtimeStatus = approvals.applyRealtimeStatus;
+  const noteIncomingMessage = readStates.noteIncomingMessage;
+  const refreshReadStates = readStates.refresh;
 
   // Re-sync the pending list whenever the approvals surface opens.
   useEffect(() => {
@@ -185,6 +191,61 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
     [...channels, ...dms].find((channel) =>
       uuidEq(channel.id, selectedChannelId ?? "")
     ) ?? null;
+
+  const subscribedChannelIds = useMemo(
+    () => [...channels, ...dms].map((channel) => channel.id),
+    [channels, dms]
+  );
+
+  // Keep lightweight subscriptions for every sidebar conversation. The
+  // selected Timeline shares the same underlying subscription through the
+  // reference-counted realtime rail; inactive message.new events update the
+  // badge immediately and then re-baseline from the server projection.
+  useEffect(() => {
+    if (!realtime) return;
+    const unsubscribes = subscribedChannelIds.map((channelId) =>
+      realtime.subscribeChannel(workspaceId, channelId, {
+        onSubscribed: (recovered) => {
+          if (!recovered) void refreshReadStates();
+        },
+        onPublication: (event) => {
+          if (
+            event.type === "approval.decided" ||
+            event.type === "approval.approved" ||
+            event.type === "approval.rejected" ||
+            event.type === "approval.expired"
+          ) {
+            applyApprovalRealtimeStatus(
+              event.payload.approval_id,
+              event.payload.status
+            );
+            return;
+          }
+          if (
+            event.type === "message.new" &&
+            !uuidEq(channelId, selectedChannelIdRef.current ?? "")
+          ) {
+            noteIncomingMessage(
+              channelId,
+              event.payload.seq,
+              mentionsMember(event.payload.props ?? undefined, session.member.id)
+            );
+          }
+        },
+      })
+    );
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe();
+    };
+  }, [
+    applyApprovalRealtimeStatus,
+    noteIncomingMessage,
+    realtime,
+    refreshReadStates,
+    session.member.id,
+    subscribedChannelIds,
+    workspaceId,
+  ]);
 
   const pendingApprovalCount = approvals.pending.filter(
     (approval) => approvals.statusFor(approval.id) === "pending"
@@ -303,6 +364,7 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
             realtime={realtime}
             approvals={approvals}
             onLatestSeq={readStates.reportViewedSeq}
+            online={online}
           />
         ) : (
           loadError === null && loadingWorkspace && (

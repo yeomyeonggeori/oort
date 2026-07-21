@@ -186,6 +186,7 @@ export function createRealtime(
   client.on("connected", () => onStatus("connected"));
   client.on("disconnected", () => onStatus("disconnected"));
   client.connect();
+  const channelListenerCounts = new Map<string, number>();
 
   function subscribeChannel(
     workspaceId: string,
@@ -196,6 +197,8 @@ export function createRealtime(
     let sub: Subscription | null =
       client.getSubscription(name) ??
       client.newSubscription(name, { recoverable: true, positioned: true });
+    const listenerCount = channelListenerCounts.get(name) ?? 0;
+    channelListenerCounts.set(name, listenerCount + 1);
 
     const onSubscribed = (ctx: { recovered?: boolean }) => {
       handlers.onSubscribed(ctx.recovered === true);
@@ -221,14 +224,20 @@ export function createRealtime(
 
     sub.on("subscribed", onSubscribed);
     sub.on("publication", onPublication);
-    sub.subscribe();
+    if (listenerCount === 0) sub.subscribe();
 
     return () => {
       if (!sub) return;
       sub.off("subscribed", onSubscribed);
       sub.off("publication", onPublication);
-      sub.unsubscribe();
-      client.removeSubscription(sub);
+      const remaining = (channelListenerCounts.get(name) ?? 1) - 1;
+      if (remaining <= 0) {
+        channelListenerCounts.delete(name);
+        sub.unsubscribe();
+        client.removeSubscription(sub);
+      } else {
+        channelListenerCounts.set(name, remaining);
+      }
       sub = null;
     };
   }

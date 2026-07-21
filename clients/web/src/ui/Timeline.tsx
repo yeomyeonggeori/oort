@@ -12,6 +12,7 @@ import {
   approvalCardModel,
   resolveApprovalStatus,
 } from "../state/approvalModel";
+import { highestVisibleSequence } from "../state/readStates";
 import {
   applyReactionDelta,
   fromRestMessage,
@@ -37,6 +38,7 @@ interface TimelineProps {
   approvals: ApprovalsStore;
   /** Highest committed seq rendered — drives the read-state cursor PUT. */
   onLatestSeq: (channelId: string, seq: number) => void;
+  online: boolean;
 }
 
 const HEAD_PAGE_LIMIT = 200;
@@ -107,6 +109,7 @@ export default function Timeline({
   realtime,
   approvals,
   onLatestSeq,
+  online,
 }: TimelineProps) {
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [reactions, setReactions] = useState<ReactionSnapshot>({});
@@ -131,6 +134,7 @@ export default function Timeline({
   const loadingProjectionRef = useRef(true);
   const bufferedEventsRef = useRef<ChannelRealtimeEvent[]>([]);
   const channelId = channel.id;
+  const applyApprovalRealtimeStatus = approvals.applyRealtimeStatus;
 
   const appendMessages = useCallback((incoming: TimelineMessage[]) => {
     setMessages((current) => {
@@ -151,7 +155,7 @@ export default function Timeline({
         event.type === "approval.rejected" ||
         event.type === "approval.expired"
       ) {
-        approvals.applyRealtimeStatus(
+        applyApprovalRealtimeStatus(
           event.payload.approval_id,
           event.payload.status
         );
@@ -188,7 +192,7 @@ export default function Timeline({
         })
       );
     },
-    [appendMessages, approvals]
+    [appendMessages, applyApprovalRealtimeStatus]
   );
 
   /**
@@ -319,13 +323,32 @@ export default function Timeline({
     }
   }, [messages]);
 
-  // Viewing this channel = reading it: report the highest COMMITTED seq so
-  // the read-state store can advance the cursor (monotonic PUT; the store
-  // dedupes and never regresses).
+  // A message counts as read only after at least half of its row enters the
+  // scroll viewport. Visibility churn is debounced by the read-state store.
   useEffect(() => {
-    const last = messages[messages.length - 1];
-    if (last) onLatestSeq(channelId, last.seq);
-  }, [channelId, messages, onLatestSeq]);
+    const list = listRef.current;
+    if (!list || typeof IntersectionObserver === "undefined") return;
+    const visible = new Set<number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const sequence = Number(
+            (entry.target as HTMLElement).dataset["seq"] ?? "0"
+          );
+          if (sequence <= 0) continue;
+          if (entry.isIntersecting) visible.add(sequence);
+          else visible.delete(sequence);
+        }
+        const highest = highestVisibleSequence(visible);
+        if (highest > 0) onLatestSeq(channelId, highest);
+      },
+      { root: list, threshold: 0.5 }
+    );
+    for (const row of list.querySelectorAll<HTMLElement>("[data-seq]")) {
+      observer.observe(row);
+    }
+    return () => observer.disconnect();
+  }, [channelId, messages.length, onLatestSeq]);
 
   function handleScroll() {
     const list = listRef.current;
@@ -459,6 +482,7 @@ export default function Timeline({
           workspaceId={workspaceId}
           channelId={channelId}
           placeholder={`${channelLabel}에 메시지 보내기`}
+          online={online}
           onSent={(message) => appendMessages([fromRestMessage(message)])}
         />
       </footer>
