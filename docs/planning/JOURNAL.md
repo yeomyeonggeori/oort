@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-21 (Fable 5차) · W-5 랜딩 — 웹 트랙 W-1~W-5 완주
+- **#594 W-5**(초대 링크 웹 합류): `/join`·`/i/<code>` SPA 랜딩(같은 가입 폼·403 사유별 종결 카피·replaceState 코드 제거) + LinkShort prod 편입(pinned 이미지·publish-images 가산·Caddy `/i/*` SPA보다 선행 프록시). 게이트: vitest 47·lint·build + **web-serving docker 8단정 PASS**. track/engine bfe6d51.
+- **웹 트랙 완주**: W-1~W-5 전부 랜딩 — "설치 → 브라우저 접속 → 초대 링크로 합류" Mattermost급 온보딩 문법 완성. 잔여=실배포 TLS/DNS·초대 실왕복(게이트 부채 목록).
+- 다음: LICENSE+ghcr(공개 게이트) → ADR-0117 기안. track/engine=main+2 — 동생 다음 랜딩과 묶어 main.
+
 ## 2026-07-21 (Fable 기획 2차) · PLN-20260721-01 승인 처리 — ADR-0129·0130 Accepted + 패브릭 배치 패킷 + Blaxel 캔슬
 - 성재 지시(모바일) 5건 처리: ①노션 정리(인증 URL 발급 — 성재 승인 대기) ②UXUI 레퍼런스 분석(research/19-05, 에이전트 진행 중→도착 시 커밋) ③**Blaxel 콜라보 캔슬**(오픈소스화 전 credential 제공 불가 — E2B 베이스 확정, 진단 §5 반영) ④상세 실행 설계 main 랜딩 ⑤트랙 구조 진단.
 - **ADR-0129·0130 → Accepted**("main에 설계 기반 상세 전개+트랙 실행" 지시 근거). 실행 정본 **handoffs/2026-07-21-agent-native-fabric-batch.md**: Wave M(526→527→528 메모리/pgvector/packet)·Wave A(530→533→531 gateway tool/도구원장/ACP host)·Wave U(518→529→532), 티켓 계약 원문·공통 함정(검수 축적분)·검증 규율·**오케스트레이터 인수 프롬프트(§8)** 포함.
