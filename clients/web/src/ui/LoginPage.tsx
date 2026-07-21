@@ -46,17 +46,8 @@ export default function LoginPage({ initialEmail, onUseInviteCode }: LoginPagePr
 
   async function handleInvite() {
     if (submitting || inviteCode.trim() === "") return;
-    setSubmitting(true);
     setError(null);
-    try {
-      await verifyServer(serverUrl);
-      onUseInviteCode(inviteCode.trim());
-    } catch (cause) {
-      const detail = cause instanceof Error ? ` ${cause.message}` : "";
-      setError(`초대 서버에 연결하지 못했습니다.${detail}`);
-    } finally {
-      setSubmitting(false);
-    }
+    onUseInviteCode(inviteCode.trim());
   }
 
   return (
@@ -100,7 +91,7 @@ export default function LoginPage({ initialEmail, onUseInviteCode }: LoginPagePr
             value={inviteCode}
             onChange={(event) => setInviteCode(event.target.value)}
           />
-          <span className="field-help">입력하면 로그인 대신 초대 가입으로 이동합니다.</span>
+          <span className="field-help">입력하면 현재 사이트의 초대 가입으로 이동합니다.</span>
         </label>
 
         <label className="field">

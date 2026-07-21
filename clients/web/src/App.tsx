@@ -9,26 +9,11 @@ import {
 import JoinPage from "./ui/JoinPage";
 import LoginPage from "./ui/LoginPage";
 import ChatPage from "./ui/ChatPage";
+import { inviteCodeFromUrl } from "./join/model";
 
-// ---- /join/<code> deep link (MOMO-401, ADR-0121 D2-B) -------------------------
-// The invite code is a bearer secret. The path segment is the only place it
-// can arrive (D2-B link shape), so capture it ONCE at module load and
-// immediately REPLACE the address bar with "/": the code never survives in
-// browser history, never rides along on subsequent navigations, and is never
-// logged — it leaves memory only inside the POST /v1/join body.
-function captureJoinCode(): string | null {
-  const match = /^\/join\/([^/]+)\/?$/.exec(window.location.pathname);
-  if (match === null) return null;
-  let code = match[1];
-  try {
-    code = decodeURIComponent(code);
-  } catch {
-    // Malformed escape: submit the raw segment; the server will 404 it.
-  }
-  window.history.replaceState(null, "", "/");
-  return code;
-}
-const initialJoinCode = captureJoinCode();
+// Read the bearer invite once. The address is cleaned only after a successful
+// join, as required by the W-5 handoff; the code is never logged.
+const initialJoinCode = inviteCodeFromUrl(new URL(window.location.href));
 
 export default function App() {
   const session = useSyncExternalStore(subscribeSession, getSession);
@@ -73,7 +58,10 @@ export default function App() {
     return (
       <JoinPage
         code={joinCode}
-        onJoined={() => setJoinCode(null)}
+        onJoined={() => {
+          window.history.replaceState(null, "", "/");
+          setJoinCode(null);
+        }}
         onGoToLogin={(prefillEmail) => {
           setLoginPrefillEmail(prefillEmail);
           setJoinCode(null);

@@ -83,12 +83,14 @@ async function parseError(response: Response): Promise<ApiError> {
 async function rawRequest(
   path: string,
   init: RequestInit,
-  token: string | null
+  token: string | null,
+  baseUrl?: string
 ): Promise<Response> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(apiUrl(path), { ...init, headers });
+  const url = baseUrl === undefined ? apiUrl(path) : new URL(path, `${baseUrl}/`).toString();
+  return fetch(url, { ...init, headers });
 }
 
 // ---- refresh rotation (single flight) ---------------------------------------
@@ -179,10 +181,9 @@ export async function login(
 
 /**
  * Public invite redemption (MOMO-401, ADR-0121 D2-B web landing). No auth:
- * the invite code is the only credential, and it travels ONLY in this
- * request body — never in a query string, never in a log line (bearer-secret
- * handling; the /join/<code> path segment is stripped from the address bar
- * before this call can happen, see App.tsx).
+ * the invite code is the only credential, and the API receives it only in
+ * this request body. The landing route may receive it in the URL, but it is
+ * never logged and App removes it from browser history after success.
  *
  * 201 creates a member, 200 re-joins an existing one (same email). Both
  * return a session token pair per the canonical contract — openapi.yaml
@@ -194,7 +195,8 @@ export async function joinInvite(request: JoinRequest): Promise<JoinResponse> {
   const response = await rawRequest(
     "/v1/join",
     { method: "POST", body: JSON.stringify(request) },
-    null
+    null,
+    window.location.origin
   );
   if (!response.ok) throw await parseError(response);
   const joinResponse = (await response.json()) as JoinResponse;
