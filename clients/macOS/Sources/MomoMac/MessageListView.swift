@@ -38,6 +38,7 @@ private enum MomoChannelMenuFocusTarget: Hashable {
     case invite
     case members
     case copyID
+    case leave
 }
 
 // MARK: - MessageListView  (seq-ordered)
@@ -97,6 +98,7 @@ public struct MessageListView: View {
     @State private var pollOptions = ["", ""]
     @State private var highlightedMessageID: MessageID?
     @State private var isChannelMenuPresented = false
+    @State private var channelLeaveConfirmation: Channel?
     @State private var selectedThreadRootID: MessageID?
     @State private var availableTimelineWidth: CGFloat = 0
 
@@ -287,6 +289,25 @@ public struct MessageListView: View {
                 selectedPlugins: $selectedPlugins
             )
         }
+        .confirmationDialog(
+            "Leave this channel?",
+            isPresented: Binding(
+                get: { channelLeaveConfirmation != nil },
+                set: { if !$0 { channelLeaveConfirmation = nil } }
+            ),
+            presenting: channelLeaveConfirmation
+        ) { channel in
+            Button("Leave \(channelPresentation(for: channel).name)", role: .destructive) {
+                Task {
+                    if await viewModel.leaveCurrentChannel() {
+                        channelLeaveConfirmation = nil
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { channel in
+            Text("You will stop receiving messages from \(channelPresentation(for: channel).name).")
+        }
         .onAppear(perform: loadSelectedPlugins)
         .onChange(of: selectedPlugins) { _, _ in saveSelectedPlugins() }
         .onChange(of: viewModel.workspaceId) { _, _ in loadSelectedPlugins() }
@@ -448,6 +469,18 @@ public struct MessageListView: View {
             ) {
                 copyChannelID(channel.id)
                 isChannelMenuPresented = false
+            }
+
+            if channel.kind != .dm {
+                Divider()
+                channelMenuAction(
+                    "Leave channel",
+                    systemImage: "rectangle.portrait.and.arrow.right",
+                    target: .leave
+                ) {
+                    isChannelMenuPresented = false
+                    channelLeaveConfirmation = channel
+                }
             }
         }
         .padding(MomoTheme.ChannelHeader.edgeInset)

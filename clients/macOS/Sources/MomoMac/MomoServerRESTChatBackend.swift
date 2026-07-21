@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 /// Scope is intentionally narrow: auth/login, history, and send use MomoServer
 /// REST. Realtime can be composed with a `RealtimeSubscriptionDriver`, while the
 /// default remains an empty stream until a real SwiftCentrifuge adapter is wired.
-public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend {
+public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTransport, AgentWorkRunBackend, ReadStateBackend, AuthenticatedMemberIDProvidingBackend, WorkspaceIdentityCacheScopeProviding, MomoAgentCredentialBackend, RealtimeStatusProvidingBackend, AgentRuntimeStatusProviding, MomoSessionSensitiveStateClearing, ServerRosterSourceOfTruth, MomoWorkspaceMessageSearchBackend, MomoChannelNotificationBackend, MomoMessageInteractionBackend, MomoThreadRepliesBackend, MomoAttachmentTransferBackend, MomoWorkConsoleBackend, MomoWorkHostBackend, MomoMembershipAdministrationBackend {
     public let config: MomoServerRESTChatBackendConfig
     public private(set) var realtimeWebSocketURL: URL?
 
@@ -487,6 +487,97 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         }
         cachedMembers = all
         return all
+    }
+
+    public func changeWorkspaceRole(member: MemberID, role: MembershipRole) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await patch(
+            "/v1/workspaces/\(workspace.description)/members/\(member.description)/role",
+            body: MembershipRoleRequestDTO(role: role.rawValue),
+            response: MembershipRoleResponseDTO.self
+        )
+        cachedMembers = nil
+    }
+
+    public func suspendWorkspaceMember(_ member: MemberID) async throws {
+        try await changeWorkspaceMemberStatus(member, action: "suspend")
+    }
+
+    public func reinstateWorkspaceMember(_ member: MemberID) async throws {
+        try await changeWorkspaceMemberStatus(member, action: "reinstate")
+    }
+
+    public func removeWorkspaceMember(_ member: MemberID, ban: Bool, reason: String?) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await delete(
+            "/v1/workspaces/\(workspace.description)/members/\(member.description)",
+            body: RemoveWorkspaceMemberRequestDTO(ban: ban, reason: reason),
+            response: MembershipLifecycleResponseDTO.self
+        )
+        cachedMembers = nil
+    }
+
+    public func leaveWorkspace() async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await delete(
+            "/v1/workspaces/\(workspace.description)/members/me",
+            authorized: true,
+            response: MembershipLifecycleResponseDTO.self
+        )
+        await clearSessionSensitiveState()
+    }
+
+    public func leaveChannel(_ channel: ChannelID) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await delete(
+            "/v1/workspaces/\(workspace.description)/channels/\(channel.description)/members/me",
+            authorized: true,
+            response: ChannelLeaveResponseDTO.self
+        )
+        cachedChannels = nil
+        cachedMembers = nil
+    }
+
+    public func workspaceAudit(
+        cursor: UUID?,
+        limit: Int,
+        filter: MomoWorkspaceAuditFilter
+    ) async throws -> MomoWorkspaceAuditPage {
+        guard let workspace else { throw BackendError.notConnected }
+        var query = [URLQueryItem(name: "limit", value: String(max(1, min(limit, 100))))]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor.uuidString.lowercased())) }
+        if !filter.actionPrefixes.isEmpty {
+            query.append(URLQueryItem(name: "actions", value: filter.actionPrefixes.joined(separator: ",")))
+        }
+        if let target = filter.targetMember {
+            query.append(URLQueryItem(name: "target_member_id", value: target.description.lowercased()))
+        }
+        if let fromMs = filter.fromMs {
+            query.append(URLQueryItem(name: "from_ms", value: String(fromMs)))
+        }
+        if let toMs = filter.toMs {
+            query.append(URLQueryItem(name: "to_ms", value: String(toMs)))
+        }
+        let page = try await get(
+            "/v1/workspaces/\(workspace.description)/audit",
+            queryItems: query,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            response: WorkspaceAuditPageDTO.self
+        )
+        return MomoWorkspaceAuditPage(
+            events: page.events,
+            nextCursor: page.nextCursor.flatMap(UUID.init(uuidString:))
+        )
+    }
+
+    private func changeWorkspaceMemberStatus(_ member: MemberID, action: String) async throws {
+        guard let workspace else { throw BackendError.notConnected }
+        _ = try await postEmpty(
+            "/v1/workspaces/\(workspace.description)/members/\(member.description)/\(action)",
+            authorized: true,
+            response: MembershipLifecycleResponseDTO.self
+        )
+        cachedMembers = nil
     }
 
     public func channels(workspace: WorkspaceID) async throws -> [Channel] {
@@ -1660,6 +1751,19 @@ public actor MomoServerRESTChatBackend: ChatBackend, WorkspaceBackend, AgentTran
         return try await execute(request, response: response)
     }
 
+    private func delete<RequestBody: Encodable, ResponseBody: Decodable>(
+        _ path: String,
+        body: RequestBody,
+        response: ResponseBody.Type
+    ) async throws -> ResponseBody {
+        var request = URLRequest(url: config.baseURL.appendingPathComponent(path))
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(body)
+        try authorize(&request)
+        return try await execute(request, response: response)
+    }
+
     private func authorize(_ request: inout URLRequest) throws {
         guard let accessToken else { throw BackendError.notConnected }
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -2038,6 +2142,37 @@ private struct MemberDTO: Decodable {
 
 private struct WorkspaceRosterResponse: Decodable {
     let members: [MemberDTO]
+}
+
+private struct MembershipRoleRequestDTO: Encodable {
+    let role: String
+}
+
+private struct RemoveWorkspaceMemberRequestDTO: Encodable {
+    let ban: Bool
+    let reason: String?
+}
+
+private struct MembershipRoleResponseDTO: Decodable {
+    let memberId: String
+    let scope: String
+    let role: String
+}
+
+private struct MembershipLifecycleResponseDTO: Decodable {
+    let memberId: String
+    let status: String
+}
+
+private struct ChannelLeaveResponseDTO: Decodable {
+    let channelId: String
+    let memberId: String
+    let archived: Bool
+}
+
+private struct WorkspaceAuditPageDTO: Decodable {
+    let events: [MomoWorkspaceAuditEvent]
+    let nextCursor: String?
 }
 
 private struct ReadStateListResponseDTO: Decodable {

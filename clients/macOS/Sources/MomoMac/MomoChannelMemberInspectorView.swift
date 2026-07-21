@@ -102,6 +102,15 @@ enum MomoMemberInspectorPolicy {
 }
 
 struct MomoChannelMemberInspectorView: View {
+    private enum LifecycleConfirmation: Identifiable {
+        case suspend(Member)
+        case reinstate(Member)
+
+        var id: MemberID {
+            switch self { case .suspend(let member), .reinstate(let member): member.id }
+        }
+    }
+
     private enum FocusTarget: Hashable {
         case search
         case close
@@ -119,6 +128,9 @@ struct MomoChannelMemberInspectorView: View {
     @State private var hoveredMemberID: MemberID?
     @State private var failedDirectMessageMemberID: MemberID?
     @State private var directMessageTasks: [MemberID: Task<Void, Never>] = [:]
+    @State private var lifecycleConfirmation: LifecycleConfirmation?
+    @State private var removalMember: Member?
+    @State private var showsAudit = false
     @FocusState private var focusedControl: FocusTarget?
 
     init(
@@ -175,6 +187,39 @@ struct MomoChannelMemberInspectorView: View {
             failedDirectMessageMemberID = nil
             query = ""
         }
+        .sheet(isPresented: $showsAudit) {
+            MomoWorkspaceAuditView(viewModel: viewModel)
+        }
+        .sheet(item: $removalMember) { member in
+            MomoMemberRemovalSheet(viewModel: viewModel, member: member)
+        }
+        .confirmationDialog(
+            "Update member access?",
+            isPresented: Binding(
+                get: { lifecycleConfirmation != nil },
+                set: { if !$0 { lifecycleConfirmation = nil } }
+            ),
+            presenting: lifecycleConfirmation
+        ) { confirmation in
+            switch confirmation {
+            case .suspend(let member):
+                Button("Suspend \(member.displayName)", role: .destructive) {
+                    Task { await viewModel.suspendWorkspaceMember(member) }
+                }
+            case .reinstate(let member):
+                Button("Reinstate \(member.displayName)") {
+                    Task { await viewModel.reinstateWorkspaceMember(member) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { confirmation in
+            switch confirmation {
+            case .suspend(let member):
+                Text("\(member.displayName) will lose access immediately. Existing tokens are revoked.")
+            case .reinstate(let member):
+                Text("\(member.displayName) can sign in again, but revoked tokens stay revoked.")
+            }
+        }
     }
 
     private var memberGroups: MomoMemberInspectorPolicy.Groups {
@@ -204,6 +249,21 @@ struct MomoChannelMemberInspectorView: View {
                     .monospacedDigit()
             }
             Spacer(minLength: MomoTheme.MemberInspector.standardSpacing)
+            if audience == .workspace, viewModel.canManageWorkspace {
+                Button {
+                    showsAudit = true
+                } label: {
+                    Label("Audit log", systemImage: "list.bullet.clipboard")
+                        .labelStyle(.iconOnly)
+                        .frame(
+                            width: MomoTheme.ChannelHeader.actionSize,
+                            height: MomoTheme.ChannelHeader.actionSize
+                        )
+                }
+                .buttonStyle(.borderless)
+                .momoQuickTooltip("Audit log")
+                .accessibilityLabel("Audit log")
+            }
             Button(action: close) {
                 Label(copy.closeMemberInspector, systemImage: "xmark")
                     .labelStyle(.iconOnly)
@@ -275,6 +335,19 @@ struct MomoChannelMemberInspectorView: View {
                     }
                     .controlSize(.small)
                 }
+            }
+
+            if let error = viewModel.membershipAdministrationError {
+                HStack(alignment: .firstTextBaseline, spacing: MomoTheme.MemberInspector.standardSpacing) {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(MomoTheme.irreversibleRed)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: MomoTheme.MemberInspector.compactSpacing)
+                    Button("Dismiss") { viewModel.clearMembershipAdministrationError() }
+                        .controlSize(.small)
+                }
+                .accessibilityIdentifier("membershipAdministrationError")
             }
         }
         .padding(MomoTheme.MemberInspector.contentSpacing)
@@ -382,6 +455,16 @@ struct MomoChannelMemberInspectorView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
+                        if member.workspaceRole == .guest {
+                            Text(copy.workspaceRoleTitle(.guest))
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                        if member.status == .suspended {
+                            Text(copy.memberStatusTitle(.suspended))
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(MomoTheme.costAmber)
+                        }
                         if member.isAgent, !member.normalizedCapabilities.isEmpty {
                             MomoAgentBadgeGroup(
                                 capabilities: member.normalizedCapabilities,
@@ -487,6 +570,52 @@ struct MomoChannelMemberInspectorView: View {
             copyHandle(member)
         } label: {
             Label(copy.copyMemberHandle, systemImage: "doc.on.doc")
+        }
+
+
+        if audience == .workspace {
+            let assignableRoles = viewModel.assignableWorkspaceRoles(for: member)
+            if !assignableRoles.isEmpty {
+                Divider()
+                Menu {
+                    ForEach(assignableRoles, id: \.self) { role in
+                        Button {
+                            Task { await viewModel.changeWorkspaceRole(member: member, role: role) }
+                        } label: {
+                            if member.workspaceRole == role {
+                                Label(copy.workspaceRoleTitle(role), systemImage: "checkmark")
+                            } else {
+                                Text(copy.workspaceRoleTitle(role))
+                            }
+                        }
+                    }
+                } label: {
+                    Label("Role", systemImage: "person.badge.key")
+                }
+                .disabled(viewModel.membershipMutationMemberIDs.contains(member.id))
+            }
+
+            if viewModel.canChangeLifecycle(of: member) {
+                if member.status == .suspended {
+                    Button {
+                        lifecycleConfirmation = .reinstate(member)
+                    } label: {
+                        Label("Reinstate member", systemImage: "person.badge.plus")
+                    }
+                } else if member.status == .active {
+                    Button {
+                        lifecycleConfirmation = .suspend(member)
+                    } label: {
+                        Label("Suspend member", systemImage: "person.badge.minus")
+                    }
+                }
+                Divider()
+                Button(role: .destructive) {
+                    removalMember = member
+                } label: {
+                    Label("Remove member", systemImage: "person.crop.circle.badge.xmark")
+                }
+            }
         }
     }
 
@@ -761,5 +890,205 @@ private struct MomoMemberAvatarView: View {
         if member.status != .active { return .offline }
         if member.isAgent, viewModel.isAgentWorking(member) { return .working }
         return member.presence
+    }
+}
+
+private struct MomoMemberRemovalSheet: View {
+    @ObservedObject var viewModel: ChatViewModel
+    let member: Member
+    @Environment(\.dismiss) private var dismiss
+    @State private var reason = ""
+    @State private var ban = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Remove \(member.displayName)?")
+                .font(.title3.weight(.semibold))
+            Text("This removes workspace access and revokes active tokens. The action is recorded in the audit log.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            TextField("Reason (optional)", text: $reason, axis: .vertical)
+                .lineLimit(2...4)
+                .textFieldStyle(.roundedBorder)
+
+            Toggle("Block @\(member.handle) from rejoining", isOn: $ban)
+            if member.isAgent {
+                Label(
+                    "Reinstating or recreating this agent requires a new credential. Revoked credentials cannot be restored.",
+                    systemImage: "key.slash"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button("Remove", role: .destructive) {
+                    Task {
+                        if await viewModel.removeWorkspaceMember(member, ban: ban, reason: reason) {
+                            dismiss()
+                        }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(viewModel.membershipMutationMemberIDs.contains(member.id))
+            }
+        }
+        .padding(24)
+        .frame(width: 440)
+        .accessibilityIdentifier("memberRemovalSheet")
+    }
+}
+
+private struct MomoWorkspaceAuditView: View {
+    @ObservedObject var viewModel: ChatViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var actionFilter = MomoAuditActionFilter.all
+    @State private var targetMember: MemberID?
+    @State private var period = MomoAuditPeriod.all
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Picker("Action", selection: $actionFilter) {
+                        ForEach(MomoAuditActionFilter.allCases) { filter in
+                            Text(filter.title).tag(filter)
+                        }
+                    }
+                    Picker("Member", selection: $targetMember) {
+                        Text("All members").tag(nil as MemberID?)
+                        ForEach(viewModel.members.filter { $0.status != .deleted }) { member in
+                            Text(member.displayName).tag(Optional(member.id))
+                        }
+                    }
+                    Picker("Time", selection: $period) {
+                        ForEach(MomoAuditPeriod.allCases) { period in
+                            Text(period.title).tag(period)
+                        }
+                    }
+                    Button("Apply") { Task { await applyFilters() } }
+                        .disabled(viewModel.workspaceAuditIsLoading)
+                }
+                .labelsHidden()
+                .padding(16)
+
+                Divider()
+
+                if viewModel.workspaceAuditIsLoading && viewModel.workspaceAuditEvents.isEmpty {
+                    ProgressView("Loading audit log")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let error = viewModel.workspaceAuditError,
+                          viewModel.workspaceAuditEvents.isEmpty {
+                    ContentUnavailableView {
+                        Label("Could not load audit log", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(error)
+                    } actions: {
+                        Button("Retry") { Task { await viewModel.loadWorkspaceAudit(reset: true) } }
+                    }
+                } else if viewModel.workspaceAuditEvents.isEmpty {
+                    ContentUnavailableView("No audit events", systemImage: "list.bullet.clipboard")
+                } else {
+                    List {
+                        if let error = viewModel.workspaceAuditError {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(.secondary)
+                        }
+                        ForEach(viewModel.workspaceAuditEvents) { event in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(event.action.replacingOccurrences(of: ".", with: " ").capitalized)
+                                    .font(.body.weight(.medium))
+                                HStack(spacing: 8) {
+                                    Text(Date(timeIntervalSince1970: TimeInterval(event.createdAtMs) / 1_000), style: .date)
+                                    Text(Date(timeIntervalSince1970: TimeInterval(event.createdAtMs) / 1_000), style: .time)
+                                    if let subject = event.subjectMemberId {
+                                        Text(viewModel.member(subject)?.displayName ?? subject.description)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        if viewModel.workspaceAuditNextCursor != nil {
+                            Button("Load more") { Task { await viewModel.loadWorkspaceAudit() } }
+                                .disabled(viewModel.workspaceAuditIsLoading)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Audit log")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await viewModel.loadWorkspaceAudit(reset: true) }
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(viewModel.workspaceAuditIsLoading)
+                }
+            }
+        }
+        .frame(minWidth: 560, minHeight: 520)
+        .task { await viewModel.loadWorkspaceAudit(reset: true) }
+        .accessibilityIdentifier("workspaceAuditView")
+    }
+
+    private func applyFilters() async {
+        await viewModel.loadWorkspaceAudit(
+            reset: true,
+            filter: MomoWorkspaceAuditFilter(
+                actionPrefixes: actionFilter.prefix.map { [$0] } ?? [],
+                targetMember: targetMember,
+                fromMs: period.fromMs,
+                toMs: nil
+            )
+        )
+    }
+}
+
+private enum MomoAuditActionFilter: String, CaseIterable, Identifiable {
+    case all
+    case member
+    case ban
+
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .all: "All actions"; case .member: "Member lifecycle"; case .ban: "Bans" }
+    }
+    var prefix: String? {
+        switch self { case .all: nil; case .member: "member."; case .ban: "ban." }
+    }
+}
+
+private enum MomoAuditPeriod: String, CaseIterable, Identifiable {
+    case all
+    case day
+    case week
+    case month
+
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .all: "All time"; case .day: "24 hours"; case .week: "7 days"; case .month: "30 days" }
+    }
+    var fromMs: Int64? {
+        let seconds: TimeInterval
+        switch self {
+        case .all: return nil
+        case .day: seconds = 86_400
+        case .week: seconds = 604_800
+        case .month: seconds = 2_592_000
+        }
+        return Int64(Date().addingTimeInterval(-seconds).timeIntervalSince1970 * 1_000)
     }
 }

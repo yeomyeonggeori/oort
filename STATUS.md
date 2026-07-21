@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-525 macOS·iOS 멤버 lifecycle·audit (#609, 2026-07-22)
+
+- ADR-0128/A-15의 workspace 역할·suspend/reinstate/remove+ban·self-leave·audit cursor 계약을 macOS와 iOS 인증 REST 클라이언트에 연결했다. owner/admin 역할 서열은 클라이언트에서도 fail-closed하고 서버가 최종 권한·마지막 owner 409를 판정한다. audit은 action prefix·대상 멤버·24시간/7일/30일 시간 범위와 cursor를 정본 query로 전달한다.
+- macOS workspace 멤버 inspector에는 guest/suspended 표시, 역할 메뉴, 정지·복원 확인, 선택적 사유와 재가입 차단이 있는 삭제 sheet, agent credential 재발급 안내, 필터·cursor audit sheet를 추가했다. iOS Profile에는 Members and audit, 동일 관리 상세, workspace self-leave를 추가했고 양 플랫폼의 일반 채널 메뉴에는 self-leave를 추가하되 DM은 노출하지 않는다.
+- macOS 전체 459 tests(관리형 loopback WebSocket 1 skip)와 real-window focus/snapshot, audit canonical query 집중 테스트, MomoiOSKit XCTest 1 + Swift Testing 69 tests, iOS Simulator SDK 직접 컴파일, design pre-flight가 실패 0으로 PASS했다. 공식 `verify_ios_build.sh`의 generic Simulator `xcodebuild`는 Xcode build-service의 build-description 단계에서 장시간 정체돼 중단했으며, 인증된 owner/admin/guest 계정의 실제 403·409·audit cursor 왕복, iPhone 라이트·다크·Dynamic Type/VoiceOver 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
 
 - ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. LinkShort `/i/*`는 prod compose 서비스가 없어 후속 프록시 위치만 주석으로 예약했다.

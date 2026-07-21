@@ -11,15 +11,17 @@ import UniformTypeIdentifiers
 struct IOSChannelHomeView: View {
     private let session: IOSSession
     private let bootstrap: WorkspaceBootstrap
-    private let backend: any IOSConversationBackend
+    private let backend: MomoServerConversationClient
     private let huddleService: any IOSHuddleService
     let model: IOSChannelListModel
+    @State private var channelToLeave: IOSChannelListItem?
+    @State private var channelLeaveError: String?
 
     init(
         session: IOSSession,
         bootstrap: WorkspaceBootstrap,
         model: IOSChannelListModel,
-        backend: any IOSConversationBackend,
+        backend: MomoServerConversationClient,
         huddleService: any IOSHuddleService
     ) {
         self.session = session
@@ -75,6 +77,32 @@ struct IOSChannelHomeView: View {
             Button("Dismiss", role: .cancel) { model.clearActionFailure() }
         } message: {
             Text(model.actionFailureMessage ?? "Try again.")
+        }
+        .confirmationDialog(
+            "Leave this channel?",
+            isPresented: Binding(
+                get: { channelToLeave != nil },
+                set: { if !$0 { channelToLeave = nil } }
+            ),
+            presenting: channelToLeave
+        ) { item in
+            Button("Leave \(item.title)", role: .destructive) {
+                Task { await leaveChannel(item) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in
+            Text("You will stop receiving messages from \(item.title). Direct messages cannot be left.")
+        }
+        .alert(
+            "Could not leave channel",
+            isPresented: Binding(
+                get: { channelLeaveError != nil },
+                set: { if !$0 { channelLeaveError = nil } }
+            )
+        ) {
+            Button("Dismiss", role: .cancel) { channelLeaveError = nil }
+        } message: {
+            Text(channelLeaveError ?? "Try again.")
         }
         .navigationDestination(for: IOSPushDeepLink.self) { link in
             if let item = deepLinkedItem(channelID: link.channelID) {
@@ -192,6 +220,15 @@ struct IOSChannelHomeView: View {
                 Label("Mark as read", systemImage: "checkmark.circle")
             }
             .disabled(!item.hasUnread || model.isMutating(item.id))
+
+            if !item.isDirectMessage {
+                Divider()
+                Button(role: .destructive) {
+                    channelToLeave = item
+                } label: {
+                    Label("Leave channel", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            }
         }
         .accessibilityAction(named: item.isMuted ? "Unmute notifications" : "Mute notifications") {
             Task { await model.setChannelMuted(item.id, muted: !item.isMuted) }
@@ -204,6 +241,17 @@ struct IOSChannelHomeView: View {
             }
         } else {
             link
+        }
+    }
+
+    private func leaveChannel(_ item: IOSChannelListItem) async {
+        channelLeaveError = nil
+        do {
+            try await backend.leaveChannel(item.id)
+            channelToLeave = nil
+            await model.refresh()
+        } catch {
+            channelLeaveError = error.localizedDescription
         }
     }
 

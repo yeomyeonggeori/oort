@@ -19,6 +19,7 @@ public struct IOSWorkspaceView: View {
     @State private var activityModel: IOSActivityModel
     @State private var workModel: IOSWorkListModel
     @State private var workApprovalModel: IOSWorkApprovalInboxModel
+    @State private var membershipModel: IOSMembershipAdministrationModel
     @AppStorage("momo.ios.developer-mode") private var developerModeEnabled = false
 
     public init(
@@ -50,6 +51,7 @@ public struct IOSWorkspaceView: View {
         _activityModel = State(initialValue: IOSActivityModel(backend: backend, currentMemberID: session.member.id))
         _workModel = State(initialValue: IOSWorkListModel(backend: backend))
         _workApprovalModel = State(initialValue: IOSWorkApprovalInboxModel(backend: backend))
+        _membershipModel = State(initialValue: IOSMembershipAdministrationModel(backend: backend))
     }
 
     public var body: some View {
@@ -120,6 +122,8 @@ public struct IOSWorkspaceView: View {
                     session: session,
                     workspaceName: bootstrap.workspace.name,
                     channelListModel: model,
+                    membershipModel: membershipModel,
+                    backend: backend,
                     developerModeEnabled: $developerModeEnabled,
                     signOut: signOut
                 )
@@ -587,8 +591,21 @@ private struct IOSProfileView: View {
     let session: IOSSession
     let workspaceName: String
     let channelListModel: IOSChannelListModel
+    let membershipModel: IOSMembershipAdministrationModel
+    let backend: MomoServerConversationClient
     @Binding var developerModeEnabled: Bool
     let signOut: @MainActor () async -> Void
+    @State private var showsLeaveWorkspaceConfirmation = false
+    @State private var leaveWorkspaceError: String?
+    @State private var leaveWorkspaceInFlight = false
+
+    private var currentMember: Member {
+        channelListModel.membersByID[session.member.id] ?? session.member
+    }
+
+    private var canManageMembers: Bool {
+        currentMember.workspaceRole == .owner || currentMember.workspaceRole == .admin
+    }
 
     var body: some View {
         Form {
@@ -600,6 +617,19 @@ private struct IOSProfileView: View {
             Section("Workspace") {
                 LabeledContent("Name", value: workspaceName)
                 LabeledContent("Server", value: session.baseURL.host ?? session.baseURL.absoluteString)
+                LabeledContent("Role", value: profileRoleTitle(currentMember.workspaceRole))
+                if canManageMembers {
+                    NavigationLink {
+                        IOSMemberManagementView(
+                            session: session,
+                            channelListModel: channelListModel,
+                            model: membershipModel
+                        )
+                    } label: {
+                        Label("Members and audit", systemImage: "person.2.badge.gearshape")
+                    }
+                    .accessibilityIdentifier("profileMemberManagement")
+                }
             }
             Section("Notifications") {
                 NavigationLink {
@@ -618,6 +648,15 @@ private struct IOSProfileView: View {
                 Text("Shows individual remote Work sessions and host status. Session output remains private unless explicitly shared.")
             }
             Section {
+                if let leaveWorkspaceError {
+                    Label(leaveWorkspaceError, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                }
+                Button("Leave workspace", role: .destructive) {
+                    showsLeaveWorkspaceConfirmation = true
+                }
+                .disabled(leaveWorkspaceInFlight)
+                .accessibilityIdentifier("profileLeaveWorkspace")
                 Button("Sign out", role: .destructive) {
                     Task { await signOut() }
                 }
@@ -625,7 +664,38 @@ private struct IOSProfileView: View {
             }
         }
         .navigationTitle("Profile")
+        .confirmationDialog(
+            "Leave \(workspaceName)?",
+            isPresented: $showsLeaveWorkspaceConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Leave workspace", role: .destructive) {
+                Task { await leaveWorkspace() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(currentMember.workspaceRole == .owner
+                 ? "If you are the last owner, assign another owner before leaving."
+                 : "Your workspace membership and active tokens will be revoked.")
+        }
     }
+
+    private func leaveWorkspace() async {
+        guard !leaveWorkspaceInFlight else { return }
+        leaveWorkspaceInFlight = true
+        leaveWorkspaceError = nil
+        defer { leaveWorkspaceInFlight = false }
+        do {
+            try await backend.leaveWorkspace()
+            await signOut()
+        } catch {
+            leaveWorkspaceError = error.localizedDescription
+        }
+    }
+}
+
+private func profileRoleTitle(_ role: MembershipRole?) -> String {
+    switch role { case .owner: "Owner"; case .admin: "Admin"; case .guest: "Guest"; default: "Member" }
 }
 
 @MainActor
