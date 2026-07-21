@@ -6,7 +6,7 @@ final class NotifierWorkerTests: XCTestCase {
     func testRelaySignerProducesVerifiableEd25519Signature() throws {
         let privateKey = Curve25519.Signing.PrivateKey()
         let signer = try PushRelayRequestSigner(rawSeed: privateKey.rawRepresentation)
-        let body = Data("{\"schema\":\"momo.push.dispatch.v1\"}".utf8)
+        let body = Data("{\"schema\":\"momo.push.dispatch.v2\"}".utf8)
         let signature = try XCTUnwrap(Data(base64Encoded: signer.signatureBase64(for: body)))
         XCTAssertTrue(privateKey.publicKey.isValidSignature(signature, for: body))
     }
@@ -27,6 +27,9 @@ final class NotifierWorkerTests: XCTestCase {
             collapseId: "m:00000000-0000-7000-8000-00000000m001",
             badge: 3,
             reason: "dm",
+            threadId: "00000000-0000-7000-8000-000000000201",
+            category: "momo.message",
+            approvalId: nil,
             channelId: "00000000-0000-7000-8000-000000000201",
             messageId: "00000000-0000-7000-8000-00000000m001"
         )
@@ -37,10 +40,11 @@ final class NotifierWorkerTests: XCTestCase {
         let allowedKeys: Set<String> = [
             "schema", "server_id", "workspace_id", "device_id",
             "device_platform", "apns_token", "apns_env", "apns_topic",
-            "collapse_id", "badge", "reason", "channel_id", "message_id",
+            "collapse_id", "badge", "reason", "thread_id", "category",
+            "channel_id", "message_id",
         ]
         XCTAssertEqual(Set(object.keys), allowedKeys)
-        XCTAssertEqual(object["schema"] as? String, "momo.push.dispatch.v1")
+        XCTAssertEqual(object["schema"] as? String, "momo.push.dispatch.v2")
 
         // No key may even resemble a content-bearing field.
         let forbiddenFragments = ["body", "text", "name", "handle", "summary", "title"]
@@ -51,6 +55,24 @@ final class NotifierWorkerTests: XCTestCase {
                     "content-shaped key '\(key)' violates the id-only contract")
             }
         }
+    }
+
+    func testPayloadCategoriesPreserveJudgmentPrecedence() {
+        XCTAssertEqual(
+            NotifierService.category(messageType: "text", propsKind: nil, reason: "dm"),
+            "momo.message")
+        XCTAssertEqual(
+            NotifierService.category(messageType: "text", propsKind: nil, reason: "mention"),
+            "momo.mention")
+        XCTAssertEqual(
+            NotifierService.category(
+                messageType: "approval_request", propsKind: "work_control_approval",
+                reason: "approval_request"),
+            "momo.approval")
+        XCTAssertEqual(
+            NotifierService.category(
+                messageType: "system", propsKind: "work_session", reason: "dm"),
+            "momo.work")
     }
 
     /// The collapse id doubles as the 011 dedupe index key AND the APNs
