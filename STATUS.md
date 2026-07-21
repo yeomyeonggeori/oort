@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-524 self-leave·에이전트 대칭·audit 조회 (2026-07-21)
+
+- ADR-0128 D4~D6에 따라 public/private 채널과 workspace self-leave, private 최종 멤버 archive, 마지막 owner 409, agent suspend/remove credential 즉시 revoke와 banned-handle 생성/pairing 차단, owner/admin audit 필터·cursor REST를 기존 FORCE RLS 원장 위에 가산했다. migration과 `schema_v0.sql` 변경은 없다.
+- server 136 tests, Swift build, OpenAPI YAML parse, verifier bash/ShellCheck 정적 검증은 PASS했다. `verify_lifecycle_completion.sh`(28060~28063)와 기존 membership/agent-create verifier의 실제 PG18 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## MOMO-523 멤버십 수명주기 코어 (2026-07-21)
 
 - ADR-0128 D1~D3에 따라 migration 026의 `workspace_membership`·`workspace_ban` FORCE RLS 원장, 중앙 `WorkspaceAuthorization`, 워크스페이스/채널 역할 변경과 suspend/reinstate/remove/ban REST·audit, suspend 로그인 403 및 token revoke, ban join/redeem 차단, guest roster 교집합 투영을 추가했다.
