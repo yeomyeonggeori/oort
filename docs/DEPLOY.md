@@ -51,7 +51,7 @@ DNS 전파, ACME 인증서 발급 시간은 포함하지 않는다.
 - Docker Engine + Compose v2, `curl`, `getent`(또는 `dig`), 80/443 인바운드,
   여유 디스크 10 GiB 이상이 준비돼 있다.
 - `infra/prod/secrets.env.example`을 바탕으로 SOPS/age 또는 권한 제한 host-local env를
-  만들었다. 네 momo 이미지(`api`, `relay`, `worker`, `migrate`)는 각각
+  만들었다. 다섯 momo 이미지(`api`, `relay`, `worker`, `migrate`, `web`)는 각각
   `ghcr.io/...@sha256:<64 hex>` 전체 digest ref여야 한다. `latest`나 tag-only 입력은
   install/upgrade가 거부한다.
 - pgBackRest stanza/check/full backup/WAL/PITR 의무와 외부 Hermes HTTPS 자격증명을
@@ -72,7 +72,7 @@ infra/prod/install.sh --env-file /run/momo/prod.env --mode prod \
 ```
 
 스크립트는 `prod_env_preflight.sh` → pinned digest 검사 → `docker compose config
---quiet` → pull → PostgreSQL/Redis/Centrifugo → one-shot `migrate` →
+--quiet` → pull → PostgreSQL/Redis/Centrifugo → one-shot `migrate`와 `web-init` →
 API/relay/worker/Caddy → `https://API_DOMAIN/health` 순으로 실행한다. 실패하면 `compose
 ps`와 확인할 서비스만 안내하며 시크릿 값은 출력하지 않는다. 성공한 이미지 세트는
 `/var/lib/momo/deploy-state.env`에 mode 0600으로 기록한다.
@@ -122,7 +122,7 @@ relay 등록은 ADR-0120 P-3/S-5의 후속 자리만 `install.sh` 끝에 주석�
 
 ### 업그레이드와 롤백
 
-실제 업그레이드는 먼저 성공한 백업 evidence가 필요하다. 새 SOPS env도 네 이미지 모두
+실제 업그레이드는 먼저 성공한 백업 evidence가 필요하다. 새 SOPS env도 다섯 이미지 모두
 새 digest를 가리켜야 한다.
 
 ```sh
@@ -132,8 +132,8 @@ sops exec-env /secure/momo/prod-next.sops.env \
 ```
 
 upgrade는 현재 이미지 세트를 `.previous`로 보존하고 새 digest pull → migrate →
-api/relay/worker 순차 재기동 → health 순으로 진행한다. v1은 짧은 중단을 허용한다.
-실패하면 이전 **앱 이미지** 3개를 자동 복구한다. DB migration은 전방 전용이라 절대
+web-init → api/relay/worker/Caddy 재기동 → health 순으로 진행한다. v1은 짧은 중단을 허용한다.
+실패하면 이전 **앱 이미지** 3개와 web 자산 이미지를 자동 복구한다. DB migration은 전방 전용이라 절대
 자동 역마이그레이션하지 않는다. 이전 앱이 새 스키마와 호환되지 않거나 자동 복구 후에도
 health가 실패하면 바로 멈추고 운영자가 판단해야 한다.
 
@@ -347,7 +347,7 @@ sops exec-env infra/prod/secrets.sops.env \
 
 Required env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
 `API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
-`MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
 `CENT_TOKEN_HMAC`, `CENT_API_KEY`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
 `HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
@@ -446,20 +446,20 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 | 키 | 기본값 | 의미 |
 |---|---|---|
 | `APP_DOMAIN` | (unset) | 웹 SPA 공개 도메인(예: `momo.example.com`). unset이면 웹 서빙 비활성. |
-| `MOMO_WEB_DIST_DIR` | `momo-web-dist`(named volume) | Caddy `/srv/momo-web`에 마운트할 웹 빌드 산출물. 절대경로를 주면 host bind mount, 미설정이면 named volume(빈 볼륨 = 404, 웹 없는 배포에 무해). |
-| `WEB_DIST_VOLUME_NAME` | `momo-web-dist` | 기본 named volume의 이름 오버라이드. |
+| `MOMO_WEB_IMAGE` | (required) | `clients/web`의 production `dist`를 담은 immutable digest image. install/upgrade가 `web-init`으로 실행한다. |
+| `WEB_STATIC_VOLUME_NAME` | `momo-web-static` | `web-init`이 채우고 Caddy가 read-only로 마운트하는 named volume 이름. |
 
 **DNS/TLS:** `APP_DOMAIN`을 쓰려면 해당 이름의 A/AAAA 레코드를 VPS IP로 추가한다(§2와 동일, Caddy ACME 자동 발급). `rt.<domain>`/`api.<domain>`과 **다른 이름**이어야 한다 — `prod_env_preflight.sh`가 strict 모드에서 APP_DOMAIN 설정 시 public DNS 형태·placeholder 금지·API/REALTIME과의 중복을 fail-fast로 검사한다(unset은 항상 허용).
 
 **미설정(`APP_DOMAIN` unset) 시 동작 — 완전 하위 호환:** Caddyfile의 site 주소가 예약 sentinel `momo-app-domain-unset.localhost`로 폴백된다. `.localhost`는 Caddy 내부 CA로만 인증서가 발급되어 ACME 트래픽이 없고, sentinel host를 겨냥한 요청은 모든 경로(`/`·deep link·`/v1/*`)에서 404로 fail-closed된다(호스트 매처 가드가 프록시/파일 핸들보다 먼저 평가 — `scripts/web_serving_smoke.sh`가 런타임 검증). 기존 `api.`/`rt.` 2-site 동작은 무변화. **주의:** compose는 `${APP_DOMAIN:-<sentinel>}`로 빈 문자열도 sentinel로 흡수한다 — Caddy는 빈 site 주소를 파싱하지 못하므로 compose 밖에서 이 Caddyfile을 쓸 때도 `APP_DOMAIN`을 빈 값으로 export하지 말 것.
 
-**자산 배치(v0 운영 경로):** 빌드 머신에서 `clients/web`(MOMO-391+) 산출물 `dist/`를 만들고 호스트 경로(예: `/opt/momo/web-dist`)로 복사한 뒤 `MOMO_WEB_DIST_DIR=/opt/momo/web-dist`를 설정한다(prod 호스트에서 소스 빌드 금지 — ADR-0002). 자산 이미지(publish 파이프라인) 승격은 MOMO-391+에서 재검토.
+**자산 배치:** `infra/prod/Dockerfile.web`이 Node build stage에서 `npm ci && npm run build`를 수행하고 최종 `momo-web` 이미지에는 `dist`와 복사용 최소 도구만 남긴다. production host는 소스를 빌드하거나 bind mount하지 않는다. install/upgrade가 pinned `MOMO_WEB_IMAGE`를 one-shot `web-init`으로 실행해 `momo-web-static` volume을 교체하고, Caddy는 이를 read-only로 서빙한다(ADR-0002).
 
-**보안 헤더:** `{$APP_DOMAIN}` site는 공통 `security_headers`(HSTS·`X-Frame-Options DENY` 등)에 더해 SPA 응답에 엄격 CSP를 강제한다 — 자체 오리진 한정, inline script 금지, `connect-src`만 `wss://{$REALTIME_DOMAIN}` 추가 허용(ADR-0119 D3-A; 공개 배포 전 httpOnly 쿠키 승격 게이트는 ADR-0119 참조). `/v1/centrifugo/*`는 이 site에서도 엣지 403(MOMO-300과 동일 규칙).
+**보안 헤더:** `{$APP_DOMAIN}` site는 공통 `security_headers`(HSTS·`X-Frame-Options DENY` 등)에 더해 SPA 응답에 ADR-0119 CSP를 강제한다. `default-src 'self'`로 inline script를 금지하고, `style-src 'self' 'unsafe-inline'`, `connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}`, `img-src 'self' data:`, `frame-ancestors 'none'`만 허용한다. 실측한 Vite 산출물은 외부 JS/CSS asset tag만 사용해 script hash가 불필요하다. `/v1/centrifugo/*`는 이 site에서도 엣지 403(MOMO-300과 동일 규칙).
 
 **웹 realtime Origin 허용 — MOMO-398:** Centrifugo v6는 `client.allowed_origins`가 정의되지 않으면 `Origin` 헤더가 요청 Host와 다른 브라우저 websocket 연결을 403으로 거부한다(PR #407 재현: `request Origin is not authorized due to empty allowed_origins`). 이를 위해 prod compose가 centrifugo 서비스에 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS=${APP_DOMAIN:+https://${APP_DOMAIN}}`를 주입한다 — **operator가 별도 env를 설정하지 않으며, 허용 오리진은 언제나 `https://<APP_DOMAIN>` 단 하나로 파생된다.** `APP_DOMAIN` unset(또는 빈 값) 시 이 env는 빈 문자열로 렌더되는데, Centrifugo v6는 빈 env를 unset으로 간주하므로("Empty environment variables are considered unset (!) and will fall back to the next configuration source" — centrifugal.dev/docs/server/configuration) `centrifugo.prod.json` 그대로 = 기존 동작 완전 무변화(브라우저 realtime fail-closed 유지). 네이티브 클라이언트는 어느 모드에서든 무영향 — Centrifugo는 `Origin` 헤더가 없는 연결을 검사 없이 통과시킨다("Connection requests without `Origin` header set are passing through without any checks", 같은 문서 `client.allowed_origins`). realtime은 `rt.` 도메인(교차 오리진)이므로 SPA의 CSP `connect-src wss://{$REALTIME_DOMAIN}` 허용과 이 allowed_origins 허용이 함께 있어야 브라우저 연결이 열린다. env 파일에 `CENTRIFUGO_CLIENT_ALLOWED_ORIGINS`를 직접 넣지 말 것 — compose 보간은 그 값을 읽지 않으며, `prod_env_preflight.sh` strict 모드가 파생값과 모순되는 설정(예: APP_DOMAIN unset인데 origins 설정, 또는 파생값과 다른 origins)을 fail-fast로 차단한다.
 
-**검증:** `scripts/web_serving_smoke.sh` — e2e compose `web` 프로파일로 prod Caddyfile을 localhost 도메인에 대해 기동해 placeholder 서빙·SPA 폴백·`/v1` 프록시 배선·엣지 403·CSP·unset fail-closed를 검사한다(고유 `COMPOSE_PROJECT_NAME` + loopback 대체 포트만 사용).
+**검증:** `scripts/local_gate.sh --profile web-serving` — e2e compose `web` 프로파일의 `web-init`과 HTTP-only Caddy edge를 28070~28074 격리 포트에서 기동한다. 실제 `dist`의 `/`와 SPA 폴백, API login 프록시, Centrifugo callback 403, CSP/X-Frame-Options, `/health` 200을 호스트 curl로 검사한다. 공인 DNS·ACME·production TLS는 이 로컬 게이트 범위 밖이다. 기존 `scripts/web_serving_smoke.sh`는 APP_DOMAIN unset sentinel 회귀를 계속 담당한다.
 
 ---
 

@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
+
+- ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. LinkShort `/i/*`는 prod compose 서비스가 없어 후속 프록시 위치만 주석으로 예약했다.
+- npm production build와 YAML/bash 정적 검증은 PASS했다. `verify_web_serving.sh`는 28070~28074 격리 포트에서 6개 HTTP 단정을 수행하도록 `web-serving` infra profile에 편입했으며, 지시대로 Docker/Caddy runtime과 공인 DNS·ACME·prod TLS는 오케스트레이터 검증 전까지 `runtime-unverified`다.
+
 ## MOMO-523 멤버십 수명주기 코어 (2026-07-21)
 
 - ADR-0128 D1~D3에 따라 migration 026의 `workspace_membership`·`workspace_ban` FORCE RLS 원장, 중앙 `WorkspaceAuthorization`, 워크스페이스/채널 역할 변경과 suspend/reinstate/remove/ban REST·audit, suspend 로그인 403 및 token revoke, ban join/redeem 차단, guest roster 교집합 투영을 추가했다.

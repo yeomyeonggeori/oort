@@ -494,7 +494,7 @@ scripts/prod_env_preflight.sh --env-file /run/momo/prod.env --mode prod --eviden
 
 필수 env: `COMPOSE_PROJECT_NAME`, `MOMO_ENV`, `PUBLIC_BASE_URL`,
 `API_DOMAIN`, `REALTIME_DOMAIN`, `CADDY_EMAIL`, `ACME_EMAIL`, `HTTP_PORT`, `HTTPS_PORT`, `MOMO_API_IMAGE`, `MOMO_RELAY_IMAGE`,
-`MOMO_WORKER_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+`MOMO_WORKER_IMAGE`, `MOMO_MIGRATE_IMAGE`, `MOMO_WEB_IMAGE`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`,
 `DATABASE_URL`, `RELAY_DATABASE_URL`, `REDIS_PASSWORD`, `CENTRIFUGO_REDIS_ADDRESS`,
 `CENT_TOKEN_HMAC`, `CENT_API_KEY`, `CENT_PROXY_SECRET`, `JWT_HMAC`, `AGENT_PROVIDER_MODE`, `AGENT_MODEL`,
 `HERMES_BASE_URL`, `HERMES_API_KEY`, `SECRET_SOURCE`, `DB_VOLUME_NAME`,
@@ -624,6 +624,14 @@ scripts/local_gate.sh --profile docs
 ```
 
 서비스 경계: `postgres` → `migrate` → `db-roles` → `api`; `relay`와 `worker`는 BYPASSRLS test roles로 Postgres를 poll하고, `worker`는 repo-local `mock-hermes` (`scripts/mock_hermes.py`)에만 연결한다. 실제 stack boot/full runtime verifier는 후속 runtime goal에서 닫는다.
+
+웹 서빙만 검증할 때는 아래 infra profile을 사용한다. 실제 `clients/web` build를 `web-init`이 named volume에 복사한 뒤 prod Caddyfile을 HTTP로 구동하며, 호스트 curl로 6개 서빙/프록시/헤더 단정을 수행한다. 포트는 28070~28074만 사용한다. 로컬 내부 CA를 만들지 않기 위해 HTTPS는 의도적으로 제외하며 공인 DNS·ACME·production TLS는 별도 host gate다.
+
+```sh
+scripts/local_gate.sh --profile web-serving
+# 또는 verifier 단독 실행
+scripts/verify_web_serving.sh
+```
 
 ### 3.3 Internal alpha diagnostics bundle
 
