@@ -233,6 +233,11 @@ ON CONFLICT (id) DO UPDATE
 SET role = EXCLUDED.role,
     left_at = EXCLUDED.left_at;
 
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES ('22000000-0000-7000-8000-000000000001',
+        '22000000-0000-7000-8000-000000000101', 'owner')
+ON CONFLICT (workspace_id, member_id) DO UPDATE SET role = EXCLUDED.role;
+
 COMMIT;
 SQL
 }

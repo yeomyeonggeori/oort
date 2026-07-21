@@ -26,9 +26,8 @@ struct ReadStateRoutes: Sendable {
 
         let result: (isMember: Bool, states: [ReadStateDTO]) = try await db
             .withTenantConnection(workspaceID: workspaceID) { conn in
-                let role = try await InviteRoutes.activeWorkspaceRole(
-                    conn: conn,
-                    logger: db.logger,
+                let role = try await WorkspaceAuthorization.activeRole(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
                     memberID: principal.memberID
                 )
                 guard role != nil else { return (false, []) }

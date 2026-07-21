@@ -90,6 +90,46 @@ services:
       retries: 30
       start_period: 2s
 
+  # ADR-0127: optional S3-compatible attachment archive. The profile is
+  # intentionally inert for every existing verifier unless `--profile s3`
+  # is selected.
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["s3"]
+    restart: "no"
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MOMO_S3_ACCESS_KEY:-momo-minio}
+      MINIO_ROOT_PASSWORD: ${MOMO_S3_SECRET_KEY:-change-me-minio-secret}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+    volumes:
+      - e2e-minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles: ["s3"]
+    restart: "no"
+    environment:
+      MOMO_S3_ACCESS_KEY: ${MOMO_S3_ACCESS_KEY:-momo-minio}
+      MOMO_S3_SECRET_KEY: ${MOMO_S3_SECRET_KEY:-change-me-minio-secret}
+      MOMO_S3_BUCKET: ${MOMO_S3_BUCKET:-momo-attachments}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set momo http://minio:9000 "$$MOMO_S3_ACCESS_KEY" "$$MOMO_S3_SECRET_KEY"
+        mc mb --ignore-existing "momo/$$MOMO_S3_BUCKET"
+    depends_on:
+      minio:
+        condition: service_healthy
+
   migrate:
     image: postgres:18
     restart: "no"
@@ -306,6 +346,7 @@ services:
 
 volumes:
   e2e-pgdata:
+  e2e-minio-data:
   api-swiftpm:
   relay-swiftpm:
   worker-swiftpm:

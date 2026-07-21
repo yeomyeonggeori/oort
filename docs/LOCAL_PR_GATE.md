@@ -229,18 +229,20 @@ credential-shaped response redaction. It never calls Google; real SA smoke is
 the manual evidence in `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`. Wired into
 `runtime-db`; also runs standalone.
 
-### Drive archive attachment gate (MOMO-474, ADR-0113)
+### Attachment archive gate (MOMO-474/521, ADR-0127)
 
-`scripts/verify_attachment_upload.sh` boots an isolated e2e API stack with the
-explicit local-only archive stub. It verifies resumable session issuance,
-direct client PUT, Drive metadata completion, uploader-only attachment binding
+`scripts/verify_attachment_upload.sh` defaults to the existing isolated Drive
+stub stack. `ATTACHMENT_GATE_BACKEND=s3` enables the compose MinIO profile on
+the reserved 28040–28044 band. Both modes verify session issuance, direct
+client PUT, HEAD/Drive metadata completion, uploader-only attachment binding
 inside the canonical message transaction, audit rows, authorized streaming
-content proxy, non-member 403, an abandoned pending row, the 100 MB ceiling,
-and FORCE RLS isolation. The verifier never receives an SA key and never calls
-Google. Real shared-drive smoke remains an orchestrator-only step. Wired into
-`runtime-db`; also runs standalone. Overrides: `ATTACHMENT_GATE_PORT` /
+content or presigned GET redirect, non-member 403, URL/credential absence from
+logs and ledgers, an abandoned pending row, the 100 MB ceiling, and FORCE RLS
+isolation. It never receives a Google SA key. Real shared-drive smoke remains
+an orchestrator-only step. Both modes are wired into `runtime-db`; also run
+standalone. Overrides: `ATTACHMENT_GATE_BACKEND=drive|s3`, `ATTACHMENT_GATE_PORT` /
 `ATTACHMENT_GATE_POSTGRES_PORT` / `ATTACHMENT_GATE_CENT_PORT` /
-`ATTACHMENT_GATE_HERMES_PORT`, `ATTACHMENT_GATE_PROJECT`,
+`ATTACHMENT_GATE_HERMES_PORT` / `ATTACHMENT_GATE_MINIO_PORT`, `ATTACHMENT_GATE_PROJECT`,
 `ATTACHMENT_GATE_BOOT_TIMEOUT`, `ATTACHMENT_GATE_KEEP=1`.
 
 ### Signed webhook ingress gate (MOMO-412, ADR-0115 SE-04B)

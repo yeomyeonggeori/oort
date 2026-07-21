@@ -897,29 +897,9 @@ struct WebhookRoutes: Sendable {
         logger: Logger,
         principal: AuthPrincipal
     ) async throws -> String {
-        let rows = try await conn.query(
-            """
-            SELECT ms.role::text
-              FROM membership ms
-              JOIN member m
-                ON m.id = ms.member_id AND m.workspace_id = ms.workspace_id
-             WHERE ms.member_id = \(principal.memberID)
-               AND ms.left_at IS NULL
-               AND m.status = 'active'
-               AND m.deleted_at IS NULL
-             ORDER BY CASE ms.role::text
-                        WHEN 'owner' THEN 0 WHEN 'admin' THEN 1 ELSE 2
-                      END
-             LIMIT 1
-            """,
-            logger: logger
-        ).collect()
-        guard let role = try rows.first?.decode(String.self),
-              role == "owner" || role == "admin"
-        else {
-            throw HTTPError(.forbidden, message: "workspace admin required")
-        }
-        return role
+        try await WorkspaceAuthorization.requireAdmin(
+            conn: conn, logger: logger, principal: principal
+        ).rawValue
     }
 
     private static func lockMutation(

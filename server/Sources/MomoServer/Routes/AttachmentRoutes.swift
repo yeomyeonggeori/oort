@@ -235,13 +235,22 @@ struct AttachmentRoutes: Sendable {
         } catch let error as DriveArchiveError {
             throw Self.httpError(error)
         }
+        if let redirectURL = archived.redirectURL {
+            var headers = HTTPFields()
+            headers[.location] = redirectURL
+            headers[.cacheControl] = "no-store"
+            return Response(status: .temporaryRedirect, headers: headers)
+        }
+        guard let body = archived.body else {
+            throw HTTPError(.badGateway, message: "attachment content response is invalid")
+        }
         var headers = HTTPFields()
         headers[.contentType] = archived.mime
         headers[.contentLength] = String(archived.sizeBytes)
         return Response(
             status: .ok,
             headers: headers,
-            body: archived.body
+            body: body
         )
     }
 

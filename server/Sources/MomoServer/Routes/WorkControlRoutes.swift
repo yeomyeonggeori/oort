@@ -1043,7 +1043,7 @@ struct WorkControlRoutes: Sendable {
                AND ws.channel_id = \(UUID(uuidString: control.channelId)!)
                AND ws.host_id = \(UUID(uuidString: control.targetHostId)!)
                AND ws.status = 'running'
-               AND (\(preallocatedSessionID) IS NULL OR ws.id = \(preallocatedSessionID))
+               AND (\(preallocatedSessionID)::uuid IS NULL OR ws.id = \(preallocatedSessionID)::uuid)
                AND (
                  (requester.kind = 'agent' AND ws.member_id = a.owner_human_id)
                  OR (

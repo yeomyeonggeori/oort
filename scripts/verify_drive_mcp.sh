@@ -102,6 +102,10 @@ INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WORKSPACE_ID', '$CHANNEL_ID', '$HUMAN_ID', 'owner'),
   ('$WORKSPACE_ID', '$CHANNEL_ID', '$AGENT_ID', 'member');
+INSERT INTO workspace_membership (workspace_id, member_id, role)
+VALUES
+  ('$WORKSPACE_ID', '$HUMAN_ID', 'owner'),
+  ('$WORKSPACE_ID', '$AGENT_ID', 'member');
 COMMIT;
 SQL
 

@@ -1,5 +1,15 @@
 # momo 진행 현황
 
+## MOMO-523 멤버십 수명주기 코어 (2026-07-21)
+
+- ADR-0128 D1~D3에 따라 migration 026의 `workspace_membership`·`workspace_ban` FORCE RLS 원장, 중앙 `WorkspaceAuthorization`, 워크스페이스/채널 역할 변경과 suspend/reinstate/remove/ban REST·audit, suspend 로그인 403 및 token revoke, ban join/redeem 차단, guest roster 교집합 투영을 추가했다.
+- server 130 tests, Swift build, OpenAPI YAML, verifier/local-gate bash 정적 검증은 PASS했다. `verify_membership_lifecycle.sh`(28050~28053)와 requireWorkspaceAdmin 회귀의 실제 PG18 왕복은 지시대로 실행하지 않아 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+## MOMO-521 S3 호환 첨부 archive + MinIO 프로파일 (#563, 2026-07-21)
+
+- ADR-0127에 따라 `MOMO_ARCHIVE_BACKEND=drive|s3` 부팅 선택과 SDK 없는 AWS SigV4 `S3ArchiveClient`를 추가했다. S3는 15분 presigned PUT/GET, signed HEAD 메타 확정, signed DELETE를 지원하며 불완전한 자격은 기존 unavailable 구현으로 fail-closed한다.
+- e2e/prod compose에 opt-in `s3` MinIO+bucket init 프로파일과 public HTTPS Caddy data plane을 추가했다. REST/OpenAPI/클라이언트와 `schema_v0.sql`은 변경하지 않았다.
+- AWS 공식 SigV4 vector·presign 만료·path-style 집중 테스트와 server 130 tests, verifier bash/ShellCheck·compose YAML 정적 검증이 PASS했다. 지시대로 Docker를 실행하지 않아 Drive stub 및 MinIO 28040~28044 실제 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
 
 - ADR-0125 D11에 따라 workspace 기본/member override `work_tier_policy`(t1_only/ask/auto), stale heartbeat의 orphan 전이, ask `resume_offer` 카드와 `momo.work` 알림, t1_only terminal 정리, auto 재디스패치를 기존 PG→outbox 및 Notifier 폴링 경로에 추가했다.

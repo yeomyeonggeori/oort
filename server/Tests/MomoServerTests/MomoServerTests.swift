@@ -178,6 +178,87 @@ final class MomoServerTests: XCTestCase {
         }
     }
 
+    func testS3SigV4MatchesAWSPresignedURLVector() throws {
+        // AWS S3 Developer Guide, "Authenticating Requests: Using Query
+        // Parameters", Example 1 (2013-05-24, GET /test.txt).
+        let config = S3ArchiveConfiguration(
+            endpoint: try XCTUnwrap(URL(string: "https://s3.amazonaws.com")),
+            region: "us-east-1",
+            bucket: "examplebucket",
+            accessKey: "AKIAIOSFODNN7EXAMPLE",
+            secretKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            forcePathStyle: false
+        )
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2013-05-24T00:00:00Z")
+        )
+        let url = try S3ArchiveSigner(configuration: config).presignedURL(
+            method: "GET", objectKey: "test.txt", now: now, expires: 86_400
+        )
+        XCTAssertEqual(
+            url.absoluteString,
+            "https://examplebucket.s3.amazonaws.com/test.txt?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAIOSFODNN7EXAMPLE%2F20130524%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20130524T000000Z&X-Amz-Expires=86400&X-Amz-Signature=aeeed9bbccd4d02ee5c0109b86d86835f995330da4c265957d157751f604d404&X-Amz-SignedHeaders=host"
+        )
+    }
+
+    func testS3PresignExpirationAndPathStyleContract() throws {
+        let environment = [
+            "MOMO_S3_ENDPOINT": "http://minio:9000",
+            "MOMO_S3_REGION": "us-east-1",
+            "MOMO_S3_BUCKET": "momo-attachments",
+            "MOMO_S3_ACCESS_KEY": "placeholder-access",
+            "MOMO_S3_SECRET_KEY": "placeholder-secret",
+            "MOMO_S3_FORCE_PATH_STYLE": "1",
+        ]
+        let config = try XCTUnwrap(S3ArchiveConfiguration.load(environment))
+        XCTAssertTrue(config.forcePathStyle)
+        let signer = S3ArchiveSigner(configuration: config)
+        let now = try XCTUnwrap(
+            ISO8601DateFormatter().date(from: "2026-07-21T00:00:00Z")
+        )
+        let url = try signer.presignedURL(
+            method: "PUT",
+            objectKey: "channels/00000000-0000-7000-8000-000000000201/object",
+            now: now
+        )
+        XCTAssertEqual(
+            url.path,
+            "/momo-attachments/channels/00000000-0000-7000-8000-000000000201/object"
+        )
+        XCTAssertEqual(url.host, "minio")
+        XCTAssertEqual(url.port, 9000)
+        let query = Dictionary(uniqueKeysWithValues: try XCTUnwrap(
+            URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        ).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(query["X-Amz-Expires"], String(S3ArchiveSigner.defaultExpirationSeconds))
+        XCTAssertEqual(query["X-Amz-Date"], "20260721T000000Z")
+        XCTAssertEqual(query["X-Amz-SignedHeaders"], "host")
+        XCTAssertNotNil(query["X-Amz-Signature"])
+        XCTAssertThrowsError(try signer.presignedURL(
+            method: "PUT", objectKey: "object", now: now, expires: 604_801
+        ))
+    }
+
+    func testS3ConfigurationFailsClosedWhenCredentialsAreIncomplete() throws {
+        XCTAssertNil(S3ArchiveConfiguration.load([
+            "MOMO_S3_ENDPOINT": "https://s3.us-east-1.amazonaws.com",
+            "MOMO_S3_REGION": "us-east-1",
+            "MOMO_S3_BUCKET": "momo-attachments",
+            "MOMO_S3_ACCESS_KEY": "placeholder-access",
+        ]))
+        XCTAssertNoThrow(try ArchiveClientFactory.validateForBoot(
+            environmentName: "production",
+            environment: ["MOMO_ARCHIVE_BACKEND": "s3"]
+        ))
+        XCTAssertThrowsError(try ArchiveClientFactory.validateForBoot(
+            environmentName: "production",
+            environment: [
+                "MOMO_ARCHIVE_BACKEND": "drive",
+                "MOMO_DRIVE_ARCHIVE_BACKEND": "stub",
+            ]
+        ))
+    }
+
     func testAttachmentMigrationAndMessageBindingStaticContracts() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -425,7 +506,7 @@ final class MomoServerTests: XCTestCase {
         )
         XCTAssertTrue(source.contains("readWorkspaceForActiveMember"))
         XCTAssertTrue(source.contains("'workspaceExists', EXISTS"))
-        XCTAssertTrue(source.contains("AND EXISTS (\n                            SELECT 1\n                              FROM membership AS ms"))
+        XCTAssertTrue(source.contains("AND EXISTS (\n                            SELECT 1\n                              FROM workspace_membership AS wm"))
     }
 
     func testJoinIdentityValidationNormalizesInputs() throws {
@@ -1685,7 +1766,7 @@ final class MomoServerTests: XCTestCase {
 
         XCTAssertTrue(routeSource.contains("withTenantConnection"))
         XCTAssertTrue(routeSource.contains("withTenantTransaction"))
-        XCTAssertTrue(routeSource.contains("activeWorkspaceRole"))
+        XCTAssertTrue(routeSource.contains("WorkspaceAuthorization.activeRole"))
         XCTAssertTrue(routeSource.contains("m.workspace_id ="))
         XCTAssertTrue(routeSource.contains("m.status = 'active'"))
         XCTAssertTrue(routeSource.contains("return .targetNotFound"))
@@ -3734,5 +3815,68 @@ final class MomoServerTests: XCTestCase {
             ),
             "messages:read"
         )
+    }
+
+    func testWorkspaceRoleValidationAndHierarchyRanks() throws {
+        XCTAssertEqual(try WorkspaceRole.parse(" OWNER "), .owner)
+        XCTAssertEqual(try WorkspaceRole.parse("guest"), .guest)
+        XCTAssertLessThan(WorkspaceRole.owner.rank, WorkspaceRole.admin.rank)
+        XCTAssertLessThan(WorkspaceRole.admin.rank, WorkspaceRole.member.rank)
+        XCTAssertThrowsError(try WorkspaceRole.parse("platform_admin"))
+    }
+
+    func testMembershipLifecycleMigrationAndRoutesStaticContracts() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let migration = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Migrations/026_workspace_membership_lifecycle.sql"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(migration.contains("CREATE TABLE IF NOT EXISTS workspace_membership"))
+        XCTAssertTrue(migration.contains("CREATE TABLE IF NOT EXISTS workspace_ban"))
+        XCTAssertTrue(migration.contains("ON CONFLICT (workspace_id, member_id) DO NOTHING"))
+        XCTAssertTrue(migration.contains("FORCE ROW LEVEL SECURITY"))
+        XCTAssertTrue(migration.contains("CREATE POLICY ws_isolation"))
+
+        let routes = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Routes/MemberLifecycleRoutes.swift"
+            ),
+            encoding: .utf8
+        )
+        for path in ["/role", "/suspend", "/reinstate", "/bans"] {
+            XCTAssertTrue(routes.contains(path))
+        }
+        for action in [
+            "role.changed", "member.suspended", "member.reinstated",
+            "member.removed", "ban.created", "ban.deleted",
+        ] {
+            XCTAssertTrue(routes.contains(action))
+        }
+        XCTAssertTrue(routes.contains("workspace must retain at least one owner"))
+        XCTAssertTrue(routes.contains("UPDATE token SET revoked_at"))
+        XCTAssertTrue(routes.contains("DELETE FROM membership"))
+        XCTAssertFalse(routes.contains("BYPASSRLS"))
+    }
+
+    func testWorkspaceAuthorizationIsCentralizedOnWorkspaceMembership() throws {
+        let serverRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let authorization = try String(
+            contentsOf: serverRoot.appendingPathComponent(
+                "Sources/MomoServer/Auth/WorkspaceAuthorization.swift"
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(authorization.contains("FROM workspace_membership wm"))
+        XCTAssertFalse(authorization.contains("FROM membership ms"))
+        XCTAssertTrue(authorization.contains("m.status = 'active'"))
+        XCTAssertTrue(authorization.contains("pg_advisory_xact_lock"))
     }
 }

@@ -463,6 +463,57 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 
 ---
 
+### 4.5 셀프호스트 첨부 저장 (`s3` / MinIO) — ADR-0127
+
+Google Workspace를 쓰지 않는 설치는 REST나 클라이언트를 바꾸지 않고 S3 호환 저장소를
+선택할 수 있다. AWS S3, Cloudflare R2, Backblaze B2처럼 운영자가 이미 관리하는 저장소는
+해당 provider의 공개 HTTPS endpoint·region·bucket·access key를 SOPS/host-local env로
+주입한다. MinIO 단일 노드 옵션은 아래처럼 prod compose의 `s3` 프로파일을 켠다.
+
+```env
+MOMO_ARCHIVE_BACKEND=s3
+MOMO_S3_ENDPOINT=https://files.example.com
+MOMO_S3_REGION=us-east-1
+MOMO_S3_BUCKET=momo-attachments
+MOMO_S3_ACCESS_KEY=__SOPS_OR_HOST_SECRET__
+MOMO_S3_SECRET_KEY=__SOPS_OR_HOST_SECRET__
+MOMO_S3_FORCE_PATH_STYLE=1
+MINIO_PUBLIC_DOMAIN=files.example.com
+MINIO_VOLUME_NAME=momo-minio-data
+```
+
+MinIO를 선택했다면 `files.example.com`의 A/AAAA는 momo 호스트를 가리켜야 한다. Caddy는
+`MINIO_PUBLIC_DOMAIN` site를 TLS로 열고 private compose network의 `minio:9000`으로만
+프록시한다. 따라서 API가 반환하는 15분 presigned PUT/GET URL은 클라이언트가 접근할 수
+있지만 MinIO 관리 포트나 자격증명은 공개되지 않는다. `MINIO_PUBLIC_DOMAIN`이 없으면 해당
+Caddy site는 `.localhost` sentinel 404로 fail-closed한다. AWS/R2/B2를 쓸 때는
+`MINIO_PUBLIC_DOMAIN`을 설정하지 않으므로 provider endpoint를 Caddy가 가로채지 않는다.
+
+```sh
+docker compose --env-file /run/momo/prod.env \
+  -f infra/prod/docker-compose.prod.yml --profile s3 up -d
+```
+
+`minio-init`은 health 이후 bucket을 멱등 생성하고 종료한다. 운영자는 최초 기동 전에 예시
+자격을 반드시 교체하고 env 파일을 0600/SOPS 경계에 둔다. key/secret, presigned URL의
+`X-Amz-*` query, 업로드/다운로드 URL 전체를 로그·이슈·PR evidence에 복사하지 않는다.
+백업은 `minio-data` 볼륨 하나로 끝나지 않는다. 별도 호스트/오브젝트 저장소로 복제하고
+복원 리허설을 수행해야 한다. 실제 MinIO 왕복과 TLS/DNS/복원 evidence 전에는
+`runtime-unverified(public host)`다.
+
+로컬 오케스트레이터 검증은 전용 28040~28044 포트에서 두 모드를 각각 실행한다.
+
+```sh
+scripts/verify_attachment_upload.sh
+ATTACHMENT_GATE_BACKEND=s3 scripts/verify_attachment_upload.sh
+```
+
+두 번째 모드는 presigned PUT → signed HEAD complete → 메시지 결속 → 인증된 content
+경로의 presigned GET → 비멤버 403을 왕복하고, 서비스 로그와 Postgres 원장에 capability
+URL/자격이 남지 않았음을 `grep`으로 단정한다.
+
+---
+
 ## 5. 데이터베이스 — 마이그레이션 · RLS 역할 · 멀티테넌시
 
 ### 5.1 마이그레이션 (멱등, L4 §8.7)

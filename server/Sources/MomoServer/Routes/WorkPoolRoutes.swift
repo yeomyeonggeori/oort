@@ -269,34 +269,12 @@ struct WorkPoolRoutes: Sendable {
         workspaceID: UUID,
         memberID: UUID
     ) async throws -> String {
-        let rows = try await conn.query(
-            """
-            SELECT ms.role::text
-              FROM membership ms
-              JOIN member m
-                ON m.id = ms.member_id
-               AND m.workspace_id = ms.workspace_id
-             WHERE ms.workspace_id = \(workspaceID)
-               AND ms.member_id = \(memberID)
-               AND ms.left_at IS NULL
-               AND m.kind = 'human'
-               AND m.status = 'active'
-               AND m.deleted_at IS NULL
-             ORDER BY CASE ms.role::text
-                        WHEN 'owner' THEN 0
-                        WHEN 'admin' THEN 1
-                        WHEN 'member' THEN 2
-                        ELSE 3
-                      END
-             LIMIT 1
-             FOR SHARE OF ms, m
-            """,
-            logger: logger
-        ).collect()
-        guard let role = try rows.first?.decode(String.self) else {
+        guard let role = try await WorkspaceAuthorization.activeRole(
+            conn: conn, logger: logger, workspaceID: workspaceID, memberID: memberID
+        ) else {
             throw HTTPError(.forbidden, message: "active workspace membership required")
         }
-        return role
+        return role.rawValue
     }
 
     private static func ensureDefaultPool(

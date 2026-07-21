@@ -40,6 +40,9 @@ struct SearchRoutes: Sendable {
         let rows: [PostgresRow] = try await withTenantTransactionUnwrapped(
             workspaceID: workspaceID
         ) { conn in
+            _ = try await WorkspaceAuthorization.requireMember(
+                conn: conn, logger: db.logger, principal: principal
+            )
             if let cursor {
                 return try await conn.query(
                     """

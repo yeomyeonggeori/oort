@@ -24,6 +24,9 @@ services:
       # web serving is disabled (the sentinel site only answers 404) and the
       # existing 2-site deploy behavior is unchanged.
       APP_DOMAIN: ${APP_DOMAIN:-momo-app-domain-unset.localhost}
+      # ADR-0127: optional public MinIO host, separate from the API's generic
+      # S3 endpoint so AWS/R2/B2 deployments never become Caddy sites.
+      MINIO_PUBLIC_DOMAIN: ${MINIO_PUBLIC_DOMAIN:-momo-minio-domain-unset.localhost}
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
@@ -147,6 +150,13 @@ services:
       AGENT_DISPLAY_NAME: ${AGENT_DISPLAY_NAME:-김인턴}
       HERMES_BASE_URL: ${HERMES_BASE_URL:?set HERMES_BASE_URL}
       HERMES_API_KEY: ${HERMES_API_KEY:?set HERMES_API_KEY}
+      MOMO_ARCHIVE_BACKEND: ${MOMO_ARCHIVE_BACKEND:-drive}
+      MOMO_S3_ENDPOINT: ${MOMO_S3_ENDPOINT:-}
+      MOMO_S3_REGION: ${MOMO_S3_REGION:-}
+      MOMO_S3_BUCKET: ${MOMO_S3_BUCKET:-}
+      MOMO_S3_ACCESS_KEY: ${MOMO_S3_ACCESS_KEY:-}
+      MOMO_S3_SECRET_KEY: ${MOMO_S3_SECRET_KEY:-}
+      MOMO_S3_FORCE_PATH_STYLE: ${MOMO_S3_FORCE_PATH_STYLE:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
@@ -224,6 +234,47 @@ services:
     networks:
       - private
 
+  # ADR-0127 self-host option. Select with `--profile s3`; Dawn-hosted
+  # deployments keep the default Drive archive and never start these services.
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["s3"]
+    restart: unless-stopped
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${MOMO_S3_ACCESS_KEY:-change-me-s3-access-key}
+      MINIO_ROOT_PASSWORD: ${MOMO_S3_SECRET_KEY:-change-me-s3-secret-key}
+    volumes:
+      - minio-data:/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles: ["s3"]
+    restart: "no"
+    environment:
+      MOMO_S3_ACCESS_KEY: ${MOMO_S3_ACCESS_KEY:-change-me-s3-access-key}
+      MOMO_S3_SECRET_KEY: ${MOMO_S3_SECRET_KEY:-change-me-s3-secret-key}
+      MOMO_S3_BUCKET: ${MOMO_S3_BUCKET:-momo-attachments}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        mc alias set momo http://minio:9000 "$$MOMO_S3_ACCESS_KEY" "$$MOMO_S3_SECRET_KEY"
+        mc mb --ignore-existing "momo/$$MOMO_S3_BUCKET"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - private
+
 networks:
   public:
   private:
@@ -233,6 +284,8 @@ volumes:
     name: ${DB_VOLUME_NAME:-momo-pgdata}
   redis-data:
     name: ${REDIS_VOLUME_NAME:-momo-redis-data}
+  minio-data:
+    name: ${MINIO_VOLUME_NAME:-momo-minio-data}
   caddy-data:
   caddy-config:
   # MOMO-390: default (empty) web asset volume; unused when MOMO_WEB_DIST_DIR

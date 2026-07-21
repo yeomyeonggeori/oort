@@ -1,6 +1,6 @@
 # momo 아키텍처 정본 (Overview)
 
-> 생성: 2026-07-10 · 갱신: 2026-07-20 (ADR-0125 D2 workd) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
+> 생성: 2026-07-10 · 갱신: 2026-07-21 (ADR-0128 D1~D3 membership lifecycle) · 근거: 2026-07-09 6방향 코드베이스 감사 · 관리 규칙: 이 문서와 어긋나는 코드 변경은 같은 PR에서 이 문서를 갱신한다 (ADR-0100)
 > 상세 진단(판정표·근거 전문)은 아티팩트 "momo 아키텍처 진단 & 빌드업 가이드 v0" 참조. 결정 이력은 `docs/adr/`.
 
 ## 제1불변식 (L4 스펙에서 승계, 여전히 유효)
@@ -52,9 +52,19 @@ flowchart LR
 
 ### 클라이언트 roster와 realtime discovery
 
+ADR-0128부터 `workspace_membership`이 owner/admin/member/guest 워크스페이스 역할의
+유일한 원장이고 채널 `membership.role`은 채널 안의 역할만 표현한다. 모든 workspace
+관리 판정은 `WorkspaceAuthorization` 한 곳에서 active member와 이 원장을 함께 조회한다.
+owner는 항상 한 명 이상이어야 하며 마지막 owner의 강등·정지·추방은 409다. suspend는
+member 상태 전이와 모든 actor/subject token revoke를, remove는 전 채널 membership과
+workspace membership 삭제·deleted 전이를 한 tenant transaction에서 audit과 함께
+커밋한다. `workspace_ban`은 정규화 email/handle을 보관하고 authenticated invite redeem과
+public join 양쪽에서 재합류를 막는다.
+
 macOS real-server 세션은 `GET /v1/workspaces/:ws/roster`를 멤버 신원과 active
-`channelIds`의 유일한 권위로 사용한다(ADR-0110). 선택 채널 membership가 없는
-에이전트는 사이드바·멘션 후보·agent realtime 구독에 나타나지 않는다. offline demo
+`channelIds`의 유일한 권위로 사용한다(ADR-0110). 일반 멤버는 active workspace member
+전체를 보고, guest는 자신과 채널을 공유하는 멤버 및 공유 `channelIds`만 본다. 채널
+목록과 검색도 계속 호출자의 active channel membership 교집합만 투영한다. offline demo
 fixture는 `LiveChatBackend`에만 존재한다.
 
 workspace shared identity는 ADR-0118을 따른다. active member는 tenant-scoped
@@ -97,6 +107,15 @@ read-state는 Postgres `read_state`가 유일한 권위다(ADR-0109). 클라이�
 주소로 centrifuge-swift transport를 구성하고 앱 환경의 `MOMO_CENTRIFUGO_WS_URL`은
 이전 서버/개발용 fallback으로만 사용한다. REST API와 realtime 공개 도메인은 계속
 분리할 수 있으며(ADR-0002), 클라이언트는 API URL에서 realtime 주소를 추론하지 않는다.
+
+### 첨부 저장 어댑터
+
+ADR-0127에 따라 첨부 REST·클라이언트 계약은 하나이고 저장 구현만 부팅 env로 선택한다.
+기본 `drive`는 기존 Google Drive archive를, `s3`는 AWS SigV4 호환
+MinIO/AWS/R2/B2를 사용한다. S3 업로드와 다운로드 바이트는 각각 presigned PUT/GET으로
+클라이언트와 오브젝트 스토리지 사이를 직접 흐르며, MomoServer는 세션 발급·채널
+membership·HEAD 메타 검증·메시지 결속만 소유한다. Postgres는 계속 첨부 lifecycle과
+권한의 SoT이고 capability query와 S3 자격증명은 DB·로그·감사 원장에 유입하지 않는다.
 
 ### Signed webhook ingress
 
