@@ -78,9 +78,10 @@ STATE_TO_READ="$CURRENT_STATE"
 OLD_API="$(read_state_value "$STATE_TO_READ" MOMO_API_IMAGE)"
 OLD_RELAY="$(read_state_value "$STATE_TO_READ" MOMO_RELAY_IMAGE)"
 OLD_WORKER="$(read_state_value "$STATE_TO_READ" MOMO_WORKER_IMAGE)"
+OLD_WEB="$(read_state_value "$STATE_TO_READ" MOMO_WEB_IMAGE)"
 
 rollback_apps() {
-  deploy_log "ROLLBACK: restoring previous api/relay/worker image digests"
+  deploy_log "ROLLBACK: restoring previous api/relay/worker/web image digests"
   deploy_log "ROLLBACK: database migrations remain forward-only; stop for operator review if an old image is not forward-compatible"
   MOMO_API_IMAGE="$OLD_API" MOMO_RELAY_IMAGE="$OLD_RELAY" MOMO_WORKER_IMAGE="$OLD_WORKER" \
     "${COMPOSE[@]}" up -d --no-deps --force-recreate api || return 1
@@ -88,15 +89,17 @@ rollback_apps() {
     "${COMPOSE[@]}" up -d --no-deps --force-recreate relay || return 1
   MOMO_API_IMAGE="$OLD_API" MOMO_RELAY_IMAGE="$OLD_RELAY" MOMO_WORKER_IMAGE="$OLD_WORKER" \
     "${COMPOSE[@]}" up -d --no-deps --force-recreate worker || return 1
-  wait_service_running api && wait_service_running relay && wait_service_running worker
+  MOMO_WEB_IMAGE="$OLD_WEB" "${COMPOSE[@]}" run --rm --no-deps web-init || return 1
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy || return 1
+  wait_service_running api && wait_service_running relay && wait_service_running worker && wait_service_running caddy
 }
 
 if [ "$DRY_RUN" = "1" ]; then
   if [ "$ROLLBACK_ONLY" = "1" ]; then
-    deploy_log "DRY RUN rollback plan: restore previous api/relay/worker digests; do not reverse migrations; verify health"
+    deploy_log "DRY RUN rollback plan: restore previous api/relay/worker/web digests; do not reverse migrations; verify health"
   else
-    deploy_log "DRY RUN upgrade plan: preserve current image state -> pull new digests -> run forward migration -> restart api/relay/worker sequentially -> health check"
-    deploy_log "DRY RUN failure plan: automatically restore previous api/relay/worker digests; database remains forward-only"
+    deploy_log "DRY RUN upgrade plan: preserve current image state -> pull new digests -> run forward migration and web-init -> restart api/relay/worker/caddy -> health check"
+    deploy_log "DRY RUN failure plan: automatically restore previous api/relay/worker/web digests; database remains forward-only"
   fi
   deploy_log "DRY RUN complete; no containers or state were changed"
   exit 0
@@ -117,7 +120,8 @@ fi
 if [ -f "$CURRENT_STATE" ] \
   && grep -Fq "MOMO_API_IMAGE=$MOMO_API_IMAGE" "$CURRENT_STATE" \
   && grep -Fq "MOMO_RELAY_IMAGE=$MOMO_RELAY_IMAGE" "$CURRENT_STATE" \
-  && grep -Fq "MOMO_WORKER_IMAGE=$MOMO_WORKER_IMAGE" "$CURRENT_STATE"; then
+  && grep -Fq "MOMO_WORKER_IMAGE=$MOMO_WORKER_IMAGE" "$CURRENT_STATE" \
+  && grep -Fq "MOMO_WEB_IMAGE=$MOMO_WEB_IMAGE" "$CURRENT_STATE"; then
   deploy_log "requested image set matches the current deploy state; keeping the existing rollback target"
 else
 cp "$CURRENT_STATE" "${CURRENT_STATE}.previous"
@@ -127,10 +131,14 @@ deploy_log "preserved the current image set for rollback"
 
 upgrade_failed=0
 deploy_log "pulling new pinned images"
-"${COMPOSE[@]}" pull api relay worker migrate || upgrade_failed=1
+"${COMPOSE[@]}" pull api relay worker migrate web-init || upgrade_failed=1
 if [ "$upgrade_failed" = "0" ]; then
   deploy_log "running forward-only migrations before app restart"
   "${COMPOSE[@]}" run --rm --no-deps migrate || upgrade_failed=1
+fi
+if [ "$upgrade_failed" = "0" ]; then
+  deploy_log "installing the new pinned web assets"
+  "${COMPOSE[@]}" run --rm --no-deps web-init || upgrade_failed=1
 fi
 if [ "$upgrade_failed" = "0" ]; then
   for service in api relay worker; do
@@ -138,6 +146,11 @@ if [ "$upgrade_failed" = "0" ]; then
     "${COMPOSE[@]}" up -d --no-deps --force-recreate "$service" || { upgrade_failed=1; break; }
     wait_service_running "$service" || { upgrade_failed=1; break; }
   done
+fi
+if [ "$upgrade_failed" = "0" ]; then
+  deploy_log "restarting caddy after the web asset swap"
+  "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy || upgrade_failed=1
+  wait_service_running caddy || upgrade_failed=1
 fi
 if [ "$upgrade_failed" = "0" ]; then
   wait_public_health || upgrade_failed=1

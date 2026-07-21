@@ -1,0 +1,19 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-alpine AS build
+
+WORKDIR /workspace/clients/web
+COPY clients/web/package.json clients/web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY clients/web/ ./
+RUN npm run build
+
+FROM alpine:3.21
+
+RUN addgroup -S momo && adduser -S -G momo momo \
+    && mkdir -p /opt/momo-web /srv/momo-web \
+    && chown -R momo:momo /opt/momo-web /srv/momo-web
+COPY --from=build --chown=momo:momo /workspace/clients/web/dist/ /opt/momo-web/
+
+USER momo
+ENTRYPOINT ["/bin/sh", "-ec", "rm -rf /srv/momo-web/* /srv/momo-web/.[!.]* /srv/momo-web/..?* 2>/dev/null || true; cp -a /opt/momo-web/. /srv/momo-web/"]

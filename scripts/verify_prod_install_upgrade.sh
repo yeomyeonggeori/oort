@@ -62,10 +62,12 @@ DIGEST_A="$(printf 'a%.0s' {1..64})"
 DIGEST_B="$(printf 'b%.0s' {1..64})"
 DIGEST_C="$(printf 'c%.0s' {1..64})"
 DIGEST_D="$(printf 'd%.0s' {1..64})"
+DIGEST_E="$(printf 'e%.0s' {1..64})"
 OLD_A="$(printf '1%.0s' {1..64})"
 OLD_B="$(printf '2%.0s' {1..64})"
 OLD_C="$(printf '3%.0s' {1..64})"
 OLD_D="$(printf '4%.0s' {1..64})"
+OLD_E="$(printf '5%.0s' {1..64})"
 ENV_FILE="$TMP_ROOT/prod.env"
 
 cat > "$ENV_FILE" <<EOF
@@ -85,6 +87,7 @@ MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server@sha256:$DIGEST_A
 MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay@sha256:$DIGEST_B
 MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker@sha256:$DIGEST_C
 MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate@sha256:$DIGEST_D
+MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo-web@sha256:$DIGEST_E
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=8d96741fb02c4e1ca8dd803a5f121c11
@@ -117,6 +120,7 @@ MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server@sha256:$OLD_A
 MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay@sha256:$OLD_B
 MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker@sha256:$OLD_C
 MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate@sha256:$OLD_D
+MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo-web@sha256:$OLD_E
 EOF
 chmod 600 "$TMP_ROOT/state/$DEPLOY_STATE_NAME"
 cp "$TMP_ROOT/state/$DEPLOY_STATE_NAME" "$TMP_ROOT/state/$DEPLOY_STATE_NAME.previous"
@@ -145,7 +149,7 @@ pass "install requires per-image sha256 digests beyond the shared preflight"
 
 run_capture "$TMP_ROOT/install.out" "$INSTALL" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/install-state" --dry-run
-grep -Fq 'pull pinned images -> start postgres/redis/centrifugo -> run migrate once -> start api/relay/worker/caddy' "$TMP_ROOT/install.out" ||
+grep -Fq 'pull five pinned images -> start postgres/redis/centrifugo -> run migrate and web-init once -> start api/relay/worker/caddy' "$TMP_ROOT/install.out" ||
   fail "install dry-run plan lost the ordered migration/start contract"
 grep -Fq 'config --quiet' "$TRACE" || fail "install did not render docker compose config"
 pass "install dry-run validates preflight/digests/compose and ordered idempotent plan"
@@ -160,9 +164,9 @@ pass "real upgrade requires explicit backup evidence"
 
 run_capture "$TMP_ROOT/upgrade.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/state" --dry-run
-grep -Fq 'run forward migration -> restart api/relay/worker sequentially' "$TMP_ROOT/upgrade.out" ||
+grep -Fq 'run forward migration and web-init -> restart api/relay/worker/caddy' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run lost migration/restart ordering"
-grep -Fq 'automatically restore previous api/relay/worker digests' "$TMP_ROOT/upgrade.out" ||
+grep -Fq 'automatically restore previous api/relay/worker/web digests' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run lost the previous-image rollback path"
 grep -Fq 'database remains forward-only' "$TMP_ROOT/upgrade.out" ||
   fail "upgrade dry-run did not disclose forward-only database migrations"
@@ -187,7 +191,7 @@ pass "simulated restart failure executes previous-digest app rollback"
 run_capture "$TMP_ROOT/rollback.out" "$UPGRADE" --env-file "$ENV_FILE" --mode staging \
   --state-dir "$TMP_ROOT/state" --rollback-only \
   --rollback-state "$TMP_ROOT/state/$DEPLOY_STATE_NAME.previous" --dry-run
-grep -Fq 'restore previous api/relay/worker digests; do not reverse migrations' "$TMP_ROOT/rollback.out" ||
+grep -Fq 'restore previous api/relay/worker/web digests; do not reverse migrations' "$TMP_ROOT/rollback.out" ||
   fail "manual rollback dry-run path is missing"
 pass "documented manual rollback state is executable in dry-run mode"
 

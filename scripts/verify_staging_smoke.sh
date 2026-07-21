@@ -181,6 +181,7 @@ MOMO_API_IMAGE=ghcr.io/dawn-kim-official/momo-server:${MOMO_IMAGE_TAG}
 MOMO_RELAY_IMAGE=ghcr.io/dawn-kim-official/momo-outbox-relay:${MOMO_IMAGE_TAG}
 MOMO_WORKER_IMAGE=ghcr.io/dawn-kim-official/momo-agent-worker:${MOMO_IMAGE_TAG}
 MOMO_MIGRATE_IMAGE=ghcr.io/dawn-kim-official/momo-migrate:${MOMO_IMAGE_TAG}
+MOMO_WEB_IMAGE=ghcr.io/dawn-kim-official/momo-web:${MOMO_IMAGE_TAG}
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=postgres_20260701_operator_generated_shape
