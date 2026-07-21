@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-22 (Fable 기획 3차) · Momo Archive 재구성 + 메신저 심화 리서치 v0.2 (노션 정본)
+- 성재 발제(집필·스터디): 노션 허브 **"Momo Archive"**(3a4c5b1cae0481739c9bc660205fc346) 개설 — 5.6 sol의 Messenger Systems Bible v0.1(00~09장)·결정 패키지·심화 리서치를 한 지붕으로 이동·체계화.
+- **심화 리서치 5편 집필·게시**(1차 자료 직접 검증): 프레이밍(Geoffrey Litt "Understanding is the new bottleneck" — 제목 정정, 발표자 블로그 문서판 전문 확보) / Slack(QCon 2016+slack.engineering 12건, v0.1 교정 3건) / Discord(blog 11건+이미지 6종 육안 검증) / Mattermost(GitHub master 소스 검증 — Save↔Publish 무보장 구멍=momo outbox 정당성의 직접 증거) / Teams(MS Learn — compliance 쌍방향 기판). 각 편에 momo 대조 시사점 7~8개 포함(outbox·seq·RLS·MPNS 동형 확인).
+- 개념도 3종 codex(gpt-image) 생성(세 평면·Slack 3시대·Mattermost ledger-first) — 로컬 PNG, 노션 첨부는 성재 드래그 필요(MCP가 로컬 바이너리 업로드 미지원).
+- 이 작업은 노션이 정본(레포 비반영). 바이블 v0.2 개정 시 심화 리서치가 근거 문서.
+
 ## 2026-07-21 (Fable 5차) · W-5 랜딩 — 웹 트랙 W-1~W-5 완주
 - **#594 W-5**(초대 링크 웹 합류): `/join`·`/i/<code>` SPA 랜딩(같은 가입 폼·403 사유별 종결 카피·replaceState 코드 제거) + LinkShort prod 편입(pinned 이미지·publish-images 가산·Caddy `/i/*` SPA보다 선행 프록시). 게이트: vitest 47·lint·build + **web-serving docker 8단정 PASS**. track/engine bfe6d51.
 - **웹 트랙 완주**: W-1~W-5 전부 랜딩 — "설치 → 브라우저 접속 → 초대 링크로 합류" Mattermost급 온보딩 문법 완성. 잔여=실배포 TLS/DNS·초대 실왕복(게이트 부채 목록).
