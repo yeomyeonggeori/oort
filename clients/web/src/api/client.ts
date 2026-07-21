@@ -31,6 +31,7 @@ export type Member = components["schemas"]["Member"];
 export type Channel = components["schemas"]["Channel"];
 export type Message = components["schemas"]["Message"];
 export type MessagePage = components["schemas"]["MessagePage"];
+export type ThreadRepliesPage = components["schemas"]["ThreadRepliesPage"];
 export type ReactionSnapshot = components["schemas"]["ReactionSnapshot"];
 export type RosterMember = components["schemas"]["RosterMember"];
 export type WorkspaceRosterResponse =
@@ -51,6 +52,11 @@ export type ApprovalProjectionPage =
 export type ApprovalDecisionReceipt =
   components["schemas"]["ApprovalDecisionReceipt"];
 export type ApprovalDecision = components["schemas"]["ApprovalDecisionRequest"];
+export type WorkSession = components["schemas"]["WorkSession"];
+export type WorkSessionListResponse =
+  components["schemas"]["WorkSessionListResponse"];
+export type TerminalAttachCapabilityResponse =
+  components["schemas"]["TerminalAttachCapabilityResponse"];
 type RefreshResponse = components["schemas"]["RefreshResponse"];
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 
@@ -289,12 +295,51 @@ export function fetchMessages(
   );
 }
 
+export function fetchThreadReplies(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+  cursor?: number,
+  limit = 200
+): Promise<ThreadRepliesPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor !== undefined) params.set("cursor", String(cursor));
+  return apiFetch<ThreadRepliesPage>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(rootId)}/replies?${params.toString()}`
+  );
+}
+
 export function fetchReactionSnapshot(
   workspaceId: string,
   channelId: string
 ): Promise<ReactionSnapshot> {
   return apiFetch<ReactionSnapshot>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/reactions`
+  );
+}
+
+// ---- Work observer (Goal #605 / W-6) ------------------------------------------
+
+/** Read-only projection; raw host endpoints and capabilities are never listed. */
+export function listWorkSessions(
+  workspaceId: string
+): Promise<WorkSessionListResponse> {
+  return apiFetch<WorkSessionListResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions`
+  );
+}
+
+/**
+ * Issues the one-use observer grant. Callers must keep the returned value in
+ * memory and pass it directly to the attach transport; never persist or log it.
+ */
+export function issueObserverTerminalAttach(
+  workspaceId: string,
+  workSessionId: string
+): Promise<TerminalAttachCapabilityResponse> {
+  return apiFetch<TerminalAttachCapabilityResponse>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/work-sessions/${encodeURIComponent(workSessionId)}/terminal-attach`,
+    { method: "POST", body: JSON.stringify({ mode: "observer" }) }
   );
 }
 

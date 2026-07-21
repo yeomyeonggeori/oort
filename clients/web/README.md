@@ -6,6 +6,8 @@ ADR-0119 W-4 (MOMO-400)가 대화 표면을 연다: 메시지 작성(clientMsgId
 read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 기본
 모드), DM 목록/열기. ADR-0119 W-5 (MOMO-401)가 초대 링크 웹 합류를 연다:
 `/join?code=<code>` 랜딩 → 공개 `POST /v1/join` → 세션 수립(아래 참조).
+W-6(#605)는 read-only Work 세션 목록과 root thread 관전, observer 터미널,
+`artifact_kind=diff|commit|pr` 타입드 카드를 추가한다.
 
 - 스택: Vite + React + TypeScript + centrifuge-js (전부 permissive 라이선스,
   ADR-0119 D2-A). 상태관리 라이브러리 없음(v0 규모에서 불필요).
@@ -90,6 +92,26 @@ read-state(unread 배지 + `user:read-state` 실시간), 승인 카드(ADR-0112 
   재개 안내만 표시한다.
 - 파일/웹훅/presence/멀티 워크스페이스 rail 비구현(각 ADR 게이트,
   ADR-0119 D5-A non-goals).
+
+## Work 관전 (`W-6`, #605)
+
+- `GET /work-sessions`의 credential-free projection만 목록에 보인다.
+  `remoteAttachAvailable`과 `observerGrantCount`는 가능 여부·현재 수만 표시하며
+  endpoint/capability를 모델이나 DOM에 저장하지 않는다.
+- 세션을 고르면 기존 `Timeline`이 `rootMessageId`와 그 답글만 렌더하고 composer를
+  제거한다. Work 화면에는 메시지 작성이나 세션 제어 API 호출이 없다.
+- 터미널 관전은 `POST terminal-attach {mode:"observer"}` 응답을 지역 변수에서
+  곧바로 direct attach에 넘긴다. capability는 request `Authorization` header에만
+  존재하고 URL query, storage, React 상태, DOM, 로그에 복사하지 않는다. xterm.js는
+  터미널을 실제로 열 때만 lazy-load하며 `disableStdin=true`; `onData`, resize, kill
+  전송 경로와 입력 UI가 모두 없다.
+- 브라우저 WebSocket API는 임의 `Authorization` header를 지원하지 않는다. 따라서
+  v0 웹 클라이언트는 정본이 허용한 HTTPS streaming attach endpoint만 연결하고
+  WSS-only 또는 query-bearing endpoint는 fail-closed한다. HTTPS endpoint의 CORS/CSP
+  허용과 실서버 byte stream 왕복은 오케스트레이터 게이트가 확인한다.
+- diff/commit/PR 감지는 MomoCore와 동일하게 명시적 `artifact_kind` → legacy typed
+  artifact → typed diff → 보수적 unified diff 순서다. HTTPS가 아니거나 credential
+  계열 query key가 있는 외부 링크는 카드 메타데이터만 남기고 링크를 제거한다.
 
 ## 실시간 계약
 

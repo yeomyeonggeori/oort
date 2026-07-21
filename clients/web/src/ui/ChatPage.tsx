@@ -17,6 +17,7 @@ import { mentionsMember } from "../timeline/model";
 import ApprovalsPanel from "./ApprovalsPanel";
 import ChannelList from "./ChannelList";
 import Timeline from "./Timeline";
+import WorkObserverView from "./WorkObserverView";
 
 interface ChatPageProps {
   session: SessionData;
@@ -37,7 +38,7 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(
     null
   );
-  const [view, setView] = useState<"channel" | "approvals">("channel");
+  const [view, setView] = useState<"channel" | "approvals" | "work">("channel");
   const [dmPickerOpen, setDmPickerOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
@@ -297,6 +298,19 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
           )}
         </button>
 
+        <button
+          type="button"
+          className={
+            view === "work"
+              ? "approvals-button approvals-button-active"
+              : "approvals-button"
+          }
+          data-testid="work-observer-button"
+          onClick={() => setView((current) => (current === "work" ? "channel" : "work"))}
+        >
+          Work 관전
+        </button>
+
         <ChannelList
           channels={channels}
           dms={dms}
@@ -357,6 +371,17 @@ export default function ChatPage({ session, authExpired }: ChatPageProps) {
             approvals={approvals}
             displayNameFor={displayNameFor}
             onClose={() => setView("channel")}
+          />
+        ) : view === "work" ? (
+          <WorkObserverView
+            workspaceId={workspaceId}
+            channels={[...channels, ...dms]}
+            currentMemberId={session.member.id}
+            displayNameFor={displayNameFor}
+            realtime={realtime}
+            approvals={approvals}
+            onLatestSeq={readStates.reportViewedSeq}
+            online={online}
           />
         ) : selectedChannel ? (
           <Timeline

@@ -1,6 +1,10 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Channel } from "../api/client";
-import { fetchMessages, fetchReactionSnapshot } from "../api/client";
+import {
+  fetchMessages,
+  fetchReactionSnapshot,
+  fetchThreadReplies,
+} from "../api/client";
 import type {
   ChannelRealtimeEvent,
   MessageEditedEvent,
@@ -24,7 +28,9 @@ import {
   type ReactionSnapshot,
   type TimelineMessage,
 } from "../timeline/model";
+import { resolveArtifact } from "../timeline/artifacts";
 import ApprovalCard from "./ApprovalCard";
+import ArtifactCard from "./ArtifactCard";
 import Composer from "./Composer";
 import MessageContent from "./MessageContent";
 
@@ -39,11 +45,15 @@ interface TimelineProps {
   /** Highest committed seq rendered — drives the read-state cursor PUT. */
   onLatestSeq: (channelId: string, seq: number) => void;
   online: boolean;
+  /** Work observer mode: reuse the timeline for one root and remove writes. */
+  focusRootMessageId?: string;
+  readOnly?: boolean;
 }
 
 const HEAD_PAGE_LIMIT = 200;
 const BACKFILL_LIMIT = 200;
 const MAX_BACKFILL_PAGES = 10;
+const MAX_THREAD_PAGES = 20;
 
 // ADR-0112 basic mode: non-text message types render as a one-line summary
 // label; tool JSON / props / cost details are intentionally not shown.
@@ -110,6 +120,8 @@ export default function Timeline({
   approvals,
   onLatestSeq,
   online,
+  focusRootMessageId,
+  readOnly = false,
 }: TimelineProps) {
   const [messages, setMessages] = useState<TimelineMessage[]>([]);
   const [reactions, setReactions] = useState<ReactionSnapshot>({});
@@ -136,6 +148,17 @@ export default function Timeline({
   const bufferedEventsRef = useRef<ChannelRealtimeEvent[]>([]);
   const channelId = channel.id;
   const applyApprovalRealtimeStatus = approvals.applyRealtimeStatus;
+  const visibleMessages = useMemo(
+    () =>
+      focusRootMessageId === undefined
+        ? messages
+        : messages.filter(
+            (message) =>
+              message.id.toLowerCase() === focusRootMessageId.toLowerCase() ||
+              message.rootId?.toLowerCase() === focusRootMessageId.toLowerCase()
+          ),
+    [focusRootMessageId, messages]
+  );
 
   const appendMessages = useCallback((incoming: TimelineMessage[]) => {
     for (const message of incoming) {
@@ -235,13 +258,21 @@ export default function Timeline({
     if (recovered) {
       const queued = recoveryEventsRef.current;
       recoveryEventsRef.current = [];
-      for (const event of queued) applyRealtimeEvent(event);
+      for (const event of queued) {
+        if (
+          focusRootMessageId !== undefined &&
+          (event.type === "message.new" || event.type === "message.edited")
+        ) {
+          continue;
+        }
+        applyRealtimeEvent(event);
+      }
     }
     if (pendingCatchUpRef.current) {
       pendingCatchUpRef.current = false;
       void catchUp();
     }
-  }, [appendMessages, applyRealtimeEvent, channelId, workspaceId]);
+  }, [appendMessages, applyRealtimeEvent, channelId, focusRootMessageId, workspaceId]);
 
   // Initial head load: history and reactions establish one cold-load baseline.
   // Publications received before both snapshots land are buffered, matching
@@ -252,12 +283,42 @@ export default function Timeline({
     bufferedEventsRef.current = [];
     async function loadHead() {
       try {
-        const [response, reactionSnapshot] = await Promise.all([
+        const threadPromise = (async () => {
+          if (focusRootMessageId === undefined) return [];
+          const replies: TimelineMessage[] = [];
+          let cursor: number | undefined;
+          const seen = new Set<number>();
+          for (let pageIndex = 0; pageIndex < MAX_THREAD_PAGES; pageIndex += 1) {
+            const page = await fetchThreadReplies(
+              workspaceId,
+              channelId,
+              focusRootMessageId,
+              cursor,
+              HEAD_PAGE_LIMIT
+            );
+            replies.push(...page.messages.map(fromRestMessage));
+            if (
+              page.nextCursor === undefined ||
+              page.nextCursor === cursor ||
+              seen.has(page.nextCursor)
+            ) {
+              break;
+            }
+            seen.add(page.nextCursor);
+            cursor = page.nextCursor;
+          }
+          return replies;
+        })();
+        const [response, reactionSnapshot, threadReplies] = await Promise.all([
           fetchMessages(workspaceId, channelId, { limit: HEAD_PAGE_LIMIT }),
           fetchReactionSnapshot(workspaceId, channelId),
+          threadPromise,
         ]);
         if (cancelled) return;
-        appendMessages(response.messages.map(fromRestMessage));
+        appendMessages([
+          ...response.messages.map(fromRestMessage),
+          ...threadReplies,
+        ]);
         setReactions(reactionSnapshot);
         setOldestCursor(response.nextBefore ?? null);
         setLoaded(true);
@@ -295,7 +356,7 @@ export default function Timeline({
     return () => {
       cancelled = true;
     };
-  }, [appendMessages, applyRealtimeEvent, catchUp, channelId, loadAttempt, workspaceId]);
+  }, [appendMessages, applyRealtimeEvent, catchUp, channelId, focusRootMessageId, loadAttempt, workspaceId]);
 
   // Realtime subscription; server-side subscribe proxy authorizes it.
   useEffect(() => {
@@ -313,6 +374,17 @@ export default function Timeline({
         }
         if (catchUpRunningRef.current) {
           recoveryEventsRef.current.push(event);
+          return;
+        }
+        // Realtime message envelopes do not project rootId. In focused Work
+        // threads, heal every message event through REST before rendering so
+        // replies are never misclassified or leaked from adjacent threads.
+        if (
+          focusRootMessageId !== undefined &&
+          (event.type === "message.new" || event.type === "message.edited")
+        ) {
+          recoveryEventsRef.current.push(event);
+          void catchUp();
           return;
         }
         if (recoveryEventsRef.current.length > 0) {
@@ -334,7 +406,7 @@ export default function Timeline({
       },
     });
     return unsubscribe;
-  }, [applyRealtimeEvent, catchUp, channelId, realtime, workspaceId]);
+  }, [applyRealtimeEvent, catchUp, channelId, focusRootMessageId, realtime, workspaceId]);
 
   async function loadOlder() {
     if (oldestCursor === null || loadingOlder) return;
@@ -359,7 +431,7 @@ export default function Timeline({
     if (list && stickToBottomRef.current) {
       list.scrollTop = list.scrollHeight;
     }
-  }, [messages]);
+  }, [visibleMessages]);
 
   // A message counts as read only after at least half of its row enters the
   // scroll viewport. Visibility churn is debounced by the read-state store.
@@ -386,7 +458,7 @@ export default function Timeline({
       observer.observe(row);
     }
     return () => observer.disconnect();
-  }, [channelId, messages.length, onLatestSeq, online]);
+  }, [channelId, onLatestSeq, online, visibleMessages.length]);
 
   function handleScroll() {
     const list = listRef.current;
@@ -432,13 +504,13 @@ export default function Timeline({
 
         {!loaded && <p className="muted timeline-empty">메시지 불러오는 중…</p>}
 
-        {loaded && messages.length === 0 && loadError === null && (
+        {loaded && visibleMessages.length === 0 && loadError === null && (
           <p className="muted timeline-empty">아직 메시지가 없습니다.</p>
         )}
 
         <ol className="message-list">
-          {messages.map((message, index) => {
-            const previous = messages[index - 1];
+          {visibleMessages.map((message, index) => {
+            const previous = visibleMessages[index - 1];
             const startsGroup = startsAuthorGroup(previous, message);
             const showDate = previous === undefined || !isSameLocalDate(previous.createdAtMs, message.createdAtMs);
             const mentioned = mentionsMember(message.props, currentMemberId);
@@ -446,6 +518,7 @@ export default function Timeline({
               Object.entries(reactions).find(([messageId]) => messageId.toLowerCase() === message.id.toLowerCase())?.[1] ?? {}
             );
             const approvalCard = approvalCardModel(message);
+            const artifact = resolveArtifact(message);
             return (
               <Fragment key={message.seq}>
               {showDate && <li className="date-divider"><span>{dateFormat.format(new Date(message.createdAtMs))}</span></li>}
@@ -484,6 +557,8 @@ export default function Timeline({
                     isResumeOffer={approvalCard.isResumeOffer}
                     decide={approvals.decide}
                   />
+                ) : artifact !== null ? (
+                  <ArtifactCard presentation={artifact} />
                 ) : (
                   <>
                     {message.type !== "text" && (
@@ -515,15 +590,21 @@ export default function Timeline({
         </ol>
       </div>
 
-      <footer className="timeline-footer">
-        <Composer
-          workspaceId={workspaceId}
-          channelId={channelId}
-          placeholder={`${channelLabel}에 메시지 보내기`}
-          online={online}
-          onSent={(message) => appendMessages([fromRestMessage(message)])}
-        />
-      </footer>
+      {readOnly ? (
+        <footer className="timeline-footer timeline-read-only" role="status">
+          관전 모드 · 메시지와 터미널 입력은 보낼 수 없습니다.
+        </footer>
+      ) : (
+        <footer className="timeline-footer">
+          <Composer
+            workspaceId={workspaceId}
+            channelId={channelId}
+            placeholder={`${channelLabel}에 메시지 보내기`}
+            online={online}
+            onSent={(message) => appendMessages([fromRestMessage(message)])}
+          />
+        </footer>
+      )}
     </div>
   );
 }
