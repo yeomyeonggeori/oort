@@ -13,9 +13,15 @@ struct CreateWorkSessionRequest: Decodable {
     let attachEndpoint: String?
 }
 
-struct EndWorkSessionRequest: Decodable {
-    let status: String
+enum WorkSessionObservation: String, Codable, Sendable, CaseIterable {
+    case open
+    case ownerOnly = "owner_only"
+}
+
+struct UpdateWorkSessionRequest: Decodable {
+    let status: String?
     let exitCode: Int?
+    let observation: WorkSessionObservation?
 }
 
 struct WorkSessionDTO: ResponseEncodable, Codable, Sendable, Equatable {
@@ -28,6 +34,9 @@ struct WorkSessionDTO: ResponseEncodable, Codable, Sendable, Equatable {
     let tool: String
     let label: String
     let status: String
+    let observation: WorkSessionObservation
+    let observerGrantCount: Int64
+    let remoteAttachAvailable: Bool
     let startedAtMs: Int64
     let endedAtMs: Int64?
     let exitCode: Int?
@@ -182,8 +191,11 @@ struct WorkSessionRoutes: Sendable {
                    \(hostID), \(rootMessageID), \(tool), \(label),
                    \(remotePTY?.ptyID), \(remotePTY?.attachEndpoint), \(startedAt))
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
-                          root_message_id, tool, label, status, started_at,
-                          ended_at, exit_code
+                          root_message_id, tool, label, status, observation,
+                          0::bigint AS observer_grant_count,
+                          (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)
+                            AS remote_attach_available,
+                          started_at, ended_at, exit_code
                 """,
                 logger: db.logger
             ).collect()
@@ -238,9 +250,22 @@ struct WorkSessionRoutes: Sendable {
         let workspaceID = try InviteRoutes.workspaceID(context, principal: principal)
         let sessionID = try Self.sessionID(context)
         let requestDTO = try await request.decode(
-            as: EndWorkSessionRequest.self,
+            as: UpdateWorkSessionRequest.self,
             context: context
         )
+        if let observation = requestDTO.observation {
+            guard requestDTO.status == nil, requestDTO.exitCode == nil else {
+                throw HTTPError(.badRequest, message: "observation cannot be combined with lifecycle fields")
+            }
+            return try await updateObservation(
+                observation,
+                request: request,
+                context: context,
+                principal: principal,
+                workspaceID: workspaceID,
+                sessionID: sessionID
+            )
+        }
         guard requestDTO.status == "ended" else {
             throw HTTPError(.badRequest, message: "status must be ended")
         }
@@ -252,7 +277,9 @@ struct WorkSessionRoutes: Sendable {
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
-                       ws.status, ws.started_at, ws.ended_at, ws.exit_code,
+                       ws.status, ws.observation,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code,
                        root.seq
                   FROM work_session ws
                   JOIN message root ON root.id = ws.root_message_id
@@ -266,7 +293,7 @@ struct WorkSessionRoutes: Sendable {
             }
             let decoded = try row.decode(
                 (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                 String, Date, Date?, Int?, Int64).self
+                 String, String, Bool, Date, Date?, Int?, Int64).self
             )
             let ownerMemberID = decoded.3
             if principal.kind == .workHost {
@@ -287,7 +314,16 @@ struct WorkSessionRoutes: Sendable {
             )
 
             if decoded.8 == "ended" {
-                return Self.sessionDTO(from: decoded)
+                return Self.sessionDTO(
+                    from: (
+                        decoded.0, decoded.1, decoded.2, decoded.3, decoded.4,
+                        decoded.5, decoded.6, decoded.7, decoded.8, decoded.11,
+                        decoded.12, decoded.13
+                    ),
+                    observation: decoded.9,
+                    observerGrantCount: 0,
+                    remoteAttachAvailable: decoded.10
+                )
             }
 
             let updatedRows = try await conn.query(
@@ -299,8 +335,11 @@ struct WorkSessionRoutes: Sendable {
                  WHERE id = \(sessionID)
                    AND status = 'running'
                 RETURNING id, workspace_id, channel_id, member_id, host_id,
-                          root_message_id, tool, label, status, started_at,
-                          ended_at, exit_code
+                          root_message_id, tool, label, status, observation,
+                          0::bigint AS observer_grant_count,
+                          (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)
+                            AS remote_attach_available,
+                          started_at, ended_at, exit_code
                 """,
                 logger: db.logger
             ).collect()
@@ -325,7 +364,7 @@ struct WorkSessionRoutes: Sendable {
             let endedPayload = Self.lifecyclePayload(
                 eventType: "work.session.ended",
                 session: workSession,
-                rootMessageSeq: decoded.12
+                rootMessageSeq: decoded.14
             )
             _ = try await conn.query(
                 """
@@ -340,6 +379,106 @@ struct WorkSessionRoutes: Sendable {
             return workSession
         }
 
+        return try WorkSessionResponse(workSession: session)
+            .response(from: request, context: context)
+    }
+
+    private func updateObservation(
+        _ observation: WorkSessionObservation,
+        request: Request,
+        context: AppRequestContext,
+        principal: AuthPrincipal,
+        workspaceID: UUID,
+        sessionID: UUID
+    ) async throws -> Response {
+        guard principal.kind == .human else {
+            throw HTTPError(.forbidden, message: "observation requires a human bearer")
+        }
+        let session = try await withTenantTransactionUnwrapped(
+            workspaceID: workspaceID
+        ) { conn in
+            try await InviteRoutes.requireWorkspaceMember(
+                conn: conn,
+                logger: db.logger,
+                principal: principal
+            )
+            let rows = try await conn.query(
+                """
+                SELECT member_id, channel_id
+                  FROM work_session
+                 WHERE id = \(sessionID)
+                 FOR UPDATE
+                """,
+                logger: db.logger
+            ).collect()
+            guard let row = rows.first else {
+                throw HTTPError(.notFound, message: "work session not found")
+            }
+            let (ownerMemberID, channelID) = try row.decode((UUID, UUID).self)
+            guard ownerMemberID == principal.memberID else {
+                throw HTTPError(.forbidden, message: "only the session owner can change observation")
+            }
+            try await Self.requireChannelMember(
+                conn: conn,
+                logger: db.logger,
+                workspaceID: workspaceID,
+                channelID: channelID,
+                memberID: principal.memberID
+            )
+            _ = try await conn.query(
+                "UPDATE work_session SET observation = \(observation.rawValue) WHERE id = \(sessionID)",
+                logger: db.logger
+            )
+            if observation == .ownerOnly {
+                _ = try await conn.query(
+                    "DELETE FROM terminal_attach_capability WHERE work_session_id = \(sessionID) AND mode = 'observer'",
+                    logger: db.logger
+                )
+            }
+            let updatedRows = try await conn.query(
+                """
+                SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
+                       ws.host_id, ws.root_message_id, ws.tool, ws.label,
+                       ws.status, ws.observation,
+                       CASE
+                         WHEN ws.status = 'running'
+                          AND ws.observation = 'open'
+                          AND h.revoked_at IS NULL
+                         THEN (
+                           SELECT count(*)
+                             FROM terminal_attach_capability tac
+                             JOIN member observer
+                               ON observer.id = tac.owner_member_id
+                              AND observer.workspace_id = tac.workspace_id
+                              AND observer.kind = 'human'
+                              AND observer.status = 'active'
+                              AND observer.deleted_at IS NULL
+                             JOIN membership observer_membership
+                               ON observer_membership.workspace_id = tac.workspace_id
+                              AND observer_membership.channel_id = ws.channel_id
+                              AND observer_membership.member_id = tac.owner_member_id
+                              AND observer_membership.left_at IS NULL
+                            WHERE tac.work_session_id = ws.id
+                              AND tac.mode = 'observer'
+                              AND tac.expires_at > clock_timestamp()
+                         )
+                         ELSE 0
+                       END,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL),
+                       ws.started_at, ws.ended_at, ws.exit_code
+                  FROM work_session ws
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
+                 WHERE ws.id = \(sessionID)
+                """,
+                logger: db.logger
+            ).collect()
+            guard let updatedRow = updatedRows.first else {
+                throw HTTPError(.internalServerError, message: "work session observation update failed")
+            }
+            return try Self.decodeSession(updatedRow)
+        }
         return try WorkSessionResponse(workSession: session)
             .response(from: request, context: context)
     }
@@ -359,9 +498,39 @@ struct WorkSessionRoutes: Sendable {
                 """
                 SELECT ws.id, ws.workspace_id, ws.channel_id, ws.member_id,
                        ws.host_id, ws.root_message_id, ws.tool, ws.label,
-                       ws.status, ws.started_at, ws.ended_at, ws.exit_code
+                       ws.status, ws.observation,
+                       CASE
+                         WHEN ws.status = 'running'
+                          AND ws.observation = 'open'
+                          AND h.revoked_at IS NULL
+                         THEN (
+                           SELECT count(*)
+                             FROM terminal_attach_capability tac
+                             JOIN member observer
+                               ON observer.id = tac.owner_member_id
+                              AND observer.workspace_id = tac.workspace_id
+                              AND observer.kind = 'human'
+                              AND observer.status = 'active'
+                              AND observer.deleted_at IS NULL
+                             JOIN membership observer_membership
+                               ON observer_membership.workspace_id = tac.workspace_id
+                              AND observer_membership.channel_id = ws.channel_id
+                              AND observer_membership.member_id = tac.owner_member_id
+                              AND observer_membership.left_at IS NULL
+                            WHERE tac.work_session_id = ws.id
+                              AND tac.mode = 'observer'
+                              AND tac.expires_at > clock_timestamp()
+                         )
+                         ELSE 0
+                       END AS observer_grant_count,
+                       (ws.pty_id IS NOT NULL AND ws.attach_endpoint IS NOT NULL)
+                         AS remote_attach_available,
+                       ws.started_at, ws.ended_at, ws.exit_code
                   FROM work_session ws
                   JOIN channel c ON c.id = ws.channel_id
+                  JOIN work_host h
+                    ON h.id = ws.host_id
+                   AND h.workspace_id = ws.workspace_id
                   JOIN membership ms
                     ON ms.channel_id = ws.channel_id
                    AND ms.member_id = \(principal.memberID)
@@ -486,7 +655,7 @@ struct WorkSessionRoutes: Sendable {
         return id
     }
 
-    private static func requireChannelMember(
+    static func requireChannelMember(
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
@@ -599,14 +768,26 @@ struct WorkSessionRoutes: Sendable {
     private static func decodeSession(_ row: PostgresRow) throws -> WorkSessionDTO {
         let decoded = try row.decode(
             (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-             String, Date, Date?, Int?).self
+             String, String, Int64, Bool, Date, Date?, Int?).self
         )
-        return sessionDTO(from: decoded)
+        return sessionDTO(
+            from: (
+                decoded.0, decoded.1, decoded.2, decoded.3, decoded.4,
+                decoded.5, decoded.6, decoded.7, decoded.8, decoded.12,
+                decoded.13, decoded.14
+            ),
+            observation: decoded.9,
+            observerGrantCount: decoded.10,
+            remoteAttachAvailable: decoded.11
+        )
     }
 
     private static func sessionDTO(
         from row: (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                   String, Date, Date?, Int?)
+                   String, Date, Date?, Int?),
+        observation: String = WorkSessionObservation.open.rawValue,
+        observerGrantCount: Int64 = 0,
+        remoteAttachAvailable: Bool = false
     ) -> WorkSessionDTO {
         WorkSessionDTO(
             id: row.0.uuidString,
@@ -618,20 +799,13 @@ struct WorkSessionRoutes: Sendable {
             tool: row.6,
             label: row.7,
             status: row.8,
+            observation: WorkSessionObservation(rawValue: observation) ?? .open,
+            observerGrantCount: observerGrantCount,
+            remoteAttachAvailable: remoteAttachAvailable,
             startedAtMs: Int64(row.9.timeIntervalSince1970 * 1000),
             endedAtMs: row.10.map { Int64($0.timeIntervalSince1970 * 1000) },
             exitCode: row.11
         )
-    }
-
-    private static func sessionDTO(
-        from row: (UUID, UUID, UUID, UUID, UUID, UUID, String, String,
-                   String, Date, Date?, Int?, Int64)
-    ) -> WorkSessionDTO {
-        sessionDTO(from: (
-            row.0, row.1, row.2, row.3, row.4, row.5, row.6,
-            row.7, row.8, row.9, row.10, row.11
-        ))
     }
 
     private static func channelName(workspaceID: UUID, channelID: UUID) -> String {

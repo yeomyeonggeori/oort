@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-516 observer terminal attach + X-8 projection (#558, 2026-07-21)
+
+- terminal attach에 기본 `controller`와 채널 멤버용 read-only `observer` capability 등급, owner-only observation 토글, 검증 응답 mode, count-only `work.session.observer` projection을 추가했다. 세션 응답은 유효 `observerGrantCount`와 credential-free `remoteAttachAvailable`만 투영하며 raw PTY 스트림은 계속 client↔host 직결이다.
+- migration 024·OpenAPI·server 126 tests와 verifier bash/ShellCheck 정적 검증은 PASS했다. 지정대로 Docker verifier는 실행하지 않아 `verify_observer_attach.sh`와 기존 terminal attach 회귀의 실제 PG18/Centrifugo 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-511-U macOS 원격 터미널 attach (2026-07-21)
 
 - macOS Work 서랍이 owner의 running 원격 `work_session`에서 exact 3-field attach grant를 메모리에서만 소비하고, capability를 Authorization header로 전달해 SwiftTerm과 remote PTY를 직접 연결한다. stdout 렌더, byte stdin, 문자 단위 resize, kill 프레임은 `connect/send_stdin/resize/kill` 최소 계약만 사용하며 capability와 endpoint를 URL query, UserDefaults, 로그, 원장에 남기지 않는다.

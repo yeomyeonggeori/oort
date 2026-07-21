@@ -828,7 +828,9 @@ paths:
         matched by SHA-256 digest; the raw token is never persisted or logged.
         Validation joins the running work_session and unrevoked work_host on
         every call, so expiry, session end, and host revoke take effect
-        immediately. This endpoint returns binding metadata only: terminal
+        immediately. The returned mode is authoritative: observer connections
+        may receive output but the host must reject send_stdin, resize, and kill.
+        This endpoint returns binding metadata only: terminal
         bytes never traverse MomoServer, OutboxRelay, or Centrifugo.
       security:
         - workHostAuth: []
@@ -1077,12 +1079,14 @@ paths:
     patch:
       tags: [work-sessions]
       operationId: endWorkSession
-      summary: End a running session without changing its card message seq.
+      summary: End a running session or change its observation policy.
       description: >
         The creating member, or the MomoHost-signed execution host bound to the
         session, may end it. The ledger row and card props update beside a
         no-version work.session.ended outbox; the message row is not edited and
-        no channel seq is minted.
+        no channel seq is minted. A human session owner may instead set
+        observation to open or owner_only; owner_only invalidates live observer
+        grants and blocks new ones.
       security:
         - bearerAuth: []
         - workHostAuth: []
@@ -1094,7 +1098,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/EndWorkSessionRequest"
+              $ref: "#/components/schemas/UpdateWorkSessionRequest"
       responses:
         "200":
           description: Ended session, or its prior result on an idempotent retry.
@@ -1137,11 +1141,15 @@ paths:
       operationId: issueTerminalAttachCapability
       summary: Issue an ephemeral capability for direct remote PTY attach.
       description: >
-        Human bearer and session owner only. The running session must carry a
+        Human bearer only. mode defaults to controller, which remains session
+        owner-only. observer requires active workspace and session-channel
+        membership while observation=open. The running session must carry a
         MomoHost-signed remote PTY binding and its work_host must be unrevoked.
         The raw capability is returned exactly once, while PostgreSQL stores
         only its SHA-256 digest and timestamptz expiry. The same transaction
-        audits only owner, issue time, and expiry. attach_endpoint contains no
+        audits only owner, mode, issue time, and expiry. Observer issuance also
+        enqueues work.session.observer with a count-only projection.
+        attach_endpoint contains no
         bearer or credential; the client connects there directly with the
         separate capability_token. MomoServer and relay expose no PTY stream.
       security:
@@ -1149,6 +1157,12 @@ paths:
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/WorkSessionId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssueTerminalAttachRequest"
       responses:
         "200":
           description: Exact three-field direct attach grant.
@@ -1165,7 +1179,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Caller is not human, owner, or active workspace member.
+          description: Caller is not an authorized active human/channel member, or observation is owner_only.
           content:
             application/json:
               schema:
@@ -3748,9 +3762,15 @@ components:
             Credential-free HTTPS or WSS direct PTY endpoint. Userinfo, query,
             and fragment are forbidden. MomoServer never proxies this stream.
 
+    UpdateWorkSessionRequest:
+      oneOf:
+        - $ref: "#/components/schemas/EndWorkSessionRequest"
+        - $ref: "#/components/schemas/UpdateWorkSessionObservationRequest"
+
     EndWorkSessionRequest:
       type: object
       required: [status]
+      additionalProperties: false
       properties:
         status:
           type: string
@@ -3759,11 +3779,21 @@ components:
           type: integer
           format: int32
 
+    UpdateWorkSessionObservationRequest:
+      type: object
+      required: [observation]
+      additionalProperties: false
+      properties:
+        observation:
+          type: string
+          enum: [open, owner_only]
+
     WorkSession:
       type: object
       required:
         [id, workspaceId, channelId, memberId, hostId, rootMessageId,
-         tool, label, status, startedAtMs]
+         tool, label, status, observation, observerGrantCount,
+         remoteAttachAvailable, startedAtMs]
       properties:
         id:
           type: string
@@ -3793,6 +3823,17 @@ components:
         status:
           type: string
           enum: [running, ended]
+        observation:
+          type: string
+          enum: [open, owner_only]
+        observerGrantCount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Currently valid observer capabilities only; expired or invalid grants are excluded.
+        remoteAttachAvailable:
+          type: boolean
+          description: True only when the session has a complete remote PTY binding; endpoint and capability remain unprojected.
         startedAtMs:
           type: integer
           format: int64
@@ -3837,6 +3878,15 @@ components:
           type: string
           pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'
 
+    IssueTerminalAttachRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        mode:
+          type: string
+          enum: [controller, observer]
+          default: controller
+
     ValidateTerminalAttachRequest:
       type: object
       required: [capability_token]
@@ -3847,7 +3897,7 @@ components:
 
     TerminalAttachValidationResponse:
       type: object
-      required: [work_session_id, pty_id, expires_at]
+      required: [work_session_id, pty_id, expires_at, mode]
       properties:
         work_session_id:
           type: string
@@ -3859,6 +3909,10 @@ components:
           type: string
           format: date-time
           description: PostgreSQL timestamptz capability expiry.
+        mode:
+          type: string
+          enum: [controller, observer]
+          description: Host authorization grade; observer forbids send_stdin, resize, and kill.
 
     # ---- Work controls ------------------------------------------------------
     CreateWorkControlRequest:
