@@ -202,14 +202,14 @@ final class MomoRemoteTerminalSession: ObservableObject, Identifiable {
     let terminalView: TerminalView
     @Published private(set) var state: State = .idle
 
-    private let grantProvider: @Sendable () async throws -> MomoTerminalAttachGrant
+    private let grantProvider: @MainActor @Sendable () async throws -> MomoTerminalAttachGrant
     private let transport: any MomoRemoteTerminalTransport
     private var ptyId: String?
     private var receiveTask: Task<Void, Never>?
     private var terminalBridge: TerminalBridge!
 
     init(
-        grantProvider: @escaping @Sendable () async throws -> MomoTerminalAttachGrant,
+        grantProvider: @escaping @MainActor @Sendable () async throws -> MomoTerminalAttachGrant,
         transport: any MomoRemoteTerminalTransport = MomoURLSessionRemoteTerminalTransport()
     ) {
         self.grantProvider = grantProvider
