@@ -62,6 +62,12 @@ struct Config: Sendable {
     var memoryExtractionPollInterval: Duration = .seconds(5)
     var memoryExtractionBatchSize: Int = 50
 
+    // ---- Memory embedding backfill (MOMO-527 / ADR-0129 D3) ----
+    var memoryEmbeddingEnabled: Bool = true
+    var memoryEmbeddingModel: String = "text-embedding-3-small"
+    var memoryEmbeddingPollInterval: Duration = .seconds(5)
+    var memoryEmbeddingBatchSize: Int = 50
+
     private static func env(_ key: String, _ fallback: String) -> String {
         ProcessInfo.processInfo.environment[key] ?? fallback
     }
@@ -120,6 +126,16 @@ struct Config: Sendable {
             ),
             memoryExtractionBatchSize: min(
                 max(envInt("MEMORY_EXTRACTION_BATCH_SIZE", 50), 1), 200
+            ),
+            memoryEmbeddingEnabled: AgentProviderValidation.boolFlag(
+                ProcessInfo.processInfo.environment["MEMORY_EMBEDDING_ENABLED"] ?? "1"
+            ),
+            memoryEmbeddingModel: env("MEMORY_EMBEDDING_MODEL", "text-embedding-3-small"),
+            memoryEmbeddingPollInterval: .milliseconds(
+                max(envInt("MEMORY_EMBEDDING_POLL_INTERVAL_MS", 5_000), 100)
+            ),
+            memoryEmbeddingBatchSize: min(
+                max(envInt("MEMORY_EMBEDDING_BATCH_SIZE", 50), 1), 200
             )
         )
     }

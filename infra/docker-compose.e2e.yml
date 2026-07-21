@@ -29,7 +29,7 @@ x-source-mount: &source-mount
 
 services:
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:0.8.5-pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0
     restart: "no"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-momo}
@@ -182,6 +182,7 @@ services:
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_E2E_REALTIME_WS_URL:-ws://127.0.0.1:${CENT_PORT:-8000}/connection/websocket}
       HERMES_BASE_URL: http://mock-hermes:8088/v1
       HERMES_API_KEY: ${HERMES_API_KEY:-change-me-hermes-bearer}
+      MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
     ports:
       - "${PORT:-8080}:8080"
     volumes:
@@ -244,6 +245,10 @@ services:
       MEMORY_EXTRACTION_ENABLED: ${MEMORY_EXTRACTION_ENABLED:-1}
       MEMORY_EXTRACTION_POLL_INTERVAL_MS: ${MEMORY_EXTRACTION_POLL_INTERVAL_MS:-5000}
       MEMORY_EXTRACTION_BATCH_SIZE: ${MEMORY_EXTRACTION_BATCH_SIZE:-50}
+      MEMORY_EMBEDDING_ENABLED: ${MEMORY_EMBEDDING_ENABLED:-1}
+      MEMORY_EMBEDDING_MODEL: ${MEMORY_EMBEDDING_MODEL:-text-embedding-3-small}
+      MEMORY_EMBEDDING_POLL_INTERVAL_MS: ${MEMORY_EMBEDDING_POLL_INTERVAL_MS:-5000}
+      MEMORY_EMBEDDING_BATCH_SIZE: ${MEMORY_EMBEDDING_BATCH_SIZE:-50}
     volumes:
       - *source-mount
       - worker-swiftpm:/tmp/momo-swiftpm/worker

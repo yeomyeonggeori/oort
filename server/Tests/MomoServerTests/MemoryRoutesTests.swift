@@ -74,6 +74,18 @@ final class MemoryRoutesTests: XCTestCase {
         XCTAssertNil(object["credential"])
     }
 
+    func testDeterministicMemoryEmbeddingIsBoundedNormalizedAndStable() throws {
+        let first = MemoryEmbedding.deterministic("한국어 launch planning")
+        let second = MemoryEmbedding.deterministic("한국어 launch planning")
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.count, 384)
+        XCTAssertEqual(sqrt(first.reduce(0) { $0 + $1 * $1 }), 1, accuracy: 0.000_001)
+        let literal = try MemoryEmbedding.vectorLiteral(first)
+        XCTAssertTrue(literal.hasPrefix("["))
+        XCTAssertTrue(literal.hasSuffix("]"))
+        XCTAssertEqual(literal.filter { $0 == "," }.count, 383)
+    }
+
     func testMemoryMigrationAndRoutesKeepSecurityContracts() throws {
         let serverRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -94,6 +106,20 @@ final class MemoryRoutesTests: XCTestCase {
         XCTAssertTrue(migration.contains("CREATE POLICY ws_isolation"))
         XCTAssertFalse(migration.contains("message_body"))
 
+        let searchMigration = try String(
+            contentsOf: serverRoot.appendingPathComponent("Migrations/028_memory_search.sql"),
+            encoding: .utf8
+        )
+        for contract in [
+            "CREATE EXTENSION IF NOT EXISTS vector", "embedding vector(384)",
+            "USING hnsw", "USING gin", "memory_search_hybrid",
+            "p_actor_member_id", "p_query_embedding IS NOT NULL",
+        ] {
+            XCTAssertTrue(searchMigration.contains(contract), "missing \(contract)")
+        }
+        XCTAssertFalse(searchMigration.contains("SECURITY DEFINER"))
+        XCTAssertFalse(searchMigration.contains("BYPASSRLS"))
+
         let routes = try String(
             contentsOf: serverRoot.appendingPathComponent(
                 "Sources/MomoServer/Routes/MemoryRoutes.swift"
@@ -102,6 +128,8 @@ final class MemoryRoutesTests: XCTestCase {
         )
         XCTAssertTrue(routes.contains("memory.updated"))
         XCTAssertTrue(routes.contains("memory_lifecycle_event"))
+        XCTAssertTrue(routes.contains("memories/search"))
+        XCTAssertTrue(routes.contains("::vector(384)"))
         XCTAssertTrue(routes.contains("INSERT INTO outbox"))
         XCTAssertTrue(routes.contains("WorkspaceAuthorization.requireAdmin"))
         XCTAssertFalse(routes.contains("BYPASSRLS"))
@@ -115,6 +143,7 @@ final class MemoryRoutesTests: XCTestCase {
         )
         for operation in [
             "operationId: listMemories", "operationId: createMemory",
+            "operationId: searchMemories",
             "operationId: updateMemory", "operationId: invalidateMemory",
             "operationId: disableAndDeleteAllMemories", "operationId: putMemoryPolicy",
         ] {

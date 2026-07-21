@@ -147,7 +147,21 @@ enum AppBuilder {
         HuddleRoutes(db: db, liveKit: config.liveKit).add(to: authed)
         PluginRoutes(db: db).add(to: authed)
         DriveMCPRoutes(db: db, backend: driveBackend).add(to: authed)
-        MemoryRoutes(db: db).add(to: authed)
+        let memoryQueryEmbedding: any MemoryQueryEmbedding
+        if config.agentProvider.mode == .externalHermes {
+            memoryQueryEmbedding = HermesMemoryQueryEmbedding(
+                httpClient: httpClient,
+                baseURL: config.agentProvider.hermesBaseURL,
+                apiKey: config.agentProvider.hermesAPIKey,
+                model: ProcessInfo.processInfo.environment["MEMORY_EMBEDDING_MODEL"]
+                    ?? "text-embedding-3-small"
+            )
+        } else {
+            memoryQueryEmbedding = MockMemoryQueryEmbedding()
+        }
+        MemoryRoutes(
+            db: db, limiter: rateLimiter, queryEmbedding: memoryQueryEmbedding
+        ).add(to: authed)
         attachmentRoutes.addProtected(to: authed)
         let webhookRoutes = WebhookRoutes(db: db, signingMasterKey: config.jwtHMAC)
         webhookRoutes.addPublic(to: router)

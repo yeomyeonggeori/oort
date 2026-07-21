@@ -3,6 +3,15 @@ import XCTest
 @testable import AgentWorker
 
 final class MemoryExtractionTests: XCTestCase {
+    func testMockEmbeddingIsStableNormalizedAnd384Dimensional() throws {
+        let first = WorkerMemoryEmbedding.deterministic("한국어 launch planning")
+        let second = WorkerMemoryEmbedding.deterministic("한국어 launch planning")
+        XCTAssertEqual(first, second)
+        XCTAssertEqual(first.count, 384)
+        XCTAssertEqual(sqrt(first.reduce(0) { $0 + $1 * $1 }), 1, accuracy: 0.000_001)
+        XCTAssertNoThrow(try WorkerMemoryEmbedding.literal(first))
+    }
+
     private let workspaceID = UUID(uuidString: "00000000-0000-7000-8000-000000000601")!
     private let channelID = UUID(uuidString: "00000000-0000-7000-8000-000000000602")!
     private let authorID = UUID(uuidString: "00000000-0000-7000-8000-000000000603")!

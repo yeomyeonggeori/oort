@@ -88,6 +88,22 @@ struct AgentWorkerMain {
             batchSize: config.memoryExtractionBatchSize,
             logger: logger
         )
+        let memoryEmbeddingProvider: any MemoryEmbeddingProvider =
+            config.agentProviderMode == .externalHermes
+            ? HermesMemoryEmbeddingProvider(
+                httpClient: httpClient,
+                baseURL: config.hermesBaseURL,
+                apiKey: config.hermesAPIKey,
+                model: config.memoryEmbeddingModel
+            )
+            : MockMemoryEmbeddingProvider()
+        let memoryEmbeddingWorker = MemoryEmbeddingService(
+            pg: pg,
+            provider: memoryEmbeddingProvider,
+            pollInterval: config.memoryEmbeddingPollInterval,
+            batchSize: config.memoryEmbeddingBatchSize,
+            logger: logger
+        )
 
         // ServiceGroup ordering: PostgresClient.run() must be live before the worker
         // issues queries; the HTTP client shutdown service tears down on cancel.
@@ -100,6 +116,11 @@ struct AgentWorkerMain {
             services.insert(.init(service: memoryWorker), at: 2)
         } else {
             logger.info("memory extraction worker disabled")
+        }
+        if config.memoryEmbeddingEnabled {
+            services.insert(.init(service: memoryEmbeddingWorker), at: min(3, services.count))
+        } else {
+            logger.info("memory embedding worker disabled")
         }
         let group = ServiceGroup(
             configuration: .init(
