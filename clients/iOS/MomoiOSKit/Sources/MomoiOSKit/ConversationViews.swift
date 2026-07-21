@@ -1,8 +1,11 @@
 #if os(iOS)
 import Foundation
 import MomoCore
+import PhotosUI
+import QuickLook
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 @MainActor
 struct IOSChannelHomeView: View {
@@ -927,7 +930,7 @@ struct IOSMessageRow: View {
                 messageContent
                 if !message.isDeleted, let attachments = message.attachments, !attachments.isEmpty {
                     ForEach(attachments) { attachment in
-                        IOSMessageAttachmentCard(attachment: attachment)
+                        IOSMessageAttachmentCard(attachment: attachment, model: model)
                     }
                 }
                 let reactions = model.reactions(for: message)
@@ -1002,28 +1005,135 @@ struct IOSMessageRow: View {
 
 private struct IOSMessageAttachmentCard: View {
     let attachment: MessageAttachment
+    let model: IOSTimelineModel
+    @State private var previewURL: URL?
+
+    private var state: IOSAttachmentDownloadState? {
+        model.attachmentDownloadState(for: attachment)
+    }
+
+    private var cachedURL: URL? {
+        model.cachedAttachmentURL(for: attachment)
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: attachment.mime.hasPrefix("image/") ? "photo" : "doc")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(.tint)
-                .frame(width: 32, height: 32)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attachment.name)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
-                Text(ByteCountFormatter.string(fromByteCount: attachment.sizeBytes, countStyle: .file))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            if attachment.mime.hasPrefix("image/") {
+                imagePreview
             }
-            Spacer(minLength: 0)
+            HStack(spacing: 10) {
+                Image(systemName: attachment.mime.hasPrefix("image/") ? "photo" : "doc")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.tint)
+                    .frame(width: 32, height: 32)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(attachment.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                        .truncationMode(.middle)
+                    Text(metadata)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                attachmentAction
+                if let cachedURL {
+                    ShareLink(item: cachedURL, preview: SharePreview(attachment.name)) {
+                        Label("Save or share attachment", systemImage: "square.and.arrow.up")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityLabel("Save or share \(attachment.name)")
+                    .frame(minWidth: 44, minHeight: 44)
+                }
+            }
         }
         .padding(10)
         .background(.quaternary.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Attachment, \(attachment.name), \(attachment.sizeBytes) bytes")
+        .accessibilityElement(children: .contain)
+        .quickLookPreview($previewURL)
+        .task(id: attachment.id) {
+            guard attachment.mime.hasPrefix("image/"), cachedURL == nil else { return }
+            _ = await model.downloadAttachment(attachment)
+        }
+    }
+
+    @ViewBuilder
+    private var imagePreview: some View {
+        if let cachedURL,
+           let image = UIImage(contentsOfFile: cachedURL.path) {
+            Button {
+                previewURL = cachedURL
+            } label: {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 320, maxHeight: 240)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Preview \(attachment.name)")
+        } else if state == .failed {
+            Button("Retry image preview") {
+                Task { _ = await model.downloadAttachment(attachment) }
+            }
+            .font(.caption)
+        } else {
+            HStack(spacing: 8) {
+                ProgressView()
+                Text("Loading image preview")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 80)
+        }
+    }
+
+    @ViewBuilder
+    private var attachmentAction: some View {
+        switch state {
+        case .downloading:
+            ProgressView()
+                .accessibilityLabel("Downloading \(attachment.name)")
+                .frame(width: 44, height: 44)
+        case .completed(let url):
+            Button {
+                previewURL = url
+            } label: {
+                Label("Open attachment", systemImage: "arrow.up.forward.app")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Open \(attachment.name)")
+            .frame(minWidth: 44, minHeight: 44)
+        case .failed:
+            Button {
+                Task { _ = await model.downloadAttachment(attachment) }
+            } label: {
+                Label("Retry attachment download", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Retry downloading \(attachment.name)")
+            .frame(minWidth: 44, minHeight: 44)
+        case nil:
+            Button {
+                Task {
+                    if let url = await model.downloadAttachment(attachment) {
+                        previewURL = url
+                    }
+                }
+            } label: {
+                Label("Download attachment", systemImage: "arrow.down.to.line")
+                    .labelStyle(.iconOnly)
+            }
+            .accessibilityLabel("Download \(attachment.name)")
+            .frame(minWidth: 44, minHeight: 44)
+        }
+    }
+
+    private var metadata: String {
+        let size = ByteCountFormatter.string(fromByteCount: attachment.sizeBytes, countStyle: .file)
+        if state == .failed { return "Download failed · \(size)" }
+        return "\(attachment.mime) · \(size)"
     }
 }
 
@@ -1443,6 +1553,10 @@ struct IOSApprovalDecisionCard: View {
 struct IOSMessageComposer: View {
     @Bindable var model: IOSTimelineModel
     @FocusState private var isFocused: Bool
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var presentsFileImporter = false
+    @State private var presentsCamera = false
+    @State private var pickerFailureMessage: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1481,7 +1595,52 @@ struct IOSMessageComposer: View {
                 }
             }
 
+            if !model.attachmentDrafts.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(model.attachmentDrafts) { draft in
+                            IOSAttachmentDraftChip(
+                                draft: draft,
+                                onRemove: { model.removeAttachmentDraft(draft.id) },
+                                onRetry: { Task { await model.retryAttachmentDraft(draft.id) } }
+                            )
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+            }
+
+            if let failure = model.attachmentFailureMessage ?? pickerFailureMessage {
+                Label(failure, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
+                Menu {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        presentsFileImporter = true
+                    } label: {
+                        Label("Files", systemImage: "folder")
+                    }
+                    Button {
+                        presentsCamera = true
+                    } label: {
+                        Label("Camera", systemImage: "camera")
+                    }
+                    .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                } label: {
+                    Label("Add attachment", systemImage: "plus.circle")
+                        .labelStyle(.iconOnly)
+                        .font(.title2)
+                }
+                .disabled(model.isSending)
+                .accessibilityLabel("Add attachment")
+                .frame(minWidth: 44, minHeight: 44)
+
                 TextField("Write a message", text: $model.composerDraft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
@@ -1505,10 +1664,53 @@ struct IOSMessageComposer: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.bar)
+        .fileImporter(
+            isPresented: $presentsFileImporter,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                for url in urls { stage(url) }
+            case .failure:
+                pickerFailureMessage = "Could not open the selected file."
+            }
+        }
+        .sheet(isPresented: $presentsCamera) {
+            IOSCameraCaptureView { image in
+                presentsCamera = false
+                guard let data = image.jpegData(compressionQuality: 0.9) else {
+                    pickerFailureMessage = "Could not prepare the captured photo."
+                    return
+                }
+                stage(data: data, name: "Camera Photo.jpg")
+            } onCancel: {
+                presentsCamera = false
+            }
+            .ignoresSafeArea()
+        }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                defer { selectedPhoto = nil }
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self) else {
+                        pickerFailureMessage = "Could not load the selected photo."
+                        return
+                    }
+                    let fileType = item.supportedContentTypes.first ?? .jpeg
+                    let ext = fileType.preferredFilenameExtension ?? "jpg"
+                    stage(data: data, name: "Photo.\(ext)")
+                } catch {
+                    pickerFailureMessage = "Could not load the selected photo."
+                }
+            }
+        }
     }
 
     private var canSend: Bool {
-        !model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!model.composerDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || !model.attachmentDrafts.isEmpty)
             && model.phase == .loaded
             && !model.isSending
             && model.sendFailureMessage == nil
@@ -1517,6 +1719,128 @@ struct IOSMessageComposer: View {
     private func submit() {
         guard canSend else { return }
         Task { await model.sendComposerDraft() }
+    }
+
+    private func stage(_ url: URL) {
+        do {
+            try model.stageAttachment(fileURL: url)
+            pickerFailureMessage = nil
+        } catch let issue as IOSAttachmentTransferIssue where issue == .fileTooLarge {
+            pickerFailureMessage = "Attachments must be 100 MB or smaller."
+        } catch {
+            pickerFailureMessage = "Could not prepare the selected attachment."
+        }
+    }
+
+    private func stage(data: Data, name: String) {
+        do {
+            stage(try IOSAttachmentFileBoundary.materialize(data, named: name))
+        } catch let issue as IOSAttachmentTransferIssue where issue == .fileTooLarge {
+            pickerFailureMessage = "Attachments must be 100 MB or smaller."
+        } catch {
+            pickerFailureMessage = "Could not prepare the selected attachment."
+        }
+    }
+}
+
+private struct IOSAttachmentDraftChip: View {
+    let draft: IOSAttachmentDraft
+    let onRemove: () -> Void
+    let onRetry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            stateIcon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(draft.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(ByteCountFormatter.string(fromByteCount: draft.sizeBytes, countStyle: .file))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if case .failed = draft.state {
+                Button(action: onRetry) {
+                    Label("Retry upload", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Retry uploading \(draft.name)")
+            }
+            if draft.state != .uploading {
+                Button(action: onRemove) {
+                    Label("Remove attachment", systemImage: "xmark.circle.fill")
+                        .labelStyle(.iconOnly)
+                }
+                .accessibilityLabel("Remove \(draft.name)")
+            }
+        }
+        .padding(.leading, 10)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var stateIcon: some View {
+        switch draft.state {
+        case .ready:
+            Image(systemName: draft.mime.hasPrefix("image/") ? "photo" : "doc")
+                .foregroundStyle(.tint)
+        case .uploading:
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityLabel("Uploading \(draft.name)")
+        case .uploaded:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        case .failed:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundStyle(.red)
+        }
+    }
+}
+
+private struct IOSCameraCaptureView: UIViewControllerRepresentable {
+    let onCapture: (UIImage) -> Void
+    let onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCapture: onCapture, onCancel: onCancel)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let controller = UIImagePickerController()
+        controller.sourceType = .camera
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onCapture: (UIImage) -> Void
+        let onCancel: () -> Void
+
+        init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
+            self.onCapture = onCapture
+            self.onCancel = onCancel
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            guard let image = info[.originalImage] as? UIImage else {
+                onCancel()
+                return
+            }
+            onCapture(image)
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onCancel()
+        }
     }
 }
 
