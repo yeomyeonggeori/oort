@@ -159,7 +159,7 @@ struct MemoryRoutes: Sendable {
                   FROM memory_search_hybrid(
                          \(workspaceID), \(principal.memberID), \(query),
                          \(vectorLiteral)::vector(384), \(scope)::text,
-                         \(agentID)::uuid, \(limit), 60
+                         \(agentID)::uuid, \(limit)::integer, 60
                        ) search
                  ORDER BY search.rrf_score DESC, search.memory_id
                 """,

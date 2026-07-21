@@ -15,10 +15,10 @@ done
 COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
 RUN_TAG="$(date -u +%s)-$$"
 PROJECT="${MEMORY_SEARCH_PROJECT:-momo527search-$RUN_TAG}"
-API_PORT="${MEMORY_SEARCH_API_PORT:-28040}"
-CENT_PORT="${MEMORY_SEARCH_CENTRIFUGO_PORT:-28041}"
-PG_PORT="${MEMORY_SEARCH_POSTGRES_PORT:-28042}"
-HERMES_PORT="${MEMORY_SEARCH_HERMES_PORT:-28043}"
+API_PORT="${MEMORY_SEARCH_API_PORT:-28090}"
+CENT_PORT="${MEMORY_SEARCH_CENTRIFUGO_PORT:-28091}"
+PG_PORT="${MEMORY_SEARCH_POSTGRES_PORT:-28092}"
+HERMES_PORT="${MEMORY_SEARCH_HERMES_PORT:-28093}"
 BOOT_TIMEOUT="${MEMORY_SEARCH_BOOT_TIMEOUT:-2400}"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/momo-memory-search.XXXXXX")"
 
@@ -111,15 +111,21 @@ VALUES ('$OTHER_WS_ID','workspace','fact','foreign vector sentinel',1.0,'worker'
 COMMIT;
 SQL
 
-SOURCE_ROW="$(run_sql -tA <<SQL | head -1
-SELECT lower(m.id::text) || '|' || lower(m.channel_id::text)
-  FROM message m WHERE m.workspace_id='$WS_ID' ORDER BY m.created_at, m.id LIMIT 1;
-SQL
-)"
-SOURCE_MESSAGE_ID="${SOURCE_ROW%%|*}"
-SOURCE_CHANNEL_ID="${SOURCE_ROW##*|}"
-[ -n "$SOURCE_MESSAGE_ID" ] && [ -n "$SOURCE_CHANNEL_ID" ] \
-  || fail "demo source message is unavailable"
+# 시드에는 채널(…202)만 있고 메시지가 없다 — 소스 메시지는 API로 만든다
+# (verify_memory_plane.sh와 동일 패턴).
+SOURCE_CHANNEL_ID="00000000-0000-7000-8000-000000000202"
+LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  --data "$(jq -cn --arg e 'demo@momo.local' --arg p "$PASSWORD" --arg w "$WS_ID" \
+    '{email:$e,password:$p,workspace:$w}')")"
+TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -er '.accessToken')"
+SOURCE_MESSAGE_ID="$(curl -fsS -X POST \
+  "$BASE_URL/v1/workspaces/$WS_ID/channels/$SOURCE_CHANNEL_ID/messages" \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  --data "$(jq -cn --arg c "$(uuidgen | tr '[:upper:]' '[:lower:]')" \
+    '{clientMsgId:$c,type:"text",body:"memory search source marker"}')" \
+  | jq -er '.id | ascii_downcase')"
+[ -n "$SOURCE_MESSAGE_ID" ] || fail "demo source message is unavailable"
 AGENT_ID="$(sql_value <<SQL
 SELECT lower(id::text) FROM member
  WHERE workspace_id='$WS_ID' AND kind='agent' AND status='active'
@@ -140,12 +146,6 @@ WITH inserted AS (
 INSERT INTO memory_source_ref (workspace_id,memory_id,message_id,channel_id)
 SELECT workspace_id,id,'$SOURCE_MESSAGE_ID','$SOURCE_CHANNEL_ID' FROM inserted;
 SQL
-
-LOGIN_JSON="$(curl -fsS -X POST "$BASE_URL/v1/auth/login" \
-  -H 'Content-Type: application/json' \
-  --data "$(jq -cn --arg e 'demo@momo.local' --arg p "$PASSWORD" --arg w "$WS_ID" \
-    '{email:$e,password:$p,workspace:$w}')")"
-TOKEN="$(printf '%s' "$LOGIN_JSON" | jq -er '.accessToken')"
 
 search() {
   curl -fsS "$BASE_URL/v1/workspaces/$WS_ID/memories/search?$1" \
