@@ -12,6 +12,8 @@ public struct IOSWorkspaceView: View {
     @Binding private var selectedTab: IOSAppTab
     @Binding private var homePath: [IOSPushDeepLink]
     @State private var model: IOSChannelListModel
+    @State private var workModel: IOSWorkListModel
+    @AppStorage("momo.ios.developer-mode") private var developerModeEnabled = false
 
     public init(
         session: IOSSession,
@@ -29,6 +31,7 @@ public struct IOSWorkspaceView: View {
         _selectedTab = selectedTab
         _homePath = homePath
         _model = State(initialValue: IOSChannelListModel(currentMemberID: session.member.id, backend: backend))
+        _workModel = State(initialValue: IOSWorkListModel(backend: backend))
     }
 
     public var body: some View {
@@ -73,7 +76,12 @@ public struct IOSWorkspaceView: View {
             .accessibilityIdentifier("tab.activity")
 
             NavigationStack {
-                IOSWorkEmptyView(selectedTab: $selectedTab)
+                IOSWorkView(
+                    model: workModel,
+                    channelIDs: bootstrap.channels.filter { !$0.isArchived }.map(\.id),
+                    isActive: selectedTab == .work,
+                    developerModeEnabled: $developerModeEnabled
+                )
             }
             .tabItem { Label("Work", systemImage: "terminal") }
             .tag(IOSAppTab.work)
@@ -83,6 +91,7 @@ public struct IOSWorkspaceView: View {
                 IOSProfileView(
                     session: session,
                     workspaceName: bootstrap.workspace.name,
+                    developerModeEnabled: $developerModeEnabled,
                     signOut: signOut
                 )
             }
@@ -265,26 +274,11 @@ private struct IOSActivityView: View {
     }
 }
 
-private struct IOSWorkEmptyView: View {
-    @Binding var selectedTab: IOSAppTab
-
-    var body: some View {
-        ContentUnavailableView {
-            Label("No work sessions", systemImage: "terminal")
-        } description: {
-            Text("Sessions started on a connected Mac will appear here.")
-        } actions: {
-            Button("Go to Home") { selectedTab = .home }
-        }
-        .navigationTitle("Work")
-        .accessibilityIdentifier("workEmpty")
-    }
-}
-
 @MainActor
 private struct IOSProfileView: View {
     let session: IOSSession
     let workspaceName: String
+    @Binding var developerModeEnabled: Bool
     let signOut: @MainActor () async -> Void
 
     var body: some View {
@@ -297,6 +291,14 @@ private struct IOSProfileView: View {
             Section("Workspace") {
                 LabeledContent("Name", value: workspaceName)
                 LabeledContent("Server", value: session.baseURL.host ?? session.baseURL.absoluteString)
+            }
+            Section {
+                Toggle("Developer Mode", isOn: $developerModeEnabled)
+                    .accessibilityIdentifier("profileDeveloperMode")
+            } header: {
+                Text("Developer")
+            } footer: {
+                Text("Shows individual remote Work sessions and host status. Session output remains private unless explicitly shared.")
             }
             Section {
                 Button("Sign out", role: .destructive) {

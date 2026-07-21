@@ -5,9 +5,9 @@ import SwiftCentrifuge
 /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
 /// REST writes and Centrifugo reads for the iOS companion.
 public actor MomoServerConversationClient: IOSConversationBackend {
-    private let authenticated: IOSSession
+    let authenticated: IOSSession
     private let urlSession: URLSession
-    private let decoder = JSONDecoder()
+    let decoder = JSONDecoder()
     private let realtimeDriver: (any RealtimeSubscriptionDriver)?
     private var lastKnownSequenceByChannel: [ChannelID: Int64] = [:]
 
@@ -259,7 +259,7 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         }
     }
 
-    private func get(_ path: String) async throws -> Data {
+    func get(_ path: String) async throws -> Data {
         try await execute(url: authenticated.baseURL.appendingPathComponent(path))
     }
 
