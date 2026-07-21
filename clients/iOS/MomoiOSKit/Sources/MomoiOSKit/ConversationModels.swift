@@ -74,6 +74,69 @@ public struct IOSChannelSections: Sendable, Equatable {
     }
 }
 
+public struct IOSThreadListItem: Identifiable, Sendable, Equatable {
+    public let channel: IOSChannelListItem
+    public let rootMessage: Message
+    public let participantMemberIDs: [MemberID]
+
+    public init(
+        channel: IOSChannelListItem,
+        rootMessage: Message,
+        participantMemberIDs: [MemberID]
+    ) {
+        self.channel = channel
+        self.rootMessage = rootMessage
+        self.participantMemberIDs = participantMemberIDs
+    }
+
+    public var id: MessageID { rootMessage.id }
+    public var replyCount: Int { rootMessage.thread?.replyCount ?? 0 }
+    public var lastReplyAtMs: Int64 { rootMessage.thread?.lastReplyAtMs ?? rootMessage.hlcTs }
+}
+
+public enum IOSThreadListAggregator {
+    public static func participatingThreads(
+        channel: IOSChannelListItem,
+        messages: [Message],
+        participantsByRoot: [MessageID: [MemberID]],
+        currentMemberID: MemberID
+    ) -> [IOSThreadListItem] {
+        messages.compactMap { message in
+            guard message.channelId == channel.id,
+                  message.rootId == nil,
+                  !message.isDeleted,
+                  let thread = message.thread,
+                  thread.replyCount > 0
+            else { return nil }
+            let participants = orderedUnique(participantsByRoot[message.id] ?? [])
+            guard message.authorMemberId == currentMemberID || participants.contains(currentMemberID) else {
+                return nil
+            }
+            return IOSThreadListItem(
+                channel: channel,
+                rootMessage: message,
+                participantMemberIDs: participants
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.lastReplyAtMs != rhs.lastReplyAtMs { return lhs.lastReplyAtMs > rhs.lastReplyAtMs }
+            return lhs.id.description < rhs.id.description
+        }
+    }
+
+    public static func sorted(_ items: [IOSThreadListItem]) -> [IOSThreadListItem] {
+        items.sorted { lhs, rhs in
+            if lhs.lastReplyAtMs != rhs.lastReplyAtMs { return lhs.lastReplyAtMs > rhs.lastReplyAtMs }
+            return lhs.id.description < rhs.id.description
+        }
+    }
+
+    private static func orderedUnique(_ ids: [MemberID]) -> [MemberID] {
+        var seen = Set<MemberID>()
+        return ids.filter { seen.insert($0).inserted }
+    }
+}
+
 /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
 /// Mirrors ADR-0109: channel rows badge mentions; DM rows badge total unread.
 public enum IOSChannelListMapper {

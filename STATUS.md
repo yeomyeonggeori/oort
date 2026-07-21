@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-500 iOS 스레드 1급 (#585, 2026-07-21)
+
+- 채널 타임라인은 서버 `Message.thread`의 답글 수를 실제 롤업으로 표시하고, replies REST 첫 페이지에서 확인한 실제 참여자만 아바타로 노출한다. 롤업을 열면 root 원문과 cursor 답글 전 페이지를 한 화면에 복원하며 `thread.updated`를 즉시 반영하고, 컴포저는 일반 메시지 REST에 동일 `rootId`·`reply_to_id`를 보존한다. 상위 타임라인에는 답글 realtime 행이 별도 메시지처럼 섞이지 않는다.
+- 홈 Threads는 채널별 최근 200개 root와 replies cursor를 로컬 집계해 내가 root를 작성했거나 답글에 참여한 스레드만 마지막 답글순으로 제공한다. 새 서버 follow 원장을 가장하지 않으며, 갱신 실패 시 기존 목록을 유지하고 인라인 오류를 표시한다. 알림으로 직접 연 스레드에서도 컴포저가 열려 정확한 root로 답장한다.
+- Design Read: iPhone 팀 메신저의 고밀도 native List, Mattermost식 replies 문법, 장식 모션 없음. 시맨틱 색상·Dynamic Type·4/8/12/16/24/32 스페이싱 pre-flight와 MomoiOSKit 62 tests가 PASS했고, `xcodebuild` generic iOS Simulator 무서명 앱 빌드가 PASS했다. 이 게이트에서 직전 MOMO-504의 누락된 `MomoiOSPushKit` import도 보정했다. 시뮬레이터 라이트/다크·Dynamic Type 스냅샷과 인증된 Mac↔iPhone 스레드 왕복은 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-504 iOS 알림 UX v2 (#583, 2026-07-21)
 
 - `momo.push.notification.v2`의 APNs `thread-id`, 4개 category, 승인 전용 `approval_id`, 서버 badge를 닫힌 파서로 소비한다. 잠금화면 빠른 답장은 기존 메시지 REST에 같은 root/reply 대상을 유지하고, 승인·거부는 기존 approval decision REST를 재사용한다. UUID는 비교·딥링크·요청 경계에서 소문자로 정규화하며 NSE의 id-only 본문 fetch 경계는 넓히지 않았다.
