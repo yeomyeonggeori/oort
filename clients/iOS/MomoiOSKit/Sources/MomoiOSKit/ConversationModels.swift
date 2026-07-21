@@ -205,6 +205,42 @@ public enum IOSTimelineReducer {
     }
 }
 
+public struct IOSMessageReaction: Identifiable, Sendable, Equatable {
+    public var id: String { emoji }
+    public let emoji: String
+    public let memberIDs: Set<MemberID>
+    public let isSelectedByCurrentMember: Bool
+
+    public var count: Int { memberIDs.count }
+}
+
+public enum IOSMessageInteractionAction: Sendable, Hashable {
+    case react
+    case reply
+    case edit
+    case delete
+    case copy
+}
+
+enum IOSReactionReducer {
+    typealias Snapshot = [MessageID: [String: Set<MemberID>]]
+
+    static func applying(_ delta: ReactionDelta, to snapshot: Snapshot) -> Snapshot {
+        var result = snapshot
+        var reactions = result[delta.messageId] ?? [:]
+        var members = reactions[delta.emoji] ?? []
+        switch delta.action {
+        case .added:
+            members.insert(delta.memberId)
+        case .removed:
+            members.remove(delta.memberId)
+        }
+        reactions[delta.emoji] = members.isEmpty ? nil : members
+        result[delta.messageId] = reactions.isEmpty ? nil : reactions
+        return result
+    }
+}
+
 struct IOSMessageBodySegment: Identifiable, Sendable, Equatable {
     enum Kind: Sendable, Equatable {
         case prose
