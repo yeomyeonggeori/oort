@@ -1,5 +1,10 @@
 # momo 진행 현황
 
+## MOMO-523 멤버십 수명주기 코어 (2026-07-21)
+
+- ADR-0128 D1~D3에 따라 migration 026의 `workspace_membership`·`workspace_ban` FORCE RLS 원장, 중앙 `WorkspaceAuthorization`, 워크스페이스/채널 역할 변경과 suspend/reinstate/remove/ban REST·audit, suspend 로그인 403 및 token revoke, ban join/redeem 차단, guest roster 교집합 투영을 추가했다.
+- server 130 tests, Swift build, OpenAPI YAML, verifier/local-gate bash 정적 검증은 PASS했다. `verify_membership_lifecycle.sh`(28050~28053)와 requireWorkspaceAdmin 회귀의 실제 PG18 왕복은 지시대로 실행하지 않아 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## MOMO-519 호스트 상실 티어 폴백 서버 계약 (2026-07-21)
 
 - ADR-0125 D11에 따라 workspace 기본/member override `work_tier_policy`(t1_only/ask/auto), stale heartbeat의 orphan 전이, ask `resume_offer` 카드와 `momo.work` 알림, t1_only terminal 정리, auto 재디스패치를 기존 PG→outbox 및 Notifier 폴링 경로에 추가했다.

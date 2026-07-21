@@ -60,6 +60,8 @@ tags:
     description: Public invite self-signup (no auth required).
   - name: roster
     description: Workspace member roster.
+  - name: membership-admin
+    description: ADR-0128 workspace/channel roles, suspension, removal, and bans.
   - name: agents
     description: Human-admin agent identity creation; channel membership and credentials remain explicit follow-up steps.
   - name: channels
@@ -319,7 +321,7 @@ paths:
             maximum: 500
       responses:
         "200":
-          description: Roster of active members with an active channel membership.
+          description: Active workspace roster, restricted to shared-channel members for guests.
           content:
             application/json:
               schema:
@@ -380,6 +382,150 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/members/{memberId}/role:
+    patch:
+      tags: [membership-admin]
+      operationId: changeWorkspaceMemberRole
+      summary: Change a workspace role under the owner/admin hierarchy.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ChangeMembershipRoleRequest"}
+      responses:
+        "200":
+          description: Workspace role changed and audited.
+          content: {application/json: {schema: {$ref: "#/components/schemas/MembershipRoleResponse"}}}
+        "400": {description: Invalid role or member id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Workspace member not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: The change would remove the last owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/members/{memberId}/role:
+    patch:
+      tags: [membership-admin]
+      operationId: changeChannelMemberRole
+      summary: Change a channel role under workspace/channel admin hierarchy.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: channelId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ChangeMembershipRoleRequest"}
+      responses:
+        "200":
+          description: Channel role changed and audited.
+          content: {application/json: {schema: {$ref: "#/components/schemas/MembershipRoleResponse"}}}
+        "400": {description: Invalid role or identifier, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Active channel membership not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/members/{memberId}/suspend:
+    post:
+      tags: [membership-admin]
+      operationId: suspendWorkspaceMember
+      summary: Suspend a member and revoke all of their tokens.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Member suspended, content: {application/json: {schema: {$ref: "#/components/schemas/MembershipLifecycleResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Workspace member not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Invalid transition or last-owner invariant, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/members/{memberId}/reinstate:
+    post:
+      tags: [membership-admin]
+      operationId: reinstateWorkspaceMember
+      summary: Return a suspended member to active status.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Member reinstated; previously revoked tokens remain revoked, content: {application/json: {schema: {$ref: "#/components/schemas/MembershipLifecycleResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Workspace member not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Member is not suspended, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/members/{memberId}:
+    delete:
+      tags: [membership-admin]
+      operationId: removeWorkspaceMember
+      summary: Remove a member while preserving authored message history.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RemoveWorkspaceMemberRequest"}
+      responses:
+        "200": {description: Memberships removed, status deleted, and tokens revoked, content: {application/json: {schema: {$ref: "#/components/schemas/MembershipLifecycleResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Workspace member not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: The member is the last active owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/bans:
+    get:
+      tags: [membership-admin]
+      operationId: listWorkspaceBans
+      summary: List the workspace ban ledger (admin only).
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200": {description: Ban ledger, content: {application/json: {schema: {$ref: "#/components/schemas/WorkspaceBanListResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      tags: [membership-admin]
+      operationId: createWorkspaceBan
+      summary: Ban an email and/or handle from invite redemption and public join.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/CreateWorkspaceBanRequest"}}}
+      responses:
+        "201": {description: Ban created and audited, content: {application/json: {schema: {$ref: "#/components/schemas/WorkspaceBanResponse"}}}}
+        "400": {description: Neither valid email nor handle supplied, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: A matching ban already exists, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/bans/{banId}:
+    delete:
+      tags: [membership-admin]
+      operationId: deleteWorkspaceBan
+      summary: Delete a workspace ban and permit future rejoin.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: banId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200": {description: Deleted ban, content: {application/json: {schema: {$ref: "#/components/schemas/WorkspaceBanResponse"}}}}
+        "400": {description: Invalid ban id, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {description: Ban not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
   /v1/workspaces/{workspaceId}/agents:
     post:
@@ -3528,6 +3674,74 @@ components:
           type: integer
         agentCount:
           type: integer
+
+    # ---- Membership lifecycle (ADR-0128) ------------------------------------
+    ChangeMembershipRoleRequest:
+      type: object
+      required: [role]
+      additionalProperties: false
+      properties:
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+
+    MembershipRoleResponse:
+      type: object
+      required: [memberId, scope, role]
+      properties:
+        memberId: {type: string, format: uuid}
+        scope: {type: string, enum: [workspace, channel]}
+        role: {$ref: "#/components/schemas/MembershipRole"}
+
+    MembershipLifecycleResponse:
+      type: object
+      required: [memberId, status]
+      properties:
+        memberId: {type: string, format: uuid}
+        status: {type: string, enum: [active, suspended, deleted]}
+
+    RemoveWorkspaceMemberRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        ban: {type: boolean, default: false}
+        reason: {type: string, maxLength: 500}
+
+    CreateWorkspaceBanRequest:
+      type: object
+      description: At least one of email or handle is required.
+      anyOf:
+        - required: [email]
+        - required: [handle]
+      additionalProperties: false
+      properties:
+        email: {type: string, maxLength: 320}
+        handle: {type: string, pattern: "^[a-z0-9_-]{2,32}$"}
+        reason: {type: string, maxLength: 500}
+
+    WorkspaceBan:
+      type: object
+      required: [id, createdBy, createdAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        email: {type: string}
+        handle: {type: string}
+        createdBy: {type: string, format: uuid}
+        reason: {type: string}
+        createdAtMs: {type: integer, format: int64}
+
+    WorkspaceBanResponse:
+      type: object
+      required: [ban]
+      properties:
+        ban: {$ref: "#/components/schemas/WorkspaceBan"}
+
+    WorkspaceBanListResponse:
+      type: object
+      required: [bans]
+      properties:
+        bans:
+          type: array
+          items: {$ref: "#/components/schemas/WorkspaceBan"}
 
     # ---- Agent creation -------------------------------------------------------
     CreateAgentRequest:
