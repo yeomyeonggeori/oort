@@ -1,6 +1,6 @@
 # ADR-0126: 협업 관전 표면 — 에이전트 작업을 팀이 함께 보고 논의한다
 
-- Status: **Proposed** (2026-07-21, Fable 기안 — 성재 승인 대기)
+- Status: **Accepted** (2026-07-21, 성재 — "우선순위 작업 진행" 지시로 우선순위 3(D1 관전) 실행 승인. D1·D2=v0 착수, D3·D4=v1 예약)
 - 관련: ADR-0114(Interactive Work Console — D2 세션=채널 스레드, D6 터미널+스레드 브리지), ADR-0125(D10 원격 attach — owner-only 계약), ADR-0119(웹 — v1+ Work 표면), docs/planning/2026-07-21-opensource-cowork-diagnosis.md §5
 - 발단: 외부 개발자 피드백(성재 전달, 2026-07-21) — "Figma가 패러다임을 바꾼 지점은 개발자·PM·디자이너가 하나의 화면을 보며 논의하는 cowork 시스템. claude/codex도 에이전트니까 hermes처럼 호스팅해 결과물을 모두가 공유·확인하며 작업·논의할 수 있으면 큰 메리트."
 
