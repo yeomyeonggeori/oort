@@ -4,7 +4,7 @@ import { ApiError, login } from "../api/client";
 import { getServerUrl, verifyServer } from "../config/server";
 
 interface LoginPageProps {
-  /** Prefill from the /join/<code> landing (MOMO-401) — email only, never a secret. */
+  /** Prefill from the invite landing. Email only, never a secret. */
   initialEmail?: string | undefined;
   onUseInviteCode: (code: string) => void;
 }

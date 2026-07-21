@@ -39,6 +39,12 @@ export default function App() {
     };
   }, [resuming]);
 
+  useEffect(() => {
+    if (session === null || getAccessToken() === null || joinCode === null) return;
+    window.history.replaceState(null, "", "/");
+    setJoinCode(null);
+  }, [joinCode, session]);
+
   if (resuming) {
     return (
       <div className="screen-center">

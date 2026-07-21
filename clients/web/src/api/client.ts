@@ -7,7 +7,7 @@ import {
   getRefreshToken,
   markAuthExpired,
 } from "../auth/session";
-import { apiUrl } from "../config/server";
+import { apiUrl, saveServerUrl } from "../config/server";
 
 // =============================================================================
 // REST client for the web v0 surface (docs/api/openapi.yaml is the canonical
@@ -200,6 +200,7 @@ export async function joinInvite(request: JoinRequest): Promise<JoinResponse> {
   );
   if (!response.ok) throw await parseError(response);
   const joinResponse = (await response.json()) as JoinResponse;
+  saveServerUrl(window.location.origin);
   applyLogin(joinResponse);
   return joinResponse;
 }

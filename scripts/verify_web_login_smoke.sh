@@ -33,7 +33,7 @@
 #     fixture SQL, one exhausted by redeeming its single use over REST
 #     POST /v1/join. Raw codes are passed to the browser smoke via env only —
 #     never echoed to the log.
-#   - browser: /join/<code> deep link -> address bar stripped of the code ->
+#   - browser: /join?code=<code> deep link -> successful join strips the code ->
 #     join form -> session established from the JoinResponse token pair ->
 #     timeline entry -> logout -> re-login with the just-created credentials.
 #   - error UX: expired / exhausted / invalid codes render DISTINCT Korean
@@ -132,7 +132,7 @@ SMOKE_ADMIN_EMAIL="web-smoke-adm-$RUN_ID@momo.local"
 SMOKE_ADMIN_PASSWORD="web-smoke-adm-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SMOKE_ADMIN_HANDLE="web-smoke-adm-$RUN_EPOCH"
 # MOMO-401: credentials the BROWSER join form will register (created through
-# the /join/<code> happy path, then re-used for the re-login proof).
+# the /join?code=<code> happy path, then re-used for the re-login proof).
 SMOKE_JOIN_EMAIL="web-smoke-join-$RUN_ID@momo.local"
 SMOKE_JOIN_PASSWORD="web-smoke-join-$(uuidgen | tr '[:upper:]' '[:lower:]')"
 SMOKE_JOIN_DISPLAY_NAME="Web Smoke Joiner"
@@ -502,5 +502,5 @@ echo "MOMO-391 + MOMO-400 + MOMO-401 web browser smoke PASS"
 echo "- stack: compose project '$PROJECT' (api :$API_PORT, edge :$EDGE_HTTPS), torn down on exit"
 echo "- verified (MOMO-391): SPA served by the prod Caddyfile under strict CSP, browser login with demo workspace fallback, channel list, seeded timeline display, wss realtime subscribe + live REST-sent message render, REST ?after= catch-up (never after=0), expired-access logout rotate+retry with server-side revoke, zero CSP console violations"
 echo "- verified (MOMO-400): unread badge from bulk read-state GET, external cursor PUT reflected via user:read-state push (zero extra GETs, counter pinned only after the re-baseline GET response completed), never-regressing browser cursor PUTs, composer clientMsgId idempotent retry (one DOM render + one REST row), ADR-0112 approval cards leak none of the gateway-shaped fixture's arguments/tool_grant/estimated_micro_usd (timeline card + panel card), in-browser approve receipt 200, externally pre-decided 409 receipt as card state transition, DM open via POST /dms + composer round-trip + GET /dms listing"
-echo "- verified (MOMO-401): REST invite issuance by the disposable admin, /join/<code> deep link with the code stripped from the address bar before any API call, browser join -> session from the JoinResponse token pair -> timeline entry, logout -> re-login with the join-created credentials, expired/exhausted/invalid codes rendered as distinct Korean error copy, and the raw code absent from every non-document request URL and console line"
+echo "- verified (Goal #593): REST invite issuance by the disposable admin, /join?code=<code> deep link with the code stripped from browser history after success, browser join -> session from the JoinResponse token pair -> timeline entry, logout -> re-login with the join-created credentials, expired/exhausted/invalid codes rendered as distinct Korean error copy, and the raw code absent from every non-document request URL and console line"
 echo "- artifacts: $OUT_DIR"

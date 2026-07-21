@@ -82,7 +82,7 @@ Profiles:
 | `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
 | `macos-ui` | MomoMac UI/run changes | `swift` profile + `MomoMacSmoke`; set `LOCAL_GATE_LAUNCH_UI=1` to run `scripts/macos_dev_run.sh --verify --logs --terminate` |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence + `verify_macos_real_backend_ui.sh` |
-| `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, HTTP SPA/proxy/security-header six-assertion gate. Public DNS/ACME/TLS is excluded. |
+| `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
 | `web` | `clients/web`, `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + generated-types sync check (openapi-typescript output vs committed `src/api/schema.d.ts`) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
@@ -309,8 +309,8 @@ and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
    (`POST /v1/workspaces/:ws/invites` — smoke tooling, not web-client
    surface), one invite is expired by fixture SQL and one exhausted through
    a real `POST /v1/join`; a fresh browser context then opens
-   `/join/<code>`, asserts the code is stripped from the address bar
-   (history.replaceState) and never appears in any non-document request URL
+   `/join?code=<code>`, asserts the code is stripped from browser history after
+   success (history.replaceState) and never appears in any non-document request URL
    or console line, joins through the form (session established from the
    JoinResponse token pair — the spec'd join-login path), enters the
    #general timeline, logs out and re-logs-in with the join-created
