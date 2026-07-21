@@ -10,10 +10,17 @@ struct PushTests {
     func payloadParsing() throws {
         let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
 
-        #expect(envelope.schema == "momo.push.notification.v1")
+        #expect(envelope.schema == "momo.push.notification.v2")
         #expect(envelope.channelID == "00000000-0000-0000-0000-000000000010")
-        #expect(envelope.deepLinkURL?.absoluteString == "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020")
-        #expect(IOSPushDeepLink(envelope: envelope)?.channelID == fixtureChannel().id)
+        #expect(envelope.category == .approval)
+        #expect(envelope.badge == 7)
+        #expect(envelope.threadRootID == "00000000-0000-0000-0000-000000000030")
+        #expect(envelope.approvalID == "00000000-0000-0000-0000-000000000040")
+        #expect(envelope.deepLinkURL?.absoluteString == "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020?category=momo.approval&thread=00000000-0000-0000-0000-000000000030")
+        let link = try #require(IOSPushDeepLink(envelope: envelope))
+        #expect(link.channelID == fixtureChannel().id)
+        #expect(link.threadRootID == MessageID(uuidString: "00000000-0000-0000-0000-000000000030"))
+        #expect(link.category == .approval)
     }
 
     @MainActor
@@ -42,6 +49,98 @@ struct PushTests {
         #expect(router.pending == link)
         #expect(router.consumePending(for: link.workspaceID) == link)
         #expect(router.pending == nil)
+    }
+
+    @Test("approval ID is accepted only for the approval category")
+    func approvalBoundary() throws {
+        let outsideApproval = Self.payload.replacingOccurrences(
+            of: "momo.approval", with: "momo.mention"
+        )
+        #expect(throws: MomoPushError.self) {
+            try MomoPushParser.parse(data: Data(outsideApproval.utf8))
+        }
+
+        let missingApproval = Self.payload.replacingOccurrences(
+            of: ",\"approval_id\":\"00000000-0000-0000-0000-000000000040\"",
+            with: ""
+        )
+        #expect(throws: MomoPushError.self) {
+            try MomoPushParser.parse(data: Data(missingApproval.utf8))
+        }
+    }
+
+    @Test("duplicate deep-link query keys fail closed")
+    func duplicateDeepLinkQueryFailsClosed() {
+        let duplicated = URL(string: Self.deepLinkURL.absoluteString + "?category=momo.work&category=momo.message")!
+        #expect(IOSPushDeepLink(url: duplicated) == nil)
+        let unknownCategory = URL(string: Self.deepLinkURL.absoluteString + "?category=momo.unknown")!
+        #expect(IOSPushDeepLink(url: unknownCategory) == nil)
+        let credentialLikeQuery = URL(string: Self.deepLinkURL.absoluteString + "?token=not-allowed")!
+        #expect(IOSPushDeepLink(url: credentialLikeQuery) == nil)
+    }
+
+    @Test("quick reply targets the pushed thread and message")
+    func quickReplyAction() async throws {
+        let backend = RecordingConversationBackend()
+        let envelope = MomoPushEnvelope(
+            schema: "momo.push.notification.v2",
+            serverID: "server-a",
+            workspaceID: fixtureWorkspaceID.description.uppercased(),
+            channelID: fixtureChannel().id.description.uppercased(),
+            messageID: "00000000-0000-0000-0000-000000000020",
+            collapseID: "message-20",
+            reason: "mention",
+            approvalID: nil,
+            threadID: "00000000-0000-0000-0000-000000000030",
+            category: .mention,
+            badge: 2
+        )
+
+        try await IOSPushActionExecutor(backend: backend).perform(
+            .quickReply("  확인했습니다.  "),
+            envelope: envelope,
+            signedInWorkspaceID: fixtureWorkspaceID
+        )
+
+        let call = try #require(await backend.sendCalls.first)
+        #expect(call.draft.channelId == fixtureChannel().id)
+        #expect(call.draft.body == "확인했습니다.")
+        #expect(call.draft.rootId == MessageID(uuidString: "00000000-0000-0000-0000-000000000030"))
+        #expect(call.draft.replyToId == MessageID(uuidString: "00000000-0000-0000-0000-000000000020"))
+    }
+
+    @Test("approval action reuses the signed-in approval REST contract")
+    func approvalAction() async throws {
+        let backend = RecordingConversationBackend()
+        let envelope = try MomoPushParser.parse(data: Data(Self.payload.utf8))
+
+        try await IOSPushActionExecutor(backend: backend).perform(
+            .decideApproval(false),
+            envelope: envelope,
+            signedInWorkspaceID: fixtureWorkspaceID
+        )
+
+        let call = try #require(await backend.approvalCalls.first)
+        #expect(call.approvalId == ApprovalID(uuidString: "00000000-0000-0000-0000-000000000040"))
+        #expect(call.approve == false)
+    }
+
+    @Test("notification action preferences persist without credentials")
+    func actionPreferenceRoundTrip() throws {
+        let suite = "MomoiOSPushTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = IOSNotificationActionPreferenceStore(defaults: defaults, key: "preferences")
+        let expected = IOSNotificationActionPreferences(
+            message: false,
+            mention: true,
+            approval: false,
+            work: true
+        )
+
+        store.save(expected)
+
+        #expect(store.load() == expected)
     }
 
     @Test("NSE resolver replaces placeholder after fetch")
@@ -115,7 +214,7 @@ struct PushTests {
         }
     }
 
-    private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":1,"mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v1","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request"}}"#
+    private static let payload = #"{"aps":{"alert":{"title":"momo","body":"새 알림"},"badge":7,"thread-id":"00000000-0000-0000-0000-000000000030","category":"momo.approval","mutable-content":1,"content-available":1},"momo":{"schema":"momo.push.notification.v2","server_id":"server-a","workspace_id":"00000000-0000-0000-0000-000000000001","channel_id":"00000000-0000-0000-0000-000000000010","message_id":"00000000-0000-0000-0000-000000000020","collapse_id":"message-20","reason":"approval_request","approval_id":"00000000-0000-0000-0000-000000000040"}}"#
     private static let deepLinkURL = URL(
         string: "momo://push/workspaces/00000000-0000-0000-0000-000000000001/channels/00000000-0000-0000-0000-000000000010/messages/00000000-0000-0000-0000-000000000020"
     )!
@@ -192,19 +291,26 @@ struct SessionTests {
         }
     }
 
-    @Test("UserDefaults form and session round trip")
+    @Test("form stays in defaults while session tokens round trip through secure storage")
     func storeRoundTrip() throws {
         let suiteName = "MomoiOSKitTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = SessionStore(defaults: defaults, prefix: "test.")
+        let secureStore = InMemorySecureValueStore()
+        let store = SessionStore(
+            defaults: defaults,
+            prefix: "test.",
+            secureStore: secureStore
+        )
         let form = SessionForm(serverURL: "https://momo.example", email: "dev@momo.local", password: "plain-dev", inviteCode: "CODE")
         let session = fixtureSession()
 
         store.save(form: form)
-        store.save(session: session)
+        #expect(store.save(session: session))
         #expect(store.loadForm() == form)
         #expect(store.loadSession() == session)
+        #expect(defaults.data(forKey: "test.authenticated") == nil)
+        #expect(defaults.data(forKey: MomoPushContract.sessionKey) == nil)
 
         store.clearSession()
         #expect(store.loadSession() == nil)
@@ -225,16 +331,29 @@ struct SessionTests {
         let session = fixtureSession()
         legacy.set(try JSONEncoder().encode(form), forKey: "momo.ios.dev.session.form")
         legacy.set(try JSONEncoder().encode(session), forKey: "momo.ios.dev.session.authenticated")
-        let store = SessionStore(defaults: group, legacyDefaults: legacy)
+        let secureStore = InMemorySecureValueStore()
+        let store = SessionStore(
+            defaults: group,
+            legacyDefaults: legacy,
+            secureStore: secureStore
+        )
 
         #expect(store.loadForm() == form)
-        let pushData = try #require(group.data(forKey: MomoPushContract.sessionKey))
+        #expect(store.loadSession() == session)
+        let pushData = try #require(secureStore.data(for: MomoPushContract.pushFetchSessionAccount))
         let pushSession = try JSONDecoder().decode(PushFetchSession.self, from: pushData)
         #expect(pushSession.baseURL == session.baseURL)
         #expect(pushSession.workspaceID == session.workspaceID.description)
         #expect(pushSession.accessToken == session.accessToken)
+        #expect(group.data(forKey: "momo.ios.dev.session.authenticated") == nil)
+        #expect(group.data(forKey: MomoPushContract.sessionKey) == nil)
+        #expect(legacy.data(forKey: "momo.ios.dev.session.authenticated") == nil)
         legacy.set(try JSONEncoder().encode(SessionForm()), forKey: "momo.ios.dev.session.form")
-        let second = SessionStore(defaults: group, legacyDefaults: legacy)
+        let second = SessionStore(
+            defaults: group,
+            legacyDefaults: legacy,
+            secureStore: secureStore
+        )
         #expect(second.loadForm() == form)
     }
 
@@ -258,7 +377,11 @@ struct SessionTests {
         let suiteName = "MomoiOSKitTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        let store = SessionStore(defaults: defaults, prefix: "model.")
+        let store = SessionStore(
+            defaults: defaults,
+            prefix: "model.",
+            secureStore: InMemorySecureValueStore()
+        )
         let bootstrap = WorkspaceBootstrap(
             workspace: Workspace(id: fixtureWorkspaceID, slug: "momo", name: "momo Team"),
             channels: [fixtureChannel()]
@@ -283,7 +406,11 @@ struct SessionTests {
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let model = MomoiOSAppModel(
-            store: SessionStore(defaults: defaults, prefix: "offline."),
+            store: SessionStore(
+                defaults: defaults,
+                prefix: "offline.",
+                secureStore: InMemorySecureValueStore()
+            ),
             backend: OfflineBackend()
         )
 
@@ -291,6 +418,39 @@ struct SessionTests {
 
         #expect(model.phase == .signedOut)
         #expect(model.failureKind == .offline)
+    }
+
+    @Test("concurrent 401 responses rotate the single-use refresh token once and retry")
+    func automaticRefreshIsSingleFlight() async throws {
+        let suiteName = "MomoiOSKitTests.refresh.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let secureStore = InMemorySecureValueStore()
+        let store = SessionStore(
+            defaults: defaults,
+            prefix: "refresh.",
+            secureStore: secureStore
+        )
+        let initial = fixtureSession()
+        #expect(store.save(session: initial))
+        let transport = RefreshingHTTPTransport()
+        let executor = IOSAuthenticatedRequestExecutor(
+            authenticated: initial,
+            store: store,
+            transport: transport
+        )
+        let request = URLRequest(url: initial.baseURL.appendingPathComponent("/v1/test-resource"))
+
+        async let first = executor.data(for: request)
+        async let second = executor.data(for: request)
+        let payloads = try await [first, second]
+
+        #expect(payloads == [Data("ok".utf8), Data("ok".utf8)])
+        #expect(await transport.refreshCount == 1)
+        #expect(await transport.expiredRequestCount == 2)
+        #expect(await transport.rotatedRequestCount == 2)
+        #expect(store.loadSession()?.accessToken == "rotated-access")
+        #expect(store.loadSession()?.refreshToken == "rotated-refresh")
     }
 }
 
@@ -368,6 +528,81 @@ struct ConversationTests {
         #expect(IOSChannelSearch.filter([general, directMessage], query: "  research ") == [directMessage])
         #expect(IOSChannelSearch.filter([general, directMessage], query: "") == [general, directMessage])
         #expect(IOSAppTab.allCases == [.home, .search, .activity, .work, .profile])
+    }
+
+    @Test("workspace message search debounces and preserves Unicode snippet offsets")
+    @MainActor
+    func workspaceMessageSearch() async throws {
+        let hit = IOSWorkspaceMessageSearchHit(
+            channelID: fixtureChannel().id,
+            messageID: fixtureMessage(sequence: 42).id,
+            sequence: 42,
+            authorMemberID: fixtureMemberID,
+            createdAtMs: 42,
+            snippet: "앞쪽 🔍 검색 결과",
+            matchOffset: 3
+        )
+        let backend = RecordingConversationBackend(
+            searchPage: IOSWorkspaceMessageSearchPage(hits: [hit], nextCursor: "next")
+        )
+        let model = IOSWorkspaceSearchModel(backend: backend)
+
+        model.schedule(query: "  검색  ")
+        try await Task.sleep(for: .milliseconds(350))
+
+        #expect(model.hits == [hit])
+        #expect(model.hasMore)
+        #expect(await backend.searchCalls.map(\.query) == ["검색"])
+        let segments = IOSSearchSnippet.segments(snippet: hit.snippet, matchOffset: 3, matchLength: 1)
+        #expect(segments.prefix == "앞쪽 ")
+        #expect(segments.match == "🔍")
+        #expect(segments.suffix == " 검색 결과")
+    }
+
+    @Test("exact search jump loads the page immediately before the target sequence")
+    @MainActor
+    func exactSearchJumpHistory() async {
+        let target = fixtureMessage(sequence: 42)
+        let backend = RecordingConversationBackend()
+        await backend.setHistory([target])
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend,
+            initialBeforeSequence: 43
+        )
+
+        await model.load()
+
+        #expect(model.messages.map(\.id) == [target.id])
+        #expect(await backend.historyBeforeCalls == [43])
+    }
+
+    @Test("activity aggregation normalizes mention UUIDs and excludes self reactions")
+    func activityAggregation() throws {
+        let otherMemberID = try #require(
+            MemberID(uuidString: "00000000-0000-0000-0000-000000000099")
+        )
+        var mention = fixtureMessage(sequence: 40, idSeed: 940)
+        mention.authorMemberId = otherMemberID
+        mention.props = [
+            "mention_member_ids": .array([.string(fixtureMemberID.description.uppercased())]),
+        ]
+        var reacted = fixtureMessage(sequence: 41, idSeed: 941)
+        reacted.authorMemberId = fixtureMemberID
+        let items = IOSActivityAggregator.recentItems(
+            messagesByChannel: [fixtureChannel().id: [mention, reacted]],
+            reactionsByChannel: [
+                fixtureChannel().id: [
+                    reacted.id: ["🎉": [fixtureMemberID, otherMemberID]],
+                ],
+            ],
+            currentMemberID: fixtureMemberID
+        )
+
+        #expect(items.count == 2)
+        #expect(items.contains { $0.kind == .mention && $0.messageID == mention.id })
+        #expect(items.contains { $0.kind == .reaction(emoji: "🎉", count: 1) && $0.messageID == reacted.id })
     }
 
     @Test("channel mute and mark-read actions use server projections")
@@ -740,6 +975,23 @@ struct ConversationTests {
         model.stop()
     }
 
+    @Test("timeline preserves loaded messages and exposes an inline session banner after refresh fails")
+    @MainActor
+    func timelineRefreshFailurePreservesMessages() async {
+        let channel = fixtureChannel()
+        let backend = ExpiringHistoryBackend(messages: [fixtureMessage(sequence: 1)])
+        let model = IOSTimelineModel(channel: channel.id, currentMemberID: fixtureMemberID, backend: backend)
+
+        await model.load()
+        await model.retry()
+
+        #expect(model.phase == .loaded)
+        #expect(model.messages.compactMap(\.seq) == [1])
+        #expect(model.refreshFailure?.requiresSignIn == true)
+        #expect(model.refreshFailure?.message.contains("Existing messages are preserved") == true)
+        model.stop()
+    }
+
     @Test("timeline append keeps seq order and drops replay duplicates")
     func timelineAppendOrderAndDeduplication() {
         let channel = fixtureChannel().id
@@ -948,6 +1200,68 @@ struct ConversationTests {
         #expect(model.sendFailureMessage == nil)
     }
 
+    @Test("attachment-only send uploads first and binds completed IDs")
+    @MainActor
+    func attachmentOnlySend() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-ios-attachment-\(UUID().uuidString).txt")
+        try Data("attachment body".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let backend = RecordingConversationBackend()
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        try model.stageAttachment(fileURL: fileURL)
+
+        await model.sendComposerDraft()
+
+        let uploadCalls = await backend.uploadCalls
+        let sendCall = await backend.sendCalls.first
+        #expect(uploadCalls == [fileURL])
+        #expect(sendCall?.draft.body == nil)
+        #expect(sendCall?.draft.attachmentIds?.count == 1)
+        #expect(model.messages.first?.attachments?.first?.name == fileURL.lastPathComponent)
+        #expect(model.attachmentDrafts.isEmpty)
+    }
+
+    @Test("failed attachment remains retryable without dropping the message draft")
+    @MainActor
+    func failedAttachmentRetry() async throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("momo-ios-attachment-retry-\(UUID().uuidString).txt")
+        try Data("retry attachment".utf8).write(to: fileURL)
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+        let backend = RecordingConversationBackend(failFirstUpload: true)
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend
+        )
+        await model.load()
+        model.composerDraft = "Keep this text"
+        try model.stageAttachment(fileURL: fileURL)
+
+        await model.sendComposerDraft()
+
+        #expect(model.composerDraft == "Keep this text")
+        #expect(model.attachmentFailureMessage != nil)
+        let draft = try #require(model.attachmentDrafts.first)
+        guard case .failed = draft.state else {
+            Issue.record("Expected the failed attachment to remain in the composer")
+            return
+        }
+        await model.retryAttachmentDraft(draft.id)
+        await model.sendComposerDraft()
+
+        #expect(await backend.uploadCalls.count == 2)
+        #expect(await backend.sendCalls.count == 1)
+        #expect(model.composerDraft.isEmpty)
+        #expect(model.attachmentDrafts.isEmpty)
+    }
+
     @Test("failed send retries with the same idempotency key")
     @MainActor
     func failedSendRetry() async {
@@ -993,6 +1307,80 @@ struct ConversationTests {
         #expect(call?.draft.replyToId == quoted.id)
         #expect(call?.draft.props["reply_to_id"]?.stringValue == quoted.id.description)
         #expect(model.messages.first?.replyToId == quoted.id)
+    }
+
+    @Test("thread detail loads cursor pages, consumes rollups, and sends to the root")
+    @MainActor
+    func firstClassThreadFlow() async throws {
+        var root = fixtureMessage(sequence: 7)
+        root.thread = ThreadRollup(replyCount: 2, lastReplySeq: 9, lastReplyAtMs: 9)
+        var firstReply = fixtureMessage(sequence: 8, idSeed: 108)
+        firstReply.rootId = root.id
+        var secondReply = fixtureMessage(sequence: 9, idSeed: 109)
+        secondReply.rootId = root.id
+        let backend = RecordingConversationBackend(threadPages: [
+            IOSThreadRepliesPage(messages: [firstReply], nextCursor: 8),
+            IOSThreadRepliesPage(messages: [secondReply], nextCursor: nil),
+        ])
+        let model = IOSTimelineModel(
+            channel: fixtureChannel().id,
+            currentMemberID: fixtureMemberID,
+            backend: backend,
+            threadRoot: root.id,
+            initialThreadRootMessage: root
+        )
+
+        await model.load()
+
+        #expect(model.messages.map(\.id) == [root.id, firstReply.id, secondReply.id])
+        let replyCursors = await backend.threadReplyCursors
+        #expect(replyCursors == [nil, 8])
+
+        await model.consumeRealtimeEvent(.threadUpdated(ThreadRollupDelta(
+            channelId: fixtureChannel().id,
+            rootId: root.id,
+            replyCount: 3,
+            lastReplySeq: 10,
+            lastReplyAtMs: 10
+        )))
+        #expect(model.messages.first(where: { $0.id == root.id })?.thread?.replyCount == 3)
+
+        model.composerDraft = "Thread reply from iPhone"
+        await model.sendComposerDraft()
+        let call = await backend.sendCalls.last
+        #expect(call?.draft.rootId == root.id)
+        #expect(call?.draft.replyToId == root.id)
+        #expect(call?.draft.props["reply_to_id"]?.stringValue == root.id.description)
+    }
+
+    @Test("thread inbox keeps only threads the current member participates in")
+    func threadInboxAggregation() throws {
+        let otherMemberID = try #require(MemberID(uuidString: "00000000-0000-0000-0000-000000000099"))
+        let channel = IOSChannelListItem(
+            channel: fixtureChannel(),
+            title: "general",
+            unreadCount: 0,
+            mentionCount: 0
+        )
+        var participated = fixtureMessage(sequence: 11, idSeed: 211)
+        participated.authorMemberId = otherMemberID
+        participated.thread = ThreadRollup(replyCount: 2, lastReplySeq: 13, lastReplyAtMs: 13)
+        var unrelated = fixtureMessage(sequence: 12, idSeed: 212)
+        unrelated.authorMemberId = otherMemberID
+        unrelated.thread = ThreadRollup(replyCount: 1, lastReplySeq: 14, lastReplyAtMs: 14)
+
+        let result = IOSThreadListAggregator.participatingThreads(
+            channel: channel,
+            messages: [unrelated, participated],
+            participantsByRoot: [
+                participated.id: [fixtureMemberID, fixtureMemberID],
+                unrelated.id: [otherMemberID],
+            ],
+            currentMemberID: fixtureMemberID
+        )
+
+        #expect(result.map(\.id) == [participated.id])
+        #expect(result.first?.participantMemberIDs == [fixtureMemberID])
     }
 
     @Test("approval retry preserves decision ID and updates card status")
@@ -1440,23 +1828,39 @@ private actor RecordingConversationBackend: IOSConversationBackend {
         let muted: Bool
     }
 
+    struct SearchCall: Sendable, Equatable {
+        let query: String
+        let cursor: String?
+        let limit: Int
+    }
+
     private var historyValue: [Message] = []
     private let snapshotValue: IOSConversationSnapshot
     private let failFirstSend: Bool
+    private let failFirstUpload: Bool
     private let failFirstApproval: Bool
     private let failFirstMute: Bool
     private let failFirstRead: Bool
+    private let threadPages: [IOSThreadRepliesPage]
+    private let searchPage: IOSWorkspaceMessageSearchPage
     private(set) var sendCalls: [SendCall] = []
+    private(set) var uploadCalls: [URL] = []
     private(set) var approvalCalls: [ApprovalDecisionRequest] = []
     private(set) var markReadCalls: [MarkReadCall] = []
     private(set) var muteCalls: [MuteCall] = []
+    private(set) var threadReplyCursors: [Int64?] = []
+    private(set) var historyBeforeCalls: [Int64] = []
+    private(set) var searchCalls: [SearchCall] = []
 
     init(
         snapshot: IOSConversationSnapshot? = nil,
         failFirstSend: Bool = false,
+        failFirstUpload: Bool = false,
         failFirstApproval: Bool = false,
         failFirstMute: Bool = false,
-        failFirstRead: Bool = false
+        failFirstRead: Bool = false,
+        threadPages: [IOSThreadRepliesPage] = [],
+        searchPage: IOSWorkspaceMessageSearchPage = .init(hits: [], nextCursor: nil)
     ) {
         self.snapshotValue = snapshot ?? IOSConversationSnapshot(
             channels: [fixtureChannel()],
@@ -1464,14 +1868,42 @@ private actor RecordingConversationBackend: IOSConversationBackend {
             readStates: []
         )
         self.failFirstSend = failFirstSend
+        self.failFirstUpload = failFirstUpload
         self.failFirstApproval = failFirstApproval
         self.failFirstMute = failFirstMute
         self.failFirstRead = failFirstRead
+        self.threadPages = threadPages
+        self.searchPage = searchPage
     }
 
     func setHistory(_ messages: [Message]) { historyValue = messages }
     func snapshot() async throws -> IOSConversationSnapshot { snapshotValue }
     func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] { historyValue }
+    func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message] {
+        historyBeforeCalls.append(sequence)
+        return historyValue
+    }
+    func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage {
+        searchCalls.append(SearchCall(query: query, cursor: cursor, limit: limit))
+        return searchPage
+    }
+    func threadReplies(
+        channel: ChannelID,
+        root: MessageID,
+        cursor: Int64?,
+        limit: Int
+    ) async throws -> IOSThreadRepliesPage {
+        threadReplyCursors.append(cursor)
+        let index = threadReplyCursors.count - 1
+        guard index < threadPages.count else {
+            return IOSThreadRepliesPage(messages: [], nextCursor: nil)
+        }
+        return threadPages[index]
+    }
     func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
         markReadCalls.append(MarkReadCall(channel: channel, sequence: sequence))
         if failFirstRead, markReadCalls.count == 1 { throw SessionError.transport("offline") }
@@ -1508,6 +1940,16 @@ private actor RecordingConversationBackend: IOSConversationBackend {
             replyToId: draft.replyToId,
             clientMsgId: clientMsgId,
             createdAtMs: now
+        )
+    }
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        uploadCalls.append(fileURL)
+        if failFirstUpload, uploadCalls.count == 1 { throw SessionError.transport("offline") }
+        return MessageAttachment(
+            id: FileID(uuidString: "00000000-0000-0000-0001-000000000099")!,
+            name: fileURL.lastPathComponent,
+            mime: "text/plain",
+            sizeBytes: Int64((try? Data(contentsOf: fileURL).count) ?? 0)
         )
     }
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
@@ -1786,6 +2228,107 @@ private actor SuspendedReadConversationBackend: IOSConversationBackend {
     func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message {
         fixtureMessage(sequence: 1)
     }
+    func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
+        ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
+    }
+}
+
+private final class InMemorySecureValueStore: MomoSecureValueStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Data] = [:]
+
+    func data(for account: String) -> Data? {
+        lock.withLock { values[account] }
+    }
+
+    @discardableResult
+    func set(_ data: Data, for account: String) -> Bool {
+        lock.withLock { values[account] = data }
+        return true
+    }
+
+    func removeValue(for account: String) {
+        lock.withLock { values[account] = nil }
+    }
+}
+
+private actor RefreshingHTTPTransport: IOSHTTPDataTransport {
+    private(set) var refreshCount = 0
+    private(set) var expiredRequestCount = 0
+    private(set) var rotatedRequestCount = 0
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        let url = try #require(request.url)
+        if url.path == "/v1/auth/refresh" {
+            refreshCount += 1
+            let body = try #require(request.httpBody)
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: String])
+            #expect(json["refreshToken"] == "refresh")
+            try await Task.sleep(for: .milliseconds(40))
+            return (
+                Data(#"{"accessToken":"rotated-access","refreshToken":"rotated-refresh"}"#.utf8),
+                response(url: url, status: 200)
+            )
+        }
+        switch request.value(forHTTPHeaderField: "Authorization") {
+        case "Bearer access":
+            expiredRequestCount += 1
+            if expiredRequestCount == 2 {
+                // Arrive after the first request already rotated the pair. The
+                // executor must retry with the new access token, not rotate again.
+                try await Task.sleep(for: .milliseconds(80))
+            }
+            return (Data(), response(url: url, status: 401))
+        case "Bearer rotated-access":
+            rotatedRequestCount += 1
+            return (Data("ok".utf8), response(url: url, status: 200))
+        default:
+            return (Data(), response(url: url, status: 403))
+        }
+    }
+
+    private func response(url: URL, status: Int) -> HTTPURLResponse {
+        HTTPURLResponse(
+            url: url,
+            statusCode: status,
+            httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"]
+        )!
+    }
+}
+
+private actor ExpiringHistoryBackend: IOSConversationBackend {
+    private let messages: [Message]
+    private var historyCalls = 0
+
+    init(messages: [Message]) { self.messages = messages }
+
+    func snapshot() async throws -> IOSConversationSnapshot {
+        IOSConversationSnapshot(channels: [fixtureChannel()], members: [], readStates: [])
+    }
+
+    func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message] {
+        historyCalls += 1
+        if historyCalls == 1 { return messages }
+        throw SessionError.sessionExpired
+    }
+
+    func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
+        ChannelReadState(
+            channelId: channel,
+            lastReadSeq: sequence,
+            latestSeq: sequence,
+            unreadCount: 0,
+            mentionCount: 0
+        )
+    }
+
+    func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool { muted }
+    func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent> { AsyncStream { $0.finish() } }
+    func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus> {
+        AsyncStream { $0.finish() }
+    }
+    func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message { messages[0] }
     func decideApproval(_ request: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
         ApprovalDecisionReceipt(approvalId: request.approvalId, status: request.status)
     }

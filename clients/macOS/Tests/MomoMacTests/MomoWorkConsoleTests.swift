@@ -406,6 +406,145 @@ final class MomoWorkConsoleTests: XCTestCase {
         XCTAssertEqual(object, ["observation": "owner_only"])
     }
 
+    func testTierFallbackRESTUsesExactPolicyAndResumeContracts() async throws {
+        WorkConsoleURLProtocol.reset()
+        defer { WorkConsoleURLProtocol.reset() }
+        let workspace = WorkspaceID(uuidString: "00000000-0000-7000-8000-000000000001")!
+        let channel = ChannelID(uuidString: "00000000-0000-7000-8000-000000000201")!
+        let member = MemberID(uuidString: "00000000-0000-7000-8000-000000000101")!
+        let targetHost = WorkHostID(uuidString: "00000000-0000-7000-8000-000000000902")!
+        let sourceSession = WorkSessionID(uuidString: "00000000-0000-7000-8000-000000000520")!
+        let resumedSession = WorkSessionID(uuidString: "00000000-0000-7000-8000-000000000521")!
+        let root = MessageID(uuidString: "00000000-0000-7000-8000-000000000701")!
+
+        let policyJSON = """
+            {"workTierPolicy":{
+              "workspaceId":"\(workspace)",
+              "memberId":"\(member)",
+              "mode":"auto",
+              "autoTarget":"\(targetHost)",
+              "inherited":false,
+              "updatedAtMs":1784452800000
+            }}
+            """
+        let workspacePolicyJSON = """
+            {"workTierPolicy":{
+              "workspaceId":"\(workspace)",
+              "memberId":null,
+              "mode":"ask",
+              "autoTarget":null,
+              "inherited":false,
+              "updatedAtMs":1784452700000
+            }}
+            """
+        let resumedJSON = """
+            {"workSession":{
+              "id":"\(resumedSession)",
+              "workspaceId":"\(workspace)",
+              "channelId":"\(channel)",
+              "memberId":"\(member)",
+              "hostId":"\(targetHost)",
+              "rootMessageId":"\(root)",
+              "tool":"codex",
+              "label":"MOMO-520",
+              "status":"running",
+              "resumedFromSessionId":"\(sourceSession)",
+              "startedAtMs":1784452900000
+            }}
+            """
+
+        WorkConsoleURLProtocol.setHandler { request in
+            XCTAssertNil(request.url?.query)
+            let path = request.url?.path ?? ""
+            switch (request.httpMethod, path) {
+            case ("GET", "/v1/workspaces/\(workspace)/work-tier-policy/me"):
+                return .init(json: policyJSON)
+            case ("GET", "/v1/workspaces/\(workspace)/work-tier-policy"):
+                return .init(json: workspacePolicyJSON)
+            case ("PUT", "/v1/workspaces/\(workspace)/work-tier-policy/me"):
+                return .init(json: policyJSON)
+            case ("POST", "/v1/workspaces/\(workspace)/work-sessions/\(sourceSession)/resume"):
+                return .init(statusCode: 201, json: resumedJSON)
+            default:
+                return .init(statusCode: 404, json: #"{"title":"unexpected request"}"#)
+            }
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WorkConsoleURLProtocol.self]
+        let backend = MomoServerRESTChatBackend(
+            config: MomoServerRESTChatBackendConfig(
+                baseURL: URL(string: "https://momo.test")!,
+                accessToken: "human-token"
+            ),
+            session: URLSession(configuration: configuration)
+        )
+        try await backend.connect(workspace: workspace, accessToken: "human-token")
+
+        let memberPolicy = try await backend.workTierPolicy(workspace: workspace, scope: .member)
+        let workspacePolicy = try await backend.workTierPolicy(workspace: workspace, scope: .workspace)
+        let updatedPolicy = try await backend.setWorkTierPolicy(
+            workspace: workspace,
+            scope: .member,
+            mode: .auto,
+            autoTarget: targetHost.description.uppercased()
+        )
+        let resumed = try await backend.resumeWorkSession(
+            workspace: workspace,
+            session: sourceSession,
+            targetHost: targetHost
+        )
+
+        XCTAssertEqual(memberPolicy.mode, .auto)
+        XCTAssertEqual(workspacePolicy.mode, .ask)
+        XCTAssertEqual(updatedPolicy.autoTarget, targetHost.description.lowercased())
+        XCTAssertEqual(resumed.id, resumedSession)
+        XCTAssertEqual(resumed.resumedFromSessionId, sourceSession)
+        XCTAssertEqual(resumed.rootMessageId, root)
+
+        let requests = WorkConsoleURLProtocol.requests()
+        XCTAssertEqual(requests.map { $0.httpMethod ?? "" }, ["GET", "GET", "PUT", "POST"])
+        let policyBody = try XCTUnwrap(requests[2].workConsoleBodyData)
+        let policyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: policyBody) as? [String: String]
+        )
+        XCTAssertEqual(
+            policyObject,
+            ["mode": "auto", "autoTarget": targetHost.description.lowercased()]
+        )
+        let resumeBody = try XCTUnwrap(requests[3].workConsoleBodyData)
+        let resumeObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: resumeBody) as? [String: String]
+        )
+        XCTAssertEqual(resumeObject, ["targetHostId": targetHost.description.lowercased()])
+    }
+
+    func testWorkSessionProjectionDecodesOrphanReasonAndResumeLineage() throws {
+        let sourceSession = "00000000-0000-7000-8000-000000000520"
+        let data = Data("""
+            {
+              "id":"00000000-0000-7000-8000-000000000521",
+              "workspaceId":"00000000-0000-7000-8000-000000000001",
+              "channelId":"00000000-0000-7000-8000-000000000201",
+              "memberId":"00000000-0000-7000-8000-000000000101",
+              "hostId":"00000000-0000-7000-8000-000000000901",
+              "rootMessageId":"00000000-0000-7000-8000-000000000701",
+              "tool":"codex",
+              "label":"MOMO-520",
+              "status":"orphaned",
+              "startedAtMs":1784452800000,
+              "endedAtMs":1784452860000,
+              "endReason":"orphaned",
+              "resumedFromSessionId":"\(sourceSession)"
+            }
+            """.utf8)
+
+        let session = try JSONDecoder.momo.decode(MomoWorkSession.self, from: data)
+
+        XCTAssertTrue(session.isOrphaned)
+        XCTAssertEqual(session.endReason, .orphaned)
+        XCTAssertEqual(session.resumedFromSessionId?.description.lowercased(), sourceSession)
+    }
+
     @MainActor
     func testRemoteTerminalStreamsOutputAndRoundTripsInputResizeAndKill() async throws {
         let transport = MockRemoteTerminalTransport()

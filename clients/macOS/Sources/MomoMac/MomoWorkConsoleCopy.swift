@@ -1,4 +1,5 @@
 import Foundation
+import MomoCore
 
 extension MomoWorkspaceCopy {
     var workConsole: String { language == .korean ? "Work Console" : "Work Console" }
@@ -53,7 +54,39 @@ extension MomoWorkspaceCopy {
             : "It was started on another host or before the app reopened. The thread history remains available."
     }
     var workSessionRunning: String { language == .korean ? "실행 중" : "Running" }
+    var workSessionOrphaned: String { language == .korean ? "호스트 연결 끊김" : "Host disconnected" }
     var workSessionEnded: String { language == .korean ? "종료됨" : "Ended" }
+    func workSessionStatus(_ status: MomoWorkSessionStatus) -> String {
+        switch status {
+        case .running: workSessionRunning
+        case .orphaned: workSessionOrphaned
+        case .ended: workSessionEnded
+        }
+    }
+    var workResumeOfferTitle: String {
+        language == .korean ? "다른 호스트에서 재개" : "Resume on another host"
+    }
+    var workResumeOfferBody: String {
+        language == .korean
+            ? "이 세션의 호스트 연결이 끊겼습니다. 마지막으로 push한 커밋부터 새 세션을 시작할 수 있습니다."
+            : "This session lost its host. You can start a new session from the last pushed commit."
+    }
+    var workResumeLossWarning: String {
+        language == .korean
+            ? "미커밋 변경과 실행 중인 프로세스는 이전되지 않습니다."
+            : "Uncommitted changes and running processes are not transferred."
+    }
+    var workResumeChooseHost: String { language == .korean ? "재개할 호스트" : "Resume host" }
+    var workResumeNoHost: String {
+        language == .korean ? "온라인 상태인 다른 호스트가 없습니다." : "No other online host is available."
+    }
+    var workResumeAction: String { language == .korean ? "새 세션으로 재개" : "Resume as new session" }
+    var workResumeInFlight: String { language == .korean ? "재개 요청 중" : "Resuming" }
+    var workResumeOpenConsole: String { language == .korean ? "Work에서 재개" : "Resume in Work" }
+    var workSessionLineage: String { language == .korean ? "이전 세션에서 이어짐" : "Continued from session" }
+    func workSessionShortID(_ id: WorkSessionID) -> String {
+        String(id.description.lowercased().prefix(8))
+    }
     func workSessionExit(_ code: Int) -> String {
         language == .korean ? "종료 코드 \(code)" : "Exit \(code)"
     }
@@ -136,6 +169,32 @@ extension MomoWorkspaceCopy {
     }
     var startWorkSession: String { language == .korean ? "세션 시작" : "Start session" }
     var workConsoleSettings: String { language == .korean ? "Work 설정" : "Work settings" }
+    var workTierPolicyTitle: String { language == .korean ? "호스트 상실 시 재개" : "Host-loss recovery" }
+    var workTierPolicyPersonal: String { language == .korean ? "내 정책" : "My policy" }
+    var workTierPolicyWorkspace: String { language == .korean ? "워크스페이스 기본" : "Workspace default" }
+    var workTierPolicyInherited: String {
+        language == .korean ? "워크스페이스 기본값을 상속 중" : "Using the workspace default"
+    }
+    var workTierPolicyT1Only: String { language == .korean ? "이 Mac에서만" : "This Mac only" }
+    var workTierPolicyAsk: String { language == .korean ? "연결 끊김 시 묻기" : "Ask when disconnected" }
+    var workTierPolicyAuto: String { language == .korean ? "자동 재개" : "Resume automatically" }
+    var workTierPolicyCloud: String { language == .korean ? "momo Cloud" : "momo Cloud" }
+    var workTierPolicyUpdating: String { language == .korean ? "정책 저장 중" : "Saving policy" }
+    var workTierPolicyFailed: String {
+        language == .korean ? "정책을 불러오지 못했습니다. 기존 세션은 그대로 유지됩니다." : "Could not load the policy. Existing sessions are unchanged."
+    }
+    var workTierPolicyHelp: String {
+        language == .korean
+            ? "자동 재개는 선택한 호스트에서 마지막 push 커밋으로 새 세션을 시작합니다. 비용이 생길 수 있어 직접 켜야 합니다."
+            : "Automatic recovery starts a new session from the last pushed commit on the selected host. It is opt-in because it may incur cost."
+    }
+    func workTierPolicyTitle(_ mode: MomoWorkTierPolicyMode) -> String {
+        switch mode {
+        case .t1Only: workTierPolicyT1Only
+        case .ask: workTierPolicyAsk
+        case .auto: workTierPolicyAuto
+        }
+    }
     var terminalTheme: String { language == .korean ? "터미널 테마" : "Terminal theme" }
     var terminalThemeHelp: String {
         language == .korean

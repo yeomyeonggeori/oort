@@ -153,7 +153,7 @@ struct IOSWorkView: View {
 }
 
 @MainActor
-private struct IOSWorkSessionDetailView: View {
+struct IOSWorkSessionDetailView: View {
     let session: IOSWorkSession
     let host: WorkHost?
     let members: [MemberID: Member]

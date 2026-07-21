@@ -5,11 +5,19 @@ import Observation
 public protocol IOSConversationBackend: Sendable {
     func snapshot() async throws -> IOSConversationSnapshot
     func history(channel: ChannelID, after sequence: Int64?, limit: Int) async throws -> [Message]
+    func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message]
+    func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage
     func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState
     func setChannelMuted(_ channel: ChannelID, muted: Bool) async throws -> Bool
     func subscribe(channel: ChannelID) async throws -> AsyncStream<RealtimeEvent>
     func realtimeStatus(channel: ChannelID) async -> AsyncStream<RealtimeConnectionStatus>
     func send(_ draft: DraftMessage, clientMsgId: UUID) async throws -> Message
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment
+    func downloadAttachment(_ attachment: MessageAttachment, from channel: ChannelID) async throws -> URL
     func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]]
     func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta
     func removeReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta
@@ -35,6 +43,22 @@ public struct IOSThreadRepliesPage: Sendable, Hashable {
 }
 
 public extension IOSConversationBackend {
+    func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message] {
+        try await history(channel: channel, after: nil, limit: limit)
+    }
+    func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage {
+        throw SessionError.server(status: 501, message: "Workspace message search is unavailable.")
+    }
+    func uploadAttachment(fileURL: URL, to channel: ChannelID) async throws -> MessageAttachment {
+        throw IOSAttachmentTransferIssue.unavailable
+    }
+    func downloadAttachment(_ attachment: MessageAttachment, from channel: ChannelID) async throws -> URL {
+        throw IOSAttachmentTransferIssue.unavailable
+    }
     func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] { [:] }
     func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
         throw SessionError.server(status: 501, message: "Message reactions are unavailable.")
@@ -65,6 +89,7 @@ public extension IOSConversationBackend {
 struct IOSPendingMessageSend: Sendable, Equatable {
     let draft: DraftMessage
     let clientMsgId: UUID
+    let attachments: [MessageAttachment]
 }
 
 struct IOSPendingApprovalDecision: Sendable, Equatable {
@@ -458,10 +483,118 @@ public final class IOSChannelListModel {
 
 @MainActor
 @Observable
+public final class IOSThreadInboxModel {
+    public struct Failure: Equatable {
+        public let message: String
+        public let isOffline: Bool
+    }
+
+    public enum Phase: Equatable {
+        case loading
+        case loaded
+        case failed(Failure)
+    }
+
+    public private(set) var phase: Phase = .loading
+    public private(set) var items: [IOSThreadListItem] = []
+    public private(set) var refreshFailureMessage: String?
+
+    private let currentMemberID: MemberID
+    private let backend: any IOSConversationBackend
+
+    public init(currentMemberID: MemberID, backend: any IOSConversationBackend) {
+        self.currentMemberID = currentMemberID
+        self.backend = backend
+    }
+
+    public func load(channels: [IOSChannelListItem]) async {
+        if items.isEmpty { phase = .loading }
+        refreshFailureMessage = nil
+        do {
+            var collected: [IOSThreadListItem] = []
+            for channel in channels {
+                try Task.checkCancellation()
+                let history = try await backend.history(channel: channel.id, after: nil, limit: 200)
+                let roots = history.filter {
+                    $0.rootId == nil && !$0.isDeleted && ($0.thread?.replyCount ?? 0) > 0
+                }
+                var participantsByRoot: [MessageID: [MemberID]] = [:]
+                for root in roots {
+                    participantsByRoot[root.id] = try await participantMemberIDs(
+                        channel: channel.id,
+                        root: root.id
+                    )
+                }
+                collected.append(contentsOf: IOSThreadListAggregator.participatingThreads(
+                    channel: channel,
+                    messages: roots,
+                    participantsByRoot: participantsByRoot,
+                    currentMemberID: currentMemberID
+                ))
+            }
+            items = IOSThreadListAggregator.sorted(collected)
+            phase = .loaded
+        } catch is CancellationError {
+            return
+        } catch {
+            let failure = Self.failure(for: error)
+            if items.isEmpty {
+                phase = .failed(failure)
+            } else {
+                phase = .loaded
+                refreshFailureMessage = failure.message
+            }
+        }
+    }
+
+    public func clearRefreshFailure() {
+        refreshFailureMessage = nil
+    }
+
+    private func participantMemberIDs(channel: ChannelID, root: MessageID) async throws -> [MemberID] {
+        var result: [MemberID] = []
+        var seenMembers = Set<MemberID>()
+        var cursor: Int64?
+        var seenCursors = Set<Int64>()
+        for _ in 0..<20 {
+            let page = try await backend.threadReplies(
+                channel: channel,
+                root: root,
+                cursor: cursor,
+                limit: 200
+            )
+            for message in page.messages where seenMembers.insert(message.authorMemberId).inserted {
+                result.append(message.authorMemberId)
+            }
+            guard let next = page.nextCursor,
+                  next != cursor,
+                  seenCursors.insert(next).inserted else { break }
+            cursor = next
+        }
+        return result
+    }
+
+    private static func failure(for error: Error) -> Failure {
+        let isOffline = (error as? SessionError).map {
+            if case .transport = $0 { return true }
+            return false
+        } ?? false
+        return Failure(
+            message: isOffline
+                ? "Threads could not be refreshed while offline. Existing results are preserved."
+                : "Threads could not be refreshed. Existing results are preserved.",
+            isOffline: isOffline
+        )
+    }
+}
+
+@MainActor
+@Observable
 public final class IOSTimelineModel {
     public struct Failure: Equatable {
         public let message: String
         public let isOffline: Bool
+        public let requiresSignIn: Bool
     }
 
     public enum Phase: Equatable {
@@ -485,20 +618,27 @@ public final class IOSTimelineModel {
     public private(set) var replyTarget: Message?
     public private(set) var isSending = false
     public private(set) var sendFailureMessage: String?
+    public private(set) var attachmentFailureMessage: String?
+    public private(set) var attachmentDrafts: [IOSAttachmentDraft] = []
+    public private(set) var attachmentDownloadStates: [FileID: IOSAttachmentDownloadState] = [:]
     public private(set) var reactionMembers: [MessageID: [String: Set<MemberID>]] = [:]
     public private(set) var reactionMutationsInFlight: Set<String> = []
     public private(set) var messageMutationsInFlight: Set<MessageID> = []
     public private(set) var interactionFailureMessage: String?
+    public private(set) var refreshFailure: Failure?
     public private(set) var recentReactionEmojis = ["👍", "❤️", "😂", "🎉", "👀"]
     public private(set) var approvalDecisionsInFlight: Set<ApprovalID> = []
     public private(set) var approvalDecisionFailures: Set<ApprovalID> = []
     public private(set) var agentPartials: [IOSAgentPartialProjection] = []
+    public private(set) var threadParticipantIDs: [MessageID: [MemberID]] = [:]
     public let huddle: IOSHuddleModel
 
     private let channel: ChannelID
     private let currentMemberID: MemberID
     private let backend: any IOSConversationBackend
     private let threadRoot: MessageID?
+    private let initialThreadRootMessage: Message?
+    private let initialBeforeSequence: Int64?
     private var workAgentMemberID: MemberID?
     private var workAgentHandle: String?
     private let workSessionID: WorkSessionID?
@@ -522,6 +662,8 @@ public final class IOSTimelineModel {
         huddleAudioSession: (any IOSHuddleAudioSession)? = nil,
         microphonePermission: (any IOSMicrophonePermissionAuthorizing)? = nil,
         threadRoot: MessageID? = nil,
+        initialThreadRootMessage: Message? = nil,
+        initialBeforeSequence: Int64? = nil,
         workAgentMemberID: MemberID? = nil,
         workAgentHandle: String? = nil,
         workSessionID: WorkSessionID? = nil,
@@ -531,6 +673,8 @@ public final class IOSTimelineModel {
         self.currentMemberID = currentMemberID
         self.backend = backend
         self.threadRoot = threadRoot
+        self.initialThreadRootMessage = initialThreadRootMessage
+        self.initialBeforeSequence = initialBeforeSequence
         self.workAgentMemberID = workAgentMemberID
         self.workAgentHandle = workAgentHandle
         self.workSessionID = workSessionID
@@ -584,7 +728,8 @@ public final class IOSTimelineModel {
 
     public func load() async {
         guard !isSending else { return }
-        phase = .loading
+        if messages.isEmpty { phase = .loading }
+        refreshFailure = nil
         isLoadingTimelineProjection = true
         bufferedRealtimeEvents = []
         subscribe()
@@ -613,17 +758,16 @@ public final class IOSTimelineModel {
             return
         } catch {
             isLoadingTimelineProjection = false
+            let bufferedEvents = bufferedRealtimeEvents
             bufferedRealtimeEvents = []
-            let isOffline = (error as? SessionError).map {
-                if case .transport = $0 { return true }
-                return false
-            } ?? false
-            phase = .failed(Failure(
-                message: isOffline
-                    ? "Message history is unavailable while offline. Check your connection and try again."
-                    : "Could not load message history. Try again.",
-                isOffline: isOffline
-            ))
+            for event in bufferedEvents { await applyRealtimeEvent(event) }
+            let failure = Self.historyFailure(for: error)
+            if messages.isEmpty {
+                phase = .failed(failure)
+            } else {
+                phase = .loaded
+                refreshFailure = failure
+            }
         }
     }
 
@@ -631,6 +775,28 @@ public final class IOSTimelineModel {
         eventTask?.cancel()
         statusTask?.cancel()
         await load()
+    }
+
+    private static func historyFailure(for error: Error) -> Failure {
+        let sessionError = error as? SessionError
+        let isOffline = sessionError.map {
+            if case .transport = $0 { return true }
+            return false
+        } ?? false
+        let requiresSignIn = sessionError.map {
+            if case .sessionExpired = $0 { return true }
+            if case .secureStorage = $0 { return true }
+            return false
+        } ?? false
+        let message: String
+        if requiresSignIn {
+            message = "Your session expired. Existing messages are preserved; sign in again from Profile."
+        } else if isOffline {
+            message = "Message history could not be refreshed while offline. Existing messages are preserved."
+        } else {
+            message = "Message history could not be refreshed. Existing messages are preserved."
+        }
+        return Failure(message: message, isOffline: isOffline, requiresSignIn: requiresSignIn)
     }
 
     public func resume() async {
@@ -657,6 +823,16 @@ public final class IOSTimelineModel {
             await huddle.apply(delta)
         }
         applyAgentProjection(event)
+        if threadRoot == nil,
+           case .message(let message) = event,
+           let rootID = message.rootId
+        {
+            var participants = threadParticipantIDs[rootID] ?? []
+            if !participants.contains(message.authorMemberId) {
+                participants.append(message.authorMemberId)
+                threadParticipantIDs[rootID] = participants
+            }
+        }
         guard belongsToCurrentTimeline(event) else { return }
         messages = IOSTimelineReducer.applying(event, to: messages, channel: channel)
         switch event {
@@ -805,20 +981,116 @@ public final class IOSTimelineModel {
         replyTarget = message
     }
 
+    public func loadThreadParticipants(for message: Message) async {
+        guard message.rootId == nil,
+              (message.thread?.replyCount ?? 0) > 0,
+              threadParticipantIDs[message.id] == nil
+        else { return }
+        do {
+            let page = try await backend.threadReplies(
+                channel: channel,
+                root: message.id,
+                cursor: nil,
+                limit: 50
+            )
+            var seen = Set<MemberID>()
+            threadParticipantIDs[message.id] = page.messages
+                .map(\.authorMemberId)
+                .filter { seen.insert($0).inserted }
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+    }
+
     public func cancelReply() {
         replyTarget = nil
+    }
+
+    public func stageAttachment(fileURL: URL) throws {
+        let draft = try IOSAttachmentFileBoundary.draft(for: fileURL)
+        guard !attachmentDrafts.contains(where: { $0.fileURL.standardizedFileURL == fileURL.standardizedFileURL }) else {
+            return
+        }
+        attachmentDrafts.append(draft)
+        attachmentFailureMessage = nil
+    }
+
+    public func removeAttachmentDraft(_ id: UUID) {
+        guard attachmentDrafts.first(where: { $0.id == id })?.state != .uploading else { return }
+        attachmentDrafts.removeAll { $0.id == id }
+        if !attachmentDrafts.contains(where: { if case .failed = $0.state { return true }; return false }) {
+            attachmentFailureMessage = nil
+        }
+    }
+
+    public func retryAttachmentDraft(_ id: UUID) async {
+        guard !isSending,
+              let index = attachmentDrafts.firstIndex(where: { $0.id == id }),
+              case .failed = attachmentDrafts[index].state else { return }
+        isSending = true
+        defer { isSending = false }
+        attachmentDrafts[index].state = .uploading
+        do {
+            let uploaded = try await backend.uploadAttachment(fileURL: attachmentDrafts[index].fileURL, to: channel)
+            guard let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) else { return }
+            attachmentDrafts[currentIndex].state = .uploaded(uploaded)
+            if !attachmentDrafts.contains(where: { if case .failed = $0.state { return true }; return false }) {
+                attachmentFailureMessage = nil
+            }
+        } catch is CancellationError {
+            if let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) {
+                attachmentDrafts[currentIndex].state = .ready
+            }
+        } catch {
+            markAttachmentDraftFailed(id, error: error)
+        }
+    }
+
+    public func attachmentDownloadState(for attachment: MessageAttachment) -> IOSAttachmentDownloadState? {
+        attachmentDownloadStates[attachment.id]
+    }
+
+    public func cachedAttachmentURL(for attachment: MessageAttachment) -> URL? {
+        guard case .completed(let url) = attachmentDownloadStates[attachment.id] else { return nil }
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    @discardableResult
+    public func downloadAttachment(_ attachment: MessageAttachment) async -> URL? {
+        if let cached = cachedAttachmentURL(for: attachment) { return cached }
+        guard attachmentDownloadStates[attachment.id] != .downloading else { return nil }
+        attachmentDownloadStates[attachment.id] = .downloading
+        do {
+            let url = try await backend.downloadAttachment(attachment, from: channel)
+            attachmentDownloadStates[attachment.id] = .completed(url)
+            return url
+        } catch is CancellationError {
+            attachmentDownloadStates[attachment.id] = nil
+            return nil
+        } catch {
+            attachmentDownloadStates[attachment.id] = .failed
+            return nil
+        }
     }
 
     /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
     /// Adds a local echo and reconciles it through the IOS-2 clientMsgId guard.
     public func sendComposerDraft() async {
         let body = composerDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard phase == .loaded, !body.isEmpty, !isSending, failedSend == nil else { return }
-        guard threadRoot == nil || (workAgentHandle != nil && workSessionID != nil) else {
+        guard phase == .loaded,
+              !isSending,
+              failedSend == nil,
+              !body.isEmpty || !attachmentDrafts.isEmpty else { return }
+        guard workSessionID == nil || workAgentHandle != nil else {
             sendFailureMessage = "Choose the agent that owns this Work session before sending input."
             return
         }
-        let preparedBody = workInstructionBody(for: body, requestsRead: nextWorkCommandIsRead)
+        isSending = true
+        defer { isSending = false }
+        guard let uploadedAttachments = await uploadPendingAttachments() else { return }
+        let preparedBody = body.isEmpty ? nil : workInstructionBody(for: body, requestsRead: nextWorkCommandIsRead)
         nextWorkCommandIsRead = false
         let replyToID = replyTarget?.id ?? threadRoot
         var props: [String: JSON] = [:]
@@ -832,12 +1104,15 @@ public final class IOSTimelineModel {
                 body: preparedBody,
                 props: .object(props),
                 rootId: threadRoot,
-                replyToId: replyToID
+                replyToId: replyToID,
+                attachmentIds: uploadedAttachments.map(\.id)
             ),
-            clientMsgId: UUID()
+            clientMsgId: UUID(),
+            attachments: uploadedAttachments
         )
         composerDraft = ""
         replyTarget = nil
+        attachmentDrafts = []
         messages = IOSTimelineReducer.applying(
             .message(optimisticMessage(for: pending)),
             to: messages,
@@ -855,6 +1130,8 @@ public final class IOSTimelineModel {
 
     public func retryFailedSend() async {
         guard let failedSend, !isSending else { return }
+        isSending = true
+        defer { isSending = false }
         updateOptimisticMessage(clientMsgId: failedSend.clientMsgId, state: .sent)
         await performSend(failedSend)
     }
@@ -890,14 +1167,15 @@ public final class IOSTimelineModel {
     }
 
     private func performSend(_ pending: IOSPendingMessageSend) async {
-        isSending = true
         sendFailureMessage = nil
-        defer { isSending = false }
         do {
             var acknowledged = try await backend.send(pending.draft, clientMsgId: pending.clientMsgId)
             acknowledged.clientMsgId = pending.clientMsgId
             acknowledged.rootId = pending.draft.rootId
             acknowledged.replyToId = pending.draft.replyToId
+            if acknowledged.attachments == nil || acknowledged.attachments?.isEmpty == true {
+                acknowledged.attachments = pending.attachments
+            }
             messages = IOSTimelineReducer.applying(.message(acknowledged), to: messages, channel: channel)
             failedSend = nil
             if let sequence = acknowledged.seq {
@@ -911,6 +1189,48 @@ public final class IOSTimelineModel {
             failedSend = pending
             updateOptimisticMessage(clientMsgId: pending.clientMsgId, state: .failed)
             sendFailureMessage = "Message not sent. Retry sending it."
+        }
+    }
+
+    private func uploadPendingAttachments() async -> [MessageAttachment]? {
+        attachmentFailureMessage = nil
+        var uploaded: [MessageAttachment] = []
+        for id in attachmentDrafts.map(\.id) {
+            guard let index = attachmentDrafts.firstIndex(where: { $0.id == id }) else { continue }
+            if case .uploaded(let attachment) = attachmentDrafts[index].state {
+                uploaded.append(attachment)
+                continue
+            }
+            attachmentDrafts[index].state = .uploading
+            do {
+                let attachment = try await backend.uploadAttachment(
+                    fileURL: attachmentDrafts[index].fileURL,
+                    to: channel
+                )
+                guard let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) else { return nil }
+                attachmentDrafts[currentIndex].state = .uploaded(attachment)
+                uploaded.append(attachment)
+            } catch is CancellationError {
+                if let currentIndex = attachmentDrafts.firstIndex(where: { $0.id == id }) {
+                    attachmentDrafts[currentIndex].state = .ready
+                }
+                return nil
+            } catch {
+                markAttachmentDraftFailed(id, error: error)
+                return nil
+            }
+        }
+        return uploaded
+    }
+
+    private func markAttachmentDraftFailed(_ id: UUID, error: Error) {
+        guard let index = attachmentDrafts.firstIndex(where: { $0.id == id }) else { return }
+        if let issue = error as? IOSAttachmentTransferIssue, issue == .fileTooLarge {
+            attachmentDrafts[index].state = .failed(.fileTooLarge)
+            attachmentFailureMessage = "Attachments must be 100 MB or smaller. Remove this file or choose another."
+        } else {
+            attachmentDrafts[index].state = .failed(.unavailable)
+            attachmentFailureMessage = "Attachment upload failed. Retry the failed file."
         }
     }
 
@@ -942,6 +1262,7 @@ public final class IOSTimelineModel {
             body: pending.draft.body,
             props: pending.draft.props,
             rootId: pending.draft.rootId,
+            attachments: pending.attachments,
             replyToId: pending.draft.replyToId,
             clientMsgId: pending.clientMsgId,
             createdAtMs: now
@@ -975,9 +1296,18 @@ public final class IOSTimelineModel {
 
     private func initialMessages() async throws -> [Message] {
         guard let threadRoot else {
+            if let initialBeforeSequence {
+                return try await backend.historyBefore(
+                    channel: channel,
+                    before: initialBeforeSequence,
+                    limit: 200
+                )
+                .filter { $0.rootId == nil }
+            }
             return try await backend.history(channel: channel, after: nil, limit: 200)
+                .filter { $0.rootId == nil }
         }
-        var messages: [Message] = []
+        var messages: [Message] = initialThreadRootMessage.map { [$0] } ?? []
         var cursor: Int64?
         var seenCursors: Set<Int64> = []
         for _ in 0..<20 {
@@ -997,10 +1327,21 @@ public final class IOSTimelineModel {
     }
 
     private func belongsToCurrentTimeline(_ event: RealtimeEvent) -> Bool {
-        guard let threadRoot else { return true }
+        guard let threadRoot else {
+            switch event {
+            case .message(let message), .messageEdited(let message):
+                return message.rootId == nil
+            case .messageDeleted(let id):
+                return messages.contains(where: { $0.id == id })
+            case .reaction(let delta):
+                return messages.contains(where: { $0.id == delta.messageId })
+            default:
+                return true
+            }
+        }
         switch event {
         case .message(let message), .messageEdited(let message):
-            return message.rootId == threadRoot
+            return message.id == threadRoot || message.rootId == threadRoot
         case .messageDeleted(let id):
             return messages.contains(where: { $0.id == id })
         case .reaction(let delta):
@@ -1009,7 +1350,9 @@ public final class IOSTimelineModel {
             return messages.contains(where: { Self.approvalID(for: $0) == approval.approvalId })
         case .agentStatus, .agentPartial:
             return false
-        case .threadUpdated, .typing, .presence, .huddle, .workSession, .workControl:
+        case .threadUpdated(let delta):
+            return delta.rootId == threadRoot
+        case .typing, .presence, .huddle, .workSession, .workControl:
             return false
         }
     }

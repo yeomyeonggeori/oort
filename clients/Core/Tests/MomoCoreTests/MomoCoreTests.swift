@@ -39,6 +39,132 @@ final class MomoCoreTests: XCTestCase {
         XCTAssertEqual(json["nested"]?["c"]?.doubleValue, 3.5)
     }
 
+    func testArtifactPresentationParsesUnifiedDiffByFile() throws {
+        let patch = """
+        diff --git a/Sources/App.swift b/Sources/App.swift
+        index 1111111..2222222 100644
+        --- a/Sources/App.swift
+        +++ b/Sources/App.swift
+        @@ -1,2 +1,3 @@
+         import SwiftUI
+        -let title = "Old"
+        +let title = "New"
+        +let enabled = true
+        diff --git a/README.md b/README.md
+        --- a/README.md
+        +++ b/README.md
+        @@ -1 +1 @@
+        -Old copy
+        +New copy
+        """
+        let message = artifactMessage(
+            type: .diff,
+            props: ["artifact_kind": "diff", "title": "App polish", "patch": .string(patch)]
+        )
+
+        guard case .diff(let presentation) = MessageArtifactPresentation.resolve(message: message) else {
+            return XCTFail("Expected a diff presentation")
+        }
+
+        XCTAssertEqual(presentation.title, "App polish")
+        XCTAssertEqual(presentation.files.map(\.path), ["Sources/App.swift", "README.md"])
+        XCTAssertEqual(presentation.additions, 3)
+        XCTAssertEqual(presentation.deletions, 2)
+        XCTAssertEqual(presentation.files[0].additions, 2)
+        XCTAssertEqual(presentation.files[0].deletions, 1)
+    }
+
+    func testArtifactPresentationConservativelyDetectsFencedDiff() throws {
+        let message = artifactMessage(
+            type: .text,
+            body: """
+            ```diff
+            --- a/a.txt
+            +++ b/a.txt
+            @@ -1 +1 @@
+            -before
+            +after
+            ```
+            """
+        )
+
+        guard case .diff(let presentation) = MessageArtifactPresentation.resolve(message: message) else {
+            return XCTFail("Expected a detected diff presentation")
+        }
+        XCTAssertEqual(presentation.files.first?.path, "a.txt")
+        XCTAssertEqual(presentation.additions, 1)
+        XCTAssertEqual(presentation.deletions, 1)
+    }
+
+    func testArtifactPresentationLeavesGeneralCodeAndOversizedDiffToFallback() throws {
+        let code = artifactMessage(type: .text, body: "```swift\nlet value = 1\n```")
+        XCTAssertNil(MessageArtifactPresentation.resolve(message: code))
+
+        let proseWithDiff = artifactMessage(
+            type: .text,
+            body: "Here is the requested explanation.\n```diff\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-before\n+after\n```"
+        )
+        XCTAssertNil(
+            MessageArtifactPresentation.resolve(message: proseWithDiff),
+            "Auto-detection must not replace prose surrounding a diff excerpt"
+        )
+
+        let oversizedPatch = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-" + String(repeating: "x", count: 200_001)
+        let oversized = artifactMessage(
+            type: .diff,
+            props: ["artifact_kind": "diff", "patch": .string(oversizedPatch)]
+        )
+        XCTAssertNil(MessageArtifactPresentation.resolve(message: oversized))
+    }
+
+    func testArtifactLinkPresentationAcceptsOnlyCredentialSafeHTTPS() throws {
+        let pullRequest = artifactMessage(
+            type: .artifact,
+            props: [
+                "artifact_kind": "pr",
+                "title": "Ship artifact cards",
+                "branch": "feat/artifacts",
+                "status": "ready",
+                "repository": "Dawn-kim-official/momo",
+                "url": "https://github.com/Dawn-kim-official/momo/pull/592",
+            ]
+        )
+        guard case .link(let safe) = MessageArtifactPresentation.resolve(message: pullRequest) else {
+            return XCTFail("Expected a link presentation")
+        }
+        XCTAssertEqual(safe.kind, .pr)
+        XCTAssertEqual(safe.url?.absoluteString, "https://github.com/Dawn-kim-official/momo/pull/592")
+
+        let unsafe = artifactMessage(
+            type: .artifact,
+            props: [
+                "artifact_kind": "commit",
+                "url": "https://example.com/commit/abc?capability=secret",
+            ]
+        )
+        guard case .link(let rejectedURL) = MessageArtifactPresentation.resolve(message: unsafe) else {
+            return XCTFail("Expected metadata to remain renderable")
+        }
+        XCTAssertNil(rejectedURL.url)
+    }
+
+    private func artifactMessage(
+        type: MessageType,
+        body: String? = nil,
+        props: JSON = .object([:])
+    ) -> Message {
+        Message(
+            id: MessageID(),
+            channelId: ChannelID(),
+            seq: 1,
+            hlcTs: 1,
+            authorMemberId: MemberID(),
+            type: type,
+            body: body,
+            props: props
+        )
+    }
+
     func testMemberCapabilitiesNormalizeForDisplayAndMatching() throws {
         let workspace = WorkspaceID()
         let member = Member(

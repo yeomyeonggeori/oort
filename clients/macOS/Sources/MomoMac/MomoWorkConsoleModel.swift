@@ -20,7 +20,35 @@ enum MomoWorkTool: String, CaseIterable, Codable, Sendable, Hashable, Identifiab
 
 enum MomoWorkSessionStatus: String, Codable, Sendable, Hashable {
     case running
+    case orphaned
     case ended
+}
+
+enum MomoWorkSessionEndReason: String, Codable, Sendable, Hashable {
+    case orphaned
+    case resumed
+}
+
+enum MomoWorkTierPolicyMode: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {
+    case t1Only = "t1_only"
+    case ask
+    case auto
+
+    var id: String { rawValue }
+}
+
+enum MomoWorkTierPolicyScope: Sendable, Hashable {
+    case workspace
+    case member
+}
+
+struct MomoWorkTierPolicy: Codable, Sendable, Hashable {
+    let workspaceId: WorkspaceID
+    let memberId: MemberID?
+    let mode: MomoWorkTierPolicyMode
+    let autoTarget: String?
+    let inherited: Bool
+    let updatedAtMs: Int64?
 }
 
 enum MomoWorkSessionObservation: String, Codable, Sendable, Hashable {
@@ -62,12 +90,15 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
     let startedAtMs: Int64
     var endedAtMs: Int64?
     var exitCode: Int?
+    var endReason: MomoWorkSessionEndReason?
+    let resumedFromSessionId: WorkSessionID?
     let ptyId: String?
     let remoteAttachAvailable: Bool?
     var observation: MomoWorkSessionObservation?
     var observerGrantCount: Int64?
 
     var isRunning: Bool { status == .running }
+    var isOrphaned: Bool { status == .orphaned }
     var isRemotePTYBound: Bool { remoteAttachAvailable == true || ptyId != nil }
 
     init(
@@ -83,6 +114,8 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
         startedAtMs: Int64,
         endedAtMs: Int64? = nil,
         exitCode: Int? = nil,
+        endReason: MomoWorkSessionEndReason? = nil,
+        resumedFromSessionId: WorkSessionID? = nil,
         ptyId: String? = nil,
         remoteAttachAvailable: Bool? = nil,
         observation: MomoWorkSessionObservation? = .open,
@@ -100,6 +133,8 @@ struct MomoWorkSession: Identifiable, Codable, Sendable, Hashable {
         self.startedAtMs = startedAtMs
         self.endedAtMs = endedAtMs
         self.exitCode = exitCode
+        self.endReason = endReason
+        self.resumedFromSessionId = resumedFromSessionId
         self.ptyId = ptyId
         self.remoteAttachAvailable = remoteAttachAvailable
         self.observation = observation
@@ -118,6 +153,7 @@ struct MomoWorkConsoleRealtimeEvent: Identifiable, Hashable {
     enum Payload: Hashable {
         case session(WorkSessionDelta)
         case control(WorkControlDelta)
+        case projectionRefresh(WorkSessionID)
     }
 
     let id = UUID()
@@ -187,6 +223,24 @@ protocol MomoWorkConsoleBackend: Sendable {
         session: WorkSessionID,
         observation: MomoWorkSessionObservation
     ) async throws -> MomoWorkSession
+
+    func resumeWorkSession(
+        workspace: WorkspaceID,
+        session: WorkSessionID,
+        targetHost: WorkHostID
+    ) async throws -> MomoWorkSession
+
+    func workTierPolicy(
+        workspace: WorkspaceID,
+        scope: MomoWorkTierPolicyScope
+    ) async throws -> MomoWorkTierPolicy
+
+    func setWorkTierPolicy(
+        workspace: WorkspaceID,
+        scope: MomoWorkTierPolicyScope,
+        mode: MomoWorkTierPolicyMode,
+        autoTarget: String?
+    ) async throws -> MomoWorkTierPolicy
 
     func acknowledgeWorkControl(
         workspace: WorkspaceID,

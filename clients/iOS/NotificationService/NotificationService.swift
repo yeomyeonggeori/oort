@@ -19,8 +19,9 @@ final class NotificationService: UNNotificationServiceExtension, @unchecked Send
         }
         bestAttemptContent = content
         guard let envelope = try? MomoPushParser.parse(userInfo: request.content.userInfo),
-              let defaults = UserDefaults(suiteName: MomoPushContract.appGroupIdentifier),
-              let data = defaults.data(forKey: MomoPushContract.sessionKey),
+              let data = MomoKeychainValueStore().data(
+                for: MomoPushContract.pushFetchSessionAccount
+              ),
               let session = try? JSONDecoder().decode(PushFetchSession.self, from: data)
         else {
             // Fail open: preserve the relay's static placeholder unchanged.

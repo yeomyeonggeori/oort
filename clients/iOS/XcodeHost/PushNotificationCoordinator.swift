@@ -14,7 +14,9 @@ final class MomoiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        IOSNotificationCategoryRegistry.register(center: center)
         if let userInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             Task { @MainActor in
                 IOSPushDeepLinkRouter.shared.route(userInfo: userInfo)
@@ -24,8 +26,7 @@ final class MomoiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        let tokenSuffix = deviceToken.suffix(4).map { String(format: "%02x", $0) }.joined()
-        pushLogger.info("APNs device token received suffix=\(tokenSuffix, privacy: .public)")
+        pushLogger.info("APNs device token received")
         Task { @MainActor in
             await PushNotificationCoordinator.shared.didRegister(deviceToken: deviceToken)
         }
@@ -40,20 +41,68 @@ final class MomoiOSAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificat
 
     func applicationWillEnterForeground(_ application: UIApplication) {
         Task { @MainActor in
+            IOSNotificationCategoryRegistry.register()
             await PushNotificationCoordinator.shared.retryRegistrationOnForeground()
         }
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        guard let envelope = try? MomoPushParser.parse(
+            userInfo: notification.request.content.userInfo
+        ) else { return [.banner, .list, .sound] }
+        await MainActor.run {
+            UIApplication.shared.applicationIconBadgeNumber = envelope.badge
+        }
+        return [.banner, .list, .sound]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        // non-Sendable 파라미터는 nonisolated 문맥에서 Sendable 값으로 환원 후 hop한다.
         guard let envelope = try? MomoPushParser.parse(
             userInfo: response.notification.request.content.userInfo
         ), let link = IOSPushDeepLink(envelope: envelope) else { return }
+
         await MainActor.run {
-            IOSPushDeepLinkRouter.shared.route(link: link)
+            UIApplication.shared.applicationIconBadgeNumber = envelope.badge
+        }
+
+        switch response.actionIdentifier {
+        case UNNotificationDismissActionIdentifier:
+            return
+        case UNNotificationDefaultActionIdentifier:
+            await MainActor.run { IOSPushDeepLinkRouter.shared.route(link: link) }
+        case MomoPushActionIdentifier.quickReply:
+            guard let textResponse = response as? UNTextInputNotificationResponse else { return }
+            let succeeded = await PushNotificationCoordinator.shared.handle(
+                action: .quickReply(textResponse.userText),
+                envelope: envelope
+            )
+            if !succeeded {
+                await MainActor.run { IOSPushDeepLinkRouter.shared.route(link: link) }
+            }
+        case MomoPushActionIdentifier.approve:
+            let succeeded = await PushNotificationCoordinator.shared.handle(
+                action: .decideApproval(true),
+                envelope: envelope
+            )
+            if !succeeded {
+                await MainActor.run { IOSPushDeepLinkRouter.shared.route(link: link) }
+            }
+        case MomoPushActionIdentifier.reject:
+            let succeeded = await PushNotificationCoordinator.shared.handle(
+                action: .decideApproval(false),
+                envelope: envelope
+            )
+            if !succeeded {
+                await MainActor.run { IOSPushDeepLinkRouter.shared.route(link: link) }
+            }
+        default:
+            await MainActor.run { IOSPushDeepLinkRouter.shared.route(link: link) }
         }
     }
 }
@@ -76,6 +125,7 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
         activeSession = session
         retryOnNextForeground = false
         usedForegroundRetry = false
+        IOSNotificationCategoryRegistry.register()
         let center = UNUserNotificationCenter.current()
         let settings = await center.notificationSettings()
         var authorized = Self.isAuthorized(settings.authorizationStatus)
@@ -114,6 +164,24 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
         await register(deviceToken: deviceToken, session: activeSession, allowsImmediateRetry: false)
     }
 
+    func handle(action: IOSPushActionIntent, envelope: MomoPushEnvelope) async -> Bool {
+        guard let session = activeSession ?? store.loadSession(),
+              session.workspaceID.description.lowercased() == envelope.workspaceID.lowercased()
+        else { return false }
+        do {
+            try await IOSPushActionExecutor(
+                backend: MomoServerConversationClient(authenticated: session)
+            ).perform(action, envelope: envelope, signedInWorkspaceID: session.workspaceID)
+            pushLogger.info("Notification action completed")
+            return true
+        } catch is CancellationError {
+            return false
+        } catch {
+            pushLogger.error("Notification action failed")
+            return false
+        }
+    }
+
     private func register(
         deviceToken: Data,
         session: IOSSession,
@@ -127,12 +195,11 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
         let environment = Self.registrationEnvironment(
             apsEnvironment: Bundle.main.object(forInfoDictionaryKey: "MomoAPNSEnvironment") as? String
         )
-        let tokenSuffix = deviceToken.suffix(4).map { String(format: "%02x", $0) }.joined()
         let attemptCount = allowsImmediateRetry ? 2 : 1
 
         for attempt in 1...attemptCount {
             pushLogger.info(
-                "Device registration POST attempt=\(attempt, privacy: .public) env=\(environment.rawValue, privacy: .public) token_suffix=\(tokenSuffix, privacy: .public)"
+                "Device registration POST attempt=\(attempt, privacy: .public) env=\(environment.rawValue, privacy: .public)"
             )
             do {
                 try await client.register(
@@ -143,15 +210,15 @@ final class PushNotificationCoordinator: IOSPushLifecycle {
                     environment: environment
                 )
                 retryOnNextForeground = false
-                pushLogger.info("Device registration POST succeeded token_suffix=\(tokenSuffix, privacy: .public)")
+                pushLogger.info("Device registration POST succeeded")
                 return
             } catch is CancellationError {
-                pushLogger.notice("Device registration POST cancelled token_suffix=\(tokenSuffix, privacy: .public)")
+                pushLogger.notice("Device registration POST cancelled")
                 return
             } catch {
                 let failure = Self.registrationFailureDescription(error)
                 pushLogger.error(
-                    "Device registration POST failed attempt=\(attempt, privacy: .public) token_suffix=\(tokenSuffix, privacy: .public): \(failure, privacy: .public)"
+                    "Device registration POST failed attempt=\(attempt, privacy: .public): \(failure, privacy: .public)"
                 )
             }
         }

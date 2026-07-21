@@ -2212,6 +2212,45 @@ public final class ChatViewModel: ObservableObject {
         )
     }
 
+    func resumeWorkSession(
+        _ session: WorkSessionID,
+        targetHost: WorkHostID
+    ) async throws -> MomoWorkSession {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.resumeWorkSession(
+            workspace: workspaceId,
+            session: session,
+            targetHost: targetHost
+        )
+    }
+
+    func workTierPolicy(
+        scope: MomoWorkTierPolicyScope
+    ) async throws -> MomoWorkTierPolicy {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.workTierPolicy(
+            workspace: workspaceId,
+            scope: scope
+        )
+    }
+
+    func setWorkTierPolicy(
+        scope: MomoWorkTierPolicyScope,
+        mode: MomoWorkTierPolicyMode,
+        autoTarget: String?
+    ) async throws -> MomoWorkTierPolicy {
+        guard let workspaceId else { throw MomoWorkConsoleError.noWorkspace }
+        guard let workConsoleBackend else { throw MomoWorkConsoleError.unavailable }
+        return try await workConsoleBackend.setWorkTierPolicy(
+            workspace: workspaceId,
+            scope: scope,
+            mode: mode,
+            autoTarget: autoTarget
+        )
+    }
+
     func acknowledgeWorkControl(
         _ control: WorkControlID,
         ok: Bool,
@@ -3095,6 +3134,13 @@ public final class ChatViewModel: ObservableObject {
             }
             if upsert(message, channel: channel) {
                 noteIncomingMessageForUnread(message)
+            }
+            if message.props["kind"]?.stringValue == "resume_offer",
+               let rawSessionID = message.props["session_id"]?.stringValue,
+               let sessionID = WorkSessionID(uuidString: rawSessionID.lowercased()) {
+                latestWorkConsoleRealtimeEvent = MomoWorkConsoleRealtimeEvent(
+                    payload: .projectionRefresh(sessionID)
+                )
             }
         case .messageEdited(let message):
             guard message.channelId == channel else { return }

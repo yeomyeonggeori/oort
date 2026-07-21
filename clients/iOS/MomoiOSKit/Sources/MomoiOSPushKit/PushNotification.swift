@@ -1,10 +1,93 @@
 import Foundation
+import Security
 
 public enum MomoPushContract {
     public static let appGroupIdentifier = "group.app.momo.ios"
+    public static let keychainAccessGroupInfoKey = "MomoKeychainAccessGroup"
+    public static let secureSessionService = "app.momo.ios.session"
+    public static let authenticatedSessionAccount = "authenticated-session"
+    public static let pushFetchSessionAccount = "push-fetch-session"
+    /// Legacy App Group key. Read only during the one-time Keychain migration.
     public static let sessionKey = "momo.ios.dev.session.push-fetch"
     public static let placeholderTitle = "momo"
     public static let placeholderBody = "새 알림"
+}
+
+/// Narrow secure-value boundary shared by the app and notification extension.
+/// Session credentials never use UserDefaults, URLs, or diagnostic output.
+public protocol MomoSecureValueStoring: Sendable {
+    func data(for account: String) -> Data?
+    @discardableResult func set(_ data: Data, for account: String) -> Bool
+    func removeValue(for account: String)
+}
+
+public struct MomoKeychainValueStore: MomoSecureValueStoring, Sendable {
+    private let service: String
+    private let accessGroup: String?
+
+    public init(
+        service: String = MomoPushContract.secureSessionService,
+        accessGroup: String? = Bundle.main.object(
+            forInfoDictionaryKey: MomoPushContract.keychainAccessGroupInfoKey
+        ) as? String
+    ) {
+        self.service = service
+        self.accessGroup = accessGroup?.isEmpty == false ? accessGroup : nil
+    }
+
+    public func data(for account: String) -> Data? {
+        var query = baseQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else {
+            return nil
+        }
+        return result as? Data
+    }
+
+    @discardableResult
+    public func set(_ data: Data, for account: String) -> Bool {
+        let query = baseQuery(account: account)
+        let attributes = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if updateStatus == errSecSuccess { return true }
+        guard updateStatus == errSecItemNotFound else { return false }
+        var addition = query
+        addition[kSecValueData as String] = data
+        addition[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(addition as CFDictionary, nil) == errSecSuccess
+    }
+
+    public func removeValue(for account: String) {
+        SecItemDelete(baseQuery(account: account) as CFDictionary)
+    }
+
+    private func baseQuery(account: String) -> [String: Any] {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: false,
+        ]
+        if let accessGroup { query[kSecAttrAccessGroup as String] = accessGroup }
+        return query
+    }
+}
+
+public enum MomoPushCategory: String, CaseIterable, Codable, Sendable, Hashable, Identifiable {
+    case message = "momo.message"
+    case mention = "momo.mention"
+    case approval = "momo.approval"
+    case work = "momo.work"
+
+    public var id: String { rawValue }
+}
+
+public enum MomoPushActionIdentifier {
+    public static let quickReply = "momo.action.quick-reply"
+    public static let approve = "momo.action.approve"
+    public static let reject = "momo.action.reject"
 }
 
 public struct PushFetchSession: Codable, Equatable, Sendable {
@@ -19,7 +102,7 @@ public struct PushFetchSession: Codable, Equatable, Sendable {
     }
 }
 
-public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
+public struct MomoPushEnvelope: Equatable, Hashable, Sendable {
     public let schema: String
     public let serverID: String
     public let workspaceID: String
@@ -27,15 +110,13 @@ public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
     public let messageID: String
     public let collapseID: String
     public let reason: String
+    public let approvalID: String?
+    public let threadID: String
+    public let category: MomoPushCategory
+    public let badge: Int
 
-    enum CodingKeys: String, CodingKey {
-        case schema
-        case serverID = "server_id"
-        case workspaceID = "workspace_id"
-        case channelID = "channel_id"
-        case messageID = "message_id"
-        case collapseID = "collapse_id"
-        case reason
+    public var threadRootID: String? {
+        threadID.lowercased() == channelID.lowercased() ? nil : threadID
     }
 
     public var deepLinkURL: URL? {
@@ -43,28 +124,86 @@ public struct MomoPushEnvelope: Codable, Equatable, Hashable, Sendable {
         components.scheme = "momo"
         components.host = "push"
         components.path = "/workspaces/\(workspaceID)/channels/\(channelID)/messages/\(messageID)"
+        var items = [URLQueryItem(name: "category", value: category.rawValue)]
+        if let threadRootID {
+            items.append(URLQueryItem(name: "thread", value: threadRootID))
+        }
+        components.queryItems = items
         return components.url
     }
 }
 
 public enum MomoPushParser {
     private struct Root: Decodable {
-        let momo: MomoPushEnvelope
+        struct APS: Decodable {
+            let badge: Int
+            let threadID: String
+            let category: MomoPushCategory
+
+            enum CodingKeys: String, CodingKey {
+                case badge
+                case threadID = "thread-id"
+                case category
+            }
+        }
+
+        struct Envelope: Decodable {
+            let schema: String
+            let serverID: String
+            let workspaceID: String
+            let channelID: String
+            let messageID: String
+            let collapseID: String
+            let reason: String
+            let approvalID: String?
+
+            enum CodingKeys: String, CodingKey {
+                case schema
+                case serverID = "server_id"
+                case workspaceID = "workspace_id"
+                case channelID = "channel_id"
+                case messageID = "message_id"
+                case collapseID = "collapse_id"
+                case reason
+                case approvalID = "approval_id"
+            }
+        }
+
+        let aps: APS
+        let momo: Envelope
     }
 
     public static func parse(data: Data) throws -> MomoPushEnvelope {
-        let envelope = try JSONDecoder().decode(Root.self, from: data).momo
-        guard envelope.schema == "momo.push.notification.v1",
-              UUID(uuidString: envelope.workspaceID) != nil,
-              UUID(uuidString: envelope.channelID) != nil,
-              UUID(uuidString: envelope.messageID) != nil,
-              !envelope.serverID.isEmpty,
-              !envelope.collapseID.isEmpty,
-              ["dm", "mention", "approval_request"].contains(envelope.reason)
+        let root = try JSONDecoder().decode(Root.self, from: data)
+        let payload = root.momo
+        let approvalID = payload.approvalID?.lowercased()
+        guard payload.schema == "momo.push.notification.v2",
+              UUID(uuidString: payload.workspaceID) != nil,
+              UUID(uuidString: payload.channelID) != nil,
+              UUID(uuidString: payload.messageID) != nil,
+              UUID(uuidString: root.aps.threadID) != nil,
+              !payload.serverID.isEmpty,
+              !payload.collapseID.isEmpty,
+              root.aps.badge >= 0,
+              ["dm", "mention", "approval_request", "resume_offer"].contains(payload.reason),
+              (root.aps.category == .approval) == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
+              (root.aps.category == .approval || approvalID == nil)
         else {
             throw MomoPushError.invalidEnvelope
         }
-        return envelope
+        return MomoPushEnvelope(
+            schema: payload.schema,
+            serverID: payload.serverID,
+            workspaceID: payload.workspaceID.lowercased(),
+            channelID: payload.channelID.lowercased(),
+            messageID: payload.messageID.lowercased(),
+            collapseID: payload.collapseID,
+            reason: payload.reason,
+            approvalID: approvalID,
+            threadID: root.aps.threadID.lowercased(),
+            category: root.aps.category,
+            badge: root.aps.badge
+        )
     }
 
     public static func parse(userInfo: [AnyHashable: Any]) throws -> MomoPushEnvelope {
