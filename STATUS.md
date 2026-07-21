@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## MOMO-526 Memory Plane 스키마·추출 워커 v0 (#596, 2026-07-21)
+
+- ADR-0129 D1·D2·D5에 따라 migration 027에 Memory Plane 원장·채널 워터마크·정책 스위치를 FORCE RLS로 추가하고, source_ref는 message/channel 식별자만 저장한다. 메모리 CRUD·무효화·admin 정책-off 일괄 삭제 REST와 `memory.updated` transactional outbox를 OpenAPI 정본에 반영했다.
+- AgentWorker는 기존 BYOA Hermes transport 또는 결정적 mock으로 후보 추출→기존 유사 대조→ADD/UPDATE/INVALIDATE/NOOP를 수행하며 후보·메모리·lifecycle·audit·outbox·watermark를 한 트랜잭션에 반영한다. server/worker focused tests와 Swift build, OpenAPI YAML, verifier bash/ShellCheck 정적 검증은 PASS했다.
+- `verify_memory_plane.sh`의 28030~28033 격리 PG18 왕복과 `runtime-db` 회귀는 오케스트레이터 실행 전까지 `runtime-unverified`다. 실제 external Hermes 추출은 repo 밖 credential opt-in 전까지 `runtime-unverified`이며 provider 자격증명은 worker process 밖으로 유입하지 않는다.
+
 ## W-5 초대 링크 웹 합류 (#593, 2026-07-21)
 
 - `/join?code=...`와 `/i/<code>` SPA 폴백이 같은 가입 폼을 사용하고, 표시명·handle·이메일·비밀번호를 현재 오리진의 `POST /v1/join`으로만 보낸다. 만료·소진·차단 403을 종결 카피로 구분하고 가입 성공 후 `history.replaceState`로 초대 코드 URL을 제거한다.
