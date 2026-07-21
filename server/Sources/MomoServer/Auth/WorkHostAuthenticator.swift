@@ -143,6 +143,14 @@ struct WorkHostAuthenticator: Sendable {
         {
             return true
         }
+        if method == "GET",
+           segments.count == 4,
+           segments[0] == "v1",
+           segments[1] == "workspaces",
+           segments[3] == "work-tool-profiles"
+        {
+            return true
+        }
         if method == "POST",
            segments.count == 7,
            segments[0] == "v1",

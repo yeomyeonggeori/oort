@@ -42,16 +42,19 @@ struct WorkHostDaemonMain {
             ])
             if CommandLine.arguments.contains("--bootstrap-only") { return }
 
-            let processes = ProcessManager(
-                templates: config.commandTemplates,
-                outputDirectory: config.outputDirectory
+            let profiles = try await runtimeClient.workToolProfiles(hostID: hostID)
+            let templates = try WorkdConfig.commandTemplates(
+                profiles: profiles,
+                localOverrides: config.localCommandOverrides
             )
+            let processes = ProcessManager(templates: templates, outputDirectory: config.outputDirectory)
             let daemon = WorkDaemon(
                 hostID: hostID,
                 api: runtimeClient,
                 processes: processes,
                 pollInterval: config.pollInterval,
                 heartbeatInterval: config.heartbeatInterval,
+                localCommandOverrides: config.localCommandOverrides,
                 logger: logger
             )
             await daemon.run()
