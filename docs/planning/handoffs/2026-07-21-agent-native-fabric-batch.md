@@ -100,8 +100,11 @@ Wave U (UXUI):        MOMO-518(diff 카드 — 즉시 가능) → MOMO-529(메�
 
 1. **nil String?/UUID? 바인딩** → `::text`/`::uuid` 명시 캐스트(jsonb_build_object 내 nullable 포함 — 489 전례).
 2. **트랜잭션 내 HTTPError**는 `Database.withTenantTransaction` 중앙 unwrap이 처리 — 라우트별 ad hoc unwrap 금지(565 전례).
-3. **verifier 작성 규율**: bash 3.2 빈 배열 금지 문법 / api 컨테이너에 curl 없음(python 대체) / `psql -q`(명령 태그 오염 방지) / UUID 비교는 `lower()` / 포트 대역 신규 배정(28030대~, 기존 27950·27970·27980·28023·28024 회피) / demo 계정 password 시드 확인.
+3. **verifier 작성 규율**: bash 3.2 빈 배열 금지 문법 / api 컨테이너에 curl 없음(python 대체) / `psql -q`(명령 태그 오염 방지) / UUID 비교는 `lower()` / 포트 대역 신규 배정(**28100대부터 — 27850~28093 사용 중**, 스폰 전 `grep -rn '<포트>' scripts/`로 선점 확인) / demo 계정 password는 NULL 아님(migration 005가 dev/e2e 백필) — 행 존재 확인 후 UPDATE 덮어쓰기.
 4. **compose/infra 변경 후 컨테이너 재시작 필수**(config drift — MOMO-338 전례). 527 이미지 교체는 e2e/dev/prod+drift guard 동시.
+5. **(527 실측) 시드에는 채널(…202)만 있고 message 행이 없다** — verifier 소스 메시지는 API POST로 생성(verify_memory_plane.sh 패턴).
+6. **(527 실측) Swift Int 바인딩은 bigint** — SQL 함수의 `integer` 파라미터에 넘길 때 `::integer` 캐스트 필수(함수 해석 실패=500).
+7. **(533 실측) 마이그레이션 번호는 병렬 wave 간 충돌** — 스폰 시점에 다른 진행 중 PR의 번호를 확인하고 배정(028 memory_search·029 work_tool_profile 확정, 다음=030).
 5. openssl 직접 호출 금지(LibreSSL 게이트 함정 — 내부 Crypto 사용, 491 전례).
 6. Centrifugo 발행 payload에 props 탑재 확인(X-9 전례 — 신규 이벤트도 REST↔outbox 일치 단정).
 7. 게이트 실행 후 docker 회수(`momo-docker-reclaim.sh`, 배치 종료 시).
