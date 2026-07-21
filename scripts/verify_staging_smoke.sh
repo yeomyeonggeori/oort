@@ -60,7 +60,7 @@ required_services="caddy postgres redis centrifugo api relay worker"
 for service in $required_services; do
   grep -Eq "^[[:space:]]{2}${service}:" "$COMPOSE_FILE" || fail "missing service in prod compose: $service"
 done
-grep -Fq 'pgvector/pgvector:0.8.5-pg18@sha256:12a379b47ad65289572ea0756efc11b7c241a6662833e8af7038cd3b73d647e0' "$COMPOSE_FILE" \
+grep -Fq 'pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e' "$COMPOSE_FILE" \
   || fail "prod compose must use the pinned pgvector 0.8.5 PostgreSQL 18 image"
 grep -Fq 'centrifugo/centrifugo:v6' "$COMPOSE_FILE" || fail "prod compose must use centrifugo v6"
 grep -Fq 'CENTRIFUGO_ENGINE_TYPE: redis' "$COMPOSE_FILE" || fail "Centrifugo must use Redis engine env"

@@ -106,7 +106,8 @@ Wave U (UXUI):        MOMO-518(diff 카드 — 즉시 가능) → MOMO-529(메�
 6. **(527 실측) Swift Int 바인딩은 bigint** — SQL 함수의 `integer` 파라미터에 넘길 때 `::integer` 캐스트 필수(함수 해석 실패=500).
 7. **(528 실측) FTS 질의에 멘션 원문 금지** — websearch_to_tsquery는 AND 결합이라 @handle 토큰이 남으면 전 매치 실패. 검색 질의는 멘션 토큰 제거 후 전달.
 8. **(528 실측) jq select 안의 `.field|contains(...) and ...`는 파이프 우선순위 함정** — `(.field|contains(...)) and ...`로 괄호 필수.
-9. **(533 실측) 마이그레이션 번호는 병렬 wave 간 충돌** — 스폰 시점에 다른 진행 중 PR의 번호를 확인하고 배정(028 memory_search·029 work_tool_profile 확정, 다음=030).
+9. **(527 회귀 실측) PG 이미지는 glibc 계보(trixie) 유지 필수** — postgres:18(trixie, collation 2.41) 볼륨을 bookworm 계열 이미지(2.36)로 열면 영속 DB(dogfood/source) collation mismatch로 bootstrap 계열 verifier 전멸. 이미지 교체는 `-trixie` 태그 고정 + **상주 스택 컨테이너 재생성은 원래 env 파일(--env-file .env.worktree)로**(포트 매핑 소실 함정).
+10. **(533 실측) 마이그레이션 번호는 병렬 wave 간 충돌** — 스폰 시점에 다른 진행 중 PR의 번호를 확인하고 배정(028 memory_search·029 work_tool_profile 확정, 다음=030).
 5. openssl 직접 호출 금지(LibreSSL 게이트 함정 — 내부 Crypto 사용, 491 전례).
 6. Centrifugo 발행 payload에 props 탑재 확인(X-9 전례 — 신규 이벤트도 REST↔outbox 일치 단정).
 7. 게이트 실행 후 docker 회수(`momo-docker-reclaim.sh`, 배치 종료 시).

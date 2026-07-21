@@ -173,10 +173,16 @@ SQL
 done
 pass "asynchronous deterministic mock embedder backfilled 384 dimensions"
 
-VECTOR_JSON="$(search 'q=unmatched%20quasar&limit=10')"
+# MOMO-528(migration 030)부터 agent 스코프 항목은 agent 필터를 명시해야 보인다
+# (기본 스코프 = workspace + 본인 subject + 지정 agent ∪ 유효 grant).
+VECTOR_JSON="$(search 'q=unmatched%20quasar&agent='"$AGENT_ID"'&limit=10')"
 printf '%s' "$VECTOR_JSON" | jq -e '
   .hits | length == 2 and all(.[]; .ftsRank == null and .vectorRank != null)
 ' >/dev/null || fail "vector-only retrieval contract failed"
+VECTOR_DEFAULT_JSON="$(search 'q=unmatched%20quasar&limit=10')"
+printf '%s' "$VECTOR_DEFAULT_JSON" | jq -e '
+  .hits | length == 1 and .[0].memory.scope == "workspace"
+' >/dev/null || fail "default scope must hide unfiltered agent memories (MOMO-528)"
 pass "vector-only retrieval"
 
 RRF_JSON="$(search 'q=quarterly%20launch&limit=10')"

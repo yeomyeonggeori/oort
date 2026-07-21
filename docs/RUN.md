@@ -578,7 +578,7 @@ LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha
 make up            # = docker compose -f infra/docker-compose.yml up -d
 ```
 
-- `postgres` (image `pgvector/pgvector:0.8.5-pg18`, digest pinned): SoT. native `uuidv7()` + pgvector. healthcheck = `pg_isready`.
+- `postgres` (image `pgvector/pgvector:0.8.5-pg18-trixie`, digest pinned): SoT. native `uuidv7()` + pgvector. healthcheck = `pg_isready`.
 - `centrifugo` (image `centrifugo/centrifugo:v6`): transport only(메모리 엔진). `infra/centrifugo.json` 마운트.
   subscribe proxy 콜백 = `http://api:8080/v1/centrifugo/subscribe`, 채널 = `ch:ws<workspaceUUID>.<channelUUID>`.
 
