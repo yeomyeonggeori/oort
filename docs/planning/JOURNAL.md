@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-07-22 (Fable 패브릭 3라운드) · Wave M/A 완주 — 528·531 랜딩, 엔진 배치 종결
+- **랜딩→main**: #613 MOMO-528 Context Packet v0(verify_context_packet 전 항목 PASS — 불변성·grant 서빙 필터(델타2)·revoke 재발급 제외·실 tool_grants·만료 재발급·RLS) / #614 MOMO-531 momo-acp-host(mock ACP 왕복 PASS — 승인 fail-closed·PTY 위임·029 template 경유). **패브릭 엔진 6장(526·527·528·530·533·531) 전부 main 랜딩** — 동생 ⑩(A-16/529)·⑪(A-17/532) 개방(A-16 중복 리넘버).
+- 528 검수 실결함 3건(패킷 §4 7·8 성문화): 멘션 원문 FTS 질의(websearch AND가 전 매치 차단 — packet에 profile만 남던 원인) / verifier jq select 파이프 우선순위 / CONTEXT_PACKET_TTL compose 미매핑(§4-4 재발). momo240_* 잔재가 28100 선점(리클레임 사각 재확인).
+- 남은 것: 회귀 게이트 잔여(runtime-agent+게이트 내 memory-search — 부하 해소 후), 529/532 랜딩 검수(동생), MOMO-534/535·0130 D4 상향 성재 결정, 공개 게이트 법무 패키지.
+
 ## 2026-07-22 (Fable 패브릭 2라운드) · 527·533 랜딩 + main 머지 + M-3/A-3 스폰 + 플랫폼 에이전트 리서치
 - **랜딩→main(e7c6592)**: #611 MOMO-527 pgvector+FTS+RRF(verify_memory_search 전 항목 PASS) / #612 MOMO-533 work_tool_profile(verifier PASS). track/engine 완전 랜딩(main과 동기). **528(#598)·531(#601) worker 스폰** — 528에 델타2 서빙 필터+memory_search_hybrid grant 확장 지시.
 - 검수 발견 3건(패킷 §4 성문화): 포트 28040대는 attachment와 충돌(신규=28100대부터, 27850~28093 사용 중) / 시드에 message 행 없음(verifier는 API 생성 — memory_plane 패턴) / Swift Int=bigint 바인딩이 SQL 함수 integer 파라미터 해석 실패(500) → `::integer` 캐스트. 마이그레이션 병렬 충돌: 028 중복 → 533을 029 리넘버.

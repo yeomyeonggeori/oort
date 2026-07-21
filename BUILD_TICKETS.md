@@ -2299,9 +2299,9 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] `verify_memory_search.sh` PASS(단독 전 항목). 회귀: runtime-db 스위트 핵심(migrate 멱등·RLS·roster·채널 관리·시드 비번) 신규 이미지서 PASS — memory-search 게이트 내 재확인·runtime-agent는 호스트 부하(load>12 가드)로 대기, 부하 해소 시 재실행
 
 ### MOMO-528 수용기준 — Context Packet v0 승격 `[runtime]`
-- [ ] context_packet 불변 저장(RLS FORCE)·만료 재발급 / memory_refs(profile 상시·fact/episode 질의 — 검색 범위=기본 스코프 ∪ 유효 visibility grant, 델타 2)
-- [ ] mock tool_grants 제거→plugin_capability 실주입(부재=빈 배열 fail-closed, R2) / permission_basis 실검증(R1)
-- [ ] AgentJobPayload memory_refs 가산(기존 필드 불변 — 양 경로 호환). `verify_context_packet.sh` PASS
+- [x] context_packet 불변 저장(RLS FORCE)·만료 재발급 / memory_refs(profile 상시·fact/episode 질의 — 검색 범위=기본 스코프 ∪ 유효 visibility grant, 델타 2)
+- [x] mock tool_grants 제거→plugin_capability 실주입(부재=빈 배열 fail-closed, R2) / permission_basis 실검증(R1)
+- [x] AgentJobPayload memory_refs 가산(기존 필드 불변 — 양 경로 호환). `verify_context_packet.sh` PASS
 
 ### MOMO-530 수용기준 — work tool gateway 노출 `[runtime]`
 - [x] gateway 에이전트 tool_call → work.control 원장 경로(승인·host 라우팅·감사 무변경 재사용), events 계약 가산(rate limit 내)
@@ -2312,8 +2312,8 @@ review -> fix if needed -> merge -> main gate -> roadmap/status update.
 - [x] launch_template 자격증명·절대경로 비유입. **530 랜딩 후 착수**(WorkControlRoutes 공유). `verify_work_tool_profile.sh` PASS
 
 ### MOMO-531 수용기준 — momo-acp-host v0 `[runtime]`
-- [ ] ACP(Zed) JSON-RPC/stdio: initialize→session/new→prompt / session/update→스레드 카드 / request_permission→승인 카드 왕복(fail-closed) / terminal/*→기존 PTY 위임(R4 정합 회복)
-- [ ] ACP 트래픽 호스트-로컬(서버 비경유), 도구 기동은 533 template 경유. `verify_acp_host.sh`(mock ACP) PASS, opencode 실왕복은 credential opt-in
+- [x] ACP(Zed) JSON-RPC/stdio: initialize→session/new→prompt / session/update→스레드 카드 / request_permission→승인 카드 왕복(fail-closed) / terminal/*→기존 PTY 위임(R4 정합 회복)
+- [x] ACP 트래픽 호스트-로컬(서버 비경유), 도구 기동은 533 template 경유. `verify_acp_host.sh`(mock ACP) PASS, opencode 실왕복은 credential opt-in
 
 ### MOMO-518 수용기준 — 산출물 diff 카드 (UXUI) `[runtime]`
 - [ ] unified diff 카드(파일별 접기·±요약·모노스페이스)+커밋/PR 카드, props `artifact_kind: diff|commit|pr` 3클라 공용 정본
