@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-502 iOS 검색·활동 실데이터화 (#589, 2026-07-21)
+
+- Search 탭을 채널명 로컬 필터와 서버 FTS `GET /search/messages`의 300ms debounce·opaque cursor 결과로 통합했다. 서버 snippet의 문자 offset을 Unicode-safe하게 강조하고, 결과의 channel/message/seq를 사용해 `before=seq+1` history를 불러온 뒤 정확한 메시지 행으로 이동·강조한다. 검색 갱신 실패는 기존 결과를 지우지 않고 인라인 오류와 재시도를 제공한다.
+- Activity 탭은 별도 서버 피드가 없는 v0 경계를 명시하고, 각 대화의 최근 200개 history와 reaction snapshot을 기기에서 집계해 나를 멘션한 메시지와 내 메시지에 다른 멤버가 남긴 반응을 최신순으로 표시한다. `mention_member_ids` UUID는 소문자로 정규화하고 자기 반응·삭제·thread reply를 제외하며, 항목을 누르면 동일한 정확한 메시지 점프를 사용한다.
+- MomoiOSKit 67 tests(신규 검색 debounce/Unicode offset·정확한 before cursor·활동 UUID/자기반응 경계 3)가 PASS했고 generic iOS Simulator 무서명 `xcodebuild build`가 PASS했다. 인증 서버 FTS cursor·membership 격리, 실제 멘션/반응의 Mac↔iPhone 반영, 라이트/다크·Dynamic Type 스냅샷과 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-501 iOS 첨부 송수신 (#587, 2026-07-21)
 
 - iOS 컴포저 `+` 메뉴에 사진 보관함·파일·카메라를 연결하고, 100MB 경계 검증 뒤 서버 upload session 발급 → capability URL 직접 PUT → complete → 메시지 `attachmentIds` 전송을 구현했다. 업로드 상태·개별 실패·재시도·삭제를 유지하며 첨부만 있는 메시지도 보낼 수 있고, 메시지 REST 실패는 같은 idempotency key와 완료된 첨부 ID로 재시도한다.

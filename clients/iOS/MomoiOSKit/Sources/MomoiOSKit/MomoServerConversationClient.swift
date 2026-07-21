@@ -100,6 +100,71 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         }
     }
 
+    public func historyBefore(channel: ChannelID, before sequence: Int64, limit: Int) async throws -> [Message] {
+        var components = URLComponents(
+            url: authenticated.baseURL.appendingPathComponent(
+                "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/messages"
+            ),
+            resolvingAgainstBaseURL: false
+        )
+        components?.queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "before", value: String(sequence))
+        ]
+        guard let url = components?.url else {
+            throw SessionError.decoding("Could not create the message history request.")
+        }
+        do {
+            let messages = try decoder.decode(IOSMessagePage.self, from: try await execute(url: url))
+                .messages.map { try $0.value() }
+                .sorted { ($0.seq ?? 0) < ($1.seq ?? 0) }
+            if let latest = messages.compactMap(\.seq).max() {
+                lastKnownSequenceByChannel[channel] = max(lastKnownSequenceByChannel[channel] ?? 0, latest)
+            }
+            return messages
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned message history this app could not read.")
+        }
+    }
+
+    public func searchMessages(
+        query: String,
+        cursor: String?,
+        limit: Int
+    ) async throws -> IOSWorkspaceMessageSearchPage {
+        var components = URLComponents(
+            url: authenticated.baseURL.appendingPathComponent(
+                "/v1/workspaces/\(authenticated.workspaceID.description)/search/messages"
+            ),
+            resolvingAgainstBaseURL: false
+        )
+        var queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        if let cursor { queryItems.append(URLQueryItem(name: "cursor", value: cursor)) }
+        components?.queryItems = queryItems
+        guard let url = components?.url else {
+            throw SessionError.decoding("Could not create the workspace search request.")
+        }
+        do {
+            let response = try decoder.decode(
+                IOSWorkspaceSearchResponse.self,
+                from: try await execute(url: url)
+            )
+            return IOSWorkspaceMessageSearchPage(
+                hits: try response.hits.map { try $0.value() },
+                nextCursor: response.nextCursor
+            )
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned search results this app could not read.")
+        }
+    }
+
     public func markRead(channel: ChannelID, through sequence: Int64) async throws -> ChannelReadState {
         let path = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/read-state"
         var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
@@ -808,6 +873,39 @@ private struct IOSReadStateResponse: Decodable {
 private struct IOSChannelsResponse: Decodable { let channels: [IOSChannelDTO] }
 private struct IOSRosterResponse: Decodable { let members: [IOSMemberDTO] }
 private struct IOSMessagePage: Decodable { let messages: [IOSMessageDTO] }
+private struct IOSWorkspaceSearchResponse: Decodable {
+    let hits: [IOSWorkspaceSearchHitDTO]
+    let nextCursor: String?
+}
+private struct IOSWorkspaceSearchHitDTO: Decodable {
+    let channelId: String
+    let messageId: String
+    let seq: Int64
+    let authorMemberId: String
+    let createdAtMs: Int64
+    let snippet: String
+    let matchOffset: Int
+
+    func value() throws -> IOSWorkspaceMessageSearchHit {
+        guard let channelID = ChannelID(uuidString: channelId),
+              let messageID = MessageID(uuidString: messageId),
+              let authorMemberID = MemberID(uuidString: authorMemberId),
+              seq >= 0,
+              matchOffset >= 0,
+              matchOffset <= snippet.count else {
+            throw SessionError.decoding("The server returned an invalid workspace search hit.")
+        }
+        return IOSWorkspaceMessageSearchHit(
+            channelID: channelID,
+            messageID: messageID,
+            sequence: seq,
+            authorMemberID: authorMemberID,
+            createdAtMs: createdAtMs,
+            snippet: snippet,
+            matchOffset: matchOffset
+        )
+    }
+}
 private struct IOSThreadRepliesDTO: Decodable {
     let messages: [IOSMessageDTO]
     let nextCursor: Int64?

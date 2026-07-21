@@ -325,6 +325,7 @@ struct IOSTimelineView: View {
     private let threadRoot: MessageID?
     private let onReadState: ((ChannelReadState) -> Void)?
     private let focusMessageID: MessageID?
+    private let focusSequence: Int64?
     private let showsComposer: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -343,6 +344,7 @@ struct IOSTimelineView: View {
         threadRoot: MessageID? = nil,
         initialThreadRootMessage: Message? = nil,
         focusMessageID: MessageID? = nil,
+        focusSequence: Int64? = nil,
         showsComposer: Bool = true,
         onReadState: ((ChannelReadState) -> Void)? = nil
     ) {
@@ -355,6 +357,7 @@ struct IOSTimelineView: View {
         self.threadRoot = threadRoot
         self.onReadState = onReadState
         self.focusMessageID = focusMessageID
+        self.focusSequence = focusSequence
         self.showsComposer = showsComposer
         _model = State(initialValue: IOSTimelineModel(
             channel: item.id,
@@ -364,6 +367,7 @@ struct IOSTimelineView: View {
             huddleService: huddleService,
             threadRoot: threadRoot,
             initialThreadRootMessage: initialThreadRootMessage,
+            initialBeforeSequence: focusSequence.flatMap { $0 == Int64.max ? nil : $0 + 1 },
             onReadState: onReadState
         ))
     }
