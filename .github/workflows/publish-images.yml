@@ -48,6 +48,10 @@ jobs:
             image: momo-migrate
             dockerfile: infra/prod/docker/internal-smoke-migrate.Dockerfile
             build_args: ""
+          - component: web
+            image: momo-web
+            dockerfile: infra/prod/Dockerfile.web
+            build_args: ""
     steps:
       - uses: actions/checkout@v4
 

@@ -74,11 +74,31 @@ export interface ReactionEvent {
   };
 }
 
+/** Channel-scoped approval decision/expiry broadcast. */
+type ApprovalEventType =
+  | "approval.decided"
+  | "approval.approved"
+  | "approval.rejected"
+  | "approval.expired";
+export type ApprovalEvent = {
+  [Type in ApprovalEventType]: {
+    type: Type;
+    v: number;
+    ts: number;
+    payload: {
+      approval_id: string;
+      channel_id: string;
+      status: string;
+    };
+  };
+}[ApprovalEventType];
+
 export type ChannelRealtimeEvent =
   | MessageNewEvent
   | MessageEditedEvent
   | MessageDeletedEvent
-  | ReactionEvent;
+  | ReactionEvent
+  | ApprovalEvent;
 
 export interface ChannelSubscriptionHandlers {
   /** Fired on (re)subscribe; `recovered:false` requires a REST backfill. */
@@ -157,12 +177,16 @@ export function createRealtime(
 ): RealtimeHandle {
   const client = new Centrifuge(realtimeWebSocketUrl, {
     getToken: fetchRealtimeToken,
+    // centrifuge-js uses jittered exponential backoff inside these bounds.
+    minReconnectDelay: 500,
+    maxReconnectDelay: 20_000,
   });
 
   client.on("connecting", () => onStatus("connecting"));
   client.on("connected", () => onStatus("connected"));
   client.on("disconnected", () => onStatus("disconnected"));
   client.connect();
+  const channelListenerCounts = new Map<string, number>();
 
   function subscribeChannel(
     workspaceId: string,
@@ -173,6 +197,8 @@ export function createRealtime(
     let sub: Subscription | null =
       client.getSubscription(name) ??
       client.newSubscription(name, { recoverable: true, positioned: true });
+    const listenerCount = channelListenerCounts.get(name) ?? 0;
+    channelListenerCounts.set(name, listenerCount + 1);
 
     const onSubscribed = (ctx: { recovered?: boolean }) => {
       handlers.onSubscribed(ctx.recovered === true);
@@ -185,7 +211,11 @@ export function createRealtime(
           event.type === "message.edited" ||
           event.type === "message.deleted" ||
           event.type === "reaction.added" ||
-          event.type === "reaction.removed") &&
+          event.type === "reaction.removed" ||
+          event.type === "approval.decided" ||
+          event.type === "approval.approved" ||
+          event.type === "approval.rejected" ||
+          event.type === "approval.expired") &&
         event.payload
       ) {
         handlers.onPublication(event);
@@ -194,14 +224,20 @@ export function createRealtime(
 
     sub.on("subscribed", onSubscribed);
     sub.on("publication", onPublication);
-    sub.subscribe();
+    if (listenerCount === 0) sub.subscribe();
 
     return () => {
       if (!sub) return;
       sub.off("subscribed", onSubscribed);
       sub.off("publication", onPublication);
-      sub.unsubscribe();
-      client.removeSubscription(sub);
+      const remaining = (channelListenerCounts.get(name) ?? 1) - 1;
+      if (remaining <= 0) {
+        channelListenerCounts.delete(name);
+        sub.unsubscribe();
+        client.removeSubscription(sub);
+      } else {
+        channelListenerCounts.set(name, remaining);
+      }
       sub = null;
     };
   }

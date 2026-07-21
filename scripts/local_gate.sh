@@ -11,7 +11,7 @@ OUT_DIR="${LOCAL_GATE_OUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all]
+Usage: scripts/local_gate.sh [--auto] [--profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all]
 
 Options:
   --auto              Pick the profile from changed paths (MOMO-316):
@@ -62,7 +62,7 @@ while [ "$#" -gt 0 ]; do
       usage
       exit 0
       ;;
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all)
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all)
       PROFILE="$1"
       PROFILE_EXPLICIT=1
       shift
@@ -81,7 +81,7 @@ fi
 
 if [ "$PROFILE_EXPLICIT" -eq 1 ]; then
   case "$PROFILE" in
-    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all) ;;
+    docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all) ;;
     *)
       echo "unknown profile: $PROFILE" >&2
       usage >&2
@@ -138,7 +138,7 @@ AUTO_NEED_ALL=0
 auto_classify_script() {
   # scripts/** → docs + 해당 스크립트가 속한 runtime 프로파일. 모호하면 all.
   case "$1" in
-    scripts/migrate.sh|scripts/verify_runtime_role_bootstrap.sh|scripts/verify_prod_seed_password.sh|scripts/verify_rls.sh|scripts/verify_roster.sh|scripts/verify_channel_list.sh|scripts/verify_channel_management.sh|scripts/verify_join.sh|scripts/verify_platform_admin.sh|scripts/verify_approval_decision.sh|scripts/verify_auth_hardening.sh|scripts/verify_push_registration.sh|scripts/verify_push_notifier.sh|scripts/verify_notification_mute.sh|scripts/verify_plugin_registry.sh|scripts/verify_signed_webhook_ingress.sh|scripts/verify_drive_mcp.sh|scripts/verify_attachment_upload.sh|scripts/verify_plugin_grant_roundtrip.sh|scripts/verify_huddle_lifecycle.sh|scripts/verify_workspace_search.sh|scripts/verify_thread_reply.sh|scripts/verify_message_interaction.sh|scripts/verify_work_session.sh|scripts/verify_work_control.sh|scripts/verify_work_agent_e2e.sh|scripts/verify_work_host.sh|scripts/verify_workd.sh|scripts/verify_work_pool.sh|scripts/verify_tier_fallback.sh|scripts/verify_agent_create.sh|scripts/verify_membership_lifecycle.sh|scripts/mock_push_relay.py)
+    scripts/migrate.sh|scripts/verify_runtime_role_bootstrap.sh|scripts/verify_prod_seed_password.sh|scripts/verify_rls.sh|scripts/verify_roster.sh|scripts/verify_channel_list.sh|scripts/verify_channel_management.sh|scripts/verify_join.sh|scripts/verify_platform_admin.sh|scripts/verify_approval_decision.sh|scripts/verify_auth_hardening.sh|scripts/verify_push_registration.sh|scripts/verify_push_notifier.sh|scripts/verify_notification_mute.sh|scripts/verify_plugin_registry.sh|scripts/verify_signed_webhook_ingress.sh|scripts/verify_drive_mcp.sh|scripts/verify_attachment_upload.sh|scripts/verify_plugin_grant_roundtrip.sh|scripts/verify_huddle_lifecycle.sh|scripts/verify_workspace_search.sh|scripts/verify_thread_reply.sh|scripts/verify_message_interaction.sh|scripts/verify_work_session.sh|scripts/verify_work_control.sh|scripts/verify_work_agent_e2e.sh|scripts/verify_work_host.sh|scripts/verify_workd.sh|scripts/verify_work_pool.sh|scripts/verify_tier_fallback.sh|scripts/verify_agent_create.sh|scripts/verify_membership_lifecycle.sh|scripts/verify_lifecycle_completion.sh|scripts/mock_push_relay.py)
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
     scripts/verify_linkshort.sh)
       AUTO_REASONS+=("$1 -> swift") ;;
@@ -317,7 +317,7 @@ if [ "$AUTO_MODE" -eq 1 ]; then
 fi
 
 case "$PROFILE" in
-  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web|all) ;;
+  docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|ios|m3-dbc|web-serving|web|all) ;;
   *)
     echo "unknown profile: $PROFILE" >&2
     usage >&2
@@ -328,7 +328,7 @@ esac
 RUNTIME_COMPOSE_PROFILE=0
 RUNTIME_COMPOSE_PREEXISTING=0
 case "$PROFILE" in
-  runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all|m3-dbc)
+  runtime-db|runtime-relay|runtime-live|runtime-agent|macos-ui|all|m3-dbc|web-serving)
     # macos-ui/all/m3-dbc included: they run the same `make up` bootstrap and
     # are Docker-heavy — the incident class this guard exists for.
     RUNTIME_COMPOSE_PROFILE=1
@@ -484,7 +484,7 @@ add_static_commands() {
   add_cmd_once "json syntax" 'jq empty .github/labels.json infra/centrifugo.json infra/prod/centrifugo.prod.json && find research/11-agent-runtime/fixtures server/Fixtures -name "*.json" -print0 | xargs -0 jq empty'
   add_cmd_once "openapi contract spec parse" "ruby -e 'require \"yaml\"; YAML.load_file(\"docs/api/openapi.yaml\"); puts \"docs/api/openapi.yaml\"'"
   add_cmd_once "Centrifugo exact credential metadata contract" 'test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/centrifugo.json)" = "true"; test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/prod/centrifugo.prod.json)" = "true"; grep -Fq "\"include_connection_meta\": true" scripts/local_alpha_runner.sh'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_design_preflight.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_membership_lifecycle.sh scripts/verify_openapi_contract.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_login_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/deploy-lib.sh infra/prod/docker/internal-smoke-migrate.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh scripts/momo scripts/local_gate.sh scripts/planning_context.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_make_deploy_bundle.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/macos_dev_run.sh scripts/local_alpha_runner.sh scripts/make_deploy_bundle.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/prod_env_preflight.sh scripts/aws_internal_alpha_preflight.sh scripts/verify_prod_install_upgrade.sh scripts/verify_design_preflight.sh scripts/verify_runtime_role_bootstrap.sh scripts/verify_prod_seed_password.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_registration.sh scripts/verify_push_notifier.sh scripts/verify_notification_mute.sh scripts/verify_linkshort.sh scripts/push_relay_keygen.sh scripts/verify_push_relay.sh scripts/verify_plugin_registry.sh scripts/verify_signed_webhook_ingress.sh scripts/verify_drive_mcp.sh scripts/verify_attachment_upload.sh scripts/verify_plugin_grant_roundtrip.sh scripts/verify_huddle_lifecycle.sh scripts/verify_workspace_search.sh scripts/verify_thread_reply.sh scripts/verify_work_session.sh scripts/verify_work_control.sh scripts/verify_work_agent_e2e.sh scripts/verify_workd.sh scripts/verify_work_pool.sh scripts/verify_tier_fallback.sh scripts/verify_membership_lifecycle.sh scripts/verify_lifecycle_completion.sh scripts/verify_openapi_contract.sh scripts/verify_relay.sh scripts/verify_realtime_live.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_worker.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_context.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_agent_live_channel.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_external_agent_provider.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_staging_smoke.sh scripts/verify_internal_hosting_smoke.sh scripts/web_serving_smoke.sh scripts/verify_web_login_smoke.sh scripts/verify_internal_host_runtime.sh scripts/verify_backup_restore_rehearsal.sh scripts/verify_macos_real_backend_ui_bootstrap.sh scripts/verify_macos_real_backend_ui.sh infra/prod/install.sh infra/prod/upgrade.sh infra/prod/deploy-lib.sh infra/prod/docker/internal-smoke-migrate.sh infra/workd/bootstrap.sh infra/workd/momo-workd-run; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f"; done'
   add_cmd_once "message interaction verifier shell syntax" "bash -n scripts/verify_message_interaction.sh"
   add_cmd_once "work session verifier shell syntax" "bash -n scripts/verify_work_session.sh"
   add_cmd_once "work control verifier shell syntax" "bash -n scripts/verify_work_control.sh"
@@ -497,6 +497,7 @@ add_static_commands() {
   add_cmd_once "observer attach verifier shell syntax" "bash -n scripts/verify_observer_attach.sh"
   add_cmd_once "agent creation verifier shell syntax" "bash -n scripts/verify_agent_create.sh"
   add_cmd_once "membership lifecycle verifier shell syntax" "bash -n scripts/verify_membership_lifecycle.sh"
+  add_cmd_once "lifecycle completion verifier shell syntax" "bash -n scripts/verify_lifecycle_completion.sh"
   add_cmd_once "deploy bundle synthetic fixture" 'scripts/tests/test_make_deploy_bundle.sh'
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
@@ -583,6 +584,8 @@ add_runtime_db_commands() {
   add_cmd "Workspace channel management runtime verification" "scripts/verify_channel_management.sh"
   add_cmd "Membership lifecycle verification (MOMO-523)" "scripts/verify_membership_lifecycle.sh"
   add_note_once coverage "MOMO-523 membership lifecycle via scripts/verify_membership_lifecycle.sh: isolated API stack on reserved 28050-28053 ports verifies migration backfill, centralized workspace roles, workspace/channel hierarchy, last-owner 409, suspend token/login denial, reinstate, removal with message preservation, invite redeem/public join bans and unban rejoin, guest roster/channel/search projection, audit rows, and FORCE RLS isolation."
+  add_cmd "Lifecycle completion verification (MOMO-524)" "scripts/verify_lifecycle_completion.sh"
+  add_note_once coverage "MOMO-524 lifecycle completion via scripts/verify_lifecycle_completion.sh: isolated API stack on reserved 28060-28063 ports verifies public/private/DM self-leave, private last-member archive, workspace last-owner guard, token revocation with message preservation, agent suspend/remove credential revocation and gateway denial, explicit credential reissue after reinstate, banned-handle creation/pairing denial, admin audit filters/cursor, and FORCE RLS isolation."
   add_cmd "Public join runtime verification" "scripts/verify_join.sh"
   add_cmd "Platform admin read-only runtime verification" "scripts/verify_platform_admin.sh"
   add_cmd "Approval decision endpoint runtime verification" "scripts/verify_approval_decision.sh"
@@ -773,6 +776,15 @@ add_web_commands() {
   add_note_once not_covered "Real DNS/ACME/TLS on public hosts, the Dawn short-link service (ADR-0121 S-4), app deep links, and Safari/Firefox coverage (the smoke drives Chromium) remain out of scope for the web v0 gate."
 }
 
+add_web_serving_commands() {
+  # MOMO-576 (ADR-0119 W-3): infrastructure-only runtime profile. It uses the
+  # e2e web profile and never joins runtime-db or a developer compose project.
+  add_static_commands
+  add_cmd "web serving (real dist + Caddy same-origin proxy)" 'scripts/verify_web_serving.sh'
+  add_note_once coverage "MOMO-576 web-serving infra gate: isolated ports 28070-28074, real Dockerfile.web dist copied by web-init into a named volume, HTTP Caddy SPA/index fallback, live API login proxy response, Centrifugo callback 403, CSP/X-Frame-Options, and /health proxy."
+  add_note_once not_covered "Public DNS, ACME issuance, and production TLS remain orchestrator/public-host evidence; the e2e gate intentionally serves HTTP."
+}
+
 add_m3_dbc_commands() {
   add_static_commands
   add_runtime_env_guard_command
@@ -869,6 +881,9 @@ case "$PROFILE" in
     ;;
   m3-dbc)
     add_m3_dbc_commands
+    ;;
+  web-serving)
+    add_web_serving_commands
     ;;
   web)
     add_web_commands

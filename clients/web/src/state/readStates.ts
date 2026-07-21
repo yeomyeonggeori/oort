@@ -46,7 +46,7 @@ function toEntry(state: ServerReadState): ReadStateEntry {
  * (older push replayed by recovery, or a PUT response racing a newer push)
  * must never regress the visible unread count.
  */
-function mergeEntry(
+export function mergeEntry(
   current: ReadStateEntry | undefined,
   incoming: ReadStateEntry
 ): ReadStateEntry {
@@ -72,6 +72,70 @@ function mergeEntry(
   };
 }
 
+/** Apply an inactive-channel message immediately while REST re-baselines. */
+export function applyIncomingMessage(
+  current: ReadStateEntry | undefined,
+  seq: number,
+  mentioned: boolean
+): ReadStateEntry {
+  const base = current ?? {
+    lastReadSeq: 0,
+    latestSeq: 0,
+    unreadCount: 0,
+    mentionCount: 0,
+  };
+  if (seq <= base.latestSeq) return base;
+  return {
+    lastReadSeq: base.lastReadSeq,
+    latestSeq: seq,
+    unreadCount: Math.max(0, seq - base.lastReadSeq),
+    mentionCount: base.mentionCount + (mentioned ? 1 : 0),
+  };
+}
+
+export function highestVisibleSequence(sequences: Iterable<number>): number {
+  let highest = 0;
+  for (const sequence of sequences) highest = Math.max(highest, sequence);
+  return highest;
+}
+
+export interface SequenceDebouncer {
+  report: (channelId: string, seq: number) => void;
+  cancel: () => void;
+}
+
+/** Coalesce visibility churn into one monotonic read-state write per channel. */
+export function createSequenceDebouncer(
+  flush: (channelId: string, seq: number) => void,
+  delayMs = 300
+): SequenceDebouncer {
+  const pending = new Map<string, { channelId: string; seq: number }>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const schedule = () => {
+    if (timer !== null) globalThis.clearTimeout(timer);
+    timer = globalThis.setTimeout(() => {
+      timer = null;
+      const batch = [...pending.values()];
+      pending.clear();
+      for (const entry of batch) flush(entry.channelId, entry.seq);
+    }, delayMs);
+  };
+  return {
+    report: (channelId, seq) => {
+      if (seq <= 0) return;
+      const key = channelId.toLowerCase();
+      const current = pending.get(key);
+      if (!current || seq > current.seq) pending.set(key, { channelId, seq });
+      schedule();
+    },
+    cancel: () => {
+      if (timer !== null) globalThis.clearTimeout(timer);
+      timer = null;
+      pending.clear();
+    },
+  };
+}
+
 interface PutPipeline {
   inFlight: boolean;
   /** Highest seq already sent (or being sent) — never re-request lower. */
@@ -88,6 +152,8 @@ export interface ReadStatesStore {
    * for a channel the user is viewing; the store advances the cursor.
    */
   reportViewedSeq: (channelId: string, seq: number) => void;
+  noteIncomingMessage: (channelId: string, seq: number, mentioned: boolean) => void;
+  refresh: () => Promise<void>;
 }
 
 export function useReadStates(
@@ -101,6 +167,7 @@ export function useReadStates(
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
   const pipelinesRef = useRef(new Map<string, PutPipeline>());
+  const refreshTimerRef = useRef<number | null>(null);
 
   const applyServerState = useCallback((state: ServerReadState) => {
     const key = state.channel_id.toLowerCase();
@@ -126,6 +193,15 @@ export function useReadStates(
   useEffect(() => {
     void loadAll();
   }, [loadAll]);
+
+  useEffect(
+    () => () => {
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+    },
+    []
+  );
 
   // Personal-channel subscription: cursor advances from ANY of this member's
   // devices/tabs land here. recovered:false => the missed pushes are healed
@@ -168,7 +244,7 @@ export function useReadStates(
     [applyServerState, workspaceId]
   );
 
-  const reportViewedSeq = useCallback(
+  const enqueueViewedSeq = useCallback(
     (channelId: string, seq: number) => {
       if (seq <= 0) return;
       const key = channelId.toLowerCase();
@@ -187,10 +263,48 @@ export function useReadStates(
     [runPutLoop]
   );
 
+  const debouncerRef = useRef<SequenceDebouncer | null>(null);
+  useEffect(() => {
+    const debouncer = createSequenceDebouncer(enqueueViewedSeq);
+    debouncerRef.current = debouncer;
+    return () => {
+      debouncer.cancel();
+      debouncerRef.current = null;
+    };
+  }, [enqueueViewedSeq]);
+
+  const reportViewedSeq = useCallback((channelId: string, seq: number) => {
+    debouncerRef.current?.report(channelId, seq);
+  }, []);
+
+  const noteIncomingMessage = useCallback(
+    (channelId: string, seq: number, mentioned: boolean) => {
+      const key = channelId.toLowerCase();
+      setEntries((current) => {
+        const previous = current.get(key);
+        const nextEntry = applyIncomingMessage(previous, seq, mentioned);
+        if (nextEntry === previous) return current;
+        const next = new Map(current);
+        next.set(key, nextEntry);
+        return next;
+      });
+      // The local increment is immediate; the canonical projection corrects
+      // gaps, mention counts, and concurrent reads from other tabs.
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+      refreshTimerRef.current = window.setTimeout(() => {
+        refreshTimerRef.current = null;
+        void loadAll();
+      }, 500);
+    },
+    [loadAll]
+  );
+
   const entryFor = useCallback(
     (channelId: string) => entries.get(channelId.toLowerCase()) ?? null,
     [entries]
   );
 
-  return { entryFor, reportViewedSeq };
+  return { entryFor, reportViewedSeq, noteIncomingMessage, refresh: loadAll };
 }

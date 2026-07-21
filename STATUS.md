@@ -1,5 +1,20 @@
 # momo 진행 현황
 
+## W-3 Caddy APP_DOMAIN 웹 서빙 (#576, 2026-07-21)
+
+- ADR-0119 D1-A에 따라 `momo-web`의 실제 Vite `dist`를 pinned 이미지에서 named volume으로 복사하는 `web-init`과 Caddy의 같은 오리진 SPA·`/v1/*`·`/health` 라우팅, Centrifugo callback 403, 지정 CSP를 완성했다. LinkShort `/i/*`는 prod compose 서비스가 없어 후속 프록시 위치만 주석으로 예약했다.
+- npm production build와 YAML/bash 정적 검증은 PASS했다. `verify_web_serving.sh`는 28070~28074 격리 포트에서 6개 HTTP 단정을 수행하도록 `web-serving` infra profile에 편입했으며, 지시대로 Docker/Caddy runtime과 공인 DNS·ACME·prod TLS는 오케스트레이터 검증 전까지 `runtime-unverified`다.
+## W-4 웹 승인·read-state·recovery 왕복 (#577, 2026-07-21)
+
+- 웹 타임라인 승인 카드는 `props.approval_status`와 `approval.*` 이벤트를 소비하고, pending/approved/rejected/expired 상태 칩과 멱등 결정 재시도를 제공한다. `resume_offer`는 결정 버튼 없이 데스크톱 재개 안내만 표시한다.
+- 가시 메시지 기반 300ms read-state debounce, 비활성 채널 unread/mention 즉시 갱신과 REST 재조회, `recovered:false`·seq gap REST reconcile, 지수 백오프 재연결 배너, 오프라인 컴포저 비활성화를 추가했다.
+- Vitest 38 tests, eslint, TypeScript typecheck, Vite build는 PASS했다. 승인 결정 상태 전이와 2탭 read-state의 실서버 왕복은 지시대로 Docker·브라우저를 실행하지 않아 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
+## MOMO-524 self-leave·에이전트 대칭·audit 조회 (2026-07-21)
+
+- ADR-0128 D4~D6에 따라 public/private 채널과 workspace self-leave, private 최종 멤버 archive, 마지막 owner 409, agent suspend/remove credential 즉시 revoke와 banned-handle 생성/pairing 차단, owner/admin audit 필터·cursor REST를 기존 FORCE RLS 원장 위에 가산했다. migration과 `schema_v0.sql` 변경은 없다.
+- server 136 tests, Swift build, OpenAPI YAML parse, verifier bash/ShellCheck 정적 검증은 PASS했다. `verify_lifecycle_completion.sh`(28060~28063)와 기존 membership/agent-create verifier의 실제 PG18 왕복은 오케스트레이터 게이트 전까지 `runtime-unverified`다.
+
 ## MOMO-523 멤버십 수명주기 코어 (2026-07-21)
 
 - ADR-0128 D1~D3에 따라 migration 026의 `workspace_membership`·`workspace_ban` FORCE RLS 원장, 중앙 `WorkspaceAuthorization`, 워크스페이스/채널 역할 변경과 suspend/reinstate/remove/ban REST·audit, suspend 로그인 403 및 token revoke, ban join/redeem 차단, guest roster 교집합 투영을 추가했다.

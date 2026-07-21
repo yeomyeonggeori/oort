@@ -43,7 +43,7 @@ export function fromRestMessage(message: Message): TimelineMessage {
   };
 }
 
-export function mergeMessages(
+export function reconcileMessages(
   existing: TimelineMessage[],
   incoming: TimelineMessage[]
 ): TimelineMessage[] {
@@ -52,6 +52,9 @@ export function mergeMessages(
   for (const message of incoming) bySeq.set(message.seq, message);
   return [...bySeq.values()].sort((left, right) => left.seq - right.seq);
 }
+
+/** Backward-compatible name for the ordinary realtime append path. */
+export const mergeMessages = reconcileMessages;
 
 export function startsAuthorGroup(
   previous: TimelineMessage | undefined,

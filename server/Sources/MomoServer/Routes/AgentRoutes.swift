@@ -56,6 +56,10 @@ struct AgentRoutes: Sendable {
             )
             guard role?.isAdmin == true else { return .forbidden }
 
+            try await JoinRoutes.requireNotBanned(
+                conn: conn, logger: db.logger, email: nil, handle: handle
+            )
+
             let ownerRows = try await conn.query(
                 """
                 SELECT 1

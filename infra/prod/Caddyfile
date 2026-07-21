@@ -93,16 +93,21 @@
         reverse_proxy api:8080
     }
 
+    handle /health {
+        reverse_proxy api:8080
+    }
+
+    # ADR-0121 LinkShort is not part of the current prod compose. When that
+    # service lands, add a dedicated /i/* reverse_proxy handle here before the
+    # SPA fallback; do not send short-link requests to the api container.
+
     handle {
         root * /srv/momo-web
-        # ADR-0119 D3-A: strict SPA CSP — own origin only, no inline script.
-        # connect-src additionally allows the realtime websocket origin
-        # (centrifuge-js connects to wss://{$REALTIME_DOMAIN}; the ws URL
-        # itself still comes only from the server's realtimeWebSocketUrl,
-        # ADR-0110).
-        # img-src includes data: on purpose — inline avatar/icon data URIs
-        # only; still no remote image origins (PR #403 review Low-2).
-        header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' wss://{$REALTIME_DOMAIN}; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+        # ADR-0119 D3-A: Vite emits external scripts, so default-src 'self'
+        # keeps inline script blocked. React's current CSS does not require an
+        # inline script hash; style-src keeps the ADR-approved inline style
+        # allowance. connect-src permits both realtime transport schemes.
+        header Content-Security-Policy "default-src 'self'; connect-src 'self' wss://{$REALTIME_DOMAIN} https://{$REALTIME_DOMAIN}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
         # SPA routing fallback: unknown paths rewrite to index.html.
         try_files {path} /index.html
         file_server

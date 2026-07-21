@@ -134,6 +134,7 @@ enum AppBuilder {
         RosterRoutes(db: db).add(to: authed)
         ChannelRoutes(db: db).add(to: authed)
         MemberLifecycleRoutes(db: db).add(to: authed)
+        AuditRoutes(db: db).add(to: authed)
         DMRoutes(db: db).add(to: authed)
         ReadStateRoutes(db: db).add(to: authed)
         CostProjectionRoutes(db: db).add(to: authed)
