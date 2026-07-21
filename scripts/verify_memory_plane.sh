@@ -100,14 +100,14 @@ until curl -fsS "$BASE_URL/health" >/dev/null 2>&1; do
   sleep 3
 done
 
-# The e2e seed intentionally has no password hash. Give it an ephemeral gate-only
-# password after confirming that fact, and create one foreign-tenant sentinel.
-missing_password="$(sql_value <<SQL
+# migration 005가 dev/e2e에서 demo에 'dev-password'를 백필하므로 NULL 가정 금지 —
+# 행 존재만 확인하고 게이트 전용 비밀번호로 덮어쓴다.
+demo_rows="$(sql_value <<SQL
 SELECT count(*) FROM human
- WHERE workspace_id='$WS_ID' AND email='demo@momo.local' AND password_hash IS NULL;
+ WHERE workspace_id='$WS_ID' AND email='demo@momo.local';
 SQL
 )"
-[ "$missing_password" = "1" ] || fail "unexpected demo password seed state"
+[ "$demo_rows" = "1" ] || fail "unexpected demo password seed state"
 run_sql <<SQL
 BEGIN;
 SET LOCAL row_security = off;
