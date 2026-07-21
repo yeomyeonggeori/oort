@@ -511,6 +511,7 @@ public enum MomoTheme {
         public static let rightPanelMinimumWidth: CGFloat = 320
         public static let rightPanelMaximumWidth: CGFloat = 640
         public static let headerHeight: CGFloat = 48
+        public static let remoteHostBadgeMaximumWidth: CGFloat = 160
         public static let rowMinimumHeight: CGFloat = 56
         public static let resizeHandleExtent: CGFloat = 8
         public static let resizeAdjustmentStep: CGFloat = 16

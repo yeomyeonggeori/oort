@@ -62,6 +62,9 @@ struct MomoWorkConsoleDrawer: View {
         .sheet(isPresented: $showsNewSession) {
             MomoNewWorkSessionSheet(controller: controller, copy: copy)
         }
+        .onDisappear {
+            controller.disconnectRemoteTerminals()
+        }
     }
 
     private var header: some View {
@@ -374,6 +377,12 @@ private struct MomoWorkSessionDetail: View {
                             .padding(MomoTheme.WorkConsole.standardSpacing)
                             .allowsHitTesting(false)
                     }
+            } else if let remote = controller.remoteSessions[session.id] {
+                MomoRemoteWorkTerminalDetail(
+                    session: remote,
+                    terminalTheme: terminalTheme,
+                    copy: copy
+                )
             } else {
                 detachedState
             }
@@ -399,6 +408,8 @@ private struct MomoWorkSessionDetail: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(session.label)
                     .momoTypography(.emphasizedRow)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 HStack(spacing: MomoTheme.WorkConsole.compactSpacing) {
                     Text(copy.workToolTitle(session.tool))
                     Text("•")
@@ -410,6 +421,18 @@ private struct MomoWorkSessionDetail: View {
                 }
                 .momoTypography(.metadata)
                 .foregroundStyle(.secondary)
+            }
+            if session.isRemotePTYBound,
+               let hostName = controller.hostDisplayName(for: session) {
+                Text(hostName)
+                    .momoTypography(.metadata)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: MomoTheme.WorkConsole.remoteHostBadgeMaximumWidth)
+                    .padding(.horizontal, MomoTheme.WorkConsole.standardSpacing)
+                    .padding(.vertical, MomoTheme.WorkConsole.compactSpacing)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: MomoTheme.cornerSmall))
             }
             Spacer(minLength: 0)
             if let local = controller.localSessions[session.id] {
@@ -490,6 +513,13 @@ private struct MomoWorkSessionDetail: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
+            if controller.canOpenRemoteTerminal(session) {
+                Button(copy.workSessionOpenRemoteTerminal) {
+                    Task { await controller.openRemoteTerminal(session) }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.return, modifiers: [])
+            }
             Button(copy.workSessionOpenThread) {
                 Task { await controller.openThread(session) }
             }
@@ -498,6 +528,63 @@ private struct MomoWorkSessionDetail: View {
         .padding(MomoTheme.WorkConsole.edgeInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+private struct MomoRemoteWorkTerminalDetail: View {
+    @ObservedObject var session: MomoRemoteTerminalSession
+    let terminalTheme: MomoTerminalThemePreset
+    let copy: MomoWorkspaceCopy
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let presentation = bannerPresentation {
+                HStack(spacing: MomoTheme.WorkConsole.standardSpacing) {
+                    Image(systemName: presentation.systemImage)
+                        .foregroundStyle(presentation.isFailure ? MomoTheme.irreversibleRed : .secondary)
+                    Text(presentation.message)
+                        .momoTypography(.supporting)
+                    Spacer(minLength: 0)
+                    if presentation.canRetry {
+                        Button(copy.workSessionRemoteRetry) {
+                            Task { await session.retry() }
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.horizontal, MomoTheme.WorkConsole.contentSpacing)
+                .padding(.vertical, MomoTheme.WorkConsole.standardSpacing)
+                .background(
+                    (presentation.isFailure ? MomoTheme.irreversibleRed : Color.secondary).opacity(0.06)
+                )
+                Divider()
+            }
+            MomoRemoteSwiftTermView(session: session, theme: terminalTheme)
+        }
+    }
+
+    private var bannerPresentation: MomoRemoteTerminalBannerPresentation? {
+        switch session.state {
+        case .idle:
+            return .init(message: copy.workSessionRemoteDisconnected, systemImage: "network.slash", canRetry: true, isFailure: true)
+        case .issuingGrant:
+            return .init(message: copy.workSessionRemoteGrantLoading, systemImage: "ellipsis.circle", canRetry: false, isFailure: false)
+        case .connecting:
+            return .init(message: copy.workSessionRemoteConnecting, systemImage: "network", canRetry: false, isFailure: false)
+        case .connected:
+            return nil
+        case .failed(let error):
+            return .init(message: copy.remoteTerminalError(error), systemImage: "exclamationmark.triangle", canRetry: true, isFailure: true)
+        case .ended:
+            return .init(message: copy.workSessionRemoteEnded, systemImage: "stop.circle", canRetry: false, isFailure: false)
+        }
+    }
+}
+
+private struct MomoRemoteTerminalBannerPresentation {
+    let message: String
+    let systemImage: String
+    let canRetry: Bool
+    let isFailure: Bool
 }
 
 private struct MomoWorkExcerptDraft: Identifiable {
