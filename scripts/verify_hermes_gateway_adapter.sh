@@ -844,6 +844,12 @@ assert_equals() {
   fi
 }
 
+fail() {
+  echo "[hermes-gateway] FAIL: $1" >&2
+  tail -120 "$SERVER_LOG" >&2 || true
+  exit 1
+}
+
 assert_between() {
   minimum=$1
   actual=$2
@@ -1200,7 +1206,7 @@ WORK_TOOL_CONFLICT_CODE=$(api_status POST "/v1/workspaces/${WORKSPACE_ID}/agent-
   "{\"job_id\":${CURRENT_JOB_ID},\"lease_id\":\"${CURRENT_LEASE_ID}\",\"status\":\"tool_call\",\"tool_call\":{\"call_id\":\"${WORK_CALL_ID}\",\"name\":\"work.spawn\",\"target_host_id\":\"${WORK_HOST_ID}\",\"arguments\":{\"tool\":\"codex\",\"label\":\"mismatched retry\"}}}")
 assert_equals "409" "$WORK_TOOL_CONFLICT_CODE" "gateway work call_id cannot widen on retry"
 
-WORK_APPROVAL_ID=$(psql_scalar "SELECT id FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${WORK_RUN_ID}' AND payload->>'work_control_id'='${WORK_CONTROL_ID}' LIMIT 1")
+WORK_APPROVAL_ID=$(psql_scalar "SELECT id FROM approval WHERE workspace_id='${WORKSPACE_ID}' AND run_id='${WORK_RUN_ID}' AND lower(payload->>'work_control_id')=lower('${WORK_CONTROL_ID}') LIMIT 1")
 [ "$WORK_APPROVAL_ID" != "" ] || fail "gateway work spawn did not create linked approval"
 WORK_INITIAL_JOB_STATUS=$(psql_scalar "SELECT status FROM outbox WHERE id=${CURRENT_JOB_ID}")
 assert_equals "done" "$WORK_INITIAL_JOB_STATUS" "pending gateway work spawn settles claimed job"
