@@ -1,5 +1,11 @@
 # momo 진행 현황
 
+## UXUI MOMO-518 macOS·iOS 산출물 카드 표준 (#592, 2026-07-21)
+
+- ADR-0126 D2의 공용 `artifact_kind=diff|commit|pr` 해석을 MomoCore의 닫힌 표현 모델로 추가했다. unified diff는 200KB·2,000줄·100파일 상한 안에서만 파일별 경로와 추가/삭제 수를 계산하며, 일반 코드·malformed·oversized 입력은 기존 메시지 렌더로 fail-safe한다. commit/PR 링크는 HTTPS만 허용하고 credential 계열 query key·userinfo를 거부한다.
+- macOS·iOS 타임라인에 파일별 DisclosureGroup, 총/파일별 +/− 요약, 모노스페이스 시맨틱 diff 라인과 제목·브랜치·상태·repository·안전한 링크 카드를 추가했다. agent 개발자 모드와 무관하게 검토 대상 산출물은 같은 타입드 카드로 보이고, URL이 거부돼도 메타데이터 카드는 유지된다.
+- Core 42 tests, macOS 457 tests(관리형 loopback WebSocket 1 skip), MomoiOSKit 69 tests가 실패 0으로 PASS했고, 전체 `make build`·`make test`도 구성된 Core·서버·relay·workers·service·macOS 패키지에서 PASS했다. iOS generic Simulator `xcodebuild`는 package resolution 뒤 Xcode build-service의 package-loading 단계에서 60초 이상 산출물 갱신 없이 정체돼 중단했다. 실제 iOS 타깃 컴파일, real-window/Simulator 라이트·다크, Dynamic Type/VoiceOver, 키보드 DisclosureGroup·링크 동작 및 design-review는 Fable 오케스트레이터 확인 전까지 `runtime-unverified`다.
+
 ## UXUI MOMO-514 iOS 토큰 자동 리프레시·비파괴 오류 UX (#554, 2026-07-21)
 
 - iOS의 인증 REST·realtime token·다운로드·허들 요청을 하나의 actor executor로 통합했다. 401은 single-use refresh token을 단 한 번 회전한 뒤 원 요청을 한 번만 재시도하며, 이미 회전된 뒤 늦게 도착한 401은 새 access token으로만 재시도해 refresh replay를 만들지 않는다. 회전 실패 또는 재시도 401만 `sessionExpired`로 분류한다.

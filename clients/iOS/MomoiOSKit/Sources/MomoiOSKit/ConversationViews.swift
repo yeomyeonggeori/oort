@@ -976,7 +976,7 @@ struct IOSMessageRow: View {
             }
         }
         .padding(.vertical, startsAuthorGroup ? 8 : 4)
-        .accessibilityElement(children: message.type == .approvalRequest ? .contain : .combine)
+        .accessibilityElement(children: containsInteractiveContent ? .contain : .combine)
         .accessibilityLabel(accessibilitySummary)
         .accessibilityHint(mentionsCurrentMember ? "Mentions you" : "")
     }
@@ -987,6 +987,8 @@ struct IOSMessageRow: View {
             Label("메시지 삭제됨", systemImage: "trash")
                 .font(.body)
                 .foregroundStyle(.secondary)
+        } else if let artifactPresentation {
+            IOSMessageArtifactCard(presentation: artifactPresentation)
         } else if message.type == .approvalRequest {
             IOSApprovalDecisionCard(
                 message: message,
@@ -1029,6 +1031,14 @@ struct IOSMessageRow: View {
     }
 
     private var approvalID: ApprovalID? { IOSTimelineModel.approvalID(for: message) }
+
+    private var artifactPresentation: MessageArtifactPresentation? {
+        MessageArtifactPresentation.resolve(message: message)
+    }
+
+    private var containsInteractiveContent: Bool {
+        message.type == .approvalRequest || artifactPresentation != nil
+    }
 }
 
 private struct IOSMessageAttachmentCard: View {
