@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-07-21 (Fable 기획) · PLN-20260721-01 에이전트-네이티브 비전 리서치 완료 + ADR-0129/0130 기안
+- 성재 발제(CTO 대화 4대 고민+Blaxel cofounder 접촉) → 병렬 리서치 5기(내부 실사 2+외부 3) 완료, **research/19-agent-native-fabric/00~04** 저장(컨텍스트/메모리 실사·연동 표면 실사·프로토콜 지형·메모리 OSS·샌드박스 유휴 경제/Blaxel).
+- 진단 정본 **docs/planning/2026-07-21-agent-native-vision-diagnosis.md**: cowork=0126 잔여 실행만(518 승격 권고) / 에이전트 호스팅=막힘 3곳, ACP 클라이언트로 40+ 에이전트 즉시 호환 / 규격 공백 실재("구현→스펙 추출" 순서, 창 12~18개월) / 메모리=최대 갭(PG-native 유일 경로, pgvector 도입) / Blaxel=명시 기각 아님·2nd 기질 후보+협상 카드, CTO 유휴 질문 직답 포함(E2B·Blaxel 메모리+FS 보존 재개 가능, 보관비 E2B 미명문화 vs Blaxel $0.20/GB-월).
+- **ADR-0129**(Memory Plane & Context Fabric 런타임, MOMO-526~529 예약)·**ADR-0130**(외부 코딩 에이전트 멤버십·ACP, MOMO-530~533 예약) **Proposed** 기안. 구현-설계 정합 리뷰 6건(R1~R6)은 진단 §6 — 위반 0, 스펙 대비 미완 관리 항목.
+- **성재 대기**: ①0129/0130 옵션 승인 ②우선순위 결정(진단 §7: 0129→0130→518 승격→Blaxel 미팅) ③Nicolas(Blaxel) 답장 발신 여부 — 초안은 세션 보고에 전달.
+
 ## 2026-07-21 (Fable 3차) · MOMO-524 랜딩 — ADR-0128 서버 절반 완전 종결 + 동생 ①② 순항
 - 2차 배치(565 S3·566 멤버십) main 랜딩(49edf5d, 성재 승인). **#574 MOMO-524**(self-leave·agent credential 대칭·banned handle 생성차단·audit 조회 REST) track/engine 8cd20a2 랜딩 — docker 실런 PASS(self-leave/대칭/ban/audit/RLS) + 523 회귀 PASS. **ADR-0128 D1~D6 서버 전부 완결** — 잔여는 UXUI 525(=A-15, worker가 ENGINE_HANDOFF 등재)뿐.
 - 검수 수정 2건: 전송 응답 jq 경로(.message.id→.id — 응답은 top-level 객체), e2e compose gateway 기본 비활성이라 agent 대칭 probe용 AGENT_GATEWAY_MODE=gateway override 가산.
