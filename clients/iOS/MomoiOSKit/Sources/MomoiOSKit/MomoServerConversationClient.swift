@@ -183,6 +183,64 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         }
     }
 
+    public func reactionSnapshot(channel: ChannelID) async throws -> [MessageID: [String: Set<MemberID>]] {
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/channels/\(channel.description)/reactions"
+        do {
+            let raw = try decoder.decode([String: [String: [String]]].self, from: try await get(path))
+            var snapshot: [MessageID: [String: Set<MemberID>]] = [:]
+            for (rawMessageID, reactions) in raw {
+                guard let messageID = MessageID(uuidString: rawMessageID) else {
+                    throw SessionError.decoding("The server returned an invalid reaction message identity.")
+                }
+                var decoded: [String: Set<MemberID>] = [:]
+                for (emoji, rawMemberIDs) in reactions {
+                    guard !emoji.isEmpty else {
+                        throw SessionError.decoding("The server returned an invalid reaction emoji.")
+                    }
+                    let memberIDs = try rawMemberIDs.map { rawMemberID in
+                        guard let memberID = MemberID(uuidString: rawMemberID) else {
+                            throw SessionError.decoding("The server returned an invalid reaction member identity.")
+                        }
+                        return memberID
+                    }
+                    decoded[emoji] = Set(memberIDs)
+                }
+                snapshot[messageID] = decoded
+            }
+            return snapshot
+        } catch let error as SessionError {
+            throw error
+        } catch {
+            throw SessionError.decoding("The server returned reactions this app could not read.")
+        }
+    }
+
+    public func addReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
+        try await mutateReaction(id, emoji: emoji, method: "PUT", expectedAction: .added)
+    }
+
+    public func removeReaction(_ id: MessageID, emoji: String) async throws -> ReactionDelta {
+        try await mutateReaction(id, emoji: emoji, method: "DELETE", expectedAction: .removed)
+    }
+
+    public func editMessage(_ id: MessageID, body: String) async throws -> Message {
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/messages/\(id.description)"
+        var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(IOSEditMessageRequest(body: body))
+        return try decoder.decode(IOSMessageDTO.self, from: try await execute(request: request)).value()
+    }
+
+    public func deleteMessage(_ id: MessageID) async throws -> Message {
+        let path = "/v1/workspaces/\(authenticated.workspaceID.description)/messages/\(id.description)"
+        var request = URLRequest(url: authenticated.baseURL.appendingPathComponent(path))
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        return try decoder.decode(IOSMessageDTO.self, from: try await execute(request: request)).value()
+    }
+
     /// MomoMac에서 복제, ADR-0123 D1 복제 후 수렴.
     /// Retries preserve ApprovalDecisionRequest.clientDecisionId.
     public func decideApproval(_ decision: ApprovalDecisionRequest) async throws -> ApprovalDecisionReceipt {
@@ -231,6 +289,36 @@ public actor MomoServerConversationClient: IOSConversationBackend {
         } catch {
             throw SessionError.transport("Could not reach the momo server. Check your connection and try again.")
         }
+    }
+
+    private func mutateReaction(
+        _ id: MessageID,
+        emoji: String,
+        method: String,
+        expectedAction: ReactionDelta.Action
+    ) async throws -> ReactionDelta {
+        let collectionPath = "/v1/workspaces/\(authenticated.workspaceID.description)/messages/\(id.description)/reactions"
+        let collectionURL = authenticated.baseURL.appendingPathComponent(collectionPath)
+        let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard !emoji.isEmpty,
+              let encodedEmoji = emoji.addingPercentEncoding(withAllowedCharacters: unreserved),
+              var components = URLComponents(url: collectionURL, resolvingAgainstBaseURL: false)
+        else { throw SessionError.decoding("Could not create the message reaction request.") }
+        components.percentEncodedPath += "/\(encodedEmoji)"
+        guard let url = components.url else {
+            throw SessionError.decoding("Could not create the message reaction request.")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("Bearer \(authenticated.accessToken)", forHTTPHeaderField: "Authorization")
+        let delta = try decoder.decode(
+            IOSReactionDeltaDTO.self,
+            from: try await execute(request: request)
+        ).value()
+        guard delta.action == expectedAction, delta.messageId == id, delta.emoji == emoji else {
+            throw SessionError.decoding("The server returned a different message reaction.")
+        }
+        return delta
     }
 }
 
@@ -453,6 +541,24 @@ private struct IOSSendMessageRequest: Encodable {
         case body
         case props
         case runId = "run_id"
+    }
+}
+private struct IOSEditMessageRequest: Encodable { let body: String }
+struct IOSReactionDeltaDTO: Decodable {
+    let action: String
+    let messageId: String
+    let memberId: String
+    let emoji: String
+
+    func value() throws -> ReactionDelta {
+        guard let action = ReactionDelta.Action(rawValue: action),
+              let messageID = MessageID(uuidString: messageId),
+              let memberID = MemberID(uuidString: memberId),
+              !emoji.isEmpty
+        else {
+            throw SessionError.decoding("The server returned an invalid message reaction.")
+        }
+        return ReactionDelta(action: action, messageId: messageID, memberId: memberID, emoji: emoji)
     }
 }
 private struct IOSApprovalDecisionReceiptDTO: Decodable {
