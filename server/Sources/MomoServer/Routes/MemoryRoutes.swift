@@ -125,15 +125,21 @@ struct MemoryRoutes: Sendable {
                    AND (\(agentID)::uuid IS NULL OR mi.agent_member_id = \(agentID)::uuid)
                    AND (\(includeInvalid) OR mi.invalid_at IS NULL)
                    AND EXISTS (
-                     SELECT 1
-                       FROM memory_source_ref msr
-                       JOIN membership ms
-                         ON ms.workspace_id = msr.workspace_id
-                        AND ms.channel_id = msr.channel_id
-                        AND ms.member_id = \(principal.memberID)
-                        AND ms.left_at IS NULL
-                      WHERE msr.workspace_id = mi.workspace_id
-                        AND msr.memory_id = mi.id
+                     SELECT 1 FROM memory_source_ref present
+                      WHERE present.workspace_id = mi.workspace_id
+                        AND present.memory_id = mi.id
+                   )
+                   AND NOT EXISTS (
+                     SELECT 1 FROM memory_source_ref hidden
+                      WHERE hidden.workspace_id = mi.workspace_id
+                        AND hidden.memory_id = mi.id
+                        AND NOT EXISTS (
+                          SELECT 1 FROM membership ms
+                           WHERE ms.workspace_id = hidden.workspace_id
+                             AND ms.channel_id = hidden.channel_id
+                             AND ms.member_id = \(principal.memberID)
+                             AND ms.left_at IS NULL
+                        )
                    )
                  ORDER BY mi.valid_at DESC, mi.id DESC
                  LIMIT \(limit)
@@ -154,14 +160,15 @@ struct MemoryRoutes: Sendable {
         let validated = try Self.validateCreate(input)
 
         let item = try await db.withTenantTransaction(workspaceID: workspaceID) { conn in
-            _ = try await WorkspaceAuthorization.requireMember(
+            let role = try await WorkspaceAuthorization.requireMember(
                 conn: conn, logger: db.logger, principal: principal
             )
             try await Self.requirePolicyEnabled(
                 conn: conn, logger: db.logger, workspaceID: workspaceID
             )
             try await Self.requireScopeSubjects(
-                conn: conn, logger: db.logger, workspaceID: workspaceID, input: validated
+                conn: conn, logger: db.logger, workspaceID: workspaceID,
+                principal: principal, role: role, input: validated
             )
             try await Self.requireReadableSources(
                 conn: conn,
@@ -260,6 +267,12 @@ struct MemoryRoutes: Sendable {
             guard role.isAdmin || ownerID == principal.memberID else {
                 throw HTTPError(.forbidden, message: "memory edit requires its creator or workspace admin")
             }
+            if !role.isAdmin {
+                try await Self.requireReadableStoredSources(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    actorMemberID: principal.memberID, memoryID: memoryID
+                )
+            }
             let rows = try await conn.query(
                 """
                 UPDATE memory_item
@@ -323,6 +336,12 @@ struct MemoryRoutes: Sendable {
             let ownerID = try ownerRow.decode(UUID?.self)
             guard role.isAdmin || ownerID == principal.memberID else {
                 throw HTTPError(.forbidden, message: "memory invalidation requires its creator or workspace admin")
+            }
+            if !role.isAdmin {
+                try await Self.requireReadableStoredSources(
+                    conn: conn, logger: db.logger, workspaceID: workspaceID,
+                    actorMemberID: principal.memberID, memoryID: memoryID
+                )
             }
             if let replacementID = input.invalidatedByMemoryId {
                 let replacement = try await conn.query(
@@ -539,6 +558,8 @@ struct MemoryRoutes: Sendable {
         conn: PostgresConnection,
         logger: Logger,
         workspaceID: UUID,
+        principal: AuthPrincipal,
+        role: WorkspaceRole,
         input: CreateMemoryRequest
     ) async throws {
         let memberID = input.subjectMemberId ?? input.agentMemberId
@@ -558,6 +579,37 @@ struct MemoryRoutes: Sendable {
             guard let raw = try rows.first?.decode(String.self), expectedKind == nil || raw == expectedKind else {
                 throw HTTPError(.badRequest, message: "memory subject is unavailable")
             }
+        }
+        switch input.scope {
+        case "workspace":
+            guard role.isAdmin else {
+                throw HTTPError(.forbidden, message: "workspace memory requires workspace admin")
+            }
+            for source in input.sourceRefs {
+                let rows = try await conn.query(
+                    """
+                    SELECT 1 FROM channel
+                     WHERE workspace_id = \(workspaceID)
+                       AND id = \(source.channelId)
+                       AND kind = 'public'
+                       AND archived_at IS NULL
+                    """,
+                    logger: logger
+                ).collect()
+                guard !rows.isEmpty else {
+                    throw HTTPError(.badRequest, message: "workspace memory requires public-channel sources")
+                }
+            }
+        case "member":
+            guard role.isAdmin || input.subjectMemberId == principal.memberID else {
+                throw HTTPError(.forbidden, message: "member memory requires self or workspace admin")
+            }
+        case "agent":
+            guard role.isAdmin || input.agentMemberId == principal.memberID else {
+                throw HTTPError(.forbidden, message: "agent memory requires self or workspace admin")
+            }
+        default:
+            break
         }
     }
 
@@ -593,6 +645,32 @@ struct MemoryRoutes: Sendable {
                 throw HTTPError(.forbidden, message: "memory source is unavailable to this actor")
             }
         }
+    }
+
+    private static func requireReadableStoredSources(
+        conn: PostgresConnection,
+        logger: Logger,
+        workspaceID: UUID,
+        actorMemberID: UUID,
+        memoryID: UUID
+    ) async throws {
+        let rows = try await conn.query(
+            """
+            SELECT message_id, channel_id
+              FROM memory_source_ref
+             WHERE workspace_id = \(workspaceID) AND memory_id = \(memoryID)
+            """,
+            logger: logger
+        ).collect()
+        let sources = try rows.map { row -> MemorySourceRefRequest in
+            let value = try row.decode((UUID, UUID).self)
+            return .init(messageId: value.0, channelId: value.1)
+        }
+        try await requireReadableSources(
+            conn: conn, logger: logger, workspaceID: workspaceID,
+            actorMemberID: actorMemberID, sources: sources,
+            conversationChannelID: nil
+        )
     }
 
     private static func requirePolicyEnabled(
