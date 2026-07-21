@@ -79,6 +79,7 @@ struct NotifierService: Service {
             group.addTask {
                 for await _ in wakes {
                     if Task.isCancelled { break }
+                    await sweepTierFallback()
                     await drainToEmpty()
                 }
             }
@@ -250,6 +251,7 @@ struct NotifierService: Service {
     }
 
     static func category(messageType: String, propsKind: String?, reason: String) -> String {
+        if propsKind == "resume_offer" { return "momo.work" }
         if messageType == "approval_request" { return "momo.approval" }
         if propsKind == "work_session" { return "momo.work" }
         if reason == "mention" { return "momo.mention" }
@@ -316,6 +318,7 @@ struct NotifierService: Service {
         //     dm:       other active channel members of a dm channel
         //     mention:  message.props.mention_member_ids (server projection)
         //     approval: active HUMAN channel members for approval_request
+        //     resume:   the orphaned session owner for resume_offer
         //   minus the author, joined to their ACTIVE push tokens (exactly one
         //   per device+env — 010 partial unique index).
         // Reason precedence per member: approval_request > mention > dm.
@@ -329,6 +332,7 @@ struct NotifierService: Service {
                      m.type::text AS message_type,
                      COALESCE(m.props->'mention_member_ids', '[]'::jsonb) AS mention_ids,
                      m.props->>'kind' AS props_kind,
+                     m.props->>'owner_member_id' AS owner_member_id,
                      m.root_id,
                      c.kind::text AS channel_kind
                 FROM message m
@@ -339,6 +343,9 @@ struct NotifierService: Service {
             recipients AS (
               SELECT ms.member_id,
                      CASE
+                       WHEN (SELECT props_kind FROM msg) = 'resume_offer'
+                            AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg))
+                         THEN 'resume_offer'
                        WHEN (SELECT message_type FROM msg) = 'approval_request'
                             AND mem.kind = 'human' THEN 'approval_request'
                        WHEN EXISTS (
@@ -358,7 +365,10 @@ struct NotifierService: Service {
                WHERE ms.channel_id = (SELECT channel_id FROM msg)
                  AND ms.workspace_id = \(workspaceID)
                  AND ms.left_at IS NULL
-                 AND ms.member_id <> (SELECT author_member_id FROM msg)
+                 AND (
+                   ms.member_id <> (SELECT author_member_id FROM msg)
+                   OR (SELECT props_kind FROM msg) = 'resume_offer'
+                 )
             )
             SELECT r.member_id, t.id, d.id, d.platform::text,
                    t.apns_token, t.env::text, t.topic, r.reason,
@@ -401,7 +411,9 @@ struct NotifierService: Service {
                 threadID: threadID,
                 category: Self.category(
                     messageType: messageType, propsKind: propsKind, reason: reason),
-                approvalID: messageType == "approval_request" ? approvalID : nil)
+                approvalID: Self.category(
+                    messageType: messageType, propsKind: propsKind, reason: reason
+                ) == "momo.approval" ? approvalID : nil)
         }
     }
 

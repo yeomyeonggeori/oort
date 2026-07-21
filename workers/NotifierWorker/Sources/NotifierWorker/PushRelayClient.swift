@@ -13,7 +13,7 @@ import NIOFoundationCompat
 ///   - channel_id/message_id (the client fetches content from ITS OWN server
 ///     to complete the notification — iOS Notification Service Extension, P-4)
 ///   - collapse_id (APNs dedup/replace key) + exact server unread badge
-///   - reason ("dm" | "mention" | "approval_request") — judgment metadata
+///   - reason ("dm" | "mention" | "approval_request" | "resume_offer")
 ///   - thread_id/category/approval_id — APNs grouping and action routing ids
 ///
 /// Conversation content — message body, sender display name/handle, channel
